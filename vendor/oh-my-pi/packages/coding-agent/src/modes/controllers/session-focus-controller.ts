@@ -111,16 +111,13 @@ export class SessionFocusController {
 			draftError = this.#asError(error as object);
 		}
 
-		// Commit the view state first: returning to the parent must remain possible
-		// even when the child can no longer service its subscription or draft.
+		// Keep the committed focus until the main session has attached. #attach
+		// rolls the visible UI back to this session on failure; clearing here
+		// would leave its live subscription attached while the controller claimed
+		// to be unfocused, stranding parent navigation.
+		await this.#restoreMain();
 		this.#focusedAgentId = undefined;
 		this.#attachedSession = undefined;
-		try {
-			await this.#restoreMain();
-		} catch (error) {
-			const failure = this.#asError(error as object);
-			throw failure;
-		}
 		if (draftError) {
 			throw draftError;
 		}

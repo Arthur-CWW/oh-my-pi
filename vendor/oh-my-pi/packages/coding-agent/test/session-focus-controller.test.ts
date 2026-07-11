@@ -9,16 +9,21 @@ interface SessionStub {
 	session: AgentSession;
 	/** Emit an event through the listener captured by the last subscribe(). */
 	emit: (event: unknown) => Promise<void>;
+	failNextSubscribe: (error: Error) => void;
 	unsubscribeCalls: () => number;
 	setStreaming: (streaming: boolean) => void;
 }
 
 function makeSessionStub(opts: { isStreaming?: boolean } = {}): SessionStub {
 	let listener: ((event: AgentSessionEvent) => Promise<void> | void) | undefined;
+	let nextSubscribeError: Error | undefined;
 	let unsubscribeCalls = 0;
 	const stub = {
 		isStreaming: opts.isStreaming ?? false,
 		subscribe(fn: (event: AgentSessionEvent) => Promise<void> | void) {
+			const error = nextSubscribeError;
+			nextSubscribeError = undefined;
+			if (error) throw error;
 			listener = fn;
 			return () => {
 				unsubscribeCalls++;
@@ -30,6 +35,9 @@ function makeSessionStub(opts: { isStreaming?: boolean } = {}): SessionStub {
 		emit: async event => {
 			if (!listener) throw new Error("no listener captured: subscribe() was never called");
 			await listener(event as AgentSessionEvent);
+		},
+		failNextSubscribe: error => {
+			nextSubscribeError = error;
 		},
 		unsubscribeCalls: () => unsubscribeCalls,
 		setStreaming: streaming => {
@@ -186,6 +194,54 @@ describe("SessionFocusController", () => {
 		expect(h.setSessionCalls).toEqual([
 			[worker.session, "Worker"],
 			[parent.session, "Parent"],
+			[h.main.session, undefined],
+		]);
+	});
+
+	it("returns through a finished parent and can repeat the path", async () => {
+		const h = makeHarness();
+		const parent = makeSessionStub();
+		const worker = makeSessionStub();
+		registerSub(h.registry, "Parent", parent.session, MAIN_AGENT_ID);
+		registerSub(h.registry, "Worker", worker.session, "Parent");
+		h.registry.setStatus("Parent", "idle");
+
+		await h.controller.focusAgent("Worker");
+		await h.controller.focusParent();
+		expect(h.controller.focusedAgentId).toBe("Parent");
+		expect(h.controller.target).toBe(parent.session);
+
+		await h.controller.focusParent();
+		expect(h.controller.focusedAgentId).toBeUndefined();
+		await h.controller.focusAgent("Worker");
+		await h.controller.focusParent();
+		expect(h.controller.focusedAgentId).toBe("Parent");
+		expect(h.controller.target).toBe(parent.session);
+	});
+
+	it("keeps the child focused when returning to main cannot attach, then recovers on retry", async () => {
+		const h = makeHarness();
+		const worker = makeSessionStub();
+		registerSub(h.registry, "Worker", worker.session, MAIN_AGENT_ID);
+		await h.controller.focusAgent("Worker");
+		h.main.failNextSubscribe(new Error("main session ownership changed"));
+
+		await expect(h.controller.focusParent()).rejects.toThrow("main session ownership changed");
+		expect(h.controller.focusedAgentId).toBe("Worker");
+		expect(h.controller.target).toBe(worker.session);
+		expect(worker.unsubscribeCalls()).toBe(0);
+		expect(h.setSessionCalls).toEqual([
+			[worker.session, "Worker"],
+			[worker.session, "Worker"],
+		]);
+
+		await h.controller.focusParent();
+		expect(h.controller.focusedAgentId).toBeUndefined();
+		expect(h.controller.target).toBeUndefined();
+		expect(worker.unsubscribeCalls()).toBe(1);
+		expect(h.setSessionCalls).toEqual([
+			[worker.session, "Worker"],
+			[worker.session, "Worker"],
 			[h.main.session, undefined],
 		]);
 	});
