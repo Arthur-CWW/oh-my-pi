@@ -378,11 +378,8 @@ export class SessionManager {
 	/** Lazy gate crossed (ensureOnDisk / loaded file): every entry must persist from now on. */
 	#forceFileCreation = false;
 
-	/**
-	 * Collab replication tap: invoked for every appended entry with the
-	 * in-memory (pre-blob-externalization) entry, so inline images survive.
-	 */
-	onEntryAppended?: (entry: SessionEntry) => void;
+	/** Post-commit listeners for newly appended in-memory entries. */
+	#entryListeners = new Set<(entry: SessionEntry) => void>();
 
 	#turnBudgetTotal: number | null = null;
 	#turnBudgetHard = false;
@@ -673,19 +670,21 @@ export class SessionManager {
 		};
 	}
 
+	#notifyEntryListeners(entry: SessionEntry): void {
+		for (const listener of [...this.#entryListeners]) {
+			try {
+				listener(entry);
+			} catch (err) {
+				logger.warn("SessionManager: entry listener failed", { error: String(err) });
+			}
+		}
+	}
+
 	#recordEntry(entry: SessionEntry): void {
 		this.#entries.push(entry);
 		this.#index.insert(entry);
 		this.#appendToSessionFile(entry);
-
-		const callback = this.onEntryAppended;
-		if (callback) {
-			try {
-				callback(entry);
-			} catch (err) {
-				logger.warn("collab entry hook failed", { error: String(err) });
-			}
-		}
+		this.#notifyEntryListeners(entry);
 	}
 
 	#recordLeafChange(target: string | null): void {
@@ -1188,6 +1187,13 @@ export class SessionManager {
 		return this.#sessionName;
 	}
 
+	subscribeEntries(listener: (entry: SessionEntry) => void): () => void {
+		this.#entryListeners.add(listener);
+		return () => {
+			this.#entryListeners.delete(listener);
+		};
+	}
+
 	onSessionNameChanged(cb: () => void): () => void {
 		this.#sessionNameChangedCallbacks.add(cb);
 		return () => {
@@ -1407,7 +1413,7 @@ export class SessionManager {
 			this.#index.rebuild(this.#entries);
 			throw error;
 		}
-		for (const entry of appended) this.onEntryAppended?.(entry);
+		for (const entry of appended) this.#notifyEntryListeners(entry);
 	}
 
 	/**

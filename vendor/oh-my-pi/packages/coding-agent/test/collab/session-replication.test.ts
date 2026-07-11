@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test";
+import { readFileSync } from "node:fs";
 import * as path from "node:path";
 import { isWireSessionEntry } from "@oh-my-pi/pi-coding-agent/collab/host";
 import { isBlobRef } from "@oh-my-pi/pi-coding-agent/session/blob-store";
@@ -23,10 +24,10 @@ afterEach(async () => {
 const BIG_IMAGE_B64 = Buffer.alloc(4096, 7).toString("base64");
 
 describe("SessionManager collab replication", () => {
-	it("onEntryAppended receives the in-memory entry with inline image data while the persisted line externalizes it", async () => {
+	it("subscribeEntries receives the in-memory entry with inline image data while the persisted line externalizes it", async () => {
 		const { manager } = makeManager();
 		const captured: SessionEntry[] = [];
-		manager.onEntryAppended = entry => captured.push(entry);
+		manager.subscribeEntries(entry => captured.push(entry));
 
 		manager.appendMessage({
 			role: "user",
@@ -55,13 +56,61 @@ describe("SessionManager collab replication", () => {
 		expect(isBlobRef(persistedImage.data)).toBe(true);
 	});
 
-	it("swallows hook failures so persistence is never broken by a broadcast error", () => {
+	it("isolates listeners, unsubscription, and listener failures from durable appends", async () => {
 		const { manager } = makeManager();
-		manager.onEntryAppended = () => {
+		const first: string[] = [];
+		const second: string[] = [];
+		const committedAtNotification: boolean[] = [];
+		const unsubscribeFirst = manager.subscribeEntries(entry => first.push(entry.id));
+		manager.subscribeEntries(() => {
 			throw new Error("socket exploded");
-		};
-		const id = manager.appendMessage({ role: "user", content: "still works", timestamp: Date.now() });
-		expect(manager.getEntry(id)?.id).toBe(id);
+		});
+		manager.subscribeEntries(entry => {
+			second.push(entry.id);
+			const file = manager.getSessionFile();
+			committedAtNotification.push(file !== undefined && readFileSync(file, "utf8").includes(entry.id));
+		});
+		await manager.ensureOnDisk();
+
+		const firstId = manager.appendMessage({ role: "user", content: "still works", timestamp: Date.now() });
+		unsubscribeFirst();
+		unsubscribeFirst();
+		const secondId = manager.appendMessage({ role: "user", content: "still works again", timestamp: Date.now() });
+
+		expect(first).toEqual([firstId]);
+		expect(second).toEqual([firstId, secondId]);
+		expect(committedAtNotification).toEqual([true, true]);
+		expect(manager.getEntry(firstId)?.id).toBe(firstId);
+		expect(manager.getEntry(secondId)?.id).toBe(secondId);
+		await manager.flush();
+		const file = manager.getSessionFile();
+		if (!file) throw new Error("expected a persisted session file");
+		const persistedIds = (await Bun.file(file).text())
+			.split("\n")
+			.filter(Boolean)
+			.map(line => JSON.parse(line) as { type?: string; id?: string })
+			.flatMap(entry => (entry.type === "message" && entry.id ? [entry.id] : []));
+		expect(persistedIds).toEqual([firstId, secondId]);
+	});
+
+	it("notifies subscribers for every historical hotswap entry after its atomic rewrite", async () => {
+		const { manager } = makeManager();
+		const captured: SessionEntry[] = [];
+		const committedAtNotification: boolean[] = [];
+		manager.subscribeEntries(entry => {
+			captured.push(entry);
+			const file = manager.getSessionFile();
+			committedAtNotification.push(file !== undefined && readFileSync(file, "utf8").includes(entry.id));
+		});
+
+		await manager.appendHistoricalHotswap("openai/model-b", "high", {
+			customType: "hotswap_audit",
+			data: { requestedBy: "Main" },
+		});
+
+		expect(captured.map(entry => entry.type)).toEqual(["model_change", "thinking_level_change", "custom"]);
+		expect(manager.getEntries().slice(-3).map(entry => entry.id)).toEqual(captured.map(entry => entry.id));
+		expect(committedAtNotification).toEqual([true, true, true]);
 	});
 
 	it("ingestReplicatedEntry preserves foreign ids and advances the leaf", async () => {
@@ -106,9 +155,9 @@ describe("SessionManager collab replication", () => {
 		expect(liveGuest.getLeafId()).toBe(branchLeaf);
 
 		const liveFrames: SessionEntry[] = [];
-		host.onEntryAppended = entry => {
+		host.subscribeEntries(entry => {
 			if (isWireSessionEntry(entry)) liveFrames.push(entry);
-		};
+		});
 		host.branch(mainLeaf);
 
 		expect(liveFrames.map(entry => entry.type)).toEqual(["leaf_change"]);

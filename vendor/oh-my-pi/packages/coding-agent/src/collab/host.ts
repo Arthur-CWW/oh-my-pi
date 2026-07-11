@@ -119,6 +119,7 @@ export class CollabHost {
 	#writeToken: Uint8Array | null = null;
 	#sessionId = "";
 	#unsubscribe?: () => void;
+	#entryUnsubscribe?: () => void;
 	#peers = new Map<number, { name: string; canWrite: boolean }>();
 	#lastStateJson = "";
 	#stateDebounce: Timer | null = null;
@@ -229,12 +230,12 @@ export class CollabHost {
 			}
 		}
 		this.#registryUnsubscribe = AgentRegistry.global().onChange(() => this.#scheduleAgentsBroadcast());
-		this.#ctx.sessionManager.onEntryAppended = entry => {
+		this.#entryUnsubscribe = this.#ctx.sessionManager.subscribeEntries(entry => {
 			if (isWireSessionEntry(entry)) this.#broadcast({ t: "entry", entry });
 			// Model/thinking/title changes land as entries while idle; refresh
 			// guest state promptly (debounce + JSON diff dedupe).
 			this.#scheduleStateBroadcast();
-		};
+		});
 		this.#updateStatusSegment();
 	}
 
@@ -248,7 +249,8 @@ export class CollabHost {
 	async #teardown(): Promise<void> {
 		if (this.#stopped) return;
 		this.#stopped = true;
-		this.#ctx.sessionManager.onEntryAppended = undefined;
+		this.#entryUnsubscribe?.();
+		this.#entryUnsubscribe = undefined;
 		this.#unsubscribe?.();
 		this.#unsubscribe = undefined;
 		for (const unsubscribe of this.#busUnsubscribers) unsubscribe();

@@ -275,6 +275,8 @@ import {
 	shouldPromptCodexAutoRedeem,
 } from "./codex-auto-reset";
 import {
+	type DurableInputAdmissionReceipt,
+	type DurableInputCommandMetadata,
 	type DurableInputPayload,
 	DurableInputQueue,
 	type DurableInputState,
@@ -385,6 +387,7 @@ export interface AsyncJobSnapshot {
 }
 
 export type { ShakeMode, ShakeResult };
+export type DurableInputEnqueue = Parameters<DurableInputQueue["enqueueCommand"]>[0];
 
 // ============================================================================
 // Types
@@ -393,6 +396,8 @@ export type { ShakeMode, ShakeResult };
 export interface AgentSessionConfig {
 	agent: Agent;
 	sessionManager: SessionManager;
+	/** Already-adopted durable queue owned by the runner. */
+	durableInputQueue?: DurableInputQueue;
 	settings: Settings;
 	/** Whether the caller explicitly requested yolo/auto-approve behavior for this session. */
 	autoApprove?: boolean;
@@ -1501,24 +1506,34 @@ export class AgentSession {
 	constructor(config: AgentSessionConfig) {
 		this.agent = config.agent;
 		this.sessionManager = config.sessionManager;
-		const ownership = this.sessionManager.getSessionOwnership();
-		if (ownership) {
+		const injectedDurableInputQueue = config.durableInputQueue;
+		const ownership = injectedDurableInputQueue ? undefined : this.sessionManager.getSessionOwnership();
+		let durableInputQueueInitialization: Promise<DurableInputQueue> | undefined;
+		if (injectedDurableInputQueue) {
+			durableInputQueueInitialization = (async () => {
+				await this.#refreshDurableQueuedInputProjection(injectedDurableInputQueue);
+				await this.#reconcileDurableInputAttempts(injectedDurableInputQueue);
+				await this.#scheduleDurableRetry(injectedDurableInputQueue);
+				return injectedDurableInputQueue;
+			})();
+		} else if (ownership) {
+			durableInputQueueInitialization = DurableInputQueue.open(ownership).then(async queue => {
+				await queue.adopt();
+				await this.#refreshDurableQueuedInputProjection(queue);
+				await this.#reconcileDurableInputAttempts(queue);
+				await this.#scheduleDurableRetry(queue);
+				return queue;
+			});
+		}
+		if (durableInputQueueInitialization) {
 			this.#durableInputQueueRequired = true;
-			this.#durableInputQueue = DurableInputQueue.open(ownership)
-				.then(async queue => {
-					await queue.adopt();
-					await this.#refreshDurableQueuedInputProjection(queue);
-					await this.#reconcileDurableInputAttempts(queue);
-					await this.#scheduleDurableRetry(queue);
-					return queue;
-				})
-				.catch(error => {
-					if (this.#handleDurableOwnershipLoss(error as Error)) return undefined;
-					const failure = error instanceof Error ? error : new Error(String(error));
-					this.#durableInputQueueError = failure;
-					logger.error("Durable input queue initialization failed", { error: failure.message });
-					return undefined;
-				});
+			this.#durableInputQueue = durableInputQueueInitialization.catch(error => {
+				if (this.#handleDurableOwnershipLoss(error as Error)) return undefined;
+				const failure = error instanceof Error ? error : new Error(String(error));
+				this.#durableInputQueueError = failure;
+				logger.error("Durable input queue initialization failed", { error: failure.message });
+				return undefined;
+			});
 		}
 		const providerStream = this.agent.streamFn;
 		this.agent.streamFn = async (...args) => {
@@ -6686,6 +6701,22 @@ export class AgentSession {
 			expandPromptTemplates: false,
 			images,
 		});
+	}
+
+	async acceptDurableInput(
+		input: DurableInputEnqueue,
+		command: DurableInputCommandMetadata,
+	): Promise<DurableInputAdmissionReceipt> {
+		const queue = await this.#getDurableInputQueueForMutation();
+		try {
+			const receipt = await queue.enqueueCommand(input, command);
+			await this.#refreshDurableQueuedInputProjection(queue);
+			if (!receipt.replayed) this.#scheduleDurableQueueDrainAfterIdle();
+			return receipt;
+		} catch (error) {
+			if (this.#handleDurableOwnershipLoss(error as Error)) throw this.#durableOwnershipLostError ?? error;
+			throw error;
+		}
 	}
 
 	/** Read-only pending durable-input projection, sorted by durable sequence. */
