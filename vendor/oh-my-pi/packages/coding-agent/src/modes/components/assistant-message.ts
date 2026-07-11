@@ -400,6 +400,11 @@ export class AssistantMessageComponent extends Container {
 		// Fast path: reuse Markdown children when shape is stable during streaming
 		if (this.#tryFastPathUpdate(message)) return;
 
+		// A shape change permanently discards the old subtree. `Container.clear()`
+		// deliberately does not dispose detached children, so tear them down first:
+		// extension thinking renderers may own timers or subscriptions.
+		this.#contentContainer.dispose();
+
 		// Clear content container
 		this.#contentContainer.clear();
 		this.#thinkingDots = undefined;

@@ -274,6 +274,45 @@ describe("Agent hub Enter activation", () => {
 		hub.dispose();
 	});
 
+	it("releases parsed transcript entries and components on every chat close", async () => {
+		using tempDir = TempDir.createSync("@omp-agent-hub-retention-");
+		const sessionFile = `${tempDir.path()}/Worker.jsonl`;
+		const timestamp = "2026-07-12T00:00:00.000Z";
+		const entries = Array.from({ length: 2_000 }, (_, index) => ({
+			type: "message",
+			id: `message-${index}`,
+			parentId: null,
+			timestamp,
+			message: { role: "user", content: `retained message ${index}`, timestamp: Date.parse(timestamp) + index },
+		}));
+		await Bun.write(sessionFile, `${entries.map(entry => JSON.stringify(entry)).join("\n")}\n`);
+		const { hub } = makeHub(async () => {}, { sessionFile });
+
+		for (let cycle = 0; cycle < 25; cycle++) {
+			hub.openChat(AGENT_ID);
+			expect(renderedText(hub)).toContain("retained message 1999");
+			expect(hub.getRetentionMetrics()).toMatchObject({
+				cachedTranscriptEntries: 2_000,
+				materializedChatComponents: 2_000,
+				liveTimers: 1,
+			});
+			hub.handleInput("\x1b");
+			expect(hub.getRetentionMetrics()).toMatchObject({
+				cachedTranscriptEntries: 0,
+				materializedChatComponents: 0,
+				liveTimers: 1,
+			});
+		}
+
+		hub.dispose();
+		expect(hub.getRetentionMetrics()).toMatchObject({
+			cachedTranscriptEntries: 0,
+			materializedChatComponents: 0,
+			externalIdentityRows: 0,
+			externalOrderEntries: 0,
+			liveTimers: 0,
+		});
+	});
 	it("does not promote archived session journals into the active roster", async () => {
 		using tempDir = TempDir.createSync("@omp-agent-hub-persisted-");
 		await Bun.write(`${tempDir.path()}/main.jsonl`, "");

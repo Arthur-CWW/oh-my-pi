@@ -470,6 +470,14 @@ export interface AgentHubRetentionMetrics {
 	archivedIdentityRows: number;
 	/** Materialized roster rows are capped by the terminal viewport. */
 	materializedRows: number;
+	/** Stable-order identities retained by external-peer polling. */
+	externalOrderEntries: number;
+	/** Parsed journal messages retained only while a chat transcript is open. */
+	cachedTranscriptEntries: number;
+	/** Transcript components retained only while a chat transcript is open. */
+	materializedChatComponents: number;
+	/** The age interval plus an optional debounced chat refresh. */
+	liveTimers: number;
 }
 export class AgentHubOverlayComponent extends Container {
 	#registry: AgentRegistry;
@@ -654,6 +662,10 @@ export class AgentHubOverlayComponent extends Container {
 			externalIdentityRows: this.#externalRows.length,
 			archivedIdentityRows: this.#archivedRows.length,
 			materializedRows: this.#totalTableRows() === 0 ? 0 : Math.min(this.#totalTableRows(), this.#tableViewportCapacity()),
+			externalOrderEntries: this.#externalOrder.size,
+			cachedTranscriptEntries: this.#transcriptCache?.entries.length ?? 0,
+			materializedChatComponents: this.#chatLog.children.length,
+			liveTimers: Number(this.#ageTimer !== undefined) + Number(this.#chatRefreshTimer !== undefined),
 		};
 	}
 
@@ -670,6 +682,18 @@ export class AgentHubOverlayComponent extends Container {
 		}
 		this.#detachLiveSession();
 		this.#resetChatLog();
+		this.#transcriptCache = undefined;
+		this.#chatRenderedContent = [];
+		this.#chatSearchMatches = [];
+		this.#viewerHeaderLines = [];
+		this.#rows = [];
+		this.#visibleActiveRows = [];
+		this.#observerById.clear();
+		this.#externalRows = [];
+		this.#visibleExternalRows = [];
+		this.#externalOrder.clear();
+		this.#archivedRows = [];
+		this.#visibleArchivedRows = [];
 	}
 
 	override render(width: number): readonly string[] {
@@ -1073,19 +1097,30 @@ export class AgentHubOverlayComponent extends Container {
 	}
 
 	#loadExternalRows(): ExternalPeerRow[] {
-		if (this.#remote) return [];
+		if (this.#remote) {
+			this.#externalOrder.clear();
+			return [];
+		}
 		const bus = this.#resolveExternalBus();
-		if (!bus) return [];
+		if (!bus) {
+			this.#externalOrder.clear();
+			return [];
+		}
 		let peers: AgentHubExternalPeer[];
 		try {
 			peers = bus.listPeers({
 				excludeSessionId: this.#externalSessionId,
-				includeStale: true,
+				includeStale: false,
 				staleMs: IRC_EXTERNAL_STALE_MS,
 			});
 		} catch (error) {
 			logger.debug("Agent hub: external IRC peers unavailable", { error: String(error) });
+			this.#externalOrder.clear();
 			return [];
+		}
+		const peerIds = new Set(peers.map(peer => peer.sessionId));
+		for (const sessionId of this.#externalOrder.keys()) {
+			if (!peerIds.has(sessionId)) this.#externalOrder.delete(sessionId);
 		}
 		return peers
 			.map(peer => {
@@ -2110,6 +2145,11 @@ export class AgentHubOverlayComponent extends Container {
 		this.#chatSearchMatches = [];
 		this.#chatSearchMatchIndex = -1;
 		this.#chatRenderedContent = [];
+		this.#viewerHeaderLines = [];
+		this.#transcriptCache = undefined;
+		this.#remoteTranscriptUnavailable = false;
+		this.#remoteFetchInFlight = false;
+		this.#remoteFetchToken++;
 		this.#detachLiveSession();
 		this.#resetChatLog();
 		this.#refreshRows();

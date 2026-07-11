@@ -823,4 +823,30 @@ describe("TranscriptContainer renderViewportTail", () => {
 		const { container } = fourBlocks();
 		expect([...container.renderViewportTail(W, 0)]).toEqual([]);
 	});
+	it("retains only canonical history state across thousands of finalized blocks", () => {
+		const container = new TranscriptContainer();
+		for (let index = 0; index < 5_000; index++) {
+			container.addChild(new CountingFinalizedBlock([`message ${index}`]));
+		}
+
+		const lines = container.render(W);
+		expect(lines[0]).toBe("message 0");
+		expect(lines.at(-1)).toBe("message 4999");
+
+		// Full-frame rows and one segment per child are durable render history:
+		// the TUI compose contract still returns the complete transcript, and the
+		// segments preserve per-child invalidation boundaries. The redundant
+		// live-diff and prefix-cache state must stay constant instead of scaling
+		// with finalized history.
+		expect(container.getRetentionMetrics()).toEqual({
+			assembledRows: 9_999,
+			segments: 5_000,
+			segmentRawRowRefs: 5_000,
+			segmentContributionRowRefs: 5_000,
+			liveSnapshots: 0,
+			liveSnapshotRowRefs: 0,
+			historyPrefixCacheEntries: 0,
+			historyPrefixSegmentRefs: 0,
+		});
+	});
 });
