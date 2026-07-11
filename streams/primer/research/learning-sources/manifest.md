@@ -1,6 +1,6 @@
 # Primer learning-system source manifest
 
-Canonical sources gathered for the one-chapter Meltdown annotation workbench. **Read [`system-synthesis.md`](system-synthesis.md) first** — it synthesizes all four source families with phase constraints, agreements/tensions, and explicit now-vs-defer guidance. Then read the cleaned local copies before any source-specific summaries.
+Canonical sources gathered for the one-chapter Meltdown annotation workbench. **Read [`system-synthesis.md`](system-synthesis.md) first** — it synthesizes all five source families with phase constraints, agreements/tensions, and explicit now-vs-defer guidance. Then read the cleaned local copies before any source-specific summaries.
 
 **→ Recommended entry point: [`system-synthesis.md`](system-synthesis.md)** — compact, source-linked synthesis covering what each source constrains, agreements/tensions/unknowns, what to use now vs. defer, and a prior-session recovery appendix.
 
@@ -29,6 +29,18 @@ The focal posts are saved. Their X reply timelines were not captured: the authen
 - Andy Matuschak research trail, “Using machine learning to generate good spaced repetition prompts…”  
   Source: https://notes.andymatuschak.org/Using_machine_learning_to_generate_good_spaced_repetition_prompts_from_explanatory_text  
   Local: `cleaned/matuschak-ml-prompts-notes.md`
+
+## Plain-text card and review-system design
+
+- Fernando Borretti, Hashcards repository
+  Source: https://github.com/eudoxia0/hashcards
+  Pinned source revision: https://github.com/eudoxia0/hashcards/tree/91fecff2dd7339398be0bdca8c23823e6f262622
+  Local checkout: `../../repos/hashcards`
+- Fernando Borretti, “Hashcards: A Plain-Text Spaced Repetition System”
+  Source: https://borretti.me/article/hashcards-plain-text-spaced-repetition
+- Primer-oriented, source-grounded notes: `cleaned/hashcards-design-notes.md`
+
+Hashcards constrains the later card-artifact, review-state, and inspectability layers. Its checked-in `Cards`/`Inbox`/`Sources`/`Scripts` collection layout is a personal workflow example, not a core schema or evidence that Primer currently exports or schedules cards.
 
 ## Teaching / theory of mind
 

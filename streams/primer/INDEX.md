@@ -1,5 +1,20 @@
 # Primer Stream Index
 
+## Reading order
+
+Successor sessions should read these in order. Status matters: durable doctrine, living design space, dated implementation state, and situated research are different kinds of authority.
+
+1. [`INTENT.md`](INTENT.md) — durable, revisable theory of Arthur’s aims and the product’s boundaries.
+2. [`LINEAGE.md`](LINEAGE.md) — predecessor evidence, correction/delta ontology, and explicit recovery gaps.
+3. [`GOAL.md`](GOAL.md) — stream charter, ownership, and settled constraints.
+4. [`VISION.md`](VISION.md) — living design space and dated decisions; broader than the current experiment.
+5. [`HANDOFF-LIVE-2026-07-10.md`](HANDOFF-LIVE-2026-07-10.md) — current shipped/staged state, including the 2026-07-11 continuation. Consult [`HANDOFF.md`](HANDOFF.md) for canonical boot/ownership context; older live handoffs are historical.
+6. [`research/learning-sources/system-synthesis.md`](research/learning-sources/system-synthesis.md) — source-grounded synthesis for the current one-chapter workbench, explicitly not universal pedagogy.
+7. [`DESIGN-LOG.md`](DESIGN-LOG.md) — append-oriented dated decisions, hypotheses, alternatives, and deferred debt.
+8. [`docs/plans/primer-intuitions.md`](../../docs/plans/primer-intuitions.md) — earlier direct-quote dossier and exact predecessor-session inventory; use as evidence, not a rigid specification.
+
+For the current task, the handoff wins on implementation status. For durable product interpretation, start with INTENT and preserve corrections through LINEAGE and the design log.
+
 ## Symlinked repos
 
 | Name | Original absolute path | Action | Description |
@@ -26,11 +41,11 @@
 | gay-primer | /Users/arthur/archives/gay-primer | symlink | Archived gay-primer reference material. |
 | youtube-transcripts | /Users/arthur/archives/youtube-transcripts | symlink | Archived YouTube transcript feedstock. |
 
-## Pending move
+## Nested in-repo checkout
 
-| Name | Original absolute path | Action | Description |
+| Name | Repository path | Action | Description |
 | --- | --- | --- | --- |
-| wrapped-commentary-reader | /Users/arthur/exploratory/systems/wrapped-commentary-reader | pending move → streams/primer/wrapped-commentary-reader/ | 754M annotation reader + transcript/podcast artifacts. |
+| wrapped-commentary-reader | `streams/primer/wrapped-commentary-reader/` | nested git checkout | Reader, annotation workbench, prompt experiments, and source-local reference artifacts. Commit separately from the outer repo. |
 
 ## In-repo material
 
@@ -40,7 +55,11 @@
 | packages/borges-library | /Users/arthur/agents/packages/borges-library | in-repo | Borges library package for book/source retrieval workflows. |
 | browser-extensions/extensions/twitter-archive-firefox | /Users/arthur/agents/browser-extensions/extensions/twitter-archive-firefox | in-repo | Firefox extension for Twitter archive workflows. |
 | data/twitter-archive | /Users/arthur/agents/data/twitter-archive | in-repo | 130M Twitter archive data. |
-| docs/plans/primer-intuitions.md | /Users/arthur/agents/docs/plans/primer-intuitions.md | in-repo | Session distillate; may still be being written. |
+| streams/primer/INTENT.md | /Users/arthur/agents/streams/primer/INTENT.md | in-repo | Durable, revisable project intent and Arthur-prior boundaries. |
+| streams/primer/LINEAGE.md | /Users/arthur/agents/streams/primer/LINEAGE.md | in-repo | Intellectual/document lineage, predecessor sessions, corrections, and recovery gaps. |
+| streams/primer/DESIGN-LOG.md | /Users/arthur/agents/streams/primer/DESIGN-LOG.md | in-repo | Append-oriented design decisions, hypotheses, alternatives, and debt. |
+| streams/primer/research/learning-sources/cleaned/hashcards-design-notes.md | /Users/arthur/agents/streams/primer/research/learning-sources/cleaned/hashcards-design-notes.md | in-repo | Source-grounded Hashcards behavior and Primer borrow/adapt/reject notes. |
+| docs/plans/primer-intuitions.md | /Users/arthur/agents/docs/plans/primer-intuitions.md | in-repo | Quote-preserving predecessor-session distillation and source inventory. |
 
 ## Missing
 
