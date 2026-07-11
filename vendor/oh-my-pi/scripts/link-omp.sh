@@ -135,6 +135,18 @@ immutable_target_from_link() {
 	printf '%s\n' "$target"
 }
 
+is_release_link() {
+	local link="$1"
+	local target
+
+	[ -L "$link" ] || return 1
+	target="$(readlink "$link")" || return 1
+	case "$target" in
+		"$releases"/omp-*) return 0 ;;
+		*) return 1 ;;
+	esac
+}
+
 repo_root="${OMP_LINK_REPO_ROOT:-$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)}"
 global_bin="$(resolve_global_bin)"
 releases="$global_bin/.omp-releases"
@@ -150,6 +162,38 @@ cleanup_stage() {
 }
 
 trap cleanup_stage EXIT
+materialize_release() {
+	local source="$1"
+	local digest
+	local staged_digest
+
+	digest="$(sha256 "$source")"
+	materialized_release="$releases/omp-$digest"
+	if has_path "$materialized_release"; then
+		if ! validate_release "$materialized_release" "$digest"; then
+			printf 'link-omp: existing release is invalid or collides with candidate digest: %s\n' "$materialized_release" >&2
+			exit 1
+		fi
+		return
+	fi
+
+	stage="$(mktemp "$releases/.omp-$digest.tmp.XXXXXX")"
+	cp "$source" "$stage"
+	chmod 755 "$stage"
+	validate_candidate "$stage" >/dev/null
+	staged_digest="$(sha256 "$stage")"
+	if [ "$staged_digest" != "$digest" ]; then
+		printf 'link-omp: candidate changed while being promoted: %s\n' "$source" >&2
+		exit 1
+	fi
+	if ! smoke_candidate "$stage"; then
+		printf 'link-omp: staged candidate failed validation: %s\n' "$source" >&2
+		exit 1
+	fi
+	mv "$stage" "$materialized_release"
+	stage=""
+}
+
 
 cmd_dev() {
 	local target="$repo_root/packages/coding-agent/scripts/omp"
@@ -167,42 +211,22 @@ cmd_stable() {
 		usage
 	fi
 	local candidate
-	local digest
 	local release
-	local staged_digest
 	local prior=""
 	candidate="$(validate_candidate "$1")"
-	digest="$(sha256 "$candidate")"
-	release="$releases/omp-$digest"
 	mkdir -p "$releases"
-
-	if has_path "$release"; then
-		if ! validate_release "$release" "$digest"; then
-			printf 'link-omp: existing release is invalid or collides with candidate digest: %s\n' "$release" >&2
-			exit 1
-		fi
-	else
-		stage="$(mktemp "$releases/.omp-$digest.tmp.XXXXXX")"
-		cp "$candidate" "$stage"
-		chmod 755 "$stage"
-		validate_candidate "$stage" >/dev/null
-		staged_digest="$(sha256 "$stage")"
-		if [ "$staged_digest" != "$digest" ]; then
-			printf 'link-omp: candidate changed while being promoted: %s\n' "$candidate" >&2
-			exit 1
-		fi
-		if ! smoke_candidate "$stage"; then
-			printf 'link-omp: staged candidate failed validation: %s\n' "$candidate" >&2
-			exit 1
-		fi
-		mv "$stage" "$release"
-		stage=""
-	fi
+	materialize_release "$candidate"
+	release="$materialized_release"
 
 	if has_path "$stable"; then
 		if ! prior="$(immutable_target_from_link "$stable")"; then
-			printf 'link-omp: active stable command is not a valid immutable release: %s\n' "$stable" >&2
-			exit 1
+			if is_release_link "$stable"; then
+				printf 'link-omp: active stable command is not a valid immutable release: %s\n' "$stable" >&2
+				exit 1
+			fi
+			candidate="$(validate_candidate "$stable")"
+			materialize_release "$candidate"
+			prior="$materialized_release"
 		fi
 		if [ "$prior" = "$release" ]; then
 			printf 'link-omp: stable release already active: %s\n' "$release"

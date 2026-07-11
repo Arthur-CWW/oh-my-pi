@@ -87,7 +87,7 @@ describe("link-omp immutable stable promotion", () => {
 
 		const result = run(root, ["dev"]);
 		expect(result.exitCode).toBe(0);
-		expect(fs.readlinkSync(path.join(bin, "omp"))).toBe(existing);
+		expect(linkTarget(path.join(bin, "omp"))).toBe(fs.realpathSync(existing));
 		expect(fs.realpathSync(path.join(bin, "omp-dev"))).toBe(
 			fs.realpathSync(path.join(repoRoot, "packages", "coding-agent", "scripts", "omp")),
 		);
@@ -128,6 +128,34 @@ describe("link-omp immutable stable promotion", () => {
 		expect(linkTarget(path.join(bin, "omp"))).toBe(fs.realpathSync(releaseA));
 		expect(fs.existsSync(path.join(bin, "omp.previous"))).toBeFalse();
 		expect(runInstalled(root)).toBe("A");
+	});
+
+	it("imports legacy stable symlink and file bytes before promoting B, preserving A for rollback", () => {
+		for (const stableKind of ["symlink", "file"] as const) {
+			const root = temporaryRoot();
+			const bin = path.join(root, "global bin");
+			const legacyA = candidate(root, `${stableKind}-A`, "A");
+			const b = candidate(root, `${stableKind}-B`, "B");
+			const stable = path.join(bin, "omp");
+			fs.mkdirSync(bin, { recursive: true });
+			if (stableKind === "symlink") fs.symlinkSync(legacyA, stable);
+			else fs.copyFileSync(legacyA, stable);
+			if (stableKind === "file") fs.chmodSync(stable, 0o755);
+
+			const importedA = releasePath(bin, legacyA);
+			const importedDigest = checksum(legacyA);
+			expect(run(root, ["stable", b]).exitCode).toBe(0);
+			const releaseB = releasePath(bin, b);
+			expect(linkTarget(stable)).toBe(fs.realpathSync(releaseB));
+			expect(linkTarget(path.join(bin, "omp.previous"))).toBe(fs.realpathSync(importedA));
+
+			candidate(root, `${stableKind}-A`, "mutated-A");
+			expect(checksum(legacyA)).not.toBe(importedDigest);
+			expect(checksum(importedA)).toBe(importedDigest);
+			expect(run(root, ["rollback"]).exitCode).toBe(0);
+			expect(linkTarget(stable)).toBe(fs.realpathSync(importedA));
+			expect(runInstalled(root)).toBe("A");
+		}
 	});
 
 	it("retains A as N-1 after B and atomically rolls back while preserving B inspectably", () => {
