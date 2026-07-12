@@ -1,9 +1,11 @@
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { Model } from "@oh-my-pi/pi-ai";
 import type { Effect, Scope } from "effect";
+import type { GoalModeState } from "../goals/state";
 import type { AgentSessionEvent } from "../session/agent-session";
 import type { WorkflowModeSnapshot } from "../session/session-entries";
 import type { ConfiguredThinkingLevel } from "../thinking";
+import type { TodoPhase } from "../tools/todo";
 import type {
 	CancelCompactionCommand,
 	CancelCompactionReceipt,
@@ -16,6 +18,10 @@ import type {
 	RunnerCommandReceipt,
 	RunnerEvent,
 	SessionRunnerSnapshot,
+	RefreshSshToolCommand,
+	RefreshSshToolReceipt,
+	ReplaceTodosCommand,
+	ReplaceTodosReceipt,
 	SetActiveToolsCommand,
 	SetActiveToolsReceipt,
 	SetModelCommand,
@@ -39,6 +45,10 @@ export interface TerminalSessionStateSnapshot {
 	readonly workflow: WorkflowModeSnapshot;
 	readonly toolConfigurationGeneration: number;
 	readonly activeToolNames: ReadonlyArray<string>;
+	readonly todoGeneration: number;
+	readonly todoPhases: ReadonlyArray<TodoPhase>;
+	readonly goalModeState: GoalModeState | undefined;
+	readonly planReferencePath: string;
 	readonly autoCompactionEnabled: boolean;
 	readonly isStreaming: boolean;
 	readonly isCompacting: boolean;
@@ -83,6 +93,12 @@ export interface TerminalSessionView {
 	readonly setActiveTools: (
 		command: SetActiveToolsCommand,
 	) => Effect.Effect<SetActiveToolsReceipt, RunnerFailure, Scope.Scope>;
+	readonly replaceTodos: (
+		command: ReplaceTodosCommand,
+	) => Effect.Effect<ReplaceTodosReceipt, RunnerFailure, Scope.Scope>;
+	readonly refreshSshTool: (
+		command: RefreshSshToolCommand,
+	) => Effect.Effect<RefreshSshToolReceipt, RunnerFailure, Scope.Scope>;
 	readonly setModel: (command: SetModelCommand) => Effect.Effect<SetModelReceipt, RunnerFailure, Scope.Scope>;
 	readonly setThinkingLevel: (
 		command: SetThinkingLevelCommand,

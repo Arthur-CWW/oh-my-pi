@@ -28,6 +28,8 @@ import {
 	RunnerControllerConflictError,
 	RunnerRevisionConflictError,
 	RunnerToolConfigurationConflictError,
+	RunnerTodoConflictError,
+	RunnerSshToolUnavailableError,
 	RunnerCompactionCommandConflictError,
 	RunnerCompactionUnavailableError,
 	RunnerCompactionTargetError,
@@ -46,6 +48,8 @@ import {
 	decodeCancelCompactionCommand,
 	decodeEditQueuedInputCommand,
 	decodeSetActiveToolsCommand,
+	decodeRefreshSshToolCommand,
+	decodeReplaceTodosCommand,
 	decodeSubmitInputCommand,
 	decodeRunCompactionCommand,
 	decodeSetModelCommand,
@@ -68,6 +72,10 @@ import {
 	type SetModelReceipt,
 	type SetActiveToolsReceipt,
 	type SetActiveToolsCommand,
+	type RefreshSshToolCommand,
+	type RefreshSshToolReceipt,
+	type ReplaceTodosCommand,
+	type ReplaceTodosReceipt,
 	type InterruptPromptCommand,
 	type SetThinkingLevelReceipt,
 	type TransitionPlanModeReceipt,
@@ -90,6 +98,8 @@ import type {
 export type RunnerFailure =
 	| InvalidRunnerCommandError
 	| RunnerToolConfigurationConflictError
+	| RunnerSshToolUnavailableError
+	| RunnerTodoConflictError
 	| RunnerRevisionConflictError
 	| RunnerItemRevisionConflictError
 	| RunnerPromptOperationConflictError
@@ -146,6 +156,10 @@ export interface ControllerSessionRunnerView extends RunnerViewBase {
 	readonly editQueuedInput: (input: unknown) => Effect.Effect<RunnerCommandReceipt, RunnerFailure, Scope.Scope>;
 	readonly cancelQueuedInput: (input: unknown) => Effect.Effect<RunnerCommandReceipt, RunnerFailure, Scope.Scope>;
 	readonly setActiveTools: (input: unknown) => Effect.Effect<SetActiveToolsReceipt, RunnerFailure, Scope.Scope>;
+	readonly replaceTodos: (input: ReplaceTodosCommand) => Effect.Effect<ReplaceTodosReceipt, RunnerFailure, Scope.Scope>;
+	readonly refreshSshTool: (
+		input: RefreshSshToolCommand,
+	) => Effect.Effect<RefreshSshToolReceipt, RunnerFailure, Scope.Scope>;
 	readonly setModel: (input: unknown) => Effect.Effect<SetModelReceipt, RunnerFailure, Scope.Scope>;
 	readonly setThinkingLevel: (input: unknown) => Effect.Effect<SetThinkingLevelReceipt, RunnerFailure, Scope.Scope>;
 	readonly transitionPlanMode: (input: unknown) => Effect.Effect<TransitionPlanModeReceipt, RunnerFailure, Scope.Scope>;
@@ -186,7 +200,13 @@ interface ActiveController {
 
 interface EventDetails {
 	readonly kind: RunnerEventKind;
-	readonly metadata: RunnerControlMetadata | SetActiveToolsCommand | InterruptPromptCommand | CancelCompactionCommand;
+	readonly metadata:
+		| RunnerControlMetadata
+		| SetActiveToolsCommand
+		| ReplaceTodosCommand
+		| RefreshSshToolCommand
+		| InterruptPromptCommand
+		| CancelCompactionCommand;
 	readonly controllerEpoch: number;
 	readonly viewId?: string;
 	readonly inputId?: string;
@@ -221,6 +241,8 @@ const asRunnerFailure = (error: unknown): RunnerFailure => {
 	if (
 		error instanceof InvalidRunnerCommandError ||
 		error instanceof RunnerRevisionConflictError ||
+		error instanceof RunnerTodoConflictError ||
+		error instanceof RunnerSshToolUnavailableError ||
 		error instanceof RunnerControllerConflictError ||
 		error instanceof RunnerItemRevisionConflictError ||
 		error instanceof RunnerPromptOperationConflictError ||
@@ -369,6 +391,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 			workflow: resources.sessionManager.buildSessionContext().workflow ?? { kind: "none" },
 			toolConfigurationGeneration: resources.session.toolConfigurationGeneration,
 			activeToolNames: resources.session.getActiveToolNames(),
+			todoGeneration: resources.session.todoGeneration,
 			status,
 			pendingOperations: pending,
 		} satisfies SessionRunnerSnapshot;
@@ -396,6 +419,13 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 				workflow: resources.sessionManager.buildSessionContext().workflow ?? { kind: "none" },
 				toolConfigurationGeneration: resources.session.toolConfigurationGeneration,
 				activeToolNames: resources.session.getActiveToolNames(),
+				todoGeneration: resources.session.todoGeneration,
+				todoPhases: resources.session.getTodoPhases(),
+				goalModeState: (() => {
+					const state = resources.session.getGoalModeState();
+					return state === undefined ? undefined : { ...state, goal: { ...state.goal } };
+				})(),
+				planReferencePath: resources.session.getPlanReferencePath(),
 				autoCompactionEnabled: resources.session.autoCompactionEnabled,
 				isStreaming: resources.session.isStreaming,
 				isCompacting: resources.session.isCompacting,
@@ -627,6 +657,16 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 		controllerEpoch: number,
 		input: unknown,
 	) => Effect.Effect<SetActiveToolsReceipt, RunnerFailure, Scope.Scope>;
+	let replaceTodos!: (
+		viewId: string,
+		controllerEpoch: number,
+		input: ReplaceTodosCommand,
+	) => Effect.Effect<ReplaceTodosReceipt, RunnerFailure, Scope.Scope>;
+	let refreshSshTool!: (
+		viewId: string,
+		controllerEpoch: number,
+		input: RefreshSshToolCommand,
+	) => Effect.Effect<RefreshSshToolReceipt, RunnerFailure, Scope.Scope>;
 	let setModel!: (
 		viewId: string,
 		controllerEpoch: number,
@@ -695,6 +735,8 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 			editQueuedInput: (input) => editQueuedInput(viewId, controllerEpoch, input),
 			cancelQueuedInput: (input) => cancelQueuedInput(viewId, controllerEpoch, input),
 			setActiveTools: (input) => setActiveTools(viewId, controllerEpoch, input),
+			replaceTodos: (input) => replaceTodos(viewId, controllerEpoch, input),
+			refreshSshTool: (input) => refreshSshTool(viewId, controllerEpoch, input),
 			setThinkingLevel: (input) => setThinkingLevel(viewId, controllerEpoch, input),
 			setModel: (input) => setModel(viewId, controllerEpoch, input),
 			transitionPlanMode: (input) => transitionPlanMode(viewId, controllerEpoch, input),
@@ -1205,6 +1247,106 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 					targetGeneration: decoded.targetGeneration,
 					interrupted: true,
 				} satisfies InterruptPromptReceipt;
+			}),
+		);
+	});
+
+	replaceTodos = Effect.fn("Runner.replaceTodos")(function* (
+		viewId: string,
+		controllerEpoch: number,
+		input: ReplaceTodosCommand,
+	) {
+		const command = yield* Effect.try({ try: () => decodeReplaceTodosCommand(input), catch: asRunnerFailure });
+		if (command.viewId !== viewId) return yield* mismatchedView(viewId);
+		if (command.controllerEpoch !== controllerEpoch) {
+			return yield* Effect.fail(
+				new StaleRunnerControllerLeaseError({
+					viewId,
+					expectedControllerEpoch: command.controllerEpoch,
+					actualControllerEpoch: controllerEpoch,
+				}),
+			);
+		}
+		return yield* enqueue(
+			Effect.gen(function* () {
+				yield* requireController(viewId, controllerEpoch);
+				const result = yield* Effect.tryPromise({
+					try: () =>
+						resources.session.configureTodoPhases(
+							command.expectedTodoGeneration,
+							command.phases.map(phase => ({
+								name: phase.name,
+								tasks: phase.tasks.map(task => ({ content: task.content, status: task.status })),
+							})),
+						),
+					catch: asRunnerFailure,
+				});
+				if (result.kind === "conflict") {
+					return yield* Effect.fail(
+						new RunnerTodoConflictError({
+							expectedGeneration: command.expectedTodoGeneration,
+							actualGeneration: result.actualGeneration,
+						}),
+					);
+				}
+				yield* publishEvent({ kind: "todosReplaced", metadata: command, controllerEpoch, viewId });
+				return {
+					commandId: command.commandId,
+					correlationId: command.correlationId,
+					...(command.causationId === undefined ? {} : { causationId: command.causationId }),
+					todoGeneration: result.todoGeneration,
+					phases: result.phases,
+				} satisfies ReplaceTodosReceipt;
+			}),
+		);
+	});
+
+	refreshSshTool = Effect.fn("Runner.refreshSshTool")(function* (
+		viewId: string,
+		controllerEpoch: number,
+		input: RefreshSshToolCommand,
+	) {
+		const command = yield* Effect.try({ try: () => decodeRefreshSshToolCommand(input), catch: asRunnerFailure });
+		if (command.viewId !== viewId) return yield* mismatchedView(viewId);
+		if (command.controllerEpoch !== controllerEpoch) {
+			return yield* Effect.fail(
+				new StaleRunnerControllerLeaseError({
+					viewId,
+					expectedControllerEpoch: command.controllerEpoch,
+					actualControllerEpoch: controllerEpoch,
+				}),
+			);
+		}
+		return yield* enqueue(
+			Effect.gen(function* () {
+				yield* requireController(viewId, controllerEpoch);
+				const result = yield* Effect.tryPromise({
+					try: () =>
+						resources.session.refreshSshToolConfiguration(
+							command.expectedToolConfigurationGeneration,
+							command.activateIfAvailable,
+						),
+					catch: asRunnerFailure,
+				});
+				if (result.kind === "conflict") {
+					return yield* Effect.fail(
+						new RunnerToolConfigurationConflictError({
+							expectedGeneration: command.expectedToolConfigurationGeneration,
+							actualGeneration: result.actualGeneration,
+						}),
+					);
+				}
+				if (result.kind === "unavailable") {
+					return yield* Effect.fail(new RunnerSshToolUnavailableError({ reason: result.reason }));
+				}
+				yield* publishEvent({ kind: "sshToolRefreshed", metadata: command, controllerEpoch, viewId });
+				return {
+					commandId: command.commandId,
+					correlationId: command.correlationId,
+					...(command.causationId === undefined ? {} : { causationId: command.causationId }),
+					toolConfigurationGeneration: result.toolConfigurationGeneration,
+					activeToolNames: result.activeToolNames,
+				} satisfies RefreshSshToolReceipt;
 			}),
 		);
 	});
@@ -1767,6 +1909,8 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 			edit: attached.editQueuedInput,
 			cancel: attached.cancelQueuedInput,
 			setActiveTools: attached.setActiveTools,
+			replaceTodos: attached.replaceTodos,
+			refreshSshTool: attached.refreshSshTool,
 			setThinkingLevel: attached.setThinkingLevel,
 			setModel: attached.setModel,
 			transitionPlanMode: attached.transitionPlanMode,

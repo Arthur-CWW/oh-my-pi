@@ -20,12 +20,14 @@ import {
 	decodeRunCompactionCommand,
 	decodeSubmitInputCommand,
 	decodeSetActiveToolsCommand,
+	decodeRefreshSshToolCommand,
 	decodeSetModelCommand,
 	decodeSetThinkingLevelCommand,
 	decodeTransitionGoalModeCommand,
 	decodeTransitionPlanModeCommand,
 	InvalidRunnerCommandError,
 	RunnerToolConfigurationConflictError,
+	RunnerSshToolUnavailableError,
 	RunnerRevisionConflictError,
 	RunnerItemRevisionConflictError,
 	RunnerPromptOperationConflictError,
@@ -92,7 +94,10 @@ const submit = (viewId: string, controllerEpoch: number, commandId: string, expe
 	payload: { text: `input-${commandId}`, deliveryClass: "followUp" as const },
 });
 
-async function createLiveFixture(holdProviderResponses = false) {
+async function createLiveFixture(
+	holdProviderResponses = false,
+	reloadSshTool?: () => Promise<AgentTool | null>,
+) {
 	let shouldHoldProviderResponses = holdProviderResponses;
 	const root = await fs.mkdtemp(path.join(os.tmpdir(), "omp-session-runner-"));
 	roots.push(root);
@@ -204,6 +209,7 @@ async function createLiveFixture(holdProviderResponses = false) {
 			[mcpTool.name, mcpTool],
 		]),
 		mcpDiscoveryEnabled: true,
+		...(reloadSshTool === undefined ? {} : { reloadSshTool }),
 		rebuildSystemPrompt: async () => {
 			if (heldPromptRebuild) {
 				const held = heldPromptRebuild;
@@ -1208,6 +1214,23 @@ describe("live SessionRunner", () => {
 			expect(alphaTools.toolConfigurationGeneration).toBe(2);
 			expect(alphaTools.activeToolNames).toEqual(["alpha"]);
 			expect(controller.snapshot().runner.toolConfigurationGeneration).toBe(2);
+			const beforeTodoRevision = controller.snapshot().runner.revision;
+			const beforeTodoSessionRevision = controller.snapshot().runner.sessionRevision;
+			const beforeTodoGeneration = controller.snapshot().runner.todoGeneration;
+			const firstTodos = await controller.replaceTodos({
+				phases: [{ name: "build", tasks: [{ content: "first", status: "in_progress" }] }],
+			});
+			const secondTodos = await controller.replaceTodos({
+				phases: [{ name: "verify", tasks: [{ content: "second", status: "pending" }] }],
+			});
+			expect(firstTodos.todoGeneration).toBe(beforeTodoGeneration + 1);
+			expect(secondTodos.todoGeneration).toBe(beforeTodoGeneration + 2);
+			expect(controller.snapshot().runner.todoGeneration).toBe(secondTodos.todoGeneration);
+			expect(controller.snapshot().session.todoPhases).toEqual(secondTodos.phases);
+			secondTodos.phases[0]!.tasks[0]!.content = "mutated receipt";
+			expect(controller.snapshot().session.todoPhases[0]!.tasks[0]!.content).toBe("second");
+			expect(controller.snapshot().runner.revision).toBe(beforeTodoRevision);
+			expect(controller.snapshot().runner.sessionRevision).toBe(beforeTodoSessionRevision);
 			await controller.close();
 			expect((await run(runner.snapshot())).status).toBe("running");
 			fixture.releaseProviderResponses();
@@ -1218,6 +1241,128 @@ describe("live SessionRunner", () => {
 			await Effect.runPromise(Scope.close(scope, Exit.void));
 		}
 	});
+	it("reports an unavailable SSH reloader without consuming the generation", async () => {
+		const fixture = await createLiveFixture();
+		const scope = Scope.makeUnsafe("sequential");
+		const run = <A, E>(effect: Effect.Effect<A, E, Scope.Scope>) =>
+			Effect.runPromise(Scope.provide(scope)(effect));
+		try {
+			const runner = await run(makeSessionRunnerLive(fixture, { mailboxCapacity: 4, eventCapacity: 4 }));
+			const controller = await createTerminalSessionController(runner, { viewId: "ssh-unavailable-terminal" });
+			const initial = controller.snapshot();
+			await expect(controller.refreshSshTool({ activateIfAvailable: true })).rejects.toBeInstanceOf(
+				RunnerSshToolUnavailableError,
+			);
+			const refreshed = controller.snapshot();
+			expect(refreshed.runner.toolConfigurationGeneration).toBe(initial.runner.toolConfigurationGeneration);
+			expect(refreshed.runner.revision).toBe(initial.runner.revision);
+			expect(refreshed.runner.sessionRevision).toBe(initial.runner.sessionRevision);
+			await controller.close();
+			await run(runner.stop());
+		} finally {
+			fixture.releaseProviderResponses();
+			await Effect.runPromise(Scope.close(scope, Exit.void));
+		}
+	});
+
+	it("refreshes SSH through the Promise controller and rolls back a failed prompt rebuild", async () => {
+		const sshTool = (description: string): AgentTool => ({
+			name: "ssh",
+			label: "SSH",
+			description,
+			parameters: z.object({}),
+			execute: async () => ({ content: [{ type: "text" as const, text: "ssh" }] }),
+		});
+		let reloadedSshTool: AgentTool | null = sshTool("SSH v1");
+		const fixture = await createLiveFixture(false, async () => reloadedSshTool);
+		const scope = Scope.makeUnsafe("sequential");
+		const run = <A, E>(effect: Effect.Effect<A, E, Scope.Scope>) =>
+			Effect.runPromise(Scope.provide(scope)(effect));
+		try {
+			const runner = await run(makeSessionRunnerLive(fixture, { mailboxCapacity: 4, eventCapacity: 8 }));
+			const controller = await createTerminalSessionController(runner, { viewId: "ssh-refresh-terminal" });
+			const initial = controller.snapshot();
+			const available = await controller.refreshSshTool({ activateIfAvailable: true });
+			expect(available.toolConfigurationGeneration).toBe(initial.runner.toolConfigurationGeneration + 1);
+			expect(available.activeToolNames).toEqual(["alpha", "ssh"]);
+			await controller.setActiveTools({ toolNames: ["alpha", "mcp__test_lookup", "ssh"] });
+
+			const beforeFailure = controller.snapshot();
+			const previousTools = fixture.session.agent.state.tools.map(tool => ({
+				name: tool.name,
+				description: tool.description,
+			}));
+			const previousPrompt = [...fixture.session.agent.state.systemPrompt];
+			const previousMcpSelection = fixture.session.getSelectedMCPToolNames();
+			reloadedSshTool = sshTool("SSH v2");
+			fixture.failNextPromptRebuild();
+			await expect(controller.refreshSshTool({ activateIfAvailable: true })).rejects.toBeInstanceOf(
+				SessionRunnerRuntimeError,
+			);
+			const recovered = controller.snapshot();
+			expect(fixture.session.agent.state.tools.map(tool => ({ name: tool.name, description: tool.description }))).toEqual(
+				previousTools,
+			);
+			expect(fixture.session.agent.state.systemPrompt).toEqual(previousPrompt);
+			expect(fixture.session.getSelectedMCPToolNames()).toEqual(previousMcpSelection);
+			expect(recovered.runner.toolConfigurationGeneration).toBe(
+				beforeFailure.runner.toolConfigurationGeneration + 2,
+			);
+			expect(recovered.runner.revision).toBe(initial.runner.revision);
+			expect(recovered.runner.sessionRevision).toBe(initial.runner.sessionRevision);
+			await controller.close();
+			await run(runner.stop());
+		} finally {
+			fixture.releaseProviderResponses();
+			await Effect.runPromise(Scope.close(scope, Exit.void));
+		}
+	});
+
+	it("fences stale SSH refresh generation and controller epoch without mutation", async () => {
+		const fixture = await createLiveFixture(false, async () => null);
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const runner = yield* makeSessionRunnerLive(fixture, { mailboxCapacity: 4, eventCapacity: 8 });
+					const terminal = yield* runner.attachTerminalView(attach("ssh-fence-terminal", "controller", 0));
+					const subscription = yield* terminal.subscribe();
+					const initial = yield* terminal.snapshot();
+					yield* Effect.promise(() => fixture.session.setActiveToolsByName(["beta"]));
+					const command = (commandId: string, generation: number, epoch = terminal.epoch) =>
+						decodeRefreshSshToolCommand({
+							schemaVersion: 1,
+							kind: "refreshSshTool",
+							commandId,
+							correlationId: commandId,
+							viewId: terminal.viewId,
+							controllerEpoch: epoch,
+							expectedToolConfigurationGeneration: generation,
+							activateIfAvailable: true,
+						});
+					const staleGeneration = yield* Effect.flip(terminal.refreshSshTool(command("ssh-stale", 0)));
+					expect(staleGeneration).toBeInstanceOf(RunnerToolConfigurationConflictError);
+					const staleEpoch = yield* Effect.flip(
+						terminal.refreshSshTool(command("ssh-stale-epoch", 1, terminal.epoch + 1)),
+					);
+					expect(staleEpoch).toBeInstanceOf(StaleRunnerControllerLeaseError);
+					expect(fixture.session.toolConfigurationGeneration).toBe(1);
+
+					const receipt = yield* terminal.refreshSshTool(command("ssh-current", 1));
+					expect(receipt.toolConfigurationGeneration).toBe(2);
+					const delivery = yield* subscription.take;
+					expect(delivery.kind).toBe("runnerEvent");
+					if (delivery.kind !== "runnerEvent") throw new Error("expected runner event");
+					expect(delivery.event.kind).toBe("sshToolRefreshed");
+					const final = yield* terminal.snapshot();
+					expect(final.runner.revision).toBe(initial.runner.revision);
+					expect(final.runner.sessionRevision).toBe(initial.runner.sessionRevision);
+					yield* terminal.detach();
+					yield* runner.stop();
+				}),
+			),
+		);
+	});
+
 	it("rejects live tool changes while a prompt is active without blocking snapshots", async () => {
 		const fixture = await createLiveFixture(true);
 		const scope = Scope.makeUnsafe("sequential");
@@ -1876,7 +2021,7 @@ describe("live SessionRunner", () => {
 
 					const held = fixture.holdNextPromptRebuild();
 					const external = yield* Effect.forkScoped(
-						Effect.promise(() => fixture.session.setActiveToolsByName(["beta"])),
+						Effect.promise(() => fixture.session.refreshMCPTools([])),
 					);
 					yield* Effect.promise(() => held.started.promise);
 					const concurrentCommand = yield* Effect.forkScoped(
@@ -1887,7 +2032,7 @@ describe("live SessionRunner", () => {
 					const concurrentConflict = yield* Effect.flip(Fiber.join(concurrentCommand));
 					expect(concurrentConflict).toBeInstanceOf(RunnerToolConfigurationConflictError);
 					expect(fixture.session.toolConfigurationGeneration).toBe(8);
-					expect(fixture.session.getActiveToolNames()).toEqual(["beta"]);
+					expect(fixture.session.getActiveToolNames()).toEqual([]);
 					expect(() => command("tools-duplicate", 8, ["alpha", "alpha"])).toThrow(
 						InvalidRunnerCommandError,
 					);

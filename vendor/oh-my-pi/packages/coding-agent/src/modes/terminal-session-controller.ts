@@ -7,6 +7,8 @@ import type {
 	RunCompactionReceipt,
 	RunnerImageContent,
 	SetActiveToolsReceipt,
+	RefreshSshToolReceipt,
+	ReplaceTodosReceipt,
 	SetModelReceipt,
 	SetThinkingLevelReceipt,
 	TransitionPlanModeReceipt,
@@ -20,6 +22,8 @@ import {
 	decodeRunCompactionCommand,
 	decodeSubmitInputCommand,
 	decodeSetActiveToolsCommand,
+	decodeRefreshSshToolCommand,
+	decodeReplaceTodosCommand,
 	decodeSetModelCommand,
 	decodeSetThinkingLevelCommand,
 	decodeTransitionPlanModeCommand,
@@ -31,6 +35,7 @@ import type { AgentSessionEvent } from "../session/agent-session";
 import type { RunnerFailure, SessionRunner } from "../runner/session-runner";
 import type { TerminalSessionSnapshot, TerminalSessionView } from "../runner/terminal-session-view";
 import type { ConfiguredThinkingLevel } from "../thinking";
+import type { TodoPhase } from "../tools/todo";
 
 export interface TerminalSubmitIntent {
 	readonly text: string;
@@ -61,6 +66,20 @@ export interface TerminalCancelIntent {
 
 export interface TerminalSetActiveToolsIntent {
 	readonly toolNames: ReadonlyArray<string>;
+	readonly commandId?: string;
+	readonly correlationId?: string;
+	readonly causationId?: string;
+}
+
+export interface TerminalReplaceTodosIntent {
+	readonly phases: ReadonlyArray<TodoPhase>;
+	readonly commandId?: string;
+	readonly correlationId?: string;
+	readonly causationId?: string;
+}
+
+export interface TerminalRefreshSshToolIntent {
+	readonly activateIfAvailable: boolean;
 	readonly commandId?: string;
 	readonly correlationId?: string;
 	readonly causationId?: string;
@@ -150,6 +169,8 @@ export interface TerminalSessionController {
 	readonly edit: (intent: TerminalEditIntent) => Promise<RunnerCommandReceipt>;
 	readonly cancel: (intent: TerminalCancelIntent) => Promise<RunnerCommandReceipt>;
 	readonly setActiveTools: (intent: TerminalSetActiveToolsIntent) => Promise<SetActiveToolsReceipt>;
+	readonly replaceTodos: (intent: TerminalReplaceTodosIntent) => Promise<ReplaceTodosReceipt>;
+	readonly refreshSshTool: (intent: TerminalRefreshSshToolIntent) => Promise<RefreshSshToolReceipt>;
 	readonly setModel: (intent: TerminalSetModelIntent) => Promise<SetModelReceipt>;
 	readonly setThinkingLevel: (intent: TerminalSetThinkingLevelIntent) => Promise<SetThinkingLevelReceipt>;
 	readonly transitionPlanMode: (intent: TerminalTransitionPlanModeIntent) => Promise<TransitionPlanModeReceipt>;
@@ -320,6 +341,59 @@ export async function createTerminalSessionController(
 								controllerEpoch: view!.epoch,
 								expectedToolConfigurationGeneration: current.runner.toolConfigurationGeneration,
 								toolNames: [...intent.toolNames],
+							}),
+						),
+					);
+					await refresh();
+					return receipt;
+				} catch (error) {
+					await refresh();
+					throw error;
+				}
+			},
+			replaceTodos: async (intent) => {
+				const current = await refresh();
+				try {
+					const ids = metadata(intent);
+					const receipt = await run(
+						view!.replaceTodos(
+							decodeReplaceTodosCommand({
+								schemaVersion: RUNNER_SCHEMA_VERSION,
+								kind: "replaceTodos",
+								...ids,
+								...(intent.causationId === undefined ? {} : { causationId: intent.causationId }),
+								viewId,
+								controllerEpoch: view!.epoch,
+								expectedTodoGeneration: current.runner.todoGeneration,
+								phases: intent.phases.map(phase => ({
+									name: phase.name,
+									tasks: phase.tasks.map(task => ({ content: task.content, status: task.status })),
+								})),
+							}),
+						),
+					);
+					await refresh();
+					return receipt;
+				} catch (error) {
+					await refresh();
+					throw error;
+				}
+			},
+			refreshSshTool: async (intent) => {
+				const current = await refresh();
+				try {
+					const ids = metadata(intent);
+					const receipt = await run(
+						view!.refreshSshTool(
+							decodeRefreshSshToolCommand({
+								schemaVersion: RUNNER_SCHEMA_VERSION,
+								kind: "refreshSshTool",
+								...ids,
+								...(intent.causationId === undefined ? {} : { causationId: intent.causationId }),
+								viewId,
+								controllerEpoch: view!.epoch,
+								expectedToolConfigurationGeneration: current.runner.toolConfigurationGeneration,
+								activateIfAvailable: intent.activateIfAvailable,
 							}),
 						),
 					);

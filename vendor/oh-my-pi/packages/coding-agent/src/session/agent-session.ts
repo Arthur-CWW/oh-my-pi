@@ -1245,6 +1245,7 @@ export class AgentSession {
 	 */
 	#todoReminderAwaitingProgress = false;
 	#todoPhases: TodoPhase[] = [];
+	#todoGeneration = 0;
 	#toolChoiceQueue = new ToolChoiceQueue();
 
 	// Bash execution state
@@ -4735,8 +4736,12 @@ export class AgentSession {
 	 * refreshed definition visible to the next model call without restarting.
 	 */
 	async refreshSshTool(options?: { activateIfAvailable?: boolean }): Promise<void> {
+		await this.#withActiveToolMutation(() => this.#refreshSshToolUnlocked(options));
+	}
+
+	async #refreshSshToolUnlocked(options?: { activateIfAvailable?: boolean }): Promise<boolean> {
+		if (!this.#reloadSshTool) return false;
 		resetCapabilities();
-		if (!this.#reloadSshTool) return;
 		const previousSshTool = this.#toolRegistry.get("ssh");
 		const previousActiveToolNames = this.getActiveToolNames();
 		const hadSshTool = previousSshTool !== undefined;
@@ -4748,9 +4753,7 @@ export class AgentSession {
 		const candidateHostNames = new Set(previousHostNames);
 		const capability = await loadCapability<{ name: string }>("ssh", { cwd: this.sessionManager.getCwd() });
 		for (const host of capability.items) {
-			if (typeof host?.name === "string") {
-				candidateHostNames.add(host.name);
-			}
+			if (typeof host?.name === "string") candidateHostNames.add(host.name);
 		}
 		await invalidateHostMetadata(candidateHostNames);
 		const sshAllowed = this.#requestedToolNames === undefined || this.#requestedToolNames.has("ssh");
@@ -4761,12 +4764,80 @@ export class AgentSession {
 			this.#toolRegistry.delete("ssh");
 			this.#selectedDiscoveredToolNames.delete("ssh");
 		}
-
 		const nextActive = previousActiveToolNames.filter(name => name !== "ssh" && this.#toolRegistry.has(name));
 		if (refreshedTool && sshAllowed && (wasActive || (options?.activateIfAvailable && !hadSshTool))) {
 			nextActive.push(refreshedTool.name);
 		}
-		await this.#applyActiveToolsByName(nextActive);
+		await this.#applyActiveToolsByNameUnlocked(nextActive);
+		return true;
+	}
+
+	async refreshSshToolConfiguration(
+		expectedGeneration: number,
+		activateIfAvailable: boolean,
+	): Promise<
+		| { readonly kind: "conflict"; readonly actualGeneration: number }
+		| { readonly kind: "unavailable"; readonly reason: "reload-not-configured" }
+		| {
+				readonly kind: "applied";
+				readonly toolConfigurationGeneration: number;
+				readonly activeToolNames: ReadonlyArray<string>;
+		  }
+	> {
+		const promptGeneration = this.#promptGeneration;
+		if (this.isStreaming || this.isCompacting || this.isRetrying || this.isGeneratingHandoff) {
+			throw new SessionStateCommandInFlightError();
+		}
+		const release = await this.#acquireDurableAdmissionMaintenance();
+		try {
+			if (
+				promptGeneration !== this.#promptGeneration ||
+				this.isStreaming ||
+				this.isCompacting ||
+				this.isRetrying ||
+				this.isGeneratingHandoff
+			) {
+				throw new SessionStateCommandInFlightError();
+			}
+			return await this.#withActiveToolMutation(async () => {
+				if (expectedGeneration !== this.#toolConfigurationGeneration) {
+					return { kind: "conflict" as const, actualGeneration: this.#toolConfigurationGeneration };
+				}
+				const previousSshTool = this.#toolRegistry.get("ssh");
+				const previousTools = [...this.agent.state.tools];
+				const previousSystemPrompt = this.agent.state.systemPrompt;
+				const previousBaseSystemPrompt = this.#baseSystemPrompt;
+				const previousSignature = this.#lastAppliedToolSignature;
+				const previousPromptModelKey = this.#promptModelKey;
+				const previousSelectedMCPToolNames = new Set(this.#selectedMCPToolNames);
+				const previousSelectedDiscoveredToolNames = new Set(this.#selectedDiscoveredToolNames);
+				try {
+					const available = await this.#refreshSshToolUnlocked({ activateIfAvailable });
+					if (!available) return { kind: "unavailable" as const, reason: "reload-not-configured" as const };
+				} catch (error) {
+					if (previousSshTool === undefined) this.#toolRegistry.delete("ssh");
+					else this.#toolRegistry.set("ssh", previousSshTool);
+					this.agent.setTools(previousTools);
+					this.agent.setSystemPrompt(previousSystemPrompt);
+					this.#baseSystemPrompt = previousBaseSystemPrompt;
+					this.#lastAppliedToolSignature = previousSignature;
+					this.#promptModelKey = previousPromptModelKey;
+					this.#selectedMCPToolNames = previousSelectedMCPToolNames;
+					this.#selectedDiscoveredToolNames = previousSelectedDiscoveredToolNames;
+					this.#toolConfigurationGeneration += 1;
+					this.#invalidateDiscoveryCaches();
+					resetCapabilities();
+					throw error;
+				}
+				return {
+					kind: "applied" as const,
+					toolConfigurationGeneration: this.#toolConfigurationGeneration,
+					activeToolNames: this.getActiveToolNames(),
+				};
+			});
+		} finally {
+			release();
+		}
 	}
 
 	/**
@@ -4987,60 +5058,57 @@ export class AgentSession {
 	 *   for a session where MCP discovery is disabled.
 	 */
 	async refreshMCPTools(mcpTools: CustomTool[], options?: { activateAll?: boolean }): Promise<void> {
-		const previousSelectedMCPToolNames = this.getSelectedMCPToolNames();
-		const existingNames = Array.from(this.#toolRegistry.keys());
-		for (const name of existingNames) {
-			if (isMCPToolName(name)) {
-				this.#toolRegistry.delete(name);
+		await this.#withActiveToolMutation(async () => {
+			const previousSelectedMCPToolNames = this.getSelectedMCPToolNames();
+			const existingNames = Array.from(this.#toolRegistry.keys());
+			for (const name of existingNames) {
+				if (isMCPToolName(name)) {
+					this.#toolRegistry.delete(name);
+				}
 			}
-		}
 
-		const getCustomToolContext = (): CustomToolContext => ({
-			sessionManager: this.sessionManager,
-			modelRegistry: this.#modelRegistry,
-			model: this.model,
-			isIdle: () => !this.isStreaming,
-			hasQueuedMessages: () => this.queuedMessageCount > 0,
-			abort: () => {
-				this.agent.abort();
-			},
+			const getCustomToolContext = (): CustomToolContext => ({
+				sessionManager: this.sessionManager,
+				modelRegistry: this.#modelRegistry,
+				model: this.model,
+				isIdle: () => !this.isStreaming,
+				hasQueuedMessages: () => this.queuedMessageCount > 0,
+				abort: () => {
+					this.agent.abort();
+				},
+			});
+
+			for (const customTool of mcpTools) {
+				const wrapped = CustomToolAdapter.wrap(customTool, getCustomToolContext) as AgentTool;
+				const finalTool = (
+					this.#extensionRunner ? new ExtensionToolWrapper(wrapped, this.#extensionRunner) : wrapped
+				) as AgentTool;
+				this.#toolRegistry.set(finalTool.name, finalTool);
+			}
+
+			this.#setDiscoverableMCPTools(this.#collectDiscoverableMCPToolsFromRegistry());
+			this.#pruneSelectedMCPToolNames();
+			if (!this.buildDisplaySessionContext().hasPersistedMCPToolSelection) {
+				this.#selectedMCPToolNames = new Set([
+					...this.#selectedMCPToolNames,
+					...this.#getConfiguredDefaultSelectedMCPToolNames(),
+				]);
+			}
+			this.#rememberSessionDefaultSelectedMCPToolNames(
+				this.sessionFile,
+				this.#getConfiguredDefaultSelectedMCPToolNames(),
+			);
+
+			if (options?.activateAll) {
+				const newMcpNames = mcpTools.map(tool => tool.name);
+				const nextActive = [...new Set([...this.#getActiveNonMCPToolNames(), ...newMcpNames])];
+				await this.#applyActiveToolsByNameUnlocked(nextActive, { previousSelectedMCPToolNames });
+				return;
+			}
+
+			const nextActive = [...this.#getActiveNonMCPToolNames(), ...this.getSelectedMCPToolNames()];
+			await this.#applyActiveToolsByNameUnlocked(nextActive, { previousSelectedMCPToolNames });
 		});
-
-		for (const customTool of mcpTools) {
-			const wrapped = CustomToolAdapter.wrap(customTool, getCustomToolContext) as AgentTool;
-			const finalTool = (
-				this.#extensionRunner ? new ExtensionToolWrapper(wrapped, this.#extensionRunner) : wrapped
-			) as AgentTool;
-			this.#toolRegistry.set(finalTool.name, finalTool);
-		}
-
-		this.#setDiscoverableMCPTools(this.#collectDiscoverableMCPToolsFromRegistry());
-		this.#pruneSelectedMCPToolNames();
-		if (!this.buildDisplaySessionContext().hasPersistedMCPToolSelection) {
-			this.#selectedMCPToolNames = new Set([
-				...this.#selectedMCPToolNames,
-				...this.#getConfiguredDefaultSelectedMCPToolNames(),
-			]);
-		}
-		this.#rememberSessionDefaultSelectedMCPToolNames(
-			this.sessionFile,
-			this.#getConfiguredDefaultSelectedMCPToolNames(),
-		);
-
-		if (options?.activateAll) {
-			// Force-activate every newly registered MCP tool. This path is used
-			// when an ACP client provisions MCP servers for a session where MCP
-			// discovery is disabled — without it, getSelectedMCPToolNames()
-			// returns only already-active tools (circular deadlock: tools can
-			// only become active if they're already active).
-			const newMcpNames = mcpTools.map(t => t.name);
-			const nextActive = [...new Set([...this.#getActiveNonMCPToolNames(), ...newMcpNames])];
-			await this.#applyActiveToolsByName(nextActive, { previousSelectedMCPToolNames });
-			return;
-		}
-
-		const nextActive = [...this.#getActiveNonMCPToolNames(), ...this.getSelectedMCPToolNames()];
-		await this.#applyActiveToolsByName(nextActive, { previousSelectedMCPToolNames });
 	}
 
 	/**
@@ -7423,12 +7491,50 @@ export class AgentSession {
 		return this.#skillWarnings;
 	}
 
+	get todoGeneration(): number {
+		return this.#todoGeneration;
+	}
+
 	getTodoPhases(): TodoPhase[] {
 		return this.#cloneTodoPhases(this.#todoPhases);
 	}
 
-	setTodoPhases(phases: TodoPhase[]): void {
+	setTodoPhases(phases: readonly TodoPhase[]): void {
 		this.#todoPhases = this.#cloneTodoPhases(phases);
+		this.#todoGeneration += 1;
+	}
+
+	/** Replace the live todo projection under controller generation and idle fences. */
+	async configureTodoPhases(
+		expectedGeneration: number,
+		phases: readonly TodoPhase[],
+	): Promise<
+		| { readonly kind: "conflict"; readonly actualGeneration: number }
+		| { readonly kind: "applied"; readonly todoGeneration: number; readonly phases: ReadonlyArray<TodoPhase> }
+	> {
+		const promptGeneration = this.#promptGeneration;
+		if (this.isStreaming || this.isCompacting || this.isRetrying || this.isGeneratingHandoff) {
+			throw new SessionStateCommandInFlightError();
+		}
+		const release = await this.#acquireDurableAdmissionMaintenance();
+		try {
+			if (
+				promptGeneration !== this.#promptGeneration ||
+				this.isStreaming ||
+				this.isCompacting ||
+				this.isRetrying ||
+				this.isGeneratingHandoff
+			) {
+				throw new SessionStateCommandInFlightError();
+			}
+			if (expectedGeneration !== this.#todoGeneration) {
+				return { kind: "conflict", actualGeneration: this.#todoGeneration };
+			}
+			this.setTodoPhases(phases);
+			return { kind: "applied", todoGeneration: this.#todoGeneration, phases: this.getTodoPhases() };
+		} finally {
+			release();
+		}
 	}
 
 	#syncTodoPhasesFromBranch(): void {
@@ -7441,7 +7547,7 @@ export class AgentSession {
 		this.setTodoPhases(phases.filter(p => p.tasks.length > 0));
 	}
 
-	#cloneTodoPhases(phases: TodoPhase[]): TodoPhase[] {
+	#cloneTodoPhases(phases: readonly TodoPhase[]): TodoPhase[] {
 		return phases.map(phase => ({
 			name: phase.name,
 			tasks: phase.tasks.map(task => ({ content: task.content, status: task.status })),

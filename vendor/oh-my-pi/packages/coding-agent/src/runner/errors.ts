@@ -17,6 +17,16 @@ export class RunnerToolConfigurationConflictError extends Schema.TaggedErrorClas
 	{ expectedGeneration: NonNegativeInt, actualGeneration: NonNegativeInt },
 ) {}
 
+export class RunnerSshToolUnavailableError extends Schema.TaggedErrorClass<RunnerSshToolUnavailableError>()(
+	"RunnerSshToolUnavailableError",
+	{ reason: Schema.Literal("reload-not-configured") },
+) {}
+
+export class RunnerTodoConflictError extends Schema.TaggedErrorClass<RunnerTodoConflictError>()(
+	"RunnerTodoConflictError",
+	{ expectedGeneration: NonNegativeInt, actualGeneration: NonNegativeInt },
+) {}
+
 export class RunnerItemRevisionConflictError extends Schema.TaggedErrorClass<RunnerItemRevisionConflictError>()(
 	"RunnerItemRevisionConflictError",
 	{ inputId: Schema.String, expectedRevision: NonNegativeInt, actualRevision: NonNegativeInt },

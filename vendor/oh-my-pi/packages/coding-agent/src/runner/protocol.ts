@@ -1,6 +1,7 @@
 import { Schema } from "effect";
 import type { DurableQueuedInput } from "../session/durable-input-queue";
 import type { WorkflowModeSnapshot } from "../session/session-entries";
+import type { TodoPhase } from "../tools/todo";
 import { InvalidRunnerCommandError, RunnerRevisionConflictError } from "./errors";
 
 export * from "./errors";
@@ -83,6 +84,39 @@ export const SetActiveToolsCommandSchema = Schema.Struct({
 	controllerEpoch: ControllerEpochSchema,
 	expectedToolConfigurationGeneration: RunnerRevisionSchema,
 	toolNames: Schema.Array(Schema.String),
+});
+
+export const TodoTaskSchema = Schema.Struct({
+	content: Schema.String,
+	status: Schema.Literals(["pending", "in_progress", "completed", "abandoned"]),
+});
+
+export const TodoPhaseSchema = Schema.Struct({
+	name: Schema.String,
+	tasks: Schema.Array(TodoTaskSchema),
+});
+
+const LiveCommandMetadataSchema = {
+	schemaVersion: Schema.Literal(RUNNER_SCHEMA_VERSION),
+	commandId: Schema.String,
+	correlationId: Schema.String,
+	causationId: Schema.optional(Schema.String),
+	viewId: Schema.String,
+	controllerEpoch: ControllerEpochSchema,
+};
+
+export const ReplaceTodosCommandSchema = Schema.Struct({
+	...LiveCommandMetadataSchema,
+	kind: Schema.Literal("replaceTodos"),
+	expectedTodoGeneration: RunnerRevisionSchema,
+	phases: Schema.Array(TodoPhaseSchema),
+});
+
+export const RefreshSshToolCommandSchema = Schema.Struct({
+	...LiveCommandMetadataSchema,
+	kind: Schema.Literal("refreshSshTool"),
+	expectedToolConfigurationGeneration: RunnerRevisionSchema,
+	activateIfAvailable: Schema.Boolean,
 });
 
 export const SetThinkingLevelCommandSchema = Schema.Struct({
@@ -215,6 +249,8 @@ export type RunCompactionCommand = typeof RunCompactionCommandSchema.Type;
 export type CancelCompactionCommand = typeof CancelCompactionCommandSchema.Type;
 export type TransitionPlanModeCommand = typeof TransitionPlanModeCommandSchema.Type;
 export type TransitionGoalModeCommand = typeof TransitionGoalModeCommandSchema.Type;
+export type ReplaceTodosCommand = typeof ReplaceTodosCommandSchema.Type;
+export type RefreshSshToolCommand = typeof RefreshSshToolCommandSchema.Type;
 export type RunnerCapability = "observer" | "controller";
 export type RunnerStatus = "running" | "stopping" | "stopped";
 
@@ -266,6 +302,16 @@ export interface SetActiveToolsReceipt {
 	readonly toolConfigurationGeneration: number;
 	readonly activeToolNames: ReadonlyArray<string>;
 }
+
+export interface ReplaceTodosReceipt {
+	readonly commandId: string;
+	readonly correlationId: string;
+	readonly causationId?: string;
+	readonly todoGeneration: number;
+	readonly phases: ReadonlyArray<TodoPhase>;
+}
+
+export type RefreshSshToolReceipt = SetActiveToolsReceipt;
 
 export interface SetThinkingLevelReceipt {
 	readonly commandId: string;
@@ -347,6 +393,7 @@ export interface SessionRunnerSnapshot {
 	readonly workflow: WorkflowModeSnapshot;
 	readonly toolConfigurationGeneration: number;
 	readonly activeToolNames: ReadonlyArray<string>;
+	readonly todoGeneration: number;
 	readonly status: RunnerStatus;
 	readonly pendingOperations: number;
 }
@@ -361,6 +408,8 @@ export type RunnerEventKind =
 	| "inputCancelled"
 	| "thinkingLevelChanged"
 	| "toolsChanged"
+	| "todosReplaced"
+	| "sshToolRefreshed"
 	| "modelChanged"
 	| "planModeChanged"
 	| "goalModeChanged"
@@ -441,6 +490,32 @@ export const decodeSetActiveToolsCommand = (input: unknown): SetActiveToolsComma
 	} catch (error) {
 		throw new InvalidRunnerCommandError({
 			issue: error instanceof Error ? error.message : "Invalid set-active-tools command",
+		});
+	}
+};
+
+export const decodeReplaceTodosCommand = (input: unknown): ReplaceTodosCommand => {
+	try {
+		const command = Schema.decodeUnknownSync(ReplaceTodosCommandSchema)(input, { onExcessProperty: "error" });
+		const phaseNames = new Set<string>();
+		for (const phase of command.phases) {
+			if (phaseNames.has(phase.name)) throw new Error(`Duplicate todo phase: ${phase.name}`);
+			phaseNames.add(phase.name);
+		}
+		return command;
+	} catch (error) {
+		throw new InvalidRunnerCommandError({
+			issue: error instanceof Error ? error.message : "Invalid replace-todos command",
+		});
+	}
+};
+
+export const decodeRefreshSshToolCommand = (input: unknown): RefreshSshToolCommand => {
+	try {
+		return Schema.decodeUnknownSync(RefreshSshToolCommandSchema)(input, { onExcessProperty: "error" });
+	} catch (error) {
+		throw new InvalidRunnerCommandError({
+			issue: error instanceof Error ? error.message : "Invalid refresh-ssh-tool command",
 		});
 	}
 };
