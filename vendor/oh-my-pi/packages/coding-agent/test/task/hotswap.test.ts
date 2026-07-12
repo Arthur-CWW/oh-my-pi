@@ -8,6 +8,7 @@ import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AgentLifecycleManager } from "@oh-my-pi/pi-coding-agent/registry/agent-lifecycle";
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import type { AgentSession, AgentSessionEvent } from "@oh-my-pi/pi-coding-agent/session/agent-session";
+import type { SetModelSessionCommand } from "@oh-my-pi/pi-coding-agent/session/session-entries";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { MemorySessionStorage } from "@oh-my-pi/pi-coding-agent/session/session-storage";
 import * as hotswapModule from "@oh-my-pi/pi-coding-agent/task/hotswap";
@@ -201,6 +202,16 @@ function makeSessionStub(
 			getEntries: () => [],
 			getSessionId: () => "stub-session",
 			flush: async () => {},
+		},
+		commitJournaledModel: async (command: SetModelSessionCommand) => {
+			const target = (options.registry ?? makeRegistry()).getAvailable().find(
+				model => `${model.provider}/${model.id}` === command.model,
+			);
+			if (!target) throw new Error(`Model not found: ${command.model}`);
+			const receipt = await (options.sessionManager ?? (session.sessionManager as SessionManager)).commitStateCommand(command);
+			setModelCalls.push({ model: target, role: command.role });
+			currentModel = target;
+			return receipt;
 		},
 		setModel: async (model: Model, role: string) => {
 			setModelCalls.push({ model, role });
@@ -730,6 +741,8 @@ describe("job setModel operation", () => {
 			model: "openai/model-b",
 			reason: "capacity",
 			requestedBy: "Main",
+			commandId: "job-set-model",
+			correlationId: "job-set-model",
 		});
 		expect(firstText(result)).toBe("Hot-swap applied: OwnedSub now openai/model-b (was anthropic/model-a)");
 	});
@@ -760,6 +773,37 @@ describe("job setModel operation", () => {
 		expect(firstText(result)).toBe("Hot-swap applied: Main now openai/model-b (was anthropic/model-a)");
 		expect(stub.setModelCalls).toEqual([{ model: modelB, role: "hotswap" }]);
 		expect(stub.thinkingCalls).toEqual(["high" as ThinkingLevel]);
+		const modelEntry = parent.getBranch().findLast(entry => entry.type === "model_change");
+		expect(modelEntry?.command).toMatchObject({
+			commandId: "job-main-set-model",
+			correlationId: "job-main-set-model",
+			request: { kind: "setModel", model: "openai/model-b", role: "hotswap" },
+		});
+		const auditEntry = parent
+			.getBranch()
+			.findLast(entry => entry.type === "custom" && entry.customType === "omp:route-resolution:v1");
+		expect(auditEntry?.type === "custom" ? auditEntry.data : undefined).toMatchObject({
+			hotswapAudit: { requestedBy: "Main" },
+		});
+		const receiptBeforeRetry = parent.getSessionCommandReceipt("job-main-set-model");
+		if (!receiptBeforeRetry) throw new Error("Expected initial root hot-swap receipt");
+		const entryCountBeforeRetry = parent.getBranch().length;
+		const retried = await hotswapAgentModel({
+			agentId: "Main",
+			model: "openai/model-b:high",
+			reason: "operator route",
+			requestedBy: "Main",
+			commandId: "job-main-set-model",
+			correlationId: "job-main-set-model",
+			parentSessionManager: parent,
+		});
+		expect(retried.status === "applied" ? retried.receipt : undefined).toEqual({
+			...receiptBeforeRetry,
+			replayed: true,
+		});
+		expect(parent.getBranch()).toHaveLength(entryCountBeforeRetry);
+		expect(stub.thinkingCalls).toEqual(["high" as ThinkingLevel]);
+		expect(stub.notices).toHaveLength(1);
 	});
 
 	it("routes setModel to a historical direct child without a background job", async () => {

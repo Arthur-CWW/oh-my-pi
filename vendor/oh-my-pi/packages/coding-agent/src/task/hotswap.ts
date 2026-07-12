@@ -8,6 +8,7 @@ import type { Settings } from "../config/settings";
 import { AgentLifecycleManager } from "../registry/agent-lifecycle";
 import { AgentRegistry, MAIN_AGENT_ID, type AgentRef } from "../registry/agent-registry";
 import type { AgentSession, AgentSessionEvent } from "../session/agent-session";
+import type { SessionCommandReceipt, SetModelSessionCommand } from "../session/session-entries";
 import { getRestorableSessionModels } from "../session/session-context";
 import { SessionManager } from "../session/session-manager";
 import { parseThinkingLevel } from "../thinking";
@@ -19,6 +20,9 @@ export interface HotswapArgs {
 	model: string;
 	requestedBy?: string;
 	reason?: string;
+	/** Stable command identity supplied by the invoking tool/runner for durable receipt replay. */
+	commandId?: string;
+	correlationId?: string;
 	/** Current parent journal, required to address a historical direct child. */
 	parentSessionManager?: SessionManager;
 	/** Resolver/auth source when no live AgentSession exists. */
@@ -26,11 +30,21 @@ export interface HotswapArgs {
 	settings?: Settings;
 }
 
+export type HotswapFailureReason =
+	| "unknown_agent"
+	| "wrong_root"
+	| "unauthorized"
+	| "unavailable"
+	| "unsafe_state"
+	| "invalid_model"
+	| "missing_credentials"
+	| "apply_failed";
+
 export type HotswapResult =
-	| { status: "applied"; agentId: string; from: string; to: string }
+	| { status: "applied"; agentId: string; from: string; to: string; receipt?: SessionCommandReceipt }
 	| { status: "queued"; agentId: string; from: string; to: string }
 	| { status: "recorded"; agentId: string; from: string; to: string }
-	| { status: "failed"; agentId: string; error: string };
+	| { status: "failed"; agentId: string; error: string; reason?: HotswapFailureReason };
 
 export interface RestorableSessionModel {
 	model: Model;
@@ -59,8 +73,8 @@ function formatModel(model: Model): string {
 	return `${model.provider}/${model.id}`;
 }
 
-function failed(agentId: string, error: string): HotswapResult {
-	return { status: "failed", agentId, error };
+function failed(agentId: string, error: string, reason?: HotswapFailureReason): HotswapResult {
+	return { status: "failed", agentId, error, ...(reason ? { reason } : {}) };
 }
 
 function cancelPending(agentId: string): void {
@@ -133,9 +147,29 @@ async function applyHotswap(
 	from: string,
 	to: string,
 	previousThinkingLevel: ThinkingLevel | undefined,
+	journaledCommand?: { commandId: string; correlationId: string },
 ): Promise<HotswapResult> {
 	try {
-		await session.setModel(model, "hotswap");
+		let receipt: SessionCommandReceipt | undefined;
+		if (journaledCommand) {
+			const existingReceipt = session.sessionManager.getSessionCommandReceipt(journaledCommand.commandId);
+			const command: SetModelSessionCommand = {
+				schemaVersion: 1,
+				kind: "setModel",
+				commandId: journaledCommand.commandId,
+				correlationId: journaledCommand.correlationId,
+				expectedSessionRevision:
+					existingReceipt?.entry.command?.expectedSessionRevision ?? session.sessionManager.getSessionRevision(),
+				model: to,
+				role: "hotswap",
+			};
+			receipt = await session.commitJournaledModel(command);
+			if (receipt.replayed) {
+				return { status: "applied", agentId, from, to, receipt };
+			}
+		} else {
+			await session.setModel(model, "hotswap");
+		}
 		if (explicitThinkingLevel) {
 			session.setThinkingLevel(thinkingLevel);
 		}
@@ -153,11 +187,15 @@ async function applyHotswap(
 			),
 		);
 		await injectHotswapNotice(session, from, to, requestedBy, reason);
-		return { status: "applied", agentId, from, to };
+		return { status: "applied", agentId, from, to, ...(receipt ? { receipt } : {}) };
 	} catch (error) {
 		const err = toError(error);
 		logger.warn("Failed to hot-swap agent model", { agentId, error: err.message, from, to });
-		return { status: "failed", agentId, error: err.message };
+		return failed(
+			agentId,
+			err.message,
+			err.name === "SessionStateCommandInFlightError" ? "unsafe_state" : "apply_failed",
+		);
 	}
 }
 
@@ -347,13 +385,13 @@ export async function hotswapAgentModel(args: HotswapArgs): Promise<HotswapResul
 		cancelPending(args.agentId);
 
 		const sameModel = modelsAreEqual(resolved.model, currentModel);
-		if (sameModel && !explicitThinkingLevel) {
+		if (!isMain && sameModel && !explicitThinkingLevel) {
 			return { status: "applied", agentId: args.agentId, from, to: from };
 		}
 
 		const targetModel = resolved.model;
 		const apply = async (): Promise<HotswapResult> =>
-			sameModel
+			sameModel && !isMain
 				? applyThinkingOnlyHotswap(
 						args.agentId,
 						session,
@@ -374,6 +412,12 @@ export async function hotswapAgentModel(args: HotswapArgs): Promise<HotswapResul
 						from,
 						to,
 						previousThinkingLevel,
+						isMain
+							? {
+									commandId: args.commandId ?? Bun.randomUUIDv7(),
+									correlationId: args.correlationId ?? args.commandId ?? Bun.randomUUIDv7(),
+								}
+							: undefined,
 					);
 
 		if (!session.isStreaming) {

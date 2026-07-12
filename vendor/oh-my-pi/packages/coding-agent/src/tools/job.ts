@@ -115,7 +115,7 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 	}
 
 	async execute(
-		_toolCallId: string,
+		toolCallId: string,
 		params: JobParams,
 		signal?: AbortSignal,
 		onUpdate?: AgentToolUpdateCallback<JobToolDetails>,
@@ -144,6 +144,8 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 				model: params.setModel.model,
 				reason: params.setModel.reason,
 				requestedBy: ownerId,
+				commandId: toolCallId,
+				correlationId: toolCallId,
 				...(this.session.sessionManager && this.session.modelRegistry
 					? {
 						parentSessionManager: this.session.sessionManager,
