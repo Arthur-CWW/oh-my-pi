@@ -2490,18 +2490,19 @@ export class TUI extends Container {
 			frameLength <= this.#committedRows ||
 			(committedRowsResynced &&
 				frameLength - this.#committedRows < height &&
-				cursorMarkers.some(marker => marker.row >= this.#committedRows))
+				(liveRegionStart !== undefined || cursorMarkers.some(marker => marker.row >= this.#committedRows)))
 		) {
-			// Either the frame shrank into the committed prefix, or a
-			// committed-prefix resync left a focused cursor tail shorter than the
-			// viewport. The latter happens when a streaming/live block had an
-			// append-only prefix committed, then collapses on abort/finalize:
-			// the audit re-anchors #committedRows at the first divergent row, but
-			// flooring windowTop there would pin the editor near the top and
-			// leave blank rows underneath. Re-show the frame tail instead. The
-			// stale committed copy stays in native history; duplicating a few rows
-			// is preferable to a live editor gap and matches the existing
-			// "duplication, never loss" resync contract.
+			// Either the frame shrank into the committed prefix, or a resynced
+			// short tail is known live through an explicit seam or focused cursor.
+			// Seamless, cursorless components treat the whole frame as durable:
+			// their high-water collapse must stay anchored at the divergence so
+			// the replacement tail can recommit into native history. A seamed
+			// transcript instead owns a mutable live tail; after an append-only
+			// tool block collapses on abort/finalize, flooring windowTop at the
+			// audited divergence would pin a cursorless completion near the top
+			// above blank rows. Re-show that live tail. The stale committed copy
+			// stays in native history, preserving the "duplication, never loss"
+			// resync contract.
 			windowTop = Math.max(0, frameLength - height);
 			chunkTo = Math.min(durableBoundary, windowTop);
 			committedPrefixResliced = true;
