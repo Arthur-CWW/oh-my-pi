@@ -79,6 +79,7 @@ export class ExternalSessionOwnerUnverifiable extends Error {
 export interface SessionOwnershipHandle {
 	readonly sessionFile: string;
 	readonly sessionId: string;
+	readonly ownershipRoot?: string;
 	readonly ownerEpoch: string;
 	readonly ownerKind: "agent-mux" | "omp";
 	readonly buildRevision: BuildRevision;
@@ -98,6 +99,20 @@ export interface SessionOwnershipOptions {
 export interface SessionOwnershipAcquisitionOptions extends SessionOwnershipOptions {
 	readonly buildRevision: BuildRevision;
 	readonly runnerInstanceIdentity: RunnerInstanceIdentity;
+}
+
+export interface RestartChildManifestEntryV1 {
+	readonly agentId: string;
+	readonly state: "running" | "parked";
+	readonly journalPath: string;
+	readonly queueCheckpoint: string | null;
+}
+
+export interface RestartHandoffV1 {
+	readonly version: 1;
+	readonly predecessorOwnerEpoch: string;
+	readonly initiatedAt: number;
+	readonly childManifest: readonly RestartChildManifestEntryV1[];
 }
 
 interface LeaseLocation {
@@ -178,7 +193,7 @@ export function decodeSessionLeaseV1(value: unknown): SessionLeaseV1 | null {
 	if (
 		(keys.length !== 13 && keys.length !== 15) ||
 		!keys.every(key => allowedKeys.includes(key)) ||
-		("buildRevision" in value) !== ("runnerInstanceId" in value) ||
+		"buildRevision" in value !== "runnerInstanceId" in value ||
 		value.version !== 1 ||
 		typeof value.sessionFile !== "string" ||
 		value.sessionFile.length === 0 ||
@@ -299,6 +314,81 @@ async function leaseLocation(sessionFile: string, sessionId: string, root?: stri
 		detailsFilePrefix: path.join(claim, "identity-v1-"),
 		canonicalSessionFile: canonical,
 	};
+}
+
+function isRestartChildManifestEntry(value: unknown): value is RestartChildManifestEntryV1 {
+	return (
+		isRecord(value) &&
+		Object.keys(value).length === 4 &&
+		typeof value.agentId === "string" &&
+		(value.state === "running" || value.state === "parked") &&
+		typeof value.journalPath === "string" &&
+		(value.queueCheckpoint === null || typeof value.queueCheckpoint === "string")
+	);
+}
+
+function restartHandoffFile(location: LeaseLocation, predecessorOwnerEpoch: string): string {
+	return path.join(location.parent, `restart-${predecessorOwnerEpoch}.json`);
+}
+
+export async function writeRestartHandoff(
+	ownership: SessionOwnershipHandle,
+	childManifest: readonly RestartChildManifestEntryV1[],
+	options: SessionOwnershipOptions = {},
+): Promise<RestartHandoffV1> {
+	if (!(await ownership.isCurrent())) throw new ExternalSessionOwnerUnverifiable("external_owner_unverifiable");
+	const location = await leaseLocation(
+		ownership.sessionFile,
+		ownership.sessionId,
+		options.root ?? ownership.ownershipRoot,
+	);
+	const handoff: RestartHandoffV1 = {
+		version: 1,
+		predecessorOwnerEpoch: ownership.ownerEpoch,
+		initiatedAt: Date.now(),
+		childManifest,
+	};
+	await fs.mkdir(location.parent, { recursive: true });
+	const target = restartHandoffFile(location, ownership.ownerEpoch);
+	const temp = `${target}.${process.pid}.tmp`;
+	await fs.writeFile(temp, JSON.stringify(handoff), { flag: "wx" });
+	await fs.rename(temp, target);
+	return handoff;
+}
+
+export async function readRestartHandoff(
+	sessionFile: string,
+	sessionId: string,
+	predecessorOwnerEpoch: string,
+	options: SessionOwnershipOptions = {},
+): Promise<RestartHandoffV1 | undefined> {
+	const location = await leaseLocation(sessionFile, sessionId, options.root);
+	try {
+		const value: unknown = JSON.parse(await fs.readFile(restartHandoffFile(location, predecessorOwnerEpoch), "utf8"));
+		if (
+			!isRecord(value) ||
+			value.version !== 1 ||
+			value.predecessorOwnerEpoch !== predecessorOwnerEpoch ||
+			typeof value.initiatedAt !== "number" ||
+			!Array.isArray(value.childManifest) ||
+			!value.childManifest.every(isRestartChildManifestEntry)
+		)
+			throw new ExternalSessionOwnerUnverifiable("owner_record_corrupt");
+		return value as unknown as RestartHandoffV1;
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+		throw error;
+	}
+}
+
+export async function removeRestartHandoff(
+	sessionFile: string,
+	sessionId: string,
+	predecessorOwnerEpoch: string,
+	options: SessionOwnershipOptions = {},
+): Promise<void> {
+	const location = await leaseLocation(sessionFile, sessionId, options.root);
+	await fs.rm(restartHandoffFile(location, predecessorOwnerEpoch), { force: true });
 }
 
 async function readLease(location: LeaseLocation): Promise<SessionLeaseV1 | null | "corrupt"> {
@@ -490,7 +580,7 @@ function decodeOwnerProof(value: unknown): OwnerProof | undefined {
 		!Object.keys(value).every(key =>
 			["t", "nonce", "ownerEpoch", "buildRevision", "runnerInstanceId", "sessionMatch", "phase"].includes(key),
 		) ||
-		("buildRevision" in value) !== ("runnerInstanceId" in value) ||
+		"buildRevision" in value !== "runnerInstanceId" in value ||
 		value.t !== "ownerProof" ||
 		typeof value.nonce !== "string" ||
 		!isUuid(value.ownerEpoch) ||
@@ -754,6 +844,7 @@ class DirectOwnershipHandle implements SessionOwnershipHandle {
 	readonly #location: LeaseLocation;
 	readonly #probeServer: DirectOwnerProbeServer;
 	readonly sessionFile: string;
+	readonly ownershipRoot: string;
 	readonly sessionId: string;
 	readonly ownerEpoch: string;
 	readonly ownerKind = "omp" as const;
@@ -771,6 +862,7 @@ class DirectOwnershipHandle implements SessionOwnershipHandle {
 		probeServer: DirectOwnerProbeServer,
 	) {
 		this.#location = location;
+		this.ownershipRoot = location.root;
 		this.#probeServer = probeServer;
 		this.sessionFile = lease.sessionFile;
 		this.sessionId = lease.sessionId;
@@ -822,7 +914,12 @@ class DirectOwnershipHandle implements SessionOwnershipHandle {
 			lease === null ||
 			lease === "corrupt" ||
 			!leaseMatchesEpoch(lease, this.ownerEpoch) ||
-			!identityMatches(identity, this.ownerEpoch, this.buildRevision, this.runnerInstanceIdentity.runnerInstanceId) ||
+			!identityMatches(
+				identity,
+				this.ownerEpoch,
+				this.buildRevision,
+				this.runnerInstanceIdentity.runnerInstanceId,
+			) ||
 			lease.phase !== "running"
 		) {
 			await this.#fence();
@@ -879,6 +976,7 @@ class DirectOwnershipHandle implements SessionOwnershipHandle {
 
 class MuxOwnershipHandle implements SessionOwnershipHandle {
 	readonly ownerKind = "agent-mux" as const;
+	readonly ownershipRoot: string;
 	readonly #location: LeaseLocation;
 	constructor(
 		readonly sessionFile: string,
@@ -889,6 +987,7 @@ class MuxOwnershipHandle implements SessionOwnershipHandle {
 		location: LeaseLocation,
 	) {
 		this.#location = location;
+		this.ownershipRoot = location.root;
 	}
 	async isCurrent(): Promise<boolean> {
 		const [lease, identity] = await Promise.all([readLease(this.#location), readOwnerIdentity(this.#location)]);

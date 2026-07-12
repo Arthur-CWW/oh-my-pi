@@ -3,9 +3,17 @@ import * as path from "node:path";
 import { logger } from "@oh-my-pi/pi-utils";
 import { AgentLifecycleManager, type AgentReviver } from "../registry/agent-lifecycle";
 import { AgentRegistry, MAIN_AGENT_ID } from "../registry/agent-registry";
-import type { SessionOwnershipHandle } from "../session/session-ownership";
+import type { AgentSession } from "../session/agent-session";
+import type { RestartChildManifestEntryV1, SessionOwnershipHandle } from "../session/session-ownership";
 import type { FileEntry, ModelChangeEntry, SessionInitEntry, SubagentSessionMetadata } from "../session/session-entries";
-import { isTerminalChildLifecycleState, latestChildLifecycleRecord, type ChildLifecycleRecord } from "./child-lifecycle";
+import {
+	appendChildRestartRecord,
+	isTerminalChildLifecycleState,
+	latestChildLifecycleRecord,
+	latestChildRestartRecord,
+	type ChildLifecycleRecord,
+	type ChildRestartRecord,
+} from "./child-lifecycle";
 
 export type ReAdoptionDiagnosticReason =
 	| "corrupt_journal"
@@ -19,7 +27,8 @@ export type ReAdoptionDiagnosticReason =
 	| "owner_record_corrupt"
 	| "ownership_lost"
 	| "legacy_journal"
-	| "terminal_state";
+	| "terminal_state"
+	| "manifest_unadopted";
 
 export interface ReAdoptionDiagnostic {
 	file: string;
@@ -50,9 +59,14 @@ export interface ReAdoptionOptions {
 	parentSessionId: string;
 	idleTtlMs: number;
 	ownership: SessionOwnershipHandle;
+	/** Ordered-restart predecessor epoch. Omit for an ordinary resume. */
+	predecessorOwnerEpoch?: string;
+	restartManifest?: readonly RestartChildManifestEntryV1[];
 	registry?: AgentRegistry;
 	lifecycle?: AgentLifecycleManager;
 	createReviver: (child: ReAdoptedChild, init: SessionInitEntry) => Promise<AgentReviver>;
+	/** Restarts one provider turn from its last journaled boundary. */
+	resumeInterruptedTurn?: (child: ReAdoptedChild, session: AgentSession) => Promise<void>;
 }
 
 interface ReAdoptionCandidate {
@@ -61,6 +75,7 @@ interface ReAdoptionCandidate {
 	metadata: SubagentSessionMetadata;
 	lifecycle: ChildLifecycleRecord;
 	hotswapModel?: string;
+	restart?: ChildRestartRecord;
 }
 
 function isSubagentMetadata(value: SubagentSessionMetadata | undefined): value is SubagentSessionMetadata {
@@ -124,16 +139,33 @@ export async function reAdoptDirectChildren(options: ReAdoptionOptions): Promise
 		result.adopted.length = 0;
 		return result;
 	};
+	const restartManifest = new Map((options.restartManifest ?? []).map(entry => [entry.agentId, entry]));
+	const unmatchedManifest = new Map(restartManifest);
+	const diagnoseUnmatchedManifest = (): void => {
+		for (const entry of unmatchedManifest.values()) {
+			diagnostic(
+				result,
+				entry.journalPath,
+				"manifest_unadopted",
+				`restart manifest child ${entry.agentId} was not validated and registered`,
+			);
+		}
+		unmatchedManifest.clear();
+	};
 	if (!(await options.ownership.isCurrent())) return rollbackOwnershipLoss(options.parentSessionFile);
 	const childrenDir = options.parentSessionFile.endsWith(".jsonl")
 		? options.parentSessionFile.slice(0, -".jsonl".length)
 		: "";
-	if (!childrenDir) return result;
+	if (!childrenDir) {
+		diagnoseUnmatchedManifest();
+		return result;
+	}
 
 	let names: string[];
 	try {
 		names = await fs.readdir(childrenDir);
 	} catch {
+		diagnoseUnmatchedManifest();
 		return result;
 	}
 
@@ -204,11 +236,39 @@ export async function reAdoptDirectChildren(options: ReAdoptionOptions): Promise
 		const hotswap = [...entries].reverse().find(
 			(entry): entry is ModelChangeEntry => entry.type === "model_change" && entry.role === "hotswap",
 		);
+		const manifestEntry = restartManifest.get(metadata.agentId);
+		if (manifestEntry && !samePath(manifestEntry.journalPath, sessionFile)) {
+			diagnostic(result, sessionFile, "owner_record_corrupt", "restart manifest journal does not match this child");
+			continue;
+		}
+		const journalRestart = latestChildRestartRecord(entries);
+		if (journalRestart === null) {
+			diagnostic(result, sessionFile, "corrupt_journal", "child restart record is malformed");
+			continue;
+		}
+		const restart =
+			journalRestart ??
+			(manifestEntry && options.predecessorOwnerEpoch
+				? {
+						version: 1 as const,
+						agentId: metadata.agentId,
+						predecessorOwnerEpoch: options.predecessorOwnerEpoch,
+						state: manifestEntry.state,
+						queueCheckpoint: manifestEntry.queueCheckpoint,
+						status: "pending" as const,
+						updatedAt: new Date().toISOString(),
+					}
+				: undefined);
+		if (restart && restart.agentId !== metadata.agentId) {
+			diagnostic(result, sessionFile, "owner_record_corrupt", "restart checkpoint agent does not match this journal");
+			continue;
+		}
 		candidates.push({
 			sessionFile,
 			init,
 			metadata,
 			lifecycle: childLifecycle,
+			...(restart ? { restart } : {}),
 			...(hotswap && typeof hotswap.model === "string" ? { hotswapModel: hotswap.model } : {}),
 		});
 	}
@@ -274,6 +334,54 @@ export async function reAdoptDirectChildren(options: ReAdoptionOptions): Promise
 		}
 		lifecycle.adopt(child.id, { idleTtlMs: options.idleTtlMs, revive });
 		result.adopted.push(child);
+		unmatchedManifest.delete(child.id);
+	}
+
+	diagnoseUnmatchedManifest();
+	// Registration is deliberately a barrier: a crash before this point leaves
+	// every journal checkpoint pending and safe for the next replacement.
+	if (options.predecessorOwnerEpoch && options.resumeInterruptedTurn) {
+		for (const candidate of candidates) {
+			const restart = candidate.restart;
+			if (
+				!restart ||
+				(restart.status !== "pending" && restart.status !== "resuming") ||
+				restart.state !== "running" ||
+				restart.predecessorOwnerEpoch !== options.predecessorOwnerEpoch ||
+				!result.adopted.some(child => child.id === candidate.metadata.agentId)
+			) {
+				continue;
+			}
+			if (!(await options.ownership.isCurrent())) return rollbackOwnershipLoss(candidate.sessionFile);
+			try {
+				const session = await lifecycle.ensureLive(candidate.metadata.agentId);
+				const child = result.adopted.find(adopted => adopted.id === candidate.metadata.agentId);
+				if (!child) continue;
+				const attemptId = crypto.randomUUID();
+				appendChildRestartRecord(session.sessionManager, {
+					...restart,
+					status: "resuming",
+					attemptId,
+					updatedAt: new Date().toISOString(),
+				});
+				await session.sessionManager.flush();
+				await options.resumeInterruptedTurn(child, session);
+				appendChildRestartRecord(session.sessionManager, {
+					...restart,
+					status: "resumed",
+					attemptId,
+					updatedAt: new Date().toISOString(),
+				});
+				await session.sessionManager.flush();
+			} catch (error) {
+				diagnostic(
+					result,
+					candidate.sessionFile,
+					"reviver_unavailable",
+					error instanceof Error ? error.message : "interrupted turn could not be restarted",
+				);
+			}
+		}
 	}
 	return result;
 }

@@ -217,6 +217,124 @@ describe("restart child re-adoption", () => {
 		expect(AgentRegistry.global().get("Raced")).toEqual(expect.objectContaining({ displayName: "live", status: "idle" }));
 	});
 
+	it("restarts only the running child named by the predecessor handoff", async () => {
+		const { parent, children } = await makeParent();
+		const runningFile = await writeChild({ parent, children, id: "Running", lifecycleState: "running" });
+		const parkedFile = await writeChild({ parent, children, id: "Parked", lifecycleState: "parked" });
+		let resumed = 0;
+		const sessions = new Map<string, SessionManager>();
+		const result = await reAdoptDirectChildren({
+			parentSessionFile: parent,
+			parentSessionId: "parent",
+			idleTtlMs: 0,
+			ownership: ownership(parent),
+			predecessorOwnerEpoch: "old-epoch",
+			restartManifest: [
+				{ agentId: "Running", state: "running", journalPath: runningFile, queueCheckpoint: "queue-7" },
+				{ agentId: "Parked", state: "parked", journalPath: parkedFile, queueCheckpoint: null },
+			],
+			createReviver: async child => async () => {
+				const sessionManager = await SessionManager.open(child.sessionFile);
+				sessions.set(child.id, sessionManager);
+				return {
+					subscribe: () => () => {},
+					sessionManager,
+					dispose: async () => sessionManager.close(),
+				} as never;
+			},
+			resumeInterruptedTurn: async child => {
+				expect(child.id).toBe("Running");
+				resumed += 1;
+			},
+		});
+
+		expect(result.diagnostics).toEqual([]);
+		expect(resumed).toBe(1);
+		expect(AgentRegistry.global().get("Running")?.status).toBe("idle");
+		expect(AgentRegistry.global().get("Parked")?.status).toBe("parked");
+		const runningEntries = sessions.get("Running")?.getEntries() ?? [];
+		expect(
+			runningEntries.filter(
+				entry =>
+					entry.type === "custom" &&
+					entry.customType === "child_restart" &&
+					(entry.data as { status?: string }).status === "resumed",
+			),
+		).toHaveLength(1);
+	});
+
+	it("retries a durably resuming turn after a crash before admission", async () => {
+		const { parent, children } = await makeParent();
+		const runningFile = await writeChild({ parent, children, id: "Retry", lifecycleState: "running" });
+		const manifest = [{ agentId: "Retry", state: "running" as const, journalPath: runningFile, queueCheckpoint: null }];
+		const opened: SessionManager[] = [];
+		const createReviver = async (child: { sessionFile: string }) => async () => {
+			const sessionManager = await SessionManager.open(child.sessionFile);
+			opened.push(sessionManager);
+			return { subscribe: () => () => {}, sessionManager, dispose: async () => sessionManager.close() } as never;
+		};
+
+		const crashed = await reAdoptDirectChildren({
+			parentSessionFile: parent,
+			parentSessionId: "parent",
+			idleTtlMs: 0,
+			ownership: ownership(parent),
+			predecessorOwnerEpoch: "old-epoch",
+			restartManifest: manifest,
+			createReviver,
+			resumeInterruptedTurn: async () => {
+				throw new Error("replacement killed before admission");
+			},
+		});
+		expect(crashed.diagnostics).toEqual([expect.objectContaining({ reason: "reviver_unavailable" })]);
+		await Promise.all(opened.splice(0).map(manager => manager.close()));
+		AgentLifecycleManager.resetGlobalForTests();
+		AgentRegistry.resetGlobalForTests();
+
+		let admitted = 0;
+		const recovered = await reAdoptDirectChildren({
+			parentSessionFile: parent,
+			parentSessionId: "parent",
+			idleTtlMs: 0,
+			ownership: ownership(parent),
+			predecessorOwnerEpoch: "old-epoch",
+			restartManifest: manifest,
+			createReviver,
+			resumeInterruptedTurn: async () => {
+				admitted += 1;
+			},
+		});
+		expect(recovered.diagnostics).toEqual([]);
+		expect(admitted).toBe(1);
+		const entries = opened.at(-1)?.getEntries() ?? [];
+		expect(
+			entries.filter(
+				entry =>
+					entry.type === "custom" &&
+					entry.customType === "child_restart" &&
+					(entry.data as { status?: string }).status === "resumed",
+			),
+		).toHaveLength(1);
+	});
+
+	it("diagnoses a manifest child whose journal is not visible", async () => {
+		const { parent, children } = await makeParent();
+		const missing = path.join(children, "Missing.jsonl");
+		const result = await reAdoptDirectChildren({
+			parentSessionFile: parent,
+			parentSessionId: "parent",
+			idleTtlMs: 0,
+			ownership: ownership(parent),
+			predecessorOwnerEpoch: "old-epoch",
+			restartManifest: [{ agentId: "Missing", state: "running", journalPath: missing, queueCheckpoint: null }],
+			createReviver: async () => async () => ({ subscribe: () => () => {} }) as never,
+		});
+		expect(result.adopted).toEqual([]);
+		expect(result.diagnostics).toEqual([
+			expect.objectContaining({ file: missing, reason: "manifest_unadopted" }),
+		]);
+	});
+
 	it("rolls back all rows when ownership changes before a later registration", async () => {
 		const { parent, children } = await makeParent();
 		await writeChild({ parent, children, id: "First" });

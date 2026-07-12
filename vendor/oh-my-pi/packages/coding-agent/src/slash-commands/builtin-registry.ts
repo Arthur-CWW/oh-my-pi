@@ -27,11 +27,18 @@ import {
 import { resolveMemoryBackend } from "../memory-backend";
 import { theme } from "../modes/theme/theme";
 import type { InteractiveModeContext } from "../modes/types";
+import { AgentRegistry, MAIN_AGENT_ID } from "../registry/agent-registry";
 import type { AgentSession, FreshSessionResult } from "../session/agent-session";
+import type { RestartChildManifestEntryV1 } from "../session/session-ownership";
 import { decodeSessionWorkstream, type SessionWorkstream } from "../session/session-entries";
-import type { SessionManager } from "../session/session-manager";
+import { SessionManager } from "../session/session-manager";
 import { formatShakeSummary, type ShakeMode } from "../session/shake-types";
 import { urlHyperlinkAlways } from "../tui";
+import {
+	appendChildRestartRecord,
+	isTerminalChildLifecycleState,
+	latestChildLifecycleRecord,
+} from "../task/child-lifecycle";
 import { getChangelogPath, parseChangelog } from "../utils/changelog";
 import { buildContextReportText } from "./helpers/context-report";
 import { formatDuration } from "./helpers/format";
@@ -169,6 +176,46 @@ const shutdownHandlerTui = (_command: ParsedSlashCommand, runtime: TuiSlashComma
 	return commandConsumed();
 };
 
+async function captureRestartChildrenAfterShutdown(
+	ctx: InteractiveModeContext,
+	predecessorOwnerEpoch: string,
+): Promise<readonly RestartChildManifestEntryV1[]> {
+	const children = AgentRegistry.global()
+		.list()
+		.filter(
+			ref =>
+				ref.parentId === MAIN_AGENT_ID &&
+				(ref.status === "running" || ref.status === "parked") &&
+				typeof ref.sessionFile === "string",
+		)
+		.map(ref => ({ agentId: ref.id, state: ref.status as "running" | "parked", journalPath: ref.sessionFile! }));
+
+	await ctx.shutdown({ childPolicy: "detach", persistSession: false });
+
+	const manifest: RestartChildManifestEntryV1[] = [];
+	for (const child of children) {
+		const manager = await SessionManager.open(child.journalPath);
+		try {
+			const lifecycle = latestChildLifecycleRecord(manager.getEntries());
+			if (!lifecycle || isTerminalChildLifecycleState(lifecycle.state)) continue;
+			appendChildRestartRecord(manager, {
+				version: 1,
+				agentId: child.agentId,
+				predecessorOwnerEpoch,
+				state: child.state,
+				queueCheckpoint: null,
+				status: "pending",
+				updatedAt: new Date().toISOString(),
+			});
+			await manager.flush();
+			manifest.push({ ...child, queueCheckpoint: null });
+		} finally {
+			await manager.close();
+		}
+	}
+	return manifest;
+}
+
 async function restartHandlerTui(
 	_command: ParsedSlashCommand,
 	runtime: TuiSlashCommandRuntime,
@@ -204,11 +251,16 @@ async function restartHandlerTui(
 	});
 	ctx.showStatus(`Restarting ${APP_NAME} --resume ${sessionId}…`);
 	try {
-		await handoffRestartProcess(spec, ownership);
+		await handoffRestartProcess(spec, ownership, async () => {
+			if (!ownership) {
+				await ctx.shutdown({ childPolicy: "detach", persistSession: false });
+				return;
+			}
+			return captureRestartChildrenAfterShutdown(ctx, ownership.ownerEpoch);
+		});
 	} catch (err) {
 		ctx.showError(`Restart failed during session handoff: ${errorMessage(err)}`);
 	}
-	await ctx.shutdown({ childPolicy: "detach", persistSession: false });
 	return commandConsumed();
 }
 
@@ -311,9 +363,7 @@ function parseShakeMode(args: string): ShakeMode | { error: string } {
 
 function formatSessionWorkstream(workstream: SessionWorkstream | undefined): string {
 	if (!workstream) return "Session classification: unclassified";
-	return workstream.kind === "adhoc"
-		? "Session classification: adhoc"
-		: `Session workstream: ${workstream.id}`;
+	return workstream.kind === "adhoc" ? "Session classification: adhoc" : `Session workstream: ${workstream.id}`;
 }
 
 export type SessionCommandAction = "info" | "delete" | "classification" | "invalid";
@@ -966,9 +1016,7 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<SlashCommandSpec> = [
 		],
 		allowArgs: true,
 		handle: async (command, runtime) => {
-			if (
-				await executeSessionClassificationCommand(command.args, runtime.sessionManager, runtime.output)
-			) {
+			if (await executeSessionClassificationCommand(command.args, runtime.sessionManager, runtime.output)) {
 				return commandConsumed();
 			}
 			if (!command.args || command.args === "info") {
@@ -1009,10 +1057,11 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<SlashCommandSpec> = [
 				await runtime.ctx.handleSessionDeleteCommand();
 				return;
 			}
-			if (action === "classification" &&
-				await executeSessionClassificationCommand(command.args, runtime.ctx.sessionManager, text =>
+			if (
+				action === "classification" &&
+				(await executeSessionClassificationCommand(command.args, runtime.ctx.sessionManager, text =>
 					runtime.ctx.showStatus(text),
-				)
+				))
 			) {
 				runtime.ctx.editor.setText("");
 				return;

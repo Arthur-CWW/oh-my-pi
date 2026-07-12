@@ -28,12 +28,8 @@ import { processFileArguments } from "./cli/file-processor";
 import { buildInitialMessage } from "./cli/initial-message";
 import { selectSession } from "./cli/session-picker";
 import { applyStartupCwd } from "./cli/startup-cwd";
-import { RESTART_API_KEY_ENV } from "./cli/restart-session";
-import {
-	resolveStartupWorkstream,
-	type StartupWorkstream,
-	WorkstreamResolutionError,
-} from "./cli/workstream";
+import { acquireRestartSessionOwnership, RESTART_API_KEY_ENV, RESTART_OWNER_EPOCH_ENV } from "./cli/restart-session";
+import { resolveStartupWorkstream, type StartupWorkstream, WorkstreamResolutionError } from "./cli/workstream";
 import { findConfigFile } from "./config";
 import { ModelRegistry } from "./config/model-registry";
 import {
@@ -80,9 +76,10 @@ import {
 } from "./session/session-listing";
 import { SessionManager } from "./session/session-manager";
 import {
-	acquireSessionOwnership,
 	ExternalSessionOwner,
 	ExternalSessionOwnerUnverifiable,
+	readRestartHandoff,
+	removeRestartHandoff,
 	type SessionOwnershipHandle,
 } from "./session/session-ownership";
 import { executeBuiltinSlashCommand } from "./slash-commands/builtin-registry";
@@ -1252,12 +1249,16 @@ export async function runRootCommand(
 	if (sessionManager?.getSessionFile()) {
 		try {
 			if (!runnerIdentity) throw new Error("Persistent session runner identity is unavailable");
-			ownership = await acquireSessionOwnership(sessionManager.getSessionFile() as string, sessionManager.getSessionId(), {
-				suppliedEpoch: process.env.OMP_SESSION_OWNER_EPOCH,
-				suppliedSocket: process.env.OMP_SESSION_OWNER_SOCKET,
-				buildRevision: runnerIdentity.buildRevision,
-				runnerInstanceIdentity: runnerIdentity.runnerInstance,
-			});
+			ownership = await acquireRestartSessionOwnership(
+				sessionManager.getSessionFile() as string,
+				sessionManager.getSessionId(),
+				{
+					suppliedEpoch: process.env.OMP_SESSION_OWNER_EPOCH,
+					suppliedSocket: process.env.OMP_SESSION_OWNER_SOCKET,
+					buildRevision: runnerIdentity.buildRevision,
+					runnerInstanceIdentity: runnerIdentity.runnerInstance,
+				},
+			);
 			sessionManager.bindSessionOwnership(ownership);
 		} catch (error) {
 			if (error instanceof ExternalSessionOwner || error instanceof ExternalSessionOwnerUnverifiable) {
@@ -1429,15 +1430,39 @@ export async function runRootCommand(
 		if (parsedArgs.apiKey && !sessionOptions.model && session.model) {
 			authStorage.setRuntimeApiKey(session.model.provider, parsedArgs.apiKey);
 		}
-		// A replacement process owns no former AsyncJobManager work. Rebuild only
-		// durable direct-child control handles as parked revivable sessions.
+		// Ordered restart re-adopts durable children only after the fresh parent
+		// ownership epoch is current. The predecessor-keyed handoff remains until
+		// every child is registered, so another replacement can retry safely.
 		const resumedParentFile = session.sessionManager.getSessionFile();
 		if ((parsedArgs.continue || parsedArgs.resume) && resumedParentFile && ownership) {
-			await reAdoptDirectChildren({
+			const predecessorOwnerEpoch = process.env[RESTART_OWNER_EPOCH_ENV];
+			const restartHandoff =
+				predecessorOwnerEpoch && predecessorOwnerEpoch !== ownership.ownerEpoch
+					? await readRestartHandoff(
+							resumedParentFile,
+							session.sessionManager.getSessionId(),
+							predecessorOwnerEpoch,
+						)
+					: undefined;
+			let restartedTurn = false;
+			const adoption = await reAdoptDirectChildren({
 				parentSessionFile: resumedParentFile,
 				parentSessionId: session.sessionManager.getSessionId(),
 				idleTtlMs: Math.trunc(Number(settingsInstance.get("task.agentIdleTtlMs") ?? 420_000) || 0),
 				ownership,
+				...(restartHandoff
+					? {
+							predecessorOwnerEpoch: restartHandoff.predecessorOwnerEpoch,
+							restartManifest: restartHandoff.childManifest,
+							resumeInterruptedTurn: async (_child: unknown, childSession: AgentSession) => {
+								const continuation = childSession.agent.continue();
+								restartedTurn = true;
+								void continuation.catch(error => {
+									logger.error("Restarted subagent turn failed", { error: String(error) });
+								});
+							},
+						}
+					: {}),
 				createReviver: (child, init) =>
 					createReAdoptedSessionReviver({
 						id: child.id,
@@ -1455,6 +1480,19 @@ export async function runRootCommand(
 						modelRegistry,
 					}),
 			});
+			if (restartHandoff && adoption.diagnostics.length === 0) {
+				await removeRestartHandoff(
+					resumedParentFile,
+					session.sessionManager.getSessionId(),
+					restartHandoff.predecessorOwnerEpoch,
+				);
+			}
+			if (restartedTurn) {
+				notifs.push({
+					kind: "info",
+					message: "A subagent turn interrupted by restart was resumed from its journal.",
+				});
+			}
 		}
 
 		if (modelFallbackMessage) {

@@ -1,4 +1,12 @@
-import type { SessionOwnershipHandle } from "../session/session-ownership";
+import {
+	acquireSessionOwnership,
+	ExternalSessionOwner,
+	ExternalSessionOwnerUnverifiable,
+	type SessionOwnershipAcquisitionOptions,
+	type RestartChildManifestEntryV1,
+	writeRestartHandoff,
+	type SessionOwnershipHandle,
+} from "../session/session-ownership";
 import { OPTIONAL_VALUE_FLAGS, STRING_VALUE_FLAGS } from "./flag-tables";
 
 let launchArgsForRestart: readonly string[] = [];
@@ -16,6 +24,7 @@ const DROPPED_BOOLEAN_FLAGS: Record<string, true> = {
 	"-v": true,
 };
 export const RESTART_API_KEY_ENV = "OMP_RESTART_API_KEY";
+export const RESTART_OWNER_EPOCH_ENV = "OMP_RESTART_OWNER_EPOCH";
 
 function restartApiKey(args: readonly string[]): string | undefined {
 	for (let i = 0; i < args.length; i++) {
@@ -136,6 +145,32 @@ export function buildRestartSpawnSpec(options: {
 	};
 }
 
+const RESTART_CLAIM_DELAYS_MS = [0, 10, 25, 50, 100, 200] as const;
+
+/**
+ * A replacement may observe the predecessor between its releasing write and
+ * atomic claim-directory retirement. Only restart children carrying that exact
+ * predecessor epoch retry; ordinary concurrent resumes still fail immediately.
+ */
+export async function acquireRestartSessionOwnership(
+	sessionFile: string,
+	sessionId: string,
+	options: SessionOwnershipAcquisitionOptions,
+	predecessorEpoch = process.env[RESTART_OWNER_EPOCH_ENV],
+): Promise<SessionOwnershipHandle> {
+	for (const delayMs of RESTART_CLAIM_DELAYS_MS) {
+		if (delayMs > 0) await Bun.sleep(delayMs);
+		try {
+			return await acquireSessionOwnership(sessionFile, sessionId, options);
+		} catch (error) {
+			if (!predecessorEpoch) throw error;
+			if (error instanceof ExternalSessionOwner && error.lease.ownerEpoch !== predecessorEpoch) throw error;
+			if (!(error instanceof ExternalSessionOwner || error instanceof ExternalSessionOwnerUnverifiable)) throw error;
+		}
+	}
+	return acquireSessionOwnership(sessionFile, sessionId, options);
+}
+
 export function spawnRestartProcess(spec: RestartSpawnSpec): void {
 	const child = Bun.spawn([spec.executable, ...spec.args], {
 		cwd: spec.cwd,
@@ -156,7 +191,12 @@ export function spawnRestartProcess(spec: RestartSpawnSpec): void {
 export async function handoffRestartProcess(
 	spec: RestartSpawnSpec,
 	ownership: SessionOwnershipHandle | undefined,
+	teardown?: () => Promise<void | readonly RestartChildManifestEntryV1[]>,
+	childManifest: readonly RestartChildManifestEntryV1[] = [],
 ): Promise<void> {
+	const capturedManifest = await teardown?.();
+	if (ownership) await writeRestartHandoff(ownership, capturedManifest ?? childManifest);
 	await ownership?.release();
-	spawnRestartProcess(spec);
+	const env = ownership ? { ...(spec.env ?? Bun.env), [RESTART_OWNER_EPOCH_ENV]: ownership.ownerEpoch } : spec.env;
+	spawnRestartProcess({ ...spec, ...(env ? { env } : {}) });
 }
