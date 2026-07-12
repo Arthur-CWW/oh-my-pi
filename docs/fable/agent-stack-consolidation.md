@@ -157,3 +157,7 @@ This prevents recurrence of the `6d47bcbf` detached-HEAD compile break caused by
 6. Should `codex-system` and `reflect` remain hidden/manual skills, or be folded into global personal instructions so they stop looking invocable?
 7. Does `impeccable-design-review` earn its Playground-local place despite the global `impeccable` archive, or should it be renamed to avoid guilt by association?
 8. Do you want the reviewer attachment rule enforced by task templates/runtime, or kept as charter doctrine until more than today's five-review sample accumulates?
+
+## Observed tool-usage baseline
+
+The seven-day cross-project session analysis is in [`tool-usage-analytics.md`](tool-usage-analytics.md). Its 1,391-session-file baseline supports the chooser-first consolidation above, identifies browser/web overlap and broken low-use surfaces, and ranks ten retire/merge candidates by observed result-token waste. Use that evidence—not inventory size alone—when applying the removal rule.
