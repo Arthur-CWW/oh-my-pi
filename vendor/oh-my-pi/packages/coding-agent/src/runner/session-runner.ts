@@ -30,6 +30,9 @@ import {
 	RunnerCompactionCommandConflictError,
 	RunnerCompactionTargetError,
 	RunnerCompactionUnavailableError,
+	RunnerEphemeralTurnCommandConflictError,
+	RunnerEphemeralTurnTargetError,
+	RunnerEphemeralTurnUnavailableError,
 	RunnerLocalOperationCommandConflictError,
 	RunnerLocalOperationTargetError,
 	RunnerLocalOperationUnavailableError,
@@ -53,10 +56,13 @@ import {
 	assertRunnerRevision,
 	type CancelCompactionCommand,
 	type CancelCompactionReceipt,
+	type CancelEphemeralTurnCommand,
+	type CancelEphemeralTurnReceipt,
 	type CancelLocalOperationCommand,
 	type CancelLocalOperationReceipt,
 	type DetachRunnerViewCommand,
 	decodeCancelCompactionCommand,
+	decodeCancelEphemeralTurnCommand,
 	decodeCancelLocalOperationCommand,
 	decodeCancelQueuedInputCommand,
 	decodeEditQueuedInputCommand,
@@ -64,6 +70,7 @@ import {
 	decodeRefreshSshToolCommand,
 	decodeReplaceTodosCommand,
 	decodeRunCompactionCommand,
+	decodeRunEphemeralTurnCommand,
 	decodeRunLocalOperationCommand,
 	decodeSetActiveToolsCommand,
 	decodeSetModelCommand,
@@ -81,6 +88,8 @@ import {
 	RUNNER_SCHEMA_VERSION,
 	type RunCompactionCommand,
 	type RunCompactionReceipt,
+	type RunEphemeralTurnCommand,
+	type RunEphemeralTurnReceipt,
 	type RunLocalOperationCommand,
 	type RunLocalOperationReceipt,
 	type RunnerCapability,
@@ -118,6 +127,9 @@ export type RunnerFailure =
 	| RunnerCompactionCommandConflictError
 	| RunnerCompactionUnavailableError
 	| RunnerCompactionTargetError
+	| RunnerEphemeralTurnCommandConflictError
+	| RunnerEphemeralTurnUnavailableError
+	| RunnerEphemeralTurnTargetError
 	| RunnerLocalOperationCommandConflictError
 	| RunnerLocalOperationUnavailableError
 	| RunnerLocalOperationTargetError
@@ -192,6 +204,12 @@ export interface ControllerSessionRunnerView extends RunnerViewBase {
 	readonly cancelCompaction: (
 		command: CancelCompactionCommand,
 	) => Effect.Effect<CancelCompactionReceipt, RunnerFailure, Scope.Scope>;
+	readonly runEphemeralTurn: (
+		command: RunEphemeralTurnCommand,
+	) => Effect.Effect<RunEphemeralTurnReceipt, RunnerFailure, Scope.Scope>;
+	readonly cancelEphemeralTurn: (
+		command: CancelEphemeralTurnCommand,
+	) => Effect.Effect<CancelEphemeralTurnReceipt, RunnerFailure, Scope.Scope>;
 	readonly runLocalOperation: (
 		command: RunLocalOperationCommand,
 	) => Effect.Effect<RunLocalOperationReceipt, RunnerFailure, Scope.Scope>;
@@ -240,7 +258,9 @@ interface EventDetails {
 		| InterruptPromptCommand
 		| CancelCompactionCommand
 		| RunLocalOperationCommand
-		| CancelLocalOperationCommand;
+		| CancelLocalOperationCommand
+		| RunEphemeralTurnCommand
+		| CancelEphemeralTurnCommand;
 	readonly controllerEpoch: number;
 	readonly viewId?: string;
 	readonly inputId?: string;
@@ -248,6 +268,12 @@ interface EventDetails {
 	readonly targetCommandId?: string;
 	readonly targetOperationGeneration?: number;
 	readonly localOperationOutput?: {
+		readonly chunk: string;
+		readonly totalBytes: number;
+		readonly truncated: boolean;
+		readonly reset: boolean;
+	};
+	readonly ephemeralTurnOutput?: {
 		readonly chunk: string;
 		readonly totalBytes: number;
 		readonly truncated: boolean;
@@ -304,6 +330,35 @@ interface LiveLocalOperationRecord {
 	readonly outputDrained: Deferred.Deferred<void>;
 }
 
+interface LiveEphemeralTurnRecord {
+	readonly command: RunEphemeralTurnCommand;
+	readonly operationGeneration: number;
+	readonly startedSessionRevision: number;
+	readonly deferred: Deferred.Deferred<RunEphemeralTurnReceipt, RunnerFailure>;
+	readonly abortController: AbortController;
+	readonly outputChunks: Map<number, Buffer>;
+	outputHead: number;
+	outputTail: number;
+	outputHeadOffset: number;
+	retainedBytes: number;
+	totalBytes: number;
+	completed: boolean;
+	cancellationRequested: boolean;
+	readonly pendingOutputChunks: Array<{
+		chunk: string;
+		bytes: number;
+		reset: boolean;
+		totalBytes: number;
+		truncated: boolean;
+	}>;
+	pendingOutputBytes: number;
+	peakPendingOutputChunks: number;
+	peakPendingOutputBytes: number;
+	outputPumpRunning: boolean;
+	outputClosed: boolean;
+	readonly outputDrained: Deferred.Deferred<void>;
+}
+
 const asRunnerFailure = (error: unknown): RunnerFailure => {
 	if (
 		error instanceof InvalidRunnerCommandError ||
@@ -319,6 +374,9 @@ const asRunnerFailure = (error: unknown): RunnerFailure => {
 		error instanceof RunnerLocalOperationCommandConflictError ||
 		error instanceof RunnerLocalOperationUnavailableError ||
 		error instanceof RunnerLocalOperationTargetError ||
+		error instanceof RunnerEphemeralTurnCommandConflictError ||
+		error instanceof RunnerEphemeralTurnUnavailableError ||
+		error instanceof RunnerEphemeralTurnTargetError ||
 		error instanceof StaleRunnerControllerLeaseError ||
 		error instanceof RunnerViewAlreadyAttachedError ||
 		error instanceof RunnerViewNotAttachedError ||
@@ -420,6 +478,9 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 	let activeLocalOperation: LiveLocalOperationRecord | undefined;
 	let nextLocalOperationGeneration = 1;
 	const localOperationOutputLimit = 256 * 1024;
+	const ephemeralTurnCommands = new Map<string, LiveEphemeralTurnRecord>();
+	let activeEphemeralTurn: LiveEphemeralTurnRecord | undefined;
+	let nextEphemeralTurnGeneration = 1;
 	let activeCompaction: { readonly commandId: string; readonly operationGeneration: number } | undefined;
 	let nextCompactionOperationGeneration = 1;
 
@@ -474,6 +535,19 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 							pendingOutputBytes: activeLocalOperation.pendingOutputBytes,
 							peakPendingOutputChunks: activeLocalOperation.peakPendingOutputChunks,
 							peakPendingOutputBytes: activeLocalOperation.peakPendingOutputBytes,
+						},
+			activeEphemeralTurn:
+				activeEphemeralTurn === undefined
+					? undefined
+					: {
+							commandId: activeEphemeralTurn.command.commandId,
+							operationGeneration: activeEphemeralTurn.operationGeneration,
+							startedSessionRevision: activeEphemeralTurn.startedSessionRevision,
+							output: localOperationOutputSnapshot(activeEphemeralTurn),
+							pendingOutputChunks: activeEphemeralTurn.pendingOutputChunks.length,
+							pendingOutputBytes: activeEphemeralTurn.pendingOutputBytes,
+							peakPendingOutputChunks: activeEphemeralTurn.peakPendingOutputChunks,
+							peakPendingOutputBytes: activeEphemeralTurn.peakPendingOutputBytes,
 						},
 			workflow: resources.sessionManager.buildSessionContext().workflow ?? { kind: "none" },
 			toolConfigurationGeneration: resources.session.toolConfigurationGeneration,
@@ -564,6 +638,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 			targetCommandId: details.targetCommandId,
 			targetOperationGeneration: details.targetOperationGeneration,
 			localOperationOutput: details.localOperationOutput,
+			ephemeralTurnOutput: details.ephemeralTurnOutput,
 		};
 		yield* PubSub.publish(events, event);
 		yield* publishTerminal({ kind: "runnerEvent", event });
@@ -784,6 +859,16 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 		controllerEpoch: number,
 		command: CancelCompactionCommand,
 	) => Effect.Effect<CancelCompactionReceipt, RunnerFailure, Scope.Scope>;
+	let runEphemeralTurn!: (
+		viewId: string,
+		controllerEpoch: number,
+		command: RunEphemeralTurnCommand,
+	) => Effect.Effect<RunEphemeralTurnReceipt, RunnerFailure, Scope.Scope>;
+	let cancelEphemeralTurn!: (
+		viewId: string,
+		controllerEpoch: number,
+		command: CancelEphemeralTurnCommand,
+	) => Effect.Effect<CancelEphemeralTurnReceipt, RunnerFailure, Scope.Scope>;
 	let runLocalOperation!: (
 		viewId: string,
 		controllerEpoch: number,
@@ -840,6 +925,8 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 			transitionGoalMode: input => transitionGoalMode(viewId, controllerEpoch, input),
 			compact: input => runCompaction(viewId, controllerEpoch, input),
 			cancelCompaction: command => cancelCompaction(viewId, controllerEpoch, command),
+			runEphemeralTurn: command => runEphemeralTurn(viewId, controllerEpoch, command),
+			cancelEphemeralTurn: command => cancelEphemeralTurn(viewId, controllerEpoch, command),
 			runLocalOperation: command => runLocalOperation(viewId, controllerEpoch, command),
 			cancelLocalOperation: command => cancelLocalOperation(viewId, controllerEpoch, command),
 			interruptPrompt: command => interruptPrompt(viewId, controllerEpoch, command),
@@ -1325,7 +1412,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 					left.operation.code === right.operation.code;
 	};
 
-	const trimLocalOperationOutput = (record: LiveLocalOperationRecord): void => {
+	const trimLocalOperationOutput = (record: LiveLocalOperationRecord | LiveEphemeralTurnRecord): void => {
 		let excess = record.retainedBytes - localOperationOutputLimit;
 		while (excess > 0 && record.outputHead < record.outputTail) {
 			const head = record.outputChunks.get(record.outputHead)!;
@@ -1349,7 +1436,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 		}
 	};
 
-	const appendLocalOperationOutput = (record: LiveLocalOperationRecord, chunk: string): void => {
+	const appendLocalOperationOutput = (record: LiveLocalOperationRecord | LiveEphemeralTurnRecord, chunk: string): void => {
 		const bytes = Buffer.from(chunk);
 		record.totalBytes += bytes.length;
 		if (bytes.length === 0) return;
@@ -1358,7 +1445,11 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 		trimLocalOperationOutput(record);
 	};
 
-	const replaceLocalOperationOutput = (record: LiveLocalOperationRecord, output: string, totalBytes: number): void => {
+	const replaceLocalOperationOutput = (
+		record: LiveLocalOperationRecord | LiveEphemeralTurnRecord,
+		output: string,
+		totalBytes: number,
+	): void => {
 		record.outputChunks.clear();
 		record.outputHead = 0;
 		record.outputTail = 0;
@@ -1373,7 +1464,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 		}
 	};
 
-	const materializeLocalOperationOutput = (record: LiveLocalOperationRecord): string => {
+	const materializeLocalOperationOutput = (record: LiveLocalOperationRecord | LiveEphemeralTurnRecord): string => {
 		if (record.retainedBytes === 0) return "";
 		const chunks: Buffer[] = [];
 		for (let index = record.outputHead; index < record.outputTail; index++) {
@@ -1383,7 +1474,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 		return Buffer.concat(chunks, record.retainedBytes).toString();
 	};
 
-	const localOperationOutputSnapshot = (record: LiveLocalOperationRecord) => ({
+	const localOperationOutputSnapshot = (record: LiveLocalOperationRecord | LiveEphemeralTurnRecord) => ({
 		text: materializeLocalOperationOutput(record),
 		totalBytes: record.totalBytes,
 		truncated: record.totalBytes > record.retainedBytes,
@@ -1734,6 +1825,274 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 				} satisfies CancelLocalOperationReceipt;
 			}),
 		);
+	});
+
+	const sameEphemeralTurnCommand = (left: RunEphemeralTurnCommand, right: RunEphemeralTurnCommand): boolean =>
+		left.schemaVersion === right.schemaVersion &&
+		left.kind === right.kind &&
+		left.commandId === right.commandId &&
+		left.correlationId === right.correlationId &&
+		left.causationId === right.causationId &&
+		left.expectedSessionRevision === right.expectedSessionRevision &&
+		left.viewId === right.viewId &&
+		left.controllerEpoch === right.controllerEpoch &&
+		left.prompt === right.prompt;
+
+	runEphemeralTurn = Effect.fn("Runner.runEphemeralTurn")(function* (
+		viewId: string,
+		controllerEpoch: number,
+		command: RunEphemeralTurnCommand,
+	) {
+		command = yield* Effect.try({ try: () => decodeRunEphemeralTurnCommand(command), catch: asRunnerFailure });
+		if (command.viewId !== viewId) return yield* mismatchedView(viewId);
+		if (command.controllerEpoch !== controllerEpoch) {
+			return yield* Effect.fail(new StaleRunnerControllerLeaseError({
+				viewId,
+				expectedControllerEpoch: command.controllerEpoch,
+				actualControllerEpoch: controllerEpoch,
+			}));
+		}
+		const admitted = yield* enqueue(Effect.gen(function* () {
+			yield* requireController(viewId, controllerEpoch);
+			const retained = ephemeralTurnCommands.get(command.commandId);
+			if (retained) {
+				if (!sameEphemeralTurnCommand(retained.command, command)) {
+					return yield* Effect.fail(new RunnerEphemeralTurnCommandConflictError({ commandId: command.commandId }));
+				}
+				return { record: retained, replayed: true };
+			}
+			if (command.expectedSessionRevision !== sessionRevision) {
+				return yield* Effect.fail(new SessionRevisionConflictError(command.expectedSessionRevision, sessionRevision));
+			}
+			if (activeEphemeralTurn !== undefined) {
+				return yield* Effect.fail(new RunnerEphemeralTurnUnavailableError({ reason: "active" }));
+			}
+			if (ephemeralTurnCommands.size >= options.eventCapacity) {
+				let evicted = false;
+				for (const [commandId, record] of ephemeralTurnCommands) {
+					if (!record.completed) continue;
+					ephemeralTurnCommands.delete(commandId);
+					evicted = true;
+					break;
+				}
+				if (!evicted) return yield* Effect.fail(new RunnerEphemeralTurnUnavailableError({ reason: "capacity" }));
+			}
+			const deferred = yield* Deferred.make<RunEphemeralTurnReceipt, RunnerFailure>();
+			const outputDrained = yield* Deferred.make<void>();
+			const record: LiveEphemeralTurnRecord = {
+				command,
+				operationGeneration: nextEphemeralTurnGeneration++,
+				startedSessionRevision: sessionRevision,
+				deferred,
+				abortController: new AbortController(),
+				outputChunks: new Map(),
+				outputHead: 0,
+				outputTail: 0,
+				outputHeadOffset: 0,
+				retainedBytes: 0,
+				totalBytes: 0,
+				completed: false,
+				cancellationRequested: false,
+				pendingOutputChunks: [],
+				pendingOutputBytes: 0,
+				peakPendingOutputChunks: 0,
+				peakPendingOutputBytes: 0,
+				outputPumpRunning: false,
+				outputClosed: false,
+				outputDrained,
+			};
+			ephemeralTurnCommands.set(command.commandId, record);
+			activeEphemeralTurn = record;
+			const runOutputPump = (): void => {
+				if (record.outputPumpRunning) return;
+				record.outputPumpRunning = true;
+				runCallback(Effect.gen(function* () {
+					while (record.pendingOutputChunks.length > 0) {
+						yield* enqueue(Effect.gen(function* () {
+							const pending = record.pendingOutputChunks.splice(0, 32);
+							for (const delivery of pending) {
+								record.pendingOutputBytes -= delivery.bytes;
+								if (record.completed) continue;
+								yield* publishEvent({
+									kind: "ephemeralTurnOutput",
+									metadata: command,
+									controllerEpoch,
+									viewId,
+									targetCommandId: command.commandId,
+									targetOperationGeneration: record.operationGeneration,
+									sessionRevision,
+									ephemeralTurnOutput: {
+										chunk: delivery.chunk,
+										totalBytes: delivery.totalBytes,
+										truncated: delivery.truncated,
+										reset: delivery.reset,
+									},
+								});
+							}
+						}));
+						yield* Effect.yieldNow;
+					}
+					record.outputPumpRunning = false;
+					if (record.outputClosed) yield* Deferred.succeed(record.outputDrained, undefined);
+				}).pipe(Effect.matchCauseEffect({ onFailure: () => Effect.void, onSuccess: () => Effect.void })));
+			};
+			const onChunk = (chunk: string): void => {
+				if (record.outputClosed) return;
+				appendLocalOperationOutput(record, chunk);
+				const bytes = Buffer.byteLength(chunk);
+				const tail = record.pendingOutputChunks.at(-1);
+				if (tail?.reset === true || record.pendingOutputChunks.length >= 32 ||
+					record.pendingOutputBytes + bytes > localOperationOutputLimit) {
+					record.pendingOutputChunks.length = 0;
+					record.pendingOutputBytes = 0;
+					const resetChunk = materializeLocalOperationOutput(record);
+					const resetBytes = Buffer.byteLength(resetChunk);
+					record.pendingOutputChunks.push({
+						chunk: resetChunk,
+						bytes: resetBytes,
+						reset: true,
+						totalBytes: record.totalBytes,
+						truncated: record.totalBytes > record.retainedBytes,
+					});
+					record.pendingOutputBytes = resetBytes;
+				} else {
+					record.pendingOutputChunks.push({
+						chunk,
+						bytes,
+						reset: false,
+						totalBytes: record.totalBytes,
+						truncated: record.totalBytes > record.retainedBytes,
+					});
+					record.pendingOutputBytes += bytes;
+				}
+				record.peakPendingOutputChunks = Math.max(record.peakPendingOutputChunks, record.pendingOutputChunks.length);
+				record.peakPendingOutputBytes = Math.max(record.peakPendingOutputBytes, record.pendingOutputBytes);
+				runOutputPump();
+			};
+			const closeOutput = Effect.sync(() => {
+				record.outputClosed = true;
+				if (record.outputPumpRunning) return;
+				if (record.pendingOutputChunks.length > 0) runOutputPump();
+				else runCallback(Deferred.succeed(record.outputDrained, undefined));
+			});
+			runCallback(Effect.tryPromise({
+				try: () => resources.session.runEphemeralTurn({
+					promptText: command.prompt,
+					onTextDelta: onChunk,
+					signal: record.abortController.signal,
+				}),
+				catch: asRunnerFailure,
+			}).pipe(Effect.matchEffect({
+				onFailure: failure => closeOutput.pipe(
+					Effect.andThen(Deferred.await(record.outputDrained)),
+					Effect.andThen(enqueue(Effect.sync(() => {
+						record.completed = true;
+						if (activeEphemeralTurn?.operationGeneration === record.operationGeneration) activeEphemeralTurn = undefined;
+						return failure;
+					}))),
+					Effect.flatMap(retainedFailure => Deferred.fail(record.deferred, retainedFailure)),
+					Effect.matchCauseEffect({ onFailure: () => Effect.void, onSuccess: () => Effect.void }),
+				),
+				onSuccess: result => closeOutput.pipe(
+					Effect.andThen(Deferred.await(record.outputDrained)),
+					Effect.andThen(enqueue(Effect.gen(function* () {
+						replaceLocalOperationOutput(record, result.replyText, Buffer.byteLength(result.replyText));
+						record.completed = true;
+						if (activeEphemeralTurn?.operationGeneration === record.operationGeneration) activeEphemeralTurn = undefined;
+						const receipt: RunEphemeralTurnReceipt = {
+							commandId: command.commandId,
+							correlationId: command.correlationId,
+							...(command.causationId === undefined ? {} : { causationId: command.causationId }),
+							startedSessionRevision: record.startedSessionRevision,
+							operationGeneration: record.operationGeneration,
+							completedSessionRevision: sessionRevision,
+							replayed: false,
+							output: localOperationOutputSnapshot(record),
+						};
+						yield* publishEvent({
+							kind: "ephemeralTurnOutput",
+							metadata: command,
+							controllerEpoch,
+							viewId,
+							targetCommandId: command.commandId,
+							targetOperationGeneration: record.operationGeneration,
+							sessionRevision,
+							ephemeralTurnOutput: {
+								chunk: receipt.output.text,
+								totalBytes: receipt.output.totalBytes,
+								truncated: receipt.output.truncated,
+								reset: true,
+							},
+						});
+						yield* publishEvent({
+							kind: "ephemeralTurnCompleted",
+							metadata: command,
+							controllerEpoch,
+							viewId,
+							targetCommandId: command.commandId,
+							targetOperationGeneration: record.operationGeneration,
+							sessionRevision,
+						});
+						yield* Deferred.succeed(record.deferred, receipt);
+					}))),
+					Effect.matchCauseEffect({ onFailure: () => Effect.void, onSuccess: () => Effect.void }),
+				),
+			})));
+			return { record, replayed: false };
+		}));
+		const receipt = yield* Deferred.await(admitted.record.deferred);
+		return admitted.replayed ? { ...receipt, replayed: true } : receipt;
+	});
+
+	cancelEphemeralTurn = Effect.fn("Runner.cancelEphemeralTurn")(function* (
+		viewId: string,
+		controllerEpoch: number,
+		command: CancelEphemeralTurnCommand,
+	) {
+		command = yield* Effect.try({ try: () => decodeCancelEphemeralTurnCommand(command), catch: asRunnerFailure });
+		if (command.viewId !== viewId) return yield* mismatchedView(viewId);
+		if (command.controllerEpoch !== controllerEpoch) {
+			return yield* Effect.fail(new StaleRunnerControllerLeaseError({
+				viewId,
+				expectedControllerEpoch: command.controllerEpoch,
+				actualControllerEpoch: controllerEpoch,
+			}));
+		}
+		return yield* enqueue(Effect.gen(function* () {
+			yield* requireController(viewId, controllerEpoch);
+			if (command.expectedSessionRevision !== sessionRevision) {
+				return yield* Effect.fail(new SessionRevisionConflictError(command.expectedSessionRevision, sessionRevision));
+			}
+			const record = activeEphemeralTurn;
+			if (record === undefined || record.completed || record.command.commandId !== command.targetCommandId ||
+				record.operationGeneration !== command.targetOperationGeneration) {
+				return yield* Effect.fail(new RunnerEphemeralTurnTargetError({
+					targetCommandId: command.targetCommandId,
+					targetOperationGeneration: command.targetOperationGeneration,
+				}));
+			}
+			if (!record.cancellationRequested) {
+				record.cancellationRequested = true;
+				record.abortController.abort();
+				yield* publishEvent({
+					kind: "ephemeralTurnCancelRequested",
+					metadata: command,
+					controllerEpoch,
+					viewId,
+					targetCommandId: command.targetCommandId,
+					targetOperationGeneration: command.targetOperationGeneration,
+					sessionRevision,
+				});
+			}
+			return {
+				commandId: command.commandId,
+				correlationId: command.correlationId,
+				...(command.causationId === undefined ? {} : { causationId: command.causationId }),
+				targetCommandId: command.targetCommandId,
+				targetOperationGeneration: command.targetOperationGeneration,
+				cancellationRequested: true,
+			} satisfies CancelEphemeralTurnReceipt;
+		}));
 	});
 
 	interruptPrompt = Effect.fn("Runner.interruptPrompt")(function* (
@@ -2538,6 +2897,8 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 			transitionGoalMode: attached.transitionGoalMode,
 			compact: attached.compact,
 			cancelCompaction: attached.cancelCompaction,
+			runEphemeralTurn: attached.runEphemeralTurn,
+			cancelEphemeralTurn: attached.cancelEphemeralTurn,
 			runLocalOperation: attached.runLocalOperation,
 			cancelLocalOperation: attached.cancelLocalOperation,
 			interruptPrompt: attached.interruptPrompt,
@@ -2553,6 +2914,14 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 				);
 				if (!leader) return yield* restore(Deferred.await(stopDone));
 
+				const stoppingEphemeralTurn = activeEphemeralTurn;
+				activeEphemeralTurn = undefined;
+				stoppingEphemeralTurn?.abortController.abort();
+				yield* Effect.forEach(
+					ephemeralTurnCommands.values(),
+					record => Deferred.fail(record.deferred, new SessionRunnerStoppedError()).pipe(Effect.asVoid),
+					{ discard: true },
+				);
 				resources.session.beginDispose();
 				activeCompaction = undefined;
 				yield* Effect.forEach(

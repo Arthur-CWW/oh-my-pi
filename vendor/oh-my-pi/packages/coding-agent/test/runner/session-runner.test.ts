@@ -17,9 +17,11 @@ import {
 	type AttachRunnerViewCommand,
 	type DetachRunnerViewCommand,
 	decodeCancelCompactionCommand,
+	decodeCancelEphemeralTurnCommand,
 	decodeCancelLocalOperationCommand,
 	decodeInterruptPromptCommand,
 	decodeRefreshSshToolCommand,
+	decodeRunEphemeralTurnCommand,
 	decodeRunLocalOperationCommand,
 	decodeRunCompactionCommand,
 	decodeSetActiveToolsCommand,
@@ -31,6 +33,8 @@ import {
 	InvalidRunnerCommandError,
 	RunnerCompactionCommandConflictError,
 	RunnerCompactionTargetError,
+	RunnerEphemeralTurnCommandConflictError,
+	RunnerEphemeralTurnTargetError,
 	RunnerLocalOperationCommandConflictError,
 	RunnerLocalOperationTargetError,
 	RunnerCompactionUnavailableError,
@@ -2474,6 +2478,259 @@ describe("live SessionRunner", () => {
 				}),
 			),
 		);
+	});
+
+	it("supervises ephemeral turns with ordered output, replay, fences, exact cancellation, and no durable mutation", async () => {
+		const fixture = await createLiveFixture();
+		let providerCalls = 0;
+		let release!: () => void;
+		const gate = new Promise<void>(resolve => {
+			release = resolve;
+		});
+		fixture.session.runEphemeralTurn = async args => {
+			providerCalls++;
+			args.onTextDelta?.("first");
+			await gate;
+			if (args.signal?.aborted) throw new DOMException("Aborted", "AbortError");
+			args.onTextDelta?.(" second");
+			return { replyText: "first second", assistantMessage: {} as AssistantMessage };
+		};
+		await Effect.runPromise(Effect.scoped(Effect.gen(function* () {
+			const runner = yield* makeSessionRunnerLive(fixture, { mailboxCapacity: 1, eventCapacity: 2 });
+			const controller = yield* runner.attachView(attach("ephemeral-controller", "controller", 0));
+			if (controller.capability !== "controller") throw new Error("expected controller");
+			const before = yield* runner.snapshot();
+			const makeRun = (commandId: string, prompt: string) => decodeRunEphemeralTurnCommand({
+				schemaVersion: 1,
+				kind: "runEphemeralTurn",
+				commandId,
+				correlationId: `${commandId}-correlation`,
+				expectedSessionRevision: before.sessionRevision,
+				viewId: controller.viewId,
+				controllerEpoch: controller.controllerEpoch,
+				prompt,
+			});
+			const command = makeRun("ephemeral-once", "side question");
+			const running = yield* Effect.forkScoped(controller.runEphemeralTurn(command));
+			while ((yield* runner.snapshot()).activeEphemeralTurn?.output.text !== "first") yield* Effect.sleep("1 millis");
+			expect((yield* runner.snapshot()).status).toBe("running");
+			expect(providerCalls).toBe(1);
+			const duplicate = yield* Effect.forkScoped(controller.runEphemeralTurn(command));
+			const conflict = yield* Effect.flip(controller.runEphemeralTurn(makeRun("ephemeral-once", "different")));
+			expect(conflict).toBeInstanceOf(RunnerEphemeralTurnCommandConflictError);
+			const stale = yield* Effect.flip(controller.runEphemeralTurn(decodeRunEphemeralTurnCommand({
+				...makeRun("stale-ephemeral", "stale"),
+				expectedSessionRevision: before.sessionRevision + 1,
+			})));
+			expect(stale).toBeInstanceOf(SessionRevisionConflictError);
+			release();
+			const receipt = yield* Fiber.join(running);
+			expect((yield* Fiber.join(duplicate))).toEqual({ ...receipt, replayed: true });
+			expect(receipt.output.text).toBe("first second");
+			expect(providerCalls).toBe(1);
+			const after = yield* runner.snapshot();
+			expect(after.revision).toBe(before.revision);
+			expect(after.sessionRevision).toBe(before.sessionRevision);
+			expect(after.transcript).toEqual(before.transcript);
+
+			fixture.session.runEphemeralTurn = async args => {
+				providerCalls++;
+				args.onTextDelta?.("evicted");
+				return { replyText: "evicted", assistantMessage: {} as AssistantMessage };
+			};
+			yield* controller.runEphemeralTurn(makeRun("evict-one", "evict one"));
+			yield* controller.runEphemeralTurn(makeRun("evict-two", "evict two"));
+
+			let cancelledSignal: AbortSignal | undefined;
+			fixture.session.runEphemeralTurn = async args => {
+				providerCalls++;
+				cancelledSignal = args.signal;
+				await new Promise<void>((_resolve, reject) => args.signal?.addEventListener("abort", () => reject(
+					new DOMException("Aborted", "AbortError"),
+				), { once: true }));
+				throw new Error("unreachable");
+			};
+			const replacement = yield* Effect.forkScoped(controller.runEphemeralTurn(makeRun("ephemeral-once", "same ID ABA")));
+			let generation = 0;
+			while (generation === 0) {
+				generation = (yield* runner.snapshot()).activeEphemeralTurn?.operationGeneration ?? 0;
+				if (generation === 0) yield* Effect.sleep("1 millis");
+			}
+			expect(generation).toBeGreaterThan(receipt.operationGeneration);
+			const wrong = yield* Effect.flip(controller.cancelEphemeralTurn(decodeCancelEphemeralTurnCommand({
+				schemaVersion: 1,
+				kind: "cancelEphemeralTurn",
+				commandId: "wrong-cancel",
+				correlationId: "wrong-cancel",
+				expectedSessionRevision: before.sessionRevision,
+				viewId: controller.viewId,
+				controllerEpoch: controller.controllerEpoch,
+				targetCommandId: "ephemeral-once",
+				targetOperationGeneration: receipt.operationGeneration,
+			})));
+			expect(wrong).toBeInstanceOf(RunnerEphemeralTurnTargetError);
+			const staleLease = yield* Effect.flip(controller.cancelEphemeralTurn(decodeCancelEphemeralTurnCommand({
+				schemaVersion: 1,
+				kind: "cancelEphemeralTurn",
+				commandId: "stale-lease-cancel",
+				correlationId: "stale-lease-cancel",
+				expectedSessionRevision: before.sessionRevision,
+				viewId: controller.viewId,
+				controllerEpoch: controller.controllerEpoch + 1,
+				targetCommandId: "ephemeral-once",
+				targetOperationGeneration: generation,
+			})));
+			expect(staleLease).toBeInstanceOf(StaleRunnerControllerLeaseError);
+			yield* controller.cancelEphemeralTurn(decodeCancelEphemeralTurnCommand({
+				schemaVersion: 1,
+				kind: "cancelEphemeralTurn",
+				commandId: "exact-cancel",
+				correlationId: "exact-cancel",
+				expectedSessionRevision: before.sessionRevision,
+				viewId: controller.viewId,
+				controllerEpoch: controller.controllerEpoch,
+				targetCommandId: "ephemeral-once",
+				targetOperationGeneration: generation,
+			}));
+			expect(cancelledSignal?.aborted).toBe(true);
+			expect(yield* Effect.flip(Fiber.join(replacement))).toBeInstanceOf(SessionRunnerRuntimeError);
+			yield* runner.stop();
+		})));
+	});
+
+	it("bounds and resets UTF-8 ephemeral output deliveries under synchronous provider backpressure", async () => {
+		const fixture = await createLiveFixture();
+		let release!: () => void;
+		const gate = new Promise<void>(resolve => {
+			release = resolve;
+		});
+		const chunk = "🙂".repeat(1024);
+		fixture.session.runEphemeralTurn = async args => {
+			for (let index = 0; index < 100; index++) args.onTextDelta?.(chunk);
+			await gate;
+			return { replyText: `  ${chunk.repeat(50)}  `, assistantMessage: {} as AssistantMessage };
+		};
+		await Effect.runPromise(Effect.scoped(Effect.gen(function* () {
+			const runner = yield* makeSessionRunnerLive(fixture, { mailboxCapacity: 1, eventCapacity: 128 });
+			const controller = yield* runner.attachView(attach("ephemeral-output-controller", "controller", 0));
+			if (controller.capability !== "controller") throw new Error("expected controller");
+			const subscription = yield* controller.subscribe();
+			let projected = "";
+			let sawReset = false;
+			const collect = yield* Effect.forkScoped(Effect.gen(function* () {
+				while (true) {
+					const delivery = yield* subscription.take;
+					if (delivery.kind !== "event") continue;
+					const output = delivery.event.ephemeralTurnOutput;
+					if (delivery.event.kind === "ephemeralTurnOutput" && output) {
+						projected = output.reset ? output.chunk : projected + output.chunk;
+						sawReset ||= output.reset;
+					}
+					if (delivery.event.kind === "ephemeralTurnCompleted") return;
+				}
+			}));
+			const running = yield* Effect.forkScoped(controller.runEphemeralTurn(decodeRunEphemeralTurnCommand({
+				schemaVersion: 1,
+				kind: "runEphemeralTurn",
+				commandId: "bounded-ephemeral",
+				correlationId: "bounded-ephemeral",
+				expectedSessionRevision: fixture.sessionManager.getSessionRevision(),
+				viewId: controller.viewId,
+				controllerEpoch: controller.controllerEpoch,
+				prompt: "large output",
+			})));
+			let active = (yield* runner.snapshot()).activeEphemeralTurn;
+			while (active === undefined || active.pendingOutputChunks > 0) {
+				yield* Effect.sleep("1 millis");
+				active = (yield* runner.snapshot()).activeEphemeralTurn;
+			}
+			expect(active.output.totalBytes).toBe(409_600);
+			expect(Buffer.byteLength(active.output.text)).toBeLessThanOrEqual(256 * 1024);
+			expect(Buffer.from(active.output.text).toString()).toBe(active.output.text);
+			expect(active.peakPendingOutputChunks).toBeLessThanOrEqual(32);
+			expect(active.peakPendingOutputBytes).toBeLessThanOrEqual(256 * 1024);
+			release();
+			const receipt = yield* Fiber.join(running);
+			yield* Fiber.join(collect);
+			expect(sawReset).toBe(true);
+			expect(receipt.output.text).toBe(`  ${chunk.repeat(50)}  `);
+			expect(projected).toBe(receipt.output.text);
+			expect(receipt.output.truncated).toBe(false);
+			yield* runner.stop();
+		})));
+	});
+
+	it("routes canonical ephemeral reset output through the Promise terminal controller", async () => {
+		const fixture = await createLiveFixture();
+		fixture.session.runEphemeralTurn = async args => {
+			args.onTextDelta?.("duplicate duplicate ");
+			return { replyText: "canonical answer", assistantMessage: {} as AssistantMessage };
+		};
+		const scope = Scope.makeUnsafe("sequential");
+		const run = <A, E>(effect: Effect.Effect<A, E, Scope.Scope>) => Effect.runPromise(Scope.provide(scope)(effect));
+		try {
+			const runner = await run(makeSessionRunnerLive(fixture, { mailboxCapacity: 1, eventCapacity: 8 }));
+			const controller = await createTerminalSessionController(runner, { viewId: "ephemeral-terminal-controller" });
+			const outputs: Array<{ readonly chunk: string; readonly reset: boolean }> = [];
+			const unsubscribe = controller.subscribeEphemeralTurnOutput(output => outputs.push({
+				chunk: output.chunk,
+				reset: output.reset,
+			}));
+			const receipt = await controller.runEphemeralTurn({ prompt: "canonicalize" });
+			for (let attempts = 0; attempts < 100 && outputs.at(-1)?.chunk !== receipt.output.text; attempts++) {
+				await Bun.sleep(1);
+			}
+			expect(outputs.some(output => output.chunk === "duplicate duplicate " && !output.reset)).toBe(true);
+			expect(outputs.at(-1)).toEqual({ chunk: "canonical answer", reset: true });
+			expect(receipt.output.text).toBe("canonical answer");
+			unsubscribe();
+			await controller.close();
+			await run(runner.stop());
+		} finally {
+			await Effect.runPromise(Scope.close(scope, Exit.void));
+		}
+	});
+
+	it("retains ephemeral provider failure and aborts a held turn before stop disposal", async () => {
+		const fixture = await createLiveFixture();
+		let calls = 0;
+		fixture.session.runEphemeralTurn = async () => {
+			calls++;
+			throw new Error("retained ephemeral failure");
+		};
+		await Effect.runPromise(Effect.scoped(Effect.gen(function* () {
+			const runner = yield* makeSessionRunnerLive(fixture, { mailboxCapacity: 1, eventCapacity: 2 });
+			const controller = yield* runner.attachView(attach("ephemeral-failure-controller", "controller", 0));
+			if (controller.capability !== "controller") throw new Error("expected controller");
+			const makeRun = (commandId: string) => decodeRunEphemeralTurnCommand({
+				schemaVersion: 1,
+				kind: "runEphemeralTurn",
+				commandId,
+				correlationId: commandId,
+				expectedSessionRevision: fixture.sessionManager.getSessionRevision(),
+				viewId: controller.viewId,
+				controllerEpoch: controller.controllerEpoch,
+				prompt: "question",
+			});
+			const failed = makeRun("retained-failure");
+			expect(yield* Effect.flip(controller.runEphemeralTurn(failed))).toBeInstanceOf(SessionRunnerRuntimeError);
+			expect(yield* Effect.flip(controller.runEphemeralTurn(failed))).toBeInstanceOf(SessionRunnerRuntimeError);
+			expect(calls).toBe(1);
+			let aborted = false;
+			fixture.session.runEphemeralTurn = async args => {
+				calls++;
+				await new Promise<void>((_resolve, reject) => args.signal?.addEventListener("abort", () => {
+					aborted = true;
+					reject(new DOMException("Aborted", "AbortError"));
+				}, { once: true }));
+				throw new Error("unreachable");
+			};
+			const held = yield* Effect.forkScoped(controller.runEphemeralTurn(makeRun("held-stop")));
+			while ((yield* runner.snapshot()).activeEphemeralTurn === undefined) yield* Effect.sleep("1 millis");
+			yield* runner.stop();
+			expect(aborted).toBe(true);
+			expect(yield* Effect.flip(Fiber.join(held))).toBeInstanceOf(SessionRunnerStoppedError);
+		})));
 	});
 
 	it.skipIf(Bun.env.PI_PYTHON_INTEGRATION !== "1")(

@@ -2,11 +2,13 @@ import { randomUUID } from "node:crypto";
 import { Effect, Exit, Scope } from "effect";
 import type {
 	CancelCompactionReceipt,
+	CancelEphemeralTurnReceipt,
 	CancelLocalOperationReceipt,
 	InterruptPromptReceipt,
 	RefreshSshToolReceipt,
 	ReplaceTodosReceipt,
 	RunCompactionReceipt,
+	RunEphemeralTurnReceipt,
 	RunLocalOperationReceipt,
 	RunnerCommandReceipt,
 	RunnerImageContent,
@@ -18,6 +20,7 @@ import type {
 } from "../runner/protocol";
 import {
 	decodeCancelCompactionCommand,
+	decodeCancelEphemeralTurnCommand,
 	decodeCancelLocalOperationCommand,
 	decodeCancelQueuedInputCommand,
 	decodeEditQueuedInputCommand,
@@ -25,6 +28,7 @@ import {
 	decodeRefreshSshToolCommand,
 	decodeReplaceTodosCommand,
 	decodeRunCompactionCommand,
+	decodeRunEphemeralTurnCommand,
 	decodeRunLocalOperationCommand,
 	decodeSetActiveToolsCommand,
 	decodeSetModelCommand,
@@ -33,6 +37,7 @@ import {
 	decodeTransitionGoalModeCommand,
 	decodeTransitionPlanModeCommand,
 	RunnerLocalOperationTargetError,
+	RunnerEphemeralTurnTargetError,
 	RUNNER_SCHEMA_VERSION,
 	RunnerCompactionTargetError,
 } from "../runner/protocol";
@@ -166,6 +171,19 @@ export interface TerminalCancelCompactionIntent {
 	readonly causationId?: string;
 }
 
+export interface TerminalEphemeralTurnIntent {
+	readonly prompt: string;
+	readonly commandId?: string;
+	readonly correlationId?: string;
+	readonly causationId?: string;
+}
+
+export interface TerminalCancelEphemeralTurnIntent {
+	readonly commandId?: string;
+	readonly correlationId?: string;
+	readonly causationId?: string;
+}
+
 export type TerminalLocalOperationIntent = {
 	readonly excludeFromContext: boolean;
 	readonly commandId?: string;
@@ -191,6 +209,15 @@ export interface TerminalLocalOperationOutput {
 	readonly reset: boolean;
 }
 
+export interface TerminalEphemeralTurnOutput {
+	readonly commandId: string;
+	readonly operationGeneration: number;
+	readonly chunk: string;
+	readonly totalBytes: number;
+	readonly truncated: boolean;
+	readonly reset: boolean;
+}
+
 export interface TerminalSessionControllerOptions {
 	readonly viewId?: string;
 	readonly commandId?: string;
@@ -204,6 +231,9 @@ export interface TerminalSessionController {
 	readonly subscribeAgentEvents: (listener: (event: AgentSessionEvent) => void) => () => void;
 	readonly subscribeLocalOperationOutput: (
 		listener: (output: TerminalLocalOperationOutput) => void,
+	) => () => void;
+	readonly subscribeEphemeralTurnOutput: (
+		listener: (output: TerminalEphemeralTurnOutput) => void,
 	) => () => void;
 	readonly refresh: () => Promise<TerminalSessionSnapshot>;
 	readonly getContextUsage: (options?: {
@@ -230,6 +260,10 @@ export interface TerminalSessionController {
 	readonly transitionGoalMode: (intent: TerminalTransitionGoalModeIntent) => Promise<TransitionGoalModeReceipt>;
 	readonly compact: (intent?: TerminalCompactionIntent) => Promise<RunCompactionReceipt>;
 	readonly cancelCompaction: (intent?: TerminalCancelCompactionIntent) => Promise<CancelCompactionReceipt>;
+	readonly runEphemeralTurn: (intent: TerminalEphemeralTurnIntent) => Promise<RunEphemeralTurnReceipt>;
+	readonly cancelEphemeralTurn: (
+		intent?: TerminalCancelEphemeralTurnIntent,
+	) => Promise<CancelEphemeralTurnReceipt>;
 	readonly runLocalOperation: (intent: TerminalLocalOperationIntent) => Promise<RunLocalOperationReceipt>;
 	readonly cancelLocalOperation: (
 		intent?: TerminalCancelLocalOperationIntent,
@@ -272,6 +306,7 @@ export async function createTerminalSessionController(
 		let latest = await run(view.snapshot());
 		const listeners = new Set<(event: AgentSessionEvent) => void>();
 		const localOperationOutputListeners = new Set<(output: TerminalLocalOperationOutput) => void>();
+		const ephemeralTurnOutputListeners = new Set<(output: TerminalEphemeralTurnOutput) => void>();
 		const refresh = async (): Promise<TerminalSessionSnapshot> => {
 			latest = await run(view!.snapshot());
 			return latest;
@@ -295,6 +330,15 @@ export async function createTerminalSessionController(
 										...output,
 									} satisfies TerminalLocalOperationOutput;
 									for (const listener of localOperationOutputListeners) listener(projected);
+								}
+								const ephemeralOutput = delivery.event.ephemeralTurnOutput;
+								if (ephemeralOutput !== undefined && operationGeneration !== undefined) {
+									const projected = {
+										commandId: delivery.event.commandId,
+										operationGeneration,
+										...ephemeralOutput,
+									} satisfies TerminalEphemeralTurnOutput;
+									for (const listener of ephemeralTurnOutputListeners) listener(projected);
 								}
 								await refresh();
 								return;
@@ -330,6 +374,10 @@ export async function createTerminalSessionController(
 			subscribeLocalOperationOutput: listener => {
 				localOperationOutputListeners.add(listener);
 				return () => localOperationOutputListeners.delete(listener);
+			},
+			subscribeEphemeralTurnOutput: listener => {
+				ephemeralTurnOutputListeners.add(listener);
+				return () => ephemeralTurnOutputListeners.delete(listener);
 			},
 			refresh,
 			getContextUsage: queryOptions => run(view!.getContextUsage(queryOptions)),
@@ -644,6 +692,51 @@ export async function createTerminalSessionController(
 				await refresh();
 				return receipt;
 			},
+			runEphemeralTurn: async intent => {
+				const current = await refresh();
+				try {
+					const ids = metadata(intent);
+					const receipt = await run(view!.runEphemeralTurn(decodeRunEphemeralTurnCommand({
+						schemaVersion: RUNNER_SCHEMA_VERSION,
+						kind: "runEphemeralTurn",
+						...ids,
+						...(intent.causationId === undefined ? {} : { causationId: intent.causationId }),
+						expectedSessionRevision: current.runner.sessionRevision,
+						viewId,
+						controllerEpoch: view!.epoch,
+						prompt: intent.prompt,
+					})));
+					await refresh();
+					return receipt;
+				} catch (error) {
+					await refresh();
+					throw error;
+				}
+			},
+			cancelEphemeralTurn: async (intent = {}) => {
+				const current = await refresh();
+				const active = current.runner.activeEphemeralTurn;
+				if (active === undefined) {
+					throw new RunnerEphemeralTurnTargetError({
+						targetCommandId: "",
+						targetOperationGeneration: 0,
+					});
+				}
+				const ids = metadata(intent);
+				const receipt = await run(view!.cancelEphemeralTurn(decodeCancelEphemeralTurnCommand({
+					schemaVersion: RUNNER_SCHEMA_VERSION,
+					kind: "cancelEphemeralTurn",
+					...ids,
+					...(intent.causationId === undefined ? {} : { causationId: intent.causationId }),
+					expectedSessionRevision: current.runner.sessionRevision,
+					viewId,
+					controllerEpoch: view!.epoch,
+					targetCommandId: active.commandId,
+					targetOperationGeneration: active.operationGeneration,
+				})));
+				await refresh();
+				return receipt;
+			},
 			runLocalOperation: async intent => {
 				const current = await refresh();
 				try {
@@ -741,6 +834,7 @@ export async function createTerminalSessionController(
 				} finally {
 					listeners.clear();
 					localOperationOutputListeners.clear();
+					ephemeralTurnOutputListeners.clear();
 					await Effect.runPromise(Scope.close(scope, Exit.void));
 				}
 			},

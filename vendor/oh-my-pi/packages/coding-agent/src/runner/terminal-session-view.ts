@@ -10,6 +10,8 @@ import type { TodoPhase } from "../tools/todo";
 import type {
 	CancelCompactionCommand,
 	CancelCompactionReceipt,
+	CancelEphemeralTurnCommand,
+	CancelEphemeralTurnReceipt,
 	CancelQueuedInputCommand,
 	CancelLocalOperationCommand,
 	CancelLocalOperationReceipt,
@@ -22,6 +24,8 @@ import type {
 	ReplaceTodosReceipt,
 	RunCompactionCommand,
 	RunCompactionReceipt,
+	RunEphemeralTurnCommand,
+	RunEphemeralTurnReceipt,
 	RunLocalOperationCommand,
 	RunLocalOperationReceipt,
 	RunnerCommandReceipt,
@@ -178,6 +182,12 @@ export interface TerminalSessionView {
 	readonly cancelCompaction: (
 		command: CancelCompactionCommand,
 	) => Effect.Effect<CancelCompactionReceipt, RunnerFailure, Scope.Scope>;
+	readonly runEphemeralTurn: (
+		command: RunEphemeralTurnCommand,
+	) => Effect.Effect<RunEphemeralTurnReceipt, RunnerFailure, Scope.Scope>;
+	readonly cancelEphemeralTurn: (
+		command: CancelEphemeralTurnCommand,
+	) => Effect.Effect<CancelEphemeralTurnReceipt, RunnerFailure, Scope.Scope>;
 	readonly runLocalOperation: (
 		command: RunLocalOperationCommand,
 	) => Effect.Effect<RunLocalOperationReceipt, RunnerFailure, Scope.Scope>;

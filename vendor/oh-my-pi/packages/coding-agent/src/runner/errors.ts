@@ -90,6 +90,21 @@ export class RunnerLocalOperationTargetError extends Schema.TaggedErrorClass<Run
 	{ targetCommandId: Schema.String, targetOperationGeneration: NonNegativeInt },
 ) {}
 
+export class RunnerEphemeralTurnCommandConflictError extends Schema.TaggedErrorClass<RunnerEphemeralTurnCommandConflictError>()(
+	"RunnerEphemeralTurnCommandConflictError",
+	{ commandId: Schema.String },
+) {}
+
+export class RunnerEphemeralTurnUnavailableError extends Schema.TaggedErrorClass<RunnerEphemeralTurnUnavailableError>()(
+	"RunnerEphemeralTurnUnavailableError",
+	{ reason: Schema.Literals(["active", "capacity"]) },
+) {}
+
+export class RunnerEphemeralTurnTargetError extends Schema.TaggedErrorClass<RunnerEphemeralTurnTargetError>()(
+	"RunnerEphemeralTurnTargetError",
+	{ targetCommandId: Schema.String, targetOperationGeneration: NonNegativeInt },
+) {}
+
 export class RunnerCompactionCommandConflictError extends Schema.TaggedErrorClass<RunnerCompactionCommandConflictError>()(
 	"RunnerCompactionCommandConflictError",
 	{ commandId: Schema.String },

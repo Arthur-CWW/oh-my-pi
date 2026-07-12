@@ -276,6 +276,31 @@ export const CancelLocalOperationCommandSchema = Schema.Struct({
 	targetOperationGeneration: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(1))),
 });
 
+export const RunEphemeralTurnCommandSchema = Schema.Struct({
+	schemaVersion: Schema.Literal(RUNNER_SCHEMA_VERSION),
+	kind: Schema.Literal("runEphemeralTurn"),
+	commandId: Schema.String,
+	correlationId: Schema.String,
+	causationId: Schema.optional(Schema.String),
+	expectedSessionRevision: RunnerRevisionSchema,
+	viewId: Schema.String,
+	controllerEpoch: ControllerEpochSchema,
+	prompt: Schema.String,
+});
+
+export const CancelEphemeralTurnCommandSchema = Schema.Struct({
+	schemaVersion: Schema.Literal(RUNNER_SCHEMA_VERSION),
+	kind: Schema.Literal("cancelEphemeralTurn"),
+	commandId: Schema.String,
+	correlationId: Schema.String,
+	causationId: Schema.optional(Schema.String),
+	expectedSessionRevision: RunnerRevisionSchema,
+	viewId: Schema.String,
+	controllerEpoch: ControllerEpochSchema,
+	targetCommandId: Schema.String,
+	targetOperationGeneration: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(1))),
+});
+
 export type SubmitInputCommand = typeof SubmitInputCommandSchema.Type;
 export type EditQueuedInputCommand = typeof EditQueuedInputCommandSchema.Type;
 export type CancelQueuedInputCommand = typeof CancelQueuedInputCommandSchema.Type;
@@ -287,6 +312,9 @@ export type RunCompactionCommand = typeof RunCompactionCommandSchema.Type;
 export type CancelCompactionCommand = typeof CancelCompactionCommandSchema.Type;
 export type RunLocalOperationCommand = typeof RunLocalOperationCommandSchema.Type;
 export type CancelLocalOperationCommand = typeof CancelLocalOperationCommandSchema.Type;
+export type RunEphemeralTurnCommand = typeof RunEphemeralTurnCommandSchema.Type;
+export type CancelEphemeralTurnCommand = typeof CancelEphemeralTurnCommandSchema.Type;
+
 export type TransitionPlanModeCommand = typeof TransitionPlanModeCommandSchema.Type;
 export type TransitionGoalModeCommand = typeof TransitionGoalModeCommandSchema.Type;
 export type ReplaceTodosCommand = typeof ReplaceTodosCommandSchema.Type;
@@ -458,6 +486,37 @@ export interface CancelLocalOperationReceipt {
 	readonly cancellationRequested: true;
 }
 
+export interface ActiveEphemeralTurnSnapshot {
+	readonly commandId: string;
+	readonly operationGeneration: number;
+	readonly startedSessionRevision: number;
+	readonly output: LocalOperationOutputSnapshot;
+	readonly pendingOutputChunks: number;
+	readonly pendingOutputBytes: number;
+	readonly peakPendingOutputChunks: number;
+	readonly peakPendingOutputBytes: number;
+}
+
+export interface RunEphemeralTurnReceipt {
+	readonly commandId: string;
+	readonly correlationId: string;
+	readonly causationId?: string;
+	readonly startedSessionRevision: number;
+	readonly operationGeneration: number;
+	readonly completedSessionRevision: number;
+	readonly replayed: boolean;
+	readonly output: LocalOperationOutputSnapshot;
+}
+
+export interface CancelEphemeralTurnReceipt {
+	readonly commandId: string;
+	readonly correlationId: string;
+	readonly causationId?: string;
+	readonly targetCommandId: string;
+	readonly targetOperationGeneration: number;
+	readonly cancellationRequested: true;
+}
+
 export interface RunnerViewSnapshot {
 	readonly viewId: string;
 	readonly capability: RunnerCapability;
@@ -488,6 +547,7 @@ export interface SessionRunnerSnapshot {
 		  }
 		| undefined;
 	readonly activeLocalOperation: ActiveLocalOperationSnapshot | undefined;
+	readonly activeEphemeralTurn: ActiveEphemeralTurnSnapshot | undefined;
 	readonly workflow: WorkflowModeSnapshot;
 	readonly toolConfigurationGeneration: number;
 	readonly activeToolNames: ReadonlyArray<string>;
@@ -517,6 +577,9 @@ export type RunnerEventKind =
 	| "localOperationOutput"
 	| "localOperationCancelRequested"
 	| "localOperationCompleted"
+	| "ephemeralTurnOutput"
+	| "ephemeralTurnCancelRequested"
+	| "ephemeralTurnCompleted"
 	| "transcriptEntryAppended";
 
 /** Every event is a closed causal envelope in the runner's single total order. */
@@ -541,6 +604,12 @@ export interface RunnerEvent {
 	readonly targetCommandId: string | undefined;
 	readonly targetOperationGeneration: number | undefined;
 	readonly localOperationOutput?: {
+		readonly chunk: string;
+		readonly totalBytes: number;
+		readonly truncated: boolean;
+		readonly reset: boolean;
+	};
+	readonly ephemeralTurnOutput?: {
 		readonly chunk: string;
 		readonly totalBytes: number;
 		readonly truncated: boolean;
@@ -686,6 +755,28 @@ export const decodeCancelCompactionCommand = (input: unknown): CancelCompactionC
 		});
 	}
 };
+export const decodeRunEphemeralTurnCommand = (input: unknown): RunEphemeralTurnCommand => {
+	try {
+		const command = Schema.decodeUnknownSync(RunEphemeralTurnCommandSchema)(input, { onExcessProperty: "error" });
+		if (command.prompt.trim().length === 0) throw new Error("Ephemeral turn prompt must not be empty");
+		return command;
+	} catch (error) {
+		throw new InvalidRunnerCommandError({
+			issue: error instanceof Error ? error.message : "Invalid ephemeral-turn command",
+		});
+	}
+};
+
+export const decodeCancelEphemeralTurnCommand = (input: unknown): CancelEphemeralTurnCommand => {
+	try {
+		return Schema.decodeUnknownSync(CancelEphemeralTurnCommandSchema)(input, { onExcessProperty: "error" });
+	} catch (error) {
+		throw new InvalidRunnerCommandError({
+			issue: error instanceof Error ? error.message : "Invalid cancel-ephemeral-turn command",
+		});
+	}
+};
+
 export const decodeRunLocalOperationCommand = (input: unknown): RunLocalOperationCommand => {
 	try {
 		return Schema.decodeUnknownSync(RunLocalOperationCommandSchema)(input, { onExcessProperty: "error" });
