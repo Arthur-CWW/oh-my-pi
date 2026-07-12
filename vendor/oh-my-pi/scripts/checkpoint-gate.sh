@@ -73,6 +73,11 @@ done < <(git diff --cached --name-only --diff-filter=ACDMRTUXB)
 for package in "${packages[@]-}"; do
 	package_json="$snapshot_root/packages/$package/package.json"
 	[[ -f $package_json ]] || continue
+	# Generated artifacts are gitignored, so the staged snapshot lacks them;
+	# run the package's `generate` script (if any) before typechecking.
+	if bun -e 'const p = await Bun.file(process.argv[1]).json(); process.exit(p.scripts?.generate ? 0 : 1)' "$package_json"; then
+		bun --cwd="$snapshot_root/packages/$package" run generate || exit $?
+	fi
 	if bun -e 'const p = await Bun.file(process.argv[1]).json(); process.exit(p.scripts?.["check:types"] ? 0 : 1)' "$package_json"; then
 		bun --cwd="$snapshot_root/packages/$package" run check:types || exit $?
 	fi

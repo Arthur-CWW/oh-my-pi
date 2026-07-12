@@ -41,6 +41,7 @@
 		"fmt": "biome format --write . && bun run format-prompts",
 		"format-prompts": "bun scripts/format-prompts.ts",
 		"generate-docs-index": "bun scripts/generate-docs-index.ts",
+		"generate": "bun scripts/generate-docs-index.ts && bun --cwd=../collab-web run build:tool-views",
 		"prepack": "bun scripts/generate-docs-index.ts && bun --cwd=../collab-web run build:tool-views && bun scripts/bundle-dist.ts",
 		"bench:guard": "bun scripts/bench-guard.ts",
 		"bench:lifecycle-memory": "bun bench/lifecycle-memory.ts"
