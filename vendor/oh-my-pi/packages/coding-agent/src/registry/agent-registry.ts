@@ -184,6 +184,18 @@ export class AgentRegistry {
 		return this.#refs.get(id);
 	}
 
+	/** True when `id` is the ancestor itself or belongs to its registered descendant tree. */
+	isInSubtree(id: string, ancestorId: string): boolean {
+		let currentId: string | undefined = id;
+		const visited = new Set<string>();
+		while (currentId && !visited.has(currentId)) {
+			if (currentId === ancestorId) return true;
+			visited.add(currentId);
+			currentId = this.#refs.get(currentId)?.parentId;
+		}
+		return false;
+	}
+
 	list(): AgentRef[] {
 		return [...this.#refs.values()];
 	}

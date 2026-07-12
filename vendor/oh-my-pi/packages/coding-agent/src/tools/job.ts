@@ -5,7 +5,7 @@ import { prompt } from "@oh-my-pi/pi-utils";
 import { z } from "zod/v4";
 import type { AsyncJob, AsyncJobManager } from "../async";
 import type { RenderResultOptions } from "../extensibility/custom-tools/types";
-import { MAIN_AGENT_ID } from "../registry/agent-registry";
+import { AgentRegistry, MAIN_AGENT_ID } from "../registry/agent-registry";
 import { shimmerEnabled, shimmerText } from "../modes/theme/shimmer";
 import type { Theme } from "../modes/theme/theme";
 import jobDescription from "../prompts/tools/job.md" with { type: "text" };
@@ -33,12 +33,12 @@ const jobSchema = z.object({
 	list: z.boolean().optional().describe("snapshot all jobs"),
 	setModel: z
 		.object({
-			id: z.string().describe("current Main session or stable direct-child id to hot-swap"),
+			id: z.string().describe("current Main session or stable descendant id to hot-swap"),
 			model: z.string().describe("model selector to apply, including optional :thinking suffix"),
 			reason: z.string().optional().describe("why the target agent is being swapped"),
 		})
 		.optional()
-		.describe("swap the current Main session or a live, parked, or historical direct-child model; live targets switch at a safe boundary"),
+		.describe("swap the current Main session or a live, parked, or historical descendant model; live targets switch at a safe boundary"),
 });
 
 type JobParams = z.infer<typeof jobSchema>;
@@ -104,7 +104,7 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 	readonly name = "job";
 	readonly approval = "read" as const;
 	readonly label = "Job";
-	readonly summary = "Manage background jobs and hot-swap the current session or direct child models";
+	readonly summary = "Manage background jobs and hot-swap the current session or descendant models";
 	readonly description: string;
 	readonly parameters = jobSchema;
 	readonly strict = true;
@@ -133,7 +133,7 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 				throw new ToolError("`setModel` cannot be combined with `list`, `poll`, `cancel`, or `interrupt`.");
 			}
 			const job = params.setModel.id === MAIN_AGENT_ID ? undefined : manager?.getJob(params.setModel.id);
-			if (job && ownerId && job.ownerId !== ownerId) {
+			if (job && !this.#ownsJob(job, ownerId)) {
 				return {
 					content: [{ type: "text", text: `Hot-swap failed: background job not found: ${params.setModel.id}` }],
 					details: { jobs: [] },
@@ -174,7 +174,7 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 		const cancelOutcomes: CancelOutcome[] = [];
 		for (const id of cancelIds) {
 			const existing = manager.getJob(id);
-			if (!existing || (ownerId && existing.ownerId !== ownerId)) {
+			if (!existing || !this.#ownsJob(existing, ownerId)) {
 				cancelOutcomes.push({ id, status: "not_found", message: `Background job not found: ${id}` });
 				continue;
 			}
@@ -186,7 +186,7 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 				});
 				continue;
 			}
-			const cancelled = manager.cancel(id, ownerFilter);
+			const cancelled = manager.cancel(id);
 			cancelOutcomes.push(
 				cancelled
 					? { id, status: "cancelled", message: `Cancelled background job ${id}.` }
@@ -201,7 +201,7 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 		}
 		for (const id of interruptIds) {
 			const existing = manager.getJob(id);
-			if (!existing || (ownerId && existing.ownerId !== ownerId)) {
+			if (!existing || !this.#ownsJob(existing, ownerId)) {
 				interruptOutcomes.push({ id, status: "not_found", message: `Background job not found: ${id}` });
 				continue;
 			}
@@ -221,7 +221,7 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 				});
 				continue;
 			}
-			const interrupted = manager.interrupt(id, ownerFilter, params.interruptReason);
+			const interrupted = manager.interrupt(id, undefined, params.interruptReason, ownerId);
 			interruptOutcomes.push(
 				interrupted
 					? {
@@ -345,20 +345,23 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 		return this.#buildResult(manager, allTrackedJobs, cancelOutcomes, interruptOutcomes);
 	}
 
-	/**
-	 * Resolve a list of job ids to job records visible to the calling agent.
-	 * Drops missing ids and ids owned by other agents, so cross-agent inspection
-	 * via the `job` tool is impossible.
-	 */
+	/** Resolve job ids within the caller's complete registered agent subtree. */
 	#visibleJobs(manager: AsyncJobManager, ids: string[], ownerId: string | undefined): AsyncJob[] {
 		const out: AsyncJob[] = [];
 		for (const id of ids) {
 			const job = manager.getJob(id);
-			if (!job) continue;
-			if (ownerId && job.ownerId !== ownerId) continue;
-			out.push(job);
+			if (job && this.#ownsJob(job, ownerId)) out.push(job);
 		}
 		return out;
+	}
+
+	#ownsJob(job: AsyncJob, ownerId: string | undefined): boolean {
+		if (!ownerId) return true;
+		if (job.ownerId === ownerId) return true;
+		const registry = AgentRegistry.global();
+		// A nested task is registered under its stable dotted id but its async
+		// job is owned by the immediate parent that spawned it.
+		return registry.isInSubtree(job.id, ownerId) && (!job.ownerId || registry.isInSubtree(job.ownerId, ownerId));
 	}
 
 	#snapshotJobs(

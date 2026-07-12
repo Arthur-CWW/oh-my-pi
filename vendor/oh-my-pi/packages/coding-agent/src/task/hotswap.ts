@@ -3,7 +3,7 @@ import type { Model, ReasoningEffort } from "@oh-my-pi/pi-ai";
 import { getSupportedEfforts } from "@oh-my-pi/pi-catalog/model-thinking";
 import { modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
 import { logger, toError } from "@oh-my-pi/pi-utils";
-import { isBlockedSubagentModel, resolveModelOverride } from "../config/model-resolver";
+import { extractExplicitThinkingSelector, isBlockedSubagentModel, resolveModelOverride } from "../config/model-resolver";
 import type { Settings } from "../config/settings";
 import { AgentLifecycleManager } from "../registry/agent-lifecycle";
 import { AgentRegistry, MAIN_AGENT_ID, type AgentRef } from "../registry/agent-registry";
@@ -72,13 +72,13 @@ function cancelPending(agentId: string): void {
 
 function validateThinkingLevel(model: Model, thinkingLevel: ThinkingLevel | undefined, explicit: boolean): string | undefined {
 	if (!explicit || thinkingLevel === undefined || thinkingLevel === "off" || thinkingLevel === "inherit") return undefined;
-	if (getSupportedEfforts(model).includes(thinkingLevel as ReasoningEffort)) return undefined;
-	const supported = getSupportedEfforts(model);
+	const supported = model.reasoning ? getSupportedEfforts(model) : [];
+	if (supported.includes(thinkingLevel as ReasoningEffort)) return undefined;
 	return `Thinking effort ${thinkingLevel} is not supported by ${formatModel(model)}${supported.length ? `. Supported efforts: ${supported.join(", ")}` : ""}`;
 }
 
-function isOwnedDirectChild(ref: AgentRef, requestedBy: string | undefined): boolean {
-	return requestedBy === undefined || ref.parentId === requestedBy;
+function isOwnedAgent(ref: AgentRef, requestedBy: string | undefined, registry: AgentRegistry): boolean {
+	return requestedBy === undefined || registry.isInSubtree(ref.id, requestedBy);
 }
 
 function hotswapAudit(
@@ -306,7 +306,7 @@ export async function hotswapAgentModel(args: HotswapArgs): Promise<HotswapResul
 		}
 	} else if (initialRef.kind !== "sub") {
 		return failed(args.agentId, `Agent ${args.agentId} is not a subagent.`);
-	} else if (!isOwnedDirectChild(initialRef, args.requestedBy)) {
+	} else if (!isOwnedAgent(initialRef, args.requestedBy, registry)) {
 		return failed(args.agentId, `Agent ${args.agentId} is not a direct child of ${args.requestedBy}.`);
 	}
 
@@ -338,13 +338,16 @@ export async function hotswapAgentModel(args: HotswapArgs): Promise<HotswapResul
 			return failed(args.agentId, `Missing credentials for ${formatModel(resolved.model)}`);
 		}
 		const to = formatModel(resolved.model);
-		const thinkingError = validateThinkingLevel(resolved.model, resolved.thinkingLevel, resolved.explicitThinkingLevel);
+		const requestedThinking = extractExplicitThinkingSelector(args.model, session.settings);
+		const thinkingLevel = requestedThinking ?? resolved.thinkingLevel;
+		const explicitThinkingLevel = requestedThinking !== undefined || resolved.explicitThinkingLevel;
+		const thinkingError = validateThinkingLevel(resolved.model, thinkingLevel, explicitThinkingLevel);
 		if (thinkingError) return failed(args.agentId, thinkingError);
 
 		cancelPending(args.agentId);
 
 		const sameModel = modelsAreEqual(resolved.model, currentModel);
-		if (sameModel && !resolved.explicitThinkingLevel) {
+		if (sameModel && !explicitThinkingLevel) {
 			return { status: "applied", agentId: args.agentId, from, to: from };
 		}
 
@@ -354,7 +357,7 @@ export async function hotswapAgentModel(args: HotswapArgs): Promise<HotswapResul
 				? applyThinkingOnlyHotswap(
 						args.agentId,
 						session,
-						resolved.thinkingLevel,
+						thinkingLevel,
 						args.requestedBy,
 						args.reason,
 						from,
@@ -364,8 +367,8 @@ export async function hotswapAgentModel(args: HotswapArgs): Promise<HotswapResul
 						args.agentId,
 						session,
 						targetModel,
-						resolved.thinkingLevel,
-						resolved.explicitThinkingLevel,
+						thinkingLevel,
+						explicitThinkingLevel,
 						args.requestedBy,
 						args.reason,
 						from,

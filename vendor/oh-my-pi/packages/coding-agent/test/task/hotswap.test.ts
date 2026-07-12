@@ -441,6 +441,21 @@ describe("hotswapAgentModel", () => {
 		expect(stub.setModelCalls).toEqual([{ model: modelB, role: "hotswap" }]);
 	});
 
+
+	it("hot-swaps a registered grandchild from the owning root session", async () => {
+		const stub = makeSessionStub();
+		registerSub("Parent", null, "parked", "Main");
+		registerSub("Parent.Child", stub.session, "idle", "Parent");
+
+		const result = await hotswapAgentModel({
+			agentId: "Parent.Child",
+			model: "openai/model-b",
+			requestedBy: "Main",
+		});
+
+		expect(result.status).toBe("applied");
+		expect(stub.setModelCalls).toEqual([{ model: modelB, role: "hotswap" }]);
+	});
 	it("rejects live children owned by another parent without mutating them", async () => {
 		const stub = makeSessionStub();
 		registerSub("ForeignLive", stub.session, "idle", "OtherParent");
@@ -825,8 +840,68 @@ describe("job setModel operation", () => {
 		expect(result.details?.interrupted).toEqual([{ id: "InterruptSub", status: "interrupted" }]);
 		expect(manager.getJob("InterruptSub")?.interruptRequested).toBe(true);
 		expect(manager.getJob("InterruptSub")?.interruptReason).toBe("need a checkpoint");
+		expect(manager.getJob("InterruptSub")?.interruptRequestedBy).toBe("Main");
 	});
 
+
+	it("resolves dotted grandchildren for poll, cancel, interrupt, and setModel", async () => {
+		const manager = createManager();
+		const registry = AgentRegistry.global();
+		registry.register({
+			id: "Parent",
+			displayName: "parent",
+			kind: "sub",
+			parentId: "Main",
+			session: null,
+			status: "idle",
+		});
+		registry.register({
+			id: "Parent.Child",
+			displayName: "child",
+			kind: "sub",
+			parentId: "Parent",
+			session: null,
+			status: "running",
+		});
+		registerRunningTask(manager, "Parent.Child", "Parent");
+		const tool = new JobTool(createToolSession(manager, "Main"));
+
+		const pollAbort = new AbortController();
+		setTimeout(() => pollAbort.abort(), 5);
+		const polled = await tool.execute("job-poll-grandchild", { poll: ["Parent.Child"] }, pollAbort.signal);
+		expect(polled.details?.jobs.map(job => job.id)).toEqual(["Parent.Child"]);
+		const swap = vi.spyOn(hotswapModule, "hotswapAgentModel").mockResolvedValue({
+			status: "queued",
+			agentId: "Parent.Child",
+			from: "anthropic/model-a",
+			to: "openai/model-b",
+		});
+		const swapped = await tool.execute("job-model-grandchild", {
+			setModel: { id: "Parent.Child", model: "openai/model-b" },
+		});
+		expect(firstText(swapped)).toContain("Hot-swap queued: Parent.Child");
+		expect(swap).toHaveBeenCalledWith(
+			expect.objectContaining({ agentId: "Parent.Child", requestedBy: "Main" }),
+		);
+
+		const interrupted = await tool.execute("job-interrupt-grandchild", { interrupt: ["Parent.Child"] });
+		expect(interrupted.details?.interrupted).toEqual([{ id: "Parent.Child", status: "interrupted" }]);
+		expect(manager.getJob("Parent.Child")?.interruptRequested).toBe(true);
+		expect(manager.getJob("Parent.Child")?.interruptRequestedBy).toBe("Main");
+
+		registry.register({
+			id: "Parent.CancelChild",
+			displayName: "cancel child",
+			kind: "sub",
+			parentId: "Parent",
+			session: null,
+			status: "running",
+		});
+		registerRunningTask(manager, "Parent.CancelChild", "Parent");
+		const cancelled = await tool.execute("job-cancel-grandchild", { cancel: ["Parent.CancelChild"] });
+		expect(cancelled.details?.cancelled).toEqual([{ id: "Parent.CancelChild", status: "cancelled" }]);
+		expect(manager.getJob("Parent.CancelChild")?.status).toBe("cancelled");
+	});
 	it("enforces interrupt ownership and rejects non-running jobs cleanly", async () => {
 		const manager = createManager();
 		registerRunningTask(manager, "OtherInterruptSub", "OtherParent");
