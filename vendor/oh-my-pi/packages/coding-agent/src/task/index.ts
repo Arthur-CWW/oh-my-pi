@@ -871,6 +871,9 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 			if (routeDecision && !routeDecision.invalid) {
 				routeDecision = await this.#applyQuotaAdmission(routeDecision, signal);
 			}
+			if (routeDecision && !routeDecision.invalid && !routeDecision.block) {
+				routeDecision = await this.#applyAuthFallback(routeDecision);
+			}
 			const routeError = routeDecision ? this.#routeError(agentLabel, routeDecision) : undefined;
 			if (routeError) {
 				return withAdvisory({
@@ -915,6 +918,10 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 					tokens: 0,
 					cost: 0,
 					durationMs: 0,
+					routeReceipt:
+						routeDecision?.source && routeDecision.route && !routeDecision.invalid && !routeDecision.block
+							? toSpawnRouteReceipt(routeDecision)
+							: undefined,
 					...(routeDecision
 						? { modelOverride: [...routeDecision.resolvedPatterns], resolvedModel: routeDecision.route?.selector }
 						: {}),

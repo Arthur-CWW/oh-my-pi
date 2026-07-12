@@ -62,6 +62,13 @@ export interface SpawnRouteQuotaBlock {
 	readonly reason: string | undefined;
 	readonly resetAt: number | undefined;
 }
+export interface SpawnRouteAttempt {
+	readonly source: SubsequentSpawnRouteSource;
+	readonly route: ResolvedRoute;
+	readonly reason: string | undefined;
+	readonly quotaAdmission?: AgentQuotaAdmission;
+}
+
 
 export interface SpawnRouteDecision {
 	readonly source: SubsequentSpawnRouteSource | undefined;
@@ -78,6 +85,7 @@ export interface SpawnRouteDecision {
 	readonly invalid: SpawnRouteInvalidError | undefined;
 	readonly quotaAdmission?: AgentQuotaAdmission;
 	readonly block?: SpawnRouteQuotaBlock;
+	readonly priorAttempts?: readonly SpawnRouteAttempt[];
 }
 
 export interface SpawnRouteReceipt {
@@ -89,6 +97,8 @@ export interface SpawnRouteReceipt {
 	readonly consulted: readonly ConsultedRouteInput[];
 	readonly overridden: readonly ConsultedRouteInput[];
 	readonly resolvedPatterns: readonly string[];
+	readonly quotaAdmission?: AgentQuotaAdmission;
+	readonly priorAttempts?: readonly SpawnRouteAttempt[];
 }
 
 type RouteTier = {
@@ -272,6 +282,13 @@ export function rerouteSpawnRoute(
 		originalRoute: decision.route,
 		reason,
 		quotaAdmission,
+		priorAttempts:
+			decision.source && decision.route
+				? immutable([
+						...(decision.priorAttempts ?? []),
+						{ source: decision.source, route: decision.route, reason, quotaAdmission },
+					])
+				: decision.priorAttempts,
 		block: undefined,
 		invalid: undefined,
 	};
@@ -288,7 +305,7 @@ export function reconcileSpawnRouteAuthFallback(
 	}
 	const route = toRoute(model, thinking, explicitThinking, decision.parentActiveSelector);
 	const authReason = `auth fallback from ${decision.route.selector} to ${route.selector}`;
-	const reason = decision.reason ? `${decision.reason}; ${authReason}` : authReason;
+	const reason = authReason;
 	return {
 		...decision,
 		source: "auth_fallback",
@@ -298,14 +315,11 @@ export function reconcileSpawnRouteAuthFallback(
 		originalSource: decision.source,
 		originalRoute: decision.route,
 		reason,
-		quotaAdmission: decision.quotaAdmission
-			? {
-					...decision.quotaAdmission,
-					reroutedProvider: route.provider,
-					reroutedModel: route.selector,
-					decisionReason: reason,
-				}
-			: undefined,
+		priorAttempts: immutable([
+			...(decision.priorAttempts ?? []),
+			{ source: decision.source, route: decision.route, reason: authReason },
+		]),
+		quotaAdmission: decision.quotaAdmission,
 	};
 }
 
@@ -322,5 +336,7 @@ export function toSpawnRouteReceipt(decision: SpawnRouteDecision): SpawnRouteRec
 		consulted: decision.consulted,
 		overridden: decision.overridden,
 		resolvedPatterns: decision.resolvedPatterns,
+		quotaAdmission: decision.quotaAdmission,
+		priorAttempts: decision.priorAttempts ?? immutable([]),
 	};
 }

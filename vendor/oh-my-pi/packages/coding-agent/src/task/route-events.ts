@@ -80,8 +80,8 @@ export type RouteResolutionSource = Linkage & {
 		effort: string;
 		disposition: "selected" | "rerouted";
 		fallbackOrdinal: number | null;
-		rejectionCode: null;
-		rejectionReason: null;
+		rejectionCode: "quota_admission" | "auth_fallback" | null;
+		rejectionReason: string | null;
 		failedConstraintIds: readonly string[];
 	}[];
 	fallbackFromResolutionId: null;
@@ -183,7 +183,6 @@ export function createSpawnRouteResolution(
 ): RouteResolutionSource {
 	const agentSeq = nextAgentSeq(sessionManager.getEntries(), linkage.agentId);
 	const route = routeRecord(receipt.route);
-	const original = receipt.originalRoute ? routeRecord(receipt.originalRoute) : undefined;
 	const candidates: RouteResolutionSource["candidates"] = [
 		{
 			ordinal: 0,
@@ -198,21 +197,28 @@ export function createSpawnRouteResolution(
 			rejectionReason: null,
 			failedConstraintIds: [],
 		},
-		...(original
-			? [{
-					ordinal: 1,
-					lane: original.lane,
-					provider: original.provider,
-					model: original.model,
-					account: original.account,
-					effort: original.effort,
+		...(receipt.priorAttempts ?? [])
+			.slice()
+			.reverse()
+			.map((attempt, index) => {
+				const attemptedRoute = routeRecord(attempt.route);
+				const quota = attempt.quotaAdmission;
+				return {
+					ordinal: index + 1,
+					lane: attemptedRoute.lane,
+					provider: attemptedRoute.provider,
+					model: attemptedRoute.model,
+					account: attemptedRoute.account,
+					effort: attemptedRoute.effort,
 					disposition: "rerouted" as const,
-					fallbackOrdinal: 0,
-					rejectionCode: null,
-					rejectionReason: null,
-					failedConstraintIds: [],
-				}]
-			: []),
+					fallbackOrdinal: index,
+					rejectionCode: quota ? ("quota_admission" as const) : ("auth_fallback" as const),
+					rejectionReason: quota?.decisionReason ?? attempt.reason ?? null,
+					failedConstraintIds: [quota?.quotaPoolId, quota?.limitWindowId].filter(
+						(value): value is string => value !== undefined,
+					),
+				};
+			}),
 	];
 	return {
 		...linkage,
@@ -226,7 +232,12 @@ export function createSpawnRouteResolution(
 		route,
 		provenance: {
 			winningLayer: receipt.source,
-			constraints: [],
+			constraints:
+				receipt.source === "automatic_reroute"
+					? [receipt.quotaAdmission?.quotaPoolId, receipt.quotaAdmission?.limitWindowId].filter(
+							(value): value is string => value !== undefined,
+						)
+					: [],
 			consultedSources: receipt.consulted.map(input => input.source),
 			overriddenValues: receipt.overridden.flatMap(input => input.patterns),
 		},

@@ -184,9 +184,13 @@ describe("resolveSpawnRoute", () => {
 		expect(reconciled.quotaAdmission).toMatchObject({
 			originalProvider: "openai",
 			originalModel: "openai/smol-literal",
-			reroutedProvider: "openai-codex",
-			reroutedModel: "openai-codex/gpt-5.6-terra:low",
-			decisionReason: "auth fallback from openai/smol-literal to openai-codex/gpt-5.6-terra:low",
+			decisionReason: "quota admitted selected route",
+		});
+		expect(receipt.quotaAdmission).toEqual(reconciled.quotaAdmission);
+		expect(receipt.priorAttempts).toHaveLength(1);
+		expect(receipt.priorAttempts?.[0]).toMatchObject({
+			source: "agent_frontmatter",
+			reason: "auth fallback from openai/smol-literal to openai-codex/gpt-5.6-terra:low",
 		});
 	});
 

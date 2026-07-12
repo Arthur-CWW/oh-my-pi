@@ -4,7 +4,7 @@ import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { MemorySessionStorage } from "@oh-my-pi/pi-coding-agent/session/session-storage";
-import { resolveSpawnRoute, rerouteSpawnRoute, toSpawnRouteReceipt } from "@oh-my-pi/pi-coding-agent/task/route-resolution";
+import { admitSpawnRoute, reconcileSpawnRouteAuthFallback, resolveSpawnRoute, rerouteSpawnRoute, toSpawnRouteReceipt } from "@oh-my-pi/pi-coding-agent/task/route-resolution";
 import { appendSpawnRouteResolution, createSpawnRouteResolution, ROUTE_RESOLUTION_ENTRY } from "@oh-my-pi/pi-coding-agent/task/route-events";
 
 const primary = buildModel({ id: "terra", name: "Terra", api: "openai-responses", provider: "openai-codex", baseUrl: "https://api.openai.com/v1", reasoning: true, thinking: { mode: "effort", efforts: [ThinkingLevel.Medium] }, input: ["text"], cost: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 }, contextWindow: 128000, maxTokens: 8192 });
@@ -34,6 +34,63 @@ describe("spawn route resolution events", () => {
 		expect(event.provenance.winningLayer).toBe("automatic_reroute");
 		expect(event.reason).toBe("quota");
 		expect(event.candidates).toHaveLength(2);
+		expect(event.provenance.constraints).toEqual([]);
+		expect(event.candidates[1]).toMatchObject({
+			rejectionCode: "quota_admission",
+			rejectionReason: "quota",
+		});
+	});
+
+	it("keeps admitted and auth-failed attempts distinct", () => {
+		const admitted = admitSpawnRoute(decision({ sessionInherited: "openai/fallback" }), {
+			originalProvider: "openai",
+			originalModel: "openai/fallback",
+			decisionReason: "admitted",
+		});
+		const reconciled = reconcileSpawnRouteAuthFallback(admitted, primary, ThinkingLevel.Medium, true);
+		const event = createSpawnRouteResolution(manager(), linkage, toSpawnRouteReceipt(reconciled));
+		expect(event.provenance.winningLayer).toBe("auth_fallback");
+		expect(event.provenance.constraints).toEqual([]);
+		expect(event.candidates).toHaveLength(2);
+		expect(event.candidates[1]).toMatchObject({
+			lane: "openai/fallback",
+			rejectionCode: "auth_fallback",
+		});
+	});
+
+	it("retains quota and auth fallback as separate ordered attempts", () => {
+		const quota = {
+			originalProvider: "openai-codex",
+			reroutedProvider: "openai",
+			originalModel: "openai-codex/terra",
+			reroutedModel: "openai/fallback",
+			decisionReason: "reserve",
+			quotaPoolId: "pool-a",
+			limitWindowId: "window-a",
+		};
+		const rerouted = rerouteSpawnRoute(
+			decision({ sessionInherited: "openai-codex/terra" }),
+			{ providerId: "openai", modelId: "fallback", selector: "openai/fallback" },
+			quota,
+			"reserve",
+		);
+		const reconciled = reconcileSpawnRouteAuthFallback(rerouted, primary, ThinkingLevel.Medium, true);
+		const receipt = toSpawnRouteReceipt(reconciled);
+		const event = createSpawnRouteResolution(manager(), linkage, receipt);
+		expect(receipt.quotaAdmission).toEqual(quota);
+		expect(event.provenance.winningLayer).toBe("auth_fallback");
+		expect(event.provenance.constraints).toEqual([]);
+		expect(event.candidates).toHaveLength(3);
+		expect(event.candidates[1]).toMatchObject({
+			lane: "openai/fallback",
+			rejectionCode: "auth_fallback",
+		});
+		expect(event.candidates[2]).toMatchObject({
+			lane: "openai-codex/terra",
+			rejectionCode: "quota_admission",
+			rejectionReason: "reserve",
+			failedConstraintIds: ["pool-a", "window-a"],
+		});
 	});
 
 	it("rejects blocked and invalid decisions", () => {

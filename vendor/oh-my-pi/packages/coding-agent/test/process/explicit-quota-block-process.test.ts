@@ -48,6 +48,11 @@ const cwd = process.env.CWD;
 const sessionsDir = process.env.SESSIONS_DIR;
 const artifactsDir = process.env.ARTIFACTS_DIR;
 if (!home || !cwd || !sessionsDir || !artifactsDir) throw new Error("missing explicit quota block child environment");
+const TEST_BUILD_REVISION = { digest: "0".repeat(64), version: "explicit-quota-block-process-test" };
+const TEST_RUNNER_INSTANCE_IDENTITY = {
+	runnerInstanceId: "00000000-0000-4000-8000-000000000008",
+	startedAt: "2026-01-01T00:00:00.000Z",
+};
 
 const provider = "provider-a";
 const model = "model-a";
@@ -57,7 +62,11 @@ process.on("unhandledRejection", () => { unhandledRejections += 1; });
 
 const authStorage = await AuthStorage.create(path.join(home, "auth.db"));
 const sessionManager = SessionManager.create(cwd, sessionsDir);
-const ownership = await acquireSessionOwnership(sessionManager.getSessionFile(), sessionManager.getSessionId(), { root: path.join(home, "ownership") });
+const ownership = await acquireSessionOwnership(sessionManager.getSessionFile(), sessionManager.getSessionId(), {
+	root: path.join(home, "ownership"),
+	buildRevision: TEST_BUILD_REVISION,
+	runnerInstanceIdentity: TEST_RUNNER_INSTANCE_IDENTITY,
+});
 sessionManager.bindSessionOwnership(ownership);
 const jobs = new AsyncJobManager({ onJobComplete: () => {} });
 
@@ -186,6 +195,11 @@ const sessionsDir = process.env.SESSIONS_DIR;
 const artifactsDir = process.env.ARTIFACTS_DIR;
 const receiptsFile = process.env.RECEIPTS_FILE;
 if (!home || !cwd || !sessionsDir || !artifactsDir || !receiptsFile) throw new Error("missing automatic quota reroute child environment");
+const TEST_BUILD_REVISION = { digest: "0".repeat(64), version: "automatic-quota-reroute-process-test" };
+const TEST_RUNNER_INSTANCE_IDENTITY = {
+	runnerInstanceId: "00000000-0000-4000-8000-000000000009",
+	startedAt: "2026-01-01T00:00:00.000Z",
+};
 
 const providerA = "provider-a";
 const providerB = "provider-b";
@@ -238,7 +252,11 @@ function createProvider(provider, model, api) {
 clearCustomApis();
 const authStorage = await AuthStorage.create(path.join(home, "auth.db"));
 const sessionManager = SessionManager.create(cwd, sessionsDir);
-const ownership = await acquireSessionOwnership(sessionManager.getSessionFile(), sessionManager.getSessionId(), { root: path.join(home, "ownership") });
+const ownership = await acquireSessionOwnership(sessionManager.getSessionFile(), sessionManager.getSessionId(), {
+	root: path.join(home, "ownership"),
+	buildRevision: TEST_BUILD_REVISION,
+	runnerInstanceIdentity: TEST_RUNNER_INSTANCE_IDENTITY,
+});
 sessionManager.bindSessionOwnership(ownership);
 const jobs = new AsyncJobManager({ onJobComplete: () => {} });
 
