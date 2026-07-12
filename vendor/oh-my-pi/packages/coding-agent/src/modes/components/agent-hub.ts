@@ -106,6 +106,10 @@ const RECENT_COMPLETED_LIMIT = 20;
 const PREVIEW_TAIL_BYTES = 256 * 1024;
 /** Maximum parsed message entries retained for the selected preview. */
 const PREVIEW_MAX_ENTRIES = 200;
+/** Wide cockpit breakpoint: two independently scrollable 80-column lanes. */
+const DUAL_LANE_MIN_WIDTH = 160;
+const INSPECTOR_PROMPT_MAX_CHARS = 32 * 1024;
+const INSPECTOR_DELIVERY_LIMIT = 20;
 
 /** Compute the max content width for the current terminal, accounting for chrome. */
 function contentWidth(): number {
@@ -626,6 +630,12 @@ export class AgentHubOverlayComponent extends Container {
 	#lastMaxScroll = 0;
 	#viewportHeight = 20;
 	#wasAtBottom = true;
+	#inspectorSection: "prompt" | "route" | "comms" = "prompt";
+	#inspectorFocused = false;
+	#inspectorScrollOffset = 0;
+	#inspectorLastMaxScroll = 0;
+	#dualLaneActive = false;
+
 	#detailPrefixActive = false;
 	/** Vim `g` prefix is scoped to transcript navigation and only armed outside the editor. */
 	#viewerGotoPrefixActive = false;
@@ -1204,6 +1214,9 @@ export class AgentHubOverlayComponent extends Container {
 		this.#chatArchived = nextArchive;
 		this.#scrollOffset = 0;
 		this.#wasAtBottom = true;
+		this.#inspectorScrollOffset = 0;
+		this.#inspectorFocused = false;
+
 		this.#chatSearchQuery = "";
 		this.#chatSearchMatches = [];
 		this.#editor.setText("");
@@ -1220,6 +1233,28 @@ export class AgentHubOverlayComponent extends Container {
 			this.#previewRenderedHeight = 3;
 			return [theme.fg("dim", " No agent transcript selected."), ...new DynamicBorder().render(width)];
 		}
+		if (width < DUAL_LANE_MIN_WIDTH) {
+			this.#dualLaneActive = false;
+			return this.#renderTranscriptPreview(width);
+		}
+		this.#dualLaneActive = true;
+		const leftWidth = Math.floor(width / 2);
+		const rightWidth = width - leftWidth;
+		const transcript = this.#renderTranscriptPreview(rightWidth, false);
+		const inspector = this.#renderInspectorPreview(leftWidth, Math.max(transcript.length, this.#viewportHeight + 2));
+		const lines: string[] = [];
+		for (let index = 0; index < Math.max(inspector.length, transcript.length); index++) {
+			const left = inspector[index] ?? "";
+			const right = transcript[index] ?? "";
+			lines.push(
+				`${truncateToWidth(left, leftWidth)}${padding(Math.max(0, leftWidth - visibleWidth(left)))}${right}`,
+			);
+		}
+		this.#previewRenderedHeight = lines.length;
+		return lines;
+	}
+
+	#renderTranscriptPreview(width: number, trackHeight = true): string[] {
 		const innerWidth = Math.max(20, width - 2);
 		const rendered = this.#chatPlaceholder
 			? [theme.fg("dim", this.#chatPlaceholder)]
@@ -1230,15 +1265,95 @@ export class AgentHubOverlayComponent extends Container {
 		if (this.#wasAtBottom && !this.#chatSearchQuery) this.#scrollOffset = this.#lastMaxScroll;
 		this.#scrollOffset = Math.max(0, Math.min(this.#scrollOffset, this.#lastMaxScroll));
 		this.#chatRenderedContent = content;
+		const focus = this.#dualLaneActive && !this.#inspectorFocused ? theme.fg("accent", "●") : "";
 		const mode = this.#cockpitMode === "input" ? theme.fg("accent", "INPUT") : theme.fg("dim", "SCROLL");
-		const lines = [` ${theme.fg("accent", "Preview transcript")}  ${mode}`];
+		const lines = [` ${focus}${theme.fg("accent", "Preview transcript")}  ${mode}`];
 		for (const row of content.slice(this.#scrollOffset, this.#scrollOffset + this.#viewportHeight))
 			lines.push(` ${row}`);
 		if (this.#cockpitMode === "input" && !this.#chatArchived) {
 			for (const editorLine of this.#editor.render(innerWidth)) lines.push(` ${editorLine}`);
 		}
 		lines.push(...new DynamicBorder().render(width));
-		this.#previewRenderedHeight = lines.length;
+		if (trackHeight) this.#previewRenderedHeight = lines.length;
+		return lines;
+	}
+
+	#renderInspectorPreview(width: number, targetHeight: number): string[] {
+		const observed = this.#chatAgentId ? this.#observerById.get(this.#chatAgentId) : undefined;
+		const innerWidth = Math.max(20, width - 2);
+		const content = this.#inspectorLines(observed, innerWidth);
+		const viewportHeight = Math.max(1, targetHeight - 2);
+		this.#inspectorLastMaxScroll = Math.max(0, content.length - viewportHeight);
+		this.#inspectorScrollOffset = Math.max(0, Math.min(this.#inspectorScrollOffset, this.#inspectorLastMaxScroll));
+		const focus = this.#inspectorFocused ? theme.fg("accent", "●") : "";
+		const label = this.#inspectorSection[0].toUpperCase() + this.#inspectorSection.slice(1);
+		const lines = [` ${focus}${theme.fg("accent", label)} ${theme.fg("dim", "[ / ] section")}`];
+		for (const row of content.slice(this.#inspectorScrollOffset, this.#inspectorScrollOffset + viewportHeight))
+			lines.push(` ${sanitizeLine(row, innerWidth)}`);
+		lines.push(...new DynamicBorder().render(width));
+		return lines;
+	}
+
+	#inspectorLines(observed: ObservableSession | undefined, width: number): string[] {
+		if (this.#inspectorSection === "prompt") {
+			const progress = observed?.progress;
+			const context = progress?.spawnContext?.slice(0, INSPECTOR_PROMPT_MAX_CHARS) ?? "";
+			const remaining = Math.max(0, INSPECTOR_PROMPT_MAX_CHARS - context.length);
+			const assignment = (progress?.assignment ?? progress?.task ?? observed?.description ?? "").slice(0, remaining);
+			if (!context && !assignment) return ["No spawn prompt available."];
+			const lines: string[] = [];
+			if (context) {
+				lines.push(theme.fg("dim", "Context"));
+				lines.push(...this.#wrapInspectorText(context, width, ""));
+			}
+			if (assignment) {
+				if (context) lines.push("");
+				lines.push(theme.fg("dim", "Assignment"));
+				lines.push(...this.#wrapInspectorText(assignment, width, ""));
+			}
+			return lines;
+		}
+		if (this.#inspectorSection === "comms") {
+			const deliveries = this.#chatAgentId
+				? this.#irc.recentDeliveries({ peerId: this.#chatAgentId, limit: INSPECTOR_DELIVERY_LIMIT })
+				: [];
+			if (deliveries.length === 0) return ["No recent IRC deliveries."];
+			return deliveries.map(record => {
+				const direction =
+					record.senderId === this.#chatAgentId ? `→ ${record.recipientId}` : `← ${record.senderId}`;
+				const method = record.delivery ? ` via ${record.delivery}` : "";
+				return `${direction} ${record.state}${method}`;
+			});
+		}
+		const receipt = observed?.progress?.routeReceipt;
+		if (!receipt) return ["No route provenance available."];
+		const lines = [
+			`Selected: ${receipt.route.selector}`,
+			`Source: ${receipt.source}`,
+			...(receipt.reason ? [`Reason: ${receipt.reason}`] : []),
+			...(receipt.resolvedPatterns.length ? [`Candidates: ${receipt.resolvedPatterns.join(", ")}`] : []),
+		];
+		if (receipt.quotaAdmission) lines.push(`Quota: ${JSON.stringify(receipt.quotaAdmission)}`);
+		for (const attempt of receipt.priorAttempts ?? []) {
+			lines.push(
+				`Prior: ${attempt.route.selector} [${attempt.source}]${attempt.reason ? ` — ${attempt.reason}` : ""}`,
+			);
+			if (attempt.quotaAdmission) lines.push(`  Quota: ${JSON.stringify(attempt.quotaAdmission)}`);
+		}
+		return lines.flatMap(line => this.#wrapInspectorText(line, width, ""));
+	}
+
+	#wrapInspectorText(text: string, width: number, empty: string): string[] {
+		if (!text) return empty ? [empty] : [];
+		const lines: string[] = [];
+		for (const sourceLine of replaceTabs(text).split("\n")) {
+			if (!sourceLine) {
+				lines.push("");
+				continue;
+			}
+			for (let offset = 0; offset < sourceLine.length; offset += width)
+				lines.push(sourceLine.slice(offset, offset + width));
+		}
 		return lines;
 	}
 
@@ -1511,7 +1626,7 @@ export class AgentHubOverlayComponent extends Container {
 		lines.push("");
 		const focusHint = this.#showRunningOnly ? ". show all" : ". running only";
 		lines.push(
-			` ${theme.fg("dim", `SCROLL j/k,ctrl-u/d,g/G:preview  n/p:agent  i:input  Enter:attach  /:filter  t:tree/flat  h/l:parent/child  H/L:group  ?:legend  ${focusHint}  Esc/q:close`)}`,
+			` ${theme.fg("dim", `SCROLL j/k,ctrl-u/d,g/G:preview  n/p:agent  i:input  Enter:attach  /:filter  t:tree/flat  h/l:${this.#dualLaneActive ? "lane" : "parent/child"}  [ ]:${this.#dualLaneActive ? "section" : "—"}  H/L:group  ?:legend  ${focusHint}  Esc/q:close`)}`,
 		);
 		lines.push(...new DynamicBorder().render(width));
 		return lines;
@@ -1709,6 +1824,21 @@ export class AgentHubOverlayComponent extends Container {
 			this.#requestRender();
 			return;
 		}
+		if (this.#dualLaneActive && (keyData === "[" || keyData === "]")) {
+			const sections = ["prompt", "route", "comms"] as const;
+			const current = sections.indexOf(this.#inspectorSection);
+			this.#inspectorSection = sections[(current + (keyData === "]" ? 1 : sections.length - 1)) % sections.length];
+			this.#inspectorScrollOffset = 0;
+			this.#requestRender();
+			return;
+		}
+		if (this.#dualLaneActive && (keyData === "h" || keyData === "l")) {
+			this.#inspectorFocused = keyData === "h";
+			this.#requestRender();
+			return;
+		}
+		if (this.#dualLaneActive && this.#inspectorFocused && this.#handleInspectorNavigation(keyData)) return;
+
 		if (this.#handleViewerNavigation(keyData)) return;
 		if (keyData === ".") {
 			this.#toggleRunningOnly();
@@ -2566,6 +2696,7 @@ export class AgentHubOverlayComponent extends Container {
 			scrollBy(-1);
 			return true;
 		}
+
 		if (matchesNavigationPageDown(keyData)) {
 			scrollBy(Math.max(1, Math.floor(this.#viewportHeight / 2)));
 			return true;
@@ -2590,6 +2721,28 @@ export class AgentHubOverlayComponent extends Container {
 		}
 
 		return false;
+	}
+	/** Viewport scrolling for the spawn-packet inspector. */
+	#handleInspectorNavigation(keyData: string): boolean {
+		let delta: number | undefined;
+		if (matchesNavigationDown(keyData) || matchesSelectDown(keyData)) delta = 1;
+		else if (matchesNavigationUp(keyData) || matchesSelectUp(keyData)) delta = -1;
+		else if (matchesNavigationPageDown(keyData)) delta = Math.max(1, Math.floor(this.#viewportHeight / 2));
+		else if (matchesNavigationPageUp(keyData)) delta = -Math.max(1, Math.floor(this.#viewportHeight / 2));
+		else if (matchesKey(keyData, "pageDown")) delta = PAGE_SIZE;
+		else if (matchesKey(keyData, "pageUp")) delta = -PAGE_SIZE;
+		else if (matchesNavigationBottom(keyData)) {
+			this.#inspectorScrollOffset = this.#inspectorLastMaxScroll;
+			this.#requestRender();
+			return true;
+		}
+		if (delta === undefined) return false;
+		this.#inspectorScrollOffset = Math.max(
+			0,
+			Math.min(this.#inspectorScrollOffset + delta, this.#inspectorLastMaxScroll),
+		);
+		this.#requestRender();
+		return true;
 	}
 
 	// ========================================================================

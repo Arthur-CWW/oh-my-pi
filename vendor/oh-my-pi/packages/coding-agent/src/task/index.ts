@@ -149,7 +149,6 @@ function addUsageTotals(target: Usage, usage: Partial<Usage>): void {
 	target.cost.total += cost.total;
 }
 
-
 function formatResolvedModelSelector(
 	model: { provider: string; id: string },
 	thinkingLevel: string | undefined,
@@ -169,7 +168,9 @@ export function formatModelChain(
 	if (!resolvedModel) return undefined;
 	const route = source ? ` [${source}]` : "";
 	const roleLabel = role?.trim();
-	return roleLabel ? `${agentName} → "${roleLabel}" → ${resolvedModel}${route}` : `${agentName} → ${resolvedModel}${route}`;
+	return roleLabel
+		? `${agentName} → "${roleLabel}" → ${resolvedModel}${route}`
+		: `${agentName} → ${resolvedModel}${route}`;
 }
 
 export function formatAvailableModels(models: ReadonlyArray<{ provider: string; id: string }>): string {
@@ -189,7 +190,6 @@ export function formatInvalidModelOverrideError(args: {
 	const resolved = args.resolvedPatterns.length > 0 ? args.resolvedPatterns.join(", ") : "none";
 	return `Invalid model override for task agent "${args.agentName}": ${requested}. Resolved selector${args.resolvedPatterns.length === 1 ? "" : "s"}: ${resolved}; no available model matched. Valid model selectors include: ${formatAvailableModels(args.availableModels)}.`;
 }
-
 
 // Re-export types and utilities
 export { loadBundledAgents as BUNDLED_AGENTS } from "./agents";
@@ -663,11 +663,8 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 
 	#quotaModel(decision: SpawnRouteDecision): QuotaModel | undefined {
 		const route = decision.route;
-		return route
-			? { providerId: route.provider, modelId: route.model, selector: route.selector }
-			: undefined;
+		return route ? { providerId: route.provider, modelId: route.model, selector: route.selector } : undefined;
 	}
-	
 
 	#quotaCandidates(decision: SpawnRouteDecision, primary: QuotaModel | undefined): QuotaModel[] {
 		const modelRegistry = this.session.modelRegistry;
@@ -782,9 +779,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 		}
 		if (decision.block) {
 			const reason = decision.block.reason ? ` (${decision.block.reason})` : "";
-			const reset = decision.block.resetAt
-				? ` Reset at ${new Date(decision.block.resetAt).toISOString()}.`
-				: "";
+			const reset = decision.block.resetAt ? ` Reset at ${new Date(decision.block.resetAt).toISOString()}.` : "";
 			return `Quota admission blocked ${decision.block.selector}${reason}.${reset}`;
 		}
 		return undefined;
@@ -877,7 +872,12 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 			const routeError = routeDecision ? this.#routeError(agentLabel, routeDecision) : undefined;
 			if (routeError) {
 				return withAdvisory({
-					content: [{ type: "text", text: `Failed to start background task job${spawnItems.length === 1 ? "" : "s"}: ${routeError}` }],
+					content: [
+						{
+							type: "text",
+							text: `Failed to start background task job${spawnItems.length === 1 ? "" : "s"}: ${routeError}`,
+						},
+					],
 					details: { projectAgentsDir: null, results: [], totalDurationMs: 0 },
 				});
 			}
@@ -958,7 +958,12 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 				if (routeDecision) this.#preResolvedModels.set(spawn.agentId, routeDecision);
 				const spawnIsolated =
 					this.session.settings.get("task.isolation.mode") !== "none" && spawnParams.isolated === true;
-				const modelChain = formatModelChain(agentLabel, spawnParams.role, routeDecision?.route?.selector, routeDecision?.source);
+				const modelChain = formatModelChain(
+					agentLabel,
+					spawnParams.role,
+					routeDecision?.route?.selector,
+					routeDecision?.source,
+				);
 				const jobId = this.#registerSpawnJob({
 					manager,
 					toolCallId,
@@ -1368,7 +1373,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 				content: [
 					{
 						type: "text",
-		
+
 						text: `Agent "${agentName}" is disabled in settings. Enable it via /agents, or use a different agent type.${enabled.length > 0 ? ` Available: ${enabled.join(", ")}` : ""}`,
 					},
 				],
@@ -1522,18 +1527,21 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 				agentId = await outputManager.allocate(params.id?.trim() || generateTaskName());
 			}
 			if (this.session.sessionManager && routeReceipt) {
-				appendSpawnRouteResolution(this.session.sessionManager, {
-					agentId,
-					agentSessionId: null,
-					parentSessionId: this.session.getSessionId?.() ?? null,
-					parentAgentId: this.session.getAgentId?.() ?? null,
-					taskId: params.id?.trim() || null,
-					packetId: null,
-					branchId: null,
-					turnId: toolCallId ?? null,
-				}, routeReceipt);
+				appendSpawnRouteResolution(
+					this.session.sessionManager,
+					{
+						agentId,
+						agentSessionId: null,
+						parentSessionId: this.session.getSessionId?.() ?? null,
+						parentAgentId: this.session.getAgentId?.() ?? null,
+						taskId: params.id?.trim() || null,
+						packetId: null,
+						branchId: null,
+						turnId: toolCallId ?? null,
+					},
+					routeReceipt,
+				);
 			}
-
 
 			const availableSkills = [...(this.session.skills ?? [])];
 			// Resolve autoload skills from agent definition against available skills
@@ -1560,6 +1568,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 				status: "pending",
 				task: renderSubagentUserPrompt(assignment),
 				assignment,
+				spawnContext: sharedContext,
 				recentTools: [],
 				recentOutput: [],
 				toolCount: 0,

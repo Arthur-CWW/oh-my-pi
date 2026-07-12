@@ -288,6 +288,8 @@ export interface AgentProgress {
 	status: "pending" | "running" | "completed" | "failed" | "aborted";
 	task: string;
 	assignment?: string;
+	/** Shared spawn context supplied alongside the per-agent assignment. */
+	spawnContext?: string;
 	description?: string;
 	lastIntent?: string;
 	currentTool?: string;
