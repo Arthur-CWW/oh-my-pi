@@ -123,7 +123,9 @@ Punch list:
 - Future cards are not text-only: pictures, HTML/JS embeds, timelines — scrapbook canvas direction.
 - Flat graph is underdetermined for some works: impose higher-level structures (timeline lens for historical texts, functional groupings).
 
-## Architecture direction (proposed, pending Arthur confirmation)
+## Architecture direction — CONFIRMED by Arthur, 2026-07-12
+
+Arthur confirmed the hybrid. Priority is typography/text rendering quality; GPU card materials are explicitly not a goal (shaders remain welcome in the field layer, never under text).
 
 Hybrid rendering, Figma/Miro-class: keep Three/WebGL for field marks (edges, contours, trails, parallax); move cards to a DOM layer on a CSS-transformed plane driven by the same camera. Browser text layout eliminates the Troika flicker/blank class entirely and makes images/embeds/timelines native. Card layer stays framework-free vanilla TS per repo perf doctrine (stable DOM, class patching, viewport virtualization, capped live embeds); React remains the shell. Solid noted as a candidate only if the Atlas becomes a standalone package.
 
