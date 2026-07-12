@@ -3,7 +3,19 @@ import type { Model } from "@oh-my-pi/pi-ai";
 import type { Effect, Scope } from "effect";
 import type { ContextUsage } from "../extensibility/extensions/types";
 import type { GoalModeState } from "../goals/state";
-import type { AdvisorStats, AgentSessionEvent, AsyncJobSnapshot, SessionStats } from "../session/agent-session";
+import type {
+	AdvisorStats,
+	AgentSessionEvent,
+	AgentSessionMetadataSnapshot,
+	AgentSessionModelCatalogItem,
+	AgentSessionToolCatalog,
+	AgentSessionWorkflowEligibility,
+	AsyncJobSnapshot,
+	ExtensionCommandInvocationResult,
+	PlanResolveInvocationResult,
+	SessionStats,
+} from "../session/agent-session";
+import type { JsonValue } from "../session/durable-input-queue";
 import type { WorkflowModeSnapshot } from "../session/session-entries";
 import type { ConfiguredThinkingLevel } from "../thinking";
 import type { TodoPhase } from "../tools/todo";
@@ -12,27 +24,44 @@ import type {
 	CancelCompactionReceipt,
 	CancelEphemeralTurnCommand,
 	CancelEphemeralTurnReceipt,
-	CancelQueuedInputCommand,
+	CancelHandoffCommand,
+	CancelHandoffReceipt,
 	CancelLocalOperationCommand,
 	CancelLocalOperationReceipt,
+	CancelQueuedInputCommand,
+	CancelShakeCommand,
+	CancelShakeReceipt,
+	CycleModelCommand,
+	CycleModelReceipt,
 	EditQueuedInputCommand,
+	GetCheckpointStateCommand,
+	GetCheckpointStateReceipt,
 	InterruptPromptCommand,
 	InterruptPromptReceipt,
 	RefreshSshToolCommand,
 	RefreshSshToolReceipt,
+	ReloadSessionCommand,
+	ReloadSessionReceipt,
 	ReplaceTodosCommand,
 	ReplaceTodosReceipt,
 	RunCompactionCommand,
 	RunCompactionReceipt,
 	RunEphemeralTurnCommand,
 	RunEphemeralTurnReceipt,
+	RunHandoffCommand,
+	RunHandoffReceipt,
 	RunLocalOperationCommand,
 	RunLocalOperationReceipt,
 	RunnerCommandReceipt,
 	RunnerEvent,
+	RunnerTurnLifecycle,
+	RunShakeCommand,
+	RunShakeReceipt,
 	SessionRunnerSnapshot,
 	SetActiveToolsCommand,
 	SetActiveToolsReceipt,
+	SetCheckpointStateCommand,
+	SetCheckpointStateReceipt,
 	SetModelCommand,
 	SetModelReceipt,
 	SetThinkingLevelCommand,
@@ -71,6 +100,13 @@ export type TerminalAsyncJobSnapshot = Readonly<
 		>;
 	}
 >;
+export type TerminalModelCatalogItem = Readonly<AgentSessionModelCatalogItem>;
+export type TerminalToolCatalog = Readonly<AgentSessionToolCatalog>;
+export type TerminalSessionMetadataSnapshot = Readonly<AgentSessionMetadataSnapshot>;
+export type TerminalWorkflowEligibility = Readonly<AgentSessionWorkflowEligibility>;
+export type TerminalTurnLifecycle = Readonly<RunnerTurnLifecycle>;
+export type TerminalExtensionCommandResult = ExtensionCommandInvocationResult;
+export type TerminalPlanResolveResult = PlanResolveInvocationResult;
 
 export interface TerminalHindsightSessionState {
 	readonly sessionId: string;
@@ -155,6 +191,25 @@ export interface TerminalSessionView {
 	readonly formatAdvisorHistoryAsText: (options?: {
 		readonly compact?: boolean;
 	}) => Effect.Effect<string | null, RunnerFailure, Scope.Scope>;
+	readonly getModelCatalog: () => Effect.Effect<readonly TerminalModelCatalogItem[], RunnerFailure, Scope.Scope>;
+	readonly getToolCatalog: () => Effect.Effect<TerminalToolCatalog, RunnerFailure, Scope.Scope>;
+	readonly getSessionMetadataSnapshot: () => Effect.Effect<
+		TerminalSessionMetadataSnapshot,
+		RunnerFailure,
+		Scope.Scope
+	>;
+	readonly getWorkflowEligibility: () => Effect.Effect<TerminalWorkflowEligibility, RunnerFailure, Scope.Scope>;
+	readonly getTurnLifecycle: () => Effect.Effect<TerminalTurnLifecycle, RunnerFailure, Scope.Scope>;
+	readonly saveDraft: (text: string) => Effect.Effect<void, RunnerFailure, Scope.Scope>;
+	readonly consumeDraft: () => Effect.Effect<string | null, RunnerFailure, Scope.Scope>;
+	readonly invokeExtensionCommand: (
+		name: string,
+		args: string,
+	) => Effect.Effect<TerminalExtensionCommandResult, RunnerFailure, Scope.Scope>;
+	readonly invokePlanResolve: (
+		input: JsonValue,
+	) => Effect.Effect<TerminalPlanResolveResult, RunnerFailure, Scope.Scope>;
+	readonly requestGoalContinuation: () => Effect.Effect<boolean, RunnerFailure, Scope.Scope>;
 	readonly submit: (command: SubmitInputCommand) => Effect.Effect<RunnerCommandReceipt, RunnerFailure, Scope.Scope>;
 	readonly submitCustomMessage: (
 		command: SubmitCustomMessageCommand,
@@ -173,6 +228,7 @@ export interface TerminalSessionView {
 		command: RefreshSshToolCommand,
 	) => Effect.Effect<RefreshSshToolReceipt, RunnerFailure, Scope.Scope>;
 	readonly setModel: (command: SetModelCommand) => Effect.Effect<SetModelReceipt, RunnerFailure, Scope.Scope>;
+	readonly cycleModel: (command: CycleModelCommand) => Effect.Effect<CycleModelReceipt, RunnerFailure, Scope.Scope>;
 	readonly setThinkingLevel: (
 		command: SetThinkingLevelCommand,
 	) => Effect.Effect<SetThinkingLevelReceipt, RunnerFailure, Scope.Scope>;
@@ -182,6 +238,19 @@ export interface TerminalSessionView {
 	readonly transitionGoalMode: (
 		command: TransitionGoalModeCommand,
 	) => Effect.Effect<TransitionGoalModeReceipt, RunnerFailure, Scope.Scope>;
+	readonly shake: (command: RunShakeCommand) => Effect.Effect<RunShakeReceipt, RunnerFailure, Scope.Scope>;
+	readonly cancelShake: (command: CancelShakeCommand) => Effect.Effect<CancelShakeReceipt, RunnerFailure, Scope.Scope>;
+	readonly handoff: (command: RunHandoffCommand) => Effect.Effect<RunHandoffReceipt, RunnerFailure, Scope.Scope>;
+	readonly cancelHandoff: (
+		command: CancelHandoffCommand,
+	) => Effect.Effect<CancelHandoffReceipt, RunnerFailure, Scope.Scope>;
+	readonly getCheckpointState: (
+		command: GetCheckpointStateCommand,
+	) => Effect.Effect<GetCheckpointStateReceipt, RunnerFailure, Scope.Scope>;
+	readonly setCheckpointState: (
+		command: SetCheckpointStateCommand,
+	) => Effect.Effect<SetCheckpointStateReceipt, RunnerFailure, Scope.Scope>;
+	readonly reload: (command: ReloadSessionCommand) => Effect.Effect<ReloadSessionReceipt, RunnerFailure, Scope.Scope>;
 	readonly compact: (command: RunCompactionCommand) => Effect.Effect<RunCompactionReceipt, RunnerFailure, Scope.Scope>;
 	readonly cancelCompaction: (
 		command: CancelCompactionCommand,

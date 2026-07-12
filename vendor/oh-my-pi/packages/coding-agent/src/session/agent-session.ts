@@ -410,6 +410,73 @@ export interface AsyncJobSnapshot {
 export type { ShakeMode, ShakeResult };
 export type DurableInputEnqueue = Parameters<DurableInputQueue["enqueueCommand"]>[0];
 
+export type ExtensionCommandInvocationResult =
+	| Readonly<{ handled: false }>
+	| Readonly<{ handled: true; result: "completed" }>
+	| Readonly<{ handled: true; result: "error"; error: string }>;
+
+export type PlanResolveInvocationResult =
+	| Readonly<{ result: "stale" }>
+	| Readonly<{ result: "unavailable" }>
+	| Readonly<{ result: "resolved" }>
+	| Readonly<{ result: "error"; error: string }>;
+
+export interface AgentSessionModelCatalogItem {
+	readonly provider: string;
+	readonly id: string;
+	readonly name: string;
+	readonly contextWindow: number | null;
+	readonly authenticated: boolean;
+	readonly current: boolean;
+	readonly roles: readonly string[];
+}
+
+export interface AgentSessionToolCatalogItem {
+	readonly name: string;
+	readonly description: string;
+	readonly active: boolean;
+	readonly selectable: boolean;
+}
+
+export interface AgentSessionToolCatalog {
+	readonly generation: number;
+	readonly tools: readonly AgentSessionToolCatalogItem[];
+}
+
+export interface AgentSessionMetadataSnapshot {
+	readonly id: string;
+	readonly file: string | null;
+	readonly cwd: string;
+	readonly name: string | null;
+	readonly parent: string | null;
+	readonly branch: readonly string[];
+	readonly leaf: string | null;
+	readonly usage: Readonly<import("./session-entries").UsageStatistics>;
+	readonly draft: null;
+	readonly workflow: Readonly<{ kind: "none" | "plan" | "goal" }>;
+}
+
+export interface AgentSessionWorkflowEligibility {
+	readonly eligible: boolean;
+	readonly reason?: "busy" | "disposed";
+	readonly planResolve: Readonly<{ readonly bound: boolean; readonly capabilityEpoch: number }>;
+	readonly goalContinuation: Readonly<{
+		readonly eligible: boolean;
+		readonly reason?: "busy" | "disposed" | "inactive" | "already-requested" | "unavailable";
+	}>;
+}
+
+export interface AgentSessionTurnLifecycle {
+	readonly streaming: boolean;
+	readonly abortRequested: boolean;
+	readonly settling: boolean;
+	readonly postPromptWork: boolean;
+	readonly compacting: boolean;
+	readonly retrying: boolean;
+	readonly handoff: boolean;
+	readonly promptGeneration: number;
+}
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -1202,6 +1269,9 @@ export class AgentSession {
 	#lastAppliedWorkflowCommandEntryId: string | undefined;
 	#goalModeState: GoalModeState | undefined;
 	#goalRuntime: GoalRuntime;
+	#planResolveCapabilityEpoch = 0;
+	#boundPlanResolveViewEpoch: string | number | undefined;
+	#goalContinuationRequestedFor: string | undefined;
 	#advisorRuntime?: AdvisorRuntime;
 	#advisorEnabled = false;
 	/** The advisor's own agent, retained so `/dump advisor` can serialize its transcript. Undefined when no advisor is active. */
@@ -2219,6 +2289,34 @@ export class AgentSession {
 
 	setStandingResolveHandler(handler: ((input: unknown) => Promise<unknown> | unknown) | null): void {
 		this.#standingResolveHandler = handler ?? undefined;
+	}
+
+	bindPlanResolveCapability(viewEpoch: string | number): number {
+		this.#boundPlanResolveViewEpoch = viewEpoch;
+		return ++this.#planResolveCapabilityEpoch;
+	}
+
+	unbindPlanResolveCapability(capabilityEpoch: number): void {
+		if (capabilityEpoch !== this.#planResolveCapabilityEpoch) return;
+		this.#boundPlanResolveViewEpoch = undefined;
+		this.#planResolveCapabilityEpoch++;
+	}
+
+	async invokePlanResolve(input: JsonValue, capabilityEpoch: number): Promise<PlanResolveInvocationResult> {
+		if (capabilityEpoch !== this.#planResolveCapabilityEpoch || this.#boundPlanResolveViewEpoch === undefined) {
+			return Object.freeze({ result: "stale" });
+		}
+		const handler = this.#standingResolveHandler;
+		if (!handler) return Object.freeze({ result: "unavailable" });
+		try {
+			await handler(input);
+			return Object.freeze({ result: "resolved" });
+		} catch (error) {
+			return Object.freeze({
+				result: "error",
+				error: error instanceof Error ? error.message : String(error),
+			});
+		}
 	}
 
 	#sessionSwitchReconciler: (() => Promise<void>) | undefined;
@@ -5376,6 +5474,116 @@ export class AgentSession {
 		return this.sessionManager.getSessionName();
 	}
 
+	getSessionMetadataSnapshot(): AgentSessionMetadataSnapshot {
+		const workflow = this.sessionManager.buildSessionContext().workflow;
+		const header = this.sessionManager.getHeader();
+		const usage = this.sessionManager.getUsageStatistics();
+		const branch = Object.freeze(this.sessionManager.getBranch().map(entry => entry.id));
+		return Object.freeze({
+			id: this.sessionManager.getSessionId(),
+			file: this.sessionFile ?? null,
+			cwd: this.sessionManager.getCwd(),
+			name: this.sessionName ?? null,
+			parent: header?.parentSession ?? null,
+			branch,
+			leaf: this.sessionManager.getLeafId(),
+			usage: Object.freeze({ ...usage }),
+			draft: null,
+			workflow: Object.freeze({ kind: workflow?.kind ?? "none" }),
+		});
+	}
+
+	async saveDraft(text: string): Promise<void> {
+		await this.sessionManager.saveDraft(text);
+	}
+
+	async consumeDraft(): Promise<string | null> {
+		return await this.sessionManager.consumeDraft();
+	}
+
+	getTurnLifecycle(): AgentSessionTurnLifecycle {
+		const agentStreaming = this.agent.state.isStreaming;
+		return Object.freeze({
+			streaming: agentStreaming,
+			abortRequested: this.isAborting,
+			settling: !agentStreaming && this.#promptInFlightCount > 0,
+			postPromptWork: this.hasPostPromptWork,
+			compacting: this.isCompacting,
+			retrying: this.isRetrying,
+			handoff: this.isGeneratingHandoff,
+			promptGeneration: this.#promptOperationGeneration,
+		});
+	}
+
+	getWorkflowEligibility(): AgentSessionWorkflowEligibility {
+		const planResolve = Object.freeze({
+			bound: this.#boundPlanResolveViewEpoch !== undefined,
+			capabilityEpoch: this.#planResolveCapabilityEpoch,
+		});
+		const goal = this.#goalModeState?.goal;
+		const busy = this.isStreaming || this.isCompacting || this.isRetrying || this.isGeneratingHandoff;
+		const goalContinuation = Object.freeze(
+			this.#isDisposed
+				? { eligible: false as const, reason: "disposed" as const }
+				: busy
+					? { eligible: false as const, reason: "busy" as const }
+					: !this.#goalModeState?.enabled || goal?.status !== "active"
+						? { eligible: false as const, reason: "inactive" as const }
+						: this.#goalContinuationRequestedFor === goal.id
+							? { eligible: false as const, reason: "already-requested" as const }
+							: this.#goalRuntime.buildContinuationPrompt()
+								? { eligible: true as const }
+								: { eligible: false as const, reason: "unavailable" as const },
+		);
+		if (this.#isDisposed) {
+			return Object.freeze({ eligible: false, reason: "disposed", planResolve, goalContinuation });
+		}
+		if (busy) return Object.freeze({ eligible: false, reason: "busy", planResolve, goalContinuation });
+		return Object.freeze({ eligible: true, planResolve, goalContinuation });
+	}
+
+	getModelCatalog(): readonly AgentSessionModelCatalogItem[] {
+		const currentModel = this.model;
+		const rolesByModel = new Map<string, string[]>();
+		for (const role of MODEL_ROLE_IDS) {
+			const cycle = this.getRoleModelCycle([role]);
+			const resolved = cycle?.models[0]?.model;
+			if (!resolved) continue;
+			const key = `${resolved.provider}/${resolved.id}`;
+			const roles = rolesByModel.get(key);
+			if (roles) roles.push(role);
+			else rolesByModel.set(key, [role]);
+		}
+		return Object.freeze(
+			this.getAvailableModels().map(model =>
+				Object.freeze({
+					provider: model.provider,
+					id: model.id,
+					name: model.name,
+					contextWindow: model.contextWindow,
+					authenticated: this.#modelRegistry.hasConfiguredAuth(model),
+					current: currentModel !== undefined && modelsAreEqual(model, currentModel),
+					roles: Object.freeze([...(rolesByModel.get(`${model.provider}/${model.id}`) ?? [])]),
+				}),
+			),
+		);
+	}
+
+	getToolCatalog(): AgentSessionToolCatalog {
+		const active = new Set(this.getActiveToolNames());
+		const tools = Object.freeze(
+			[...this.#toolRegistry.values()].map(tool =>
+				Object.freeze({
+					name: tool.name,
+					description: tool.description,
+					active: active.has(tool.name),
+					selectable: this.#requestedToolNames === undefined || this.#requestedToolNames.has(tool.name),
+				}),
+			),
+		);
+		return Object.freeze({ generation: this.#toolConfigurationGeneration, tools });
+	}
+
 	/** Scoped models for cycling (from --models flag) */
 	get scopedModels(): ReadonlyArray<{ model: Model; thinkingLevel?: ThinkingLevel }> {
 		return this.#scopedModels;
@@ -5400,6 +5608,25 @@ export class AgentSession {
 
 	setGoalModeState(state: GoalModeState | undefined): void {
 		this.#goalModeState = state;
+	}
+
+	async requestGoalContinuation(): Promise<boolean> {
+		const goal = this.#goalModeState?.goal;
+		if (!this.#goalModeState?.enabled || goal?.status !== "active") return false;
+		if (this.#goalContinuationRequestedFor === goal.id) return false;
+		const content = this.#goalRuntime.buildContinuationPrompt();
+		if (!content) return false;
+		this.#goalContinuationRequestedFor = goal.id;
+		try {
+			await this.sendCustomMessage(
+				{ customType: "goal-continuation", content, display: false, attribution: "agent" },
+				{ deliverAs: "followUp" },
+			);
+			return true;
+		} catch (error) {
+			this.#goalContinuationRequestedFor = undefined;
+			throw error;
+		}
 	}
 
 	get goalRuntime(): GoalRuntime {
@@ -6073,30 +6300,28 @@ export class AgentSession {
 	 * Try to execute an extension command. Returns true if command was found and executed.
 	 */
 	async #tryExecuteExtensionCommand(text: string): Promise<boolean> {
-		if (!this.#extensionRunner) return false;
-
-		// Parse command name and args
 		const spaceIndex = text.indexOf(" ");
-		const commandName = spaceIndex === -1 ? text.slice(1) : text.slice(1, spaceIndex);
+		const name = spaceIndex === -1 ? text.slice(1) : text.slice(1, spaceIndex);
 		const args = spaceIndex === -1 ? "" : text.slice(spaceIndex + 1);
+		return (await this.invokeExtensionCommand(name, args)).handled;
+	}
 
-		const command = this.#extensionRunner.getCommand(commandName);
-		if (!command) return false;
-
-		// Get command context from extension runner (includes session control methods)
-		const ctx = this.#extensionRunner.createCommandContext();
-
+	async invokeExtensionCommand(name: string, args: string): Promise<ExtensionCommandInvocationResult> {
+		const extensionRunner = this.#extensionRunner;
+		if (!extensionRunner) return Object.freeze({ handled: false });
+		const command = extensionRunner.getCommand(name);
+		if (!command) return Object.freeze({ handled: false });
 		try {
-			await command.handler(args, ctx);
-			return true;
-		} catch (err) {
-			// Emit error via extension runner
-			this.#extensionRunner.emitError({
-				extensionPath: `command:${commandName}`,
+			await command.handler(args, extensionRunner.createCommandContext());
+			return Object.freeze({ handled: true, result: "completed" });
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			extensionRunner.emitError({
+				extensionPath: `command:${name}`,
 				event: "command",
-				error: err instanceof Error ? err.message : String(err),
+				error: message,
 			});
-			return true;
+			return Object.freeze({ handled: true, result: "error", error: message });
 		}
 	}
 
@@ -12436,10 +12661,10 @@ export class AgentSession {
 	 * Intended for extension commands and headless modes to re-read the current session
 	 * file and re-emit session_switch hooks.
 	 */
-	async reload(): Promise<void> {
+	async reload(): Promise<boolean> {
 		const sessionFile = this.sessionFile;
-		if (!sessionFile) return;
-		await this.switchSession(sessionFile);
+		if (!sessionFile) return false;
+		return this.switchSession(sessionFile);
 	}
 
 	/**
@@ -12615,6 +12840,10 @@ export class AgentSession {
 					error: String(error),
 				});
 			}
+			// Checkpoints are process-local snapshots into a particular in-memory
+			// conversation. A successful load invalidates those offsets, even when
+			// the session file path itself did not change.
+			this.setCheckpointState(undefined);
 			return true;
 		} catch (error) {
 			this.sessionManager.restoreState(previousSessionState);

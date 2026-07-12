@@ -195,4 +195,141 @@ describe("AgentSession user shortcut hooks", () => {
 		expect(result.exitCode).toBe(0);
 		expect(result.output.trim()).toBe("123");
 	});
+
+	it("invokes extension commands through the narrow result boundary", async () => {
+		const handler = vi.fn().mockResolvedValue(undefined);
+		const emitError = vi.fn();
+		const extensionRunner = {
+			getCommand: vi.fn((name: string) => (name === "hello" ? { handler } : undefined)),
+			createCommandContext: vi.fn(() => ({ privateExtensionState: true })),
+			emitError,
+			hasHandlers: vi.fn(() => false),
+		} as unknown as ExtensionRunner;
+		createSession(extensionRunner);
+
+		expect(await session.invokeExtensionCommand("missing", "")).toEqual({ handled: false });
+		expect(await session.invokeExtensionCommand("hello", "world")).toEqual({
+			handled: true,
+			result: "completed",
+		});
+		expect(handler).toHaveBeenCalledWith("world", { privateExtensionState: true });
+
+		handler.mockRejectedValueOnce(new Error("command failed"));
+		expect(await session.invokeExtensionCommand("hello", "again")).toEqual({
+			handled: true,
+			result: "error",
+			error: "command failed",
+		});
+		expect(emitError).toHaveBeenCalledWith({
+			extensionPath: "command:hello",
+			event: "command",
+			error: "command failed",
+		});
+	});
+
+	it("fences plan resolution by opaque capability epoch", async () => {
+		createSession();
+		const resolve = vi.fn().mockResolvedValue({ secret: "not exported" });
+		session.setStandingResolveHandler(resolve);
+
+		const first = session.bindPlanResolveCapability("view-a");
+		const second = session.bindPlanResolveCapability("view-b");
+		expect(session.getWorkflowEligibility().planResolve).toEqual({ bound: true, capabilityEpoch: second });
+		expect(await session.invokePlanResolve({ action: "approve" }, first)).toEqual({ result: "stale" });
+		expect(await session.invokePlanResolve({ action: "approve" }, second)).toEqual({ result: "resolved" });
+		expect(resolve).toHaveBeenCalledTimes(1);
+
+		session.unbindPlanResolveCapability(second);
+		expect(session.getWorkflowEligibility().planResolve).toEqual({
+			bound: false,
+			capabilityEpoch: second + 1,
+		});
+		expect(await session.invokePlanResolve({ action: "approve" }, second)).toEqual({ result: "stale" });
+	});
+
+	it("returns deeply frozen controller query DTOs and delegates drafts", async () => {
+		createSession();
+		const models = session.getModelCatalog();
+		const tools = session.getToolCatalog();
+		const metadata = session.getSessionMetadataSnapshot();
+		const eligibility = session.getWorkflowEligibility();
+		const lifecycle = session.getTurnLifecycle();
+
+		expect(Object.isFrozen(models)).toBe(true);
+		expect(models.every(item => Object.isFrozen(item) && Object.isFrozen(item.roles))).toBe(true);
+		expect(models.every(item => typeof item.current === "boolean")).toBe(true);
+		expect(Object.isFrozen(tools)).toBe(true);
+		expect(Object.isFrozen(tools.tools)).toBe(true);
+		expect(tools.tools.every(Object.isFrozen)).toBe(true);
+		expect(tools.tools.every(item => typeof item.selectable === "boolean")).toBe(true);
+		expect(Object.isFrozen(metadata)).toBe(true);
+		expect(Object.isFrozen(metadata.branch)).toBe(true);
+		expect(Object.isFrozen(metadata.usage)).toBe(true);
+		expect(Object.isFrozen(metadata.workflow)).toBe(true);
+		expect(metadata).toMatchObject({
+			id: expect.any(String),
+			file: null,
+			cwd: tempDir.path(),
+			name: null,
+			parent: null,
+			leaf: null,
+			draft: null,
+			workflow: { kind: "none" },
+		});
+		expect(Object.isFrozen(eligibility)).toBe(true);
+		expect(Object.isFrozen(eligibility.planResolve)).toBe(true);
+		expect(Object.isFrozen(eligibility.goalContinuation)).toBe(true);
+		expect(eligibility.goalContinuation).toEqual({ eligible: false, reason: "inactive" });
+		expect(lifecycle).toEqual({
+			streaming: false,
+			abortRequested: false,
+			settling: false,
+			postPromptWork: false,
+			compacting: false,
+			retrying: false,
+			handoff: false,
+			promptGeneration: 0,
+		});
+		expect(Object.isFrozen(lifecycle)).toBe(true);
+
+		const saveDraft = vi.spyOn(session.sessionManager, "saveDraft").mockResolvedValue(undefined);
+		const consumeDraft = vi.spyOn(session.sessionManager, "consumeDraft").mockResolvedValue("continue here");
+		await session.saveDraft("continue here");
+		expect(await session.consumeDraft()).toBe("continue here");
+		expect(saveDraft).toHaveBeenCalledWith("continue here");
+		expect(consumeDraft).toHaveBeenCalledTimes(1);
+	});
+
+	it("admits a goal continuation only once for the active goal", async () => {
+		createSession();
+		session.setGoalModeState({
+			enabled: true,
+			mode: "active",
+			goal: {
+				id: "goal-1",
+				objective: "Finish the focused work",
+				status: "active",
+				tokensUsed: 0,
+				timeUsedSeconds: 0,
+				createdAt: 1,
+				updatedAt: 1,
+			},
+		});
+		const send = vi.spyOn(session, "sendCustomMessage").mockResolvedValue(false);
+		expect(session.getWorkflowEligibility().goalContinuation).toEqual({ eligible: true });
+
+		expect(await session.requestGoalContinuation()).toBe(true);
+		expect(session.getWorkflowEligibility().goalContinuation).toEqual({
+			eligible: false,
+			reason: "already-requested",
+		});
+		expect(await session.requestGoalContinuation()).toBe(false);
+		expect(send).toHaveBeenCalledTimes(1);
+		expect(send.mock.calls[0]?.[0]).toMatchObject({
+			customType: "goal-continuation",
+			display: false,
+			attribution: "agent",
+		});
+		expect(send.mock.calls[0]?.[1]).toEqual({ deliverAs: "followUp" });
+	});
 });

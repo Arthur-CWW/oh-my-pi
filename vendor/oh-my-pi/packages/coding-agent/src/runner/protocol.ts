@@ -1,3 +1,4 @@
+import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import { Schema } from "effect";
 import type { KernelDisplayOutput } from "../eval/py/display";
 import type { DurableQueuedInput } from "../session/durable-input-queue";
@@ -214,6 +215,18 @@ export const SetModelCommandSchema = Schema.Struct({
 	}),
 });
 
+export const CycleModelCommandSchema = Schema.Struct({
+	schemaVersion: Schema.Literal(RUNNER_SCHEMA_VERSION),
+	kind: Schema.Literal("cycleModel"),
+	commandId: Schema.String,
+	correlationId: Schema.String,
+	causationId: Schema.optional(Schema.String),
+	expectedSessionRevision: RunnerRevisionSchema,
+	viewId: Schema.String,
+	controllerEpoch: ControllerEpochSchema,
+	direction: Schema.Literals(["forward", "backward"]),
+});
+
 export const TransitionPlanModeCommandSchema = Schema.Struct({
 	schemaVersion: Schema.Literal(RUNNER_SCHEMA_VERSION),
 	kind: Schema.Literal("transitionPlanMode"),
@@ -365,6 +378,58 @@ export const CancelEphemeralTurnCommandSchema = Schema.Struct({
 	targetOperationGeneration: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(1))),
 });
 
+export const RunShakeCommandSchema = Schema.Struct({
+	...LiveCommandMetadataSchema,
+	kind: Schema.Literal("runShake"),
+	expectedSessionRevision: RunnerRevisionSchema,
+	mode: Schema.Literals(["elide", "images"]),
+});
+
+export const CancelShakeCommandSchema = Schema.Struct({
+	...LiveCommandMetadataSchema,
+	kind: Schema.Literal("cancelShake"),
+	targetCommandId: Schema.String,
+	targetOperationGeneration: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(1))),
+});
+
+export const RunHandoffCommandSchema = Schema.Struct({
+	...LiveCommandMetadataSchema,
+	kind: Schema.Literal("runHandoff"),
+	expectedSessionRevision: RunnerRevisionSchema,
+	customInstructions: Schema.optional(Schema.String),
+});
+
+export const CancelHandoffCommandSchema = Schema.Struct({
+	...LiveCommandMetadataSchema,
+	kind: Schema.Literal("cancelHandoff"),
+	targetCommandId: Schema.String,
+	targetOperationGeneration: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(1))),
+});
+
+export const CheckpointStateSchema = Schema.Struct({
+	checkpointMessageCount: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0))),
+	checkpointEntryId: Schema.NullOr(Schema.String),
+	startedAt: TimestampSchema,
+});
+
+export const GetCheckpointStateCommandSchema = Schema.Struct({
+	...LiveCommandMetadataSchema,
+	kind: Schema.Literal("getCheckpointState"),
+});
+
+export const SetCheckpointStateCommandSchema = Schema.Struct({
+	...LiveCommandMetadataSchema,
+	kind: Schema.Literal("setCheckpointState"),
+	expectedCheckpointRevision: RunnerRevisionSchema,
+	state: Schema.NullOr(CheckpointStateSchema),
+});
+
+export const ReloadSessionCommandSchema = Schema.Struct({
+	...LiveCommandMetadataSchema,
+	kind: Schema.Literal("reloadSession"),
+	expectedSessionRevision: RunnerRevisionSchema,
+});
+
 export type SubmitInputCommand = typeof SubmitInputCommandSchema.Type;
 export type SubmitCustomMessageCommand = typeof SubmitCustomMessageCommandSchema.Type;
 export type EditQueuedInputCommand = typeof EditQueuedInputCommandSchema.Type;
@@ -372,6 +437,7 @@ export type CancelQueuedInputCommand = typeof CancelQueuedInputCommandSchema.Typ
 export type SetActiveToolsCommand = typeof SetActiveToolsCommandSchema.Type;
 export type SetThinkingLevelCommand = typeof SetThinkingLevelCommandSchema.Type;
 export type SetModelCommand = typeof SetModelCommandSchema.Type;
+export type CycleModelCommand = typeof CycleModelCommandSchema.Type;
 export type InterruptPromptCommand = typeof InterruptPromptCommandSchema.Type;
 export type RunCompactionCommand = typeof RunCompactionCommandSchema.Type;
 export type CancelCompactionCommand = typeof CancelCompactionCommandSchema.Type;
@@ -379,6 +445,14 @@ export type RunLocalOperationCommand = typeof RunLocalOperationCommandSchema.Typ
 export type CancelLocalOperationCommand = typeof CancelLocalOperationCommandSchema.Type;
 export type RunEphemeralTurnCommand = typeof RunEphemeralTurnCommandSchema.Type;
 export type CancelEphemeralTurnCommand = typeof CancelEphemeralTurnCommandSchema.Type;
+export type RunShakeCommand = typeof RunShakeCommandSchema.Type;
+export type CancelShakeCommand = typeof CancelShakeCommandSchema.Type;
+export type RunHandoffCommand = typeof RunHandoffCommandSchema.Type;
+export type CancelHandoffCommand = typeof CancelHandoffCommandSchema.Type;
+export type RunnerCheckpointState = typeof CheckpointStateSchema.Type;
+export type GetCheckpointStateCommand = typeof GetCheckpointStateCommandSchema.Type;
+export type SetCheckpointStateCommand = typeof SetCheckpointStateCommandSchema.Type;
+export type ReloadSessionCommand = typeof ReloadSessionCommandSchema.Type;
 
 export type TransitionPlanModeCommand = typeof TransitionPlanModeCommandSchema.Type;
 export type TransitionGoalModeCommand = typeof TransitionGoalModeCommandSchema.Type;
@@ -386,6 +460,18 @@ export type ReplaceTodosCommand = typeof ReplaceTodosCommandSchema.Type;
 export type RefreshSshToolCommand = typeof RefreshSshToolCommandSchema.Type;
 export type RunnerCapability = "observer" | "controller";
 export type RunnerStatus = "running" | "stopping" | "stopped";
+
+/** Immutable prompt/turn state projected to controller clients. */
+export interface RunnerTurnLifecycle {
+	readonly streaming: boolean;
+	readonly abortRequested: boolean;
+	readonly settling: boolean;
+	readonly postPromptWork: boolean;
+	readonly compacting: boolean;
+	readonly retrying: boolean;
+	readonly handoff: boolean;
+	readonly promptGeneration: number;
+}
 
 export interface RunnerControlMetadata {
 	readonly schemaVersion: typeof RUNNER_SCHEMA_VERSION;
@@ -527,7 +613,7 @@ export interface RunLocalOperationReceipt {
 				readonly exitCode: number | undefined;
 				readonly cancelled: boolean;
 				readonly artifactId?: string;
-			}
+		  }
 		| {
 				readonly kind: "python";
 				readonly output: LocalOperationOutputSnapshot;
@@ -539,7 +625,7 @@ export interface RunLocalOperationReceipt {
 				readonly outputBytes: number;
 				readonly displayOutputs: readonly KernelDisplayOutput[];
 				readonly stdinRequested: boolean;
-			};
+		  };
 }
 
 export interface CancelLocalOperationReceipt {
@@ -582,6 +668,107 @@ export interface CancelEphemeralTurnReceipt {
 	readonly cancellationRequested: true;
 }
 
+export interface ActiveSessionOperationSnapshot {
+	readonly kind: "shake" | "handoff" | "reload";
+	readonly commandId: string;
+	readonly operationGeneration: number;
+	readonly startedSessionRevision: number;
+}
+
+export interface RunShakeReceipt {
+	readonly commandId: string;
+	readonly correlationId: string;
+	readonly causationId?: string;
+	readonly startedSessionRevision: number;
+	readonly operationGeneration: number;
+	readonly completedSessionRevision: number;
+	readonly replayed: boolean;
+	readonly result: {
+		readonly mode: "elide" | "images";
+		readonly toolResultsDropped: number;
+		readonly blocksDropped: number;
+		readonly imagesDropped?: number;
+		readonly tokensFreed: number;
+		readonly artifactId?: string;
+	};
+}
+
+export interface CancelShakeReceipt {
+	readonly commandId: string;
+	readonly correlationId: string;
+	readonly causationId?: string;
+	readonly targetCommandId: string;
+	readonly targetOperationGeneration: number;
+	readonly cancellationRequested: true;
+}
+
+export interface RunHandoffReceipt {
+	readonly commandId: string;
+	readonly correlationId: string;
+	readonly causationId?: string;
+	readonly startedSessionRevision: number;
+	readonly operationGeneration: number;
+	readonly completedSessionRevision: number;
+	readonly replayed: boolean;
+	readonly result:
+		| {
+				readonly document: string;
+				readonly savedPath?: string;
+				readonly sessionId: string;
+				readonly sessionFile?: string;
+		  }
+		| undefined;
+}
+
+export interface CancelHandoffReceipt {
+	readonly commandId: string;
+	readonly correlationId: string;
+	readonly causationId?: string;
+	readonly targetCommandId: string;
+	readonly targetOperationGeneration: number;
+	readonly cancellationRequested: true;
+}
+
+export interface GetCheckpointStateReceipt {
+	readonly commandId: string;
+	readonly correlationId: string;
+	readonly causationId?: string;
+	readonly sessionRevision: number;
+	readonly checkpointRevision: number;
+	readonly state: RunnerCheckpointState | undefined;
+	readonly replayed: boolean;
+}
+
+export type SetCheckpointStateReceipt = GetCheckpointStateReceipt;
+
+export interface ReloadSessionReceipt {
+	readonly commandId: string;
+	readonly correlationId: string;
+	readonly causationId?: string;
+	readonly startedSessionRevision: number;
+	readonly operationGeneration: number;
+	readonly completedSessionRevision: number;
+	readonly sessionId: string;
+	readonly sessionFile?: string;
+	readonly replayed: boolean;
+}
+
+export interface CycleModelReceipt {
+	readonly commandId: string;
+	readonly correlationId: string;
+	readonly causationId?: string;
+	readonly sessionRevision: number;
+	readonly replayed: boolean;
+	readonly result:
+		| {
+				readonly provider: string;
+				readonly id: string;
+				readonly thinkingLevel: ThinkingLevel | undefined;
+				readonly isScoped: boolean;
+		  }
+		| undefined;
+}
+
 export interface RunnerViewSnapshot {
 	readonly viewId: string;
 	readonly capability: RunnerCapability;
@@ -616,6 +803,9 @@ export interface SessionRunnerSnapshot {
 		| undefined;
 	readonly activeLocalOperation: ActiveLocalOperationSnapshot | undefined;
 	readonly activeEphemeralTurn: ActiveEphemeralTurnSnapshot | undefined;
+	readonly activeSessionOperation: ActiveSessionOperationSnapshot | undefined;
+	readonly checkpointRevision: number;
+	readonly checkpointState: RunnerCheckpointState | undefined;
 	readonly workflow: WorkflowModeSnapshot;
 	readonly toolConfigurationGeneration: number;
 	readonly activeToolNames: ReadonlyArray<string>;
@@ -648,6 +838,12 @@ export type RunnerEventKind =
 	| "ephemeralTurnOutput"
 	| "ephemeralTurnCancelRequested"
 	| "ephemeralTurnCompleted"
+	| "shakeCancelRequested"
+	| "shakeCompleted"
+	| "handoffCancelRequested"
+	| "handoffCompleted"
+	| "checkpointChanged"
+	| "sessionReloaded"
 	| "transcriptEntryAppended";
 
 /** Every event is a closed causal envelope in the runner's single total order. */
@@ -798,6 +994,16 @@ export const decodeSetThinkingLevelCommand = (input: unknown): SetThinkingLevelC
 	}
 };
 
+export const decodeCycleModelCommand = (input: unknown): CycleModelCommand => {
+	try {
+		return Schema.decodeUnknownSync(CycleModelCommandSchema)(input, { onExcessProperty: "error" });
+	} catch (error) {
+		throw new InvalidRunnerCommandError({
+			issue: error instanceof Error ? error.message : "Invalid cycle-model command",
+		});
+	}
+};
+
 export const decodeSetModelCommand = (input: unknown): SetModelCommand => {
 	try {
 		return Schema.decodeUnknownSync(SetModelCommandSchema)(input);
@@ -889,6 +1095,75 @@ export const decodeCancelLocalOperationCommand = (input: unknown): CancelLocalOp
 	}
 };
 
+export const decodeRunShakeCommand = (input: unknown): RunShakeCommand => {
+	try {
+		return Schema.decodeUnknownSync(RunShakeCommandSchema)(input, { onExcessProperty: "error" });
+	} catch (error) {
+		throw new InvalidRunnerCommandError({
+			issue: error instanceof Error ? error.message : "Invalid shake command",
+		});
+	}
+};
+
+export const decodeCancelShakeCommand = (input: unknown): CancelShakeCommand => {
+	try {
+		return Schema.decodeUnknownSync(CancelShakeCommandSchema)(input, { onExcessProperty: "error" });
+	} catch (error) {
+		throw new InvalidRunnerCommandError({
+			issue: error instanceof Error ? error.message : "Invalid cancel-shake command",
+		});
+	}
+};
+
+export const decodeRunHandoffCommand = (input: unknown): RunHandoffCommand => {
+	try {
+		return Schema.decodeUnknownSync(RunHandoffCommandSchema)(input, { onExcessProperty: "error" });
+	} catch (error) {
+		throw new InvalidRunnerCommandError({
+			issue: error instanceof Error ? error.message : "Invalid handoff command",
+		});
+	}
+};
+
+export const decodeCancelHandoffCommand = (input: unknown): CancelHandoffCommand => {
+	try {
+		return Schema.decodeUnknownSync(CancelHandoffCommandSchema)(input, { onExcessProperty: "error" });
+	} catch (error) {
+		throw new InvalidRunnerCommandError({
+			issue: error instanceof Error ? error.message : "Invalid cancel-handoff command",
+		});
+	}
+};
+
+export const decodeGetCheckpointStateCommand = (input: unknown): GetCheckpointStateCommand => {
+	try {
+		return Schema.decodeUnknownSync(GetCheckpointStateCommandSchema)(input, { onExcessProperty: "error" });
+	} catch (error) {
+		throw new InvalidRunnerCommandError({
+			issue: error instanceof Error ? error.message : "Invalid get-checkpoint-state command",
+		});
+	}
+};
+
+export const decodeSetCheckpointStateCommand = (input: unknown): SetCheckpointStateCommand => {
+	try {
+		return Schema.decodeUnknownSync(SetCheckpointStateCommandSchema)(input, { onExcessProperty: "error" });
+	} catch (error) {
+		throw new InvalidRunnerCommandError({
+			issue: error instanceof Error ? error.message : "Invalid set-checkpoint-state command",
+		});
+	}
+};
+
+export const decodeReloadSessionCommand = (input: unknown): ReloadSessionCommand => {
+	try {
+		return Schema.decodeUnknownSync(ReloadSessionCommandSchema)(input, { onExcessProperty: "error" });
+	} catch (error) {
+		throw new InvalidRunnerCommandError({
+			issue: error instanceof Error ? error.message : "Invalid reload-session command",
+		});
+	}
+};
 
 export const decodeRunCompactionCommand = (input: unknown): RunCompactionCommand => {
 	try {

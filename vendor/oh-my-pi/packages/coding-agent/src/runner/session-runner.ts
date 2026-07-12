@@ -3,8 +3,8 @@ import type { PythonResult } from "../eval/py/executor";
 import type { BashResult } from "../exec/bash-executor";
 import { type AgentSession, type AgentSessionEvent, PromptOperationConflictError } from "../session/agent-session";
 import {
-	DurableInputCommandConflictError,
 	type DurableCustomPayload,
+	DurableInputCommandConflictError,
 	DurableInputItemRevisionConflictError,
 	type DurableInputQueue,
 	DurableInputQueueConflictError,
@@ -31,16 +31,17 @@ import {
 	RunnerCompactionCommandConflictError,
 	RunnerCompactionTargetError,
 	RunnerCompactionUnavailableError,
+	RunnerControllerConflictError,
 	RunnerEphemeralTurnCommandConflictError,
 	RunnerEphemeralTurnTargetError,
 	RunnerEphemeralTurnUnavailableError,
+	RunnerItemRevisionConflictError,
 	RunnerLocalOperationCommandConflictError,
 	RunnerLocalOperationTargetError,
 	RunnerLocalOperationUnavailableError,
-	RunnerControllerConflictError,
-	RunnerItemRevisionConflictError,
 	RunnerPromptOperationConflictError,
 	RunnerRevisionConflictError,
+	RunnerSessionReloadCancelledError,
 	RunnerSshToolUnavailableError,
 	RunnerTodoConflictError,
 	RunnerToolConfigurationConflictError,
@@ -59,32 +60,50 @@ import {
 	type CancelCompactionReceipt,
 	type CancelEphemeralTurnCommand,
 	type CancelEphemeralTurnReceipt,
+	type CancelHandoffCommand,
+	type CancelHandoffReceipt,
 	type CancelLocalOperationCommand,
 	type CancelLocalOperationReceipt,
+	type CancelShakeCommand,
+	type CancelShakeReceipt,
+	type CycleModelCommand,
+	type CycleModelReceipt,
 	type DetachRunnerViewCommand,
 	decodeCancelCompactionCommand,
 	decodeCancelEphemeralTurnCommand,
+	decodeCancelHandoffCommand,
 	decodeCancelLocalOperationCommand,
 	decodeCancelQueuedInputCommand,
+	decodeCancelShakeCommand,
+	decodeCycleModelCommand,
 	decodeEditQueuedInputCommand,
+	decodeGetCheckpointStateCommand,
 	decodeInterruptPromptCommand,
 	decodeRefreshSshToolCommand,
+	decodeReloadSessionCommand,
 	decodeReplaceTodosCommand,
 	decodeRunCompactionCommand,
 	decodeRunEphemeralTurnCommand,
+	decodeRunHandoffCommand,
 	decodeRunLocalOperationCommand,
+	decodeRunShakeCommand,
 	decodeSetActiveToolsCommand,
+	decodeSetCheckpointStateCommand,
 	decodeSetModelCommand,
 	decodeSetThinkingLevelCommand,
-	decodeSubmitInputCommand,
 	decodeSubmitCustomMessageCommand,
+	decodeSubmitInputCommand,
 	decodeTransitionGoalModeCommand,
 	decodeTransitionPlanModeCommand,
+	type GetCheckpointStateCommand,
+	type GetCheckpointStateReceipt,
 	type InterruptPromptCommand,
 	type InterruptPromptReceipt,
 	type RefreshSshToolCommand,
 	type RefreshSshToolReceipt,
 	type ReleaseRunnerControllerCommand,
+	type ReloadSessionCommand,
+	type ReloadSessionReceipt,
 	type ReplaceTodosCommand,
 	type ReplaceTodosReceipt,
 	RUNNER_SCHEMA_VERSION,
@@ -92,6 +111,8 @@ import {
 	type RunCompactionReceipt,
 	type RunEphemeralTurnCommand,
 	type RunEphemeralTurnReceipt,
+	type RunHandoffCommand,
+	type RunHandoffReceipt,
 	type RunLocalOperationCommand,
 	type RunLocalOperationReceipt,
 	type RunnerCapability,
@@ -103,9 +124,13 @@ import {
 	type RunnerIdentity,
 	type RunnerStatus,
 	type RunnerViewSnapshot,
+	type RunShakeCommand,
+	type RunShakeReceipt,
 	type SessionRunnerSnapshot,
 	type SetActiveToolsCommand,
 	type SetActiveToolsReceipt,
+	type SetCheckpointStateCommand,
+	type SetCheckpointStateReceipt,
 	type SetModelReceipt,
 	type SetThinkingLevelReceipt,
 	type TransitionGoalModeReceipt,
@@ -141,6 +166,7 @@ export type RunnerFailure =
 	| RunnerViewNotAttachedError
 	| RunnerViewCapabilityError
 	| SessionRunnerRuntimeError
+	| RunnerSessionReloadCancelledError
 	| SessionRunnerStoppedError
 	| SessionRevisionConflictError
 	| SessionCommandConflictError
@@ -204,6 +230,7 @@ export interface ControllerSessionRunnerView extends RunnerViewBase {
 	readonly refreshSshTool: (
 		input: RefreshSshToolCommand,
 	) => Effect.Effect<RefreshSshToolReceipt, RunnerFailure, Scope.Scope>;
+	readonly cycleModel: (input: unknown) => Effect.Effect<CycleModelReceipt, RunnerFailure, Scope.Scope>;
 	readonly setModel: (input: unknown) => Effect.Effect<SetModelReceipt, RunnerFailure, Scope.Scope>;
 	readonly setThinkingLevel: (input: unknown) => Effect.Effect<SetThinkingLevelReceipt, RunnerFailure, Scope.Scope>;
 	readonly transitionPlanMode: (
@@ -212,6 +239,19 @@ export interface ControllerSessionRunnerView extends RunnerViewBase {
 	readonly transitionGoalMode: (
 		input: unknown,
 	) => Effect.Effect<TransitionGoalModeReceipt, RunnerFailure, Scope.Scope>;
+	readonly shake: (command: RunShakeCommand) => Effect.Effect<RunShakeReceipt, RunnerFailure, Scope.Scope>;
+	readonly cancelShake: (command: CancelShakeCommand) => Effect.Effect<CancelShakeReceipt, RunnerFailure, Scope.Scope>;
+	readonly handoff: (command: RunHandoffCommand) => Effect.Effect<RunHandoffReceipt, RunnerFailure, Scope.Scope>;
+	readonly cancelHandoff: (
+		command: CancelHandoffCommand,
+	) => Effect.Effect<CancelHandoffReceipt, RunnerFailure, Scope.Scope>;
+	readonly getCheckpointState: (
+		command: GetCheckpointStateCommand,
+	) => Effect.Effect<GetCheckpointStateReceipt, RunnerFailure, Scope.Scope>;
+	readonly setCheckpointState: (
+		command: SetCheckpointStateCommand,
+	) => Effect.Effect<SetCheckpointStateReceipt, RunnerFailure, Scope.Scope>;
+	readonly reload: (command: ReloadSessionCommand) => Effect.Effect<ReloadSessionReceipt, RunnerFailure, Scope.Scope>;
 	readonly compact: (command: RunCompactionCommand) => Effect.Effect<RunCompactionReceipt, RunnerFailure, Scope.Scope>;
 	readonly cancelCompaction: (
 		command: CancelCompactionCommand,
@@ -267,12 +307,19 @@ interface EventDetails {
 		| SetActiveToolsCommand
 		| ReplaceTodosCommand
 		| RefreshSshToolCommand
+		| CycleModelCommand
 		| InterruptPromptCommand
 		| CancelCompactionCommand
 		| RunLocalOperationCommand
 		| CancelLocalOperationCommand
 		| RunEphemeralTurnCommand
-		| CancelEphemeralTurnCommand;
+		| CancelEphemeralTurnCommand
+		| RunShakeCommand
+		| CancelShakeCommand
+		| RunHandoffCommand
+		| CancelHandoffCommand
+		| SetCheckpointStateCommand
+		| ReloadSessionCommand;
 	readonly controllerEpoch: number;
 	readonly viewId?: string;
 	readonly inputId?: string;
@@ -304,6 +351,7 @@ type TerminalRawDelivery =
 
 interface TerminalViewState {
 	readonly events: PubSub.PubSub<TerminalRawDelivery>;
+	planResolveCapabilityEpoch?: number;
 }
 
 interface LiveCompactionRecord {
@@ -372,6 +420,49 @@ interface LiveEphemeralTurnRecord {
 	readonly outputDrained: Deferred.Deferred<void>;
 }
 
+interface LiveShakeRecord {
+	readonly command: RunShakeCommand;
+	readonly operationGeneration: number;
+	readonly startedSessionRevision: number;
+	readonly deferred: Deferred.Deferred<RunShakeReceipt, RunnerFailure>;
+	readonly abortController: AbortController;
+	completed: boolean;
+	cancellationRequested: boolean;
+}
+
+interface LiveHandoffRecord {
+	readonly command: RunHandoffCommand;
+	readonly operationGeneration: number;
+	readonly startedSessionRevision: number;
+	readonly deferred: Deferred.Deferred<RunHandoffReceipt, RunnerFailure>;
+	readonly abortController: AbortController;
+	completed: boolean;
+	cancellationRequested: boolean;
+}
+
+interface LiveReloadRecord {
+	readonly command: ReloadSessionCommand;
+	readonly operationGeneration: number;
+	readonly startedSessionRevision: number;
+	readonly deferred: Deferred.Deferred<ReloadSessionReceipt, RunnerFailure>;
+	completed: boolean;
+}
+
+type ActiveSessionOperation =
+	| { readonly kind: "shake"; readonly record: LiveShakeRecord }
+	| { readonly kind: "handoff"; readonly record: LiveHandoffRecord }
+	| { readonly kind: "reload"; readonly record: LiveReloadRecord };
+
+interface RetainedCheckpointRead {
+	readonly command: GetCheckpointStateCommand;
+	readonly receipt: GetCheckpointStateReceipt;
+}
+
+interface RetainedCheckpointWrite {
+	readonly command: SetCheckpointStateCommand;
+	readonly receipt: SetCheckpointStateReceipt;
+}
+
 const asRunnerFailure = (error: unknown): RunnerFailure => {
 	if (
 		error instanceof InvalidRunnerCommandError ||
@@ -395,6 +486,7 @@ const asRunnerFailure = (error: unknown): RunnerFailure => {
 		error instanceof RunnerViewNotAttachedError ||
 		error instanceof RunnerViewCapabilityError ||
 		error instanceof SessionRunnerRuntimeError ||
+		error instanceof RunnerSessionReloadCancelledError ||
 		error instanceof SessionRunnerStoppedError ||
 		error instanceof SessionRevisionConflictError ||
 		error instanceof SessionCommandConflictError ||
@@ -478,6 +570,8 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 	const stopDone = yield* Deferred.make<void, RunnerFailure>();
 	const callbackFibers = yield* FiberSet.make<void, never>();
 	const runCallback = yield* FiberSet.runtime(callbackFibers)<never>();
+	const sessionOperationFibers = yield* FiberSet.make<void, never>();
+	const runSessionOperation = yield* FiberSet.runtime(sessionOperationFibers)<never>();
 	const views = new Map<string, MutableViewState>();
 	const terminalViews = new Map<string, TerminalViewState>();
 	let unsubscribeTerminalAgent: (() => void) | undefined;
@@ -496,6 +590,15 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 	let nextEphemeralTurnGeneration = 1;
 	let activeCompaction: { readonly commandId: string; readonly operationGeneration: number } | undefined;
 	let nextCompactionOperationGeneration = 1;
+	const shakeCommands = new Map<string, LiveShakeRecord>();
+	const handoffCommands = new Map<string, LiveHandoffRecord>();
+	const reloadCommands = new Map<string, LiveReloadRecord>();
+	const cycleModelCommands = new Map<string, { command: CycleModelCommand; receipt: CycleModelReceipt }>();
+	const checkpointReads = new Map<string, RetainedCheckpointRead>();
+	const checkpointWrites = new Map<string, RetainedCheckpointWrite>();
+	let activeSessionOperation: ActiveSessionOperation | undefined;
+	let nextSessionOperationGeneration = 1;
+	let checkpointRevision = 0;
 
 	const materializeSnapshot = Effect.fn("Runner.materializeSnapshot")(function* (refreshQueue: boolean) {
 		if (refreshQueue) {
@@ -566,6 +669,20 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 							peakPendingOutputChunks: activeEphemeralTurn.peakPendingOutputChunks,
 							peakPendingOutputBytes: activeEphemeralTurn.peakPendingOutputBytes,
 						},
+			activeSessionOperation:
+				activeSessionOperation === undefined
+					? undefined
+					: {
+							kind: activeSessionOperation.kind,
+							commandId: activeSessionOperation.record.command.commandId,
+							operationGeneration: activeSessionOperation.record.operationGeneration,
+							startedSessionRevision: activeSessionOperation.record.startedSessionRevision,
+						},
+			checkpointRevision,
+			checkpointState: (() => {
+				const state = resources.session.getCheckpointState();
+				return state === undefined ? undefined : { ...state };
+			})(),
 			workflow: resources.sessionManager.buildSessionContext().workflow ?? { kind: "none" },
 			toolConfigurationGeneration: resources.session.toolConfigurationGeneration,
 			activeToolNames: resources.session.getActiveToolNames(),
@@ -874,6 +991,41 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 		controllerEpoch: number,
 		input: unknown,
 	) => Effect.Effect<TransitionGoalModeReceipt, RunnerFailure, Scope.Scope>;
+	let runShake!: (
+		viewId: string,
+		controllerEpoch: number,
+		command: RunShakeCommand,
+	) => Effect.Effect<RunShakeReceipt, RunnerFailure, Scope.Scope>;
+	let cancelShake!: (
+		viewId: string,
+		controllerEpoch: number,
+		command: CancelShakeCommand,
+	) => Effect.Effect<CancelShakeReceipt, RunnerFailure, Scope.Scope>;
+	let runHandoff!: (
+		viewId: string,
+		controllerEpoch: number,
+		command: RunHandoffCommand,
+	) => Effect.Effect<RunHandoffReceipt, RunnerFailure, Scope.Scope>;
+	let cancelHandoff!: (
+		viewId: string,
+		controllerEpoch: number,
+		command: CancelHandoffCommand,
+	) => Effect.Effect<CancelHandoffReceipt, RunnerFailure, Scope.Scope>;
+	let getCheckpointState!: (
+		viewId: string,
+		controllerEpoch: number,
+		command: GetCheckpointStateCommand,
+	) => Effect.Effect<GetCheckpointStateReceipt, RunnerFailure, Scope.Scope>;
+	let setCheckpointState!: (
+		viewId: string,
+		controllerEpoch: number,
+		command: SetCheckpointStateCommand,
+	) => Effect.Effect<SetCheckpointStateReceipt, RunnerFailure, Scope.Scope>;
+	let reloadSession!: (
+		viewId: string,
+		controllerEpoch: number,
+		command: ReloadSessionCommand,
+	) => Effect.Effect<ReloadSessionReceipt, RunnerFailure, Scope.Scope>;
 	let runCompaction!: (
 		viewId: string,
 		controllerEpoch: number,
@@ -946,11 +1098,19 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 			cancelQueuedInput: input => cancelQueuedInput(viewId, controllerEpoch, input),
 			setActiveTools: input => setActiveTools(viewId, controllerEpoch, input),
 			replaceTodos: input => replaceTodos(viewId, controllerEpoch, input),
+			cycleModel: input => cycleModel(viewId, controllerEpoch, input),
 			refreshSshTool: input => refreshSshTool(viewId, controllerEpoch, input),
 			setThinkingLevel: input => setThinkingLevel(viewId, controllerEpoch, input),
 			setModel: input => setModel(viewId, controllerEpoch, input),
 			transitionPlanMode: input => transitionPlanMode(viewId, controllerEpoch, input),
 			transitionGoalMode: input => transitionGoalMode(viewId, controllerEpoch, input),
+			shake: input => runShake(viewId, controllerEpoch, input),
+			cancelShake: input => cancelShake(viewId, controllerEpoch, input),
+			handoff: input => runHandoff(viewId, controllerEpoch, input),
+			cancelHandoff: input => cancelHandoff(viewId, controllerEpoch, input),
+			getCheckpointState: input => getCheckpointState(viewId, controllerEpoch, input),
+			setCheckpointState: input => setCheckpointState(viewId, controllerEpoch, input),
+			reload: input => reloadSession(viewId, controllerEpoch, input),
 			compact: input => runCompaction(viewId, controllerEpoch, input),
 			cancelCompaction: command => cancelCompaction(viewId, controllerEpoch, command),
 			runEphemeralTurn: command => runEphemeralTurn(viewId, controllerEpoch, command),
@@ -1302,6 +1462,680 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 		);
 	});
 
+	const reserveOperationCapacity = <T extends { readonly completed: boolean }>(records: Map<string, T>): boolean => {
+		if (records.size < options.eventCapacity) return true;
+		for (const [commandId, record] of records) {
+			if (!record.completed) continue;
+			records.delete(commandId);
+			return true;
+		}
+		return false;
+	};
+
+	const refreshSessionProjection = (): void => {
+		sessionRevision = resources.sessionManager.getSessionRevision();
+		const entries = resources.sessionManager.getEntries();
+		transcriptEntryCount = entries.length;
+		transcriptPosition = entries.length;
+		transcriptLeafId = resources.sessionManager.getLeafId();
+		transcriptLastEntryId = entries.at(-1)?.id;
+	};
+
+	const requireSessionOperationAvailable = (): Effect.Effect<void, RunnerFailure> => {
+		if (
+			activeSessionOperation !== undefined ||
+			activeCompaction !== undefined ||
+			activeLocalOperation !== undefined ||
+			activeEphemeralTurn !== undefined ||
+			resources.session.isStreaming ||
+			resources.session.isCompacting ||
+			resources.session.isRetrying ||
+			resources.session.isGeneratingHandoff
+		) {
+			return Effect.fail(new SessionStateCommandInFlightError());
+		}
+		return Effect.void;
+	};
+
+	const sameShakeCommand = (left: RunShakeCommand, right: RunShakeCommand): boolean =>
+		left.schemaVersion === right.schemaVersion &&
+		left.kind === right.kind &&
+		left.commandId === right.commandId &&
+		left.correlationId === right.correlationId &&
+		left.causationId === right.causationId &&
+		left.expectedSessionRevision === right.expectedSessionRevision &&
+		left.viewId === right.viewId &&
+		left.controllerEpoch === right.controllerEpoch &&
+		left.mode === right.mode;
+
+	runShake = Effect.fn("Runner.runShake")(function* (viewId: string, controllerEpoch: number, input: RunShakeCommand) {
+		const command = yield* Effect.try({ try: () => decodeRunShakeCommand(input), catch: asRunnerFailure });
+		if (command.viewId !== viewId) return yield* mismatchedView(viewId);
+		if (command.controllerEpoch !== controllerEpoch) {
+			return yield* Effect.fail(
+				new StaleRunnerControllerLeaseError({
+					viewId,
+					expectedControllerEpoch: command.controllerEpoch,
+					actualControllerEpoch: controllerEpoch,
+				}),
+			);
+		}
+		const admitted = yield* enqueue(
+			Effect.gen(function* () {
+				yield* requireController(viewId, controllerEpoch);
+				const retained = shakeCommands.get(command.commandId);
+				if (retained !== undefined) {
+					if (!sameShakeCommand(retained.command, command)) {
+						return yield* Effect.fail(
+							new InvalidRunnerCommandError({ issue: `Conflicting shake command ${command.commandId}` }),
+						);
+					}
+					return { record: retained, replayed: true };
+				}
+				if (command.expectedSessionRevision !== sessionRevision) {
+					return yield* Effect.fail(
+						new SessionRevisionConflictError(command.expectedSessionRevision, sessionRevision),
+					);
+				}
+				yield* requireSessionOperationAvailable();
+				if (!reserveOperationCapacity(shakeCommands)) {
+					return yield* Effect.fail(new SessionStateCommandInFlightError());
+				}
+				const deferred = yield* Deferred.make<RunShakeReceipt, RunnerFailure>();
+				const record: LiveShakeRecord = {
+					command,
+					operationGeneration: nextSessionOperationGeneration++,
+					startedSessionRevision: sessionRevision,
+					deferred,
+					abortController: new AbortController(),
+					completed: false,
+					cancellationRequested: false,
+				};
+				shakeCommands.set(command.commandId, record);
+				activeSessionOperation = { kind: "shake", record };
+				runSessionOperation(
+					Effect.tryPromise({
+						try: () => resources.session.shake(command.mode, { signal: record.abortController.signal }),
+						catch: asRunnerFailure,
+					}).pipe(
+						Effect.matchEffect({
+							onFailure: failure =>
+								enqueue(
+									Effect.sync(() => {
+										record.completed = true;
+										if (activeSessionOperation?.record === record) activeSessionOperation = undefined;
+										return failure;
+									}),
+								).pipe(
+									Effect.flatMap(retainedFailure => Deferred.fail(record.deferred, retainedFailure)),
+									Effect.matchCauseEffect({ onFailure: () => Effect.void, onSuccess: () => Effect.void }),
+								),
+							onSuccess: result =>
+								enqueue(
+									Effect.gen(function* () {
+										refreshSessionProjection();
+										record.completed = true;
+										if (activeSessionOperation?.record === record) activeSessionOperation = undefined;
+										const receipt: RunShakeReceipt = {
+											commandId: command.commandId,
+											correlationId: command.correlationId,
+											...(command.causationId === undefined ? {} : { causationId: command.causationId }),
+											startedSessionRevision: record.startedSessionRevision,
+											operationGeneration: record.operationGeneration,
+											completedSessionRevision: sessionRevision,
+											replayed: false,
+											result: {
+												mode: result.mode,
+												toolResultsDropped: result.toolResultsDropped,
+												blocksDropped: result.blocksDropped,
+												...(result.imagesDropped === undefined
+													? {}
+													: { imagesDropped: result.imagesDropped }),
+												tokensFreed: result.tokensFreed,
+												...(result.artifactId === undefined ? {} : { artifactId: result.artifactId }),
+											},
+										};
+										yield* publishEvent({
+											kind: "shakeCompleted",
+											metadata: command,
+											controllerEpoch,
+											viewId,
+											targetCommandId: command.commandId,
+											targetOperationGeneration: record.operationGeneration,
+											sessionRevision,
+										});
+										yield* Deferred.succeed(record.deferred, receipt);
+									}),
+								).pipe(Effect.matchCauseEffect({ onFailure: () => Effect.void, onSuccess: () => Effect.void })),
+						}),
+					),
+				);
+				return { record, replayed: false };
+			}),
+		);
+		const receipt = yield* Deferred.await(admitted.record.deferred);
+		return admitted.replayed ? { ...receipt, replayed: true } : receipt;
+	});
+
+	cancelShake = Effect.fn("Runner.cancelShake")(function* (
+		viewId: string,
+		controllerEpoch: number,
+		input: CancelShakeCommand,
+	) {
+		const command = yield* Effect.try({ try: () => decodeCancelShakeCommand(input), catch: asRunnerFailure });
+		if (command.viewId !== viewId) return yield* mismatchedView(viewId);
+		if (command.controllerEpoch !== controllerEpoch) {
+			return yield* Effect.fail(
+				new StaleRunnerControllerLeaseError({
+					viewId,
+					expectedControllerEpoch: command.controllerEpoch,
+					actualControllerEpoch: controllerEpoch,
+				}),
+			);
+		}
+		return yield* enqueue(
+			Effect.gen(function* () {
+				yield* requireController(viewId, controllerEpoch);
+				const active = activeSessionOperation;
+				if (
+					active?.kind !== "shake" ||
+					active.record.completed ||
+					active.record.command.commandId !== command.targetCommandId ||
+					active.record.operationGeneration !== command.targetOperationGeneration
+				) {
+					return yield* Effect.fail(
+						new InvalidRunnerCommandError({ issue: "Shake cancellation target is not active" }),
+					);
+				}
+				if (!active.record.cancellationRequested) {
+					active.record.cancellationRequested = true;
+					active.record.abortController.abort();
+					yield* publishEvent({
+						kind: "shakeCancelRequested",
+						metadata: command,
+						controllerEpoch,
+						viewId,
+						targetCommandId: command.targetCommandId,
+						targetOperationGeneration: command.targetOperationGeneration,
+						sessionRevision,
+					});
+				}
+				return {
+					commandId: command.commandId,
+					correlationId: command.correlationId,
+					...(command.causationId === undefined ? {} : { causationId: command.causationId }),
+					targetCommandId: command.targetCommandId,
+					targetOperationGeneration: command.targetOperationGeneration,
+					cancellationRequested: true,
+				} satisfies CancelShakeReceipt;
+			}),
+		);
+	});
+
+	const sameHandoffCommand = (left: RunHandoffCommand, right: RunHandoffCommand): boolean =>
+		left.schemaVersion === right.schemaVersion &&
+		left.kind === right.kind &&
+		left.commandId === right.commandId &&
+		left.correlationId === right.correlationId &&
+		left.causationId === right.causationId &&
+		left.expectedSessionRevision === right.expectedSessionRevision &&
+		left.viewId === right.viewId &&
+		left.controllerEpoch === right.controllerEpoch &&
+		left.customInstructions === right.customInstructions;
+
+	runHandoff = Effect.fn("Runner.runHandoff")(function* (
+		viewId: string,
+		controllerEpoch: number,
+		input: RunHandoffCommand,
+	) {
+		const command = yield* Effect.try({ try: () => decodeRunHandoffCommand(input), catch: asRunnerFailure });
+		if (command.viewId !== viewId) return yield* mismatchedView(viewId);
+		if (command.controllerEpoch !== controllerEpoch) {
+			return yield* Effect.fail(
+				new StaleRunnerControllerLeaseError({
+					viewId,
+					expectedControllerEpoch: command.controllerEpoch,
+					actualControllerEpoch: controllerEpoch,
+				}),
+			);
+		}
+		const admitted = yield* enqueue(
+			Effect.gen(function* () {
+				yield* requireController(viewId, controllerEpoch);
+				const retained = handoffCommands.get(command.commandId);
+				if (retained !== undefined) {
+					if (!sameHandoffCommand(retained.command, command)) {
+						return yield* Effect.fail(
+							new InvalidRunnerCommandError({ issue: `Conflicting handoff command ${command.commandId}` }),
+						);
+					}
+					return { record: retained, replayed: true };
+				}
+				if (command.expectedSessionRevision !== sessionRevision) {
+					return yield* Effect.fail(
+						new SessionRevisionConflictError(command.expectedSessionRevision, sessionRevision),
+					);
+				}
+				yield* requireSessionOperationAvailable();
+				if (!reserveOperationCapacity(handoffCommands)) {
+					return yield* Effect.fail(new SessionStateCommandInFlightError());
+				}
+				const deferred = yield* Deferred.make<RunHandoffReceipt, RunnerFailure>();
+				const record: LiveHandoffRecord = {
+					command,
+					operationGeneration: nextSessionOperationGeneration++,
+					startedSessionRevision: sessionRevision,
+					deferred,
+					abortController: new AbortController(),
+					completed: false,
+					cancellationRequested: false,
+				};
+				handoffCommands.set(command.commandId, record);
+				activeSessionOperation = { kind: "handoff", record };
+				runSessionOperation(
+					Effect.tryPromise({
+						try: () =>
+							resources.session.handoff(command.customInstructions, { signal: record.abortController.signal }),
+						catch: asRunnerFailure,
+					}).pipe(
+						Effect.matchEffect({
+							onFailure: failure =>
+								enqueue(
+									Effect.sync(() => {
+										record.completed = true;
+										if (activeSessionOperation?.record === record) activeSessionOperation = undefined;
+										return failure;
+									}),
+								).pipe(
+									Effect.flatMap(retainedFailure => Deferred.fail(record.deferred, retainedFailure)),
+									Effect.matchCauseEffect({ onFailure: () => Effect.void, onSuccess: () => Effect.void }),
+								),
+							onSuccess: result =>
+								enqueue(
+									Effect.gen(function* () {
+										refreshSessionProjection();
+										record.completed = true;
+										if (activeSessionOperation?.record === record) activeSessionOperation = undefined;
+										const receipt: RunHandoffReceipt = {
+											commandId: command.commandId,
+											correlationId: command.correlationId,
+											...(command.causationId === undefined ? {} : { causationId: command.causationId }),
+											startedSessionRevision: record.startedSessionRevision,
+											operationGeneration: record.operationGeneration,
+											completedSessionRevision: sessionRevision,
+											replayed: false,
+											result:
+												result === undefined
+													? undefined
+													: {
+															document: result.document,
+															...(result.savedPath === undefined ? {} : { savedPath: result.savedPath }),
+															sessionId: resources.session.sessionId,
+															...(resources.session.sessionFile === undefined
+																? {}
+																: { sessionFile: resources.session.sessionFile }),
+														},
+										};
+										yield* publishEvent({
+											kind: "handoffCompleted",
+											metadata: command,
+											controllerEpoch,
+											viewId,
+											targetCommandId: command.commandId,
+											targetOperationGeneration: record.operationGeneration,
+											sessionRevision,
+										});
+										yield* Deferred.succeed(record.deferred, receipt);
+									}),
+								).pipe(Effect.matchCauseEffect({ onFailure: () => Effect.void, onSuccess: () => Effect.void })),
+						}),
+					),
+				);
+				return { record, replayed: false };
+			}),
+		);
+		const receipt = yield* Deferred.await(admitted.record.deferred);
+		return admitted.replayed ? { ...receipt, replayed: true } : receipt;
+	});
+
+	cancelHandoff = Effect.fn("Runner.cancelHandoff")(function* (
+		viewId: string,
+		controllerEpoch: number,
+		input: CancelHandoffCommand,
+	) {
+		const command = yield* Effect.try({ try: () => decodeCancelHandoffCommand(input), catch: asRunnerFailure });
+		if (command.viewId !== viewId) return yield* mismatchedView(viewId);
+		if (command.controllerEpoch !== controllerEpoch) {
+			return yield* Effect.fail(
+				new StaleRunnerControllerLeaseError({
+					viewId,
+					expectedControllerEpoch: command.controllerEpoch,
+					actualControllerEpoch: controllerEpoch,
+				}),
+			);
+		}
+		return yield* enqueue(
+			Effect.gen(function* () {
+				yield* requireController(viewId, controllerEpoch);
+				const active = activeSessionOperation;
+				if (
+					active?.kind !== "handoff" ||
+					active.record.completed ||
+					active.record.command.commandId !== command.targetCommandId ||
+					active.record.operationGeneration !== command.targetOperationGeneration
+				) {
+					return yield* Effect.fail(
+						new InvalidRunnerCommandError({ issue: "Handoff cancellation target is not active" }),
+					);
+				}
+				if (!active.record.cancellationRequested) {
+					active.record.cancellationRequested = true;
+					active.record.abortController.abort();
+					yield* publishEvent({
+						kind: "handoffCancelRequested",
+						metadata: command,
+						controllerEpoch,
+						viewId,
+						targetCommandId: command.targetCommandId,
+						targetOperationGeneration: command.targetOperationGeneration,
+						sessionRevision,
+					});
+				}
+				return {
+					commandId: command.commandId,
+					correlationId: command.correlationId,
+					...(command.causationId === undefined ? {} : { causationId: command.causationId }),
+					targetCommandId: command.targetCommandId,
+					targetOperationGeneration: command.targetOperationGeneration,
+					cancellationRequested: true,
+				} satisfies CancelHandoffReceipt;
+			}),
+		);
+	});
+
+	const sameCheckpointReadCommand = (left: GetCheckpointStateCommand, right: GetCheckpointStateCommand): boolean =>
+		left.schemaVersion === right.schemaVersion &&
+		left.kind === right.kind &&
+		left.commandId === right.commandId &&
+		left.correlationId === right.correlationId &&
+		left.causationId === right.causationId &&
+		left.viewId === right.viewId &&
+		left.controllerEpoch === right.controllerEpoch;
+
+	getCheckpointState = Effect.fn("Runner.getCheckpointState")(function* (
+		viewId: string,
+		controllerEpoch: number,
+		input: GetCheckpointStateCommand,
+	) {
+		const command = yield* Effect.try({
+			try: () => decodeGetCheckpointStateCommand(input),
+			catch: asRunnerFailure,
+		});
+		if (command.viewId !== viewId) return yield* mismatchedView(viewId);
+		if (command.controllerEpoch !== controllerEpoch) {
+			return yield* Effect.fail(
+				new StaleRunnerControllerLeaseError({
+					viewId,
+					expectedControllerEpoch: command.controllerEpoch,
+					actualControllerEpoch: controllerEpoch,
+				}),
+			);
+		}
+		return yield* enqueue(
+			Effect.gen(function* () {
+				yield* requireController(viewId, controllerEpoch);
+				const retained = checkpointReads.get(command.commandId);
+				if (retained !== undefined) {
+					if (!sameCheckpointReadCommand(retained.command, command)) {
+						return yield* Effect.fail(
+							new InvalidRunnerCommandError({ issue: `Conflicting checkpoint read ${command.commandId}` }),
+						);
+					}
+					return { ...retained.receipt, replayed: true };
+				}
+				if (checkpointReads.size >= options.eventCapacity) {
+					const oldest = checkpointReads.keys().next().value;
+					if (oldest !== undefined) checkpointReads.delete(oldest);
+				}
+				const state = resources.session.getCheckpointState();
+				const receipt: GetCheckpointStateReceipt = {
+					commandId: command.commandId,
+					correlationId: command.correlationId,
+					...(command.causationId === undefined ? {} : { causationId: command.causationId }),
+					sessionRevision,
+					checkpointRevision,
+					state: state === undefined ? undefined : { ...state },
+					replayed: false,
+				};
+				checkpointReads.set(command.commandId, { command, receipt });
+				return receipt;
+			}),
+		);
+	});
+
+	const sameCheckpointState = (
+		left: SetCheckpointStateCommand["state"],
+		right: SetCheckpointStateCommand["state"],
+	): boolean =>
+		(left === null && right === null) ||
+		(left !== null &&
+			right !== null &&
+			left.checkpointMessageCount === right.checkpointMessageCount &&
+			left.checkpointEntryId === right.checkpointEntryId &&
+			left.startedAt === right.startedAt);
+
+	const sameCheckpointWriteCommand = (left: SetCheckpointStateCommand, right: SetCheckpointStateCommand): boolean =>
+		left.schemaVersion === right.schemaVersion &&
+		left.kind === right.kind &&
+		left.commandId === right.commandId &&
+		left.correlationId === right.correlationId &&
+		left.causationId === right.causationId &&
+		left.viewId === right.viewId &&
+		left.controllerEpoch === right.controllerEpoch &&
+		left.expectedCheckpointRevision === right.expectedCheckpointRevision &&
+		sameCheckpointState(left.state, right.state);
+
+	setCheckpointState = Effect.fn("Runner.setCheckpointState")(function* (
+		viewId: string,
+		controllerEpoch: number,
+		input: SetCheckpointStateCommand,
+	) {
+		const command = yield* Effect.try({
+			try: () => decodeSetCheckpointStateCommand(input),
+			catch: asRunnerFailure,
+		});
+		if (command.viewId !== viewId) return yield* mismatchedView(viewId);
+		if (command.controllerEpoch !== controllerEpoch) {
+			return yield* Effect.fail(
+				new StaleRunnerControllerLeaseError({
+					viewId,
+					expectedControllerEpoch: command.controllerEpoch,
+					actualControllerEpoch: controllerEpoch,
+				}),
+			);
+		}
+		return yield* enqueue(
+			Effect.gen(function* () {
+				yield* requireController(viewId, controllerEpoch);
+				const retained = checkpointWrites.get(command.commandId);
+				if (retained !== undefined) {
+					if (!sameCheckpointWriteCommand(retained.command, command)) {
+						return yield* Effect.fail(
+							new InvalidRunnerCommandError({ issue: `Conflicting checkpoint write ${command.commandId}` }),
+						);
+					}
+					return { ...retained.receipt, replayed: true };
+				}
+				if (command.expectedCheckpointRevision !== checkpointRevision) {
+					return yield* Effect.fail(
+						new RunnerRevisionConflictError({
+							expectedRevision: command.expectedCheckpointRevision,
+							actualRevision: checkpointRevision,
+						}),
+					);
+				}
+				const state = command.state === null ? undefined : { ...command.state };
+				resources.session.setCheckpointState(state);
+				checkpointRevision += 1;
+				const receipt: SetCheckpointStateReceipt = {
+					commandId: command.commandId,
+					correlationId: command.correlationId,
+					...(command.causationId === undefined ? {} : { causationId: command.causationId }),
+					sessionRevision,
+					checkpointRevision,
+					state,
+					replayed: false,
+				};
+				if (checkpointWrites.size >= options.eventCapacity) {
+					const oldest = checkpointWrites.keys().next().value;
+					if (oldest !== undefined) checkpointWrites.delete(oldest);
+				}
+				checkpointWrites.set(command.commandId, { command, receipt });
+				yield* publishEvent({
+					kind: "checkpointChanged",
+					metadata: command,
+					controllerEpoch,
+					viewId,
+					targetGeneration: checkpointRevision,
+					sessionRevision,
+				});
+				return receipt;
+			}),
+		);
+	});
+
+	const sameReloadCommand = (left: ReloadSessionCommand, right: ReloadSessionCommand): boolean =>
+		left.schemaVersion === right.schemaVersion &&
+		left.kind === right.kind &&
+		left.commandId === right.commandId &&
+		left.correlationId === right.correlationId &&
+		left.causationId === right.causationId &&
+		left.expectedSessionRevision === right.expectedSessionRevision &&
+		left.viewId === right.viewId &&
+		left.controllerEpoch === right.controllerEpoch;
+
+	reloadSession = Effect.fn("Runner.reloadSession")(function* (
+		viewId: string,
+		controllerEpoch: number,
+		input: ReloadSessionCommand,
+	) {
+		const command = yield* Effect.try({ try: () => decodeReloadSessionCommand(input), catch: asRunnerFailure });
+		if (command.viewId !== viewId) return yield* mismatchedView(viewId);
+		if (command.controllerEpoch !== controllerEpoch) {
+			return yield* Effect.fail(
+				new StaleRunnerControllerLeaseError({
+					viewId,
+					expectedControllerEpoch: command.controllerEpoch,
+					actualControllerEpoch: controllerEpoch,
+				}),
+			);
+		}
+		const admitted = yield* enqueue(
+			Effect.gen(function* () {
+				yield* requireController(viewId, controllerEpoch);
+				const retained = reloadCommands.get(command.commandId);
+				if (retained !== undefined) {
+					if (!sameReloadCommand(retained.command, command)) {
+						return yield* Effect.fail(
+							new InvalidRunnerCommandError({ issue: `Conflicting reload command ${command.commandId}` }),
+						);
+					}
+					return { record: retained, replayed: true };
+				}
+				if (command.expectedSessionRevision !== sessionRevision) {
+					return yield* Effect.fail(
+						new SessionRevisionConflictError(command.expectedSessionRevision, sessionRevision),
+					);
+				}
+				yield* requireSessionOperationAvailable();
+				if (!reserveOperationCapacity(reloadCommands)) {
+					return yield* Effect.fail(new SessionStateCommandInFlightError());
+				}
+				const deferred = yield* Deferred.make<ReloadSessionReceipt, RunnerFailure>();
+				const record: LiveReloadRecord = {
+					command,
+					operationGeneration: nextSessionOperationGeneration++,
+					startedSessionRevision: sessionRevision,
+					deferred,
+					completed: false,
+				};
+				reloadCommands.set(command.commandId, record);
+				activeSessionOperation = { kind: "reload", record };
+				runSessionOperation(
+					Effect.tryPromise({
+						try: () => resources.session.reload(),
+						catch: asRunnerFailure,
+					}).pipe(
+						Effect.matchEffect({
+							onFailure: failure =>
+								enqueue(
+									Effect.sync(() => {
+										record.completed = true;
+										if (activeSessionOperation?.record === record) activeSessionOperation = undefined;
+										return failure;
+									}),
+								).pipe(
+									Effect.flatMap(retainedFailure => Deferred.fail(record.deferred, retainedFailure)),
+									Effect.matchCauseEffect({ onFailure: () => Effect.void, onSuccess: () => Effect.void }),
+								),
+							onSuccess: switched =>
+								enqueue(
+									Effect.gen(function* () {
+										record.completed = true;
+										if (activeSessionOperation?.record === record) activeSessionOperation = undefined;
+										if (!switched) {
+											reloadCommands.delete(command.commandId);
+											return yield* Deferred.fail(
+												record.deferred,
+												new RunnerSessionReloadCancelledError({ reason: "session-before-switch" }),
+											);
+										}
+										refreshSessionProjection();
+										resources.session.setCheckpointState(undefined);
+										checkpointRevision += 1;
+										yield* publishEvent({
+											kind: "checkpointChanged",
+											metadata: command,
+											controllerEpoch,
+											viewId,
+											targetGeneration: checkpointRevision,
+											sessionRevision,
+										});
+										const receipt: ReloadSessionReceipt = {
+											commandId: command.commandId,
+											correlationId: command.correlationId,
+											...(command.causationId === undefined ? {} : { causationId: command.causationId }),
+											startedSessionRevision: record.startedSessionRevision,
+											operationGeneration: record.operationGeneration,
+											completedSessionRevision: sessionRevision,
+											sessionId: resources.session.sessionId,
+											...(resources.session.sessionFile === undefined
+												? {}
+												: { sessionFile: resources.session.sessionFile }),
+											replayed: false,
+										};
+										yield* publishEvent({
+											kind: "sessionReloaded",
+											metadata: command,
+											controllerEpoch,
+											viewId,
+											targetCommandId: command.commandId,
+											targetOperationGeneration: record.operationGeneration,
+											sessionRevision,
+										});
+										yield* Deferred.succeed(record.deferred, receipt);
+									}),
+								).pipe(Effect.matchCauseEffect({ onFailure: () => Effect.void, onSuccess: () => Effect.void })),
+						}),
+					),
+				);
+				return { record, replayed: false };
+			}),
+		);
+		const receipt = yield* Deferred.await(admitted.record.deferred);
+		return admitted.replayed ? { ...receipt, replayed: true } : receipt;
+	});
+
 	const sameCompactionCommand = (left: RunCompactionCommand, right: RunCompactionCommand): boolean =>
 		left.schemaVersion === right.schemaVersion &&
 		left.kind === right.kind &&
@@ -1343,6 +2177,13 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 				if (command.expectedSessionRevision !== sessionRevision) {
 					return yield* Effect.fail(
 						new SessionRevisionConflictError(command.expectedSessionRevision, sessionRevision),
+					);
+				}
+				if (activeSessionOperation !== undefined) {
+					return yield* Effect.fail(
+						new RunnerCompactionUnavailableError({
+							reason: activeSessionOperation.kind === "handoff" ? "handoff" : "compacting",
+						}),
 					);
 				}
 				const unavailableReason = resources.session.isStreaming
@@ -1516,10 +2357,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 		);
 	});
 
-	const sameLocalOperationCommand = (
-		left: RunLocalOperationCommand,
-		right: RunLocalOperationCommand,
-	): boolean => {
+	const sameLocalOperationCommand = (left: RunLocalOperationCommand, right: RunLocalOperationCommand): boolean => {
 		if (
 			left.schemaVersion !== right.schemaVersion ||
 			left.kind !== right.kind ||
@@ -1550,10 +2388,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 			if (excess < available) {
 				record.outputHeadOffset += excess;
 				record.retainedBytes -= excess;
-				while (
-					record.outputHeadOffset < head.length &&
-					(head[record.outputHeadOffset]! & 0xc0) === 0x80
-				) {
+				while (record.outputHeadOffset < head.length && (head[record.outputHeadOffset]! & 0xc0) === 0x80) {
 					record.outputHeadOffset++;
 					record.retainedBytes--;
 				}
@@ -1566,7 +2401,10 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 		}
 	};
 
-	const appendLocalOperationOutput = (record: LiveLocalOperationRecord | LiveEphemeralTurnRecord, chunk: string): void => {
+	const appendLocalOperationOutput = (
+		record: LiveLocalOperationRecord | LiveEphemeralTurnRecord,
+		chunk: string,
+	): void => {
 		const bytes = Buffer.from(chunk);
 		record.totalBytes += bytes.length;
 		if (bytes.length === 0) return;
@@ -1646,7 +2484,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 						new SessionRevisionConflictError(command.expectedSessionRevision, sessionRevision),
 					);
 				}
-				if (activeLocalOperation !== undefined) {
+				if (activeLocalOperation !== undefined || activeSessionOperation !== undefined) {
 					return yield* Effect.fail(new RunnerLocalOperationUnavailableError({ reason: "active" }));
 				}
 				if (localOperationCommands.size >= options.eventCapacity) {
@@ -1772,22 +2610,14 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 										useUserShell: true,
 									}),
 								catch: asRunnerFailure,
-							}).pipe(
-								Effect.map(
-									(result): LocalOperationExecutionResult => ({ kind: "bash", result }),
-								),
-							)
+							}).pipe(Effect.map((result): LocalOperationExecutionResult => ({ kind: "bash", result })))
 						: Effect.tryPromise({
 								try: () =>
 									resources.session.executePython(operation.code, onChunk, {
 										excludeFromContext: operation.excludeFromContext,
 									}),
 								catch: asRunnerFailure,
-							}).pipe(
-								Effect.map(
-									(result): LocalOperationExecutionResult => ({ kind: "python", result }),
-								),
-							);
+							}).pipe(Effect.map((result): LocalOperationExecutionResult => ({ kind: "python", result })));
 				const closeOutput = Effect.sync(() => {
 					record.outputClosed = true;
 					if (record.outputPumpRunning) return;
@@ -1800,7 +2630,8 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 							onFailure: failure =>
 								closeOutput.pipe(
 									Effect.andThen(Deferred.await(record.outputDrained)),
-									Effect.andThen(enqueue(
+									Effect.andThen(
+										enqueue(
 											Effect.sync(() => {
 												record.completed = true;
 												if (activeLocalOperation?.operationGeneration === record.operationGeneration) {
@@ -1808,73 +2639,77 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 												}
 												return failure;
 											}),
-										)),
+										),
+									),
 									Effect.flatMap(retainedFailure => Deferred.fail(record.deferred, retainedFailure)),
 									Effect.matchCauseEffect({ onFailure: () => Effect.void, onSuccess: () => Effect.void }),
 								),
 							onSuccess: result =>
 								closeOutput.pipe(
 									Effect.andThen(Deferred.await(record.outputDrained)),
-									Effect.andThen(enqueue(
+									Effect.andThen(
+										enqueue(
 											Effect.gen(function* () {
 												replaceLocalOperationOutput(record, result.result.output, result.result.totalBytes);
-										sessionRevision = resources.sessionManager.getSessionRevision();
-										record.completed = true;
-										if (activeLocalOperation?.operationGeneration === record.operationGeneration) {
-											activeLocalOperation = undefined;
-										}
-										const output = {
-											...localOperationOutputSnapshot(record),
-											truncated:
-												result.result.truncated || record.totalBytes > record.retainedBytes,
-										};
-										const resultSummary: RunLocalOperationReceipt["result"] =
-											result.kind === "bash"
-												? {
-														kind: "bash",
-														output,
-														exitCode: result.result.exitCode,
-														cancelled: result.result.cancelled,
-														...(result.result.artifactId === undefined
-															? {}
-															: { artifactId: result.result.artifactId }),
-													}
-												: {
-														kind: "python",
-														output,
-														exitCode: result.result.exitCode,
-														cancelled: result.result.cancelled,
-														...(result.result.artifactId === undefined
-															? {}
-															: { artifactId: result.result.artifactId }),
-														totalLines: result.result.totalLines,
-														outputLines: result.result.outputLines,
-														outputBytes: result.result.outputBytes,
-														displayOutputs: result.result.displayOutputs,
-														stdinRequested: result.result.stdinRequested,
-													};
-										const receipt: RunLocalOperationReceipt = {
-											commandId: command.commandId,
-											correlationId: command.correlationId,
-											...(command.causationId === undefined ? {} : { causationId: command.causationId }),
-											startedSessionRevision: record.startedSessionRevision,
-											operationGeneration: record.operationGeneration,
-											completedSessionRevision: sessionRevision,
-											replayed: false,
-											result: resultSummary,
-										};
-										yield* publishEvent({
-											kind: "localOperationCompleted",
-											metadata: command,
-											controllerEpoch,
-											viewId,
-											targetCommandId: command.commandId,
-											targetOperationGeneration: record.operationGeneration,
-											sessionRevision,
-										});
+												sessionRevision = resources.sessionManager.getSessionRevision();
+												record.completed = true;
+												if (activeLocalOperation?.operationGeneration === record.operationGeneration) {
+													activeLocalOperation = undefined;
+												}
+												const output = {
+													...localOperationOutputSnapshot(record),
+													truncated: result.result.truncated || record.totalBytes > record.retainedBytes,
+												};
+												const resultSummary: RunLocalOperationReceipt["result"] =
+													result.kind === "bash"
+														? {
+																kind: "bash",
+																output,
+																exitCode: result.result.exitCode,
+																cancelled: result.result.cancelled,
+																...(result.result.artifactId === undefined
+																	? {}
+																	: { artifactId: result.result.artifactId }),
+															}
+														: {
+																kind: "python",
+																output,
+																exitCode: result.result.exitCode,
+																cancelled: result.result.cancelled,
+																...(result.result.artifactId === undefined
+																	? {}
+																	: { artifactId: result.result.artifactId }),
+																totalLines: result.result.totalLines,
+																outputLines: result.result.outputLines,
+																outputBytes: result.result.outputBytes,
+																displayOutputs: result.result.displayOutputs,
+																stdinRequested: result.result.stdinRequested,
+															};
+												const receipt: RunLocalOperationReceipt = {
+													commandId: command.commandId,
+													correlationId: command.correlationId,
+													...(command.causationId === undefined
+														? {}
+														: { causationId: command.causationId }),
+													startedSessionRevision: record.startedSessionRevision,
+													operationGeneration: record.operationGeneration,
+													completedSessionRevision: sessionRevision,
+													replayed: false,
+													result: resultSummary,
+												};
+												yield* publishEvent({
+													kind: "localOperationCompleted",
+													metadata: command,
+													controllerEpoch,
+													viewId,
+													targetCommandId: command.commandId,
+													targetOperationGeneration: record.operationGeneration,
+													sessionRevision,
+												});
 												yield* Deferred.succeed(record.deferred, receipt);
 											}),
-										)),
+										),
+									),
 									Effect.matchCauseEffect({ onFailure: () => Effect.void, onSuccess: () => Effect.void }),
 								),
 						}),
@@ -1976,200 +2811,241 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 		command = yield* Effect.try({ try: () => decodeRunEphemeralTurnCommand(command), catch: asRunnerFailure });
 		if (command.viewId !== viewId) return yield* mismatchedView(viewId);
 		if (command.controllerEpoch !== controllerEpoch) {
-			return yield* Effect.fail(new StaleRunnerControllerLeaseError({
-				viewId,
-				expectedControllerEpoch: command.controllerEpoch,
-				actualControllerEpoch: controllerEpoch,
-			}));
-		}
-		const admitted = yield* enqueue(Effect.gen(function* () {
-			yield* requireController(viewId, controllerEpoch);
-			const retained = ephemeralTurnCommands.get(command.commandId);
-			if (retained) {
-				if (!sameEphemeralTurnCommand(retained.command, command)) {
-					return yield* Effect.fail(new RunnerEphemeralTurnCommandConflictError({ commandId: command.commandId }));
-				}
-				return { record: retained, replayed: true };
-			}
-			if (command.expectedSessionRevision !== sessionRevision) {
-				return yield* Effect.fail(new SessionRevisionConflictError(command.expectedSessionRevision, sessionRevision));
-			}
-			if (activeEphemeralTurn !== undefined) {
-				return yield* Effect.fail(new RunnerEphemeralTurnUnavailableError({ reason: "active" }));
-			}
-			if (ephemeralTurnCommands.size >= options.eventCapacity) {
-				let evicted = false;
-				for (const [commandId, record] of ephemeralTurnCommands) {
-					if (!record.completed) continue;
-					ephemeralTurnCommands.delete(commandId);
-					evicted = true;
-					break;
-				}
-				if (!evicted) return yield* Effect.fail(new RunnerEphemeralTurnUnavailableError({ reason: "capacity" }));
-			}
-			const deferred = yield* Deferred.make<RunEphemeralTurnReceipt, RunnerFailure>();
-			const outputDrained = yield* Deferred.make<void>();
-			const record: LiveEphemeralTurnRecord = {
-				command,
-				operationGeneration: nextEphemeralTurnGeneration++,
-				startedSessionRevision: sessionRevision,
-				deferred,
-				abortController: new AbortController(),
-				outputChunks: new Map(),
-				outputHead: 0,
-				outputTail: 0,
-				outputHeadOffset: 0,
-				retainedBytes: 0,
-				totalBytes: 0,
-				completed: false,
-				cancellationRequested: false,
-				pendingOutputChunks: [],
-				pendingOutputBytes: 0,
-				peakPendingOutputChunks: 0,
-				peakPendingOutputBytes: 0,
-				outputPumpRunning: false,
-				outputClosed: false,
-				outputDrained,
-			};
-			ephemeralTurnCommands.set(command.commandId, record);
-			activeEphemeralTurn = record;
-			const runOutputPump = (): void => {
-				if (record.outputPumpRunning) return;
-				record.outputPumpRunning = true;
-				runCallback(Effect.gen(function* () {
-					while (record.pendingOutputChunks.length > 0) {
-						yield* enqueue(Effect.gen(function* () {
-							const pending = record.pendingOutputChunks.splice(0, 32);
-							for (const delivery of pending) {
-								record.pendingOutputBytes -= delivery.bytes;
-								if (record.completed) continue;
-								yield* publishEvent({
-									kind: "ephemeralTurnOutput",
-									metadata: command,
-									controllerEpoch,
-									viewId,
-									targetCommandId: command.commandId,
-									targetOperationGeneration: record.operationGeneration,
-									sessionRevision,
-									ephemeralTurnOutput: {
-										chunk: delivery.chunk,
-										totalBytes: delivery.totalBytes,
-										truncated: delivery.truncated,
-										reset: delivery.reset,
-									},
-								});
-							}
-						}));
-						yield* Effect.yieldNow;
-					}
-					record.outputPumpRunning = false;
-					if (record.outputClosed) yield* Deferred.succeed(record.outputDrained, undefined);
-				}).pipe(Effect.matchCauseEffect({ onFailure: () => Effect.void, onSuccess: () => Effect.void })));
-			};
-			const onChunk = (chunk: string): void => {
-				if (record.outputClosed) return;
-				appendLocalOperationOutput(record, chunk);
-				const bytes = Buffer.byteLength(chunk);
-				const tail = record.pendingOutputChunks.at(-1);
-				if (tail?.reset === true || record.pendingOutputChunks.length >= 32 ||
-					record.pendingOutputBytes + bytes > localOperationOutputLimit) {
-					record.pendingOutputChunks.length = 0;
-					record.pendingOutputBytes = 0;
-					const resetChunk = materializeLocalOperationOutput(record);
-					const resetBytes = Buffer.byteLength(resetChunk);
-					record.pendingOutputChunks.push({
-						chunk: resetChunk,
-						bytes: resetBytes,
-						reset: true,
-						totalBytes: record.totalBytes,
-						truncated: record.totalBytes > record.retainedBytes,
-					});
-					record.pendingOutputBytes = resetBytes;
-				} else {
-					record.pendingOutputChunks.push({
-						chunk,
-						bytes,
-						reset: false,
-						totalBytes: record.totalBytes,
-						truncated: record.totalBytes > record.retainedBytes,
-					});
-					record.pendingOutputBytes += bytes;
-				}
-				record.peakPendingOutputChunks = Math.max(record.peakPendingOutputChunks, record.pendingOutputChunks.length);
-				record.peakPendingOutputBytes = Math.max(record.peakPendingOutputBytes, record.pendingOutputBytes);
-				runOutputPump();
-			};
-			const closeOutput = Effect.sync(() => {
-				record.outputClosed = true;
-				if (record.outputPumpRunning) return;
-				if (record.pendingOutputChunks.length > 0) runOutputPump();
-				else runCallback(Deferred.succeed(record.outputDrained, undefined));
-			});
-			runCallback(Effect.tryPromise({
-				try: () => resources.session.runEphemeralTurn({
-					promptText: command.prompt,
-					onTextDelta: onChunk,
-					signal: record.abortController.signal,
+			return yield* Effect.fail(
+				new StaleRunnerControllerLeaseError({
+					viewId,
+					expectedControllerEpoch: command.controllerEpoch,
+					actualControllerEpoch: controllerEpoch,
 				}),
-				catch: asRunnerFailure,
-			}).pipe(Effect.matchEffect({
-				onFailure: failure => closeOutput.pipe(
-					Effect.andThen(Deferred.await(record.outputDrained)),
-					Effect.andThen(enqueue(Effect.sync(() => {
-						record.completed = true;
-						if (activeEphemeralTurn?.operationGeneration === record.operationGeneration) activeEphemeralTurn = undefined;
-						return failure;
-					}))),
-					Effect.flatMap(retainedFailure => Deferred.fail(record.deferred, retainedFailure)),
-					Effect.matchCauseEffect({ onFailure: () => Effect.void, onSuccess: () => Effect.void }),
-				),
-				onSuccess: result => closeOutput.pipe(
-					Effect.andThen(Deferred.await(record.outputDrained)),
-					Effect.andThen(enqueue(Effect.gen(function* () {
-						replaceLocalOperationOutput(record, result.replyText, Buffer.byteLength(result.replyText));
-						record.completed = true;
-						if (activeEphemeralTurn?.operationGeneration === record.operationGeneration) activeEphemeralTurn = undefined;
-						const receipt: RunEphemeralTurnReceipt = {
-							commandId: command.commandId,
-							correlationId: command.correlationId,
-							...(command.causationId === undefined ? {} : { causationId: command.causationId }),
-							startedSessionRevision: record.startedSessionRevision,
-							operationGeneration: record.operationGeneration,
-							completedSessionRevision: sessionRevision,
-							replayed: false,
-							output: localOperationOutputSnapshot(record),
-						};
-						yield* publishEvent({
-							kind: "ephemeralTurnOutput",
-							metadata: command,
-							controllerEpoch,
-							viewId,
-							targetCommandId: command.commandId,
-							targetOperationGeneration: record.operationGeneration,
-							sessionRevision,
-							ephemeralTurnOutput: {
-								chunk: receipt.output.text,
-								totalBytes: receipt.output.totalBytes,
-								truncated: receipt.output.truncated,
-								reset: true,
-							},
+			);
+		}
+		const admitted = yield* enqueue(
+			Effect.gen(function* () {
+				yield* requireController(viewId, controllerEpoch);
+				const retained = ephemeralTurnCommands.get(command.commandId);
+				if (retained) {
+					if (!sameEphemeralTurnCommand(retained.command, command)) {
+						return yield* Effect.fail(
+							new RunnerEphemeralTurnCommandConflictError({ commandId: command.commandId }),
+						);
+					}
+					return { record: retained, replayed: true };
+				}
+				if (command.expectedSessionRevision !== sessionRevision) {
+					return yield* Effect.fail(
+						new SessionRevisionConflictError(command.expectedSessionRevision, sessionRevision),
+					);
+				}
+				if (activeEphemeralTurn !== undefined || activeSessionOperation !== undefined) {
+					return yield* Effect.fail(new RunnerEphemeralTurnUnavailableError({ reason: "active" }));
+				}
+				if (ephemeralTurnCommands.size >= options.eventCapacity) {
+					let evicted = false;
+					for (const [commandId, record] of ephemeralTurnCommands) {
+						if (!record.completed) continue;
+						ephemeralTurnCommands.delete(commandId);
+						evicted = true;
+						break;
+					}
+					if (!evicted) return yield* Effect.fail(new RunnerEphemeralTurnUnavailableError({ reason: "capacity" }));
+				}
+				const deferred = yield* Deferred.make<RunEphemeralTurnReceipt, RunnerFailure>();
+				const outputDrained = yield* Deferred.make<void>();
+				const record: LiveEphemeralTurnRecord = {
+					command,
+					operationGeneration: nextEphemeralTurnGeneration++,
+					startedSessionRevision: sessionRevision,
+					deferred,
+					abortController: new AbortController(),
+					outputChunks: new Map(),
+					outputHead: 0,
+					outputTail: 0,
+					outputHeadOffset: 0,
+					retainedBytes: 0,
+					totalBytes: 0,
+					completed: false,
+					cancellationRequested: false,
+					pendingOutputChunks: [],
+					pendingOutputBytes: 0,
+					peakPendingOutputChunks: 0,
+					peakPendingOutputBytes: 0,
+					outputPumpRunning: false,
+					outputClosed: false,
+					outputDrained,
+				};
+				ephemeralTurnCommands.set(command.commandId, record);
+				activeEphemeralTurn = record;
+				const runOutputPump = (): void => {
+					if (record.outputPumpRunning) return;
+					record.outputPumpRunning = true;
+					runCallback(
+						Effect.gen(function* () {
+							while (record.pendingOutputChunks.length > 0) {
+								yield* enqueue(
+									Effect.gen(function* () {
+										const pending = record.pendingOutputChunks.splice(0, 32);
+										for (const delivery of pending) {
+											record.pendingOutputBytes -= delivery.bytes;
+											if (record.completed) continue;
+											yield* publishEvent({
+												kind: "ephemeralTurnOutput",
+												metadata: command,
+												controllerEpoch,
+												viewId,
+												targetCommandId: command.commandId,
+												targetOperationGeneration: record.operationGeneration,
+												sessionRevision,
+												ephemeralTurnOutput: {
+													chunk: delivery.chunk,
+													totalBytes: delivery.totalBytes,
+													truncated: delivery.truncated,
+													reset: delivery.reset,
+												},
+											});
+										}
+									}),
+								);
+								yield* Effect.yieldNow;
+							}
+							record.outputPumpRunning = false;
+							if (record.outputClosed) yield* Deferred.succeed(record.outputDrained, undefined);
+						}).pipe(Effect.matchCauseEffect({ onFailure: () => Effect.void, onSuccess: () => Effect.void })),
+					);
+				};
+				const onChunk = (chunk: string): void => {
+					if (record.outputClosed) return;
+					appendLocalOperationOutput(record, chunk);
+					const bytes = Buffer.byteLength(chunk);
+					const tail = record.pendingOutputChunks.at(-1);
+					if (
+						tail?.reset === true ||
+						record.pendingOutputChunks.length >= 32 ||
+						record.pendingOutputBytes + bytes > localOperationOutputLimit
+					) {
+						record.pendingOutputChunks.length = 0;
+						record.pendingOutputBytes = 0;
+						const resetChunk = materializeLocalOperationOutput(record);
+						const resetBytes = Buffer.byteLength(resetChunk);
+						record.pendingOutputChunks.push({
+							chunk: resetChunk,
+							bytes: resetBytes,
+							reset: true,
+							totalBytes: record.totalBytes,
+							truncated: record.totalBytes > record.retainedBytes,
 						});
-						yield* publishEvent({
-							kind: "ephemeralTurnCompleted",
-							metadata: command,
-							controllerEpoch,
-							viewId,
-							targetCommandId: command.commandId,
-							targetOperationGeneration: record.operationGeneration,
-							sessionRevision,
+						record.pendingOutputBytes = resetBytes;
+					} else {
+						record.pendingOutputChunks.push({
+							chunk,
+							bytes,
+							reset: false,
+							totalBytes: record.totalBytes,
+							truncated: record.totalBytes > record.retainedBytes,
 						});
-						yield* Deferred.succeed(record.deferred, receipt);
-					}))),
-					Effect.matchCauseEffect({ onFailure: () => Effect.void, onSuccess: () => Effect.void }),
-				),
-			})));
-			return { record, replayed: false };
-		}));
+						record.pendingOutputBytes += bytes;
+					}
+					record.peakPendingOutputChunks = Math.max(
+						record.peakPendingOutputChunks,
+						record.pendingOutputChunks.length,
+					);
+					record.peakPendingOutputBytes = Math.max(record.peakPendingOutputBytes, record.pendingOutputBytes);
+					runOutputPump();
+				};
+				const closeOutput = Effect.sync(() => {
+					record.outputClosed = true;
+					if (record.outputPumpRunning) return;
+					if (record.pendingOutputChunks.length > 0) runOutputPump();
+					else runCallback(Deferred.succeed(record.outputDrained, undefined));
+				});
+				runCallback(
+					Effect.tryPromise({
+						try: () =>
+							resources.session.runEphemeralTurn({
+								promptText: command.prompt,
+								onTextDelta: onChunk,
+								signal: record.abortController.signal,
+							}),
+						catch: asRunnerFailure,
+					}).pipe(
+						Effect.matchEffect({
+							onFailure: failure =>
+								closeOutput.pipe(
+									Effect.andThen(Deferred.await(record.outputDrained)),
+									Effect.andThen(
+										enqueue(
+											Effect.sync(() => {
+												record.completed = true;
+												if (activeEphemeralTurn?.operationGeneration === record.operationGeneration)
+													activeEphemeralTurn = undefined;
+												return failure;
+											}),
+										),
+									),
+									Effect.flatMap(retainedFailure => Deferred.fail(record.deferred, retainedFailure)),
+									Effect.matchCauseEffect({ onFailure: () => Effect.void, onSuccess: () => Effect.void }),
+								),
+							onSuccess: result =>
+								closeOutput.pipe(
+									Effect.andThen(Deferred.await(record.outputDrained)),
+									Effect.andThen(
+										enqueue(
+											Effect.gen(function* () {
+												replaceLocalOperationOutput(
+													record,
+													result.replyText,
+													Buffer.byteLength(result.replyText),
+												);
+												record.completed = true;
+												if (activeEphemeralTurn?.operationGeneration === record.operationGeneration)
+													activeEphemeralTurn = undefined;
+												const receipt: RunEphemeralTurnReceipt = {
+													commandId: command.commandId,
+													correlationId: command.correlationId,
+													...(command.causationId === undefined
+														? {}
+														: { causationId: command.causationId }),
+													startedSessionRevision: record.startedSessionRevision,
+													operationGeneration: record.operationGeneration,
+													completedSessionRevision: sessionRevision,
+													replayed: false,
+													output: localOperationOutputSnapshot(record),
+												};
+												yield* publishEvent({
+													kind: "ephemeralTurnOutput",
+													metadata: command,
+													controllerEpoch,
+													viewId,
+													targetCommandId: command.commandId,
+													targetOperationGeneration: record.operationGeneration,
+													sessionRevision,
+													ephemeralTurnOutput: {
+														chunk: receipt.output.text,
+														totalBytes: receipt.output.totalBytes,
+														truncated: receipt.output.truncated,
+														reset: true,
+													},
+												});
+												yield* publishEvent({
+													kind: "ephemeralTurnCompleted",
+													metadata: command,
+													controllerEpoch,
+													viewId,
+													targetCommandId: command.commandId,
+													targetOperationGeneration: record.operationGeneration,
+													sessionRevision,
+												});
+												yield* Deferred.succeed(record.deferred, receipt);
+											}),
+										),
+									),
+									Effect.matchCauseEffect({ onFailure: () => Effect.void, onSuccess: () => Effect.void }),
+								),
+						}),
+					),
+				);
+				return { record, replayed: false };
+			}),
+		);
 		const receipt = yield* Deferred.await(admitted.record.deferred);
 		return admitted.replayed ? { ...receipt, replayed: true } : receipt;
 	});
@@ -2182,47 +3058,59 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 		command = yield* Effect.try({ try: () => decodeCancelEphemeralTurnCommand(command), catch: asRunnerFailure });
 		if (command.viewId !== viewId) return yield* mismatchedView(viewId);
 		if (command.controllerEpoch !== controllerEpoch) {
-			return yield* Effect.fail(new StaleRunnerControllerLeaseError({
-				viewId,
-				expectedControllerEpoch: command.controllerEpoch,
-				actualControllerEpoch: controllerEpoch,
-			}));
-		}
-		return yield* enqueue(Effect.gen(function* () {
-			yield* requireController(viewId, controllerEpoch);
-			if (command.expectedSessionRevision !== sessionRevision) {
-				return yield* Effect.fail(new SessionRevisionConflictError(command.expectedSessionRevision, sessionRevision));
-			}
-			const record = activeEphemeralTurn;
-			if (record === undefined || record.completed || record.command.commandId !== command.targetCommandId ||
-				record.operationGeneration !== command.targetOperationGeneration) {
-				return yield* Effect.fail(new RunnerEphemeralTurnTargetError({
-					targetCommandId: command.targetCommandId,
-					targetOperationGeneration: command.targetOperationGeneration,
-				}));
-			}
-			if (!record.cancellationRequested) {
-				record.cancellationRequested = true;
-				record.abortController.abort();
-				yield* publishEvent({
-					kind: "ephemeralTurnCancelRequested",
-					metadata: command,
-					controllerEpoch,
+			return yield* Effect.fail(
+				new StaleRunnerControllerLeaseError({
 					viewId,
+					expectedControllerEpoch: command.controllerEpoch,
+					actualControllerEpoch: controllerEpoch,
+				}),
+			);
+		}
+		return yield* enqueue(
+			Effect.gen(function* () {
+				yield* requireController(viewId, controllerEpoch);
+				if (command.expectedSessionRevision !== sessionRevision) {
+					return yield* Effect.fail(
+						new SessionRevisionConflictError(command.expectedSessionRevision, sessionRevision),
+					);
+				}
+				const record = activeEphemeralTurn;
+				if (
+					record === undefined ||
+					record.completed ||
+					record.command.commandId !== command.targetCommandId ||
+					record.operationGeneration !== command.targetOperationGeneration
+				) {
+					return yield* Effect.fail(
+						new RunnerEphemeralTurnTargetError({
+							targetCommandId: command.targetCommandId,
+							targetOperationGeneration: command.targetOperationGeneration,
+						}),
+					);
+				}
+				if (!record.cancellationRequested) {
+					record.cancellationRequested = true;
+					record.abortController.abort();
+					yield* publishEvent({
+						kind: "ephemeralTurnCancelRequested",
+						metadata: command,
+						controllerEpoch,
+						viewId,
+						targetCommandId: command.targetCommandId,
+						targetOperationGeneration: command.targetOperationGeneration,
+						sessionRevision,
+					});
+				}
+				return {
+					commandId: command.commandId,
+					correlationId: command.correlationId,
+					...(command.causationId === undefined ? {} : { causationId: command.causationId }),
 					targetCommandId: command.targetCommandId,
 					targetOperationGeneration: command.targetOperationGeneration,
-					sessionRevision,
-				});
-			}
-			return {
-				commandId: command.commandId,
-				correlationId: command.correlationId,
-				...(command.causationId === undefined ? {} : { causationId: command.causationId }),
-				targetCommandId: command.targetCommandId,
-				targetOperationGeneration: command.targetOperationGeneration,
-				cancellationRequested: true,
-			} satisfies CancelEphemeralTurnReceipt;
-		}));
+					cancellationRequested: true,
+				} satisfies CancelEphemeralTurnReceipt;
+			}),
+		);
 	});
 
 	interruptPrompt = Effect.fn("Runner.interruptPrompt")(function* (
@@ -2420,6 +3308,90 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 					toolConfigurationGeneration: result.toolConfigurationGeneration,
 					activeToolNames: result.activeToolNames,
 				} satisfies SetActiveToolsReceipt;
+			}),
+		);
+	});
+
+	const sameCycleModelCommand = (left: CycleModelCommand, right: CycleModelCommand): boolean =>
+		left.schemaVersion === right.schemaVersion &&
+		left.kind === right.kind &&
+		left.commandId === right.commandId &&
+		left.correlationId === right.correlationId &&
+		left.causationId === right.causationId &&
+		left.expectedSessionRevision === right.expectedSessionRevision &&
+		left.viewId === right.viewId &&
+		left.controllerEpoch === right.controllerEpoch &&
+		left.direction === right.direction;
+
+	const cycleModel = Effect.fn("Runner.cycleModel")(function* (
+		viewId: string,
+		controllerEpoch: number,
+		input: unknown,
+	) {
+		const command = yield* Effect.try({ try: () => decodeCycleModelCommand(input), catch: asRunnerFailure });
+		if (command.viewId !== viewId) return yield* mismatchedView(viewId);
+		if (command.controllerEpoch !== controllerEpoch) {
+			return yield* Effect.fail(
+				new StaleRunnerControllerLeaseError({
+					viewId,
+					expectedControllerEpoch: command.controllerEpoch,
+					actualControllerEpoch: controllerEpoch,
+				}),
+			);
+		}
+		return yield* enqueue(
+			Effect.gen(function* () {
+				yield* requireController(viewId, controllerEpoch);
+				const retained = cycleModelCommands.get(command.commandId);
+				if (retained) {
+					if (!sameCycleModelCommand(retained.command, command)) {
+						return yield* Effect.fail(
+							new InvalidRunnerCommandError({ issue: `Conflicting cycle-model command ${command.commandId}` }),
+						);
+					}
+					return { ...retained.receipt, replayed: true };
+				}
+				if (command.expectedSessionRevision !== sessionRevision) {
+					return yield* Effect.fail(
+						new SessionRevisionConflictError(command.expectedSessionRevision, sessionRevision),
+					);
+				}
+				const result = yield* Effect.tryPromise({
+					try: () => resources.session.cycleModel(command.direction),
+					catch: asRunnerFailure,
+				});
+				sessionRevision = Math.max(sessionRevision, resources.sessionManager.getSessionRevision());
+				const receipt: CycleModelReceipt = {
+					commandId: command.commandId,
+					correlationId: command.correlationId,
+					...(command.causationId === undefined ? {} : { causationId: command.causationId }),
+					sessionRevision,
+					replayed: false,
+					result:
+						result === undefined
+							? undefined
+							: {
+									provider: result.model.provider,
+									id: result.model.id,
+									thinkingLevel: result.thinkingLevel,
+									isScoped: result.isScoped,
+								},
+				};
+				if (cycleModelCommands.size >= options.eventCapacity) {
+					const oldest = cycleModelCommands.keys().next().value;
+					if (oldest !== undefined) cycleModelCommands.delete(oldest);
+				}
+				cycleModelCommands.set(command.commandId, { command, receipt });
+				if (result !== undefined) {
+					yield* publishEvent({
+						kind: "modelChanged",
+						metadata: command,
+						controllerEpoch,
+						viewId,
+						sessionRevision,
+					});
+				}
+				return receipt;
 			}),
 		);
 	});
@@ -2834,6 +3806,8 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 			);
 		}
 		const epoch = attached.controllerEpoch;
+		const planResolveCapabilityEpoch = resources.session.bindPlanResolveCapability(epoch);
+		terminalViews.get(command.viewId)!.planResolveCapabilityEpoch = planResolveCapabilityEpoch;
 
 		const terminalSnapshot = () =>
 			enqueue(
@@ -2855,7 +3829,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 		 * once started, a later detach or stop does not invalidate its result.
 		 * Only the private callable crosses the mailbox boundary.
 		 */
-		const terminalOutsideMailboxRead = <A>(read: () => A): Effect.Effect<A, RunnerFailure> =>
+		const terminalOutsideMailboxRead = <A>(read: () => A | Promise<A>): Effect.Effect<A, RunnerFailure> =>
 			Effect.gen(function* () {
 				const admittedRead = yield* enqueue(
 					Effect.gen(function* () {
@@ -2937,6 +3911,50 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 			terminalOutsideMailboxRead(() => resources.session.formatSessionAsText(queryOptions));
 		const formatAdvisorHistoryAsText = (queryOptions?: { readonly compact?: boolean }) =>
 			terminalOutsideMailboxRead(() => resources.session.formatAdvisorHistoryAsText(queryOptions));
+		const getModelCatalog = () =>
+			terminalQuery(() =>
+				Object.freeze(
+					resources.session
+						.getModelCatalog()
+						.map(item => Object.freeze({ ...item, roles: Object.freeze([...item.roles]) })),
+				),
+			);
+		const getToolCatalog = () =>
+			terminalQuery(() => {
+				const catalog = resources.session.getToolCatalog();
+				return Object.freeze({
+					generation: catalog.generation,
+					tools: Object.freeze(catalog.tools.map(item => Object.freeze({ ...item }))),
+				});
+			});
+		const getSessionMetadataSnapshot = () =>
+			terminalQuery(() => {
+				const metadata = resources.session.getSessionMetadataSnapshot();
+				return Object.freeze({
+					...metadata,
+					branch: Object.freeze([...metadata.branch]),
+					usage: Object.freeze({ ...metadata.usage }),
+					workflow: Object.freeze({ ...metadata.workflow }),
+				});
+			});
+		const getWorkflowEligibility = () =>
+			terminalQuery(() => {
+				const eligibility = resources.session.getWorkflowEligibility();
+				return Object.freeze({
+					...eligibility,
+					planResolve: Object.freeze({ ...eligibility.planResolve }),
+					goalContinuation: Object.freeze({ ...eligibility.goalContinuation }),
+				});
+			});
+		const getTurnLifecycle = () => terminalQuery(() => Object.freeze({ ...resources.session.getTurnLifecycle() }));
+		const saveDraft = (text: string) => terminalOutsideMailboxRead(() => resources.session.saveDraft(text));
+		const consumeDraft = () => terminalOutsideMailboxRead(() => resources.session.consumeDraft());
+		const invokeExtensionCommand = (name: string, args: string) =>
+			terminalOutsideMailboxRead(() => resources.session.invokeExtensionCommand(name, args));
+		const invokePlanResolve = (input: import("../session/durable-input-queue").JsonValue) =>
+			terminalOutsideMailboxRead(() => resources.session.invokePlanResolve(input, planResolveCapabilityEpoch));
+		const requestGoalContinuation = () =>
+			terminalOutsideMailboxRead(() => resources.session.requestGoalContinuation());
 		const subscribe = Effect.fn("Runner.subscribeTerminalView")(function* () {
 			const subscription = yield* PubSub.subscribe(terminalEvents);
 			const starting = yield* enqueue(
@@ -2985,6 +4003,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 						viewId: command.viewId,
 						controllerEpoch: epoch,
 					};
+					resources.session.unbindPlanResolveCapability(planResolveCapabilityEpoch);
 					views.delete(command.viewId);
 					activeController = undefined;
 					yield* publishEvent({
@@ -3015,6 +4034,16 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 			getAllToolNames,
 			formatSessionAsText,
 			formatAdvisorHistoryAsText,
+			getModelCatalog,
+			getToolCatalog,
+			getSessionMetadataSnapshot,
+			getWorkflowEligibility,
+			getTurnLifecycle,
+			saveDraft,
+			consumeDraft,
+			invokeExtensionCommand,
+			invokePlanResolve,
+			requestGoalContinuation,
 			submit: attached.submitInput,
 			submitCustomMessage: attached.submitCustomMessage,
 			edit: attached.editQueuedInput,
@@ -3022,10 +4051,18 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 			setActiveTools: attached.setActiveTools,
 			replaceTodos: attached.replaceTodos,
 			refreshSshTool: attached.refreshSshTool,
+			cycleModel: attached.cycleModel,
 			setThinkingLevel: attached.setThinkingLevel,
 			setModel: attached.setModel,
 			transitionPlanMode: attached.transitionPlanMode,
 			transitionGoalMode: attached.transitionGoalMode,
+			shake: attached.shake,
+			cancelShake: attached.cancelShake,
+			handoff: attached.handoff,
+			cancelHandoff: attached.cancelHandoff,
+			getCheckpointState: attached.getCheckpointState,
+			setCheckpointState: attached.setCheckpointState,
+			reload: attached.reload,
 			compact: attached.compact,
 			cancelCompaction: attached.cancelCompaction,
 			runEphemeralTurn: attached.runEphemeralTurn,
@@ -3053,6 +4090,32 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 					record => Deferred.fail(record.deferred, new SessionRunnerStoppedError()).pipe(Effect.asVoid),
 					{ discard: true },
 				);
+				const stoppingSessionOperation = activeSessionOperation;
+				activeSessionOperation = undefined;
+				if (stoppingSessionOperation?.kind === "shake" || stoppingSessionOperation?.kind === "handoff") {
+					stoppingSessionOperation.record.abortController.abort();
+				}
+				yield* Effect.forEach(
+					shakeCommands.values(),
+					record => Deferred.fail(record.deferred, new SessionRunnerStoppedError()).pipe(Effect.asVoid),
+					{ discard: true },
+				);
+				yield* Effect.forEach(
+					handoffCommands.values(),
+					record => Deferred.fail(record.deferred, new SessionRunnerStoppedError()).pipe(Effect.asVoid),
+					{ discard: true },
+				);
+				yield* Effect.forEach(
+					reloadCommands.values(),
+					record => Deferred.fail(record.deferred, new SessionRunnerStoppedError()).pipe(Effect.asVoid),
+					{ discard: true },
+				);
+				yield* FiberSet.clear(sessionOperationFibers);
+				for (const terminalView of terminalViews.values()) {
+					if (terminalView.planResolveCapabilityEpoch !== undefined) {
+						resources.session.unbindPlanResolveCapability(terminalView.planResolveCapabilityEpoch);
+					}
+				}
 				resources.session.beginDispose();
 				activeCompaction = undefined;
 				yield* Effect.forEach(

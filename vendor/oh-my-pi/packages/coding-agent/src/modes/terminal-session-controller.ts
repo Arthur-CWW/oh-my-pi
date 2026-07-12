@@ -3,57 +3,83 @@ import { Effect, Exit, Scope } from "effect";
 import type {
 	CancelCompactionReceipt,
 	CancelEphemeralTurnReceipt,
+	CancelHandoffReceipt,
 	CancelLocalOperationReceipt,
+	CancelShakeReceipt,
+	CycleModelReceipt,
+	GetCheckpointStateReceipt,
 	InterruptPromptReceipt,
 	RefreshSshToolReceipt,
+	ReloadSessionReceipt,
 	ReplaceTodosReceipt,
 	RunCompactionReceipt,
 	RunEphemeralTurnReceipt,
+	RunHandoffReceipt,
 	RunLocalOperationReceipt,
+	RunnerCheckpointState,
 	RunnerCommandReceipt,
 	RunnerImageContent,
+	RunShakeReceipt,
 	SetActiveToolsReceipt,
+	SetCheckpointStateReceipt,
 	SetModelReceipt,
-	SubmitCustomMessageCommand,
 	SetThinkingLevelReceipt,
+	SubmitCustomMessageCommand,
 	TransitionGoalModeReceipt,
 	TransitionPlanModeReceipt,
 } from "../runner/protocol";
 import {
 	decodeCancelCompactionCommand,
 	decodeCancelEphemeralTurnCommand,
+	decodeCancelHandoffCommand,
 	decodeCancelLocalOperationCommand,
 	decodeCancelQueuedInputCommand,
+	decodeCancelShakeCommand,
+	decodeCycleModelCommand,
 	decodeEditQueuedInputCommand,
+	decodeGetCheckpointStateCommand,
 	decodeInterruptPromptCommand,
 	decodeRefreshSshToolCommand,
+	decodeReloadSessionCommand,
 	decodeReplaceTodosCommand,
 	decodeRunCompactionCommand,
 	decodeRunEphemeralTurnCommand,
+	decodeRunHandoffCommand,
 	decodeRunLocalOperationCommand,
+	decodeRunShakeCommand,
 	decodeSetActiveToolsCommand,
+	decodeSetCheckpointStateCommand,
 	decodeSetModelCommand,
 	decodeSetThinkingLevelCommand,
-	decodeSubmitInputCommand,
 	decodeSubmitCustomMessageCommand,
+	decodeSubmitInputCommand,
 	decodeTransitionGoalModeCommand,
 	decodeTransitionPlanModeCommand,
-	RunnerLocalOperationTargetError,
-	RunnerEphemeralTurnTargetError,
+	InvalidRunnerCommandError,
 	RUNNER_SCHEMA_VERSION,
 	RunnerCompactionTargetError,
+	RunnerEphemeralTurnTargetError,
+	RunnerLocalOperationTargetError,
 } from "../runner/protocol";
 import type { RunnerFailure, SessionRunner } from "../runner/session-runner";
 import type {
 	TerminalAdvisorStats,
 	TerminalAsyncJobSnapshot,
 	TerminalContextUsage,
+	TerminalExtensionCommandResult,
 	TerminalHindsightSessionState,
+	TerminalModelCatalogItem,
+	TerminalPlanResolveResult,
+	TerminalSessionMetadataSnapshot,
 	TerminalSessionSnapshot,
 	TerminalSessionStats,
 	TerminalSessionView,
+	TerminalToolCatalog,
+	TerminalTurnLifecycle,
+	TerminalWorkflowEligibility,
 } from "../runner/terminal-session-view";
 import type { AgentSessionEvent } from "../session/agent-session";
+import type { JsonValue } from "../session/durable-input-queue";
 import type { ConfiguredThinkingLevel } from "../thinking";
 import type { TodoPhase } from "../tools/todo";
 
@@ -121,6 +147,13 @@ export interface TerminalSetModelIntent {
 	readonly causationId?: string;
 }
 
+export interface TerminalCycleModelIntent {
+	readonly direction?: "forward" | "backward";
+	readonly commandId?: string;
+	readonly correlationId?: string;
+	readonly causationId?: string;
+}
+
 export interface TerminalSetThinkingLevelIntent {
 	readonly thinkingLevel: ConfiguredThinkingLevel | undefined;
 	readonly commandId?: string;
@@ -167,6 +200,51 @@ export interface TerminalInterruptPromptIntent {
 	readonly causationId?: string;
 }
 
+export interface TerminalShakeIntent {
+	readonly mode: "elide" | "images";
+	readonly commandId?: string;
+	readonly correlationId?: string;
+	readonly causationId?: string;
+}
+
+export interface TerminalCancelShakeIntent {
+	readonly commandId?: string;
+	readonly correlationId?: string;
+	readonly causationId?: string;
+}
+
+export interface TerminalHandoffIntent {
+	readonly customInstructions?: string;
+	readonly commandId?: string;
+	readonly correlationId?: string;
+	readonly causationId?: string;
+}
+
+export interface TerminalCancelHandoffIntent {
+	readonly commandId?: string;
+	readonly correlationId?: string;
+	readonly causationId?: string;
+}
+
+export interface TerminalGetCheckpointStateIntent {
+	readonly commandId?: string;
+	readonly correlationId?: string;
+	readonly causationId?: string;
+}
+
+export interface TerminalSetCheckpointStateIntent {
+	readonly state: RunnerCheckpointState | null;
+	readonly commandId?: string;
+	readonly correlationId?: string;
+	readonly causationId?: string;
+}
+
+export interface TerminalReloadSessionIntent {
+	readonly commandId?: string;
+	readonly correlationId?: string;
+	readonly causationId?: string;
+}
+
 export interface TerminalCompactionIntent {
 	readonly customInstructions?: string;
 	readonly commandId?: string;
@@ -198,10 +276,7 @@ export type TerminalLocalOperationIntent = {
 	readonly commandId?: string;
 	readonly correlationId?: string;
 	readonly causationId?: string;
-} & (
-	| { readonly kind: "bash"; readonly command: string }
-	| { readonly kind: "python"; readonly code: string }
-);
+} & ({ readonly kind: "bash"; readonly command: string } | { readonly kind: "python"; readonly code: string });
 
 export interface TerminalCancelLocalOperationIntent {
 	readonly commandId?: string;
@@ -238,12 +313,8 @@ export interface TerminalSessionController {
 	readonly epoch: number;
 	readonly snapshot: () => TerminalSessionSnapshot;
 	readonly subscribeAgentEvents: (listener: (event: AgentSessionEvent) => void) => () => void;
-	readonly subscribeLocalOperationOutput: (
-		listener: (output: TerminalLocalOperationOutput) => void,
-	) => () => void;
-	readonly subscribeEphemeralTurnOutput: (
-		listener: (output: TerminalEphemeralTurnOutput) => void,
-	) => () => void;
+	readonly subscribeLocalOperationOutput: (listener: (output: TerminalLocalOperationOutput) => void) => () => void;
+	readonly subscribeEphemeralTurnOutput: (listener: (output: TerminalEphemeralTurnOutput) => void) => () => void;
 	readonly refresh: () => Promise<TerminalSessionSnapshot>;
 	readonly getContextUsage: (options?: {
 		readonly contextWindow?: number;
@@ -257,6 +328,16 @@ export interface TerminalSessionController {
 	readonly getAllToolNames: () => Promise<ReadonlyArray<string>>;
 	readonly formatSessionAsText: (options?: { readonly compact?: boolean }) => Promise<string>;
 	readonly formatAdvisorHistoryAsText: (options?: { readonly compact?: boolean }) => Promise<string | null>;
+	readonly getModelCatalog: () => Promise<readonly TerminalModelCatalogItem[]>;
+	readonly getToolCatalog: () => Promise<TerminalToolCatalog>;
+	readonly getSessionMetadataSnapshot: () => Promise<TerminalSessionMetadataSnapshot>;
+	readonly getWorkflowEligibility: () => Promise<TerminalWorkflowEligibility>;
+	readonly getTurnLifecycle: () => Promise<TerminalTurnLifecycle>;
+	readonly saveDraft: (text: string) => Promise<void>;
+	readonly consumeDraft: () => Promise<string | null>;
+	readonly invokeExtensionCommand: (name: string, args: string) => Promise<TerminalExtensionCommandResult>;
+	readonly invokePlanResolve: (input: JsonValue) => Promise<TerminalPlanResolveResult>;
+	readonly requestGoalContinuation: () => Promise<boolean>;
 	readonly submit: (intent: TerminalSubmitIntent) => Promise<RunnerCommandReceipt>;
 	readonly submitCustomMessage: (intent: TerminalSubmitCustomMessageIntent) => Promise<RunnerCommandReceipt>;
 	readonly edit: (intent: TerminalEditIntent) => Promise<RunnerCommandReceipt>;
@@ -265,19 +346,23 @@ export interface TerminalSessionController {
 	readonly replaceTodos: (intent: TerminalReplaceTodosIntent) => Promise<ReplaceTodosReceipt>;
 	readonly refreshSshTool: (intent: TerminalRefreshSshToolIntent) => Promise<RefreshSshToolReceipt>;
 	readonly setModel: (intent: TerminalSetModelIntent) => Promise<SetModelReceipt>;
+	readonly cycleModel: (intent?: TerminalCycleModelIntent) => Promise<CycleModelReceipt>;
 	readonly setThinkingLevel: (intent: TerminalSetThinkingLevelIntent) => Promise<SetThinkingLevelReceipt>;
 	readonly transitionPlanMode: (intent: TerminalTransitionPlanModeIntent) => Promise<TransitionPlanModeReceipt>;
 	readonly transitionGoalMode: (intent: TerminalTransitionGoalModeIntent) => Promise<TransitionGoalModeReceipt>;
+	readonly shake: (intent: TerminalShakeIntent) => Promise<RunShakeReceipt>;
+	readonly cancelShake: (intent?: TerminalCancelShakeIntent) => Promise<CancelShakeReceipt>;
+	readonly handoff: (intent?: TerminalHandoffIntent) => Promise<RunHandoffReceipt>;
+	readonly cancelHandoff: (intent?: TerminalCancelHandoffIntent) => Promise<CancelHandoffReceipt>;
+	readonly getCheckpointState: (intent?: TerminalGetCheckpointStateIntent) => Promise<GetCheckpointStateReceipt>;
+	readonly setCheckpointState: (intent: TerminalSetCheckpointStateIntent) => Promise<SetCheckpointStateReceipt>;
+	readonly reload: (intent?: TerminalReloadSessionIntent) => Promise<ReloadSessionReceipt>;
 	readonly compact: (intent?: TerminalCompactionIntent) => Promise<RunCompactionReceipt>;
 	readonly cancelCompaction: (intent?: TerminalCancelCompactionIntent) => Promise<CancelCompactionReceipt>;
 	readonly runEphemeralTurn: (intent: TerminalEphemeralTurnIntent) => Promise<RunEphemeralTurnReceipt>;
-	readonly cancelEphemeralTurn: (
-		intent?: TerminalCancelEphemeralTurnIntent,
-	) => Promise<CancelEphemeralTurnReceipt>;
+	readonly cancelEphemeralTurn: (intent?: TerminalCancelEphemeralTurnIntent) => Promise<CancelEphemeralTurnReceipt>;
 	readonly runLocalOperation: (intent: TerminalLocalOperationIntent) => Promise<RunLocalOperationReceipt>;
-	readonly cancelLocalOperation: (
-		intent?: TerminalCancelLocalOperationIntent,
-	) => Promise<CancelLocalOperationReceipt>;
+	readonly cancelLocalOperation: (intent?: TerminalCancelLocalOperationIntent) => Promise<CancelLocalOperationReceipt>;
 	readonly interruptPrompt: (intent?: TerminalInterruptPromptIntent) => Promise<InterruptPromptReceipt>;
 	readonly close: () => Promise<void>;
 }
@@ -398,6 +483,16 @@ export async function createTerminalSessionController(
 			getAllToolNames: () => run(view!.getAllToolNames()),
 			formatSessionAsText: queryOptions => run(view!.formatSessionAsText(queryOptions)),
 			formatAdvisorHistoryAsText: queryOptions => run(view!.formatAdvisorHistoryAsText(queryOptions)),
+			getModelCatalog: () => run(view!.getModelCatalog()),
+			getToolCatalog: () => run(view!.getToolCatalog()),
+			getSessionMetadataSnapshot: () => run(view!.getSessionMetadataSnapshot()),
+			getWorkflowEligibility: () => run(view!.getWorkflowEligibility()),
+			getTurnLifecycle: () => run(view!.getTurnLifecycle()),
+			saveDraft: text => run(view!.saveDraft(text)),
+			consumeDraft: () => run(view!.consumeDraft()),
+			invokeExtensionCommand: (name, args) => run(view!.invokeExtensionCommand(name, args)),
+			invokePlanResolve: input => run(view!.invokePlanResolve(input)),
+			requestGoalContinuation: () => run(view!.requestGoalContinuation()),
 			submit: intent =>
 				fenced(async current => {
 					const ids = metadata(intent);
@@ -586,6 +681,31 @@ export async function createTerminalSessionController(
 					throw error;
 				}
 			},
+			cycleModel: async (intent = {}) => {
+				const current = await refresh();
+				try {
+					const ids = metadata(intent);
+					const receipt = await run(
+						view!.cycleModel(
+							decodeCycleModelCommand({
+								schemaVersion: RUNNER_SCHEMA_VERSION,
+								kind: "cycleModel",
+								...ids,
+								...(intent.causationId === undefined ? {} : { causationId: intent.causationId }),
+								expectedSessionRevision: current.runner.sessionRevision,
+								viewId,
+								controllerEpoch: view!.epoch,
+								direction: intent.direction ?? "forward",
+							}),
+						),
+					);
+					await refresh();
+					return receipt;
+				} catch (error) {
+					await refresh();
+					throw error;
+				}
+			},
 			setThinkingLevel: async intent => {
 				try {
 					const ids = metadata(intent);
@@ -666,6 +786,175 @@ export async function createTerminalSessionController(
 					throw error;
 				}
 			},
+			shake: async intent => {
+				const current = await refresh();
+				try {
+					const ids = metadata(intent);
+					const receipt = await run(
+						view!.shake(
+							decodeRunShakeCommand({
+								schemaVersion: RUNNER_SCHEMA_VERSION,
+								kind: "runShake",
+								...ids,
+								...(intent.causationId === undefined ? {} : { causationId: intent.causationId }),
+								expectedSessionRevision: current.runner.sessionRevision,
+								viewId,
+								controllerEpoch: view!.epoch,
+								mode: intent.mode,
+							}),
+						),
+					);
+					await refresh();
+					return receipt;
+				} catch (error) {
+					await refresh();
+					throw error;
+				}
+			},
+			cancelShake: async (intent = {}) => {
+				const current = await refresh();
+				const active = current.runner.activeSessionOperation;
+				if (active?.kind !== "shake") {
+					throw new InvalidRunnerCommandError({ issue: "No active shake operation" });
+				}
+				const ids = metadata(intent);
+				const receipt = await run(
+					view!.cancelShake(
+						decodeCancelShakeCommand({
+							schemaVersion: RUNNER_SCHEMA_VERSION,
+							kind: "cancelShake",
+							...ids,
+							...(intent.causationId === undefined ? {} : { causationId: intent.causationId }),
+							viewId,
+							controllerEpoch: view!.epoch,
+							targetCommandId: active.commandId,
+							targetOperationGeneration: active.operationGeneration,
+						}),
+					),
+				);
+				await refresh();
+				return receipt;
+			},
+			handoff: async (intent = {}) => {
+				const current = await refresh();
+				try {
+					const ids = metadata(intent);
+					const receipt = await run(
+						view!.handoff(
+							decodeRunHandoffCommand({
+								schemaVersion: RUNNER_SCHEMA_VERSION,
+								kind: "runHandoff",
+								...ids,
+								...(intent.causationId === undefined ? {} : { causationId: intent.causationId }),
+								expectedSessionRevision: current.runner.sessionRevision,
+								viewId,
+								controllerEpoch: view!.epoch,
+								...(intent.customInstructions === undefined
+									? {}
+									: { customInstructions: intent.customInstructions }),
+							}),
+						),
+					);
+					await refresh();
+					return receipt;
+				} catch (error) {
+					await refresh();
+					throw error;
+				}
+			},
+			cancelHandoff: async (intent = {}) => {
+				const current = await refresh();
+				const active = current.runner.activeSessionOperation;
+				if (active?.kind !== "handoff") {
+					throw new InvalidRunnerCommandError({ issue: "No active handoff operation" });
+				}
+				const ids = metadata(intent);
+				const receipt = await run(
+					view!.cancelHandoff(
+						decodeCancelHandoffCommand({
+							schemaVersion: RUNNER_SCHEMA_VERSION,
+							kind: "cancelHandoff",
+							...ids,
+							...(intent.causationId === undefined ? {} : { causationId: intent.causationId }),
+							viewId,
+							controllerEpoch: view!.epoch,
+							targetCommandId: active.commandId,
+							targetOperationGeneration: active.operationGeneration,
+						}),
+					),
+				);
+				await refresh();
+				return receipt;
+			},
+			getCheckpointState: async (intent = {}) => {
+				const ids = metadata(intent);
+				try {
+					return await run(
+						view!.getCheckpointState(
+							decodeGetCheckpointStateCommand({
+								schemaVersion: RUNNER_SCHEMA_VERSION,
+								kind: "getCheckpointState",
+								...ids,
+								...(intent.causationId === undefined ? {} : { causationId: intent.causationId }),
+								viewId,
+								controllerEpoch: view!.epoch,
+							}),
+						),
+					);
+				} catch (error) {
+					await refresh();
+					throw error;
+				}
+			},
+			setCheckpointState: async intent => {
+				const current = await refresh();
+				try {
+					const ids = metadata(intent);
+					const receipt = await run(
+						view!.setCheckpointState(
+							decodeSetCheckpointStateCommand({
+								schemaVersion: RUNNER_SCHEMA_VERSION,
+								kind: "setCheckpointState",
+								...ids,
+								...(intent.causationId === undefined ? {} : { causationId: intent.causationId }),
+								viewId,
+								controllerEpoch: view!.epoch,
+								expectedCheckpointRevision: current.runner.checkpointRevision,
+								state: intent.state,
+							}),
+						),
+					);
+					await refresh();
+					return receipt;
+				} catch (error) {
+					await refresh();
+					throw error;
+				}
+			},
+			reload: async (intent = {}) => {
+				const current = await refresh();
+				try {
+					const ids = metadata(intent);
+					const receipt = await run(
+						view!.reload(
+							decodeReloadSessionCommand({
+								schemaVersion: RUNNER_SCHEMA_VERSION,
+								kind: "reloadSession",
+								...ids,
+								...(intent.causationId === undefined ? {} : { causationId: intent.causationId }),
+								expectedSessionRevision: current.runner.sessionRevision,
+								viewId,
+								controllerEpoch: view!.epoch,
+							}),
+						),
+					);
+					await refresh();
+					return receipt;
+				} catch (error) {
+					await refresh();
+					throw error;
+				}
+			},
 			compact: async (intent = {}) => {
 				const current = await refresh();
 				try {
@@ -724,16 +1013,20 @@ export async function createTerminalSessionController(
 				const current = await refresh();
 				try {
 					const ids = metadata(intent);
-					const receipt = await run(view!.runEphemeralTurn(decodeRunEphemeralTurnCommand({
-						schemaVersion: RUNNER_SCHEMA_VERSION,
-						kind: "runEphemeralTurn",
-						...ids,
-						...(intent.causationId === undefined ? {} : { causationId: intent.causationId }),
-						expectedSessionRevision: current.runner.sessionRevision,
-						viewId,
-						controllerEpoch: view!.epoch,
-						prompt: intent.prompt,
-					})));
+					const receipt = await run(
+						view!.runEphemeralTurn(
+							decodeRunEphemeralTurnCommand({
+								schemaVersion: RUNNER_SCHEMA_VERSION,
+								kind: "runEphemeralTurn",
+								...ids,
+								...(intent.causationId === undefined ? {} : { causationId: intent.causationId }),
+								expectedSessionRevision: current.runner.sessionRevision,
+								viewId,
+								controllerEpoch: view!.epoch,
+								prompt: intent.prompt,
+							}),
+						),
+					);
 					await refresh();
 					return receipt;
 				} catch (error) {
@@ -751,17 +1044,21 @@ export async function createTerminalSessionController(
 					});
 				}
 				const ids = metadata(intent);
-				const receipt = await run(view!.cancelEphemeralTurn(decodeCancelEphemeralTurnCommand({
-					schemaVersion: RUNNER_SCHEMA_VERSION,
-					kind: "cancelEphemeralTurn",
-					...ids,
-					...(intent.causationId === undefined ? {} : { causationId: intent.causationId }),
-					expectedSessionRevision: current.runner.sessionRevision,
-					viewId,
-					controllerEpoch: view!.epoch,
-					targetCommandId: active.commandId,
-					targetOperationGeneration: active.operationGeneration,
-				})));
+				const receipt = await run(
+					view!.cancelEphemeralTurn(
+						decodeCancelEphemeralTurnCommand({
+							schemaVersion: RUNNER_SCHEMA_VERSION,
+							kind: "cancelEphemeralTurn",
+							...ids,
+							...(intent.causationId === undefined ? {} : { causationId: intent.causationId }),
+							expectedSessionRevision: current.runner.sessionRevision,
+							viewId,
+							controllerEpoch: view!.epoch,
+							targetCommandId: active.commandId,
+							targetOperationGeneration: active.operationGeneration,
+						}),
+					),
+				);
 				await refresh();
 				return receipt;
 			},

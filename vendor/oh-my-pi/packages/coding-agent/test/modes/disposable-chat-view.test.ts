@@ -54,6 +54,9 @@ function createSnapshot(): TerminalSessionSnapshot {
 			activeCompaction: undefined,
 			activeLocalOperation: undefined,
 			activeEphemeralTurn: undefined,
+			activeSessionOperation: undefined,
+			checkpointRevision: 0,
+			checkpointState: undefined,
 			workflow: { kind: "none" },
 			toolConfigurationGeneration: 0,
 			activeToolNames: [],
@@ -175,6 +178,7 @@ function createCallbacks(): {
 		requestStop: async () => {
 			stops++;
 		},
+		requestTransition: async () => {},
 	};
 	return { callbacks, reloads: () => reloads, stops: () => stops };
 }
