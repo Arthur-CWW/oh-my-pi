@@ -292,6 +292,11 @@ export class AgentLifecycleManager {
 			clearTimeout(adopted.timer);
 			adopted.timer = undefined;
 		}
+		// Publish the transition before the first await. Message delivery uses
+		// `parked` as the reserve-before-revive path; leaving this ref `idle`
+		// during flush/dispose lets a sender target a session that is already
+		// dying and falsely report a successful wake.
+		this.#registry.setStatus(id, "parked");
 		const sessionManager = session.sessionManager;
 		if (sessionManager) {
 			try {
@@ -300,7 +305,16 @@ export class AgentLifecycleManager {
 				await sessionManager.flush();
 			} catch (error) {
 				logger.warn("AgentLifecycleManager.park: could not persist parked state", { id, error: String(error) });
-				this.#armTimer(id, adopted);
+				if (
+					this.#adopted.get(id) === adopted &&
+					this.#registry.get(id) === ref &&
+					ref.session === session &&
+					this.#registry.get(id)?.status === "parked"
+				) {
+					// Persistence is authoritative: make the still-live session
+					// visible again. The idle status event re-arms its TTL.
+					this.#registry.setStatus(id, "idle");
+				}
 				return;
 			}
 		}
@@ -309,7 +323,7 @@ export class AgentLifecycleManager {
 			this.#adopted.get(id) !== adopted ||
 			this.#registry.get(id) !== ref ||
 			ref.session !== session ||
-			ref.status !== "idle"
+			this.#registry.get(id)?.status !== "parked"
 		) {
 			return;
 		}
@@ -324,7 +338,6 @@ export class AgentLifecycleManager {
 		// Only a replacement ref/session may take ownership away from this park.
 		if (this.#registry.get(id) !== ref || ref.session !== session) return;
 		this.#registry.detachSession(id);
-		this.#registry.setStatus(id, "parked");
 	}
 
 	#hasLiveWork(id: string, session: AgentSession): "live_async_job" | "live_model_turn" | undefined {

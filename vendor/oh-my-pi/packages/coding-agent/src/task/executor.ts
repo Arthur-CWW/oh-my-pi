@@ -2613,16 +2613,19 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 					}
 					registry.detachSession(id);
 				} else {
-					// Keep-alive: finished and failed subagents both stay interrogable.
-					// The lifecycle manager owns idle-TTL parking + revival from here on.
+					// Completed/failed children are journal-authoritative: keep only
+					// their bounded registry projection resident and reconstruct the
+					// detailed session on demand. Soft interrupts and runtime-limit
+					// pauses remain live because they are explicitly resumable work.
 					registry.setStatus(id, "idle");
-					// Soft interrupts retain a live, immediately revivable session.
-					AgentLifecycleManager.global().adopt(id, {
+					const lifecycle = AgentLifecycleManager.global();
+					lifecycle.adopt(id, {
 						idleTtlMs: agentIdleTtlMs,
 						revive: reviveSession ?? undefined,
 						sessionSubscription: sessionStatusSubscription,
 					});
 					sessionStatusSubscription = undefined;
+					if (!softInterruptKeptAlive && !timeoutKeptAlive) await lifecycle.park(id);
 				}
 			}
 		}

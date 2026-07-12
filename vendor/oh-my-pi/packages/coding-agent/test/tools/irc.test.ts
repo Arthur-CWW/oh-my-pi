@@ -183,6 +183,51 @@ describe("IRC", () => {
 			expect(registry.get("0-Parked")?.status).toBe("idle");
 		});
 
+		it("reserves a send racing park and delivers exactly once after revival", async () => {
+			const flush = Promise.withResolvers<void>();
+			const revived = makeFakeSession();
+			revived.setOutcome("woken");
+			const dyingDeliveries: IrcMessage[] = [];
+			const dying = {
+				sessionManager: {
+					appendCustomEntry: () => {},
+					getEntries: () => [],
+					getSessionId: () => "parking-race",
+					flush: () => flush.promise,
+				},
+				deliverIrcMessage: async (message: IrcMessage) => {
+					dyingDeliveries.push(message);
+					return "woken" as const;
+				},
+				dispose: async () => {},
+			} as unknown as AgentSession;
+			registry.register({
+				id: "0-Parking",
+				displayName: "task",
+				kind: "sub",
+				session: dying,
+				sessionFile: "/tmp/0-Parking.jsonl",
+				status: "idle",
+			});
+			const lifecycle = AgentLifecycleManager.global();
+			lifecycle.adopt("0-Parking", {
+				idleTtlMs: 0,
+				revive: async () => revived.session,
+			});
+
+			const parking = lifecycle.park("0-Parking");
+			expect(registry.get("0-Parking")?.status).toBe("parked");
+			const sending = bus.send({ from: "0-Main", to: "0-Parking", body: "race-safe" });
+			flush.resolve();
+
+			await parking;
+			const receipt = await sending;
+			expect(receipt).toEqual({ to: "0-Parking", outcome: "revived" });
+			expect(dyingDeliveries).toEqual([]);
+			expect(revived.delivered.map(message => message.body)).toEqual(["race-safe"]);
+			expect(bus.unreadCount("0-Parking")).toBe(0);
+		});
+
 		it("send survives a parked revive being replaced and delivers exactly once", async () => {
 			const replacement = makeFakeSession();
 			replacement.setOutcome("woken");

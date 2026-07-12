@@ -477,19 +477,19 @@ describe("AgentLifecycleManager", () => {
 		expect(stub.disposeCalls()).toBe(0);
 	});
 
-	it("isParking is true exactly while park's dispose is in flight; parked only after it completes", async () => {
+	it("publishes parked while dispose is in flight and detaches after it completes", async () => {
 		const gate = deferred();
 		const stub = makeSessionStub(() => gate.promise);
 		registerIdleSub("7-Sub", stub.session);
 		lifecycle.adopt("7-Sub", { idleTtlMs: 0 });
 
-		// park() runs synchronously up to `await session.dispose()`, which we hold open.
+		// park() publishes the reservation-safe state before awaiting dispose.
 		const parking = lifecycle.park("7-Sub");
 
 		expect(stub.disposeCalls()).toBe(1);
 		expect(lifecycle.isParking("7-Sub")).toBe(true);
 		expect(registry.get("7-Sub")).toBeDefined();
-		expect(registry.get("7-Sub")?.status).toBe("idle"); // not yet flipped
+		expect(registry.get("7-Sub")?.status).toBe("parked");
 
 		gate.resolve();
 		await parking;

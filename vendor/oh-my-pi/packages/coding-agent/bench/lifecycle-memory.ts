@@ -10,10 +10,11 @@ import { AgentSession } from "../src/session/agent-session";
 import { AuthStorage } from "../src/session/auth-storage";
 import { SessionManager } from "../src/session/session-manager";
 
-const CHILD_COUNTS = [1, 10, 50] as const;
+const CHILD_COUNTS = [1, 100, 300] as const;
 const PHASES = ["baseline", "live-idle", "parked-settled", "revived", "reparked"] as const;
 const MAX_PARKED_DESCRIPTOR_SLOPE = 0.1;
 const IDLE_TTL_MS = 60_000;
+const SYNTHETIC_TRANSCRIPT_BYTES = 256 * 1024;
 
 export type LifecycleMemoryPhase = (typeof PHASES)[number];
 
@@ -28,6 +29,7 @@ export interface LifecycleMemorySample {
 	phase: LifecycleMemoryPhase;
 	baselineDescriptors: number;
 	descriptors: number;
+	heapUsedBytes: number;
 	pssBytes: number | null;
 	resources: LifecycleResourceCounts;
 	rssBytes: number;
@@ -40,6 +42,7 @@ export interface LifecycleMetricSlope {
 
 export interface LifecycleBenchmarkSummary {
 	descriptorDelta: Record<LifecycleMemoryPhase, LifecycleMetricSlope>;
+	heapUsedBytes: Record<LifecycleMemoryPhase, LifecycleMetricSlope>;
 	pssBytes: Partial<Record<LifecycleMemoryPhase, LifecycleMetricSlope>>;
 	rssBytes: Record<LifecycleMemoryPhase, LifecycleMetricSlope>;
 }
@@ -86,10 +89,10 @@ function regression(values: readonly { x: number; y: number }[]): LifecycleMetri
 	return { baseline: meanY - meanX * perChild, perChild };
 }
 
-function slope(samples: readonly LifecycleMemorySample[], metric: "rssBytes" | "pssBytes"): LifecycleMetricSlope | null {
+function slope(samples: readonly LifecycleMemorySample[], metric: "heapUsedBytes" | "rssBytes" | "pssBytes"): LifecycleMetricSlope | null {
 	return regression(
 		samples
-			.filter(sample => metric === "rssBytes" || sample.pssBytes !== null)
+			.filter(sample => metric !== "pssBytes" || sample.pssBytes !== null)
 			.map(sample => ({ x: sample.childCount, y: sample[metric] as number })),
 	);
 }
@@ -100,19 +103,22 @@ function descriptorSlope(samples: readonly LifecycleMemorySample[]): LifecycleMe
 
 export function summarizeSamples(samples: readonly LifecycleMemorySample[]): LifecycleBenchmarkSummary {
 	const descriptorDelta = {} as Record<LifecycleMemoryPhase, LifecycleMetricSlope>;
+	const heapUsedBytes = {} as Record<LifecycleMemoryPhase, LifecycleMetricSlope>;
 	const rssBytes = {} as Record<LifecycleMemoryPhase, LifecycleMetricSlope>;
 	const pssBytes: Partial<Record<LifecycleMemoryPhase, LifecycleMetricSlope>> = {};
 	for (const phase of PHASES) {
 		const phaseSamples = samples.filter(sample => sample.phase === phase).sort((a, b) => a.childCount - b.childCount);
 		const descriptors = descriptorSlope(phaseSamples);
+		const heapUsed = slope(phaseSamples, "heapUsedBytes");
 		const rss = slope(phaseSamples, "rssBytes");
-		if (!descriptors || !rss) throw new Error(`Missing benchmark samples for ${phase}`);
+		if (!descriptors || !heapUsed || !rss) throw new Error(`Missing benchmark samples for ${phase}`);
 		descriptorDelta[phase] = descriptors;
+		heapUsedBytes[phase] = heapUsed;
 		rssBytes[phase] = rss;
 		const pss = slope(phaseSamples, "pssBytes");
 		if (pss) pssBytes[phase] = pss;
 	}
-	return { descriptorDelta, rssBytes, pssBytes };
+	return { descriptorDelta, heapUsedBytes, rssBytes, pssBytes };
 }
 
 export function assertParkedResources(counts: LifecycleResourceCounts): void {
@@ -169,15 +175,26 @@ async function capture(
 		phase,
 		baselineDescriptors,
 		descriptors,
+		heapUsedBytes: process.memoryUsage().heapUsed,
 		pssBytes: await pssBytes(),
 		resources,
 		rssBytes: process.memoryUsage.rss(),
 	};
 }
 
-function createSession(sessionManager: SessionManager, modelRegistry: ModelRegistry): AgentSession {
+function createSession(sessionManager: SessionManager, modelRegistry: ModelRegistry, seed: string): AgentSession {
+	const transcript = Array.from(
+		{ length: Math.ceil(SYNTHETIC_TRANSCRIPT_BYTES / 32) },
+		(_, index) => `${seed}:${index.toString(36).padStart(6, "0")}:synthetic-row`,
+	).join("\n");
 	return new AgentSession({
-		agent: new Agent({ initialState: { messages: [], systemPrompt: ["Lifecycle memory benchmark"], tools: [] } }),
+		agent: new Agent({
+			initialState: {
+				messages: [{ role: "user", content: transcript, timestamp: Date.now() }],
+				systemPrompt: ["Lifecycle memory benchmark"],
+				tools: [],
+			},
+		}),
 		modelRegistry,
 		sessionManager,
 		settings: Settings.isolated(),
@@ -207,13 +224,13 @@ async function runWorker(childCount: number): Promise<WorkerResult> {
 			const sessionManager = SessionManager.create(process.cwd(), path.join(directory, "sessions"));
 			const sessionFile = sessionManager.getSessionFile();
 			if (!sessionFile) throw new Error("Benchmark child session has no journal path");
-			const session = createSession(sessionManager, modelRegistry);
+			const session = createSession(sessionManager, modelRegistry, `${id}:initial`);
 			registry.register({ id, displayName: "task", kind: "sub", session, sessionFile, status: "idle" });
 			lifecycle.adopt(id, {
 				idleTtlMs: IDLE_TTL_MS,
 				sessionSubscription: session.subscribe(() => {}),
 				revive: async registerSubscription => {
-					const revived = createSession(await SessionManager.open(sessionFile), modelRegistry);
+					const revived = createSession(await SessionManager.open(sessionFile), modelRegistry, `${id}:revived`);
 					registerSubscription(revived.subscribe(() => {}));
 					return revived;
 				},
@@ -279,7 +296,7 @@ if (import.meta.main) {
 	if (workerIndex >= 0) {
 		const childCount = Number(process.argv[workerIndex + 1]);
 		if (!CHILD_COUNTS.includes(childCount as (typeof CHILD_COUNTS)[number])) {
-			throw new Error("Worker child count must be 1, 10, or 50");
+			throw new Error(`Worker child count must be one of: ${CHILD_COUNTS.join(", ")}`);
 		}
 		process.stdout.write(`${JSON.stringify(await runWorker(childCount))}\n`);
 	} else {

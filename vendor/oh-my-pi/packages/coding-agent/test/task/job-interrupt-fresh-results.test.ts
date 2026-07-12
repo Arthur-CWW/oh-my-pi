@@ -55,7 +55,13 @@ function createSessionHarness(options: {
 		state: { messages: [] } as never,
 		agent: { state: { systemPrompt: ["test"] } } as never,
 		extensionRunner: undefined as never,
-		sessionManager: { appendSessionInit: () => {} } as never,
+		sessionManager: {
+			appendSessionInit: () => {},
+			appendCustomEntry: () => {},
+			getEntries: () => [],
+			getSessionId: () => "fresh-results-test",
+			flush: async () => {},
+		} as never,
 		getActiveToolNames: () => ["read", "yield"],
 		setActiveToolsByName: async () => {},
 		subscribe: (listener: (event: AgentSessionEvent) => void) => {
@@ -163,9 +169,16 @@ describe("job result refresh and interrupt executor hooks", () => {
 		AgentRegistry.resetGlobalForTests();
 	});
 
-	it("refreshes a completed task job from a later agent_end turn", async () => {
+	it("cold-parks a completed task and ignores events from its disposed session", async () => {
 		const harness = createSessionHarness({ autoYieldText: "initial result" });
 		mockCreateAgentSession(harness.session);
+		AgentRegistry.global().register({
+			id: "FreshSub",
+			displayName: "FreshSub",
+			kind: "sub",
+			session: harness.session,
+			sessionFile: "/tmp/FreshSub.jsonl",
+		});
 		const completions: string[] = [];
 		const manager = new AsyncJobManager({
 			onJobComplete: async (_jobId, text) => {
@@ -186,11 +199,21 @@ describe("job result refresh and interrupt executor hooks", () => {
 		await manager.waitForAll();
 		await manager.drainDeliveries({ timeoutMs: 2_000 });
 		expect(manager.getJob(jobId)?.status).toBe("completed");
+		const completedResult = manager.getJob(jobId)?.resultText;
+		expect(AgentRegistry.global().get("FreshSub")).toEqual(
+			expect.objectContaining({ status: "parked", session: null }),
+		);
+		expect(AgentLifecycleManager.global().resourceCountsForTests()).toEqual({
+			liveSessions: 0,
+			subscriptions: 0,
+			timers: 0,
+		});
+		expect(harness.disposeCalls()).toBe(1);
 
 		harness.setLastAssistantText("follow-up answer");
 		harness.emit({ type: "agent_end", messages: [] } as AgentSessionEvent);
 
-		expect(manager.getJob(jobId)?.resultText).toBe("follow-up answer\n\n[refreshed after follow-up turn]");
+		expect(manager.getJob(jobId)?.resultText).toBe(completedResult);
 		expect(completions).toHaveLength(1);
 		expect(manager.hasPendingDeliveries()).toBe(false);
 	});

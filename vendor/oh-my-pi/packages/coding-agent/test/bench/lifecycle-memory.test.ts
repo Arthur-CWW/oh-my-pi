@@ -25,6 +25,7 @@ function sample(
 		childCount,
 		phase,
 		rssBytes: baseline + childCount * bytesPerChild,
+		heapUsedBytes: baseline + childCount * bytesPerChild,
 		pssBytes: pssBytesPerChild === null ? null : baseline + childCount * pssBytesPerChild,
 		resources: PARKED_RESOURCES,
 		descriptors: 1,
@@ -67,6 +68,8 @@ describe("lifecycle memory benchmark helpers", () => {
 		expect(summary.rssBytes["live-idle"].perChild).toBeCloseTo(400);
 		expect(summary.rssBytes["parked-settled"].baseline).toBeCloseTo(1_000);
 		expect(summary.rssBytes["parked-settled"].perChild).toBeCloseTo(20);
+		expect(summary.heapUsedBytes["live-idle"].perChild).toBeCloseTo(400);
+		expect(summary.heapUsedBytes["parked-settled"].perChild).toBeCloseTo(20);
 		expect(summary.pssBytes["live-idle"]?.baseline).toBeCloseTo(1_000);
 		expect(summary.pssBytes["live-idle"]?.perChild).toBeCloseTo(250);
 		expect(summary.pssBytes["parked-settled"]?.baseline).toBeCloseTo(1_000);
