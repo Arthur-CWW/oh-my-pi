@@ -5,6 +5,7 @@ import * as path from "node:path";
 
 export type IrcExternalPeerState = "unknown" | "working" | "waiting_input" | "idle";
 export type IrcExternalPeerDisplayState = IrcExternalPeerState | "disconnected";
+export type IrcExternalMessageOrigin = "agent" | "user";
 
 export interface IrcExternalPeer {
 	sessionId: string;
@@ -16,6 +17,7 @@ export interface IrcExternalPeer {
 	stateTs: string | null;
 	/** True when the operator supplied irc.peerName; ambient automation must preserve it. */
 	explicitName?: boolean;
+	sessionFile?: string;
 }
 
 export interface IrcExternalMessage {
@@ -24,6 +26,7 @@ export interface IrcExternalMessage {
 	fromPeer: string;
 	toPeer: string;
 	body: string;
+	origin: IrcExternalMessageOrigin;
 }
 
 interface PeerRow {
@@ -35,6 +38,7 @@ interface PeerRow {
 	state: string;
 	state_ts: string | null;
 	explicit_name: number;
+	session_file: string | null;
 }
 
 interface MessageRow {
@@ -43,6 +47,7 @@ interface MessageRow {
 	from_peer: string;
 	to_peer: string;
 	body: string;
+	origin: string;
 }
 
 interface TableInfoRow {
@@ -55,6 +60,7 @@ export interface IrcExternalRegistration {
 	cwd: string;
 	pid?: number;
 	explicitName?: boolean;
+	sessionFile?: string;
 }
 
 export const IRC_EXTERNAL_STALE_MS = 10 * 60 * 1000;
@@ -124,6 +130,7 @@ function toPeer(row: PeerRow): IrcExternalPeer {
 		state: normalizePeerState(row.state),
 		stateTs: row.state_ts,
 		explicitName: row.explicit_name === 1,
+		sessionFile: row.session_file ?? undefined,
 	};
 }
 
@@ -134,6 +141,7 @@ function toMessage(row: MessageRow): IrcExternalMessage {
 		fromPeer: row.from_peer,
 		toPeer: row.to_peer,
 		body: row.body,
+		origin: row.origin === "user" ? "user" : "agent",
 	};
 }
 
@@ -170,12 +178,26 @@ export class IrcExternalBus {
 		if (!columns.has("explicit_name")) {
 			this.#db.run("ALTER TABLE peers ADD COLUMN explicit_name INTEGER NOT NULL DEFAULT 0");
 		}
+		if (!columns.has("session_file")) {
+			this.#db.run("ALTER TABLE peers ADD COLUMN session_file TEXT");
+		}
+	}
+	#ensureMessageOriginColumn(): void {
+		const columns = new Set(
+			this.#db
+				.query<TableInfoRow, []>("PRAGMA table_info(messages)")
+				.all()
+				.map(column => column.name),
+		);
+		if (!columns.has("origin")) {
+			this.#db.run("ALTER TABLE messages ADD COLUMN origin TEXT NOT NULL DEFAULT 'agent'");
+		}
 	}
 
 	#getPeerBySessionId(sessionId: string): IrcExternalPeer | undefined {
 		const row = this.#db
 			.query<PeerRow, { $sessionId: string }>(
-				"SELECT session_id, name, cwd, pid, last_seen, state, state_ts, explicit_name FROM peers WHERE session_id = $sessionId",
+				"SELECT session_id, name, cwd, pid, last_seen, state, state_ts, explicit_name, session_file FROM peers WHERE session_id = $sessionId",
 			)
 			.get({ $sessionId: sessionId });
 		return row ? toPeer(row) : undefined;
@@ -195,7 +217,8 @@ export class IrcExternalBus {
 				last_seen TEXT,
 				state TEXT NOT NULL DEFAULT 'unknown',
 				state_ts TEXT,
-				explicit_name INTEGER NOT NULL DEFAULT 0
+				explicit_name INTEGER NOT NULL DEFAULT 0,
+				session_file TEXT
 			)
 		`);
 		this.#ensurePeerStateColumns();
@@ -209,6 +232,7 @@ export class IrcExternalBus {
 				delivered INTEGER DEFAULT 0
 			)
 		`);
+		this.#ensureMessageOriginColumn();
 		this.#db.run("CREATE INDEX IF NOT EXISTS idx_irc_messages_to_delivered ON messages(to_peer, delivered, id)");
 		this.#db.run("CREATE INDEX IF NOT EXISTS idx_irc_peers_name ON peers(name)");
 	}
@@ -222,14 +246,15 @@ export class IrcExternalBus {
 		const lastSeen = nowIso();
 		this.#db
 			.query(
-				`INSERT INTO peers (session_id, name, cwd, pid, last_seen, explicit_name)
-				 VALUES ($sessionId, $name, $cwd, $pid, $lastSeen, $explicitName)
+				`INSERT INTO peers (session_id, name, cwd, pid, last_seen, explicit_name, session_file)
+				 VALUES ($sessionId, $name, $cwd, $pid, $lastSeen, $explicitName, $sessionFile)
 				 ON CONFLICT(session_id) DO UPDATE SET
 					name = CASE WHEN peers.explicit_name = 1 THEN peers.name ELSE excluded.name END,
 					cwd = excluded.cwd,
 					pid = excluded.pid,
 					last_seen = excluded.last_seen,
-					explicit_name = MAX(peers.explicit_name, excluded.explicit_name)`,
+					explicit_name = MAX(peers.explicit_name, excluded.explicit_name),
+					session_file = COALESCE(excluded.session_file, peers.session_file)`,
 			)
 			.run({
 				$sessionId: peer.sessionId,
@@ -238,6 +263,7 @@ export class IrcExternalBus {
 				$pid: pid,
 				$lastSeen: lastSeen,
 				$explicitName: peer.explicitName ? 1 : 0,
+				$sessionFile: peer.sessionFile ?? null,
 			});
 		return (
 			this.#getPeerBySessionId(peer.sessionId) ?? {
@@ -294,7 +320,7 @@ export class IrcExternalBus {
 		const staleMs = options.staleMs ?? IRC_EXTERNAL_STALE_MS;
 		return this.#db
 			.query<PeerRow, []>(
-				"SELECT session_id, name, cwd, pid, last_seen, state, state_ts, explicit_name FROM peers ORDER BY last_seen DESC",
+				"SELECT session_id, name, cwd, pid, last_seen, state, state_ts, explicit_name, session_file FROM peers ORDER BY last_seen DESC",
 			)
 			.all()
 			.filter(
@@ -308,7 +334,7 @@ export class IrcExternalBus {
 	findPeerByName(name: string, options: { excludeSessionId?: string } = {}): IrcExternalPeer | undefined {
 		const rows = this.#db
 			.query<PeerRow, { $name: string }>(
-				"SELECT session_id, name, cwd, pid, last_seen, state, state_ts, explicit_name FROM peers WHERE name = $name ORDER BY last_seen DESC",
+				"SELECT session_id, name, cwd, pid, last_seen, state, state_ts, explicit_name, session_file FROM peers WHERE name = $name ORDER BY last_seen DESC",
 			)
 			.all({ $name: name });
 		const row = rows.find(
@@ -317,14 +343,17 @@ export class IrcExternalBus {
 		return row ? toPeer(row) : undefined;
 	}
 
-	sendMessage(args: { fromPeer: string; toPeer: string; body: string }): number {
+	sendMessage(args: { fromPeer: string; toPeer: string; body: string; origin?: IrcExternalMessageOrigin }): number {
 		const result = this.#db
-			.query("INSERT INTO messages (ts, from_peer, to_peer, body) VALUES ($ts, $fromPeer, $toPeer, $body)")
+			.query(
+				"INSERT INTO messages (ts, from_peer, to_peer, body, origin) VALUES ($ts, $fromPeer, $toPeer, $body, $origin)",
+			)
 			.run({
 				$ts: nowIso(),
 				$fromPeer: args.fromPeer,
 				$toPeer: args.toPeer,
 				$body: args.body,
+				$origin: args.origin ?? "agent",
 			});
 		return Number(result.lastInsertRowid);
 	}
@@ -332,7 +361,7 @@ export class IrcExternalBus {
 	pollMessages(toPeer: string): IrcExternalMessage[] {
 		return this.#db
 			.query<MessageRow, { $toPeer: string }>(
-				"SELECT id, ts, from_peer, to_peer, body FROM messages WHERE to_peer = $toPeer AND delivered = 0 ORDER BY id",
+				"SELECT id, ts, from_peer, to_peer, body, origin FROM messages WHERE to_peer = $toPeer AND delivered = 0 ORDER BY id",
 			)
 			.all({ $toPeer: toPeer })
 			.map(toMessage);

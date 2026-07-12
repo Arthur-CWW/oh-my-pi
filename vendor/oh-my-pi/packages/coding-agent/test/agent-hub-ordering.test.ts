@@ -261,7 +261,11 @@ describe("Agent hub row ordering", () => {
 		const hub = makeHub(agents, { externalIrc, externalSessionId: "this-session" });
 		expect(renderedExternalPeerNames(hub)).toEqual(["alpha", "beta"]);
 		hub.handleInput("\r");
-		expect(Bun.stripANSI(hub.render(120).join("\n"))).toContain("message with: omp irc send alpha …");
+		const siblingView = Bun.stripANSI(hub.render(120).join("\n"));
+		expect(siblingView).toContain("READONLY");
+		expect(siblingView).toContain("cmd+p to real TUI");
+		expect(siblingView).toContain("Sibling transcript path unavailable");
+		hub.handleInput("\x1b");
 
 		peers = [
 			externalPeer("external:beta", "beta", lastSeen, "idle"),

@@ -35,6 +35,7 @@ import {
 	type IrcExternalPeerState,
 	isIrcExternalPeerFresh,
 } from "../../irc/bus-external";
+import { watchSiblingTranscript } from "../../irc/sibling-session";
 import { AgentLifecycleManager } from "../../registry/agent-lifecycle";
 import {
 	type AgentRef,
@@ -146,6 +147,7 @@ export type AgentHubExternalPeer = Omit<IrcExternalPeer, "state" | "stateTs"> & 
 
 export interface AgentHubExternalPeerDataSource {
 	listPeers(options?: { excludeSessionId?: string; staleMs?: number; includeStale?: boolean }): AgentHubExternalPeer[];
+	sendMessage?(args: { fromPeer: string; toPeer: string; body: string; origin?: "agent" | "user" }): number;
 }
 
 interface ExternalPeerRow {
@@ -590,6 +592,9 @@ export class AgentHubOverlayComponent extends Container {
 	// Chat state
 	#chatAgentId: string | undefined;
 	#chatArchived: ArchivedDirectChildDescriptor | undefined;
+	#chatExternal: AgentHubExternalPeer | undefined;
+	#externalInputActive = false;
+	#siblingWatchDispose: (() => void) | undefined;
 	#editor: Editor;
 	#sessionUnsubscribe: (() => void) | undefined;
 	#attachedSession: AgentSession | undefined;
@@ -691,6 +696,7 @@ export class AgentHubOverlayComponent extends Container {
 			// Relative ages are read at render time. Only external peers have an
 			// independent snapshot that may need filter invalidation here.
 			if (this.#refreshExternalRows() && this.#filterDirty) this.#applyFilter();
+			if (this.#chatExternal) this.#scheduleChatRefresh();
 			this.#requestRender();
 		}, AGE_TICK_MS);
 		this.#ageTimer.unref?.();
@@ -748,6 +754,8 @@ export class AgentHubOverlayComponent extends Container {
 			clearTimeout(this.#chatRefreshTimer);
 			this.#chatRefreshTimer = undefined;
 		}
+		this.#siblingWatchDispose?.();
+		this.#siblingWatchDispose = undefined;
 		this.#detachLiveSession();
 		this.#resetChatLog();
 		this.#transcriptCache = undefined;
@@ -793,6 +801,7 @@ export class AgentHubOverlayComponent extends Container {
 		this.#view = "chat";
 		this.#chatArchived = undefined;
 		this.#chatAgentId = id;
+		this.#chatExternal = undefined;
 		this.#notice = undefined;
 		this.#transcriptCache = undefined;
 		this.#remoteTranscriptUnavailable = false;
@@ -814,6 +823,7 @@ export class AgentHubOverlayComponent extends Container {
 		this.#detachLiveSession();
 		this.#chatAgentId = row.agentId;
 		this.#chatArchived = row;
+		this.#chatExternal = undefined;
 		this.#notice = undefined;
 		this.#transcriptCache = undefined;
 		this.#remoteTranscriptUnavailable = false;
@@ -824,6 +834,26 @@ export class AgentHubOverlayComponent extends Container {
 		this.#wasAtBottom = true;
 		this.#lastLeftTap = 0;
 		this.#editor.setText("");
+		this.#rebuildChatContent();
+		this.#requestRender();
+	}
+	#openExternalChat(peer: AgentHubExternalPeer): void {
+		this.#view = "chat";
+		this.#detachLiveSession();
+		this.#siblingWatchDispose?.();
+		this.#chatAgentId = peer.name || peer.sessionId;
+		this.#chatArchived = undefined;
+		this.#chatExternal = peer;
+		this.#externalInputActive = false;
+		this.#notice = undefined;
+		this.#transcriptCache = undefined;
+		this.#resetChatLog();
+		this.#scrollOffset = 0;
+		this.#wasAtBottom = true;
+		this.#editor.setText("");
+		if (peer.sessionFile) {
+			this.#siblingWatchDispose = watchSiblingTranscript(peer.sessionFile, () => this.#scheduleChatRefresh());
+		}
 		this.#rebuildChatContent();
 		this.#requestRender();
 	}
@@ -902,6 +932,7 @@ export class AgentHubOverlayComponent extends Container {
 				a.peer.sessionId !== b.peer.sessionId ||
 				a.peer.name !== b.peer.name ||
 				a.peer.cwd !== b.peer.cwd ||
+				a.peer.sessionFile !== b.peer.sessionFile ||
 				a.peer.lastSeen !== b.peer.lastSeen
 			)
 				return false;
@@ -1958,7 +1989,10 @@ export class AgentHubOverlayComponent extends Container {
 			else {
 				const archived = this.#selectedArchivedRow();
 				if (archived) this.#openArchivedChat(archived);
-				else this.#showExternalPeerHint();
+				else {
+					const external = this.#selectedExternalRow();
+					if (external) this.#openExternalChat(external.peer);
+				}
 			}
 			return;
 		}
@@ -2281,7 +2315,9 @@ export class AgentHubOverlayComponent extends Container {
 
 		// Load transcript first so model info is available for the header
 		let messageEntries: SessionMessageEntry[] | null = null;
-		if (this.#chatArchived) {
+		if (this.#chatExternal?.sessionFile) {
+			messageEntries = this.#loadTranscript(this.#chatExternal.sessionFile);
+		} else if (this.#chatArchived) {
 			messageEntries = this.#loadTranscript(this.#chatArchived.childSessionFile);
 		} else if (this.#remote) {
 			if (id) this.#fetchRemoteTranscript(id);
@@ -2292,6 +2328,13 @@ export class AgentHubOverlayComponent extends Container {
 
 		this.#viewerHeaderLines = [];
 		this.#viewerHeaderLines.push(theme.fg("accent", `Agent Hub > ${id ?? "?"}`));
+		if (this.#chatExternal) {
+			const peer = this.#chatExternal;
+			const state = displayedExternalPeerState(peer);
+			this.#viewerHeaderLines.push(
+				`${theme.bold(peer.name || peer.sessionId)} ${theme.fg("warning", "READONLY")} ${theme.fg("dim", `${state} · pid ${peer.pid} · ${peer.cwd} · cmd+p to real TUI`)}`,
+			);
+		} else
 		if (this.#chatArchived) {
 			const archived = this.#chatArchived;
 			const model = archived.modelId
@@ -2316,6 +2359,16 @@ export class AgentHubOverlayComponent extends Container {
 			);
 		}
 
+		if (this.#chatExternal) {
+			this.#chatPlaceholder = !this.#chatExternal.sessionFile
+				? "Sibling transcript path unavailable. Use cmd+p to navigate to its real TUI."
+				: messageEntries === null
+					? "Sibling transcript is no longer available."
+					: messageEntries.length === 0
+						? "No messages yet."
+						: undefined;
+			if (messageEntries && messageEntries.length > 0) this.#syncChatComponents(messageEntries);
+		} else
 		if (this.#chatArchived) {
 			this.#chatPlaceholder =
 				messageEntries === null
@@ -2371,6 +2424,10 @@ export class AgentHubOverlayComponent extends Container {
 				this.#computeChatSearchMatches();
 				this.#requestRender();
 			}
+			return;
+		}
+		if (this.#chatExternal) {
+			this.#handleExternalChatInput(keyData);
 			return;
 		}
 		if (this.#chatArchived) {
@@ -2475,6 +2532,44 @@ export class AgentHubOverlayComponent extends Container {
 		this.#requestRender();
 	}
 
+	#handleExternalChatInput(keyData: string): void {
+		if (!this.#externalInputActive) {
+			if (keyData === "i") {
+				this.#externalInputActive = true;
+				this.#editor.setText("");
+				this.#notice = "IRC input · Ctrl+Enter sends as User";
+				this.#requestRender();
+				return;
+			}
+			this.#handleReadOnlyChatInput(keyData);
+			return;
+		}
+		if (matchesAppInterrupt(keyData)) {
+			this.#externalInputActive = false;
+			this.#editor.setText("");
+			this.#notice = undefined;
+			this.#requestRender();
+			return;
+		}
+		if (matchesKey(keyData, "ctrl+enter")) {
+			const body = this.#editor.getText().trim();
+			const peer = this.#chatExternal;
+			const bus = this.#resolveExternalBus();
+			if (!body || !peer || !bus?.sendMessage) return;
+			try {
+				bus.sendMessage({ fromPeer: this.#externalSessionId, toPeer: peer.name, body, origin: "user" });
+				this.#editor.setText("");
+				this.#externalInputActive = false;
+				this.#notice = `Sent to ${peer.name} as User`;
+			} catch (error) {
+				this.#notice = error instanceof Error ? error.message : String(error);
+			}
+			this.#requestRender();
+			return;
+		}
+		this.#editor.handleInput(keyData);
+		this.#requestRender();
+	}
 	#handleReadOnlyChatInput(keyData: string): void {
 		if (matchesAppInterrupt(keyData)) {
 			if (this.#chatSearchQuery) {
@@ -2611,11 +2706,16 @@ export class AgentHubOverlayComponent extends Container {
 
 	#closeChat(): void {
 		// Restore selection to the agent or completed child we just drilled into.
-		if (this.#chatArchived) this.#selectedAgentKey = `archived:${this.#chatArchived.childSessionFile}`;
+		if (this.#chatExternal) this.#selectedAgentKey = `external:${this.#chatExternal.sessionId}`;
+		else if (this.#chatArchived) this.#selectedAgentKey = `archived:${this.#chatArchived.childSessionFile}`;
 		else if (this.#chatAgentId) this.#selectedAgentKey = `agent:${this.#chatAgentId}`;
 		this.#view = "table";
 		this.#chatAgentId = undefined;
 		this.#chatArchived = undefined;
+		this.#chatExternal = undefined;
+		this.#externalInputActive = false;
+		this.#siblingWatchDispose?.();
+		this.#siblingWatchDispose = undefined;
 		this.#notice = undefined;
 		this.#chatSearchQuery = "";
 		this.#chatSearchEditing = false;
@@ -3248,7 +3348,7 @@ function readFileIncremental(
 		}
 		let text = buf.toString("utf-8");
 		let actualStart = start;
-		if (start > 0) {
+		if (fromByte === 0 && start > 0) {
 			const newline = text.indexOf("\n");
 			if (newline >= 0) {
 				actualStart += Buffer.byteLength(text.slice(0, newline + 1), "utf-8");

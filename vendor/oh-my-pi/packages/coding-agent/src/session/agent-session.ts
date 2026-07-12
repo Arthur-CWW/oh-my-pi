@@ -12641,6 +12641,7 @@ export class AgentSession {
 			cwd,
 			pid: process.pid,
 			explicitName: Boolean(this.settings.get("irc.peerName")?.trim()),
+			sessionFile: this.sessionManager.getSessionFile() ?? undefined,
 		});
 		return { bus, sessionId, name };
 	}
@@ -12662,18 +12663,26 @@ export class AgentSession {
 		const messages = bus.pollMessages(name);
 		for (const message of messages) {
 			const timestamp = Date.parse(message.ts) || Date.now();
+			const userOrigin = message.origin === "user";
 			const record: CustomMessage = {
 				role: "custom",
-				customType: "irc:incoming",
-				content: prompt.render(ircIncomingTemplate, {
-					from: message.fromPeer,
-					message: message.body,
-					replyTo: "",
-					autoReplied: false,
-				}),
+				customType: userOrigin ? "session" : "irc:incoming",
+				content: userOrigin
+					? `<session>Message from User via sibling cockpit:\n${message.body}</session>`
+					: prompt.render(ircIncomingTemplate, {
+							from: message.fromPeer,
+							message: message.body,
+							replyTo: "",
+							autoReplied: false,
+						}),
 				display: true,
-				details: { id: `external:${message.id}`, from: message.fromPeer, message: message.body },
-				attribution: "agent",
+				details: {
+					id: `external:${message.id}`,
+					from: userOrigin ? "User" : message.fromPeer,
+					message: message.body,
+					origin: message.origin,
+				},
+				attribution: userOrigin ? "user" : "agent",
 				timestamp,
 			};
 			void this.#emitSessionEvent({ type: "irc_message", message: record });
