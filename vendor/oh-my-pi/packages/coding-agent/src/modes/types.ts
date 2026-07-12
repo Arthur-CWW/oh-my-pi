@@ -40,6 +40,9 @@ import type { Theme } from "./theme/theme";
 import type { DiagnosticEventInput, ErrorInbox } from "./utils/error-inbox";
 
 export type SubmittedUserInput = {
+	/** Stable identity for this editor submission. Repeated dispatch attempts with
+	 *  the same id are one admission, even across a turn-boundary race. */
+	submissionId?: string;
 	text: string;
 	images?: ImageContent[];
 	imageLinks?: (string | undefined)[];

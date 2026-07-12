@@ -2,6 +2,7 @@
  * Interactive mode for the coding agent.
  * Handles TUI rendering and user interaction, delegating business logic to AgentSession.
  */
+import { randomUUID } from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import {
@@ -428,6 +429,8 @@ export class InteractiveMode implements InteractiveModeContext {
 	optimisticUserMessageSignature: string | undefined = undefined;
 	locallySubmittedUserSignatures: Set<string> = new Set();
 	#pendingSubmittedInput: SubmittedUserInput | undefined;
+	readonly #startedSubmissionIds = new Set<string>();
+	readonly #startedSubmissionOrder: string[] = [];
 	#pendingSubmissionDispose: (() => void) | undefined;
 	lastSigintTime = 0;
 	lastEscapeTime = 0;
@@ -1196,6 +1199,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		streamingBehavior?: "steer" | "followUp";
 	}): SubmittedUserInput {
 		const submission: SubmittedUserInput = {
+			submissionId: randomUUID(),
 			text: input.text,
 			images: input.images,
 			imageLinks: input.imageLinks,
@@ -1265,7 +1269,17 @@ export class InteractiveMode implements InteractiveModeContext {
 		if (this.#pendingSubmittedInput !== input || input.cancelled) {
 			return false;
 		}
+		const submissionId = input.submissionId;
+		if (input.started || (submissionId !== undefined && this.#startedSubmissionIds.has(submissionId))) {
+			return false;
+		}
 		input.started = true;
+		if (submissionId !== undefined) {
+			this.#startedSubmissionIds.add(submissionId);
+			this.#startedSubmissionOrder.push(submissionId);
+			const expired = this.#startedSubmissionOrder.length > 256 ? this.#startedSubmissionOrder.shift() : undefined;
+			if (expired !== undefined) this.#startedSubmissionIds.delete(expired);
+		}
 		return true;
 	}
 

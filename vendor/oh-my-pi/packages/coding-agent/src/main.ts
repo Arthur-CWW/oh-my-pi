@@ -324,9 +324,11 @@ export async function submitInteractiveInput(
 		// background/continuation submits omit it and fall back to "followUp". The
 		// synthetic branch below opts out by design.
 		const streamingBehavior = input.streamingBehavior ?? ("followUp" as const);
-		// Continue shortcuts submit an already-started synthetic developer prompt with
-		// no optimistic user message.
-		if (!input.started && !mode.markPendingSubmissionStarted(input)) {
+		// Continue shortcuts are the sole already-started inputs: they submit a
+		// synthetic developer prompt without an optimistic user message. Every editor
+		// submission must cross the idempotent admission gate, including a duplicate
+		// callback that observes `started` after the first callback won the race.
+		if (!(input.synthetic && input.started) && !mode.markPendingSubmissionStarted(input)) {
 			return;
 		}
 		if (input.customType) {

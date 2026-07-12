@@ -206,4 +206,38 @@ describe("submitInteractiveInput", () => {
 		expect(mode.finishPendingSubmission).toHaveBeenCalledWith(input);
 		expect(mode.showError).not.toHaveBeenCalled();
 	});
+
+	it("admits a submission once when duplicate callbacks race a turn boundary", async () => {
+		const admittedIds = new Set<string>();
+		const journal: string[] = [];
+		const mode = {
+			markPendingSubmissionStarted: vi.fn((candidate: SubmittedUserInput) => {
+				const id = candidate.submissionId;
+				if (candidate.started || id === undefined || admittedIds.has(id)) return false;
+				candidate.started = true;
+				admittedIds.add(id);
+				return true;
+			}),
+			finishPendingSubmission: vi.fn(),
+			showError: vi.fn(),
+			checkShutdownRequested: vi.fn(async () => {}),
+		};
+		const session = {
+			prompt: vi.fn(async (text: string) => {
+				journal.push(text);
+				await Promise.resolve();
+				return true;
+			}),
+			promptCustomMessage: vi.fn(async () => {}),
+			isStreaming: false,
+		};
+		const input = createInput({ submissionId: "editor-submit-44", text: "go on" });
+
+		await Promise.all([submitInteractiveInput(mode, session, input), submitInteractiveInput(mode, session, input)]);
+
+		expect(mode.markPendingSubmissionStarted).toHaveBeenCalledTimes(2);
+		expect(session.prompt).toHaveBeenCalledTimes(1);
+		expect(journal).toEqual(["go on"]);
+		expect(mode.showError).not.toHaveBeenCalled();
+	});
 });
