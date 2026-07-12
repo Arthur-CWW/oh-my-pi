@@ -9,6 +9,7 @@ import {
 	decodeSessionLeaseV1,
 	ExternalSessionOwner,
 	ExternalSessionOwnerUnverifiable,
+	inspectLiveSessionOwnerDetails,
 	inspectLiveSessionOwnerView,
 	inspectSessionOwnership,
 	resolveAgentMuxRoot,
@@ -40,6 +41,22 @@ async function acquireFixtureOwnership(
 ) {
 	return acquireSessionOwnership(sessionFile, sessionId, { ...options, buildRevision, runnerInstanceIdentity });
 }
+
+	it("surfaces epoch-bound owner identity for takeover diagnostics", async () => {
+		const { root, session } = await fixture();
+		const ownership = await acquireFixtureOwnership(session, "parent", { root });
+
+		const details = await inspectLiveSessionOwnerDetails(session, "parent", { root });
+		expect(details).toEqual({
+			ownerEpoch: ownership.ownerEpoch,
+			pid: process.pid,
+			cwd: process.cwd(),
+			startedAt: runnerInstanceIdentity.startedAt,
+			muxHint: process.env.CMUX_SURFACE_ID ?? process.env.TMUX_PANE ?? null,
+		});
+
+		await ownership.release();
+	});
 
 async function claimPath(root: string): Promise<string> {
 	const [key] = await fs.readdir(path.join(root, "owners-v1"));
@@ -285,6 +302,10 @@ describe("owners-v1 OMP guard", () => {
 			ownerEpoch: ownership.ownerEpoch,
 			buildRevision,
 			runnerInstanceId: runnerInstanceIdentity.runnerInstanceId,
+			pid: process.pid,
+			cwd: process.cwd(),
+			startedAt: runnerInstanceIdentity.startedAt,
+			muxHint: process.env.CMUX_SURFACE_ID ?? process.env.TMUX_PANE ?? null,
 		});
 		expect(JSON.parse(await requestOwner(lease.socketPath, `${JSON.stringify(probe)}\n`))).toEqual({
 			t: "ownerProof",

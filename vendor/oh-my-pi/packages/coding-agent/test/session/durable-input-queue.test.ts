@@ -25,6 +25,20 @@ const TEST_RUNNER_INSTANCE_IDENTITY = {
 	startedAt: "2026-01-01T00:00:00.000Z",
 };
 
+it("includes owner identity fields in the read-only takeover banner", () => {
+	const error = new SessionOwnershipLostError("session-1", "old-epoch", {
+		ownerEpoch: "new-epoch",
+		pid: 4242,
+		cwd: "/work/active",
+		startedAt: "2026-07-12T13:40:00.000Z",
+		muxHint: "cmux-surface-7",
+	});
+	expect(error.message).toContain("pid 4242");
+	expect(error.message).toContain("cwd /work/active");
+	expect(error.message).toContain("started 2026-07-12T13:40:00.000Z");
+	expect(error.message).toContain("mux cmux-surface-7");
+});
+
 interface Owner {
 	readonly handle: SessionOwnershipHandle;
 	current: boolean;

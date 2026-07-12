@@ -876,6 +876,18 @@ export class Settings {
 
 	/** Apply schema migrations to raw settings */
 	#migrateRawSettings(raw: RawSettings): RawSettings {
+		if ("modelRoles" in raw) {
+			const modelRoles = raw.modelRoles;
+			if (!modelRoles || typeof modelRoles !== "object" || Array.isArray(modelRoles)) {
+				logger.warn("Settings: ignoring malformed modelRoles; expected an object", {
+					actualType: Array.isArray(modelRoles) ? "array" : modelRoles === null ? "null" : typeof modelRoles,
+				});
+				delete raw.modelRoles;
+			} else {
+				raw.modelRoles = shallowStringRecord(modelRoles);
+			}
+		}
+
 		// queueMode -> steeringMode
 		if ("queueMode" in raw && !("steeringMode" in raw)) {
 			raw.steeringMode = raw.queueMode;

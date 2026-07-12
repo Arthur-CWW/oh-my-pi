@@ -375,6 +375,11 @@ class SessionList implements Component {
 			if (status) {
 				metadata += ` ${dot} ${status}`;
 			}
+			if (session.owner) {
+				const owner = session.owner;
+				const hint = owner.muxHint ? `mux ${owner.muxHint}` : "tty/mux unavailable";
+				metadata += ` ${dot} ${dim(`active pid ${owner.pid} · ${owner.cwd} · ${hint} · started ${owner.startedAt}`)}`;
+			}
 			if (this.#showCwd && session.cwd) {
 				metadata += ` ${dot} ${dim(shortenPath(session.cwd))}`;
 			}

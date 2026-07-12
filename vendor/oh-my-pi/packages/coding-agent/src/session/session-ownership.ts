@@ -44,6 +44,14 @@ export interface CmuxOwnerView {
 	};
 }
 
+export interface SessionOwnerDetails {
+	readonly ownerEpoch: string;
+	readonly pid: number;
+	readonly cwd: string;
+	readonly startedAt: string;
+	readonly muxHint: string | null;
+}
+
 export type SessionOwnershipLookup =
 	| { readonly status: "none" }
 	| { readonly status: "live"; readonly lease: SessionLeaseV1 }
@@ -98,6 +106,7 @@ interface LeaseLocation {
 	readonly claim: string;
 	readonly leaseFile: string;
 	readonly viewFile: string;
+	readonly detailsFilePrefix: string;
 	readonly canonicalSessionFile: string;
 }
 
@@ -287,6 +296,7 @@ async function leaseLocation(sessionFile: string, sessionId: string, root?: stri
 		claim,
 		leaseFile: path.join(claim, "lease.json"),
 		viewFile: path.join(claim, "view.json"),
+		detailsFilePrefix: path.join(claim, "identity-v1-"),
 		canonicalSessionFile: canonical,
 	};
 }
@@ -322,24 +332,38 @@ interface OwnerIdentitySidecarV1 {
 	readonly ownerEpoch: string;
 	readonly buildRevision: BuildRevision;
 	readonly runnerInstanceId: string;
+	readonly pid?: number;
+	readonly cwd?: string;
+	readonly startedAt?: string;
+	readonly muxHint?: string | null;
 }
 
 function decodeOwnerIdentitySidecarV1(value: unknown): OwnerIdentitySidecarV1 | undefined {
+	if (!isRecord(value)) return undefined;
+	const keys = Object.keys(value);
+	const allowed = ["version", "ownerEpoch", "buildRevision", "runnerInstanceId", "pid", "cwd", "startedAt", "muxHint"];
 	if (
-		!isRecord(value) ||
-		Object.keys(value).length !== 4 ||
-		!Object.keys(value).every(key => ["version", "ownerEpoch", "buildRevision", "runnerInstanceId"].includes(key)) ||
+		(keys.length !== 4 && keys.length !== 8) ||
+		!keys.every(key => allowed.includes(key)) ||
 		value.version !== 1 ||
 		!isUuid(value.ownerEpoch) ||
 		!isBuildRevision(value.buildRevision) ||
-		!isUuid(value.runnerInstanceId)
+		!isUuid(value.runnerInstanceId) ||
+		(keys.length === 8 &&
+			(!Number.isInteger(value.pid) ||
+				(value.pid as number) <= 0 ||
+				typeof value.cwd !== "string" ||
+				!path.isAbsolute(value.cwd) ||
+				typeof value.startedAt !== "string" ||
+				!Number.isFinite(Date.parse(value.startedAt)) ||
+				(value.muxHint !== null && typeof value.muxHint !== "string")))
 	)
 		return undefined;
 	return value as unknown as OwnerIdentitySidecarV1;
 }
 
 function ownerIdentityFile(location: LeaseLocation, ownerEpoch: string): string {
-	return path.join(location.claim, `identity-v1-${ownerEpoch}.json`);
+	return `${location.detailsFilePrefix}${ownerEpoch}.json`;
 }
 
 async function readOwnerIdentity(location: LeaseLocation): Promise<OwnerIdentitySidecarV1 | undefined> {
@@ -352,6 +376,32 @@ async function readOwnerIdentity(location: LeaseLocation): Promise<OwnerIdentity
 	} catch {
 		return undefined;
 	}
+}
+
+export async function inspectLiveSessionOwnerDetails(
+	sessionFile: string,
+	sessionId: string,
+	options: SessionOwnershipOptions = {},
+): Promise<SessionOwnerDetails | undefined> {
+	const location = await leaseLocation(sessionFile, sessionId, options.root);
+	const ownership = await inspectSessionOwnership(sessionFile, sessionId, options);
+	if (ownership.status !== "live") return undefined;
+	const identity = await readOwnerIdentity(location);
+	if (
+		identity?.ownerEpoch !== ownership.lease.ownerEpoch ||
+		identity.pid === undefined ||
+		identity.cwd === undefined ||
+		identity.startedAt === undefined ||
+		identity.muxHint === undefined
+	)
+		return undefined;
+	return {
+		ownerEpoch: identity.ownerEpoch,
+		pid: identity.pid,
+		cwd: identity.cwd,
+		startedAt: identity.startedAt,
+		muxHint: identity.muxHint,
+	};
 }
 
 async function writeOwnerIdentity(location: LeaseLocation, identity: OwnerIdentitySidecarV1): Promise<void> {
@@ -921,6 +971,10 @@ export async function acquireSessionOwnership(
 			ownerEpoch: lease.ownerEpoch,
 			buildRevision: options.buildRevision,
 			runnerInstanceId: options.runnerInstanceIdentity.runnerInstanceId,
+			pid: lease.controllerProcess.pid,
+			cwd: process.cwd(),
+			startedAt: options.runnerInstanceIdentity.startedAt,
+			muxHint: lease.muxName,
 		};
 		await writeOwnerIdentity(location, identity);
 		const confirmed = await readLease(location);
@@ -987,6 +1041,10 @@ export async function acquireSessionOwnership(
 		ownerEpoch: epoch,
 		buildRevision: options.buildRevision,
 		runnerInstanceId: options.runnerInstanceIdentity.runnerInstanceId,
+		pid: process.pid,
+		cwd: process.cwd(),
+		startedAt: options.runnerInstanceIdentity.startedAt,
+		muxHint: process.env.CMUX_SURFACE_ID ?? process.env.TMUX_PANE ?? null,
 	};
 	let probeServer: DirectOwnerProbeServer | undefined;
 	try {

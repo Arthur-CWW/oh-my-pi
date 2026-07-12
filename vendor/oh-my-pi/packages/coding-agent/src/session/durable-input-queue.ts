@@ -4,7 +4,12 @@ import * as path from "node:path";
 
 import type { ImageContent, MessageAttribution } from "@oh-my-pi/pi-ai";
 
-import { resolveAgentMuxRoot, type SessionOwnershipHandle } from "./session-ownership";
+import {
+	inspectLiveSessionOwnerDetails,
+	resolveAgentMuxRoot,
+	type SessionOwnerDetails,
+	type SessionOwnershipHandle,
+} from "./session-ownership";
 
 const QUEUE_VERSION = 2 as const;
 const HEAD_FILE = "head.json";
@@ -147,14 +152,19 @@ interface QueueHead {
 export class SessionOwnershipLostError extends Error {
 	readonly sessionId: string;
 	readonly ownerEpoch: string;
+	readonly ownerDetails?: SessionOwnerDetails;
 
-	constructor(sessionId: string, ownerEpoch: string) {
+	constructor(sessionId: string, ownerEpoch: string, ownerDetails?: SessionOwnerDetails) {
+		const identity = ownerDetails
+			? ` Owner: pid ${ownerDetails.pid}; cwd ${ownerDetails.cwd}; started ${ownerDetails.startedAt}; ${ownerDetails.muxHint ? `mux ${ownerDetails.muxHint}` : "tty/mux unavailable"}.`
+			: "";
 		super(
-			`Session ${sessionId} is active in another process; this view is read-only. Resume or return to the active session.`,
+			`Session ${sessionId} is active in another process; this view is read-only.${identity} Resume or return to the active session.`,
 		);
 		this.name = "SessionOwnershipLostError";
 		this.sessionId = sessionId;
 		this.ownerEpoch = ownerEpoch;
+		this.ownerDetails = ownerDetails;
 	}
 }
 
@@ -1708,7 +1718,7 @@ export class DurableInputQueue {
 
 	async #assertCurrentOwner(): Promise<void> {
 		const current = !this.#ownership.isFenced?.() && (await this.#ownership.isCurrent());
-		if (!current) throw new SessionOwnershipLostError(this.#ownership.sessionId, this.#ownership.ownerEpoch);
+		if (!current) throw await this.#ownershipLostError();
 	}
 
 	async #assertOwner(): Promise<void> {
@@ -1719,8 +1729,16 @@ export class DurableInputQueue {
 			head.ownershipEpoch !== this.#ownership.ownerEpoch ||
 			head.epoch !== this.#activeEpoch
 		) {
-			throw new SessionOwnershipLostError(this.#ownership.sessionId, this.#ownership.ownerEpoch);
+			throw await this.#ownershipLostError();
 		}
+	}
+
+	async #ownershipLostError(): Promise<SessionOwnershipLostError> {
+		const ownerDetails = await inspectLiveSessionOwnerDetails(
+			this.#ownership.sessionFile,
+			this.#ownership.sessionId,
+		).catch(() => undefined);
+		return new SessionOwnershipLostError(this.#ownership.sessionId, this.#ownership.ownerEpoch, ownerDetails);
 	}
 
 	async #exclusive<T>(operation: () => Promise<T>): Promise<T> {

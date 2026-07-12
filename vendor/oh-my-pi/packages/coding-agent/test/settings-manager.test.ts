@@ -67,6 +67,16 @@ describe("Settings", () => {
 			expect(settings.get("tui.maxInlineImages")).toBe(8);
 		});
 
+		it("normalizes malformed modelRoles while loading a resumable configuration", async () => {
+			await writeSettings({ modelRoles: "legacy-role-selector" });
+
+			const settings = await Settings.init({ cwd: projectDir, agentDir });
+
+			expect(settings.get("modelRoles")).toEqual(getDefault("modelRoles"));
+			expect(settings.getModelRole("default")).toBeUndefined();
+			expect(settings.resolveModelRole("default").winningLayer).toBeUndefined();
+		});
+
 		it("exposes all tool calling mode options", () => {
 			const values = getEnumValues("tools.format");
 			expect(values).toEqual([

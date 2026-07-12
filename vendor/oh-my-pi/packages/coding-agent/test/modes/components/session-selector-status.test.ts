@@ -109,3 +109,21 @@ describe("SessionSelectorComponent status labels", () => {
 		}
 	});
 });
+
+describe("SessionSelectorComponent owner identity", () => {
+	it("renders the active owner pid, cwd, mux hint, and start time", () => {
+		const session = createSession("owned", "pending");
+		session.owner = {
+			ownerEpoch: "owner-epoch",
+			pid: 4242,
+			cwd: "/w",
+			startedAt: "2026-07-12T13:40:00.000Z",
+			muxHint: "tab-7",
+		};
+		const rendered = renderPlain([session]);
+		expect(rendered).toContain("active pid 4242");
+		expect(rendered).toContain("/w");
+		expect(rendered).toContain("mux tab-7");
+		expect(rendered).toContain("started 2026-07-12T13:40:00.000Z");
+	});
+});

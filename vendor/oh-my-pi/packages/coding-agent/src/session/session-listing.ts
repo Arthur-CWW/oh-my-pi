@@ -4,6 +4,7 @@ import type { Message, TextContent } from "@oh-my-pi/pi-ai";
 import { getAgentDir as getDefaultAgentDir, logger, parseJsonlLenient, toError } from "@oh-my-pi/pi-utils";
 import { decodeSessionWorkstream, type SessionWorkstream } from "./session-entries";
 import { computeDefaultSessionDir } from "./session-paths";
+import { inspectLiveSessionOwnerDetails, type SessionOwnerDetails } from "./session-ownership";
 import { FileSessionStorage, type SessionStorage } from "./session-storage";
 
 /**
@@ -43,6 +44,8 @@ export interface SessionInfo {
 	 * synthesized {@link SessionInfo}s (cross-project stubs, tests) leave it unset.
 	 */
 	status?: SessionStatus;
+	/** Live process currently owning this session, when epoch-bound metadata is available. */
+	owner?: SessionOwnerDetails;
 }
 
 export interface ResolvedSessionMatch {
@@ -412,6 +415,7 @@ async function scanSessionFile(
 
 		firstMessage ||= extractFirstUserMessageFromPrefix(content) ?? "";
 		const messageCount = Math.max(parsedMessageCount, countMessageMarkers(content));
+		const owner = withStatus ? await inspectLiveSessionOwnerDetails(file, header.id).catch(() => undefined) : undefined;
 		return {
 			session: {
 				path: file,
@@ -427,6 +431,7 @@ async function scanSessionFile(
 				firstMessage: firstMessage || "(no messages)",
 				allMessagesText: allMessages.length > 0 ? allMessages.join(" ") : firstMessage,
 				status: withStatus ? deriveSessionStatus(suffix) : undefined,
+				owner,
 			},
 		};
 	} catch (err) {
