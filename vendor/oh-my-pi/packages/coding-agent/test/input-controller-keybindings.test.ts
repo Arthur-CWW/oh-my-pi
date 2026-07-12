@@ -62,6 +62,7 @@ async function createContext() {
 	let editorText = "";
 	const keyMap: Record<string, string[]> = {
 		"app.display.reset": ["ctrl+l"],
+		"app.transcript.rawToggle": ["alt+v"],
 		"app.model.selectTemporary": ["ctrl+y"],
 		"app.model.select": ["alt+m"],
 		"app.message.followUp": ["ctrl+q", "ctrl+enter"],
@@ -86,6 +87,7 @@ async function createContext() {
 	const sendUserMessage = vi.fn(async () => {});
 	const hardCancel = vi.fn();
 	const focusParentSession = vi.fn(async () => {});
+	const toggleTranscriptMode = vi.fn();
 	const showStatus = vi.fn();
 	const updatePendingMessagesDisplay = vi.fn();
 	const showError = vi.fn();
@@ -131,6 +133,7 @@ async function createContext() {
 			abort,
 			cancel: hardCancel,
 		} as unknown as InteractiveModeContext["session"],
+		sessionManager: { getSessionFile: () => undefined },
 		keybindings: {
 			getKeys(action: string) {
 				return keyMap[action] ? [...keyMap[action]] : [];
@@ -176,7 +179,7 @@ async function createContext() {
 		handleSTTToggle: vi.fn(),
 		showDebugSelector: vi.fn(),
 		showHistorySearch: vi.fn(),
-		toggleThinkingBlockVisibility: vi.fn(),
+		toggleTranscriptMode,
 		showModelSelector,
 		focusParentSession,
 		showStatus,
@@ -205,6 +208,7 @@ async function createContext() {
 			focusParentSession,
 			showStatus,
 			resetDisplay,
+			toggleTranscriptMode,
 			showError,
 		},
 	};
@@ -233,6 +237,26 @@ describe("InputController keybinding setup", () => {
 		expect(spies.showModelSelector).toHaveBeenNthCalledWith(1, { temporaryOnly: true });
 		expect(spies.showModelSelector).toHaveBeenNthCalledWith(2);
 		expect(spies.resetDisplay).toHaveBeenCalledTimes(1);
+	});
+
+	it("toggles the raw semantic transcript only when the editor is empty", async () => {
+		const { InputController, ctx, editor, customHandlers, spies } = await createContext();
+		const controller = new InputController(ctx);
+
+		controller.setupKeyHandlers();
+		const toggle = customHandlers.get("alt+v");
+		expect(toggle).toBeDefined();
+
+		toggle?.();
+		expect(spies.toggleTranscriptMode).toHaveBeenCalledTimes(1);
+
+		editor.setText("draft");
+		toggle?.();
+		expect(spies.toggleTranscriptMode).toHaveBeenCalledTimes(1);
+
+		editor.setText("  ");
+		toggle?.();
+		expect(spies.toggleTranscriptMode).toHaveBeenCalledTimes(2);
 	});
 
 	it("empty Enter aborts the active stream when queued messages are pending", async () => {

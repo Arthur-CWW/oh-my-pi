@@ -20,6 +20,7 @@ export * from "./logout-account-selector";
 export * from "./model-selector";
 export * from "./oauth-selector";
 export * from "./queue-mode-selector";
+export * from "./raw-semantic-transcript";
 export * from "./read-tool-group";
 export * from "./segment-track";
 export * from "./session-selector";

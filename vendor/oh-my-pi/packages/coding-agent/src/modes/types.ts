@@ -77,6 +77,8 @@ export type TodoPhase = {
 	tasks: TodoItem[];
 };
 
+export type TranscriptMode = "rich" | "rawSemantic";
+
 export interface InteractiveModeInitOptions {
 	suppressWelcomeIntro?: boolean;
 	clearInitialTerminalHistory?: boolean;
@@ -135,6 +137,7 @@ export interface InteractiveModeContext {
 
 	// State
 	isInitialized: boolean;
+	transcriptMode: TranscriptMode;
 	isBashMode: boolean;
 	toolOutputExpanded: boolean;
 	todoExpanded: boolean;
@@ -341,6 +344,7 @@ export interface InteractiveModeContext {
 	cycleThinkingLevel(): void;
 	cycleRoleModel(direction?: "forward" | "backward"): Promise<void>;
 	toggleToolOutputExpansion(): void;
+	toggleTranscriptMode(): void;
 	setToolsExpanded(expanded: boolean): void;
 	toggleThinkingBlockVisibility(): void;
 	openExternalEditor(): void;

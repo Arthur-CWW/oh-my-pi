@@ -310,6 +310,12 @@ export class InputController {
 		this.ctx.editor.setActionKeys("app.message.dequeue", this.ctx.keybindings.getKeys("app.message.dequeue"));
 		this.ctx.editor.onDequeue = () => this.handleDequeue();
 		this.ctx.editor.clearCustomKeyHandlers();
+		for (const key of this.ctx.keybindings.getKeys("app.transcript.rawToggle")) {
+			this.ctx.editor.setCustomKeyHandler(key, () => {
+				if (this.ctx.editor.getText().trim()) return;
+				this.ctx.toggleTranscriptMode();
+			});
+		}
 		// Wire up extension shortcuts
 		this.registerExtensionShortcuts();
 		const planModeKeys = this.ctx.keybindings.getKeys("app.plan.toggle");
@@ -1118,11 +1124,7 @@ export class InputController {
 		if (durableProjection.length > 0) {
 			let selected: (typeof durableProjection)[number] | undefined;
 			for (const item of durableProjection) {
-				if (
-					item.state === "queued" &&
-					"text" in item.payload &&
-					(!selected || item.sequence > selected.sequence)
-				) {
+				if (item.state === "queued" && "text" in item.payload && (!selected || item.sequence > selected.sequence)) {
 					selected = item;
 				}
 			}

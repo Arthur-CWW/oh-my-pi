@@ -122,6 +122,7 @@ import type { HookEditorComponent } from "./components/hook-editor";
 import type { HookInputComponent } from "./components/hook-input";
 import type { HookSelectorComponent, HookSelectorSlider } from "./components/hook-selector";
 import { PlanReviewOverlay } from "./components/plan-review-overlay";
+import { RawSemanticTranscriptComponent } from "./components/raw-semantic-transcript";
 import { StatusLineComponent } from "./components/status-line";
 import type { ToolExecutionHandle } from "./components/tool-execution";
 import { TranscriptContainer } from "./components/transcript-container";
@@ -169,6 +170,7 @@ import type {
 	SubmittedUserInput,
 	TodoItem,
 	TodoPhase,
+	TranscriptMode,
 } from "./types";
 import { focusCmuxOwner } from "./utils/cmux-owner-navigation";
 import { type DiagnosticEventInput, ErrorInbox } from "./utils/error-inbox";
@@ -384,6 +386,7 @@ export class InteractiveMode implements InteractiveModeContext {
 	statusLine: StatusLineComponent;
 
 	isInitialized = false;
+	transcriptMode: TranscriptMode = "rich";
 	isBashMode = false;
 	toolOutputExpanded = false;
 	todoExpanded = false;
@@ -521,6 +524,7 @@ export class InteractiveMode implements InteractiveModeContext {
 	#observerRegistry: SessionObserverRegistry;
 	#eventBus?: EventBus;
 	#eventBusUnsubscribers: Array<() => void> = [];
+	#rawSemanticTranscript: RawSemanticTranscriptComponent;
 	#welcomeComponent?: WelcomeComponent;
 	readonly #chatHost: ChatBlockHost = { requestRender: () => this.ui.requestRender() };
 
@@ -656,6 +660,14 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.#commandController = new CommandController(this);
 		this.#todoCommandController = new TodoCommandController(this);
 		this.#selectorController = new SelectorController(this);
+		this.#rawSemanticTranscript = new RawSemanticTranscriptComponent(() => {
+			const viewSession = this.viewSession;
+			return {
+				header: viewSession.sessionManager.getHeader(),
+				entries: viewSession.sessionManager.getEntries(),
+				streaming: viewSession.isStreaming || this.streamingComponent !== undefined,
+			};
+		});
 		this.#focusController = new SessionFocusController(this);
 		this.#inputController = new InputController(this);
 		this.#observerRegistry = new SessionObserverRegistry();
@@ -1353,6 +1365,21 @@ export class InteractiveMode implements InteractiveModeContext {
 		}
 		this.updateEditorTopBorder();
 		this.ui.requestRender();
+	}
+
+	toggleTranscriptMode(): void {
+		const nextMode: TranscriptMode = this.transcriptMode === "rich" ? "rawSemantic" : "rich";
+		this.transcriptMode = nextMode;
+		this.chatContainer.setRawProjection(nextMode === "rawSemantic" ? this.#rawSemanticTranscript : undefined);
+		const key = this.keybindings.getDisplayString("app.transcript.rawToggle") || "Alt+V";
+		this.statusLine.setHookStatus(
+			"transcript-mode",
+			nextMode === "rawSemantic"
+				? `Transcript: raw semantic · ${key} to return`
+				: `Transcript: rich · ${key} for raw semantic`,
+		);
+		this.statusLine.invalidate();
+		this.ui.resetDisplay();
 	}
 
 	updateEditorTopBorder(): void {

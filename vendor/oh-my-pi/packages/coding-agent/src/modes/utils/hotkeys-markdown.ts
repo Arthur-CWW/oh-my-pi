@@ -38,6 +38,7 @@ export function buildHotkeysMarkdown(bindings: HotkeysMarkdownBindings): string 
 		`| \`${appKey(bindings, "app.exit")}\` | Exit (when editor is empty) |`,
 		`| \`${appKey(bindings, "app.suspend")}\` | Suspend to background |`,
 		`| \`${appKey(bindings, "app.display.reset")}\` | Reset terminal display |`,
+		`| \`${appKey(bindings, "app.transcript.rawToggle")}\` | Toggle raw semantic transcript |`,
 		`| \`${appKey(bindings, "app.thinking.cycle")}\` | Cycle thinking level |`,
 		`| \`${appKey(bindings, "app.model.cycleForward")}\` | Cycle role models (slow/default/smol) |`,
 		`| \`${appKey(bindings, "app.model.cycleBackward")}\` | Cycle role models (backward) |`,

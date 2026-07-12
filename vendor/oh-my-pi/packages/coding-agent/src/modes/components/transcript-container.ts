@@ -1,11 +1,11 @@
 import {
 	type Component,
 	Container,
+	isTranscriptVirtualizationEnabled,
 	type NativeScrollbackCommittedRows,
 	type NativeScrollbackLiveRegion,
 	type RenderStablePrefix,
 	type ViewportTailProvider,
-	isTranscriptVirtualizationEnabled,
 } from "@oh-my-pi/pi-tui";
 
 const kSnapshot = Symbol("transcript.liveDiffSnapshot");
@@ -495,6 +495,12 @@ export class TranscriptContainer
 	// consumes the report and re-bases the baseline). Out-of-band renders
 	// between engine frames lower it; they can never inflate it.
 	#stableRowsFloor = 0;
+	/**
+	 * Optional render-only diagnostic projection. Rich children remain mounted
+	 * so streaming/event-controller state continues to advance while raw mode is
+	 * visible; clearing the projection restores those same components.
+	 */
+	#rawProjection: Component | undefined;
 	override addChild(component: Component): void {
 		// Structural history changes can alter every following separator/offset.
 		this.#historyPrefix = undefined;
@@ -518,6 +524,18 @@ export class TranscriptContainer
 		this.#generation++;
 		this.#historyPrefix = undefined;
 		super.clear();
+	}
+
+	setRawProjection(projection: Component | undefined): void {
+		if (this.#rawProjection === projection) return;
+		this.#rawProjection = projection;
+		this.#historyPrefix = undefined;
+		this.#lines.length = 0;
+		this.#segments = EMPTY_SEGMENTS;
+		this.#renderWidth = -1;
+		this.#committedRows = 0;
+		this.#stableRowsFloor = 0;
+		this.invalidate();
 	}
 	#usableHistoryPrefix(width: number, childCount: number): HistoryPrefixCache | undefined {
 		if (!isTranscriptVirtualizationEnabled()) {
@@ -709,6 +727,10 @@ export class TranscriptContainer
 	renderViewportTail(width: number, maxRows: number): readonly string[] {
 		width = Math.max(1, width);
 		if (maxRows <= 0) return EMPTY_TAIL;
+		if (this.#rawProjection) {
+			const lines = this.#rawProjection.render(width);
+			return lines.length <= maxRows ? lines : lines.slice(lines.length - maxRows);
+		}
 		const collected: (readonly string[])[] = [];
 		let total = 0;
 		for (let i = this.children.length - 1; i >= 0 && total < maxRows; i--) {
@@ -732,6 +754,16 @@ export class TranscriptContainer
 
 	override render(width: number): readonly string[] {
 		width = Math.max(1, width);
+		if (this.#rawProjection) {
+			this.#nativeScrollbackLiveRegionStart = 0;
+			this.#nativeScrollbackCommitSafeEnd = undefined;
+			this.#nativeScrollbackSnapshotSafeEnd = undefined;
+			this.#lines.length = 0;
+			this.#segments = EMPTY_SEGMENTS;
+			this.#renderWidth = width;
+			this.#stableRowsFloor = 0;
+			return this.#rawProjection.render(width);
+		}
 		this.#nativeScrollbackLiveRegionStart = undefined;
 		this.#nativeScrollbackCommitSafeEnd = undefined;
 		this.#nativeScrollbackSnapshotSafeEnd = undefined;

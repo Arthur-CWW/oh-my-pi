@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { getDefaultPasteImageKeys, KeybindingsManager } from "@oh-my-pi/pi-coding-agent/config/keybindings";
+import { buildHotkeysMarkdown } from "@oh-my-pi/pi-coding-agent/modes/utils/hotkeys-markdown";
 
 describe("KeybindingsManager.getDisplayString", () => {
 	it("formats a single binding as a human-readable key hint", () => {
@@ -24,6 +25,12 @@ describe("KeybindingsManager.getDisplayString", () => {
 		});
 
 		expect(keybindings.getDisplayString("app.clipboard.copyPrompt")).toBe("");
+	});
+
+	it("includes the raw semantic transcript toggle in the hotkey table", () => {
+		const keybindings = KeybindingsManager.inMemory();
+
+		expect(buildHotkeysMarkdown({ keybindings })).toContain("| `Alt+V` | Toggle raw semantic transcript |");
 	});
 
 	it("keeps session/tree defaults off editor word-navigation chords", () => {
