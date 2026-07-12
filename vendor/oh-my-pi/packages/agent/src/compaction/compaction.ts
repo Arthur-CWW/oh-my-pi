@@ -224,7 +224,7 @@ export function effectiveReserveTokens(contextWindow: number, settings: Compacti
 export function shouldCompact(contextTokens: number, contextWindow: number, settings: CompactionSettings): boolean {
 	if (!settings.enabled || settings.strategy === "off" || contextWindow <= 0) return false;
 	const thresholdTokens = resolveThresholdTokens(contextWindow, settings);
-	return contextTokens > thresholdTokens;
+	return contextTokens >= thresholdTokens;
 }
 
 export function resolveThresholdTokens(contextWindow: number, settings: CompactionSettings): number {
