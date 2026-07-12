@@ -30,4 +30,4 @@ The `sources/` folder is the evidence archive. Read it when checking provenance,
 
 ## Implementation scope
 
-The first implementation is desktop-first at 1440x900. Mobile requirements remain preserved in the design research and briefs, but mobile implementation is deferred rather than part of the first build.
+The first implementation is desktop-first: the UI uses the full available desktop window and adapts to whatever viewport exists, while knowledge worlds remain unbounded 2D spaces that may extend beyond the viewport in both axes. Mobile requirements remain preserved in the design research and briefs, but mobile implementation is deferred rather than part of the first build.

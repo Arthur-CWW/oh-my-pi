@@ -1,6 +1,6 @@
 # Argument World: implementation brief
 
-Argument World is a source-recoverable environment for disciplined disagreement. The current implementation target is **desktop 1440 × 900 only**. It is not a dashboard, a tab collection, a premise-tree renderer, or a generic graph with argumentative colors. It is one continuous issue-centered world in which a learner can move from why an idea arose, through how it becomes intelligible and operational, to what it claims, what licenses it, what contests it, and what remains unknown.
+Argument World is a source-recoverable environment for disciplined disagreement. The current implementation target is an **adaptive desktop surface that uses the full available window**. It is not a dashboard, a tab collection, a premise-tree renderer, or a generic graph with argumentative colors. It is one continuous issue-centered world in which a learner can move from why an idea arose, through how it becomes intelligible and operational, to what it claims, what licenses it, what contests it, and what remains unknown.
 
 The canonical durable model is `inquiry-world-contract.md`. This renderer consumes and changes only `Workspace` records through `InquiryWorldApi`; it must not add position, assumption, argument-node, evidence-cell, consequence, layout, history, or selection schemas beside that contract. Renderer state is transient and must point back to canonical stable IDs.
 
@@ -22,7 +22,7 @@ The world answers nine connected questions:
 
 A position is not a new object kind. It is a `claim` with `claimRole: "thesis" | "interpretation"` connected by `answers` to the active question. An assumption is not a new durable record: it is either a hypothetical warrant claim, a string in `mechanism.assumptions` addressed by mechanism ID plus exact array index, or a learner artifact that has not yet been promoted. A consequence is an existing claim or mechanism reached through licensed relations, never a generated sentence.
 
-The aesthetic is an **editorial argument terrain**: a finite, quiet field of issue thresholds, position terraces, labeled inferential roads, source observation posts, objection fronts, mechanism cutaways, uncertainty frontiers, and a historical river. The metaphors are functional, not theatrical. There are no sidebars full of KPIs, global app tabs, card-grid menus, avatars, scores, damage, conquest, decorative fog, or force-directed drift.
+The aesthetic is an **editorial argument terrain**: a quiet, extensible field of issue thresholds, position terraces, labeled inferential roads, source observation posts, objection fronts, mechanism cutaways, uncertainty frontiers, and a historical river. The metaphors are functional, not theatrical. There are no sidebars full of KPIs, global app tabs, card-grid menus, avatars, scores, damage, conquest, decorative fog, or force-directed drift.
 
 ---
 
@@ -42,17 +42,18 @@ Argument World is a semantic-camera hybrid rather than four applications placed 
 
 `CameraState.semanticLevel`, `sourceGranularity`, `focusedObjectId`, and `breadcrumb` are the only durable camera vocabulary. Transitions are named: **enter argument**, **compare interpretations**, **descend to mechanism**, **audit evidence**, **recover source**, **follow genealogy**, and **widen to issue**. At reduced motion, travel becomes an immediate layout change, focus transfer, and announcement; no meaning depends on animation.
 
-### 2.2 Persistent world composition at 1440 × 900
+### 2.2 Adaptive desktop world composition
+The world and canvas dimensions are independent of the available desktop viewport: the knowledge world may extend arbitrarily beyond the viewport in both axes. The UI uses the full available window and adapts to its current desktop size; the world surface owns pan/scroll in both axes (and zoom where supported), while matrix and source passages retain local overflow. Fixed viewport values may be initial measurement fallbacks before `ResizeObserver`, never layout authority. A 1440 × 900 viewport is a baseline QA example only, never a design target, maximum, or world bound.
 
-The document viewport does not scroll horizontally. The world surface owns pan/zoom; matrix and source passages own local overflow.
+The document viewport does not scroll horizontally as a UI shell behavior. The world surface owns pan/scroll in both axes; matrix and source passages own local overflow.
 
 - **Question threshold, 64 px high:** the active question is physically anchored at the top edge of the world, with its status, active lens name, current source-revision conflict count, and unsupported-claim count. This is a landmark, not generic toolbar chrome.
-- **World viewport, remaining height:** finite authored plane from active placements plus margin. It contains position territories, DAG roads, context objects, genealogy river, frontiers, and matrix rooms.
+- **World surface, remaining available area:** an unbounded authored world from active placements plus margin. It contains position territories, DAG roads, context objects, genealogy river, frontiers, and matrix rooms; the world may continue beyond the viewport in either axis.
 - **Coordinate ledger, docked 320 px when opened:** a semantic peer that overlays the right edge and reduces the world viewport. It is not always-visible dashboard chrome. `L` opens it; the selected world record and ledger row remain synchronized.
 - **Source leaf, 480 px when opened:** replaces the ledger dock and unfolds beside the selected object. It is opaque, keyboard-contained while modal, Escape-closeable, and never navigates away from the world.
 - **Path ribbon, 48–128 px at bottom when active:** shows a mixed-semantics developmental or critique route. It disappears when no route is active.
 
-At 1440 × 900 the default world has at least 24 px outer breathing room, an 860–1040 px usable terrain depending on the dock, and no component that assumes a second screen. Mobile anatomy and acceptance are intentionally outside the current implementation.
+At the 1440 × 900 baseline QA viewport, the default composition should retain at least 24 px outer breathing room, an 860–1040 px usable terrain depending on the dock, and no component that assumes a second screen. Those values are a QA reference, not a design target or world/canvas cap. Mobile anatomy and acceptance are intentionally outside the current implementation.
 
 ### 2.3 Declared default lens
 
@@ -364,7 +365,7 @@ Props: resolved focus question, answering position claims, active lens, unsuppor
 
 ### `ArgumentWorldSurface`
 
-Props: projected objects, relations, placements, groups, route, camera. Renders finite ground, records, typed edges, frontiers, river, and room portals. DOM order follows ledger/topological order; SVG/canvas marks have ledger equivalents.
+Props: projected objects, relations, placements, groups, route, camera. Renders the unbounded world surface, records, typed edges, frontiers, river, and room portals. DOM order follows ledger/topological order; SVG/canvas marks have ledger equivalents.
 
 ### `ArgumentRecordMark`
 
@@ -548,7 +549,7 @@ These scenarios use only IDs established in the shared contract. Bodies are edit
 
 ## 17. Implementation and acceptance gate
 
-The implementation is ready when all of the following hold at 1440 × 900:
+The implementation is ready when the adaptive desktop viewport uses the full available window and all of the following hold. A 1440 × 900 viewport may be used as a baseline QA example only; it is never a design target, maximum, or world/canvas bound. Mobile anatomy and acceptance remain intentionally deferred.
 
 1. `InquiryWorldApi.validateWorkspace` passes before the world renders accepted semantics.
 2. Every object mark resolves to one canonical object and placement; every visible edge resolves to one legal relation with evidence.

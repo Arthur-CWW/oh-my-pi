@@ -6,7 +6,7 @@ Construction Studio is a desktop learner-authoring environment in which organizi
 
 It is one renderer and authoring surface over the canonical `Workspace` in `inquiry-world-contract.md`. It does not define a second document model. Every durable object, relation, placement, group, matrix, cell, route, snapshot, artifact, and ledger row is a shared-contract record; every durable change passes through an exact `AuthoringEvent` variant and increments the workspace revision. Atlas of Inquiry and Argument World can open the result without conversion.
 
-The first implementation is the 1440 × 900 desktop surface described here. This brief contains no current mobile component or acceptance requirement.
+The first implementation is an **adaptive desktop surface that uses the full available window**. The studio floor/canvas is independent of the available viewport and may extend arbitrarily beyond it in both axes; local matrix views own their scroll. Fixed viewport values may be initial measurement fallbacks before `ResizeObserver`, never layout authority. This brief preserves the current mobile-deferred status: it contains no current mobile component or acceptance requirement.
 
 ## What the studio is—and is not
 
@@ -212,7 +212,8 @@ Authorship is explicit and visually redundant:
 
 A `source` actor may appear in provenance but never authors learner events. The system may append only `deterministic-import`, `candidate-create`, `candidate-update`, and `sync-ledger` as allowed by the contract. Learner and editor promotions do not rewrite a candidate's origin.
 
-## Direct desktop implementation anatomy (1440 × 900)
+## Adaptive desktop implementation anatomy
+The shell fills whatever desktop viewport is available. The floor is an unbounded world surface rather than a fixed canvas; it can extend beyond the viewport in both axes, with world-surface pan/scroll in both axes. The dimensions shown below are component reference allocations, not viewport or world limits. A 1440 × 900 viewport is useful only as a baseline QA example, never as a design target, cap, or world bound.
 
 ### Spatial shell
 
@@ -229,7 +230,7 @@ A `source` actor may appear in provenance but never authors learner events. The 
 └────────────────────────────────────────────────────────────────────────────┘
 ```
 
-The top rail and side edges are restrained tools around the floor, not independent dashboards. Opening source context replaces the inspector; it does not create another panel. The challenge view is a mode within the inspector, not a parallel feed.
+The top rail and side edges are restrained tools around the floor, not independent dashboards. Their allocations adapt to the available desktop window and collapse when needed. Opening source context replaces the inspector; it does not create another panel. The challenge view is a mode within the inspector, not a parallel feed.
 
 ### Component/data boundaries
 
@@ -402,7 +403,7 @@ All body descriptions below are interface labels or paraphrases. Source text is 
 
 ## Desktop acceptance gates
 
-1. At 1440 × 900, the source table, continuous floor, context inspector, and ledger can be used without document-level horizontal scrolling. Large matrices own local scroll.
+1. At every available desktop viewport, the source table, continuous unbounded floor, context inspector, and ledger use the full window without document-level horizontal scrolling; large matrices own local scroll. A 1440 × 900 viewport is a baseline QA example only, never a target, cap, or world bound.
 2. The three Machinic walkthroughs complete end to end through pointer/tactile controls and through list-ledger/keyboard controls, producing equivalent exact `AuthoringEvent` variants.
 3. Every durable action round-trips through `InquiryWorldApi.applyEvent`; workspace validation confirms IDs, endpoint kinds, relation evidence, matrix Cartesian completeness, immutable snapshots, declared geometry, ledger parity, and event preconditions.
 4. A provisional pile is an `AuthoredGroup`; promotion preserves the original history and uses `pile-to-group` or `group-to-room` as applicable. No pile silently creates relations.

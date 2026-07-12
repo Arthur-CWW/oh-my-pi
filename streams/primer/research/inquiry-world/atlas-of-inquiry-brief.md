@@ -1,5 +1,5 @@
 # Atlas of Inquiry: Design Brief
-Implementation scope note: the first implementation targets the desktop 1440x900 layout; mobile requirements remain design research and are deferred, not deleted.
+Implementation scope note: the first implementation targets an adaptive desktop viewport: the UI fills and adapts to the available window, while the Atlas world and canvas may extend independently beyond it in both axes. Mobile requirements remain design research and are deferred, not deleted. Fixed viewport values are initial measurement fallbacks before `ResizeObserver` reports the available window; they are never layout authority.
 
 This document specifies the Atlas of Inquiry prototype in implementation-ready detail. The Atlas is a continuous 2D world for knowledge exploration, built on the Inquiry World contract (`inquiry-world-contract.md`). It is not a dashboard, not a graph skin, and not cards on a big canvas. It is a place one inhabits to orient, trace conceptual development, compare adjacent ideas, and recover authored source at every level.
 
@@ -9,7 +9,7 @@ The Atlas uses the `atlas` projection from `ViewLens`, consumes the full `Inquir
 
 ## 1. Macro world composition
 
-The Atlas world is a finite authored plane, not an infinite canvas. Its extent is determined by the union of all `SpatialPlacement` records for the active `ViewLens`, plus a declared margin. There is no procedural terrain, no decorative biome, and no ornamental geography.
+The Atlas world is an unbounded authored 2D world, not a viewport-sized plane. Spatial placements may extend arbitrarily beyond the viewport in either axis; there is no maximum world or canvas dimension. Authored placement semantics, meaningful regions, and the absence of procedural terrain, decorative biome, or ornamental geography remain explicit.
 
 ### 1.1 World layers
 
@@ -22,9 +22,9 @@ The world composes four layers, rendered bottom-to-top:
 | **Roads** | Route paths rendered as named traversal lines connecting step objects | `Route.steps` mapped through `SpatialPlacement` coordinates |
 | **Overlay** | Active lens legend, minimap, breadcrumb, selection inspector, genealogy/time overlay when toggled | UI state; not persisted as `SpatialPlacement` |
 
-### 1.2 World bounds and density
+### 1.2 World envelope and density
 
-- **Extent:** The renderer computes the bounding box of all placements for the active lens, adds 20% margin on each side. Objects beyond the margin are errors in the dataset, not hidden content.
+- **Extent:** The renderer derives the active lens's authored content envelope from its placements and adds 20% margin on each side for overview framing. This envelope is a navigation aid, not a world boundary or cap; placements may extend arbitrarily beyond it.
 - **Density contract:** No two objects may overlap at the default zoom level. The layout algorithm (or manual-v0 author) must satisfy this. When procedural layout would create overlap, objects are pushed apart along the axis declared by `proximityMeans`, and the manifest records the adjustment.
 - **Empty space is meaningful:** Gaps between regions are not wasted canvas. They signal that no authored relation connects the regions. The gap width is proportional to the weakest inter-region relation, or a constant gutter if no relation exists.
 
@@ -366,7 +366,7 @@ Zoom level transitions are smooth when not in reduced-motion mode. The renderer 
 - **Trackpad:** Two-finger drag.
 - **Touch:** Single-finger drag (when not on an object).
 - **Keyboard:** Arrow keys pan by 100px per press; hold `Shift` for 400px jumps.
-- **Constraint:** Pan is bounded to the world extent plus margin. No infinite scrolling.
+- **Constraint:** The canvas is an unbounded 2D world: pan and scroll work arbitrarily in both axes, and no authored extent imposes a stopping boundary. Empty space remains meaningful where no authored relation connects regions.
 
 ### 11.2 Zoom
 
@@ -374,7 +374,7 @@ Zoom level transitions are smooth when not in reduced-motion mode. The renderer 
 - **Trackpad:** Pinch to zoom.
 - **Touch:** Two-finger pinch.
 - **Keyboard:** `+`/`=` to zoom in, `-` to zoom out. Zoom is centered on the current viewport center, or on the focused object if one is focused.
-- **Zoom range:** Minimum zoom shows the full world extent. Maximum zoom makes a single object fill 50% of the viewport width. There are no zoom levels beyond these bounds.
+- **Zoom range:** Minimum zoom frames the active lens's authored content envelope. Maximum zoom makes a single object fill 50% of the viewport width. These framing choices do not define a maximum world or canvas dimension.
 - **Snap levels:** The zoom snaps gently to the five semantic zoom levels (Z1-Z5) with a 10% hysteresis band. The learner can zoom freely between snap levels, but the LOD transition points align with the snap levels.
 
 ### 11.3 Keyboard navigation
@@ -400,7 +400,7 @@ Zoom level transitions are smooth when not in reduced-motion mode. The renderer 
 
 ### 11.4 Minimap
 
-The minimap is a persistent panel in the bottom-right corner of the viewport. It shows a compressed view of the entire world.
+The minimap is a persistent panel in the bottom-right corner of the viewport. It shows a compressed view of the active lens's authored content envelope for orientation; the unbounded world may continue beyond that envelope.
 
 **Minimap contents:**
 - Region outlines as filled rectangles with region colors.
@@ -413,9 +413,9 @@ The minimap is a persistent panel in the bottom-right corner of the viewport. It
 **Minimap interactions:**
 - Click anywhere on the minimap to pan the main viewport to that position.
 - Drag the viewport rectangle on the minimap to pan the main viewport.
-- The minimap cannot be zoomed independently; it always shows the full world extent.
+- The minimap cannot be zoomed independently; it shows the active lens's authored content envelope for orientation.
 
-**Minimap sizing:** 200x150px on desktop, 120x90px on mobile. Collapsible via a toggle button on its corner.
+**Minimap sizing:** 200x150px on desktop, 120x90px on mobile; these are baseline QA examples only, not design authority or caps. Collapsible via a toggle button on its corner.
 
 **Accessibility fallback:** When minimap is not useful (screen reader, very small viewport), the same information is available as a textual "Location summary": current region, nearest landmarks, open roads, and frontier count. This summary is announced on camera transitions.
 
@@ -560,7 +560,7 @@ Columns are determined by the active lens's `ledgerColumns` field. The renderer 
 
 ## 14. Desktop and mobile layouts
 
-### 14.1 Desktop (1440x900 and wider)
+### 14.1 Adaptive desktop viewport
 
 ```
 +-------------------------------------------------------+
@@ -578,10 +578,11 @@ Columns are determined by the active lens's `ledgerColumns` field. The renderer 
 ```
 
 - Toolbar: top, full width, 48px height.
-- Canvas: fills remaining space.
+- Desktop UI: fills and adapts to the available window; panels resize the canvas rather than imposing a fixed viewport.
+- World and canvas: dimensions are independent from the viewport. The canvas supports scroll/pan arbitrarily in both horizontal and vertical axes.
 - Inspector: right panel, 320px width, slides in when an object is selected. Canvas resizes.
 - Ledger: left panel, 40% width (max 560px), slides in on toggle. Canvas resizes.
-- Minimap: bottom-right, 200x150px, overlays the canvas.
+- Minimap: bottom-right, 200x150px baseline QA example, overlays the canvas; this value is not design authority or a cap.
 - Route HUD: bottom bar, 48px height, overlays the canvas. Appears only during route traversal.
 - Breadcrumb: bottom-left, overlays the canvas, above the minimap.
 - Source panel: right side, replaces inspector, 400px width.

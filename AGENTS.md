@@ -39,6 +39,7 @@ Invariants. Most are also static lints — push every lesson down the guardrail 
 
 ## Review surfaces (Arthur, 2026-07-03 — repeatable patterns)
 
+- **Adaptive desktop worlds.** Desktop UI uses the full available window and adapts to whatever desktop viewport exists. Knowledge worlds/canvases may extend arbitrarily beyond the viewport in both axes; pan/scroll handles both axes. `1440x900` is baseline QA only, never a design target, cap, or world bound. Fixed viewport values are initial measurement fallbacks before `ResizeObserver`, never layout authority.
 - **Bret Victor rule.** Artifacts show the *behavior itself* and invite direct manipulation — playable, draggable, runnable in place. A number or a static file is a failure when the thing itself could be experienced. Design every proof asking: "can Arthur *feel* this in one click?"
 - **Portless per stream.** Every stream's review surface is a self-contained local app behind a stable name: `bunx portless <name> <cmd>` → `http://<name>.localhost:1355`. No port numbers, no collisions across parallel OMP sessions.
 - **Artifact-viewer/dashboard pattern.** Finished work → entry in a feed ledger (JSONL + schema) → live dashboard card with inline media, runnable actions, and **error logs of every run**. Taste forks → `question` entries answered in-place. Arthur reviews products, not commits. Reference implementations: `apps/xanadu` (companion), `packages/primer-daemon` dashboard (primer) — converge these into a shared package when a third consumer appears.
@@ -49,7 +50,7 @@ Invariants. Most are also static lints — push every lesson down the guardrail 
 ## Hard rules
 
 - **No `sudo`** without Arthur's explicit approval via `ask` (exact command, cwd, why, reversibility).
-- **Model routing.** Never launch GPT-5.5 or Fable. Sol medium is the default for implementation, UI, and design; use Terra for bounded logic and retrieval. Every spawn that overrides a role default must explicitly choose a GPT-5.6 lane.
+- **Model routing.** Never launch GPT-5.5 or Fable. Sol medium is the default for implementation, UI, and design; use Terra for bounded logic and retrieval. Sol medium remains the design/implementation lead; Sol design subagents may spawn Luna xhigh only for bounded mechanical exploration, inventory, retrieval, code searches, small variants, and QA evidence. Luna never owns synthesis, taste decisions, architecture, or final integration. The current global `smol` is already Luna xhigh.
 - **No secrets in commits.** No `.env`, tokens, credentials, session files.
 - **Provider spend gates.** Jimeng/Dreamina: dry-run default, live spend only inside a named cap with approval; concurrency 1; stop on rate-limit errors.
 - **Respectful external access.** Low concurrency, jitter/backoff, disk cache, entity dedupe. No private/locked content.
