@@ -154,14 +154,70 @@ describe("Agent hub queued follow-up", () => {
 		new UiHelpers(ctx).updatePendingMessagesDisplay();
 
 		const rendered = Bun.stripANSI(pendingMessagesContainer.render(120).join("\n"));
-		expect(rendered).toContain("Pending inputs (4):");
+		expect(rendered).toContain("Pending inputs (3):");
 		expect(rendered).toContain("#3 steer · queued · steer003: interrupt first");
 		expect(rendered).toContain("#14 steer · failed-rate-limit · steer014: retry between");
-		expect(rendered).toContain("#20 followUp · running · follow20: finish second [image]");
+		expect(rendered).not.toContain("#20 followUp · running · follow20: finish second [image]");
 		expect(rendered).toContain("legacy steer · queued · core: core-only");
 		expect(rendered).not.toContain("legacy steer · queued · core: interrupt first");
 		expect(rendered).not.toContain("legacy followUp · queued · core: finish second");
 		expect(rendered.indexOf("#3 steer")).toBeLessThan(rendered.indexOf("#14 steer"));
-		expect(rendered.indexOf("#14 steer")).toBeLessThan(rendered.indexOf("#20 followUp"));
+		expect(rendered.indexOf("#14 steer")).toBeLessThan(rendered.indexOf("legacy steer"));
+	});
+	it("dedupes admitted, running, and completed durable mirrors while preserving a separate legacy duplicate", () => {
+		const pendingMessagesContainer = new Container();
+		const projection = [
+			{
+				sequence: 1,
+				deliveryClass: "steer",
+				state: "admitted",
+				inputId: "admitted001-identity",
+				payload: { text: "same input", images: undefined },
+			},
+			{
+				sequence: 2,
+				deliveryClass: "followUp",
+				state: "running",
+				inputId: "running002-identity",
+				payload: { text: "active input", images: undefined },
+			},
+			{
+				sequence: 3,
+				deliveryClass: "steer",
+				state: "queued",
+				inputId: "queued003-identity",
+				payload: { text: "same input", images: undefined },
+			},
+			{
+				sequence: 4,
+				deliveryClass: "followUp",
+				state: "completed",
+				inputId: "completed004-identity",
+				payload: { text: "completed input", images: undefined },
+			},
+		];
+		const ctx = {
+			pendingMessagesContainer,
+			viewSession: {
+				getQueuedInputProjection: () => projection,
+				getQueuedMessages: () => ({
+					steering: ["same input", "same input", "same input"],
+					followUp: ["active input", "completed input"],
+				}),
+			},
+			keybindings: { getDisplayString: () => "Alt+Up" },
+		} as unknown as InteractiveModeContext;
+
+		new UiHelpers(ctx).updatePendingMessagesDisplay();
+
+		const rendered = Bun.stripANSI(pendingMessagesContainer.render(120).join("\n"));
+		expect(rendered).toContain("Pending inputs (2):");
+		expect(rendered).toContain("#3 steer · queued · queued00: same input");
+		expect((rendered.match(/legacy steer · queued · core: same input/g) ?? []).length).toBe(1);
+		expect(rendered).not.toContain("#1 steer · admitted");
+		expect(rendered).not.toContain("#2 followUp · running");
+		expect(rendered).not.toContain("#4 followUp · completed");
+		expect(rendered).not.toContain("legacy followUp · queued · core: active input");
+		expect(rendered).not.toContain("legacy followUp · queued · core: completed input");
 	});
 });

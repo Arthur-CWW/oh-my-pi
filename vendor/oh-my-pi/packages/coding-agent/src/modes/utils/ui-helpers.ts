@@ -669,17 +669,19 @@ export class UiHelpers {
 		// An admitted or running durable item already owns the live turn and is
 		// rendered as the user transcript message. Only work not yet delivered
 		// belongs in the pending queue, otherwise one physical submit appears twice.
-		const durableInputs = this.ctx.viewSession
+		const durableProjection = this.ctx.viewSession
 			.getQueuedInputProjection()
-			.filter(input => input.state !== "admitted" && input.state !== "running")
 			.toSorted((left, right) => left.sequence - right.sequence);
-		const durableSummary = (input: (typeof durableInputs)[number]): string =>
+		const durableSummary = (input: (typeof durableProjection)[number]): string =>
 			"text" in input.payload ? input.payload.text : `[${input.payload.message.customType}]`;
 		const durablePayloadCounts = new Map<string, number>();
-		for (const input of durableInputs) {
+		for (const input of durableProjection) {
 			const key = `${input.deliveryClass}\0${durableSummary(input)}`;
 			durablePayloadCounts.set(key, (durablePayloadCounts.get(key) ?? 0) + 1);
 		}
+		const durableInputs = durableProjection.filter(
+			input => input.state !== "admitted" && input.state !== "running" && input.state !== "completed" && input.state !== "cancelled",
+		);
 
 		const legacyEntries: Array<{ deliveryClass: "steer" | "followUp"; text: string }> = [];
 		const queuedMessages = this.ctx.viewSession.getQueuedMessages() as QueuedMessages;
