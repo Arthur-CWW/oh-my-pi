@@ -92,7 +92,7 @@
   "overrides": {},
   "scripts": {
     "install:dev": "bun install && bash scripts/link-omp.sh dev",
-    "install:stable": "bun run build && bash scripts/link-omp.sh stable packages/coding-agent/dist/omp",
+    "install:candidate": "bun run build && bash scripts/link-omp.sh candidate packages/coding-agent/dist/omp",
     "dev": "bun --cwd=packages/coding-agent src/cli.ts",
     "dev:timing": "PI_TIMING=x bun --cwd=packages/coding-agent --preload ../utils/src/module-timer.ts src/cli.ts",
     "stats": "bun --cwd=packages/coding-agent src/cli.ts stats",
