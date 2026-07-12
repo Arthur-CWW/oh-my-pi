@@ -118,6 +118,21 @@ function samePath(left: string, right: string): boolean {
 	return path.resolve(left) === path.resolve(right);
 }
 
+function hasLaterParkedTimeline(entries: readonly FileEntry[], lifecycle: ChildLifecycleRecord): boolean {
+	const lifecycleIndex = entries.findLastIndex(
+		entry =>
+			entry.type === "custom" &&
+			entry.customType === "child_lifecycle" &&
+			(entry.data as { updatedAt?: unknown }).updatedAt === lifecycle.updatedAt,
+	);
+	if (lifecycleIndex < 0) return false;
+	return entries.slice(lifecycleIndex + 1).some(entry => {
+		if (entry.type !== "custom" || entry.customType !== "omp:agent-timeline:v1") return false;
+		const data = entry.data as { agentId?: unknown; toState?: unknown };
+		return data.agentId === lifecycle.agentId && data.toState === "parked";
+	});
+}
+
 function diagnostic(result: ReAdoptionResult, file: string, reason: ReAdoptionDiagnosticReason, detail: string): void {
 	result.diagnostics.push({ file, reason, detail });
 	logger.warn("Subagent restart re-adoption skipped", { file, reason, detail });
@@ -229,10 +244,7 @@ export async function reAdoptDirectChildren(options: ReAdoptionOptions): Promise
 			diagnostic(result, sessionFile, "owner_record_corrupt", "lifecycle ownership does not match this direct child journal");
 			continue;
 		}
-		if (isTerminalChildLifecycleState(childLifecycle.state)) {
-			diagnostic(result, sessionFile, "terminal_state", `child lifecycle is terminal (${childLifecycle.state})`);
-			continue;
-		}
+		const terminalLifecycle = isTerminalChildLifecycleState(childLifecycle.state);
 		const hotswap = [...entries].reverse().find(
 			(entry): entry is ModelChangeEntry => entry.type === "model_change" && entry.role === "hotswap",
 		);
@@ -259,6 +271,15 @@ export async function reAdoptDirectChildren(options: ReAdoptionOptions): Promise
 						updatedAt: new Date().toISOString(),
 					}
 				: undefined);
+		const restartAuthorizesRecovery =
+			manifestEntry !== undefined &&
+			options.predecessorOwnerEpoch !== undefined &&
+			restart?.predecessorOwnerEpoch === options.predecessorOwnerEpoch &&
+			(restart.status === "pending" || restart.status === "resuming");
+		if (terminalLifecycle && !restartAuthorizesRecovery && !hasLaterParkedTimeline(entries, childLifecycle)) {
+			diagnostic(result, sessionFile, "terminal_state", `child lifecycle is terminal (${childLifecycle.state})`);
+			continue;
+		}
 		if (restart && restart.agentId !== metadata.agentId) {
 			diagnostic(result, sessionFile, "owner_record_corrupt", "restart checkpoint agent does not match this journal");
 			continue;

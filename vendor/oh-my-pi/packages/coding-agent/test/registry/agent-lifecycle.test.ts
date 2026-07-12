@@ -499,6 +499,7 @@ describe("AgentLifecycleManager", () => {
 		expect(registry.get("7-Sub")?.session).toBeNull();
 	});
 
+
 	it("idleTtlMs <= 0 adopts without a timer: the agent never parks", async () => {
 		vi.useFakeTimers();
 		const stub = makeSessionStub();

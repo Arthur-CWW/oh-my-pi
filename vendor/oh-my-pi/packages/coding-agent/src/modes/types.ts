@@ -89,7 +89,7 @@ export interface InteractiveModeInitOptions {
 
 export type InteractiveSelectorDialogOptions = ExtensionUIDialogOptions & Pick<HookSelectorOptions, "disabledIndices">;
 
-export type ChildShutdownPolicy = "detach" | "stop";
+export type ChildShutdownPolicy = "detach" | "restart" | "stop";
 
 export interface InteractiveModeContext {
 	// UI access
@@ -189,7 +189,7 @@ export interface InteractiveModeContext {
 	// Lifecycle
 	init(options?: InteractiveModeInitOptions): Promise<void>;
 	playWelcomeIntro(): void;
-	shutdown(options?: { childPolicy?: ChildShutdownPolicy; persistSession?: boolean }): Promise<void>;
+	shutdown(options?: { childPolicy?: ChildShutdownPolicy; persistSession?: boolean; exitProcess?: boolean }): Promise<void>;
 	checkShutdownRequested(): Promise<void>;
 
 	// Extension UI integration

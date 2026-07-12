@@ -1631,6 +1631,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 				sessionFile,
 				parentSessionFile: sessionFile,
 				parentSessionId: this.session.getSessionId?.() ?? undefined,
+				parentAgentId: this.session.getAgentId?.() ?? undefined,
 				parentWorkstream: this.session.sessionManager?.getWorkstream(),
 				persistArtifacts: !!artifactsDir,
 				artifactsDir: effectiveArtifactsDir,

@@ -113,18 +113,23 @@ export interface RestartSpawnSpec {
 	env?: Record<string, string | undefined>;
 }
 
+
+function isBunVirtualEntry(arg: string): boolean {
+	return arg.startsWith("/$bunfs/");
+}
+
 function processArgPrefix(processArgv: readonly string[], launchArgs: readonly string[]): string[] {
 	if (processArgv.length <= 1) return [];
 
 	if (launchArgs.length > 0) {
 		const tailStart = processArgv.length - launchArgs.length;
 		if (tailStart >= 1 && launchArgs.every((arg, index) => processArgv[tailStart + index] === arg)) {
-			return processArgv.slice(1, tailStart);
+			return processArgv.slice(1, tailStart).filter(arg => !isBunVirtualEntry(arg));
 		}
 	}
 
 	const maybeScript = processArgv[1];
-	return maybeScript && !maybeScript.startsWith("-") ? [maybeScript] : [];
+	return maybeScript && !maybeScript.startsWith("-") && !isBunVirtualEntry(maybeScript) ? [maybeScript] : [];
 }
 
 export function buildRestartSpawnSpec(options: {
@@ -171,22 +176,12 @@ export async function acquireRestartSessionOwnership(
 	return acquireSessionOwnership(sessionFile, sessionId, options);
 }
 
-export function spawnRestartProcess(spec: RestartSpawnSpec): void {
-	const child = Bun.spawn([spec.executable, ...spec.args], {
-		cwd: spec.cwd,
-		detached: true,
-		env: spec.env ?? Bun.env,
-		stdin: "inherit",
-		stdout: "inherit",
-		stderr: "inherit",
-	});
-	child.unref();
-}
 
 /**
- * Retire this process's direct session lease before launching its replacement.
- * Mux-backed ownership releases as a no-op, so its inherited attach semantics
- * remain intact.
+ * Retire this process's direct session lease, then atomically replace its
+ * process image. Keeping the same PID preserves the PTY foreground process
+ * group and tmux pane ownership while execve guarantees the replacement image
+ * was installed before any old-process exit can occur.
  */
 export async function handoffRestartProcess(
 	spec: RestartSpawnSpec,
@@ -197,6 +192,8 @@ export async function handoffRestartProcess(
 	const capturedManifest = await teardown?.();
 	if (ownership) await writeRestartHandoff(ownership, capturedManifest ?? childManifest);
 	await ownership?.release();
-	const env = ownership ? { ...(spec.env ?? Bun.env), [RESTART_OWNER_EPOCH_ENV]: ownership.ownerEpoch } : spec.env;
-	spawnRestartProcess({ ...spec, ...(env ? { env } : {}) });
+	const env = ownership ? { ...(spec.env ?? Bun.env), [RESTART_OWNER_EPOCH_ENV]: ownership.ownerEpoch } : spec.env ?? Bun.env;
+	if (!process.execve) throw new Error("restart requires process.execve support");
+	process.chdir(spec.cwd);
+	process.execve(spec.executable, [spec.executable, ...spec.args], env);
 }

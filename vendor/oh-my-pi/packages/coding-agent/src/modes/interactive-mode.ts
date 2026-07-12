@@ -3132,7 +3132,9 @@ export class InteractiveMode implements InteractiveModeContext {
 		}
 	}
 
-	async shutdown(options: { childPolicy?: "detach" | "stop"; persistSession?: boolean } = {}): Promise<void> {
+	async shutdown(
+		options: { childPolicy?: "detach" | "restart" | "stop"; persistSession?: boolean; exitProcess?: boolean } = {},
+	): Promise<void> {
 		if (this.#isShuttingDown) return;
 		this.#isShuttingDown = true;
 
@@ -3179,7 +3181,7 @@ export class InteractiveMode implements InteractiveModeContext {
 			process.stderr.write(`\n${chalk.dim(`Resume this session with ${APP_NAME} --resume ${sessionId}`)}\n`);
 		}
 
-		await postmortem.quit(0);
+		if (options.exitProcess !== false) await postmortem.quit(0);
 	}
 
 	async checkShutdownRequested(): Promise<void> {

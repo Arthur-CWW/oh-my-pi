@@ -118,7 +118,7 @@ describe("task spawn routing", () => {
 		});
 
 		const manager = createManager();
-		const tool = await TaskTool.create(createSession({ manager }));
+		const tool = await TaskTool.create(createSession({ manager, agentId: "Main" }));
 
 		const result = await tool.execute("tc-spawn", {
 			agent: "task",
@@ -146,6 +146,7 @@ describe("task spawn routing", () => {
 		expect(job!.resultText).toContain("message it via `irc` to follow up");
 		expect(job!.resultText).toContain("history://Spawnling");
 		expect(runSpy).toHaveBeenCalledTimes(1);
+		expect(runSpy.mock.calls[0]?.[0]?.parentAgentId).toBe("Main");
 	});
 
 

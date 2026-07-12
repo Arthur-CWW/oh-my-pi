@@ -271,6 +271,14 @@ export class AgentLifecycleManager {
 		this.#releasing.clear();
 	}
 
+	/** Park child sessions after their supervised turns have soft-stopped, then relinquish lifecycle ownership. */
+	async checkpointRestart(ids: readonly string[]): Promise<void> {
+		for (const id of ids) {
+			if (this.#registry.get(id)?.status === "idle" && this.#adopted.has(id)) await this.park(id);
+		}
+		await this.detach();
+	}
+
 	/** Teardown everything (process exit / main session dispose). */
 	async dispose(): Promise<void> {
 		this.#unsubscribe?.();
@@ -432,7 +440,7 @@ export class AgentLifecycleManager {
 			throw error;
 		}
 		const ref = this.#registry.get(id);
-		if (this.#adopted.get(id) !== adopted || !ref || ref.status !== "parked" || ref.session) {
+		if (this.#adopted.get(id) !== adopted || !ref || (ref.session && ref.session !== session)) {
 			adopted.sessionSubscription?.();
 			adopted.sessionSubscription = undefined;
 			await session.dispose({ scope: "child" });
@@ -458,15 +466,14 @@ export class AgentLifecycleManager {
 		if (
 			this.#adopted.get(id) !== adopted ||
 			this.#registry.get(id) !== ref ||
-			ref.status !== "parked" ||
-			ref.session
+			(ref.session && ref.session !== session)
 		) {
 			adopted.sessionSubscription?.();
 			adopted.sessionSubscription = undefined;
 			await session.dispose({ scope: "child" });
 			throw new Error(`Agent "${id}" was released or replaced while reviving.`);
 		}
-		this.#registry.attachSession(id, session, sessionFile);
+		if (!ref.session) this.#registry.attachSession(id, session, sessionFile);
 		this.#registry.setStatus(id, "idle");
 		return session;
 	}

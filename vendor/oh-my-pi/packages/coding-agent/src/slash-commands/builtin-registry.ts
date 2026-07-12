@@ -1,11 +1,17 @@
+import { createHash, randomUUID } from "node:crypto";
+import { createReadStream } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { getOAuthProviders } from "@oh-my-pi/pi-ai/oauth";
 import { setNextRequestDebugPath } from "@oh-my-pi/pi-ai/utils/request-debug";
 import type { AutocompleteItem } from "@oh-my-pi/pi-tui";
-import { APP_NAME, setProjectDir } from "@oh-my-pi/pi-utils";
-import { buildRestartSpawnSpec, handoffRestartProcess } from "../cli/restart-session";
+import { APP_NAME, setProjectDir, VERSION } from "@oh-my-pi/pi-utils";
+import {
+	acquireRestartSessionOwnership,
+	buildRestartSpawnSpec,
+	handoffRestartProcess,
+} from "../cli/restart-session";
 import { COLLAB_GUEST_ALLOWED_COMMANDS } from "../collab/guest";
 import { CollabHost } from "../collab/host";
 import type { SettingPath, SettingValue } from "../config/settings";
@@ -29,7 +35,7 @@ import { theme } from "../modes/theme/theme";
 import type { InteractiveModeContext } from "../modes/types";
 import { AgentRegistry, MAIN_AGENT_ID } from "../registry/agent-registry";
 import type { AgentSession, FreshSessionResult } from "../session/agent-session";
-import type { RestartChildManifestEntryV1 } from "../session/session-ownership";
+import type { RestartChildManifestEntryV1, SessionOwnershipHandle } from "../session/session-ownership";
 import { decodeSessionWorkstream, type SessionWorkstream } from "../session/session-entries";
 import { SessionManager } from "../session/session-manager";
 import { formatShakeSummary, type ShakeMode } from "../session/shake-types";
@@ -180,21 +186,30 @@ async function captureRestartChildrenAfterShutdown(
 	ctx: InteractiveModeContext,
 	predecessorOwnerEpoch: string,
 ): Promise<readonly RestartChildManifestEntryV1[]> {
+	const supervisedJobIds = new Set(
+		ctx.session.asyncJobManager
+			?.getRunningJobs({ ownerId: MAIN_AGENT_ID })
+			.filter(job => job.type === "task" && !job.isolated)
+			.map(job => job.id) ?? [],
+	);
 	const children = AgentRegistry.global()
 		.list()
 		.filter(
 			ref =>
-				ref.parentId === MAIN_AGENT_ID &&
+				(ref.parentId === MAIN_AGENT_ID || supervisedJobIds.has(ref.id)) &&
 				(ref.status === "running" || ref.status === "parked") &&
 				typeof ref.sessionFile === "string",
 		)
-		.map(ref => ({ agentId: ref.id, state: ref.status as "running" | "parked", journalPath: ref.sessionFile! }));
-
-	await ctx.shutdown({ childPolicy: "detach", persistSession: false });
+		.map(ref => ({
+			agentId: ref.id,
+			state: ref.status as "running" | "parked",
+			journalPath: ref.sessionFile!,
+			sessionManager: ref.session?.sessionManager,
+		}));
 
 	const manifest: RestartChildManifestEntryV1[] = [];
 	for (const child of children) {
-		const manager = await SessionManager.open(child.journalPath);
+		const manager = child.sessionManager ?? (await SessionManager.open(child.journalPath));
 		try {
 			const lifecycle = latestChildLifecycleRecord(manager.getEntries());
 			if (!lifecycle || isTerminalChildLifecycleState(lifecycle.state)) continue;
@@ -208,13 +223,47 @@ async function captureRestartChildrenAfterShutdown(
 				updatedAt: new Date().toISOString(),
 			});
 			await manager.flush();
-			manifest.push({ ...child, queueCheckpoint: null });
+			manifest.push({
+				agentId: child.agentId,
+				state: child.state,
+				journalPath: child.journalPath,
+				queueCheckpoint: null,
+			});
 		} finally {
-			await manager.close();
+			if (!child.sessionManager) await manager.close();
 		}
 	}
+	await ctx.shutdown({ childPolicy: "restart", persistSession: false, exitProcess: false });
 	return manifest;
 }
+
+async function createRestartRunnerIdentity() {
+	const hash = createHash("sha256");
+	for await (const chunk of createReadStream(process.execPath)) hash.update(chunk);
+	return {
+		buildRevision: { digest: hash.digest("hex"), version: VERSION },
+		runnerInstance: { runnerInstanceId: randomUUID(), startedAt: new Date().toISOString() },
+	};
+}
+
+/** Acquire the parent lease after a fresh session has chosen its lazy JSONL path. */
+export async function ensureRestartSessionOwnership(sessionManager: SessionManager) {
+	const current = sessionManager.getSessionOwnership();
+	if (current) return current;
+	const sessionFile = sessionManager.getSessionFile();
+	if (!sessionFile) throw new Error("Persistent session file is unavailable after saving");
+	const runnerIdentity = await createRestartRunnerIdentity();
+	const ownership = await acquireRestartSessionOwnership(sessionFile, sessionManager.getSessionId(), {
+		suppliedEpoch: process.env.OMP_SESSION_OWNER_EPOCH,
+		suppliedSocket: process.env.OMP_SESSION_OWNER_SOCKET,
+		buildRevision: runnerIdentity.buildRevision,
+		runnerInstanceIdentity: runnerIdentity.runnerInstance,
+	});
+	sessionManager.bindSessionOwnership(ownership);
+	// Follow-up: bind ownership eagerly when lazy session-file creation chooses its path.
+	return ownership;
+}
+
 
 async function restartHandlerTui(
 	_command: ParsedSlashCommand,
@@ -228,22 +277,23 @@ async function restartHandlerTui(
 	}
 
 	const sessionId = ctx.sessionManager.getSessionId();
-	if (!sessionId || !ctx.sessionManager.getSessionFile()) {
+	if (!sessionId) {
 		ctx.showError(
 			"Cannot restart an in-memory session. Start without --no-session so /restart can resume from JSONL.",
 		);
 		return commandConsumed();
 	}
 
+	let ownership: SessionOwnershipHandle;
 	try {
 		await ctx.sessionManager.ensureOnDisk();
 		await ctx.sessionManager.flush();
 		await ctx.sessionManager.saveDraft("");
+		ownership = await ensureRestartSessionOwnership(ctx.sessionManager);
 	} catch (err) {
-		ctx.showError(`Restart failed while saving the session: ${errorMessage(err)}`);
+		ctx.showError(`Restart failed while acquiring session ownership: ${errorMessage(err)}`);
 		return commandConsumed();
 	}
-	const ownership = ctx.sessionManager.getSessionOwnership();
 
 	const spec = buildRestartSpawnSpec({
 		sessionId,
@@ -251,13 +301,10 @@ async function restartHandlerTui(
 	});
 	ctx.showStatus(`Restarting ${APP_NAME} --resume ${sessionId}…`);
 	try {
-		await handoffRestartProcess(spec, ownership, async () => {
-			if (!ownership) {
-				await ctx.shutdown({ childPolicy: "detach", persistSession: false });
-				return;
-			}
-			return captureRestartChildrenAfterShutdown(ctx, ownership.ownerEpoch);
-		});
+		await handoffRestartProcess(spec, ownership, async () =>
+			captureRestartChildrenAfterShutdown(ctx, ownership.ownerEpoch),
+		);
+		process.exit(0);
 	} catch (err) {
 		ctx.showError(`Restart failed during session handoff: ${errorMessage(err)}`);
 	}

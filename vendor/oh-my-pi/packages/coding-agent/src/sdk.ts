@@ -511,6 +511,8 @@ export interface CreateAgentSessionOptions {
 	agentId?: string;
 	/** Display name for the agent in IRC. Default: "main" or "sub". */
 	agentDisplayName?: string;
+	/** Direct parent agent identity for registry lineage. Required for subagent sessions. */
+	parentAgentId?: string;
 	/** Optional shared agent registry for IRC routing. Default: AgentRegistry.global(). */
 	agentRegistry?: AgentRegistry;
 	/** Quota admission metadata for this agent run. */
@@ -2382,7 +2384,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			id: resolvedAgentId,
 			displayName: resolvedAgentDisplayName,
 			kind: agentKind,
-			parentId: options.parentTaskPrefix,
+			parentId: options.parentAgentId,
 			session: null,
 			sessionFile: sessionManager.getSessionFile() ?? null,
 			status: "running",
@@ -2718,13 +2720,28 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 					// AgentSession.dispose() would otherwise set its guards.
 					session.beginDispose();
 					if (agentKind === "main") {
-						// Detach preserves durable child descriptors and any
-						// out-of-process execution for a replacement controller.
-						// Destructive shutdown retains the historical release path.
-						if (disposeOptions.childPolicy === "detach") {
-							await AgentLifecycleManager.global().detach();
+						const lifecycle = AgentLifecycleManager.global();
+						if (disposeOptions.childPolicy === "restart") {
+							const supervisedJobIds = new Set(
+								session.asyncJobManager
+									?.getRunningJobs({ ownerId: MAIN_AGENT_ID })
+									.filter(job => job.type === "task" && !job.isolated)
+									.map(job => job.id) ?? [],
+							);
+							const runningChildIds = agentRegistry
+								.list()
+								.filter(
+									ref =>
+										ref.status === "running" &&
+										(ref.parentId === MAIN_AGENT_ID || supervisedJobIds.has(ref.id)),
+								)
+								.map(ref => ref.id);
+							await session.checkpointChildJobsForRestart(runningChildIds);
+							await lifecycle.checkpointRestart(runningChildIds);
+						} else if (disposeOptions.childPolicy === "detach") {
+							await lifecycle.detach();
 						} else {
-							await AgentLifecycleManager.global().dispose();
+							await lifecycle.dispose();
 						}
 					}
 					await originalDispose(disposeOptions);

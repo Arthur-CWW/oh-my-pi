@@ -28,7 +28,12 @@ import { processFileArguments } from "./cli/file-processor";
 import { buildInitialMessage } from "./cli/initial-message";
 import { selectSession } from "./cli/session-picker";
 import { applyStartupCwd } from "./cli/startup-cwd";
-import { acquireRestartSessionOwnership, RESTART_API_KEY_ENV, RESTART_OWNER_EPOCH_ENV } from "./cli/restart-session";
+import {
+	acquireRestartSessionOwnership,
+	captureRestartLaunchArgs,
+	RESTART_API_KEY_ENV,
+	RESTART_OWNER_EPOCH_ENV,
+} from "./cli/restart-session";
 import { resolveStartupWorkstream, type StartupWorkstream, WorkstreamResolutionError } from "./cli/workstream";
 import { findConfigFile } from "./config";
 import { ModelRegistry } from "./config/model-registry";
@@ -996,6 +1001,7 @@ export async function runRootCommand(
 	await logger.time("initTheme:initial", initTheme);
 
 	const parsedArgs = parsed;
+	captureRestartLaunchArgs(rawArgs);
 	const restartApiKey = process.env[RESTART_API_KEY_ENV];
 	delete process.env[RESTART_API_KEY_ENV];
 	if (parsedArgs.apiKey === undefined && restartApiKey !== undefined) parsedArgs.apiKey = restartApiKey;

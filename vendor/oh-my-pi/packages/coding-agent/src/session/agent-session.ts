@@ -1215,8 +1215,8 @@ export type SessionDisposeScope = "root" | "child";
 export interface SessionDisposeOptions {
 	/** Root disposal releases process-wide helpers; child disposal retains host-owned services. */
 	scope?: SessionDisposeScope;
-	/** Main-session child handling. Detach leaves recoverable journals and external processes intact. */
-	childPolicy?: "detach" | "stop";
+	/** Main-session child handling. Restart soft-stops running turns after their durable checkpoint is written. */
+	childPolicy?: "detach" | "restart" | "stop";
 }
 
 export class AgentSession {
@@ -4201,6 +4201,24 @@ export class AgentSession {
 		this.#durableQueueDrainPending = false;
 		this.#durableQueueDrainScheduled = false;
 		this.#durableQueueDrainPromise = undefined;
+	}
+
+	/**
+	 * Soft-stop supervised direct-child turns before ordered restart teardown.
+	 * This must use the manager owned by the main session: child construction can
+	 * replace the process-global manager pointer.
+	 */
+	async checkpointChildJobsForRestart(ids: readonly string[]): Promise<void> {
+		const manager = this.#ownedAsyncJobManager;
+		if (!manager) return;
+		const jobs = ids.flatMap(id => {
+			const job = manager.getJob(id);
+			return job?.type === "task" && job.status === "running" && !job.isolated ? [job] : [];
+		});
+		for (const job of jobs) {
+			manager.interrupt(job.id, undefined, "ordered process restart", this.getAgentId());
+		}
+		await Promise.allSettled(jobs.map(job => job.promise));
 	}
 
 	/**

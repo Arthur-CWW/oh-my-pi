@@ -13,6 +13,8 @@ import {
 	RESTART_API_KEY_ENV,
 } from "../src/cli/restart-session";
 import { acquireSessionOwnership, inspectSessionOwnership, readRestartHandoff } from "../src/session/session-ownership";
+import { SessionManager } from "../src/session/session-manager";
+import { ensureRestartSessionOwnership } from "../src/slash-commands/builtin-registry";
 
 type HandoffReceipt = {
 	predecessorEpoch?: string;
@@ -96,6 +98,7 @@ async function runRestartHandoffChild(): Promise<void> {
 			predecessorStatus: predecessor.status,
 		};
 		await writeFile(receiptPath, JSON.stringify(receipt));
+		await Bun.sleep(2_000);
 		await ownership.release();
 		receipt.replacementReleased = true;
 		await writeFile(receiptPath, JSON.stringify(receipt));
@@ -305,6 +308,20 @@ describe("buildRestartSpawnSpec", () => {
 		});
 	});
 
+	test("drops Bun compiled-binary virtual entries", () => {
+		const spec = buildRestartSpawnSpec({
+			sessionId: SESSION,
+			cwd: "/cwd",
+			executable: "/opt/omp",
+			processArgv: ["bun", "/$bunfs/root/omp", "--no-extensions"],
+			launchArgs: ["--no-extensions"],
+		});
+
+		expect(spec.executable).toBe("/opt/omp");
+		expect(spec.args).toEqual(["--no-extensions", "--resume", SESSION]);
+		expect(spec.args.join("\0")).not.toContain("/$bunfs/");
+	});
+
 	test("keeps bun run script prefix", () => {
 		const spec = buildRestartSpawnSpec({
 			sessionId: SESSION,
@@ -397,6 +414,24 @@ describe("buildRestartSpawnSpec", () => {
 			cwd: "/work/tree",
 			args: ["src/cli.ts", "--config", "/tmp/cfg.json", "--model", "pi/large", "--resume", SESSION],
 		});
+	});
+});
+
+describe("ensureRestartSessionOwnership", () => {
+	test("acquires and binds ownership when a fresh manager has none", async () => {
+		const tempDir = await mkdtemp(path.join(os.tmpdir(), "omp-restart-fresh-"));
+		const manager = SessionManager.create(tempDir, path.join(tempDir, "sessions"));
+		try {
+			expect(manager.getSessionOwnership()).toBeUndefined();
+			await manager.ensureOnDisk();
+			const ownership = await ensureRestartSessionOwnership(manager);
+			expect(manager.getSessionOwnership()).toBe(ownership);
+			expect(await ownership.isCurrent()).toBe(true);
+			await ownership.release();
+		} finally {
+			await manager.close();
+			await rm(tempDir, { recursive: true, force: true });
+		}
 	});
 });
 

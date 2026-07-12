@@ -106,6 +106,7 @@ describe("runSubprocess parent-discovery pass-through (issue #2190)", () => {
 
 		const result = await runSubprocess({
 			...baseOptions,
+			parentAgentId: "Main",
 			rules,
 			preloadedExtensionPaths,
 			preloadedCustomToolPaths,
@@ -118,6 +119,7 @@ describe("runSubprocess parent-discovery pass-through (issue #2190)", () => {
 		expect(forwarded?.rules).toBe(rules);
 		expect(forwarded?.preloadedExtensionPaths).toBe(preloadedExtensionPaths);
 		expect(forwarded?.preloadedCustomToolPaths).toBe(preloadedCustomToolPaths);
+		expect(forwarded?.parentAgentId).toBe("Main");
 	});
 
 	it("forwards undefined when the parent has not pre-discovered state", async () => {

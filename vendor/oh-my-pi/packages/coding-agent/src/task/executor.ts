@@ -31,7 +31,7 @@ import submitReminderTemplate from "../prompts/system/subagent-yield-reminder.md
 import { AgentLifecycleManager } from "../registry/agent-lifecycle";
 import type { AgentQuotaAdmission } from "../registry/agent-registry";
 
-import { AgentRegistry } from "../registry/agent-registry";
+import { AgentRegistry, MAIN_AGENT_ID } from "../registry/agent-registry";
 import { type CreateAgentSessionOptions, createAgentSession, discoverAuthStorage } from "../sdk";
 import type { AgentSession, AgentSessionEvent } from "../session/agent-session";
 import type { ArtifactManager } from "../session/artifacts";
@@ -308,6 +308,8 @@ export interface ExecutorOptions {
 	parentSessionFile?: string | null;
 	/** Durable parent session id for replacement-process child re-adoption. */
 	parentSessionId?: string;
+	/** Direct parent agent identity for registry lineage and restart capture. */
+	parentAgentId?: string;
 	persistArtifacts?: boolean;
 	artifactsDir?: string;
 	eventBus?: EventBus;
@@ -802,6 +804,7 @@ export async function createReAdoptedSessionReviver(
 				parentTaskPrefix: descriptor.parentTaskPrefix,
 				hasUI: false,
 				agentId: descriptor.id,
+				parentAgentId: MAIN_AGENT_ID,
 				agentDisplayName: descriptor.displayName,
 			});
 			registerSubscription(
@@ -2313,6 +2316,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 				parentMnemopiSessionState: options.parentMnemopiSessionState,
 				parentTaskPrefix: id,
 				agentId: id,
+				parentAgentId: options.parentAgentId,
 				agentDisplayName: subagentDisplayName,
 				enableLsp: lspEnabled,
 				skipPythonPreflight,

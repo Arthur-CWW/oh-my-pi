@@ -49,6 +49,7 @@ async function writeChild(options: {
 	corrupt?: boolean;
 	lifecycleState?: ChildLifecycleState;
 	legacy?: boolean;
+	parkedTimeline?: boolean;
 }): Promise<string> {
 	const file = path.join(options.children, `${options.fileName ?? options.id}.jsonl`);
 	if (options.corrupt) {
@@ -99,6 +100,18 @@ async function writeChild(options: {
 						},
 					}),
 				]),
+			...(options.parkedTimeline
+				? [
+						JSON.stringify({
+							type: "custom",
+							id: "parked-timeline",
+							parentId: "lifecycle",
+							timestamp,
+							customType: "omp:agent-timeline:v1",
+							data: { agentId: options.id, toState: "parked" },
+						}),
+					]
+				: []),
 		].join("\n") + "\n",
 	);
 	return file;
@@ -142,6 +155,23 @@ describe("restart child re-adoption", () => {
 		);
 		await AgentLifecycleManager.global().ensureLive("Parked");
 		expect(revived).toBe(1);
+	});
+
+	it("re-adopts a parked child after its completed turn wrote a terminal lifecycle record", async () => {
+		const { parent, children } = await makeParent();
+		await writeChild({ parent, children, id: "ParkedAfterTurn", lifecycleState: "failed", parkedTimeline: true });
+
+		const result = await reAdoptDirectChildren({
+			parentSessionFile: parent,
+			parentSessionId: "parent",
+			idleTtlMs: 0,
+			ownership: ownership(parent),
+			createReviver: async () => async () => ({ subscribe: () => () => {} }) as never,
+		});
+
+		expect(result.diagnostics).toEqual([]);
+		expect(result.adopted.map(child => child.id)).toEqual(["ParkedAfterTurn"]);
+		expect(AgentRegistry.global().get("ParkedAfterTurn")?.status).toBe("parked");
 	});
 
 	it("keeps terminal, legacy, foreign, duplicate-id, isolated, corrupt, and unavailable children history-only", async () => {
