@@ -48,8 +48,8 @@ export const MAX_PLAUSIBLE_REMAINING_MS = 7 * 24 * 3_600_000 + 60 * 60_000;
 
 /** Report must be no older than the 5-min usage cache TTL plus slack. */
 export const REPORT_FRESHNESS_MS = 10 * 60_000;
-/** Per-account cooldown that catches blockKey drift across a minute boundary. */
-export const ATTEMPT_COOLDOWN_MS = 60_000;
+/** Hard safety cap: never spend more than one saved reset per account in 24 hours. */
+export const ATTEMPT_COOLDOWN_MS = 24 * 60 * 60_000;
 /** Minute bucket for blockKey, absorbing `reset_after_seconds`-derived jitter. */
 export const DEBOUNCE_BUCKET_MS = 60_000;
 

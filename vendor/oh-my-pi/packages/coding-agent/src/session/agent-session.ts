@@ -13505,12 +13505,33 @@ export class AgentSession {
 			coordinator.attemptedBlockKeys.add(decision.blockKey);
 			coordinator.lastAttemptAtByAccount.set(decision.accountKey, Date.now());
 			const who = decision.target.email ?? decision.target.accountId ?? "the active account";
-			const outcome = await authStorage.redeemResetCredit({
-				target: decision.target,
-				baseUrlResolver: provider => this.#modelRegistry.getProviderBaseUrl?.(provider),
-				// Not tied to the retry abort controller: aborting a consume
-				// mid-flight leaves credit state unknown.
-				signal: AbortSignal.timeout(15_000),
+			let outcome: ResetCreditRedeemOutcome;
+			try {
+				outcome = await authStorage.redeemResetCredit({
+					target: decision.target,
+					baseUrlResolver: provider => this.#modelRegistry.getProviderBaseUrl?.(provider),
+					// Not tied to the retry abort controller: aborting a consume
+					// mid-flight leaves credit state unknown.
+					signal: AbortSignal.timeout(15_000),
+				});
+			} catch (error) {
+				logger.info("codex-auto-reset audit", {
+					at: new Date().toISOString(),
+					action: "POST /wham/rate-limit-reset-credits/consume",
+					account: decision.accountKey,
+					window: decision.blockKey,
+					result: "transport-error",
+					error: String(error),
+				});
+				this.emitNotice("error", "Codex auto-redeem failed before confirmation; no retry will be attempted.", "codex-auto-reset");
+				return false;
+			}
+			logger.info("codex-auto-reset audit", {
+				at: new Date().toISOString(),
+				action: "POST /wham/rate-limit-reset-credits/consume",
+				account: decision.accountKey,
+				window: decision.blockKey,
+				result: outcome.code,
 			});
 			switch (outcome.code) {
 				case "reset": {
@@ -13531,7 +13552,11 @@ export class AgentSession {
 					);
 					return false;
 				case "no_credit":
-					logger.debug("codex-auto-reset: no_credit (snapshot/live mismatch)", { account: accountKey });
+					this.emitNotice(
+						"warning",
+						"Codex auto-redeem found no saved reset credit; automatic reset remains stopped for this window.",
+						"codex-auto-reset",
+					);
 					return false;
 				case "nothing_to_reset":
 					this.emitNotice(

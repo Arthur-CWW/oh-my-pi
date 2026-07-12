@@ -219,6 +219,24 @@ describe("evaluateCodexAutoRedeem", () => {
 		expect(decision).toEqual({ redeem: false, reason: "cooldown" });
 	});
 
+	it("enforces the one-reset-per-24-hours hard cap across distinct quota windows", () => {
+		const decision = evaluateCodexAutoRedeem(
+			input([report(1.0, 3 * DAY, 1)], {
+				lastAttemptAtByAccount: new Map([[ACCOUNT_ID, NOW - DAY + 1]]),
+			}),
+		);
+		expect(decision).toEqual({ redeem: false, reason: "cooldown" });
+	});
+
+	it("allows a distinct quota window after the 24-hour hard cap expires", () => {
+		const decision = evaluateCodexAutoRedeem(
+			input([report(1.0, 3 * DAY, 1)], {
+				lastAttemptAtByAccount: new Map([[ACCOUNT_ID, NOW - DAY]]),
+			}),
+		);
+		expect(decision).toMatchObject({ redeem: true });
+	});
+
 	it("skips Spark models (reset vs Spark meter is unknown)", () => {
 		const decision = evaluateCodexAutoRedeem(input([report(1.0, 3 * DAY, 1)], { modelId: "gpt-5.3-codex-spark" }));
 		expect(decision).toEqual({ redeem: false, reason: "spark-model" });
@@ -234,8 +252,8 @@ describe("evaluateCodexAutoRedeem", () => {
 			input([report(1.0, 3 * DAY, 1)], { settings: { autoRedeem: false, minBlockedMinutes: 60, keepCredits: 0 } }),
 		);
 		expect(decision).toEqual({ redeem: false, reason: "disabled" });
-		// The public setting defaults to prompt-on-eligibility, not silent spend.
-		expect(SETTINGS_SCHEMA["codexResets.autoRedeem"].default).toBe("unset");
+		// Arthur explicitly opted in: Codex saved resets auto-redeem by default.
+		expect(SETTINGS_SCHEMA["codexResets.autoRedeem"].default).toBe("yes");
 		expect(shouldEvaluateCodexAutoRedeem("unset")).toBe(true);
 		expect(shouldPromptCodexAutoRedeem("unset")).toBe(true);
 		expect(shouldEvaluateCodexAutoRedeem("yes")).toBe(true);
@@ -245,7 +263,7 @@ describe("evaluateCodexAutoRedeem", () => {
 	});
 
 	it("migrates legacy boolean autoRedeem config to the tri-state policy", () => {
-		expect(Settings.isolated().get("codexResets.autoRedeem")).toBe("unset");
+		expect(Settings.isolated().get("codexResets.autoRedeem")).toBe("yes");
 		expect(Settings.isolated({ "codexResets.autoRedeem": true }).get("codexResets.autoRedeem")).toBe("yes");
 		expect(Settings.isolated({ "codexResets.autoRedeem": false }).get("codexResets.autoRedeem")).toBe("no");
 	});

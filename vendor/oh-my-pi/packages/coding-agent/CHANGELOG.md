@@ -6,6 +6,7 @@
 - Effect v4 beta.92 alignment probe covering service layers, typed failures, scoped cleanup/interruption, bounded queues, and deterministic test-clock scheduling.
 - Added workstream session classification via `--workstream`, `OMP_WORKSTREAM`, exact `streams/<slug>` launch-directory inference, and live `/session workstream`, `/session adhoc`, and `/session unclassify` commands while preserving resumed-session metadata.
 - Added opt-in ambient main-session labels (`irc.ambientRename.enabled`, 5-minute `irc.ambientRename.intervalMs` default), preserving explicit peer names while using the `smol` role for stale automatic labels.
+- Added default-on OpenAI Codex weekly-quota saved-reset redemption with per-window idempotency, a one-reset-per-24-hours safety cap, structured audit logs, and session notices for every outcome.
 
 - Per-spawn `model` override for `task` tool items: each spawn item accepts an optional `model` selector that takes priority over agent-level `task.agentModelOverrides`. Invalid overrides are rejected at schedule time with a formatted error listing available models, and spawn receipts now include a resolved model chain (e.g., `explore → "Rust specialist" → openai/gpt-5.2:high`).
 

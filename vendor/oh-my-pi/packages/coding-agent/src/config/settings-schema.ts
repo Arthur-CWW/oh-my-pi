@@ -4249,13 +4249,13 @@ export const SETTINGS_SCHEMA = {
 	"codexResets.autoRedeem": {
 		type: "enum",
 		values: ["unset", "yes", "no"] as const,
-		default: "unset" as const,
+		default: "yes" as const,
 		ui: {
 			tab: "providers",
 			group: "Services",
 			label: "Codex Auto-Redeem Saved Resets",
 			description:
-				"When a turn is blocked by the Codex weekly limit on the active account and no other account is available, run the conservative saved-reset check. unset asks before spending the first eligible reset, yes spends eligible resets without prompting, and no disables the check entirely. Requires retries enabled.",
+				"When a turn is blocked by the Codex weekly limit on the active account and no other account is available, automatically spend one eligible saved reset. yes is the default, unset asks before spending, and no disables the check. Requires retries enabled.",
 			options: [
 				{
 					value: "unset",
