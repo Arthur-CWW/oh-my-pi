@@ -121,6 +121,11 @@ const cwd = process.env.CWD;
 const sessionFile = process.env.SESSION_FILE;
 const sessionsDir = process.env.SESSIONS_DIR;
 const home = process.env.HOME;
+const TEST_BUILD_REVISION = { digest: "d".repeat(64), version: "durable-input-queue-agent-session-process" };
+const TEST_RUNNER_INSTANCE_IDENTITY = {
+	runnerInstanceId: "00000000-0000-4000-8000-000000000001",
+	startedAt: "2026-01-01T00:00:00.000Z",
+};
 if (
 	(action !== "first" &&
 		action !== "resume" &&
@@ -331,6 +336,8 @@ async function createSession(responseKind, providerCalls, existing) {
 	if (!acquired.ownership) {
 		acquired.ownership = await acquireSessionOwnership(acquired.sessionManager.getSessionFile(), acquired.sessionManager.getSessionId(), {
 			root: path.join(home, ".agent-mux"),
+			buildRevision: TEST_BUILD_REVISION,
+			runnerInstanceIdentity: TEST_RUNNER_INSTANCE_IDENTITY,
 		});
 	}
 	acquired.sessionManager.bindSessionOwnership(acquired.ownership);
@@ -440,6 +447,8 @@ if (action === "first") {
 	const sessionManager = await SessionManager.open(sessionFile, sessionsDir);
 	const ownership = await acquireSessionOwnership(sessionManager.getSessionFile(), sessionManager.getSessionId(), {
 		root: path.join(home, ".agent-mux"),
+		buildRevision: TEST_BUILD_REVISION,
+		runnerInstanceIdentity: TEST_RUNNER_INSTANCE_IDENTITY,
 	});
 	sessionManager.bindSessionOwnership(ownership);
 	const queue = await DurableInputQueue.open(ownership, path.join(home, ".agent-mux"));
