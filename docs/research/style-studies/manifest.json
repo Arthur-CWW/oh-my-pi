@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-07-11",
+  "updated_at": "2026-07-12",
   "layers": ["source", "study", "primitive", "prototype", "adoption"],
   "sources": [
     {
@@ -31,6 +31,16 @@
       "label": "Primer graph audit",
       "artifact": "../../../streams/primer/wrapped-commentary-reader/experiments/graph-creation-engine/current-graph-audit.md",
       "status": "complete"
+    },
+    {
+      "id": "nocturnal-mnemosyne",
+      "label": "Nocturnal Mnemosyne",
+      "artifact": "studies/nocturnal-mnemosyne.md",
+      "source_manifest": "sources/nocturnal-mnemosyne/manifest.md",
+      "decision": "arthur-liked-deferred-not-current-atlas",
+      "theme_coverage": "dark-only-light-unresolved",
+      "source_coverage": "url-level-references",
+      "status": "deferred"
     }
   ],
   "prototypes": [

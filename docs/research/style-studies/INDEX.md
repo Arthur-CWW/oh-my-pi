@@ -30,6 +30,7 @@ A source is inspiration, not a template. Do not copy motifs without understandin
 | Graph data contract | [`experiments/graph-creation-engine/graph-data-contract.md`](../../../streams/primer/wrapped-commentary-reader/experiments/graph-creation-engine/graph-data-contract.md) | Typed records, assertions, provenance, and missing relation semantics. |
 | Creation-engine prototype brief | [`experiments/graph-creation-engine/prototype-brief.md`](../../../streams/primer/wrapped-commentary-reader/experiments/graph-creation-engine/prototype-brief.md) | Passage Lens, Recurrence Trail, Argument Spine, Source Genealogy Desk, Evidence Neighborhood. |
 | Primer creation engine v0 | [`#/graph`](http://meltdown.localhost:1355/#/graph) | Five bounded projections over real reader IR: Passage Lens, Recurrence Trail, Authored Spine, Source Genealogy, and Evidence Neighborhood, with deterministic manifests and explicit provenance gaps. |
+| Nocturnal Mnemosyne | [`studies/nocturnal-mnemosyne.md`](studies/nocturnal-mnemosyne.md) | Arthur-liked dark-only montage/constellation field, deferred for another project or part and not selected for the current Atlas; URL-level [source manifest](sources/nocturnal-mnemosyne/manifest.md). |
 
 ## Provisional vocabulary to test
 
