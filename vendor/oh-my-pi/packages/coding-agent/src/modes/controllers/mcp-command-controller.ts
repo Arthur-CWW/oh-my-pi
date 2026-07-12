@@ -555,7 +555,7 @@ export class MCPCommandController {
 				return await this.#handleTestConnection(config);
 			},
 			() => {
-				this.ctx.ui.requestRender();
+				this.ctx.ui.requestComponentRender(wizard);
 			},
 			parsed.initialName,
 		);

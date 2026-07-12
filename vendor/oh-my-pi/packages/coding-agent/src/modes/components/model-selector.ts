@@ -307,7 +307,7 @@ export class ModelSelectorComponent extends Container {
 					this.#errorMessage = error instanceof Error ? error.message : String(error);
 					this.#updateList();
 				})
-				.finally(() => this.#tui.requestRender());
+				.finally(() => this.#tui.requestComponentRender(this));
 		}
 	}
 
@@ -611,7 +611,7 @@ export class ModelSelectorComponent extends Container {
 				this.#refreshSpinnerFrame = (this.#refreshSpinnerFrame + 1) % frameCount;
 			}
 			this.#updateTabBar();
-			this.#tui.requestRender();
+			this.#tui.requestComponentRender(this);
 		}, 80);
 	}
 
@@ -677,7 +677,7 @@ export class ModelSelectorComponent extends Container {
 		} finally {
 			this.#setProviderRefreshing(providerId, false);
 			this.#updateTabBar();
-			this.#tui.requestRender();
+			this.#tui.requestComponentRender(this);
 		}
 	}
 
@@ -696,7 +696,7 @@ export class ModelSelectorComponent extends Container {
 			// Let TUI's normal post-input render paint the new tab immediately.
 			// The live refresh is debounced onto a later timer so tab cycling never
 			// shares a stack frame with provider refresh work.
-			this.#tui.requestRender();
+			this.#tui.requestComponentRender(this);
 		};
 		this.#tabBar = tabBar;
 		this.#headerContainer.addChild(tabBar);

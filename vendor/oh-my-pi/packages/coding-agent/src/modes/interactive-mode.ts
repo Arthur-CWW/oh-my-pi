@@ -526,7 +526,7 @@ export class InteractiveMode implements InteractiveModeContext {
 	#eventBusUnsubscribers: Array<() => void> = [];
 	#rawSemanticTranscript: RawSemanticTranscriptComponent;
 	#welcomeComponent?: WelcomeComponent;
-	readonly #chatHost: ChatBlockHost = { requestRender: () => this.ui.requestRender() };
+	readonly #chatHost: ChatBlockHost = { requestRender: component => this.ui.requestComponentRender(component) };
 
 	readonly errorInbox: ErrorInbox;
 	constructor(

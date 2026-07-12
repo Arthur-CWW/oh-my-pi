@@ -50,6 +50,7 @@ export class HookInputComponent extends Container {
 					opts.onTimeout?.();
 					this.#onCancelCallback();
 				},
+				this,
 			);
 		}
 

@@ -1,12 +1,12 @@
-import { Container } from "@oh-my-pi/pi-tui";
+import { type Component, Container } from "@oh-my-pi/pi-tui";
 
 /**
  * Capabilities a mounted {@link ChatBlock} may use against its host transcript.
  * Kept minimal so blocks never reach into the full TUI/InteractiveMode surface.
  */
 export interface ChatBlockHost {
-	/** Schedule a repaint of the transcript. */
-	requestRender(): void;
+	/** Schedule a component-scoped repaint of the transcript block. */
+	requestRender(component: Component): void;
 }
 
 /**
@@ -54,7 +54,7 @@ export abstract class ChatBlock extends Container {
 
 	/** Ask the host to repaint. No-op before mount or after dispose. */
 	protected requestRender(): void {
-		this.#host?.requestRender();
+		this.#host?.requestRender(this);
 	}
 
 	/** True between {@link mount} and {@link finish}/{@link dispose}. */

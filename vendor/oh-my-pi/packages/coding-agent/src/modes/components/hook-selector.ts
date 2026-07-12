@@ -234,6 +234,7 @@ export class HookSelectorComponent extends Container {
 						this.#onCancelCallback();
 					}
 				},
+				this,
 			);
 		}
 

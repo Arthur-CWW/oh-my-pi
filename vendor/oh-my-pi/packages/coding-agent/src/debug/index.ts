@@ -254,6 +254,7 @@ export class DebugSelectorComponent extends Container {
 			const result = await createReportBundle({
 				sessionFile: this.ctx.sessionManager.getSessionFile(),
 				settings: this.#getResolvedSettings(),
+				renderMetrics: this.ctx.ui.renderMetrics,
 				rawSseText: this.#getRawSseText(),
 			});
 

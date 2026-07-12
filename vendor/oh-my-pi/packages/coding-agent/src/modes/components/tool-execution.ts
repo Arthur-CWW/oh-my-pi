@@ -392,7 +392,7 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 				this.#editDiffPreview = isStreaming ? stabilizeStreamingPreviews(previews) : previews;
 				this.#displayInputVersion++;
 				this.#updateDisplay();
-				this.#ui.requestRender();
+				this.#ui.requestComponentRender(this);
 			}
 		} catch (err) {
 			if (controller.signal.aborted) return;
@@ -543,7 +543,7 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 		this.#backgroundTaskFrozen = true;
 		this.#updateSpinnerAnimation();
 		this.#updateDisplay();
-		this.#ui.requestRender();
+		this.#ui.requestComponentRender(this);
 		return true;
 	}
 
@@ -660,7 +660,7 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 		this.#backgroundTaskFrozen = true;
 		this.stopAnimation();
 		this.#updateDisplay();
-		this.#ui.requestRender();
+		this.#ui.requestComponentRender(this);
 	}
 
 	/**

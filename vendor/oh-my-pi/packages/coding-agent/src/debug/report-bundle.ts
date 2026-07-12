@@ -39,6 +39,8 @@ export interface ReportBundleOptions {
 	sessionFile: string | undefined;
 	/** Settings to include */
 	settings?: Record<string, unknown>;
+	/** Allocation-free TUI render counters and cumulative phase timings. */
+	renderMetrics?: Readonly<Record<string, number>>;
 	/** CPU profile (for performance reports) */
 	cpuProfile?: CpuProfile;
 	/** Heap snapshot (for memory reports) */
@@ -71,6 +73,7 @@ export interface DebugLogSource {
  * - system.json: OS, arch, CPU, memory, versions
  * - env.json: Sanitized environment variables
  * - config.json: Resolved settings
+ * - tui-render.json: TUI scheduling counters and cumulative phase timings
  * - profile.cpuprofile: CPU profile (performance report only)
  * - raw-sse.txt: Recent raw provider SSE diagnostics (when captured)
  * - profile.md: Markdown CPU profile (performance report only)
@@ -102,6 +105,10 @@ export async function createReportBundle(options: ReportBundleOptions): Promise<
 	if (options.settings) {
 		data["config.json"] = JSON.stringify(options.settings, null, 2);
 		files.push("config.json");
+	}
+	if (options.renderMetrics) {
+		data["tui-render.json"] = JSON.stringify(options.renderMetrics, null, 2);
+		files.push("tui-render.json");
 	}
 
 	// Recent logs (last 1000 lines)

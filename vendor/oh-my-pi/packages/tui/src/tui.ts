@@ -109,12 +109,19 @@ export interface RenderScheduler {
 	scheduleRender(callback: () => void, delayMs: number): RenderTimer;
 }
 
-/** Counters for diagnosing invalidation bursts without sampling terminal output. */
+/** Allocation-free counters and cumulative phase timings for render diagnostics. */
 export interface TUIRenderMetrics {
 	invalidations: number;
 	renderRequests: number;
+	componentRenderRequests: number;
+	supersededComponentFrames: number;
 	scheduledPaints: number;
 	renderPasses: number;
+	composeMs: number;
+	prepareMs: number;
+	auditMs: number;
+	diffMs: number;
+	writeMs: number;
 }
 
 export interface TUIOptions {
@@ -711,7 +718,19 @@ export class TUI extends Container {
 	// harmless after a superseding reset or disposal.
 	#forcedRenderQueued = false;
 	#forcedRenderGeneration = 0;
-	#renderMetrics: TUIRenderMetrics = { invalidations: 0, renderRequests: 0, scheduledPaints: 0, renderPasses: 0 };
+	#renderMetrics: TUIRenderMetrics = {
+		invalidations: 0,
+		renderRequests: 0,
+		componentRenderRequests: 0,
+		supersededComponentFrames: 0,
+		scheduledPaints: 0,
+		renderPasses: 0,
+		composeMs: 0,
+		prepareMs: 0,
+		auditMs: 0,
+		diffMs: 0,
+		writeMs: 0,
+	};
 	#renderScheduler: RenderScheduler;
 	#lastRenderAt = 0;
 	static readonly #MIN_RENDER_INTERVAL_MS = 1000 / 30;
@@ -1660,6 +1679,13 @@ export class TUI extends Container {
 	 */
 	requestComponentRender(component: Component): void {
 		if (this.#stopped) return;
+		this.#renderMetrics.componentRenderRequests++;
+		// Repeated animation ticks before the pending paint supersede the same
+		// component's previous frame. The Set is the dirty-root index: retain one
+		// obligation, not one frame per tick.
+		if (this.#componentRenderTargets.has(component)) {
+			this.#renderMetrics.supersededComponentFrames++;
+		}
 		// Start a component-scoped accumulation only when nothing else is in
 		// flight (a pending throttled request or a deferred ConPTY settle
 		// replay may carry full-render intent that must not be narrowed).
@@ -1735,9 +1761,9 @@ export class TUI extends Container {
 	/** Root child whose subtree contains `target`, memoized per component. */
 	#resolveComponentRoot(target: Component): Component | null {
 		const cached = this.#componentRootCache.get(target);
-		if (cached !== undefined && this.children.includes(cached) && subtreeContains(cached, target)) {
-			return cached;
-		}
+		// Root membership is the structural validity check. Re-walking the cached
+		// root's subtree here made every keystroke O(committed history).
+		if (cached !== undefined && this.children.includes(cached)) return cached;
 		for (const child of this.children) {
 			if (subtreeContains(child, target)) {
 				this.#componentRootCache.set(target, child);
@@ -1978,14 +2004,16 @@ export class TUI extends Container {
 		}
 
 		// Pass input to focused component (including Ctrl+C)
-		// The focused component can decide how to handle Ctrl+C
-		if (this.#focusedComponent?.handleInput) {
+		// The focused component can decide how to handle Ctrl+C.
+		const focused = this.#focusedComponent;
+		if (focused?.handleInput) {
 			// Filter out key release events unless component opts in
-			if (isKeyRelease(data) && !this.#focusedComponent.wantsKeyRelease) {
+			if (isKeyRelease(data) && !focused.wantsKeyRelease) {
 				return;
 			}
-			this.#focusedComponent.handleInput(data);
-			this.requestRender();
+			focused.handleInput(data);
+			// Input dirties the focused subtree, not committed transcript history.
+			this.requestComponentRender(focused);
 		}
 	}
 
@@ -2271,6 +2299,7 @@ export class TUI extends Container {
 		this.#renderMetrics.renderPasses++;
 		const width = this.terminal.columns;
 		const height = this.terminal.rows;
+		let phaseStartedAt = this.#renderScheduler.now();
 
 		// Consume the component-scoped accumulation: it describes the render
 		// requests made up to this frame, whichever path the frame takes.
@@ -2356,6 +2385,8 @@ export class TUI extends Container {
 			rawFrame = this.render(width);
 			this.#imageBudget.endPass();
 		}
+		this.#renderMetrics.composeMs += this.#renderScheduler.now() - phaseStartedAt;
+		phaseStartedAt = this.#renderScheduler.now();
 		// Ghostty initial-image deferral must run before any render state is
 		// consumed (#resizeEventPending, hardware-cursor state, commit
 		// re-anchoring): the early return abandons this frame and the deferred
@@ -2399,6 +2430,7 @@ export class TUI extends Container {
 		// composed frame's stable prefix covers every committed row — bytes
 		// that provably did not change since the last (aligned) frame cannot
 		// have diverged.
+		const auditStartedAt = this.#renderScheduler.now();
 		let committedRowsResynced = false;
 		if (
 			this.#hasEverRendered &&
@@ -2410,6 +2442,8 @@ export class TUI extends Container {
 			this.#auditCommittedPrefix(rawFrame);
 			committedRowsResynced = this.#committedRows !== committedRowsBeforeAudit;
 		}
+		this.#renderMetrics.auditMs += this.#renderScheduler.now() - auditStartedAt;
+		phaseStartedAt = this.#renderScheduler.now();
 		// Committed-prefix state this frame's commit math extends from (post-audit).
 		// Drives the byte-stable audit-rows cap recomputed after the emit.
 		const preCommitRows = this.#committedRows;
@@ -2497,6 +2531,8 @@ export class TUI extends Container {
 			}
 		}
 
+		this.#renderMetrics.diffMs += this.#renderScheduler.now() - phaseStartedAt;
+		phaseStartedAt = this.#renderScheduler.now();
 		// 5. Pick the visible cursor marker (bottom-most at or below the window
 		// top), prepare lines, and build the visible window slice.
 		let cursorPos: { row: number; col: number } | null = null;
@@ -2518,6 +2554,8 @@ export class TUI extends Container {
 			}
 			window = this.#prepareLinesArray(window, width);
 		}
+		this.#renderMetrics.prepareMs += this.#renderScheduler.now() - phaseStartedAt;
+		phaseStartedAt = this.#renderScheduler.now();
 
 		const intent: RenderIntent = fullPaint
 			? { kind: "fullPaint", clearScrollback: replaceRequested ? !isMultiplexerSession() : false }
@@ -2545,6 +2583,9 @@ export class TUI extends Container {
 			this.#imageBudget.takePurgeIds();
 		}
 
+		// Image transmit/purge planning is part of the output diff.
+		this.#renderMetrics.diffMs += this.#renderScheduler.now() - phaseStartedAt;
+		phaseStartedAt = this.#renderScheduler.now();
 		// 6. Emit.
 		if (intent.kind === "fullPaint") {
 			this.#emitFullPaint(frame, window, width, height, cursorPos, purgeSequence, {
@@ -2552,6 +2593,7 @@ export class TUI extends Container {
 				chunkTo,
 				windowTop,
 			});
+			this.#renderMetrics.writeMs += this.#renderScheduler.now() - phaseStartedAt;
 			this.#committedPrefix = rawFrame.slice(0, chunkTo);
 			this.#updateCommittedAuditRows(true, preCommitRows, preCommitAuditRows, byteStableBoundary);
 			this.#clearScrollbackOnNextRender = false;
@@ -2566,6 +2608,7 @@ export class TUI extends Container {
 			prevHardwareCursorRow,
 			forceWindowRewrite: this.#forceViewportRepaintOnNextRender || (geometryChanged && isMultiplexerSession()),
 		});
+		this.#renderMetrics.writeMs += this.#renderScheduler.now() - phaseStartedAt;
 		for (let i = this.#committedPrefix.length; i < chunkTo; i++) {
 			this.#committedPrefix.push(rawFrame[i] ?? "");
 		}

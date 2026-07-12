@@ -1184,7 +1184,7 @@ export class SelectorController {
 						return !!apiKey;
 					},
 					requestRender: () => {
-						this.ctx.ui.requestRender();
+						this.ctx.ui.requestComponentRender(selector);
 					},
 				},
 			);
