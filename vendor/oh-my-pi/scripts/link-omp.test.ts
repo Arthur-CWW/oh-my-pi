@@ -82,6 +82,23 @@ describe("two-step immutable OMP registry", () => {
 		expect(fs.realpathSync(path.join(base, "bin", "omp.previous"))).toBe(fs.realpathSync(path.join(base, "bin", ".omp-releases", `omp-${ad}`)));
 	});
 
+	it("adopts an immutable selected release when initializing the registry", () => {
+		const base = root(), a = fixture(base, "a", "A"), b = fixture(base, "b", "B");
+		const ad = candidateDigest(base, a);
+		const bin = path.join(base, "bin");
+		const releaseA = path.join(bin, ".omp-releases", `omp-${ad}`);
+		fs.rmSync(path.join(bin, ".omp-release-registry.json"));
+		fs.symlinkSync(releaseA, path.join(bin, "omp"));
+
+		const bd = candidateDigest(base, b);
+		expect(registry(base).stable).toBe(ad);
+		const releaseB = path.join(bin, ".omp-releases", `omp-${bd}`);
+		expect(bless(base, bd, receipt(releaseB)).exitCode).toBe(0);
+		expect(registry(base)).toMatchObject({ stable: bd, previous: ad, candidate: null });
+		expect(run(base, ["rollback"]).exitCode).toBe(0);
+		expect(registry(base)).toMatchObject({ stable: ad, previous: bd, candidate: null });
+	});
+
 	it("rejects false, stale, mismatched, tampered, and missing-candidate proofs", () => {
 		const cases: Array<(release: string) => string> = [
 			release => receipt(release, { proof: { mutationAppliedExactlyOnce: false, leaseReleased: true, leaseReacquired: true, jsonlPersisted: true, queuePersisted: true } }),

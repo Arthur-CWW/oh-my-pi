@@ -232,6 +232,11 @@ def main():
         fcntl.flock(lock, fcntl.LOCK_EX)
         recover_pending(bin_dir, releases, registry_path, pending_path)
         registry = load_registry(registry_path)
+        if registry["stable"] is None:
+            adopted = selected_digest(bin_dir / "omp", releases)
+            if adopted is not None:
+                registry["stable"] = adopted
+                atomic_json(registry_path, registry)
         if command == "candidate":
             if len(args) != 1: fail("candidate requires an executable binary")
             source = pathlib.Path(args[0]).resolve()
