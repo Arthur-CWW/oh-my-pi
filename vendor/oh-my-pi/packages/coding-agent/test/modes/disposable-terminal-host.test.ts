@@ -195,6 +195,30 @@ describe("DisposableTerminalHost", () => {
 		expect(state.runnerStops).toBe(1);
 	});
 
+	test("retires the active view and runner before publishing a session transition", async () => {
+		let callbacks: DisposableTerminalHostCallbacks | undefined;
+		const lifecycle: string[] = [];
+		const state = harness({
+			load: async () => (_controller, hostCallbacks) => {
+				callbacks = hostCallbacks;
+				return {
+					run: async () => {},
+					quiesce: async () => { lifecycle.push("view:quiesce"); },
+					dispose: async () => { lifecycle.push("view:dispose"); },
+				};
+			},
+		});
+		await state.host.reload({ specifier: "sample", cacheKey: "A" });
+
+		await callbacks!.requestTransition({ kind: "switchSession", session: { kind: "id", id: "session-b" } });
+		const intent = await state.host.completion;
+
+		expect(lifecycle).toEqual(["view:quiesce", "view:dispose"]);
+		expect(state.closedControllers).toEqual([1]);
+		expect(state.runnerStops).toBe(1);
+		expect(intent).toEqual({ kind: "switchSession", session: { kind: "id", id: "session-b" } });
+	});
+
 	test("reattaches the known-good revision when loading or initializing fails", async () => {
 		const runs: string[] = [];
 		let aFactoryCalls = 0;

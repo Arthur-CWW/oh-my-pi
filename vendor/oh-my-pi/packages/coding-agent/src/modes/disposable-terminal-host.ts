@@ -5,6 +5,9 @@ import {
 	createTerminalSessionController,
 	type TerminalSessionController,
 } from "./terminal-session-controller";
+import type { InteractiveHostIntent } from "./interactive-host-intent";
+export type { InteractiveHostIntent };
+
 
 export interface DisposableTerminalHostCallbacks {
 	readonly epoch: number;
@@ -12,6 +15,7 @@ export interface DisposableTerminalHostCallbacks {
 	readonly assertCurrentEpoch: () => void;
 	readonly requestReload: () => Promise<void>;
 	readonly requestStop: () => Promise<void>;
+	readonly requestTransition: (intent: InteractiveHostIntent) => Promise<void>;
 }
 
 export interface DisposableTerminalView {
@@ -92,8 +96,9 @@ export class DisposableTerminalHost {
 	#epoch = 0;
 	#stopped = false;
 	#stopPromise: Promise<void> | undefined;
-	readonly #completion: Promise<void>;
-	#resolveCompletion!: () => void;
+	readonly #completion: Promise<InteractiveHostIntent | undefined>;
+	#resolveCompletion!: (intent: InteractiveHostIntent | undefined) => void;
+	#exitIntent: InteractiveHostIntent | undefined;
 
 	constructor(options: DisposableTerminalHostOptions) {
 		this.#runner = options.runner;
@@ -109,7 +114,7 @@ export class DisposableTerminalHost {
 		return this.#active?.revision;
 	}
 
-	get completion(): Promise<void> {
+	get completion(): Promise<InteractiveHostIntent | undefined> {
 		return this.#completion;
 	}
 
@@ -163,7 +168,7 @@ export class DisposableTerminalHost {
 			if (errors.length === 1) throw errors[0];
 			if (errors.length > 1) throw new AggregateError(errors, "Disposable terminal host stop failed");
 		}).finally(() => {
-			this.#resolveCompletion();
+			this.#resolveCompletion(this.#exitIntent);
 		});
 		return this.#stopPromise;
 	}
@@ -190,6 +195,7 @@ export class DisposableTerminalHost {
 			},
 			requestReload: () => this.#requestReload(epoch),
 			requestStop: () => this.#requestStop(epoch),
+			requestTransition: intent => this.#requestTransition(epoch, intent),
 		};
 		let view: DisposableTerminalView | undefined;
 		try {
@@ -249,6 +255,19 @@ export class DisposableTerminalHost {
 				void this.stop().then(resolve, reject);
 			});
 		});
+	}
+
+	#requestTransition(epoch: number, intent: InteractiveHostIntent): Promise<void> {
+		const { promise, resolve, reject } = Promise.withResolvers<void>();
+		queueMicrotask(() => {
+			if (this.#active?.epoch !== epoch || this.#stopped) {
+				reject(new Error(`Stale disposable terminal view epoch ${epoch}`));
+				return;
+			}
+			this.#exitIntent = intent;
+			void this.stop().then(resolve, reject);
+		});
+		return promise;
 	}
 
 	async #retire(active: ActiveRevision): Promise<void> {

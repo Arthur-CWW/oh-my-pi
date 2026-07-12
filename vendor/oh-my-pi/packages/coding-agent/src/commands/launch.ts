@@ -66,7 +66,7 @@ export default class Index extends Command {
 			options: ["text", "json", "rpc", "acp", "rpc-ui"],
 		}),
 		"tui-bundle-manifest": Flags.string({
-			description: "Load a disposable TUI bundle manifest for this run",
+			description: "Override the default rich terminal with a hash-reloadable TUI bundle manifest",
 		}),
 		config: Flags.string({
 			description: "Load an extra config.yml-style overlay for this run (repeatable)",

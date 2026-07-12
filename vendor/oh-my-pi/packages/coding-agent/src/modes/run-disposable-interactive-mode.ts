@@ -5,6 +5,9 @@ import {
 	createUniqueRevisionLoader,
 	DisposableTerminalHost,
 	type DisposableTerminalRevision,
+	type DisposableTerminalRevisionLoader,
+	type DisposableTerminalViewFactory,
+	type InteractiveHostIntent,
 } from "./disposable-terminal-host";
 
 export interface DisposableTuiManifest {
@@ -44,27 +47,53 @@ export async function resolveDisposableTuiManifest(manifestPath: string): Promis
 	return { specifier, cacheKey: manifest.cacheKey };
 }
 
-/** Own the disposable terminal host while the supplied runner remains the persistent session authority. */
-export async function runDisposableInteractiveMode(runner: SessionRunner, manifestPath: string): Promise<void> {
-	const absoluteManifestPath = path.resolve(manifestPath);
-	const resolveRevision = () => resolveDisposableTuiManifest(absoluteManifestPath);
+export interface RunDisposableInteractiveModeOptions {
+	/** Optional immutable revision manifest used by the opt-in hash reload path. */
+	readonly manifestPath?: string;
+	/** In-process rich view used by the default interactive terminal. */
+	readonly defaultFactory?: DisposableTerminalViewFactory;
+}
+
+const BUILTIN_RICH_REVISION: DisposableTerminalRevision = {
+	specifier: "omp:rich-interactive-terminal",
+	cacheKey: "builtin-rich",
+};
+
+function createBuiltinLoader(factory: DisposableTerminalViewFactory): DisposableTerminalRevisionLoader {
+	return { load: async () => factory };
+}
+
+/** Own one disposable terminal host while the supplied runner remains the session authority. */
+export async function runDisposableInteractiveMode(
+	runner: SessionRunner,
+	options: RunDisposableInteractiveModeOptions,
+): Promise<InteractiveHostIntent | undefined> {
+	const absoluteManifestPath = options.manifestPath ? path.resolve(options.manifestPath) : undefined;
+	if (!absoluteManifestPath && !options.defaultFactory) {
+		throw new Error("Default disposable terminal launch requires a rich view factory");
+	}
+	const resolveRevision = absoluteManifestPath
+		? () => resolveDisposableTuiManifest(absoluteManifestPath)
+		: undefined;
 	const host = new DisposableTerminalHost({
 		runner,
-		loader: createUniqueRevisionLoader(),
+		loader: absoluteManifestPath ? createUniqueRevisionLoader() : createBuiltinLoader(options.defaultFactory!),
 		resolveRevision,
 	});
 	const unregisterCleanup = postmortem.register("disposable-terminal-host", () => host.stop());
 	let failure: unknown;
 	let started = false;
+	let intent: InteractiveHostIntent | undefined;
 	try {
-		await host.reload(await resolveRevision());
+		const revision = resolveRevision ? await resolveRevision() : BUILTIN_RICH_REVISION;
+		await host.reload(revision);
 		started = true;
-		await host.completion;
+		intent = await host.completion;
 	} catch (error) {
 		failure = started
 			? error
 			: new Error(
-					`Failed to start disposable TUI from ${absoluteManifestPath}: ${error instanceof Error ? error.message : String(error)}`,
+					`Failed to start disposable TUI${absoluteManifestPath ? ` from ${absoluteManifestPath}` : ""}: ${error instanceof Error ? error.message : String(error)}`,
 					{ cause: error },
 				);
 	}
@@ -79,4 +108,5 @@ export async function runDisposableInteractiveMode(runner: SessionRunner, manife
 		unregisterCleanup();
 	}
 	if (failure) throw failure;
+	return intent;
 }

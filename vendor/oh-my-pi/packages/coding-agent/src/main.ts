@@ -1403,7 +1403,7 @@ export async function runRootCommand(
 			modelRegistry.refreshInBackground();
 			stopStartupWatchdog();
 			logger.endTiming();
-			await runDisposableInteractiveMode(runner, parsedArgs.tuiBundleManifest);
+			await runDisposableInteractiveMode(runner, { manifestPath: parsedArgs.tuiBundleManifest });
 			stopThemeWatcher();
 			await postmortem.quit(0);
 			return;

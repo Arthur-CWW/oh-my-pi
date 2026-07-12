@@ -73,17 +73,31 @@ if (build.exitCode === 0) {
 	]));
 }
 
-const mainSource = await fs.readFile(path.join(root, "packages/coding-agent/src/main.ts"), "utf8");
-const legacyDefault = /new\s+InteractiveMode\s*\(/.test(mainSource);
-const residuals = legacyDefault
-	? [{
-			id: "default-terminal-selection",
-			severity: "phase-blocker",
-			detail: "The default interactive launch still constructs legacy InteractiveMode; disposable runner/view shell remains opt-in.",
-		}]
-	: [];
+const [mainSource, interactiveTypesSource] = await Promise.all([
+	fs.readFile(path.join(root, "packages/coding-agent/src/main.ts"), "utf8"),
+	fs.readFile(path.join(root, "packages/coding-agent/src/modes/types.ts"), "utf8"),
+]);
+const residuals: Array<{ id: string; severity: "phase-blocker"; detail: string }> = [];
+if (/new\s+InteractiveMode\s*\(/.test(mainSource)) {
+	residuals.push({
+		id: "default-terminal-selection",
+		severity: "phase-blocker",
+		detail: "The default interactive launch still constructs legacy InteractiveMode; disposable runner/view shell remains opt-in.",
+	});
+}
+if (
+	/import\s+type\s+\{\s*AgentSession\s*\}/.test(interactiveTypesSource) ||
+	/import\s+type\s+\{\s*SessionManager\s*\}/.test(interactiveTypesSource) ||
+	/^\s*(?:readonly\s+)?(?:session|sessionManager|viewSession|agent)\s*:/m.test(interactiveTypesSource)
+) {
+	residuals.push({
+		id: "interactive-view-authority",
+		severity: "phase-blocker",
+		detail: "InteractiveModeContext still exposes raw AgentSession, SessionManager, viewSession, or agent authority.",
+	});
+}
 const failed = checks.filter(check => check.exitCode !== 0);
-const status = failed.length > 0 ? "fail" : residuals.length > 0 ? "pass_with_residual" : "pass";
+const status = failed.length > 0 || residuals.length > 0 ? "fail" : "pass";
 const artifact = {
 	schemaVersion: 1,
 	gate: "phase-two-runner-view",
@@ -98,4 +112,4 @@ await fs.mkdir(path.dirname(output), { recursive: true });
 await fs.writeFile(output, serialized);
 const digest = createHash("sha256").update(serialized).digest("hex");
 process.stdout.write(`${JSON.stringify({ status, output: path.relative(root, output), sha256: digest, summary: artifact.summary })}\n`);
-if (failed.length > 0) process.exitCode = 1;
+if (failed.length > 0 || residuals.length > 0) process.exitCode = 1;
