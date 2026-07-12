@@ -1243,6 +1243,7 @@ export class AgentSession {
 	/** A terminal drain remains due after a turn_end raced outer prompt recovery. */
 	#durableQueueDrainPending = false;
 	#durableOwnershipLostError: SessionOwnershipLostError | undefined;
+	#ownershipLossUnsubscribe: (() => void) | undefined;
 	fileSnapshotStore?: InMemorySnapshotStore;
 	#autoApprove: boolean;
 
@@ -1651,6 +1652,10 @@ export class AgentSession {
 	constructor(config: AgentSessionConfig) {
 		this.agent = config.agent;
 		this.sessionManager = config.sessionManager;
+		this.#ownershipLossUnsubscribe = this.sessionManager.subscribeOwnershipLost(error => {
+			if (!this.#handleDurableOwnershipLoss(error)) return;
+			this.emitNotice("error", error.message, "session-ownership");
+		});
 		const injectedDurableInputQueue = config.durableInputQueue;
 		const ownership = injectedDurableInputQueue ? undefined : this.sessionManager.getSessionOwnership();
 		let durableInputQueueInitialization: Promise<DurableInputQueue> | undefined;
@@ -4180,6 +4185,8 @@ export class AgentSession {
 	 */
 	beginDispose(): void {
 		this.#isDisposed = true;
+		this.#ownershipLossUnsubscribe?.();
+		this.#ownershipLossUnsubscribe = undefined;
 		this.#ambientAgentRenamer?.stop();
 		this.#ambientAgentRenamer = undefined;
 		if (this.#durableRateLimitRetryTimer) {

@@ -6,10 +6,12 @@ import {
 	type CustomMessageEntry,
 	type SessionHeader,
 } from "@oh-my-pi/pi-coding-agent/session/session-entries";
+import { SessionOwnershipLostError } from "@oh-my-pi/pi-coding-agent/session/durable-input-queue";
 import {
 	DurableCustomMessageConflictError,
 	SessionManager,
 } from "@oh-my-pi/pi-coding-agent/session/session-manager";
+import { FileSessionStorage, type SessionStorageWriter } from "@oh-my-pi/pi-coding-agent/session/session-storage";
 import { TempDir } from "@oh-my-pi/pi-utils";
 
 const message = {
@@ -109,4 +111,67 @@ describe("SessionManager durable custom messages", () => {
 		expect(customEntries(manager)[0]?.content).toBe("still readable");
 		await manager.close();
 	});
+	it("transitions read-only without an unhandled rejection when ownership is revoked during a rewrite", async () => {
+		using temp = TempDir.createSync("@omp-ownership-rewrite-");
+		let releaseClose!: () => void;
+		let closeStarted!: () => void;
+		const closeGate = new Promise<void>(resolve => {
+			releaseClose = resolve;
+		});
+		const closeObserved = new Promise<void>(resolve => {
+			closeStarted = resolve;
+		});
+		class GatedStorage extends FileSessionStorage {
+			override openWriter(file: string, options?: { flags?: "a" | "w"; onError?: (error: Error) => void }): SessionStorageWriter {
+				const writer = super.openWriter(file, options);
+				return {
+					append: line => writer.append(line),
+					flush: () => writer.flush(),
+					isOpen: () => writer.isOpen(),
+					getError: () => writer.getError(),
+					close: async () => {
+						closeStarted();
+						await closeGate;
+						await writer.close();
+					},
+				};
+			}
+		}
+		const manager = SessionManager.create(temp.path(), path.join(temp.path(), "sessions"), new GatedStorage());
+		await manager.ensureOnDisk();
+		const sessionFile = manager.getSessionFile();
+		if (!sessionFile) throw new Error("expected session file");
+		let fenced = false;
+		manager.bindSessionOwnership({
+			sessionFile,
+			sessionId: manager.getSessionId(),
+			ownerEpoch: "revoked-epoch",
+			ownerKind: "omp",
+			buildRevision: {} as never,
+			runnerInstanceIdentity: {} as never,
+			isCurrent: async () => !fenced,
+			isFenced: () => fenced,
+			release: async () => {},
+		});
+		manager.appendCustomMessageEntry("probe", "before revoke", true);
+		const notices: SessionOwnershipLostError[] = [];
+		manager.subscribeOwnershipLost(error => notices.push(error));
+		const unhandled: unknown[] = [];
+		const onUnhandled = (reason: unknown) => unhandled.push(reason);
+		process.on("unhandledRejection", onUnhandled);
+		try {
+			const rewrite = manager.rewriteEntries();
+			await closeObserved;
+			fenced = true;
+			releaseClose();
+			await expect(rewrite).rejects.toBeInstanceOf(SessionOwnershipLostError);
+			await Bun.sleep(10);
+			expect(unhandled).toEqual([]);
+			expect(notices).toHaveLength(1);
+			expect(notices[0]?.message).toContain("read-only");
+		} finally {
+			process.off("unhandledRejection", onUnhandled);
+		}
+	});
+
 });

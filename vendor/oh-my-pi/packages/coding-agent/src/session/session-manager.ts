@@ -58,6 +58,7 @@ import {
 	type WorkflowRestoreState,
 	type WorkstreamSource,
 } from "./session-entries";
+import { SessionOwnershipLostError } from "./durable-input-queue";
 import {
 	findMostRecentSession,
 	listAllSessions,
@@ -524,6 +525,8 @@ export class SessionManager {
 	#writer: SessionStorageWriter | undefined;
 	/** The lease that authorizes every persistent mutation of this parent journal. */
 	#ownership: SessionOwnershipHandle | undefined;
+	#ownershipLostError: SessionOwnershipLostError | undefined;
+	#ownershipLostListeners = new Set<(error: SessionOwnershipLostError) => void>();
 	/** Serializes async disk work (flush/close/atomic rewrite). Appends are synchronous and bypass it. */
 	#diskTail: Promise<void> = Promise.resolve();
 	#diskFailure: Error | undefined;
@@ -567,7 +570,20 @@ export class SessionManager {
 			canonicalFilePathSync(this.#ownership.sessionFile) !== canonicalFilePathSync(this.#sessionFile) ||
 			this.#ownership.sessionId !== this.#sessionId
 		) {
-			throw new Error("Session ownership lost; refusing to write stale epoch");
+			const error =
+				this.#ownershipLostError ??
+				new SessionOwnershipLostError(this.#ownership.sessionId, this.#ownership.ownerEpoch);
+			if (!this.#ownershipLostError) {
+				this.#ownershipLostError = error;
+				for (const listener of [...this.#ownershipLostListeners]) {
+					try {
+						listener(error);
+					} catch (listenerError) {
+						logger.warn("SessionManager: ownership loss hook failed", { error: String(listenerError) });
+					}
+				}
+			}
+			throw error;
 		}
 	}
 
@@ -697,6 +713,7 @@ export class SessionManager {
 		await this.#scheduleDiskWork(
 			async () => {
 				await this.#closeWriterHandle();
+				this.#assertOwnership();
 				const sessionFile = this.#sessionFile;
 				if (!sessionFile) return;
 				await this.#storage.writeTextAtomic(sessionFile, this.#fileBody());
@@ -966,6 +983,13 @@ export class SessionManager {
 	getSessionOwnership(): SessionOwnershipHandle | undefined {
 		return this.#ownership;
 	}
+
+	/** Observe the irreversible transition to a fenced, read-only session writer. */
+	subscribeOwnershipLost(listener: (error: SessionOwnershipLostError) => void): () => void {
+		this.#ownershipLostListeners.add(listener);
+		if (this.#ownershipLostError) listener(this.#ownershipLostError);
+		return () => this.#ownershipLostListeners.delete(listener);
+	}
 	async putBlob(data: Buffer, options?: BlobPutOptions): Promise<BlobPutResult> {
 		return this.#blobs.put(data, options);
 	}
@@ -1228,6 +1252,7 @@ export class SessionManager {
 	async flush(): Promise<void> {
 		if (!this.#persist || !this.#sessionFile) return;
 		await this.#scheduleDiskWork(async () => {
+			this.#assertOwnership();
 			if (this.#writer?.isOpen()) await this.#writer.flush();
 		});
 		if (this.#diskFailure) throw this.#diskFailure;
