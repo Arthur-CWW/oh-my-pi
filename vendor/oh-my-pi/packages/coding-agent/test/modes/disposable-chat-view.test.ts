@@ -49,6 +49,7 @@ function createSnapshot(): TerminalSessionSnapshot {
 				leafId: null,
 				lastEntryId: undefined,
 			},
+			recentDeliveries: [],
 			views: [],
 			controller: { viewId: "test-view", epoch: 1 },
 			activeCompaction: undefined,

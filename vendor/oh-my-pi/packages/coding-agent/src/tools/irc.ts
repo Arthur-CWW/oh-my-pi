@@ -16,7 +16,7 @@ import { formatAge, formatDuration, prompt } from "@oh-my-pi/pi-utils";
 import { z } from "zod/v4";
 import type { Settings } from "../config/settings";
 import type { RenderResultOptions } from "../extensibility/custom-tools/types";
-import { IrcBus, type IrcDeliveryReceipt, type IrcMessage } from "../irc/bus";
+import { IrcBus, type IrcDeliveryReceipt, type IrcDeliveryRecord, type IrcMessage } from "../irc/bus";
 import { getIrcExternalPeerDisplayState, IrcExternalBus, resolveIrcExternalPeerName } from "../irc/bus-external";
 import type { Theme } from "../modes/theme/theme";
 import ircDescription from "../prompts/tools/irc.md" with { type: "text" };
@@ -74,6 +74,9 @@ interface IrcPeerInfo {
 	activity?: string;
 	cwd?: string;
 	external?: boolean;
+	pendingDeliveries?: number;
+	undeliveredDeliveries?: number;
+	lastDelivery?: IrcDeliveryRecord;
 }
 
 export interface IrcDetails {
@@ -196,6 +199,9 @@ export class IrcTool implements AgentTool<typeof ircSchema, IrcDetails> {
 				status: ref.status,
 				parentId: ref.parentId,
 				unread: bus.unreadCount(ref.id),
+				pendingDeliveries: bus.peerDeliverySummary(ref.id).pendingCount,
+				undeliveredDeliveries: bus.peerDeliverySummary(ref.id).undeliveredCount,
+				lastDelivery: bus.peerDeliverySummary(ref.id).lastMessage,
 				lastActivity: ref.lastActivity,
 				activity: ref.activity,
 			}));
@@ -231,6 +237,9 @@ export class IrcTool implements AgentTool<typeof ircSchema, IrcDetails> {
 				const extras = [
 					peer.activity || undefined,
 					peer.unread > 0 ? `unread ${peer.unread}` : undefined,
+					peer.pendingDeliveries ? `pending ${peer.pendingDeliveries}` : undefined,
+					peer.undeliveredDeliveries ? `undelivered ${peer.undeliveredDeliveries}` : undefined,
+					peer.lastDelivery ? `last message ${peer.lastDelivery.state}` : undefined,
 					peer.parentId ? `parent ${peer.parentId}` : undefined,
 					`active ${formatDuration(Date.now() - peer.lastActivity)} ago`,
 				].filter(Boolean);

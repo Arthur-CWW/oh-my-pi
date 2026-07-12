@@ -159,6 +159,18 @@ describe("IRC", () => {
 			expect(aborted.outcome).toBe("failed");
 		});
 
+		it("bounds delivery history and never exposes message bodies", async () => {
+			for (let index = 0; index < 201; index++) {
+				await bus.send({ from: "0-Main", to: `0-Ghost-${index}`, body: `secret-${index}` });
+			}
+
+			const deliveries = bus.recentDeliveries({ limit: 1_000 });
+			expect(deliveries).toHaveLength(200);
+			expect(deliveries[0]?.recipientId).toBe("0-Ghost-200");
+			expect(deliveries[199]?.recipientId).toBe("0-Ghost-1");
+			expect(JSON.stringify(deliveries)).not.toContain("secret-");
+		});
+
 		it("send surfaces recipient delivery errors as failed", async () => {
 			const sub = makeFakeSession();
 			registry.register({ id: "0-Sub", displayName: "task", kind: "sub", session: sub.session });
@@ -181,6 +193,17 @@ describe("IRC", () => {
 			expect(receipt.outcome).toBe("revived");
 			expect(sub.delivered.map(msg => msg.body)).toEqual(["wake up"]);
 			expect(registry.get("0-Parked")?.status).toBe("idle");
+			const [delivery] = bus.recentDeliveries({ peerId: "0-Parked" });
+			expect(delivery).toMatchObject({
+				senderId: "0-Main",
+				recipientId: "0-Parked",
+				preview: "[message body hidden]",
+				state: "read",
+				delivery: "revived",
+			});
+			expect(delivery?.queuedAt).toBeLessThanOrEqual(delivery?.deliveredAt ?? 0);
+			expect(delivery?.deliveredAt).toBeLessThanOrEqual(delivery?.readAt ?? 0);
+			expect(bus.peerDeliverySummary("0-Parked")).toMatchObject({ pendingCount: 0, undeliveredCount: 0 });
 		});
 
 		it("reserves a send racing park and delivers exactly once after revival", async () => {
@@ -476,6 +499,14 @@ describe("IRC", () => {
 			expect(receipt).toEqual({ to: "0-Parked", outcome: "failed", error: "revive exploded" });
 			// The pre-revive reservation remains available for later recovery.
 			expect(bus.unreadCount("0-Parked")).toBe(1);
+			const [delivery] = bus.recentDeliveries({ peerId: "0-Parked" });
+			expect(delivery).toMatchObject({
+				state: "failed",
+				failureReason: "revive exploded",
+				preview: "[message body hidden]",
+			});
+			expect(delivery?.failedAt).toBeGreaterThanOrEqual(delivery?.queuedAt ?? Number.POSITIVE_INFINITY);
+			expect(bus.peerDeliverySummary("0-Parked")).toMatchObject({ pendingCount: 0, undeliveredCount: 1 });
 		});
 	});
 

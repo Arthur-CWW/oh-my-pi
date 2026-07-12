@@ -784,6 +784,8 @@ export interface RunnerTranscriptSnapshot {
 	readonly lastEntryId: string | undefined;
 }
 
+export type { IrcDeliveryRecord } from "../irc/bus";
+
 export interface SessionRunnerSnapshot {
 	readonly runnerIdentity: RunnerIdentity;
 	readonly revision: number;
@@ -792,6 +794,7 @@ export interface SessionRunnerSnapshot {
 	readonly durableSequence: number;
 	readonly items: ReadonlyArray<DurableQueuedInput>;
 	readonly transcript: RunnerTranscriptSnapshot;
+	readonly recentDeliveries: ReadonlyArray<import("../irc/bus").IrcDeliveryRecord>;
 	readonly views: ReadonlyArray<RunnerViewSnapshot>;
 	readonly controller: { readonly viewId: string; readonly epoch: number } | undefined;
 	readonly activeCompaction:

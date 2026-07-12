@@ -1,6 +1,7 @@
 import { Cause, Deferred, Effect, FiberSet, PubSub, Queue, Ref, type Scope } from "effect";
 import type { PythonResult } from "../eval/py/executor";
 import type { BashResult } from "../exec/bash-executor";
+import { IrcBus } from "../irc/bus";
 import { type AgentSession, type AgentSessionEvent, PromptOperationConflictError } from "../session/agent-session";
 import {
 	type DurableCustomPayload,
@@ -633,6 +634,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 				entries: transcript.entries,
 				lastEntryId: transcriptLastEntryId,
 			},
+			recentDeliveries: IrcBus.global().recentDeliveries(),
 			views: viewSnapshots,
 			controller: activeController,
 			activeCompaction:
