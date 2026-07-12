@@ -36,7 +36,13 @@ import {
 	isIrcExternalPeerFresh,
 } from "../../irc/bus-external";
 import { AgentLifecycleManager } from "../../registry/agent-lifecycle";
-import { type AgentRef, AgentRegistry, type AgentStatus, MAIN_AGENT_ID } from "../../registry/agent-registry";
+import {
+	type AgentRef,
+	AgentRegistry,
+	type AgentStatus,
+	MAIN_AGENT_ID,
+	type RegistryEvent,
+} from "../../registry/agent-registry";
 import {
 	listArchivedDirectChildren,
 	type ArchivedDirectChildDescriptor,
@@ -87,6 +93,8 @@ const AGE_TICK_MS = 5_000;
 const CHAT_REFRESH_DEBOUNCE_MS = 80;
 /** Double-tap window for the left-left "go to parent" gesture (matches the editor's). */
 const LEFT_TAP_WINDOW_MS = 500;
+/** Completed journal rows shown without an explicit archive expansion. */
+const RECENT_COMPLETED_LIMIT = 20;
 
 /** Compute the max content width for the current terminal, accounting for chrome. */
 function contentWidth(): number {
@@ -492,6 +500,15 @@ export class AgentHubOverlayComponent extends Container {
 	#hubKeys: KeyId[];
 	#unsubscribers: Array<() => void> = [];
 	#ageTimer: NodeJS.Timeout | undefined;
+	#projectionTimer: NodeJS.Timeout | undefined;
+	#pendingRegistryEvents: RegistryEvent[] = [];
+	#registryRefs = new Map<string, AgentRef>();
+	#refsByStatus: Record<AgentStatus, Map<string, AgentRef>> = {
+		running: new Map(),
+		idle: new Map(),
+		parked: new Map(),
+		aborted: new Map(),
+	};
 	#remote: AgentHubRemote | undefined;
 	#turnStatus: ((agentId: string) => AgentHubTurnStatus | undefined) | undefined;
 	#remoteFetchInFlight = false;
@@ -518,6 +535,7 @@ export class AgentHubOverlayComponent extends Container {
 	#showRunningOnly = false;
 	#focusRestoreSelectedKey: string | undefined;
 	#statusCounts: Record<AgentStatus, number> = { running: 0, idle: 0, parked: 0, aborted: 0 };
+	#sectionStarts: Array<{ index: number; label: string }> = [];
 	#notice: string | undefined;
 	// Table roster filter (/ key)
 	#tableFilterQuery = "";
@@ -624,9 +642,10 @@ export class AgentHubOverlayComponent extends Container {
 		this.#editor.onSubmit = text => this.#submitChatMessage(text);
 
 		this.#unsubscribers.push(
-			this.#registry.onChange(() => {
+			this.#registry.onChange(event => {
+				this.#pendingRegistryEvents.push({ ...event, ref: { ...event.ref } });
 				this.#registryGeneration++;
-				this.#onDataChange();
+				this.#scheduleProjection();
 			}),
 		);
 		this.#unsubscribers.push(
@@ -644,6 +663,7 @@ export class AgentHubOverlayComponent extends Container {
 		this.#ageTimer.unref?.();
 
 		this.#rebuildObserverSnapshot();
+		this.#initializeRegistryProjection();
 		this.#refreshRows();
 		// Oldest active agent is first; external peers remain informational.
 		if (this.#visibleActiveRows.length > 0) {
@@ -654,7 +674,8 @@ export class AgentHubOverlayComponent extends Container {
 
 	/** Whether the table view has no registered live or revivable agents. */
 	get isEmpty(): boolean {
-		return this.#totalTableRows() === 0;
+		this.#flushProjection();
+		return this.#registryRefs.size + this.#archivedRows.length + this.#externalRows.length === 0;
 	}
 
 	getRetentionMetrics(): AgentHubRetentionMetrics {
@@ -679,6 +700,10 @@ export class AgentHubOverlayComponent extends Container {
 			clearInterval(this.#ageTimer);
 			this.#ageTimer = undefined;
 		}
+		if (this.#projectionTimer) {
+			clearTimeout(this.#projectionTimer);
+			this.#projectionTimer = undefined;
+		}
 		if (this.#chatRefreshTimer) {
 			clearTimeout(this.#chatRefreshTimer);
 			this.#chatRefreshTimer = undefined;
@@ -697,9 +722,13 @@ export class AgentHubOverlayComponent extends Container {
 		this.#externalOrder.clear();
 		this.#archivedRows = [];
 		this.#visibleArchivedRows = [];
+		this.#pendingRegistryEvents = [];
+		this.#registryRefs.clear();
+		for (const bucket of Object.values(this.#refsByStatus)) bucket.clear();
 	}
 
 	override render(width: number): readonly string[] {
+		this.#flushProjection();
 		return this.#view === "table" ? this.#renderTable(width) : this.#renderChat(width);
 	}
 
@@ -763,6 +792,24 @@ export class AgentHubOverlayComponent extends Container {
 	// Live data plumbing
 	// ========================================================================
 
+	#scheduleProjection(): void {
+		if (this.#projectionTimer) return;
+		this.#projectionTimer = setTimeout(() => {
+			this.#projectionTimer = undefined;
+			this.#flushProjection();
+			this.#requestRender();
+		}, 0);
+		this.#projectionTimer.unref?.();
+	}
+
+	#flushProjection(): void {
+		if (this.#pendingRegistryEvents.length === 0) return;
+		const events = this.#pendingRegistryEvents;
+		this.#pendingRegistryEvents = [];
+		for (const event of events) this.#applyRegistryEvent(event);
+		this.#onDataChange();
+	}
+
 	#onDataChange(): void {
 		if (
 			this.#showArchivedChildren &&
@@ -772,14 +819,11 @@ export class AgentHubOverlayComponent extends Container {
 		}
 		this.#refreshRows();
 		if (this.#view === "chat") {
-			// Archived descriptors must never attach a colliding live registry session.
 			if (!this.#chatArchived) {
 				this.#attachLiveSession();
 				this.#scheduleChatRefresh();
 			}
-			return;
 		}
-		this.#requestRender();
 	}
 
 	#isTerminal(ref: AgentRef): boolean {
@@ -794,7 +838,7 @@ export class AgentHubOverlayComponent extends Container {
 
 	#rebuildActiveSearchFields(): void {
 		this.#activeSearchFields.clear();
-		for (const ref of this.#rows) {
+		for (const ref of this.#registryRefs.values()) {
 			const observed = this.#observerById.get(ref.id);
 			const task = observed?.description ?? observed?.progress?.task ?? "";
 			const model = observed?.progress?.resolvedModel ?? "";
@@ -832,27 +876,46 @@ export class AgentHubOverlayComponent extends Container {
 		return true;
 	}
 
-	/** Rebuild live rows only when the registry generation changes. */
-	#refreshRows(): void {
-		const activeRows: AgentRef[] = [];
+	#initializeRegistryProjection(): void {
 		for (const ref of this.#registry.list()) {
-			if (ref.id !== MAIN_AGENT_ID) activeRows.push(ref);
+			if (ref.id !== MAIN_AGENT_ID) this.#applyRegistryEvent({ type: "registered", ref: { ...ref } });
 		}
+	}
+
+	#applyRegistryEvent(event: RegistryEvent): void {
+		if (event.ref.id === MAIN_AGENT_ID) return;
+		const previous = this.#registryRefs.get(event.ref.id);
+		if (previous) this.#refsByStatus[previous.status].delete(previous.id);
+		if (event.type === "removed") {
+			this.#registryRefs.delete(event.ref.id);
+			return;
+		}
+		const snapshot = { ...event.ref };
+		this.#registryRefs.set(snapshot.id, snapshot);
+		this.#refsByStatus[snapshot.status].set(snapshot.id, snapshot);
+	}
+
+	#orderedStatus(status: AgentStatus): AgentRef[] {
+		return [...this.#refsByStatus[status].values()].sort(
+			(a, b) => a.spawnIndex - b.spawnIndex || a.id.localeCompare(b.id),
+		);
+	}
+
+	/** Rebuild displayed identities only from expanded status buckets. */
+	#refreshRows(): void {
 		if (this.#orderedRegistryGeneration !== this.#registryGeneration) {
-			let hiddenTerminalCount = 0;
-			const counts: Record<AgentStatus, number> = { running: 0, idle: 0, parked: 0, aborted: 0 };
-			const rows: AgentRef[] = [];
-			for (const ref of activeRows) {
-				if (this.#isTerminal(ref)) hiddenTerminalCount++;
-				if (this.#showTerminalAgents || !this.#isTerminal(ref)) {
-					rows.push(ref);
-					counts[ref.status]++;
-				}
-			}
-			rows.sort((a, b) => a.spawnIndex - b.spawnIndex || a.id.localeCompare(b.id));
+			const counts: Record<AgentStatus, number> = {
+				running: this.#refsByStatus.running.size,
+				idle: this.#refsByStatus.idle.size,
+				parked: this.#refsByStatus.parked.size,
+				aborted: this.#refsByStatus.aborted.size,
+			};
+			const rows = [...this.#orderedStatus("running"), ...this.#orderedStatus("idle")];
+			if (this.#tableFilterQuery) rows.push(...this.#orderedStatus("parked"));
+			if (this.#showTerminalAgents) rows.push(...this.#orderedStatus("aborted"));
 			this.#rows = rows;
 			this.#statusCounts = counts;
-			this.#hiddenTerminalCount = hiddenTerminalCount;
+			this.#hiddenTerminalCount = this.#showTerminalAgents ? 0 : counts.aborted;
 			this.#orderedRegistryGeneration = this.#registryGeneration;
 			this.#searchFieldsDirty = true;
 			this.#filterDirty = true;
@@ -954,13 +1017,41 @@ export class AgentHubOverlayComponent extends Container {
 	}
 	#applyFilter(): void {
 		const q = this.#tableFilterQuery.toLowerCase();
-		const filteredActive = q ? this.#rows.filter(ref => this.#matchesTableFilter(ref, q)) : this.#rows;
-		const focusedActive = this.#showRunningOnly ? filteredActive.filter(ref => ref.status === "running") : filteredActive;
-		this.#visibleActiveRows = this.#treeActiveRows(focusedActive);
+		const matches = (rows: readonly AgentRef[]) => (q ? rows.filter(ref => this.#matchesTableFilter(ref, q)) : rows);
+		const running = matches(this.#orderedStatus("running"));
+		const idleRows = this.#showRunningOnly ? [] : matches(this.#orderedStatus("idle"));
+		const recentCompleted: AgentRef[] = [];
+		const idle: AgentRef[] = [];
+		for (const ref of idleRows) {
+			if (this.#turnStatus?.(ref.id)?.state === "completed") {
+				if (recentCompleted.length < RECENT_COMPLETED_LIMIT) recentCompleted.push(ref);
+				continue;
+			}
+			idle.push(ref);
+		}
+		const parked = this.#showRunningOnly || !q ? [] : matches(this.#orderedStatus("parked"));
+		const terminal = this.#showRunningOnly || !this.#showTerminalAgents ? [] : matches(this.#orderedStatus("aborted"));
+		this.#sectionStarts = [];
+		const active: AgentRef[] = [];
+		for (const [label, rows] of [
+			["Running", running],
+			["Idle / needs attention", idle],
+			["Recent completed", recentCompleted],
+			["Parked matches", parked],
+			["Terminal", terminal],
+		] as const) {
+			if (rows.length === 0) continue;
+			this.#sectionStarts.push({ index: active.length, label: `${label} (${rows.length})` });
+			active.push(...this.#treeActiveRows(rows));
+		}
+		this.#visibleActiveRows = active;
 		const filteredArchived = this.#showArchivedChildren
-			? this.#archivedRows.filter(row => !q || this.#matchesArchivedFilter(row, q))
+			? this.#archivedRows.filter(row => !q || this.#matchesArchivedFilter(row, q)).slice(0, RECENT_COMPLETED_LIMIT)
 			: [];
 		this.#visibleArchivedRows = this.#showRunningOnly ? [] : filteredArchived;
+		if (this.#visibleArchivedRows.length > 0) {
+			this.#sectionStarts.push({ index: active.length, label: `Archived completed (${this.#visibleArchivedRows.length})` });
+		}
 		const filteredExternal = q ? this.#externalRows.filter(row => this.#matchesExternalFilter(row, q)) : this.#externalRows;
 		this.#visibleExternalRows = this.#showRunningOnly ? [] : filteredExternal;
 		this.#filterDirty = false;
@@ -1224,7 +1315,7 @@ export class AgentHubOverlayComponent extends Container {
 		if (!this.#showRunningOnly) return 0;
 		const q = this.#tableFilterQuery.toLowerCase();
 		let hidden = 0;
-		for (const ref of this.#rows) {
+		for (const ref of this.#registryRefs.values()) {
 			if (ref.status !== "running" && (!q || this.#matchesTableFilter(ref, q))) hidden++;
 		}
 		if (this.#showArchivedChildren) {
@@ -1240,7 +1331,7 @@ export class AgentHubOverlayComponent extends Container {
 		const counts = this.#statusSummary();
 		const filterIndicator = this.#tableFilterQuery
 			? theme.fg("accent", ` /${this.#tableFilterQuery}`) +
-				theme.fg("dim", ` (${this.#totalTableRows()}/${this.#rows.length + this.#archivedRows.length + this.#externalRows.length})`)
+				theme.fg("dim", ` (${this.#totalTableRows()}/${this.#registryRefs.size + this.#archivedRows.length + this.#externalRows.length})`)
 			: "";
 		const terminalIndicator = this.#hiddenTerminalCount > 0 ? theme.fg("dim", ` · ${this.#hiddenTerminalCount} terminal hidden`) : "";
 		const archiveIndicator = this.#showArchivedChildren ? theme.fg("dim", " · archived") : "";
@@ -1255,7 +1346,9 @@ export class AgentHubOverlayComponent extends Container {
 		}
 		const totalRows = this.#totalTableRows();
 		if (totalRows === 0 && this.#showRunningOnly) lines.push(` ${theme.fg("dim", "No running subagents · . to show all")}`);
-		else if (totalRows === 0 && !this.#tableFilterQuery) lines.push(` ${theme.fg("dim", "no subagents yet — task spawns appear here")}`);
+		else if (totalRows === 0 && this.#statusCounts.parked > 0 && !this.#tableFilterQuery) {
+			lines.push(` ${theme.fg("dim", `Parked (${this.#statusCounts.parked}) · / to search and expand`)}`);
+		} else if (totalRows === 0 && !this.#tableFilterQuery) lines.push(` ${theme.fg("dim", "no subagents yet — task spawns appear here")}`);
 		else if (totalRows === 0) lines.push(` ${theme.fg("dim", "no matches")}`);
 		else {
 			const maxVisible = this.#tableViewportCapacity();
@@ -1270,15 +1363,20 @@ export class AgentHubOverlayComponent extends Container {
 			const activeRowCount = this.#visibleActiveRows.length;
 			const agentRowCount = this.#visibleAgentRowCount();
 			for (let i = start; i < end; i++) {
+				const section = this.#sectionStarts.find(candidate => candidate.index === i);
+				if (section) lines.push(` ${theme.fg("accent", section.label)}`);
 				const active = this.#visibleActiveRows[i];
 				if (active) { lines.push(this.#renderRow(active, i === this.#selectedRow, width)); continue; }
 				const archived = this.#visibleArchivedRows[i - activeRowCount];
 				if (archived) { lines.push(this.#renderArchivedRow(archived, i === this.#selectedRow, width)); continue; }
-				if (!externalHeaderShown) { lines.push(` ${theme.fg("dim", "external peers")}`); externalHeaderShown = true; }
+				if (!externalHeaderShown) { lines.push(` ${theme.fg("dim", "External peers")}`); externalHeaderShown = true; }
 				const external = this.#visibleExternalRows[i - agentRowCount];
 				if (external) lines.push(this.#renderExternalRow(external, i === this.#selectedRow, width));
 			}
 			if (end < totalRows) lines.push(` ${theme.fg("dim", `… ${totalRows - end} more`)}`);
+		}
+		if (!this.#showRunningOnly && !this.#tableFilterQuery && this.#statusCounts.parked > 0) {
+			lines.push(` ${theme.fg("dim", `Parked (${this.#statusCounts.parked}) collapsed · / to search and expand`)}`);
 		}
 		if (this.#notice) lines.push(` ${theme.fg("error", sanitizeLine(this.#notice, Math.max(10, width - 2)))}`);
 		if (this.#tableFilterEditing) lines.push(` ${theme.fg("accent", "/")}${this.#tableFilterQuery}${theme.fg("accent", "▏")}`);

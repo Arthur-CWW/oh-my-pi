@@ -136,6 +136,11 @@ function renderedText(hub: AgentHubOverlayComponent): string {
 		.map(line => Bun.stripANSI(line))
 		.join("\n");
 }
+function revealParked(hub: AgentHubOverlayComponent, id: string): void {
+	hub.handleInput("/");
+	for (const character of id) hub.handleInput(character);
+	hub.handleInput("\r");
+}
 
 function renderedAgentIds(hub: AgentHubOverlayComponent): string[] {
 	return hub
@@ -220,7 +225,7 @@ describe("Agent Hub selection and filter", () => {
 		expect(renderedText(hub)).toContain(". show all");
 
 		hub.handleInput(".");
-		expect(renderedAgentIds(hub)).toEqual(["Alpha", "Beta", "Gamma"]);
+		expect(renderedAgentIds(hub)).toEqual(["Alpha", "Beta"]);
 		expect(selectedAgentId(hub)).toBe("Beta");
 		expect(renderedText(hub)).toContain(". running only");
 
@@ -517,11 +522,11 @@ describe("Agent Hub selection and filter", () => {
 		hub.handleInput("h");
 		expect(renderedAgentIds(hub)).toEqual(before);
 		hub.handleInput("j");
-		expect(selectedAgentId(hub)).toBe("Agent09");
+		expect(selectedAgentId(hub)).toBe("Agent10");
 		hub.dispose();
 	});
 
-	it("restores selection to drilled agent on return from chat", () => {
+	it("restores a searched parked selection on return from chat", () => {
 		vi.spyOn(Date, "now").mockReturnValue(1_000);
 		geometry = stubStdoutGeometry(120);
 		const agents = new AgentRegistry();
@@ -537,18 +542,12 @@ describe("Agent Hub selection and filter", () => {
 			},
 		});
 
-		// Navigate to Beta (middle agent).
-		hub.handleInput("g"); // top = Alpha
-		hub.handleInput("j"); // Beta
-
-		// Enter on parked agent opens chat view.
+		revealParked(hub, "Beta");
 		hub.handleInput("\r");
-
-		// Close chat with Esc.
 		hub.handleInput("\x1b");
 		expect(selectedAgentId(hub)).toBe("Beta");
 
-		// Move down once from the restored Beta selection to Gamma.
+		hub.handleInput("\x1b");
 		hub.handleInput("j");
 		hub.handleInput("\r");
 		expect(focusedId()).toBe("Gamma");
@@ -577,6 +576,7 @@ describe("Agent Hub transcript search", () => {
 		registerAgent(agents, "Worker", "parked");
 
 		const { hub, doneCalls } = makeHub(agents);
+		revealParked(hub, "Worker");
 		hub.handleInput("\r"); // open chat for parked Worker
 
 		// Verify we're in chat view
@@ -624,6 +624,7 @@ describe("Agent Hub transcript search", () => {
 		registerAgent(agents, "Worker", "parked");
 
 		const { hub } = makeHub(agents);
+		revealParked(hub, "Worker");
 		hub.handleInput("\r"); // open chat
 
 		// Enter search, type, then Esc during editing
@@ -693,6 +694,7 @@ describe("Agent Hub transcript search", () => {
 		expect(text).toContain("g/G:");
 
 		// Enter on parked agent opens chat view (not focusAgent)
+		revealParked(hub, "Worker");
 		hub.handleInput("\r");
 		text = renderedText(hub);
 		expect(text).toContain("/:search");

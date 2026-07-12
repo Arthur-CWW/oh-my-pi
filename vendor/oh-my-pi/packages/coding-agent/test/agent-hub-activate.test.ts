@@ -90,6 +90,11 @@ function renderedText(hub: AgentHubOverlayComponent): string {
 		.map(line => Bun.stripANSI(line))
 		.join("\n");
 }
+function revealParked(hub: AgentHubOverlayComponent, id: string): void {
+	hub.handleInput("/");
+	for (const character of id) hub.handleInput(character);
+	hub.handleInput("\r");
+}
 
 async function waitForRenderedText(hub: AgentHubOverlayComponent, text: string): Promise<void> {
 	const deadline = Date.now() + 1_000;
@@ -172,6 +177,7 @@ describe("Agent hub Enter activation", () => {
 	afterEach(() => {
 		vi.restoreAllMocks();
 		resetSettingsForTest();
+		AgentRegistry.resetGlobalForTests();
 	});
 
 	it("Enter focuses the selected agent and closes the hub", async () => {
@@ -200,6 +206,7 @@ describe("Agent hub Enter activation", () => {
 			{ status: "parked", sessionFile },
 		);
 
+		revealParked(hub, AGENT_ID);
 		hub.handleInput("\r");
 
 		const rendered = Bun.stripANSI(hub.render(120).join("\n"));
@@ -250,6 +257,7 @@ describe("Agent hub Enter activation", () => {
 			externalIrc: null,
 		});
 
+		revealParked(hub, AGENT_ID);
 		hub.handleInput("\r");
 		hub.handleInput("R");
 		await revived.promise;
@@ -457,7 +465,7 @@ describe("Agent hub Enter activation", () => {
 	});
 
 	it("selector controller restores focus to the editor after Enter focuses an agent", async () => {
-		const agents = new AgentRegistry();
+		const agents = AgentRegistry.global();
 		agents.register({
 			id: AGENT_ID,
 			displayName: AGENT_ID,
@@ -527,6 +535,7 @@ describe("Agent hub double-← gating", () => {
 	afterEach(() => {
 		vi.restoreAllMocks();
 		resetSettingsForTest();
+		AgentRegistry.resetGlobalForTests();
 	});
 
 	function setup(agents: AgentRegistry) {
@@ -568,7 +577,7 @@ describe("Agent hub double-← gating", () => {
 	}
 
 	it("requireContent keeps the hub closed when only Main is registered", () => {
-		const agents = new AgentRegistry();
+		const agents = AgentRegistry.global();
 		agents.register({
 			id: "Main",
 			displayName: "Main",
@@ -585,7 +594,7 @@ describe("Agent hub double-← gating", () => {
 	});
 
 	it("requireContent opens the hub once a subagent exists", () => {
-		const agents = new AgentRegistry();
+		const agents = AgentRegistry.global();
 		registerWorker(agents);
 		const { controller, shown } = setup(agents);
 
@@ -596,7 +605,7 @@ describe("Agent hub double-← gating", () => {
 	});
 
 	it("the explicit hub key opens the empty roster even with no subagents", () => {
-		const agents = new AgentRegistry();
+		const agents = AgentRegistry.global();
 		const { controller, shown } = setup(agents);
 
 		controller.showAgentHub(new SessionObserverRegistry());

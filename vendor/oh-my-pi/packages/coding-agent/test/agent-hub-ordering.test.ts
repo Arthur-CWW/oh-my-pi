@@ -223,12 +223,12 @@ describe("Agent hub row ordering", () => {
 		agents.setActivity("A", "updated");
 		expect(renderedAgentIds(hub)).toEqual(["A", "B", "C"]);
 		agents.setStatus("A", "idle");
-		expect(renderedAgentIds(hub)).toEqual(["A", "B", "C"]);
+		expect(renderedAgentIds(hub)).toEqual(["B", "C", "A"]);
 		expect(renderedText(hub)).toContain("○ IDLE A");
 
 		now.mockReturnValue(5000);
 		agents.register({ id: "D", displayName: "Delta", kind: "sub", session: liveSession() });
-		expect(renderedAgentIds(hub)).toEqual(["A", "B", "C", "D"]);
+		expect(renderedAgentIds(hub)).toEqual(["B", "C", "D", "A"]);
 		hub.dispose();
 	});
 
@@ -394,7 +394,7 @@ describe("Agent hub row ordering", () => {
 
 		for (const w of [60, 80, 120, 160] as const) {
 			const rendered = hub.render(w);
-			const line = Bun.stripANSI(rendered[3] || "");
+			const line = Bun.stripANSI(rendered.find(candidate => Bun.stripANSI(candidate).includes("Worker")) || "");
 
 			const modelWidth = w <= 80 ? 13 : w <= 120 ? 14 : 15;
 			const stateWidth = w <= 80 ? 6 : 7;
@@ -415,13 +415,13 @@ describe("Agent hub row ordering", () => {
 
 		// Test adjacent variant distinction (claude-sonnet-4-5 vs claude-opus-4-5)
 		sessionsList[0].progress.resolvedModel = "anthropic/claude-sonnet-4-5";
-		const sonnetLine = Bun.stripANSI(hub.render(120)[3] || "");
+		const sonnetLine = Bun.stripANSI(hub.render(120).find(candidate => Bun.stripANSI(candidate).includes("Worker")) || "");
 		const sonnetModelCol = sonnetLine.slice(3, 3 + 14);
 		expect(sonnetModelCol.startsWith("A AN")).toBe(true);
 		expect(sonnetModelCol.includes("4.5So")).toBe(true);
 
 		sessionsList[0].progress.resolvedModel = "anthropic/claude-opus-4-5";
-		const opusLine = Bun.stripANSI(hub.render(120)[3] || "");
+		const opusLine = Bun.stripANSI(hub.render(120).find(candidate => Bun.stripANSI(candidate).includes("Worker")) || "");
 		const opusModelCol = opusLine.slice(3, 3 + 14);
 		expect(opusModelCol.startsWith("A AN")).toBe(true);
 		expect(opusModelCol.includes("4.5Op")).toBe(true);
