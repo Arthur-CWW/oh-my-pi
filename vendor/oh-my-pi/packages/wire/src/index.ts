@@ -348,58 +348,105 @@ export interface SubagentLifecyclePayload {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Frames (JSON inside the AES-GCM seal)
+// Collaboration protocol v2
 // ═══════════════════════════════════════════════════════════════════════════
 
-export type GuestFrame =
-	| {
-			t: "hello";
-			proto: number;
-			name: string;
-			/**
-			 * base64url write token proving full-link possession; absent for
-			 * read-only (view) links. The host marks peers without a valid token
-			 * read-only and rejects their mutating frames.
-			 */
-			writeToken?: string;
-	  }
-	| { t: "prompt"; text: string; images?: ImageContent[] }
-	| { t: "abort" }
-	| { t: "agent-cmd"; cmd: "chat" | "kill" | "revive"; agentId: string; text?: string }
-	| { t: "agent-op-cmd"; reqId: number; action: AgentOperationAction; agentId: string; inputId?: string }
-	| { t: "fetch-transcript"; reqId: number; agentId: string; fromByte: number };
+export const COLLAB_PROTO = 2 as const;
 
-/** EventBus channels mirrored to guests (task subagent traffic only). */
-export type BusChannel = "task:subagent:progress" | "task:subagent:lifecycle";
+export type JsonPrimitive = string | number | boolean | null;
+export type JsonValue = JsonPrimitive | { readonly [key: string]: JsonValue } | readonly JsonValue[];
+export type CollabCapability = "observer" | "controller";
+export type CollabDirection = "guestToHost" | "hostToGuest";
+
+/** Sent in plaintext by the host. It contains fresh entropy, but no secret. */
+export interface CollabChallengeFrame {
+	readonly t: "challenge";
+	readonly proto: typeof COLLAB_PROTO;
+	readonly challengeId: string;
+	readonly challenge: string;
+}
+
+/** First authenticated guest payload. A challenge is valid for one attach only. */
+export interface CollabAttachFrame {
+	readonly t: "attach";
+	readonly proto: typeof COLLAB_PROTO;
+	readonly clientId: string;
+	readonly viewId: string;
+	readonly requestedCapability: CollabCapability;
+	readonly writeToken?: string;
+	readonly challengeId: string;
+	readonly challengeResponse: string;
+	readonly afterSequence?: number;
+}
+
+/** JSON-only runner projection. Live runner objects must never cross this boundary. */
+export interface CollabRunnerSnapshot {
+	readonly revision: number;
+	readonly runnerSequence: number;
+	readonly sessionRevision: number;
+	readonly transcript: JsonValue;
+	readonly durableInputs: readonly JsonValue[];
+	readonly activeOperations: readonly JsonValue[];
+	readonly workflow: JsonValue;
+	readonly tools: JsonValue;
+	readonly todos: JsonValue;
+	readonly model: JsonValue;
+	readonly session: JsonValue;
+}
+
+export interface CollabRunnerEventDelivery {
+	readonly kind: "event";
+	readonly event: JsonValue;
+}
+
+export type GuestFrame =
+	| CollabAttachFrame
+	| { readonly t: "command"; readonly requestId: string; readonly command: JsonValue }
+	| { readonly t: "acquireController"; readonly requestId: string }
+	| { readonly t: "releaseController"; readonly requestId: string; readonly controllerEpoch: number }
+	| { readonly t: "detach" }
+	| { readonly t: "resyncRequest"; readonly afterSequence: number };
 
 export type HostFrame =
 	| {
-			t: "welcome";
-			proto: number;
-			header: SessionHeader;
-			entries: SessionEntry[];
-			state: SessionState;
-			agents: AgentSnapshot[];
-			/** True when this peer joined through a read-only (view) link. */
-			readOnly?: boolean;
+			readonly t: "welcome";
+			readonly connectionId: string;
+			readonly viewId: string;
+			readonly capability: CollabCapability;
+			readonly controllerEpoch?: number;
+			readonly snapshot: CollabRunnerSnapshot;
+			readonly sequence: number;
 	  }
-	| { t: "entry"; entry: SessionEntry }
-	| { t: "event"; event: AgentEvent }
-	| { t: "state"; state: SessionState }
-	/** Mirrored EventBus traffic (task subagent lifecycle/progress channels only). */
-	| { t: "bus"; channel: BusChannel; data: unknown }
-	| { t: "agents"; agents: AgentSnapshot[] }
-	/** Targeted reply to fetch-transcript; `text` is decoded JSONL from `fromByte`, `newSize` the next offset base. */
-	| { t: "transcript"; reqId: number; text: string; newSize: number; error?: string }
-	/** Correlated outcome of a durable agent operation command. */
-	| { t: "agent-op-result"; reqId: number; action: AgentOperationAction; agentId: string; ok: boolean; error?: string }
-	| { t: "bye"; reason: string }
-	| { t: "error"; message: string };
+	| { readonly t: "delta"; readonly delivery: CollabRunnerEventDelivery }
+	| {
+			readonly t: "resync";
+			readonly snapshot: CollabRunnerSnapshot;
+			readonly expectedSequence: number;
+			readonly observedSequence: number;
+	  }
+	| {
+			readonly t: "commandResult";
+			readonly requestId: string;
+			readonly ok: boolean;
+			readonly receipt?: JsonValue;
+			readonly error?: { readonly code: string; readonly message: string };
+	  }
+	| { readonly t: "controllerChanged"; readonly capability: CollabCapability; readonly controllerEpoch?: number }
+	| { readonly t: "bye"; readonly reason: string }
+	| { readonly t: "error"; readonly code: string; readonly message: string; readonly requestId?: string };
 
-export type WireFrame = GuestFrame | HostFrame;
+export type CollabApplicationFrame = GuestFrame | HostFrame;
 
-/** Wire protocol version carried in `hello`; the host rejects mismatches. */
-export const COLLAB_PROTO = 1;
+/** Authenticated plaintext. Routing metadata is duplicated as AES-GCM AAD. */
+export interface SecureCollabFrame {
+	readonly proto: typeof COLLAB_PROTO;
+	readonly connectionId: string;
+	readonly direction: CollabDirection;
+	readonly sequence: number;
+	readonly frame: CollabApplicationFrame;
+}
+
+export type WireFrame = CollabChallengeFrame | SecureCollabFrame;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Envelope & link constants

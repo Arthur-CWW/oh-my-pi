@@ -77,7 +77,7 @@ export function Composer({ client, snapshot }: ComposerProps): ReactNode {
 						<button
 							type="button"
 							className="sh-btn sh-btn-stop"
-							onClick={() => client.sendAbort()}
+							onClick={() => client.interruptPrompt()}
 							disabled={!live}
 							title="stop the current turn"
 						>

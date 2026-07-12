@@ -111,6 +111,7 @@ import { AgentLifecycleManager } from "./registry/agent-lifecycle";
 import { type AgentQuotaAdmission, AgentRegistry, MAIN_AGENT_ID } from "./registry/agent-registry";
 import type { SessionRunner } from "./runner/session-runner";
 import { makeSessionRunnerLive } from "./runner/session-runner";
+import type { RunnerIdentity } from "./runner/protocol";
 import {
 	collectEnvSecrets,
 	deobfuscateSessionContext,
@@ -570,6 +571,7 @@ export interface CreateSessionRunnerOptions
 	extends Omit<CreateAgentSessionOptions, "durableInputQueue" | "sessionManager"> {
 	/** Already-acquired ownership; release authority transfers to the returned runner. */
 	ownership: SessionOwnershipHandle;
+	runnerIdentity: RunnerIdentity;
 	sessionManager: SessionManager;
 	mailboxCapacity: number;
 	eventCapacity: number;
@@ -2949,11 +2951,20 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
  * AgentSession. The returned runner is the sole release authority.
  */
 export async function createSessionRunner(options: CreateSessionRunnerOptions): Promise<CreateSessionRunnerResult> {
-	const { ownership, sessionManager, mailboxCapacity, eventCapacity, childStopPolicy, ...sessionOptions } = options;
+	const { ownership, runnerIdentity, sessionManager, mailboxCapacity, eventCapacity, childStopPolicy, ...sessionOptions } =
+		options;
 	let sessionResult: CreateAgentSessionResult | undefined;
 	let scope: Scope.Closeable | undefined;
 	let transferred = false;
 	try {
+		if (
+			ownership.buildRevision.digest !== runnerIdentity.buildRevision.digest ||
+			ownership.buildRevision.version !== runnerIdentity.buildRevision.version ||
+			ownership.runnerInstanceIdentity.runnerInstanceId !== runnerIdentity.runnerInstance.runnerInstanceId ||
+			ownership.runnerInstanceIdentity.startedAt !== runnerIdentity.runnerInstance.startedAt
+		) {
+			throw new Error("Session ownership identity does not match runner identity");
+		}
 		if (!(await ownership.isCurrent())) throw new Error("Session ownership is no longer current");
 		sessionManager.bindSessionOwnership(ownership);
 		const queue = await DurableInputQueue.open(ownership);
@@ -2967,7 +2978,7 @@ export async function createSessionRunner(options: CreateSessionRunnerOptions): 
 		const liveRunner = await Effect.runPromise(
 			Scope.provide(scope)(
 				makeSessionRunnerLive(
-					{ ownership, queue, session: sessionResult.session, sessionManager },
+					{ ownership, runnerIdentity, queue, session: sessionResult.session, sessionManager },
 					{ mailboxCapacity, eventCapacity, childStopPolicy },
 				),
 			),

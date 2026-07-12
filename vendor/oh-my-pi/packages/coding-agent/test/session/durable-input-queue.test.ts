@@ -19,6 +19,11 @@ import {
 import { acquireSessionOwnership, type SessionOwnershipHandle } from "@oh-my-pi/pi-coding-agent/session/session-ownership";
 
 const roots: string[] = [];
+const TEST_BUILD_REVISION = { digest: "0".repeat(64), version: "durable-input-queue-test" };
+const TEST_RUNNER_INSTANCE_IDENTITY = {
+	runnerInstanceId: "00000000-0000-4000-8000-000000000006",
+	startedAt: "2026-01-01T00:00:00.000Z",
+};
 
 interface Owner {
 	readonly handle: SessionOwnershipHandle;
@@ -37,6 +42,8 @@ async function fixture(epoch: string): Promise<{ root: string; session: string; 
 			sessionId: "parent",
 			ownerEpoch: epoch,
 			ownerKind: "omp",
+			buildRevision: TEST_BUILD_REVISION,
+			runnerInstanceIdentity: TEST_RUNNER_INSTANCE_IDENTITY,
 			isCurrent: async () => owner.current,
 			release: async () => {
 				owner.current = false;
@@ -54,6 +61,8 @@ function replacement(session: string, epoch: string): Owner {
 			sessionId: "parent",
 			ownerEpoch: epoch,
 			ownerKind: "omp",
+			buildRevision: TEST_BUILD_REVISION,
+			runnerInstanceIdentity: TEST_RUNNER_INSTANCE_IDENTITY,
 			isCurrent: async () => owner.current,
 			release: async () => {
 				owner.current = false;
@@ -105,7 +114,10 @@ describe("durable input queue", () => {
 		const original = process.env.AGENT_MUX_DIR;
 		try {
 			process.env.AGENT_MUX_DIR = muxRoot;
-			const ownership = await acquireSessionOwnership(session, "parent");
+			const ownership = await acquireSessionOwnership(session, "parent", {
+				buildRevision: TEST_BUILD_REVISION,
+				runnerInstanceIdentity: TEST_RUNNER_INSTANCE_IDENTITY,
+			});
 			try {
 				await DurableInputQueue.open(ownership);
 				expect(await ownership.isCurrent()).toBe(true);

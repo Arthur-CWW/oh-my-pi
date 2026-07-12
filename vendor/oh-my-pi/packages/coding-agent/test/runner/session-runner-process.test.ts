@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it } from "bun:test";
+import { createHash, randomUUID } from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { Effect } from "effect";
 import { ModelRegistry } from "../../src/config/model-registry";
@@ -27,7 +29,17 @@ async function construct(root: string) {
 	await sessionManager.flush();
 	const sessionFile = sessionManager.getSessionFile();
 	if (!sessionFile) throw new Error("persistent session file was not created");
-	const ownership = await acquireSessionOwnership(sessionFile, sessionManager.getSessionId());
+	const runnerIdentity = {
+		buildRevision: {
+			digest: process.env.OMP_CANARY_BUILD_DIGEST ?? "c".repeat(64),
+			version: process.env.OMP_CANARY_BUILD_DIGEST ? "process-fixture-v1" : "session-runner-process-test",
+		},
+		runnerInstance: { runnerInstanceId: randomUUID(), startedAt: new Date().toISOString() },
+	};
+	const ownership = await acquireSessionOwnership(sessionFile, sessionManager.getSessionId(), {
+		buildRevision: runnerIdentity.buildRevision,
+		runnerInstanceIdentity: runnerIdentity.runnerInstance,
+	});
 	const model = getBundledModel("anthropic", "claude-sonnet-4-5");
 	if (!model) throw new Error("bundled model unavailable");
 	const authStorage = await AuthStorage.create(path.join(root, "auth.db"));
@@ -42,6 +54,7 @@ async function construct(root: string) {
 		settings: Settings.isolated({ "compaction.enabled": false }),
 		sessionManager,
 		ownership,
+		runnerIdentity,
 		mailboxCapacity: 8,
 		eventCapacity: 8,
 		disableExtensionDiscovery: true,
@@ -61,11 +74,110 @@ async function construct(root: string) {
 		sessionFile,
 		sessionId: sessionManager.getSessionId(),
 		ownershipEpoch: ownership.ownerEpoch,
+		runnerIdentity,
 	};
 }
 
 async function childMain(mode: string, root: string): Promise<void> {
 	const composition = await construct(root);
+	const canaryOutput = process.env.OMP_CANARY_OUTPUT;
+	const canaryCommandId = process.env.OMP_CANARY_COMMAND_ID;
+	const canaryBuildDigest = process.env.OMP_CANARY_BUILD_DIGEST;
+	if (mode === "canary") {
+		if (!canaryOutput || !canaryCommandId || !canaryBuildDigest) throw new Error("missing canary worker environment");
+		const startedAt = composition.runnerIdentity.runnerInstance.startedAt;
+		const result = await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const controller = yield* composition.runner.attachView({
+						schemaVersion: 1,
+						kind: "attachView",
+						commandId: "attach-canary-controller",
+						correlationId: "attach-canary-controller",
+						expectedRevision: 0,
+						viewId: "canary-controller",
+						capability: "controller",
+					});
+					if (controller.capability !== "controller") throw new Error("controller attachment failed");
+					const initial = yield* controller.snapshot();
+					const thinkingCommandId = `${canaryCommandId}-thinking`;
+					const thinkingCommand = {
+						schemaVersion: 1 as const,
+						kind: "setThinkingLevel" as const,
+						commandId: thinkingCommandId,
+						correlationId: thinkingCommandId,
+						expectedSessionRevision: initial.sessionRevision,
+						viewId: controller.viewId,
+						controllerEpoch: controller.controllerEpoch,
+						thinkingLevel: ThinkingLevel.High,
+					};
+					const thinkingAccepted = yield* controller.setThinkingLevel(thinkingCommand);
+					const thinkingReplayed = yield* controller.setThinkingLevel(thinkingCommand);
+					const command = {
+						schemaVersion: 1 as const,
+						kind: "submitInput" as const,
+						commandId: canaryCommandId,
+						correlationId: canaryCommandId,
+						expectedRevision: initial.revision,
+						viewId: controller.viewId,
+						controllerEpoch: controller.controllerEpoch,
+						payload: { text: "canary durable mutation", deliveryClass: "followUp" as const },
+					};
+					const accepted = yield* controller.submitInput(command);
+					const replayed = yield* controller.submitInput(command);
+					const final = yield* controller.snapshot();
+					return { accepted, replayed, thinkingAccepted, thinkingReplayed, thinkingCommandId, initial, final };
+				}),
+			),
+		);
+		await Effect.runPromise(Effect.scoped(composition.runner.stop()));
+		const replacementIdentity = {
+			buildRevision: composition.runnerIdentity.buildRevision,
+			runnerInstance: { runnerInstanceId: randomUUID(), startedAt: new Date().toISOString() },
+		};
+		const replacement = await acquireSessionOwnership(composition.sessionFile, composition.sessionId, {
+			buildRevision: replacementIdentity.buildRevision,
+			runnerInstanceIdentity: replacementIdentity.runnerInstance,
+		});
+		const leaseReacquired = await replacement.isCurrent();
+		await replacement.release();
+		const queueRecords = await jsonlRecords(process.env.AGENT_MUX_DIR ?? path.join(root, "mux"));
+		const jsonl = await fs.readFile(composition.sessionFile, "utf8");
+		await fs.writeFile(
+			canaryOutput,
+			`${JSON.stringify({
+				schemaVersion: 1,
+				buildDigest: canaryBuildDigest,
+				version: "process-fixture-v1",
+				runnerInstanceId: composition.runnerIdentity.runnerInstance.runnerInstanceId,
+				fixtureSessionId: composition.sessionId,
+				ownerEpoch: composition.ownershipEpoch,
+				startedAt,
+				stoppedAt: new Date().toISOString(),
+				initialSnapshotRevision: result.initial.revision,
+				finalSnapshotRevision: result.final.revision,
+				commandId: canaryCommandId,
+				proof: {
+					mutationAppliedExactlyOnce:
+						result.accepted.replayed === false &&
+						result.replayed.replayed === true &&
+						result.thinkingAccepted.replayed === false &&
+						result.thinkingReplayed.replayed === true,
+					leaseReleased: true,
+					leaseReacquired,
+					jsonlPersisted: jsonl.includes(result.thinkingCommandId),
+					queuePersisted:
+						queueRecords.filter(
+							record =>
+								record.type === "enqueue" &&
+								(record.command as Record<string, unknown> | undefined)?.commandId === canaryCommandId,
+						).length === 1,
+				},
+			})}\n`,
+			{ flag: "wx" },
+		);
+		process.exit(0);
+	}
 	if (mode === "accept") {
 		const receipts = await Effect.runPromise(
 			Effect.scoped(
@@ -80,6 +192,7 @@ async function childMain(mode: string, root: string): Promise<void> {
 						capability: "controller",
 					});
 					if (controller.capability !== "controller") throw new Error("controller attachment failed");
+					const initialSnapshot = yield* controller.snapshot();
 					const blockerCommand = {
 						schemaVersion: 1 as const,
 						kind: "submitInput" as const,
@@ -131,7 +244,8 @@ async function childMain(mode: string, root: string): Promise<void> {
 					};
 					const cancelled = yield* controller.cancelQueuedInput(cancelCommand);
 					const cancelReplayed = yield* controller.cancelQueuedInput(cancelCommand);
-					return { accepted, replayed, edited, editReplayed, cancelled, cancelReplayed };
+					const finalSnapshot = yield* controller.snapshot();
+					return { accepted, replayed, edited, editReplayed, cancelled, cancelReplayed, initialSnapshot, finalSnapshot };
 				}),
 			),
 		);
@@ -140,6 +254,7 @@ async function childMain(mode: string, root: string): Promise<void> {
 				...receipts,
 				sessionFile: composition.sessionFile,
 				ownershipEpoch: composition.ownershipEpoch,
+				runnerIdentity: composition.runnerIdentity,
 			})}`,
 		);
 		process.exit(0);
@@ -147,7 +262,14 @@ async function childMain(mode: string, root: string): Promise<void> {
 
 	await Effect.runPromise(Effect.scoped(composition.runner.stop()));
 	await Effect.runPromise(Effect.scoped(composition.runner.stop()));
-	const replacement = await acquireSessionOwnership(composition.sessionFile, composition.sessionId);
+	const replacementIdentity = {
+		buildRevision: composition.runnerIdentity.buildRevision,
+		runnerInstance: { runnerInstanceId: randomUUID(), startedAt: new Date().toISOString() },
+	};
+	const replacement = await acquireSessionOwnership(composition.sessionFile, composition.sessionId, {
+		buildRevision: replacementIdentity.buildRevision,
+		runnerInstanceIdentity: replacementIdentity.runnerInstance,
+	});
 	const replacementCurrent = await replacement.isCurrent();
 	await replacement.release();
 	console.log(`${CHILD_MARKER}${JSON.stringify({ replacementCurrent })}`);
@@ -209,6 +331,116 @@ async function readQueueHead(root: string): Promise<Record<string, unknown>> {
 	throw new Error(`queue-v2/head.json not found under ${root}`);
 }
 
+async function createCanaryCandidate(root: string): Promise<{ candidate: string; digest: string }> {
+	const testPath = import.meta.path;
+	const source = `#!/usr/bin/env bun
+import { createHash } from "node:crypto";
+import * as fs from "node:fs";
+const digest = createHash("sha256").update(fs.readFileSync(import.meta.path)).digest("hex");
+const args = Bun.argv.slice(2);
+if (args.length === 1 && args[0] === "--runner-build-revision") {
+	process.stdout.write(JSON.stringify({ buildDigest: digest, version: "process-fixture-v1" }));
+	process.exit(0);
+}
+if (args[0] !== "--runner-canary-readiness-worker") process.exit(64);
+const value = name => args[args.indexOf(name) + 1];
+const fixtureRoot = value("--fixture-root");
+const output = value("--output");
+const commandId = value("--command-id");
+const child = Bun.spawnSync([process.execPath, "test", ${JSON.stringify(testPath)}], {
+	cwd: ${JSON.stringify(path.resolve(import.meta.dir, "../.."))},
+	env: {
+		...process.env,
+		OMP_SESSION_RUNNER_CHILD_MODE: "canary",
+		OMP_SESSION_RUNNER_ROOT: fixtureRoot,
+		OMP_CANARY_OUTPUT: output,
+		OMP_CANARY_COMMAND_ID: commandId,
+		OMP_CANARY_BUILD_DIGEST: digest,
+		AGENT_MUX_DIR: process.env.AGENT_MUX_ROOT,
+	},
+	stdout: "inherit",
+	stderr: "inherit",
+});
+process.exit(child.exitCode);
+`;
+	const digest = createHash("sha256").update(source).digest("hex");
+	const candidate = path.join(root, `omp-${digest}`);
+	await fs.writeFile(candidate, source, { mode: 0o755 });
+	await fs.chmod(candidate, 0o755);
+	return { candidate, digest };
+}
+
+async function runReadinessDriver(
+	candidate: string,
+	fixtureRoot: string,
+	output: string,
+): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+	const child = Bun.spawn(
+		[
+			process.execPath,
+			path.resolve(import.meta.dir, "../../scripts/runner-canary-readiness.ts"),
+			"--candidate",
+			candidate,
+			"--fixture-root",
+			fixtureRoot,
+			"--output",
+			output,
+		],
+		{ cwd: path.resolve(import.meta.dir, "../.."), stdout: "pipe", stderr: "pipe" },
+	);
+	const [exitCode, stdout, stderr] = await Promise.all([
+		child.exited,
+		new Response(child.stdout).text(),
+		new Response(child.stderr).text(),
+	]);
+	return { exitCode, stdout, stderr };
+}
+
+describe("runner canary readiness process", () => {
+	it("rejects the old checkout-test wrapper even when its receipt would otherwise pass", async () => {
+		const root = await fs.mkdtemp(path.join(os.tmpdir(), "omp-runner-canary-wrapper-"));
+		roots.push(root);
+		const fixtureRoot = path.join(root, "fixture-source");
+		await fs.mkdir(fixtureRoot, { recursive: true });
+		const { candidate } = await createCanaryCandidate(root);
+		const output = path.join(root, "receipt.json");
+
+		const processResult = await runReadinessDriver(candidate, fixtureRoot, output);
+		expect(processResult.exitCode).toBe(1);
+		expect(processResult.stderr).toContain("candidate is not a compiled native executable");
+		await expect(fs.stat(output)).rejects.toMatchObject({ code: "ENOENT" });
+	});
+
+	it("rejects a corrupted old wrapper and atomically removes a stale receipt", async () => {
+		const root = await fs.mkdtemp(path.join(os.tmpdir(), "omp-runner-canary-corrupt-wrapper-"));
+		roots.push(root);
+		const fixtureRoot = path.join(root, "fixture-source");
+		await fs.mkdir(fixtureRoot, { recursive: true });
+		const { candidate } = await createCanaryCandidate(root);
+		await fs.appendFile(candidate, "\n// corrupted after content-addressing\n");
+		const output = path.join(root, "receipt.json");
+		await fs.writeFile(output, "{\"stale\":true}\n");
+
+		const processResult = await runReadinessDriver(candidate, fixtureRoot, output);
+		expect(processResult.exitCode).toBe(1);
+		expect(processResult.stderr).toContain("candidate is not a compiled native executable");
+		await expect(fs.stat(output)).rejects.toMatchObject({ code: "ENOENT" });
+	});
+
+	it("embeds the readiness worker without invoking checkout tests", async () => {
+		const workerSource = await fs.readFile(
+			path.resolve(import.meta.dir, "../../src/runner/canary-readiness-worker.ts"),
+			"utf8",
+		);
+		expect(workerSource).not.toContain("Bun.spawn");
+		expect(workerSource).not.toContain("bun test");
+		expect(workerSource).toContain("createSessionRunner");
+		expect(workerSource).toContain('record.type === "enqueue"');
+		expect(workerSource).toContain("record.command as Record<string, unknown>");
+		expect(workerSource).toContain("matchingEnqueues.length === 1");
+	});
+});
+
 describe("createSessionRunner process composition", () => {
 	it("journals one record for each replayed input command without claiming provider completion", async () => {
 		const root = await fs.mkdtemp(path.join(os.tmpdir(), "omp-sdk-runner-process-"));
@@ -224,6 +456,16 @@ describe("createSessionRunner process composition", () => {
 		expect(replayed).toEqual({ ...accepted, replayed: true });
 		expect(editReplayed).toEqual({ ...edited, replayed: true });
 		expect(cancelReplayed).toEqual({ ...cancelled, replayed: true });
+		const runnerIdentity = result.runnerIdentity as Record<string, unknown>;
+		const initialSnapshot = result.initialSnapshot as Record<string, unknown>;
+		const finalSnapshot = result.finalSnapshot as Record<string, unknown>;
+		expect(initialSnapshot.runnerIdentity).toEqual(runnerIdentity);
+		expect(finalSnapshot.runnerIdentity).toEqual(runnerIdentity);
+		expect((runnerIdentity.buildRevision as Record<string, unknown>).digest).toMatch(/^[a-f0-9]{64}$/);
+		expect((runnerIdentity.runnerInstance as Record<string, unknown>).runnerInstanceId).toMatch(
+			/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+		);
+		expect(Number(finalSnapshot.revision)).toBeGreaterThan(Number(initialSnapshot.revision));
 
 		const queueRecords = await jsonlRecords(path.join(root, "mux"));
 		expect(queueRecords.filter(record => record.type === "adopt")).toHaveLength(0);

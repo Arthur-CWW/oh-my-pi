@@ -1,13 +1,53 @@
 import { Schema } from "effect";
 import type { KernelDisplayOutput } from "../eval/py/display";
 import type { DurableQueuedInput } from "../session/durable-input-queue";
-import type { WorkflowModeSnapshot } from "../session/session-entries";
+import type { SessionEntry, SessionHeader, WorkflowModeSnapshot } from "../session/session-entries";
 import type { TodoPhase } from "../tools/todo";
 import { InvalidRunnerCommandError, RunnerRevisionConflictError } from "./errors";
 
 export * from "./errors";
 
 export const RUNNER_SCHEMA_VERSION = 1 as const;
+
+const ContentDigestSchema = Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]{64}$/)));
+
+const UUIDSchema = Schema.String.pipe(
+	Schema.check(Schema.isPattern(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i)),
+);
+
+const TimestampSchema = Schema.String.pipe(
+	Schema.refine((value): value is string => {
+		const milliseconds = Date.parse(value);
+		return Number.isFinite(milliseconds) && new Date(milliseconds).toISOString() === value;
+	}),
+);
+
+export const BuildRevisionSchema = Schema.Struct({
+	digest: ContentDigestSchema,
+	version: Schema.String.pipe(Schema.check(Schema.isMinLength(1), Schema.isTrimmed())),
+});
+export type BuildRevision = typeof BuildRevisionSchema.Type;
+
+export const RunnerInstanceIdentitySchema = Schema.Struct({
+	runnerInstanceId: UUIDSchema,
+	startedAt: TimestampSchema,
+});
+export type RunnerInstanceIdentity = typeof RunnerInstanceIdentitySchema.Type;
+
+export const RunnerIdentitySchema = Schema.Struct({
+	buildRevision: BuildRevisionSchema,
+	runnerInstance: RunnerInstanceIdentitySchema,
+});
+export type RunnerIdentity = typeof RunnerIdentitySchema.Type;
+
+export const decodeBuildRevision = (input: unknown): BuildRevision =>
+	Schema.decodeUnknownSync(BuildRevisionSchema)(input, { onExcessProperty: "error" });
+
+export const decodeRunnerInstanceIdentity = (input: unknown): RunnerInstanceIdentity =>
+	Schema.decodeUnknownSync(RunnerInstanceIdentitySchema)(input, { onExcessProperty: "error" });
+
+export const decodeRunnerIdentity = (input: unknown): RunnerIdentity =>
+	Schema.decodeUnknownSync(RunnerIdentitySchema)(input, { onExcessProperty: "error" });
 
 export const RunnerRevisionSchema = Schema.Int.pipe(
 	Schema.check(Schema.isGreaterThanOrEqualTo(0)),
@@ -550,12 +590,15 @@ export interface RunnerViewSnapshot {
 }
 
 export interface RunnerTranscriptSnapshot {
+	readonly header: SessionHeader;
+	readonly entries: ReadonlyArray<SessionEntry>;
 	readonly entryCount: number;
 	readonly leafId: string | null;
 	readonly lastEntryId: string | undefined;
 }
 
 export interface SessionRunnerSnapshot {
+	readonly runnerIdentity: RunnerIdentity;
 	readonly revision: number;
 	readonly sessionRevision: number;
 	readonly sequence: number;
@@ -625,6 +668,8 @@ export interface RunnerEvent {
 	readonly transcriptEntryId: string | undefined;
 	readonly transcriptLeafId: string | null | undefined;
 	readonly transcriptPosition: number | undefined;
+	/** Immutable payload captured with the append notification inside the runner mailbox. */
+	readonly transcriptEntry: SessionEntry | undefined;
 	readonly targetGeneration: number | undefined;
 	readonly targetCommandId: string | undefined;
 	readonly targetOperationGeneration: number | undefined;

@@ -8,6 +8,11 @@ import { reAdoptDirectChildren } from "@oh-my-pi/pi-coding-agent/task/re-adopt";
 import { CHILD_LIFECYCLE_CUSTOM_TYPE, type ChildLifecycleState } from "@oh-my-pi/pi-coding-agent/task/child-lifecycle";
 
 const tempDirs: string[] = [];
+const TEST_BUILD_REVISION = { digest: "0".repeat(64), version: "re-adopt-test" };
+const TEST_RUNNER_INSTANCE_IDENTITY = {
+	runnerInstanceId: "00000000-0000-4000-8000-000000000007",
+	startedAt: "2026-01-01T00:00:00.000Z",
+};
 
 function ownership(parent: string, current: () => boolean = () => true) {
 	return {
@@ -15,6 +20,8 @@ function ownership(parent: string, current: () => boolean = () => true) {
 		sessionId: "parent",
 		ownerEpoch: "test-epoch",
 		ownerKind: "omp" as const,
+		buildRevision: TEST_BUILD_REVISION,
+		runnerInstanceIdentity: TEST_RUNNER_INSTANCE_IDENTITY,
 		isCurrent: async () => current(),
 		release: async () => {},
 	};

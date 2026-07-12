@@ -13,6 +13,11 @@ import {
 } from "../../../src/session/session-ownership";
 
 const cleanups: Array<() => Promise<void>> = [];
+const TEST_BUILD_REVISION = { digest: "0".repeat(64), version: "cmux-owner-navigation-test" };
+const TEST_RUNNER_INSTANCE_IDENTITY = {
+	runnerInstanceId: "00000000-0000-4000-8000-000000000003",
+	startedAt: "2026-01-01T00:00:00.000Z",
+};
 
 afterEach(async () => {
 	for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
@@ -59,7 +64,11 @@ async function liveOwner(
 	const root = path.join(temp, "owners");
 	const sessionFile = path.join(temp, "session.jsonl");
 	await fs.writeFile(sessionFile, "");
-	const handle = await acquireSessionOwnership(sessionFile, "session-1", { root });
+	const handle = await acquireSessionOwnership(sessionFile, "session-1", {
+		root,
+		buildRevision: TEST_BUILD_REVISION,
+		runnerInstanceIdentity: TEST_RUNNER_INSTANCE_IDENTITY,
+	});
 	const canonical = await fs.realpath(sessionFile);
 	const key = createHash("sha256").update(`${canonical}\0session-1`).digest("hex");
 	await fs.writeFile(

@@ -766,7 +766,7 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<SlashCommandSpec> = [
 					ctx.showStatus("Not hosting a collab session");
 					return;
 				}
-				await ctx.collabHost.stop("host stopped");
+				await ctx.collabHost.stop();
 				ctx.showStatus("Collab stopped");
 				return;
 			}
@@ -799,25 +799,7 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<SlashCommandSpec> = [
 				);
 				return;
 			}
-			const explicitUrl = first === "start" || view ? args.slice(first.length).trim() : args;
-			const relayInput = explicitUrl || ctx.settings.get("collab.relayUrl") || "";
-			if (!relayInput) {
-				ctx.showError(
-					"No relay configured. Set collab.relayUrl in /settings or pass one: /collab relay.example.com",
-				);
-				return;
-			}
-			// Scheme-less relay args default to wss (ws:// must be spelled out for localhost).
-			const relayUrl = relayInput.includes("://") ? relayInput : `wss://${relayInput}`;
-			const host = new CollabHost(ctx);
-			try {
-				await host.start(relayUrl);
-			} catch (err) {
-				ctx.showError(`Failed to start collab session: ${errorMessage(err)}`);
-				return;
-			}
-			ctx.collabHost = host;
-			ctx.showStatus(collabLinkHint(host, "Collab session started!", view), { dim: false });
+			ctx.showError("Terminal collab hosting is not available with protocol v2 yet");
 		},
 	},
 	{
@@ -841,11 +823,7 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<SlashCommandSpec> = [
 				ctx.showError("Already in a collab session (/leave first)");
 				return;
 			}
-			try {
-				await new CollabGuestLink(ctx).join(link);
-			} catch (err) {
-				ctx.showError(`Failed to join collab session: ${errorMessage(err)}`);
-			}
+			ctx.showError("Terminal collab guest rendering is not available with protocol v2 yet");
 		},
 	},
 	{
@@ -855,11 +833,11 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<SlashCommandSpec> = [
 			const ctx = runtime.ctx;
 			ctx.editor.setText("");
 			if (ctx.collabGuest) {
-				await ctx.collabGuest.leave("left");
+				ctx.collabGuest.leave("left");
 				return;
 			}
 			if (ctx.collabHost) {
-				await ctx.collabHost.stop("host stopped");
+				await ctx.collabHost.stop();
 				ctx.showStatus("Collab stopped");
 				return;
 			}

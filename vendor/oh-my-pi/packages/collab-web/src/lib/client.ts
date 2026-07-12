@@ -1,479 +1,153 @@
-/**
- * Guest-side session replica for the collab web client.
- *
- * Owns the relay socket, applies host frames in strict arrival order, and
- * exposes an immutable {@link GuestSnapshot} through a
- * `useSyncExternalStore`-compatible subscribe/getSnapshot pair. The snapshot
- * object (and every replaced collection inside it) gets a new reference per
- * applied frame, so React change detection is reference equality all the way.
- */
-
-import type {
-	AgentOperationAction,
-	AgentSnapshot,
-	AssistantMessage,
-	HostFrame,
-	SessionEntry,
-	SessionHeader,
-	SessionState,
-	SubagentLifecyclePayload,
-	SubagentProgressPayload,
-} from "@oh-my-pi/pi-wire";
+import type { AgentSnapshot, AssistantMessage, CollabCapability, CollabChallengeFrame, CollabRunnerEventDelivery, CollabRunnerSnapshot, HostFrame, JsonValue, SessionEntry, SessionHeader, SessionState, SubagentLifecyclePayload, SubagentProgressPayload } from "@oh-my-pi/pi-wire";
+import { COLLAB_PROTO } from "@oh-my-pi/pi-wire";
 import { importRoomKey } from "./codec";
-import { COLLAB_PROTO, encodeBase64Url, parseCollabLink } from "./link";
+import { encodeBase64Url, parseCollabLink } from "./link";
 import { CollabSocket } from "./socket";
 
 export type ConnectionPhase = "connecting" | "waiting" | "live" | "reconnecting" | "ended";
-
-export interface ActiveTool {
-	toolCallId: string;
-	toolName: string;
-	args: unknown;
-	intent?: string;
-	partialResult?: unknown;
-	startedAt: number;
-}
-
-export interface Notice {
-	id: number;
-	level: "info" | "warning" | "error";
-	message: string;
-	at: number;
-}
-
+export interface ActiveTool { toolCallId: string; toolName: string; args: unknown; intent?: string; partialResult?: unknown; startedAt: number }
+export interface Notice { id: number; level: "info" | "warning" | "error"; message: string; at: number }
 export interface GuestSnapshot {
-	phase: ConnectionPhase;
-	endedReason: string | null;
-	header: SessionHeader | null;
-	entries: readonly SessionEntry[];
-	state: SessionState | null;
-	agents: readonly AgentSnapshot[];
-	/** Keyed by `payload.progress.id`. */
-	progress: ReadonlyMap<string, SubagentProgressPayload>;
-	/** Keyed by `payload.id`. */
-	lifecycle: ReadonlyMap<string, SubagentLifecyclePayload>;
-	/** Streaming assistant ghost; held until the matching entry lands. */
-	stream: AssistantMessage | null;
-	streamDone: boolean;
-	activeTools: ReadonlyMap<string, ActiveTool>;
-	/** agent_start..agent_end, reconciled by state.isStreaming. */
-	working: boolean;
-	/** True when this guest joined through a read-only (view) link. */
-	readOnly: boolean;
-	/** Capped at 50, newest last. */
-	notices: readonly Notice[];
+	readonly phase: ConnectionPhase; readonly endedReason: string | null; readonly runner: CollabRunnerSnapshot | null;
+	readonly capability: CollabCapability | null; readonly controllerEpoch: number | null; readonly header: SessionHeader | null;
+	readonly entries: readonly SessionEntry[]; readonly state: SessionState | null; readonly agents: readonly AgentSnapshot[];
+	readonly progress: ReadonlyMap<string, SubagentProgressPayload>; readonly lifecycle: ReadonlyMap<string, SubagentLifecyclePayload>;
+	readonly stream: AssistantMessage | null; readonly streamDone: boolean; readonly activeTools: ReadonlyMap<string, ActiveTool>;
+	readonly working: boolean; readonly readOnly: boolean; readonly notices: readonly Notice[];
+}
+export type DeltaReduction = { readonly kind: "applied" | "duplicate"; readonly snapshot: CollabRunnerSnapshot }
+	| { readonly kind: "gap"; readonly expectedSequence: number; readonly observedSequence: number };
+
+function record(value: JsonValue): Readonly<Record<string, JsonValue>> | null {
+	return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Readonly<Record<string, JsonValue>> : null;
 }
 
-const MAX_NOTICES = 50;
-const TRANSCRIPT_TIMEOUT_MS = 10_000;
-/** Mirrors the TUI guest's WELCOME_TIMEOUT_MS: a host that never answers hello ends the join. */
-const WELCOME_TIMEOUT_MS = 30_000;
-
-interface PendingTranscript {
-	resolve: (result: { text: string; newSize: number } | null) => void;
-	timer: Timer;
+/** Pure contiguous runner projection reducer. */
+export function reduceRunnerDelta(snapshot: CollabRunnerSnapshot, delivery: CollabRunnerEventDelivery): DeltaReduction {
+	const event = record(delivery.event);
+	const observedSequence = typeof event?.sequence === "number" ? event.sequence : Number.NaN;
+	const expectedSequence = snapshot.runnerSequence + 1;
+	if (!Number.isSafeInteger(observedSequence) || observedSequence < 1 || observedSequence > expectedSequence) return { kind: "gap", expectedSequence, observedSequence };
+	if (observedSequence <= snapshot.runnerSequence) return { kind: "duplicate", snapshot };
+	let transcript = snapshot.transcript;
+	if (event?.kind === "transcriptEntryAppended" && event.transcriptEntry !== undefined) {
+		transcript = [...(Array.isArray(transcript) ? transcript : []), event.transcriptEntry];
+	}
+	const field = (key: keyof CollabRunnerSnapshot, fallback: JsonValue): JsonValue => event?.[key] ?? fallback;
+	return { kind: "applied", snapshot: {
+		revision: typeof event?.revision === "number" ? event.revision : snapshot.revision, runnerSequence: observedSequence,
+		sessionRevision: typeof event?.sessionRevision === "number" ? event.sessionRevision : snapshot.sessionRevision, transcript,
+		durableInputs: field("durableInputs", snapshot.durableInputs) as readonly JsonValue[], activeOperations: field("activeOperations", snapshot.activeOperations) as readonly JsonValue[],
+		workflow: field("workflow", snapshot.workflow), tools: field("tools", snapshot.tools), todos: field("todos", snapshot.todos),
+		model: field("model", snapshot.model), session: field("session", snapshot.session),
+	} };
 }
 
-export interface AgentOperationResult {
-	ok: boolean;
-	error?: string;
-}
-
-interface PendingAgentOperation {
-	resolve: (result: AgentOperationResult | null) => void;
-	timer: Timer;
-}
-
-function copyState(state: SessionState): SessionState {
-	return {
-		...state,
-		model: state.model ? { ...state.model } : undefined,
-		contextUsage: state.contextUsage ? { ...state.contextUsage } : undefined,
-		participants: state.participants.map(participant => ({ ...participant })),
-	};
-}
-
-function copyAgent(agent: AgentSnapshot): AgentSnapshot {
-	return {
-		...agent,
-		activity: agent.activity ? { ...agent.activity } : undefined,
-		recovery: agent.recovery ? { ...agent.recovery } : undefined,
-		quota: agent.quota ? { ...agent.quota } : undefined,
-		operation: agent.operation ? { ...agent.operation, supportedActions: [...agent.operation.supportedActions] } : undefined,
-	};
-}
+interface PendingCommand { resolve(value: JsonValue): void; reject(reason: Error): void }
+const EMPTY_PROGRESS: ReadonlyMap<string, SubagentProgressPayload> = new Map();
+const EMPTY_LIFECYCLE: ReadonlyMap<string, SubagentLifecyclePayload> = new Map();
+const EMPTY_TOOLS: ReadonlyMap<string, ActiveTool> = new Map();
 
 export class GuestClient {
 	readonly #socket: CollabSocket;
-	readonly #name: string;
-	/** base64url write token from a full link; absent when joined via a view link. */
+	readonly #keyPromise: Promise<CryptoKey>;
 	readonly #writeToken: string | undefined;
+	readonly #rawKey: Uint8Array;
+	readonly #clientId = crypto.randomUUID();
+	readonly #viewId = crypto.randomUUID();
 	readonly #listeners = new Set<() => void>();
-	readonly #pendingTranscripts = new Map<number, PendingTranscript>();
-	readonly #pendingAgentOperations = new Map<number, PendingAgentOperation>();
-	#reqSeq = 0;
-	#noticeSeq = 0;
-	#everConnected = false;
-	#welcomed = false;
-	#welcomeTimer: Timer | null = null;
+	readonly #pending = new Map<string, PendingCommand>();
+	#phase: ConnectionPhase = "connecting"; #endedReason: string | null = null; #runner: CollabRunnerSnapshot | null = null;
+	#capability: CollabCapability | null = null; #controllerEpoch: number | null = null; #everConnected = false;
+	#notices: readonly Notice[] = []; #noticeSequence = 0; #snapshot: GuestSnapshot;
 
-	#phase: ConnectionPhase = "connecting";
-	#endedReason: string | null = null;
-	#header: SessionHeader | null = null;
-	#entries: readonly SessionEntry[] = [];
-	#state: SessionState | null = null;
-	#agents: readonly AgentSnapshot[] = [];
-	#progress: ReadonlyMap<string, SubagentProgressPayload> = new Map();
-	#lifecycle: ReadonlyMap<string, SubagentLifecyclePayload> = new Map();
-	#stream: AssistantMessage | null = null;
-	#streamDone = false;
-	#activeTools: ReadonlyMap<string, ActiveTool> = new Map();
-	#working = false;
-	#readOnly = false;
-	#notices: readonly Notice[] = [];
-	#snapshot: GuestSnapshot;
-
-	/** @throws Error when the link does not parse. */
-	constructor(link: string, displayName: string) {
+	constructor(link: string, _displayName: string) {
 		const parsed = parseCollabLink(link);
 		if ("error" in parsed) throw new Error(parsed.error);
-		this.#name = displayName;
 		this.#writeToken = parsed.writeToken ? encodeBase64Url(parsed.writeToken) : undefined;
-		this.#socket = new CollabSocket({ wsUrl: parsed.wsUrl, role: "guest", key: importRoomKey(parsed.key) });
-		this.#socket.onOpen = () => this.#handleOpen();
-		this.#socket.onFrame = frame => this.#applyFrameSafe(frame);
-		this.#socket.onControl = msg => {
-			if (msg.t === "room-closed") this.#end("room closed");
-		};
-		this.#socket.onClose = (reason, willReconnect) => this.#handleClose(reason, willReconnect);
+		this.#keyPromise = importRoomKey(parsed.key);
+		this.#rawKey = parsed.key;
+		this.#socket = new CollabSocket({ wsUrl: parsed.wsUrl, role: "guest", key: this.#keyPromise });
+		this.#socket.onOpen = () => { this.#phase = this.#everConnected ? "reconnecting" : "waiting"; this.#everConnected = true; this.#commit(); };
+		this.#socket.onChallenge = challenge => void this.#attach(challenge);
+		this.#socket.onFrame = frame => this.#applyFrame(frame);
+		this.#socket.onSequenceGap = () => { if (this.#runner) this.#socket.send({ t: "resyncRequest", afterSequence: this.#runner.runnerSequence }); };
+		this.#socket.onControl = message => { if (message.t === "room-closed") this.#end("room closed"); };
+		this.#socket.onClose = (reason, reconnecting) => this.#handleClose(reason, reconnecting);
 		this.#snapshot = this.#buildSnapshot();
 	}
 
-	connect(): void {
-		if (this.#phase === "ended") {
-			this.#phase = "connecting";
-			this.#endedReason = null;
-			this.#commit();
-		}
-		this.#socket.connect();
-		if (!this.#welcomed && this.#welcomeTimer === null) {
-			this.#welcomeTimer = setTimeout(() => {
-				this.#welcomeTimer = null;
-				if (!this.#welcomed) this.#end("timed out waiting for the host's welcome");
-			}, WELCOME_TIMEOUT_MS);
-		}
-	}
+	connect(): void { this.#socket.connect(); }
+	close(): void { if (this.#socket.isOpen && this.#capability !== null) this.#socket.send({ t: "detach" }); this.#socket.close(); this.#end("client closed"); }
+	subscribe(listener: () => void): () => void { this.#listeners.add(listener); return () => this.#listeners.delete(listener); }
+	getSnapshot(): GuestSnapshot { return this.#snapshot; }
 
-	close(): void {
-		this.#clearWelcomeTimer();
-		this.#socket.close();
+	sendCommand(command: JsonValue, requestId = crypto.randomUUID()): Promise<JsonValue> {
+		if (this.#capability !== "controller" || this.#controllerEpoch === null) return Promise.reject(new Error("controller capability is not active"));
+		const { promise, resolve, reject } = Promise.withResolvers<JsonValue>();
+		this.#pending.set(requestId, { resolve, reject });
+		try { this.#socket.send({ t: "command", requestId, command }); } catch (error) { this.#pending.delete(requestId); reject(error instanceof Error ? error : new Error(String(error))); }
+		return promise;
 	}
-
-	subscribe(listener: () => void): () => void {
-		this.#listeners.add(listener);
-		return () => {
-			this.#listeners.delete(listener);
-		};
-	}
-
-	/** Cached stable reference; replaced (with fresh collection refs) per applied frame. */
-	getSnapshot(): GuestSnapshot {
-		return this.#snapshot;
-	}
-
 	sendPrompt(text: string): void {
-		this.#socket.send({ t: "prompt", text });
+		if (!this.#runner || this.#controllerEpoch === null) return;
+		const commandId = crypto.randomUUID();
+		void this.sendCommand({ schemaVersion: 1, kind: "submitInput", commandId, correlationId: commandId, expectedRevision: this.#runner.revision,
+			viewId: this.#viewId, controllerEpoch: this.#controllerEpoch, payload: { text, deliveryClass: "followUp" } }).catch(error => this.#notice("error", error.message));
 	}
+	interruptPrompt(): void {
+		if (!this.#runner || this.#controllerEpoch === null) return;
+		const session = record(this.#runner.session);
+		const promptOperation = session ? record(session.promptOperation) : null;
+		const targetGeneration = promptOperation?.generation;
+		if (typeof targetGeneration !== "number" || !Number.isSafeInteger(targetGeneration)) return;
+		const commandId = crypto.randomUUID();
+		void this.sendCommand({ schemaVersion: 1, kind: "interruptPrompt", commandId, correlationId: commandId,
+			viewId: this.#viewId, controllerEpoch: this.#controllerEpoch, targetGeneration }).catch(error => this.#notice("error", error.message));
+	}
+	applyFrameForTest(frame: HostFrame): void { this.#applyFrame(frame); }
 
-	sendAbort(): void {
-		this.#socket.send({ t: "abort" });
-	}
-
-	sendAgentCmd(cmd: "chat" | "kill" | "revive", agentId: string, text?: string): void {
-		this.#socket.send({ t: "agent-cmd", cmd, agentId, text });
-	}
-	/** Sends a real host-advertised durable operation and resolves its correlated outcome. */
-	sendOperationCmd(
-		action: AgentOperationAction,
-		agentId: string,
-		inputId?: string,
-	): Promise<AgentOperationResult | null> {
-		const reqId = ++this.#reqSeq;
-		const { promise, resolve } = Promise.withResolvers<AgentOperationResult | null>();
-		const timer = setTimeout(() => {
-			this.#pendingAgentOperations.delete(reqId);
-			resolve(null);
-		}, TRANSCRIPT_TIMEOUT_MS);
-		this.#pendingAgentOperations.set(reqId, { resolve, timer });
-		this.#socket.send({ t: "agent-op-cmd", reqId, action, agentId, inputId });
-		return promise;
-	}
-
-	/** Incremental subagent-transcript read. Resolves null on error reply or 10s timeout. */
-	fetchTranscript(agentId: string, fromByte: number): Promise<{ text: string; newSize: number } | null> {
-		const reqId = ++this.#reqSeq;
-		const { promise, resolve } = Promise.withResolvers<{ text: string; newSize: number } | null>();
-		const timer = setTimeout(() => {
-			this.#pendingTranscripts.delete(reqId);
-			resolve(null);
-		}, TRANSCRIPT_TIMEOUT_MS);
-		this.#pendingTranscripts.set(reqId, { resolve, timer });
-		this.#socket.send({ t: "fetch-transcript", reqId, agentId, fromByte });
-		return promise;
-	}
-
-	/** Test seam: apply a synthetic host frame through the real apply path. */
-	applyFrameForTest(frame: HostFrame): void {
-		this.#applyFrameSafe(frame);
-	}
-
-	#handleOpen(): void {
-		this.#socket.send({ t: "hello", proto: COLLAB_PROTO, name: this.#name, writeToken: this.#writeToken });
-		this.#phase = this.#everConnected ? "reconnecting" : "waiting";
-		this.#everConnected = true;
-		this.#commit();
-	}
-
-	#handleClose(reason: string, willReconnect: boolean): void {
-		if (this.#phase === "ended") return;
-		if (willReconnect) {
-			this.#phase = "reconnecting";
-			this.#commit();
-			return;
-		}
-		this.#end(reason);
-	}
-
-	#end(reason: string): void {
-		if (this.#phase === "ended") return;
-		this.#clearWelcomeTimer();
-		this.#phase = "ended";
-		this.#endedReason = reason;
-		for (const [, pending] of this.#pendingTranscripts) {
-			clearTimeout(pending.timer);
-			pending.resolve(null);
-		}
-		this.#pendingTranscripts.clear();
-		for (const [, pending] of this.#pendingAgentOperations) {
-			clearTimeout(pending.timer);
-			pending.resolve(null);
-		}
-		this.#pendingAgentOperations.clear();
-		this.#commit();
-		this.#socket.close();
-	}
-
-	#clearWelcomeTimer(): void {
-		if (this.#welcomeTimer !== null) {
-			clearTimeout(this.#welcomeTimer);
-			this.#welcomeTimer = null;
-		}
-	}
-
-	/** Surfaces apply failures instead of letting the socket's recv chain swallow them. */
-	#applyFrameSafe(frame: HostFrame): void {
-		try {
-			this.#applyFrame(frame);
-		} catch (err) {
-			console.warn("collab: failed to apply frame", frame.t, err);
-			if (frame.t === "welcome" && !this.#welcomed) {
-				this.#end(`failed to apply session snapshot: ${err instanceof Error ? err.message : String(err)}`);
-				return;
-			}
-			this.#pushNotice("error", `failed to apply ${frame.t} frame`);
-			this.#commit();
-		}
+	async #attach(challenge: CollabChallengeFrame): Promise<void> {
+		const requestedCapability: CollabCapability = this.#writeToken ? "controller" : "observer";
+		const canonical = `${challenge.challengeId.length}:${challenge.challengeId}${challenge.challenge.length}:${challenge.challenge}${this.#clientId.length}:${this.#clientId}${requestedCapability}`;
+		const hmacKey = await crypto.subtle.importKey("raw", new Uint8Array(this.#rawKey), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+		const response = new Uint8Array(await crypto.subtle.sign("HMAC", hmacKey, new TextEncoder().encode(canonical)));
+		this.#socket.activateConnection(challenge.challengeId);
+		this.#socket.sendAttach({
+			t: "attach",
+			proto: COLLAB_PROTO,
+			clientId: this.#clientId,
+			viewId: this.#viewId,
+			requestedCapability,
+			writeToken: this.#writeToken,
+			challengeId: challenge.challengeId,
+			challengeResponse: encodeBase64Url(response),
+			afterSequence: this.#runner?.runnerSequence,
+		});
 	}
 
 	#applyFrame(frame: HostFrame): void {
 		switch (frame.t) {
-			case "welcome":
-				this.#header = { ...frame.header };
-				this.#entries = [...frame.entries];
-				this.#state = copyState(frame.state);
-				this.#agents = frame.agents.map(copyAgent);
-				this.#stream = null;
-				this.#streamDone = false;
-				this.#activeTools = new Map();
-				this.#progress = new Map();
-				this.#lifecycle = new Map();
-				this.#working = frame.state.isStreaming;
-				this.#phase = "live";
-				this.#endedReason = null;
-				this.#readOnly = frame.readOnly === true;
-				this.#welcomed = true;
-				this.#clearWelcomeTimer();
-				break;
-			case "entry":
-				this.#entries = [...this.#entries, frame.entry];
-				if (this.#streamDone && frame.entry.type === "message" && frame.entry.message.role === "assistant") {
-					this.#stream = null;
-					this.#streamDone = false;
-				}
-				break;
-			case "event":
-				this.#applyEvent(frame.event);
-				break;
-			case "state":
-				this.#state = copyState(frame.state);
-				if (!frame.state.isStreaming) {
-					this.#working = false;
-					if (this.#streamDone) {
-						this.#stream = null;
-						this.#streamDone = false;
-					}
-				}
-				break;
-			case "agents":
-				this.#agents = frame.agents.map(copyAgent);
-				break;
-			case "bus":
-				if (frame.channel === "task:subagent:progress") {
-					const payload = frame.data as SubagentProgressPayload;
-					this.#progress = new Map(this.#progress).set(payload.progress.id, payload);
-				} else if (frame.channel === "task:subagent:lifecycle") {
-					const payload = frame.data as SubagentLifecyclePayload;
-					this.#lifecycle = new Map(this.#lifecycle).set(payload.id, payload);
-				}
-				break;
-			case "transcript": {
-				const pending = this.#pendingTranscripts.get(frame.reqId);
-				if (pending) {
-					this.#pendingTranscripts.delete(frame.reqId);
-					clearTimeout(pending.timer);
-					pending.resolve(frame.error !== undefined ? null : { text: frame.text, newSize: frame.newSize });
-				}
-				break;
-			}
-			case "agent-op-result": {
-				const pending = this.#pendingAgentOperations.get(frame.reqId);
-				if (pending) {
-					this.#pendingAgentOperations.delete(frame.reqId);
-					clearTimeout(pending.timer);
-					pending.resolve(frame.ok ? { ok: true } : { ok: false, error: frame.error });
-				}
-				break;
-			}
-			case "bye":
-				this.#end(frame.reason);
-				return; // #end already committed
-			case "error":
-				this.#pushNotice("error", frame.message);
-				break;
-			default:
-				// unknown frame type from a newer host — ignore
-				break;
+			case "welcome": this.#runner = frame.snapshot; this.#capability = frame.capability; this.#controllerEpoch = frame.capability === "controller" ? frame.controllerEpoch ?? null : null; this.#phase = "live"; this.#endedReason = null; break;
+			case "delta": { if (!this.#runner) break; const reduced = reduceRunnerDelta(this.#runner, frame.delivery); if (reduced.kind === "gap") this.#socket.send({ t: "resyncRequest", afterSequence: this.#runner.runnerSequence }); else this.#runner = reduced.snapshot; break; }
+			case "resync": this.#runner = frame.snapshot; break;
+			case "controllerChanged": this.#capability = frame.capability; this.#controllerEpoch = frame.capability === "controller" ? frame.controllerEpoch ?? null : null; break;
+			case "commandResult": { const pending = this.#pending.get(frame.requestId); if (!pending) break; this.#pending.delete(frame.requestId); if (frame.ok) pending.resolve(frame.receipt ?? null); else pending.reject(new Error(frame.error?.message ?? "runner command failed")); break; }
+			case "error": { if (frame.requestId) { const pending = this.#pending.get(frame.requestId); if (pending) { this.#pending.delete(frame.requestId); pending.reject(new Error(frame.message)); } } this.#notice("error", frame.message); return; }
+			case "bye": this.#end(frame.reason); return;
 		}
 		this.#commit();
 	}
-
-	#applyEvent(event: Extract<HostFrame, { t: "event" }>["event"]): void {
-		switch (event.type) {
-			case "message_start":
-			case "message_update":
-				if (event.message.role === "assistant") {
-					this.#stream = event.message;
-					this.#streamDone = false;
-				}
-				break;
-			case "message_end":
-				if (event.message.role === "assistant") {
-					this.#stream = event.message;
-					this.#streamDone = true;
-				}
-				break;
-			case "tool_execution_start": {
-				const tool: ActiveTool = {
-					toolCallId: event.toolCallId,
-					toolName: event.toolName,
-					args: event.args,
-					intent: event.intent,
-					startedAt: Date.now(),
-				};
-				this.#activeTools = new Map(this.#activeTools).set(event.toolCallId, tool);
-				break;
-			}
-			case "tool_execution_update": {
-				const existing = this.#activeTools.get(event.toolCallId);
-				const tool: ActiveTool = existing
-					? { ...existing, partialResult: event.partialResult }
-					: {
-							toolCallId: event.toolCallId,
-							toolName: event.toolName,
-							args: event.args,
-							partialResult: event.partialResult,
-							startedAt: Date.now(),
-						};
-				this.#activeTools = new Map(this.#activeTools).set(event.toolCallId, tool);
-				break;
-			}
-			case "tool_execution_end": {
-				const next = new Map(this.#activeTools);
-				next.delete(event.toolCallId);
-				this.#activeTools = next;
-				break;
-			}
-			case "agent_start":
-				this.#working = true;
-				break;
-			case "agent_end":
-				this.#working = false;
-				break;
-			case "notice":
-				this.#pushNotice(event.level, event.message);
-				break;
-			case "auto_retry_start":
-				this.#pushNotice("info", `retry ${event.attempt}/${event.maxAttempts}: ${event.errorMessage}`);
-				break;
-			case "auto_compaction_start":
-				this.#pushNotice("info", `compacting context (${event.reason})`);
-				break;
-			case "auto_compaction_end":
-				if (!event.skipped) {
-					this.#pushNotice(
-						"info",
-						event.aborted
-							? "compaction aborted"
-							: event.errorMessage
-								? `compaction failed: ${event.errorMessage}`
-								: "context compacted",
-					);
-				}
-				break;
-			default:
-				// turn_start/turn_end/thinking_level_changed/unknown — ignore
-				break;
-		}
-	}
-
-	#pushNotice(level: Notice["level"], message: string): void {
-		const notice: Notice = { id: ++this.#noticeSeq, level, message, at: Date.now() };
-		const next = [...this.#notices, notice];
-		if (next.length > MAX_NOTICES) next.splice(0, next.length - MAX_NOTICES);
-		this.#notices = next;
-	}
-
+	#handleClose(reason: string, reconnecting: boolean): void { for (const pending of this.#pending.values()) pending.reject(new Error("connection closed before command result")); this.#pending.clear(); this.#capability = null; this.#controllerEpoch = null; if (reconnecting) { this.#phase = "reconnecting"; this.#commit(); } else this.#end(reason); }
+	#end(reason: string): void { this.#phase = "ended"; this.#endedReason = reason; this.#capability = null; this.#controllerEpoch = null; this.#commit(); }
+	#notice(level: Notice["level"], message: string): void { this.#notices = [...this.#notices.slice(-48), { id: ++this.#noticeSequence, level, message, at: Date.now() }]; this.#commit(); }
 	#buildSnapshot(): GuestSnapshot {
-		return {
-			phase: this.#phase,
-			endedReason: this.#endedReason,
-			header: this.#header,
-			entries: this.#entries,
-			state: this.#state,
-			agents: this.#agents,
-			progress: this.#progress,
-			lifecycle: this.#lifecycle,
-			stream: this.#stream,
-			streamDone: this.#streamDone,
-			activeTools: this.#activeTools,
-			working: this.#working,
-			readOnly: this.#readOnly,
-			notices: this.#notices,
-		};
+		const session = this.#runner ? record(this.#runner.session) : null; const transcript = this.#runner?.transcript;
+		return { phase: this.#phase, endedReason: this.#endedReason, runner: this.#runner, capability: this.#capability, controllerEpoch: this.#controllerEpoch,
+			header: (session?.header as SessionHeader | undefined) ?? null, entries: (Array.isArray(transcript) ? transcript : []) as readonly SessionEntry[],
+			state: (session?.state as SessionState | undefined) ?? null, agents: (Array.isArray(session?.agents) ? session.agents : []) as unknown as readonly AgentSnapshot[],
+			progress: EMPTY_PROGRESS, lifecycle: EMPTY_LIFECYCLE, stream: null, streamDone: false, activeTools: EMPTY_TOOLS,
+			working: session?.isStreaming === true, readOnly: this.#capability !== "controller", notices: this.#notices };
 	}
-
-	#commit(): void {
-		this.#snapshot = this.#buildSnapshot();
-		for (const listener of this.#listeners) listener();
-	}
+	#commit(): void { this.#snapshot = this.#buildSnapshot(); for (const listener of this.#listeners) listener(); }
 }

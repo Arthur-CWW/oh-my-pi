@@ -1,36 +1,22 @@
 import type { AgentSnapshot, SessionEntry, SubagentProgressPayload } from "@oh-my-pi/pi-wire";
-import { OctagonX, RotateCcw, SendHorizontal, X } from "lucide-react";
+import { X } from "lucide-react";
 import type { ReactNode } from "react";
-import { useEffect, useState } from "react";
-import type { GuestClient } from "../../lib/client";
+import { useEffect } from "react";
 import { fmtCost, fmtDuration, fmtTokens } from "../../lib/format";
-import { parseJsonl } from "../../lib/jsonl";
 import type { TranscriptProps } from "../transcript/Transcript";
 import { Transcript } from "../transcript/Transcript";
 
 const EMPTY_TOOLS: TranscriptProps["activeTools"] = new Map();
 
-type OperationAction = "retry" | "reconcile" | "cancel" | "inspect";
-type OperationalAgent = AgentSnapshot & {
-	quota?: { originalModel?: string; routedModel?: string; quotaPoolId?: string; resetAt?: number; decisionReason?: string };
-	operation?: { inputId?: string; state?: string; reason?: string; supportedActions?: OperationAction[] };
-};
-const POLL_MS = 1200;
-
 export function AgentDrawer(props: {
 	agent: AgentSnapshot;
 	progress?: SubagentProgressPayload;
-	client: GuestClient;
-	/** View-link guests: hide kill/revive/chat (the host rejects them anyway). */
-	readOnly?: boolean;
+	entries: readonly SessionEntry[];
 	/** Forwarded to tool renderers so nested task cards can drill further. */
 	host?: TranscriptProps["host"];
 	onClose(): void;
 }): ReactNode {
-	const { progress, client, readOnly, host, onClose } = props;
-	const agent = props.agent as OperationalAgent;
-	const [entries, setEntries] = useState<readonly SessionEntry[]>([]);
-	const [draft, setDraft] = useState("");
+	const { progress, host, onClose, entries, agent } = props;
 
 	useEffect(() => {
 		const onKey = (e: KeyboardEvent) => {
@@ -40,57 +26,6 @@ export function AgentDrawer(props: {
 		return () => window.removeEventListener("keydown", onKey);
 	}, [onClose]);
 
-	// Live transcript: poll the host-side session file while the drawer is
-	// open, appending parsed JSONL entries. State resets when the agent
-	// changes; the interval and any in-flight reply are dropped on cleanup.
-	useEffect(() => {
-		setEntries([]);
-		if (!agent.hasSessionFile) return;
-		let disposed = false;
-		let inFlight = false;
-		let cursor = 0;
-		let carry = "";
-		let acc: readonly SessionEntry[] = [];
-		const poll = async (): Promise<void> => {
-			if (disposed || inFlight) return;
-			inFlight = true;
-			try {
-				const reply = await client.fetchTranscript(agent.id, cursor);
-				if (disposed || reply === null) return; // timeout/error → keep polling
-				cursor = reply.newSize;
-				if (!reply.text) return;
-				const parsed = parseJsonl(reply.text, carry);
-				carry = parsed.carry;
-				const fresh: SessionEntry[] = [];
-				for (const item of parsed.items) {
-					if (typeof item !== "object" || item === null) continue;
-					if ((item as { type?: unknown }).type === "session") continue;
-					fresh.push(item as SessionEntry);
-				}
-				if (fresh.length > 0) {
-					acc = [...acc, ...fresh];
-					setEntries(acc);
-				}
-			} finally {
-				inFlight = false;
-			}
-		};
-		void poll();
-		const timer = setInterval(() => {
-			void poll();
-		}, POLL_MS);
-		return () => {
-			disposed = true;
-			clearInterval(timer);
-		};
-	}, [agent.id, agent.hasSessionFile, client]);
-
-	const sendChat = () => {
-		const text = draft.trim();
-		if (!text) return;
-		client.sendAgentCmd("chat", agent.id, text);
-		setDraft("");
-	};
 
 	const p = progress?.progress;
 	const model = p?.resolvedModel;
@@ -98,12 +33,6 @@ export function AgentDrawer(props: {
 		p?.contextTokens !== undefined && p.contextWindow
 			? Math.min(100, (p.contextTokens / p.contextWindow) * 100)
 			: null;
-	const runOperation = (action: OperationAction): void => {
-		const operationalClient = client as GuestClient & {
-			sendOperationCmd?: (action: OperationAction, agentId: string, inputId?: string) => void;
-		};
-		operationalClient.sendOperationCmd?.(action, agent.id, agent.operation?.inputId);
-	};
 
 	return (
 		<aside className="ag-drawer" role="dialog" aria-label={agent.displayName}>
@@ -114,32 +43,6 @@ export function AgentDrawer(props: {
 					{model ? <span className="ag-chip ag-chip--model">{model}</span> : null}
 				</div>
 				<div className="ag-drawer-actions">
-					{!readOnly
-						? agent.operation?.supportedActions
-								?.filter(action => action !== "inspect")
-								.map(action => (
-									<button type="button" className="ag-btn" key={action} onClick={() => runOperation(action)}>
-										<RotateCcw size={13} aria-hidden />
-										{action}
-									</button>
-								))
-						: null}
-					{agent.status === "running" && !readOnly ? (
-						<button
-							type="button"
-							className="ag-btn ag-btn--danger"
-							onClick={() => client.sendAgentCmd("kill", agent.id)}
-						>
-							<OctagonX size={13} aria-hidden />
-							kill
-						</button>
-					) : null}
-					{(agent.status === "parked" || agent.status === "aborted") && !readOnly ? (
-						<button type="button" className="ag-btn" onClick={() => client.sendAgentCmd("revive", agent.id)}>
-							<RotateCcw size={13} aria-hidden />
-							revive
-						</button>
-					) : null}
 					<button type="button" className="ag-iconbtn" aria-label="close" onClick={onClose}>
 						<X size={15} aria-hidden />
 					</button>
@@ -189,12 +92,12 @@ export function AgentDrawer(props: {
 				</div>
 			) : null}
 			<div className="ag-drawer-body">
-				{agent.hasSessionFile ? (
+				{entries.length > 0 ? (
 					<Transcript
 						compact
 						entries={entries}
 						stream={null}
-						streamDone={false}
+						streamDone
 						activeTools={EMPTY_TOOLS}
 						working={agent.status === "running"}
 						host={host}
@@ -203,25 +106,6 @@ export function AgentDrawer(props: {
 					<div className="ag-empty">no transcript available</div>
 				)}
 			</div>
-			{!readOnly && (
-				<form
-					className="ag-chat"
-					onSubmit={e => {
-						e.preventDefault();
-						sendChat();
-					}}
-				>
-					<input
-						className="ag-chat-input"
-						value={draft}
-						placeholder={`message ${agent.displayName}…`}
-						onChange={e => setDraft(e.target.value)}
-					/>
-					<button type="submit" className="ag-iconbtn" aria-label="send" disabled={draft.trim().length === 0}>
-						<SendHorizontal size={15} aria-hidden />
-					</button>
-				</form>
-			)}
 		</aside>
 	);
 }

@@ -1,4 +1,4 @@
-import type { CollabSessionState } from "../../../collab/protocol";
+import type { CollabSessionState } from "../../collab-presentation-types";
 import type { StatusLinePreset, StatusLineSegmentId, StatusLineSeparatorStyle } from "../../../config/settings-schema";
 import type { AgentSession } from "../../../session/agent-session";
 

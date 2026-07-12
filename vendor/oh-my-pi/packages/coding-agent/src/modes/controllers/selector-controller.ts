@@ -1276,7 +1276,7 @@ export class SelectorController {
 			this.ctx.ui.requestRender();
 		};
 
-		const registry = this.ctx.collabGuest?.agentRegistry ?? AgentRegistry.global();
+		const registry = AgentRegistry.global();
 		hub = new AgentHubOverlayComponent({
 			observers,
 			hubKeys,
@@ -1284,7 +1284,6 @@ export class SelectorController {
 			onDone: done,
 			requestRender: () => this.ctx.ui.requestRender(),
 			registry,
-			remote: this.ctx.collabGuest?.hubRemote,
 			turnStatus: (agentId: string) => getAgentHubTurnStatus(registry, agentId),
 			ui: this.ctx.ui,
 			getTool: name => this.ctx.session.getToolByName(name),

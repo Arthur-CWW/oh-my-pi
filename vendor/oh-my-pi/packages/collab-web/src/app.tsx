@@ -172,13 +172,6 @@ function Session({ client, onLeave, onRejoin }: SessionProps): ReactNode {
 							lifecycle={snap.lifecycle}
 							selectedId={selectedId}
 							onSelect={setSelectedId}
-							onAction={(action, agent, inputId) => {
-								const operationClient = client as GuestClient & {
-									sendOperationCmd?: (action: string, agentId: string, inputId?: string) => void;
-								};
-								operationClient.sendOperationCmd?.(action, agent.id, inputId);
-								if (action === "inspect") setSelectedId(agent.id);
-							}}
 						/>
 					) : (
 						<div className="sh-transcript">
@@ -201,8 +194,7 @@ function Session({ client, onLeave, onRejoin }: SessionProps): ReactNode {
 					<AgentDrawer
 						agent={drawerAgent}
 						progress={snap.progress.get(drawerAgent.id)}
-						client={client}
-						readOnly={snap.readOnly}
+						entries={snap.entries}
 						host={toolHost}
 						onClose={() => setSelectedId(null)}
 					/>

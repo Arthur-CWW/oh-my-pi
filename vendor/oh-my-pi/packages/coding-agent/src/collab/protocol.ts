@@ -7,90 +7,187 @@
  * control messages that carry no session data.
  */
 
-import type { ImageContent, Model } from "@oh-my-pi/pi-ai";
 import type {
-	BusChannel,
+	CollabApplicationFrame,
+	CollabAttachFrame,
+	CollabChallengeFrame,
+	CollabDirection,
 	GuestFrame,
+	HostFrame,
+	JsonValue,
 	ParsedCollabLink,
-	Participant,
-	SessionState,
-	AgentSnapshot as WireAgentSnapshot,
+	SecureCollabFrame,
 } from "@oh-my-pi/pi-wire";
 import {
+	COLLAB_PROTO,
 	DEFAULT_RELAY_URL,
 	ENVELOPE_HEADER_LENGTH,
 	ROOM_ID_BYTES,
 	ROOM_KEY_BYTES,
 	WRITE_TOKEN_BYTES,
 } from "@oh-my-pi/pi-wire";
-import type { ContextUsage } from "../extensibility/extensions/types";
-import type { AgentSessionEvent } from "../session/agent-session";
-import type { SessionEntry, SessionHeader } from "../session/session-entries";
 
 export type {
-	CollabPromptDetails,
+	CollabApplicationFrame,
+	CollabAttachFrame,
+	CollabCapability,
+	CollabChallengeFrame,
+	CollabDirection,
+	CollabRunnerEventDelivery,
+	CollabRunnerSnapshot,
+	GuestFrame,
+	HostFrame,
+	JsonValue,
 	ParsedCollabLink,
-	RelayControlMessage,
-	RelayControlToGuest,
-	RelayControlToHost,
+	SecureCollabFrame,
 } from "@oh-my-pi/pi-wire";
-export { COLLAB_PROMPT_MESSAGE_TYPE, COLLAB_PROTO } from "@oh-my-pi/pi-wire";
+export {
+	COLLAB_PROMPT_MESSAGE_TYPE,
+	COLLAB_PROTO,
+} from "@oh-my-pi/pi-wire";
 export { DEFAULT_RELAY_URL, ENVELOPE_HEADER_LENGTH, ROOM_ID_BYTES };
 
-export type CollabParticipant = Participant;
-export type AgentSnapshot = WireAgentSnapshot;
+export type CollabFrame = CollabApplicationFrame;
 
-/** Debounced footer snapshot broadcast by the host. */
-export type CollabSessionState = SessionState & {
-	/**
-	 * Host model (full catalog object). Guests apply it to their replica
-	 * agent state so model display and context-window math are native.
-	 */
-	model?: Model;
-	/** Host status-line context numbers (guest system prompt/tools differ, so local estimates drift). */
-	contextUsage?: ContextUsage;
-};
+const RECORD = (value: unknown): value is Record<string, unknown> =>
+	typeof value === "object" && value !== null && !Array.isArray(value);
+const STRING = (value: unknown): value is string => typeof value === "string" && value.length > 0;
+const UINT = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0;
+const POSITIVE_SEQUENCE = (value: unknown): value is number => UINT(value) && value > 0 && value < Number.MAX_SAFE_INTEGER;
 
-/**
- * Encrypted payload frames (inside AES-GCM, JSON). The wire package pins the
- * JSON skeleton (`WireFrame`); host-side frames carry the rich session types
- * that serialize into those shapes.
- */
-export type CollabFrame =
-	// guest -> host (hello/abort/agent-cmd/fetch-transcript are taken verbatim from the wire grammar)
-	| Exclude<GuestFrame, { t: "prompt" }>
-	| { t: "prompt"; text: string; images?: ImageContent[] }
-	// host -> guest
-	| {
-			t: "welcome";
-			proto: number;
-			header: SessionHeader;
-			entries: SessionEntry[];
-			state: CollabSessionState;
-			agents: AgentSnapshot[];
-			/** True when this peer joined through a read-only (view) link. */
-			readOnly?: boolean;
-	  }
-	| { t: "entry"; entry: SessionEntry }
-	| { t: "event"; event: AgentSessionEvent }
-	| { t: "state"; state: CollabSessionState }
-	/** Mirrored EventBus traffic (task subagent lifecycle/progress channels only). */
-	| { t: "bus"; channel: BusChannel; data: unknown }
-	/** Full agent-registry snapshot (debounced on registry change). */
-	| { t: "agents"; agents: AgentSnapshot[] }
-	/** Targeted reply to fetch-transcript; `text` is decoded JSONL from `fromByte`, `newSize` the next offset base. */
-	| { t: "transcript"; reqId: number; text: string; newSize: number; error?: string }
-	/** Correlated reply to a durable-operation command. */
-	| {
-			t: "agent-op-result";
-			reqId: number;
-			action: "reconcile" | "retry" | "cancel" | "inspect";
-			agentId: string;
-			ok: boolean;
-			error?: string;
-	  }
-	| { t: "bye"; reason: string }
-	| { t: "error"; message: string };
+function exact(value: Record<string, unknown>, required: readonly string[], optional: readonly string[] = []): void {
+	const allowed = new Set([...required, ...optional]);
+	for (const key of required) if (!(key in value)) throw new Error(`Missing field: ${key}`);
+	for (const key of Object.keys(value)) if (!allowed.has(key)) throw new Error(`Unknown field: ${key}`);
+}
+
+export function isJsonValue(value: unknown): value is JsonValue {
+	if (value === null || typeof value === "string" || typeof value === "boolean") return true;
+	if (typeof value === "number") return Number.isFinite(value);
+	if (Array.isArray(value)) return value.every(isJsonValue);
+	if (!RECORD(value)) return false;
+	return Object.values(value).every(isJsonValue);
+}
+
+export function decodeChallengeFrame(input: unknown): CollabChallengeFrame {
+	if (!RECORD(input)) throw new Error("Challenge must be an object");
+	exact(input, ["t", "proto", "challengeId", "challenge"]);
+	if (input.t !== "challenge" || input.proto !== COLLAB_PROTO || !STRING(input.challengeId) || !STRING(input.challenge)) {
+		throw new Error("Invalid collaboration challenge");
+	}
+	return input as unknown as CollabChallengeFrame;
+}
+
+export function decodeAttachFrame(input: unknown): CollabAttachFrame {
+	if (!RECORD(input)) throw new Error("Attach must be an object");
+	exact(input, ["t", "proto", "clientId", "viewId", "requestedCapability", "challengeId", "challengeResponse"], [
+		"writeToken",
+		"afterSequence",
+	]);
+	if (
+		input.t !== "attach" ||
+		input.proto !== COLLAB_PROTO ||
+		!STRING(input.clientId) ||
+		!STRING(input.viewId) ||
+		(input.requestedCapability !== "observer" && input.requestedCapability !== "controller") ||
+		!STRING(input.challengeId) ||
+		!STRING(input.challengeResponse) ||
+		(input.writeToken !== undefined && !STRING(input.writeToken)) ||
+		(input.afterSequence !== undefined && !UINT(input.afterSequence))
+	) {
+		throw new Error("Invalid collaboration attach");
+	}
+	return input as unknown as CollabAttachFrame;
+}
+
+export function decodeApplicationFrame(input: unknown): CollabApplicationFrame {
+	if (!RECORD(input) || !STRING(input.t)) throw new Error("Frame must be a tagged object");
+	const request = () => {
+		if (!STRING(input.requestId)) throw new Error("Invalid request id");
+	};
+	switch (input.t) {
+		case "attach":
+			return decodeAttachFrame(input);
+		case "command":
+			exact(input, ["t", "requestId", "command"]);
+			request();
+			if (!RECORD(input.command) || !isJsonValue(input.command)) throw new Error("Invalid runner command");
+			break;
+		case "acquireController":
+			exact(input, ["t", "requestId"]);
+			request();
+			break;
+		case "releaseController":
+			exact(input, ["t", "requestId", "controllerEpoch"]);
+			request();
+			if (!POSITIVE_SEQUENCE(input.controllerEpoch)) throw new Error("Invalid controller epoch");
+			break;
+		case "detach":
+			exact(input, ["t"]);
+			break;
+		case "resyncRequest":
+			exact(input, ["t", "afterSequence"]);
+			if (!UINT(input.afterSequence)) throw new Error("Invalid resync sequence");
+			break;
+		case "welcome":
+			exact(input, ["t", "connectionId", "viewId", "capability", "snapshot", "sequence"], ["controllerEpoch"]);
+			if (!STRING(input.connectionId) || !STRING(input.viewId) || !POSITIVE_SEQUENCE(input.sequence)) throw new Error("Invalid welcome");
+			if (input.capability !== "observer" && input.capability !== "controller") throw new Error("Invalid capability");
+			if (!decodeSnapshot(input.snapshot)) throw new Error("Invalid snapshot");
+			break;
+		case "delta":
+			exact(input, ["t", "delivery"]);
+			if (!RECORD(input.delivery) || input.delivery.kind !== "event" || !isJsonValue(input.delivery.event)) throw new Error("Invalid delta");
+			break;
+		case "resync":
+			exact(input, ["t", "snapshot", "expectedSequence", "observedSequence"]);
+			if (!decodeSnapshot(input.snapshot) || !POSITIVE_SEQUENCE(input.expectedSequence) || !POSITIVE_SEQUENCE(input.observedSequence)) throw new Error("Invalid resync");
+			break;
+		case "commandResult":
+			exact(input, ["t", "requestId", "ok"], ["receipt", "error"]);
+			request();
+			if (typeof input.ok !== "boolean" || (input.receipt !== undefined && !isJsonValue(input.receipt))) throw new Error("Invalid result");
+			if (input.error !== undefined && (!RECORD(input.error) || !STRING(input.error.code) || !STRING(input.error.message))) throw new Error("Invalid result error");
+			break;
+		case "controllerChanged":
+			exact(input, ["t", "capability"], ["controllerEpoch"]);
+			if (input.capability !== "observer" && input.capability !== "controller") throw new Error("Invalid capability");
+			break;
+		case "bye":
+			exact(input, ["t", "reason"]);
+			if (!STRING(input.reason)) throw new Error("Invalid bye");
+			break;
+		case "error":
+			exact(input, ["t", "code", "message"], ["requestId"]);
+			if (!STRING(input.code) || !STRING(input.message) || (input.requestId !== undefined && !STRING(input.requestId))) throw new Error("Invalid error");
+			break;
+		default:
+			throw new Error(`Unknown collaboration frame: ${input.t}`);
+	}
+	return input as unknown as CollabApplicationFrame;
+}
+
+function decodeSnapshot(value: unknown): boolean {
+	if (!RECORD(value)) return false;
+	try {
+		exact(value, ["revision", "runnerSequence", "sessionRevision", "transcript", "durableInputs", "activeOperations", "workflow", "tools", "todos", "model", "session"]);
+	} catch {
+		return false;
+	}
+	return UINT(value.revision) && UINT(value.runnerSequence) && UINT(value.sessionRevision) && isJsonValue(value);
+}
+
+export function decodeSecureCollabFrame(input: unknown): SecureCollabFrame {
+	if (!RECORD(input)) throw new Error("Secure frame must be an object");
+	exact(input, ["proto", "connectionId", "direction", "sequence", "frame"]);
+	if (
+		input.proto !== COLLAB_PROTO ||
+		!STRING(input.connectionId) ||
+		(input.direction !== "guestToHost" && input.direction !== "hostToGuest") ||
+		!POSITIVE_SEQUENCE(input.sequence)
+	) throw new Error("Invalid secure frame metadata");
+	return { ...input, frame: decodeApplicationFrame(input.frame) } as SecureCollabFrame;
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Wire envelope: [4B uint32 BE peerId][sealed payload]

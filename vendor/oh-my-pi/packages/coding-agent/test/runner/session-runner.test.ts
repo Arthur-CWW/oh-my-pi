@@ -63,6 +63,14 @@ import { acquireSessionOwnership } from "../../src/session/session-ownership";
 import { AUTO_THINKING } from "../../src/thinking";
 import * as imageLoading from "../../src/utils/image-loading";
 
+const runnerIdentity = {
+	buildRevision: { digest: "0".repeat(64), version: "session-runner-test" },
+	runnerInstance: {
+		runnerInstanceId: "00000000-0000-4000-8000-000000000001",
+		startedAt: "2026-01-01T00:00:00.000Z",
+	},
+} as const;
+
 const roots: string[] = [];
 
 afterEach(async () => {
@@ -190,6 +198,8 @@ async function createLiveFixture(holdProviderResponses = false, reloadSshTool?: 
 	if (!sessionFile) throw new Error("persistent test session has no file");
 	const ownership = await acquireSessionOwnership(sessionFile, sessionManager.getSessionId(), {
 		root: muxRoot,
+		buildRevision: runnerIdentity.buildRevision,
+		runnerInstanceIdentity: runnerIdentity.runnerInstance,
 	});
 	sessionManager.bindSessionOwnership(ownership);
 	const queue = await DurableInputQueue.open(ownership, muxRoot);
@@ -236,6 +246,7 @@ async function createLiveFixture(holdProviderResponses = false, reloadSshTool?: 
 		queue,
 		session,
 		sessionManager,
+		runnerIdentity,
 		providerInputs,
 		providerPlanModeContextCounts,
 		settings,
@@ -307,17 +318,30 @@ describe("live SessionRunner", () => {
 					yield* Effect.promise(() => fixture.session.waitForIdle());
 					expect(fixture.providerInputs).toEqual(["input-duplicate"]);
 
-					const transcriptSubscription = yield* observer.subscribe();
+					const projection = yield* observer.openProjection();
+					expect(projection.snapshot.transcript.entries).toHaveLength(
+						projection.snapshot.transcript.entryCount,
+					);
 					fixture.sessionManager.appendMessage({
 						role: "user",
 						content: "transcript-race",
 						timestamp: Date.now(),
 					});
-					const transcriptDelivery = yield* transcriptSubscription.take;
+					const transcriptDelivery = yield* projection.subscription.take;
+					expect(transcriptDelivery.kind).toBe("event");
+					if (transcriptDelivery.kind !== "event") throw new Error("expected transcript delta");
 					expect(transcriptDelivery.event.kind).toBe("transcriptEntryAppended");
+					expect(transcriptDelivery.event.sequence).toBe(projection.snapshot.sequence + 1);
+					expect(transcriptDelivery.event.transcriptEntry).toMatchObject({
+						id: transcriptDelivery.event.transcriptEntryId,
+						type: "message",
+						message: { role: "user", content: "transcript-race" },
+					});
 					const transcriptSnapshot = yield* observer.snapshot();
 					expect(transcriptSnapshot.transcript.lastEntryId).toBe(transcriptDelivery.event.transcriptEntryId);
-
+					expect(transcriptSnapshot.transcript.entries.at(-1)).toEqual(
+						transcriptDelivery.event.transcriptEntry,
+					);
 					const lagging = yield* observer.subscribe();
 					const extraA = yield* runner.attachView(attach("extra-a", "observer", 1));
 					yield* extraA.detach(detach("extra-a", 1));
@@ -337,7 +361,14 @@ describe("live SessionRunner", () => {
 		const replacementOwnership = await acquireSessionOwnership(
 			fixture.sessionFile,
 			fixture.sessionManager.getSessionId(),
-			{ root: fixture.muxRoot },
+			{
+				root: fixture.muxRoot,
+				buildRevision: runnerIdentity.buildRevision,
+				runnerInstanceIdentity: {
+					runnerInstanceId: "00000000-0000-4000-8000-000000000002",
+					startedAt: "2026-01-01T00:00:01.000Z",
+				},
+			},
 		);
 		expect(await replacementOwnership.isCurrent()).toBe(true);
 		await replacementOwnership.release();

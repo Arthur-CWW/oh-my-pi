@@ -42,7 +42,11 @@ async function runRestartHandoffChild(): Promise<void> {
 		}
 
 		if (mode === "--restart-handoff-owner") {
-			const ownership = await acquireSessionOwnership(sessionFile, sessionId, { root });
+			const ownership = await acquireSessionOwnership(sessionFile, sessionId, {
+				root,
+				buildRevision: TEST_BUILD_REVISION,
+				runnerInstanceIdentity: OWNER_RUNNER_INSTANCE_IDENTITY,
+			});
 			await handoffRestartProcess(
 				{
 					executable: process.execPath,
@@ -64,7 +68,11 @@ async function runRestartHandoffChild(): Promise<void> {
 		}
 
 		const predecessor = await inspectSessionOwnership(sessionFile, sessionId, { root });
-		const ownership = await acquireSessionOwnership(sessionFile, sessionId, { root });
+		const ownership = await acquireSessionOwnership(sessionFile, sessionId, {
+			root,
+			buildRevision: TEST_BUILD_REVISION,
+			runnerInstanceIdentity: REPLACEMENT_RUNNER_INSTANCE_IDENTITY,
+		});
 		const receipt: HandoffReceipt = {
 			ownerEpoch: ownership.ownerEpoch,
 			predecessorEpoch,
@@ -90,6 +98,15 @@ if (restartHandoffChild === "--restart-handoff-owner" || restartHandoffChild ===
 	process.exit(process.exitCode ?? 0);
 }
 const SESSION = "live-session-abc";
+const TEST_BUILD_REVISION = { digest: "0".repeat(64), version: "restart-session-test" };
+const OWNER_RUNNER_INSTANCE_IDENTITY = {
+	runnerInstanceId: "00000000-0000-4000-8000-000000000004",
+	startedAt: "2026-01-01T00:00:00.000Z",
+};
+const REPLACEMENT_RUNNER_INSTANCE_IDENTITY = {
+	runnerInstanceId: "00000000-0000-4000-8000-000000000005",
+	startedAt: "2026-01-01T00:00:01.000Z",
+};
 
 describe("buildRestartLaunchArgs", () => {
 	test("preserves --config and its value", () => {
@@ -478,7 +495,11 @@ describe("handoffRestartProcess", () => {
 		const sessionFile = path.join(tempDir, "session.jsonl");
 		const sessionId = "restart-spawn-failure-session";
 		await writeFile(sessionFile, "");
-		const ownership = await acquireSessionOwnership(sessionFile, sessionId, { root });
+		const ownership = await acquireSessionOwnership(sessionFile, sessionId, {
+			root,
+			buildRevision: TEST_BUILD_REVISION,
+			runnerInstanceIdentity: OWNER_RUNNER_INSTANCE_IDENTITY,
+		});
 
 		try {
 			await expect(

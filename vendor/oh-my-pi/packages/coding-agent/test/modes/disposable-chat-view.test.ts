@@ -25,12 +25,30 @@ function createSnapshot(): TerminalSessionSnapshot {
 	const snapshot = {
 		terminalSequence: 0,
 		runner: {
+			runnerIdentity: {
+				buildRevision: { digest: "0".repeat(64), version: "test" },
+				runnerInstance: {
+					runnerInstanceId: "00000000-0000-4000-8000-000000000000",
+					startedAt: "2026-01-01T00:00:00.000Z",
+				},
+			},
 			revision: 7,
 			sessionRevision: 4,
 			sequence: 0,
 			durableSequence: 0,
 			items: [],
-			transcript: { entryCount: 0, leafId: null, lastEntryId: undefined },
+			transcript: {
+				header: {
+					type: "session",
+					id: "test-session",
+					timestamp: "2026-01-01T00:00:00.000Z",
+					cwd: "/tmp",
+				},
+				entries: [],
+				entryCount: 0,
+				leafId: null,
+				lastEntryId: undefined,
+			},
 			views: [],
 			controller: { viewId: "test-view", epoch: 1 },
 			activeCompaction: undefined,

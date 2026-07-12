@@ -206,12 +206,8 @@ export class InputController {
 				return; // double-escape backtrack (/tree, /branch) stays main-only
 			}
 			if (this.ctx.collabGuest) {
-				// Guest Esc: ask the host to interrupt its agent; the local replica
-				// session is never streaming, so the native abort path below would
-				// no-op.
-				if (this.ctx.collabGuest.state?.isStreaming || this.ctx.loadingAnimation) {
-					this.ctx.collabGuest.sendAbort();
-				}
+				// The protocol-v2 guest is a pure read model until terminal rendering
+				// and controller command construction are cut over.
 				return;
 			}
 			if (this.ctx.loadingAnimation) {
@@ -602,15 +598,7 @@ export class InputController {
 					this.ctx.showStatus("This collab link is read-only — prompting is disabled");
 					return;
 				}
-				this.ctx.editor.addToHistory(text);
-				this.ctx.editor.setText("");
-				this.ctx.editor.imageLinks = undefined;
-				const images = inputImages && inputImages.length > 0 ? [...inputImages] : undefined;
-				this.ctx.pendingImages = [];
-				this.ctx.pendingImageLinks = [];
-				// No local render: the prompt comes back from the host as a
-				// collab-prompt event/entry and renders with the author badge.
-				this.ctx.collabGuest.sendPrompt(text, images);
+				this.ctx.showStatus("Terminal collab prompting is not available with protocol v2 yet");
 				return;
 			}
 

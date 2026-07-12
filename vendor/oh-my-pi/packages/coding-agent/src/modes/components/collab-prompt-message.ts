@@ -1,6 +1,6 @@
 import type { TextContent } from "@oh-my-pi/pi-ai";
 import { Container, Markdown, Text } from "@oh-my-pi/pi-tui";
-import type { CollabPromptDetails } from "../../collab/protocol";
+import type { CollabPromptDetails } from "../collab-presentation-types";
 import type { CustomMessage } from "../../session/messages";
 import { getMarkdownTheme, theme } from "../theme/theme";
 

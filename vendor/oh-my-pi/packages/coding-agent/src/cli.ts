@@ -220,7 +220,25 @@ async function runTinyWorker(): Promise<void> {
 }
 
 /** Run the CLI with the given argv (no `process.argv` prefix). */
+const RUNNER_BUILD_REVISION_FLAG = "--runner-build-revision";
+const RUNNER_CANARY_WORKER_FLAG = "--runner-canary-readiness-worker";
+
+async function runRunnerCanaryEntrypoint(argv: string[]): Promise<boolean> {
+	if (argv.length === 1 && argv[0] === RUNNER_BUILD_REVISION_FLAG) {
+		const { candidateBuildRevision } = await import("./runner/canary-readiness-worker");
+		process.stdout.write(`${JSON.stringify(candidateBuildRevision())}\n`);
+		return true;
+	}
+	if (argv[0] === RUNNER_CANARY_WORKER_FLAG) {
+		const { runCandidateReadinessWorker } = await import("./runner/canary-readiness-worker");
+		await runCandidateReadinessWorker(argv.slice(1));
+		return true;
+	}
+	return false;
+}
+
 export async function runCli(argv: string[]): Promise<void> {
+	if (await runRunnerCanaryEntrypoint(argv)) return;
 	let resolvedArgv = argv;
 	try {
 		const extracted = extractProfileFlags(resolvedArgv);

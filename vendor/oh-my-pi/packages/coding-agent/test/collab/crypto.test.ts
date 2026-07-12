@@ -1,14 +1,19 @@
 import { describe, expect, it } from "bun:test";
+import { COLLAB_PROTO, type SecureCollabFrame } from "@oh-my-pi/pi-wire";
 import {
+	ChallengeVerifier,
+	ReceiveSequenceWindow,
+	createChallengeResponse,
 	generateRoomKey,
 	generateWriteToken,
 	importRoomKey,
 	open,
 	seal,
+	timingSafeEqualBase64Url,
 } from "@oh-my-pi/pi-coding-agent/collab/crypto";
 import {
-	type CollabFrame,
 	DEFAULT_RELAY_URL,
+	decodeApplicationFrame,
 	formatCollabLink,
 	formatCollabWebLink,
 	generateRoomId,
@@ -18,25 +23,66 @@ import {
 	unpackEnvelope,
 } from "@oh-my-pi/pi-coding-agent/collab/protocol";
 
-describe("collab crypto", () => {
-	it("round-trips a frame through seal/open", async () => {
+const secureContext = { connectionId: "connection-a", direction: "guestToHost" as const, sequence: 1 };
+const secureFrame: SecureCollabFrame = {
+	proto: COLLAB_PROTO,
+	...secureContext,
+	frame: { t: "detach" },
+};
+
+describe("collab crypto v2", () => {
+	it("round-trips with connection, direction, and sequence AAD", async () => {
 		const key = await importRoomKey(generateRoomKey());
-		const frame: CollabFrame = { t: "prompt", text: "check bun.lock — and ünïcode 🚀" };
-		const sealed = await seal(key, frame);
-		expect(await open(key, sealed)).toEqual(frame);
+		expect(await open(key, await seal(key, secureFrame), secureContext)).toEqual(secureFrame);
 	});
 
-	it("rejects tampered ciphertext", async () => {
+	it("rejects tampering and cross-connection replay", async () => {
 		const key = await importRoomKey(generateRoomKey());
-		const sealed = await seal(key, { t: "abort" });
+		const sealed = await seal(key, secureFrame);
+		await expect(open(key, sealed, { ...secureContext, connectionId: "connection-b" })).rejects.toThrow();
+		await expect(open(key, sealed, { ...secureContext, direction: "hostToGuest" })).rejects.toThrow();
+		await expect(open(key, sealed, { ...secureContext, sequence: 2 })).rejects.toThrow();
 		sealed[sealed.length - 1]! ^= 0xff;
-		expect(open(key, sealed)).rejects.toThrow();
+		await expect(open(key, sealed, secureContext)).rejects.toThrow();
 	});
 
-	it("rejects frames sealed with a different key", async () => {
-		const sealed = await seal(await importRoomKey(generateRoomKey()), { t: "abort" });
-		const otherKey = await importRoomKey(generateRoomKey());
-		expect(open(otherKey, sealed)).rejects.toThrow();
+	it("produces challenge responses bound to exact attach fields", async () => {
+		const roomKey = generateRoomKey();
+		const response = await createChallengeResponse(roomKey, "challenge-id", "challenge", "client", "controller");
+		expect(timingSafeEqualBase64Url(response, response)).toBe(true);
+		expect(response).not.toBe(await createChallengeResponse(roomKey, "challenge-id", "challenge", "client", "observer"));
+		expect(response).not.toBe(await createChallengeResponse(roomKey, "challenge-id", "other", "client", "controller"));
+		expect(timingSafeEqualBase64Url(response, `${response}x`)).toBe(false);
+	});
+
+	it("consumes challenges once and rejects forged or expired responses", async () => {
+		const roomKey = generateRoomKey();
+		const verifier = new ChallengeVerifier(roomKey);
+		const first = verifier.issue(10, 100);
+		const valid = await createChallengeResponse(roomKey, first.challengeId, first.challenge, "client", "observer");
+		expect(typeof (await verifier.consume(first.challengeId, valid, "client", "observer", 105))).toBe("string");
+		await expect(verifier.consume(first.challengeId, valid, "client", "observer", 105)).rejects.toThrow("missing or expired");
+
+		const forged = verifier.issue(10, 100);
+		await expect(verifier.consume(forged.challengeId, valid, "client", "observer", 105)).rejects.toThrow("Invalid challenge");
+		const expired = verifier.issue(10, 100);
+		const expiredResponse = await createChallengeResponse(roomKey, expired.challengeId, expired.challenge, "client", "observer");
+		await expect(verifier.consume(expired.challengeId, expiredResponse, "client", "observer", 111)).rejects.toThrow("expired");
+	});
+
+	it("drops duplicates and lower values while surfacing gaps", () => {
+		const window = new ReceiveSequenceWindow();
+		expect(window.accept(1).kind).toBe("accepted");
+		expect(window.accept(1).kind).toBe("dropped");
+		expect(window.accept(3)).toEqual({ kind: "gap", expectedSequence: 2, observedSequence: 3 });
+		expect(window.lastAccepted).toBe(1);
+		expect(window.accept(2).kind).toBe("accepted");
+		expect(() => window.accept(Number.MAX_SAFE_INTEGER + 1)).toThrow();
+	});
+
+	it("strictly rejects v1 and unknown application fields", () => {
+		expect(() => decodeApplicationFrame({ t: "hello", proto: 1, name: "legacy" })).toThrow();
+		expect(() => decodeApplicationFrame({ t: "detach", legacy: true })).toThrow("Unknown field");
 	});
 });
 

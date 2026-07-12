@@ -4,6 +4,7 @@
  * This file handles CLI argument parsing and translates them into
  * createAgentSession() options. The SDK does the heavy lifting.
  */
+import { createHash, randomUUID } from "node:crypto";
 import * as fsSync from "node:fs";
 import * as os from "node:os";
 import { createInterface } from "node:readline/promises";
@@ -101,6 +102,15 @@ import { reAdoptDirectChildren } from "./task/re-adopt";
 
 const DISPOSABLE_TUI_MAILBOX_CAPACITY = 64;
 const DISPOSABLE_TUI_EVENT_CAPACITY = 256;
+
+async function createMainRunnerIdentity() {
+	const hash = createHash("sha256");
+	for await (const chunk of fsSync.createReadStream(process.execPath)) hash.update(chunk);
+	return {
+		buildRevision: { digest: hash.digest("hex"), version: VERSION },
+		runnerInstance: { runnerInstanceId: randomUUID(), startedAt: new Date().toISOString() },
+	};
+}
 type RunAcpMode = (createSession: AcpSessionFactory) => Promise<never>;
 type RunPrintMode = (session: AgentSession, options: PrintModeOptions) => Promise<void>;
 type RunRpcMode = (
@@ -1231,12 +1241,16 @@ export async function runRootCommand(
 
 	// The session file and persisted id are now final. Acquire before extension
 	// startup, session creation, writer open, or durable child re-adoption.
+	const runnerIdentity = sessionManager?.getSessionFile() ? await createMainRunnerIdentity() : undefined;
 	let ownership: SessionOwnershipHandle | undefined;
 	if (sessionManager?.getSessionFile()) {
 		try {
+			if (!runnerIdentity) throw new Error("Persistent session runner identity is unavailable");
 			ownership = await acquireSessionOwnership(sessionManager.getSessionFile() as string, sessionManager.getSessionId(), {
 				suppliedEpoch: process.env.OMP_SESSION_OWNER_EPOCH,
 				suppliedSocket: process.env.OMP_SESSION_OWNER_SOCKET,
+				buildRevision: runnerIdentity.buildRevision,
+				runnerInstanceIdentity: runnerIdentity.runnerInstance,
 			});
 			sessionManager.bindSessionOwnership(ownership);
 		} catch (error) {
@@ -1372,7 +1386,7 @@ export async function runRootCommand(
 		});
 
 		if (isInteractive && parsedArgs.tuiBundleManifest !== undefined) {
-			if (!sessionManager || !ownership) {
+			if (!sessionManager || !ownership || !runnerIdentity) {
 				throw new Error("Disposable TUI requires a persistent session; --no-session is not supported");
 			}
 			const { runner } = await logger.time("createSessionRunner", createSessionRunner, {
@@ -1381,6 +1395,7 @@ export async function runRootCommand(
 				preloadedExtensions: extensionsResult,
 				sessionManager,
 				ownership,
+				runnerIdentity,
 				mailboxCapacity: DISPOSABLE_TUI_MAILBOX_CAPACITY,
 				eventCapacity: DISPOSABLE_TUI_EVENT_CAPACITY,
 				childStopPolicy: "detach",

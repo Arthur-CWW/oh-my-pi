@@ -100,6 +100,7 @@ import {
 	type RunnerEvent,
 	type RunnerEventDelivery,
 	type RunnerEventKind,
+	type RunnerIdentity,
 	type RunnerStatus,
 	type RunnerViewSnapshot,
 	type SessionRunnerSnapshot,
@@ -153,6 +154,7 @@ export interface SessionRunnerOptions {
 
 export interface SessionRunnerLiveResources {
 	readonly ownership: SessionOwnershipHandle;
+	readonly runnerIdentity: RunnerIdentity;
 	readonly queue: DurableInputQueue;
 	readonly session: AgentSession;
 	readonly sessionManager: SessionManager;
@@ -166,9 +168,16 @@ export interface RunnerSubscription {
 	readonly take: Effect.Effect<RunnerEventDelivery, RunnerFailure, Scope.Scope>;
 }
 
+export interface RunnerProjection {
+	readonly snapshot: SessionRunnerSnapshot;
+	readonly subscription: RunnerSubscription;
+}
+
 interface RunnerViewBase {
 	readonly viewId: string;
 	readonly snapshot: () => Effect.Effect<SessionRunnerSnapshot, RunnerFailure, Scope.Scope>;
+	/** Atomically establishes delivery before materializing its sequence baseline. */
+	readonly openProjection: () => Effect.Effect<RunnerProjection, RunnerFailure, Scope.Scope>;
 	readonly subscribe: () => Effect.Effect<RunnerSubscription, RunnerFailure, Scope.Scope>;
 	readonly detach: (command: DetachRunnerViewCommand) => Effect.Effect<void, RunnerFailure, Scope.Scope>;
 	readonly close: (command: DetachRunnerViewCommand) => Effect.Effect<void, RunnerFailure, Scope.Scope>;
@@ -285,6 +294,7 @@ interface EventDetails {
 	readonly durableSequence?: number;
 	readonly transcriptEntryId?: string;
 	readonly transcriptLeafId?: string | null;
+	readonly transcriptEntry?: SessionEntry;
 	readonly transcriptPosition?: number;
 	readonly sessionRevision?: number;
 }
@@ -496,6 +506,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 		const pending = yield* Ref.get(pendingOperations);
 		const status = yield* Ref.get(statusRef);
 		const items = Array.from(durableItems.values()).sort((left, right) => left.sequence - right.sequence);
+		const transcript = resources.sessionManager.snapshotForReplication();
 		const viewSnapshots: Array<RunnerViewSnapshot> = [];
 		for (const [viewId, view] of views) {
 			viewSnapshots.push({
@@ -506,6 +517,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 			});
 		}
 		return {
+			runnerIdentity: resources.runnerIdentity,
 			revision,
 			sessionRevision,
 			sequence: runnerSequence,
@@ -514,6 +526,8 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 			transcript: {
 				entryCount: transcriptEntryCount,
 				leafId: transcriptLeafId,
+				header: transcript.header,
+				entries: transcript.entries,
 				lastEntryId: transcriptLastEntryId,
 			},
 			views: viewSnapshots,
@@ -637,6 +651,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 			transcriptEntryId: details.transcriptEntryId,
 			transcriptLeafId: details.transcriptLeafId,
 			transcriptPosition: details.transcriptPosition,
+			transcriptEntry: details.transcriptEntry,
 			targetGeneration: details.targetGeneration,
 			targetCommandId: details.targetCommandId,
 			targetOperationGeneration: details.targetOperationGeneration,
@@ -785,6 +800,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 						controllerEpoch: activeController?.epoch ?? 0,
 						transcriptEntryId: entry.id,
 						transcriptLeafId: leafId,
+						transcriptEntry: structuredClone(entry) as SessionEntry,
 						transcriptPosition: position,
 					});
 				}),
@@ -794,6 +810,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 
 	let snapshot!: () => Effect.Effect<SessionRunnerSnapshot, RunnerFailure, Scope.Scope>;
 	let snapshotView!: (viewId: string) => Effect.Effect<SessionRunnerSnapshot, RunnerFailure, Scope.Scope>;
+	let openProjectionView!: (viewId: string) => Effect.Effect<RunnerProjection, RunnerFailure, Scope.Scope>;
 	let subscribeView!: (viewId: string) => Effect.Effect<RunnerSubscription, RunnerFailure, Scope.Scope>;
 	let detachView!: (command: DetachRunnerViewCommand) => Effect.Effect<void, RunnerFailure, Scope.Scope>;
 	let acquireController!: (
@@ -904,6 +921,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 			capability: "observer",
 			snapshot: () => snapshotView(viewId),
 			subscribe: () => subscribeView(viewId),
+			openProjection: () => openProjectionView(viewId),
 			detach,
 			close: detach,
 			acquireController: command =>
@@ -919,6 +937,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 			controllerEpoch,
 			snapshot: () => snapshotView(viewId),
 			subscribe: () => subscribeView(viewId),
+			openProjection: () => openProjectionView(viewId),
 			detach,
 			close: detach,
 			submitInput: input => submitInput(viewId, controllerEpoch, input),
@@ -958,6 +977,43 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 		);
 	});
 
+	openProjectionView = Effect.fn("Runner.openProjectionView")(function* (viewId: string) {
+		const subscription = yield* PubSub.subscribe(events);
+		const baseline = yield* enqueue(
+			Effect.gen(function* () {
+				yield* requireView(viewId);
+				return yield* materializeSnapshot(true);
+			}),
+		);
+		let expectedSequence = baseline.sequence + 1;
+		let take!: Effect.Effect<RunnerEventDelivery, RunnerFailure, Scope.Scope>;
+		take = Effect.suspend(() =>
+			PubSub.take(subscription).pipe(
+				Effect.flatMap((event): Effect.Effect<RunnerEventDelivery, RunnerFailure, Scope.Scope> => {
+					if (event.sequence < expectedSequence) return take;
+					if (event.sequence !== expectedSequence) {
+						const expected = expectedSequence;
+						return snapshot().pipe(
+							Effect.map(current => {
+								expectedSequence = current.sequence + 1;
+								return {
+									kind: "resyncRequired" as const,
+									expectedSequence: expected,
+									observedSequence: event.sequence,
+									event,
+									snapshot: current,
+								};
+							}),
+						);
+					}
+					expectedSequence += 1;
+					return Effect.succeed({ kind: "event" as const, event });
+				}),
+			),
+		);
+		return { snapshot: baseline, subscription: { take } };
+	});
+
 	subscribeView = Effect.fn("Runner.subscribeView")(function* (viewId: string) {
 		const subscription = yield* PubSub.subscribe(events);
 		const starting = yield* enqueue(
@@ -974,15 +1030,17 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 					if (event.sequence < expectedSequence) return take;
 					if (event.sequence !== expectedSequence) {
 						const expected = expectedSequence;
-						expectedSequence = event.sequence + 1;
 						return snapshot().pipe(
-							Effect.map(current => ({
-								kind: "resyncRequired" as const,
-								expectedSequence: expected,
-								observedSequence: event.sequence,
-								event,
-								snapshot: current,
-							})),
+							Effect.map(current => {
+								expectedSequence = current.sequence + 1;
+								return {
+									kind: "resyncRequired" as const,
+									expectedSequence: expected,
+									observedSequence: event.sequence,
+									event,
+									snapshot: current,
+								};
+							}),
 						);
 					}
 					expectedSequence += 1;
