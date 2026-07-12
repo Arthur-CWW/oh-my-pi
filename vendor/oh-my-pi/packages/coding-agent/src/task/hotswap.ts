@@ -3,16 +3,21 @@ import type { Model, ReasoningEffort } from "@oh-my-pi/pi-ai";
 import { getSupportedEfforts } from "@oh-my-pi/pi-catalog/model-thinking";
 import { modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
 import { logger, toError } from "@oh-my-pi/pi-utils";
-import { extractExplicitThinkingSelector, isBlockedSubagentModel, resolveModelOverride } from "../config/model-resolver";
+import {
+	extractExplicitThinkingSelector,
+	isBlockedSubagentModel,
+	resolveModelOverride,
+} from "../config/model-resolver";
 import type { Settings } from "../config/settings";
 import { AgentLifecycleManager } from "../registry/agent-lifecycle";
-import { AgentRegistry, MAIN_AGENT_ID, type AgentRef } from "../registry/agent-registry";
+import { resolveAgentRef } from "../registry/agent-ref";
+import { AgentRegistry, MAIN_AGENT_ID } from "../registry/agent-registry";
 import type { AgentSession, AgentSessionEvent } from "../session/agent-session";
-import type { SessionCommandReceipt, SetModelSessionCommand } from "../session/session-entries";
 import { getRestorableSessionModels } from "../session/session-context";
-import { SessionManager } from "../session/session-manager";
+import type { SessionCommandReceipt, SetModelSessionCommand } from "../session/session-entries";
+import type { SessionManager } from "../session/session-manager";
 import { parseThinkingLevel } from "../thinking";
-import { ROUTE_RESOLUTION_ENTRY, createEffectiveHotswapRoute } from "./route-events";
+import { createEffectiveHotswapRoute, ROUTE_RESOLUTION_ENTRY } from "./route-events";
 
 export interface HotswapArgs {
 	agentId: string;
@@ -84,15 +89,16 @@ function cancelPending(agentId: string): void {
 	pendingSwaps.delete(agentId);
 }
 
-function validateThinkingLevel(model: Model, thinkingLevel: ThinkingLevel | undefined, explicit: boolean): string | undefined {
-	if (!explicit || thinkingLevel === undefined || thinkingLevel === "off" || thinkingLevel === "inherit") return undefined;
+function validateThinkingLevel(
+	model: Model,
+	thinkingLevel: ThinkingLevel | undefined,
+	explicit: boolean,
+): string | undefined {
+	if (!explicit || thinkingLevel === undefined || thinkingLevel === "off" || thinkingLevel === "inherit")
+		return undefined;
 	const supported = model.reasoning ? getSupportedEfforts(model) : [];
 	if (supported.includes(thinkingLevel as ReasoningEffort)) return undefined;
 	return `Thinking effort ${thinkingLevel} is not supported by ${formatModel(model)}${supported.length ? `. Supported efforts: ${supported.join(", ")}` : ""}`;
-}
-
-function isOwnedAgent(ref: AgentRef, requestedBy: string | undefined, registry: AgentRegistry): boolean {
-	return requestedBy === undefined || registry.isInSubtree(ref.id, requestedBy);
 }
 
 function hotswapAudit(
@@ -260,11 +266,16 @@ async function hotswapHistoricalAgentModel(args: HotswapArgs): Promise<HotswapRe
 		if (isBlockedSubagentModel(resolved.model, args.settings)) {
 			return failed(args.agentId, `Model ${formatModel(resolved.model)} is not allowed for subagents.`);
 		}
-		const thinkingError = validateThinkingLevel(resolved.model, resolved.thinkingLevel, resolved.explicitThinkingLevel);
+		const thinkingError = validateThinkingLevel(
+			resolved.model,
+			resolved.thinkingLevel,
+			resolved.explicitThinkingLevel,
+		);
 		if (thinkingError) return failed(args.agentId, thinkingError);
 		const to = formatModel(resolved.model);
 		const key = await modelRegistry.getApiKey(resolved.model);
-		if (!key || !modelRegistry.hasConfiguredAuth(resolved.model)) return failed(args.agentId, `Missing credentials for ${to}`);
+		if (!key || !modelRegistry.hasConfiguredAuth(resolved.model))
+			return failed(args.agentId, `Missing credentials for ${to}`);
 		if (to === from && !resolved.explicitThinkingLevel) {
 			return { status: "recorded", agentId: args.agentId, from, to };
 		}
@@ -326,11 +337,15 @@ export function resolveRestorableSessionModel(
 
 export async function hotswapAgentModel(args: HotswapArgs): Promise<HotswapResult> {
 	const registry = AgentRegistry.global();
-	const initialRef = registry.get(args.agentId);
-	if (!initialRef) {
+	const registeredRef = registry.get(args.agentId);
+	const initialRef = registeredRef ? resolveAgentRef(args.agentId, args.requestedBy, registry)?.ref : undefined;
+	if (!registeredRef) {
 		return args.agentId === MAIN_AGENT_ID
 			? failed(args.agentId, `Unknown agent: ${args.agentId}`)
 			: await hotswapHistoricalAgentModel(args);
+	}
+	if (!initialRef) {
+		return failed(args.agentId, `Agent ${args.agentId} is not a direct child of ${args.requestedBy}.`);
 	}
 	if (initialRef.status === "aborted") return failed(args.agentId, `Agent ${args.agentId} is aborted.`);
 
@@ -339,13 +354,14 @@ export async function hotswapAgentModel(args: HotswapArgs): Promise<HotswapResul
 		if (args.agentId !== MAIN_AGENT_ID || args.requestedBy !== MAIN_AGENT_ID) {
 			return failed(args.agentId, `Agent ${args.agentId} is not the current Main session.`);
 		}
-		if (!initialRef.session || (args.parentSessionManager && initialRef.session.sessionManager !== args.parentSessionManager)) {
+		if (
+			!initialRef.session ||
+			(args.parentSessionManager && initialRef.session.sessionManager !== args.parentSessionManager)
+		) {
 			return failed(args.agentId, `Agent ${args.agentId} is not the current Main session.`);
 		}
 	} else if (initialRef.kind !== "sub") {
 		return failed(args.agentId, `Agent ${args.agentId} is not a subagent.`);
-	} else if (!isOwnedAgent(initialRef, args.requestedBy, registry)) {
-		return failed(args.agentId, `Agent ${args.agentId} is not a direct child of ${args.requestedBy}.`);
 	}
 
 	let session: AgentSession;

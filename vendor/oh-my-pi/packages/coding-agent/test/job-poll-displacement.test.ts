@@ -126,7 +126,7 @@ describe("EventController displaces consecutive waiting polls", () => {
 		const ctx = {
 			isInitialized: true,
 			init: vi.fn(async () => {}),
-			ui: { requestRender: vi.fn() },
+			ui: { requestRender: vi.fn(), requestComponentRender: vi.fn() },
 			statusLine: { invalidate: vi.fn() },
 			updateEditorTopBorder: vi.fn(),
 			toolOutputExpanded: false,

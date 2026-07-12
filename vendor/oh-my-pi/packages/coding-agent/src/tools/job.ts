@@ -5,12 +5,13 @@ import { prompt } from "@oh-my-pi/pi-utils";
 import { z } from "zod/v4";
 import type { AsyncJob, AsyncJobManager } from "../async";
 import type { RenderResultOptions } from "../extensibility/custom-tools/types";
-import { AgentRegistry, MAIN_AGENT_ID } from "../registry/agent-registry";
 import { shimmerEnabled, shimmerText } from "../modes/theme/shimmer";
 import type { Theme } from "../modes/theme/theme";
 import jobDescription from "../prompts/tools/job.md" with { type: "text" };
+import { isAgentJobOwned } from "../registry/agent-ref";
+import { AgentRegistry, MAIN_AGENT_ID } from "../registry/agent-registry";
+import { type HotswapResult, hotswapAgentModel } from "../task/hotswap";
 import { Ellipsis, Hasher, type RenderCache, renderStatusLine, renderTreeList, truncateToWidth } from "../tui";
-import { hotswapAgentModel, type HotswapResult } from "../task/hotswap";
 import type { ToolSession } from "./index";
 import {
 	formatBadge,
@@ -38,7 +39,9 @@ const jobSchema = z.object({
 			reason: z.string().optional().describe("why the target agent is being swapped"),
 		})
 		.optional()
-		.describe("swap the current Main session or a live, parked, or historical descendant model; live targets switch at a safe boundary"),
+		.describe(
+			"swap the current Main session or a live, parked, or historical descendant model; live targets switch at a safe boundary",
+		),
 });
 
 type JobParams = z.infer<typeof jobSchema>;
@@ -148,10 +151,10 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 				correlationId: toolCallId,
 				...(this.session.sessionManager && this.session.modelRegistry
 					? {
-						parentSessionManager: this.session.sessionManager,
-						modelRegistry: this.session.modelRegistry,
-						settings: this.session.settings,
-					}
+							parentSessionManager: this.session.sessionManager,
+							modelRegistry: this.session.modelRegistry,
+							settings: this.session.settings,
+						}
 					: {}),
 			});
 			return this.#buildHotswapResult(result);
@@ -358,12 +361,7 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 	}
 
 	#ownsJob(job: AsyncJob, ownerId: string | undefined): boolean {
-		if (!ownerId) return true;
-		if (job.ownerId === ownerId) return true;
-		const registry = AgentRegistry.global();
-		// A nested task is registered under its stable dotted id but its async
-		// job is owned by the immediate parent that spawned it.
-		return registry.isInSubtree(job.id, ownerId) && (!job.ownerId || registry.isInSubtree(job.ownerId, ownerId));
+		return isAgentJobOwned(job, ownerId, AgentRegistry.global());
 	}
 
 	#snapshotJobs(

@@ -11,6 +11,9 @@
 
 import type { AgentSession } from "../session/agent-session";
 import { oneLineLabel } from "../task/types";
+import { type AgentRef, isAgentInLineage } from "./agent-ref";
+
+export type { AgentRef } from "./agent-ref";
 
 export const MAIN_AGENT_ID = "Main";
 
@@ -36,32 +39,6 @@ export interface AgentQuotaAdmission {
 	decisionReason?: string;
 	quotaPoolId?: string;
 	limitWindowId?: string;
-}
-
-export interface AgentRef {
-	id: string;
-	displayName: string;
-	kind: AgentKind;
-	parentId?: string;
-	status: AgentStatus;
-	/** Null exactly when parked/aborted. */
-	session: AgentSession | null;
-	sessionFile: string | null;
-	createdAt: number;
-	lastActivity: number;
-	/** Fixed session-local appearance order; lower values were registered first. */
-	readonly spawnIndex: number;
-	/** Short gist of what the agent is currently doing (latest intent or tool), for the work-aware roster. Display-only. */
-	activity?: string;
-	/** Durable recovery state for a child re-adopted after controller replacement. */
-	recovery?: {
-		task: string;
-		model?: string;
-		thinkingLevel?: string | null;
-		hotswapModel?: string;
-		turnState: "interrupted_by_restart";
-	};
-	quota?: AgentQuotaAdmission;
 }
 
 export type RegistryEvent =
@@ -186,14 +163,7 @@ export class AgentRegistry {
 
 	/** True when `id` is the ancestor itself or belongs to its registered descendant tree. */
 	isInSubtree(id: string, ancestorId: string): boolean {
-		let currentId: string | undefined = id;
-		const visited = new Set<string>();
-		while (currentId && !visited.has(currentId)) {
-			if (currentId === ancestorId) return true;
-			visited.add(currentId);
-			currentId = this.#refs.get(currentId)?.parentId;
-		}
-		return false;
+		return isAgentInLineage(id, ancestorId, this);
 	}
 
 	list(): AgentRef[] {
