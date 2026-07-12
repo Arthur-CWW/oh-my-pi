@@ -1084,6 +1084,57 @@
       box-shadow: 0 16px 48px color-mix(in srgb, var(--text) 12%, transparent);
     }
 
+    .tree-disclosure {
+      width: 14px;
+      flex: 0 0 14px;
+      color: var(--muted);
+      text-align: center;
+    }
+
+    .tree-section-heading {
+      position: sticky;
+      top: 0;
+      margin-top: 8px;
+      padding: 7px 12px 5px;
+      background: var(--sidebar-bg);
+      border-top: 1px solid var(--hairline);
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    .subsession-tree-node { opacity: 1 !important; }
+
+    .viewer-tree-hidden #sidebar,
+    .viewer-tree-hidden #sidebar-resizer { display: none; }
+
+    .keyboard-help {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 1000;
+      place-items: center;
+      background: color-mix(in srgb, var(--body-bg) 72%, transparent);
+      backdrop-filter: blur(4px);
+    }
+
+    .keyboard-help.open { display: grid; }
+
+    .keyboard-help-panel {
+      width: min(520px, calc(100vw - 32px));
+      padding: 20px 24px;
+      border: 1px solid var(--hairline-strong);
+      border-radius: var(--radius-card);
+      background: var(--card-bg);
+      box-shadow: 0 20px 70px color-mix(in srgb, #000 35%, transparent);
+    }
+
+    .keyboard-help-panel h2 { margin: 0 0 14px; font-size: 16px; }
+    .keyboard-help-panel dl { display: grid; grid-template-columns: 130px 1fr; gap: 8px 16px; margin: 0; }
+    .keyboard-help-panel dt { color: var(--accent); font-weight: 700; }
+    .keyboard-help-panel dd { margin: 0; color: var(--muted); }
     /* ================= Footer ================= */
 
     .footer {

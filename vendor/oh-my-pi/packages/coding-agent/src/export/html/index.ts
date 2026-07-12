@@ -12,6 +12,8 @@ import templateJs from "./template.js" with { type: "text" };
 // Pre-built React tool renderers: built by `bun --cwd=packages/collab-web run build:tool-views`,
 // run automatically by root `prepare` on install and by `prepack` at publish.
 import toolViewsJs from "./tool-views.generated.js" with { type: "text" };
+import highlightJs from "./vendor/highlight.min.js" with { type: "text" };
+import markedJs from "./vendor/marked.min.js" with { type: "text" };
 
 let cachedTemplate: string | undefined;
 
@@ -29,6 +31,8 @@ export function getTemplate(): string {
 	// every *.html import as HTMLBundle (TS can't vary types by import attribute).
 	cachedTemplate = (templateHtml as unknown as string)
 		.replace("<template-css/>", () => `<style>${minifiedCss}</style>`)
+		.replace("<template-marked/>", () => `<script>${markedJs}</script>`)
+		.replace("<template-highlight/>", () => `<script>${highlightJs}</script>`)
 		.replace("<template-tool-views/>", () => `<script>${toolViewsJs}</script>`)
 		.replace("<template-js/>", () => `<script>${templateJs}</script>`);
 	return cachedTemplate;
@@ -129,6 +133,9 @@ export interface SubSession {
 	header: SessionHeader | null;
 	entries: SessionEntry[];
 	leafId: string | null;
+	/** DOM payload id used by standalone exports for lazy transcript inflation. */
+	payloadId?: string;
+	entryCount?: number;
 }
 
 export interface SessionData {
@@ -138,6 +145,70 @@ export interface SessionData {
 	systemPrompt?: string;
 	tools?: { name: string; description: string }[];
 	subSessions?: Record<string, SubSession>;
+}
+
+export interface ViewerTreeNode {
+	kind: "entry" | "session";
+	key: string;
+	parentKey: string | null;
+	label: string;
+	entryId?: string;
+}
+
+function viewerEntryLabel(entry: SessionEntry): string {
+	switch (entry.type) {
+		case "model_change":
+			return `Model: ${entry.model}`;
+		case "thinking_level_change":
+			return `Thinking: ${entry.thinkingLevel}`;
+		case "mode_change":
+			return `Mode: ${entry.mode}`;
+		case "branch_summary":
+			return "Branch summary";
+		case "compaction":
+			return "Compaction";
+		case "message":
+			return entry.message.role;
+		default:
+			return entry.type;
+	}
+}
+
+/** Build the viewer's branch/session navigation projection without touching the DOM. */
+export function buildViewerTree(
+	entries: readonly SessionEntry[],
+	subSessions: Readonly<Record<string, SubSession>> = {},
+): ViewerTreeNode[] {
+	const entryById = new Map(entries.map(entry => [entry.id, entry]));
+	const safeParentKey = (entry: SessionEntry): string | null => {
+		if (!entry.parentId || entry.parentId === entry.id || !entryById.has(entry.parentId)) return null;
+		const visited = new Set([entry.id]);
+		let parentId: string | null = entry.parentId;
+		while (parentId) {
+			if (visited.has(parentId)) return null;
+			visited.add(parentId);
+			const parent = entryById.get(parentId);
+			if (!parent?.parentId || parent.parentId === parent.id) break;
+			parentId = parent.parentId;
+		}
+		return `entry:${entry.parentId}`;
+	};
+	const nodes: ViewerTreeNode[] = entries.map(entry => ({
+		kind: "entry",
+		key: `entry:${entry.id}`,
+		parentKey: safeParentKey(entry),
+		label: viewerEntryLabel(entry),
+		entryId: entry.id,
+	}));
+	for (const [key, session] of Object.entries(subSessions)) {
+		nodes.push({
+			kind: "session",
+			key: `session:${key}`,
+			parentKey: session.parent ? `session:${session.parent}` : null,
+			label: session.agentId,
+		});
+	}
+	return nodes;
 }
 
 /** Snapshot the session (plus optional agent state) into the JSON shape the viewer renders. */
@@ -202,14 +273,30 @@ async function collectSubSessionsFromDir(
 /** Generate HTML from bundled template with runtime substitutions. */
 async function generateHtml(sessionData: SessionData, themeName?: string): Promise<string> {
 	const themeVars = await generateThemeVars(themeName);
-	const sessionDataBase64 = Buffer.from(JSON.stringify(sessionData)).toBase64();
+	const lightweightSubSessions: Record<string, SubSession> = {};
+	const payloadElements: string[] = [];
+	for (const [key, subSession] of Object.entries(sessionData.subSessions ?? {})) {
+		const payloadId = `subsession-payload-${payloadElements.length}`;
+		const compressed = Bun.gzipSync(new TextEncoder().encode(JSON.stringify(subSession.entries)));
+		payloadElements.push(
+			`<script id="${payloadId}" type="application/octet-stream">${Buffer.from(compressed).toBase64()}</script>`,
+		);
+		lightweightSubSessions[key] = { ...subSession, entries: [], payloadId, entryCount: subSession.entries.length };
+	}
+	const initialData: SessionData = {
+		...sessionData,
+		subSessions: Object.keys(lightweightSubSessions).length > 0 ? lightweightSubSessions : undefined,
+	};
+	const sessionDataBase64 = Buffer.from(
+		Bun.gzipSync(new TextEncoder().encode(JSON.stringify(initialData))),
+	).toBase64();
 
 	// Use function replacements so `$'`, `$&`, `$$`, `$n`, etc. in the
-	// substituted CSS/base64 are not interpreted as substitution patterns
-	// (see https://mdn.io/String.replace).
+	// substituted CSS/base64 are not interpreted as substitution patterns.
 	return getTemplate()
 		.replace("<theme-vars/>", () => `<style>:root { ${themeVars} }</style>`)
-		.replace("{{SESSION_DATA}}", () => sessionDataBase64);
+		.replace("{{SESSION_DATA}}", () => sessionDataBase64)
+		.replace("<subsession-data/>", () => payloadElements.join(""));
 }
 
 /** Export session to HTML using SessionManager and AgentState. */
