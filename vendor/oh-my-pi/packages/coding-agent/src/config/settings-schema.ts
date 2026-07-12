@@ -3388,6 +3388,28 @@ export const SETTINGS_SCHEMA = {
 		},
 	},
 
+	"irc.ambientRename.enabled": {
+		type: "boolean",
+		default: false,
+		ui: {
+			tab: "tools",
+			group: "Execution",
+			label: "Ambient Agent Labels",
+			description: "Periodically refresh automatic main-session names with a cheap smol-role summary.",
+		},
+	},
+
+	"irc.ambientRename.intervalMs": {
+		type: "number",
+		default: 300_000,
+		ui: {
+			tab: "tools",
+			group: "Execution",
+			label: "Ambient Label Interval",
+			description: "Milliseconds between ambient main-session label refreshes.",
+		},
+	},
+
 	"bash.autoBackground.thresholdMs": {
 		type: "number",
 		default: 60_000,

@@ -156,6 +156,7 @@ import { loadCapability } from "../discovery";
 import { expandApplyPatchToEntries, normalizeDiff, normalizeToLF, ParseError, previewPatch, stripBom } from "../edit";
 import { getFileSnapshotStore } from "../edit/file-snapshot-store";
 import { disposeVmContextsByOwner } from "../eval/js/context-manager";
+import { runEvalCompletion } from "../eval/completion-bridge";
 import { namespaceSessionId as namespacePythonSessionId } from "../eval/py";
 import {
 	disposeKernelSessionsByOwner,
@@ -196,6 +197,11 @@ import { GoalRuntime } from "../goals/runtime";
 import type { Goal, GoalModeState } from "../goals/state";
 import type { HindsightSessionState } from "../hindsight/state";
 import { type LocalProtocolOptions, resolveLocalUrlToPath } from "../internal-urls";
+import {
+	AmbientAgentRenamer,
+	type AmbientAgentRenamerOptions,
+	type AmbientRenameCompletion,
+} from "../irc/ambient-agent-renamer";
 import { IrcBus, type IrcMessage } from "../irc/bus";
 import { IrcExternalBus, type IrcExternalPeerState, resolveIrcExternalPeerName } from "../irc/bus-external";
 import { resolveMemoryBackend } from "../memory-backend";
@@ -508,6 +514,11 @@ export interface AgentSessionConfig {
 	skillsSettings?: SkillsSettings;
 	/** Model registry for API key resolution and model discovery */
 	modelRegistry: ModelRegistry;
+	/** Test seams for the opt-in ambient IRC label service. Production callers leave this unset. */
+	ambientAgentRenamer?: Omit<AmbientAgentRenamerOptions, "bus" | "complete"> & {
+		bus?: AmbientAgentRenamerOptions["bus"];
+		complete?: AmbientRenameCompletion;
+	};
 	/** Tool registry for LSP and settings */
 	toolRegistry?: Map<string, AgentTool>;
 	/** Current session pre-LLM message transform pipeline */
@@ -1351,6 +1362,7 @@ export class AgentSession {
 	#ircExternalSessionId: string | undefined;
 	#ircExternalPeerName: string | undefined;
 	#ircExternalPeerState: Exclude<IrcExternalPeerState, "unknown"> | undefined;
+	#ambientAgentRenamer: AmbientAgentRenamer | undefined;
 	// Agent identity (registry id) used for IRC routing and job ownership.
 	#agentId: string | undefined;
 	#agentKind: "main" | "sub" = "main";
@@ -1818,6 +1830,24 @@ export class AgentSession {
 		this.#agentKind = config.agentKind ?? "main";
 		if (this.#agentKind === "main") {
 			this.#updateExternalIrcPeerState("idle");
+		}
+		if (this.#agentKind === "main" && this.settings.get("irc.ambientRename.enabled")) {
+			const options = config.ambientAgentRenamer;
+			this.#ambientAgentRenamer = new AmbientAgentRenamer({
+				...options,
+				bus: options?.bus ?? IrcExternalBus.global(),
+				complete:
+					options?.complete ??
+					(async promptText => {
+						const result = await runEvalCompletion(
+							{ prompt: promptText, model: "smol" },
+							{ session: this },
+						);
+						return result.text;
+					}),
+				intervalMs: options?.intervalMs ?? this.settings.get("irc.ambientRename.intervalMs"),
+			});
+			this.#ambientAgentRenamer.start();
 		}
 		this.#providerSessionId = config.providerSessionId;
 		this.agent.setAssistantMessageEventInterceptor((message, assistantMessageEvent) => {
@@ -4150,6 +4180,8 @@ export class AgentSession {
 	 */
 	beginDispose(): void {
 		this.#isDisposed = true;
+		this.#ambientAgentRenamer?.stop();
+		this.#ambientAgentRenamer = undefined;
 		if (this.#durableRateLimitRetryTimer) {
 			clearTimeout(this.#durableRateLimitRetryTimer);
 			this.#durableRateLimitRetryTimer = undefined;
@@ -12596,7 +12628,13 @@ export class AgentSession {
 			});
 		this.#ircExternalPeerName = name;
 		const bus = IrcExternalBus.global();
-		bus.registerPeer({ sessionId, name, cwd, pid: process.pid });
+		bus.registerPeer({
+			sessionId,
+			name,
+			cwd,
+			pid: process.pid,
+			explicitName: Boolean(this.settings.get("irc.peerName")?.trim()),
+		});
 		return { bus, sessionId, name };
 	}
 

@@ -49,8 +49,13 @@ const completionArgsSchema = z.object({
 	schema: z.record(z.string(), z.unknown()).optional(),
 });
 
+type EvalCompletionSession = Pick<
+	ToolSession,
+	"settings" | "modelRegistry" | "getActiveModelString" | "getModelString" | "getTelemetry" | "getSessionId"
+>;
+
 export interface EvalCompletionBridgeOptions {
-	session: ToolSession;
+	session: EvalCompletionSession;
 	signal?: AbortSignal;
 	emitStatus?: (event: JsStatusEvent) => void;
 }
@@ -65,7 +70,7 @@ export interface EvalCompletionResult {
  * active model and falls back to the `pi/default` role; `smol`/`slow` resolve
  * their respective role patterns. Returns `undefined` when nothing matches.
  */
-function resolveTierModel(tier: CompletionTier, session: ToolSession): Model<Api> | undefined {
+function resolveTierModel(tier: CompletionTier, session: EvalCompletionSession): Model<Api> | undefined {
 	const modelRegistry = session.modelRegistry;
 	if (!modelRegistry) return undefined;
 	const available = modelRegistry.getAvailable();

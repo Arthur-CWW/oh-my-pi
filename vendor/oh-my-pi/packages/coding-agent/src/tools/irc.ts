@@ -468,7 +468,13 @@ export class IrcTool implements AgentTool<typeof ircSchema, IrcDetails> {
 			cwd: this.session.cwd,
 			sessionId,
 		});
-		bus.registerPeer({ sessionId, name, cwd: this.session.cwd, pid: process.pid });
+		bus.registerPeer({
+			sessionId,
+			name,
+			cwd: this.session.cwd,
+			pid: process.pid,
+			explicitName: Boolean(this.session.settings.get("irc.peerName")?.trim()),
+		});
 		return { bus, sessionId, name };
 	}
 

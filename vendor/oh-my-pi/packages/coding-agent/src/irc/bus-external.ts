@@ -14,6 +14,8 @@ export interface IrcExternalPeer {
 	lastSeen: string;
 	state: IrcExternalPeerState;
 	stateTs: string | null;
+	/** True when the operator supplied irc.peerName; ambient automation must preserve it. */
+	explicitName?: boolean;
 }
 
 export interface IrcExternalMessage {
@@ -32,6 +34,7 @@ interface PeerRow {
 	last_seen: string;
 	state: string;
 	state_ts: string | null;
+	explicit_name: number;
 }
 
 interface MessageRow {
@@ -51,6 +54,7 @@ export interface IrcExternalRegistration {
 	name: string;
 	cwd: string;
 	pid?: number;
+	explicitName?: boolean;
 }
 
 export const IRC_EXTERNAL_STALE_MS = 10 * 60 * 1000;
@@ -119,6 +123,7 @@ function toPeer(row: PeerRow): IrcExternalPeer {
 		lastSeen: row.last_seen,
 		state: normalizePeerState(row.state),
 		stateTs: row.state_ts,
+		explicitName: row.explicit_name === 1,
 	};
 }
 
@@ -162,12 +167,15 @@ export class IrcExternalBus {
 		if (!columns.has("state_ts")) {
 			this.#db.run("ALTER TABLE peers ADD COLUMN state_ts TEXT");
 		}
+		if (!columns.has("explicit_name")) {
+			this.#db.run("ALTER TABLE peers ADD COLUMN explicit_name INTEGER NOT NULL DEFAULT 0");
+		}
 	}
 
 	#getPeerBySessionId(sessionId: string): IrcExternalPeer | undefined {
 		const row = this.#db
 			.query<PeerRow, { $sessionId: string }>(
-				"SELECT session_id, name, cwd, pid, last_seen, state, state_ts FROM peers WHERE session_id = $sessionId",
+				"SELECT session_id, name, cwd, pid, last_seen, state, state_ts, explicit_name FROM peers WHERE session_id = $sessionId",
 			)
 			.get({ $sessionId: sessionId });
 		return row ? toPeer(row) : undefined;
@@ -186,7 +194,8 @@ export class IrcExternalBus {
 				pid INTEGER,
 				last_seen TEXT,
 				state TEXT NOT NULL DEFAULT 'unknown',
-				state_ts TEXT
+				state_ts TEXT,
+				explicit_name INTEGER NOT NULL DEFAULT 0
 			)
 		`);
 		this.#ensurePeerStateColumns();
@@ -213,13 +222,14 @@ export class IrcExternalBus {
 		const lastSeen = nowIso();
 		this.#db
 			.query(
-				`INSERT INTO peers (session_id, name, cwd, pid, last_seen)
-				 VALUES ($sessionId, $name, $cwd, $pid, $lastSeen)
+				`INSERT INTO peers (session_id, name, cwd, pid, last_seen, explicit_name)
+				 VALUES ($sessionId, $name, $cwd, $pid, $lastSeen, $explicitName)
 				 ON CONFLICT(session_id) DO UPDATE SET
-					name = excluded.name,
+					name = CASE WHEN peers.explicit_name = 1 THEN peers.name ELSE excluded.name END,
 					cwd = excluded.cwd,
 					pid = excluded.pid,
-					last_seen = excluded.last_seen`,
+					last_seen = excluded.last_seen,
+					explicit_name = MAX(peers.explicit_name, excluded.explicit_name)`,
 			)
 			.run({
 				$sessionId: peer.sessionId,
@@ -227,6 +237,7 @@ export class IrcExternalBus {
 				$cwd: peer.cwd,
 				$pid: pid,
 				$lastSeen: lastSeen,
+				$explicitName: peer.explicitName ? 1 : 0,
 			});
 		return (
 			this.#getPeerBySessionId(peer.sessionId) ?? {
@@ -237,6 +248,7 @@ export class IrcExternalBus {
 				lastSeen,
 				state: "unknown",
 				stateTs: null,
+				explicitName: Boolean(peer.explicitName),
 			}
 		);
 	}
@@ -248,12 +260,22 @@ export class IrcExternalBus {
 		});
 	}
 
+	/** Rename a peer through the shared metadata path. Explicit operator names are immutable. */
+	updatePeerName(sessionId: string, name: string): boolean {
+		const normalized = name.trim();
+		if (!normalized) return false;
+		const result = this.#db
+			.query("UPDATE peers SET name = $name WHERE session_id = $sessionId AND explicit_name = 0 AND name <> $name")
+			.run({ $sessionId: sessionId, $name: normalized });
+		return result.changes > 0;
+	}
+
 	updatePeerState(sessionId: string, state: Exclude<IrcExternalPeerState, "unknown">): void {
 		const ts = nowIso();
 		this.#db
 			.query(
-				`INSERT INTO peers (session_id, name, cwd, pid, last_seen, state, state_ts)
-				 VALUES ($sessionId, $sessionId, '', $pid, $ts, $state, $ts)
+				`INSERT INTO peers (session_id, name, cwd, pid, last_seen, state, state_ts, explicit_name)
+				 VALUES ($sessionId, $sessionId, '', $pid, $ts, $state, $ts, 0)
 				 ON CONFLICT(session_id) DO UPDATE SET
 					state = excluded.state,
 					state_ts = excluded.state_ts,
@@ -272,7 +294,7 @@ export class IrcExternalBus {
 		const staleMs = options.staleMs ?? IRC_EXTERNAL_STALE_MS;
 		return this.#db
 			.query<PeerRow, []>(
-				"SELECT session_id, name, cwd, pid, last_seen, state, state_ts FROM peers ORDER BY last_seen DESC",
+				"SELECT session_id, name, cwd, pid, last_seen, state, state_ts, explicit_name FROM peers ORDER BY last_seen DESC",
 			)
 			.all()
 			.filter(
@@ -286,7 +308,7 @@ export class IrcExternalBus {
 	findPeerByName(name: string, options: { excludeSessionId?: string } = {}): IrcExternalPeer | undefined {
 		const rows = this.#db
 			.query<PeerRow, { $name: string }>(
-				"SELECT session_id, name, cwd, pid, last_seen, state, state_ts FROM peers WHERE name = $name ORDER BY last_seen DESC",
+				"SELECT session_id, name, cwd, pid, last_seen, state, state_ts, explicit_name FROM peers WHERE name = $name ORDER BY last_seen DESC",
 			)
 			.all({ $name: name });
 		const row = rows.find(
