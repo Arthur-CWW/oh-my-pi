@@ -4,7 +4,7 @@ import type { AgentState } from "@oh-my-pi/pi-agent-core";
 import { APP_NAME, isEnoent } from "@oh-my-pi/pi-utils";
 import { getResolvedThemeColors, getThemeExportColors } from "../../modes/theme/theme";
 import type { SessionEntry, SessionHeader } from "../../session/session-entries";
-import { loadEntriesFromFile } from "../../session/session-loader";
+import { loadJournalProjection } from "../../journal/projection";
 import { SessionManager } from "../../session/session-manager";
 import templateCss from "./template.css" with { type: "text" };
 import templateHtml from "./template.html" with { type: "text" };
@@ -253,17 +253,15 @@ async function collectSubSessionsFromDir(
 		if (!name.endsWith(".jsonl") || name.includes(".bak")) continue;
 		const agentId = name.slice(0, -6);
 		const key = parentKey ? `${parentKey}/${agentId}` : agentId;
-		const fileEntries = await loadEntriesFromFile(path.join(dir, name));
-		// Empty/corrupt files (no valid session header) load as [] — skip silently.
-		if (fileEntries.length > 0) {
-			const header = (fileEntries.find(e => e.type === "session") as SessionHeader | undefined) ?? null;
-			const entries = fileEntries.filter((e): e is SessionEntry => e.type !== "session");
+		const proj = await loadJournalProjection(path.join(dir, name));
+		// Empty/corrupt files return null — skip silently.
+		if (proj) {
 			out[key] = {
 				agentId,
 				parent: parentKey,
-				header,
-				entries,
-				leafId: entries.length > 0 ? entries[entries.length - 1].id : null,
+				header: proj.header,
+				entries: proj.entries,
+				leafId: proj.leafId,
 			};
 		}
 		await collectSubSessionsFromDir(path.join(dir, agentId), key, out);

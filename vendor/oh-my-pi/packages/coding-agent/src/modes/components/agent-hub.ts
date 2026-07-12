@@ -44,6 +44,7 @@ import {
 	MAIN_AGENT_ID,
 	type RegistryEvent,
 } from "../../registry/agent-registry";
+import { decodeJournalEntries, JOURNAL_TAIL_BYTES, readJournalTailChunk } from "../../journal/projection";
 import { listArchivedDirectChildren, type ArchivedDirectChildDescriptor } from "../../internal-urls/history-protocol";
 import type { AgentSession } from "../../session/agent-session";
 import {
@@ -57,7 +58,6 @@ import {
 	USER_INTERRUPT_LABEL,
 } from "../../session/messages";
 import type { SessionMessageEntry } from "../../session/session-entries";
-import { parseSessionEntries } from "../../session/session-loader";
 import { createIrcMessageCard } from "../../tools/irc";
 import { replaceTabs, shortenPath, TRUNCATE_LENGTHS, truncateToWidth } from "../../tools/render-utils";
 import { canonicalizeMessage, normalizeThinkingDisplay } from "../../utils/thinking-display";
@@ -104,7 +104,7 @@ const LEFT_TAP_WINDOW_MS = 500;
 /** Completed journal rows shown without an explicit archive expansion. */
 const RECENT_COMPLETED_LIMIT = 20;
 /** Maximum bytes retained while glancing at a transcript in the cockpit. */
-const PREVIEW_TAIL_BYTES = 256 * 1024;
+const PREVIEW_TAIL_BYTES = JOURNAL_TAIL_BYTES;
 /** Maximum parsed message entries retained for the selected preview. */
 const PREVIEW_MAX_ENTRIES = 200;
 /** Wide cockpit breakpoint: two independently scrollable 80-column lanes. */
@@ -3240,7 +3240,7 @@ export class AgentHubOverlayComponent extends Container {
 		}
 
 		const fromByte = this.#transcriptCache?.bytesRead ?? 0;
-		const result = readFileIncremental(sessionFile, fromByte);
+		const result = readJournalTailChunk(sessionFile, fromByte, PREVIEW_TAIL_BYTES);
 		if (!result) {
 			logger.debug("Agent hub: failed to read session file", { path: sessionFile });
 			return this.#transcriptCache?.entries ?? null;
@@ -3264,7 +3264,7 @@ export class AgentHubOverlayComponent extends Container {
 		const lastNewline = text.lastIndexOf("\n");
 		if (lastNewline < 0) return;
 		const completeChunk = text.slice(0, lastNewline + 1);
-		const newEntries = parseSessionEntries(completeChunk);
+		const newEntries = decodeJournalEntries(completeChunk);
 		for (const entry of newEntries) {
 			if (entry.type === "message") {
 				this.#transcriptCache.entries.push(entry);
@@ -3327,36 +3327,5 @@ export class AgentHubOverlayComponent extends Container {
 				if (token === this.#remoteFetchToken) this.#remoteFetchInFlight = false;
 				logger.warn("Agent hub: remote transcript fetch failed", { id, error: String(error) });
 			});
-	}
-}
-
-// Sync helper for the render path
-function readFileIncremental(
-	filePath: string,
-	fromByte: number,
-): { text: string; newSize: number; fromByte: number } | null {
-	try {
-		const stat = fs.statSync(filePath);
-		if (stat.size <= fromByte) return { text: "", newSize: stat.size, fromByte };
-		const start = fromByte === 0 ? Math.max(0, stat.size - PREVIEW_TAIL_BYTES) : fromByte;
-		const buf = Buffer.alloc(stat.size - start);
-		const fd = fs.openSync(filePath, "r");
-		try {
-			fs.readSync(fd, buf, 0, buf.length, start);
-		} finally {
-			fs.closeSync(fd);
-		}
-		let text = buf.toString("utf-8");
-		let actualStart = start;
-		if (fromByte === 0 && start > 0) {
-			const newline = text.indexOf("\n");
-			if (newline >= 0) {
-				actualStart += Buffer.byteLength(text.slice(0, newline + 1), "utf-8");
-				text = text.slice(newline + 1);
-			}
-		}
-		return { text, newSize: stat.size, fromByte: actualStart };
-	} catch {
-		return null;
 	}
 }

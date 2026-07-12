@@ -1,5 +1,6 @@
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
-import { getBlobsDir, isEnoent, parseJsonlLenient } from "@oh-my-pi/pi-utils";
+import { getBlobsDir, isEnoent } from "@oh-my-pi/pi-utils";
+import { decodeJournalEntries } from "../journal/projection";
 import { BlobStore, isBlobRef, resolveImageData, resolveImageDataUrl } from "./blob-store";
 import { buildSessionContext, resolveSessionLeaf } from "./session-context";
 import type { FileEntry, SessionEntry, SessionHeader } from "./session-entries";
@@ -8,9 +9,7 @@ import { isImageBlock } from "./session-persistence";
 import { FileSessionStorage, type SessionStorage } from "./session-storage";
 
 /** Exported for compaction.test.ts */
-export function parseSessionEntries(content: string): FileEntry[] {
-	return parseJsonlLenient<FileEntry>(content);
-}
+export const parseSessionEntries = decodeJournalEntries;
 
 function isSessionHeader(entry: FileEntry | undefined): entry is SessionHeader {
 	return entry?.type === "session" && typeof entry.id === "string";
@@ -59,7 +58,7 @@ export async function loadEntriesFromFile(
 		if (isEnoent(err)) return [];
 		throw err;
 	}
-	const entries = parseJsonlLenient<FileEntry>(content);
+	const entries = decodeJournalEntries(content);
 	return normalizeSessionEntries(entries);
 }
 
