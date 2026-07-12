@@ -79,11 +79,11 @@ export class IrcBus {
 	 * (waiter/aside = "injected", idle wake = "woken", park revival =
 	 * "revived"), not what they did with it.
 	 *
-	 * Mailbox semantics: a successfully delivered message never lingers in
-	 * the recipient's mailbox — injection/wake puts the full body into their
-	 * context, so buffering it too would double-deliver via a later
-	 * `wait`/`inbox` and inflate unread counts. Only a failed live hand-off
-	 * is buffered for the recipient to drain later.
+	 * Mailbox semantics: parked delivery is reserved before revival and removed
+	 * only after a successful hand-off, so a release/replacement race cannot
+	 * lose it. Successfully delivered messages never linger: injection/wake
+	 * already puts the full body into recipient context. Failed live hand-offs
+	 * and failed revivals remain buffered for later recovery.
 	 *
 	 * `opts.expectsReply` marks sends whose caller is blocked on an answer
 	 * (`send await:true`). It is forwarded to the recipient session so a
@@ -99,17 +99,35 @@ export class IrcBus {
 			return { to: message.to, outcome: "failed", error: `Unknown or terminated agent "${message.to}".` };
 		}
 
+		const wasParked = ref.status === "parked";
 		let revived = false;
-		if (ref.status === "parked") {
-			try {
-				await this.#lifecycle().ensureLive(message.to);
-				revived = true;
-			} catch (error) {
-				return {
-					to: message.to,
-					outcome: "failed",
-					error: error instanceof Error ? error.message : String(error),
-				};
+		if (wasParked) {
+			// Reserve the message before revival starts. A failed or superseded
+			// revive therefore cannot lose it; successful hand-off removes this
+			// exact id, preserving one-delivery semantics.
+			this.#enqueue(message);
+			let reviveRef = ref;
+			for (;;) {
+				try {
+					await this.#lifecycle().ensureLive(message.to);
+					revived = true;
+					break;
+				} catch (error) {
+					const current = this.#registry.get(message.to);
+					if (current?.session) {
+						revived = true;
+						break;
+					}
+					if (current && current !== reviveRef && current.status === "parked") {
+						reviveRef = current;
+						continue;
+					}
+					return {
+						to: message.to,
+						outcome: "failed",
+						error: error instanceof Error ? error.message : String(error),
+					};
+				}
 			}
 		}
 
@@ -118,6 +136,7 @@ export class IrcBus {
 		// the session injection path.
 		const waiter = this.#takeMatchingWaiter(message.to, message.from);
 		if (waiter) {
+			if (wasParked) this.#removeQueued(message);
 			waiter.resolve(message);
 			this.#relayToMainUi(message);
 			return { to: message.to, outcome: revived ? "revived" : "injected" };
@@ -130,13 +149,13 @@ export class IrcBus {
 
 		try {
 			const delivery = await session.deliverIrcMessage(message, opts);
+			if (wasParked) this.#removeQueued(message);
 			this.#relayToMainUi(message);
 			return { to: message.to, outcome: revived ? "revived" : delivery };
 		} catch (error) {
-			// Live hand-off failed (e.g. recipient disposed mid-shutdown): buffer
-			// the message so a later `wait`/`inbox` from the recipient can still
-			// pick it up. The receipt stays "failed" — the recipient has not
-			// seen it.
+			// Normalize to one tail copy. The original parked reservation may
+			// have been evicted by the mailbox cap during a slow revival.
+			if (wasParked) this.#removeQueued(message);
 			this.#enqueue(message);
 			return {
 				to: message.to,
@@ -242,6 +261,16 @@ export class IrcBus {
 				droppedFrom: dropped?.from,
 			});
 		}
+	}
+
+	#removeQueued(message: IrcMessage): boolean {
+		const mailbox = this.#mailboxes.get(message.to);
+		if (!mailbox) return false;
+		const index = mailbox.findIndex(candidate => candidate.id === message.id);
+		if (index === -1) return false;
+		mailbox.splice(index, 1);
+		if (mailbox.length === 0) this.#mailboxes.delete(message.to);
+		return true;
 	}
 
 	/** Resolve the OLDEST waiter for `agentId` whose from-filter accepts `from`. */

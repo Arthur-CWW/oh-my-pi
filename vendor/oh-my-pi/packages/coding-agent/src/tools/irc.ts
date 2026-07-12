@@ -141,7 +141,10 @@ export class IrcTool implements AgentTool<typeof ircSchema, IrcDetails> {
 		},
 	];
 	readonly loadMode = "discoverable";
-	constructor(private readonly session: ToolSession) {
+	constructor(
+		private readonly session: ToolSession,
+		private readonly externalBus?: IrcExternalBus | null,
+	) {
 		this.description = prompt.render(ircDescription);
 	}
 
@@ -279,7 +282,7 @@ export class IrcTool implements AgentTool<typeof ircSchema, IrcDetails> {
 			!isBroadcast && !localTarget && external
 				? external.bus.findPeerByName(to, { excludeSessionId: external.sessionId })
 				: undefined;
-		if (externalTarget) {
+		if (external && externalTarget) {
 			if (params.await) {
 				return errorResult("`await:true` is in-process-only; external peers receive fire-and-forget messages.", {
 					op: "send",
@@ -447,9 +450,10 @@ export class IrcTool implements AgentTool<typeof ircSchema, IrcDetails> {
 		};
 	}
 
-	#registerExternalPeer(): { bus: IrcExternalBus; sessionId: string; name: string } {
+	#registerExternalPeer(): { bus: IrcExternalBus; sessionId: string; name: string } | null {
+		if (this.externalBus === null) return null;
 		const sessionId = `${this.session.cwd}:${process.pid}`;
-		const bus = IrcExternalBus.global();
+		const bus = this.externalBus ?? IrcExternalBus.global();
 		const name = resolveIrcExternalPeerName({
 			configuredName: this.session.settings.get("irc.peerName"),
 			cwd: this.session.cwd,

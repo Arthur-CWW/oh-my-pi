@@ -183,6 +183,90 @@ describe("IRC", () => {
 			expect(registry.get("0-Parked")?.status).toBe("idle");
 		});
 
+		it("send survives a parked revive being replaced and delivers exactly once", async () => {
+			const replacement = makeFakeSession();
+			replacement.setOutcome("woken");
+			const revivalStarted = Promise.withResolvers<void>();
+			const finishRevival = Promise.withResolvers<void>();
+			const superseded = {
+				deliverIrcMessage: async () => "woken" as const,
+				dispose: async () => undefined,
+			} as unknown as AgentSession;
+			registry.register({
+				id: "0-Raced",
+				displayName: "task",
+				kind: "sub",
+				session: null,
+				status: "parked",
+			});
+			AgentLifecycleManager.global().adopt("0-Raced", {
+				idleTtlMs: 0,
+				revive: async () => {
+					revivalStarted.resolve();
+					await finishRevival.promise;
+					return superseded;
+				},
+			});
+
+			const sending = bus.send({ from: "0-Main", to: "0-Raced", body: "survive replacement" });
+			await revivalStarted.promise;
+			registry.register({
+				id: "0-Raced",
+				displayName: "replacement",
+				kind: "sub",
+				session: replacement.session,
+				status: "idle",
+			});
+			finishRevival.resolve();
+
+			const receipt = await sending;
+			expect(receipt).toEqual({ to: "0-Raced", outcome: "revived" });
+			expect(replacement.delivered.map(message => message.body)).toEqual(["survive replacement"]);
+			expect(bus.unreadCount("0-Raced")).toBe(0);
+		});
+
+		it("requeues a failed parked handoff when the revive reservation was evicted", async () => {
+			const revivalStarted = Promise.withResolvers<void>();
+			const finishRevival = Promise.withResolvers<void>();
+			const delivered: string[] = [];
+			const revived = {
+				deliverIrcMessage: async (message: IrcMessage) => {
+					if (message.body === "must survive") throw new Error("handoff failed");
+					delivered.push(message.body);
+					return "woken" as const;
+				},
+			} as unknown as AgentSession;
+			registry.register({
+				id: "0-Capped",
+				displayName: "task",
+				kind: "sub",
+				session: null,
+				status: "parked",
+			});
+			AgentLifecycleManager.global().adopt("0-Capped", {
+				idleTtlMs: 0,
+				revive: async () => {
+					revivalStarted.resolve();
+					await finishRevival.promise;
+					return revived;
+				},
+			});
+
+			const primary = bus.send({ from: "0-Main", to: "0-Capped", body: "must survive" });
+			await revivalStarted.promise;
+			const fillers = Array.from({ length: 100 }, (_, index) =>
+				bus.send({ from: "0-Main", to: "0-Capped", body: `filler ${index}` }),
+			);
+			expect(bus.unreadCount("0-Capped")).toBe(100);
+			finishRevival.resolve();
+
+			const [primaryReceipt, fillerReceipts] = await Promise.all([primary, Promise.all(fillers)]);
+			expect(primaryReceipt).toEqual({ to: "0-Capped", outcome: "failed", error: "handoff failed" });
+			expect(fillerReceipts.every(receipt => receipt.outcome === "revived")).toBe(true);
+			expect(delivered).toHaveLength(100);
+			expect(bus.inbox("0-Capped").map(message => message.body)).toEqual(["must survive"]);
+		});
+
 		it("send fails cleanly when a parked recipient has no reviver", async () => {
 			registry.register({ id: "0-Parked", displayName: "task", kind: "sub", session: null, status: "parked" });
 			AgentLifecycleManager.global().adopt("0-Parked", { idleTtlMs: 0 });
@@ -345,8 +429,8 @@ describe("IRC", () => {
 
 			const receipt = await bus.send({ from: "0-Main", to: "0-Parked", body: "wake up" });
 			expect(receipt).toEqual({ to: "0-Parked", outcome: "failed", error: "revive exploded" });
-			// Failed revival never enqueues: the message is lost, not buffered.
-			expect(bus.unreadCount("0-Parked")).toBe(0);
+			// The pre-revive reservation remains available for later recovery.
+			expect(bus.unreadCount("0-Parked")).toBe(1);
 		});
 	});
 
@@ -423,7 +507,7 @@ describe("IRC", () => {
 			sub.setError(new Error("temporarily unavailable"));
 			await bus.send({ from: "0-Main", to: "0-AuthLoader", body: "unread one" });
 
-			const tool = new IrcTool(makeToolSession(registry, "0-Main"));
+			const tool = new IrcTool(makeToolSession(registry, "0-Main"), null);
 			const result = await tool.execute("call-1", { op: "list" });
 			expect(result.details?.op).toBe("list");
 			expect(result.details?.peers).toMatchObject([
@@ -438,7 +522,7 @@ describe("IRC", () => {
 			const sub = makeFakeSession();
 			registry.register({ id: "0-Sub", displayName: "task", kind: "sub", session: sub.session });
 
-			const tool = new IrcTool(makeToolSession(registry, "0-Main"));
+			const tool = new IrcTool(makeToolSession(registry, "0-Main"), null);
 			const result = await tool.execute("call-1", { op: "send", to: "0-Sub", message: "ping" });
 			expect(result.isError).toBeFalsy();
 			expect(result.details?.receipts).toEqual([{ to: "0-Sub", outcome: "injected" }]);
@@ -454,7 +538,7 @@ describe("IRC", () => {
 			registry.register({ id: "0-B", displayName: "task", kind: "sub", session: b.session });
 			registry.register({ id: "0-Parked", displayName: "task", kind: "sub", session: null, status: "parked" });
 
-			const tool = new IrcTool(makeToolSession(registry, "0-Main"));
+			const tool = new IrcTool(makeToolSession(registry, "0-Main"), null);
 			const result = await tool.execute("call-1", { op: "send", to: "all", message: "anyone there?" });
 			// Broadcast skips parked agents; one failure does not block the other delivery.
 			expect(result.details?.receipts).toEqual([
@@ -476,7 +560,7 @@ describe("IRC", () => {
 				void bus.send({ from: "0-Sub", to: msg.from, body: "pong", replyTo: msg.id });
 			});
 
-			const tool = new IrcTool(makeToolSession(registry, "0-Main"));
+			const tool = new IrcTool(makeToolSession(registry, "0-Main"), null);
 			const result = await tool.execute("call-1", { op: "send", to: "0-Sub", message: "ping", await: true });
 			expect(result.details?.waited?.body).toBe("pong");
 			const text = result.content[0]?.type === "text" ? result.content[0].text : "";
@@ -494,7 +578,7 @@ describe("IRC", () => {
 				void bus.send({ from: "0-Sub", to: msg.from, body: "fresh reply", replyTo: msg.id });
 			});
 
-			const tool = new IrcTool(makeToolSession(registry, "0-Main"));
+			const tool = new IrcTool(makeToolSession(registry, "0-Main"), null);
 			const result = await tool.execute("call-1", { op: "send", to: "0-Sub", message: "ping", await: true });
 
 			expect(result.details?.waited?.body).toBe("fresh reply");
@@ -505,7 +589,7 @@ describe("IRC", () => {
 			const sub = makeFakeSession();
 			registry.register({ id: "0-Sub", displayName: "task", kind: "sub", session: sub.session });
 
-			const tool = new IrcTool(makeToolSession(registry, "0-Main"));
+			const tool = new IrcTool(makeToolSession(registry, "0-Main"), null);
 			const result = await tool.execute("call-1", {
 				op: "send",
 				to: "0-Sub",
@@ -521,7 +605,7 @@ describe("IRC", () => {
 		});
 
 		it("op=send rejects await with to=all and self-sends", async () => {
-			const tool = new IrcTool(makeToolSession(registry, "0-Main"));
+			const tool = new IrcTool(makeToolSession(registry, "0-Main"), null);
 			const broadcast = await tool.execute("call-1", { op: "send", to: "all", message: "x", await: true });
 			expect(broadcast.isError).toBe(true);
 			const self = await tool.execute("call-2", { op: "send", to: "0-Main", message: "x" });
@@ -529,14 +613,14 @@ describe("IRC", () => {
 		});
 
 		it("op=send returns a failed receipt for unknown targets", async () => {
-			const tool = new IrcTool(makeToolSession(registry, "0-Main"));
+			const tool = new IrcTool(makeToolSession(registry, "0-Main"), null);
 			const result = await tool.execute("call-1", { op: "send", to: "0-Ghost", message: "ping" });
 			expect(result.isError).toBe(true);
 			expect(result.details?.receipts?.[0]?.outcome).toBe("failed");
 		});
 
 		it("op=wait returns a clean non-error timeout result", async () => {
-			const tool = new IrcTool(makeToolSession(registry, "0-Main"));
+			const tool = new IrcTool(makeToolSession(registry, "0-Main"), null);
 			const result = await tool.execute("call-1", { op: "wait", timeoutMs: 5 });
 			expect(result.isError).toBeFalsy();
 			expect(result.details?.waited).toBeNull();
@@ -552,7 +636,7 @@ describe("IRC", () => {
 			main.setError(new Error("temporarily unavailable"));
 			await bus.send({ from: "0-Sub", to: "0-Main", body: "fyi" });
 
-			const tool = new IrcTool(makeToolSession(registry, "0-Main"));
+			const tool = new IrcTool(makeToolSession(registry, "0-Main"), null);
 			const peeked = await tool.execute("call-1", { op: "inbox", peek: true });
 			expect(peeked.details?.inbox?.map(msg => msg.body)).toEqual(["fyi"]);
 			const drained = await tool.execute("call-2", { op: "inbox" });

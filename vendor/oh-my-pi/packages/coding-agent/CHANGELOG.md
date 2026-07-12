@@ -10,6 +10,7 @@
 
 ### Fixed
 
+- IRC sends now reserve parked-agent messages before revival and follow replacement identities across revive races, preventing dropped messages and `released or replaced while reviving` failures.
 - Ask-tool waits now publish `waiting_input` IRC presence while they are blocking for user input, then restore the prior state on answer or abort.
 - Fixed one-shot `omp irc` CLI commands hanging after opening the external IRC SQLite bus by closing CLI-owned bus handles after each command.
 - Agent Hub now opens parked-agent history read-only on Enter instead of reviving the agent, with `R` as the explicit revive shortcut from the history view.
