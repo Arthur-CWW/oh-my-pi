@@ -97,3 +97,10 @@ Score each grammar from 1 (weak) to 5 (strong), using the same content and the s
 | Durability | Could the vocabulary guide many states without becoming a decorative theme? |
 
 A promising direction should reveal inquiry structure while resisting sterile, over-administered, over-resolved, closed, low-entropy, or insufficiently negotiable presentation. Selection should follow task trials and interaction design—not visual preference alone.
+
+## Arthur review — 2026-07-12
+
+- **Wonderland Cartography:** strongest current vibe; explore further after the Living Field interactions stabilize.
+- **Nocturnal Mnemosyne:** liked, but may belong to another project rather than this Atlas.
+- **Living Diagram:** current palette is the weakest direction; do not treat it as a default or continue it unchanged.
+- Theme adaptation remains unresolved. These specimens currently have intrinsic light/dark material conditions rather than paired application themes.
