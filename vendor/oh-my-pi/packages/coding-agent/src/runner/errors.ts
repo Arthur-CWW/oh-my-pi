@@ -37,6 +37,11 @@ export class SessionRunnerRuntimeError extends Schema.TaggedErrorClass<SessionRu
 	{ issue: Schema.String },
 ) {}
 
+export class RunnerSessionReloadCancelledError extends Schema.TaggedErrorClass<RunnerSessionReloadCancelledError>()(
+	"RunnerSessionReloadCancelledError",
+	{ reason: Schema.Literal("session-before-switch") },
+) {}
+
 export class RunnerControllerConflictError extends Schema.TaggedErrorClass<RunnerControllerConflictError>()(
 	"RunnerControllerConflictError",
 	{ requestedViewId: Schema.String, activeViewId: Schema.String, controllerEpoch: NonNegativeInt },

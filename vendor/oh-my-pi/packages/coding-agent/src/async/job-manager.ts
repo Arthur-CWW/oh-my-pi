@@ -356,16 +356,17 @@ export class AsyncJobManager {
 	 * while leaving completion status to the job body. Unlike cancel(), this does
 	 * not mark the job terminal or schedule eviction.
 	 */
-	interrupt(id: string, filter?: AsyncJobFilter, reason?: string): boolean {
+	interrupt(id: string, filter?: AsyncJobFilter, reason?: string, requestedBy?: string): boolean {
 		const job = this.#jobs.get(id);
 		if (!job) return false;
 		if (filter?.ownerId && job.ownerId !== filter.ownerId) return false;
 		if (job.status !== "running" || job.queued || job.interruptRequested || job.isolated) return false;
 		const interruptReason = reason?.trim();
+		const attribution = requestedBy ?? filter?.ownerId;
 		job.interruptRequested = true;
-		job.interruptRequestedBy = filter?.ownerId;
+		job.interruptRequestedBy = attribution;
 		if (interruptReason) job.interruptReason = interruptReason;
-		job.abortController.abort(createInterruptReason(filter?.ownerId, interruptReason));
+		job.abortController.abort(createInterruptReason(attribution, interruptReason));
 		return true;
 	}
 
