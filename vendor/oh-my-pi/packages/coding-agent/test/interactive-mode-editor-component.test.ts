@@ -73,4 +73,16 @@ describe("InteractiveMode.setEditorComponent", () => {
 		expect(mode.editor.onEscape).toBeDefined();
 		expect(refreshSpy).toHaveBeenCalled();
 	});
+	it("falls through to editor history when dequeue declines Alt+Up", () => {
+		const editor = mode.editor;
+		editor.addToHistory("older prompt");
+		editor.setText("");
+		editor.setActionKeys("app.message.dequeue", ["alt+up"]);
+		editor.onDequeue = () => false;
+
+		editor.handleInput("\x1b[1;3A");
+
+		expect(editor.getText()).toBe("older prompt");
+	});
+
 });

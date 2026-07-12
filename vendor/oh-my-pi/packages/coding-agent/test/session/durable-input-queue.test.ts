@@ -967,6 +967,39 @@ describe("durable input queue", () => {
 		expect(await reopened.getCommandReceipt("cancel-target")).toEqual(cancelled);
 	});
 
+	it("persists queued-input removal across ownership replacement and journal replay", async () => {
+		const { root, session, owner } = await fixture("epoch-a");
+		const queue = await DurableInputQueue.open(owner.handle, root);
+		await queue.adopt();
+		const retained = await queue.enqueueCommand(
+			{ text: "keep queued", deliveryClass: "followUp" },
+			command("enqueue-retained", 0),
+		);
+		const removed = await queue.enqueueCommand(
+			{ text: "move back to editor", deliveryClass: "followUp" },
+			command("enqueue-removed", 1),
+		);
+		const cancellation = await queue.cancelCommand(
+			removed.item.inputId,
+			removed.item.revision,
+			command("unqueue-newest", 2),
+		);
+		expect(cancellation.item).toMatchObject({
+			inputId: removed.item.inputId,
+			state: "cancelled",
+			payload: { text: "move back to editor" },
+		});
+
+		owner.current = false;
+		const nextOwner = replacement(session, "epoch-b");
+		const reopened = await DurableInputQueue.open(nextOwner.handle, root);
+		await reopened.adopt();
+
+		expect(await reopened.replayQueued()).toEqual([retained.item]);
+		expect(await reopened.get(removed.item.inputId)).toEqual(cancellation.item);
+		expect(await reopened.getCommandReceipt("unqueue-newest")).toEqual(cancellation);
+	});
+
 	it("lets only one same-runner-revision mutation win and keeps legacy mutations outside the ledger", async () => {
 		const { root, owner } = await fixture("epoch-a");
 		const queue = await DurableInputQueue.open(owner.handle, root);

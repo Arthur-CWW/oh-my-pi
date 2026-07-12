@@ -251,8 +251,8 @@ export class CustomEditor extends Editor {
 	onPasteImagePath?: (path: string) => void | Promise<void>;
 	/** Called when the configured raw text-paste shortcut is pressed. */
 	onPasteTextRaw?: () => void;
-	/** Called when the configured dequeue shortcut is pressed. */
-	onDequeue?: () => void;
+	/** Called when the configured dequeue shortcut is pressed. Return false to preserve editor history navigation. */
+	onDequeue?: () => boolean;
 	/** Called when Caps Lock is pressed. */
 	onCapsLock?: () => void;
 	/** Called when left-arrow is pressed while the editor is empty (cursor necessarily at start). */
@@ -544,9 +544,11 @@ export class CustomEditor extends Editor {
 				return;
 			}
 
-			// Intercept configured dequeue shortcut (restore queued message to editor)
+			// Intercept dequeue only when the controller accepted a queued input.
+			// A declined Alt+Up is translated to the base editor's history-up action.
 			if (this.#matchesAction(canonical, "app.message.dequeue") && this.onDequeue) {
-				this.onDequeue();
+				if (this.onDequeue()) return;
+				super.handleInput("\x1b[A");
 				return;
 			}
 

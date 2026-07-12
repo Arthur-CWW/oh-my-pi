@@ -89,7 +89,7 @@ export class InputController {
 	// action. Seeded from 0 and bumped past any existing attachment files in #attachPasteAsFile.
 	#attachmentCounter = 0;
 	#quitConfirmationPending = false;
-	#queuedInputEdit?: { inputId: string; revision: number };
+	#dequeuePending = false;
 
 	#showTinyTitleDownloadProgress(modelKey: string): void {
 		if (!isTinyTitleLocalModelKey(modelKey)) return;
@@ -214,7 +214,9 @@ export class InputController {
 				if (this.ctx.cancelPendingSubmission()) {
 					return;
 				}
-				this.restoreQueuedMessagesToEditor({ abort: true });
+				void this.restoreQueuedMessagesToEditor({ abort: true }).catch(error => {
+					this.ctx.showError(diagnosticInputFromError(error, this.ctx.sessionManager.getSessionFile()));
+				});
 			} else if (this.ctx.session.isBashRunning) {
 				this.ctx.session.abortBash();
 			} else if (this.ctx.isBashMode) {
@@ -489,9 +491,6 @@ export class InputController {
 			text = text.trim();
 			if ((!isSettingsInitialized() || settings.get("emojiAutocomplete")) && text) text = expandEmoticons(text);
 
-			if (text && (await this.#submitQueuedInputEdit(text, this.ctx.pendingImages))) {
-				return;
-			}
 
 			// Focused subagent session: the editor is a plain chat box for it.
 			// Everything below (continue shortcuts, slash/bash/python, loop,
@@ -980,13 +979,24 @@ export class InputController {
 		}
 	}
 
-	handleDequeue(): void {
-		const restored = this.restoreQueuedMessagesToEditor();
-		if (restored === 0) {
-			this.ctx.showStatus("No queued messages to restore");
-		} else {
-			this.ctx.showStatus(`Restored ${restored} queued message${restored > 1 ? "s" : ""} to editor`);
-		}
+	handleDequeue(): boolean {
+		const hasQueuedText = this.ctx.session
+			.getQueuedInputProjection()
+			.some(item => item.state === "queued" && "text" in item.payload);
+		if (!hasQueuedText) return false;
+		if (this.#dequeuePending) return true;
+		this.#dequeuePending = true;
+		void this.restoreQueuedMessagesToEditor()
+			.then(restored => {
+				this.ctx.showStatus(`Restored ${restored} queued message${restored > 1 ? "s" : ""} to editor`);
+			})
+			.catch(error => {
+				this.ctx.showError(diagnosticInputFromError(error, this.ctx.sessionManager.getSessionFile()));
+			})
+			.finally(() => {
+				this.#dequeuePending = false;
+			});
+		return true;
 	}
 
 	/**
@@ -1051,9 +1061,6 @@ export class InputController {
 		let text = this.ctx.editor.getText().trim();
 		if (!text) return;
 
-		if (await this.#submitQueuedInputEdit(text, this.ctx.pendingImages)) {
-			return;
-		}
 
 		// Focused subagent session: follow-ups go to it; non-chat input is gated.
 		if (this.ctx.focusedAgentId) {
@@ -1103,92 +1110,47 @@ export class InputController {
 	}
 
 	/**
-	 * Restore one durable queued input for identity-aware editing. Legacy agent-core
-	 * queues remain restorable only while the durable projection is empty.
+	 * Durably remove the newest contiguous group of queued text inputs and move
+	 * their combined payload into the editor. A later submit is a fresh admission.
 	 */
-	restoreQueuedMessagesToEditor(options?: { abort?: boolean; currentText?: string }): number {
+	async restoreQueuedMessagesToEditor(options?: { abort?: boolean; currentText?: string }): Promise<number> {
 		this.ctx.locallySubmittedUserSignatures.clear();
-		const durableProjection = this.ctx.session.getQueuedInputProjection();
-		if (durableProjection.length > 0) {
-			let selected: (typeof durableProjection)[number] | undefined;
-			for (const item of durableProjection) {
-				if (item.state === "queued" && "text" in item.payload && (!selected || item.sequence > selected.sequence)) {
-					selected = item;
-				}
-			}
-			if (selected && "text" in selected.payload) {
-				this.ctx.editor.setText(selected.payload.text);
-				this.ctx.pendingImages = selected.payload.images ? [...selected.payload.images] : [];
-				this.ctx.pendingImageLinks = this.ctx.pendingImages.map(() => undefined);
-				this.ctx.editor.imageLinks = this.ctx.pendingImageLinks.length > 0 ? this.ctx.pendingImageLinks : undefined;
-				this.#queuedInputEdit = { inputId: selected.inputId, revision: selected.revision };
-			}
-			this.ctx.updatePendingMessagesDisplay();
-			if (options?.abort) {
-				void this.ctx.session.abort({ reason: USER_INTERRUPT_LABEL });
-			}
-			return selected ? 1 : 0;
+		const queued = this.ctx.session
+			.getQueuedInputProjection()
+			.filter(item => item.state === "queued")
+			.toSorted((left, right) => left.sequence - right.sequence);
+		const newest = queued.at(-1);
+		if (!newest || !("text" in newest.payload)) return 0;
+
+		const group = [newest];
+		for (let index = queued.length - 2; index >= 0; index--) {
+			const item = queued[index]!;
+			if (item.deliveryClass !== newest.deliveryClass || !("text" in item.payload)) break;
+			group.unshift(item);
+		}
+		for (const item of group) {
+			await this.ctx.session.cancelQueuedInput(item.inputId);
 		}
 
-		const { steering, followUp } = this.ctx.session.clearQueue();
-		const allQueued = [...steering, ...followUp];
-		if (allQueued.length === 0) {
-			this.ctx.updatePendingMessagesDisplay();
-			if (options?.abort) {
-				void this.ctx.session.abort({ reason: USER_INTERRUPT_LABEL });
-			}
-			return 0;
-		}
-		const queuedImages = allQueued.flatMap(entry => entry.images ?? []);
-		let queuedText: string;
-		if (queuedImages.length > 0) {
-			const parts: string[] = [];
-			let imageOffset = this.ctx.pendingImages.length;
-			for (const entry of allQueued) {
-				parts.push(shiftImageMarkers(entry.text, imageOffset));
-				if (entry.images && entry.images.length > 0) imageOffset += entry.images.length;
-			}
-			queuedText = parts.join("\n\n");
-		} else {
-			queuedText = allQueued.map(entry => entry.text).join("\n\n");
+		const queuedImages = group.flatMap(item => ("text" in item.payload ? (item.payload.images ?? []) : []));
+		const parts: string[] = [];
+		let imageOffset = this.ctx.pendingImages.length;
+		for (const item of group) {
+			if (!("text" in item.payload)) continue;
+			parts.push(shiftImageMarkers(item.payload.text, imageOffset));
+			imageOffset += item.payload.images?.length ?? 0;
 		}
 		const currentText = options?.currentText ?? this.ctx.editor.getText();
-		this.ctx.editor.setText([queuedText, currentText].filter(text => text.trim()).join("\n\n"));
+		this.ctx.editor.setText([parts.join("\n\n"), currentText].filter(text => text.trim()).join("\n\n"));
 		if (queuedImages.length > 0) {
 			this.ctx.pendingImages.push(...queuedImages);
 			this.ctx.pendingImageLinks.push(...queuedImages.map(() => undefined));
 			this.ctx.editor.imageLinks = this.ctx.pendingImageLinks;
 		}
 		this.ctx.updatePendingMessagesDisplay();
-		if (options?.abort) {
-			void this.ctx.session.abort({ reason: USER_INTERRUPT_LABEL });
-		}
-		return allQueued.length;
-	}
-
-	async #submitQueuedInputEdit(text: string, images: readonly ImageContent[]): Promise<boolean> {
-		const token = this.#queuedInputEdit;
-		if (!token) return false;
-		const payloadImages = images.length > 0 ? [...images] : undefined;
-		try {
-			await this.ctx.session.editQueuedInput(token.inputId, token.revision, {
-				text,
-				images: payloadImages,
-			});
-		} catch (error) {
-			this.#queuedInputEdit = undefined;
-			this.ctx.showError(diagnosticInputFromError(error, this.ctx.sessionManager.getSessionFile()));
-			return true;
-		}
-		this.ctx.editor.addToHistory(text);
-		this.ctx.editor.setText("");
-		this.ctx.editor.imageLinks = undefined;
-		this.ctx.pendingImages = [];
-		this.ctx.pendingImageLinks = [];
-		this.#queuedInputEdit = undefined;
-		this.ctx.updatePendingMessagesDisplay();
+		if (options?.abort) void this.ctx.session.abort({ reason: USER_INTERRUPT_LABEL });
 		this.ctx.ui.requestRender();
-		return true;
+		return group.length;
 	}
 
 	async #insertPendingImage(imageData: ImageContent): Promise<void> {

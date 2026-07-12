@@ -64,7 +64,10 @@ function createContext() {
 			getQueuedMessages: () => ({ steering: [], followUp: [] }),
 			getQueuedInputProjection: () => [],
 		} as unknown as InteractiveModeContext["session"],
-		sessionManager: { getSessionName: () => "named-session" } as InteractiveModeContext["sessionManager"],
+		sessionManager: {
+			getSessionName: () => "named-session",
+			getSessionFile: () => undefined,
+		} as InteractiveModeContext["sessionManager"],
 		pendingImages: [] as InteractiveModeContext["pendingImages"],
 		pendingImageLinks: [] as InteractiveModeContext["pendingImageLinks"],
 		fileSlashCommands: new Set<string>(),
@@ -162,14 +165,24 @@ describe("InputController orphaned submit", () => {
 	it("returns queued images to the pending-image buffer on queue restore", async () => {
 		const { ctx, editor } = createContext();
 		const image = { type: "image" as const, data: "abc", mimeType: "image/png" };
-		const session = ctx.session as unknown as { clearQueue: () => unknown };
-		session.clearQueue = () => ({
-			steering: [{ text: "queued with image", images: [image] }],
-			followUp: [],
-		});
+		const session = ctx.session as unknown as {
+			getQueuedInputProjection: () => unknown[];
+			cancelQueuedInput: (inputId: string) => Promise<unknown>;
+		};
+		const queued = {
+			inputId: "queued-image",
+			sequence: 1,
+			deliveryClass: "steer" as const,
+			revision: 1,
+			payload: { text: "queued with image", images: [image] },
+			state: "queued" as const,
+			attempts: [],
+		};
+		session.getQueuedInputProjection = () => [queued];
+		session.cancelQueuedInput = async () => ({ ...queued, state: "cancelled" as const });
 		const controller = new InputController(ctx);
 
-		const restored = controller.restoreQueuedMessagesToEditor();
+		const restored = await controller.restoreQueuedMessagesToEditor();
 
 		expect(restored).toBe(1);
 		expect(editor.getText()).toBe("queued with image");

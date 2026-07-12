@@ -347,18 +347,18 @@ describe("UiHelpers / InputController against derived queued custom display", ()
 		expect(rendered).toMatch(/legacy steer · queued · core: \/skill:test-skill arg1 arg2/);
 	});
 
-	it("restores the compact slash form into the editor and clears the queue", async () => {
+	it("does not treat legacy custom-message queues as editable user input", async () => {
 		fixture = await createRealSession();
 		const { session } = fixture;
 		queueCustomSteer(session, "/skill:test-skill arg1 arg2");
 
 		const { ctx, editor } = createStubInteractiveModeContextForUiHelpers(session);
 		const controller = new InputController(ctx);
-		const count = controller.restoreQueuedMessagesToEditor();
+		const count = await controller.restoreQueuedMessagesToEditor();
 
-		expect(count).toBe(1);
-		expect(editor.getText()).toBe("/skill:test-skill arg1 arg2");
-		expect(session.getQueuedMessages()).toEqual({ steering: [], followUp: [] });
+		expect(count).toBe(0);
+		expect(editor.getText()).toBe("");
+		expect(session.getQueuedMessages().steering).toHaveLength(1);
 	});
 });
 

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "bun:test";
 import { InputController } from "@oh-my-pi/pi-coding-agent/modes/controllers/input-controller";
 import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
-import type { DurableInputPayload, DurableQueuedInput } from "@oh-my-pi/pi-coding-agent/session/durable-input-queue";
+import type { DurableQueuedInput } from "@oh-my-pi/pi-coding-agent/session/durable-input-queue";
 import manualContinuePrompt from "../src/prompts/system/manual-continue.md" with { type: "text" };
 
 type FakeEditor = {
@@ -22,7 +22,7 @@ type FakeEditor = {
 	onExpandTools?: () => void;
 	onToggleThinking?: () => void;
 	onExternalEditor?: () => void;
-	onDequeue?: () => void;
+	onDequeue?: () => boolean;
 	onChange?: (text: string) => void;
 	onSubmit?: (text: string) => Promise<void>;
 	setText(text: string): void;
@@ -39,24 +39,24 @@ type DurableProjectionItem = DurableQueuedInput;
 function installDurableInputSeam(
 	ctx: InteractiveModeContext,
 	projection: DurableProjectionItem[],
-	edit: (inputId: string, revision: number, payload: DurableInputPayload) => Promise<DurableQueuedInput>,
-): { clearQueueCalls: () => number; cancelCalls: () => number } {
+): { clearQueueCalls: () => number; cancelledIds: () => readonly string[] } {
 	let clearQueueCalls = 0;
-	let cancelCalls = 0;
+	const cancelledIds: string[] = [];
 	const session = ctx.session as AgentSession;
 	Object.assign(session, {
 		getQueuedInputProjection: () => projection,
-		editQueuedInput: edit,
 		clearQueue: () => {
 			clearQueueCalls += 1;
 			return { steering: [], followUp: [] };
 		},
-		cancelQueuedInput: async () => {
-			cancelCalls += 1;
-			return projection[0]!;
+		cancelQueuedInput: async (inputId: string) => {
+			cancelledIds.push(inputId);
+			const index = projection.findIndex(candidate => candidate.inputId === inputId);
+			const [item] = projection.splice(index, 1);
+			return { ...item!, state: "cancelled" as const };
 		},
-	} satisfies Pick<AgentSession, "getQueuedInputProjection" | "editQueuedInput" | "clearQueue" | "cancelQueuedInput">);
-	return { clearQueueCalls: () => clearQueueCalls, cancelCalls: () => cancelCalls };
+	} satisfies Pick<AgentSession, "getQueuedInputProjection" | "clearQueue" | "cancelQueuedInput">);
+	return { clearQueueCalls: () => clearQueueCalls, cancelledIds: () => cancelledIds };
 }
 async function createContext() {
 	let editorText = "";
@@ -140,6 +140,7 @@ async function createContext() {
 			},
 		} as InteractiveModeContext["keybindings"],
 		pendingImages: [],
+		pendingImageLinks: [],
 		locallySubmittedUserSignatures: new Set<string>(),
 		isKnownSlashCommand: () => false,
 		recordLocalSubmission(this: InteractiveModeContext, text: string, imageCount = 0) {
@@ -275,7 +276,7 @@ describe("InputController keybinding setup", () => {
 		expect(spies.prompt).not.toHaveBeenCalled();
 	});
 
-	it("restores exactly one highest-sequence durable input without class grouping or queue mutation", async () => {
+	it("durably removes the newest queued group and restores it as one editor payload", async () => {
 		const { InputController, ctx, editor } = await createContext();
 		const projection: DurableProjectionItem[] = [
 			{
@@ -283,7 +284,16 @@ describe("InputController keybinding setup", () => {
 				sequence: 2,
 				deliveryClass: "steer",
 				revision: 1,
-				payload: { text: "first steer", images: undefined },
+				payload: { text: "older steer", images: undefined },
+				state: "queued",
+				attempts: [],
+			},
+			{
+				inputId: "follow-8",
+				sequence: 8,
+				deliveryClass: "followUp",
+				revision: 1,
+				payload: { text: "first follow-up", images: undefined },
 				state: "queued",
 				attempts: [],
 			},
@@ -297,83 +307,54 @@ describe("InputController keybinding setup", () => {
 				attempts: [],
 			},
 		];
-		const seam = installDurableInputSeam(ctx, projection, async () => projection[1]!);
+		const seam = installDurableInputSeam(ctx, projection);
 		const controller = new InputController(ctx);
 
-		expect(controller.restoreQueuedMessagesToEditor()).toBe(1);
-		expect(editor.getText()).toBe("latest follow-up");
+		expect(await controller.restoreQueuedMessagesToEditor()).toBe(2);
+		expect(editor.getText()).toBe("first follow-up\n\nlatest follow-up");
+		expect(seam.cancelledIds()).toEqual(["follow-8", "follow-9"]);
 		expect(seam.clearQueueCalls()).toBe(0);
-		expect(seam.cancelCalls()).toBe(0);
+		expect(projection.map(item => item.inputId)).toEqual(["steer-2"]);
 	});
 
-	it("edits the restored durable input by stable identity and revision", async () => {
-		const { InputController, ctx, editor, spies } = await createContext();
-		const projection: DurableProjectionItem[] = [
-			{
-				inputId: "input-7",
-				sequence: 7,
-				deliveryClass: "steer",
-				revision: 3,
-				payload: { text: "original", images: undefined },
-				state: "queued",
-				attempts: [],
-			},
-		];
-		const edits: { inputId: string; revision: number; payload: DurableInputPayload }[] = [];
-		installDurableInputSeam(ctx, projection, async (inputId, revision, payload) => {
-			edits.push({ inputId, revision, payload });
-			return projection[0]!;
-		});
-		const controller = new InputController(ctx);
-		controller.restoreQueuedMessagesToEditor();
-		editor.setText("replacement");
-		controller.setupEditorSubmitHandler();
-
-		await editor.onSubmit?.("replacement");
-
-		expect(edits).toEqual([{ inputId: "input-7", revision: 3, payload: { text: "replacement", images: undefined } }]);
-		expect(editor.getText()).toBe("");
-		expect(spies.prompt).not.toHaveBeenCalled();
-	});
-
-	it("releases a stale queued edit token so the retained draft submits as new input", async () => {
+	it("resubmits an unqueued group through one fresh admission exactly once", async () => {
 		const { InputController, ctx, editor, spies } = await createContext();
 		const session = ctx.session as unknown as { isStreaming: boolean };
 		session.isStreaming = true;
 		const projection: DurableProjectionItem[] = [
 			{
-				inputId: "input-8",
+				inputId: "follow-7",
+				sequence: 7,
+				deliveryClass: "followUp",
+				revision: 3,
+				payload: { text: "first", images: undefined },
+				state: "queued",
+				attempts: [],
+			},
+			{
+				inputId: "follow-8",
 				sequence: 8,
-				deliveryClass: "steer",
-				revision: 5,
-				payload: { text: "original", images: undefined },
+				deliveryClass: "followUp",
+				revision: 3,
+				payload: { text: "second", images: undefined },
 				state: "queued",
 				attempts: [],
 			},
 		];
-		const attemptedRevisions: number[] = [];
-		installDurableInputSeam(ctx, projection, async (_inputId, revision) => {
-			attemptedRevisions.push(revision);
-			throw new Error("queued input input-8 was admitted");
-		});
+		const seam = installDurableInputSeam(ctx, projection);
 		const controller = new InputController(ctx);
-		controller.restoreQueuedMessagesToEditor();
-		editor.setText("keep this draft");
+		await controller.restoreQueuedMessagesToEditor();
 		controller.setupEditorSubmitHandler();
 
-		await editor.onSubmit?.("keep this draft");
+		await editor.onSubmit?.("edited combined payload");
 
-		expect(editor.getText()).toBe("keep this draft");
-		expect(spies.showError).toHaveBeenCalledWith("queued input input-8 was admitted");
-
-		await editor.onSubmit?.("keep this draft");
-
-		expect(attemptedRevisions).toEqual([5]);
+		expect(seam.cancelledIds()).toEqual(["follow-7", "follow-8"]);
 		expect(spies.prompt).toHaveBeenCalledTimes(1);
-		expect(spies.prompt).toHaveBeenCalledWith("keep this draft", {
+		expect(spies.prompt).toHaveBeenCalledWith("edited combined payload", {
 			streamingBehavior: "steer",
 			images: undefined,
 		});
+		expect(editor.getText()).toBe("");
 	});
 
 	it("marks streaming follow-up submissions as local", async () => {
