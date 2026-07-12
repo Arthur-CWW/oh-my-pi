@@ -397,6 +397,22 @@ describe("live SessionRunner", () => {
 		);
 	});
 
+	it("detaches a terminal view after a remote controller preempts it", async () => {
+		const fixture = await createLiveFixture();
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const runner = yield* makeSessionRunnerLive(fixture, { mailboxCapacity: 1, eventCapacity: 4 });
+					const terminal = yield* runner.attachTerminalView(attach("terminal-controller", "controller", 0));
+					const remote = yield* runner.attachView(attach("remote-controller", "controller", 0));
+					if (remote.capability !== "controller") throw new Error("expected controller");
+					yield* terminal.detach();
+					yield* remote.snapshot();
+				}),
+			),
+		);
+	});
+
 	it("decodes and persists steer and follow-up image payloads", async () => {
 		const fixture = await createLiveFixture();
 		await Effect.runPromise(

@@ -3990,7 +3990,10 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 		const detach = Effect.fn("Runner.detachTerminalView")(function* () {
 			yield* enqueue(
 				Effect.gen(function* () {
-					yield* requireController(command.viewId, epoch);
+					const attachedView = yield* requireView(command.viewId);
+					if (attachedView.capability === "controller") {
+						yield* requireController(command.viewId, epoch);
+					}
 					const detachCommand: DetachRunnerViewCommand = {
 						schemaVersion: RUNNER_SCHEMA_VERSION,
 						kind: "detachView",
@@ -4002,7 +4005,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 					};
 					resources.session.unbindPlanResolveCapability(planResolveCapabilityEpoch);
 					views.delete(command.viewId);
-					activeController = undefined;
+					if (activeController?.viewId === command.viewId) activeController = undefined;
 					yield* publishEvent({
 						kind: "viewDetached",
 						metadata: detachCommand,
