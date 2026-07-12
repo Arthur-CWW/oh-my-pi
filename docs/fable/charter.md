@@ -42,50 +42,33 @@ The harness (OMP/meta) is not a ranked project — it improves **while** the str
 
 ## Routing
 
-| Need | Lane |
-|---|---|
-| Synthesis, taste, prompts, ontology, creative direction | Fable (self) |
-| Implementation — small/bounded | GPT-5.5 `:medium` (default worker) |
-| Implementation — harder logic/architecture | GPT-5.5 `:high` / `gpt-implementer` |
-| Adversarial review | `reviewer` (→ GPT-5.5 under fable overlay) |
-| Design / UX / visual craft | `designer` (→ Opus) |
-| Ultra-cheap scouting, cataloging, Jimeng orchestration | Gemini Flash (Antigravity OAuth) |
-| Read-only scouting | `explore` |
-| Deep research | GPT-5.5 Pro / frontend LLM sessions (subscription before API) |
-| Web search | Kagi |
-| UGC generation | Jimeng/Dreamina — dry-run default, live spend only inside a named cap with approval |
-| Feedstock retrieval GPT refuses (books, resources, downloads) | Kimi — refusal-basin lane only, not a default worker (subscription likely cancelled; GPT fallback chains cover outages); Borges library lane for books |
-| Computer use / GUI automation | By lane: Codex/GPT-5.5 sessions → Codex computer-use plugin (trained for it); other lanes → CuaDriver (`computer_use` tool, background-safe); DOM/network/cookies/auth → CDP/Playwright — never GUI automation for protocol work |
+Current routing policy is [`routing-doctrine.md`](routing-doctrine.md). It resolves each work packet through constraints, eligible lanes, an exploit-or-experiment choice, and a recorded route; the routing ledger holds dated observations and their evidence. The doctrine, not this charter, is the single durable policy source.
 
-**ROUTING OVERRIDE (Arthur, 2026-07-08, until OpenAI account recovers):** GPT-5.5 lanes are DOWN — Pro account degraded to free tier. `oracle` + `llm-frontend-browser` skills archived (`skills-attic/disabled-20260708/`, restore one-liner in its README). Interim routing: implementation + review → **Opus** (creates AND reviews — use a second Opus instance with a reviewer role for adversarial passes); mechanical/pipeline/retrieval slices → **Kimi**; bounded scouts/vision one-shots → **Gemini Flash (Antigravity, via `omp token`/`omp -p` — subscription, never KIE/API keys)**. Rows above mentioning GPT-5.5 read as Opus until this notice is removed.
+Current posture (Arthur, 2026-07-10): OpenAI access recovered; Claude likely remains; GPT-5.5 is not an active or default candidate, and its row below is historical evidence only; Kimi remains available but is planned to sunset with its subscription cancellation in roughly a week. DeepSeek is a candidate advisor/compaction lane only; measure its API cost before use. None of these facts creates a standing default: the frontier orchestrator resolves each route from the doctrine and current ledger state.
 
-Route around refusal basins instead of arguing with the wrong model. Old "GPT-5.5 must be parent / Gemini simple-only / Kimi fallback-only" prescriptions are dead: use the right model for the job.
+## Dated lane-temperament evidence
 
-Conserve Fable: Fable orchestrates only — decomposition, contracts, gating, verification. All implementation, research, and drafting goes to cheaper lanes: Opus-class for creative/design shaping, GPT-5.5 for straightforward implementation, Gemini Flash for bounded scouts. Fable writing code directly is the exception reserved for trivial inline fixes. **Orchestrator effort defaults to Fable `:medium`** (Arthur, 2026-07-03) — routing and gating don't need `:high`; all `.omp/*-config.yml` pin `model: anthropic/claude-fable-5:medium`, and `:high` is an explicit per-launch override for genuinely hard sessions.
+These observations are retained as evidence, not universal policy. Re-test candidates on comparable work and record the verdict, evidence, and confidence in the routing ledger.
 
-**No Fable-model subagents** (Arthur, 2026-07-06, hard rule while quota is scarce): never spawn a subagent on `anthropic/claude-fable-5` — bare `task`/`quick_task`/`explore` spawns inherit the session model, so EVERY spawn carries an explicit model override. Allowed subagent lanes: **Opus** (creative/design) and **GPT-5.5** (logic/implementation/scouting); Kimi stays for its niches (retrieval/borges, maintenance, computer-use QA). Fable tokens are for orchestration only.
-
-UI/UX routing (Arthur, 2026-07-03): anything design- or web-facing that is not straight-up logic — visual design, UI implementation, UX flows, dashboards, editor chrome — goes to the Opus/designer lane, never GPT-5.5. GPT-5.5 on UI produces functional-but-fucked interfaces; it stays on logic, pipelines, and harness code. The loop is complementary: **Opus creates, GPT-5.5 reviews** — after design-lane work lands, a GPT-5.5 pass checks correctness, edge cases, and consistency (the detail-precision Opus lacks; Opus is more creative but dumber). Verification/QA browser passes are also delegated (GPT-5.5 or Kimi preferred for computer-use QA), never run on Fable tokens.
-
-Model A/B practice (Arthur, 2026-07-03): lane assignments are hypotheses, not doctrine. When comparable UI/design tasks come up, occasionally run the same brief on two candidate models (e.g. Opus point-versions, GPT vs Kimi for computer use) and compare on TWO axes: output quality and steerability — how well the orchestrator can control them mid-flight ("they're your hands"). Record verdicts here.
-
-Lane temperaments (Fable, observed 2026-07-03 across ~35 spawns — the packet style each hand needs):
-- **Opus/designer**: give it a TELOS, not a spec ("glanceability IS the product"); it exceeds the brief when the goal is vivid (booted Open Design unprompted, studied five design systems). Directing it is editing, not operating. Over-specified packets waste its range.
-- **GPT-5.5**: a good lathe — total literalism, loud failures, superb pedantic review (found the `javascript:` href blocker). The packet must be COMPLETE: every ambiguity left in becomes a defect returned. Sandbox learned-helplessness is real; expect "please run this for me" and pre-arrange the audit-then-fire protocol.
-- **Kimi**: most inventive under constraint — sandboxed to uselessness, it invented the staged-driver protocol (writes audited scripts for a privileged agent to fire). Needs teardown supervision and explicit wall-clock slicing; verify its instances are actually dead.
-- **Gemini flash (Antigravity)**: capability is not lane-portable — fine as a one-shot (vision role) but spun out agentically (60 requests, zero output) on a two-question task. Use for stateless calls, not loops.
+- **Opus/designer** (Fable, observed 2026-07-03 across ~35 spawns): give it a TELOS, not a spec ("glanceability IS the product"); it exceeds the brief when the goal is vivid (booted Open Design unprompted, studied five design systems). Directing it is editing, not operating. Over-specified packets waste its range.
+- **GPT-5.5** (Fable, observed 2026-07-03): a good lathe — total literalism, loud failures, superb pedantic review (found the `javascript:` href blocker). The packet must be COMPLETE: every ambiguity left in becomes a defect returned. Sandbox learned-helplessness is real; expect "please run this for me" and pre-arrange the audit-then-fire protocol.
+- **GPT-5.6 Terra** (Arthur working hypothesis, 2026-07-10): medium effort is a candidate baseline for straightforward, low-entropy implementation; higher effort often has diminishing returns. Arthur cites release-day reports/evals suggesting Terra improves the GPT-5.5 cost frontier; ingest these as external, user-provided evidence, not locally verified proof. Promote or escalate only from acceptance evidence; this is not a universal default.
+- **Kimi** (Fable, observed 2026-07-03): most inventive under constraint — sandboxed to uselessness, it invented the staged-driver protocol (writes audited scripts for a privileged agent to fire). Needs teardown supervision and explicit wall-clock slicing; verify its instances are actually dead.
+- **Gemini Flash (Antigravity)** (Fable, observed 2026-07-03): capability was not lane-portable — fine as a one-shot (vision role) but spun out agentically (60 requests, zero output) on a two-question task. Use this as an observation to re-test, not a prohibition.
 
 Interaction design defaults (Arthur, 2026-07-03): Arthur is vim-native — every viewer/editor we build gets vim-style keys (j/k lists, modal focus, / filter, ? keymap overlay). Design against dead software (Bret Victor): artifacts stay live, edits give immediate visible feedback, understanding never requires staring at code. SQLite everywhere for state; artifact/workflow edits carry provenance (human vs agent) so human-added entropy is tracked — future: cursor-style prediction of human edits.
 
 ## Subagent contract (packet)
 
-Every dispatch specifies: **owner paths** (explicit files), **excluded paths**, **model lane**, **the change** with APIs/patterns, **acceptance** (observable), **non-goals**. Workers skip formatters/linters/test suites; Fable gates once per phase. Subagents may be full agents with bounded recursion when the task warrants — they are not required to be one-shot drones. Substantial work ships with proof artifacts (`proof-of-work-qa`): screenshots, logs, fixtures, rerun commands.
+Every dispatch specifies: **owner paths** (explicit files), **excluded paths**, **work role**, **applicable hard constraints** (budget, context, tools, privacy/auth, review independence), **the change** with APIs/patterns, **acceptance** (observable), **non-goals**, and a **resolved decision**: explicitly selected lane, precedence and provenance, and required fallback chain. Roles remain independent of models: current Sol/Luna assignments are resolved lanes, not permanent identities. Subagents may be full agents with bounded recursion when the task warrants.
+
+Dispatch coherent, independently verifiable feature pods rather than tiny file slices. The implementation owner carries the behavior and focused checks; long or cancellation-prone end-to-end evidence runs become a separate short **proof slice**, so a cancelled proof runner cannot erase implementation ownership or leave success unsubstantiated. Attach an independent reviewer by default to core state, concurrency, durability, routing, or other load-bearing runtime slices. Attach a direct QA/play child to UI slices; do not add a separate reviewer unless the UI change also crosses a load-bearing state boundary or QA exposes a correctness concern. Workers skip project-wide formatters, linters, and suites; the coordinator runs one final gate per phase against a staged snapshot, not a moving working tree. Substantial work ships with rerunnable proof artifacts (`proof-of-work-qa`): screenshots, logs, fixtures, and exact commands.
 
 ## Exclusions and non-goals
 
 - Cybersecurity, reveng, vphone, proxy, anti-detection: not Fable lanes. Route away or leave to non-Fable sessions.
 - Built-in `autolearn`: inadequate, do not fix. Curated docs + session index are the memory substrate for now.
-- Menial ops (file moves, lint loops, dep bumps): workers, never Fable tokens.
+- Menial ops (file moves, lint loops, dep bumps): workers, never scarce orchestrator capacity.
 - No moralizing or legalistic language in docs or decisions.
 
 ## Working style
