@@ -18,7 +18,10 @@ afterEach(async () => {
 	await Promise.all(temporaryDirectories.splice(0).map(path => rm(path, { recursive: true, force: true })));
 });
 
-function harness(loader: { load: (revision: DisposableTerminalRevision) => Promise<DisposableTerminalViewFactory> }) {
+function harness(
+	loader: { load: (revision: DisposableTerminalRevision) => Promise<DisposableTerminalViewFactory> },
+	resolveRevision?: () => Promise<DisposableTerminalRevision>,
+) {
 	let runnerStops = 0;
 	let controllerEpoch = 0;
 	const closedControllers: number[] = [];
@@ -30,6 +33,7 @@ function harness(loader: { load: (revision: DisposableTerminalRevision) => Promi
 	const host = new DisposableTerminalHost({
 		runner,
 		loader,
+		resolveRevision,
 		createController: async () => {
 			const epoch = ++controllerEpoch;
 			return {
@@ -107,6 +111,88 @@ describe("DisposableTerminalHost", () => {
 		expect(() => callbacks[0]!.assertCurrentEpoch()).toThrow("Stale disposable terminal view epoch");
 		expect(callbacks[1]!.isCurrentEpoch()).toBe(true);
 		await state.host.stop();
+	});
+
+	test("mediates callback reloads through the resolver and serialized replacement", async () => {
+		const lifecycle: string[] = [];
+		const callbacks: DisposableTerminalHostCallbacks[] = [];
+		let resolverCalls = 0;
+		const state = harness(
+			{
+				load: async revision => (_controller, hostCallbacks) => {
+					callbacks.push(hostCallbacks);
+					return {
+						run: async () => { lifecycle.push(`${revision.cacheKey}:run`); },
+						quiesce: async () => { lifecycle.push(`${revision.cacheKey}:quiesce`); },
+						dispose: async () => { lifecycle.push(`${revision.cacheKey}:dispose`); },
+					};
+				},
+			},
+			async () => {
+				resolverCalls++;
+				return { specifier: "resolved", cacheKey: "B" };
+			},
+		);
+		await state.host.reload({ specifier: "initial", cacheKey: "A" });
+
+		await callbacks[0]!.requestReload();
+
+		expect(resolverCalls).toBe(1);
+		expect(state.host.revision).toEqual({ specifier: "resolved", cacheKey: "B" });
+		expect(lifecycle).toEqual(["A:run", "A:quiesce", "A:dispose", "B:run"]);
+		expect(state.closedControllers).toEqual([1]);
+		expect(callbacks[0]!.isCurrentEpoch()).toBe(false);
+		expect(callbacks[1]!.isCurrentEpoch()).toBe(true);
+		await state.host.stop();
+	});
+
+	test("rejects stale epoch callback requests without resolving or stopping", async () => {
+		const callbacks: DisposableTerminalHostCallbacks[] = [];
+		let resolverCalls = 0;
+		const state = harness(
+			{
+				load: async () => (_controller, hostCallbacks) => {
+					callbacks.push(hostCallbacks);
+					return { run: async () => {}, quiesce: async () => {}, dispose: async () => {} };
+				},
+			},
+			async () => {
+				resolverCalls++;
+				return { specifier: "resolved", cacheKey: "resolved" };
+			},
+		);
+		await state.host.reload({ specifier: "sample", cacheKey: "A" });
+		await state.host.reload({ specifier: "sample", cacheKey: "B" });
+
+		await expect(callbacks[0]!.requestReload()).rejects.toThrow("Stale disposable terminal view epoch 1");
+		await expect(callbacks[0]!.requestStop()).rejects.toThrow("Stale disposable terminal view epoch 1");
+		expect(resolverCalls).toBe(0);
+		expect(state.runnerStops).toBe(0);
+		expect(state.host.revision?.cacheKey).toBe("B");
+		await state.host.stop();
+	});
+
+	test("requestStop settles completion and stops the runner exactly once", async () => {
+		let callbacks: DisposableTerminalHostCallbacks | undefined;
+		let completionSettled = false;
+		const state = harness({
+			load: async () => (_controller, hostCallbacks) => {
+				callbacks = hostCallbacks;
+				return { run: async () => {}, quiesce: async () => {}, dispose: async () => {} };
+			},
+		});
+		void state.host.completion.then(() => {
+			completionSettled = true;
+		});
+		await state.host.reload({ specifier: "sample", cacheKey: "A" });
+
+		await callbacks!.requestStop();
+		await state.host.completion;
+
+		expect(completionSettled).toBe(true);
+		expect(state.runnerStops).toBe(1);
+		await state.host.stop();
+		expect(state.runnerStops).toBe(1);
 	});
 
 	test("reattaches the known-good revision when loading or initializing fails", async () => {

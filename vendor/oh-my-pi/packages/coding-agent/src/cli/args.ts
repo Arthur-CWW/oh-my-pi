@@ -40,6 +40,7 @@ export interface Args {
 	version?: boolean;
 	mode?: Mode;
 	noSession?: boolean;
+	tuiBundleManifest?: string;
 	sessionDir?: string;
 	providerSessionId?: string;
 	fork?: string;

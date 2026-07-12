@@ -105,6 +105,9 @@ export const STRING_SETTERS: Record<string, StringSetter> = {
 			result.mode = value;
 		}
 	},
+	"--tui-bundle-manifest": (result, value) => {
+		result.tuiBundleManifest = value;
+	},
 	"--fork": (result, value) => {
 		result.fork = value;
 	},

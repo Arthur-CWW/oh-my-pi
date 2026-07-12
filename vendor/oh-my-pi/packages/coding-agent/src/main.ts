@@ -56,6 +56,7 @@ import type { ExtensionUIContext } from "./extensibility/extensions/types";
 import { scheduleMarketplaceAutoUpdate } from "./extensibility/plugins/marketplace-auto-update";
 import type { MCPManager } from "./mcp";
 import { InteractiveMode } from "./modes/interactive-mode";
+import { runDisposableInteractiveMode } from "./modes/run-disposable-interactive-mode";
 import type { PrintModeOptions } from "./modes/print-mode";
 import { CURRENT_SETUP_VERSION } from "./modes/setup-version";
 import { initTheme, stopThemeWatcher } from "./modes/theme/theme";
@@ -64,6 +65,7 @@ import {
 	type CreateAgentSessionOptions,
 	type CreateAgentSessionResult,
 	createAgentSession,
+	createSessionRunner,
 	discoverAuthStorage,
 	loadSessionExtensions,
 } from "./sdk";
@@ -97,6 +99,8 @@ import { EventBus } from "./utils/event-bus";
 import { createReAdoptedSessionReviver } from "./task/executor";
 import { reAdoptDirectChildren } from "./task/re-adopt";
 
+const DISPOSABLE_TUI_MAILBOX_CAPACITY = 64;
+const DISPOSABLE_TUI_EVENT_CAPACITY = 256;
 type RunAcpMode = (createSession: AcpSessionFactory) => Promise<never>;
 type RunPrintMode = (session: AgentSession, options: PrintModeOptions) => Promise<void>;
 type RunRpcMode = (
@@ -1217,7 +1221,11 @@ export async function runRootCommand(
 	// prompt/tool initialization observes the header authority immediately.
 	// SessionManager.create is allocation-only here; persistence still begins
 	// after ownership and normal session creation.
-	if (!sessionManager && startupWorkstream.workstream && !isResumingLaunch) {
+	if (
+		!sessionManager &&
+		(startupWorkstream.workstream || (isInteractive && parsedArgs.tuiBundleManifest !== undefined)) &&
+		!isResumingLaunch
+	) {
 		sessionManager = SessionManager.create(cwd, parsedArgs.sessionDir);
 	}
 
@@ -1362,6 +1370,29 @@ export async function runRootCommand(
 			quiet: settingsInstance.get("startup.quiet"),
 			version: VERSION,
 		});
+
+		if (isInteractive && parsedArgs.tuiBundleManifest !== undefined) {
+			if (!sessionManager || !ownership) {
+				throw new Error("Disposable TUI requires a persistent session; --no-session is not supported");
+			}
+			const { runner } = await logger.time("createSessionRunner", createSessionRunner, {
+				...sessionOptions,
+				eventBus,
+				preloadedExtensions: extensionsResult,
+				sessionManager,
+				ownership,
+				mailboxCapacity: DISPOSABLE_TUI_MAILBOX_CAPACITY,
+				eventCapacity: DISPOSABLE_TUI_EVENT_CAPACITY,
+				childStopPolicy: "detach",
+			});
+			modelRegistry.refreshInBackground();
+			stopStartupWatchdog();
+			logger.endTiming();
+			await runDisposableInteractiveMode(runner, parsedArgs.tuiBundleManifest);
+			stopThemeWatcher();
+			await postmortem.quit(0);
+			return;
+		}
 
 		const { session, setToolUIContext, modelFallbackMessage, lspServers, mcpManager } = await createSession({
 			...sessionOptions,

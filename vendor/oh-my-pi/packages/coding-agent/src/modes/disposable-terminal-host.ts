@@ -10,6 +10,8 @@ export interface DisposableTerminalHostCallbacks {
 	readonly epoch: number;
 	readonly isCurrentEpoch: () => boolean;
 	readonly assertCurrentEpoch: () => void;
+	readonly requestReload: () => Promise<void>;
+	readonly requestStop: () => Promise<void>;
 }
 
 export interface DisposableTerminalView {
@@ -45,7 +47,7 @@ export interface DisposableTerminalRevisionLoader {
 export function createUniqueRevisionLoader(): DisposableTerminalRevisionLoader {
 	return {
 		load: async revision => {
-			const base = revision.specifier.includes(":")
+			const base = revision.specifier.startsWith("file:")
 				? new URL(revision.specifier)
 				: pathToFileURL(revision.specifier);
 			base.searchParams.set("omp-revision", revision.cacheKey);
@@ -67,6 +69,7 @@ export function createUniqueRevisionLoader(): DisposableTerminalRevisionLoader {
 export interface DisposableTerminalHostOptions {
 	readonly runner: SessionRunner;
 	readonly loader: DisposableTerminalRevisionLoader;
+	readonly resolveRevision?: () => Promise<DisposableTerminalRevision>;
 	readonly createController?: (runner: SessionRunner) => Promise<TerminalSessionController>;
 }
 
@@ -82,25 +85,32 @@ export class DisposableTerminalHost {
 	readonly #runner: SessionRunner;
 	readonly #loader: DisposableTerminalRevisionLoader;
 	readonly #createController: (runner: SessionRunner) => Promise<TerminalSessionController>;
+	readonly #resolveRevision: (() => Promise<DisposableTerminalRevision>) | undefined;
 	readonly #runnerScope = Scope.makeUnsafe("sequential");
 	#active: ActiveRevision | undefined;
 	#serial: Promise<void> = Promise.resolve();
 	#epoch = 0;
 	#stopped = false;
 	#stopPromise: Promise<void> | undefined;
+	readonly #completion: Promise<void>;
+	#resolveCompletion!: () => void;
 
 	constructor(options: DisposableTerminalHostOptions) {
 		this.#runner = options.runner;
 		this.#loader = options.loader;
+		this.#resolveRevision = options.resolveRevision;
 		this.#createController = options.createController ?? createTerminalSessionController;
+		this.#completion = new Promise(resolve => {
+			this.#resolveCompletion = resolve;
+		});
 	}
 
 	get revision(): DisposableTerminalRevision | undefined {
 		return this.#active?.revision;
 	}
 
-	get controller(): TerminalSessionController | undefined {
-		return this.#active?.controller;
+	get completion(): Promise<void> {
+		return this.#completion;
 	}
 
 	reload(revision: DisposableTerminalRevision): Promise<void> {
@@ -152,6 +162,8 @@ export class DisposableTerminalHost {
 			}
 			if (errors.length === 1) throw errors[0];
 			if (errors.length > 1) throw new AggregateError(errors, "Disposable terminal host stop failed");
+		}).finally(() => {
+			this.#resolveCompletion();
 		});
 		return this.#stopPromise;
 	}
@@ -176,6 +188,8 @@ export class DisposableTerminalHost {
 					throw new Error(`Stale disposable terminal view epoch ${epoch}`);
 				}
 			},
+			requestReload: () => this.#requestReload(epoch),
+			requestStop: () => this.#requestStop(epoch),
 		};
 		let view: DisposableTerminalView | undefined;
 		try {
@@ -207,6 +221,34 @@ export class DisposableTerminalHost {
 			if (errors.length === 1) throw error;
 			throw new AggregateError(errors, "Disposable terminal view activation failed");
 		}
+	}
+
+	#requestReload(epoch: number): Promise<void> {
+		return new Promise<void>((resolve, reject) => {
+			queueMicrotask(() => {
+				if (this.#active?.epoch !== epoch || this.#stopped) {
+					reject(new Error(`Stale disposable terminal view epoch ${epoch}`));
+					return;
+				}
+				if (!this.#resolveRevision) {
+					reject(new Error("Disposable terminal reload is not configured"));
+					return;
+				}
+				void this.#resolveRevision().then(revision => this.reload(revision)).then(resolve, reject);
+			});
+		});
+	}
+
+	#requestStop(epoch: number): Promise<void> {
+		return new Promise<void>((resolve, reject) => {
+			queueMicrotask(() => {
+				if (this.#active?.epoch !== epoch || this.#stopped) {
+					reject(new Error(`Stale disposable terminal view epoch ${epoch}`));
+					return;
+				}
+				void this.stop().then(resolve, reject);
+			});
+		});
 	}
 
 	async #retire(active: ActiveRevision): Promise<void> {
