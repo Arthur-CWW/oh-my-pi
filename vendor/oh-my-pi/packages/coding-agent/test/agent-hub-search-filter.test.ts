@@ -40,7 +40,10 @@ function stubStdoutGeometry(cols: number): GeometryStub {
 	};
 }
 
-function makeHub(agents: AgentRegistry, options: { focusAgent?: (id: string) => Promise<void> } = {}) {
+function makeHub(
+	agents: AgentRegistry,
+	options: { focusAgent?: (id: string) => Promise<void>; initialAgentId?: string } = {},
+) {
 	let doneCalls = 0;
 	const hub = new AgentHubOverlayComponent({
 		observers: new SessionObserverRegistry(),
@@ -52,6 +55,7 @@ function makeHub(agents: AgentRegistry, options: { focusAgent?: (id: string) => 
 		registry: agents,
 		irc: new IrcBus(agents),
 		focusAgent: options.focusAgent ?? (async () => {}),
+		initialAgentId: options.initialAgentId,
 		externalIrc: null,
 	});
 	return { hub, doneCalls: () => doneCalls };
@@ -85,7 +89,13 @@ async function writeArchivedChildJournal(options: {
 	thinkingLevel?: string;
 }): Promise<void> {
 	const entries = [
-		{ type: "session", version: CURRENT_SESSION_VERSION, id: options.agentId, timestamp: options.updatedAt, cwd: "/tmp" },
+		{
+			type: "session",
+			version: CURRENT_SESSION_VERSION,
+			id: options.agentId,
+			timestamp: options.updatedAt,
+			cwd: "/tmp",
+		},
 		{
 			type: "session_init",
 			id: "init",
@@ -201,10 +211,49 @@ describe("Agent Hub selection and filter", () => {
 		const { hub } = makeHub(agents);
 		expect(renderedAgentIds(hub)).toEqual(["Alpha", "Beta", "Gamma"]);
 		expect(selectedAgentId(hub)).toBe("Alpha");
-		hub.handleInput("j");
+		hub.handleInput("n");
 		expect(selectedAgentId(hub)).toBe("Beta");
-		hub.handleInput("k");
+		hub.handleInput("p");
 		expect(selectedAgentId(hub)).toBe("Alpha");
+		hub.handleInput("n");
+		hub.handleInput("n");
+		expect(selectedAgentId(hub)).toBe("Gamma");
+		hub.handleInput("p");
+		expect(selectedAgentId(hub)).toBe("Beta");
+		hub.dispose();
+	});
+
+	it("opens on the agent currently attached in the main view", () => {
+		geometry = stubStdoutGeometry(120);
+		const agents = new AgentRegistry();
+		registerAgent(agents, "Alpha");
+		registerAgent(agents, "Beta");
+		registerAgent(agents, "Gamma");
+		const { hub } = makeHub(agents, { initialAgentId: "Beta" });
+		expect(selectedAgentId(hub)).toBe("Beta");
+		hub.handleInput("n");
+		expect(selectedAgentId(hub)).toBe("Gamma");
+		hub.handleInput("p");
+		expect(selectedAgentId(hub)).toBe("Beta");
+		hub.dispose();
+	});
+
+	it("keeps scroll and input modes modal", () => {
+		geometry = stubStdoutGeometry(120);
+		const agents = new AgentRegistry();
+		registerAgent(agents, "Alpha");
+		registerAgent(agents, "Beta");
+		const { hub } = makeHub(agents);
+		hub.handleInput("j");
+		expect(selectedAgentId(hub)).toBe("Alpha");
+		hub.handleInput("i");
+		expect(renderedText(hub)).toContain("INPUT");
+		hub.handleInput("n");
+		expect(selectedAgentId(hub)).toBe("Alpha");
+		hub.handleInput("\x1b");
+		expect(renderedText(hub)).toContain("SCROLL");
+		hub.handleInput("n");
+		expect(selectedAgentId(hub)).toBe("Beta");
 		hub.dispose();
 	});
 
@@ -216,7 +265,7 @@ describe("Agent Hub selection and filter", () => {
 		registerAgent(agents, "Gamma", "parked");
 		const { hub } = makeHub(agents);
 
-		hub.handleInput("j");
+		hub.handleInput("n");
 		expect(selectedAgentId(hub)).toBe("Beta");
 		hub.handleInput(".");
 		expect(renderedAgentIds(hub)).toEqual(["Alpha"]);
@@ -267,7 +316,7 @@ describe("Agent Hub selection and filter", () => {
 		expect(selectedAgentId(hub)).toBe("Alpha");
 
 		// Non-first stable selection regression test
-		hub.handleInput("j");
+		hub.handleInput("n");
 		expect(selectedAgentId(hub)).toBe("Beta");
 		registerAgent(agents, "Delta");
 		expect(renderedAgentIds(hub)).toEqual(["Alpha", "Beta", "Gamma", "Delta"]);
@@ -290,7 +339,7 @@ describe("Agent Hub selection and filter", () => {
 		hub2.dispose();
 	});
 
-	it("g/G jump to top/bottom of roster", () => {
+	it("n/p move through the roster", () => {
 		geometry = stubStdoutGeometry(120);
 		const agents = new AgentRegistry();
 		registerAgent(agents, "Alpha");
@@ -305,12 +354,12 @@ describe("Agent Hub selection and filter", () => {
 			},
 		});
 		// Oldest registrations are at the top.
-		hub.handleInput("g");
 		hub.handleInput("\r");
 		expect(focusedId()).toBe("Alpha");
 
-		// Go to bottom (newest).
-		hub.handleInput("G");
+		// Move to the newest registration.
+		hub.handleInput("n");
+		hub.handleInput("n");
 		focus.id = undefined;
 		hub.handleInput("\r");
 		expect(focusedId()).toBe("Gamma");
@@ -334,7 +383,7 @@ describe("Agent Hub selection and filter", () => {
 			activeSearchFieldEntries: 0,
 			materializedRows: 3,
 		});
-		hub.handleInput("G");
+		for (let i = 0; i < 10_000; i++) hub.handleInput("n");
 		expect(renderedAgentIds(hub)).toEqual(["Agent9997", "Agent9998", "Agent9999"]);
 
 		hub.handleInput("/");
@@ -378,6 +427,21 @@ describe("Agent Hub selection and filter", () => {
 
 		hub.dispose();
 	});
+	it("treats vim navigation letters as filter text while text entry is focused", () => {
+		geometry = stubStdoutGeometry(120);
+		const agents = new AgentRegistry();
+		registerAgent(agents, "Alpha");
+		registerAgent(agents, "JkWorker");
+		const { hub } = makeHub(agents);
+
+		hub.handleInput("/");
+		hub.handleInput("j");
+		hub.handleInput("k");
+
+		expect(renderedText(hub)).toContain("/jk");
+		expect(renderedAgentIds(hub)).toEqual(["JkWorker"]);
+		hub.dispose();
+	});
 
 	it("Esc clears filter before closing hub", () => {
 		geometry = stubStdoutGeometry(120);
@@ -417,7 +481,7 @@ describe("Agent Hub selection and filter", () => {
 
 		let focusedId: string | undefined;
 		const { hub } = makeHub(agents, {
-			focusAgent: async (id) => {
+			focusAgent: async id => {
 				focusedId = id;
 			},
 		});
@@ -448,7 +512,7 @@ describe("Agent Hub selection and filter", () => {
 		registerAgent(agents, "Beta");
 		registerAgent(agents, "Gamma");
 		const { hub } = makeHub(agents);
-		hub.handleInput("j");
+		hub.handleInput("n");
 		expect(selectedAgentId(hub)).toBe("Beta");
 		hub.handleInput("/");
 		for (const key of "Alpha") hub.handleInput(key);
@@ -489,7 +553,14 @@ describe("Agent Hub selection and filter", () => {
 			modelId: "anthropic/claude-haiku",
 		});
 		const agents = new AgentRegistry();
-		agents.register({ id: "Main", displayName: "main", kind: "main", session: null, sessionFile: parentFile, status: "parked" });
+		agents.register({
+			id: "Main",
+			displayName: "main",
+			kind: "main",
+			session: null,
+			sessionFile: parentFile,
+			status: "parked",
+		});
 		const { hub } = makeHub(agents);
 
 		hub.handleInput("c");
@@ -516,12 +587,12 @@ describe("Agent Hub selection and filter", () => {
 			registerAgent(agents, `Agent${String(i).padStart(2, "0")}`, i === 8 ? "parked" : "running");
 		}
 		const { hub } = makeHub(agents);
-		for (let i = 0; i < 7; i++) hub.handleInput("j");
+		for (let i = 0; i < 7; i++) hub.handleInput("n");
 		const before = renderedAgentIds(hub);
 		hub.handleInput("\r");
 		hub.handleInput("h");
 		expect(renderedAgentIds(hub)).toEqual(before);
-		hub.handleInput("j");
+		hub.handleInput("n");
 		expect(selectedAgentId(hub)).toBe("Agent10");
 		hub.dispose();
 	});
@@ -548,7 +619,7 @@ describe("Agent Hub selection and filter", () => {
 		expect(selectedAgentId(hub)).toBe("Beta");
 
 		hub.handleInput("\x1b");
-		hub.handleInput("j");
+		hub.handleInput("n");
 		hub.handleInput("\r");
 		expect(focusedId()).toBe("Gamma");
 
@@ -706,11 +777,18 @@ describe("Agent Hub transcript search", () => {
 		geometry = stubStdoutGeometry(120);
 		const agents = new AgentRegistry();
 		agents.register({ id: "Pod", displayName: "Pod", kind: "sub", session: liveSession(), status: "running" });
-		agents.register({ id: "Pod.Leaf", displayName: "Leaf", kind: "sub", parentId: "Pod", session: liveSession(), status: "running" });
+		agents.register({
+			id: "Pod.Leaf",
+			displayName: "Leaf",
+			kind: "sub",
+			parentId: "Pod",
+			session: liveSession(),
+			status: "running",
+		});
 		const { hub } = makeHub(agents);
 		hub.handleInput("t");
 		expect(renderedText(hub)).toContain("Agent Hub · tree");
-		hub.handleInput("j");
+		hub.handleInput("n");
 		hub.handleInput("t");
 		hub.handleInput("t");
 		expect(renderedText(hub)).toContain("Pod.Leaf");
@@ -723,7 +801,14 @@ describe("Agent Hub transcript search", () => {
 		const agents = new AgentRegistry();
 		agents.register({ id: "Pod", displayName: "Pod", kind: "sub", session: liveSession(), status: "running" });
 		for (let index = 0; index < 10_000; index++) {
-			agents.register({ id: `Pod.${index}`, displayName: `Leaf ${index}`, kind: "sub", parentId: "Pod", session: liveSession(), status: "running" });
+			agents.register({
+				id: `Pod.${index}`,
+				displayName: `Leaf ${index}`,
+				kind: "sub",
+				parentId: "Pod",
+				session: liveSession(),
+				status: "running",
+			});
 		}
 		const { hub } = makeHub(agents);
 		hub.handleInput("t");

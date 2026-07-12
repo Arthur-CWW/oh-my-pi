@@ -1291,6 +1291,7 @@ export class SelectorController {
 			cwd: this.ctx.sessionManager.getCwd(),
 			hideThinkingBlock: () => this.ctx.hideThinkingBlock,
 			focusAgent: id => this.ctx.focusAgentSession(id),
+			initialAgentId: this.ctx.focusedAgentId,
 			parentSessionFile: this.ctx.sessionManager.getSessionFile(),
 		});
 		// requireContent stays inert without live or revivable children; explicit

@@ -40,6 +40,12 @@ describe("buildHotkeysMarkdown", () => {
 		expect(markdown).toContain("| `Ctrl+L` | Reset terminal display |");
 		expect(markdown).toContain("| `Alt+Shift+P` | Toggle plan mode |");
 		expect(markdown).toContain("| `#` | Open prompt actions |");
+		expect(markdown).toContain("| `j` / `k` | Scroll the Agent Hub preview");
+		expect(markdown).toContain("| `n` / `p` | Select next / previous agent");
+		expect(markdown).toContain("| `gg` / `G` | Jump to start / end of transcript scrollback |");
+		expect(markdown).toContain(
+			"| `Ctrl+D` / `Ctrl+U` | Scroll transcript preview by half a page outside text entry |",
+		);
 		for (const line of lines) {
 			if (line.length === 0) continue;
 			expect(line.startsWith(" ")).toBe(false);

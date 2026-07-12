@@ -115,7 +115,13 @@ async function writeArchivedChildJournal(options: {
 	message: string;
 }): Promise<void> {
 	const entries = [
-		{ type: "session", version: CURRENT_SESSION_VERSION, id: options.agentId, timestamp: options.updatedAt, cwd: "/tmp" },
+		{
+			type: "session",
+			version: CURRENT_SESSION_VERSION,
+			id: options.agentId,
+			timestamp: options.updatedAt,
+			cwd: "/tmp",
+		},
 		{
 			type: "session_init",
 			id: "init",
@@ -300,8 +306,8 @@ describe("Agent hub Enter activation", () => {
 			hub.openChat(AGENT_ID);
 			expect(renderedText(hub)).toContain("retained message 1999");
 			expect(hub.getRetentionMetrics()).toMatchObject({
-				cachedTranscriptEntries: 2_000,
-				materializedChatComponents: 2_000,
+				cachedTranscriptEntries: 200,
+				materializedChatComponents: 200,
 				liveTimers: 1,
 			});
 			hub.handleInput("\x1b");
@@ -363,7 +369,14 @@ describe("Agent hub Enter activation", () => {
 		});
 		const before = await Bun.file(childFile).text();
 		const agents = new AgentRegistry();
-		agents.register({ id: "Main", displayName: "main", kind: "main", session: null, sessionFile: parentFile, status: "parked" });
+		agents.register({
+			id: "Main",
+			displayName: "main",
+			kind: "main",
+			session: null,
+			sessionFile: parentFile,
+			status: "parked",
+		});
 		const hub = new AgentHubOverlayComponent({
 			observers: new SessionObserverRegistry(),
 			hubKeys: [],
@@ -428,7 +441,14 @@ describe("Agent hub Enter activation", () => {
 			message: "older transcript",
 		});
 		const agents = new AgentRegistry();
-		agents.register({ id: "Main", displayName: "main", kind: "main", session: null, sessionFile: parentFile, status: "parked" });
+		agents.register({
+			id: "Main",
+			displayName: "main",
+			kind: "main",
+			session: null,
+			sessionFile: parentFile,
+			status: "parked",
+		});
 		const hub = new AgentHubOverlayComponent({
 			observers: new SessionObserverRegistry(),
 			hubKeys: [],
@@ -488,7 +508,11 @@ describe("Agent hub Enter activation", () => {
 			ui: {
 				showOverlay: component => {
 					capturedHub = component;
-					return { hide: () => { hideCalls++; } };
+					return {
+						hide: () => {
+							hideCalls++;
+						},
+					};
 				},
 				setFocus: target => {
 					focusTargets.push(target);

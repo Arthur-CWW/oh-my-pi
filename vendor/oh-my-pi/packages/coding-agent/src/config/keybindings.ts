@@ -23,6 +23,12 @@ interface AppKeybindings {
 	"app.suspend": true;
 	"app.display.reset": true;
 	"app.transcript.rawToggle": true;
+	"app.navigation.down": true;
+	"app.navigation.up": true;
+	"app.navigation.pageDown": true;
+	"app.navigation.pageUp": true;
+	"app.navigation.top": true;
+	"app.navigation.bottom": true;
 	"app.thinking.cycle": true;
 	"app.thinking.toggle": true;
 	"app.model.cycleForward": true;
@@ -97,6 +103,30 @@ export const KEYBINDINGS = {
 	"app.transcript.rawToggle": {
 		defaultKeys: "alt+v",
 		description: "Toggle raw semantic transcript",
+	},
+	"app.navigation.down": {
+		defaultKeys: "j",
+		description: "Move or scroll down outside text entry",
+	},
+	"app.navigation.up": {
+		defaultKeys: "k",
+		description: "Move or scroll up outside text entry",
+	},
+	"app.navigation.pageDown": {
+		defaultKeys: "ctrl+d",
+		description: "Move or scroll down half a page outside text entry",
+	},
+	"app.navigation.pageUp": {
+		defaultKeys: "ctrl+u",
+		description: "Move or scroll up half a page outside text entry",
+	},
+	"app.navigation.top": {
+		defaultKeys: "g",
+		description: "Start a jump-to-top sequence outside text entry",
+	},
+	"app.navigation.bottom": {
+		defaultKeys: "shift+g",
+		description: "Jump to bottom outside text entry",
 	},
 	"app.thinking.cycle": {
 		defaultKeys: "shift+tab",

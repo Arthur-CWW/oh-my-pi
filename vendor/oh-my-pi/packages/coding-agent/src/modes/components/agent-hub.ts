@@ -43,10 +43,7 @@ import {
 	MAIN_AGENT_ID,
 	type RegistryEvent,
 } from "../../registry/agent-registry";
-import {
-	listArchivedDirectChildren,
-	type ArchivedDirectChildDescriptor,
-} from "../../internal-urls/history-protocol";
+import { listArchivedDirectChildren, type ArchivedDirectChildDescriptor } from "../../internal-urls/history-protocol";
 import type { AgentSession } from "../../session/agent-session";
 import {
 	BACKGROUND_TAN_DISPATCH_MESSAGE_TYPE,
@@ -65,7 +62,17 @@ import { replaceTabs, shortenPath, TRUNCATE_LENGTHS, truncateToWidth } from "../
 import { canonicalizeMessage, normalizeThinkingDisplay } from "../../utils/thinking-display";
 import type { ObservableSession, SessionObserverRegistry } from "../session-observer-registry";
 import { getEditorTheme, theme } from "../theme/theme";
-import { matchesAppInterrupt, matchesSelectDown, matchesSelectUp } from "../utils/keybinding-matchers";
+import {
+	matchesAppInterrupt,
+	matchesNavigationBottom,
+	matchesNavigationDown,
+	matchesNavigationPageDown,
+	matchesNavigationPageUp,
+	matchesNavigationTop,
+	matchesNavigationUp,
+	matchesSelectDown,
+	matchesSelectUp,
+} from "../utils/keybinding-matchers";
 import { createAdvisorMessageCard } from "./advisor-message";
 import { AssistantMessageComponent } from "./assistant-message";
 import { createBackgroundTanDispatchBlock } from "./background-tan-message";
@@ -95,6 +102,10 @@ const CHAT_REFRESH_DEBOUNCE_MS = 80;
 const LEFT_TAP_WINDOW_MS = 500;
 /** Completed journal rows shown without an explicit archive expansion. */
 const RECENT_COMPLETED_LIMIT = 20;
+/** Maximum bytes retained while glancing at a transcript in the cockpit. */
+const PREVIEW_TAIL_BYTES = 256 * 1024;
+/** Maximum parsed message entries retained for the selected preview. */
+const PREVIEW_MAX_ENTRIES = 200;
 
 /** Compute the max content width for the current terminal, accounting for chrome. */
 function contentWidth(): number {
@@ -140,9 +151,7 @@ interface ExternalPeerRow {
 }
 
 /** A selectable local agent row; archived children never become registry refs. */
-type HubAgentRow =
-	| { kind: "active"; ref: AgentRef }
-	| { kind: "archived"; descriptor: ArchivedDirectChildDescriptor };
+type HubAgentRow = { kind: "active"; ref: AgentRef } | { kind: "archived"; descriptor: ArchivedDirectChildDescriptor };
 
 function externalIrcDbPath(): string {
 	return path.join(os.homedir(), ".omp", "agent", "irc-bus.sqlite");
@@ -223,7 +232,6 @@ function shortProviderName(provider: string): string {
 	return PROVIDER_SHORT_NAMES[provider] ?? provider.slice(0, 2).toUpperCase();
 }
 
-
 function splitThinkingSuffix(value: string): { id: string; thinking: string | undefined } {
 	const suffixStart = value.lastIndexOf(":");
 	if (suffixStart <= 0 || suffixStart === value.length - 1) return { id: value, thinking: undefined };
@@ -263,7 +271,10 @@ function abbreviateResolvedModel(parts: ResolvedModelParts): string {
 	const abbreviation = MODEL_ABBREVIATIONS[modelKey];
 	if (abbreviation) return abbreviation;
 
-	const id = parts.id.replace(/^gpt-/, "").replace(/^claude-/, "").toLowerCase();
+	const id = parts.id
+		.replace(/^gpt-/, "")
+		.replace(/^claude-/, "")
+		.toLowerCase();
 
 	let family = "";
 	for (const f of Object.keys(VARIANT_ALIASES)) {
@@ -365,7 +376,7 @@ function fixedLane(value: string, width: number): string {
 
 function fixedLaneWithSeparator(value: string, width: number): string {
 	const truncated = truncateToWidth(replaceTabs(value), width - 1);
-	return truncated + padding(Math.max(0, (width - 1) - visibleWidth(truncated))) + " ";
+	return truncated + padding(Math.max(0, width - 1 - visibleWidth(truncated))) + " ";
 }
 
 function renderHubColumns(options: {
@@ -381,9 +392,7 @@ function renderHubColumns(options: {
 	const modelLaneWidth = getModelLaneWidth(options.width);
 	const stateLaneWidth = getStateLaneWidth(options.width);
 
-	const model = options.model
-		? modelLane(options.model, modelLaneWidth)
-		: " ".repeat(modelLaneWidth);
+	const model = options.model ? modelLane(options.model, modelLaneWidth) : " ".repeat(modelLaneWidth);
 	const state = fixedLaneWithSeparator(options.state, stateLaneWidth);
 
 	const prefixWidth = modelLaneWidth + stateLaneWidth;
@@ -391,7 +400,10 @@ function renderHubColumns(options: {
 	const available = Math.max(1, innerWidth - prefixWidth);
 	let extras = optional.map(value => sanitizeLine(value, TRUNCATE_LENGTHS.TITLE));
 	const COLUMN_GAP = " ";
-	while (extras.length > 0 && extras.reduce((sum, value) => sum + COLUMN_GAP.length + visibleWidth(value), 0) > Math.max(0, available - 4)) {
+	while (
+		extras.length > 0 &&
+		extras.reduce((sum, value) => sum + COLUMN_GAP.length + visibleWidth(value), 0) > Math.max(0, available - 4)
+	) {
 		extras.shift();
 	}
 	const extraWidth = extras.reduce((sum, value) => sum + COLUMN_GAP.length + visibleWidth(value), 0);
@@ -399,7 +411,6 @@ function renderHubColumns(options: {
 	const name = fixedLane(options.name, nameWidth);
 	return `${model}${state}${name}${extras.map(value => `${COLUMN_GAP}${value}`).join("")}`;
 }
-
 
 /** Guest-side proxy for hub actions executed on the collab host. */
 export interface AgentHubRemote {
@@ -456,6 +467,8 @@ export interface AgentHubDeps {
 	expandKeys?: KeyId[];
 	/** Focus the main view on this agent's live session (ctx.focusAgentSession). When absent (collab guest, tests), Enter opens the in-hub chat view instead. */
 	focusAgent?: (id: string) => Promise<void>;
+	/** Agent currently attached in the main view; the cockpit opens with this row selected. */
+	initialAgentId?: string;
 	/** Collab guest: route actions/transcripts to the host instead of local sessions. */
 	remote?: AgentHubRemote;
 	/** Queue/admission projection for the selected agent, if the host exposes one. */
@@ -530,6 +543,10 @@ export class AgentHubOverlayComponent extends Container {
 	#selectedRow = 0;
 	#selectedAgentKey: string | undefined;
 	#tableScrollOffset = 0;
+	/** Modal cockpit state: scroll is the default; input forwards text to the selected agent. */
+	#cockpitMode: "scroll" | "input" = "scroll";
+	#cockpitPreview = true;
+	#previewRenderedHeight = 0;
 	#showTerminalAgents = false;
 	#hiddenTerminalCount = 0;
 	#showRunningOnly = false;
@@ -551,19 +568,21 @@ export class AgentHubOverlayComponent extends Container {
 	#archivedLoadToken = 0;
 	#archiveSourceSessionFile: string | undefined;
 
-    /** Flat preserves activity order; tree groups direct and nested children by registry parentage. */
-    #topologyView: "flat" | "tree" = "flat";
-    /** Collapsed node ids, retained by id across registry/filter refreshes. */
-    #foldedAgentIds = new Set<string>();
-    /** Active tree depth for visible rows; only populated in tree view. */
-    #treeDepthById = new Map<string, number>();
-    /** Direct child counts for folded-row summaries. */
-    #hiddenDescendantsById = new Map<string, number>();
-    /** First row index per group/root for H/L navigation. */
-    #groupStartIndexes: number[] = [];
-    /** Pending z prefix for Vim folds; table-only so chat input remains literal. */
-    #foldPrefixActive = false;
-    #showLegend = false;
+	/** Flat preserves activity order; tree groups direct and nested children by registry parentage. */
+	#topologyView: "flat" | "tree" = "flat";
+	/** Collapsed node ids, retained by id across registry/filter refreshes. */
+	#foldedAgentIds = new Set<string>();
+	/** Active tree depth for visible rows; only populated in tree view. */
+	#treeDepthById = new Map<string, number>();
+	/** Direct child counts for folded-row summaries. */
+	#hiddenDescendantsById = new Map<string, number>();
+	/** First row index per group/root for H/L navigation. */
+	#groupStartIndexes: number[] = [];
+	/** Pending z prefix for Vim folds; table-only so chat input remains literal. */
+	#foldPrefixActive = false;
+	/** Vim `g` prefix is scoped to the table so a lone `g` never jumps. */
+	#tableGotoPrefixActive = false;
+	#showLegend = false;
 	// Chat state
 	#chatAgentId: string | undefined;
 	#chatArchived: ArchivedDirectChildDescriptor | undefined;
@@ -571,7 +590,9 @@ export class AgentHubOverlayComponent extends Container {
 	#sessionUnsubscribe: (() => void) | undefined;
 	#attachedSession: AgentSession | undefined;
 	#chatRefreshTimer: NodeJS.Timeout | undefined;
-	#transcriptCache: { path: string; bytesRead: number; entries: SessionMessageEntry[]; model?: string; thinking?: string } | undefined;
+	#transcriptCache:
+		| { path: string; bytesRead: number; entries: SessionMessageEntry[]; model?: string; thinking?: string }
+		| undefined;
 
 	// Chat transcript: the same component renderers as the main session
 	// transcript, assembled incrementally from the persisted JSONL entries.
@@ -606,6 +627,8 @@ export class AgentHubOverlayComponent extends Container {
 	#viewportHeight = 20;
 	#wasAtBottom = true;
 	#detailPrefixActive = false;
+	/** Vim `g` prefix is scoped to transcript navigation and only armed outside the editor. */
+	#viewerGotoPrefixActive = false;
 	#viewerHeaderLines: string[] = [];
 	#lastLeftTap = 0;
 
@@ -669,6 +692,12 @@ export class AgentHubOverlayComponent extends Container {
 		if (this.#visibleActiveRows.length > 0) {
 			this.#selectedRow = 0;
 			this.#selectedAgentKey = this.#selectedTableKey();
+			const initialIndex = deps.initialAgentId ? this.#findTableIndex(`agent:${deps.initialAgentId}`) : -1;
+			if (initialIndex >= 0) {
+				this.#selectedRow = initialIndex;
+				this.#selectedAgentKey = `agent:${deps.initialAgentId}`;
+			}
+			this.#syncSelectedPreview();
 		}
 	}
 
@@ -685,7 +714,8 @@ export class AgentHubOverlayComponent extends Container {
 			observerEntries: this.#observerById.size,
 			externalIdentityRows: this.#externalRows.length,
 			archivedIdentityRows: this.#archivedRows.length,
-			materializedRows: this.#totalTableRows() === 0 ? 0 : Math.min(this.#totalTableRows(), this.#tableViewportCapacity()),
+			materializedRows:
+				this.#totalTableRows() === 0 ? 0 : Math.min(this.#totalTableRows(), this.#tableViewportCapacity()),
 			externalOrderEntries: this.#externalOrder.size,
 			cachedTranscriptEntries: this.#transcriptCache?.entries.length ?? 0,
 			materializedChatComponents: this.#chatLog.children.length,
@@ -843,11 +873,13 @@ export class AgentHubOverlayComponent extends Container {
 			const task = observed?.description ?? observed?.progress?.task ?? "";
 			const model = observed?.progress?.resolvedModel ?? "";
 			const source = observed?.progress?.routeReceipt?.source ?? "";
-			this.#activeSearchFields.set(ref.id, `${ref.id}\n${ref.displayName}\n${ref.status}\n${task}\n${model}\n${source}`.toLowerCase());
+			this.#activeSearchFields.set(
+				ref.id,
+				`${ref.id}\n${ref.displayName}\n${ref.status}\n${task}\n${model}\n${source}`.toLowerCase(),
+			);
 		}
 		this.#searchFieldsDirty = false;
 	}
-
 
 	#sameExternalRows(left: readonly ExternalPeerRow[], right: readonly ExternalPeerRow[]): boolean {
 		if (left.length !== right.length) return false;
@@ -928,17 +960,23 @@ export class AgentHubOverlayComponent extends Container {
 		if (this.#filterDirty) this.#applyFilter();
 	}
 
-
 	#tableViewportCapacity(): number {
 		const termHeight = process.stdout.rows || 40;
 		const legendLines = this.#showLegend ? 7 : 0;
-		return Math.max(3, termHeight - 7 - legendLines - (this.#notice ? 1 : 0) - (this.#tableFilterEditing ? 1 : 0));
+		return Math.max(
+			3,
+			termHeight -
+				7 -
+				legendLines -
+				(this.#notice ? 1 : 0) -
+				(this.#tableFilterEditing ? 1 : 0) -
+				this.#previewRenderedHeight,
+		);
 	}
 	/** Recompute selectable identities from the cached search fields; materialize row variants only at the viewport. */
 	#treeActiveRows(rows: readonly AgentRef[]): readonly AgentRef[] {
-		this.#treeDepthById.clear();
-		this.#hiddenDescendantsById.clear();
-		this.#groupStartIndexes = [];
+		// Tree metadata is cleared once by #applyFilter so sections can contribute
+		// to one coherent lineage projection.
 		if (this.#topologyView === "flat") return rows;
 
 		const byParent = new Map<string | undefined, AgentRef[]>();
@@ -963,11 +1001,12 @@ export class AgentHubOverlayComponent extends Container {
 					(byParent.get(node.id) ?? []).reduce((total, child) => total + 1 + count(child), 0);
 				descendantCount = children.reduce((total, child) => total + 1 + count(child), 0);
 			}
-			if (this.#foldedAgentIds.has(row.id) && descendantCount > 0) this.#hiddenDescendantsById.set(row.id, descendantCount);
+			if (this.#foldedAgentIds.has(row.id) && descendantCount > 0)
+				this.#hiddenDescendantsById.set(row.id, descendantCount);
 			return flattened.length - start - 1;
 		};
 		for (const root of byParent.get(undefined) ?? []) {
-			this.#groupStartIndexes.push(flattened.length);
+			this.#groupStartIndexes.push(this.#groupStartIndexes.length === 0 ? flattened.length : -flattened.length - 1);
 			append(root, 0);
 		}
 		return flattened;
@@ -1000,7 +1039,9 @@ export class AgentHubOverlayComponent extends Container {
 		if (!ref || this.#topologyView !== "tree") return;
 		if (child) {
 			const depth = this.#treeDepthById.get(ref.id) ?? 0;
-			const next = this.#visibleActiveRows.slice(this.#selectedRow + 1).find(candidate => (this.#treeDepthById.get(candidate.id) ?? 0) === depth + 1);
+			const next = this.#visibleActiveRows
+				.slice(this.#selectedRow + 1)
+				.find(candidate => (this.#treeDepthById.get(candidate.id) ?? 0) === depth + 1);
 			if (next) this.#selectedAgentKey = `agent:${next.id}`;
 		} else if (ref.parentId && this.#treeDepthById.has(ref.parentId)) {
 			this.#selectedAgentKey = `agent:${ref.parentId}`;
@@ -1017,6 +1058,9 @@ export class AgentHubOverlayComponent extends Container {
 	}
 	#applyFilter(): void {
 		const q = this.#tableFilterQuery.toLowerCase();
+		this.#treeDepthById.clear();
+		this.#hiddenDescendantsById.clear();
+		this.#groupStartIndexes = [];
 		const matches = (rows: readonly AgentRef[]) => (q ? rows.filter(ref => this.#matchesTableFilter(ref, q)) : rows);
 		const running = matches(this.#orderedStatus("running"));
 		const idleRows = this.#showRunningOnly ? [] : matches(this.#orderedStatus("idle"));
@@ -1030,7 +1074,8 @@ export class AgentHubOverlayComponent extends Container {
 			idle.push(ref);
 		}
 		const parked = this.#showRunningOnly || !q ? [] : matches(this.#orderedStatus("parked"));
-		const terminal = this.#showRunningOnly || !this.#showTerminalAgents ? [] : matches(this.#orderedStatus("aborted"));
+		const terminal =
+			this.#showRunningOnly || !this.#showTerminalAgents ? [] : matches(this.#orderedStatus("aborted"));
 		this.#sectionStarts = [];
 		const active: AgentRef[] = [];
 		for (const [label, rows] of [
@@ -1042,7 +1087,13 @@ export class AgentHubOverlayComponent extends Container {
 		] as const) {
 			if (rows.length === 0) continue;
 			this.#sectionStarts.push({ index: active.length, label: `${label} (${rows.length})` });
-			active.push(...this.#treeActiveRows(rows));
+			const groupStart = this.#groupStartIndexes.length;
+			const sectionRows = this.#treeActiveRows(rows);
+			for (let i = groupStart; i < this.#groupStartIndexes.length; i++) {
+				const local = this.#groupStartIndexes[i]!;
+				this.#groupStartIndexes[i] = active.length + (local < 0 ? -local - 1 : local);
+			}
+			active.push(...sectionRows);
 		}
 		this.#visibleActiveRows = active;
 		const filteredArchived = this.#showArchivedChildren
@@ -1050,9 +1101,14 @@ export class AgentHubOverlayComponent extends Container {
 			: [];
 		this.#visibleArchivedRows = this.#showRunningOnly ? [] : filteredArchived;
 		if (this.#visibleArchivedRows.length > 0) {
-			this.#sectionStarts.push({ index: active.length, label: `Archived completed (${this.#visibleArchivedRows.length})` });
+			this.#sectionStarts.push({
+				index: active.length,
+				label: `Archived completed (${this.#visibleArchivedRows.length})`,
+			});
 		}
-		const filteredExternal = q ? this.#externalRows.filter(row => this.#matchesExternalFilter(row, q)) : this.#externalRows;
+		const filteredExternal = q
+			? this.#externalRows.filter(row => this.#matchesExternalFilter(row, q))
+			: this.#externalRows;
 		this.#visibleExternalRows = this.#showRunningOnly ? [] : filteredExternal;
 		this.#filterDirty = false;
 		this.#resolveSelection();
@@ -1127,8 +1183,63 @@ export class AgentHubOverlayComponent extends Container {
 	#moveTableSelection(delta: number): void {
 		const totalRows = this.#totalTableRows();
 		if (totalRows === 0) return;
+		const previous = this.#selectedRow;
 		this.#selectedRow = Math.max(0, Math.min(this.#selectedRow + delta, totalRows - 1));
 		this.#syncSelectedKey();
+		if (this.#selectedRow !== previous) this.#syncSelectedPreview();
+	}
+
+	/** Swap only the selected preview and its one live subscription. */
+	#syncSelectedPreview(): void {
+		if (!this.#cockpitPreview) return;
+		const row = this.#selectedAgentRow();
+		const nextId =
+			row?.kind === "active" ? row.ref.id : row?.kind === "archived" ? row.descriptor.agentId : undefined;
+		const nextArchive = row?.kind === "archived" ? row.descriptor : undefined;
+		if (nextId === this.#chatAgentId && nextArchive === this.#chatArchived) return;
+		this.#detachLiveSession();
+		this.#resetChatLog();
+		this.#transcriptCache = undefined;
+		this.#chatAgentId = nextId;
+		this.#chatArchived = nextArchive;
+		this.#scrollOffset = 0;
+		this.#wasAtBottom = true;
+		this.#chatSearchQuery = "";
+		this.#chatSearchMatches = [];
+		this.#editor.setText("");
+		if (!nextId) {
+			this.#viewerHeaderLines = [];
+			return;
+		}
+		this.#attachLiveSession();
+		this.#rebuildChatContent();
+	}
+
+	#renderPreview(width: number): string[] {
+		if (!this.#chatAgentId) {
+			this.#previewRenderedHeight = 3;
+			return [theme.fg("dim", " No agent transcript selected."), ...new DynamicBorder().render(width)];
+		}
+		const innerWidth = Math.max(20, width - 2);
+		const rendered = this.#chatPlaceholder
+			? [theme.fg("dim", this.#chatPlaceholder)]
+			: this.#chatLog.render(innerWidth);
+		const content = rendered.length > 0 ? rendered : [theme.fg("dim", "No messages yet.")];
+		this.#viewportHeight = Math.max(4, Math.min(12, Math.floor((process.stdout.rows || 40) * 0.35)));
+		this.#lastMaxScroll = Math.max(0, content.length - this.#viewportHeight);
+		if (this.#wasAtBottom && !this.#chatSearchQuery) this.#scrollOffset = this.#lastMaxScroll;
+		this.#scrollOffset = Math.max(0, Math.min(this.#scrollOffset, this.#lastMaxScroll));
+		this.#chatRenderedContent = content;
+		const mode = this.#cockpitMode === "input" ? theme.fg("accent", "INPUT") : theme.fg("dim", "SCROLL");
+		const lines = [` ${theme.fg("accent", "Preview transcript")}  ${mode}`];
+		for (const row of content.slice(this.#scrollOffset, this.#scrollOffset + this.#viewportHeight))
+			lines.push(` ${row}`);
+		if (this.#cockpitMode === "input" && !this.#chatArchived) {
+			for (const editorLine of this.#editor.render(innerWidth)) lines.push(` ${editorLine}`);
+		}
+		lines.push(...new DynamicBorder().render(width));
+		this.#previewRenderedHeight = lines.length;
+		return lines;
 	}
 
 	#visibleAgentRowCount(): number {
@@ -1331,24 +1442,31 @@ export class AgentHubOverlayComponent extends Container {
 		const counts = this.#statusSummary();
 		const filterIndicator = this.#tableFilterQuery
 			? theme.fg("accent", ` /${this.#tableFilterQuery}`) +
-				theme.fg("dim", ` (${this.#totalTableRows()}/${this.#registryRefs.size + this.#archivedRows.length + this.#externalRows.length})`)
+				theme.fg(
+					"dim",
+					` (${this.#totalTableRows()}/${this.#registryRefs.size + this.#archivedRows.length + this.#externalRows.length})`,
+				)
 			: "";
-		const terminalIndicator = this.#hiddenTerminalCount > 0 ? theme.fg("dim", ` · ${this.#hiddenTerminalCount} terminal hidden`) : "";
+		const terminalIndicator =
+			this.#hiddenTerminalCount > 0 ? theme.fg("dim", ` · ${this.#hiddenTerminalCount} terminal hidden`) : "";
 		const archiveIndicator = this.#showArchivedChildren ? theme.fg("dim", " · archived") : "";
 		const focusIndicator = this.#showRunningOnly ? theme.fg("dim", ` · ${this.#focusHiddenCount()} hidden`) : "";
 		lines.push(
 			` ${theme.fg("accent", "Agent Hub")}${theme.fg("dim", ` · ${this.#topologyView}`)}${counts ? theme.fg("dim", `${theme.sep.dot}${counts}`) : ""}${terminalIndicator}${archiveIndicator}${focusIndicator}${filterIndicator}`,
 		);
 		lines.push(...new DynamicBorder().render(width));
+		lines.push(...this.#renderPreview(width));
 		if (this.#showLegend) {
 			lines.push(...this.#renderLegend(width));
 			lines.push(...new DynamicBorder().render(width));
 		}
 		const totalRows = this.#totalTableRows();
-		if (totalRows === 0 && this.#showRunningOnly) lines.push(` ${theme.fg("dim", "No running subagents · . to show all")}`);
+		if (totalRows === 0 && this.#showRunningOnly)
+			lines.push(` ${theme.fg("dim", "No running subagents · . to show all")}`);
 		else if (totalRows === 0 && this.#statusCounts.parked > 0 && !this.#tableFilterQuery) {
 			lines.push(` ${theme.fg("dim", `Parked (${this.#statusCounts.parked}) · / to search and expand`)}`);
-		} else if (totalRows === 0 && !this.#tableFilterQuery) lines.push(` ${theme.fg("dim", "no subagents yet — task spawns appear here")}`);
+		} else if (totalRows === 0 && !this.#tableFilterQuery)
+			lines.push(` ${theme.fg("dim", "no subagents yet — task spawns appear here")}`);
 		else if (totalRows === 0) lines.push(` ${theme.fg("dim", "no matches")}`);
 		else {
 			const maxVisible = this.#tableViewportCapacity();
@@ -1366,10 +1484,19 @@ export class AgentHubOverlayComponent extends Container {
 				const section = this.#sectionStarts.find(candidate => candidate.index === i);
 				if (section) lines.push(` ${theme.fg("accent", section.label)}`);
 				const active = this.#visibleActiveRows[i];
-				if (active) { lines.push(this.#renderRow(active, i === this.#selectedRow, width)); continue; }
+				if (active) {
+					lines.push(this.#renderRow(active, i === this.#selectedRow, width));
+					continue;
+				}
 				const archived = this.#visibleArchivedRows[i - activeRowCount];
-				if (archived) { lines.push(this.#renderArchivedRow(archived, i === this.#selectedRow, width)); continue; }
-				if (!externalHeaderShown) { lines.push(` ${theme.fg("dim", "External peers")}`); externalHeaderShown = true; }
+				if (archived) {
+					lines.push(this.#renderArchivedRow(archived, i === this.#selectedRow, width));
+					continue;
+				}
+				if (!externalHeaderShown) {
+					lines.push(` ${theme.fg("dim", "External peers")}`);
+					externalHeaderShown = true;
+				}
 				const external = this.#visibleExternalRows[i - agentRowCount];
 				if (external) lines.push(this.#renderExternalRow(external, i === this.#selectedRow, width));
 			}
@@ -1379,10 +1506,13 @@ export class AgentHubOverlayComponent extends Container {
 			lines.push(` ${theme.fg("dim", `Parked (${this.#statusCounts.parked}) collapsed · / to search and expand`)}`);
 		}
 		if (this.#notice) lines.push(` ${theme.fg("error", sanitizeLine(this.#notice, Math.max(10, width - 2)))}`);
-		if (this.#tableFilterEditing) lines.push(` ${theme.fg("accent", "/")}${this.#tableFilterQuery}${theme.fg("accent", "▏")}`);
+		if (this.#tableFilterEditing)
+			lines.push(` ${theme.fg("accent", "/")}${this.#tableFilterQuery}${theme.fg("accent", "▏")}`);
 		lines.push("");
 		const focusHint = this.#showRunningOnly ? ". show all" : ". running only";
-		lines.push(` ${theme.fg("dim", `j/k:select  ?:legend  ctrl-u/d:page  gg/G:oldest/newest  Enter:open  t:tree/flat  h/l:parent/child  H/L:group  za/zc/zo/zC/zO/zM/zR:fold  p:park stale  c:archived  /:filter  ${focusHint}  Esc/q:close`)}`);
+		lines.push(
+			` ${theme.fg("dim", `SCROLL j/k,ctrl-u/d,g/G:preview  n/p:agent  i:input  Enter:attach  /:filter  t:tree/flat  h/l:parent/child  H/L:group  ?:legend  ${focusHint}  Esc/q:close`)}`,
+		);
 		lines.push(...new DynamicBorder().render(width));
 		return lines;
 	}
@@ -1391,15 +1521,18 @@ export class AgentHubOverlayComponent extends Container {
 		const active = this.#selectedInternalRef();
 		if (active) {
 			const observed = this.#observerById.get(active.id);
-			const cachedRoute = this.#transcriptCache?.path === active.sessionFile && this.#transcriptCache?.model
-				? `${this.#transcriptCache.model}${this.#transcriptCache.thinking ? `:${this.#transcriptCache.thinking}` : ""}`
-				: undefined;
+			const cachedRoute =
+				this.#transcriptCache?.path === active.sessionFile && this.#transcriptCache?.model
+					? `${this.#transcriptCache.model}${this.#transcriptCache.thinking ? `:${this.#transcriptCache.thinking}` : ""}`
+					: undefined;
 			const model = observed?.progress?.resolvedModel ?? cachedRoute;
 			return { id: active.id, model };
 		}
 		const archived = this.#selectedArchivedRow();
 		if (archived) {
-			const model = archived.modelId ? `${archived.modelId}${archived.thinkingLevel ? `:${archived.thinkingLevel}` : ""}` : undefined;
+			const model = archived.modelId
+				? `${archived.modelId}${archived.thinkingLevel ? `:${archived.thinkingLevel}` : ""}`
+				: undefined;
 			return { id: archived.agentId, model };
 		}
 		const external = this.#selectedExternalRow();
@@ -1419,7 +1552,9 @@ export class AgentHubOverlayComponent extends Container {
 			lines.push(` ${theme.fg("dim", "Selected Agent:")} ${theme.bold(selectedRow.id)}`);
 			if (selectedRow.model) {
 				const parts = parseResolvedModel(selectedRow.model);
-				const authStr = SUBSCRIPTION_MODEL_PROVIDERS.has(parts.provider ?? "") ? "Subscription (S)" : "Auth/Paid (A)";
+				const authStr = SUBSCRIPTION_MODEL_PROVIDERS.has(parts.provider ?? "")
+					? "Subscription (S)"
+					: "Auth/Paid (A)";
 				const effortStr = parts.thinking ? parts.thinking : "none";
 				lines.push(`   ${theme.fg("dim", "Provider:")} ${parts.provider ?? "none"}`);
 				lines.push(`   ${theme.fg("dim", "Model:")}    ${parts.id}`);
@@ -1448,20 +1583,29 @@ export class AgentHubOverlayComponent extends Container {
 	#renderRow(ref: AgentRef, selected: boolean, width: number): string {
 		const cursor = selected ? theme.fg("accent", theme.nav.cursor) : " ";
 		const depth = this.#treeDepthById.get(ref.id) ?? 0;
-		const prefix = this.#topologyView === "tree" ? `${"  ".repeat(depth)}${this.#hiddenDescendantsById.has(ref.id) ? "▸ " : "▾ "}` : "";
-		const context = ref.parentId === MAIN_AGENT_ID ? "MAIN CONTEXT" : ref.parentId ? "GROUP CONTEXT" : "SEPARATE/HUB-ONLY";
+		const prefix =
+			this.#topologyView === "tree"
+				? `${"  ".repeat(depth)}${this.#hiddenDescendantsById.has(ref.id) ? "▸ " : "▾ "}`
+				: "";
+		const context =
+			ref.parentId === MAIN_AGENT_ID ? "MAIN CONTEXT" : ref.parentId ? "GROUP CONTEXT" : "SEPARATE/HUB-ONLY";
 		const observed = this.#observableFor(ref.id);
 		const task = observed?.description ?? observed?.progress?.task;
 		const age = formatAge(Math.max(1, Math.round((Date.now() - ref.lastActivity) / 1000)));
 		const unread = this.#irc.unreadCount(ref.id);
 		const hiddenDescendants = this.#hiddenDescendantsById.get(ref.id);
-		const tail = [unread > 0 ? `⧉ ${unread}` : undefined, hiddenDescendants ? `+${hiddenDescendants} folded` : undefined]
+		const tail = [
+			unread > 0 ? `⧉ ${unread}` : undefined,
+			hiddenDescendants ? `+${hiddenDescendants} folded` : undefined,
+		]
 			.filter(Boolean)
 			.join(" ");
-		const cachedRoute = this.#transcriptCache?.path === ref.sessionFile && this.#transcriptCache?.model
-			? `${this.#transcriptCache.model}${this.#transcriptCache.thinking ? `:${this.#transcriptCache.thinking}` : ""}`
-			: undefined;
-		const model = observed?.progress?.resolvedModel ?? cachedRoute ?? ref.recovery?.hotswapModel ?? ref.recovery?.model;
+		const cachedRoute =
+			this.#transcriptCache?.path === ref.sessionFile && this.#transcriptCache?.model
+				? `${this.#transcriptCache.model}${this.#transcriptCache.thinking ? `:${this.#transcriptCache.thinking}` : ""}`
+				: undefined;
+		const model =
+			observed?.progress?.resolvedModel ?? cachedRoute ?? ref.recovery?.hotswapModel ?? ref.recovery?.model;
 		const row = renderHubColumns({
 			width: Math.max(10, width - 1),
 			model,
@@ -1478,7 +1622,8 @@ export class AgentHubOverlayComponent extends Container {
 		const cursor = selected ? theme.fg("accent", theme.nav.cursor) : " ";
 		const model = row.modelId ? `${row.modelId}${row.thinkingLevel ? `:${row.thinkingLevel}` : ""}` : undefined;
 		const updatedAt = parseTimestampMs(row.updatedAt);
-		const age = updatedAt === undefined ? undefined : formatAge(Math.max(1, Math.round((Date.now() - updatedAt) / 1000)));
+		const age =
+			updatedAt === undefined ? undefined : formatAge(Math.max(1, Math.round((Date.now() - updatedAt) / 1000)));
 		const rendered = renderHubColumns({
 			width: Math.max(10, width - 1),
 			model,
@@ -1503,6 +1648,18 @@ export class AgentHubOverlayComponent extends Container {
 	}
 
 	#handleTableInput(keyData: string): void {
+		const gotoTop = matchesNavigationTop(keyData) && this.#tableGotoPrefixActive;
+		this.#tableGotoPrefixActive = false;
+		if (matchesNavigationTop(keyData) && !gotoTop) {
+			this.#tableGotoPrefixActive = true;
+			return;
+		}
+		if (gotoTop) {
+			this.#moveTableSelection(-this.#selectedRow);
+			this.#requestRender();
+			return;
+		}
+
 		// Filter editing mode: capture keystrokes for the filter query
 		if (this.#tableFilterEditing) {
 			if (matchesAppInterrupt(keyData) || matchesKey(keyData, "enter") || keyData === "\r" || keyData === "\n") {
@@ -1526,6 +1683,33 @@ export class AgentHubOverlayComponent extends Container {
 			}
 			return;
 		}
+		if (this.#cockpitMode === "input") {
+			if (matchesAppInterrupt(keyData)) {
+				this.#cockpitMode = "scroll";
+				this.#requestRender();
+				return;
+			}
+			if (matchesKey(keyData, "ctrl+enter")) {
+				this.#submitChatMessage(this.#editor.getText(), true);
+				return;
+			}
+			this.#editor.handleInput(keyData);
+			this.#requestRender();
+			return;
+		}
+		if (keyData === "i" && this.#chatAgentId && !this.#chatArchived) {
+			this.#scrollOffset = this.#lastMaxScroll;
+			this.#wasAtBottom = true;
+			this.#cockpitMode = "input";
+			this.#requestRender();
+			return;
+		}
+		if (keyData === "n" || keyData === "p") {
+			this.#moveTableSelection(keyData === "n" ? 1 : -1);
+			this.#requestRender();
+			return;
+		}
+		if (this.#handleViewerNavigation(keyData)) return;
 		if (keyData === ".") {
 			this.#toggleRunningOnly();
 			this.#requestRender();
@@ -1572,7 +1756,10 @@ export class AgentHubOverlayComponent extends Container {
 			this.#requestRender();
 			return;
 		}
-		if (keyData === "z") { this.#foldPrefixActive = true; return; }
+		if (keyData === "z") {
+			this.#foldPrefixActive = true;
+			return;
+		}
 		if (keyData === "?") {
 			this.#showLegend = !this.#showLegend;
 			this.#requestRender();
@@ -1585,36 +1772,29 @@ export class AgentHubOverlayComponent extends Container {
 			this.#requestRender();
 			return;
 		}
-		if (keyData === "h") { this.#moveToParentOrChild(false); this.#requestRender(); return; }
-		if (keyData === "l") { this.#moveToParentOrChild(true); this.#requestRender(); return; }
-		if (keyData === "H") { this.#moveGroup(-1); this.#requestRender(); return; }
-		if (keyData === "L") { this.#moveGroup(1); this.#requestRender(); return; }
-		if (keyData === "j" || matchesSelectDown(keyData)) {
-			this.#moveTableSelection(1);
+		if (keyData === "h") {
+			this.#moveToParentOrChild(false);
 			this.#requestRender();
 			return;
 		}
-		if (keyData === "k" || matchesSelectUp(keyData)) {
-			this.#moveTableSelection(-1);
+		if (keyData === "l") {
+			this.#moveToParentOrChild(true);
 			this.#requestRender();
 			return;
 		}
-		if (matchesKey(keyData, "ctrl+d")) {
-			this.#moveTableSelection(Math.max(1, Math.floor((process.stdout.rows || 40) / 2)));
+		if (keyData === "H") {
+			this.#moveGroup(-1);
 			this.#requestRender();
 			return;
 		}
-		if (matchesKey(keyData, "ctrl+u")) {
-			this.#moveTableSelection(-Math.max(1, Math.floor((process.stdout.rows || 40) / 2)));
+		if (keyData === "L") {
+			this.#moveGroup(1);
 			this.#requestRender();
 			return;
 		}
-		if (keyData === "g") {
-			this.#moveTableSelection(-this.#selectedRow);
-			this.#requestRender();
-			return;
-		}
-		if (keyData === "G") {
+		// j/k and Ctrl+U/Ctrl+D belong to the preview in cockpit scroll mode.
+
+		if (matchesNavigationBottom(keyData)) {
 			this.#moveTableSelection(this.#totalTableRows());
 			this.#requestRender();
 			return;
@@ -1638,7 +1818,10 @@ export class AgentHubOverlayComponent extends Container {
 			this.#requestRender();
 			return;
 		}
-		if (keyData === "p") { void this.#reconcileSelected(); return; }
+		if (keyData === "P") {
+			void this.#reconcileSelected();
+			return;
+		}
 		if (matchesKey(keyData, "enter") || keyData === "\r" || keyData === "\n") {
 			const selected = this.#selectedInternalRef();
 			if (selected) this.#activateAgent(selected);
@@ -1678,10 +1861,11 @@ export class AgentHubOverlayComponent extends Container {
 		const ref = this.#selectedInternalRef();
 		if (!ref) return;
 		const result = await this.#lifecycle().reconcileStaleOrphan(ref.id);
-		this.#notice = result.reconciled ? `${ref.id} parked after terminal evidence` : `cannot park ${ref.id}: ${result.reason.replaceAll("_", " ")}`;
+		this.#notice = result.reconciled
+			? `${ref.id} parked after terminal evidence`
+			: `cannot park ${ref.id}: ${result.reason.replaceAll("_", " ")}`;
 		this.#requestRender();
 	}
-
 
 	#showExternalPeerHint(): void {
 		const row = this.#selectedExternalRow();
@@ -1927,7 +2111,8 @@ export class AgentHubOverlayComponent extends Container {
 			status.limitWindowId ? `window:${sanitizeLine(status.limitWindowId, 16)}` : undefined,
 			status.canCancel ? "cancellable" : undefined,
 		].filter((detail): detail is string => detail !== undefined);
-		const color = status.state === "failed-rate-limit" ? "error" : status.state === "cancelled" ? "warning" : "accent";
+		const color =
+			status.state === "failed-rate-limit" ? "error" : status.state === "cancelled" ? "warning" : "accent";
 		return theme.fg(color, `${status.state}${details.length ? ` · ${details.join(" · ")}` : ""}`);
 	}
 
@@ -1983,7 +2168,9 @@ export class AgentHubOverlayComponent extends Container {
 				? `${archived.modelId}${archived.thinkingLevel ? `:${archived.thinkingLevel}` : ""}`
 				: this.#transcriptCache?.model;
 			const modelLabel = model ? `${theme.sep.dot}${modelHeaderLane(model)}` : "";
-			this.#viewerHeaderLines.push(`${theme.bold(archived.agentId)} ${theme.fg("dim", `${archived.state} · archived · read-only`)}${modelLabel}`);
+			this.#viewerHeaderLines.push(
+				`${theme.bold(archived.agentId)} ${theme.fg("dim", `${archived.state} · archived · read-only`)}${modelLabel}`,
+			);
 		} else if (ref) {
 			const observed = this.#observableFor(ref.id);
 			const cachedRoute = this.#transcriptCache?.model
@@ -1994,11 +2181,18 @@ export class AgentHubOverlayComponent extends Container {
 			const modelLabel = model ? `${theme.sep.dot}${modelHeaderLane(model)}` : "";
 			const source = observed?.progress?.routeReceipt?.source;
 			const sourceLabel = source ? theme.fg("dim", ` [${source}]`) : "";
-			this.#viewerHeaderLines.push(`${theme.bold(ref.id)} ${statusBadge(ref.status)}${kindTag}${modelLabel}${sourceLabel}`);
+			this.#viewerHeaderLines.push(
+				`${theme.bold(ref.id)} ${statusBadge(ref.status)}${kindTag}${modelLabel}${sourceLabel}`,
+			);
 		}
 
 		if (this.#chatArchived) {
-			this.#chatPlaceholder = messageEntries === null ? "Archived transcript is no longer available." : messageEntries.length === 0 ? "No messages yet." : undefined;
+			this.#chatPlaceholder =
+				messageEntries === null
+					? "Archived transcript is no longer available."
+					: messageEntries.length === 0
+						? "No messages yet."
+						: undefined;
 			if (messageEntries && messageEntries.length > 0) this.#syncChatComponents(messageEntries);
 		} else if (!ref) {
 			this.#chatPlaceholder = "Agent no longer registered.";
@@ -2346,25 +2540,37 @@ export class AgentHubOverlayComponent extends Container {
 
 	/** Viewport scrolling for the chat transcript. Returns true when handled. */
 	#handleViewerNavigation(keyData: string): boolean {
+		const gotoTop = matchesNavigationTop(keyData) && this.#viewerGotoPrefixActive;
+		this.#viewerGotoPrefixActive = false;
+		if (matchesNavigationTop(keyData) && !gotoTop) {
+			this.#viewerGotoPrefixActive = true;
+			return true;
+		}
+		if (gotoTop) {
+			this.#scrollOffset = 0;
+			this.#wasAtBottom = this.#lastMaxScroll === 0;
+			this.#requestRender();
+			return true;
+		}
 		const maxScroll = this.#lastMaxScroll;
 		const scrollBy = (delta: number) => {
 			this.#scrollOffset = Math.max(0, Math.min(this.#scrollOffset + delta, maxScroll));
 			this.#wasAtBottom = this.#scrollOffset >= maxScroll;
 			this.#requestRender();
 		};
-		if (keyData === "j" || matchesSelectDown(keyData)) {
+		if (matchesNavigationDown(keyData) || matchesSelectDown(keyData)) {
 			scrollBy(1);
 			return true;
 		}
-		if (keyData === "k" || matchesSelectUp(keyData)) {
+		if (matchesNavigationUp(keyData) || matchesSelectUp(keyData)) {
 			scrollBy(-1);
 			return true;
 		}
-		if (matchesKey(keyData, "ctrl+d")) {
+		if (matchesNavigationPageDown(keyData)) {
 			scrollBy(Math.max(1, Math.floor(this.#viewportHeight / 2)));
 			return true;
 		}
-		if (matchesKey(keyData, "ctrl+u")) {
+		if (matchesNavigationPageUp(keyData)) {
 			scrollBy(-Math.max(1, Math.floor(this.#viewportHeight / 2)));
 			return true;
 		}
@@ -2376,18 +2582,13 @@ export class AgentHubOverlayComponent extends Container {
 			scrollBy(-PAGE_SIZE);
 			return true;
 		}
-		if (keyData === "G") {
+		if (matchesNavigationBottom(keyData)) {
 			this.#scrollOffset = maxScroll;
 			this.#wasAtBottom = true;
 			this.#requestRender();
 			return true;
 		}
-		if (keyData === "g") {
-			this.#scrollOffset = 0;
-			this.#wasAtBottom = maxScroll === 0;
-			this.#requestRender();
-			return true;
-		}
+
 		return false;
 	}
 
@@ -2797,7 +2998,7 @@ export class AgentHubOverlayComponent extends Container {
 			return this.#loadTranscript(sessionFile);
 		}
 
-		this.#ingestTranscriptChunk(sessionFile, result.text, fromByte);
+		this.#ingestTranscriptChunk(sessionFile, result.text, result.fromByte);
 		return this.#transcriptCache?.entries ?? null;
 	}
 
@@ -2824,6 +3025,9 @@ export class AgentHubOverlayComponent extends Container {
 			} else if (entry.type === "thinking_level_change") {
 				this.#transcriptCache.thinking = entry.thinkingLevel ?? undefined;
 			}
+		}
+		if (this.#transcriptCache.entries.length > PREVIEW_MAX_ENTRIES) {
+			this.#transcriptCache.entries.splice(0, this.#transcriptCache.entries.length - PREVIEW_MAX_ENTRIES);
 		}
 		this.#transcriptCache.bytesRead = fromByte + Buffer.byteLength(completeChunk, "utf-8");
 	}
@@ -2855,21 +3059,18 @@ export class AgentHubOverlayComponent extends Container {
 					return;
 				}
 				if (result.newSize < fromByte) {
-					// Host transcript truncated/rotated — restart from 0.
 					this.#transcriptCache = undefined;
+					this.#remoteFetchInFlight = false;
 					this.#fetchRemoteTranscript(id);
 					return;
 				}
-				this.#remoteTranscriptUnavailable = false;
 				const hadCache = this.#transcriptCache !== undefined;
 				const before = this.#transcriptCache?.entries.length ?? 0;
 				this.#ingestTranscriptChunk(cacheKey, result.text, fromByte);
 				const after = this.#transcriptCache?.entries.length ?? 0;
-				// Only refresh on new content (or first completed fetch) — an
-				// unconditional rebuild would re-kick the fetch in a tight loop.
 				if (after > before || !hadCache) this.#scheduleChatRefresh();
 			})
-			.catch((error: unknown) => {
+			.catch(error => {
 				if (token === this.#remoteFetchToken) this.#remoteFetchInFlight = false;
 				logger.warn("Agent hub: remote transcript fetch failed", { id, error: String(error) });
 			});
@@ -2877,18 +3078,31 @@ export class AgentHubOverlayComponent extends Container {
 }
 
 // Sync helper for the render path
-function readFileIncremental(filePath: string, fromByte: number): { text: string; newSize: number } | null {
+function readFileIncremental(
+	filePath: string,
+	fromByte: number,
+): { text: string; newSize: number; fromByte: number } | null {
 	try {
 		const stat = fs.statSync(filePath);
-		if (stat.size <= fromByte) return { text: "", newSize: stat.size };
-		const buf = Buffer.alloc(stat.size - fromByte);
+		if (stat.size <= fromByte) return { text: "", newSize: stat.size, fromByte };
+		const start = fromByte === 0 ? Math.max(0, stat.size - PREVIEW_TAIL_BYTES) : fromByte;
+		const buf = Buffer.alloc(stat.size - start);
 		const fd = fs.openSync(filePath, "r");
 		try {
-			fs.readSync(fd, buf, 0, buf.length, fromByte);
+			fs.readSync(fd, buf, 0, buf.length, start);
 		} finally {
 			fs.closeSync(fd);
 		}
-		return { text: buf.toString("utf-8"), newSize: stat.size };
+		let text = buf.toString("utf-8");
+		let actualStart = start;
+		if (start > 0) {
+			const newline = text.indexOf("\n");
+			if (newline >= 0) {
+				actualStart += Buffer.byteLength(text.slice(0, newline + 1), "utf-8");
+				text = text.slice(newline + 1);
+			}
+		}
+		return { text, newSize: stat.size, fromByte: actualStart };
 	} catch {
 		return null;
 	}

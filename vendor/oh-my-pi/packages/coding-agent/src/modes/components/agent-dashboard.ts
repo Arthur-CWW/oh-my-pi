@@ -52,7 +52,13 @@ import { discoverAgents } from "../../task/discovery";
 import type { AgentDefinition, AgentSource } from "../../task/types";
 import { shortenPath } from "../../tools/render-utils";
 import { getEditorTheme, theme } from "../theme/theme";
-import { matchesAppInterrupt, matchesSelectDown, matchesSelectUp } from "../utils/keybinding-matchers";
+import {
+	matchesAppInterrupt,
+	matchesNavigationDown,
+	matchesNavigationUp,
+	matchesSelectDown,
+	matchesSelectUp,
+} from "../utils/keybinding-matchers";
 import { DynamicBorder } from "./dynamic-border";
 
 type SourceTabId = "all" | AgentSource;
@@ -1159,11 +1165,11 @@ export class AgentDashboard extends Container {
 			return;
 		}
 
-		if (matchesSelectUp(data) || data === "k") {
+		if (matchesSelectUp(data) || matchesNavigationUp(data)) {
 			this.#moveSelection(-1);
 			return;
 		}
-		if (matchesSelectDown(data) || data === "j") {
+		if (matchesSelectDown(data) || matchesNavigationDown(data)) {
 			this.#moveSelection(1);
 			return;
 		}
