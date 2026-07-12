@@ -4,7 +4,7 @@ import { OPTIONAL_VALUE_FLAGS, STRING_VALUE_FLAGS } from "./flag-tables";
 let launchArgsForRestart: readonly string[] = [];
 
 const SESSION_SELECTOR_FLAGS: Record<string, true> = { "--resume": true, "-r": true, "--session": true };
-const DROPPED_STRING_FLAGS: Record<string, true> = { "--fork": true, "--export": true };
+const DROPPED_STRING_FLAGS: Record<string, true> = { "--fork": true, "--export": true, "--api-key": true };
 const DROPPED_BOOLEAN_FLAGS: Record<string, true> = {
 	"--continue": true,
 	"-c": true,
@@ -15,6 +15,16 @@ const DROPPED_BOOLEAN_FLAGS: Record<string, true> = {
 	"--version": true,
 	"-v": true,
 };
+export const RESTART_API_KEY_ENV = "OMP_RESTART_API_KEY";
+
+function restartApiKey(args: readonly string[]): string | undefined {
+	for (let i = 0; i < args.length; i++) {
+		const arg = args[i];
+		if (arg === "--api-key") return args[i + 1];
+		if (arg?.startsWith("--api-key=")) return arg.slice("--api-key=".length);
+	}
+	return undefined;
+}
 
 /** Capture the launch argv after profile/bootstrap rewriting, before extension reparsing mutates semantics. */
 export function captureRestartLaunchArgs(args: readonly string[]): void {
@@ -91,6 +101,7 @@ export interface RestartSpawnSpec {
 	executable: string;
 	args: string[];
 	cwd: string;
+	env?: Record<string, string | undefined>;
 }
 
 function processArgPrefix(processArgv: readonly string[], launchArgs: readonly string[]): string[] {
@@ -116,10 +127,12 @@ export function buildRestartSpawnSpec(options: {
 }): RestartSpawnSpec {
 	const processArgv = options.processArgv ?? process.argv;
 	const launchArgs = options.launchArgs ?? launchArgsForRestart;
+	const apiKey = restartApiKey(launchArgs);
 	return {
 		executable: options.executable ?? process.execPath,
 		args: [...processArgPrefix(processArgv, launchArgs), ...buildRestartLaunchArgs(launchArgs, options.sessionId)],
 		cwd: options.cwd,
+		...(apiKey === undefined ? {} : { env: { ...Bun.env, [RESTART_API_KEY_ENV]: apiKey } }),
 	};
 }
 
@@ -127,7 +140,7 @@ export function spawnRestartProcess(spec: RestartSpawnSpec): void {
 	const child = Bun.spawn([spec.executable, ...spec.args], {
 		cwd: spec.cwd,
 		detached: true,
-		env: Bun.env,
+		env: spec.env ?? Bun.env,
 		stdin: "inherit",
 		stdout: "inherit",
 		stderr: "inherit",

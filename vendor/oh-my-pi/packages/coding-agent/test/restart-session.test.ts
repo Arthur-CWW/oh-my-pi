@@ -9,6 +9,7 @@ import {
 	captureRestartLaunchArgs,
 	getRestartLaunchArgsForTest,
 	handoffRestartProcess,
+	RESTART_API_KEY_ENV,
 } from "../src/cli/restart-session";
 import { acquireSessionOwnership, inspectSessionOwnership } from "../src/session/session-ownership";
 
@@ -333,6 +334,25 @@ describe("buildRestartSpawnSpec", () => {
 		});
 
 		expect(spec.args).toEqual(["--resume", SESSION]);
+	});
+
+	test("moves API keys from restart argv into the child environment", () => {
+		for (const launchArgs of [
+			["--model", "anthropic/claude", "--api-key", "known-secret-value"],
+			["--model=anthropic/claude", "--api-key=known-secret-value"],
+		]) {
+			const spec = buildRestartSpawnSpec({
+				sessionId: SESSION,
+				cwd: "/cwd",
+				executable: "omp",
+				processArgv: ["omp", ...launchArgs],
+				launchArgs,
+			});
+
+			expect(spec.args.join("\0")).not.toContain("known-secret-value");
+			expect(spec.args).not.toContain("--api-key");
+			expect(spec.env?.[RESTART_API_KEY_ENV]).toBe("known-secret-value");
+		}
 	});
 
 	test("full integration preserves config, model, and cwd while dropping one-shot flags", () => {

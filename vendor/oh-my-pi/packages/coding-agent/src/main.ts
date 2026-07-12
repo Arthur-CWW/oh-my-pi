@@ -28,6 +28,7 @@ import { processFileArguments } from "./cli/file-processor";
 import { buildInitialMessage } from "./cli/initial-message";
 import { selectSession } from "./cli/session-picker";
 import { applyStartupCwd } from "./cli/startup-cwd";
+import { RESTART_API_KEY_ENV } from "./cli/restart-session";
 import {
 	resolveStartupWorkstream,
 	type StartupWorkstream,
@@ -996,6 +997,9 @@ export async function runRootCommand(
 	await logger.time("initTheme:initial", initTheme);
 
 	const parsedArgs = parsed;
+	const restartApiKey = process.env[RESTART_API_KEY_ENV];
+	delete process.env[RESTART_API_KEY_ENV];
+	if (parsedArgs.apiKey === undefined && restartApiKey !== undefined) parsedArgs.apiKey = restartApiKey;
 	await logger.time("applyStartupCwd", applyStartupCwd, parsedArgs);
 
 	const notifs: (InteractiveModeNotify | null)[] = [];
