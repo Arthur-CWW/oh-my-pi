@@ -2,10 +2,12 @@ import { randomUUID } from "node:crypto";
 import { Effect, Exit, Scope } from "effect";
 import type {
 	CancelCompactionReceipt,
+	CancelLocalOperationReceipt,
 	InterruptPromptReceipt,
 	RefreshSshToolReceipt,
 	ReplaceTodosReceipt,
 	RunCompactionReceipt,
+	RunLocalOperationReceipt,
 	RunnerCommandReceipt,
 	RunnerImageContent,
 	SetActiveToolsReceipt,
@@ -16,18 +18,21 @@ import type {
 } from "../runner/protocol";
 import {
 	decodeCancelCompactionCommand,
+	decodeCancelLocalOperationCommand,
 	decodeCancelQueuedInputCommand,
 	decodeEditQueuedInputCommand,
 	decodeInterruptPromptCommand,
 	decodeRefreshSshToolCommand,
 	decodeReplaceTodosCommand,
 	decodeRunCompactionCommand,
+	decodeRunLocalOperationCommand,
 	decodeSetActiveToolsCommand,
 	decodeSetModelCommand,
 	decodeSetThinkingLevelCommand,
 	decodeSubmitInputCommand,
 	decodeTransitionGoalModeCommand,
 	decodeTransitionPlanModeCommand,
+	RunnerLocalOperationTargetError,
 	RUNNER_SCHEMA_VERSION,
 	RunnerCompactionTargetError,
 } from "../runner/protocol";
@@ -161,6 +166,31 @@ export interface TerminalCancelCompactionIntent {
 	readonly causationId?: string;
 }
 
+export type TerminalLocalOperationIntent = {
+	readonly excludeFromContext: boolean;
+	readonly commandId?: string;
+	readonly correlationId?: string;
+	readonly causationId?: string;
+} & (
+	| { readonly kind: "bash"; readonly command: string }
+	| { readonly kind: "python"; readonly code: string }
+);
+
+export interface TerminalCancelLocalOperationIntent {
+	readonly commandId?: string;
+	readonly correlationId?: string;
+	readonly causationId?: string;
+}
+
+export interface TerminalLocalOperationOutput {
+	readonly commandId: string;
+	readonly operationGeneration: number;
+	readonly chunk: string;
+	readonly totalBytes: number;
+	readonly truncated: boolean;
+	readonly reset: boolean;
+}
+
 export interface TerminalSessionControllerOptions {
 	readonly viewId?: string;
 	readonly commandId?: string;
@@ -172,6 +202,9 @@ export interface TerminalSessionController {
 	readonly epoch: number;
 	readonly snapshot: () => TerminalSessionSnapshot;
 	readonly subscribeAgentEvents: (listener: (event: AgentSessionEvent) => void) => () => void;
+	readonly subscribeLocalOperationOutput: (
+		listener: (output: TerminalLocalOperationOutput) => void,
+	) => () => void;
 	readonly refresh: () => Promise<TerminalSessionSnapshot>;
 	readonly getContextUsage: (options?: {
 		readonly contextWindow?: number;
@@ -197,6 +230,10 @@ export interface TerminalSessionController {
 	readonly transitionGoalMode: (intent: TerminalTransitionGoalModeIntent) => Promise<TransitionGoalModeReceipt>;
 	readonly compact: (intent?: TerminalCompactionIntent) => Promise<RunCompactionReceipt>;
 	readonly cancelCompaction: (intent?: TerminalCancelCompactionIntent) => Promise<CancelCompactionReceipt>;
+	readonly runLocalOperation: (intent: TerminalLocalOperationIntent) => Promise<RunLocalOperationReceipt>;
+	readonly cancelLocalOperation: (
+		intent?: TerminalCancelLocalOperationIntent,
+	) => Promise<CancelLocalOperationReceipt>;
 	readonly interruptPrompt: (intent?: TerminalInterruptPromptIntent) => Promise<InterruptPromptReceipt>;
 	readonly close: () => Promise<void>;
 }
@@ -234,6 +271,7 @@ export async function createTerminalSessionController(
 		const subscription = await run(view.subscribe());
 		let latest = await run(view.snapshot());
 		const listeners = new Set<(event: AgentSessionEvent) => void>();
+		const localOperationOutputListeners = new Set<(output: TerminalLocalOperationOutput) => void>();
 		const refresh = async (): Promise<TerminalSessionSnapshot> => {
 			latest = await run(view!.snapshot());
 			return latest;
@@ -248,6 +286,16 @@ export async function createTerminalSessionController(
 								return;
 							}
 							if (delivery.kind === "runnerEvent") {
+								const output = delivery.event.localOperationOutput;
+								const operationGeneration = delivery.event.targetOperationGeneration;
+								if (output !== undefined && operationGeneration !== undefined) {
+									const projected = {
+										commandId: delivery.event.commandId,
+										operationGeneration,
+										...output,
+									} satisfies TerminalLocalOperationOutput;
+									for (const listener of localOperationOutputListeners) listener(projected);
+								}
 								await refresh();
 								return;
 							}
@@ -278,6 +326,10 @@ export async function createTerminalSessionController(
 			subscribeAgentEvents: listener => {
 				listeners.add(listener);
 				return () => listeners.delete(listener);
+			},
+			subscribeLocalOperationOutput: listener => {
+				localOperationOutputListeners.add(listener);
+				return () => localOperationOutputListeners.delete(listener);
 			},
 			refresh,
 			getContextUsage: queryOptions => run(view!.getContextUsage(queryOptions)),
@@ -592,6 +644,71 @@ export async function createTerminalSessionController(
 				await refresh();
 				return receipt;
 			},
+			runLocalOperation: async intent => {
+				const current = await refresh();
+				try {
+					const ids = metadata(intent);
+					const receipt = await run(
+						view!.runLocalOperation(
+							decodeRunLocalOperationCommand({
+								schemaVersion: RUNNER_SCHEMA_VERSION,
+								kind: "runLocalOperation",
+								...ids,
+								...(intent.causationId === undefined ? {} : { causationId: intent.causationId }),
+								expectedSessionRevision: current.runner.sessionRevision,
+								viewId,
+								controllerEpoch: view!.epoch,
+								operation:
+									intent.kind === "bash"
+										? {
+												kind: "bash",
+												command: intent.command,
+												excludeFromContext: intent.excludeFromContext,
+												useUserShell: true,
+											}
+										: {
+												kind: "python",
+												code: intent.code,
+												excludeFromContext: intent.excludeFromContext,
+											},
+							}),
+						),
+					);
+					await refresh();
+					return receipt;
+				} catch (error) {
+					await refresh();
+					throw error;
+				}
+			},
+			cancelLocalOperation: async (intent = {}) => {
+				const current = await refresh();
+				const active = current.runner.activeLocalOperation;
+				if (active === undefined) {
+					throw new RunnerLocalOperationTargetError({
+						targetCommandId: "",
+						targetOperationGeneration: 0,
+					});
+				}
+				const ids = metadata(intent);
+				const receipt = await run(
+					view!.cancelLocalOperation(
+						decodeCancelLocalOperationCommand({
+							schemaVersion: RUNNER_SCHEMA_VERSION,
+							kind: "cancelLocalOperation",
+							...ids,
+							...(intent.causationId === undefined ? {} : { causationId: intent.causationId }),
+							expectedSessionRevision: current.runner.sessionRevision,
+							viewId,
+							controllerEpoch: view!.epoch,
+							targetCommandId: active.commandId,
+							targetOperationGeneration: active.operationGeneration,
+						}),
+					),
+				);
+				await refresh();
+				return receipt;
+			},
 			interruptPrompt: async (intent = {}) => {
 				try {
 					const ids = metadata(intent);
@@ -623,6 +740,7 @@ export async function createTerminalSessionController(
 					await run(view!.detach());
 				} finally {
 					listeners.clear();
+					localOperationOutputListeners.clear();
 					await Effect.runPromise(Scope.close(scope, Exit.void));
 				}
 			},

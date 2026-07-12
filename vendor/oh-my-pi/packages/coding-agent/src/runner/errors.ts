@@ -75,6 +75,21 @@ export class RunnerPromptOperationConflictError extends Schema.TaggedErrorClass<
 	},
 ) {}
 
+export class RunnerLocalOperationCommandConflictError extends Schema.TaggedErrorClass<RunnerLocalOperationCommandConflictError>()(
+	"RunnerLocalOperationCommandConflictError",
+	{ commandId: Schema.String },
+) {}
+
+export class RunnerLocalOperationUnavailableError extends Schema.TaggedErrorClass<RunnerLocalOperationUnavailableError>()(
+	"RunnerLocalOperationUnavailableError",
+	{ reason: Schema.Literals(["active", "capacity"]) },
+) {}
+
+export class RunnerLocalOperationTargetError extends Schema.TaggedErrorClass<RunnerLocalOperationTargetError>()(
+	"RunnerLocalOperationTargetError",
+	{ targetCommandId: Schema.String, targetOperationGeneration: NonNegativeInt },
+) {}
+
 export class RunnerCompactionCommandConflictError extends Schema.TaggedErrorClass<RunnerCompactionCommandConflictError>()(
 	"RunnerCompactionCommandConflictError",
 	{ commandId: Schema.String },

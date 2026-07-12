@@ -11,6 +11,8 @@ import type {
 	CancelCompactionCommand,
 	CancelCompactionReceipt,
 	CancelQueuedInputCommand,
+	CancelLocalOperationCommand,
+	CancelLocalOperationReceipt,
 	EditQueuedInputCommand,
 	InterruptPromptCommand,
 	InterruptPromptReceipt,
@@ -20,6 +22,8 @@ import type {
 	ReplaceTodosReceipt,
 	RunCompactionCommand,
 	RunCompactionReceipt,
+	RunLocalOperationCommand,
+	RunLocalOperationReceipt,
 	RunnerCommandReceipt,
 	RunnerEvent,
 	SessionRunnerSnapshot,
@@ -174,6 +178,12 @@ export interface TerminalSessionView {
 	readonly cancelCompaction: (
 		command: CancelCompactionCommand,
 	) => Effect.Effect<CancelCompactionReceipt, RunnerFailure, Scope.Scope>;
+	readonly runLocalOperation: (
+		command: RunLocalOperationCommand,
+	) => Effect.Effect<RunLocalOperationReceipt, RunnerFailure, Scope.Scope>;
+	readonly cancelLocalOperation: (
+		command: CancelLocalOperationCommand,
+	) => Effect.Effect<CancelLocalOperationReceipt, RunnerFailure, Scope.Scope>;
 	readonly interruptPrompt: (
 		command: InterruptPromptCommand,
 	) => Effect.Effect<InterruptPromptReceipt, RunnerFailure, Scope.Scope>;

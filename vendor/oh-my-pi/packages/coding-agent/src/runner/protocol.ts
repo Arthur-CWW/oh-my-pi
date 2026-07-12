@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import type { KernelDisplayOutput } from "../eval/py/display";
 import type { DurableQueuedInput } from "../session/durable-input-queue";
 import type { WorkflowModeSnapshot } from "../session/session-entries";
 import type { TodoPhase } from "../tools/todo";
@@ -238,6 +239,43 @@ export const CancelCompactionCommandSchema = Schema.Struct({
 	targetOperationGeneration: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(1))),
 });
 
+export const RunLocalOperationCommandSchema = Schema.Struct({
+	schemaVersion: Schema.Literal(RUNNER_SCHEMA_VERSION),
+	kind: Schema.Literal("runLocalOperation"),
+	commandId: Schema.String,
+	correlationId: Schema.String,
+	causationId: Schema.optional(Schema.String),
+	expectedSessionRevision: RunnerRevisionSchema,
+	viewId: Schema.String,
+	controllerEpoch: ControllerEpochSchema,
+	operation: Schema.Union([
+		Schema.Struct({
+			kind: Schema.Literal("bash"),
+			command: Schema.String,
+			excludeFromContext: Schema.Boolean,
+			useUserShell: Schema.Literal(true),
+		}),
+		Schema.Struct({
+			kind: Schema.Literal("python"),
+			code: Schema.String,
+			excludeFromContext: Schema.Boolean,
+		}),
+	]),
+});
+
+export const CancelLocalOperationCommandSchema = Schema.Struct({
+	schemaVersion: Schema.Literal(RUNNER_SCHEMA_VERSION),
+	kind: Schema.Literal("cancelLocalOperation"),
+	commandId: Schema.String,
+	correlationId: Schema.String,
+	causationId: Schema.optional(Schema.String),
+	expectedSessionRevision: RunnerRevisionSchema,
+	viewId: Schema.String,
+	controllerEpoch: ControllerEpochSchema,
+	targetCommandId: Schema.String,
+	targetOperationGeneration: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(1))),
+});
+
 export type SubmitInputCommand = typeof SubmitInputCommandSchema.Type;
 export type EditQueuedInputCommand = typeof EditQueuedInputCommandSchema.Type;
 export type CancelQueuedInputCommand = typeof CancelQueuedInputCommandSchema.Type;
@@ -247,6 +285,8 @@ export type SetModelCommand = typeof SetModelCommandSchema.Type;
 export type InterruptPromptCommand = typeof InterruptPromptCommandSchema.Type;
 export type RunCompactionCommand = typeof RunCompactionCommandSchema.Type;
 export type CancelCompactionCommand = typeof CancelCompactionCommandSchema.Type;
+export type RunLocalOperationCommand = typeof RunLocalOperationCommandSchema.Type;
+export type CancelLocalOperationCommand = typeof CancelLocalOperationCommandSchema.Type;
 export type TransitionPlanModeCommand = typeof TransitionPlanModeCommandSchema.Type;
 export type TransitionGoalModeCommand = typeof TransitionGoalModeCommandSchema.Type;
 export type ReplaceTodosCommand = typeof ReplaceTodosCommandSchema.Type;
@@ -361,6 +401,63 @@ export interface CancelCompactionReceipt {
 	readonly cancellationRequested: true;
 }
 
+export interface LocalOperationOutputSnapshot {
+	readonly text: string;
+	readonly totalBytes: number;
+	readonly truncated: boolean;
+}
+
+export interface ActiveLocalOperationSnapshot {
+	readonly commandId: string;
+	readonly operationGeneration: number;
+	readonly startedSessionRevision: number;
+	readonly operation: RunLocalOperationCommand["operation"];
+	readonly output: LocalOperationOutputSnapshot;
+	readonly pendingOutputChunks: number;
+	readonly pendingOutputBytes: number;
+	readonly peakPendingOutputChunks: number;
+	readonly peakPendingOutputBytes: number;
+}
+
+export interface RunLocalOperationReceipt {
+	readonly commandId: string;
+	readonly correlationId: string;
+	readonly causationId?: string;
+	readonly startedSessionRevision: number;
+	readonly operationGeneration: number;
+	readonly completedSessionRevision: number;
+	readonly replayed: boolean;
+	readonly result:
+		| {
+				readonly kind: "bash";
+				readonly output: LocalOperationOutputSnapshot;
+				readonly exitCode: number | undefined;
+				readonly cancelled: boolean;
+				readonly artifactId?: string;
+			}
+		| {
+				readonly kind: "python";
+				readonly output: LocalOperationOutputSnapshot;
+				readonly exitCode: number | undefined;
+				readonly cancelled: boolean;
+				readonly artifactId?: string;
+				readonly totalLines: number;
+				readonly outputLines: number;
+				readonly outputBytes: number;
+				readonly displayOutputs: readonly KernelDisplayOutput[];
+				readonly stdinRequested: boolean;
+			};
+}
+
+export interface CancelLocalOperationReceipt {
+	readonly commandId: string;
+	readonly correlationId: string;
+	readonly causationId?: string;
+	readonly targetCommandId: string;
+	readonly targetOperationGeneration: number;
+	readonly cancellationRequested: true;
+}
+
 export interface RunnerViewSnapshot {
 	readonly viewId: string;
 	readonly capability: RunnerCapability;
@@ -390,6 +487,7 @@ export interface SessionRunnerSnapshot {
 				readonly startedSessionRevision: number;
 		  }
 		| undefined;
+	readonly activeLocalOperation: ActiveLocalOperationSnapshot | undefined;
 	readonly workflow: WorkflowModeSnapshot;
 	readonly toolConfigurationGeneration: number;
 	readonly activeToolNames: ReadonlyArray<string>;
@@ -416,6 +514,9 @@ export type RunnerEventKind =
 	| "promptInterrupted"
 	| "compactionCancelRequested"
 	| "compactionCompleted"
+	| "localOperationOutput"
+	| "localOperationCancelRequested"
+	| "localOperationCompleted"
 	| "transcriptEntryAppended";
 
 /** Every event is a closed causal envelope in the runner's single total order. */
@@ -439,6 +540,12 @@ export interface RunnerEvent {
 	readonly targetGeneration: number | undefined;
 	readonly targetCommandId: string | undefined;
 	readonly targetOperationGeneration: number | undefined;
+	readonly localOperationOutput?: {
+		readonly chunk: string;
+		readonly totalBytes: number;
+		readonly truncated: boolean;
+		readonly reset: boolean;
+	};
 }
 
 export type RunnerEventDelivery =
@@ -579,6 +686,26 @@ export const decodeCancelCompactionCommand = (input: unknown): CancelCompactionC
 		});
 	}
 };
+export const decodeRunLocalOperationCommand = (input: unknown): RunLocalOperationCommand => {
+	try {
+		return Schema.decodeUnknownSync(RunLocalOperationCommandSchema)(input, { onExcessProperty: "error" });
+	} catch (error) {
+		throw new InvalidRunnerCommandError({
+			issue: error instanceof Error ? error.message : "Invalid local-operation command",
+		});
+	}
+};
+
+export const decodeCancelLocalOperationCommand = (input: unknown): CancelLocalOperationCommand => {
+	try {
+		return Schema.decodeUnknownSync(CancelLocalOperationCommandSchema)(input, { onExcessProperty: "error" });
+	} catch (error) {
+		throw new InvalidRunnerCommandError({
+			issue: error instanceof Error ? error.message : "Invalid cancel-local-operation command",
+		});
+	}
+};
+
 
 export const decodeRunCompactionCommand = (input: unknown): RunCompactionCommand => {
 	try {

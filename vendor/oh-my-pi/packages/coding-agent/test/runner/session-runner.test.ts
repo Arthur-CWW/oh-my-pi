@@ -17,8 +17,10 @@ import {
 	type AttachRunnerViewCommand,
 	type DetachRunnerViewCommand,
 	decodeCancelCompactionCommand,
+	decodeCancelLocalOperationCommand,
 	decodeInterruptPromptCommand,
 	decodeRefreshSshToolCommand,
+	decodeRunLocalOperationCommand,
 	decodeRunCompactionCommand,
 	decodeSetActiveToolsCommand,
 	decodeSetModelCommand,
@@ -29,6 +31,8 @@ import {
 	InvalidRunnerCommandError,
 	RunnerCompactionCommandConflictError,
 	RunnerCompactionTargetError,
+	RunnerLocalOperationCommandConflictError,
+	RunnerLocalOperationTargetError,
 	RunnerCompactionUnavailableError,
 	type RunnerControlMetadata,
 	RunnerItemRevisionConflictError,
@@ -2125,4 +2129,397 @@ describe("live SessionRunner", () => {
 			),
 		);
 	});
+
+	it("streams real bash output in order while snapshots and view detach remain responsive", async () => {
+		const fixture = await createLiveFixture();
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const runner = yield* makeSessionRunnerLive(fixture, { mailboxCapacity: 1, eventCapacity: 8 });
+					const controller = yield* runner.attachView(attach("local-controller", "controller", 0));
+					const observer = yield* runner.attachView(attach("local-observer", "observer", 0));
+					if (controller.capability !== "controller") throw new Error("expected controller");
+					const subscription = yield* observer.subscribe();
+					const initial = yield* runner.snapshot();
+					const startedRevision = fixture.sessionManager.getSessionRevision();
+					const command = decodeRunLocalOperationCommand({
+						schemaVersion: 1,
+						kind: "runLocalOperation",
+						commandId: "streaming-bash",
+						correlationId: "streaming-bash-correlation",
+						expectedSessionRevision: startedRevision,
+						viewId: controller.viewId,
+						controllerEpoch: controller.controllerEpoch,
+						operation: {
+							kind: "bash",
+							command: "printf first; sleep 0.15; printf second",
+							excludeFromContext: false,
+							useUserShell: true,
+						},
+					});
+					const running = yield* Effect.forkScoped(controller.runLocalOperation(command));
+					while ((yield* runner.snapshot()).activeLocalOperation === undefined) {
+						yield* Effect.sleep("1 millis");
+					}
+					const during = yield* runner.snapshot();
+					expect(during.revision).toBe(initial.revision);
+					expect(during.activeLocalOperation?.commandId).toBe(command.commandId);
+					let firstChunk = "";
+					while (firstChunk.length === 0) {
+						const delivery = yield* subscription.take;
+						if (delivery.event.kind === "localOperationOutput") {
+							firstChunk = delivery.event.localOperationOutput?.chunk ?? "";
+						}
+					}
+					expect(firstChunk).toBe("first");
+					yield* observer.detach(detach(observer.viewId, initial.revision));
+
+					const receipt = yield* Fiber.join(running);
+					expect(receipt.result.output.text).toBe("firstsecond");
+					expect(receipt.result.exitCode).toBe(0);
+					expect(receipt.result.cancelled).toBe(false);
+					expect(receipt.startedSessionRevision).toBe(startedRevision);
+					expect(receipt.completedSessionRevision).toBe(startedRevision + 1);
+					expect((yield* runner.snapshot()).revision).toBe(initial.revision);
+					expect(receipt.result.output.text.startsWith(firstChunk)).toBe(true);
+					const finalMessage = fixture.session.messages.at(-1);
+					expect(finalMessage?.role).toBe("bashExecution");
+					if (finalMessage?.role !== "bashExecution") throw new Error("expected bash transcript entry");
+					if (command.operation.kind !== "bash") throw new Error("expected bash command");
+					expect(finalMessage.command).toBe(command.operation.command);
+					expect(finalMessage.output).toBe("firstsecond");
+
+					const replay = yield* controller.runLocalOperation(command);
+					expect(replay).toEqual({ ...receipt, replayed: true });
+					expect(fixture.session.messages.filter(message => message.role === "bashExecution")).toHaveLength(1);
+					yield* controller.detach(detach(controller.viewId, initial.revision, controller.controllerEpoch));
+					yield* runner.stop();
+				}),
+			),
+		);
+	});
+
+	it("bounds pending tiny output and resets consumers to the retained projection", async () => {
+		const fixture = await createLiveFixture();
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const runner = yield* makeSessionRunnerLive(fixture, { mailboxCapacity: 1, eventCapacity: 512 });
+					const controller = yield* runner.attachView(attach("tiny-output-controller", "controller", 0));
+					if (controller.capability !== "controller") throw new Error("expected controller");
+					const subscription = yield* controller.subscribe();
+					const chunk = "abcdefghijklmnop";
+					const fullOutput = chunk.repeat(20_004);
+					const executionStarted = Promise.withResolvers<void>();
+					const releaseExecution = Promise.withResolvers<void>();
+					fixture.session.executeBash = async (_command, onOutput) => {
+						for (let index = 0; index < 4; index++) onOutput?.(chunk);
+						await Bun.sleep(10);
+						for (let index = 0; index < 20_000; index++) onOutput?.(chunk);
+						executionStarted.resolve();
+						await releaseExecution.promise;
+						return {
+							output: fullOutput,
+							exitCode: 0,
+							cancelled: false,
+							truncated: false,
+							totalLines: 1,
+							totalBytes: Buffer.byteLength(fullOutput),
+							outputLines: 1,
+							outputBytes: Buffer.byteLength(fullOutput),
+						};
+					};
+					let projected = "";
+					let sawReset = false;
+					const outputMetadata: Array<{ totalBytes: number; truncated: boolean }> = [];
+					const consume = yield* Effect.forkScoped(
+						Effect.gen(function* () {
+							while (true) {
+								const delivery = yield* subscription.take;
+								if (delivery.event.kind === "localOperationOutput") {
+									const output = delivery.event.localOperationOutput;
+									if (output) {
+										projected = output.reset ? output.chunk : projected + output.chunk;
+										sawReset ||= output.reset;
+										outputMetadata.push({
+											totalBytes: output.totalBytes,
+											truncated: output.truncated,
+										});
+									}
+								}
+								if (delivery.event.kind === "localOperationCompleted") return;
+							}
+						}),
+					);
+					const running = yield* Effect.forkScoped(
+						controller.runLocalOperation(
+							decodeRunLocalOperationCommand({
+								schemaVersion: 1,
+								kind: "runLocalOperation",
+								commandId: "tiny-output-bash",
+								correlationId: "tiny-output-bash-correlation",
+								expectedSessionRevision: fixture.sessionManager.getSessionRevision(),
+								viewId: controller.viewId,
+								controllerEpoch: controller.controllerEpoch,
+								operation: {
+									kind: "bash",
+									command: "synchronous-test-producer",
+									excludeFromContext: true,
+									useUserShell: true,
+								},
+							}),
+						),
+					);
+					yield* Effect.promise(() => executionStarted.promise);
+					let active = (yield* runner.snapshot()).activeLocalOperation;
+					if (active === undefined) throw new Error("expected active local operation");
+					while (projected !== active.output.text) {
+						yield* Effect.sleep("1 millis");
+						active = (yield* runner.snapshot()).activeLocalOperation;
+						if (active === undefined) throw new Error("expected active local operation");
+					}
+					expect(active.output.totalBytes).toBe(Buffer.byteLength(fullOutput));
+					expect(active.peakPendingOutputChunks).toBeLessThanOrEqual(32);
+					expect(active.peakPendingOutputBytes).toBeLessThanOrEqual(256 * 1024);
+					expect(outputMetadata.length).toBeGreaterThan(1);
+					for (let index = 1; index < outputMetadata.length; index++) {
+						expect(outputMetadata[index]!.totalBytes).toBeGreaterThan(outputMetadata[index - 1]!.totalBytes);
+					}
+					expect(
+						outputMetadata.every(
+							metadata => metadata.truncated === (metadata.totalBytes > 256 * 1024),
+						),
+					).toBe(true);
+					expect(sawReset).toBe(true);
+					expect(projected).toBe(active.output.text);
+					releaseExecution.resolve();
+					yield* Fiber.join(running);
+					yield* Fiber.join(consume);
+					yield* controller.detach(
+						detach(controller.viewId, (yield* runner.snapshot()).revision, controller.controllerEpoch),
+					);
+					yield* runner.stop();
+				}),
+			),
+		);
+	});
+
+	it("bounds real bash output and retains non-zero results with included and excluded transcript revisions", async () => {
+		const fixture = await createLiveFixture();
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const runner = yield* makeSessionRunnerLive(fixture, { mailboxCapacity: 1, eventCapacity: 4 });
+					const controller = yield* runner.attachView(attach("bounded-controller", "controller", 0));
+					if (controller.capability !== "controller") throw new Error("expected controller");
+					const inputRevision = (yield* runner.snapshot()).revision;
+					const firstSessionRevision = fixture.sessionManager.getSessionRevision();
+					const bounded = yield* controller.runLocalOperation(
+						decodeRunLocalOperationCommand({
+							schemaVersion: 1,
+							kind: "runLocalOperation",
+							commandId: "bounded-bash",
+							correlationId: "bounded-bash-correlation",
+							expectedSessionRevision: firstSessionRevision,
+							viewId: controller.viewId,
+							controllerEpoch: controller.controllerEpoch,
+							operation: {
+								kind: "bash",
+								command: "python3 -c 'import sys; sys.stdout.write(\"€\" * 100000)'",
+								excludeFromContext: true,
+								useUserShell: true,
+							},
+						}),
+					);
+					expect(bounded.result.output.totalBytes).toBe(300_000);
+					expect(Buffer.byteLength(bounded.result.output.text)).toBeLessThanOrEqual(256 * 1024);
+					expect(bounded.result.output.text).not.toContain("\uFFFD");
+					expect(bounded.result.output.truncated).toBe(true);
+					expect(bounded.completedSessionRevision).toBe(firstSessionRevision + 1);
+					const excluded = fixture.session.messages.at(-1);
+					expect(excluded?.role).toBe("bashExecution");
+					if (excluded?.role !== "bashExecution") throw new Error("expected excluded bash transcript entry");
+					expect(excluded.excludeFromContext).toBe(true);
+
+					const retained = yield* controller.runLocalOperation(
+						decodeRunLocalOperationCommand({
+							schemaVersion: 1,
+							kind: "runLocalOperation",
+							commandId: "failed-bash",
+							correlationId: "failed-bash-correlation",
+							expectedSessionRevision: bounded.completedSessionRevision,
+							viewId: controller.viewId,
+							controllerEpoch: controller.controllerEpoch,
+							operation: {
+								kind: "bash",
+								command: "printf retained-failure; exit 7",
+								excludeFromContext: false,
+								useUserShell: true,
+							},
+						}),
+					);
+					expect(retained.result.exitCode).toBe(7);
+					expect(retained.result.cancelled).toBe(false);
+					expect(retained.result.output.text).toBe("retained-failure");
+					expect(retained.completedSessionRevision).toBe(bounded.completedSessionRevision + 1);
+					expect((yield* runner.snapshot()).revision).toBe(inputRevision);
+					const included = fixture.session.messages.at(-1);
+					expect(included?.role).toBe("bashExecution");
+					if (included?.role !== "bashExecution") throw new Error("expected included bash transcript entry");
+					expect(included.excludeFromContext).toBe(false);
+					yield* runner.stop();
+				}),
+			),
+		);
+	});
+
+	it("fences duplicate, conflicting, stale-lease, exact-cancel, and same-ID ABA local operations", async () => {
+		const fixture = await createLiveFixture();
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const runner = yield* makeSessionRunnerLive(fixture, { mailboxCapacity: 1, eventCapacity: 1 });
+					const controller = yield* runner.attachView(attach("cancel-controller", "controller", 0));
+					if (controller.capability !== "controller") throw new Error("expected controller");
+					const makeRun = (commandId: string, command: string) =>
+						decodeRunLocalOperationCommand({
+							schemaVersion: 1,
+							kind: "runLocalOperation",
+							commandId,
+							correlationId: `${commandId}-correlation`,
+							expectedSessionRevision: fixture.sessionManager.getSessionRevision(),
+							viewId: controller.viewId,
+							controllerEpoch: controller.controllerEpoch,
+							operation: {
+								kind: "bash",
+								command,
+								excludeFromContext: true,
+								useUserShell: true,
+							},
+						});
+					const staleRevisionCommand = makeRun("stale-session", "printf forbidden");
+					const staleRevision = yield* Effect.flip(
+						controller.runLocalOperation(
+							decodeRunLocalOperationCommand({
+								...staleRevisionCommand,
+								expectedSessionRevision: staleRevisionCommand.expectedSessionRevision + 1,
+							}),
+						),
+					);
+					expect(staleRevision).toBeInstanceOf(SessionRevisionConflictError);
+					const first = yield* controller.runLocalOperation(makeRun("aba", "printf first"));
+					const conflict = yield* Effect.flip(controller.runLocalOperation(makeRun("aba", "printf conflict")));
+					expect(conflict).toBeInstanceOf(RunnerLocalOperationCommandConflictError);
+					yield* controller.runLocalOperation(makeRun("evict", "printf evict"));
+
+					const replacementCommand = makeRun("aba", "printf begun; sleep 10; printf forbidden");
+					const replacementFiber = yield* Effect.forkScoped(controller.runLocalOperation(replacementCommand));
+					let replacementGeneration = 0;
+					while (replacementGeneration === 0) {
+						replacementGeneration = (yield* runner.snapshot()).activeLocalOperation?.operationGeneration ?? 0;
+						if (replacementGeneration === 0) yield* Effect.sleep("1 millis");
+					}
+					expect(replacementGeneration).toBeGreaterThan(first.operationGeneration);
+					const staleTarget = yield* Effect.flip(
+						controller.cancelLocalOperation(
+							decodeCancelLocalOperationCommand({
+								schemaVersion: 1,
+								kind: "cancelLocalOperation",
+								commandId: "stale-aba-cancel",
+								correlationId: "stale-aba-cancel-correlation",
+								expectedSessionRevision: fixture.sessionManager.getSessionRevision(),
+								viewId: controller.viewId,
+								controllerEpoch: controller.controllerEpoch,
+								targetCommandId: "aba",
+								targetOperationGeneration: first.operationGeneration,
+							}),
+						),
+					);
+					expect(staleTarget).toBeInstanceOf(RunnerLocalOperationTargetError);
+					const staleLease = yield* Effect.flip(
+						controller.cancelLocalOperation(
+							decodeCancelLocalOperationCommand({
+								schemaVersion: 1,
+								kind: "cancelLocalOperation",
+								commandId: "stale-lease-cancel",
+								correlationId: "stale-lease-cancel-correlation",
+								expectedSessionRevision: fixture.sessionManager.getSessionRevision(),
+								viewId: controller.viewId,
+								controllerEpoch: controller.controllerEpoch + 1,
+								targetCommandId: "aba",
+								targetOperationGeneration: replacementGeneration,
+							}),
+						),
+					);
+					expect(staleLease).toBeInstanceOf(StaleRunnerControllerLeaseError);
+					const cancel = decodeCancelLocalOperationCommand({
+						schemaVersion: 1,
+						kind: "cancelLocalOperation",
+						commandId: "exact-cancel",
+						correlationId: "exact-cancel-correlation",
+						expectedSessionRevision: fixture.sessionManager.getSessionRevision(),
+						viewId: controller.viewId,
+						controllerEpoch: controller.controllerEpoch,
+						targetCommandId: "aba",
+						targetOperationGeneration: replacementGeneration,
+					});
+					const cancelled = yield* controller.cancelLocalOperation(cancel);
+					const duplicateCancel = yield* controller.cancelLocalOperation(cancel);
+					expect(duplicateCancel).toEqual(cancelled);
+					const result = yield* Fiber.join(replacementFiber);
+					expect(result.result.cancelled).toBe(true);
+					expect(result.result.output.text).toContain("begun");
+					expect(result.result.output.text).not.toContain("forbidden");
+					yield* runner.stop();
+				}),
+			),
+		);
+	});
+
+	it.skipIf(Bun.env.PI_PYTHON_INTEGRATION !== "1")(
+		"executes a real Python kernel operation and persists its final transcript entry",
+		async () => {
+			const fixture = await createLiveFixture();
+			await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const runner = yield* makeSessionRunnerLive(fixture, { mailboxCapacity: 1, eventCapacity: 4 });
+						const controller = yield* runner.attachView(attach("python-controller", "controller", 0));
+						if (controller.capability !== "controller") throw new Error("expected controller");
+						const startedRevision = fixture.sessionManager.getSessionRevision();
+						const receipt = yield* controller.runLocalOperation(
+							decodeRunLocalOperationCommand({
+								schemaVersion: 1,
+								kind: "runLocalOperation",
+								commandId: "real-python",
+								correlationId: "real-python-correlation",
+								expectedSessionRevision: startedRevision,
+								viewId: controller.viewId,
+								controllerEpoch: controller.controllerEpoch,
+								operation: {
+									kind: "python",
+									code: "print('python-real', flush=True)\n21 * 2",
+									excludeFromContext: false,
+								},
+							}),
+						);
+						expect(receipt.result.kind).toBe("python");
+						if (receipt.result.kind !== "python") throw new Error("expected Python operation result");
+						expect(receipt.result.output.text).toContain("python-real");
+						expect(receipt.result.cancelled).toBe(false);
+						expect(receipt.result.stdinRequested).toBe(false);
+						expect(receipt.result.totalLines).toBeGreaterThanOrEqual(1);
+						expect(receipt.completedSessionRevision).toBe(startedRevision + 1);
+						const finalMessage = fixture.session.messages.at(-1);
+						expect(finalMessage?.role).toBe("pythonExecution");
+						if (finalMessage?.role !== "pythonExecution") throw new Error("expected Python transcript entry");
+						expect(finalMessage.code).toContain("21 * 2");
+						expect(finalMessage.output).toContain("python-real");
+						yield* runner.stop();
+						yield* Effect.promise(() => fixture.session.dispose());
+					}),
+				),
+			);
+		},
+	);
 });

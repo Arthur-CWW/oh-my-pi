@@ -1,4 +1,6 @@
 import { Cause, Deferred, Effect, FiberSet, PubSub, Queue, Ref, type Scope } from "effect";
+import type { PythonResult } from "../eval/py/executor";
+import type { BashResult } from "../exec/bash-executor";
 import { type AgentSession, type AgentSessionEvent, PromptOperationConflictError } from "../session/agent-session";
 import {
 	DurableInputCommandConflictError,
@@ -28,6 +30,9 @@ import {
 	RunnerCompactionCommandConflictError,
 	RunnerCompactionTargetError,
 	RunnerCompactionUnavailableError,
+	RunnerLocalOperationCommandConflictError,
+	RunnerLocalOperationTargetError,
+	RunnerLocalOperationUnavailableError,
 	RunnerControllerConflictError,
 	RunnerItemRevisionConflictError,
 	RunnerPromptOperationConflictError,
@@ -48,14 +53,18 @@ import {
 	assertRunnerRevision,
 	type CancelCompactionCommand,
 	type CancelCompactionReceipt,
+	type CancelLocalOperationCommand,
+	type CancelLocalOperationReceipt,
 	type DetachRunnerViewCommand,
 	decodeCancelCompactionCommand,
+	decodeCancelLocalOperationCommand,
 	decodeCancelQueuedInputCommand,
 	decodeEditQueuedInputCommand,
 	decodeInterruptPromptCommand,
 	decodeRefreshSshToolCommand,
 	decodeReplaceTodosCommand,
 	decodeRunCompactionCommand,
+	decodeRunLocalOperationCommand,
 	decodeSetActiveToolsCommand,
 	decodeSetModelCommand,
 	decodeSetThinkingLevelCommand,
@@ -72,6 +81,8 @@ import {
 	RUNNER_SCHEMA_VERSION,
 	type RunCompactionCommand,
 	type RunCompactionReceipt,
+	type RunLocalOperationCommand,
+	type RunLocalOperationReceipt,
 	type RunnerCapability,
 	type RunnerCommandReceipt,
 	type RunnerControlMetadata,
@@ -107,6 +118,9 @@ export type RunnerFailure =
 	| RunnerCompactionCommandConflictError
 	| RunnerCompactionUnavailableError
 	| RunnerCompactionTargetError
+	| RunnerLocalOperationCommandConflictError
+	| RunnerLocalOperationUnavailableError
+	| RunnerLocalOperationTargetError
 	| StaleRunnerControllerLeaseError
 	| RunnerViewAlreadyAttachedError
 	| RunnerViewNotAttachedError
@@ -129,6 +143,10 @@ export interface SessionRunnerLiveResources {
 	readonly session: AgentSession;
 	readonly sessionManager: SessionManager;
 }
+
+type LocalOperationExecutionResult =
+	| { readonly kind: "bash"; readonly result: BashResult }
+	| { readonly kind: "python"; readonly result: PythonResult };
 
 export interface RunnerSubscription {
 	readonly take: Effect.Effect<RunnerEventDelivery, RunnerFailure, Scope.Scope>;
@@ -174,6 +192,12 @@ export interface ControllerSessionRunnerView extends RunnerViewBase {
 	readonly cancelCompaction: (
 		command: CancelCompactionCommand,
 	) => Effect.Effect<CancelCompactionReceipt, RunnerFailure, Scope.Scope>;
+	readonly runLocalOperation: (
+		command: RunLocalOperationCommand,
+	) => Effect.Effect<RunLocalOperationReceipt, RunnerFailure, Scope.Scope>;
+	readonly cancelLocalOperation: (
+		command: CancelLocalOperationCommand,
+	) => Effect.Effect<CancelLocalOperationReceipt, RunnerFailure, Scope.Scope>;
 	readonly interruptPrompt: (
 		command: InterruptPromptCommand,
 	) => Effect.Effect<InterruptPromptReceipt, RunnerFailure, Scope.Scope>;
@@ -214,13 +238,21 @@ interface EventDetails {
 		| ReplaceTodosCommand
 		| RefreshSshToolCommand
 		| InterruptPromptCommand
-		| CancelCompactionCommand;
+		| CancelCompactionCommand
+		| RunLocalOperationCommand
+		| CancelLocalOperationCommand;
 	readonly controllerEpoch: number;
 	readonly viewId?: string;
 	readonly inputId?: string;
 	readonly targetGeneration?: number;
 	readonly targetCommandId?: string;
 	readonly targetOperationGeneration?: number;
+	readonly localOperationOutput?: {
+		readonly chunk: string;
+		readonly totalBytes: number;
+		readonly truncated: boolean;
+		readonly reset: boolean;
+	};
 	readonly durableSequence?: number;
 	readonly transcriptEntryId?: string;
 	readonly transcriptLeafId?: string | null;
@@ -244,6 +276,34 @@ interface LiveCompactionRecord {
 	cancellationRequested: boolean;
 }
 
+interface LiveLocalOperationRecord {
+	readonly command: RunLocalOperationCommand;
+	readonly operationGeneration: number;
+	readonly startedSessionRevision: number;
+	readonly deferred: Deferred.Deferred<RunLocalOperationReceipt, RunnerFailure>;
+	readonly outputChunks: Map<number, Buffer>;
+	outputHead: number;
+	outputTail: number;
+	outputHeadOffset: number;
+	retainedBytes: number;
+	totalBytes: number;
+	completed: boolean;
+	cancellationRequested: boolean;
+	readonly pendingOutputChunks: Array<{
+		chunk: string;
+		bytes: number;
+		reset: boolean;
+		totalBytes: number;
+		truncated: boolean;
+	}>;
+	pendingOutputBytes: number;
+	peakPendingOutputChunks: number;
+	peakPendingOutputBytes: number;
+	outputPumpRunning: boolean;
+	outputClosed: boolean;
+	readonly outputDrained: Deferred.Deferred<void>;
+}
+
 const asRunnerFailure = (error: unknown): RunnerFailure => {
 	if (
 		error instanceof InvalidRunnerCommandError ||
@@ -256,6 +316,9 @@ const asRunnerFailure = (error: unknown): RunnerFailure => {
 		error instanceof RunnerCompactionCommandConflictError ||
 		error instanceof RunnerCompactionUnavailableError ||
 		error instanceof RunnerCompactionTargetError ||
+		error instanceof RunnerLocalOperationCommandConflictError ||
+		error instanceof RunnerLocalOperationUnavailableError ||
+		error instanceof RunnerLocalOperationTargetError ||
 		error instanceof StaleRunnerControllerLeaseError ||
 		error instanceof RunnerViewAlreadyAttachedError ||
 		error instanceof RunnerViewNotAttachedError ||
@@ -353,6 +416,10 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 	let runnerSequence = 0;
 	const mailboxWaiters = new Set<() => Effect.Effect<void>>();
 	const compactionCommands = new Map<string, LiveCompactionRecord>();
+	const localOperationCommands = new Map<string, LiveLocalOperationRecord>();
+	let activeLocalOperation: LiveLocalOperationRecord | undefined;
+	let nextLocalOperationGeneration = 1;
+	const localOperationOutputLimit = 256 * 1024;
 	let activeCompaction: { readonly commandId: string; readonly operationGeneration: number } | undefined;
 	let nextCompactionOperationGeneration = 1;
 
@@ -393,6 +460,20 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 					: {
 							...activeCompaction,
 							startedSessionRevision: compactionCommands.get(activeCompaction.commandId)!.startedSessionRevision,
+						},
+			activeLocalOperation:
+				activeLocalOperation === undefined
+					? undefined
+					: {
+							commandId: activeLocalOperation.command.commandId,
+							operationGeneration: activeLocalOperation.operationGeneration,
+							startedSessionRevision: activeLocalOperation.startedSessionRevision,
+							operation: activeLocalOperation.command.operation,
+							output: localOperationOutputSnapshot(activeLocalOperation),
+							pendingOutputChunks: activeLocalOperation.pendingOutputChunks.length,
+							pendingOutputBytes: activeLocalOperation.pendingOutputBytes,
+							peakPendingOutputChunks: activeLocalOperation.peakPendingOutputChunks,
+							peakPendingOutputBytes: activeLocalOperation.peakPendingOutputBytes,
 						},
 			workflow: resources.sessionManager.buildSessionContext().workflow ?? { kind: "none" },
 			toolConfigurationGeneration: resources.session.toolConfigurationGeneration,
@@ -482,6 +563,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 			targetGeneration: details.targetGeneration,
 			targetCommandId: details.targetCommandId,
 			targetOperationGeneration: details.targetOperationGeneration,
+			localOperationOutput: details.localOperationOutput,
 		};
 		yield* PubSub.publish(events, event);
 		yield* publishTerminal({ kind: "runnerEvent", event });
@@ -702,6 +784,16 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 		controllerEpoch: number,
 		command: CancelCompactionCommand,
 	) => Effect.Effect<CancelCompactionReceipt, RunnerFailure, Scope.Scope>;
+	let runLocalOperation!: (
+		viewId: string,
+		controllerEpoch: number,
+		command: RunLocalOperationCommand,
+	) => Effect.Effect<RunLocalOperationReceipt, RunnerFailure, Scope.Scope>;
+	let cancelLocalOperation!: (
+		viewId: string,
+		controllerEpoch: number,
+		command: CancelLocalOperationCommand,
+	) => Effect.Effect<CancelLocalOperationReceipt, RunnerFailure, Scope.Scope>;
 	let interruptPrompt!: (
 		viewId: string,
 		controllerEpoch: number,
@@ -748,6 +840,8 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 			transitionGoalMode: input => transitionGoalMode(viewId, controllerEpoch, input),
 			compact: input => runCompaction(viewId, controllerEpoch, input),
 			cancelCompaction: command => cancelCompaction(viewId, controllerEpoch, command),
+			runLocalOperation: command => runLocalOperation(viewId, controllerEpoch, command),
+			cancelLocalOperation: command => cancelLocalOperation(viewId, controllerEpoch, command),
 			interruptPrompt: command => interruptPrompt(viewId, controllerEpoch, command),
 			releaseController: command =>
 				command.viewId === viewId ? releaseController(command) : mismatchedView(viewId),
@@ -1201,6 +1295,443 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 					targetOperationGeneration: decoded.targetOperationGeneration,
 					cancellationRequested: true,
 				} satisfies CancelCompactionReceipt;
+			}),
+		);
+	});
+
+	const sameLocalOperationCommand = (
+		left: RunLocalOperationCommand,
+		right: RunLocalOperationCommand,
+	): boolean => {
+		if (
+			left.schemaVersion !== right.schemaVersion ||
+			left.kind !== right.kind ||
+			left.commandId !== right.commandId ||
+			left.correlationId !== right.correlationId ||
+			left.causationId !== right.causationId ||
+			left.expectedSessionRevision !== right.expectedSessionRevision ||
+			left.viewId !== right.viewId ||
+			left.controllerEpoch !== right.controllerEpoch ||
+			left.operation.kind !== right.operation.kind ||
+			left.operation.excludeFromContext !== right.operation.excludeFromContext
+		) {
+			return false;
+		}
+		return left.operation.kind === "bash" && right.operation.kind === "bash"
+			? left.operation.command === right.operation.command &&
+					left.operation.useUserShell === right.operation.useUserShell
+			: left.operation.kind === "python" &&
+					right.operation.kind === "python" &&
+					left.operation.code === right.operation.code;
+	};
+
+	const trimLocalOperationOutput = (record: LiveLocalOperationRecord): void => {
+		let excess = record.retainedBytes - localOperationOutputLimit;
+		while (excess > 0 && record.outputHead < record.outputTail) {
+			const head = record.outputChunks.get(record.outputHead)!;
+			const available = head.length - record.outputHeadOffset;
+			if (excess < available) {
+				record.outputHeadOffset += excess;
+				record.retainedBytes -= excess;
+				while (
+					record.outputHeadOffset < head.length &&
+					(head[record.outputHeadOffset]! & 0xc0) === 0x80
+				) {
+					record.outputHeadOffset++;
+					record.retainedBytes--;
+				}
+				return;
+			}
+			record.outputChunks.delete(record.outputHead++);
+			record.outputHeadOffset = 0;
+			record.retainedBytes -= available;
+			excess -= available;
+		}
+	};
+
+	const appendLocalOperationOutput = (record: LiveLocalOperationRecord, chunk: string): void => {
+		const bytes = Buffer.from(chunk);
+		record.totalBytes += bytes.length;
+		if (bytes.length === 0) return;
+		record.outputChunks.set(record.outputTail++, bytes);
+		record.retainedBytes += bytes.length;
+		trimLocalOperationOutput(record);
+	};
+
+	const replaceLocalOperationOutput = (record: LiveLocalOperationRecord, output: string, totalBytes: number): void => {
+		record.outputChunks.clear();
+		record.outputHead = 0;
+		record.outputTail = 0;
+		record.outputHeadOffset = 0;
+		record.retainedBytes = 0;
+		record.totalBytes = totalBytes;
+		const bytes = Buffer.from(output);
+		if (bytes.length > 0) {
+			record.outputChunks.set(record.outputTail++, bytes);
+			record.retainedBytes = bytes.length;
+			trimLocalOperationOutput(record);
+		}
+	};
+
+	const materializeLocalOperationOutput = (record: LiveLocalOperationRecord): string => {
+		if (record.retainedBytes === 0) return "";
+		const chunks: Buffer[] = [];
+		for (let index = record.outputHead; index < record.outputTail; index++) {
+			const chunk = record.outputChunks.get(index)!;
+			chunks.push(index === record.outputHead ? chunk.subarray(record.outputHeadOffset) : chunk);
+		}
+		return Buffer.concat(chunks, record.retainedBytes).toString();
+	};
+
+	const localOperationOutputSnapshot = (record: LiveLocalOperationRecord) => ({
+		text: materializeLocalOperationOutput(record),
+		totalBytes: record.totalBytes,
+		truncated: record.totalBytes > record.retainedBytes,
+	});
+
+	runLocalOperation = Effect.fn("Runner.runLocalOperation")(function* (
+		viewId: string,
+		controllerEpoch: number,
+		command: RunLocalOperationCommand,
+	) {
+		command = yield* Effect.try({
+			try: () => decodeRunLocalOperationCommand(command),
+			catch: asRunnerFailure,
+		});
+		if (command.viewId !== viewId) return yield* mismatchedView(viewId);
+		if (command.controllerEpoch !== controllerEpoch) {
+			return yield* Effect.fail(
+				new StaleRunnerControllerLeaseError({
+					viewId,
+					expectedControllerEpoch: command.controllerEpoch,
+					actualControllerEpoch: controllerEpoch,
+				}),
+			);
+		}
+		const admitted = yield* enqueue(
+			Effect.gen(function* () {
+				yield* requireController(viewId, controllerEpoch);
+				const retained = localOperationCommands.get(command.commandId);
+				if (retained) {
+					if (!sameLocalOperationCommand(retained.command, command)) {
+						return yield* Effect.fail(
+							new RunnerLocalOperationCommandConflictError({ commandId: command.commandId }),
+						);
+					}
+					return { record: retained, replayed: true };
+				}
+				if (command.expectedSessionRevision !== sessionRevision) {
+					return yield* Effect.fail(
+						new SessionRevisionConflictError(command.expectedSessionRevision, sessionRevision),
+					);
+				}
+				if (activeLocalOperation !== undefined) {
+					return yield* Effect.fail(new RunnerLocalOperationUnavailableError({ reason: "active" }));
+				}
+				if (localOperationCommands.size >= options.eventCapacity) {
+					let evicted = false;
+					for (const [commandId, record] of localOperationCommands) {
+						if (!record.completed) continue;
+						localOperationCommands.delete(commandId);
+						evicted = true;
+						break;
+					}
+					if (!evicted) {
+						return yield* Effect.fail(new RunnerLocalOperationUnavailableError({ reason: "capacity" }));
+					}
+				}
+				const deferred = yield* Deferred.make<RunLocalOperationReceipt, RunnerFailure>();
+				const outputDrained = yield* Deferred.make<void>();
+				const record: LiveLocalOperationRecord = {
+					command,
+					operationGeneration: nextLocalOperationGeneration++,
+					startedSessionRevision: sessionRevision,
+					deferred,
+					outputChunks: new Map(),
+					outputHead: 0,
+					outputTail: 0,
+					outputHeadOffset: 0,
+					retainedBytes: 0,
+					totalBytes: 0,
+					completed: false,
+					cancellationRequested: false,
+					pendingOutputChunks: [],
+					pendingOutputBytes: 0,
+					peakPendingOutputChunks: 0,
+					peakPendingOutputBytes: 0,
+					outputPumpRunning: false,
+					outputClosed: false,
+					outputDrained,
+				};
+				localOperationCommands.set(command.commandId, record);
+				activeLocalOperation = record;
+				const runOutputPump = (): void => {
+					if (record.outputPumpRunning) return;
+					record.outputPumpRunning = true;
+					runCallback(
+						Effect.gen(function* () {
+							while (record.pendingOutputChunks.length > 0) {
+								yield* enqueue(
+									Effect.gen(function* () {
+										const pending = record.pendingOutputChunks.splice(0, 32);
+										for (const delivery of pending) {
+											record.pendingOutputBytes -= delivery.bytes;
+											if (record.completed) continue;
+											yield* publishEvent({
+												kind: "localOperationOutput",
+												metadata: command,
+												controllerEpoch,
+												viewId,
+												targetCommandId: command.commandId,
+												targetOperationGeneration: record.operationGeneration,
+												sessionRevision,
+												localOperationOutput: {
+													chunk: delivery.chunk,
+													totalBytes: delivery.totalBytes,
+													truncated: delivery.truncated,
+													reset: delivery.reset,
+												},
+											});
+										}
+									}),
+								);
+								yield* Effect.yieldNow;
+							}
+							record.outputPumpRunning = false;
+							if (record.outputClosed) yield* Deferred.succeed(record.outputDrained, undefined);
+						}).pipe(Effect.matchCauseEffect({ onFailure: () => Effect.void, onSuccess: () => Effect.void })),
+					);
+				};
+				const onChunk = (chunk: string): void => {
+					if (record.outputClosed) return;
+					appendLocalOperationOutput(record, chunk);
+					const bytes = Buffer.byteLength(chunk);
+					const tail = record.pendingOutputChunks.at(-1);
+					if (
+						tail?.reset === true ||
+						record.pendingOutputChunks.length >= 32 ||
+						record.pendingOutputBytes + bytes > localOperationOutputLimit
+					) {
+						record.pendingOutputChunks.length = 0;
+						record.pendingOutputBytes = 0;
+						const resetChunk = materializeLocalOperationOutput(record);
+						const resetBytes = Buffer.byteLength(resetChunk);
+						record.pendingOutputChunks.push({
+							chunk: resetChunk,
+							bytes: resetBytes,
+							reset: true,
+							totalBytes: record.totalBytes,
+							truncated: record.totalBytes > record.retainedBytes,
+						});
+						record.pendingOutputBytes = resetBytes;
+					} else {
+						record.pendingOutputChunks.push({
+							chunk,
+							bytes,
+							reset: false,
+							totalBytes: record.totalBytes,
+							truncated: record.totalBytes > record.retainedBytes,
+						});
+						record.pendingOutputBytes += bytes;
+					}
+					record.peakPendingOutputChunks = Math.max(
+						record.peakPendingOutputChunks,
+						record.pendingOutputChunks.length,
+					);
+					record.peakPendingOutputBytes = Math.max(record.peakPendingOutputBytes, record.pendingOutputBytes);
+					runOutputPump();
+				};
+				const operation = command.operation;
+				const operationEffect: Effect.Effect<LocalOperationExecutionResult, RunnerFailure> =
+					operation.kind === "bash"
+						? Effect.tryPromise({
+								try: () =>
+									resources.session.executeBash(operation.command, onChunk, {
+										excludeFromContext: operation.excludeFromContext,
+										useUserShell: true,
+									}),
+								catch: asRunnerFailure,
+							}).pipe(
+								Effect.map(
+									(result): LocalOperationExecutionResult => ({ kind: "bash", result }),
+								),
+							)
+						: Effect.tryPromise({
+								try: () =>
+									resources.session.executePython(operation.code, onChunk, {
+										excludeFromContext: operation.excludeFromContext,
+									}),
+								catch: asRunnerFailure,
+							}).pipe(
+								Effect.map(
+									(result): LocalOperationExecutionResult => ({ kind: "python", result }),
+								),
+							);
+				const closeOutput = Effect.sync(() => {
+					record.outputClosed = true;
+					if (record.outputPumpRunning) return;
+					if (record.pendingOutputChunks.length > 0) runOutputPump();
+					else runCallback(Deferred.succeed(record.outputDrained, undefined));
+				});
+				runCallback(
+					operationEffect.pipe(
+						Effect.matchEffect({
+							onFailure: failure =>
+								closeOutput.pipe(
+									Effect.andThen(Deferred.await(record.outputDrained)),
+									Effect.andThen(enqueue(
+											Effect.sync(() => {
+												record.completed = true;
+												if (activeLocalOperation?.operationGeneration === record.operationGeneration) {
+													activeLocalOperation = undefined;
+												}
+												return failure;
+											}),
+										)),
+									Effect.flatMap(retainedFailure => Deferred.fail(record.deferred, retainedFailure)),
+									Effect.matchCauseEffect({ onFailure: () => Effect.void, onSuccess: () => Effect.void }),
+								),
+							onSuccess: result =>
+								closeOutput.pipe(
+									Effect.andThen(Deferred.await(record.outputDrained)),
+									Effect.andThen(enqueue(
+											Effect.gen(function* () {
+												replaceLocalOperationOutput(record, result.result.output, result.result.totalBytes);
+										sessionRevision = resources.sessionManager.getSessionRevision();
+										record.completed = true;
+										if (activeLocalOperation?.operationGeneration === record.operationGeneration) {
+											activeLocalOperation = undefined;
+										}
+										const output = {
+											...localOperationOutputSnapshot(record),
+											truncated:
+												result.result.truncated || record.totalBytes > record.retainedBytes,
+										};
+										const resultSummary: RunLocalOperationReceipt["result"] =
+											result.kind === "bash"
+												? {
+														kind: "bash",
+														output,
+														exitCode: result.result.exitCode,
+														cancelled: result.result.cancelled,
+														...(result.result.artifactId === undefined
+															? {}
+															: { artifactId: result.result.artifactId }),
+													}
+												: {
+														kind: "python",
+														output,
+														exitCode: result.result.exitCode,
+														cancelled: result.result.cancelled,
+														...(result.result.artifactId === undefined
+															? {}
+															: { artifactId: result.result.artifactId }),
+														totalLines: result.result.totalLines,
+														outputLines: result.result.outputLines,
+														outputBytes: result.result.outputBytes,
+														displayOutputs: result.result.displayOutputs,
+														stdinRequested: result.result.stdinRequested,
+													};
+										const receipt: RunLocalOperationReceipt = {
+											commandId: command.commandId,
+											correlationId: command.correlationId,
+											...(command.causationId === undefined ? {} : { causationId: command.causationId }),
+											startedSessionRevision: record.startedSessionRevision,
+											operationGeneration: record.operationGeneration,
+											completedSessionRevision: sessionRevision,
+											replayed: false,
+											result: resultSummary,
+										};
+										yield* publishEvent({
+											kind: "localOperationCompleted",
+											metadata: command,
+											controllerEpoch,
+											viewId,
+											targetCommandId: command.commandId,
+											targetOperationGeneration: record.operationGeneration,
+											sessionRevision,
+										});
+												yield* Deferred.succeed(record.deferred, receipt);
+											}),
+										)),
+									Effect.matchCauseEffect({ onFailure: () => Effect.void, onSuccess: () => Effect.void }),
+								),
+						}),
+					),
+				);
+				return { record, replayed: false };
+			}),
+		);
+		const receipt = yield* Deferred.await(admitted.record.deferred);
+		return admitted.replayed ? { ...receipt, replayed: true } : receipt;
+	});
+
+	cancelLocalOperation = Effect.fn("Runner.cancelLocalOperation")(function* (
+		viewId: string,
+		controllerEpoch: number,
+		command: CancelLocalOperationCommand,
+	) {
+		command = yield* Effect.try({
+			try: () => decodeCancelLocalOperationCommand(command),
+			catch: asRunnerFailure,
+		});
+		if (command.viewId !== viewId) return yield* mismatchedView(viewId);
+		if (command.controllerEpoch !== controllerEpoch) {
+			return yield* Effect.fail(
+				new StaleRunnerControllerLeaseError({
+					viewId,
+					expectedControllerEpoch: command.controllerEpoch,
+					actualControllerEpoch: controllerEpoch,
+				}),
+			);
+		}
+		return yield* enqueue(
+			Effect.gen(function* () {
+				yield* requireController(viewId, controllerEpoch);
+				if (command.expectedSessionRevision !== sessionRevision) {
+					return yield* Effect.fail(
+						new SessionRevisionConflictError(command.expectedSessionRevision, sessionRevision),
+					);
+				}
+				const record = activeLocalOperation;
+				if (
+					record === undefined ||
+					record.completed ||
+					record.command.commandId !== command.targetCommandId ||
+					record.operationGeneration !== command.targetOperationGeneration
+				) {
+					return yield* Effect.fail(
+						new RunnerLocalOperationTargetError({
+							targetCommandId: command.targetCommandId,
+							targetOperationGeneration: command.targetOperationGeneration,
+						}),
+					);
+				}
+				if (!record.cancellationRequested) {
+					record.cancellationRequested = true;
+					if (record.command.operation.kind === "bash") {
+						resources.session.abortBash();
+					} else {
+						resources.session.abortEval();
+					}
+					yield* publishEvent({
+						kind: "localOperationCancelRequested",
+						metadata: command,
+						controllerEpoch,
+						viewId,
+						targetCommandId: command.targetCommandId,
+						targetOperationGeneration: command.targetOperationGeneration,
+						sessionRevision,
+					});
+				}
+				return {
+					commandId: command.commandId,
+					correlationId: command.correlationId,
+					...(command.causationId === undefined ? {} : { causationId: command.causationId }),
+					targetCommandId: command.targetCommandId,
+					targetOperationGeneration: command.targetOperationGeneration,
+					cancellationRequested: true,
+				} satisfies CancelLocalOperationReceipt;
 			}),
 		);
 	});
@@ -2007,6 +2538,8 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 			transitionGoalMode: attached.transitionGoalMode,
 			compact: attached.compact,
 			cancelCompaction: attached.cancelCompaction,
+			runLocalOperation: attached.runLocalOperation,
+			cancelLocalOperation: attached.cancelLocalOperation,
 			interruptPrompt: attached.interruptPrompt,
 			detach,
 		} satisfies TerminalSessionView;
@@ -2024,6 +2557,12 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 				activeCompaction = undefined;
 				yield* Effect.forEach(
 					compactionCommands.values(),
+					record => Deferred.fail(record.deferred, new SessionRunnerStoppedError()).pipe(Effect.asVoid),
+					{ discard: true },
+				);
+				activeLocalOperation = undefined;
+				yield* Effect.forEach(
+					localOperationCommands.values(),
 					record => Deferred.fail(record.deferred, new SessionRunnerStoppedError()).pipe(Effect.asVoid),
 					{ discard: true },
 				);
