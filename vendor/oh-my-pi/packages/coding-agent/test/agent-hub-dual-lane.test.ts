@@ -17,6 +17,21 @@ function text(hub: AgentHubOverlayComponent, width: number): string {
 		.join("\n");
 }
 
+function stubStdoutRows(): { setRows(rows: number): void; restore(): void } {
+	const descriptor = Object.getOwnPropertyDescriptor(process.stdout, "rows");
+	let rows = 40;
+	Object.defineProperty(process.stdout, "rows", { configurable: true, get: () => rows });
+	return {
+		setRows(next: number) {
+			rows = next;
+		},
+		restore() {
+			if (descriptor) Object.defineProperty(process.stdout, "rows", descriptor);
+			else Reflect.deleteProperty(process.stdout, "rows");
+		},
+	};
+}
+
 function fixture(assignment: string) {
 	const registry = new AgentRegistry();
 	const session = { subscribe: () => () => {} } as unknown as AgentSession;
@@ -121,6 +136,27 @@ describe("Agent Hub dual-lane inspector", () => {
 		hub.dispose();
 		observers.dispose();
 	});
+	it("gives the preview the full height above the compact roster", () => {
+		const geometry = stubStdoutRows();
+		const { hub, observers } = fixture("Full-height preview");
+		try {
+			for (const rows of [24, 40, 60]) {
+				geometry.setRows(rows);
+				const lines = hub.render(120).map(line => Bun.stripANSI(line));
+				const previewStart = lines.findIndex(line => line.includes("Preview transcript"));
+				const rosterStart = lines.findIndex(line => line.includes("Running (1)"));
+				expect(previewStart).toBeGreaterThan(0);
+				expect(rosterStart - previewStart).toBe(rows - 9 - 6);
+			}
+			hub.handleInput("j");
+			expect(text(hub, 120)).toContain("Full-height preview");
+		} finally {
+			hub.dispose();
+			observers.dispose();
+			geometry.restore();
+		}
+	});
+
 
 	it("bounds prompt materialization before inspector scrolling", () => {
 		const { hub, observers } = fixture(`${"x".repeat(40_000)}TAIL_BEYOND_BOUND`);

@@ -109,6 +109,10 @@ const PREVIEW_TAIL_BYTES = JOURNAL_TAIL_BYTES;
 const PREVIEW_MAX_ENTRIES = 200;
 /** Wide cockpit breakpoint: two independently scrollable 80-column lanes. */
 const DUAL_LANE_MIN_WIDTH = 160;
+/** Bounded roster strip left below the full-height cockpit preview. */
+const ROSTER_STRIP_HEIGHT = 9;
+/** Hub title and footer chrome outside the preview and roster tracks. */
+const HUB_CHROME_HEIGHT = 6;
 const INSPECTOR_PROMPT_MAX_CHARS = 32 * 1024;
 const INSPECTOR_DELIVERY_LIMIT = 20;
 
@@ -1002,17 +1006,9 @@ export class AgentHubOverlayComponent extends Container {
 	}
 
 	#tableViewportCapacity(): number {
-		const termHeight = process.stdout.rows || 40;
-		const legendLines = this.#showLegend ? 7 : 0;
-		return Math.max(
-			3,
-			termHeight -
-				7 -
-				legendLines -
-				(this.#notice ? 1 : 0) -
-				(this.#tableFilterEditing ? 1 : 0) -
-				this.#previewRenderedHeight,
-		);
+		// The roster is deliberately a compact, scrollable strip. Section labels
+		// and the overflow marker share this budget with the selectable rows.
+		return Math.max(3, Math.min(ROSTER_STRIP_HEIGHT - 3, (process.stdout.rows || 40) - 7));
 	}
 	/** Recompute selectable identities from the cached search fields; materialize row variants only at the viewport. */
 	#treeActiveRows(rows: readonly AgentRef[]): readonly AgentRef[] {
@@ -1259,22 +1255,25 @@ export class AgentHubOverlayComponent extends Container {
 		this.#rebuildChatContent();
 	}
 
-	#renderPreview(width: number): string[] {
+	#renderPreview(width: number, targetHeight: number): string[] {
 		if (!this.#chatAgentId) {
-			this.#previewRenderedHeight = 3;
-			return [theme.fg("dim", " No agent transcript selected."), ...new DynamicBorder().render(width)];
+			const lines = [theme.fg("dim", " No agent transcript selected.")];
+			while (lines.length < targetHeight - 1) lines.push("");
+			lines.push(...new DynamicBorder().render(width));
+			this.#previewRenderedHeight = lines.length;
+			return lines;
 		}
 		if (width < DUAL_LANE_MIN_WIDTH) {
 			this.#dualLaneActive = false;
-			return this.#renderTranscriptPreview(width);
+			return this.#renderTranscriptPreview(width, targetHeight);
 		}
 		this.#dualLaneActive = true;
 		const leftWidth = Math.floor(width / 2);
 		const rightWidth = width - leftWidth;
-		const transcript = this.#renderTranscriptPreview(rightWidth, false);
-		const inspector = this.#renderInspectorPreview(leftWidth, Math.max(transcript.length, this.#viewportHeight + 2));
+		const transcript = this.#renderTranscriptPreview(rightWidth, targetHeight, false);
+		const inspector = this.#renderInspectorPreview(leftWidth, targetHeight);
 		const lines: string[] = [];
-		for (let index = 0; index < Math.max(inspector.length, transcript.length); index++) {
+		for (let index = 0; index < targetHeight; index++) {
 			const left = inspector[index] ?? "";
 			const right = transcript[index] ?? "";
 			lines.push(
@@ -1285,13 +1284,15 @@ export class AgentHubOverlayComponent extends Container {
 		return lines;
 	}
 
-	#renderTranscriptPreview(width: number, trackHeight = true): string[] {
+	#renderTranscriptPreview(width: number, targetHeight: number, trackHeight = true): string[] {
 		const innerWidth = Math.max(20, width - 2);
 		const rendered = this.#chatPlaceholder
 			? [theme.fg("dim", this.#chatPlaceholder)]
 			: this.#chatLog.render(innerWidth);
 		const content = rendered.length > 0 ? rendered : [theme.fg("dim", "No messages yet.")];
-		this.#viewportHeight = Math.max(4, Math.min(12, Math.floor((process.stdout.rows || 40) * 0.35)));
+		const editorLines =
+			this.#cockpitMode === "input" && !this.#chatArchived ? [...this.#editor.render(innerWidth)] : [];
+		this.#viewportHeight = Math.max(1, targetHeight - 2 - editorLines.length);
 		this.#lastMaxScroll = Math.max(0, content.length - this.#viewportHeight);
 		if (this.#wasAtBottom && !this.#chatSearchQuery) this.#scrollOffset = this.#lastMaxScroll;
 		this.#scrollOffset = Math.max(0, Math.min(this.#scrollOffset, this.#lastMaxScroll));
@@ -1301,9 +1302,8 @@ export class AgentHubOverlayComponent extends Container {
 		const lines = [` ${focus}${theme.fg("accent", "Preview transcript")}  ${mode}`];
 		for (const row of content.slice(this.#scrollOffset, this.#scrollOffset + this.#viewportHeight))
 			lines.push(` ${row}`);
-		if (this.#cockpitMode === "input" && !this.#chatArchived) {
-			for (const editorLine of this.#editor.render(innerWidth)) lines.push(` ${editorLine}`);
-		}
+		while (lines.length < targetHeight - 1 - editorLines.length) lines.push("");
+		for (const editorLine of editorLines) lines.push(` ${editorLine}`);
 		lines.push(...new DynamicBorder().render(width));
 		if (trackHeight) this.#previewRenderedHeight = lines.length;
 		return lines;
@@ -1601,7 +1601,16 @@ export class AgentHubOverlayComponent extends Container {
 			` ${theme.fg("accent", "Agent Hub")}${theme.fg("dim", ` · ${this.#topologyView}`)}${counts ? theme.fg("dim", `${theme.sep.dot}${counts}`) : ""}${terminalIndicator}${archiveIndicator}${focusIndicator}${filterIndicator}`,
 		);
 		lines.push(...new DynamicBorder().render(width));
-		lines.push(...this.#renderPreview(width));
+		const previewHeight = Math.max(
+			4,
+			(process.stdout.rows || 40) -
+				ROSTER_STRIP_HEIGHT -
+				HUB_CHROME_HEIGHT -
+				(this.#showLegend ? 8 : 0) -
+				(this.#notice ? 1 : 0) -
+				(this.#tableFilterEditing ? 1 : 0),
+		);
+		lines.push(...this.#renderPreview(width, previewHeight));
 		if (this.#showLegend) {
 			lines.push(...this.#renderLegend(width));
 			lines.push(...new DynamicBorder().render(width));
