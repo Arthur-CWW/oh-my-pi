@@ -109,6 +109,8 @@ const PREVIEW_TAIL_BYTES = JOURNAL_TAIL_BYTES;
 const PREVIEW_MAX_ENTRIES = 200;
 /** Wide cockpit breakpoint: two independently scrollable 80-column lanes. */
 const DUAL_LANE_MIN_WIDTH = 160;
+/** Smallest useful inspector/transcript track when narrow cockpits stack them. */
+const STACKED_LANE_MIN_HEIGHT = 6;
 /** Bounded roster strip left below the full-height cockpit preview. */
 const ROSTER_STRIP_HEIGHT = 9;
 /** Hub title and footer chrome outside the preview and roster tracks. */
@@ -1257,17 +1259,29 @@ export class AgentHubOverlayComponent extends Container {
 
 	#renderPreview(width: number, targetHeight: number): string[] {
 		if (!this.#chatAgentId) {
+			this.#dualLaneActive = false;
 			const lines = [theme.fg("dim", " No agent transcript selected.")];
 			while (lines.length < targetHeight - 1) lines.push("");
 			lines.push(...new DynamicBorder().render(width));
 			this.#previewRenderedHeight = lines.length;
 			return lines;
 		}
-		if (width < DUAL_LANE_MIN_WIDTH) {
+		const canStack = targetHeight >= STACKED_LANE_MIN_HEIGHT * 2;
+		if (width < DUAL_LANE_MIN_WIDTH && !canStack) {
 			this.#dualLaneActive = false;
 			return this.#renderTranscriptPreview(width, targetHeight);
 		}
 		this.#dualLaneActive = true;
+		if (width < DUAL_LANE_MIN_WIDTH) {
+			const inspectorHeight = Math.floor(targetHeight / 2);
+			const transcriptHeight = targetHeight - inspectorHeight;
+			const lines = [
+				...this.#renderInspectorPreview(width, inspectorHeight),
+				...this.#renderTranscriptPreview(width, transcriptHeight, false),
+			];
+			this.#previewRenderedHeight = lines.length;
+			return lines;
+		}
 		const leftWidth = Math.floor(width / 2);
 		const rightWidth = width - leftWidth;
 		const transcript = this.#renderTranscriptPreview(rightWidth, targetHeight, false);
@@ -1321,6 +1335,7 @@ export class AgentHubOverlayComponent extends Container {
 		const lines = [` ${focus}${theme.fg("accent", label)} ${theme.fg("dim", "[ / ] section")}`];
 		for (const row of content.slice(this.#inspectorScrollOffset, this.#inspectorScrollOffset + viewportHeight))
 			lines.push(` ${sanitizeLine(row, innerWidth)}`);
+		while (lines.length < targetHeight - 1) lines.push("");
 		lines.push(...new DynamicBorder().render(width));
 		return lines;
 	}
@@ -2343,8 +2358,7 @@ export class AgentHubOverlayComponent extends Container {
 			this.#viewerHeaderLines.push(
 				`${theme.bold(peer.name || peer.sessionId)} ${theme.fg("warning", "READONLY")} ${theme.fg("dim", `${state} · pid ${peer.pid} · ${peer.cwd} · cmd+p to real TUI`)}`,
 			);
-		} else
-		if (this.#chatArchived) {
+		} else if (this.#chatArchived) {
 			const archived = this.#chatArchived;
 			const model = archived.modelId
 				? `${archived.modelId}${archived.thinkingLevel ? `:${archived.thinkingLevel}` : ""}`
@@ -2377,8 +2391,7 @@ export class AgentHubOverlayComponent extends Container {
 						? "No messages yet."
 						: undefined;
 			if (messageEntries && messageEntries.length > 0) this.#syncChatComponents(messageEntries);
-		} else
-		if (this.#chatArchived) {
+		} else if (this.#chatArchived) {
 			this.#chatPlaceholder =
 				messageEntries === null
 					? "Archived transcript is no longer available."

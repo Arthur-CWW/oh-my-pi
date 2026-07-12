@@ -109,11 +109,17 @@ describe("Agent Hub dual-lane inspector", () => {
 		await initTheme();
 	});
 
-	it("activates exactly at the 160-column breakpoint", () => {
+	it("keeps side-by-side lanes at the 160-column breakpoint", () => {
 		const { hub, observers } = fixture("Inspect this spawn packet");
-		expect(text(hub, 159)).not.toContain("[ / ] section");
-		expect(text(hub, 160)).toContain("Prompt [ / ] section");
-		expect(text(hub, 160)).toContain("Shared cockpit context");
+		const narrow = text(hub, 159).split("\n");
+		expect(narrow.findIndex(line => line.includes("Prompt [ / ] section"))).toBeLessThan(
+			narrow.findIndex(line => line.includes("Preview transcript")),
+		);
+		const wide = text(hub, 160).split("\n");
+		expect(wide.findIndex(line => line.includes("Prompt [ / ] section"))).toBe(
+			wide.findIndex(line => line.includes("Preview transcript")),
+		);
+		expect(wide.join("\n")).toContain("Shared cockpit context");
 		hub.dispose();
 		observers.dispose();
 	});
@@ -143,10 +149,12 @@ describe("Agent Hub dual-lane inspector", () => {
 			for (const rows of [24, 40, 60]) {
 				geometry.setRows(rows);
 				const lines = hub.render(120).map(line => Bun.stripANSI(line));
-				const previewStart = lines.findIndex(line => line.includes("Preview transcript"));
+				const transcriptStart = lines.findIndex(line => line.includes("Preview transcript"));
+				const inspectorStart = lines.findIndex(line => line.includes("Prompt [ / ] section"));
+				const previewTrackStart = inspectorStart >= 0 ? inspectorStart : transcriptStart;
 				const rosterStart = lines.findIndex(line => line.includes("Running (1)"));
-				expect(previewStart).toBeGreaterThan(0);
-				expect(rosterStart - previewStart).toBe(rows - 9 - 6);
+				expect(transcriptStart).toBeGreaterThan(0);
+				expect(rosterStart - previewTrackStart).toBe(rows - 9 - 6);
 			}
 			hub.handleInput("j");
 			expect(text(hub, 120)).toContain("Full-height preview");
@@ -157,6 +165,48 @@ describe("Agent Hub dual-lane inspector", () => {
 		}
 	});
 
+	it.each([80, 120])("stacks inspector and transcript at %i columns with the same lane keys", width => {
+		const geometry = stubStdoutRows();
+		geometry.setRows(40);
+		const { hub, observers } = fixture("Stacked prompt body");
+		try {
+			const initial = text(hub, width).split("\n");
+			const inspectorStart = initial.findIndex(line => line.includes("Prompt [ / ] section"));
+			const transcriptStart = initial.findIndex(line => line.includes("Preview transcript"));
+			const rosterStart = initial.findIndex(line => line.includes("Running (1)"));
+			expect(inspectorStart).toBeGreaterThan(0);
+			expect(transcriptStart).toBeGreaterThan(inspectorStart);
+			expect(rosterStart - inspectorStart).toBe(40 - 9 - 6);
+
+			hub.handleInput("]");
+			expect(text(hub, width)).toContain("Route [ / ] section");
+			hub.handleInput("h");
+			expect(text(hub, width)).toContain("●Route");
+			hub.handleInput("l");
+			expect(text(hub, width)).toContain("●Preview transcript");
+		} finally {
+			hub.dispose();
+			observers.dispose();
+			geometry.restore();
+		}
+	});
+
+	it("falls back to transcript-only when the preview track cannot fit two useful lanes", () => {
+		const geometry = stubStdoutRows();
+		geometry.setRows(24);
+		const { hub, observers } = fixture("Short terminal prompt");
+		try {
+			const rendered = text(hub, 120);
+			expect(rendered).toContain("Preview transcript");
+			expect(rendered).not.toContain("Prompt [ / ] section");
+			hub.handleInput("h");
+			expect(text(hub, 120)).not.toContain("●Prompt");
+		} finally {
+			hub.dispose();
+			observers.dispose();
+			geometry.restore();
+		}
+	});
 
 	it("bounds prompt materialization before inspector scrolling", () => {
 		const { hub, observers } = fixture(`${"x".repeat(40_000)}TAIL_BEYOND_BOUND`);
