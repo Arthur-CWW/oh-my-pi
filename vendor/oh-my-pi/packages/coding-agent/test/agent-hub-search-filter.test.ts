@@ -203,6 +203,50 @@ describe("Agent Hub selection and filter", () => {
 		hub.dispose();
 	});
 
+	it("toggles running-only focus with hidden counts and stable selection restore", () => {
+		geometry = stubStdoutGeometry(120);
+		const agents = new AgentRegistry();
+		registerAgent(agents, "Alpha", "running");
+		registerAgent(agents, "Beta", "idle");
+		registerAgent(agents, "Gamma", "parked");
+		const { hub } = makeHub(agents);
+
+		hub.handleInput("j");
+		expect(selectedAgentId(hub)).toBe("Beta");
+		hub.handleInput(".");
+		expect(renderedAgentIds(hub)).toEqual(["Alpha"]);
+		expect(selectedAgentId(hub)).toBe("Alpha");
+		expect(renderedText(hub)).toContain("2 hidden");
+		expect(renderedText(hub)).toContain(". show all");
+
+		hub.handleInput(".");
+		expect(renderedAgentIds(hub)).toEqual(["Alpha", "Beta", "Gamma"]);
+		expect(selectedAgentId(hub)).toBe("Beta");
+		expect(renderedText(hub)).toContain(". running only");
+
+		hub.handleInput("/");
+		hub.handleInput(".");
+		expect(renderedText(hub)).toContain("/.");
+		expect(renderedText(hub)).toContain(". running only");
+		hub.handleInput("\x1b");
+		hub.handleInput("\x1b");
+		hub.dispose();
+	});
+
+	it("renders the explicit empty running-only state", () => {
+		geometry = stubStdoutGeometry(120);
+		const agents = new AgentRegistry();
+		registerAgent(agents, "Idle", "idle");
+		registerAgent(agents, "Parked", "parked");
+		const { hub } = makeHub(agents);
+
+		hub.handleInput(".");
+		const text = renderedText(hub);
+		expect(text).toContain("No running subagents · . to show all");
+		expect(text).toContain("2 hidden");
+		hub.dispose();
+	});
+
 	it("preserves selection by stable ID when agents are added", () => {
 		geometry = stubStdoutGeometry(120);
 		vi.spyOn(Date, "now").mockReturnValue(1_000);

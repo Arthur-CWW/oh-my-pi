@@ -514,6 +514,8 @@ export class AgentHubOverlayComponent extends Container {
 	#tableScrollOffset = 0;
 	#showTerminalAgents = false;
 	#hiddenTerminalCount = 0;
+	#showRunningOnly = false;
+	#focusRestoreSelectedKey: string | undefined;
 	#statusCounts: Record<AgentStatus, number> = { running: 0, idle: 0, parked: 0, aborted: 0 };
 	#notice: string | undefined;
 	// Table roster filter (/ key)
@@ -949,17 +951,45 @@ export class AgentHubOverlayComponent extends Container {
 		this.#selectedRow = this.#groupStartIndexes[target]!;
 		this.#syncSelectedKey();
 	}
-
 	#applyFilter(): void {
 		const q = this.#tableFilterQuery.toLowerCase();
 		const filteredActive = q ? this.#rows.filter(ref => this.#matchesTableFilter(ref, q)) : this.#rows;
-		this.#visibleActiveRows = this.#treeActiveRows(filteredActive);
-		this.#visibleArchivedRows = this.#showArchivedChildren
+		const focusedActive = this.#showRunningOnly ? filteredActive.filter(ref => ref.status === "running") : filteredActive;
+		this.#visibleActiveRows = this.#treeActiveRows(focusedActive);
+		const filteredArchived = this.#showArchivedChildren
 			? this.#archivedRows.filter(row => !q || this.#matchesArchivedFilter(row, q))
 			: [];
-		this.#visibleExternalRows = q ? this.#externalRows.filter(row => this.#matchesExternalFilter(row, q)) : this.#externalRows;
+		this.#visibleArchivedRows = this.#showRunningOnly ? [] : filteredArchived;
+		const filteredExternal = q ? this.#externalRows.filter(row => this.#matchesExternalFilter(row, q)) : this.#externalRows;
+		this.#visibleExternalRows = this.#showRunningOnly ? [] : filteredExternal;
 		this.#filterDirty = false;
 		this.#resolveSelection();
+	}
+
+	#toggleRunningOnly(): void {
+		if (this.#showRunningOnly) {
+			const restoreKey = this.#focusRestoreSelectedKey;
+			this.#focusRestoreSelectedKey = undefined;
+			this.#showRunningOnly = false;
+			this.#filterDirty = true;
+			this.#applyFilter();
+			if (restoreKey) {
+				const index = this.#findTableIndex(restoreKey);
+				if (index >= 0) {
+					this.#selectedRow = index;
+					this.#selectedAgentKey = restoreKey;
+				}
+			}
+			return;
+		}
+		this.#focusRestoreSelectedKey = this.#selectedTableKey();
+		this.#showRunningOnly = true;
+		this.#filterDirty = true;
+		this.#applyFilter();
+		if (this.#totalTableRows() === 0) return;
+		if (this.#focusRestoreSelectedKey && this.#findTableIndex(this.#focusRestoreSelectedKey) >= 0) return;
+		this.#selectedRow = 0;
+		this.#selectedAgentKey = this.#selectedTableKey();
 	}
 
 	#matchesTableFilter(ref: AgentRef, q: string): boolean {
@@ -1189,6 +1219,20 @@ export class AgentHubOverlayComponent extends Container {
 	// Table view
 	// ========================================================================
 
+	#focusHiddenCount(): number {
+		if (!this.#showRunningOnly) return 0;
+		const q = this.#tableFilterQuery.toLowerCase();
+		let hidden = 0;
+		for (const ref of this.#rows) {
+			if (ref.status !== "running" && (!q || this.#matchesTableFilter(ref, q))) hidden++;
+		}
+		if (this.#showArchivedChildren) {
+			hidden += this.#archivedRows.filter(row => !q || this.#matchesArchivedFilter(row, q)).length;
+		}
+		hidden += this.#externalRows.filter(row => !q || this.#matchesExternalFilter(row, q)).length;
+		return hidden;
+	}
+
 	#renderTable(width: number): string[] {
 		const lines: string[] = [];
 		lines.push(...new DynamicBorder().render(width));
@@ -1199,14 +1243,18 @@ export class AgentHubOverlayComponent extends Container {
 			: "";
 		const terminalIndicator = this.#hiddenTerminalCount > 0 ? theme.fg("dim", ` · ${this.#hiddenTerminalCount} terminal hidden`) : "";
 		const archiveIndicator = this.#showArchivedChildren ? theme.fg("dim", " · archived") : "";
-		lines.push(` ${theme.fg("accent", "Agent Hub")}${theme.fg("dim", ` · ${this.#topologyView}`)}${counts ? theme.fg("dim", `${theme.sep.dot}${counts}`) : ""}${terminalIndicator}${archiveIndicator}${filterIndicator}`);
+		const focusIndicator = this.#showRunningOnly ? theme.fg("dim", ` · ${this.#focusHiddenCount()} hidden`) : "";
+		lines.push(
+			` ${theme.fg("accent", "Agent Hub")}${theme.fg("dim", ` · ${this.#topologyView}`)}${counts ? theme.fg("dim", `${theme.sep.dot}${counts}`) : ""}${terminalIndicator}${archiveIndicator}${focusIndicator}${filterIndicator}`,
+		);
 		lines.push(...new DynamicBorder().render(width));
 		if (this.#showLegend) {
 			lines.push(...this.#renderLegend(width));
 			lines.push(...new DynamicBorder().render(width));
 		}
 		const totalRows = this.#totalTableRows();
-		if (totalRows === 0 && !this.#tableFilterQuery) lines.push(` ${theme.fg("dim", "no subagents yet — task spawns appear here")}`);
+		if (totalRows === 0 && this.#showRunningOnly) lines.push(` ${theme.fg("dim", "No running subagents · . to show all")}`);
+		else if (totalRows === 0 && !this.#tableFilterQuery) lines.push(` ${theme.fg("dim", "no subagents yet — task spawns appear here")}`);
 		else if (totalRows === 0) lines.push(` ${theme.fg("dim", "no matches")}`);
 		else {
 			const maxVisible = this.#tableViewportCapacity();
@@ -1234,7 +1282,8 @@ export class AgentHubOverlayComponent extends Container {
 		if (this.#notice) lines.push(` ${theme.fg("error", sanitizeLine(this.#notice, Math.max(10, width - 2)))}`);
 		if (this.#tableFilterEditing) lines.push(` ${theme.fg("accent", "/")}${this.#tableFilterQuery}${theme.fg("accent", "▏")}`);
 		lines.push("");
-		lines.push(` ${theme.fg("dim", "j/k:select  ?:legend  ctrl-u/d:page  gg/G:oldest/newest  Enter:open  t:tree/flat  h/l:parent/child  H/L:group  za/zc/zo/zC/zO/zM/zR:fold  p:park stale  c:archived  /:filter  Esc/q:close")}`);
+		const focusHint = this.#showRunningOnly ? ". show all" : ". running only";
+		lines.push(` ${theme.fg("dim", `j/k:select  ?:legend  ctrl-u/d:page  gg/G:oldest/newest  Enter:open  t:tree/flat  h/l:parent/child  H/L:group  za/zc/zo/zC/zO/zM/zR:fold  p:park stale  c:archived  /:filter  ${focusHint}  Esc/q:close`)}`);
 		lines.push(...new DynamicBorder().render(width));
 		return lines;
 	}
@@ -1376,6 +1425,11 @@ export class AgentHubOverlayComponent extends Container {
 				this.#requestRender();
 				return;
 			}
+			return;
+		}
+		if (keyData === ".") {
+			this.#toggleRunningOnly();
+			this.#requestRender();
 			return;
 		}
 
