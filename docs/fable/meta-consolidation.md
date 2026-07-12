@@ -45,3 +45,9 @@ Every feature that shipped cleanly leaned on ONE primitive: the append-only sess
 ## Next decision (small)
 
 Order the two big unlocks: (a) coordinator restart with re-adoption, then (b) journal-projection library — or reverse. Recommendation: (a) first; it makes every subsequent fix testable live, including (b).
+
+## Primitive design bar (Arthur, 2026-07-12, verbatim intent)
+
+"We want strong primitives, well designed, non-overlapping (orthogonal-ish; more orthogonal/composable is better)."
+
+Acceptance test for any new primitive: (1) does an existing primitive already own this concern (extend, don't twin)? (2) can it be composed without knowing its consumers? (3) does deleting it leave exactly one hole? Overlap found later is a bug with a deletion deadline, not a coexistence plan.
