@@ -1,7 +1,7 @@
 # Harness request register
 
 Status: canonical intake and decision register  
-Grounded: 2026-07-11  
+Grounded: 2026-07-12  
 Runtime contract: [Harness runtime contract](harness-runtime-contract.md)  
 Regression evidence: [Harness friction log](../state/harness-friction.md)
 
@@ -11,16 +11,18 @@ This register preserves Arthur's harness asks at request granularity. It does no
 
 New asks enter this register before implementation. Status transitions are updated in place rather than copied into a new row. Implementation requires the applicable phase gate in the [runtime contract](harness-runtime-contract.md#three-sequential-stabilization-phases). Completion requires a proof link; code, a build, or an assertion without linked behavioral evidence is not `IMPLEMENTED`.
 
-Statuses used here are `REQUESTED`, `DECIDED`, `IMPLEMENTED-PARTIAL`, `IMPLEMENTED`, `BROKEN`, `DEFERRED`, `NEEDS-DECISION`, and `REJECTED/NOT-NOW`. `DECIDED` records an approved contract, not completed implementation; `IMPLEMENTED` requires linked behavioral proof.
+Statuses used here are `REQUESTED`, `DECIDED`, `IMPLEMENTED-PARTIAL`, `IMPLEMENTED`, `BROKEN`, `DEFERRED`, `NEEDS-DECISION`, `PAUSED`, and `REJECTED/NOT-NOW`. `DECIDED` records an approved contract, not completed implementation; `IMPLEMENTED` requires linked behavioral proof.
 
 Owner phase abbreviations: P1 = canonical decisions/evidence; P2 = runner/view and rollout seam; P3 = operational viewer/regression loop; Later = outside stabilization gates.
 
 ## What happens next
 
-1. Finish P1 proof: route precedence, globally ordered visible obligations, identity semantics, and correlated diagnostics.
-2. Only after the full P1 gate, build and prove the P2 runner/view seam and N−1 rollout boundary.
-3. Only after the full P2 gate, deliver the P3 operational viewer and regression/proof loop.
-4. Reconsider deferred experiments only after stabilization; they do not create a parallel workstream.
+1. Follow the 2026-07-12 redesign priority contract in order: beachball latency, message delivery reliability, sectioned Agent Hub, minimal HTML workstream page, then hot-swap/view-reload proof from the web.
+2. Keep the rich-terminal and default-terminal migration requests paused while that priority contract runs; they are paused, not dropped.
+3. Finish P1 proof: route precedence, globally ordered visible obligations, identity semantics, and correlated diagnostics.
+4. Only after the full P1 gate, build and prove the P2 runner/view seam and N−1 rollout boundary.
+5. Only after the full P2 gate, deliver the P3 operational viewer and regression/proof loop.
+6. Reconsider deferred experiments only after stabilization; they do not create a parallel workstream.
 
 ## UX / input
 
@@ -127,6 +129,13 @@ Owner phase abbreviations: P1 = canonical decisions/evidence; P2 = runner/view a
 | HR-069 | Diagnose unexpected activation of loop mode and make its owner, trigger, and current state visible. | REQUESTED | P1 | [Regression log](../state/harness-friction.md) | Reproduction identifies the exact loop feature, activating event/config source, and a visible disable path. | Needs the exact UI/screenshot/session event because “loop” is currently ambiguous. |
 | HR-070 | Keep tmux, cmux, agent-mux, and the target runner/view architecture terminologically distinct. | DECIDED | P1/P2 | [Vocabulary](harness-runtime-contract.md#vocabulary) | Docs and UI say runner, client/view, and workspace tab; they name tmux or cmux only when referring to that actual external program. | Voice transcription frequently confuses “tmux” and “cmux”; neither owns OMP runtime state. |
 | HR-083 | Persist typed workstream identity in each session so root-launched sessions remain filterable, while keeping stable stream charters and concurrent per-session `/goal` state distinct but linked. | IMPLEMENTED | P2 | [Session metadata proof](../../vendor/oh-my-pi/packages/coding-agent/test/session-manager/session-workstream.test.ts); [startup/command proof](../../vendor/oh-my-pi/packages/coding-agent/test/workstream-startup.test.ts); [child inheritance proof](../../vendor/oh-my-pi/packages/coding-agent/test/task/workstream-inheritance.test.ts) (commits `243a8104`, `ce45e90d`) | Header is sole workstream authority; CLI/env/cwd classification, live reclassification, selector filtering, goal charter projection, resume, and child snapshot inheritance are proven. | `streams/<id>/GOAL.md` is the stable charter; `/goal` remains session-local JSONL execution/accounting state. Missing legacy metadata is unclassified, distinct from deliberate adhoc. |
+| HR-084 | Reduce beachball latency in long sessions before advancing the harness experience redesign. | REQUESTED | P1/P2 | session-local `omp-experience-contract.md`; session-local `tui-latency-diagnosis.md` | Measured long-session latency and ranked root-cause evidence are recorded before the next priority advances. | Priority 1 of 5; measured 5.9GB footprint/8.3GB peak, 338 in-process subagents, with retention and O(N) Agent Hub projection ranked top. |
+| HR-085 | Improve message delivery reliability across IRC revive and wake paths. | REQUESTED | P1 | session-local `omp-experience-contract.md`; `bus.ts` | Delivery proof covers revive success and failure-path eviction without wake loops. | Priority 2 of 5; IRC revive race fix is in flight with reservation-before-revive and eviction on failure. |
+| HR-086 | Deliver a sectioned Agent Hub. | REQUESTED | P2 | session-local `omp-experience-contract.md` | Agent Hub sections preserve message delivery while bounding projection work. | Priority 3 of 5; sectioned Agent Hub fix is in flight. |
+| HR-087 | Build a minimal HTML workstream page. | REQUESTED | P3 | session-local `omp-experience-contract.md` | The minimal web page exposes the active workstream without becoming a second authority. | Priority 4 of 5. |
+| HR-088 | Prove hot-swap/view-reload behavior from the web. | REQUESTED | P2 | session-local `omp-experience-contract.md` | Web proof demonstrates hot-swap and view reload against the live session. | Priority 5 of 5; follows the latency, delivery, Agent Hub, and HTML priorities. |
+| HR-089 | Port the rich terminal/TUI to the runner/view boundary. | PAUSED | P2 | [Runner/view boundary](harness-runtime-contract.md#runner-view-boundary); phase-two residuals in commit `71098639` | Rich-terminal migration remains resumable after the redesign pivot. | Arthur paused this migration on 2026-07-12; not dropped. |
+| HR-090 | Cut over the default terminal to the runner/view authority. | PAUSED | P2 | [Runner/view boundary](harness-runtime-contract.md#runner-view-boundary); phase-two residuals in commit `71098639` | Default-terminal cutover remains resumable after the redesign pivot. | Arthur paused this migration on 2026-07-12; not dropped. |
 
 ## Tools / learning / communication
 
@@ -165,6 +174,7 @@ Owner phase abbreviations: P1 = canonical decisions/evidence; P2 = runner/view a
 | D-009 | DECIDED | This register is the intake ledger; implementation claims require phase gate and linked proof. | [Register rules](#register-rules) |
 | D-010 | DECIDED | A slice is complete only after behavioral proof and a coherent Git checkpoint; dirty-tree builds are not rollback revisions. | [Slice checkpoint contract](harness-runtime-contract.md#slice-checkpoint-contract) |
 | D-011 | DECIDED | cmux tabs are convenient test/client surfaces; one-writer and isolation rules come from the runner/profile contract, not cmux. | [Slice checkpoint contract](harness-runtime-contract.md#slice-checkpoint-contract) |
+| D-012 | DECIDED | On 2026-07-12 Arthur paused rich-terminal/default-terminal migration and adopted the ordered five-priority redesign contract: beachball latency, message delivery reliability, sectioned Agent Hub, minimal HTML workstream page, then hot-swap/view-reload proof from the web. Paused work is not dropped. | session-local `omp-experience-contract.md` |
 
 ## Open questions
 
