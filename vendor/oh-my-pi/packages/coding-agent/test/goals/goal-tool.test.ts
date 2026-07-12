@@ -150,48 +150,48 @@ describe("GoalTool", () => {
 		});
 	});
 
-	it("enforces the create, update, and resume lifecycle truth table", async () => {
+	it("converges create, update, and resume wrappers on the set lifecycle", async () => {
 		const cases: Array<{
 			status: Goal["status"] | "absent";
-			create: "success" | string;
-			update: "success" | string;
+			create: "success";
+			update: "success";
 			resume: "success" | string;
 		}> = [
 			{
 				status: "absent",
 				create: "success",
-				update: "cannot update goal because this session has no goal; use op=create",
-				resume: "cannot resume goal because this session has no goal; use op=create",
+				update: "success",
+				resume: "cannot activate goal because this session has no goal; set an objective",
 			},
 			{
 				status: "active",
-				create: "cannot create goal because existing goal is active; use op=update to replace it",
+				create: "success",
 				update: "success",
-				resume: "cannot resume goal because existing goal is active; no action is needed",
+				resume: "success",
 			},
 			{
 				status: "paused",
-				create: "cannot create goal because existing goal is paused; use op=update to replace it",
+				create: "success",
 				update: "success",
 				resume: "success",
 			},
 			{
 				status: "budget-limited",
-				create: "cannot create goal because existing goal is budget-limited; use op=update to replace it",
+				create: "success",
 				update: "success",
-				resume: "cannot resume goal because existing goal is budget-limited; use op=update to replace it",
+				resume: "success",
 			},
 			{
 				status: "complete",
 				create: "success",
-				update: "cannot update goal because existing goal is complete; use op=create",
-				resume: "cannot resume goal because existing goal is complete; use op=create",
+				update: "success",
+				resume: "cannot activate goal because existing goal is complete; set an objective",
 			},
 			{
 				status: "dropped",
 				create: "success",
-				update: "cannot update goal because existing goal is dropped; use op=create",
-				resume: "cannot resume goal because existing goal is dropped; use op=create",
+				update: "success",
+				resume: "cannot activate goal because existing goal is dropped; set an objective",
 			},
 		];
 

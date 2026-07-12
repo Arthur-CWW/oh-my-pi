@@ -636,75 +636,51 @@ export class GoalRuntime {
 		});
 	}
 
-	async createGoal(input: { objective: string; tokenBudget?: number; workstream?: string }): Promise<GoalModeState> {
-		const objective = input.objective.trim();
-		if (!objective) throw new Error("objective is required when op=create");
-		validateTokenBudget(input.tokenBudget);
+	async setGoal(input?: { objective?: string; tokenBudget?: number; workstream?: string }): Promise<GoalModeState> {
+		const objective = input?.objective?.trim();
+		if (input?.objective !== undefined && !objective) throw new Error("objective must not be empty");
+		validateTokenBudget(input?.tokenBudget);
 		return await this.#withAccounting(async () => {
-			const existing = this.#host.getState();
-			if (existing?.goal && existing.goal.status !== "dropped" && existing.goal.status !== "complete") {
-				throw new Error(
-					`cannot create goal because existing goal is ${existing.goal.status}; use op=update to replace it`,
-				);
+			const existing = this.#getStateClone();
+			if (objective !== undefined) {
+				if (existing?.goal && existing.goal.status !== "complete" && existing.goal.status !== "dropped") {
+					await this.#flushUsageLocked("suppressed");
+				}
+				await this.#classifyWorkstream(objective, input?.workstream);
+				const state = this.#createGoalState(objective, input?.tokenBudget);
+				this.#budgetReportedFor = undefined;
+				this.#markActiveAccounting(state.goal);
+				await this.#commitState(state, { persist: "goal" });
+				return state;
 			}
-			await this.#classifyWorkstream(objective, input.workstream);
-			const state = this.#createGoalState(objective, input.tokenBudget);
+			if (!existing?.goal) {
+				throw new Error("cannot activate goal because this session has no goal; set an objective");
+			}
+			if (existing.goal.status === "complete" || existing.goal.status === "dropped") {
+				throw new Error(`cannot activate goal because existing goal is ${existing.goal.status}; set an objective`);
+			}
+			existing.enabled = true;
+			existing.mode = "active";
+			existing.reason = undefined;
+			existing.goal.status = "active";
+			existing.goal.updatedAt = this.#now();
 			this.#budgetReportedFor = undefined;
-			this.#markActiveAccounting(state.goal);
-			await this.#commitState(state, { persist: "goal" });
-			return state;
+			this.#markActiveAccounting(existing.goal);
+			await this.#commitState(existing, { persist: "goal" });
+			return existing;
 		});
+	}
+
+	async createGoal(input: { objective: string; tokenBudget?: number; workstream?: string }): Promise<GoalModeState> {
+		return await this.setGoal(input);
 	}
 
 	async replaceGoal(input: { objective: string; tokenBudget?: number; workstream?: string }): Promise<GoalModeState> {
-		const objective = input.objective.trim();
-		if (!objective) throw new Error("objective is required when op=update");
-		validateTokenBudget(input.tokenBudget);
-		return await this.#withAccounting(async () => {
-			const existing = this.#host.getState();
-			if (!existing?.goal) {
-				throw new Error("cannot update goal because this session has no goal; use op=create");
-			}
-			if (existing.goal.status === "complete" || existing.goal.status === "dropped") {
-				throw new Error(
-					`cannot update goal because existing goal is ${existing.goal.status}; use op=create`,
-				);
-			}
-			await this.#flushUsageLocked("suppressed");
-			await this.#classifyWorkstream(objective, input.workstream);
-			const state = this.#createGoalState(objective, input.tokenBudget);
-			this.#budgetReportedFor = undefined;
-			this.#markActiveAccounting(state.goal);
-			await this.#commitState(state, { persist: "goal" });
-			return state;
-		});
+		return await this.setGoal(input);
 	}
 
 	async resumeGoal(): Promise<GoalModeState> {
-		return await this.#withAccounting(async () => {
-			const state = this.#getStateClone();
-			if (!state?.goal) {
-				throw new Error("cannot resume goal because this session has no goal; use op=create");
-			}
-			if (state.goal.status !== "paused") {
-				const action =
-					state.goal.status === "complete" || state.goal.status === "dropped"
-						? "use op=create"
-						: state.goal.status === "active"
-							? "no action is needed"
-							: "use op=update to replace it";
-				throw new Error(`cannot resume goal because existing goal is ${state.goal.status}; ${action}`);
-			}
-			state.enabled = true;
-			state.mode = "active";
-			state.reason = undefined;
-			state.goal.status = "active";
-			state.goal.updatedAt = this.#now();
-			this.#budgetReportedFor = undefined;
-			this.#markActiveAccounting(state.goal);
-			await this.#commitState(state, { persist: "goal" });
-			return state;
-		});
+		return await this.setGoal();
 	}
 
 	async pauseGoal(): Promise<GoalModeState | undefined> {

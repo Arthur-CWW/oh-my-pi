@@ -350,7 +350,7 @@ describe("goal runtime", () => {
 		expect(lastEvent.state?.enabled).toBe(false);
 	});
 
-	it("rejects op=create on the runtime when a non-dropped goal already exists", async () => {
+	it("create converges an existing nonterminal goal to a fresh active goal", async () => {
 		const harness = createHarness({
 			state: {
 				enabled: true,
@@ -359,9 +359,11 @@ describe("goal runtime", () => {
 			},
 		});
 
-		await expect(harness.runtime.createGoal({ objective: "Second" })).rejects.toThrow(
-			"cannot create goal because existing goal is active; use op=update to replace it",
-		);
+		const next = await harness.runtime.createGoal({ objective: "Second" });
+		expect(next.enabled).toBe(true);
+		expect(next.goal.objective).toBe("Second");
+		expect(next.goal.status).toBe("active");
+		expect(next.goal.id).not.toBe("goal-1");
 	});
 
 	it("replaces an active goal with a fresh active goal", async () => {
@@ -426,6 +428,24 @@ describe("goal runtime", () => {
 		expect(harness.getState()?.goal.tokensUsed).toBe(3);
 		expect(harness.getState()?.goal.timeUsedSeconds).toBe(1);
 		expect(harness.persists).toHaveLength(2);
+	});
+
+	it("resume converges a budget-limited goal to active without replacing it", async () => {
+		const harness = createHarness({
+			state: {
+				enabled: false,
+				mode: "active",
+				goal: createGoal({ status: "budget-limited", tokensUsed: 30, timeUsedSeconds: 5 }),
+			},
+		});
+
+		const resumed = await harness.runtime.resumeGoal();
+		expect(resumed.enabled).toBe(true);
+		expect(resumed.mode).toBe("active");
+		expect(resumed.reason).toBeUndefined();
+		expect(resumed.goal.status).toBe("active");
+		expect(resumed.goal.id).toBe("goal-1");
+		expect(resumed.goal.tokensUsed).toBe(30);
 	});
 
 	it("allows creating a new goal after the previous one is complete", async () => {
