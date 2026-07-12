@@ -1,20 +1,20 @@
-import { type AgentSession, type AgentSessionEvent, PromptOperationConflictError } from "../session/agent-session";
 import { Cause, Deferred, Effect, FiberSet, PubSub, Queue, Ref, type Scope } from "effect";
+import { type AgentSession, type AgentSessionEvent, PromptOperationConflictError } from "../session/agent-session";
 import {
 	DurableInputCommandConflictError,
-	DurableInputQueueConflictError,
 	DurableInputItemRevisionConflictError,
+	type DurableInputQueue,
+	DurableInputQueueConflictError,
+	type DurableInputQueueEvent,
 	DurableInputRunnerRevisionConflictError,
 	SessionOwnershipLostError,
-	type DurableInputQueue,
-	type DurableInputQueueEvent,
 } from "../session/durable-input-queue";
 import type {
 	SessionEntry,
 	SetModelSessionCommand,
 	SetThinkingSessionCommand,
-	TransitionPlanModeSessionCommand,
 	TransitionGoalModeSessionCommand,
+	TransitionPlanModeSessionCommand,
 } from "../session/session-entries";
 import {
 	SessionCommandConflictError,
@@ -25,16 +25,16 @@ import {
 import type { SessionOwnershipHandle } from "../session/session-ownership";
 import {
 	InvalidRunnerCommandError,
-	RunnerControllerConflictError,
-	RunnerRevisionConflictError,
-	RunnerToolConfigurationConflictError,
-	RunnerTodoConflictError,
-	RunnerSshToolUnavailableError,
 	RunnerCompactionCommandConflictError,
-	RunnerCompactionUnavailableError,
 	RunnerCompactionTargetError,
+	RunnerCompactionUnavailableError,
+	RunnerControllerConflictError,
 	RunnerItemRevisionConflictError,
 	RunnerPromptOperationConflictError,
+	RunnerRevisionConflictError,
+	RunnerSshToolUnavailableError,
+	RunnerTodoConflictError,
+	RunnerToolConfigurationConflictError,
 	RunnerViewAlreadyAttachedError,
 	RunnerViewCapabilityError,
 	RunnerViewNotAttachedError,
@@ -43,43 +43,37 @@ import {
 	StaleRunnerControllerLeaseError,
 } from "./errors";
 import {
-	assertRunnerRevision,
-	decodeCancelQueuedInputCommand,
-	decodeCancelCompactionCommand,
-	decodeEditQueuedInputCommand,
-	decodeSetActiveToolsCommand,
-	decodeRefreshSshToolCommand,
-	decodeReplaceTodosCommand,
-	decodeSubmitInputCommand,
-	decodeRunCompactionCommand,
-	decodeSetModelCommand,
-	decodeTransitionPlanModeCommand,
-	decodeTransitionGoalModeCommand,
-	decodeInterruptPromptCommand,
-	decodeSetThinkingLevelCommand,
-	RUNNER_SCHEMA_VERSION,
 	type AcquireRunnerControllerCommand,
+	type AttachRunnerViewCommand,
+	assertRunnerRevision,
 	type CancelCompactionCommand,
 	type CancelCompactionReceipt,
-	type AttachRunnerViewCommand,
 	type DetachRunnerViewCommand,
-	type ReleaseRunnerControllerCommand,
-	type RunnerCapability,
-	type RunnerCommandReceipt,
-	type RunCompactionCommand,
-	type RunCompactionReceipt,
+	decodeCancelCompactionCommand,
+	decodeCancelQueuedInputCommand,
+	decodeEditQueuedInputCommand,
+	decodeInterruptPromptCommand,
+	decodeRefreshSshToolCommand,
+	decodeReplaceTodosCommand,
+	decodeRunCompactionCommand,
+	decodeSetActiveToolsCommand,
+	decodeSetModelCommand,
+	decodeSetThinkingLevelCommand,
+	decodeSubmitInputCommand,
+	decodeTransitionGoalModeCommand,
+	decodeTransitionPlanModeCommand,
+	type InterruptPromptCommand,
 	type InterruptPromptReceipt,
-	type SetModelReceipt,
-	type SetActiveToolsReceipt,
-	type SetActiveToolsCommand,
 	type RefreshSshToolCommand,
 	type RefreshSshToolReceipt,
+	type ReleaseRunnerControllerCommand,
 	type ReplaceTodosCommand,
 	type ReplaceTodosReceipt,
-	type InterruptPromptCommand,
-	type SetThinkingLevelReceipt,
-	type TransitionPlanModeReceipt,
-	type TransitionGoalModeReceipt,
+	RUNNER_SCHEMA_VERSION,
+	type RunCompactionCommand,
+	type RunCompactionReceipt,
+	type RunnerCapability,
+	type RunnerCommandReceipt,
 	type RunnerControlMetadata,
 	type RunnerEvent,
 	type RunnerEventDelivery,
@@ -87,6 +81,12 @@ import {
 	type RunnerStatus,
 	type RunnerViewSnapshot,
 	type SessionRunnerSnapshot,
+	type SetActiveToolsCommand,
+	type SetActiveToolsReceipt,
+	type SetModelReceipt,
+	type SetThinkingLevelReceipt,
+	type TransitionGoalModeReceipt,
+	type TransitionPlanModeReceipt,
 } from "./protocol";
 import type {
 	TerminalSessionDelivery,
@@ -156,14 +156,20 @@ export interface ControllerSessionRunnerView extends RunnerViewBase {
 	readonly editQueuedInput: (input: unknown) => Effect.Effect<RunnerCommandReceipt, RunnerFailure, Scope.Scope>;
 	readonly cancelQueuedInput: (input: unknown) => Effect.Effect<RunnerCommandReceipt, RunnerFailure, Scope.Scope>;
 	readonly setActiveTools: (input: unknown) => Effect.Effect<SetActiveToolsReceipt, RunnerFailure, Scope.Scope>;
-	readonly replaceTodos: (input: ReplaceTodosCommand) => Effect.Effect<ReplaceTodosReceipt, RunnerFailure, Scope.Scope>;
+	readonly replaceTodos: (
+		input: ReplaceTodosCommand,
+	) => Effect.Effect<ReplaceTodosReceipt, RunnerFailure, Scope.Scope>;
 	readonly refreshSshTool: (
 		input: RefreshSshToolCommand,
 	) => Effect.Effect<RefreshSshToolReceipt, RunnerFailure, Scope.Scope>;
 	readonly setModel: (input: unknown) => Effect.Effect<SetModelReceipt, RunnerFailure, Scope.Scope>;
 	readonly setThinkingLevel: (input: unknown) => Effect.Effect<SetThinkingLevelReceipt, RunnerFailure, Scope.Scope>;
-	readonly transitionPlanMode: (input: unknown) => Effect.Effect<TransitionPlanModeReceipt, RunnerFailure, Scope.Scope>;
-	readonly transitionGoalMode: (input: unknown) => Effect.Effect<TransitionGoalModeReceipt, RunnerFailure, Scope.Scope>;
+	readonly transitionPlanMode: (
+		input: unknown,
+	) => Effect.Effect<TransitionPlanModeReceipt, RunnerFailure, Scope.Scope>;
+	readonly transitionGoalMode: (
+		input: unknown,
+	) => Effect.Effect<TransitionGoalModeReceipt, RunnerFailure, Scope.Scope>;
 	readonly compact: (command: RunCompactionCommand) => Effect.Effect<RunCompactionReceipt, RunnerFailure, Scope.Scope>;
 	readonly cancelCompaction: (
 		command: CancelCompactionCommand,
@@ -179,7 +185,9 @@ export interface ControllerSessionRunnerView extends RunnerViewBase {
 export type SessionRunnerView = ObserverSessionRunnerView | ControllerSessionRunnerView;
 
 export interface SessionRunner {
-	readonly attachView: (command: AttachRunnerViewCommand) => Effect.Effect<SessionRunnerView, RunnerFailure, Scope.Scope>;
+	readonly attachView: (
+		command: AttachRunnerViewCommand,
+	) => Effect.Effect<SessionRunnerView, RunnerFailure, Scope.Scope>;
 	readonly attachTerminalView: (
 		command: AttachRunnerViewCommand,
 	) => Effect.Effect<TerminalSessionView, RunnerFailure, Scope.Scope>;
@@ -235,7 +243,6 @@ interface LiveCompactionRecord {
 	completed: boolean;
 	cancellationRequested: boolean;
 }
-
 
 const asRunnerFailure = (error: unknown): RunnerFailure => {
 	if (
@@ -323,7 +330,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 		sessionRevision = Math.max(sessionRevision, resources.sessionManager.getSessionRevision());
 		return asRunnerFailure(error);
 	};
-	const durableItems = new Map(openedItems.map((item) => [item.inputId, item]));
+	const durableItems = new Map(openedItems.map(item => [item.inputId, item]));
 	const acceptedCommands = new Set<string>();
 	const transcriptEntries = resources.sessionManager.getEntries();
 	let transcriptEntryCount = transcriptEntries.length;
@@ -348,7 +355,6 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 	const compactionCommands = new Map<string, LiveCompactionRecord>();
 	let activeCompaction: { readonly commandId: string; readonly operationGeneration: number } | undefined;
 	let nextCompactionOperationGeneration = 1;
-
 
 	const materializeSnapshot = Effect.fn("Runner.materializeSnapshot")(function* (refreshQueue: boolean) {
 		if (refreshQueue) {
@@ -406,16 +412,21 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 			runner,
 			session: {
 				sessionId: resources.session.sessionId,
+				sessionFile: resources.session.sessionFile,
+				cwd: resources.sessionManager.getCwd(),
 				modelSummary:
 					model === undefined
 						? undefined
 						: {
 								provider: model.provider,
+								api: model.api,
 								id: model.id,
+								...(model.requestModelId === undefined ? {} : { requestModelId: model.requestModelId }),
 								name: model.name,
 								contextWindow: model.contextWindow,
 							},
 				configuredThinkingLevel: resources.session.configuredThinkingLevel(),
+				effectiveThinkingLevel: resources.session.thinkingLevel,
 				workflow: resources.sessionManager.buildSessionContext().workflow ?? { kind: "none" },
 				toolConfigurationGeneration: resources.session.toolConfigurationGeneration,
 				activeToolNames: resources.session.getActiveToolNames(),
@@ -433,11 +444,9 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 				isBashRunning: resources.session.isBashRunning,
 				promptOperation: resources.session.promptOperation,
 				isEvalRunning: resources.session.isEvalRunning,
-				messages: [...resources.session.messages],
 			},
 		} satisfies TerminalSessionSnapshot;
 	});
-
 
 	const publishTerminal = Effect.fn("Runner.publishTerminal")(function* (
 		delivery:
@@ -446,7 +455,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 	) {
 		terminalSequence += 1;
 		const sequenced = { ...delivery, sequence: terminalSequence } as TerminalRawDelivery;
-		yield* Effect.forEach(terminalViews.values(), (view) => PubSub.publish(view.events, sequenced), {
+		yield* Effect.forEach(terminalViews.values(), view => PubSub.publish(view.events, sequenced), {
 			discard: true,
 		});
 	});
@@ -499,7 +508,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 				}
 				yield* operation.pipe(
 					Effect.matchCauseEffect({
-						onFailure: (cause) => {
+						onFailure: cause => {
 							const failure = Cause.findErrorOption(cause);
 							return Deferred.fail(
 								reply,
@@ -508,22 +517,22 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 									: new SessionRunnerRuntimeError({ issue: Cause.pretty(cause) }),
 							);
 						},
-						onSuccess: (value) => Deferred.succeed(reply, value),
+						onSuccess: value => Deferred.succeed(reply, value),
 					}),
 					Effect.asVoid,
 				);
 			});
-			yield* Ref.update(pendingOperations, (count) => count + 1);
+			yield* Ref.update(pendingOperations, count => count + 1);
 			const offered = yield* Queue.offer(mailbox, queued).pipe(
 				Effect.onInterrupt(() =>
 					Effect.sync(() => mailboxWaiters.delete(cancel)).pipe(
-						Effect.andThen(Ref.update(pendingOperations, (count) => count - 1)),
+						Effect.andThen(Ref.update(pendingOperations, count => count - 1)),
 					),
 				),
 			);
 			if (!offered) {
 				mailboxWaiters.delete(cancel);
-				yield* Ref.update(pendingOperations, (count) => count - 1);
+				yield* Ref.update(pendingOperations, count => count - 1);
 				return yield* Effect.fail(new SessionRunnerStoppedError());
 			}
 			return yield* Deferred.await(reply);
@@ -531,9 +540,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 
 	const drainMailbox = Effect.forever(
 		Queue.take(mailbox).pipe(
-			Effect.flatMap((operation) =>
-				Ref.update(pendingOperations, (count) => count - 1).pipe(Effect.andThen(operation)),
-			),
+			Effect.flatMap(operation => Ref.update(pendingOperations, count => count - 1).pipe(Effect.andThen(operation))),
 		),
 	);
 	yield* Effect.forkScoped(drainMailbox, { startImmediately: true });
@@ -543,9 +550,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 
 	const requireView = (viewId: string): Effect.Effect<MutableViewState, RunnerFailure> => {
 		const view = views.get(viewId);
-		return view
-			? Effect.succeed(view)
-			: Effect.fail(new RunnerViewNotAttachedError({ viewId }));
+		return view ? Effect.succeed(view) : Effect.fail(new RunnerViewNotAttachedError({ viewId }));
 	};
 
 	const requireController = (
@@ -591,7 +596,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 	});
 
 	let transcriptPosition = transcriptEntryCount;
-	const unsubscribeQueue = resources.queue.subscribe((event) => {
+	const unsubscribeQueue = resources.queue.subscribe(event => {
 		runCallback(
 			enqueue(applyQueueEvent(event)).pipe(
 				Effect.matchCauseEffect({ onFailure: () => Effect.void, onSuccess: () => Effect.void }),
@@ -716,7 +721,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 			subscribe: () => subscribeView(viewId),
 			detach,
 			close: detach,
-			acquireController: (command) =>
+			acquireController: command =>
 				command.viewId === viewId ? acquireController(command) : mismatchedView(viewId),
 		};
 	};
@@ -731,20 +736,20 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 			subscribe: () => subscribeView(viewId),
 			detach,
 			close: detach,
-			submitInput: (input) => submitInput(viewId, controllerEpoch, input),
-			editQueuedInput: (input) => editQueuedInput(viewId, controllerEpoch, input),
-			cancelQueuedInput: (input) => cancelQueuedInput(viewId, controllerEpoch, input),
-			setActiveTools: (input) => setActiveTools(viewId, controllerEpoch, input),
-			replaceTodos: (input) => replaceTodos(viewId, controllerEpoch, input),
-			refreshSshTool: (input) => refreshSshTool(viewId, controllerEpoch, input),
-			setThinkingLevel: (input) => setThinkingLevel(viewId, controllerEpoch, input),
-			setModel: (input) => setModel(viewId, controllerEpoch, input),
-			transitionPlanMode: (input) => transitionPlanMode(viewId, controllerEpoch, input),
-			transitionGoalMode: (input) => transitionGoalMode(viewId, controllerEpoch, input),
-			compact: (input) => runCompaction(viewId, controllerEpoch, input),
-			cancelCompaction: (command) => cancelCompaction(viewId, controllerEpoch, command),
-			interruptPrompt: (command) => interruptPrompt(viewId, controllerEpoch, command),
-			releaseController: (command) =>
+			submitInput: input => submitInput(viewId, controllerEpoch, input),
+			editQueuedInput: input => editQueuedInput(viewId, controllerEpoch, input),
+			cancelQueuedInput: input => cancelQueuedInput(viewId, controllerEpoch, input),
+			setActiveTools: input => setActiveTools(viewId, controllerEpoch, input),
+			replaceTodos: input => replaceTodos(viewId, controllerEpoch, input),
+			refreshSshTool: input => refreshSshTool(viewId, controllerEpoch, input),
+			setThinkingLevel: input => setThinkingLevel(viewId, controllerEpoch, input),
+			setModel: input => setModel(viewId, controllerEpoch, input),
+			transitionPlanMode: input => transitionPlanMode(viewId, controllerEpoch, input),
+			transitionGoalMode: input => transitionGoalMode(viewId, controllerEpoch, input),
+			compact: input => runCompaction(viewId, controllerEpoch, input),
+			cancelCompaction: command => cancelCompaction(viewId, controllerEpoch, command),
+			interruptPrompt: command => interruptPrompt(viewId, controllerEpoch, command),
+			releaseController: command =>
 				command.viewId === viewId ? releaseController(command) : mismatchedView(viewId),
 		};
 	};
@@ -781,7 +786,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 						const expected = expectedSequence;
 						expectedSequence = event.sequence + 1;
 						return snapshot().pipe(
-							Effect.map((current) => ({
+							Effect.map(current => ({
 								kind: "resyncRequired" as const,
 								expectedSequence: expected,
 								observedSequence: event.sequence,
@@ -798,11 +803,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 		return { take };
 	});
 
-	submitInput = Effect.fn("Runner.submitInput")(function* (
-		viewId: string,
-		controllerEpoch: number,
-		input: unknown,
-	) {
+	submitInput = Effect.fn("Runner.submitInput")(function* (viewId: string, controllerEpoch: number, input: unknown) {
 		const command = yield* Effect.try({ try: () => decodeSubmitInputCommand(input), catch: asRunnerFailure });
 		if (command.viewId !== viewId) return yield* mismatchedView(viewId);
 		if (command.controllerEpoch !== controllerEpoch) {
@@ -1024,9 +1025,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 				const retained = compactionCommands.get(command.commandId);
 				if (retained) {
 					if (!sameCompactionCommand(retained.command, command)) {
-						return yield* Effect.fail(
-							new RunnerCompactionCommandConflictError({ commandId: command.commandId }),
-						);
+						return yield* Effect.fail(new RunnerCompactionCommandConflictError({ commandId: command.commandId }));
 					}
 					return { record: retained, replayed: true };
 				}
@@ -1077,23 +1076,25 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 						catch: asRunnerFailure,
 					}).pipe(
 						Effect.matchEffect({
-							onFailure: (failure) =>
+							onFailure: failure =>
 								enqueue(
 									Effect.sync(() => {
 										record.completed = true;
-										if (activeCompaction?.operationGeneration === record.operationGeneration) activeCompaction = undefined;
+										if (activeCompaction?.operationGeneration === record.operationGeneration)
+											activeCompaction = undefined;
 										return failure;
 									}),
 								).pipe(
-									Effect.flatMap((retainedFailure) => Deferred.fail(record.deferred, retainedFailure)),
+									Effect.flatMap(retainedFailure => Deferred.fail(record.deferred, retainedFailure)),
 									Effect.matchCauseEffect({ onFailure: () => Effect.void, onSuccess: () => Effect.void }),
 								),
-							onSuccess: (result) =>
+							onSuccess: result =>
 								enqueue(
 									Effect.gen(function* () {
 										sessionRevision = resources.sessionManager.getSessionRevision();
 										record.completed = true;
-										if (activeCompaction?.operationGeneration === record.operationGeneration) activeCompaction = undefined;
+										if (activeCompaction?.operationGeneration === record.operationGeneration)
+											activeCompaction = undefined;
 										const receipt: RunCompactionReceipt = {
 											commandId: command.commandId,
 											correlationId: command.correlationId,
@@ -1104,9 +1105,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 											replayed: false,
 											result: {
 												summary: result.summary,
-												...(result.shortSummary === undefined
-													? {}
-													: { shortSummary: result.shortSummary }),
+												...(result.shortSummary === undefined ? {} : { shortSummary: result.shortSummary }),
 												firstKeptEntryId: result.firstKeptEntryId,
 												tokensBefore: result.tokensBefore,
 											},
@@ -1117,9 +1116,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 												schemaVersion: RUNNER_SCHEMA_VERSION,
 												commandId: command.commandId,
 												correlationId: command.correlationId,
-												...(command.causationId === undefined
-													? {}
-													: { causationId: command.causationId }),
+												...(command.causationId === undefined ? {} : { causationId: command.causationId }),
 												expectedRevision: revision,
 											},
 											controllerEpoch,
@@ -1128,9 +1125,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 										});
 										yield* Deferred.succeed(record.deferred, receipt);
 									}),
-								).pipe(
-									Effect.matchCauseEffect({ onFailure: () => Effect.void, onSuccess: () => Effect.void }),
-								),
+								).pipe(Effect.matchCauseEffect({ onFailure: () => Effect.void, onSuccess: () => Effect.void })),
 						}),
 					),
 				);
@@ -1373,9 +1368,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 				const available = new Set(resources.session.getAllToolNames());
 				for (const name of command.toolNames) {
 					if (!available.has(name)) {
-						return yield* Effect.fail(
-							new InvalidRunnerCommandError({ issue: `Tool "${name}" is unavailable` }),
-						);
+						return yield* Effect.fail(new InvalidRunnerCommandError({ issue: `Tool "${name}" is unavailable` }));
 					}
 				}
 				const result = yield* Effect.tryPromise({
@@ -1411,11 +1404,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 		);
 	});
 
-	setModel = Effect.fn("Runner.setModel")(function* (
-		viewId: string,
-		controllerEpoch: number,
-		input: unknown,
-	) {
+	setModel = Effect.fn("Runner.setModel")(function* (viewId: string, controllerEpoch: number, input: unknown) {
 		const command = yield* Effect.try({ try: () => decodeSetModelCommand(input), catch: asRunnerFailure });
 		if (command.viewId !== viewId) return yield* mismatchedView(viewId);
 		if (command.controllerEpoch !== controllerEpoch) {
@@ -1719,31 +1708,31 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 	detachView = Effect.fn("Runner.detachView")(function* (command: DetachRunnerViewCommand) {
 		yield* Effect.try({ try: () => validateMetadata(command), catch: asRunnerFailure });
 		yield* enqueue(
-		Effect.gen(function* () {
-			const view = yield* requireView(command.viewId);
-			yield* requireRevision(command.expectedRevision);
-			const detachedEpoch = view.controllerEpoch ?? activeController?.epoch ?? nextControllerEpoch - 1;
-			if (view.capability === "controller") {
-				if (command.controllerEpoch === undefined) {
-					return yield* Effect.fail(
-						new StaleRunnerControllerLeaseError({
-							viewId: command.viewId,
-							expectedControllerEpoch: 0,
-							actualControllerEpoch: view.controllerEpoch,
-						}),
-					);
+			Effect.gen(function* () {
+				const view = yield* requireView(command.viewId);
+				yield* requireRevision(command.expectedRevision);
+				const detachedEpoch = view.controllerEpoch ?? activeController?.epoch ?? nextControllerEpoch - 1;
+				if (view.capability === "controller") {
+					if (command.controllerEpoch === undefined) {
+						return yield* Effect.fail(
+							new StaleRunnerControllerLeaseError({
+								viewId: command.viewId,
+								expectedControllerEpoch: 0,
+								actualControllerEpoch: view.controllerEpoch,
+							}),
+						);
+					}
+					yield* requireController(command.viewId, command.controllerEpoch);
+					activeController = undefined;
 				}
-				yield* requireController(command.viewId, command.controllerEpoch);
-				activeController = undefined;
-			}
-			views.delete(command.viewId);
-			yield* publishEvent({
-				kind: "viewDetached",
-				metadata: command,
-				controllerEpoch: detachedEpoch,
-				viewId: command.viewId,
-			});
-		}),
+				views.delete(command.viewId);
+				yield* publishEvent({
+					kind: "viewDetached",
+					metadata: command,
+					controllerEpoch: detachedEpoch,
+					viewId: command.viewId,
+				});
+			}),
 		);
 	});
 
@@ -1789,9 +1778,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 		return observerView(command.viewId);
 	});
 
-	const attachTerminalView = Effect.fn("Runner.attachTerminalView")(function* (
-		command: AttachRunnerViewCommand,
-	) {
+	const attachTerminalView = Effect.fn("Runner.attachTerminalView")(function* (command: AttachRunnerViewCommand) {
 		if (command.capability !== "controller") {
 			return yield* Effect.fail(
 				new RunnerViewCapabilityError({ viewId: command.viewId, requiredCapability: "controller" }),
@@ -1800,7 +1787,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 		const terminalEvents = yield* PubSub.sliding<TerminalRawDelivery>(options.eventCapacity);
 		terminalViews.set(command.viewId, { events: terminalEvents });
 		if (unsubscribeTerminalAgent === undefined) {
-			unsubscribeTerminalAgent = resources.session.subscribe((event) => {
+			unsubscribeTerminalAgent = resources.session.subscribe(event => {
 				runCallback(
 					enqueue(publishTerminal({ kind: "agentEvent", event })).pipe(
 						Effect.matchCauseEffect({ onFailure: () => Effect.void, onSuccess: () => Effect.void }),
@@ -1810,7 +1797,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 		}
 		const attached = yield* attachView(command).pipe(
 			Effect.matchEffect({
-				onFailure: (failure) =>
+				onFailure: failure =>
 					Effect.sync(() => {
 						terminalViews.delete(command.viewId);
 						if (terminalViews.size === 0) {
@@ -1835,6 +1822,101 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 					return yield* materializeTerminalSnapshot(true);
 				}),
 			);
+		const terminalQuery = <A>(read: () => A): Effect.Effect<A, RunnerFailure> =>
+			enqueue(
+				Effect.gen(function* () {
+					yield* requireController(command.viewId, epoch);
+					return read();
+				}),
+			);
+		/**
+		 * Admit an expensive read under the runner/controller lifetime fence, then
+		 * execute it outside the serialized mailbox. Admission defines lifetime:
+		 * once started, a later detach or stop does not invalidate its result.
+		 * Only the private callable crosses the mailbox boundary.
+		 */
+		const terminalOutsideMailboxRead = <A>(read: () => A): Effect.Effect<A, RunnerFailure> =>
+			Effect.gen(function* () {
+				const admittedRead = yield* enqueue(
+					Effect.gen(function* () {
+						yield* requireController(command.viewId, epoch);
+						return read;
+					}),
+				);
+				return yield* Effect.tryPromise({
+					try: () => Promise.resolve().then(admittedRead),
+					catch: asRunnerFailure,
+				});
+			});
+		const getContextUsage = (queryOptions?: { readonly contextWindow?: number }) =>
+			terminalQuery(() => {
+				const usage = resources.session.getContextUsage(queryOptions);
+				return usage === undefined ? undefined : { ...usage };
+			});
+		const getSessionStats = () =>
+			terminalQuery(() => {
+				const stats = resources.session.getSessionStats();
+				return { ...stats, tokens: { ...stats.tokens } };
+			});
+		const getAdvisorStats = () =>
+			terminalQuery(() => {
+				const stats = resources.session.getAdvisorStats();
+				const model = stats.model;
+				return {
+					...stats,
+					...(model === undefined
+						? {}
+						: {
+								model: {
+									provider: model.provider,
+									api: model.api,
+									id: model.id,
+									...(model.requestModelId === undefined ? {} : { requestModelId: model.requestModelId }),
+									name: model.name,
+									contextWindow: model.contextWindow,
+								},
+							}),
+					tokens: { ...stats.tokens },
+					messages: { ...stats.messages },
+				};
+			});
+		const getAsyncJobSnapshot = (queryOptions?: { readonly recentLimit?: number }) =>
+			terminalQuery(() => {
+				const snapshot = resources.session.getAsyncJobSnapshot(queryOptions);
+				return snapshot === null
+					? null
+					: {
+							running: snapshot.running.map(job => ({ ...job })),
+							recent: snapshot.recent.map(job => ({ ...job })),
+							delivery: {
+								...snapshot.delivery,
+								pendingJobIds: [...snapshot.delivery.pendingJobIds],
+							},
+						};
+			});
+		const getHindsightSessionState = () =>
+			terminalQuery(() => {
+				const state = resources.session.getHindsightSessionState();
+				if (state === undefined) return undefined;
+				return {
+					sessionId: state.sessionId,
+					bankId: state.bankId,
+					retainTags: state.retainTags === undefined ? undefined : [...state.retainTags],
+					recallTags: state.recallTags === undefined ? undefined : [...state.recallTags],
+					recallTagsMatch: state.recallTagsMatch,
+					lastRetainedTurn: state.lastRetainedTurn,
+					hasRecalledForFirstTurn: state.hasRecalledForFirstTurn,
+					lastRecallSnippet: state.lastRecallSnippet,
+					mentalModelsSnippet: state.mentalModelsSnippet,
+					mentalModelsLoadedAt: state.mentalModelsLoadedAt,
+					isAlias: state.aliasOf !== undefined,
+				};
+			});
+		const getAllToolNames = () => terminalQuery(() => [...resources.session.getAllToolNames()]);
+		const formatSessionAsText = (queryOptions?: { readonly compact?: boolean }) =>
+			terminalOutsideMailboxRead(() => resources.session.formatSessionAsText(queryOptions));
+		const formatAdvisorHistoryAsText = (queryOptions?: { readonly compact?: boolean }) =>
+			terminalOutsideMailboxRead(() => resources.session.formatAdvisorHistoryAsText(queryOptions));
 		const subscribe = Effect.fn("Runner.subscribeTerminalView")(function* () {
 			const subscription = yield* PubSub.subscribe(terminalEvents);
 			const starting = yield* enqueue(
@@ -1852,7 +1934,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 						if (delivery.sequence !== expectedSequence) {
 							const expected = expectedSequence;
 							return terminalSnapshot().pipe(
-								Effect.map((current) => {
+								Effect.map(current => {
 									expectedSequence = current.terminalSequence + 1;
 									return {
 										kind: "resyncRequired" as const,
@@ -1905,6 +1987,14 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 			epoch,
 			snapshot: terminalSnapshot,
 			subscribe,
+			getContextUsage,
+			getSessionStats,
+			getAdvisorStats,
+			getAsyncJobSnapshot,
+			getHindsightSessionState,
+			getAllToolNames,
+			formatSessionAsText,
+			formatAdvisorHistoryAsText,
 			submit: attached.submitInput,
 			edit: attached.editQueuedInput,
 			cancel: attached.cancelQueuedInput,
@@ -1923,9 +2013,9 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 	});
 
 	const stop = Effect.fn("Runner.stop")(function* () {
-		return yield* Effect.uninterruptibleMask((restore) =>
+		return yield* Effect.uninterruptibleMask(restore =>
 			Effect.gen(function* () {
-				const leader = yield* Ref.modify(statusRef, (status) =>
+				const leader = yield* Ref.modify(statusRef, status =>
 					status === "running" ? [true, "stopping" as const] : [false, status],
 				);
 				if (!leader) return yield* restore(Deferred.await(stopDone));
@@ -1934,14 +2024,14 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 				activeCompaction = undefined;
 				yield* Effect.forEach(
 					compactionCommands.values(),
-					(record) => Deferred.fail(record.deferred, new SessionRunnerStoppedError()).pipe(Effect.asVoid),
+					record => Deferred.fail(record.deferred, new SessionRunnerStoppedError()).pipe(Effect.asVoid),
 					{ discard: true },
 				);
 				let firstFailure: RunnerFailure | undefined;
 				const finish = (effect: Effect.Effect<void, RunnerFailure>) =>
 					effect.pipe(
 						Effect.matchCauseEffect({
-							onFailure: (cause) =>
+							onFailure: cause =>
 								Effect.sync(() => {
 									if (firstFailure) return;
 									const failure = Cause.findErrorOption(cause);
@@ -1954,7 +2044,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 						}),
 					);
 
-				yield* Effect.forEach(mailboxWaiters, (cancel) => cancel(), { discard: true });
+				yield* Effect.forEach(mailboxWaiters, cancel => cancel(), { discard: true });
 				mailboxWaiters.clear();
 				yield* finish(
 					Effect.tryPromise({
@@ -1972,16 +2062,14 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 					}),
 				);
 				yield* finish(FiberSet.clear(callbackFibers));
-				yield* Effect.forEach(terminalViews.values(), (view) => finish(PubSub.shutdown(view.events)), {
+				yield* Effect.forEach(terminalViews.values(), view => finish(PubSub.shutdown(view.events)), {
 					discard: true,
 				});
 				terminalViews.clear();
 				yield* finish(PubSub.shutdown(events));
 				yield* finish(Queue.shutdown(mailbox).pipe(Effect.asVoid));
 				yield* Ref.set(pendingOperations, 0);
-				yield* finish(
-					Effect.tryPromise({ try: () => resources.ownership.release(), catch: asRunnerFailure }),
-				);
+				yield* finish(Effect.tryPromise({ try: () => resources.ownership.release(), catch: asRunnerFailure }));
 				yield* Ref.set(statusRef, "stopped");
 				if (firstFailure) yield* Deferred.fail(stopDone, firstFailure);
 				else yield* Deferred.succeed(stopDone, undefined);

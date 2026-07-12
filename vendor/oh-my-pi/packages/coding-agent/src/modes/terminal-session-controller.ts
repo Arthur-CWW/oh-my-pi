@@ -1,39 +1,47 @@
 import { randomUUID } from "node:crypto";
 import { Effect, Exit, Scope } from "effect";
 import type {
-	RunnerCommandReceipt,
 	CancelCompactionReceipt,
 	InterruptPromptReceipt,
-	RunCompactionReceipt,
-	RunnerImageContent,
-	SetActiveToolsReceipt,
 	RefreshSshToolReceipt,
 	ReplaceTodosReceipt,
+	RunCompactionReceipt,
+	RunnerCommandReceipt,
+	RunnerImageContent,
+	SetActiveToolsReceipt,
 	SetModelReceipt,
 	SetThinkingLevelReceipt,
-	TransitionPlanModeReceipt,
 	TransitionGoalModeReceipt,
+	TransitionPlanModeReceipt,
 } from "../runner/protocol";
 import {
-	decodeCancelQueuedInputCommand,
 	decodeCancelCompactionCommand,
+	decodeCancelQueuedInputCommand,
 	decodeEditQueuedInputCommand,
 	decodeInterruptPromptCommand,
-	decodeRunCompactionCommand,
-	decodeSubmitInputCommand,
-	decodeSetActiveToolsCommand,
 	decodeRefreshSshToolCommand,
 	decodeReplaceTodosCommand,
+	decodeRunCompactionCommand,
+	decodeSetActiveToolsCommand,
 	decodeSetModelCommand,
 	decodeSetThinkingLevelCommand,
-	decodeTransitionPlanModeCommand,
+	decodeSubmitInputCommand,
 	decodeTransitionGoalModeCommand,
-	RunnerCompactionTargetError,
+	decodeTransitionPlanModeCommand,
 	RUNNER_SCHEMA_VERSION,
+	RunnerCompactionTargetError,
 } from "../runner/protocol";
-import type { AgentSessionEvent } from "../session/agent-session";
 import type { RunnerFailure, SessionRunner } from "../runner/session-runner";
-import type { TerminalSessionSnapshot, TerminalSessionView } from "../runner/terminal-session-view";
+import type {
+	TerminalAdvisorStats,
+	TerminalAsyncJobSnapshot,
+	TerminalContextUsage,
+	TerminalHindsightSessionState,
+	TerminalSessionSnapshot,
+	TerminalSessionStats,
+	TerminalSessionView,
+} from "../runner/terminal-session-view";
+import type { AgentSessionEvent } from "../session/agent-session";
 import type { ConfiguredThinkingLevel } from "../thinking";
 import type { TodoPhase } from "../tools/todo";
 
@@ -165,6 +173,18 @@ export interface TerminalSessionController {
 	readonly snapshot: () => TerminalSessionSnapshot;
 	readonly subscribeAgentEvents: (listener: (event: AgentSessionEvent) => void) => () => void;
 	readonly refresh: () => Promise<TerminalSessionSnapshot>;
+	readonly getContextUsage: (options?: {
+		readonly contextWindow?: number;
+	}) => Promise<TerminalContextUsage | undefined>;
+	readonly getSessionStats: () => Promise<TerminalSessionStats>;
+	readonly getAdvisorStats: () => Promise<TerminalAdvisorStats>;
+	readonly getAsyncJobSnapshot: (options?: {
+		readonly recentLimit?: number;
+	}) => Promise<TerminalAsyncJobSnapshot | null>;
+	readonly getHindsightSessionState: () => Promise<TerminalHindsightSessionState | undefined>;
+	readonly getAllToolNames: () => Promise<ReadonlyArray<string>>;
+	readonly formatSessionAsText: (options?: { readonly compact?: boolean }) => Promise<string>;
+	readonly formatAdvisorHistoryAsText: (options?: { readonly compact?: boolean }) => Promise<string | null>;
 	readonly submit: (intent: TerminalSubmitIntent) => Promise<RunnerCommandReceipt>;
 	readonly edit: (intent: TerminalEditIntent) => Promise<RunnerCommandReceipt>;
 	readonly cancel: (intent: TerminalCancelIntent) => Promise<RunnerCommandReceipt>;
@@ -176,9 +196,7 @@ export interface TerminalSessionController {
 	readonly transitionPlanMode: (intent: TerminalTransitionPlanModeIntent) => Promise<TransitionPlanModeReceipt>;
 	readonly transitionGoalMode: (intent: TerminalTransitionGoalModeIntent) => Promise<TransitionGoalModeReceipt>;
 	readonly compact: (intent?: TerminalCompactionIntent) => Promise<RunCompactionReceipt>;
-	readonly cancelCompaction: (
-		intent?: TerminalCancelCompactionIntent,
-	) => Promise<CancelCompactionReceipt>;
+	readonly cancelCompaction: (intent?: TerminalCancelCompactionIntent) => Promise<CancelCompactionReceipt>;
 	readonly interruptPrompt: (intent?: TerminalInterruptPromptIntent) => Promise<InterruptPromptReceipt>;
 	readonly close: () => Promise<void>;
 }
@@ -222,7 +240,7 @@ export async function createTerminalSessionController(
 		};
 		const pump = Effect.forever(
 			subscription.take.pipe(
-				Effect.flatMap((delivery) =>
+				Effect.flatMap(delivery =>
 					Effect.tryPromise({
 						try: async () => {
 							if (delivery.kind === "resyncRequired") {
@@ -257,76 +275,84 @@ export async function createTerminalSessionController(
 			viewId,
 			epoch: view.epoch,
 			snapshot: () => latest,
-			subscribeAgentEvents: (listener) => {
+			subscribeAgentEvents: listener => {
 				listeners.add(listener);
 				return () => listeners.delete(listener);
 			},
 			refresh,
-			submit: (intent) =>
-				fenced(async (current) => {
+			getContextUsage: queryOptions => run(view!.getContextUsage(queryOptions)),
+			getSessionStats: () => run(view!.getSessionStats()),
+			getAdvisorStats: () => run(view!.getAdvisorStats()),
+			getAsyncJobSnapshot: queryOptions => run(view!.getAsyncJobSnapshot(queryOptions)),
+			getHindsightSessionState: () => run(view!.getHindsightSessionState()),
+			getAllToolNames: () => run(view!.getAllToolNames()),
+			formatSessionAsText: queryOptions => run(view!.formatSessionAsText(queryOptions)),
+			formatAdvisorHistoryAsText: queryOptions => run(view!.formatAdvisorHistoryAsText(queryOptions)),
+			submit: intent =>
+				fenced(async current => {
 					const ids = metadata(intent);
 					return run(
 						view!.submit(
 							decodeSubmitInputCommand({
-							schemaVersion: RUNNER_SCHEMA_VERSION,
-							kind: "submitInput",
-							...ids,
-							...(intent.causationId === undefined ? {} : { causationId: intent.causationId }),
-							expectedRevision: current.runner.revision,
-							viewId,
-							controllerEpoch: view!.epoch,
-							payload: {
-								text: intent.text,
-								...(intent.images === undefined ? {} : { images: [...intent.images] }),
-								deliveryClass: intent.deliveryClass,
-							},
+								schemaVersion: RUNNER_SCHEMA_VERSION,
+								kind: "submitInput",
+								...ids,
+								...(intent.causationId === undefined ? {} : { causationId: intent.causationId }),
+								expectedRevision: current.runner.revision,
+								viewId,
+								controllerEpoch: view!.epoch,
+								payload: {
+									text: intent.text,
+									...(intent.images === undefined ? {} : { images: [...intent.images] }),
+									deliveryClass: intent.deliveryClass,
+								},
 							}),
 						),
 					);
 				}),
-			edit: (intent) =>
-				fenced(async (current) => {
+			edit: intent =>
+				fenced(async current => {
 					const ids = metadata(intent);
 					return run(
 						view!.edit(
 							decodeEditQueuedInputCommand({
-							schemaVersion: RUNNER_SCHEMA_VERSION,
-							kind: "editQueuedInput",
-							...ids,
-							...(intent.causationId === undefined ? {} : { causationId: intent.causationId }),
-							expectedRevision: current.runner.revision,
-							viewId,
-							controllerEpoch: view!.epoch,
-							inputId: intent.inputId,
-							itemRevision: intent.itemRevision,
-							payload: {
-								text: intent.text,
-								...(intent.images === undefined ? {} : { images: [...intent.images] }),
-							},
+								schemaVersion: RUNNER_SCHEMA_VERSION,
+								kind: "editQueuedInput",
+								...ids,
+								...(intent.causationId === undefined ? {} : { causationId: intent.causationId }),
+								expectedRevision: current.runner.revision,
+								viewId,
+								controllerEpoch: view!.epoch,
+								inputId: intent.inputId,
+								itemRevision: intent.itemRevision,
+								payload: {
+									text: intent.text,
+									...(intent.images === undefined ? {} : { images: [...intent.images] }),
+								},
 							}),
 						),
 					);
 				}),
-			cancel: (intent) =>
-				fenced(async (current) => {
+			cancel: intent =>
+				fenced(async current => {
 					const ids = metadata(intent);
 					return run(
 						view!.cancel(
 							decodeCancelQueuedInputCommand({
-							schemaVersion: RUNNER_SCHEMA_VERSION,
-							kind: "cancelQueuedInput",
-							...ids,
-							...(intent.causationId === undefined ? {} : { causationId: intent.causationId }),
-							expectedRevision: current.runner.revision,
-							viewId,
-							controllerEpoch: view!.epoch,
-							inputId: intent.inputId,
-							itemRevision: intent.itemRevision,
+								schemaVersion: RUNNER_SCHEMA_VERSION,
+								kind: "cancelQueuedInput",
+								...ids,
+								...(intent.causationId === undefined ? {} : { causationId: intent.causationId }),
+								expectedRevision: current.runner.revision,
+								viewId,
+								controllerEpoch: view!.epoch,
+								inputId: intent.inputId,
+								itemRevision: intent.itemRevision,
 							}),
 						),
 					);
 				}),
-			setActiveTools: async (intent) => {
+			setActiveTools: async intent => {
 				const current = await refresh();
 				try {
 					const ids = metadata(intent);
@@ -351,7 +377,7 @@ export async function createTerminalSessionController(
 					throw error;
 				}
 			},
-			replaceTodos: async (intent) => {
+			replaceTodos: async intent => {
 				const current = await refresh();
 				try {
 					const ids = metadata(intent);
@@ -379,7 +405,7 @@ export async function createTerminalSessionController(
 					throw error;
 				}
 			},
-			refreshSshTool: async (intent) => {
+			refreshSshTool: async intent => {
 				const current = await refresh();
 				try {
 					const ids = metadata(intent);
@@ -404,7 +430,7 @@ export async function createTerminalSessionController(
 					throw error;
 				}
 			},
-			setModel: async (intent) => {
+			setModel: async intent => {
 				try {
 					const ids = metadata(intent);
 					const receipt = await run(
@@ -432,7 +458,7 @@ export async function createTerminalSessionController(
 					throw error;
 				}
 			},
-			setThinkingLevel: async (intent) => {
+			setThinkingLevel: async intent => {
 				try {
 					const ids = metadata(intent);
 					const receipt = await run(
@@ -445,9 +471,7 @@ export async function createTerminalSessionController(
 								expectedSessionRevision: latest.runner.sessionRevision,
 								viewId,
 								controllerEpoch: view!.epoch,
-								...(intent.thinkingLevel === undefined
-									? {}
-									: { thinkingLevel: intent.thinkingLevel }),
+								...(intent.thinkingLevel === undefined ? {} : { thinkingLevel: intent.thinkingLevel }),
 							}),
 						),
 					);
@@ -464,7 +488,7 @@ export async function createTerminalSessionController(
 					throw error;
 				}
 			},
-			transitionPlanMode: async (intent) => {
+			transitionPlanMode: async intent => {
 				const current = await refresh();
 				try {
 					const ids = metadata(intent);
@@ -489,7 +513,7 @@ export async function createTerminalSessionController(
 					throw error;
 				}
 			},
-			transitionGoalMode: async (intent) => {
+			transitionGoalMode: async intent => {
 				const current = await refresh();
 				try {
 					const ids = metadata(intent);

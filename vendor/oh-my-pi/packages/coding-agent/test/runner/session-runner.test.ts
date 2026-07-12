@@ -7,58 +7,59 @@ import * as compactionModule from "@oh-my-pi/pi-agent-core/compaction";
 import { type AssistantMessage, Effort } from "@oh-my-pi/pi-ai";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
-import * as autoThinkingClassifier from "../../src/auto-thinking/classifier";
-import * as imageLoading from "../../src/utils/image-loading";
 import { Effect, Exit, Fiber, Scope } from "effect";
 import { z } from "zod";
+import * as autoThinkingClassifier from "../../src/auto-thinking/classifier";
 import { ModelRegistry } from "../../src/config/model-registry";
 import { Settings } from "../../src/config/settings";
 import { createTerminalSessionController } from "../../src/modes/terminal-session-controller";
 import {
-	decodeInterruptPromptCommand,
+	type AttachRunnerViewCommand,
+	type DetachRunnerViewCommand,
 	decodeCancelCompactionCommand,
-	decodeRunCompactionCommand,
-	decodeSubmitInputCommand,
-	decodeSetActiveToolsCommand,
+	decodeInterruptPromptCommand,
 	decodeRefreshSshToolCommand,
+	decodeRunCompactionCommand,
+	decodeSetActiveToolsCommand,
 	decodeSetModelCommand,
 	decodeSetThinkingLevelCommand,
+	decodeSubmitInputCommand,
 	decodeTransitionGoalModeCommand,
 	decodeTransitionPlanModeCommand,
 	InvalidRunnerCommandError,
-	RunnerToolConfigurationConflictError,
-	RunnerSshToolUnavailableError,
-	RunnerRevisionConflictError,
+	RunnerCompactionCommandConflictError,
+	RunnerCompactionTargetError,
+	RunnerCompactionUnavailableError,
+	type RunnerControlMetadata,
 	RunnerItemRevisionConflictError,
 	RunnerPromptOperationConflictError,
-	RunnerCompactionCommandConflictError,
-	RunnerCompactionUnavailableError,
-	RunnerCompactionTargetError,
+	RunnerRevisionConflictError,
+	RunnerSshToolUnavailableError,
+	RunnerToolConfigurationConflictError,
+	RunnerViewNotAttachedError,
+	SessionRunnerRuntimeError,
 	SessionRunnerStoppedError,
 	StaleRunnerControllerLeaseError,
-	SessionRunnerRuntimeError,
-	type AttachRunnerViewCommand,
-	type DetachRunnerViewCommand,
-	type RunnerControlMetadata,
 } from "../../src/runner/protocol";
 import { makeSessionRunnerLive } from "../../src/runner/session-runner";
 import { AgentSession } from "../../src/session/agent-session";
 import { AuthStorage } from "../../src/session/auth-storage";
-import { convertToLlm } from "../../src/session/messages";
 import { DurableInputQueue } from "../../src/session/durable-input-queue";
+import { convertToLlm } from "../../src/session/messages";
 import {
 	SessionManager,
 	SessionRevisionConflictError,
 	SessionStateCommandInFlightError,
 } from "../../src/session/session-manager";
-import { AUTO_THINKING } from "../../src/thinking";
 import { acquireSessionOwnership } from "../../src/session/session-ownership";
+import { AUTO_THINKING } from "../../src/thinking";
+import * as imageLoading from "../../src/utils/image-loading";
 
 const roots: string[] = [];
 
 afterEach(async () => {
 	vi.restoreAllMocks();
-	await Promise.all(roots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true })));
+	await Promise.all(roots.splice(0).map(root => fs.rm(root, { recursive: true, force: true })));
 });
 
 const metadata = (commandId: string, expectedRevision: number): RunnerControlMetadata => ({
@@ -94,10 +95,7 @@ const submit = (viewId: string, controllerEpoch: number, commandId: string, expe
 	payload: { text: `input-${commandId}`, deliveryClass: "followUp" as const },
 });
 
-async function createLiveFixture(
-	holdProviderResponses = false,
-	reloadSshTool?: () => Promise<AgentTool | null>,
-) {
+async function createLiveFixture(holdProviderResponses = false, reloadSshTool?: () => Promise<AgentTool | null>) {
 	let shouldHoldProviderResponses = holdProviderResponses;
 	const root = await fs.mkdtemp(path.join(os.tmpdir(), "omp-session-runner-"));
 	roots.push(root);
@@ -143,16 +141,14 @@ async function createLiveFixture(
 		convertToLlm,
 		initialState: { model, systemPrompt: ["test"], tools: [alphaTool], messages: [] },
 		streamFn: (_model, context) => {
-			const lastUser = [...context.messages].reverse().find((message) => message.role === "user");
+			const lastUser = [...context.messages].reverse().find(message => message.role === "user");
 			const text =
 				typeof lastUser?.content === "string"
 					? lastUser.content
-					: lastUser?.content?.find((part) => part.type === "text")?.text;
+					: lastUser?.content?.find(part => part.type === "text")?.text;
 			providerInputs.push(text ?? "");
 			const serializedContext = JSON.stringify(context);
-			providerPlanModeContextCounts.push(
-				serializedContext.split("Plan mode is active.").length - 1,
-			);
+			providerPlanModeContextCounts.push(serializedContext.split("Plan mode is active.").length - 1);
 			const stream = new AssistantMessageEventStream();
 			const message: AssistantMessage = {
 				role: "assistant",
@@ -275,7 +271,9 @@ describe("live SessionRunner", () => {
 					expect(replay).toEqual({ ...first, replayed: true });
 					expect(first.durableSequence).toBe(1);
 					expect(first.revision).toBe(1);
-					expect((yield* Effect.promise(() => fixture.queue.list())).filter((item) => item.inputId === first.inputId)).toHaveLength(1);
+					expect(
+						(yield* Effect.promise(() => fixture.queue.list())).filter(item => item.inputId === first.inputId),
+					).toHaveLength(1);
 
 					const stale = yield* Effect.flip(
 						controller.submitInput(submit(controller.viewId, controller.controllerEpoch, "stale", 0)),
@@ -302,7 +300,11 @@ describe("live SessionRunner", () => {
 					expect(fixture.providerInputs).toEqual(["input-duplicate"]);
 
 					const transcriptSubscription = yield* observer.subscribe();
-					fixture.sessionManager.appendMessage({ role: "user", content: "transcript-race", timestamp: Date.now() });
+					fixture.sessionManager.appendMessage({
+						role: "user",
+						content: "transcript-race",
+						timestamp: Date.now(),
+					});
 					const transcriptDelivery = yield* transcriptSubscription.take;
 					expect(transcriptDelivery.event.kind).toBe("transcriptEntryAppended");
 					const transcriptSnapshot = yield* observer.snapshot();
@@ -478,7 +480,7 @@ describe("live SessionRunner", () => {
 					const terminal = yield* runner.attachTerminalView(attach("thinking-terminal", "controller", 0));
 					const initial = yield* terminal.snapshot();
 					let thinkingEvents = 0;
-					const unsubscribe = fixture.session.subscribe((event) => {
+					const unsubscribe = fixture.session.subscribe(event => {
 						if (event.type === "thinking_level_changed") thinkingEvents += 1;
 					});
 					const command = decodeSetThinkingLevelCommand({
@@ -502,7 +504,9 @@ describe("live SessionRunner", () => {
 					expect(
 						fixture.sessionManager
 							.getEntries()
-							.filter((entry) => entry.type === "thinking_level_change" && entry.command?.commandId === "thinking-high"),
+							.filter(
+								entry => entry.type === "thinking_level_change" && entry.command?.commandId === "thinking-high",
+							),
 					).toHaveLength(1);
 
 					const secondCommand = decodeSetThinkingLevelCommand({
@@ -521,13 +525,14 @@ describe("live SessionRunner", () => {
 					expect((yield* runner.snapshot()).sessionRevision).toBe(secondReceipt.sessionRevision);
 					expect(thinkingEvents).toBe(2);
 					expect(
-
 						fixture.sessionManager
 							.getEntries()
-							.filter((entry) => entry.type === "thinking_level_change" && entry.command?.commandId === "thinking-high"),
+							.filter(
+								entry => entry.type === "thinking_level_change" && entry.command?.commandId === "thinking-high",
+							),
 					).toHaveLength(1);
 					expect(
-						fixture.sessionManager.getEntries().filter((entry) => entry.type === "thinking_level_change"),
+						fixture.sessionManager.getEntries().filter(entry => entry.type === "thinking_level_change"),
 					).toHaveLength(2);
 					unsubscribe();
 					yield* terminal.detach();
@@ -562,10 +567,10 @@ describe("live SessionRunner", () => {
 					});
 
 					yield* Effect.flip(
-						terminal.setModel(
-							decodeSetModelCommand({ ...commandA, controllerEpoch: terminal.epoch + 1 }),
-						),
-					).pipe(Effect.tap(error => Effect.sync(() => expect(error).toBeInstanceOf(StaleRunnerControllerLeaseError))));
+						terminal.setModel(decodeSetModelCommand({ ...commandA, controllerEpoch: terminal.epoch + 1 })),
+					).pipe(
+						Effect.tap(error => Effect.sync(() => expect(error).toBeInstanceOf(StaleRunnerControllerLeaseError))),
+					);
 
 					const receiptA = yield* terminal.setModel(commandA);
 					expect(fixture.session.model?.id).toBe(fixture.alternateModel.id);
@@ -599,7 +604,9 @@ describe("live SessionRunner", () => {
 								},
 							}),
 						),
-					).pipe(Effect.tap(error => Effect.sync(() => expect(error).toBeInstanceOf(SessionRevisionConflictError))));
+					).pipe(
+						Effect.tap(error => Effect.sync(() => expect(error).toBeInstanceOf(SessionRevisionConflictError))),
+					);
 
 					const commandB = decodeSetModelCommand({
 						...commandA,
@@ -647,10 +654,11 @@ describe("live SessionRunner", () => {
 					const initialTools = [...initial.session.activeToolNames];
 					const sideEntryCount = fixture.sessionManager
 						.getEntries()
-						.filter(entry =>
-							entry.type === "mode_change" ||
-							entry.type === "model_change" ||
-							entry.type === "thinking_level_change"
+						.filter(
+							entry =>
+								entry.type === "mode_change" ||
+								entry.type === "model_change" ||
+								entry.type === "thinking_level_change",
 						).length;
 					const initialQueueEntryCount = (yield* Effect.promise(() => fixture.queue.list())).length;
 					const enter = decodeTransitionPlanModeCommand({
@@ -672,9 +680,7 @@ describe("live SessionRunner", () => {
 							decodeTransitionPlanModeCommand({ ...enter, controllerEpoch: terminal.epoch + 1 }),
 						),
 					).pipe(
-						Effect.tap(error =>
-							Effect.sync(() => expect(error).toBeInstanceOf(StaleRunnerControllerLeaseError)),
-						),
+						Effect.tap(error => Effect.sync(() => expect(error).toBeInstanceOf(StaleRunnerControllerLeaseError))),
 					);
 					yield* Effect.flip(
 						terminal.transitionPlanMode(
@@ -686,9 +692,7 @@ describe("live SessionRunner", () => {
 							}),
 						),
 					).pipe(
-						Effect.tap(error =>
-							Effect.sync(() => expect(error).toBeInstanceOf(SessionRevisionConflictError)),
-						),
+						Effect.tap(error => Effect.sync(() => expect(error).toBeInstanceOf(SessionRevisionConflictError))),
 					);
 					const enterReceipt = yield* terminal.transitionPlanMode(enter);
 					const entered = yield* terminal.snapshot();
@@ -699,9 +703,7 @@ describe("live SessionRunner", () => {
 						planFilePath: "local://PLAN.md",
 					});
 					expect(entered.session.activeToolNames).not.toContain("resolve");
-					expect(entered.runner.toolConfigurationGeneration).toBe(
-						initial.runner.toolConfigurationGeneration + 1,
-					);
+					expect(entered.runner.toolConfigurationGeneration).toBe(initial.runner.toolConfigurationGeneration + 1);
 					expect(
 						fixture.sessionManager
 							.getEntries()
@@ -710,10 +712,11 @@ describe("live SessionRunner", () => {
 					expect(
 						fixture.sessionManager
 							.getEntries()
-							.filter(entry =>
-								entry.type === "mode_change" ||
-								entry.type === "model_change" ||
-								entry.type === "thinking_level_change"
+							.filter(
+								entry =>
+									entry.type === "mode_change" ||
+									entry.type === "model_change" ||
+									entry.type === "thinking_level_change",
 							),
 					).toHaveLength(sideEntryCount);
 					expect((yield* Effect.promise(() => fixture.queue.list())).length).toBe(initialQueueEntryCount);
@@ -735,9 +738,7 @@ describe("live SessionRunner", () => {
 					const exited = yield* terminal.snapshot();
 					expect(exited.session.workflow).toMatchObject({ kind: "plan", phase: "paused" });
 					expect(exited.session.activeToolNames).toEqual(initialTools);
-					expect(exited.runner.toolConfigurationGeneration).toBe(
-						entered.runner.toolConfigurationGeneration + 1,
-					);
+					expect(exited.runner.toolConfigurationGeneration).toBe(entered.runner.toolConfigurationGeneration + 1);
 					yield* terminal.detach();
 					yield* runner.stop();
 				}),
@@ -776,9 +777,7 @@ describe("live SessionRunner", () => {
 					expect(entered.runner.revision).toBe(initial.runner.revision);
 					expect(entered.session.workflow).toMatchObject({ kind: "goal", phase: "active" });
 					expect(entered.session.activeToolNames).toEqual(initialTools);
-					expect(entered.runner.toolConfigurationGeneration).toBe(
-						initial.runner.toolConfigurationGeneration + 1,
-					);
+					expect(entered.runner.toolConfigurationGeneration).toBe(initial.runner.toolConfigurationGeneration + 1);
 					expect(fixture.session.getGoalModeState()).toMatchObject({
 						enabled: true,
 						goal: {
@@ -800,9 +799,7 @@ describe("live SessionRunner", () => {
 						transition: { kind: "exit", goalId: "different-goal", disposition: "paused" },
 					});
 					yield* Effect.flip(terminal.transitionGoalMode(mismatch)).pipe(
-						Effect.tap(error =>
-							Effect.sync(() => expect(error).toBeInstanceOf(SessionRunnerRuntimeError)),
-						),
+						Effect.tap(error => Effect.sync(() => expect(error).toBeInstanceOf(SessionRunnerRuntimeError))),
 					);
 
 					const pause = decodeTransitionGoalModeCommand({
@@ -820,9 +817,7 @@ describe("live SessionRunner", () => {
 						goalId: workflow.goalId,
 					});
 					expect(paused.session.activeToolNames).toEqual(initialTools);
-					expect(paused.runner.toolConfigurationGeneration).toBe(
-						entered.runner.toolConfigurationGeneration + 1,
-					);
+					expect(paused.runner.toolConfigurationGeneration).toBe(entered.runner.toolConfigurationGeneration + 1);
 					expect(fixture.session.getGoalModeState()).toMatchObject({
 						enabled: false,
 						goal: { id: workflow.goalId, status: "paused" },
@@ -836,10 +831,7 @@ describe("live SessionRunner", () => {
 
 	it("replays a committed plan workflow after prompt rebuild failure without duplicate events", async () => {
 		const fixture = await createLiveFixture();
-		fixture.settings.setRuntimeModelRole(
-			"plan",
-			`${fixture.alternateModel.provider}/${fixture.alternateModel.id}`,
-		);
+		fixture.settings.setRuntimeModelRole("plan", `${fixture.alternateModel.provider}/${fixture.alternateModel.id}`);
 		await Effect.runPromise(
 			Effect.scoped(
 				Effect.gen(function* () {
@@ -862,14 +854,14 @@ describe("live SessionRunner", () => {
 					});
 					fixture.failNextPromptRebuild();
 					yield* Effect.flip(terminal.transitionPlanMode(command)).pipe(
-						Effect.tap(error =>
-							Effect.sync(() => expect(error).toBeInstanceOf(SessionRunnerRuntimeError)),
-						),
+						Effect.tap(error => Effect.sync(() => expect(error).toBeInstanceOf(SessionRunnerRuntimeError))),
 					);
 					expect(
 						fixture.sessionManager
 							.getEntries()
-							.filter(entry => entry.type === "workflow_change" && entry.command.commandId === command.commandId),
+							.filter(
+								entry => entry.type === "workflow_change" && entry.command.commandId === command.commandId,
+							),
 					).toHaveLength(1);
 					const failed = yield* runner.snapshot();
 					expect(failed.sequence).toBe(initial.runner.sequence + 1);
@@ -887,7 +879,9 @@ describe("live SessionRunner", () => {
 					expect(
 						fixture.sessionManager
 							.getEntries()
-							.filter(entry => entry.type === "workflow_change" && entry.command.commandId === command.commandId),
+							.filter(
+								entry => entry.type === "workflow_change" && entry.command.commandId === command.commandId,
+							),
 					).toHaveLength(1);
 					expect((yield* runner.snapshot()).sequence).toBe(failed.sequence);
 					const correctiveExit = decodeTransitionPlanModeCommand({
@@ -931,9 +925,7 @@ describe("live SessionRunner", () => {
 					});
 					fixture.failNextPromptRebuild();
 					yield* Effect.flip(terminal.setModel(command)).pipe(
-						Effect.tap(error =>
-							Effect.sync(() => expect(error).toBeInstanceOf(SessionRunnerRuntimeError)),
-						),
+						Effect.tap(error => Effect.sync(() => expect(error).toBeInstanceOf(SessionRunnerRuntimeError))),
 					);
 					expect(fixture.session.model?.id).toBe(fixture.alternateModel.id);
 					expect(fixture.session.agent.state.systemPrompt).toEqual(["test"]);
@@ -966,8 +958,7 @@ describe("live SessionRunner", () => {
 	it("keeps busy thinking rejection, snapshots, detach, and replay responsive during a held prompt", async () => {
 		const fixture = await createLiveFixture(true);
 		const scope = Scope.makeUnsafe("sequential");
-		const run = <A, E>(effect: Effect.Effect<A, E, Scope.Scope>) =>
-			Effect.runPromise(Scope.provide(scope)(effect));
+		const run = <A, E>(effect: Effect.Effect<A, E, Scope.Scope>) => Effect.runPromise(Scope.provide(scope)(effect));
 		let releaseTimer: ReturnType<typeof setInterval> | undefined;
 		try {
 			const runner = await run(makeSessionRunnerLive(fixture, { mailboxCapacity: 4, eventCapacity: 8 }));
@@ -1058,9 +1049,8 @@ describe("live SessionRunner", () => {
 				fixture.sessionManager
 					.getEntries()
 					.some(
-						(entry) =>
-							entry.type === "thinking_level_change" &&
-							entry.command?.commandId === "thinking-during-drain",
+						entry =>
+							entry.type === "thinking_level_change" && entry.command?.commandId === "thinking-during-drain",
 					),
 			).toBe(false);
 			expect(fixture.session.configuredThinkingLevel()).toBe(ThinkingLevel.High);
@@ -1081,14 +1071,15 @@ describe("live SessionRunner", () => {
 	it("rejects a model switch promptly during a held prompt without blocking snapshots or journaling", async () => {
 		const fixture = await createLiveFixture(true);
 		const scope = Scope.makeUnsafe("sequential");
-		const run = <A, E>(effect: Effect.Effect<A, E, Scope.Scope>) =>
-			Effect.runPromise(Scope.provide(scope)(effect));
+		const run = <A, E>(effect: Effect.Effect<A, E, Scope.Scope>) => Effect.runPromise(Scope.provide(scope)(effect));
 		let releaseTimer: ReturnType<typeof setInterval> | undefined;
 		try {
 			const runner = await run(makeSessionRunnerLive(fixture, { mailboxCapacity: 4, eventCapacity: 8 }));
 			const terminal = await run(runner.attachTerminalView(attach("model-race", "controller", 0)));
 			const initial = await run(terminal.snapshot());
-			await run(terminal.submit(decodeSubmitInputCommand(submit(terminal.viewId, terminal.epoch, "model-race-input", 0))));
+			await run(
+				terminal.submit(decodeSubmitInputCommand(submit(terminal.viewId, terminal.epoch, "model-race-input", 0))),
+			);
 			while (!fixture.session.isStreaming) await Bun.sleep(1);
 			const command = decodeSetModelCommand({
 				schemaVersion: 1,
@@ -1162,34 +1153,124 @@ describe("live SessionRunner", () => {
 					const subscription = yield* terminal.subscribe();
 					const initial = yield* terminal.snapshot();
 					expect(initial.session.sessionId).toBe(fixture.session.sessionId);
+					expect(initial.session.sessionFile).toBe(fixture.session.sessionFile);
+					expect(initial.session.cwd).toBe(fixture.sessionManager.getCwd());
 					expect(initial.session.modelSummary?.provider).toBe(fixture.session.model?.provider);
+					expect(initial.session.modelSummary?.api).toBe(fixture.session.model?.api);
 					expect(initial.session.modelSummary?.id).toBe(fixture.session.model?.id);
+					expect(initial.session.modelSummary?.requestModelId).toBe(fixture.session.model?.requestModelId);
 					expect(initial.session.modelSummary?.name).toBe(fixture.session.model?.name);
 					expect(initial.session.modelSummary?.contextWindow).toBe(fixture.session.model?.contextWindow);
-					expect(initial.session.messages).not.toBe(fixture.session.messages);
+					expect(initial.session.configuredThinkingLevel).toBe(fixture.session.configuredThinkingLevel());
+					expect(initial.session.effectiveThinkingLevel).toBe(fixture.session.thinkingLevel);
+
+					const beforeQueries = initial;
+					const contextUsage = yield* terminal.getContextUsage();
+					const sessionStats = yield* terminal.getSessionStats();
+					const advisorStats = yield* terminal.getAdvisorStats();
+					const jobs = yield* terminal.getAsyncJobSnapshot({ recentLimit: 2 });
+					const hindsight = yield* terminal.getHindsightSessionState();
+					const toolNames = yield* terminal.getAllToolNames();
+					const fullText = yield* terminal.formatSessionAsText();
+					const compactText = yield* terminal.formatSessionAsText({ compact: true });
+					const advisorText = yield* terminal.formatAdvisorHistoryAsText({ compact: true });
+					expect(contextUsage).toEqual(fixture.session.getContextUsage());
+					expect(sessionStats).toEqual(fixture.session.getSessionStats());
+					expect(advisorStats).toEqual(fixture.session.getAdvisorStats());
+					expect(jobs).toEqual(fixture.session.getAsyncJobSnapshot({ recentLimit: 2 }));
+					expect(hindsight).toBeUndefined();
+					expect(toolNames).toEqual(fixture.session.getAllToolNames());
+					expect(fullText).toBe(fixture.session.formatSessionAsText());
+					expect(compactText).toBe(fixture.session.formatSessionAsText({ compact: true }));
+					expect(advisorText).toBe(fixture.session.formatAdvisorHistoryAsText({ compact: true }));
+					(sessionStats.tokens as { input: number }).input = -1;
+					(advisorStats.tokens as { input: number }).input = -1;
+					(toolNames as string[]).push("escaped");
+					if (jobs) {
+						(jobs.delivery.pendingJobIds as string[]).push("escaped");
+					}
+					expect(fixture.session.getSessionStats().tokens.input).not.toBe(-1);
+					expect(fixture.session.getAdvisorStats().tokens.input).not.toBe(-1);
+					expect(fixture.session.getAllToolNames()).not.toContain("escaped");
+					const unchangedJobs = fixture.session.getAsyncJobSnapshot({ recentLimit: 2 });
+					if (unchangedJobs) {
+						expect(unchangedJobs.delivery.pendingJobIds).not.toContain("escaped");
+					}
+					const afterQueries = yield* terminal.snapshot();
+					expect(afterQueries.terminalSequence).toBe(beforeQueries.terminalSequence);
+					expect(afterQueries.runner.revision).toBe(beforeQueries.runner.revision);
+					expect(afterQueries.runner.sessionRevision).toBe(beforeQueries.runner.sessionRevision);
+					expect(afterQueries.runner.sequence).toBe(beforeQueries.runner.sequence);
 
 					const command = submit(terminal.viewId, terminal.epoch, "terminal-submit", 0);
 					yield* terminal.submit(decodeSubmitInputCommand(command));
 					const delivery = yield* subscription.take;
 					expect(["agentEvent", "runnerEvent", "resyncRequired"]).toContain(delivery.kind);
-					expect(initial.session.messages).toHaveLength(0);
 
 					yield* terminal.detach();
+					yield* terminal.getSessionStats().pipe(
+						Effect.flip,
+						Effect.map(error => expect(error).toBeInstanceOf(RunnerViewNotAttachedError)),
+					);
 					const alive = yield* runner.snapshot();
 					expect(alive.status).toBe("running");
 					expect(alive.views).toHaveLength(0);
 					fixture.releaseProviderResponses();
 					yield* Effect.promise(() => fixture.session.waitForIdle());
 					yield* runner.stop();
+					yield* terminal.getSessionStats().pipe(
+						Effect.flip,
+						Effect.map(error => expect(error).toBeInstanceOf(SessionRunnerStoppedError)),
+					);
 				}).pipe(Effect.ensuring(Effect.sync(fixture.releaseProviderResponses))),
 			),
 		);
 	});
+	it("runs admitted transcript formatting outside the mailbox and honors start-time lifetime", async () => {
+		const fixture = await createLiveFixture();
+		const scope = Scope.makeUnsafe("sequential");
+		const run = <A, E>(effect: Effect.Effect<A, E, Scope.Scope>) => Effect.runPromise(Scope.provide(scope)(effect));
+		const started = Promise.withResolvers<void>();
+		const release = Promise.withResolvers<void>();
+		vi.spyOn(fixture.session, "formatSessionAsText").mockImplementation(() => {
+			started.resolve();
+			return release.promise.then(() => "held transcript") as never;
+		});
+		try {
+			const runner = await run(makeSessionRunnerLive(fixture, { mailboxCapacity: 4, eventCapacity: 4 }));
+			const terminal = await run(runner.attachTerminalView(attach("held-format", "controller", 0)));
+			const formatting = run(terminal.formatSessionAsText({ compact: true }));
+			await started.promise;
+
+			const snapshot = await Promise.race([
+				run(terminal.snapshot()),
+				Bun.sleep(500).then(() => {
+					throw new Error("snapshot blocked behind transcript formatting");
+				}),
+			]);
+			expect(snapshot.runner.status).toBe("running");
+			await Promise.race([
+				run(terminal.detach()),
+				Bun.sleep(500).then(() => {
+					throw new Error("detach blocked behind transcript formatting");
+				}),
+			]);
+
+			release.resolve();
+			expect(await formatting).toBe("held transcript");
+			expect((await run(runner.snapshot())).views).toHaveLength(0);
+			await run(runner.stop());
+		} finally {
+			release.resolve();
+			fixture.releaseProviderResponses();
+			await Effect.runPromise(Scope.close(scope, Exit.void));
+		}
+	});
+
 	it("advances Promise controller fences across sequential mutations and closes without stopping", async () => {
 		const fixture = await createLiveFixture();
 		const scope = Scope.makeUnsafe("sequential");
-		const run = <A, E>(effect: Effect.Effect<A, E, Scope.Scope>) =>
-			Effect.runPromise(Scope.provide(scope)(effect));
+		const run = <A, E>(effect: Effect.Effect<A, E, Scope.Scope>) => Effect.runPromise(Scope.provide(scope)(effect));
 		try {
 			const runner = await run(makeSessionRunnerLive(fixture, { mailboxCapacity: 4, eventCapacity: 4 }));
 			const controller = await createTerminalSessionController(runner, { viewId: "promise-terminal" });
@@ -1231,7 +1312,20 @@ describe("live SessionRunner", () => {
 			expect(controller.snapshot().session.todoPhases[0]!.tasks[0]!.content).toBe("second");
 			expect(controller.snapshot().runner.revision).toBe(beforeTodoRevision);
 			expect(controller.snapshot().runner.sessionRevision).toBe(beforeTodoSessionRevision);
+			expect(await controller.getContextUsage()).toEqual(fixture.session.getContextUsage());
+			expect(await controller.getSessionStats()).toEqual(fixture.session.getSessionStats());
+			expect(await controller.getAdvisorStats()).toEqual(fixture.session.getAdvisorStats());
+			expect(await controller.getAsyncJobSnapshot({ recentLimit: 1 })).toEqual(
+				fixture.session.getAsyncJobSnapshot({ recentLimit: 1 }),
+			);
+			expect(await controller.getHindsightSessionState()).toBeUndefined();
+			expect(await controller.getAllToolNames()).toEqual(fixture.session.getAllToolNames());
+			expect(await controller.formatSessionAsText({ compact: true })).toBe(
+				fixture.session.formatSessionAsText({ compact: true }),
+			);
+			expect(await controller.formatAdvisorHistoryAsText()).toBe(fixture.session.formatAdvisorHistoryAsText());
 			await controller.close();
+			await expect(controller.getSessionStats()).rejects.toBeInstanceOf(RunnerViewNotAttachedError);
 			expect((await run(runner.snapshot())).status).toBe("running");
 			fixture.releaseProviderResponses();
 			await fixture.session.waitForIdle();
@@ -1244,8 +1338,7 @@ describe("live SessionRunner", () => {
 	it("reports an unavailable SSH reloader without consuming the generation", async () => {
 		const fixture = await createLiveFixture();
 		const scope = Scope.makeUnsafe("sequential");
-		const run = <A, E>(effect: Effect.Effect<A, E, Scope.Scope>) =>
-			Effect.runPromise(Scope.provide(scope)(effect));
+		const run = <A, E>(effect: Effect.Effect<A, E, Scope.Scope>) => Effect.runPromise(Scope.provide(scope)(effect));
 		try {
 			const runner = await run(makeSessionRunnerLive(fixture, { mailboxCapacity: 4, eventCapacity: 4 }));
 			const controller = await createTerminalSessionController(runner, { viewId: "ssh-unavailable-terminal" });
@@ -1276,8 +1369,7 @@ describe("live SessionRunner", () => {
 		let reloadedSshTool: AgentTool | null = sshTool("SSH v1");
 		const fixture = await createLiveFixture(false, async () => reloadedSshTool);
 		const scope = Scope.makeUnsafe("sequential");
-		const run = <A, E>(effect: Effect.Effect<A, E, Scope.Scope>) =>
-			Effect.runPromise(Scope.provide(scope)(effect));
+		const run = <A, E>(effect: Effect.Effect<A, E, Scope.Scope>) => Effect.runPromise(Scope.provide(scope)(effect));
 		try {
 			const runner = await run(makeSessionRunnerLive(fixture, { mailboxCapacity: 4, eventCapacity: 8 }));
 			const controller = await createTerminalSessionController(runner, { viewId: "ssh-refresh-terminal" });
@@ -1300,9 +1392,9 @@ describe("live SessionRunner", () => {
 				SessionRunnerRuntimeError,
 			);
 			const recovered = controller.snapshot();
-			expect(fixture.session.agent.state.tools.map(tool => ({ name: tool.name, description: tool.description }))).toEqual(
-				previousTools,
-			);
+			expect(
+				fixture.session.agent.state.tools.map(tool => ({ name: tool.name, description: tool.description })),
+			).toEqual(previousTools);
 			expect(fixture.session.agent.state.systemPrompt).toEqual(previousPrompt);
 			expect(fixture.session.getSelectedMCPToolNames()).toEqual(previousMcpSelection);
 			expect(recovered.runner.toolConfigurationGeneration).toBe(
@@ -1366,8 +1458,7 @@ describe("live SessionRunner", () => {
 	it("rejects live tool changes while a prompt is active without blocking snapshots", async () => {
 		const fixture = await createLiveFixture(true);
 		const scope = Scope.makeUnsafe("sequential");
-		const run = <A, E>(effect: Effect.Effect<A, E, Scope.Scope>) =>
-			Effect.runPromise(Scope.provide(scope)(effect));
+		const run = <A, E>(effect: Effect.Effect<A, E, Scope.Scope>) => Effect.runPromise(Scope.provide(scope)(effect));
 		const bounded = async <A>(promise: Promise<A>): Promise<A> => {
 			let timer: ReturnType<typeof setTimeout> | undefined;
 			try {
@@ -1428,9 +1519,7 @@ describe("live SessionRunner", () => {
 
 					const mutation = yield* Effect.forkChild(
 						terminal.submit(
-							decodeSubmitInputCommand(
-								submit(terminal.viewId, terminal.epoch, "concurrent-terminal-submit", 0),
-							),
+							decodeSubmitInputCommand(submit(terminal.viewId, terminal.epoch, "concurrent-terminal-submit", 0)),
 						),
 						{ startImmediately: true },
 					);
@@ -1486,7 +1575,9 @@ describe("live SessionRunner", () => {
 							subscription.take,
 							Effect.sleep("2 seconds").pipe(
 								Effect.andThen(
-									Effect.fail(new SessionRunnerRuntimeError({ issue: "Timed out awaiting prompt interrupt event" })),
+									Effect.fail(
+										new SessionRunnerRuntimeError({ issue: "Timed out awaiting prompt interrupt event" }),
+									),
 								),
 							),
 						);
@@ -1536,8 +1627,7 @@ describe("live SessionRunner", () => {
 			return images;
 		});
 		const scope = Scope.makeUnsafe("sequential");
-		const run = <A, E>(effect: Effect.Effect<A, E, Scope.Scope>) =>
-			Effect.runPromise(Scope.provide(scope)(effect));
+		const run = <A, E>(effect: Effect.Effect<A, E, Scope.Scope>) => Effect.runPromise(Scope.provide(scope)(effect));
 		try {
 			const runner = await run(makeSessionRunnerLive(fixture, { mailboxCapacity: 4, eventCapacity: 8 }));
 			const controller = await createTerminalSessionController(runner, { viewId: "fresh-interrupt-controller" });
@@ -1611,7 +1701,6 @@ describe("live SessionRunner", () => {
 			),
 		);
 	});
-
 
 	it("supervises live compaction without occupying the mailbox and replays one retained result", async () => {
 		const fixture = await createLiveFixture();
@@ -2011,18 +2100,14 @@ describe("live SessionRunner", () => {
 					const mcpEntryCount = fixture.sessionManager
 						.getEntries()
 						.filter(entry => entry.type === "mcp_tool_selection").length;
-					const mcpChanged = yield* terminal.setActiveTools(
-						command("tools-mcp", 6, ["mcp__test_lookup"]),
-					);
+					const mcpChanged = yield* terminal.setActiveTools(command("tools-mcp", 6, ["mcp__test_lookup"]));
 					expect(mcpChanged.toolConfigurationGeneration).toBe(7);
 					expect(
 						fixture.sessionManager.getEntries().filter(entry => entry.type === "mcp_tool_selection"),
 					).toHaveLength(mcpEntryCount);
 
 					const held = fixture.holdNextPromptRebuild();
-					const external = yield* Effect.forkScoped(
-						Effect.promise(() => fixture.session.refreshMCPTools([])),
-					);
+					const external = yield* Effect.forkScoped(Effect.promise(() => fixture.session.refreshMCPTools([])));
 					yield* Effect.promise(() => held.started.promise);
 					const concurrentCommand = yield* Effect.forkScoped(
 						terminal.setActiveTools(command("tools-concurrent", 7, ["alpha"])),
@@ -2033,14 +2118,11 @@ describe("live SessionRunner", () => {
 					expect(concurrentConflict).toBeInstanceOf(RunnerToolConfigurationConflictError);
 					expect(fixture.session.toolConfigurationGeneration).toBe(8);
 					expect(fixture.session.getActiveToolNames()).toEqual([]);
-					expect(() => command("tools-duplicate", 8, ["alpha", "alpha"])).toThrow(
-						InvalidRunnerCommandError,
-					);
+					expect(() => command("tools-duplicate", 8, ["alpha", "alpha"])).toThrow(InvalidRunnerCommandError);
 					yield* terminal.detach();
 					yield* runner.stop();
 				}),
 			),
 		);
 	});
-
 });
