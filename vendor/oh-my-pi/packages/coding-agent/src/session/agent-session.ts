@@ -1379,6 +1379,18 @@ export class AgentSession {
 	#promptInFlightCount = 0;
 	/** Associates provider-delivered custom message objects with their durable transcript identity. */
 	#durableCustomDeliveries = new WeakMap<CustomMessage, { inputId: string; inputRevision: number }>();
+	#hasDurableCustomDeliveryInContext(inputId: string, payload: DurableCustomPayload["message"]): boolean {
+		return this.agent.state.messages.some(message => {
+			if (message.role !== "custom") return false;
+			if (this.#durableCustomDeliveries.get(message)?.inputId === inputId) return true;
+			return (
+				typeof payload.content === "string" &&
+				message.customType === payload.customType &&
+				typeof message.content === "string" &&
+				message.content === payload.content
+			);
+		});
+	}
 	#abortInProgress = false;
 	// Wire-level agent_end emission deferred until #promptInFlightCount drops to 0.
 	// Internal extension hooks and post-emit work (auto-retry, auto-compaction, todo
@@ -6812,6 +6824,21 @@ export class AgentSession {
 				appendOnly?.payload.kind === "custom" &&
 				appendOnly.payload.disposition === "append"
 			) {
+				const appendPayload = appendOnly.payload;
+				const alreadyPersisted = this.sessionManager.hasDurableCustomMessage(appendOnly.inputId);
+				const alreadyInContext = this.#hasDurableCustomDeliveryInContext(appendOnly.inputId, appendPayload.message);
+				const customMessage: CustomMessage = {
+					role: "custom",
+					customType: appendPayload.message.customType,
+					content:
+						typeof appendPayload.message.content === "string"
+							? appendPayload.message.content
+							: [...appendPayload.message.content],
+					display: appendPayload.message.display,
+					details: appendPayload.message.details,
+					attribution: appendPayload.message.attribution,
+					timestamp: Date.now(),
+				};
 				await this.sessionManager.appendDurableCustomMessageEntry(
 					{
 						...appendOnly.payload.message,
@@ -6825,6 +6852,11 @@ export class AgentSession {
 						inputRevision: appendOnly.revision,
 					},
 				);
+				this.#durableCustomDeliveries.set(customMessage, {
+					inputId: appendOnly.inputId,
+					inputRevision: appendOnly.revision,
+				});
+				if (!alreadyPersisted || !alreadyInContext) this.agent.appendMessage(customMessage);
 				await queue.completeAppendOnly(appendOnly.inputId, appendOnly.revision);
 				await this.#refreshDurableQueuedInputProjection(queue);
 				this.#releaseDurableAdmissionMaintenance();
@@ -6834,7 +6866,9 @@ export class AgentSession {
 			for (;;) {
 				const deferred = await queue.deferredCustomPrefix();
 				if (!deferred || deferred.payload.kind !== "custom") break;
+				const deferredPayload = deferred.payload;
 				const alreadyPersisted = this.sessionManager.hasDurableCustomMessage(deferred.inputId);
+				const alreadyInContext = this.#hasDurableCustomDeliveryInContext(deferred.inputId, deferredPayload.message);
 				const customMessage: CustomMessage = {
 					role: "custom",
 					customType: deferred.payload.message.customType,
@@ -6857,7 +6891,11 @@ export class AgentSession {
 					},
 					{ inputId: deferred.inputId, inputRevision: deferred.revision },
 				);
-				if (!alreadyPersisted) this.agent.appendMessage(customMessage);
+				this.#durableCustomDeliveries.set(customMessage, {
+					inputId: deferred.inputId,
+					inputRevision: deferred.revision,
+				});
+				if (!alreadyPersisted || !alreadyInContext) this.agent.appendMessage(customMessage);
 				await queue.completeDeferredCustomPrefix(deferred.inputId, deferred.revision);
 				await this.#refreshDurableQueuedInputProjection(queue);
 			}
@@ -7365,13 +7403,69 @@ export class AgentSession {
 		};
 		const normalizedAppMessage = await this.#normalizeAgentMessageImages(appMessage);
 		if (options?.deliveryLease && !options.deliveryLease.claim(normalizedAppMessage)) return false;
-		if (this.isStreaming) {
-			if (options?.deliverAs === "nextTurn") {
-				this.#queueHiddenNextTurnMessage(normalizedAppMessage, options?.triggerTurn ?? false);
+		if (!this.#durableInputQueueRequired) {
+			return this.#sendCustomMessageWithoutDurableQueue(normalizedAppMessage, message, options);
+		}
+
+		const queue = await this.#durableInputQueue;
+		if (!queue) throw this.#durableInputQueueError ?? new Error("Durable input queue is unavailable");
+		const triggerTurn = options?.triggerTurn ?? false;
+		const clientDeferred =
+			triggerTurn && this.#clientBridge?.deferAgentInitiatedTurns && !this.#allowAcpAgentInitiatedTurns;
+		const deliverAs = clientDeferred ? "nextTurn" : (options?.deliverAs ?? "steer");
+		const disposition = this.isStreaming ? "provider" : triggerTurn && !clientDeferred ? "provider" : "append";
+		try {
+			const item = await queue.enqueue({
+				kind: "custom",
+				message: {
+					customType: normalizedAppMessage.customType,
+					content:
+						typeof normalizedAppMessage.content === "string"
+							? normalizedAppMessage.content
+							: [...normalizedAppMessage.content],
+					display: normalizedAppMessage.display,
+					details: normalizedAppMessage.details as JsonValue | undefined,
+					attribution: normalizedAppMessage.attribution ?? "agent",
+				},
+				deliverAs,
+				triggerTurn: triggerTurn && !clientDeferred,
+				disposition,
+			});
+			options?.deliveryLease?.claimDurable(async () => {
+				try {
+					await queue.cancel(item.inputId);
+					await this.#refreshDurableQueuedInputProjection(queue);
+				} catch (error) {
+					logger.debug("advisor durable delivery cancellation skipped", { error: String(error) });
+				}
+			});
+			await this.#refreshDurableQueuedInputProjection(queue);
+			if (this.isStreaming) {
+				this.#scheduleDurableQueueDrainAfterIdle();
 				return false;
 			}
+			await this.#drainDurableTerminalInputQueue();
+			return disposition === "provider" && this.sessionManager.hasDurableCustomMessage(item.inputId);
+		} catch (error) {
+			if (this.#handleDurableOwnershipLoss(error as Error)) throw this.#durableOwnershipLostError ?? error;
+			throw error;
+		}
+	}
 
-			if (options?.deliverAs === "followUp") {
+	async #sendCustomMessageWithoutDurableQueue<T>(
+		normalizedAppMessage: CustomMessage<T>,
+		originalMessage: Pick<CustomMessage<T>, "display" | "details" | "attribution">,
+		options:
+			| {
+					triggerTurn?: boolean;
+					deliverAs?: "steer" | "followUp" | "nextTurn";
+			  }
+			| undefined,
+	): Promise<boolean> {
+		if (this.isStreaming) {
+			if (options?.deliverAs === "nextTurn") {
+				this.#queueHiddenNextTurnMessage(normalizedAppMessage, options.triggerTurn ?? false);
+			} else if (options?.deliverAs === "followUp") {
 				this.agent.followUp(normalizedAppMessage);
 			} else {
 				this.agent.steer(normalizedAppMessage);
@@ -7379,27 +7473,6 @@ export class AgentSession {
 			this.#scheduleIdleQueueDrain();
 			return false;
 		}
-
-		if (options?.deliverAs === "nextTurn") {
-			if (options?.triggerTurn) {
-				if (this.#clientBridge?.deferAgentInitiatedTurns && !this.#allowAcpAgentInitiatedTurns) {
-					this.#queueHiddenNextTurnMessage(normalizedAppMessage, false);
-					return false;
-				}
-				await this.agent.prompt(normalizedAppMessage);
-				return true;
-			}
-			this.agent.appendMessage(normalizedAppMessage);
-			this.sessionManager.appendCustomMessageEntry(
-				normalizedAppMessage.customType,
-				normalizedAppMessage.content,
-				message.display,
-				message.details,
-				message.attribution ?? "agent",
-			);
-			return false;
-		}
-
 		if (options?.triggerTurn) {
 			if (this.#clientBridge?.deferAgentInitiatedTurns && !this.#allowAcpAgentInitiatedTurns) {
 				this.#queueHiddenNextTurnMessage(normalizedAppMessage, false);
@@ -7408,14 +7481,13 @@ export class AgentSession {
 			await this.agent.prompt(normalizedAppMessage);
 			return true;
 		}
-
 		this.agent.appendMessage(normalizedAppMessage);
 		this.sessionManager.appendCustomMessageEntry(
 			normalizedAppMessage.customType,
 			normalizedAppMessage.content,
-			message.display,
-			message.details,
-			message.attribution ?? "agent",
+			originalMessage.display,
+			originalMessage.details,
+			originalMessage.attribution ?? "agent",
 		);
 		return false;
 	}
@@ -7476,10 +7548,32 @@ export class AgentSession {
 	}
 
 	async acceptDurableCustomMessage(
-		payload: DurableCustomPayload,
+		payload: Omit<DurableCustomPayload, "disposition">,
 		command: DurableInputCommandMetadata,
 	): Promise<DurableInputAdmissionReceipt> {
-		return this.acceptDurableInput(payload, command);
+		const queue = await this.#getDurableInputQueueForMutation();
+		const prior = await queue.getCommandReceipt(command.commandId);
+		if (prior) {
+			if (prior.item.payload.kind !== "custom") {
+				throw new Error(`Runner command ${command.commandId} was not a custom-message command`);
+			}
+			return this.acceptDurableInput(prior.item.payload, command);
+		}
+		const clientDeferred =
+			payload.triggerTurn && this.#clientBridge?.deferAgentInitiatedTurns && !this.#allowAcpAgentInitiatedTurns;
+		const disposition: DurableCustomPayload["disposition"] = this.isStreaming
+			? "provider"
+			: payload.triggerTurn && !clientDeferred
+				? "provider"
+				: "append";
+		return this.acceptDurableInput(
+			{
+				...payload,
+				...(clientDeferred ? { deliverAs: "nextTurn" as const, triggerTurn: false } : {}),
+				disposition,
+			},
+			command,
+		);
 	}
 
 	async editDurableInputCommand(

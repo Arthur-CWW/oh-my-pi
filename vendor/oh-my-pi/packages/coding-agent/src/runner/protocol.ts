@@ -77,7 +77,6 @@ export const SubmitCustomMessageCommandSchema = Schema.Struct({
 		}),
 		deliverAs: Schema.Literals(["steer", "followUp", "nextTurn"]),
 		triggerTurn: Schema.Boolean,
-		disposition: Schema.Literals(["provider", "append"]),
 	}),
 });
 

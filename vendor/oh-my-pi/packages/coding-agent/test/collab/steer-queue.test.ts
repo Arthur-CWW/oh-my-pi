@@ -98,7 +98,7 @@ function makeStreamingHostContext(): StreamingHostHarness {
 				header: { type: "session", id: "sess-1", timestamp: new Date().toISOString(), cwd: "/tmp" },
 				entries: [],
 			}),
-			onEntryAppended: undefined,
+			subscribeEntries: () => () => {},
 		},
 		session: {
 			isStreaming: true,

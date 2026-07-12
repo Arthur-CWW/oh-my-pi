@@ -6,7 +6,10 @@ import {
 } from "@oh-my-pi/pi-coding-agent/cli/workstream";
 import { applyStartupWorkstream } from "@oh-my-pi/pi-coding-agent/main";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
-import { executeSessionClassificationCommand } from "@oh-my-pi/pi-coding-agent/slash-commands/builtin-registry";
+import {
+	executeSessionClassificationCommand,
+	resolveSessionCommandAction,
+} from "@oh-my-pi/pi-coding-agent/slash-commands/builtin-registry";
 
 describe("workstream startup classification", () => {
 	it("parses the launch flag and gives it precedence over environment and cwd", () => {
@@ -92,6 +95,11 @@ describe("session classification commands", () => {
 		await executeSessionClassificationCommand("unclassify", manager, emit);
 		expect(manager.getWorkstream()).toBeUndefined();
 		expect(output.at(-1)).toBe("Session classification: unclassified");
+	});
+
+	it("requires exact delete syntax before entering the destructive handler", () => {
+		expect(resolveSessionCommandAction("delete")).toBe("delete");
+		expect(resolveSessionCommandAction("delete typo")).toBe("invalid");
 	});
 
 	it("rejects invalid slugs without changing classification", async () => {

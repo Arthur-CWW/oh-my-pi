@@ -35,12 +35,19 @@ const authStorage = await AuthStorage.create(path.join(root, "auth.db"));
 authStorage.setRuntimeApiKey(model.provider, "test-key");
 const modelRegistry = new ModelRegistry(authStorage, path.join(root, "models.yml"));
 const providerCalls = [];
+const providerContexts = [];
 const streamFn = (_model, context) => {
   const lastUser = [...context.messages].reverse().find(message => message.role === "user");
   const text = typeof lastUser?.content === "string"
     ? lastUser.content
     : lastUser?.content?.find(part => part.type === "text")?.text;
   providerCalls.push(text ?? "");
+  providerContexts.push(context.messages.map(message => ({
+    role: message.role,
+    content: typeof message.content === "string"
+      ? message.content
+      : message.content?.find(part => part.type === "text")?.text,
+  })));
   const stream = new AssistantMessageEventStream();
   const message: AssistantMessage = {
     role: "assistant",
@@ -61,6 +68,11 @@ const streamFn = (_model, context) => {
 function makeAgent() {
   return new Agent({
     initialState: { model, systemPrompt: ["test"], tools: [], messages: [] },
+    convertToLlm: messages => messages.map(message =>
+      message.role === "custom"
+        ? { role: "user", content: message.content, timestamp: message.timestamp }
+        : message
+    ),
     streamFn,
   });
 }
@@ -75,8 +87,9 @@ const ownership = await acquireSessionOwnership(manager.getSessionFile(), manage
 manager.bindSessionOwnership(ownership);
 const injectedQueue = await DurableInputQueue.open(ownership, injectedMuxRoot);
 await injectedQueue.adopt();
+const injectedAgent = makeAgent();
 const injectedSession = new AgentSession({
-  agent: makeAgent(),
+  agent: injectedAgent,
   sessionManager: manager,
   durableInputQueue: injectedQueue,
   settings: Settings.isolated({ "compaction.enabled": false }),
@@ -94,6 +107,62 @@ const command = {
 const first = await injectedSession.acceptDurableInput(input, command);
 const replay = await injectedSession.acceptDurableInput(input, command);
 await injectedSession.waitForIdle();
+const appendTurnStarted = await injectedSession.sendCustomMessage(
+  { customType: "idle-append", content: "idle durable append", display: false, attribution: "agent" },
+  { deliverAs: "nextTurn", triggerTurn: false },
+);
+await injectedSession.waitForIdle();
+const callsBeforeDeferred = providerCalls.length;
+await injectedSession.acceptDurableInput({
+  kind: "custom",
+  message: {
+    customType: "deferred-context",
+    content: "durable prefix",
+    display: false,
+    attribution: "agent",
+  },
+  deliverAs: "nextTurn",
+  triggerTurn: false,
+  disposition: "provider",
+}, { ...command, commandId: "custom-prefix", correlationId: "custom-prefix", expectedRevision: 1 });
+await Bun.sleep(10);
+const callsWhileDeferredAlone = providerCalls.length;
+await injectedSession.acceptDurableInput(
+  { text: "after durable prefix", deliveryClass: "followUp" },
+  { ...command, commandId: "after-prefix", correlationId: "after-prefix", expectedRevision: 2 },
+);
+await injectedSession.waitForIdle();
+const completeAppendOnly = injectedQueue.completeAppendOnly.bind(injectedQueue);
+let appendCompletionAttempts = 0;
+injectedQueue.completeAppendOnly = async (...args) => {
+  appendCompletionAttempts++;
+  if (appendCompletionAttempts === 1) throw new Error("injected append completion failure");
+  return completeAppendOnly(...args);
+};
+const structuredContent = [
+  { type: "text", text: "structured durable append" },
+  { type: "image", data: "ZmFrZQ==", mimeType: "image/png" },
+];
+let structuredFailure;
+try {
+  await injectedSession.sendCustomMessage(
+    { customType: "structured-retry", content: structuredContent, display: false, attribution: "agent" },
+    { deliverAs: "nextTurn", triggerTurn: false },
+  );
+} catch (error) {
+  structuredFailure = error?.message;
+}
+await injectedSession.sendCustomMessage(
+  { customType: "retry-drain", content: "wake retry", display: false, attribution: "agent" },
+  { deliverAs: "nextTurn", triggerTurn: false },
+);
+await injectedSession.waitForIdle();
+const structuredMessages = injectedAgent.state.messages.filter(
+  message => message.role === "custom" && message.customType === "structured-retry"
+);
+const prefixProviderContext = providerContexts.find(messages =>
+  messages.some(message => message.role === "user" && message.content === "after durable prefix")
+);
 const persisted = await injectedQueue.list();
 const promptAccepted = await injectedSession.prompt("ordinary prompt");
 await injectedSession.waitForIdle();
@@ -102,7 +171,7 @@ await injectedSession.waitForIdle();
 await injectedSession.steer("ordinary steer");
 await injectedSession.waitForIdle();
 const ordinaryQueuedInputs = (await injectedQueue.list())
-  .filter(item => item.inputId !== first.item.inputId)
+  .filter(item => item.inputId !== first.item.inputId && item.payload.kind !== "custom")
   .map(item => ({ text: item.payload.text, deliveryClass: item.deliveryClass, revision: item.revision, state: item.state }));
 const [injectedOwnerDirectory] = await fs.readdir(path.join(injectedMuxRoot, "owners-v1"));
 const injectedSegmentsRoot = path.join(injectedMuxRoot, "owners-v1", injectedOwnerDirectory, "queue-v2", "segments");
@@ -163,12 +232,24 @@ console.log(JSON.stringify({
   replay: { inputId: replay.item.inputId, sequence: replay.item.sequence, runnerRevision: replay.runnerRevision, replayed: replay.replayed },
   persisted: persisted.map(item => ({ inputId: item.inputId, revision: item.revision, attempts: item.attempts.map(attempt => attempt.state) })),
   promptAccepted,
+  appendTurnStarted,
   ordinaryQueuedInputs,
   providerCalls,
   defaultOpenedDuringInjection,
   injectedAdoptRecords,
   ownershipFailureName,
   standaloneQueueHeadExists,
+  deferredPrefix: {
+    callsBeforeDeferred,
+    callsWhileDeferredAlone,
+    providerContext: prefixProviderContext,
+  },
+  structuredRetry: {
+    appendCompletionAttempts,
+    failure: structuredFailure,
+    messageCount: structuredMessages.length,
+    content: structuredMessages[0]?.content,
+  },
 }));
 `;
 
@@ -201,26 +282,68 @@ describe("AgentSession durable input queue injection", () => {
 			persisted: Array<{ inputId: string; revision: number; attempts: string[] }>;
 			promptAccepted: boolean;
 			ordinaryQueuedInputs: Array<{ text: string; deliveryClass: string; revision: number; state: string }>;
+			appendTurnStarted: boolean;
 			providerCalls: string[];
 			defaultOpenedDuringInjection: boolean;
 			injectedAdoptRecords: number;
 			ownershipFailureName?: string;
 			standaloneQueueHeadExists: boolean;
+			deferredPrefix: {
+				callsBeforeDeferred: number;
+				callsWhileDeferredAlone: number;
+				providerContext?: Array<{ role: string; content?: string }>;
+			};
+			structuredRetry: {
+				appendCompletionAttempts: number;
+				failure?: string;
+				messageCount: number;
+				content?: Array<{ type: string; text?: string; data?: string; mimeType?: string }>;
+			};
 		};
 
 		expect(result.first).toMatchObject({ sequence: 1, runnerRevision: 1, replayed: false });
 		expect(result.replay).toEqual({ ...result.first, replayed: true });
-		expect(result.persisted).toEqual([
-			{ inputId: result.first.inputId, revision: 1, attempts: ["completed"] },
-		]);
+		expect(result.persisted).toHaveLength(6);
+		expect(result.persisted.map(item => item.attempts)).toEqual([["completed"], [], [], ["completed"], [], []]);
 		expect(result.providerCalls.filter(call => call === "runner command")).toEqual(["runner command"]);
+		expect(result.deferredPrefix.callsWhileDeferredAlone).toBe(result.deferredPrefix.callsBeforeDeferred);
+		expect(result.appendTurnStarted).toBe(false);
+		expect(
+			result.deferredPrefix.providerContext?.filter(
+				message => message.role === "user" && message.content === "idle durable append",
+			),
+		).toHaveLength(1);
+		const prefixIndex = result.deferredPrefix.providerContext?.findIndex(
+			message => message.role === "user" && message.content === "durable prefix",
+		);
+		const userIndex = result.deferredPrefix.providerContext?.findIndex(
+			message => message.role === "user" && message.content === "after durable prefix",
+		);
+		expect(prefixIndex).toBeGreaterThanOrEqual(0);
+		expect(userIndex).toBeGreaterThan(prefixIndex ?? Number.MAX_SAFE_INTEGER);
+		expect(result.structuredRetry).toEqual({
+			appendCompletionAttempts: 3,
+			failure: "injected append completion failure",
+			messageCount: 1,
+			content: [
+				{ type: "text", text: "structured durable append" },
+				{ type: "image", data: "ZmFrZQ==", mimeType: "image/png" },
+			],
+		});
 		expect(result.promptAccepted).toBe(true);
-		expect(result.ordinaryQueuedInputs).toEqual([
-			{ text: "ordinary prompt", deliveryClass: "followUp", revision: 1, state: "completed" },
-			{ text: "ordinary follow-up", deliveryClass: "followUp", revision: 1, state: "completed" },
-			{ text: "ordinary steer", deliveryClass: "steer", revision: 1, state: "completed" },
+		expect(result.ordinaryQueuedInputs.map(item => item.text)).toEqual([
+			"after durable prefix",
+			"ordinary prompt",
+			"ordinary follow-up",
+			"ordinary steer",
 		]);
-		expect(result.providerCalls).toEqual(["runner command", "ordinary prompt", "ordinary follow-up", "ordinary steer"]);
+		expect(result.providerCalls).toEqual([
+			"runner command",
+			"after durable prefix",
+			"ordinary prompt",
+			"ordinary follow-up",
+			"ordinary steer",
+		]);
 		expect(result.injectedAdoptRecords).toBe(1);
 		expect(result.defaultOpenedDuringInjection).toBe(false);
 		expect(result.ownershipFailureName).toBe("SessionOwnershipLostError");

@@ -1125,8 +1125,8 @@ describe("durable input queue", () => {
 		await expect(queue.edit(appended.inputId, appended.revision, { text: "no", images: undefined })).rejects.toThrow();
 	});
 	it("releases a deferred next-turn custom prefix only for a later provider-bound item", async () => {
-		const { root, owner } = await fixture("epoch-a");
-		const queue = await DurableInputQueue.open(owner.handle, root);
+		const { root, session, owner } = await fixture("epoch-a");
+		let queue = await DurableInputQueue.open(owner.handle, root);
 		await queue.adopt();
 		const deferred = await queue.enqueue({
 			kind: "custom",
@@ -1143,6 +1143,10 @@ describe("durable input queue", () => {
 		expect(await queue.deferredCustomPrefix()).toBeUndefined();
 		expect(await queue.admitNext()).toBeUndefined();
 		const user = await queue.enqueue({ text: "continue", deliveryClass: "followUp" });
+		owner.current = false;
+		const nextOwner = replacement(session, "epoch-b");
+		queue = await DurableInputQueue.open(nextOwner.handle, root);
+		await queue.adopt();
 		expect(await queue.deferredCustomPrefix()).toMatchObject({
 			inputId: deferred.inputId,
 			sequence: 1,

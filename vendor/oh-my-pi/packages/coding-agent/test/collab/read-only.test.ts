@@ -135,6 +135,7 @@ interface HostHarness {
 	ctx: InteractiveModeContext;
 	prompts: { from?: string }[];
 	aborts: { count: number };
+	entryUnsubscribes: { count: number };
 	/** Resolves on the next promptCustomMessage call — no polling. */
 	nextPrompt(): Promise<{ from?: string }>;
 }
@@ -143,6 +144,7 @@ interface HostHarness {
 function makeHostContext(): HostHarness {
 	const prompts: { from?: string }[] = [];
 	const aborts = { count: 0 };
+	const entryUnsubscribes = { count: 0 };
 	const promptWaiters: ((details: { from?: string }) => void)[] = [];
 	const ctx = {
 		settings: { get: () => "" },
@@ -153,7 +155,14 @@ function makeHostContext(): HostHarness {
 				header: { type: "session", id: "sess-1", timestamp: new Date().toISOString(), cwd: "/tmp" },
 				entries: [],
 			}),
-			onEntryAppended: undefined,
+			subscribeEntries: () => {
+				let subscribed = true;
+				return () => {
+					if (!subscribed) return;
+					subscribed = false;
+					entryUnsubscribes.count++;
+				};
+			},
 		},
 		session: {
 			isStreaming: false,
@@ -189,7 +198,7 @@ function makeHostContext(): HostHarness {
 		promptWaiters.push(resolve);
 		return promise;
 	};
-	return { ctx, prompts, aborts, nextPrompt };
+	return { aborts, ctx, entryUnsubscribes, nextPrompt, prompts };
 }
 
 interface TestGuest {
@@ -264,6 +273,7 @@ afterAll(async () => {
 	globalThis.WebSocket = RealWebSocket;
 	activeRelay = null;
 	await host.stop("test done");
+	expect(harness.entryUnsubscribes.count).toBe(1);
 });
 
 describe("collab read-only links", () => {

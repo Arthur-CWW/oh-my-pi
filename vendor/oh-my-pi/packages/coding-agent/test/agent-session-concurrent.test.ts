@@ -399,7 +399,7 @@ describe("AgentSession concurrent prompt guard", () => {
 			settings,
 			modelRegistry,
 		});
-		session.setClientBridge({
+		await session.setClientBridge({
 			capabilities: {},
 			deferAgentInitiatedTurns: true,
 		});
@@ -489,7 +489,7 @@ describe("AgentSession concurrent prompt guard", () => {
 			agentId: ownerId,
 			ownedAsyncJobManager: asyncJobManager,
 		});
-		session.setClientBridge({
+		await session.setClientBridge({
 			capabilities: {},
 			deferAgentInitiatedTurns: true,
 		});

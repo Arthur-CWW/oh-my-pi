@@ -204,6 +204,24 @@ describe("advisor", () => {
 			expect(consumed.filter(message => message === oldAdvice)).toHaveLength(0);
 			expect(consumed.filter(message => message === replacementAdvice)).toHaveLength(1);
 		});
+
+		it("cancels only the durable delivery claimed by a revoked lifecycle", async () => {
+			const oldLease = new AdvisorDeliveryLease();
+			const replacementLease = new AdvisorDeliveryLease();
+			const cancelled: string[] = [];
+			oldLease.claimDurable(async () => {
+				cancelled.push("old");
+			});
+			replacementLease.claimDurable(async () => {
+				cancelled.push("replacement");
+			});
+
+			oldLease.revoke();
+			await Promise.resolve();
+
+			expect(cancelled).toEqual(["old"]);
+			expect(replacementLease.active).toBe(true);
+		});
 	});
 
 	describe("advice delivery policy", () => {

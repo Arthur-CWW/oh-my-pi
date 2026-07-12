@@ -36,6 +36,7 @@ export interface AdvisorNote {
 export class AdvisorDeliveryLease {
 	#active = true;
 	readonly #claimedMessages = new WeakSet<AgentMessage>();
+	readonly #durableCancellations = new Set<() => Promise<void>>();
 
 	get active(): boolean {
 		return this.#active;
@@ -52,8 +53,19 @@ export class AdvisorDeliveryLease {
 		return true;
 	}
 
+	/** Associate a claimed message with its durable queued identity. */
+	claimDurable(cancel: () => Promise<void>): void {
+		if (this.#active) {
+			this.#durableCancellations.add(cancel);
+			return;
+		}
+		void cancel();
+	}
+
 	revoke(): void {
 		this.#active = false;
+		for (const cancel of this.#durableCancellations) void cancel();
+		this.#durableCancellations.clear();
 	}
 
 	/**
@@ -66,6 +78,8 @@ export class AdvisorDeliveryLease {
 		replaceQueues(steering: AgentMessage[], followUp: AgentMessage[]): void;
 	}): void {
 		this.#active = false;
+		for (const cancel of this.#durableCancellations) void cancel();
+		this.#durableCancellations.clear();
 		const steering = queue.peekSteeringQueue();
 		const followUp = queue.peekFollowUpQueue();
 		if (
