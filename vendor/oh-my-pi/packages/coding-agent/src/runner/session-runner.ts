@@ -4,6 +4,7 @@ import type { BashResult } from "../exec/bash-executor";
 import { type AgentSession, type AgentSessionEvent, PromptOperationConflictError } from "../session/agent-session";
 import {
 	DurableInputCommandConflictError,
+	type DurableCustomPayload,
 	DurableInputItemRevisionConflictError,
 	type DurableInputQueue,
 	DurableInputQueueConflictError,
@@ -76,6 +77,7 @@ import {
 	decodeSetModelCommand,
 	decodeSetThinkingLevelCommand,
 	decodeSubmitInputCommand,
+	decodeSubmitCustomMessageCommand,
 	decodeTransitionGoalModeCommand,
 	decodeTransitionPlanModeCommand,
 	type InterruptPromptCommand,
@@ -183,6 +185,7 @@ export interface ControllerSessionRunnerView extends RunnerViewBase {
 	readonly capability: "controller";
 	readonly controllerEpoch: number;
 	readonly submitInput: (input: unknown) => Effect.Effect<RunnerCommandReceipt, RunnerFailure, Scope.Scope>;
+	readonly submitCustomMessage: (input: unknown) => Effect.Effect<RunnerCommandReceipt, RunnerFailure, Scope.Scope>;
 	readonly editQueuedInput: (input: unknown) => Effect.Effect<RunnerCommandReceipt, RunnerFailure, Scope.Scope>;
 	readonly cancelQueuedInput: (input: unknown) => Effect.Effect<RunnerCommandReceipt, RunnerFailure, Scope.Scope>;
 	readonly setActiveTools: (input: unknown) => Effect.Effect<SetActiveToolsReceipt, RunnerFailure, Scope.Scope>;
@@ -804,6 +807,11 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 		controllerEpoch: number,
 		input: unknown,
 	) => Effect.Effect<RunnerCommandReceipt, RunnerFailure, Scope.Scope>;
+	let submitCustomMessage!: (
+		viewId: string,
+		controllerEpoch: number,
+		input: unknown,
+	) => Effect.Effect<RunnerCommandReceipt, RunnerFailure, Scope.Scope>;
 	let editQueuedInput!: (
 		viewId: string,
 		controllerEpoch: number,
@@ -914,6 +922,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 			detach,
 			close: detach,
 			submitInput: input => submitInput(viewId, controllerEpoch, input),
+			submitCustomMessage: input => submitCustomMessage(viewId, controllerEpoch, input),
 			editQueuedInput: input => editQueuedInput(viewId, controllerEpoch, input),
 			cancelQueuedInput: input => cancelQueuedInput(viewId, controllerEpoch, input),
 			setActiveTools: input => setActiveTools(viewId, controllerEpoch, input),
@@ -1022,6 +1031,69 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 								expectedRevision: command.expectedRevision,
 							},
 						),
+					catch: asRunnerFailure,
+				});
+				revision = Math.max(revision, durable.runnerRevision);
+				durableItems.set(durable.item.inputId, durable.item);
+				if (!durable.replayed) {
+					yield* applyQueueEvent({
+						kind: "inputAccepted",
+						runnerRevision: durable.runnerRevision,
+						command: durable.command,
+						item: durable.item,
+					});
+				}
+				return {
+					commandId: durable.command.commandId,
+					correlationId: durable.command.correlationId,
+					...(durable.command.causationId === undefined ? {} : { causationId: durable.command.causationId }),
+					inputId: durable.item.inputId,
+					durableSequence: durable.item.sequence,
+					revision: durable.runnerRevision,
+					replayed: durable.replayed,
+				} satisfies RunnerCommandReceipt;
+			}),
+		);
+	});
+
+	submitCustomMessage = Effect.fn("Runner.submitCustomMessage")(function* (
+		viewId: string,
+		controllerEpoch: number,
+		input: unknown,
+	) {
+		const command = yield* Effect.try({
+			try: () => decodeSubmitCustomMessageCommand(input),
+			catch: asRunnerFailure,
+		});
+		if (command.viewId !== viewId) return yield* mismatchedView(viewId);
+		if (command.controllerEpoch !== controllerEpoch) {
+			return yield* Effect.fail(
+				new StaleRunnerControllerLeaseError({
+					viewId,
+					expectedControllerEpoch: command.controllerEpoch,
+					actualControllerEpoch: controllerEpoch,
+				}),
+			);
+		}
+		return yield* enqueue(
+			Effect.gen(function* () {
+				yield* requireController(viewId, controllerEpoch);
+				const prior = yield* Effect.tryPromise({
+					try: () => resources.queue.getCommandReceipt(command.commandId),
+					catch: asRunnerFailure,
+				});
+				if (!prior) yield* requireRevision(command.expectedRevision);
+				const durable = yield* Effect.tryPromise({
+					try: () =>
+						resources.session.acceptDurableCustomMessage(command.payload as DurableCustomPayload, {
+							schemaVersion: 1,
+							commandId: command.commandId,
+							correlationId: command.correlationId,
+							...(command.causationId === undefined ? {} : { causationId: command.causationId }),
+							viewId,
+							controllerEpoch,
+							expectedRevision: command.expectedRevision,
+						}),
 					catch: asRunnerFailure,
 				});
 				revision = Math.max(revision, durable.runnerRevision);
@@ -2886,6 +2958,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 			formatSessionAsText,
 			formatAdvisorHistoryAsText,
 			submit: attached.submitInput,
+			submitCustomMessage: attached.submitCustomMessage,
 			edit: attached.editQueuedInput,
 			cancel: attached.cancelQueuedInput,
 			setActiveTools: attached.setActiveTools,

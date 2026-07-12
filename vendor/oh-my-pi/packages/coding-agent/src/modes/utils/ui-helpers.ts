@@ -673,9 +673,11 @@ export class UiHelpers {
 			.getQueuedInputProjection()
 			.filter(input => input.state !== "admitted" && input.state !== "running")
 			.toSorted((left, right) => left.sequence - right.sequence);
+		const durableSummary = (input: (typeof durableInputs)[number]): string =>
+			"text" in input.payload ? input.payload.text : `[${input.payload.message.customType}]`;
 		const durablePayloadCounts = new Map<string, number>();
 		for (const input of durableInputs) {
-			const key = `${input.deliveryClass}\0${input.payload.text}`;
+			const key = `${input.deliveryClass}\0${durableSummary(input)}`;
 			durablePayloadCounts.set(key, (durablePayloadCounts.get(key) ?? 0) + 1);
 		}
 
@@ -704,10 +706,10 @@ export class UiHelpers {
 			new TruncatedText(theme.fg("dim", `Pending inputs (${pendingCount}):`), 1, 0),
 		);
 		for (const input of durableInputs) {
-			const imageMarker = input.payload.images?.length ? " [image]" : "";
+			const imageMarker = input.payload.kind === "user" && input.payload.images?.length ? " [image]" : "";
 			const queuedText = theme.fg(
 				"dim",
-				`#${input.sequence} ${input.deliveryClass} · ${input.state} · ${input.inputId.slice(0, 8)}: ${input.payload.text}${imageMarker}`,
+				`#${input.sequence} ${input.deliveryClass} · ${input.state} · ${input.inputId.slice(0, 8)}: ${durableSummary(input)}${imageMarker}`,
 			);
 			this.ctx.pendingMessagesContainer.addChild(new TruncatedText(queuedText, 1, 0));
 		}

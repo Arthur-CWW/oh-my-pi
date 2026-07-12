@@ -25,9 +25,12 @@ import {
 	CURRENT_SESSION_VERSION,
 	type CustomEntry,
 	type CustomMessageEntry,
+	decodeDurableDeliveryIdentity,
 	decodeSessionCommandEntry,
 	decodeSessionWorkstream,
+	type DurableDeliveryIdentity,
 	type FileEntry,
+	type JsonValue,
 	type LabelEntry,
 	type LeafChangeEntry,
 	type MCPToolSelectionEntry,
@@ -159,6 +162,7 @@ class SessionEntryIndex {
 	#children = new Map<string | null, SessionEntry[]>();
 	#labels = new Map<string, string>();
 	#entryIds = new Set<string>();
+	#durableCustomMessages = new Map<string, CustomMessageEntry<JsonValue>>();
 	#leaf: string | null = null;
 	#usage = emptyUsageStatistics();
 
@@ -167,6 +171,7 @@ class SessionEntryIndex {
 		this.#children.clear();
 		this.#labels.clear();
 		this.#entryIds.clear();
+		this.#durableCustomMessages.clear();
 		this.#leaf = null;
 		this.#usage = emptyUsageStatistics();
 	}
@@ -195,6 +200,12 @@ class SessionEntryIndex {
 			else this.#labels.delete(entry.targetId);
 		}
 
+		if (entry.type === "custom_message") {
+			const durableDelivery = decodeDurableDeliveryIdentity(entry.durableDelivery);
+			if (durableDelivery && !this.#durableCustomMessages.has(durableDelivery.inputId)) {
+				this.#durableCustomMessages.set(durableDelivery.inputId, entry as CustomMessageEntry<JsonValue>);
+			}
+		}
 		addUsage(this.#usage, entryUsage(entry));
 	}
 
@@ -208,6 +219,9 @@ class SessionEntryIndex {
 
 	get(id: string): SessionEntry | undefined {
 		return this.#entriesById.get(id);
+	}
+	durableCustomMessage(inputId: string): CustomMessageEntry<JsonValue> | undefined {
+		return this.#durableCustomMessages.get(inputId);
 	}
 
 	/**
@@ -349,6 +363,83 @@ export type HistoricalDirectChildLookup =
 export interface HistoricalHotswapAudit {
 	customType: string;
 	data: unknown;
+}
+
+function cloneJsonValue(value: JsonValue, seen = new Set<object>()): JsonValue {
+	if (value === null || typeof value === "boolean" || typeof value === "string") return value;
+	if (typeof value === "number") {
+		if (!Number.isFinite(value)) throw new TypeError("Custom message details must contain only finite JSON numbers");
+		return value;
+	}
+	if (typeof value !== "object") throw new TypeError("Custom message details must be JSON");
+	if (seen.has(value)) throw new TypeError("Custom message details must not contain cycles");
+	seen.add(value);
+	try {
+		if (Array.isArray(value)) return value.map(item => cloneJsonValue(item, seen));
+		const prototype = Object.getPrototypeOf(value);
+		if (prototype !== Object.prototype && prototype !== null) {
+			throw new TypeError("Custom message details must contain only plain JSON objects");
+		}
+		const result: Record<string, JsonValue> = {};
+		for (const [key, item] of Object.entries(value)) {
+			if (item === undefined) throw new TypeError("Custom message details must not contain undefined");
+			result[key] = cloneJsonValue(item, seen);
+		}
+		return result;
+	} finally {
+		seen.delete(value);
+	}
+}
+
+function jsonValuesEqual(left: JsonValue | undefined, right: JsonValue | undefined): boolean {
+	if (left === right) return true;
+	if (left === undefined || right === undefined || left === null || right === null) return false;
+	if (typeof left !== "object" || typeof right !== "object") return false;
+	if (Array.isArray(left) || Array.isArray(right)) {
+		if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) return false;
+		return left.every((item, index) => jsonValuesEqual(item, right[index]));
+	}
+	const leftEntries = Object.entries(left);
+	const rightRecord = right as { readonly [key: string]: JsonValue };
+	if (leftEntries.length !== Object.keys(rightRecord).length) return false;
+	return leftEntries.every(([key, value]) => Object.hasOwn(rightRecord, key) && jsonValuesEqual(value, rightRecord[key]));
+}
+
+function contentEquals(
+	left: string | (TextContent | ImageContent)[],
+	right: string | (TextContent | ImageContent)[],
+): boolean {
+	if (typeof left === "string" || typeof right === "string") return left === right;
+	if (left.length !== right.length) return false;
+	return left.every((block, index) => {
+		const other = right[index];
+		if (!other || block.type !== other.type) return false;
+		if (block.type === "text" && other.type === "text") return block.text === other.text;
+		return (
+			block.type === "image" &&
+			other.type === "image" &&
+			block.data === other.data &&
+			block.mimeType === other.mimeType
+		);
+	});
+}
+
+export interface DurableCustomMessageInput {
+	customType: string;
+	content: string | (TextContent | ImageContent)[];
+	display: boolean;
+	details?: JsonValue;
+	attribution: MessageAttribution;
+}
+
+export class DurableCustomMessageConflictError extends Error {
+	readonly inputId: string;
+
+	constructor(inputId: string) {
+		super(`Durable custom message input ID was reused with different content: ${inputId}`);
+		this.name = "DurableCustomMessageConflictError";
+		this.inputId = inputId;
+	}
 }
 
 /**
@@ -650,7 +741,7 @@ export class SessionManager {
 		}
 	}
 
-	async #persistReservedStateCommandEntry(entry: SessionCommandEntry): Promise<void> {
+	async #persistReservedEntry(entry: SessionEntry): Promise<void> {
 		this.#assertOwnership();
 		if (!this.#persist || !this.#sessionFile) return;
 		if (this.#diskFailure) throw this.#diskFailure;
@@ -675,7 +766,7 @@ export class SessionManager {
 		}
 	}
 
-	#reserveStateCommandEntry(entry: SessionCommandEntry): void {
+	#reserveEntryForPersistence(entry: SessionEntry): void {
 		this.#entries.push(entry);
 		this.#index.insert(entry);
 	}
@@ -685,7 +776,7 @@ export class SessionManager {
 		this.#notifyEntryListeners(entry);
 	}
 
-	#rollbackReservedStateCommandEntry(entry: SessionCommandEntry): void {
+	#rollbackReservedEntry(entry: SessionEntry): void {
 		if (this.#entries[this.#entries.length - 1] !== entry) return;
 		this.#entries.pop();
 		this.#index.rebuild(this.#entries);
@@ -1467,7 +1558,7 @@ export class SessionManager {
 		return this.#enqueueSessionCommand(() => this.#commitSessionCommandNow(command, { from, previous, next }));
 	}
 
-	#enqueueSessionCommand(commitNow: () => Promise<SessionCommandReceipt>): Promise<SessionCommandReceipt> {
+	#enqueueSessionCommand<T>(commitNow: () => Promise<T>): Promise<T> {
 		const commit = this.#stateCommandPending ? this.#stateCommandTail.then(commitNow) : commitNow();
 		this.#stateCommandPending = true;
 		const tail = commit.then(
@@ -1636,11 +1727,11 @@ export class SessionManager {
 			if (!decodeSessionCommandEntry(entry)) throw new Error("Invalid workflow transition state");
 		}
 		this.#stateCommandPersistenceInFlight = true;
-		this.#reserveStateCommandEntry(entry);
+		this.#reserveEntryForPersistence(entry);
 		try {
-			await this.#persistReservedStateCommandEntry(entry);
+			await this.#persistReservedEntry(entry);
 		} catch (err) {
-			this.#rollbackReservedStateCommandEntry(entry);
+			this.#rollbackReservedEntry(entry);
 			throw err;
 		} finally {
 			this.#stateCommandPersistenceInFlight = false;
@@ -1766,6 +1857,62 @@ export class SessionManager {
 	}
 
 	/**
+	 * Append a queue-owned custom message exactly once. The returned promise is
+	 * acknowledged only after persistence and before post-commit listeners run.
+	 */
+	appendDurableCustomMessageEntry(
+		message: DurableCustomMessageInput,
+		durableDelivery: DurableDeliveryIdentity,
+	): Promise<CustomMessageEntry<JsonValue>> {
+		return this.#enqueueSessionCommand(() => this.#appendDurableCustomMessageEntryNow(message, durableDelivery));
+	}
+
+	async #appendDurableCustomMessageEntryNow(
+		message: DurableCustomMessageInput,
+		durableDelivery: DurableDeliveryIdentity,
+	): Promise<CustomMessageEntry<JsonValue>> {
+		const decodedIdentity = decodeDurableDeliveryIdentity(durableDelivery);
+		if (!decodedIdentity) throw new TypeError("Invalid durable custom message delivery identity");
+		const details = message.details === undefined ? undefined : cloneJsonValue(message.details);
+		const existing = this.#index.durableCustomMessage(decodedIdentity.inputId);
+		if (existing) {
+			const existingIdentity = decodeDurableDeliveryIdentity(existing.durableDelivery);
+			const same =
+				existingIdentity?.inputRevision === decodedIdentity.inputRevision &&
+				existing.customType === message.customType &&
+				contentEquals(existing.content, message.content) &&
+				existing.display === message.display &&
+				existing.attribution === message.attribution &&
+				jsonValuesEqual(existing.details, details);
+			if (!same) throw new DurableCustomMessageConflictError(decodedIdentity.inputId);
+			return existing;
+		}
+
+		const entry: CustomMessageEntry<JsonValue> = {
+			type: "custom_message",
+			customType: message.customType,
+			content: structuredClone(message.content),
+			display: message.display,
+			...(details === undefined ? {} : { details }),
+			attribution: message.attribution,
+			durableDelivery: decodedIdentity,
+			...this.#freshEntryFields(),
+		};
+		this.#stateCommandPersistenceInFlight = true;
+		this.#reserveEntryForPersistence(entry);
+		try {
+			await this.#persistReservedEntry(entry);
+		} catch (error) {
+			this.#rollbackReservedEntry(entry);
+			throw error;
+		} finally {
+			this.#stateCommandPersistenceInFlight = false;
+		}
+		this.#notifyEntryListeners(entry);
+		return entry;
+	}
+
+	/**
 	 * Append an MCP tool selection entry recording the discovery-selected MCP tools.
 	 */
 	appendMCPToolSelection(selectedToolNames: string[]): string {
@@ -1883,6 +2030,10 @@ export class SessionManager {
 	/** All session entries (excludes header). Returns a shallow copy. */
 	getEntries(): SessionEntry[] {
 		return [...this.#entries];
+	}
+
+	hasDurableCustomMessage(inputId: string): boolean {
+		return this.#index.durableCustomMessage(inputId) !== undefined;
 	}
 
 	/**

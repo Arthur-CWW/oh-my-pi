@@ -370,9 +370,13 @@ describe("live SessionRunner", () => {
 					yield* Effect.promise(() => fixture.session.waitForIdle());
 					const snapshot = yield* runner.snapshot();
 					expect(snapshot.items.find(item => item.inputId === steer.inputId)?.deliveryClass).toBe("steer");
-					expect(snapshot.items.find(item => item.inputId === steer.inputId)?.payload.images).toEqual([image]);
+					const steerItem = snapshot.items.find(item => item.inputId === steer.inputId);
+					expect(steerItem && "images" in steerItem.payload ? steerItem.payload.images : undefined).toEqual([image]);
 					expect(snapshot.items.find(item => item.inputId === followUp.inputId)?.deliveryClass).toBe("followUp");
-					expect(snapshot.items.find(item => item.inputId === followUp.inputId)?.payload.images).toEqual([image]);
+					const followUpItem = snapshot.items.find(item => item.inputId === followUp.inputId);
+					expect(followUpItem && "images" in followUpItem.payload ? followUpItem.payload.images : undefined).toEqual([
+						image,
+					]);
 					yield* runner.stop();
 				}),
 			),

@@ -4,11 +4,16 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 import {
+	cloneJsonValue,
+	decodeDurableCustomPayload,
+	decodeJsonValue,
 	DurableInputCommandConflictError,
 	DurableInputItemRevisionConflictError,
 	DurableInputQueue,
 	DurableInputRunnerRevisionConflictError,
+	type DurableCustomPayload,
 	type DurableInputCommandMetadata,
+	jsonValuesEqual,
 	SessionOwnershipLostError,
 } from "@oh-my-pi/pi-coding-agent/session/durable-input-queue";
 import { acquireSessionOwnership, type SessionOwnershipHandle } from "@oh-my-pi/pi-coding-agent/session/session-ownership";
@@ -125,7 +130,7 @@ describe("durable input queue", () => {
 		const nextOwner = replacement(session, "epoch-b");
 		const replacementQueue = await DurableInputQueue.open(nextOwner.handle, root);
 		const adopted = await replacementQueue.adopt();
-		expect(adopted.map(item => ({ id: item.inputId, text: item.payload.text, state: item.state }))).toEqual([
+		expect(adopted.map(item => ({ id: item.inputId, text: "text" in item.payload ? item.payload.text : "", state: item.state }))).toEqual([
 			{ id: first.inputId, text: "first", state: "queued" },
 			{ id: second.inputId, text: "second", state: "queued" },
 		]);
@@ -300,7 +305,7 @@ describe("durable input queue", () => {
 		const ownerC = replacement(session, "epoch-c");
 		const queueC = await DurableInputQueue.open(ownerC.handle, root);
 		const adoptedC = await queueC.adopt();
-		expect(adoptedC.map(item => ({ id: item.inputId, text: item.payload.text }))).toEqual([
+		expect(adoptedC.map(item => ({ id: item.inputId, text: "text" in item.payload ? item.payload.text : "" }))).toEqual([
 			{ id: first.inputId, text: "first" },
 			{ id: second.inputId, text: "second" },
 		]);
@@ -410,7 +415,7 @@ describe("durable input queue", () => {
 		const currentQueue = await DurableInputQueue.open(nextOwner.handle, root);
 		const adopted = await currentQueue.adopt();
 
-		expect(adopted.map(item => ({ id: item.inputId, text: item.payload.text }))).toEqual([
+		expect(adopted.map(item => ({ id: item.inputId, text: "text" in item.payload ? item.payload.text : "" }))).toEqual([
 			{ id: first.inputId, text: "first" },
 		]);
 	});
@@ -856,7 +861,7 @@ describe("durable input queue", () => {
 		await reentrant;
 		expect(seen).toEqual(["outer", "inner"]);
 		expect(await queue.getLatestRunnerRevision()).toBe(2);
-		expect((await queue.list()).map(item => item.payload.text)).toEqual(["outer", "inner"]);
+		expect((await queue.list()).map(item => ("text" in item.payload ? item.payload.text : ""))).toEqual(["outer", "inner"]);
 	});
 
 	it("atomically edits and cancels through the command ledger with durable replay and CAS", async () => {
@@ -982,4 +987,174 @@ describe("durable input queue", () => {
 		expect(seen).toEqual(["inputEdited", "inputCancelled"]);
 		expect(await queue.getLatestRunnerRevision()).toBe(2);
 	});
+
+	it("round-trips custom payloads in global order across reopen while preserving legacy records", async () => {
+		const { root, session, owner } = await fixture("epoch-a");
+		const queue = await DurableInputQueue.open(owner.handle, root);
+		await queue.adopt();
+		const legacy = await queue.enqueue({ text: "legacy", deliveryClass: "followUp" });
+		const custom: DurableCustomPayload = {
+			kind: "custom",
+			message: {
+				customType: "notice",
+				content: [
+					{ type: "text", text: "hello" },
+					{ type: "image", data: "base64", mimeType: "image/png" },
+				],
+				display: true,
+				details: { z: [1, null, true], a: { nested: "value" } },
+				attribution: "agent",
+			},
+			deliverAs: "nextTurn",
+			triggerTurn: true,
+			disposition: "provider",
+		};
+		const accepted = await queue.enqueue(custom);
+		expect(accepted).toMatchObject({ sequence: legacy.sequence + 1, deliveryClass: "followUp", payload: custom });
+
+		owner.current = false;
+		const nextOwner = replacement(session, "epoch-b");
+		const reopened = await DurableInputQueue.open(nextOwner.handle, root);
+		await reopened.adopt();
+		expect((await reopened.replayQueued()).map(item => item.payload)).toEqual([
+			{ text: "legacy", images: undefined },
+			custom,
+		]);
+	});
+
+	it("strictly decodes and clones recursive JSON without key-order-sensitive equality", () => {
+		const original = { b: [{ x: 1 }, null], a: "value" } as const;
+		const clone = cloneJsonValue(original);
+		expect(clone).toEqual(original);
+		expect(clone).not.toBe(original);
+		expect(jsonValuesEqual(original, { a: "value", b: [{ x: 1 }, null] })).toBe(true);
+		expect(decodeJsonValue(Number.NaN)).toBeUndefined();
+		expect(decodeJsonValue(Number.POSITIVE_INFINITY)).toBeUndefined();
+		expect(decodeJsonValue({ missing: undefined })).toBeUndefined();
+		expect(decodeJsonValue(new (class Value {
+			value = 1;
+		})())).toBeUndefined();
+		const cycle: Record<string, unknown> = {};
+		cycle.self = cycle;
+		expect(decodeJsonValue(cycle)).toBeUndefined();
+		expect(
+			decodeDurableCustomPayload({
+				kind: "custom",
+				message: {
+					customType: "invalid",
+					content: "x",
+					display: false,
+					attribution: "agent",
+					details: cycle,
+				},
+				deliverAs: "steer",
+				triggerTurn: false,
+				disposition: "provider",
+			}),
+		).toBeUndefined();
+	});
+
+	it("rejects invalid JSON before enqueue and detects full custom command replay conflicts", async () => {
+		const { root, owner } = await fixture("epoch-a");
+		const queue = await DurableInputQueue.open(owner.handle, root);
+		await queue.adopt();
+		const payload: DurableCustomPayload = {
+			kind: "custom",
+			message: {
+				customType: "notice",
+				content: "hello",
+				display: false,
+				details: { count: 1 },
+				attribution: "agent",
+			},
+			deliverAs: "steer",
+			triggerTurn: false,
+			disposition: "provider",
+		};
+		const metadata = command("custom", 0);
+		const first = await queue.enqueueCommand(payload, metadata);
+		expect(await queue.enqueueCommand(payload, metadata)).toEqual({ ...first, replayed: true });
+		await expect(
+			queue.enqueueCommand({ ...payload, triggerTurn: true }, metadata),
+		).rejects.toBeInstanceOf(DurableInputCommandConflictError);
+		expect(await queue.getLatestRunnerRevision()).toBe(1);
+		await expect(
+			queue.enqueue({
+				...payload,
+				message: { ...payload.message, details: { invalid: Number.NaN } },
+			}),
+		).rejects.toThrow("Invalid durable input queue enqueue payload");
+		expect(await queue.getLatestRunnerRevision()).toBe(1);
+	});
+
+	it("completes append-only custom input idempotently without provider attempt records", async () => {
+		const { root, owner } = await fixture("epoch-a");
+		const queue = await DurableInputQueue.open(owner.handle, root);
+		await queue.adopt();
+		const appended = await queue.enqueue({
+			kind: "custom",
+			message: {
+				customType: "idle",
+				content: "persist only",
+				display: true,
+				attribution: "user",
+			},
+			deliverAs: "followUp",
+			triggerTurn: false,
+			disposition: "append",
+		});
+		const events: string[] = [];
+		queue.subscribeTransitions(event => events.push(`${event.kind}:${event.item.state}`));
+		expect(await queue.admitNext()).toBeUndefined();
+		expect(await queue.completeAppendOnly(appended.inputId, appended.revision)).toMatchObject({
+			state: "completed",
+			attempts: [],
+		});
+		expect(await queue.completeAppendOnly(appended.inputId, appended.revision)).toMatchObject({
+			state: "completed",
+			attempts: [],
+		});
+		expect(events).toEqual(["inputCompleted:completed"]);
+		const rootPath = await queueRoot(root);
+		const { activeEpoch } = await queue.getStatus();
+		const records = (await fs.readFile(path.join(rootPath, "segments", `${activeEpoch}.jsonl`), "utf8"))
+			.trim()
+			.split("\n")
+			.map(line => JSON.parse(line) as { type: string });
+		expect(records.map(record => record.type)).toEqual(["enqueue", "state"]);
+		await expect(queue.edit(appended.inputId, appended.revision, { text: "no", images: undefined })).rejects.toThrow();
+	});
+	it("releases a deferred next-turn custom prefix only for a later provider-bound item", async () => {
+		const { root, owner } = await fixture("epoch-a");
+		const queue = await DurableInputQueue.open(owner.handle, root);
+		await queue.adopt();
+		const deferred = await queue.enqueue({
+			kind: "custom",
+			message: {
+				customType: "context",
+				content: "before user",
+				display: false,
+				attribution: "agent",
+			},
+			deliverAs: "nextTurn",
+			triggerTurn: false,
+			disposition: "provider",
+		});
+		expect(await queue.deferredCustomPrefix()).toBeUndefined();
+		expect(await queue.admitNext()).toBeUndefined();
+		const user = await queue.enqueue({ text: "continue", deliveryClass: "followUp" });
+		expect(await queue.deferredCustomPrefix()).toMatchObject({
+			inputId: deferred.inputId,
+			sequence: 1,
+			attempts: [],
+		});
+		await queue.completeDeferredCustomPrefix(deferred.inputId, deferred.revision);
+		const admitted = await queue.admitNext();
+		expect(admitted).toMatchObject({ inputId: user.inputId, sequence: 2 });
+		expect((await queue.list()).map(item => ({ sequence: item.sequence, state: item.state, attempts: item.attempts.length }))).toEqual([
+			{ sequence: 1, state: "completed", attempts: 0 },
+			{ sequence: 2, state: "admitted", attempts: 1 },
+		]);
+	});
+
 });

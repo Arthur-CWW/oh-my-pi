@@ -14,6 +14,7 @@ import type {
 	RunnerImageContent,
 	SetActiveToolsReceipt,
 	SetModelReceipt,
+	SubmitCustomMessageCommand,
 	SetThinkingLevelReceipt,
 	TransitionGoalModeReceipt,
 	TransitionPlanModeReceipt,
@@ -34,6 +35,7 @@ import {
 	decodeSetModelCommand,
 	decodeSetThinkingLevelCommand,
 	decodeSubmitInputCommand,
+	decodeSubmitCustomMessageCommand,
 	decodeTransitionGoalModeCommand,
 	decodeTransitionPlanModeCommand,
 	RunnerLocalOperationTargetError,
@@ -59,6 +61,13 @@ export interface TerminalSubmitIntent {
 	readonly text: string;
 	readonly images?: ReadonlyArray<RunnerImageContent>;
 	readonly deliveryClass: "steer" | "followUp";
+	readonly commandId?: string;
+	readonly correlationId?: string;
+	readonly causationId?: string;
+}
+
+export interface TerminalSubmitCustomMessageIntent {
+	readonly payload: SubmitCustomMessageCommand["payload"];
 	readonly commandId?: string;
 	readonly correlationId?: string;
 	readonly causationId?: string;
@@ -249,6 +258,7 @@ export interface TerminalSessionController {
 	readonly formatSessionAsText: (options?: { readonly compact?: boolean }) => Promise<string>;
 	readonly formatAdvisorHistoryAsText: (options?: { readonly compact?: boolean }) => Promise<string | null>;
 	readonly submit: (intent: TerminalSubmitIntent) => Promise<RunnerCommandReceipt>;
+	readonly submitCustomMessage: (intent: TerminalSubmitCustomMessageIntent) => Promise<RunnerCommandReceipt>;
 	readonly edit: (intent: TerminalEditIntent) => Promise<RunnerCommandReceipt>;
 	readonly cancel: (intent: TerminalCancelIntent) => Promise<RunnerCommandReceipt>;
 	readonly setActiveTools: (intent: TerminalSetActiveToolsIntent) => Promise<SetActiveToolsReceipt>;
@@ -406,6 +416,24 @@ export async function createTerminalSessionController(
 									...(intent.images === undefined ? {} : { images: [...intent.images] }),
 									deliveryClass: intent.deliveryClass,
 								},
+							}),
+						),
+					);
+				}),
+			submitCustomMessage: intent =>
+				fenced(async current => {
+					const ids = metadata(intent);
+					return run(
+						view!.submitCustomMessage(
+							decodeSubmitCustomMessageCommand({
+								schemaVersion: RUNNER_SCHEMA_VERSION,
+								kind: "submitCustomMessage",
+								...ids,
+								...(intent.causationId === undefined ? {} : { causationId: intent.causationId }),
+								expectedRevision: current.runner.revision,
+								viewId,
+								controllerEpoch: view!.epoch,
+								payload: intent.payload,
 							}),
 						),
 					);

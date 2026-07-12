@@ -487,6 +487,30 @@ export interface ModeChangeEntry extends SessionEntryBase {
 	data?: Record<string, unknown>;
 }
 
+export type JsonPrimitive = null | boolean | number | string;
+export type JsonValue = JsonPrimitive | readonly JsonValue[] | { readonly [key: string]: JsonValue };
+
+/** Internal identity connecting a durable queue obligation to its transcript entry. */
+export interface DurableDeliveryIdentity {
+	inputId: string;
+	inputRevision: number;
+}
+
+export function decodeDurableDeliveryIdentity(value: unknown): DurableDeliveryIdentity | undefined {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+	const candidate = value as Record<string, unknown>;
+	if (
+		typeof candidate.inputId !== "string" ||
+		candidate.inputId.length === 0 ||
+		typeof candidate.inputRevision !== "number" ||
+		!Number.isSafeInteger(candidate.inputRevision) ||
+		candidate.inputRevision < 0
+	) {
+		return undefined;
+	}
+	return { inputId: candidate.inputId, inputRevision: candidate.inputRevision };
+}
+
 /**
  * Custom message entry for extensions to inject messages into LLM context.
  * Use customType to identify your extension's entries.
@@ -507,6 +531,8 @@ export interface CustomMessageEntry<T = unknown> extends SessionEntryBase {
 	display: boolean;
 	/** Who initiated this message for billing/attribution semantics. */
 	attribution?: MessageAttribution;
+	/** Queue delivery identity. Internal control data; never extension metadata. */
+	durableDelivery?: DurableDeliveryIdentity;
 }
 
 /** Session entry - has id/parentId for persisted journal entries (tree entries plus metadata entries). */

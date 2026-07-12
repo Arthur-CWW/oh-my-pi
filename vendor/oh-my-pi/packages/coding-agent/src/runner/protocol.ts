@@ -56,6 +56,31 @@ export const SubmitInputCommandSchema = Schema.Struct({
 	}),
 });
 
+const CustomContentPartSchema = Schema.Union([
+	Schema.Struct({ type: Schema.Literal("text"), text: Schema.String }),
+	ImageContentSchema,
+]);
+
+export const SubmitCustomMessageCommandSchema = Schema.Struct({
+	...CommandMetadataSchema,
+	kind: Schema.Literal("submitCustomMessage"),
+	viewId: Schema.String,
+	controllerEpoch: ControllerEpochSchema,
+	payload: Schema.Struct({
+		kind: Schema.Literal("custom"),
+		message: Schema.Struct({
+			customType: Schema.String,
+			content: Schema.Union([Schema.String, Schema.Array(CustomContentPartSchema)]),
+			display: Schema.Boolean,
+			details: Schema.optional(Schema.Unknown),
+			attribution: Schema.Literals(["user", "agent"]),
+		}),
+		deliverAs: Schema.Literals(["steer", "followUp", "nextTurn"]),
+		triggerTurn: Schema.Boolean,
+		disposition: Schema.Literals(["provider", "append"]),
+	}),
+});
+
 export const EditQueuedInputCommandSchema = Schema.Struct({
 	...CommandMetadataSchema,
 	kind: Schema.Literal("editQueuedInput"),
@@ -302,6 +327,7 @@ export const CancelEphemeralTurnCommandSchema = Schema.Struct({
 });
 
 export type SubmitInputCommand = typeof SubmitInputCommandSchema.Type;
+export type SubmitCustomMessageCommand = typeof SubmitCustomMessageCommandSchema.Type;
 export type EditQueuedInputCommand = typeof EditQueuedInputCommandSchema.Type;
 export type CancelQueuedInputCommand = typeof CancelQueuedInputCommandSchema.Type;
 export type SetActiveToolsCommand = typeof SetActiveToolsCommandSchema.Type;
@@ -632,6 +658,28 @@ export const decodeSubmitInputCommand = (input: unknown): SubmitInputCommand => 
 		return Schema.decodeUnknownSync(SubmitInputCommandSchema)(input);
 	} catch (error) {
 		throw new InvalidRunnerCommandError({ issue: error instanceof Error ? error.message : "Invalid submit command" });
+	}
+};
+
+const isJsonValue = (value: unknown): boolean => {
+	if (value === null || typeof value === "string" || typeof value === "boolean") return true;
+	if (typeof value === "number") return Number.isFinite(value);
+	if (Array.isArray(value)) return value.every(isJsonValue);
+	if (typeof value !== "object") return false;
+	return Object.values(value as Record<string, unknown>).every(isJsonValue);
+};
+
+export const decodeSubmitCustomMessageCommand = (input: unknown): SubmitCustomMessageCommand => {
+	try {
+		const command = Schema.decodeUnknownSync(SubmitCustomMessageCommandSchema)(input);
+		if (command.payload.message.details !== undefined && !isJsonValue(command.payload.message.details)) {
+			throw new Error("Custom message details must be JSON");
+		}
+		return command;
+	} catch (error) {
+		throw new InvalidRunnerCommandError({
+			issue: error instanceof Error ? error.message : "Invalid custom message command",
+		});
 	}
 };
 

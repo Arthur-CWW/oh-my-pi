@@ -116,6 +116,18 @@ const CHILD_SOURCE = [
 '  } catch (error) {',
 '    console.log(JSON.stringify({ status: "rejected", name: error?.name, expectedRevision: error?.expectedRevision, actualRevision: error?.actualRevision }));',
 '  }',
+'} else if (action === "seed-custom-append") {',
+'  const item = await queue.enqueue({ kind: "custom", message: { customType: "process", content: "durable", display: true, details: { nested: [1, true, null] }, attribution: "agent" }, deliverAs: "nextTurn", triggerTurn: false, disposition: "append" });',
+'  console.log(JSON.stringify({ inputId: item.inputId, revision: item.revision, sequence: item.sequence }));',
+'} else if (action === "resume-custom-append") {',
+'  const inputId = process.env.INPUT_ID;',
+'  if (!inputId) throw new Error("input id missing");',
+'  const before = await queue.replayQueued();',
+'  const item = before.find(candidate => candidate.inputId === inputId);',
+'  if (!item) throw new Error("custom input missing after reopen");',
+'  const completed = await queue.completeAppendOnly(inputId, item.revision);',
+'  const replayed = await queue.completeAppendOnly(inputId, item.revision);',
+'  console.log(JSON.stringify({ adopted: adopted.length, before: before.map(candidate => candidate.inputId), state: completed.state, attempts: completed.attempts.length, replayState: replayed.state }));',
 	"} else {",
 	'  throw new Error("unknown action: " + action);',
 	"}",
@@ -501,5 +513,40 @@ describe("durable input queue process replacement", () => {
 			ATTEMPT_ID: String(first.attemptId),
 		});
 		expect(resumed).toMatchObject({ adopted: 0, before: 0, replay: 1, inputId: first.inputId });
+	});
+	it("reopens and append-completes a custom obligation without provider evidence", async () => {
+		const root = await fs.mkdtemp(path.join(os.tmpdir(), "omp-queue-custom-process-"));
+		roots.push(root);
+		const sessionFile = path.join(root, "parent.jsonl");
+		await fs.writeFile(sessionFile, "");
+		const seeded = await runChild({
+			ROOT: root,
+			SESSION_FILE: sessionFile,
+			EPOCH: "epoch-a",
+			ACTION: "seed-custom-append",
+		});
+		const resumed = await runChild({
+			ROOT: root,
+			SESSION_FILE: sessionFile,
+			EPOCH: "epoch-b",
+			ACTION: "resume-custom-append",
+			INPUT_ID: String(seeded.inputId),
+		});
+		expect(resumed).toMatchObject({
+			adopted: 1,
+			before: [seeded.inputId],
+			state: "completed",
+			attempts: 0,
+			replayState: "completed",
+		});
+		const [key] = await fs.readdir(path.join(root, "owners-v1"));
+		if (!key) throw new Error("queue root missing");
+		const queueRoot = path.join(root, "owners-v1", key, "queue-v2");
+		const head = JSON.parse(await fs.readFile(path.join(queueRoot, "head.json"), "utf8")) as { epoch: string };
+		const records = (await fs.readFile(path.join(queueRoot, "segments", `${head.epoch}.jsonl`), "utf8"))
+			.trim()
+			.split("\n")
+			.map(line => JSON.parse(line) as { type: string });
+		expect(records.map(record => record.type)).toEqual(["adopt", "state"]);
 	});
 });

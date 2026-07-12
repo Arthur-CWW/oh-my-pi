@@ -1118,11 +1118,15 @@ export class InputController {
 		if (durableProjection.length > 0) {
 			let selected: (typeof durableProjection)[number] | undefined;
 			for (const item of durableProjection) {
-				if (item.state === "queued" && (!selected || item.sequence > selected.sequence)) {
+				if (
+					item.state === "queued" &&
+					"text" in item.payload &&
+					(!selected || item.sequence > selected.sequence)
+				) {
 					selected = item;
 				}
 			}
-			if (selected) {
+			if (selected && "text" in selected.payload) {
 				this.ctx.editor.setText(selected.payload.text);
 				this.ctx.pendingImages = selected.payload.images ? [...selected.payload.images] : [];
 				this.ctx.pendingImageLinks = this.ctx.pendingImages.map(() => undefined);

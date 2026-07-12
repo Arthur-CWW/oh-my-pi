@@ -276,6 +276,8 @@ import {
 	shouldPromptCodexAutoRedeem,
 } from "./codex-auto-reset";
 import {
+	type DurableCustomPayload,
+	type JsonValue,
 	type DurableInputAdmissionReceipt,
 	type DurableInputCommandMetadata,
 	type DurableInputMutationReceipt,
@@ -1375,6 +1377,8 @@ export class AgentSession {
 
 	#streamingEditFileCache = new Map<string, string>();
 	#promptInFlightCount = 0;
+	/** Associates provider-delivered custom message objects with their durable transcript identity. */
+	#durableCustomDeliveries = new WeakMap<CustomMessage, { inputId: string; inputRevision: number }>();
 	#abortInProgress = false;
 	// Wire-level agent_end emission deferred until #promptInFlightCount drops to 0.
 	// Internal extension hooks and post-emit work (auto-retry, auto-compaction, todo
@@ -2599,14 +2603,29 @@ export class AgentSession {
 		if (event.type === "message_end") {
 			// Check if this is a hook/custom message
 			if (event.message.role === "hookMessage" || event.message.role === "custom") {
-				// Persist as CustomMessageEntry
-				this.sessionManager.appendCustomMessageEntry(
-					event.message.customType,
-					event.message.content,
-					event.message.display,
-					event.message.details,
-					event.message.attribution ?? "agent",
-				);
+				const durableDelivery =
+					event.message.role === "custom" ? this.#durableCustomDeliveries.get(event.message) : undefined;
+				if (durableDelivery && event.message.role === "custom") {
+					await this.sessionManager.appendDurableCustomMessageEntry(
+						{
+							customType: event.message.customType,
+							content: typeof event.message.content === "string" ? event.message.content : [...event.message.content],
+							display: event.message.display,
+							details: event.message.details as JsonValue | undefined,
+							attribution: event.message.attribution ?? "agent",
+						},
+						durableDelivery,
+					);
+					this.#durableCustomDeliveries.delete(event.message);
+				} else {
+					this.sessionManager.appendCustomMessageEntry(
+						event.message.customType,
+						event.message.content,
+						event.message.display,
+						event.message.details,
+						event.message.attribution ?? "agent",
+					);
+				}
 				if (event.message.role === "custom" && event.message.customType === "ttsr-injection") {
 					this.#markTtsrInjected(this.#extractTtsrRuleNames(event.message.details));
 				}
@@ -6245,11 +6264,26 @@ export class AgentSession {
 	}
 
 	#freezeDurableQueuedInput(item: DurableQueuedInput): DurableQueuedInput {
-		const images = item.payload.images?.map(image => Object.freeze({ ...image }));
-		const payload = Object.freeze({
-			text: item.payload.text,
-			images: images === undefined ? undefined : Object.freeze(images),
-		});
+		const payload =
+			"text" in item.payload
+				? Object.freeze({
+						kind: "user" as const,
+						text: item.payload.text,
+						images:
+							item.payload.images === undefined
+								? undefined
+								: Object.freeze(item.payload.images.map(image => Object.freeze({ ...image }))),
+					})
+				: Object.freeze({
+						...item.payload,
+						message: Object.freeze({
+							...item.payload.message,
+							content:
+								typeof item.payload.message.content === "string"
+									? item.payload.message.content
+									: Object.freeze(item.payload.message.content.map(part => Object.freeze({ ...part }))),
+						}),
+					});
 		const attempts = Object.freeze(item.attempts.map(attempt => Object.freeze({ ...attempt })));
 		return Object.freeze({ ...item, payload, attempts });
 	}
@@ -6693,6 +6727,22 @@ export class AgentSession {
 			this.#activeDurableRequestStarted = false;
 			await this.#appendDurableAttemptEntry(item.inputId, attempt.id, item.revision, "admitted");
 			this.#durableAdmissionMaintenanceRelease = release;
+			if (item.payload.kind === "custom") {
+				const message: CustomMessage = {
+					role: "custom",
+					customType: item.payload.message.customType,
+					content:
+						typeof item.payload.message.content === "string"
+							? item.payload.message.content
+							: [...item.payload.message.content],
+					display: item.payload.message.display,
+					details: item.payload.message.details,
+					attribution: item.payload.message.attribution,
+					timestamp: Date.now(),
+				};
+				this.#durableCustomDeliveries.set(message, { inputId: item.inputId, inputRevision: item.revision });
+				return message;
+			}
 			const content: (TextContent | ImageContent)[] = [{ type: "text", text: item.payload.text }];
 			if (item.payload.images) content.push(...item.payload.images);
 			return {
@@ -6756,6 +6806,61 @@ export class AgentSession {
 			return;
 		}
 		try {
+			const queued = await queue.list({ states: ["queued"] });
+			const appendOnly = queued[0];
+			if (
+				appendOnly?.payload.kind === "custom" &&
+				appendOnly.payload.disposition === "append"
+			) {
+				await this.sessionManager.appendDurableCustomMessageEntry(
+					{
+						...appendOnly.payload.message,
+						content:
+							typeof appendOnly.payload.message.content === "string"
+								? appendOnly.payload.message.content
+								: [...appendOnly.payload.message.content],
+					},
+					{
+						inputId: appendOnly.inputId,
+						inputRevision: appendOnly.revision,
+					},
+				);
+				await queue.completeAppendOnly(appendOnly.inputId, appendOnly.revision);
+				await this.#refreshDurableQueuedInputProjection(queue);
+				this.#releaseDurableAdmissionMaintenance();
+				this.#scheduleDurableQueueDrainAfterIdle();
+				return;
+			}
+			for (;;) {
+				const deferred = await queue.deferredCustomPrefix();
+				if (!deferred || deferred.payload.kind !== "custom") break;
+				const alreadyPersisted = this.sessionManager.hasDurableCustomMessage(deferred.inputId);
+				const customMessage: CustomMessage = {
+					role: "custom",
+					customType: deferred.payload.message.customType,
+					content:
+						typeof deferred.payload.message.content === "string"
+							? deferred.payload.message.content
+							: [...deferred.payload.message.content],
+					display: deferred.payload.message.display,
+					details: deferred.payload.message.details,
+					attribution: deferred.payload.message.attribution,
+					timestamp: Date.now(),
+				};
+				await this.sessionManager.appendDurableCustomMessageEntry(
+					{
+						...deferred.payload.message,
+						content:
+							typeof deferred.payload.message.content === "string"
+								? deferred.payload.message.content
+								: [...deferred.payload.message.content],
+					},
+					{ inputId: deferred.inputId, inputRevision: deferred.revision },
+				);
+				if (!alreadyPersisted) this.agent.appendMessage(customMessage);
+				await queue.completeDeferredCustomPrefix(deferred.inputId, deferred.revision);
+				await this.#refreshDurableQueuedInputProjection(queue);
+			}
 			const lastAssistant = this.#findLastAssistantMessage();
 			if (lastAssistant) await this.#checkCompaction(lastAssistant, false, false, false);
 			await queue.retryDue();
@@ -6778,14 +6883,36 @@ export class AgentSession {
 			await this.#appendDurableAttemptEntry(item.inputId, attempt.id, item.revision, "admitted");
 			this.#durableAdmissionMaintenanceRelease = release;
 			try {
-				const images = item.payload.images ? [...item.payload.images] : undefined;
-				await this.prompt(item.payload.text, {
-					expandPromptTemplates: false,
-					images,
-					[kDurableAdmittedPrompt]: true,
-					[kNormalizedPromptImages]: images,
-					skipCompactionCheck: true,
-				} as InternalPromptOptions);
+				if (item.payload.kind === "custom") {
+					const customMessage: CustomMessage = {
+						role: "custom",
+						customType: item.payload.message.customType,
+						content:
+							typeof item.payload.message.content === "string"
+								? item.payload.message.content
+								: [...item.payload.message.content],
+						display: item.payload.message.display,
+						details: item.payload.message.details,
+						attribution: item.payload.message.attribution,
+						timestamp: Date.now(),
+					};
+					this.#durableCustomDeliveries.set(customMessage, {
+						inputId: item.inputId,
+						inputRevision: item.revision,
+					});
+					if (item.payload.deliverAs === "steer" && this.isStreaming) this.agent.steer(customMessage);
+					else if (item.payload.deliverAs === "followUp" && this.isStreaming) this.agent.followUp(customMessage);
+					else await this.agent.prompt(customMessage);
+				} else {
+					const images = item.payload.images ? [...item.payload.images] : undefined;
+					await this.prompt(item.payload.text, {
+						expandPromptTemplates: false,
+						images,
+						[kDurableAdmittedPrompt]: true,
+						[kNormalizedPromptImages]: images,
+						skipCompactionCheck: true,
+					} as InternalPromptOptions);
+				}
 				if (this.#activeDurableInputId === item.inputId && !this.#activeDurableRequestStarted) {
 					await queue.requeueUnstarted(item.inputId, attempt.id);
 					await this.#refreshDurableQueuedInputProjection(queue);
@@ -7348,6 +7475,13 @@ export class AgentSession {
 		}
 	}
 
+	async acceptDurableCustomMessage(
+		payload: DurableCustomPayload,
+		command: DurableInputCommandMetadata,
+	): Promise<DurableInputAdmissionReceipt> {
+		return this.acceptDurableInput(payload, command);
+	}
+
 	async editDurableInputCommand(
 		inputId: string,
 		expectedItemRevision: number,
@@ -7458,10 +7592,10 @@ export class AgentSession {
 			return {
 				steering: this.#durableQueuedInputProjection
 					.filter(item => item.deliveryClass === "steer")
-					.map(item => item.payload.text),
+					.map(item => ("text" in item.payload ? item.payload.text : `[${item.payload.message.customType}]`)),
 				followUp: this.#durableQueuedInputProjection
 					.filter(item => item.deliveryClass === "followUp")
-					.map(item => item.payload.text),
+					.map(item => ("text" in item.payload ? item.payload.text : `[${item.payload.message.customType}]`)),
 			};
 		}
 		return {

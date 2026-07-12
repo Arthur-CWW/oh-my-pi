@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 
-import type { ImageContent } from "@oh-my-pi/pi-ai";
+import type { ImageContent, MessageAttribution } from "@oh-my-pi/pi-ai";
 
 import { resolveAgentMuxRoot, type SessionOwnershipHandle } from "./session-ownership";
 
@@ -15,7 +15,7 @@ const WRITER_LOCK_OWNER_FILE = "owner.json";
 const WRITER_LOCK_RECLAIM_MS = 30_000;
 
 const NEXT_STATES: Record<DurableInputState, readonly DurableInputState[]> = {
-	queued: ["admitted", "cancelled"],
+	queued: ["admitted", "completed", "cancelled"],
 	admitted: ["running", "cancelled", "queued"],
 	running: ["completed", "failed-rate-limit", "cancelled", "uncertain"],
 	uncertain: ["completed", "failed-rate-limit", "queued", "cancelled"],
@@ -35,10 +35,48 @@ export type DurableInputState =
 
 export type DurableInputDeliveryClass = "steer" | "followUp";
 
-export interface DurableInputPayload {
+export type JsonValue =
+	| null
+	| boolean
+	| number
+	| string
+	| readonly JsonValue[]
+	| { readonly [key: string]: JsonValue };
+
+export interface DurableUserPayload {
+	readonly kind?: "user";
 	readonly text: string;
 	readonly images: readonly ImageContent[] | undefined;
 }
+
+export interface DurableCustomPayload {
+	readonly kind: "custom";
+	readonly message: {
+		readonly customType: string;
+		readonly content:
+			| string
+			| readonly (
+					| { readonly type: "text"; readonly text: string }
+					| { readonly type: "image"; readonly data: string; readonly mimeType: string }
+			  )[];
+		readonly display: boolean;
+		readonly details?: JsonValue;
+		readonly attribution: MessageAttribution;
+	};
+	readonly deliverAs: "steer" | "followUp" | "nextTurn";
+	readonly triggerTurn: boolean;
+	readonly disposition: "provider" | "append";
+}
+
+export type DurableInputPayload = DurableUserPayload | DurableCustomPayload;
+export type DurableInputEnqueue =
+	| {
+			readonly kind?: undefined;
+			readonly text: string;
+			readonly images?: readonly ImageContent[];
+			readonly deliveryClass: DurableInputDeliveryClass;
+	  }
+	| DurableCustomPayload;
 
 export interface DurableInputCommandMetadata {
 	readonly schemaVersion: 1;
@@ -72,6 +110,11 @@ export type DurableInputQueueEvent =
 			readonly command: DurableInputCommandMetadata;
 			readonly item: DurableQueuedInput;
 	  };
+
+export interface DurableInputTransitionEvent {
+	readonly kind: "inputCompleted";
+	readonly item: DurableQueuedInput;
+}
 
 export interface DurableInputAttempt {
 	readonly id: string;
@@ -174,8 +217,9 @@ type QueueRecord =
 			readonly version: typeof QUEUE_VERSION;
 			readonly type: "enqueue";
 			readonly id: string;
-			readonly text: string;
-			readonly images: readonly ImageContent[] | undefined;
+			readonly text?: string;
+			readonly images?: readonly ImageContent[];
+			readonly payload?: DurableInputPayload;
 			readonly sequence?: number;
 			readonly deliveryClass?: DurableInputDeliveryClass;
 			readonly revision?: number;
@@ -316,9 +360,125 @@ function isDeliveryClass(value: unknown): value is DurableInputDeliveryClass {
 	return value === "steer" || value === "followUp";
 }
 
-function decodePayload(value: unknown): DurableInputPayload | undefined {
-	if (!isRecord(value) || typeof value.text !== "string") return undefined;
+export function decodeJsonValue(value: unknown): JsonValue | undefined {
+	const seen = new Set<object>();
+	const decode = (candidate: unknown): JsonValue | undefined => {
+		if (
+			candidate === null ||
+			typeof candidate === "string" ||
+			typeof candidate === "boolean" ||
+			(typeof candidate === "number" && Number.isFinite(candidate))
+		) {
+			return candidate as null | string | boolean | number;
+		}
+		if (typeof candidate !== "object") return undefined;
+		if (seen.has(candidate)) return undefined;
+		seen.add(candidate);
+		try {
+			if (Array.isArray(candidate)) {
+				const result: JsonValue[] = [];
+				for (const element of candidate) {
+					const decoded = decode(element);
+					if (decoded === undefined) return undefined;
+					result.push(decoded);
+				}
+				return result;
+			}
+			const prototype = Object.getPrototypeOf(candidate);
+			if (prototype !== Object.prototype && prototype !== null) return undefined;
+			const result: Record<string, JsonValue> = {};
+			for (const [key, element] of Object.entries(candidate)) {
+				const decoded = decode(element);
+				if (decoded === undefined) return undefined;
+				result[key] = decoded;
+			}
+			return result;
+		} finally {
+			seen.delete(candidate);
+		}
+	};
+	return decode(value);
+}
+
+export function cloneJsonValue(value: JsonValue): JsonValue {
+	const decoded = decodeJsonValue(value);
+	if (decoded === undefined) throw new DurableInputQueueConflictError("Invalid JSON value");
+	return decoded;
+}
+
+export function jsonValuesEqual(left: JsonValue, right: JsonValue): boolean {
+	if (Object.is(left, right)) return true;
+	if (Array.isArray(left) || Array.isArray(right)) {
+		if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) return false;
+		return left.every((value, index) => jsonValuesEqual(value, right[index] as JsonValue));
+	}
+	if (!isRecord(left) || !isRecord(right)) return false;
+	const leftKeys = Object.keys(left).sort();
+	const rightKeys = Object.keys(right).sort();
+	if (leftKeys.length !== rightKeys.length || leftKeys.some((key, index) => key !== rightKeys[index])) return false;
+	return leftKeys.every(key => jsonValuesEqual(left[key] as JsonValue, right[key] as JsonValue));
+}
+
+export function decodeDurableCustomPayload(value: unknown): DurableCustomPayload | undefined {
+	if (
+		!isRecord(value) ||
+		value.kind !== "custom" ||
+		!isRecord(value.message) ||
+		typeof value.message.customType !== "string" ||
+		typeof value.message.display !== "boolean" ||
+		(value.message.attribution !== "user" && value.message.attribution !== "agent") ||
+		(value.deliverAs !== "steer" && value.deliverAs !== "followUp" && value.deliverAs !== "nextTurn") ||
+		typeof value.triggerTurn !== "boolean" ||
+		(value.disposition !== "provider" && value.disposition !== "append")
+	) {
+		return undefined;
+	}
+	let content: DurableCustomPayload["message"]["content"];
+	if (typeof value.message.content === "string") {
+		content = value.message.content;
+	} else if (
+		Array.isArray(value.message.content) &&
+		value.message.content.every(
+			block =>
+				isRecord(block) &&
+				((block.type === "text" && typeof block.text === "string") ||
+					(block.type === "image" && typeof block.data === "string" && typeof block.mimeType === "string")),
+		)
+	) {
+		content = value.message.content.map(block =>
+			block.type === "text"
+				? { type: "text", text: block.text as string }
+				: { type: "image", data: block.data as string, mimeType: block.mimeType as string },
+		);
+	} else {
+		return undefined;
+	}
+	const details =
+		value.message.details === undefined ? undefined : decodeJsonValue(value.message.details);
+	if (value.message.details !== undefined && details === undefined) return undefined;
 	return {
+		kind: "custom",
+		message: {
+			customType: value.message.customType,
+			content,
+			display: value.message.display,
+			...(details === undefined ? {} : { details }),
+			attribution: value.message.attribution,
+		},
+		deliverAs: value.deliverAs,
+		triggerTurn: value.triggerTurn,
+		disposition: value.disposition,
+	};
+}
+
+function decodePayload(value: unknown): DurableInputPayload | undefined {
+	const custom = decodeDurableCustomPayload(value);
+	if (custom) return custom;
+	if (!isRecord(value) || (value.kind !== undefined && value.kind !== "user") || typeof value.text !== "string") {
+		return undefined;
+	}
+	return {
+		...(value.kind === "user" ? { kind: "user" as const } : {}),
 		text: value.text,
 		images: Array.isArray(value.images) ? (value.images as ImageContent[]) : undefined,
 	};
@@ -385,9 +545,12 @@ function decodeRecord(value: unknown): QueueRecord | undefined {
 	switch (value.type) {
 		case "enqueue": {
 			const command = value.command === undefined ? undefined : decodeCommandMetadata(value.command);
+			const payload = value.payload === undefined ? undefined : decodePayload(value.payload);
+			const legacy = value.payload === undefined && typeof value.text === "string";
 			if (
 				typeof value.id !== "string" ||
-				typeof value.text !== "string" ||
+				(!legacy && payload === undefined) ||
+				(value.payload !== undefined && payload === undefined) ||
 				(value.sequence !== undefined && !isPositiveSafeInteger(value.sequence)) ||
 				(value.deliveryClass !== undefined && !isDeliveryClass(value.deliveryClass)) ||
 				(value.revision !== undefined && !isPositiveSafeInteger(value.revision)) ||
@@ -401,8 +564,9 @@ function decodeRecord(value: unknown): QueueRecord | undefined {
 				version: QUEUE_VERSION,
 				type: "enqueue",
 				id: value.id,
-				text: value.text,
-				images: Array.isArray(value.images) ? (value.images as ImageContent[]) : undefined,
+				...(legacy ? { text: value.text as string } : {}),
+				...(legacy && Array.isArray(value.images) ? { images: value.images as ImageContent[] } : {}),
+				...(payload === undefined ? {} : { payload }),
 				...(value.sequence === undefined ? {} : { sequence: value.sequence as number }),
 				...(value.deliveryClass === undefined
 					? {}
@@ -561,6 +725,7 @@ export class DurableInputQueue {
 	#adopted = false;
 	readonly #commandReceipts = new Map<string, DurableInputAdmissionReceipt>();
 	readonly #listeners = new Set<(event: DurableInputQueueEvent) => void>();
+	readonly #transitionListeners = new Set<(event: DurableInputTransitionEvent) => void>();
 	#latestRunnerRevision = 0;
 
 	private constructor(root: string, ownership: SessionOwnershipHandle, activeEpoch: string) {
@@ -595,25 +760,24 @@ export class DurableInputQueue {
 		return queue;
 	}
 
-	async enqueue(input: {
-		readonly text: string;
-		readonly images?: readonly ImageContent[];
-		readonly deliveryClass: DurableInputDeliveryClass;
-	}): Promise<DurableQueuedInput> {
+	async enqueue(input: DurableInputEnqueue): Promise<DurableQueuedInput> {
 		return this.#exclusive(() =>
 			this.#withWriterLock(async () => {
 				await this.#assertOwner();
-				if (typeof input.text !== "string" || !isDeliveryClass(input.deliveryClass)) {
+				const payload = decodePayload(input.kind === "custom" ? input : { text: input.text, images: input.images });
+				if (!payload || (input.kind !== "custom" && !isDeliveryClass(input.deliveryClass))) {
 					throw new DurableInputQueueConflictError("Invalid durable input queue enqueue payload");
 				}
+				const deliveryClass =
+					input.kind === "custom" ? (input.deliverAs === "steer" ? "steer" : "followUp") : input.deliveryClass;
 				const sequence =
 					(await this.#items()).reduce((lastSequence, item) => Math.max(lastSequence, item.sequence), 0) + 1;
 				const item: DurableQueuedInput = {
 					inputId: randomUUID(),
 					sequence,
-					deliveryClass: input.deliveryClass,
+					deliveryClass,
 					revision: 1,
-					payload: { text: input.text, images: input.images },
+					payload,
 					state: "queued",
 					attempts: [],
 				};
@@ -621,8 +785,7 @@ export class DurableInputQueue {
 					version: QUEUE_VERSION,
 					type: "enqueue",
 					id: item.inputId,
-					text: item.payload.text,
-					images: item.payload.images,
+					...(payload.kind === "custom" ? { payload } : { text: payload.text, images: payload.images }),
 					sequence: item.sequence,
 					deliveryClass: item.deliveryClass,
 					revision: item.revision,
@@ -634,27 +797,26 @@ export class DurableInputQueue {
 	}
 
 	async enqueueCommand(
-		input: {
-			readonly text: string;
-			readonly images?: readonly ImageContent[];
-			readonly deliveryClass: DurableInputDeliveryClass;
-		},
+		input: DurableInputEnqueue,
 		command: DurableInputCommandMetadata,
 	): Promise<DurableInputAdmissionReceipt> {
 		const result = await this.#exclusive(() =>
 			this.#withWriterLock(async () => {
 				await this.#assertOwner();
 				const decodedCommand = decodeCommandMetadata(command);
-				if (!decodedCommand || typeof input.text !== "string" || !isDeliveryClass(input.deliveryClass)) {
+				const payload = decodePayload(input.kind === "custom" ? input : { text: input.text, images: input.images });
+				if (!decodedCommand || !payload || (input.kind !== "custom" && !isDeliveryClass(input.deliveryClass))) {
 					throw new DurableInputQueueConflictError("Invalid durable input command admission");
 				}
+				const deliveryClass =
+					input.kind === "custom" ? (input.deliverAs === "steer" ? "steer" : "followUp") : input.deliveryClass;
 				await this.#rebuildCommandIndexLocked();
 				const existing = this.#commandReceipts.get(command.commandId);
 				if (existing) {
 					if (
 						!structurallyEqual(existing.command, decodedCommand) ||
-						!structurallyEqual(existing.item.payload, { text: input.text, images: input.images }) ||
-						existing.item.deliveryClass !== input.deliveryClass
+						!structurallyEqual(existing.item.payload, payload) ||
+						existing.item.deliveryClass !== deliveryClass
 					) {
 						throw new DurableInputCommandConflictError(command.commandId);
 					}
@@ -671,9 +833,9 @@ export class DurableInputQueue {
 				const item: DurableQueuedInput = {
 					inputId: randomUUID(),
 					sequence,
-					deliveryClass: input.deliveryClass,
+					deliveryClass,
 					revision: 1,
-					payload: { text: input.text, images: input.images },
+					payload,
 					state: "queued",
 					attempts: [],
 				};
@@ -682,8 +844,7 @@ export class DurableInputQueue {
 					version: QUEUE_VERSION,
 					type: "enqueue",
 					id: item.inputId,
-					text: item.payload.text,
-					images: item.payload.images,
+					...(payload.kind === "custom" ? { payload } : { text: payload.text, images: payload.images }),
 					sequence: item.sequence,
 					deliveryClass: item.deliveryClass,
 					revision: item.revision,
@@ -717,6 +878,13 @@ export class DurableInputQueue {
 		this.#listeners.add(listener);
 		return () => {
 			this.#listeners.delete(listener);
+		};
+	}
+
+	subscribeTransitions(listener: (event: DurableInputTransitionEvent) => void): () => void {
+		this.#transitionListeners.add(listener);
+		return () => {
+			this.#transitionListeners.delete(listener);
 		};
 	}
 
@@ -922,8 +1090,8 @@ export class DurableInputQueue {
 		return this.#exclusive(() =>
 			this.#withWriterLock(async () => {
 				await this.#assertOwner();
-				if (typeof payload.text !== "string") {
-					throw new DurableInputQueueConflictError(`Invalid durable input queue revision payload: ${inputId}`);
+				if (payload.kind === "custom" || typeof payload.text !== "string") {
+					throw new DurableInputQueueConflictError(`Custom durable inputs cannot be edited: ${inputId}`);
 				}
 				const item = (await this.#items()).find(candidate => candidate.inputId === inputId);
 				if (!item) throw new DurableInputQueueConflictError(`Durable input queue item not found: ${inputId}`);
@@ -982,8 +1150,13 @@ export class DurableInputQueue {
 			this.#withWriterLock(async () => {
 				await this.#assertOwner();
 				const decodedCommand = decodeCommandMetadata(command);
-				if (!decodedCommand || !isPositiveSafeInteger(expectedItemRevision) || typeof payload.text !== "string") {
-					throw new DurableInputQueueConflictError(`Invalid durable input command edit: ${inputId}`);
+				if (
+					!decodedCommand ||
+					!isPositiveSafeInteger(expectedItemRevision) ||
+					payload.kind === "custom" ||
+					typeof payload.text !== "string"
+				) {
+					throw new DurableInputQueueConflictError(`Custom durable inputs cannot be edited: ${inputId}`);
 				}
 				await this.#rebuildCommandIndexLocked();
 				const existing = this.#commandReceipts.get(command.commandId);
@@ -1004,6 +1177,9 @@ export class DurableInputQueue {
 				}
 				const item = (await this.#items()).find(candidate => candidate.inputId === inputId);
 				if (!item) throw new DurableInputQueueConflictError(`Durable input queue item not found: ${inputId}`);
+				if (item.payload.kind === "custom") {
+					throw new DurableInputQueueConflictError(`Custom durable inputs cannot be edited: ${inputId}`);
+				}
 				if (item.revision !== expectedItemRevision) {
 					throw new DurableInputItemRevisionConflictError(inputId, expectedItemRevision, item.revision);
 				}
@@ -1128,6 +1304,9 @@ export class DurableInputQueue {
 				if (
 					!item ||
 					item.state === "failed-rate-limit" ||
+					(item.payload.kind === "custom" &&
+						(item.payload.disposition === "append" ||
+							(item.payload.deliverAs === "nextTurn" && !item.payload.triggerTurn))) ||
 					(boundary === "tool" && item.deliveryClass !== "steer") ||
 					(item.retryAt !== undefined && now < item.retryAt)
 				) {
@@ -1230,6 +1409,126 @@ export class DurableInputQueue {
 			});
 			await this.#transitionItem(item, "completed");
 		});
+	}
+
+	/**
+	 * Completes a transcript-first append obligation without fabricating a
+	 * provider attempt. Repeating the same completion after commit is a no-op.
+	 */
+	async completeAppendOnly(inputId: string, expectedRevision: number): Promise<DurableQueuedInput> {
+		const result = await this.#exclusive(() =>
+			this.#withWriterLock(async () => {
+				await this.#assertOwner();
+				const item = (await this.#items()).find(candidate => candidate.inputId === inputId);
+				if (!item) throw new DurableInputQueueConflictError(`Durable input queue item not found: ${inputId}`);
+				if (
+					item.payload.kind !== "custom" ||
+					item.payload.disposition !== "append" ||
+					item.revision !== expectedRevision ||
+					item.attempts.length !== 0
+				) {
+					throw new DurableInputQueueConflictError(`Invalid append-only completion: ${inputId}`);
+				}
+				if (item.state === "completed") return { item, changed: false as const };
+				if (item.state !== "queued") {
+					throw new DurableInputQueueConflictError(`Append-only completion conflict: ${inputId}`);
+				}
+				await this.#appendLocked({
+					version: QUEUE_VERSION,
+					type: "state",
+					id: inputId,
+					state: "completed",
+					ownerEpoch: this.#activeEpoch,
+				});
+				return { item: { ...item, state: "completed" as const }, changed: true as const };
+			}),
+		);
+		if (result.changed) {
+			for (const listener of [...this.#transitionListeners]) {
+				try {
+					listener({ kind: "inputCompleted", item: result.item });
+				} catch {}
+			}
+		}
+		return result.item;
+	}
+
+	/**
+	 * Returns the deferred custom item at the global FIFO head when a later
+	 * provider-bound item is waiting, or when a caller explicitly starts the
+	 * next turn.
+	 */
+	async deferredCustomPrefix(explicitNextTurnStart = false): Promise<DurableQueuedInput | undefined> {
+		return this.#exclusive(async () => {
+			await this.#assertOwner();
+			const items = await this.#items();
+			if (
+				items.some(
+					candidate =>
+						candidate.state === "admitted" || candidate.state === "running" || candidate.state === "uncertain",
+				)
+			) {
+				return undefined;
+			}
+			const pending = items.filter(
+				candidate => candidate.state === "queued" || candidate.state === "failed-rate-limit",
+			);
+			const item = pending[0];
+			if (
+				item?.state !== "queued" ||
+				item.payload.kind !== "custom" ||
+				item.payload.disposition !== "provider" ||
+				item.payload.deliverAs !== "nextTurn" ||
+				item.payload.triggerTurn ||
+				item.attempts.length !== 0
+			) {
+				return undefined;
+			}
+			const laterProviderBound = pending.slice(1).some(candidate => {
+				if (candidate.state !== "queued") return false;
+				if (candidate.payload.kind !== "custom") return true;
+				return (
+					candidate.payload.disposition === "provider" &&
+					(candidate.payload.deliverAs !== "nextTurn" || candidate.payload.triggerTurn)
+				);
+			});
+			return explicitNextTurnStart || laterProviderBound ? item : undefined;
+		});
+	}
+
+	async completeDeferredCustomPrefix(inputId: string, expectedRevision: number): Promise<DurableQueuedInput> {
+		const result = await this.#exclusive(() =>
+			this.#withWriterLock(async () => {
+				await this.#assertOwner();
+				const item = (await this.#items()).find(candidate => candidate.inputId === inputId);
+				if (
+					!item ||
+					item.state !== "queued" ||
+					item.revision !== expectedRevision ||
+					item.payload.kind !== "custom" ||
+					item.payload.disposition !== "provider" ||
+					item.payload.deliverAs !== "nextTurn" ||
+					item.payload.triggerTurn ||
+					item.attempts.length !== 0
+				) {
+					throw new DurableInputQueueConflictError(`Deferred custom prefix completion conflict: ${inputId}`);
+				}
+				await this.#appendLocked({
+					version: QUEUE_VERSION,
+					type: "state",
+					id: item.inputId,
+					state: "completed",
+					ownerEpoch: this.#activeEpoch,
+				});
+				return { ...item, state: "completed" as const };
+			}),
+		);
+		for (const listener of [...this.#transitionListeners]) {
+			try {
+				listener({ kind: "inputCompleted", item: result });
+			} catch {}
+		}
+		return result;
 	}
 
 	async failRateLimit(inputId: string, attemptId: string, retryAt: number): Promise<void> {
@@ -1597,7 +1896,7 @@ export class DurableInputQueue {
 					sequence,
 					deliveryClass: record.deliveryClass ?? "followUp",
 					revision: record.revision ?? 1,
-					payload: { text: record.text, images: record.images },
+					payload: record.payload ?? { text: record.text as string, images: record.images },
 					state: "queued",
 					attempts: [],
 				};
@@ -1733,7 +2032,7 @@ export class DurableInputQueue {
 						sequence,
 						deliveryClass: record.deliveryClass ?? "followUp",
 						revision: record.revision ?? 1,
-						payload: { text: record.text, images: record.images },
+						payload: record.payload ?? { text: record.text as string, images: record.images },
 						state: "queued",
 						attempts: [],
 					});

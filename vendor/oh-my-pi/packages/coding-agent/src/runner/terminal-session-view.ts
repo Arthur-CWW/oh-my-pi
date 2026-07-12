@@ -37,6 +37,7 @@ import type {
 	SetModelReceipt,
 	SetThinkingLevelCommand,
 	SetThinkingLevelReceipt,
+	SubmitCustomMessageCommand,
 	SubmitInputCommand,
 	TransitionGoalModeCommand,
 	TransitionGoalModeReceipt,
@@ -155,6 +156,9 @@ export interface TerminalSessionView {
 		readonly compact?: boolean;
 	}) => Effect.Effect<string | null, RunnerFailure, Scope.Scope>;
 	readonly submit: (command: SubmitInputCommand) => Effect.Effect<RunnerCommandReceipt, RunnerFailure, Scope.Scope>;
+	readonly submitCustomMessage: (
+		command: SubmitCustomMessageCommand,
+	) => Effect.Effect<RunnerCommandReceipt, RunnerFailure, Scope.Scope>;
 	readonly edit: (command: EditQueuedInputCommand) => Effect.Effect<RunnerCommandReceipt, RunnerFailure, Scope.Scope>;
 	readonly cancel: (
 		command: CancelQueuedInputCommand,
