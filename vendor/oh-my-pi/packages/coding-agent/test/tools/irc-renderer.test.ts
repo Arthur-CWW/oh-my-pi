@@ -19,6 +19,7 @@ const msg = (overrides: Partial<IrcMessage>): IrcMessage => ({
 	to: "Main",
 	body: "session-store rename is merged.",
 	ts: Date.now() - 30_000,
+	origin: "agent",
 	...overrides,
 });
 

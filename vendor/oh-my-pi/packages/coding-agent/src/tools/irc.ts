@@ -216,6 +216,7 @@ export class IrcTool implements AgentTool<typeof ircSchema, IrcDetails> {
 					lastActivity: Date.parse(peer.lastSeen) || Date.now(),
 					cwd: peer.cwd,
 					external: true,
+					lastDelivery: external.bus.recentDeliveries({ peerId: peer.name, limit: 1 })[0],
 				}))
 			: [];
 		const peers = [...localPeers, ...externalPeers];
@@ -440,6 +441,7 @@ export class IrcTool implements AgentTool<typeof ircSchema, IrcDetails> {
 					to: senderId,
 					body: message.body,
 					ts: Date.parse(message.ts) || Date.now(),
+					origin: message.origin,
 				}))
 			: [];
 		const messages = [...localMessages, ...externalMessages];

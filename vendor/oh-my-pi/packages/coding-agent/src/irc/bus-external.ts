@@ -2,10 +2,11 @@ import { Database } from "bun:sqlite";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import type { IrcDeliveryRecord, IrcMessageOrigin } from "./bus";
 
 export type IrcExternalPeerState = "unknown" | "working" | "waiting_input" | "idle";
 export type IrcExternalPeerDisplayState = IrcExternalPeerState | "disconnected";
-export type IrcExternalMessageOrigin = "agent" | "user";
+export type IrcExternalMessageOrigin = IrcMessageOrigin;
 
 export interface IrcExternalPeer {
 	sessionId: string;
@@ -48,6 +49,7 @@ interface MessageRow {
 	to_peer: string;
 	body: string;
 	origin: string;
+	delivered: number;
 }
 
 interface TableInfoRow {
@@ -141,7 +143,7 @@ function toMessage(row: MessageRow): IrcExternalMessage {
 		fromPeer: row.from_peer,
 		toPeer: row.to_peer,
 		body: row.body,
-		origin: row.origin === "user" ? "user" : "agent",
+		origin: row.origin === "user" || row.origin === "system" ? row.origin : "agent",
 	};
 }
 
@@ -365,6 +367,32 @@ export class IrcExternalBus {
 			)
 			.all({ $toPeer: toPeer })
 			.map(toMessage);
+	}
+
+	recentDeliveries(options: { limit?: number; peerId?: string } = {}): IrcDeliveryRecord[] {
+		const limit = Math.max(0, Math.min(options.limit ?? 50, 200));
+		if (limit === 0) return [];
+		const rows = options.peerId
+			? this.#db
+					.query<MessageRow, { $peerId: string; $limit: number }>(
+						"SELECT id, ts, from_peer, to_peer, body, origin, delivered FROM messages WHERE from_peer = $peerId OR to_peer = $peerId ORDER BY id DESC LIMIT $limit",
+					)
+					.all({ $peerId: options.peerId, $limit: limit })
+			: this.#db
+					.query<MessageRow, { $limit: number }>(
+						"SELECT id, ts, from_peer, to_peer, body, origin, delivered FROM messages ORDER BY id DESC LIMIT $limit",
+					)
+					.all({ $limit: limit });
+		return rows.map(row => ({
+			id: `external:${row.id}`,
+			senderId: row.from_peer,
+			recipientId: row.to_peer,
+			origin: row.origin === "user" || row.origin === "system" ? row.origin : "agent",
+			preview: "[message body hidden]",
+			state: row.delivered === 1 ? "delivered" : "queued",
+			queuedAt: parseTime(row.ts),
+			...(row.delivered === 1 ? { delivery: "injected" as const } : {}),
+		}));
 	}
 
 	markDelivered(id: number): void {

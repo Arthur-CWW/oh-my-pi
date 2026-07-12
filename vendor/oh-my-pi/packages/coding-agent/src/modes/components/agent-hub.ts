@@ -1353,7 +1353,7 @@ export class AgentHubOverlayComponent extends Container {
 				const direction =
 					record.senderId === this.#chatAgentId ? `→ ${record.recipientId}` : `← ${record.senderId}`;
 				const method = record.delivery ? ` via ${record.delivery}` : "";
-				return `${direction} ${record.state}${method}`;
+				return `${direction} ${record.state}${method} [${record.origin}]`;
 			});
 		}
 		const receipt = observed?.progress?.routeReceipt;

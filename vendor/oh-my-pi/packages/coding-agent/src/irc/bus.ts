@@ -19,6 +19,8 @@ import { AgentLifecycleManager } from "../registry/agent-lifecycle";
 import { AgentRegistry, MAIN_AGENT_ID } from "../registry/agent-registry";
 import type { CustomMessage } from "../session/messages";
 
+export type IrcMessageOrigin = "user" | "agent" | "system";
+
 export interface IrcMessage {
 	id: string;
 	/** Sender agent id. */
@@ -27,6 +29,8 @@ export interface IrcMessage {
 	to: string;
 	body: string;
 	ts: number;
+	/** Actor that initiated the message, independent of transport. */
+	origin: IrcMessageOrigin;
 	/** Message id being answered. */
 	replyTo?: string;
 }
@@ -45,6 +49,7 @@ export interface IrcDeliveryRecord {
 	readonly id: string;
 	readonly senderId: string;
 	readonly recipientId: string;
+	readonly origin: IrcMessageOrigin;
 	readonly preview: "[message body hidden]";
 	state: IrcDeliveryState;
 	delivery?: IrcDeliveryMethod;
@@ -121,8 +126,11 @@ export class IrcBus {
 	 * sender's own batch) can generate an ephemeral side-channel auto-reply
 	 * instead of stranding the sender until timeout.
 	 */
-	async send(msg: Omit<IrcMessage, "id" | "ts">, opts?: { expectsReply?: boolean }): Promise<IrcDeliveryReceipt> {
-		const message: IrcMessage = { ...msg, id: Snowflake.next(), ts: Date.now() };
+	async send(
+		msg: Omit<IrcMessage, "id" | "ts" | "origin"> & { origin?: IrcMessageOrigin },
+		opts?: { expectsReply?: boolean },
+	): Promise<IrcDeliveryReceipt> {
+		const message: IrcMessage = { ...msg, origin: msg.origin ?? "agent", id: Snowflake.next(), ts: Date.now() };
 		this.#recordQueued(message);
 		const ref = this.#registry.get(message.to);
 		if (!ref || ref.status === "aborted") {
@@ -317,6 +325,7 @@ export class IrcBus {
 			id: message.id,
 			senderId: message.from,
 			recipientId: message.to,
+			origin: message.origin,
 			preview: "[message body hidden]",
 			state: "queued",
 			queuedAt: message.ts,

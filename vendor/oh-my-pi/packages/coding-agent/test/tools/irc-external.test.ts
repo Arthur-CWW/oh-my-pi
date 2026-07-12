@@ -94,12 +94,20 @@ describe("IrcExternalBus", () => {
 			busB.registerPeer({ sessionId: sessionB, name: peerB, cwd: "/tmp/project-b", pid: 222 });
 
 			expect(busA.listPeers({ excludeSessionId: sessionA }).map(peer => peer.name)).toEqual([peerB]);
-			const messageId = busA.sendMessage({ fromPeer: peerA, toPeer: peerB, body: "hello from A" });
+			const messageId = busA.sendMessage({ fromPeer: peerA, toPeer: peerB, body: "hello from A", origin: "user" });
 			expect(messageId).toBeGreaterThan(0);
 			expect(busB.unreadCount(peerB)).toBe(1);
 
 			const messages = busB.pollMessages(peerB);
 			expect(messages).toMatchObject([{ id: messageId, fromPeer: peerA, toPeer: peerB, body: "hello from A" }]);
+			expect(messages[0]?.origin).toBe("user");
+			expect(busB.recentDeliveries({ peerId: peerB, limit: 1 })[0]).toMatchObject({
+				id: `external:${messageId}`,
+				senderId: peerA,
+				recipientId: peerB,
+				origin: "user",
+				state: "queued",
+			});
 			busB.markDelivered(messageId);
 			expect(busB.pollMessages(peerB)).toEqual([]);
 			expect(busB.unreadCount(peerB)).toBe(0);
@@ -318,6 +326,14 @@ describe("IrcExternalBus", () => {
 				$pid: 555,
 				$lastSeen: new Date().toISOString(),
 			});
+			db.query(
+				"INSERT INTO messages (ts, from_peer, to_peer, body) VALUES ($ts, $fromPeer, $toPeer, $body)",
+			).run({
+				$ts: new Date().toISOString(),
+				$fromPeer: "legacy",
+				$toPeer: "recipient",
+				$body: "old envelope",
+			});
 		} finally {
 			db.close();
 		}
@@ -327,6 +343,11 @@ describe("IrcExternalBus", () => {
 			expect(bus.listPeers().map(peer => ({ name: peer.name, state: peer.state, stateTs: peer.stateTs }))).toEqual([
 				{ name: "legacy", state: "unknown", stateTs: null },
 			]);
+			expect(bus.pollMessages("recipient")).toMatchObject([{ body: "old envelope", origin: "agent" }]);
+			expect(bus.recentDeliveries({ peerId: "recipient", limit: 1 })[0]).toMatchObject({
+				origin: "agent",
+				state: "queued",
+			});
 			bus.updatePeerState("legacy-session", "idle");
 			expect(bus.listPeers()[0]?.state).toBe("idle");
 		} finally {

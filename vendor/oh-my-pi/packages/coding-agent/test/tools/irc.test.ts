@@ -197,6 +197,7 @@ describe("IRC", () => {
 			expect(delivery).toMatchObject({
 				senderId: "0-Main",
 				recipientId: "0-Parked",
+				origin: "agent",
 				preview: "[message body hidden]",
 				state: "read",
 				delivery: "revived",
@@ -739,12 +740,18 @@ describe("IRC", () => {
 				to: "0-Me",
 				body: "wake up",
 				ts: Date.now(),
+				origin: "agent",
 			});
 			expect(outcome).toBe("woken");
 			expect(promptSpy).toHaveBeenCalledTimes(1);
 			const prompted = promptSpy.mock.calls[0]?.[0] as unknown as CustomMessage;
-			expect(prompted).toMatchObject({ role: "custom", customType: "irc:incoming" });
-			expect(prompted.details).toMatchObject({ id: "msg-1", from: "0-Peer", message: "wake up" });
+			expect(prompted).toMatchObject({ role: "custom", customType: "irc:incoming", attribution: "agent" });
+			expect(prompted.details).toMatchObject({
+				id: "msg-1",
+				from: "0-Peer",
+				message: "wake up",
+				origin: "agent",
+			});
 
 			const event = await ircEvent;
 			expect(event.type).toBe("irc_message");
@@ -762,6 +769,7 @@ describe("IRC", () => {
 				to: "0-Me",
 				body: "mid-turn note",
 				ts: Date.now(),
+				origin: "agent",
 			});
 			expect(outcome).toBe("injected");
 			expect(promptSpy).not.toHaveBeenCalled();
