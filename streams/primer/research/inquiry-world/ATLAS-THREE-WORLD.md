@@ -98,3 +98,40 @@ Three.js does not replace layout, graph construction, routing, or grouping algor
 - No dense everything-to-everything graph.
 - No premature persistence of generated layout.
 - No style-system commitment before the interaction and information hierarchy feel right.
+
+## Calibration round 1 — Arthur live feedback, 2026-07-12
+
+Playtest of the 223-node corpus world. Distilled directives:
+
+- Grid-packed "authored" layout is unusable; relax feels right. Offline stage must export a converged organic spread; typed-relax is the runtime default.
+- Dark mode is contrast-broken (light-first tuning); edge labels render white-on-white when unfocused — bug, not taste.
+- Levels of detail must be exclusive per node (game LOD), with a global screen-space label declutter pass; text overlap is the dominant usability failure.
+- Camera adopts 2D map/game convention: two-finger scroll pans both axes, pinch/ctrl-wheel zooms at cursor, drag pans, arrows/WASD fly, F focus, 0 overview.
+- Group blobs must tightly encapsulate members; group name sits at the visual centroid and is larger than node titles (country-label typography). Color encodes ontology family; border style encodes group kind; compact legend required.
+- Two grouping dimensions may coexist: color for one, stroke/shape for the other — never rely on position alone.
+- Scrapbox feel: hover lifts a card to the front; borders may be quirky. The field should read as a lived-in desk, not a diagram.
+
+## Calibration round 2 — Arthur live feedback, 2026-07-12
+
+Punch list:
+
+- Zoom flashing / cards blinking in and out: Troika async re-shaping on LOD swaps plus declutter visibility strobing. Root architecture answer below; do not band-aid.
+- Duplicate card text ("why pay with money? why pay with money?"): import maps the same field into title and body cue — fix mapping and add corpus lint.
+- Wasted vertical space in the shell header; compact it.
+- Light/dark quick toggle outside Tuning; auto must actually follow the system.
+- Directed relations need visible arrowheads; more visible lines by default.
+- Future cards are not text-only: pictures, HTML/JS embeds, timelines — scrapbook canvas direction.
+- Flat graph is underdetermined for some works: impose higher-level structures (timeline lens for historical texts, functional groupings).
+
+## Architecture direction (proposed, pending Arthur confirmation)
+
+Hybrid rendering, Figma/Miro-class: keep Three/WebGL for field marks (edges, contours, trails, parallax); move cards to a DOM layer on a CSS-transformed plane driven by the same camera. Browser text layout eliminates the Troika flicker/blank class entirely and makes images/embeds/timelines native. Card layer stays framework-free vanilla TS per repo perf doctrine (stable DOM, class patching, viewport virtualization, capped live embeds); React remains the shell. Solid noted as a candidate only if the Atlas becomes a standalone package.
+
+## Iteration infrastructure
+
+1. Visual regression states: scripted capture of canonical states (default, focused, dark, dense zoom, groups, specimen) on every change.
+2. Runtime invariants posting to the error log: finite camera, nonempty frustum, declutter resolution, text-shape watchdog.
+3. State permalinks: camera/selection/modes encodable in the URL for exact repro sharing.
+4. Specimen page: every card kind × LOD × theme in isolation.
+5. Corpus lint stage in the import pipeline; data bugs reported in the manifest, never discovered on canvas.
+6. Paired feedback ledger: field notes in, fix + proof out.
