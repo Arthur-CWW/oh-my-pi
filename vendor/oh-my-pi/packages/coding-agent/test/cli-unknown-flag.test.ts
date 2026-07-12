@@ -67,6 +67,14 @@ describe("parseArgs — unrecognized flag tracking (#2459)", () => {
 		expect(parsed.messages).toEqual(["hello"]);
 	});
 
+	it("parses a runner-backed collaboration relay without consuming the prompt", () => {
+		const parsed = parseArgs(["--collab-host", "--collab-relay", "ws://localhost:1355", "hello"]);
+
+		expect(parsed.unrecognizedFlags).toEqual([]);
+		expect(parsed.collabRelay).toBe("ws://localhost:1355");
+		expect(parsed.messages).toEqual(["hello"]);
+	});
+
 	it("treats `-` (stdin marker) and `--` (POSIX separator) as non-flags, not unrecognized", () => {
 		// `-` is a stdin marker by convention and shows up in pipelines; `--`
 		// is the POSIX positional separator. Neither is a typo and neither

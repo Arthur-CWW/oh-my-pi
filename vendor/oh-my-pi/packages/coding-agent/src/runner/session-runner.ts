@@ -3742,13 +3742,8 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 					return yield* Effect.fail(new RunnerViewAlreadyAttachedError({ viewId: command.viewId }));
 				}
 				if (command.capability === "controller" && activeController) {
-					return yield* Effect.fail(
-						new RunnerControllerConflictError({
-							requestedViewId: command.viewId,
-							activeViewId: activeController.viewId,
-							controllerEpoch: activeController.epoch,
-						}),
-					);
+					const displaced = views.get(activeController.viewId);
+					if (displaced) views.set(activeController.viewId, { ...displaced, capability: "observer", controllerEpoch: undefined });
 				}
 				const epoch = command.capability === "controller" ? nextControllerEpoch++ : undefined;
 				views.set(command.viewId, {

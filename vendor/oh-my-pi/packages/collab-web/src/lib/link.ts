@@ -25,6 +25,11 @@ const ROOM_PATH_RE = /^\/r\/([A-Za-z0-9_-]{10,64})(?:\.([A-Za-z0-9_-]+))?$/;
 const BARE_LINK_RE = /^([A-Za-z0-9_-]{10,64})[#.]([A-Za-z0-9_-]+)$/;
 const B64URL_RE = /^[A-Za-z0-9_-]+$/;
 const LOCAL_HOSTNAMES: Record<string, true> = { localhost: true, "127.0.0.1": true, "::1": true, "[::1]": true };
+function configuredRelayUrl(): string {
+	return typeof __OMP_COLLAB_RELAY__ === "string" && __OMP_COLLAB_RELAY__.length > 0
+		? __OMP_COLLAB_RELAY__
+		: DEFAULT_RELAY_URL;
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // base64url (no Buffer in the browser)
@@ -148,7 +153,7 @@ export function parseCollabLink(link: string): ParsedCollabLink | { error: strin
 	let text = link.trim().replace(/%23/gi, "#");
 	// Bare `<roomId>.<key>` (legacy `<roomId>#<key>`) → default relay.
 	const bare = BARE_LINK_RE.exec(text);
-	if (bare) text = `${DEFAULT_RELAY_URL}/r/${bare[1]}.${bare[2]}`;
+	if (bare) text = `${configuredRelayUrl()}/r/${bare[1]}.${bare[2]}`;
 	// Scheme-less `host[:port]/r/…` → wss.
 	else if (!text.includes("://")) text = `wss://${text}`;
 	let url: URL;

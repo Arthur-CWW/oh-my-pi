@@ -11,6 +11,7 @@ import type {
 import {
 	COLLAB_PROTO,
 	decodeApplicationFrame,
+	decodeAttachFrame,
 	decodeChallengeFrame,
 	packEnvelope,
 	unpackEnvelope,
@@ -163,6 +164,15 @@ export class CollabSocket {
 		if (!bytes) return;
 		const relay = unpackEnvelope(bytes);
 		if (!relay) return;
+		if (this.#opts.role === "host" && this.#peers.has(relay.peerId)) {
+			try {
+				const attach = decodeAttachFrame(JSON.parse(TEXT_DECODER.decode(relay.payload)));
+				this.onFrame?.(attach, relay.peerId);
+				return;
+			} catch {
+				// Not the plaintext attach bootstrap; process it as an encrypted frame.
+			}
+		}
 		const state = this.#peers.get(relay.peerId);
 		if (!state) {
 			try {

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it } from "bun:test";
 import {
 	DEFAULT_RELAY_URL,
 	encodeBase64Url,
@@ -13,6 +13,9 @@ import {
 const KEY = Uint8Array.from({ length: 32 }, (_, i) => i);
 const KEY_TEXT = encodeBase64Url(KEY);
 const ROOM = "AbCdEf123456_-Xy";
+afterEach(() => {
+	delete (globalThis as { __OMP_COLLAB_RELAY__?: string }).__OMP_COLLAB_RELAY__;
+});
 
 describe("collab link parsing", () => {
 	it("parses a bare roomId.key link against the default relay", () => {
@@ -21,6 +24,13 @@ describe("collab link parsing", () => {
 		expect(parsed.wsUrl).toBe(`${DEFAULT_RELAY_URL}/r/${ROOM}`);
 		expect(parsed.roomId).toBe(ROOM);
 		expect(parsed.key).toEqual(KEY);
+	});
+
+	it("uses the hub-provided relay for bare links", () => {
+		(globalThis as { __OMP_COLLAB_RELAY__?: string }).__OMP_COLLAB_RELAY__ = "ws://localhost:1355";
+		const parsed = parseCollabLink(`${ROOM}.${KEY_TEXT}`);
+		if ("error" in parsed) throw new Error(parsed.error);
+		expect(parsed.wsUrl).toBe(`ws://localhost:1355/r/${ROOM}`);
 	});
 
 	it("parses a legacy bare roomId#key link against the default relay", () => {

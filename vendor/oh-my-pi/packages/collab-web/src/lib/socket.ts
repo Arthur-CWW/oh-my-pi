@@ -108,7 +108,9 @@ export class CollabSocket {
 	}
 
 	#openSocket(): void {
-		const ws = new WebSocket(this.#opts.wsUrl);
+		const url = new URL(this.#opts.wsUrl);
+		url.searchParams.set("role", this.#opts.role);
+		const ws = new WebSocket(url);
 		ws.binaryType = "arraybuffer";
 		this.#ws = ws;
 		ws.addEventListener("open", () => {

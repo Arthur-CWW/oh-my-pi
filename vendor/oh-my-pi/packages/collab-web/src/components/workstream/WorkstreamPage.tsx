@@ -118,14 +118,13 @@ export function WorkstreamPage({
 		const timer = setInterval(() => setNow(Date.now()), 1000);
 		return () => clearInterval(timer);
 	}, []);
-	useEffect(() => {
-		if (swap === "pending" && currentModel && currentModel === `${provider}/${modelId}`) setSwap("applied");
-	}, [swap, currentModel, provider, modelId]);
 	const requestSwap = async () => {
 		setSwap("requested");
 		setSwapDetail(`${provider}/${modelId}`);
+		await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
 		try {
 			setSwap("pending");
+			await new Promise<void>(resolve => setTimeout(resolve, 200));
 			const receipt = await client.setModel(provider.trim(), modelId.trim());
 			setSwapDetail(clipped(receipt));
 			setSwap("applied");

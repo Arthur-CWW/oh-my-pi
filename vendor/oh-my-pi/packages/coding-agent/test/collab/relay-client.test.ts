@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { generateRoomKey, importRoomKey, open } from "../../src/collab/crypto";
-import { unpackEnvelope } from "../../src/collab/protocol";
+import { packEnvelope, unpackEnvelope } from "../../src/collab/protocol";
 import { CollabSocket } from "../../src/collab/relay-client";
 
 class TestWebSocket {
@@ -61,4 +61,27 @@ describe("CollabSocket v2 epochs", () => {
 		expect(socket.send({ t: "detach" })).toBe(false);
 		expect(ws.sent).toHaveLength(1);
 	});
+	test("delivers the host's plaintext attach bootstrap before encrypted frames", async () => {
+		globalThis.WebSocket = TestWebSocket as unknown as typeof WebSocket;
+		const key = await importRoomKey(generateRoomKey());
+		const socket = new CollabSocket({ wsUrl: "ws://relay/r/room", role: "host", key });
+		const frames: unknown[] = [];
+		socket.onFrame = (frame, peerId) => frames.push([frame, peerId]);
+		socket.connect();
+		const ws = TestWebSocket.instances[0]!;
+		ws.open();
+		socket.beginConnection("challenge-connection", 7);
+		const attach = {
+			t: "attach" as const,
+			proto: 2 as const,
+			clientId: "browser-client",
+			viewId: "workstream",
+			requestedCapability: "observer" as const,
+			challengeId: "challenge-connection",
+			challengeResponse: "authenticated-response",
+		};
+		ws.onmessage?.({ data: packEnvelope(7, new TextEncoder().encode(JSON.stringify(attach))).buffer } as MessageEvent);
+		expect(frames).toEqual([[attach, 7]]);
+	});
+
 });

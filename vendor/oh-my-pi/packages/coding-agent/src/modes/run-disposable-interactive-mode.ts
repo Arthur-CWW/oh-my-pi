@@ -56,6 +56,8 @@ export interface RunDisposableInteractiveModeOptions {
 	readonly defaultFactory?: DisposableTerminalViewFactory;
 	/** Start a collaboration host over the same runner for the lifetime of this terminal host. */
 	readonly collabHost?: boolean;
+	/** Relay used by the collaboration host. Flag wins over environment, then the public default. */
+	readonly collabRelay?: string;
 }
 
 const BUILTIN_RICH_REVISION: DisposableTerminalRevision = {
@@ -86,7 +88,7 @@ export async function runDisposableInteractiveMode(
 	});
 	const collabHost = options.collabHost ? new CollabHost(runner, { displayName: collabDisplayName() }) : undefined;
 	if (collabHost) {
-		await collabHost.start(DEFAULT_RELAY_URL);
+		await collabHost.start(options.collabRelay ?? process.env.OMP_COLLAB_RELAY ?? DEFAULT_RELAY_URL);
 		process.stderr.write(`Collab URL: ${collabHost.link}\nCollab web URL: ${collabHost.webLink}\n`);
 	}
 	const unregisterCleanup = postmortem.register("disposable-terminal-host", async () => {

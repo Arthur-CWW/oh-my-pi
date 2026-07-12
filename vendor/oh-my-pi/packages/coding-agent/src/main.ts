@@ -1410,6 +1410,7 @@ export async function runRootCommand(
 			await runDisposableInteractiveMode(runner, {
 				manifestPath: parsedArgs.tuiBundleManifest,
 				collabHost: parsedArgs.collabHost,
+				collabRelay: parsedArgs.collabRelay,
 			});
 			stopThemeWatcher();
 			await postmortem.quit(0);

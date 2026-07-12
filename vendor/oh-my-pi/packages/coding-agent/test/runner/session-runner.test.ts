@@ -378,6 +378,25 @@ describe("live SessionRunner", () => {
 		await replacementOwnership.release();
 	});
 
+	it("atomically preempts and fences the displaced controller", async () => {
+		const fixture = await createLiveFixture();
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const runner = yield* makeSessionRunnerLive(fixture, { mailboxCapacity: 1, eventCapacity: 4 });
+					const local = yield* runner.attachView(attach("local-controller", "controller", 0));
+					const remote = yield* runner.attachView(attach("remote-controller", "controller", 0));
+					if (local.capability !== "controller" || remote.capability !== "controller") throw new Error("expected controllers");
+					expect(remote.controllerEpoch).toBeGreaterThan(local.controllerEpoch);
+					const stale = yield* Effect.flip(
+						local.submitInput(submit(local.viewId, local.controllerEpoch, "displaced", 0)),
+					);
+					expect(stale).toBeInstanceOf(StaleRunnerControllerLeaseError);
+				}),
+			),
+		);
+	});
+
 	it("decodes and persists steer and follow-up image payloads", async () => {
 		const fixture = await createLiveFixture();
 		await Effect.runPromise(

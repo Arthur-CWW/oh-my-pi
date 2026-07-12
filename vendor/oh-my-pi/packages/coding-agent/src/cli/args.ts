@@ -42,6 +42,7 @@ export interface Args {
 	noSession?: boolean;
 	tuiBundleManifest?: string;
 	collabHost?: boolean;
+	collabRelay?: string;
 	sessionDir?: string;
 	providerSessionId?: string;
 	fork?: string;
@@ -189,6 +190,10 @@ export function parseArgs(inputArgs: string[], extensionFlags?: Map<string, { ty
 			result.continue = true;
 		} else if (arg === "--collab-host") {
 			result.collabHost = true;
+		} else if (arg === "--collab-relay" && i + 1 < args.length) {
+			result.collabRelay = args[++i];
+		} else if (arg.startsWith("--collab-relay=")) {
+			result.collabRelay = arg.slice("--collab-relay=".length);
 		} else if (arg === "--no-session") {
 			result.noSession = true;
 		} else if (arg === "--no-tools") {
