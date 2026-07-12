@@ -3140,6 +3140,11 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.#omfgController.dispose();
 		this.#focusController.dispose();
 
+		if (this.collabHost) {
+			await this.collabHost.stop();
+			this.collabHost = undefined;
+		}
+
 		// Emit shutdown event to hooks
 		await this.session.dispose({ childPolicy: options.childPolicy });
 

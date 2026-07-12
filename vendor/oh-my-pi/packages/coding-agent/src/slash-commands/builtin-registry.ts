@@ -6,7 +6,7 @@ import { setNextRequestDebugPath } from "@oh-my-pi/pi-ai/utils/request-debug";
 import type { AutocompleteItem } from "@oh-my-pi/pi-tui";
 import { APP_NAME, setProjectDir } from "@oh-my-pi/pi-utils";
 import { buildRestartSpawnSpec, handoffRestartProcess } from "../cli/restart-session";
-import { COLLAB_GUEST_ALLOWED_COMMANDS, CollabGuestLink } from "../collab/guest";
+import { COLLAB_GUEST_ALLOWED_COMMANDS } from "../collab/guest";
 import { CollabHost } from "../collab/host";
 import type { SettingPath, SettingValue } from "../config/settings";
 import { settings } from "../config/settings";
@@ -799,7 +799,9 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<SlashCommandSpec> = [
 				);
 				return;
 			}
-			ctx.showError("Terminal collab hosting is not available with protocol v2 yet");
+			ctx.showError(
+				"Collab hosting requires the runner-backed launch; restart with --tui-bundle-manifest and --collab-host",
+			);
 		},
 	},
 	{

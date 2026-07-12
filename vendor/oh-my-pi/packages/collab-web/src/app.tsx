@@ -1,16 +1,9 @@
 import type { ReactNode } from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AgentDrawer } from "./components/agents/AgentDrawer";
-import { AgentsPanel } from "./components/agents/AgentsPanel";
-import { Banners } from "./components/shell/Banners";
-import { Composer } from "./components/shell/Composer";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ConnectScreen } from "./components/shell/ConnectScreen";
-import { HeaderBar } from "./components/shell/HeaderBar";
-import { Toasts } from "./components/shell/Toasts";
-import { Transcript } from "./components/transcript/Transcript";
+import { WorkstreamPage } from "./components/workstream/WorkstreamPage";
 import { GuestClient } from "./lib/client";
 import { useGuestSnapshot } from "./lib/use-guest";
-import type { ToolRenderHost } from "./tool-render";
 import "./components/shell/shell.css";
 
 const NAME_KEY = "omp.collab.name";
@@ -40,6 +33,25 @@ export function App(): ReactNode {
 	const [client, setClient] = useState<GuestClient | null>(null);
 	const [connectError, setConnectError] = useState<string | null>(null);
 	const credsRef = useRef<Creds | null>(null);
+
+	useEffect(() => {
+		const report = (kind: string, value: unknown): void => {
+			const message = value instanceof Error ? (value.stack ?? value.message) : String(value);
+			void fetch("/errors", {
+				method: "POST",
+				headers: { "content-type": "text/plain" },
+				body: `${kind}: ${message}`,
+			}).catch(() => {});
+		};
+		const onError = (event: ErrorEvent) => report("error", event.error ?? event.message);
+		const onRejection = (event: PromiseRejectionEvent) => report("unhandledrejection", event.reason);
+		window.addEventListener("error", onError);
+		window.addEventListener("unhandledrejection", onRejection);
+		return () => {
+			window.removeEventListener("error", onError);
+			window.removeEventListener("unhandledrejection", onRejection);
+		};
+	}, []);
 
 	const connect = useCallback((link: string, name: string): void => {
 		let next: GuestClient;
@@ -119,89 +131,11 @@ interface SessionProps {
 	onRejoin(): void;
 }
 
-function Session({ client, onLeave, onRejoin }: SessionProps): ReactNode {
+function Session({ client, onLeave }: SessionProps): ReactNode {
 	const snap = useGuestSnapshot(client);
-	const [railOpen, setRailOpen] = useState(false);
-	const [selectedId, setSelectedId] = useState<string | null>(null);
-	const autoOpenedRef = useRef(false);
-
-	const subCount = useMemo(() => snap.agents.filter(a => a.kind === "sub").length, [snap.agents]);
-
-	// Task-card agent chips drill into the same drawer the rail uses.
-	const agentIds = useMemo(() => new Set(snap.agents.map(a => a.id)), [snap.agents]);
-	const toolHost = useMemo<ToolRenderHost>(
-		() => ({
-			hasAgent: id => agentIds.has(id),
-			openAgent: id => {
-				if (agentIds.has(id)) setSelectedId(id);
-			},
-		}),
-		[agentIds],
-	);
-
-	// Auto-open the rail the first time a subagent appears.
-	useEffect(() => {
-		if (subCount > 0 && !autoOpenedRef.current) {
-			autoOpenedRef.current = true;
-			setRailOpen(true);
-		}
-	}, [subCount]);
-
 	const title = snap.header?.title ?? snap.state?.sessionName ?? "session";
 	useEffect(() => {
-		document.title = `${title} · omp collab`;
+		document.title = `${title} · omp workstream`;
 	}, [title]);
-
-	const drawerAgent = selectedId != null ? snap.agents.find(a => a.id === selectedId) : undefined;
-
-	return (
-		<div className="sh-app">
-			<HeaderBar
-				snapshot={snap}
-				subCount={subCount}
-				railOpen={railOpen}
-				onToggleRail={() => setRailOpen(open => !open)}
-				onLeave={onLeave}
-			/>
-			<main className="sh-main">
-				<section className="sh-content" data-rail="false">
-					{railOpen ? (
-						<AgentsPanel
-							agents={snap.agents}
-							progress={snap.progress}
-							lifecycle={snap.lifecycle}
-							selectedId={selectedId}
-							onSelect={setSelectedId}
-						/>
-					) : (
-						<div className="sh-transcript">
-							<Transcript
-								entries={snap.entries}
-								stream={snap.stream}
-								streamDone={snap.streamDone}
-								activeTools={snap.activeTools}
-								working={snap.working}
-								host={toolHost}
-							/>
-						</div>
-					)}
-				</section>
-			</main>
-			<Composer client={client} snapshot={snap} />
-			{drawerAgent && (
-				<>
-					<div className="ag-drawer-backdrop" onClick={() => setSelectedId(null)} />
-					<AgentDrawer
-						agent={drawerAgent}
-						progress={snap.progress.get(drawerAgent.id)}
-						entries={snap.entries}
-						host={toolHost}
-						onClose={() => setSelectedId(null)}
-					/>
-				</>
-			)}
-			<Banners phase={snap.phase} endedReason={snap.endedReason} onRejoin={onRejoin} onNewLink={onLeave} />
-			<Toasts notices={snap.notices} />
-		</div>
-	);
+	return <WorkstreamPage client={client} snapshot={snap} onLeave={onLeave} />;
 }

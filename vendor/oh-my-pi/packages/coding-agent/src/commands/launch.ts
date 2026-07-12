@@ -68,6 +68,9 @@ export default class Index extends Command {
 		"tui-bundle-manifest": Flags.string({
 			description: "Override the default rich terminal with a hash-reloadable TUI bundle manifest",
 		}),
+		"collab-host": Flags.boolean({
+			description: "Host this runner-backed session for encrypted collaboration",
+		}),
 		config: Flags.string({
 			description: "Load an extra config.yml-style overlay for this run (repeatable)",
 			multiple: true,

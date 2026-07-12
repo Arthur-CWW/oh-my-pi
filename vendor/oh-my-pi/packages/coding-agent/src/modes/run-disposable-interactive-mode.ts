@@ -1,5 +1,7 @@
 import * as path from "node:path";
 import { postmortem } from "@oh-my-pi/pi-utils";
+import { CollabHost, collabDisplayName } from "../collab/host";
+import { DEFAULT_RELAY_URL } from "../collab/protocol";
 import type { SessionRunner } from "../runner/session-runner";
 import {
 	createUniqueRevisionLoader,
@@ -52,6 +54,8 @@ export interface RunDisposableInteractiveModeOptions {
 	readonly manifestPath?: string;
 	/** In-process rich view used by the default interactive terminal. */
 	readonly defaultFactory?: DisposableTerminalViewFactory;
+	/** Start a collaboration host over the same runner for the lifetime of this terminal host. */
+	readonly collabHost?: boolean;
 }
 
 const BUILTIN_RICH_REVISION: DisposableTerminalRevision = {
@@ -75,20 +79,28 @@ export async function runDisposableInteractiveMode(
 	const resolveRevision = absoluteManifestPath
 		? () => resolveDisposableTuiManifest(absoluteManifestPath)
 		: undefined;
-	const host = new DisposableTerminalHost({
+	const terminalHost = new DisposableTerminalHost({
 		runner,
 		loader: absoluteManifestPath ? createUniqueRevisionLoader() : createBuiltinLoader(options.defaultFactory!),
 		resolveRevision,
 	});
-	const unregisterCleanup = postmortem.register("disposable-terminal-host", () => host.stop());
+	const collabHost = options.collabHost ? new CollabHost(runner, { displayName: collabDisplayName() }) : undefined;
+	if (collabHost) {
+		await collabHost.start(DEFAULT_RELAY_URL);
+		process.stderr.write(`Collab URL: ${collabHost.link}\nCollab web URL: ${collabHost.webLink}\n`);
+	}
+	const unregisterCleanup = postmortem.register("disposable-terminal-host", async () => {
+		await collabHost?.stop();
+		await terminalHost.stop();
+	});
 	let failure: unknown;
 	let started = false;
 	let intent: InteractiveHostIntent | undefined;
 	try {
 		const revision = resolveRevision ? await resolveRevision() : BUILTIN_RICH_REVISION;
-		await host.reload(revision);
+		await terminalHost.reload(revision);
 		started = true;
-		intent = await host.completion;
+		intent = await terminalHost.completion;
 	} catch (error) {
 		failure = started
 			? error
@@ -99,7 +111,8 @@ export async function runDisposableInteractiveMode(
 	}
 
 	try {
-		await host.stop();
+		await collabHost?.stop();
+		await terminalHost.stop();
 	} catch (error) {
 		failure = failure
 			? new AggregateError([failure, error], "Disposable TUI failed and its cleanup also failed")

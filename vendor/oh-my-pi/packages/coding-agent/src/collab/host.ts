@@ -375,6 +375,7 @@ function projectSnapshot(snapshot: SessionRunnerSnapshot): CollabRunnerSnapshot 
 		todos: { generation: snapshot.todoGeneration } as never,
 		model,
 		session: {
+			runnerIdentity: snapshot.runnerIdentity,
 			header: snapshot.transcript.header,
 			status: snapshot.status,
 			pendingOperations: snapshot.pendingOperations,
