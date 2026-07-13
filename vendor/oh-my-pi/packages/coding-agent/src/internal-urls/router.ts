@@ -7,6 +7,7 @@
  */
 import { AgentProtocolHandler } from "./agent-protocol";
 import { ArtifactProtocolHandler } from "./artifact-protocol";
+import { FeedProtocolHandler } from "./feed-protocol";
 import { HistoryProtocolHandler } from "./history-protocol";
 import { IssueProtocolHandler, PrProtocolHandler } from "./issue-pr-protocol";
 import { LocalProtocolHandler } from "./local-protocol";
@@ -30,6 +31,7 @@ export class InternalUrlRouter {
 		this.register(new ArtifactProtocolHandler());
 		this.register(new MemoryProtocolHandler());
 		this.register(new LocalProtocolHandler());
+		this.register(new FeedProtocolHandler());
 		this.register(new VaultProtocolHandler());
 		this.register(new SkillProtocolHandler());
 		this.register(new RuleProtocolHandler());

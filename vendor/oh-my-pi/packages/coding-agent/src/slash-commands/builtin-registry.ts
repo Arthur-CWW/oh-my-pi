@@ -37,6 +37,7 @@ import type { SessionOwnershipHandle } from "../session/session-ownership";
 import { formatShakeSummary, type ShakeMode } from "../session/shake-types";
 import { urlHyperlinkAlways } from "../tui";
 import { getChangelogPath, parseChangelog } from "../utils/changelog";
+import { handleFeedsCommand } from "./feeds";
 import { buildContextReportText } from "./helpers/context-report";
 import { formatDuration } from "./helpers/format";
 import { createMarketplaceManager } from "./helpers/marketplace-manager";
@@ -1101,6 +1102,18 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<SlashCommandSpec> = [
 			await runtime.ctx.handleJobsCommand();
 			runtime.ctx.editor.setText("");
 		},
+	},
+	{
+		name: "feeds",
+		description: "List, add, and sync availability feeds",
+		acpDescription: "Manage availability feeds",
+		subcommands: [
+			{ name: "list", description: "Show registered feeds and cached item counts" },
+			{ name: "add", description: "Append a feed to feeds.yml", usage: "<handle-or-url> [--name n] [--cadence hourly|daily]" },
+			{ name: "sync", description: "Synchronize registered feeds", usage: "[name]" },
+		],
+		allowArgs: true,
+		handle: handleFeedsCommand,
 	},
 	{
 		name: "usage",
