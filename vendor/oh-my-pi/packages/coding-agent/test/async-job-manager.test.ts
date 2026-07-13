@@ -578,6 +578,72 @@ describe("AsyncJobManager", () => {
 		await manager.waitForAll();
 		expect(manager.getJob(parentJobId)?.status).toBe("cancelled");
 	});
+
+	test("bounds delivered completion retention at 300 jobs", async () => {
+		const manager = new AsyncJobManager({
+			onJobComplete: async () => {},
+			maxRunningJobs: 300,
+			completionSummaryBytes: 8 * 1024,
+		});
+		const largeResult = "x".repeat(256 * 1024);
+		for (let index = 0; index < 300; index++) {
+			manager.register("task", `child-${index}`, async () => largeResult);
+		}
+
+		await manager.waitForAll();
+		await manager.drainDeliveries({ timeoutMs: 5_000 });
+
+		const report = manager.getMemoryReport();
+		expect(report.terminal.count).toBe(300);
+		expect(report.deliveries.count).toBe(0);
+		expect(report.terminal.estimatedBytes / report.terminal.count).toBeLessThan(10 * 1024);
+		expect(report.totalEstimatedBytes).toBeLessThan(3 * 1024 * 1024);
+	});
+
+	test("pressure eviction preserves pending delivery authority", async () => {
+		let rejectFirst = true;
+		const manager = new AsyncJobManager({
+			onJobComplete: async () => {
+				if (rejectFirst) {
+					rejectFirst = false;
+					throw new Error("retry");
+				}
+			},
+			memoryPressureBytes: 1,
+		});
+		const jobId = manager.register("task", "journal-backed child", async () => "summary");
+		await manager.waitForAll();
+		await Bun.sleep(10);
+
+		expect(manager.enforceMemoryPressure(Number.MAX_SAFE_INTEGER)).toBe(0);
+		expect(manager.getJob(jobId)).toBeDefined();
+		expect(manager.hasPendingDeliveries()).toBe(true);
+
+		manager.watchJobs([jobId]);
+		manager.unwatchJobs([jobId]);
+		manager.resumeDeliveries([jobId]);
+		await manager.drainDeliveries({ timeoutMs: 2_000 });
+		expect(manager.getJob(jobId)).toBeUndefined();
+		expect(manager.getMemoryReport().pressureEvictions).toBe(1);
+	});
+
+	test("pressure eviction preserves watched terminal jobs until unwatch", async () => {
+		const manager = new AsyncJobManager({
+			onJobComplete: async () => {},
+			memoryPressureBytes: 1,
+		});
+		const jobId = manager.register("task", "watched child", async () => "summary");
+		manager.watchJobs([jobId]);
+		await manager.waitForAll();
+		await manager.drainDeliveries({ timeoutMs: 2_000 });
+
+		expect(manager.enforceMemoryPressure(Number.MAX_SAFE_INTEGER)).toBe(0);
+		expect(manager.getJob(jobId)?.resultText).toBe("summary");
+
+		manager.unwatchJobs([jobId]);
+		expect(manager.enforceMemoryPressure(Number.MAX_SAFE_INTEGER)).toBe(1);
+		expect(manager.getJob(jobId)).toBeUndefined();
+	});
 });
 
 describe("AsyncJobManager smart poll-wait escalation", () => {

@@ -5,6 +5,10 @@ const DELIVERY_RETRY_MAX_MS = 30_000;
 const DELIVERY_RETRY_JITTER_MS = 200;
 const DEFAULT_RETENTION_MS = 5 * 60 * 1000;
 const DEFAULT_MAX_RUNNING_JOBS = 15;
+const DEFAULT_COMPLETION_SUMMARY_BYTES = 32 * 1024;
+const JOB_METADATA_ESTIMATE_BYTES = 512;
+const UTF8_ENCODER = new TextEncoder();
+const UTF8_DECODER = new TextDecoder();
 
 /**
  * Adaptive ("smart") `job` poll-wait ladder (ms). A tight poll loop climbs
@@ -105,6 +109,19 @@ export interface AsyncJobManagerOptions {
 	onJobComplete: (jobId: string, text: string, job?: AsyncJob) => void | Promise<void>;
 	maxRunningJobs?: number;
 	retentionMs?: number;
+	/** Maximum UTF-8 bytes retained for a terminal job after reliable delivery. */
+	completionSummaryBytes?: number;
+	/** Heap-used threshold that evicts delivered terminal detail. Disabled when omitted. */
+	memoryPressureBytes?: number;
+}
+
+export interface AsyncJobMemoryReport {
+	running: { count: number; estimatedBytes: number };
+	terminal: { count: number; estimatedBytes: number };
+	deliveries: { count: number; estimatedBytes: number };
+	timers: { count: number; estimatedBytes: number };
+	totalEstimatedBytes: number;
+	pressureEvictions: number;
 }
 
 interface AsyncJobDelivery {
@@ -175,6 +192,9 @@ export class AsyncJobManager {
 	readonly #onJobComplete: AsyncJobManagerOptions["onJobComplete"];
 	readonly #maxRunningJobs: number;
 	readonly #retentionMs: number;
+	readonly #completionSummaryBytes: number;
+	readonly #memoryPressureBytes: number | undefined;
+	#pressureEvictions = 0;
 	#deliveryLoop: Promise<void> | undefined;
 	#disposed = false;
 
@@ -192,6 +212,12 @@ export class AsyncJobManager {
 		this.#onJobComplete = options.onJobComplete;
 		this.#maxRunningJobs = Math.max(1, Math.floor(options.maxRunningJobs ?? DEFAULT_MAX_RUNNING_JOBS));
 		this.#retentionMs = Math.max(0, Math.floor(options.retentionMs ?? DEFAULT_RETENTION_MS));
+		this.#completionSummaryBytes = Math.max(
+			0,
+			Math.floor(options.completionSummaryBytes ?? DEFAULT_COMPLETION_SUMMARY_BYTES),
+		);
+		this.#memoryPressureBytes =
+			options.memoryPressureBytes === undefined ? undefined : Math.max(0, Math.floor(options.memoryPressureBytes));
 	}
 
 	/**
@@ -307,7 +333,6 @@ export class AsyncJobManager {
 					},
 				});
 				if (job.status === "cancelled") {
-					job.resultText = text;
 					this.#scheduleEviction(id);
 					return;
 				}
@@ -318,7 +343,6 @@ export class AsyncJobManager {
 				this.#scheduleEviction(id);
 			} catch (error) {
 				if (job.status === "cancelled") {
-					job.errorText = error instanceof Error ? error.message : String(error);
 					this.#scheduleEviction(id);
 					return;
 				}
@@ -395,6 +419,66 @@ export class AsyncJobManager {
 
 	getAllJobs(filter?: AsyncJobFilter): AsyncJob[] {
 		return this.#filterJobs(this.#jobs.values(), filter);
+	}
+
+	/** Bounded, allocation-light view of memory held directly by the manager. */
+	getMemoryReport(): AsyncJobMemoryReport {
+		let runningCount = 0;
+		let runningBytes = 0;
+		let terminalCount = 0;
+		let terminalBytes = 0;
+		for (const job of this.#jobs.values()) {
+			const bytes =
+				JOB_METADATA_ESTIMATE_BYTES +
+				UTF8_ENCODER.encode(job.id).byteLength +
+				UTF8_ENCODER.encode(job.label).byteLength +
+				UTF8_ENCODER.encode(job.ownerId ?? "").byteLength +
+				UTF8_ENCODER.encode(job.resultText ?? "").byteLength +
+				UTF8_ENCODER.encode(job.errorText ?? "").byteLength;
+			if (job.status === "running") {
+				runningCount++;
+				runningBytes += bytes;
+			} else {
+				terminalCount++;
+				terminalBytes += bytes;
+			}
+		}
+		let deliveryBytes = 0;
+		for (const delivery of this.#deliveries) deliveryBytes += UTF8_ENCODER.encode(delivery.text).byteLength;
+		for (const delivery of this.#inFlightDeliveries) deliveryBytes += UTF8_ENCODER.encode(delivery.text).byteLength;
+		const report: AsyncJobMemoryReport = {
+			running: { count: runningCount, estimatedBytes: runningBytes },
+			terminal: { count: terminalCount, estimatedBytes: terminalBytes },
+			deliveries: {
+				count: this.#deliveries.length + this.#inFlightDeliveries.length,
+				estimatedBytes: deliveryBytes,
+			},
+			timers: { count: this.#evictionTimers.size, estimatedBytes: this.#evictionTimers.size * 128 },
+			totalEstimatedBytes: 0,
+			pressureEvictions: this.#pressureEvictions,
+		};
+		report.totalEstimatedBytes =
+			report.running.estimatedBytes +
+			report.terminal.estimatedBytes +
+			report.deliveries.estimatedBytes +
+			report.timers.estimatedBytes;
+		return report;
+	}
+
+	/**
+	 * Drop only delivered terminal cache entries under pressure. Pending
+	 * deliveries remain authoritative, and task journals are owned elsewhere.
+	 */
+	enforceMemoryPressure(heapUsedBytes = process.memoryUsage().heapUsed): number {
+		if (this.#memoryPressureBytes === undefined || heapUsedBytes < this.#memoryPressureBytes) return 0;
+		let evicted = 0;
+		for (const [jobId, job] of this.#jobs) {
+			if (job.status === "running" || this.#watchedJobs.has(jobId) || this.#hasDelivery(jobId)) continue;
+			this.#evictJob(jobId);
+			evicted++;
+		}
+		this.#pressureEvictions += evicted;
+		return evicted;
 	}
 
 	getDeliveryState(filter?: AsyncJobFilter): AsyncJobDeliveryState {
@@ -601,23 +685,41 @@ export class AsyncJobManager {
 		return candidate;
 	}
 
+	#compactTerminalJob(jobId: string): void {
+		const job = this.#jobs.get(jobId);
+		if (!job || job.status === "running") return;
+		if (job.resultText !== undefined) job.resultText = this.#truncateUtf8(job.resultText);
+		if (job.errorText !== undefined) job.errorText = this.#truncateUtf8(job.errorText);
+		// A settled promise may retain the async closure graph in JSC. Replace it
+		// with a shared-shape resolved promise once completion has been delivered.
+		job.promise = Promise.resolve();
+		job.abortController = new AbortController();
+	}
+
+	#truncateUtf8(text: string): string {
+		const encoded = UTF8_ENCODER.encode(text);
+		if (encoded.byteLength <= this.#completionSummaryBytes) return text;
+		if (this.#completionSummaryBytes === 0) return "";
+		return UTF8_DECODER.decode(encoded.subarray(0, this.#completionSummaryBytes));
+	}
+
+	#evictJob(jobId: string): void {
+		const timer = this.#evictionTimers.get(jobId);
+		if (timer) clearTimeout(timer);
+		this.#evictionTimers.delete(jobId);
+		this.#jobs.delete(jobId);
+		this.#suppressedDeliveries.delete(jobId);
+		this.#watchedJobs.delete(jobId);
+	}
+
 	#scheduleEviction(jobId: string): void {
 		if (this.#retentionMs <= 0) {
-			this.#jobs.delete(jobId);
-			this.#suppressedDeliveries.delete(jobId);
-			this.#watchedJobs.delete(jobId);
+			this.#evictJob(jobId);
 			return;
 		}
 		const existing = this.#evictionTimers.get(jobId);
-		if (existing) {
-			clearTimeout(existing);
-		}
-		const timer = setTimeout(() => {
-			this.#evictionTimers.delete(jobId);
-			this.#jobs.delete(jobId);
-			this.#suppressedDeliveries.delete(jobId);
-			this.#watchedJobs.delete(jobId);
-		}, this.#retentionMs);
+		if (existing) clearTimeout(existing);
+		const timer = setTimeout(() => this.#evictJob(jobId), this.#retentionMs);
 		timer.unref();
 		this.#evictionTimers.set(jobId, timer);
 	}
@@ -683,7 +785,10 @@ export class AsyncJobManager {
 	}
 
 	#hasDelivery(jobId: string): boolean {
-		return this.#deliveries.some(delivery => delivery.jobId === jobId) || this.#inFlightDeliveries.some(delivery => delivery.jobId === jobId);
+		return (
+			this.#deliveries.some(delivery => delivery.jobId === jobId) ||
+			this.#inFlightDeliveries.some(delivery => delivery.jobId === jobId)
+		);
 	}
 
 	#enqueueDelivery(jobId: string, text: string): void {
@@ -745,8 +850,11 @@ export class AsyncJobManager {
 	#deliverDelivery(delivery: AsyncJobDelivery): Promise<void> {
 		const promise = (async () => {
 			this.#inFlightDeliveries.push(delivery);
+			let delivered = false;
 			try {
 				await this.#onJobComplete(delivery.jobId, delivery.text, this.#jobs.get(delivery.jobId));
+				this.#compactTerminalJob(delivery.jobId);
+				delivered = true;
 			} catch (error) {
 				delivery.attempt += 1;
 				delivery.lastError = error instanceof Error ? error.message : String(error);
@@ -763,6 +871,7 @@ export class AsyncJobManager {
 			} finally {
 				const index = this.#inFlightDeliveries.indexOf(delivery);
 				if (index !== -1) this.#inFlightDeliveries.splice(index, 1);
+				if (delivered) this.enforceMemoryPressure();
 				if (this.#deliveries.length > 0) this.#ensureDeliveryLoop();
 			}
 		})();
