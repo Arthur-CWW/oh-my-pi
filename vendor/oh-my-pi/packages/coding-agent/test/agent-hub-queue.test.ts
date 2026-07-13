@@ -90,6 +90,7 @@ describe("Agent hub queued follow-up", () => {
 		});
 
 		hub.handleInput("\r");
+		hub.handleInput("i");
 		for (const character of "follow up message") hub.handleInput(character);
 		hub.handleInput("\x1b[13;5u");
 		await delivered.promise;

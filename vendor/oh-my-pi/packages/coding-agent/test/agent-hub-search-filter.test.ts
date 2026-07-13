@@ -773,7 +773,7 @@ describe("Agent Hub transcript search", () => {
 
 		hub.dispose();
 	});
-	it("toggles flat and tree topology while retaining the selected child", () => {
+	it("defaults to tree topology while retaining child selection", () => {
 		geometry = stubStdoutGeometry(120);
 		const agents = new AgentRegistry();
 		agents.register({ id: "Pod", displayName: "Pod", kind: "sub", session: liveSession(), status: "running" });
@@ -786,11 +786,8 @@ describe("Agent Hub transcript search", () => {
 			status: "running",
 		});
 		const { hub } = makeHub(agents);
-		hub.handleInput("t");
 		expect(renderedText(hub)).toContain("Agent Hub · tree");
 		hub.handleInput("n");
-		hub.handleInput("t");
-		hub.handleInput("t");
 		expect(renderedText(hub)).toContain("Pod.Leaf");
 		hub.dispose();
 	});
@@ -811,11 +808,8 @@ describe("Agent Hub transcript search", () => {
 			});
 		}
 		const { hub } = makeHub(agents);
-		hub.handleInput("t");
 		hub.handleInput("h");
-		hub.handleInput("z");
-		hub.handleInput("c");
-		expect(renderedText(hub)).toContain("+10000 folded");
+		expect(renderedText(hub)).toContain("(+10000 · 10000 run)");
 		expect(hub.getRetentionMetrics().materializedRows).toBeLessThan(20);
 		hub.dispose();
 	});
