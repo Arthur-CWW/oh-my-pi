@@ -17,7 +17,6 @@ function ctxWith(usage: Partial<SegmentContext["usageStats"]>): SegmentContext {
 			cacheWrite: 0,
 			premiumRequests: 0,
 			cost: 0,
-			tokensPerSecond: null,
 			...usage,
 		},
 	} as unknown as SegmentContext;

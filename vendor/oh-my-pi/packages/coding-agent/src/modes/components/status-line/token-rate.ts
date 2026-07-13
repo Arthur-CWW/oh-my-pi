@@ -11,7 +11,7 @@ type AssistantLikeMessage = {
 	usage: AssistantUsage;
 };
 
-type MaybeAssistantMessage = {
+export type TokenRateMessage = {
 	role?: string;
 	timestamp?: number;
 	duration?: number;
@@ -20,7 +20,7 @@ type MaybeAssistantMessage = {
 	};
 };
 
-function isAssistantMessage(message: MaybeAssistantMessage | undefined): message is AssistantLikeMessage {
+function isAssistantMessage(message: TokenRateMessage | undefined): message is AssistantLikeMessage {
 	return (
 		message?.role === "assistant" &&
 		typeof message.timestamp === "number" &&
@@ -29,7 +29,7 @@ function isAssistantMessage(message: MaybeAssistantMessage | undefined): message
 	);
 }
 
-function getLastAssistantMessage(messages: ReadonlyArray<MaybeAssistantMessage>): AssistantLikeMessage | null {
+function getLastAssistantMessage(messages: ReadonlyArray<TokenRateMessage>): AssistantLikeMessage | null {
 	for (let i = messages.length - 1; i >= 0; i--) {
 		const message = messages[i];
 		if (isAssistantMessage(message)) {
@@ -40,7 +40,7 @@ function getLastAssistantMessage(messages: ReadonlyArray<MaybeAssistantMessage>)
 }
 
 export function calculateTokensPerSecond(
-	messages: ReadonlyArray<MaybeAssistantMessage>,
+	messages: ReadonlyArray<TokenRateMessage>,
 	isStreaming: boolean,
 	nowMs: number = Date.now(),
 ): number | null {

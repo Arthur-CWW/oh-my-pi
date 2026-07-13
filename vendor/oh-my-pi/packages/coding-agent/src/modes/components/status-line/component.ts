@@ -14,7 +14,6 @@ import { canReuseCachedPr, createPrCacheContext, isSamePrCacheContext, type PrCa
 import { getPreset } from "./presets";
 import { renderSegment, type SegmentContext } from "./segments";
 import { getSeparator } from "./separators";
-import { calculateTokensPerSecond } from "./token-rate";
 import type {
 	CollabStatus,
 	EffectiveStatusLineSettings,
@@ -137,8 +136,6 @@ export class StatusLineComponent implements Component {
 	#cachedPrContext: PrCacheContext | undefined = undefined;
 	#prLookupInFlight = false;
 	#defaultBranch?: string;
-	#lastTokensPerSecond: number | null = null;
-	#lastTokensPerSecondTimestamp: number | null = null;
 
 	// Anthropic usage caching (5-min TTL, OAuth/sub only)
 	#cachedUsage: {
@@ -154,7 +151,10 @@ export class StatusLineComponent implements Component {
 	// message list + model window yields a stable result we can return verbatim.
 	#contextUsageCache: ContextUsageMemo | undefined;
 
+	readonly #mainSession: AgentSession;
+
 	constructor(private session: AgentSession) {
+		this.#mainSession = session;
 		this.#settings = {
 			preset: settings.get("statusLine.preset"),
 			leftSegments: settings.get("statusLine.leftSegments"),
@@ -275,8 +275,6 @@ export class StatusLineComponent implements Component {
 		this.#usageFetchedAt = 0;
 		this.#usageInFlight = false;
 		this.#contextUsageCache = undefined;
-		this.#lastTokensPerSecond = null;
-		this.#lastTokensPerSecondTimestamp = null;
 	}
 
 	#invalidateGitCaches(): void {
@@ -399,35 +397,6 @@ export class StatusLineComponent implements Component {
 		return stalePr ?? null;
 	}
 
-	#getTokensPerSecond(): number | null {
-		let lastAssistantTimestamp: number | null = null;
-		for (let i = this.session.state.messages.length - 1; i >= 0; i--) {
-			const message = this.session.state.messages[i];
-			if (message?.role === "assistant") {
-				lastAssistantTimestamp = message.timestamp;
-				break;
-			}
-		}
-
-		if (lastAssistantTimestamp === null) {
-			this.#lastTokensPerSecond = null;
-			this.#lastTokensPerSecondTimestamp = null;
-			return null;
-		}
-
-		const rate = calculateTokensPerSecond(this.session.state.messages, this.session.isStreaming);
-		if (rate !== null) {
-			this.#lastTokensPerSecond = rate;
-			this.#lastTokensPerSecondTimestamp = lastAssistantTimestamp;
-			return rate;
-		}
-
-		if (this.#lastTokensPerSecondTimestamp === lastAssistantTimestamp) {
-			return this.#lastTokensPerSecond;
-		}
-
-		return null;
-	}
 
 	/**
 	 * Background-refresh the Anthropic OAuth quota report. Guarded by a 5-min
@@ -565,10 +534,7 @@ export class StatusLineComponent implements Component {
 			premiumRequests: 0,
 			cost: 0,
 		};
-		const usageStats = {
-			...aggregateUsageStats,
-			tokensPerSecond: this.#getTokensPerSecond(),
-		};
+		const usageStats = aggregateUsageStats;
 
 		let contextWindow = state.model?.contextWindow ?? this.session.model?.contextWindow ?? 0;
 		let contextPercent: number | null = 0;
@@ -589,6 +555,7 @@ export class StatusLineComponent implements Component {
 
 		return {
 			session: this.session,
+			mainSession: this.#mainSession,
 			focusedAgentId: this.#focusedAgentId,
 			width,
 			options: segmentOptions ?? {},

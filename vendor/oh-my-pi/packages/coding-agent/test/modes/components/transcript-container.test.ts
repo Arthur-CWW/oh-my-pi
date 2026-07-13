@@ -453,7 +453,7 @@ describe("TranscriptContainer", () => {
 			expect([first.renderCount, second.renderCount]).toEqual([2, 2]);
 		});
 	});
-	it("does not poll every finalized version when only the live tail animates", () => {
+	it("keeps finalized-prefix scans bounded across tail streaming and invalidates on width and insertion", () => {
 		withEnvPatch({ PI_TRANSCRIPT_VIRTUALIZATION: "true" }, () => {
 			const container = new TranscriptContainer();
 			const history = Array.from(
@@ -464,6 +464,7 @@ describe("TranscriptContainer", () => {
 			for (const block of history) container.addChild(block);
 			container.addChild(tail);
 			container.render(80);
+			expect(container.getRetentionMetrics().finalizedPrefixScans).toBe(1);
 			for (const block of history) block.versionReadCount = 0;
 
 			for (let frame = 1; frame <= 2_000; frame++) {
@@ -473,7 +474,18 @@ describe("TranscriptContainer", () => {
 
 			expect(history.reduce((total, block) => total + block.versionReadCount, 0)).toBe(0);
 			expect(container.render(80).at(-1)).toBe("tail-2000");
-			expect(container.getRetentionMetrics().dirtyVersionedBlocks).toBe(0);
+			expect(container.getRetentionMetrics()).toMatchObject({
+				dirtyVersionedBlocks: 0,
+				finalizedPrefixScans: 1,
+			});
+
+			container.render(100);
+			expect(container.getRetentionMetrics().finalizedPrefixScans).toBe(2);
+
+			const inserted = new VersionedFinalizedBlock(["inserted"]);
+			container.addChild(inserted);
+			expect(container.render(100).at(-1)).toBe("inserted");
+			expect(container.getRetentionMetrics().finalizedPrefixScans).toBe(3);
 		});
 	});
 
@@ -508,13 +520,16 @@ describe("TranscriptContainer", () => {
 			container.render(40);
 			container.render(40);
 			expect(history.renderCount).toBe(1);
+			expect(container.getRetentionMetrics().finalizedPrefixScans).toBe(1);
 
 			container.render(80);
 			expect(history.renderCount).toBe(2);
+			expect(container.getRetentionMetrics().finalizedPrefixScans).toBe(2);
 			container.invalidate();
 			expect(container.render(80)).toEqual(["history", "", "tail"]);
 
 			expect(history.renderCount).toBe(3);
+			expect(container.getRetentionMetrics().finalizedPrefixScans).toBe(3);
 		});
 	});
 
@@ -878,6 +893,7 @@ describe("TranscriptContainer renderViewportTail", () => {
 			historyPrefixCacheEntries: 0,
 			historyPrefixSegmentRefs: 0,
 			dirtyVersionedBlocks: 0,
+			finalizedPrefixScans: 1,
 		});
 	});
 });

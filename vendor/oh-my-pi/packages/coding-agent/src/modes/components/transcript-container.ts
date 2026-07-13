@@ -181,6 +181,8 @@ export interface TranscriptRetentionMetrics {
 	historyPrefixSegmentRefs: 0;
 	/** Versioned blocks awaiting validation on the next compose. */
 	dirtyVersionedBlocks: number;
+	/** Full finalized-prefix validation/build scans performed since construction. */
+	finalizedPrefixScans: number;
 }
 
 interface LiveCommitState {
@@ -506,6 +508,8 @@ export class TranscriptContainer
 	#dirtyVersionedBlocks = new Set<Component>();
 	/** True when a cached prefix contains a versioned block without push invalidation. */
 	#hasUntrackedVersionedPrefix = false;
+	/** Test-visible count of full finalized-prefix validation/build scans. */
+	#finalizedPrefixScans = 0;
 	/**
 	 * Optional render-only diagnostic projection. Rich children remain mounted
 	 * so streaming/event-controller state continues to advance while raw mode is
@@ -576,6 +580,7 @@ export class TranscriptContainer
 		// retain the compatibility scan for third-party blocks implementing only
 		// getTranscriptBlockVersion().
 		if (this.#hasUntrackedVersionedPrefix) {
+			this.#finalizedPrefixScans++;
 			for (let i = 0; i < cache.childCount; i++) {
 				const child = this.children[i]!;
 				const segment = this.#segments[i];
@@ -623,6 +628,7 @@ export class TranscriptContainer
 			return;
 		}
 		this.#hasUntrackedVersionedPrefix = false;
+		this.#finalizedPrefixScans++;
 		for (let i = 0; i < childCount; i++) {
 			const segment = segments[i]!;
 			const version = getBlockVersion(segment.component);
@@ -686,6 +692,7 @@ export class TranscriptContainer
 			historyPrefixCacheEntries: this.#historyPrefix === undefined ? 0 : 1,
 			historyPrefixSegmentRefs: 0,
 			dirtyVersionedBlocks: this.#dirtyVersionedBlocks.size,
+			finalizedPrefixScans: this.#finalizedPrefixScans,
 		};
 	}
 

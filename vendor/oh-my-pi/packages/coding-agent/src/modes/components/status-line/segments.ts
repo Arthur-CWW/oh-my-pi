@@ -3,11 +3,14 @@ import * as path from "node:path";
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import { TERMINAL } from "@oh-my-pi/pi-tui";
 import { formatDuration, formatNumber, getProjectDir, pathIsWithin, relativePathWithinRoot } from "@oh-my-pi/pi-utils";
+import { settings } from "../../../config/settings";
 import { type ThemeColor, theme } from "../../../modes/theme/theme";
 import { shortenPath } from "../../../tools/render-utils";
 import { getSessionAccentAnsi, getSessionAccentHex } from "../../../utils/session-color";
 import { sanitizeStatusText } from "../../shared";
 import { formatContextUsage, getContextUsageLevel, getContextUsageThemeColor } from "./context-thresholds";
+import { processMemoryFootprintSampler } from "./memory-footprint";
+import { mainTokenRateSegment } from "./main-token-rate";
 import type { RenderedSegment, SegmentContext, StatusLineSegment, StatusLineSegmentId } from "./types";
 
 export type { SegmentContext } from "./types";
@@ -339,16 +342,6 @@ const tokenTotalSegment: StatusLineSegment = {
 	},
 };
 
-const tokenRateSegment: StatusLineSegment = {
-	id: "token_rate",
-	render(ctx) {
-		const { tokensPerSecond } = ctx.usageStats;
-		if (!tokensPerSecond) return { content: "", visible: false };
-
-		const content = withIcon(theme.icon.output, `${tokensPerSecond.toFixed(1)}/s`);
-		return { content: theme.fg("statusLineOutput", content), visible: true };
-	},
-};
 
 const costSegment: StatusLineSegment = {
 	id: "cost",
@@ -577,6 +570,15 @@ const usageSegment: StatusLineSegment = {
 	},
 };
 
+const memorySegment: StatusLineSegment = {
+	id: "memory",
+	render() {
+		const badge = processMemoryFootprintSampler.getBadge(settings.get("ui.memoryWatermarkBytes"));
+		if (badge === null) return { content: "", visible: false };
+		return { content: theme.fg("error", badge), visible: true };
+	},
+};
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Segment Registry
 // ═══════════════════════════════════════════════════════════════════════════
@@ -592,7 +594,7 @@ export const SEGMENTS: Record<StatusLineSegmentId, StatusLineSegment> = {
 	token_in: tokenInSegment,
 	token_out: tokenOutSegment,
 	token_total: tokenTotalSegment,
-	token_rate: tokenRateSegment,
+	token_rate: mainTokenRateSegment,
 	cost: costSegment,
 	context_pct: contextPctSegment,
 	context_total: contextTotalSegment,
@@ -606,6 +608,7 @@ export const SEGMENTS: Record<StatusLineSegmentId, StatusLineSegment> = {
 	session_name: sessionNameSegment,
 	usage: usageSegment,
 	collab: collabSegment,
+	memory: memorySegment,
 };
 
 export function renderSegment(id: StatusLineSegmentId, ctx: SegmentContext): RenderedSegment {

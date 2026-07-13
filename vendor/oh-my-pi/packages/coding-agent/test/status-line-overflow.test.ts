@@ -53,7 +53,6 @@ function createCtx(overrides?: { pathMaxLength?: number; branch?: string | null 
 			cacheWrite: 0,
 			premiumRequests: 0,
 			cost: 0,
-			tokensPerSecond: null,
 		},
 		contextPercent: 0,
 		contextWindow: 0,

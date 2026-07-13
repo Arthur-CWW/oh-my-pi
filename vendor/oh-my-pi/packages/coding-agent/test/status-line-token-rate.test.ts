@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
+import { getMainTokenRateViewModel } from "@oh-my-pi/pi-coding-agent/modes/components/status-line/main-token-rate";
 import { calculateTokensPerSecond } from "@oh-my-pi/pi-coding-agent/modes/components/status-line/token-rate";
 
 function assistantMessage(overrides?: Partial<AssistantMessage>): AssistantMessage {
@@ -64,5 +65,29 @@ describe("token rate calculation", () => {
 			false,
 		);
 		expect(rate).toBeNull();
+	});
+});
+
+describe("main token-rate segment view model", () => {
+	it("shows a rounded badge while the main turn is streaming", () => {
+		const base = assistantMessage();
+		const viewModel = getMainTokenRateViewModel(
+			[assistantMessage({ timestamp: 10_000, duration: undefined, usage: { ...base.usage, output: 37 } })],
+			true,
+			13_000,
+		);
+
+		expect(viewModel).toEqual({ label: "12.3 tok/s" });
+		expect(viewModel?.label.length).toBeLessThanOrEqual(14);
+	});
+
+	it("stays absent when the main turn is idle", () => {
+		const base = assistantMessage();
+		const viewModel = getMainTokenRateViewModel(
+			[assistantMessage({ duration: 2_000, usage: { ...base.usage, output: 120 } })],
+			false,
+		);
+
+		expect(viewModel).toBeNull();
 	});
 });

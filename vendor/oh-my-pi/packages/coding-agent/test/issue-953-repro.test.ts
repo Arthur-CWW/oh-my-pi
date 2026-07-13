@@ -28,7 +28,6 @@ function createCtx(usage: Partial<SegmentContext["usageStats"]>): SegmentContext
 			cacheWrite: 0,
 			premiumRequests: 0,
 			cost: 0,
-			tokensPerSecond: null,
 			...usage,
 		},
 		contextPercent: 0,

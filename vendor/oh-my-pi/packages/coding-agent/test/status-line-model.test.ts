@@ -29,7 +29,6 @@ function createModelContext(advisorActive: boolean): SegmentContext {
 			cacheWrite: 0,
 			premiumRequests: 0,
 			cost: 0,
-			tokensPerSecond: null,
 		},
 		contextPercent: 0,
 		contextWindow: 0,

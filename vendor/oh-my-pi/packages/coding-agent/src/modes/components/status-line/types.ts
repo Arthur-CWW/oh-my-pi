@@ -45,6 +45,8 @@ export type RGB = readonly [number, number, number];
 
 export interface SegmentContext {
 	session: AgentSession;
+	/** Root interactive session; present in live rendering while `session` may proxy a focused child. */
+	mainSession?: AgentSession;
 	/** Focused subagent id while the view is proxied at its session, undefined otherwise. */
 	focusedAgentId?: string | undefined;
 	width: number;
@@ -69,7 +71,6 @@ export interface SegmentContext {
 		cacheWrite: number;
 		premiumRequests: number;
 		cost: number;
-		tokensPerSecond: number | null;
 	};
 	/** Context usage percent, or null when unknown (e.g. right after compaction). */
 	contextPercent: number | null;
