@@ -865,8 +865,11 @@ export class SessionManager {
 		this.#sessionId = header.id;
 		this.#sessionName = header.title;
 		this.#titleSource = header.titleSource;
-		this.#index.rebuild(entries);
-		this.#rebuildSessionCommandIndex();
+		logger.time("session:branchReconstruction", () => {
+			this.#index.rebuild(entries);
+			this.#rebuildSessionCommandIndex();
+		});
+		logger.time(`session:branchStats entries=${entries.length}`);
 	}
 
 	#freshEntryFields(): { id: string; parentId: string | null; timestamp: string } {
@@ -1047,6 +1050,12 @@ export class SessionManager {
 		this.#rememberBreadcrumb(this.#cwd, resolvedSessionFile);
 
 		const fileEntries = await loadEntriesFromFile(resolvedSessionFile, this.#storage);
+		await this.#applyLoadedSessionEntries(resolvedSessionFile, fileEntries);
+	}
+
+	async #applyLoadedSessionEntries(resolvedSessionFile: string, fileEntries: FileEntry[]): Promise<void> {
+		this.#sessionFile = resolvedSessionFile;
+		this.#rememberBreadcrumb(this.#cwd, resolvedSessionFile);
 		if (fileEntries.length === 0) {
 			// Explicit but empty/missing path (e.g. --session flag): start fresh but
 			// keep the requested path and materialize the header immediately.
@@ -2250,7 +2259,7 @@ export class SessionManager {
 		const dir = sessionDir ?? path.dirname(path.resolve(filePath));
 		const manager = new SessionManager(cwd, dir, true, storage);
 		manager.#suppressBreadcrumb = options?.suppressBreadcrumb === true;
-		await manager.setSessionFile(filePath);
+		await manager.#applyLoadedSessionEntries(path.resolve(filePath), loaded);
 		return manager;
 	}
 

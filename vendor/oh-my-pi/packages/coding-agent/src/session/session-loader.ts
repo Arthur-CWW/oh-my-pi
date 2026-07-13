@@ -1,5 +1,5 @@
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
-import { getBlobsDir, isEnoent } from "@oh-my-pi/pi-utils";
+import { getBlobsDir, isEnoent, logger } from "@oh-my-pi/pi-utils";
 import { decodeJournalEntries } from "../journal/projection";
 import { BlobStore, isBlobRef, resolveImageData, resolveImageDataUrl } from "./blob-store";
 import { buildSessionContext, resolveSessionLeaf } from "./session-context";
@@ -53,12 +53,14 @@ export async function loadEntriesFromFile(
 ): Promise<FileEntry[]> {
 	let content: string;
 	try {
-		content = await storage.readText(filePath);
+		content = await logger.time("session:jsonlRead", () => storage.readText(filePath));
 	} catch (err) {
 		if (isEnoent(err)) return [];
 		throw err;
 	}
-	const entries = decodeJournalEntries(content);
+	const bytes = Buffer.byteLength(content, "utf8");
+	const entries = logger.time("session:jsonlDecode", decodeJournalEntries, content);
+	logger.time(`session:jsonlStats bytes=${bytes} entries=${entries.length}`);
 	return normalizeSessionEntries(entries);
 }
 

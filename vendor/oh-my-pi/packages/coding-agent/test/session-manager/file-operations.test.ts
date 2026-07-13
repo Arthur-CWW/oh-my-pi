@@ -6,6 +6,7 @@ import type { FileEntry, SessionHeader } from "@oh-my-pi/pi-coding-agent/session
 import { findMostRecentSession, resolveResumableSession } from "@oh-my-pi/pi-coding-agent/session/session-listing";
 import { loadEntriesFromFile } from "@oh-my-pi/pi-coding-agent/session/session-loader";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
+import { FileSessionStorage } from "@oh-my-pi/pi-coding-agent/session/session-storage";
 import { getConfigRootDir, getSessionsDir, Snowflake, setAgentDir } from "@oh-my-pi/pi-utils";
 
 describe("loadEntriesFromFile", () => {
@@ -43,6 +44,29 @@ describe("loadEntriesFromFile", () => {
 		);
 		const entries = await loadEntriesFromFile(file);
 		expect(entries).toHaveLength(2);
+	});
+});
+
+describe("SessionManager.open", () => {
+	it("reads a resumable journal once", async () => {
+		const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "session-open-"));
+		const file = path.join(tempDir, "session.jsonl");
+		fs.writeFileSync(file, '{"type":"session","id":"abc","timestamp":"2025-01-01T00:00:00Z","cwd":"/tmp"}\n');
+		class CountingStorage extends FileSessionStorage {
+			readCount = 0;
+			override async readText(filePath: string): Promise<string> {
+				this.readCount++;
+				return super.readText(filePath);
+			}
+		}
+		const storage = new CountingStorage();
+		const manager = await SessionManager.open(file, tempDir, storage);
+		try {
+			expect(storage.readCount).toBe(1);
+		} finally {
+			await manager.close();
+			fs.rmSync(tempDir, { recursive: true, force: true });
+		}
 	});
 });
 
