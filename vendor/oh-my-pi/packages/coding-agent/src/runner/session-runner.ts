@@ -1,7 +1,10 @@
 import { Cause, Deferred, Effect, FiberSet, PubSub, Queue, Ref, type Scope } from "effect";
+import { buildRestartSpawnSpec, type RestartSpawnSpec } from "../cli/restart-session";
 import type { PythonResult } from "../eval/py/executor";
 import type { BashResult } from "../exec/bash-executor";
 import { IrcBus } from "../irc/bus";
+import type { InteractiveHostIntent } from "../modes/interactive-host-intent";
+import { writeRestartHandoff } from "../session/session-ownership";
 import { type AgentSession, type AgentSessionEvent, PromptOperationConflictError } from "../session/agent-session";
 import {
 	type DurableCustomPayload,
@@ -22,10 +25,11 @@ import type {
 } from "../session/session-entries";
 import {
 	SessionCommandConflictError,
-	type SessionManager,
+	SessionManager,
 	SessionRevisionConflictError,
 	SessionStateCommandInFlightError,
 } from "../session/session-manager";
+import type { SessionControlCommand, SessionControlResult } from "../session/session-control";
 import type { SessionOwnershipHandle } from "../session/session-ownership";
 import {
 	InvalidRunnerCommandError,
@@ -81,6 +85,7 @@ import {
 	decodeGetCheckpointStateCommand,
 	decodeInterruptPromptCommand,
 	decodeRefreshSshToolCommand,
+	decodePrepareHostTransitionCommand,
 	decodeReloadSessionCommand,
 	decodeReplaceTodosCommand,
 	decodeRunCompactionCommand,
@@ -103,6 +108,8 @@ import {
 	type RefreshSshToolCommand,
 	type RefreshSshToolReceipt,
 	type ReleaseRunnerControllerCommand,
+	type PrepareHostTransitionCommand,
+	type PrepareHostTransitionReceipt,
 	type ReloadSessionCommand,
 	type ReloadSessionReceipt,
 	type ReplaceTodosCommand,
@@ -252,6 +259,9 @@ export interface ControllerSessionRunnerView extends RunnerViewBase {
 	readonly setCheckpointState: (
 		command: SetCheckpointStateCommand,
 	) => Effect.Effect<SetCheckpointStateReceipt, RunnerFailure, Scope.Scope>;
+	readonly prepareHostTransition: (
+		input: PrepareHostTransitionCommand,
+	) => Effect.Effect<PrepareHostTransitionReceipt, RunnerFailure, Scope.Scope>;
 	readonly reload: (command: ReloadSessionCommand) => Effect.Effect<ReloadSessionReceipt, RunnerFailure, Scope.Scope>;
 	readonly compact: (command: RunCompactionCommand) => Effect.Effect<RunCompactionReceipt, RunnerFailure, Scope.Scope>;
 	readonly cancelCompaction: (
@@ -287,6 +297,9 @@ export interface SessionRunner {
 		command: AttachRunnerViewCommand,
 	) => Effect.Effect<TerminalSessionView, RunnerFailure, Scope.Scope>;
 	readonly snapshot: () => Effect.Effect<SessionRunnerSnapshot, RunnerFailure, Scope.Scope>;
+	readonly applySessionControl: (
+		command: SessionControlCommand,
+	) => Effect.Effect<SessionControlResult, RunnerFailure, Scope.Scope>;
 	readonly stop: () => Effect.Effect<void, RunnerFailure, Scope.Scope>;
 }
 
@@ -449,10 +462,26 @@ interface LiveReloadRecord {
 	completed: boolean;
 }
 
+interface LiveHostTransitionRecord {
+	readonly command: PrepareHostTransitionCommand;
+	readonly operationGeneration: number;
+	readonly startedSessionRevision: number;
+	readonly deferred: Deferred.Deferred<PrepareHostTransitionReceipt, RunnerFailure>;
+	completed: boolean;
+}
+
+interface HostTransitionOutcome {
+	readonly intent: InteractiveHostIntent;
+	readonly cancelled: boolean;
+	readonly editorText?: string;
+	readonly restartSpawn?: RestartSpawnSpec;
+}
+
 type ActiveSessionOperation =
 	| { readonly kind: "shake"; readonly record: LiveShakeRecord }
 	| { readonly kind: "handoff"; readonly record: LiveHandoffRecord }
-	| { readonly kind: "reload"; readonly record: LiveReloadRecord };
+	| { readonly kind: "reload"; readonly record: LiveReloadRecord }
+	| { readonly kind: "hostTransition"; readonly record: LiveHostTransitionRecord };
 
 interface RetainedCheckpointRead {
 	readonly command: GetCheckpointStateCommand;
@@ -594,6 +623,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 	const shakeCommands = new Map<string, LiveShakeRecord>();
 	const handoffCommands = new Map<string, LiveHandoffRecord>();
 	const reloadCommands = new Map<string, LiveReloadRecord>();
+	const hostTransitionCommands = new Map<string, LiveHostTransitionRecord>();
 	const cycleModelCommands = new Map<string, { command: CycleModelCommand; receipt: CycleModelReceipt }>();
 	const checkpointReads = new Map<string, RetainedCheckpointRead>();
 	const checkpointWrites = new Map<string, RetainedCheckpointWrite>();
@@ -1028,6 +1058,11 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 		controllerEpoch: number,
 		command: ReloadSessionCommand,
 	) => Effect.Effect<ReloadSessionReceipt, RunnerFailure, Scope.Scope>;
+	let prepareHostTransition!: (
+		viewId: string,
+		controllerEpoch: number,
+		command: PrepareHostTransitionCommand,
+	) => Effect.Effect<PrepareHostTransitionReceipt, RunnerFailure, Scope.Scope>;
 	let runCompaction!: (
 		viewId: string,
 		controllerEpoch: number,
@@ -1113,6 +1148,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 			getCheckpointState: input => getCheckpointState(viewId, controllerEpoch, input),
 			setCheckpointState: input => setCheckpointState(viewId, controllerEpoch, input),
 			reload: input => reloadSession(viewId, controllerEpoch, input),
+			prepareHostTransition: input => prepareHostTransition(viewId, controllerEpoch, input),
 			compact: input => runCompaction(viewId, controllerEpoch, input),
 			cancelCompaction: command => cancelCompaction(viewId, controllerEpoch, command),
 			runEphemeralTurn: command => runEphemeralTurn(viewId, controllerEpoch, command),
@@ -2137,6 +2173,242 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 		const receipt = yield* Deferred.await(admitted.record.deferred);
 		return admitted.replayed ? { ...receipt, replayed: true } : receipt;
 	});
+
+	const sameSessionLocator = (
+		left: { readonly kind: "id"; readonly id: string } | { readonly kind: "path"; readonly path: string },
+		right: { readonly kind: "id"; readonly id: string } | { readonly kind: "path"; readonly path: string },
+	): boolean =>
+		left.kind === "id"
+			? right.kind === "id" && left.id === right.id
+			: right.kind === "path" && left.path === right.path;
+
+	const sameHostIntent = (left: InteractiveHostIntent, right: InteractiveHostIntent): boolean => {
+		switch (left.kind) {
+			case "exit":
+			case "freshSession":
+			case "restartProcess":
+				return right.kind === left.kind;
+			case "newSession":
+				return (
+					right.kind === "newSession" &&
+					(left.parent === undefined
+						? right.parent === undefined
+						: right.parent !== undefined && sameSessionLocator(left.parent, right.parent))
+				);
+			case "resume":
+			case "switchSession":
+				return right.kind === left.kind && sameSessionLocator(left.session, right.session);
+			case "fork":
+			case "branch":
+				return right.kind === left.kind && left.entryId === right.entryId;
+			case "navigate":
+				return right.kind === "navigate" && left.targetId === right.targetId && left.summarize === right.summarize;
+			case "moveSession":
+				return right.kind === "moveSession" && left.newDir === right.newDir;
+		}
+	};
+
+	const sameHostTransitionCommand = (
+		left: PrepareHostTransitionCommand,
+		right: PrepareHostTransitionCommand,
+	): boolean =>
+		left.schemaVersion === right.schemaVersion &&
+		left.kind === right.kind &&
+		left.commandId === right.commandId &&
+		left.correlationId === right.correlationId &&
+		left.causationId === right.causationId &&
+		left.expectedSessionRevision === right.expectedSessionRevision &&
+		left.viewId === right.viewId &&
+		left.controllerEpoch === right.controllerEpoch &&
+		sameHostIntent(left.intent, right.intent);
+
+	const resolveSessionLocator = async (
+		locator: { readonly kind: "id"; readonly id: string } | { readonly kind: "path"; readonly path: string },
+	): Promise<string> => {
+		if (locator.kind === "path") return locator.path;
+		const session = (await SessionManager.listAll()).find(candidate => candidate.id === locator.id);
+		if (!session) throw new Error(`Session ${locator.id} not found`);
+		return session.path;
+	};
+
+	const performHostTransition = async (intent: InteractiveHostIntent): Promise<HostTransitionOutcome> => {
+		switch (intent.kind) {
+			case "exit":
+				await resources.sessionManager.flush();
+				return { intent, cancelled: false };
+			case "restartProcess": {
+				await resources.sessionManager.flush();
+				await writeRestartHandoff(resources.ownership, []);
+				return {
+					intent,
+					cancelled: false,
+					restartSpawn: buildRestartSpawnSpec({
+						sessionId: resources.session.sessionId,
+						cwd: resources.sessionManager.getCwd(),
+					}),
+				};
+			}
+			case "newSession": {
+				const parentSession = intent.parent === undefined ? undefined : await resolveSessionLocator(intent.parent);
+				const switched = await resources.session.newSession(
+					parentSession === undefined ? undefined : { parentSession },
+				);
+				return {
+					intent:
+						parentSession === undefined
+							? intent
+							: { kind: "newSession", parent: { kind: "path", path: parentSession } },
+					cancelled: !switched,
+				};
+			}
+			case "freshSession":
+				return { intent, cancelled: resources.session.freshSession() === undefined };
+			case "resume":
+			case "switchSession": {
+				const sessionPath = await resolveSessionLocator(intent.session);
+				const switched = await resources.session.switchSession(sessionPath);
+				return {
+					intent: { kind: intent.kind, session: { kind: "path", path: sessionPath } },
+					cancelled: !switched,
+				};
+			}
+			case "fork":
+			case "branch": {
+				const result = await resources.session.branch(intent.entryId);
+				return { intent, cancelled: result.cancelled, editorText: result.selectedText };
+			}
+			case "navigate": {
+				const result = await resources.session.navigateTree(intent.targetId, { summarize: intent.summarize });
+				return { intent, cancelled: result.cancelled, editorText: result.editorText };
+			}
+			case "moveSession":
+				await resources.sessionManager.flush();
+				await resources.sessionManager.moveTo(intent.newDir);
+				return { intent, cancelled: false };
+		}
+	};
+
+	prepareHostTransition = Effect.fn("Runner.prepareHostTransition")(function* (
+		viewId: string,
+		controllerEpoch: number,
+		input: PrepareHostTransitionCommand,
+	) {
+		const command = yield* Effect.try({
+			try: () => decodePrepareHostTransitionCommand(input),
+			catch: asRunnerFailure,
+		});
+		if (command.viewId !== viewId) return yield* mismatchedView(viewId);
+		if (command.controllerEpoch !== controllerEpoch) {
+			return yield* Effect.fail(
+				new StaleRunnerControllerLeaseError({
+					viewId,
+					expectedControllerEpoch: command.controllerEpoch,
+					actualControllerEpoch: controllerEpoch,
+				}),
+			);
+		}
+		const admitted = yield* enqueue(
+			Effect.gen(function* () {
+				yield* requireController(viewId, controllerEpoch);
+				const retained = hostTransitionCommands.get(command.commandId);
+				if (retained !== undefined) {
+					if (!sameHostTransitionCommand(retained.command, command)) {
+						return yield* Effect.fail(
+							new InvalidRunnerCommandError({
+								issue: `Conflicting host transition command ${command.commandId}`,
+							}),
+						);
+					}
+					return { record: retained, replayed: true };
+				}
+				if (command.expectedSessionRevision !== sessionRevision) {
+					return yield* Effect.fail(
+						new SessionRevisionConflictError(command.expectedSessionRevision, sessionRevision),
+					);
+				}
+				yield* requireSessionOperationAvailable();
+				if (!reserveOperationCapacity(hostTransitionCommands)) {
+					return yield* Effect.fail(new SessionStateCommandInFlightError());
+				}
+				const deferred = yield* Deferred.make<PrepareHostTransitionReceipt, RunnerFailure>();
+				const record: LiveHostTransitionRecord = {
+					command,
+					operationGeneration: nextSessionOperationGeneration++,
+					startedSessionRevision: sessionRevision,
+					deferred,
+					completed: false,
+				};
+				hostTransitionCommands.set(command.commandId, record);
+				activeSessionOperation = { kind: "hostTransition", record };
+				runSessionOperation(
+					Effect.tryPromise({
+						try: () => performHostTransition(command.intent),
+						catch: asRunnerFailure,
+					}).pipe(
+						Effect.matchEffect({
+							onFailure: failure =>
+								enqueue(
+									Effect.sync(() => {
+										record.completed = true;
+										if (activeSessionOperation?.record === record) activeSessionOperation = undefined;
+										hostTransitionCommands.delete(command.commandId);
+										return failure;
+									}),
+								).pipe(
+									Effect.flatMap(retainedFailure => Deferred.fail(record.deferred, retainedFailure)),
+									Effect.matchCauseEffect({ onFailure: () => Effect.void, onSuccess: () => Effect.void }),
+								),
+							onSuccess: outcome =>
+								enqueue(
+									Effect.gen(function* () {
+										record.completed = true;
+										if (activeSessionOperation?.record === record) activeSessionOperation = undefined;
+										refreshSessionProjection();
+										const sessionFile = resources.session.sessionFile;
+										const receipt: PrepareHostTransitionReceipt = {
+											commandId: command.commandId,
+											correlationId: command.correlationId,
+											...(command.causationId === undefined ? {} : { causationId: command.causationId }),
+											startedSessionRevision: record.startedSessionRevision,
+											operationGeneration: record.operationGeneration,
+											completedSessionRevision: sessionRevision,
+											intent: outcome.intent,
+											...(outcome.cancelled
+												? {}
+												: {
+														target: {
+															sessionId: resources.session.sessionId,
+															...(sessionFile === undefined ? {} : { sessionFile }),
+															cwd: resources.sessionManager.getCwd(),
+															...(outcome.editorText === undefined ? {} : { editorText: outcome.editorText }),
+														},
+													}),
+											...(outcome.restartSpawn === undefined ? {} : { restartSpawn: outcome.restartSpawn }),
+											cancelled: outcome.cancelled,
+											replayed: false,
+										};
+										yield* publishEvent({
+											kind: "hostTransitionPrepared",
+											metadata: command,
+											controllerEpoch,
+											viewId,
+											targetCommandId: command.commandId,
+											targetOperationGeneration: record.operationGeneration,
+											sessionRevision,
+										});
+										yield* Deferred.succeed(record.deferred, receipt);
+									}),
+								).pipe(Effect.matchCauseEffect({ onFailure: () => Effect.void, onSuccess: () => Effect.void })),
+						}),
+					),
+				);
+				return { record, replayed: false };
+			}),
+		);
+		const receipt = yield* Deferred.await(admitted.record.deferred);
+		return admitted.replayed ? { ...receipt, replayed: true } : receipt;
+	});
+
 
 	const sameCompactionCommand = (left: RunCompactionCommand, right: RunCompactionCommand): boolean =>
 		left.schemaVersion === right.schemaVersion &&
@@ -4063,6 +4335,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 			getCheckpointState: attached.getCheckpointState,
 			setCheckpointState: attached.setCheckpointState,
 			reload: attached.reload,
+			prepareHostTransition: attached.prepareHostTransition,
 			compact: attached.compact,
 			cancelCompaction: attached.cancelCompaction,
 			runEphemeralTurn: attached.runEphemeralTurn,
@@ -4072,6 +4345,86 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 			interruptPrompt: attached.interruptPrompt,
 			detach,
 		} satisfies TerminalSessionView;
+	});
+
+	const applySessionControl = Effect.fn("Runner.applySessionControl")(function* (command: SessionControlCommand) {
+		switch (command.intent.kind) {
+			case "status": {
+				const current = yield* snapshot();
+				const model = resources.session.model;
+				return {
+					status: current.status,
+					revision: current.revision,
+					sessionRevision: current.sessionRevision,
+					pendingOperations: current.pendingOperations,
+					model: model ? `${model.provider}/${model.id}` : undefined,
+				};
+			}
+			case "pause":
+				yield* enqueue(
+					Effect.tryPromise({
+						try: () => resources.session.setSessionControlPaused(true),
+						catch: asRunnerFailure,
+					}),
+				);
+				return { paused: true };
+			case "resume":
+				yield* enqueue(
+					Effect.tryPromise({
+						try: () => resources.session.setSessionControlPaused(false),
+						catch: asRunnerFailure,
+					}),
+				);
+				return { paused: false };
+			case "setModel": {
+				const controller = activeController;
+				if (!controller) {
+					return yield* Effect.fail(new InvalidRunnerCommandError({ issue: "No active runner controller" }));
+				}
+				const separator = command.intent.selector.indexOf("/");
+				if (separator <= 0 || separator === command.intent.selector.length - 1) {
+					return yield* Effect.fail(
+						new InvalidRunnerCommandError({ issue: `Invalid model selector: ${command.intent.selector}` }),
+					);
+				}
+				const current = yield* snapshot();
+				return yield* setModel(controller.viewId, controller.epoch, {
+					schemaVersion: RUNNER_SCHEMA_VERSION,
+					kind: "setModel",
+					commandId: command.commandId,
+					correlationId: command.commandId,
+					expectedSessionRevision: current.sessionRevision,
+					viewId: controller.viewId,
+					controllerEpoch: controller.epoch,
+					payload: {
+						provider: command.intent.selector.slice(0, separator),
+						id: command.intent.selector.slice(separator + 1),
+					},
+				});
+			}
+			case "compact": {
+				const controller = activeController;
+				if (!controller) {
+					return yield* Effect.fail(new InvalidRunnerCommandError({ issue: "No active runner controller" }));
+				}
+				const current = yield* snapshot();
+				return yield* runCompaction(controller.viewId, controller.epoch, {
+					schemaVersion: RUNNER_SCHEMA_VERSION,
+					kind: "runCompaction",
+					commandId: command.commandId,
+					correlationId: command.commandId,
+					expectedSessionRevision: current.sessionRevision,
+					viewId: controller.viewId,
+					controllerEpoch: controller.epoch,
+					customInstructions: command.intent.instructions,
+				});
+			}
+			case "restart":
+			case "stop":
+				return yield* Effect.fail(
+					new InvalidRunnerCommandError({ issue: `${command.intent.kind} is a runner lifecycle action` }),
+				);
+		}
 	});
 
 	const stop = Effect.fn("Runner.stop")(function* () {
@@ -4107,6 +4460,11 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 				);
 				yield* Effect.forEach(
 					reloadCommands.values(),
+					record => Deferred.fail(record.deferred, new SessionRunnerStoppedError()).pipe(Effect.asVoid),
+					{ discard: true },
+				);
+				yield* Effect.forEach(
+					hostTransitionCommands.values(),
 					record => Deferred.fail(record.deferred, new SessionRunnerStoppedError()).pipe(Effect.asVoid),
 					{ discard: true },
 				);
@@ -4183,5 +4541,5 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 	yield* Effect.addFinalizer(() =>
 		stop().pipe(Effect.matchCauseEffect({ onFailure: () => Effect.void, onSuccess: () => Effect.void })),
 	);
-	return { attachView, attachTerminalView, snapshot, stop } satisfies SessionRunner;
+	return { attachView, attachTerminalView, snapshot, applySessionControl, stop } satisfies SessionRunner;
 });

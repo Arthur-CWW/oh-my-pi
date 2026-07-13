@@ -11,6 +11,7 @@ import type {
 	InterruptPromptReceipt,
 	RefreshSshToolReceipt,
 	ReloadSessionReceipt,
+	PrepareHostTransitionReceipt,
 	ReplaceTodosReceipt,
 	RunCompactionReceipt,
 	RunEphemeralTurnReceipt,
@@ -40,6 +41,7 @@ import {
 	decodeGetCheckpointStateCommand,
 	decodeInterruptPromptCommand,
 	decodeRefreshSshToolCommand,
+	decodePrepareHostTransitionCommand,
 	decodeReloadSessionCommand,
 	decodeReplaceTodosCommand,
 	decodeRunCompactionCommand,
@@ -61,6 +63,7 @@ import {
 	RunnerEphemeralTurnTargetError,
 	RunnerLocalOperationTargetError,
 } from "../runner/protocol";
+import type { InteractiveHostIntent } from "./interactive-host-intent";
 import type { RunnerFailure, SessionRunner } from "../runner/session-runner";
 import type {
 	TerminalAdvisorStats,
@@ -245,6 +248,12 @@ export interface TerminalReloadSessionIntent {
 	readonly causationId?: string;
 }
 
+export type TerminalPrepareHostTransitionIntent = InteractiveHostIntent & {
+	readonly commandId?: string;
+	readonly correlationId?: string;
+	readonly causationId?: string;
+};
+
 export interface TerminalCompactionIntent {
 	readonly customInstructions?: string;
 	readonly commandId?: string;
@@ -357,6 +366,9 @@ export interface TerminalSessionController {
 	readonly getCheckpointState: (intent?: TerminalGetCheckpointStateIntent) => Promise<GetCheckpointStateReceipt>;
 	readonly setCheckpointState: (intent: TerminalSetCheckpointStateIntent) => Promise<SetCheckpointStateReceipt>;
 	readonly reload: (intent?: TerminalReloadSessionIntent) => Promise<ReloadSessionReceipt>;
+	readonly prepareHostTransition: (
+		intent: TerminalPrepareHostTransitionIntent,
+	) => Promise<PrepareHostTransitionReceipt>;
 	readonly compact: (intent?: TerminalCompactionIntent) => Promise<RunCompactionReceipt>;
 	readonly cancelCompaction: (intent?: TerminalCancelCompactionIntent) => Promise<CancelCompactionReceipt>;
 	readonly runEphemeralTurn: (intent: TerminalEphemeralTurnIntent) => Promise<RunEphemeralTurnReceipt>;
@@ -370,6 +382,27 @@ export interface TerminalSessionController {
 const metadata = (intent: { readonly commandId?: string; readonly correlationId?: string }) => {
 	const commandId = intent.commandId ?? randomUUID();
 	return { commandId, correlationId: intent.correlationId ?? commandId };
+};
+
+const stripHostTransitionMetadata = (intent: TerminalPrepareHostTransitionIntent): InteractiveHostIntent => {
+	switch (intent.kind) {
+		case "exit":
+		case "freshSession":
+		case "restartProcess":
+			return { kind: intent.kind };
+		case "newSession":
+			return intent.parent === undefined ? { kind: "newSession" } : { kind: "newSession", parent: intent.parent };
+		case "resume":
+		case "switchSession":
+			return { kind: intent.kind, session: intent.session };
+		case "fork":
+		case "branch":
+			return { kind: intent.kind, entryId: intent.entryId };
+		case "navigate":
+			return { kind: "navigate", targetId: intent.targetId, summarize: intent.summarize };
+		case "moveSession":
+			return { kind: "moveSession", newDir: intent.newDir };
+	}
 };
 
 /** Promise boundary for terminal code; all authority remains in the Effect-native view. */
@@ -945,6 +978,31 @@ export async function createTerminalSessionController(
 								expectedSessionRevision: current.runner.sessionRevision,
 								viewId,
 								controllerEpoch: view!.epoch,
+							}),
+						),
+					);
+					await refresh();
+					return receipt;
+				} catch (error) {
+					await refresh();
+					throw error;
+				}
+			},
+			prepareHostTransition: async intent => {
+				const current = await refresh();
+				try {
+					const ids = metadata(intent);
+					const receipt = await run(
+						view!.prepareHostTransition(
+							decodePrepareHostTransitionCommand({
+								schemaVersion: RUNNER_SCHEMA_VERSION,
+								kind: "prepareHostTransition",
+								...ids,
+								...(intent.causationId === undefined ? {} : { causationId: intent.causationId }),
+								expectedSessionRevision: current.runner.sessionRevision,
+								viewId,
+								controllerEpoch: view!.epoch,
+								intent: stripHostTransitionMetadata(intent),
 							}),
 						),
 					);

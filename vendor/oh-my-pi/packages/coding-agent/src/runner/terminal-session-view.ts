@@ -42,6 +42,8 @@ import type {
 	RefreshSshToolReceipt,
 	ReloadSessionCommand,
 	ReloadSessionReceipt,
+	PrepareHostTransitionCommand,
+	PrepareHostTransitionReceipt,
 	ReplaceTodosCommand,
 	ReplaceTodosReceipt,
 	RunCompactionCommand,
@@ -251,6 +253,9 @@ export interface TerminalSessionView {
 		command: SetCheckpointStateCommand,
 	) => Effect.Effect<SetCheckpointStateReceipt, RunnerFailure, Scope.Scope>;
 	readonly reload: (command: ReloadSessionCommand) => Effect.Effect<ReloadSessionReceipt, RunnerFailure, Scope.Scope>;
+	readonly prepareHostTransition: (
+		command: PrepareHostTransitionCommand,
+	) => Effect.Effect<PrepareHostTransitionReceipt, RunnerFailure, Scope.Scope>;
 	readonly compact: (command: RunCompactionCommand) => Effect.Effect<RunCompactionReceipt, RunnerFailure, Scope.Scope>;
 	readonly cancelCompaction: (
 		command: CancelCompactionCommand,

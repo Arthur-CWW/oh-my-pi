@@ -39,6 +39,20 @@ function harness(
 			return {
 				epoch,
 				viewId: `view-${epoch}`,
+				prepareHostTransition: async intent => ({
+					commandId: `prepare-${epoch}`,
+					correlationId: `prepare-${epoch}`,
+					startedSessionRevision: 0,
+					operationGeneration: epoch,
+					completedSessionRevision: 0,
+					intent,
+					target: {
+						sessionId: "session-b",
+						cwd: "/tmp",
+					},
+					cancelled: false,
+					replayed: false,
+				}),
 				close: async () => {
 					closedControllers.push(epoch);
 				},
@@ -217,6 +231,7 @@ describe("DisposableTerminalHost", () => {
 		expect(state.closedControllers).toEqual([1]);
 		expect(state.runnerStops).toBe(1);
 		expect(intent).toEqual({ kind: "switchSession", session: { kind: "id", id: "session-b" } });
+		expect(state.host.preparedTransition?.intent).toEqual(intent);
 	});
 
 	test("reattaches the known-good revision when loading or initializing fails", async () => {

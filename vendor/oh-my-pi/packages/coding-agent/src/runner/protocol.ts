@@ -1,6 +1,8 @@
 import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import { Schema } from "effect";
+import type { RestartSpawnSpec } from "../cli/restart-session";
 import type { KernelDisplayOutput } from "../eval/py/display";
+import type { InteractiveHostIntent } from "../modes/interactive-host-intent";
 import type { DurableQueuedInput } from "../session/durable-input-queue";
 import type { SessionEntry, SessionHeader, WorkflowModeSnapshot } from "../session/session-entries";
 import type { TodoPhase } from "../tools/todo";
@@ -430,6 +432,31 @@ export const ReloadSessionCommandSchema = Schema.Struct({
 	expectedSessionRevision: RunnerRevisionSchema,
 });
 
+const SessionLocatorSchema = Schema.Union([
+	Schema.Struct({ kind: Schema.Literal("id"), id: Schema.String }),
+	Schema.Struct({ kind: Schema.Literal("path"), path: Schema.String }),
+]);
+
+export const InteractiveHostIntentSchema = Schema.Union([
+	Schema.Struct({ kind: Schema.Literal("exit") }),
+	Schema.Struct({ kind: Schema.Literal("newSession"), parent: Schema.optional(SessionLocatorSchema) }),
+	Schema.Struct({ kind: Schema.Literal("freshSession") }),
+	Schema.Struct({ kind: Schema.Literal("resume"), session: SessionLocatorSchema }),
+	Schema.Struct({ kind: Schema.Literal("fork"), entryId: Schema.String }),
+	Schema.Struct({ kind: Schema.Literal("branch"), entryId: Schema.String }),
+	Schema.Struct({ kind: Schema.Literal("navigate"), targetId: Schema.String, summarize: Schema.Boolean }),
+	Schema.Struct({ kind: Schema.Literal("switchSession"), session: SessionLocatorSchema }),
+	Schema.Struct({ kind: Schema.Literal("moveSession"), newDir: Schema.String }),
+	Schema.Struct({ kind: Schema.Literal("restartProcess") }),
+]);
+
+export const PrepareHostTransitionCommandSchema = Schema.Struct({
+	...LiveCommandMetadataSchema,
+	kind: Schema.Literal("prepareHostTransition"),
+	expectedSessionRevision: RunnerRevisionSchema,
+	intent: InteractiveHostIntentSchema,
+});
+
 export type SubmitInputCommand = typeof SubmitInputCommandSchema.Type;
 export type SubmitCustomMessageCommand = typeof SubmitCustomMessageCommandSchema.Type;
 export type EditQueuedInputCommand = typeof EditQueuedInputCommandSchema.Type;
@@ -453,6 +480,7 @@ export type RunnerCheckpointState = typeof CheckpointStateSchema.Type;
 export type GetCheckpointStateCommand = typeof GetCheckpointStateCommandSchema.Type;
 export type SetCheckpointStateCommand = typeof SetCheckpointStateCommandSchema.Type;
 export type ReloadSessionCommand = typeof ReloadSessionCommandSchema.Type;
+export type PrepareHostTransitionCommand = typeof PrepareHostTransitionCommandSchema.Type;
 
 export type TransitionPlanModeCommand = typeof TransitionPlanModeCommandSchema.Type;
 export type TransitionGoalModeCommand = typeof TransitionGoalModeCommandSchema.Type;
@@ -753,6 +781,27 @@ export interface ReloadSessionReceipt {
 	readonly replayed: boolean;
 }
 
+export interface PreparedHostTransitionTarget {
+	readonly sessionId: string;
+	readonly sessionFile?: string;
+	readonly cwd: string;
+	readonly editorText?: string;
+}
+
+export interface PrepareHostTransitionReceipt {
+	readonly commandId: string;
+	readonly correlationId: string;
+	readonly causationId?: string;
+	readonly startedSessionRevision: number;
+	readonly operationGeneration: number;
+	readonly completedSessionRevision: number;
+	readonly intent: InteractiveHostIntent;
+	readonly target?: PreparedHostTransitionTarget;
+	readonly restartSpawn?: RestartSpawnSpec;
+	readonly cancelled: boolean;
+	readonly replayed: boolean;
+}
+
 export interface CycleModelReceipt {
 	readonly commandId: string;
 	readonly correlationId: string;
@@ -847,6 +896,7 @@ export type RunnerEventKind =
 	| "handoffCompleted"
 	| "checkpointChanged"
 	| "sessionReloaded"
+	| "hostTransitionPrepared"
 	| "transcriptEntryAppended";
 
 /** Every event is a closed causal envelope in the runner's single total order. */
@@ -1164,6 +1214,16 @@ export const decodeReloadSessionCommand = (input: unknown): ReloadSessionCommand
 	} catch (error) {
 		throw new InvalidRunnerCommandError({
 			issue: error instanceof Error ? error.message : "Invalid reload-session command",
+		});
+	}
+};
+
+export const decodePrepareHostTransitionCommand = (input: unknown): PrepareHostTransitionCommand => {
+	try {
+		return Schema.decodeUnknownSync(PrepareHostTransitionCommandSchema)(input, { onExcessProperty: "error" });
+	} catch (error) {
+		throw new InvalidRunnerCommandError({
+			issue: error instanceof Error ? error.message : "Invalid prepare-host-transition command",
 		});
 	}
 };

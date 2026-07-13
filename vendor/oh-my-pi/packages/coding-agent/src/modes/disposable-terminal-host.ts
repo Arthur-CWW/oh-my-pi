@@ -1,5 +1,6 @@
 import { pathToFileURL } from "node:url";
 import { Effect, Exit, Scope } from "effect";
+import type { PrepareHostTransitionReceipt } from "../runner/protocol";
 import type { SessionRunner } from "../runner/session-runner";
 import {
 	createTerminalSessionController,
@@ -99,6 +100,7 @@ export class DisposableTerminalHost {
 	readonly #completion: Promise<InteractiveHostIntent | undefined>;
 	#resolveCompletion!: (intent: InteractiveHostIntent | undefined) => void;
 	#exitIntent: InteractiveHostIntent | undefined;
+	#preparedTransition: PrepareHostTransitionReceipt | undefined;
 
 	constructor(options: DisposableTerminalHostOptions) {
 		this.#runner = options.runner;
@@ -116,6 +118,10 @@ export class DisposableTerminalHost {
 
 	get completion(): Promise<InteractiveHostIntent | undefined> {
 		return this.#completion;
+	}
+
+	get preparedTransition(): PrepareHostTransitionReceipt | undefined {
+		return this.#preparedTransition;
 	}
 
 	reload(revision: DisposableTerminalRevision): Promise<void> {
@@ -260,12 +266,23 @@ export class DisposableTerminalHost {
 	#requestTransition(epoch: number, intent: InteractiveHostIntent): Promise<void> {
 		const { promise, resolve, reject } = Promise.withResolvers<void>();
 		queueMicrotask(() => {
-			if (this.#active?.epoch !== epoch || this.#stopped) {
+			const active = this.#active;
+			if (active?.epoch !== epoch || this.#stopped) {
 				reject(new Error(`Stale disposable terminal view epoch ${epoch}`));
 				return;
 			}
-			this.#exitIntent = intent;
-			void this.stop().then(resolve, reject);
+			void active.controller
+				.prepareHostTransition(intent)
+				.then(receipt => {
+					if (receipt.cancelled) {
+						resolve();
+						return;
+					}
+					this.#preparedTransition = receipt;
+					this.#exitIntent = receipt.intent;
+					return this.stop().then(resolve);
+				})
+				.catch(reject);
 		});
 		return promise;
 	}
