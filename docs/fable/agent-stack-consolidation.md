@@ -100,8 +100,8 @@ Remove only when all are true: no current config or prompt reference; no conserv
 
 - Name the responsibility: orchestrator, implementer, reviewer, designer, scout/researcher, operator, QA/proof runner.
 - A role never contains a provider/model/account. Resolve the current lane from hard constraints → explicit spawn → session strategy → workspace → global policy, with visible provenance.
-- Current config posture is evidence, not identity: Sol-high generally orchestrates/load-bearing work; Terra-medium handles bounded implementation in product overlays; Luna-xhigh is the Fable-config smol lane; designer and vision are explicit. Do not promote those mappings into permanent doctrine.
-- Use the lowest evidence-supported effort that meets acceptance. Escalate for ambiguity, irreversible decisions, or failed acceptance—not because a preferred model exists.
+- Current routing posture is explicit: **Fable owns intent, ontology, architecture, synthesis, and taste. Luna xhigh is the default bounded implementer** for UI adjustments, fixtures, configuration, docs, inventories, adapters, data extraction, and proof runbooks. Terra owns retrieval/external-source research and bounded data logic. **Sol is an escalation lane** for concurrency, persistence, process lifecycle, crash recovery, security boundaries, difficult cross-module integration, and independent review—not the default merely because a task edits production code.
+- Use the lowest evidence-supported effort that meets acceptance. Default to Luna for a settled bounded contract; escalate to Sol only when the slice crosses a load-bearing invariant, remains ambiguous, or fails acceptance. Record the escalation reason.
 
 ### Packet shape
 
