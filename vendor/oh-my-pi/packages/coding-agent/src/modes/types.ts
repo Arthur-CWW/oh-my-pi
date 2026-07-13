@@ -336,6 +336,7 @@ export interface InteractiveModeContext {
 	showHookConfirm(title: string, message: string): Promise<boolean>;
 	showDebugSelector(): Promise<void>;
 	showAgentHub(options?: { requireContent?: boolean }): void;
+	showPrimitivesInspector(): Promise<void>;
 	resetObserverRegistry(): void;
 
 	// Input handling

@@ -124,6 +124,7 @@ import type { HookEditorComponent } from "./components/hook-editor";
 import type { HookInputComponent } from "./components/hook-input";
 import type { HookSelectorComponent, HookSelectorSlider } from "./components/hook-selector";
 import { PlanReviewOverlay } from "./components/plan-review-overlay";
+import { showPrimitivesInspectorOverlay } from "./components/primitives-inspector";
 import { RawSemanticTranscriptComponent } from "./components/raw-semantic-transcript";
 import { StatusLineComponent } from "./components/status-line";
 import type { ToolExecutionHandle } from "./components/tool-execution";
@@ -3712,13 +3713,11 @@ export class InteractiveMode implements InteractiveModeContext {
 		}
 	}
 
-	async showDebugSelector(): Promise<void> {
-		await this.#selectorController.showDebugSelector();
-	}
+	async showDebugSelector(): Promise<void> { await this.#selectorController.showDebugSelector(); }
 
-	showAgentHub(options?: { requireContent?: boolean }): void {
-		this.#selectorController.showAgentHub(this.#observerRegistry, options);
-	}
+	showAgentHub(options?: { requireContent?: boolean }): void { this.#selectorController.showAgentHub(this.#observerRegistry, options); }
+
+	async showPrimitivesInspector(): Promise<void> { await showPrimitivesInspectorOverlay(this); }
 
 	resetObserverRegistry(): void {
 		this.#observerRegistry.resetSessions();

@@ -359,6 +359,9 @@ export class InputController {
 		for (const key of this.ctx.keybindings.getKeys("app.clipboard.copyLine")) {
 			this.ctx.editor.setCustomKeyHandler(key, () => this.handleCopyCurrentLine());
 		}
+		for (const key of this.ctx.keybindings.getKeys("app.primitives.inspect")) {
+			this.ctx.editor.setCustomKeyHandler(key, () => void this.ctx.showPrimitivesInspector());
+		}
 		const hubKeys = new Set([
 			...this.ctx.keybindings.getKeys("app.agents.hub"),
 			...this.ctx.keybindings.getKeys("app.session.observe"),
@@ -1461,8 +1464,6 @@ export class InputController {
 			moveCursorToLineEnd: () => this.ctx.editor.moveToLineEnd(),
 		});
 	}
-
-	/** Copy the current editor line to the system clipboard. */
 	handleCopyCurrentLine(): void {
 		const { line } = this.ctx.editor.getCursor();
 		const text = this.ctx.editor.getLines()[line] || "";
@@ -1479,8 +1480,6 @@ export class InputController {
 			this.ctx.showWarning("Failed to copy to clipboard");
 		}
 	}
-
-	/** Copy current prompt text to system clipboard. */
 	handleCopyPrompt(): void {
 		const text = this.ctx.editor.getText();
 		if (!text) {

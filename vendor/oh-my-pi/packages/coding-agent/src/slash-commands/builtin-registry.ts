@@ -10,8 +10,7 @@ import { APP_NAME, setProjectDir, VERSION } from "@oh-my-pi/pi-utils";
 import { acquireRestartSessionOwnership, buildRestartSpawnSpec, handoffRestartProcess } from "../cli/restart-session";
 import { COLLAB_GUEST_ALLOWED_COMMANDS } from "../collab/guest";
 import type { CollabHost } from "../collab/host";
-import type { SettingPath, SettingValue } from "../config/settings";
-import { settings } from "../config/settings";
+import { settings, type SettingPath, type SettingValue } from "../config/settings";
 import {
 	clearPluginRootsAndCaches,
 	resolveActiveProjectRegistryPath,
@@ -28,6 +27,7 @@ import {
 } from "../extensibility/plugins/marketplace";
 import { resolveMemoryBackend } from "../memory-backend";
 import { theme } from "../modes/theme/theme";
+import { PRIMITIVES_INSPECTOR_SLASH_COMMAND } from "../modes/components/primitives-inspector-command";
 import type { InteractiveModeContext } from "../modes/types";
 import type { AgentSession, FreshSessionResult } from "../session/agent-session";
 import { decodeSessionWorkstream, type SessionWorkstream } from "../session/session-entries";
@@ -61,7 +61,6 @@ import type {
 } from "./types";
 
 export type { BuiltinSlashCommand, SubcommandDef } from "./types";
-
 /** TUI-specific runtime accepted by `executeBuiltinSlashCommand`. */
 export type BuiltinSlashCommandRuntime = TuiSlashCommandRuntime;
 
@@ -421,6 +420,7 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<SlashCommandSpec> = [
 			runtime.ctx.editor.setText("");
 		},
 	},
+	PRIMITIVES_INSPECTOR_SLASH_COMMAND,
 	{
 		name: "setup",
 		aliases: ["providers"],

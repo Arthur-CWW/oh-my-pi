@@ -44,6 +44,7 @@ interface AppKeybindings {
 	"app.clipboard.copyLine": true;
 	"app.clipboard.copyPrompt": true;
 	"app.agents.hub": true;
+	"app.primitives.inspect": true;
 	"app.agents.returnToParent": true;
 	"app.session.new": true;
 	"app.session.tree": true;
@@ -206,6 +207,10 @@ export const KEYBINDINGS = {
 	"app.agents.hub": {
 		defaultKeys: "alt+a",
 		description: "Open the agent hub",
+	},
+	"app.primitives.inspect": {
+		defaultKeys: "alt+i",
+		description: "Open the primitives inspector",
 	},
 	"app.agents.returnToParent": {
 		defaultKeys: "alt+shift+left",
