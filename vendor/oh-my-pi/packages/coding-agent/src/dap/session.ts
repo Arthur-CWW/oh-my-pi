@@ -245,35 +245,28 @@ function buildSummary(session: DapSession): DapSessionSummary {
 		needsConfigurationDone: session.needsConfigurationDone && !session.configurationDoneSent,
 	};
 }
-
 export class DapSessionManager {
 	#sessions = new Map<string, DapSession>();
 	#activeSessionId: string | null = null;
 	#cleanupLoopPromise?: Promise<void>;
+	#cleanupAbort?: AbortController;
 	#nextId = 0;
-
-	constructor() {
-		this.#startCleanupTimer();
-	}
-
 	getActiveSession(): DapSessionSummary | null {
 		const session = this.#getActiveSessionOrNull();
 		return session ? buildSummary(session) : null;
 	}
-
 	listSessions(): DapSessionSummary[] {
 		return Array.from(this.#sessions.values()).map(buildSummary);
 	}
-
 	getCapabilities(): DapCapabilities | null {
 		return this.#getActiveSessionOrNull()?.capabilities ?? null;
 	}
-
 	async launch(
 		options: DapLaunchSessionOptions,
 		signal?: AbortSignal,
 		timeoutMs: number = 30_000,
 	): Promise<DapSessionSummary> {
+		this.#startCleanupTimer();
 		await this.#ensureLaunchSlot();
 		const client = await DapClient.spawn({ adapter: options.adapter, cwd: options.cwd });
 		const session = this.#registerSession(client, options.adapter, options.cwd, options.program);
@@ -336,12 +329,12 @@ export class DapSessionManager {
 			throw error;
 		}
 	}
-
 	async attach(
 		options: DapAttachSessionOptions,
 		signal?: AbortSignal,
 		timeoutMs: number = 30_000,
 	): Promise<DapSessionSummary> {
+		this.#startCleanupTimer();
 		await this.#ensureLaunchSlot();
 		const client = await DapClient.spawn({ adapter: options.adapter, cwd: options.cwd });
 		const session = this.#registerSession(client, options.adapter, options.cwd);
@@ -394,7 +387,6 @@ export class DapSessionManager {
 			throw error;
 		}
 	}
-
 	/**
 	 * Serialize breakpoint mutations per session: every mutator does a
 	 * read-modify-write of session state around an await, and the adapter-side
@@ -414,7 +406,6 @@ export class DapSessionManager {
 		);
 		return run;
 	}
-
 	async setBreakpoint(
 		file: string,
 		line: number,
@@ -454,7 +445,6 @@ export class DapSessionManager {
 			signal,
 		);
 	}
-
 	async removeBreakpoint(file: string, line: number, signal?: AbortSignal, timeoutMs: number = 30_000) {
 		const session = this.#touchActiveSession();
 		return this.#serializeBreakpointMutation(
@@ -1018,22 +1008,32 @@ export class DapSessionManager {
 		await this.#disposeSession(session);
 		return summary;
 	}
-
+	async dispose(): Promise<void> {
+		this.#cleanupAbort?.abort();
+		await this.#cleanupLoopPromise;
+		const sessions = Array.from(this.#sessions.values());
+		this.#sessions.clear();
+		this.#activeSessionId = null;
+		await Promise.allSettled(sessions.map(session => session.client.dispose()));
+	}
 	#startCleanupTimer(): void {
 		if (this.#cleanupLoopPromise) return;
-		this.#cleanupLoopPromise = this.#runCleanupLoop();
+		this.#cleanupAbort = new AbortController();
+		this.#cleanupLoopPromise = this.#runCleanupLoop(this.#cleanupAbort.signal);
 	}
-
-	async #runCleanupLoop(): Promise<void> {
-		for await (const _ of timers.setInterval(CLEANUP_INTERVAL_MS, null, { ref: false })) {
-			try {
-				this.#cleanupIdleSessions();
-			} catch (error) {
-				logger.error("DAP idle session cleanup failed", { error: toErrorMessage(error) });
+	async #runCleanupLoop(signal: AbortSignal): Promise<void> {
+		try {
+			for await (const _ of timers.setInterval(CLEANUP_INTERVAL_MS, null, { ref: false, signal })) {
+				try {
+					this.#cleanupIdleSessions();
+				} catch (error) {
+					logger.error("DAP idle session cleanup failed", { error: toErrorMessage(error) });
+				}
 			}
+		} catch (error) {
+			if (!signal.aborted) throw error;
 		}
 	}
-
 	#cleanupIdleSessions(): void {
 		if (this.#sessions.size === 0) return;
 		const now = Date.now();

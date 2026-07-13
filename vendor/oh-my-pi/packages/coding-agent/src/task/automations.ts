@@ -1,11 +1,14 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import type { AuthStorage } from "@oh-my-pi/pi-ai";
 import { getAgentDir, getSessionsDir, isEnoent } from "@oh-my-pi/pi-utils";
 import { YAML } from "bun";
 import { Schema } from "effect";
 import { ModelRegistry } from "../config/model-registry";
 import { resolveModelOverrideWithAuthFallback } from "../config/model-resolver";
+import { getKnownRoleIds, MODEL_ROLE_IDS } from "../config/model-roles";
 import { Settings } from "../config/settings";
+import type { MCPManager } from "../mcp/manager";
 import { createAgentSession, discoverAuthStorage } from "../sdk";
 import type { AgentSession } from "../session/agent-session";
 import { SessionManager } from "../session/session-manager";
@@ -75,7 +78,9 @@ export interface AutomationRunOptions {
 	readonly sessionsDir?: string;
 	readonly nowMs?: () => number;
 	readonly createSession?: typeof createAgentSession;
+	readonly discoverAuth?: typeof discoverAuthStorage;
 }
+
 
 export interface AutomationDaemonOptions extends AutomationRunOptions {
 	readonly signal?: AbortSignal;
@@ -299,21 +304,30 @@ export async function runAutomationOnce(
 	});
 	const createSession = options.createSession ?? createAgentSession;
 	let session: AgentSession | undefined;
+	let mcpManager: MCPManager | undefined;
+	let authStorage: AuthStorage | undefined;
 	let status: AutomationLedgerEntry["status"] = "succeeded";
 	let summary = "";
 	let finalRecord: AutomationLedgerEntry | undefined;
 	try {
 		const settings = await Settings.init({ cwd: entry.cwd, agentDir: runtimeAgentDir });
-		const authStorage = await discoverAuthStorage(runtimeAgentDir);
+		authStorage = await (options.discoverAuth ?? discoverAuthStorage)(runtimeAgentDir);
 		const modelRegistry = new ModelRegistry(authStorage, path.join(runtimeAgentDir, "models.yml"));
-		const resolution = await resolveModelOverrideWithAuthFallback(
-			[entry.model ?? entry.lane],
-			undefined,
-			modelRegistry,
-			settings,
-		);
+		const requestedSelector = entry.model ?? entry.lane;
+		const roleSelector =
+			entry.model === undefined && MODEL_ROLE_IDS.includes(requestedSelector as (typeof MODEL_ROLE_IDS)[number])
+				? `pi/${requestedSelector}`
+				: requestedSelector;
+		const resolution = await resolveModelOverrideWithAuthFallback([roleSelector], undefined, modelRegistry, settings);
 		if (!resolution.model) {
-			throw new Error(`No available model for automation lane ${JSON.stringify(entry.model ?? entry.lane)}`);
+			const availableRoles: string[] = [];
+			for (const role of getKnownRoleIds(settings)) {
+				const candidate = await resolveModelOverrideWithAuthFallback([`pi/${role}`], undefined, modelRegistry, settings);
+				if (candidate.model) availableRoles.push(role);
+			}
+			const candidates =
+				availableRoles.length > 0 ? ` Available roles: ${availableRoles.join(", ")}.` : " No automation roles are available.";
+			throw new Error(`No available model for automation lane ${JSON.stringify(requestedSelector)}.${candidates}`);
 		}
 		const created = await createSession({
 			cwd: entry.cwd,
@@ -329,6 +343,7 @@ export async function runAutomationOnce(
 			agentDisplayName: `automation: ${entry.name}`,
 		});
 		session = created.session;
+		mcpManager = created.mcpManager;
 		await session.prompt(await readAutomationPrompt(entry), {
 			attribution: "agent",
 			expandPromptTemplates: false,
@@ -339,7 +354,15 @@ export async function runAutomationOnce(
 		summary = capSummary(error instanceof Error ? error.message : String(error));
 		throw error;
 	} finally {
-		if (session) await session.dispose();
+		try {
+			if (session) await session.dispose();
+		} finally {
+			try {
+				await mcpManager?.disconnectAll();
+			} finally {
+				authStorage?.close();
+			}
+		}
 		await sessionManager.flush();
 		finalRecord = {
 			runAt,

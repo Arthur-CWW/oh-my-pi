@@ -3,6 +3,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { SessionManager } from "../src/session/session-manager";
+import { createAgentSession, discoverAuthStorage } from "../src/sdk";
 import {
 	type AutomationEntry,
 	type AutomationRunResult,
@@ -23,6 +24,25 @@ async function makeTempDir(): Promise<string> {
 	const directory = await fs.mkdtemp(path.join(os.tmpdir(), "omp-automations-"));
 	tempDirs.push(directory);
 	return directory;
+}
+
+async function writeLocalModelFixture(root: string, port: number): Promise<void> {
+	await Bun.write(
+		path.join(root, "models.yml"),
+		[
+			"providers:",
+			"  local-proof:",
+			`    baseUrl: http://127.0.0.1:${port}/v1`,
+			"    api: openai-completions",
+			"    auth: none",
+			"    models:",
+			"      - id: local-model",
+			"        name: Local proof model",
+			"        contextWindow: 8192",
+			"        maxTokens: 1024",
+		].join("\n"),
+	);
+	await Bun.write(path.join(root, "settings.json"), JSON.stringify({ modelRoles: { smol: "local-proof/local-model" } }));
 }
 
 afterEach(async () => {
@@ -180,41 +200,61 @@ describe("automation ledger and daemon", () => {
 			},
 		});
 		try {
-			await Bun.write(
-				path.join(root, "models.yml"),
-				[
-					"providers:",
-					"  local-proof:",
-					`    baseUrl: http://127.0.0.1:${server.port}/v1`,
-					"    api: openai-completions",
-					"    auth: none",
-					"    models:",
-					"      - id: local-model",
-					"        name: Local proof model",
-					"        contextWindow: 8192",
-					"        maxTokens: 1024",
-				].join("\n"),
-			);
+			if (server.port === undefined) throw new Error("Local automation test server has no port");
+			await writeLocalModelFixture(root, server.port);
 			const entry: AutomationEntry = {
 				...ENTRY,
 				name: "local-provider-proof",
-				model: "local-proof/local-model",
 				prompt: "LOCAL_AUTOMATION_PROMPT",
 			};
+			let authCloseCalls = 0;
+			let sessionDisposeCalls = 0;
+			const discoverAuth: typeof discoverAuthStorage = async agentDir => {
+				const storage = await discoverAuthStorage(agentDir);
+				const close = storage.close.bind(storage);
+				storage.close = () => {
+					authCloseCalls += 1;
+					close();
+				};
+				return storage;
+			};
+			const createSession: typeof createAgentSession = async options => {
+				const created = await createAgentSession(options);
+				const dispose = created.session.dispose.bind(created.session);
+				created.session.dispose = async disposeOptions => {
+					sessionDisposeCalls += 1;
+					await dispose(disposeOptions);
+				};
+				return created;
+			};
 			const sessionsDir = path.join(root, "sessions");
-			const first = await runAutomationOnce(entry, { agentDir: root, sessionsDir });
-			const second = await runAutomationOnce(entry, { agentDir: root, sessionsDir });
+			const runOptions = { agentDir: root, sessionsDir, discoverAuth, createSession };
+			const first = await runAutomationOnce(entry, runOptions);
+			const second = await runAutomationOnce(entry, runOptions);
 			expect(first.status).toBe("succeeded");
 			expect(first.outputSummary).toBe("AUTOMATION_OK");
 			expect(second.sessionFile).toBe(first.sessionFile);
 			expect(promptObserved).toBe(true);
+			expect(authCloseCalls).toBe(2);
+			expect(sessionDisposeCalls).toBe(2);
 			const reopened = await SessionManager.open(first.sessionFile);
 			expect(reopened.getEntries().filter(item => item.type === "message").length).toBe(4);
+			await reopened.close();
 			expect(await readAutomationLedger(entry, root)).toHaveLength(2);
 		} finally {
 			server.stop(true);
 		}
 	});
+
+	it("lists resolvable role candidates when a lane cannot resolve", async () => {
+		const root = await makeTempDir();
+		await writeLocalModelFixture(root, 1);
+		const entry = { ...ENTRY, lane: "missing-lane" };
+		await expect(runAutomationOnce(entry, { agentDir: root, sessionsDir: path.join(root, "sessions") })).rejects.toThrow(
+			/No available model for automation lane "missing-lane"\. Available roles: .*smol/,
+		);
+	});
+
 
 	it("places stable journals where the root session scan can discover them", async () => {
 		const sessionsDir = await makeTempDir();
