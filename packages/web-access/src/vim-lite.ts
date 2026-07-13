@@ -6,7 +6,7 @@ import {
   type KeybindingsManager,
 } from "@oh-my-pi/pi-coding-agent"
 import type { EditorTheme, TUI } from "@oh-my-pi/pi-tui"
-import { CURSOR_MARKER, Ellipsis, matchesKey, truncateToWidth, visibleWidth } from "@oh-my-pi/pi-tui"
+import { CURSOR_MARKER, matchesKey, visibleWidth } from "@oh-my-pi/pi-tui"
 
 type VimMode = "insert" | "normal" | "visual" | "visualLine"
 type VimOperator = "d" | "c" | "y"
@@ -56,6 +56,9 @@ type Snapshot = { text: string; cursor: Pos }
 type VisualRange = { start: number; end: number; linewise: boolean; startLine: number; endLine: number }
 type LayoutSegment = { line: number; startCol: number; endCol: number; text: string; hasCursor: boolean }
 type ExpandedPaste = { marker: string; content: string; start: number; end: number }
+type ChromeEditorCompat = {
+  setChromeMode?(mode: "horizontal"): void
+}
 
 const MAX_COUNT = 999
 const MAX_HISTORY = 300
@@ -68,7 +71,7 @@ const KEY_LEFT = "\x1b[D"
 
 
 const HELP_LINES = [
-  "vim-lite: Esc normal · i/a/I/A insert · o/O new line · Enter submits",
+  "vim-lite: modal input · cursor shapes show mode: insert thin bar, normal block, visual selection",
   "motions: h j k l · w/W b/B e/E · 0 ^ $ · gg/G · counts like 3w or 2dd",
   "visual: v charwise · V linewise · o swap end · d/c/y/x/s operate on selection",
   "clipboard: y / yy / Y / visual y copy to system clipboard · p/P paste from it · deletes stay internal",
@@ -160,6 +163,7 @@ export class VimLiteEditor extends CustomEditor {
   private insertSessionStart: Snapshot | undefined
   private historyCommandThisInput = false
   private vimVerticalCol: number | undefined
+  private readonly usesHorizontalChrome: boolean
 
   decorateText = (text: string): string => text
 
@@ -168,7 +172,16 @@ export class VimLiteEditor extends CustomEditor {
     this.vimTui = tui
     this.keybindingsManager = keybindings
     this.clipboard = clipboard
+    const chromeEditor = this as object as ChromeEditorCompat
+    if (chromeEditor.setChromeMode) {
+      chromeEditor.setChromeMode("horizontal")
+      this.usesHorizontalChrome = true
+    } else {
+      super.setBorderVisible(false)
+      this.usesHorizontalChrome = false
+    }
     super.setUseTerminalCursor(false)
+    this.syncCursorAppearance()
   }
 
   handleInput(data: string): void {
@@ -223,40 +236,25 @@ export class VimLiteEditor extends CustomEditor {
   override setUseTerminalCursor(_useTerminalCursor: boolean): void {
     super.setUseTerminalCursor(false)
   }
-
   render(width: number): string[] {
+    this.syncCursorAppearance()
     this.clampNormalCursor()
-    const wasFocused = this.focused
-    if (this.mode !== "insert") this.focused = false
-    try {
-      const lines = [...(this.isVisualMode() ? this.renderVisual(width) : super.render(width))]
-      if (lines.length === 0) return lines
-
-      const label = this.borderColor(` ${this.statusLabel()} `)
-      const labelWidth = visibleWidth(label)
-      if (labelWidth >= width) {
-        lines[lines.length - 1] = truncateToWidth(label, width, Ellipsis.Omit)
-        return lines
-      }
-
-      const last = lines[lines.length - 1]!
-      lines[lines.length - 1] = truncateToWidth(last, width - labelWidth, Ellipsis.Omit) + label
-      return lines
-    } finally {
-      this.focused = wasFocused
-    }
+    if (this.isVisualMode()) return this.renderVisual(width)
+    return super.render(width).map((line) => line.replaceAll(CURSOR_MARKER, ""))
   }
 
 
   private renderVisual(width: number): string[] {
-    // Let the stock editor update width-dependent internals used by motions.
-    super.render(width)
+    // Let the stock editor update width-dependent internals and reuse its chrome
+    // only when it actually framed every rendered content segment.
+    const stockRender = super.render(width)
 
     const paddingX = Math.min(this.getPaddingXCompat(), Math.max(0, Math.floor((width - 1) / 2)))
     const contentWidth = Math.max(1, width - paddingX * 2)
     const layoutWidth = Math.max(1, contentWidth - (paddingX ? 0 : 1))
     const range = this.getVisualRange()
     const segments = this.layoutSegments(layoutWidth)
+    const hasRenderedHorizontalChrome = this.usesHorizontalChrome && stockRender.length === segments.length + 2
     const cursorIndex = Math.max(0, segments.findIndex((segment) => segment.hasCursor))
     const maxVisible = Math.max(5, Math.floor(this.vimTui.terminal.rows * 0.3))
     const maxStart = Math.max(0, segments.length - maxVisible)
@@ -269,14 +267,14 @@ export class VimLiteEditor extends CustomEditor {
     }
     start = clamp(start, 0, maxVirtualStart)
     this.visualScrollOffset = start
-
     const needsVirtualPadding = start > maxStart
     const visible = segments.slice(start, start + maxVisible)
+
     const pad = " ".repeat(paddingX)
-    const lines: string[] = [this.borderColor("─".repeat(width))]
+    const lines: string[] = hasRenderedHorizontalChrome ? [stockRender[0] ?? ""] : []
 
     for (const segment of visible) {
-      const rendered = this.renderVisualSegment(segment, range)
+      const rendered = this.renderVisualSegment(segment, range, contentWidth)
       const renderedWidth = visibleWidth(rendered)
       const rightPad = " ".repeat(Math.max(0, contentWidth - renderedWidth))
       lines.push(`${pad}${rendered}${rightPad}${pad}`)
@@ -288,7 +286,7 @@ export class VimLiteEditor extends CustomEditor {
       }
     }
 
-    lines.push(this.borderColor("─".repeat(width)))
+    if (hasRenderedHorizontalChrome) lines.push(stockRender.at(-1) ?? "")
     return lines
   }
 
@@ -335,14 +333,14 @@ export class VimLiteEditor extends CustomEditor {
     return segments
   }
 
-  private renderVisualSegment(segment: LayoutSegment, range: VisualRange | undefined): string {
+  private renderVisualSegment(segment: LayoutSegment, range: VisualRange | undefined, maxWidth: number): string {
     const e = this.e()
     const cursorCol = e.state.cursorLine === segment.line ? e.state.cursorCol : -1
     let out = ""
 
     if (segment.text.length === 0) {
       const selected = range?.linewise && segment.line >= range.startLine && segment.line <= range.endLine
-      return selected ? "\x1b[7m \x1b[0m" : cursorCol === 0 ? "\x1b[7m \x1b[0m" : ""
+      return selected ? `\x1b[${cursorCol === 0 ? "7;4" : "7"}m \x1b[0m` : cursorCol === 0 ? "\x1b[7;4m \x1b[0m" : ""
     }
 
     for (const part of this.segments(segment.text)) {
@@ -353,10 +351,11 @@ export class VimLiteEditor extends CustomEditor {
           ? segment.line >= range.startLine && segment.line <= range.endLine
           : offset >= range.start && offset < range.end
         : false
-      out += selected ? `\x1b[7m${part.segment}\x1b[0m` : part.segment
+      const cursor = col === cursorCol || (cursorCol === segment.endCol && col + part.segment.length === segment.endCol)
+      out += selected ? `\x1b[${cursor ? "7;4" : "7"}m${part.segment}\x1b[0m` : cursor ? `\x1b[7;4m${part.segment}\x1b[0m` : part.segment
     }
 
-    if (cursorCol === segment.endCol && this.focused) out += "\x1b[7m \x1b[0m"
+    if (cursorCol === segment.endCol && this.focused && visibleWidth(out) < maxWidth) out += "\x1b[7;4m \x1b[0m"
     return out
   }
 
@@ -1495,6 +1494,7 @@ export class VimLiteEditor extends CustomEditor {
       }
     }
     this.mode = "normal"
+    this.syncCursorAppearance()
     this.visualAnchor = undefined
     this.visualScrollOffset = undefined
     this.resetPending()
@@ -1503,6 +1503,7 @@ export class VimLiteEditor extends CustomEditor {
 
   private enterInsertMode(): void {
     this.mode = "insert"
+    this.syncCursorAppearance()
     this.visualAnchor = undefined
     this.visualScrollOffset = undefined
     this.resetPending()
@@ -1511,6 +1512,7 @@ export class VimLiteEditor extends CustomEditor {
 
   private enterVisualMode(mode: "visual" | "visualLine"): void {
     this.mode = mode
+    this.syncCursorAppearance()
     this.visualAnchor = this.currentPos()
     this.visualScrollOffset = undefined
     this.resetPending()
@@ -1541,20 +1543,15 @@ export class VimLiteEditor extends CustomEditor {
     return Boolean(this.countText || this.pendingGoto || this.pendingOperator || this.pendingReplaceCount || this.pendingRegisterQuote || this.selectedRegister)
   }
 
-  private statusLabel(): string {
-    if (this.mode === "insert") return "INSERT"
-    const pieces = [this.mode === "visual" ? "VISUAL" : this.mode === "visualLine" ? "V-LINE" : "NORMAL"]
-    if (this.pendingRegisterQuote) pieces.push('"')
-    else if (this.selectedRegister) pieces.push(`"${this.selectedRegister}`)
-    if (this.countText) pieces.push(this.countText)
-    if (this.pendingGoto) pieces.push(`${this.pendingGoto.explicit ? this.pendingGoto.count : ""}g`)
-    if (this.pendingOperator) {
-      const op = this.pendingOperator.prefix ? `${this.pendingOperator.op}g` : this.pendingOperator.op
-      const register = this.pendingOperator.registerName ? `"${this.pendingOperator.registerName}` : ""
-      pieces.push(`${register}${this.pendingOperator.count > 1 ? this.pendingOperator.count : ""}${op}${this.pendingOperator.countText}`)
+  private syncCursorAppearance(): void {
+    if (this.mode === "insert") {
+      this.cursorOverride = "▏"
+      this.cursorOverrideWidth = 1
+      return
     }
-    if (this.pendingReplaceCount) pieces.push(`${this.pendingReplaceCount > 1 ? this.pendingReplaceCount : ""}r`)
-    return pieces.join(" ")
+
+    this.cursorOverride = this.mode === "normal" ? "\x1b[7m \x1b[0m" : "\x1b[7;4m \x1b[0m"
+    this.cursorOverrideWidth = 1
   }
 
   private requestRender(): void {

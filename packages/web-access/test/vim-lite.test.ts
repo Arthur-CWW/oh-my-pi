@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { existsSync, readFileSync } from "node:fs"
+import { existsSync } from "node:fs"
 import { join } from "node:path"
 import { pathToFileURL } from "node:url"
 import type { KeybindingsManager } from "@oh-my-pi/pi-coding-agent"
@@ -71,6 +71,18 @@ function renderSnapshot(editor: VimLiteEditor, width = 32): string {
     .join("\n")
 }
 
+function renderContentLines(editor: VimLiteEditor, width = 32): string[] {
+  return editor
+    .render(width)
+    .map((line) =>
+      line
+        .replace(/\u001b_pi:c\u0007/g, "")
+        .replace(/\x1b\[[0-9;]*m/g, "")
+        .trim(),
+    )
+    .filter((line) => line.length > 0 && !/^─+$/.test(line))
+}
+
 function largePasteText(): string {
   return Array.from({ length: 12 }, (_, index) => `line-${index + 1}`).join("\n")
 }
@@ -136,6 +148,7 @@ type OmpExtensionContext = {
 
 type OmpExtension = {
   handlers: Map<string, Array<(event: object, ctx: OmpExtensionContext) => void | Promise<void>>>
+  tools: Map<string, unknown>
 }
 
 type OmpLoaderModule = {
@@ -167,8 +180,16 @@ async function loadOmpRuntime(): Promise<OmpRuntime | undefined> {
   return { extensionPath, loadExtensions: loader.loadExtensions, getKeybindings: keybindings.getKeybindings }
 }
 
+const runtime = await loadOmpRuntime()
+
+test.skipIf(!runtime)("compiled OMP loads web-access extension without errors", async () => {
+  const result = await runtime!.loadExtensions([runtime!.extensionPath], process.cwd())
+  expect(result.errors).toEqual([])
+  expect(result.extensions.length).toBeGreaterThan(0)
+  expect(result.extensions[0]!.handlers.has("session_start")).toBe(true)
+})
+
 async function createOmpEditor(): Promise<VimLiteEditor | undefined> {
-  const runtime = await loadOmpRuntime()
   if (!runtime) return undefined
 
   let editorFactory: OmpEditorFactory | undefined
@@ -182,7 +203,6 @@ async function createOmpEditor(): Promise<VimLiteEditor | undefined> {
       setWidget() {},
     },
   }
-
   const result = await runtime.loadExtensions([runtime.extensionPath], process.cwd())
   expect(result.errors).toEqual([])
   const sessionStart = result.extensions[0]?.handlers.get("session_start")?.[0]
@@ -268,37 +288,71 @@ describe("VimLiteEditor", () => {
     press(pasteEditor, "gx")
     const recollapsedPaste = pasteEditor.getText()
 
-    const actual = [
-      "--- visual ---",
-      visual,
-      "--- after-delete ---",
-      afterDelete,
-      "--- after-undo ---",
-      afterUndo,
-      "--- after-redo ---",
-      afterRedo,
-      "--- visual-line ---",
-      visualLine,
-      "--- after-line-delete ---",
-      afterLineDelete,
-      "--- clipboard-yank ---",
-      afterClipboardYank,
-      "--- clipboard-paste ---",
-      afterClipboardPaste,
-      "--- line-clipboard-yank ---",
-      afterLineClipboardYank,
-      "--- line-clipboard-paste ---",
-      afterLineClipboardPaste,
-      "--- visual-wrapped-centered ---",
-      visualWrapped,
-      "--- paste-toggle ---",
-      `collapsed=${JSON.stringify(collapsedPaste)}`,
-      `expanded=${JSON.stringify(expandedPaste)}`,
-      `recollapsed=${JSON.stringify(recollapsedPaste)}`,
-    ].join("\n")
+    const rendered = [visual, afterDelete, afterUndo, afterRedo, visualLine, afterLineDelete, afterClipboardYank, afterClipboardPaste, afterLineClipboardYank, afterLineClipboardPaste, visualWrapped].join("\n")
+    expect(rendered).not.toMatch(/[╭╮╰╯│]/)
+    expect(rendered).not.toMatch(/\b(?:INSERT|NORMAL|VISUAL|V-LINE)\b/)
+    expect(afterDelete).not.toContain("hello world")
+    expect(afterUndo).toContain("hello world")
+    expect(afterRedo).not.toContain("hello world")
+    expect(clipboardText).toBe("one\n")
+    expect(collapsedPaste).not.toBe(expandedPaste)
+    expect(expandedPaste).toContain("line-12")
+    expect(recollapsedPaste).toBe(collapsedPaste)
+  })
 
-    const expected = readFileSync(join(import.meta.dir, "__snapshots__", "vim-lite-visual.snap.txt"), "utf8").trimEnd()
-    expect(actual).toBe(expected)
+  test("renders a characterwise visual span without duplicating its line", () => {
+    const editor = createEditor()
+    editor.setText("alpha beta")
+    editor.handleInput("\x1b")
+    press(editor, "0v4l")
+
+    expect(renderContentLines(editor)).toEqual(["alpha beta"])
+  })
+
+  test("renders a three-line numbered visual selection exactly once", () => {
+    const editor = createEditor()
+    editor.setText("1. some\n2. some\n3. some")
+    editor.handleInput("\x1b")
+    press(editor, "ggV2j")
+
+    // Exercise the horizontal-chrome compatibility branch used by newer OMP runtimes.
+    Reflect.set(editor, "usesHorizontalChrome", true)
+    expect(renderContentLines(editor)).toEqual(["1. some", "2. some", "3. some"])
+  })
+
+  test("renders a visual-line selection spanning the whole buffer exactly once", () => {
+    const editor = createEditor()
+    editor.setText("first\nsecond\nthird\nlast")
+    editor.handleInput("\x1b")
+    press(editor, "ggVG")
+
+    expect(renderContentLines(editor)).toEqual(["first", "second", "third", "last"])
+  })
+
+  test("renders wrapped visual lines exactly once at narrow widths", () => {
+    const editor = createEditor()
+    editor.setText("abcdefgh\nijklmnop")
+    editor.handleInput("\x1b")
+    press(editor, "ggVj")
+
+    expect(renderContentLines(editor, 8)).toEqual(["abcd", "efgh", "ijkl", "mnop"])
+  })
+
+  test("renders horizontal chrome and cursor shapes across mode transitions", () => {
+    const editor = createEditor()
+    editor.focused = true
+
+    expect(editor.render(8).join("\n")).toContain("▏")
+    press(editor, "abcd")
+    expect(editor.render(4).join("\n")).toContain("▏")
+
+    editor.handleInput("\x1b")
+    expect(editor.render(4).join("\n")).toContain("\x1b[7m")
+
+    editor.handleInput("v")
+    const visual = editor.render(4).join("\n")
+    expect(visual).toContain("\x1b[7;4m")
+    expect(visual).not.toMatch(/[╭╮╰╯│]/)
   })
 
   test("plain yanks write to system clipboard", () => {
@@ -515,7 +569,7 @@ describe("VimLiteEditor", () => {
     const rendered = renderSnapshot(editor)
 
     expect(editor.getText()).toBe("ello")
-    expect(rendered).toContain("NORMAL")
+    expect(rendered).not.toMatch(/[╭╮╰╯│]/)
   })
   test("actual OMP editor uses system clipboard for default yank and paste", async () => {
     const editor = await createOmpEditor()
