@@ -62,11 +62,10 @@ Full inventory with sizes: [`external-inventory.md`](external-inventory.md). Not
 
 | Layer | File | Notes |
 |---|---|---|
-| Global OMP | `~/.omp/agent/config.yml` | modelRoles incl. `slow: claude-fable-5` (trap: built-in `reviewer` binds `pi/slow`; without the overlay the fable-guard degrades it to Kimi), `advisor: deepseek` enabled — both overridden by the overlay |
+| Global OMP | `~/.omp/agent/config.yml` | modelRoles incl. `slow: claude-fable-5` (trap: built-in `reviewer` binds `pi/slow`; without the overlay the fable-guard routes it to a non-Fable lane), `advisor: deepseek` enabled — both overridden by the overlay |
 | Workspace | `.omp/config.yml` | Kagi search, apfs isolation, soft budget 40 |
-| Fable overlay | `.omp/fable-config.yml` | advisor off, `slow/complex/plan → gpt-5.5`, `designer → opus-4-6`, autolearn off. Launch: `omp --config ./.omp/fable-config.yml --model <fable-model-id>` |
-| Skill manifest | `package.json` `pi.skills` | Slim 20-skill profile; ledger + restore steps in [`harness-slimming.md`](harness-slimming.md) |
-| Custom agents | `.omp/agents/` | jimeng-gemini-worker, jimeng-kimi-worker, prose-deepseek-v4-pro, prose-glm-5-2; built-ins (reviewer/designer/explore/plan/…) live in `vendor/oh-my-pi/packages/coding-agent/src/prompts/agents/` |
+| Fable overlay | `.omp/fable-config.yml` | advisor off; Sol at high effort handles orchestration, plans, and escalations; Terra at medium handles normal task work. Keep `designer` for deliberate design/UI work; autolearn off. Launch: `omp --config ./.omp/fable-config.yml` |
+| Built-in agent roles | OMP task taxonomy | The eight bundled roles are `task`, `quick_task`, `explore`, `plan`, `reviewer`, `designer`, `librarian`, and `oracle`. Jimeng, prose, and authenticated-web work use `task` packets with a specialist role, owned/excluded files, least-privilege tool allowlist, and optional Terra model/effort override; read-only local scouting uses `explore`, while external or API research uses `librarian`. |
 | Fable-subagent guard | `vendor/oh-my-pi/packages/coding-agent/src/config/model-resolver.ts` | Blocks subagent selectors containing `fable` |
 | Auth / quotas | `omp auth-broker`, `omp token <provider>`, `omp usage`, `OMP_PROFILE` | Reuse; never invent token storage |
 

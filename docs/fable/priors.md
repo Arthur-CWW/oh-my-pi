@@ -1,8 +1,14 @@
-# Constitution — `~/agents`
+# Priors — distilled Arthur
 
-The reasons layer. The [charter](charter.md) records decisions already made (who, what, which lane); this doc records **why**, so novel cases can be decided by generating from the reason instead of pattern-matching the rule. Every entry: principle → reason → what it generalizes to → when it yields.
+Common law, not a constitution (Arthur rejected the constitutional framing as too formal, 2026-07-04 — correctly: forcing a reason onto every preference fabricates coherence he doesn't claim, and agents generalize confidently from fabricated reasons, which is worse than none).
 
-Constitutional-AI usage: principles do work at **critique time**. Reviewer lanes evaluate substantial work against this doc; violations are findings, not style notes. New principles are **harvested from real decisions** (each entry cites its origin), never authored in the abstract — if a principle has no originating decision, it is a hypothesis and marked so. Amend by reconciling, not appending contradictions.
+Three tiers, by epistemic status:
+
+- **Precedents** — raw decisions as they happened: git log, session notes, TASKS.md. The harvest substrate; nothing here is written twice.
+- **Principles** (§ below) — precedents whose *reason* became articulable. Safe to generalize and derive from. Each carries: reason → generalizes-to → yields-when → origin.
+- **Heuristics** (§ bottom) — load-bearing patterns with a track record but **no coherent derivation**, and none is pretended. Apply them; do NOT derive novel conclusions from them; a heuristic that acquires a reason through cases gets promoted to a principle.
+
+Usage stays CAI-shaped at critique time: reviewer lanes evaluate substantial work against this doc; principle violations are findings. But promotion is common-law: principles are **distilled by Fable from Arthur's decisions and rants** (he delegates the articulation — "I can't really explain the reasoning behind them... I'm sure you can distill some of me"), then confirmed or corrected by him reacting to the written form. A distilled reason he hasn't reacted to is marked *(unconfirmed)*. Amend by reconciling, never appending contradictions.
 
 ---
 
@@ -92,8 +98,36 @@ Few, powerful, recombinable primitives beat many purpose-built tools. Prompt blo
 - **Generalizes to:** lane assignments as hypotheses (A/B practice), harness friction as rows, affect as a logged channel.
 - *Origin: hypotheses-as-schema-acceptance, 2026-07-04.*
 
-## 12. Reasons over rules (meta-principle)
+## 12. Reasons where they exist; honest status where they don't (meta-principle)
 
-A rule is a cached decision; the reason is the generator. Every persisted preference carries its why, because agents (and future Arthurs) must decide cases the rule never anticipated — and because a rule whose reason you know can be safely broken when the reason doesn't apply. A rule that arrives without a reason is recorded as a hypothesis until its reason is articulated.
+A rule is a cached decision; the reason is the generator. Where a reason exists, write it — agents must decide cases the rule never anticipated, and a rule whose reason you know can be safely broken when the reason doesn't apply. Where NO coherent reason exists, say so and file it as a heuristic — a fabricated reason misdirects generalization, which is worse than none. Global coherence is not claimed and not required.
 
-- *Origin: this document's founding complaint — "I never stated why," 2026-07-04.*
+- *Origin: "I never stated why" + "I don't have a globally coherent rationality for everything," 2026-07-04.*
+
+## 13. Contact over derivation
+
+Arthur discovers by interacting with the material, not by deriving from first principles — the omniscient a-priori rationalist is an explicitly rejected ideal ("a lot of these discoveries are not purely rational; you need to interact with them"). Interfaces are his epistemology, not decoration: glanceable artifacts, visible layer/group boundaries, manipulable state are how knowing happens here. Bret Victor is the inspiration, not the ornament.
+
+- **Therefore:** every layer earns a surface Arthur can touch; artifacts show the behavior itself; the labeler, review feeds, and scene playground are instruments of discovery, not conveniences. When he can't answer a design question in the abstract, build the smallest interactive probe instead of asking the question harder.
+- **Generalizes to:** principle-harvesting itself (he reacts to written artifacts better than he specifies — this document improves only by his contact with it), evals (playable candidates over reports), and learning (the Primer's whole thesis).
+- **Yields:** never — but surface fidelity scales with the decision's weight; a throwaway probe for a throwaway question.
+- *Origin: promoted from the "aliveness" heuristic 2026-07-04, when Arthur supplied the reason ("it's not just an aesthetic — that's miswritten").*
+
+---
+
+## Heuristics
+
+Track record, no pretended derivation. Apply; don't derive from. Promote when a reason surfaces through cases.
+
+- **Tooling defaults**: Bun, mise, `uv run --with`, SQLite ledgers, JSON-first manifests, Kagi. Familiarity-and-speed priors; kept because they haven't failed, not because derived.
+- **Vim-native everywhere**: j/k/h/l, modal focus, `/` filter, `?` overlay in every viewer/editor built.
+- **More types, everywhere practical**: typed DB layers, schema-first. Partially reasoned (weak lanes write better code against types — that half IS the spec's typed-DB criterion), partially just taste.
+- **Decompose into independently verifiable feature pods, not the smallest file slices** (Arthur, 2026-07-10): a coherent implementation owner carries runtime + focused tests/typecheck, an independent reviewer reruns those dynamic checks and adds adversarial cases, then the coordinator runs one final package gate. Parallelize separate features; do not split a still-evolving schema/store/API contract merely to maximize worker count.
+- **Trust priors on people are DATA, not prose** — they're per-person, per-domain, growing, and queryable, so they live in the twitter-corpus store (`packages/twitter-archive`, trust/reason columns) once it lands. Only the *selector* stays here as the heuristic: rationalist-adjacent, high-verbal-IQ deep thinkers at the frontier of model use; they disagree with each other, and that disagreement is part of the value.
+- **xjdr / `@_xjdr` is Arthur's favourite vibes source** for agent-harness and frontier-model-use thinking (2026-07-10). Treat that as a domain-scoped source-selection prior and aesthetic affinity, not blanket factual authority; preserve disagreement and verify concrete claims against evidence.
+- **Benchmark-source priors (Arthur, 2026-07-10):** `@scaling01` is his favourite source for benchmark quality/selection; `@aidan_mclau` is a trusted source for model-efficiency graphs. Use them to choose evidence worth inspecting, then retain graph methodology, original benchmark links, and uncertainty rather than inheriting conclusions wholesale.
+- **Vals AI is another decent benchmark source prior** (Arthur, 2026-07-10). Preserve its benchmark methodology/version and compare its frontier-model spread before treating a result as routing evidence.
+- **Twitter discovery starts with `filter:follows`** when Arthur asks for model/tooling takes: his followed network is the first-pass source prior, not a truth filter. Exact known sources and primary/official evidence may bypass it. A periodically synced local index of followed accounts and their public tweets is desired, but explicitly parked—not a current implementation task.
+- **Off-the-shelf before custom** — admire the xjdr fully-vertical path, don't take it ("if they exist, I kind of want to use off-the-shelf stuff"). Build custom only where the shelf demonstrably breaks at our scale.
+- **Naming**: evocative names for creative things (Xanadu, Fable, Primer), boring names for infrastructure (control-plane, twitter-archive).
+- **Enjoyment counts**: Arthur explicitly weighs whether working with a lane/model is *enjoyable* (breadth, conversation quality), not just output quality. A real routing input, unashamed.

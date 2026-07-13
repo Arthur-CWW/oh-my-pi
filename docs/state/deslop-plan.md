@@ -110,3 +110,22 @@ Generated `.tmp` directories inside package tests/builds, vendored trees, `.venv
 6. **Are root script aliases a supported operator API?** Recommendation: publish a small allowlist (for example `check`, lint guards, and genuinely cross-workspace operations); remove unused package aliases only after usage evidence is collected.
 7. **Are the 11-byte `docs/prompts.md` and interrupted `docs/drafts/rork-ios-pipeline.*` artifacts still owned?** Recommendation: owner review, then delete if unreferenced; their names/sizes alone are insufficient proof.
 8. **Should the gateway own OMP-subscription execution as a provider adapter?** Recommendation: yes at the job/event contract, but keep OMP process/auth semantics distinct from API-key HTTP adapters.
+
+## Executed 2026-07-13: durable-doc rescue
+
+- Inventoried and classified all 135 files in session-scoped `local/` directories and all 11 root-level Markdown files in repo-local `local/`.
+- Copied durable session documents and moved durable repo-local documents into `docs/fable/rescued/` or `docs/fable/handoffs/`, preserving provenance on every rescued copy.
+- Left scratch artifacts in place and recorded personal OpenAI/cyber-abuse material as requiring a private store; none was copied into the repository.
+- Full source, destination, classification, checksum, stream, and disposition inventory: [rescue manifest](../fable/rescued/MANIFEST.md).
+
+## Executed 2026-07-13: log + proof compression
+
+- Added `scripts/sessions-gc.ts`; dry-run remains the default and `--apply` performs checksum-verified `zstd` compression for session JSONL/log files whose session directory is older than 14 days.
+- Applied it to 4,469 files: 1,313,968,252 bytes became 222,253,847 bytes, reclaiming 1,091,714,405 bytes. Per-file original SHA-256 and byte counts are in `~/.omp/agent/sessions-archive-manifest.jsonl`.
+- Archived superseded restart proofs (658,694,647 bytes reclaimed), 25 older companion voice E2E runs (40,490,706), four copied canary binaries (352,705,121), and the detached heap snapshot (26,841,974).
+- Proof archive source mappings, archive SHA-256 values, internal per-file checksum manifests, and the canary archive retention decision are in `local/ARCHIVE-MANIFEST.md`.
+- Total reclaimed: 2,170,446,853 bytes. Sessions older than 14 days now require manual decompression before OMP resume.
+
+## Executed 2026-07-13: ratchet re-baseline after gated wave
+
+`file-size-baseline.json` regenerated once at wave end (122 frozen files): six files legitimately grew inside union-gated, reviewed slices (twitter full-sync worker +15, input-controller +1, builtin-registry +13 for /feeds, task executor +3 / index +39 for admission+revive, tui editor +37 for paste expansion) and agent-hub.ts's ceiling DROPPED 3397→3387 after the roster extraction. Re-baselining is a coordinator-gated, dated action — never done silently per-slice.

@@ -50,7 +50,7 @@ Invariants. Most are also static lints — push every lesson down the guardrail 
 ## Hard rules
 
 - **No `sudo`** without Arthur's explicit approval via `ask` (exact command, cwd, why, reversibility).
-- **Model routing.** Never launch GPT-5.5 or Fable. Sol medium is the default for implementation, UI, and design; use Terra for bounded logic and retrieval. Sol medium remains the design/implementation lead; Sol design subagents may spawn Luna xhigh only for bounded mechanical exploration, inventory, retrieval, code searches, small variants, and QA evidence. Luna never owns synthesis, taste decisions, architecture, or final integration. The current global `smol` is already Luna xhigh.
+- **Model routing.** Never launch GPT-5.5 or Fable. Lane assignments are NOT cached here — resolve routes from `docs/fable/routing-doctrine.md` and the current posture in `docs/fable/agent-stack-consolidation.md` (2026-07-12: Luna xhigh is the default bounded implementer; Sol medium is the escalation lane for synthesis, taste, architecture, UI design leads, and final integration; Terra for bounded logic/retrieval). Luna never owns synthesis, taste decisions, architecture, or final integration. The current global `smol` is Luna xhigh. (Reconciled 2026-07-13: this bullet previously cached "Sol medium default", contradicting the newer checkpointed doctrine.)
 - **No secrets in commits.** No `.env`, tokens, credentials, session files.
 - **Provider spend gates.** Jimeng/Dreamina: dry-run default, live spend only inside a named cap with approval; concurrency 1; stop on rate-limit errors.
 - **Respectful external access.** Low concurrency, jitter/backoff, disk cache, entity dedupe. No private/locked content.

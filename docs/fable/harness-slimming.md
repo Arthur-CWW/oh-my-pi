@@ -100,25 +100,25 @@ Net effect today:
 
 - **Main Fable session** should have **no advisor**. Fable is a distinct model creature with its own preferences and working style, not an extension of Arthur; its advisor/Primer policy reflects that separation. Fable is the high-level advisor/orchestrator; adding another advisor layer on top is expensive and redundant.
 - **DeepSeek should be minimal.** Use it only for explicit advisor/oracle/prose/adversarial passes; prefer coding subscriptions and frontend sessions for normal work.
-- **Fable must never spawn a Fable subagent**. Fable is the scarce high-level model; worker execution should be delegated to cheaper/capable lanes: Kimi, Gemini Flash, Antigravity, or GPT-5.5.
-- **Subagents can be full agents** when the task warrants it: they may have explicit goals, bounded recursion, and appropriate model/tool sets. They are not required to be minimal one-shot workers.
+- **Fable must never spawn a Fable subagent**. Fable is the scarce high-level model; mutable worker execution uses `task` packets with a specialist role, owned/excluded files, and a least-privilege tool allowlist. Sol at high effort handles orchestration, plans, and escalations; Terra at medium handles normal task work. Use `explore` for read-only local scouting and `librarian` for external or API research.
+- **Subagents can be full agents** when the task warrants it: they may have explicit goals, bounded recursion, and an optional supported model/effort override. They are not required to be minimal one-shot workers.
 - **OMP autolearn is currently not trusted** for Fable preparation. Fable should rely on curated docs (`docs/fable/`), the session index, and the homey system instead of hoping autolearn will surface the right context.
 
 ### Implementation gaps / current guardrails
 
 1. **No true per-agent advisor split yet.** The committed `.omp/fable-config.yml` disables advisor for the whole Fable session (`advisor.enabled: false`, `advisor.subagents: false`). If Arthur later wants non-Fable workers to carry an advisor while main Fable does not, OMP needs a cleaner per-agent advisor policy.
 2. **Fable-subagent guard is now hardcoded in OMP.** `vendor/oh-my-pi/packages/coding-agent/src/config/model-resolver.ts` blocks resolved subagent models whose selector contains `fable` and falls back to non-Fable `pi/task`, `pi/smol`, or `pi/slow` lanes. Main sessions can still run Fable.
-3. **Fable model ID is not committed.** Launch Fable with `--model <actual-fable-model-id>` plus the local overlay once the model is available.
+3. **The committed overlay is the active routing source.** Launch Fable with the local overlay; it selects Sol high for the main session and Terra medium for worker roles.
 
 ### Committed `--config` overlay
 
 The global config at `/Users/arthur/.omp/agent/config.yml` stays untouched. A Fable session can be launched with the committed overlay:
 
 ```bash
-omp --config ./.omp/fable-config.yml --model <actual-fable-model-id>
+omp --config ./.omp/fable-config.yml
 ```
 
-The overlay disables the advisor/autolearn, binds worker roles to non-Fable lanes, keeps Kagi search, and intentionally omits a DeepSeek advisor role and a Fable default model.
+The overlay disables the advisor/autolearn, binds worker roles to non-Fable lanes, keeps Kagi search, and sets Sol high as the main-session default.
 
 ## 3b. Global-dir + managed-skills archive pass (2026-07-03)
 

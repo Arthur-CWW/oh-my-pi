@@ -3,10 +3,10 @@
 Starting a Fable OMP session in `~/agents`:
 
 ```bash
-omp --config ./.omp/fable-config.yml --model <fable-model-id>
+omp --config ./.omp/fable-config.yml
 ```
 
-(The overlay kills the advisor, binds worker lanes to GPT-5.5 medium/high, `designer→Opus`, keeps Kimi only for feedstock retrieval, disables autolearn. Without it, `pi/slow` lanes degrade through the fable-guard.)
+(The overlay disables the advisor and autolearn. Sol at high effort handles orchestration, planning, and escalations; Terra at medium handles normal mutable task work. Mutable work uses `task` packets with a specialist role, owned/excluded files, a least-privilege tool allowlist, and an optional supported model/effort override when specifically required. Keep deliberate design/UI work with `designer`; use `explore` for read-only local scouting and `librarian` for external or API research. The fable-guard prevents Fable subagents.)
 
 ## Read (in order, nothing else by default)
 
