@@ -1,0 +1,25 @@
+{
+  "feeds": [
+    {
+      "name": "thsottiaux",
+      "kind": "nitter-handle",
+      "target": "thsottiaux",
+      "cadence": "hourly",
+      "classifierProfile": "availability"
+    },
+    {
+      "name": "anthropic-news",
+      "kind": "page-hash",
+      "target": "https://www.anthropic.com/news",
+      "cadence": "daily",
+      "classifierProfile": "availability"
+    },
+    {
+      "name": "anthropic-model-deprecations",
+      "kind": "page-hash",
+      "target": "https://docs.anthropic.com/en/docs/about-claude/model-deprecations",
+      "cadence": "daily",
+      "classifierProfile": "availability"
+    }
+  ]
+}

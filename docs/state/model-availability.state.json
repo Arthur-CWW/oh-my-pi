@@ -1,0 +1,16 @@
+{
+  "lastSyncAt": "2026-07-13T04:17:51.435Z",
+  "perSource": {
+    "thsottiaux": {
+      "lastItemAt": "2026-07-13T02:33:19.000Z",
+      "lastResetMentionAt": "2026-07-12T21:28:59.000Z",
+      "lastResetQuote": "Added a banked reset to 500k users of ChatGPT Work and Codex. What’s been happening: - Just released the ability to use a banked reset from web and mobile. Before today you could only do it in the desktop app - Had an issue where less than 10% of users who used a banked reset an…"
+    },
+    "anthropic-news": {
+      "lastItemAt": "2026-07-13T04:17:36.238Z"
+    },
+    "anthropic-model-deprecations": {
+      "lastItemAt": "2026-07-13T04:17:36.238Z"
+    }
+  }
+}

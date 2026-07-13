@@ -1,0 +1,21 @@
+{
+  "name": "@wirebabel/availability-watcher",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "availability:sync": "bun src/cli.ts sync",
+    "availability:check": "bun src/cli.ts check",
+    "check:types": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@wirebabel/twitter-archive": "workspace:*",
+    "effect": "^4.0.0-beta.71"
+  },
+  "devDependencies": {
+    "@types/node": "^25.2.3",
+    "bun-types": "^1.3.9",
+    "typescript": "^5.9.3"
+  }
+}
