@@ -8,6 +8,12 @@ import {
   type NitterBackfillWorkerRunSummary,
   type NitterBackfillWorkerTargetStatus,
 } from "./backfill-worker"
+import {
+  FULL_SYNC_DEFAULT_HORIZON,
+  FULL_SYNC_DEFAULT_PAGES_PER_PASS,
+  runFullSyncPass,
+  type FullSyncPassSummary,
+} from "./full-sync"
 import { readTwitterArchiveConfig, type TwitterArchiveConfigEnv } from "./effect-services"
 import { appendTwitterArchiveJsonlLog } from "./jsonl-log"
 import type { MediaDownloadFetchFunction } from "./media-download"
@@ -30,9 +36,15 @@ export interface QueuedNitterBackfillWorkerCliEnv extends TwitterArchiveConfigEn
   readonly NITTER_QUEUED_BACKFILL_MEDIA_CONCURRENCY?: string
   readonly NITTER_QUEUED_BACKFILL_MEDIA_MAX_ITEMS?: string
   readonly NITTER_QUEUED_BACKFILL_RUN_UNTIL_END?: string
+  readonly NITTER_QUEUED_BACKFILL_EXHAUST_HORIZON?: string
+  readonly NITTER_QUEUED_BACKFILL_EXHAUST_PAGES_PER_PASS?: string
 }
 
 export interface QueuedNitterBackfillWorkerCliOptions {
+  readonly exhaust: boolean
+  readonly handles: readonly string[]
+  readonly horizon?: string
+  readonly pagesPerPass?: number
   readonly once: boolean
   readonly daemon: boolean
   readonly dbPath?: string
@@ -51,6 +63,10 @@ export interface QueuedNitterBackfillWorkerCliOptions {
 }
 
 export interface QueuedNitterBackfillWorkerOptions {
+  readonly exhaust?: boolean
+  readonly handles?: readonly string[]
+  readonly horizon?: string
+  readonly pagesPerPass?: number
   readonly runId?: string
   readonly once?: boolean
   readonly daemon?: boolean
@@ -88,6 +104,7 @@ export interface QueuedNitterBackfillWorkerCycleSummary {
   readonly startedAt: string
   readonly selectedTargets: readonly QueuedNitterBackfillSelectedTarget[]
   readonly backfill: NitterBackfillWorkerRunSummary | null
+  readonly fullSync: FullSyncPassSummary | null
 }
 
 export interface QueuedNitterBackfillWorkerSummary {
@@ -102,6 +119,10 @@ export interface QueuedNitterBackfillWorkerSummary {
   readonly completedResyncMs: number | null
   readonly batchPages: number
   readonly runUntilEnd: boolean
+  readonly exhaust: boolean
+  readonly handles: readonly string[]
+  readonly horizon: string
+  readonly pagesPerPass: number
   readonly cyclesCompleted: number
   readonly stoppedReason: "once" | "aborted"
   readonly lastCycle: QueuedNitterBackfillWorkerCycleSummary | null
@@ -127,6 +148,10 @@ interface NormalizedQueuedNitterBackfillWorkerOptions extends Required<Pick<Queu
   readonly mediaConcurrency: number
   readonly mediaMaxItems: number
   readonly runUntilEnd: boolean
+  readonly exhaust: boolean
+  readonly handles: readonly string[]
+  readonly horizon: string
+  readonly pagesPerPass: number
   readonly fetchFn: NitterFetchFunction | undefined
   readonly mediaFetchFn: MediaDownloadFetchFunction | undefined
   readonly signal: AbortSignal | undefined
@@ -142,6 +167,13 @@ export function parseQueuedNitterBackfillWorkerCliArgs(
   if (parseBooleanFlag(env.NITTER_QUEUED_BACKFILL_ONCE)) {
     daemon = false
   }
+  let exhaust = false
+  const handles: string[] = []
+  let horizon = env.NITTER_QUEUED_BACKFILL_EXHAUST_HORIZON
+  let pagesPerPass = parseOptionalPositiveInteger(
+    env.NITTER_QUEUED_BACKFILL_EXHAUST_PAGES_PER_PASS,
+    "NITTER_QUEUED_BACKFILL_EXHAUST_PAGES_PER_PASS",
+  )
 
   let dbPath: string | undefined
   let logPath: string | undefined
@@ -169,6 +201,12 @@ export function parseQueuedNitterBackfillWorkerCliArgs(
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index]
 
+    if (arg === "--exhaust") {
+      exhaust = true
+      daemon = false
+      continue
+    }
+
     if (arg === "--once") {
       daemon = false
       continue
@@ -186,6 +224,34 @@ export function parseQueuedNitterBackfillWorkerCliArgs(
 
     if (arg === "--one-batch") {
       runUntilEnd = false
+      continue
+    }
+
+    const handlesValue = readFlagValue(args, index, arg, "--handles")
+    if (handlesValue) {
+      handles.push(...parseHandleList(handlesValue.value))
+      index = handlesValue.index
+      continue
+    }
+
+    const handleValue = readFlagValue(args, index, arg, "--handle")
+    if (handleValue) {
+      handles.push(...parseHandleList(handleValue.value))
+      index = handleValue.index
+      continue
+    }
+
+    const pagesPerPassValue = readFlagValue(args, index, arg, "--pages-per-pass")
+    if (pagesPerPassValue) {
+      pagesPerPass = parsePositiveInteger(pagesPerPassValue.value, pagesPerPassValue.flag)
+      index = pagesPerPassValue.index
+      continue
+    }
+
+    const horizonValue = readFlagValue(args, index, arg, "--horizon")
+    if (horizonValue) {
+      horizon = horizonValue.value
+      index = horizonValue.index
       continue
     }
 
@@ -280,7 +346,22 @@ export function parseQueuedNitterBackfillWorkerCliArgs(
     throw new Error(`Queued Nitter backfill worker does not accept positional handles: ${arg}`)
   }
 
+  const orderedHandles = dedupeHandles(handles)
+  if (exhaust && orderedHandles.length === 0) {
+    throw new Error("--exhaust requires --handles or --handle")
+  }
+  if (!exhaust && orderedHandles.length > 0) {
+    throw new Error("--handles and --handle require --exhaust")
+  }
+  if (exhaust && daemon) {
+    throw new Error("--exhaust is a bounded pass and cannot run as a daemon")
+  }
+
   return pruneUndefined({
+    exhaust,
+    handles: orderedHandles,
+    horizon,
+    pagesPerPass,
     once: !daemon,
     daemon,
     dbPath,
@@ -306,6 +387,10 @@ export async function runQueuedNitterBackfillWorkerCli(
   const config = readTwitterArchiveConfig(env)
   const cli = parseQueuedNitterBackfillWorkerCliArgs(args, env)
   return runQueuedNitterBackfillWorker({
+    exhaust: cli.exhaust,
+    handles: cli.handles,
+    horizon: cli.horizon,
+    pagesPerPass: cli.pagesPerPass,
     runId: `queued-nitter-backfill-worker-${Date.now()}`,
     once: cli.once,
     daemon: cli.daemon,
@@ -358,6 +443,10 @@ export async function runQueuedNitterBackfillWorker(
     completedResyncMs: normalized.completedResyncMs ?? null,
     batchPages: normalized.batchPages,
     runUntilEnd: normalized.runUntilEnd,
+    exhaust: normalized.exhaust,
+    handles: normalized.handles,
+    horizon: normalized.horizon,
+    pagesPerPass: normalized.pagesPerPass,
     cyclesCompleted,
     stoppedReason,
     lastCycle,
@@ -370,6 +459,27 @@ async function runQueuedNitterBackfillWorkerCycle(
 ): Promise<QueuedNitterBackfillWorkerCycleSummary> {
   const startedAt = options.now()
   const baseUrl = normalizeBaseUrl(options.baseUrl)
+  if (options.exhaust) {
+    const fullSync = await runFullSyncPass({
+      runId,
+      handles: options.handles,
+      dbPath: options.dbPath,
+      logPath: options.logPath,
+      mediaRoot: options.mediaRoot,
+      baseUrl,
+      pagesPerPass: options.pagesPerPass,
+      horizon: options.horizon,
+      delayMs: options.delayMs,
+      jitterMs: options.jitterMs,
+      mediaMaxItems: options.mediaMaxItems,
+      fetchFn: options.fetchFn,
+      mediaFetchFn: options.mediaFetchFn,
+      signal: options.signal,
+      now: options.now,
+    })
+    return { runId, startedAt, selectedTargets: [], backfill: null, fullSync }
+  }
+
   const selectedTargets = selectAndRequeueDueTargets({
     dbPath: options.dbPath,
     baseUrl,
@@ -398,7 +508,7 @@ async function runQueuedNitterBackfillWorkerCycle(
   })
 
   if (selectedTargets.length === 0) {
-    return { runId, startedAt, selectedTargets, backfill: null }
+    return { runId, startedAt, selectedTargets, backfill: null, fullSync: null }
   }
 
   const backfill = await runNitterBackfillWorker({
@@ -420,7 +530,7 @@ async function runQueuedNitterBackfillWorkerCycle(
     now: options.now,
   })
 
-  return { runId, startedAt, selectedTargets, backfill }
+  return { runId, startedAt, selectedTargets, backfill, fullSync: null }
 }
 
 function selectAndRequeueDueTargets(options: {
@@ -513,9 +623,20 @@ function normalizeQueuedNitterBackfillWorkerOptions(
   if (options.once === true && options.daemon === true) {
     throw new Error("Queued Nitter backfill worker cannot run with both once and daemon modes")
   }
+  if (options.exhaust && (options.handles?.length ?? 0) === 0) {
+    throw new Error("Exhaust mode requires at least one explicit handle")
+  }
+  if (options.exhaust && (options.daemon === true || options.once === false)) {
+    throw new Error("Exhaust mode is a bounded pass and cannot run as a daemon")
+  }
+
 
   return {
     runId: options.runId ?? `queued-nitter-backfill-worker-${Date.now()}`,
+    exhaust: options.exhaust ?? false,
+    handles: dedupeHandles(options.handles ?? []),
+    horizon: options.horizon ?? FULL_SYNC_DEFAULT_HORIZON,
+    pagesPerPass: normalizePositive(options.pagesPerPass, FULL_SYNC_DEFAULT_PAGES_PER_PASS),
     daemon: options.daemon ?? options.once === false,
     dbPath: options.dbPath,
     logPath: options.logPath,
@@ -567,6 +688,28 @@ function sleep(delayMs: number, signal?: AbortSignal): Promise<void> {
     timer = setTimeout(finish, delayMs)
     signal?.addEventListener("abort", finish, { once: true })
   })
+}
+
+function parseHandleList(value: string): string[] {
+  const handles = value
+    .split(",")
+    .map((handle) => handle.trim().replace(/^@/, ""))
+    .filter((handle) => handle.length > 0)
+  if (handles.length === 0) throw new Error("Handle list must not be empty")
+  return handles
+}
+
+function dedupeHandles(handles: readonly string[]): string[] {
+  const seen = new Set<string>()
+  const result: string[] = []
+  for (const handle of handles) {
+    const normalized = handle.trim().replace(/^@/, "")
+    const key = normalized.toLowerCase()
+    if (!normalized || seen.has(key)) continue
+    seen.add(key)
+    result.push(normalized)
+  }
+  return result
 }
 
 function normalizeBaseUrl(baseUrl: string): string {

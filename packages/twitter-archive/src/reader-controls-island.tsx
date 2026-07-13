@@ -3,6 +3,13 @@ import * as Select from "@radix-ui/react-select"
 import { Command } from "cmdk"
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactElement } from "react"
 
+// cmdk currently resolves React 19's JSX types from the workspace while this package
+// intentionally targets React 18. Preserve cmdk's prop types at the local JSX boundary.
+const CommandRoot = Command as unknown as (props: Parameters<typeof Command>[0]) => ReactElement | null
+const CommandInput = Command.Input as unknown as (props: Parameters<typeof Command.Input>[0]) => ReactElement | null
+const CommandList = Command.List as unknown as (props: Parameters<typeof Command.List>[0]) => ReactElement | null
+const CommandItem = Command.Item as unknown as (props: Parameters<typeof Command.Item>[0]) => ReactElement | null
+
 export interface ReaderSortOption {
   readonly value: string
   readonly label: string
@@ -158,7 +165,7 @@ export function ReaderControlsIsland({
     <div className="reader-builder" data-builder-mode={builderControlsSql ? "builder" : "manual"}>
       <div className="reader-field reader-command-field">
         <span id={commandLabelId}>Filter builder</span>
-        <Command
+        <CommandRoot
           className="reader-command-shell"
           shouldFilter={false}
           loop
@@ -167,7 +174,7 @@ export function ReaderControlsIsland({
         >
           <Popover.Root open={open} onOpenChange={handleOpenChange}>
             <Popover.Anchor asChild>
-              <Command.Input
+              <CommandInput
                 ref={inputRef}
                 aria-labelledby={commandLabelId}
                 className="reader-command-input"
@@ -202,9 +209,9 @@ export function ReaderControlsIsland({
                 collisionPadding={12}
                 onOpenAutoFocus={(event) => event.preventDefault()}
               >
-                <Command.List className="reader-command-list" aria-label="Reader filter suggestions">
+                <CommandList className="reader-command-list" aria-label="Reader filter suggestions">
                   {visibleSuggestions.map((suggestion) => (
-                    <Command.Item
+                    <CommandItem
                       key={suggestion}
                       className="reader-command-item"
                       value={suggestion}
@@ -212,13 +219,13 @@ export function ReaderControlsIsland({
                     >
                       <span className="reader-command-item-value">{suggestion}</span>
                       <span className="reader-command-item-hint">{suggestionHint(suggestion)}</span>
-                    </Command.Item>
+                    </CommandItem>
                   ))}
-                </Command.List>
+                </CommandList>
               </Popover.Content>
             </Popover.Portal>
           </Popover.Root>
-        </Command>
+        </CommandRoot>
       </div>
 
       <div className="reader-field reader-sort-field">
