@@ -687,7 +687,8 @@ export class EventController {
 					model: event.message.model,
 					status: event.message.errorStatus,
 					session: this.ctx.sessionManager.getSessionId(),
-					category: "provider",
+					category: event.message.stopDetails?.category ?? event.message.stopDetails?.type ?? "provider",
+					code: event.message.stopDetails?.type,
 					operation: "turn",
 				});
 			}

@@ -106,4 +106,25 @@ describe("finish_reason: error", () => {
 		expect(result.stopReason).toBe("error");
 		expect(result.errorMessage).toMatch(RETRYABLE_PATTERN);
 	}, 10_000);
+	it("captures streamed refusal details as a structured error", async () => {
+		const fetchMock = createSseFetch([
+			completionChunk({
+				choices: [{ index: 0, delta: { role: "assistant", refusal: "I cannot perform that request." } }],
+			}),
+			completionChunk({ choices: [{ index: 0, delta: {}, finish_reason: "stop" }] }),
+			"[DONE]",
+		]);
+
+		const result = await streamOpenAICompletions(completionsModel, baseContext(), {
+			apiKey: "test-key",
+			fetch: fetchMock,
+		}).result();
+
+		expect(result.stopReason).toBe("error");
+		expect(result.stopDetails).toEqual({
+			type: "refusal",
+			explanation: "I cannot perform that request.",
+		});
+		expect(result.errorMessage).toBe("Refusal: I cannot perform that request.");
+	}, 10_000);
 });

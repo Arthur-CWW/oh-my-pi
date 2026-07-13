@@ -900,6 +900,7 @@ export const streamOpenAICompletions: StreamFunction<"openai-completions"> = (
 			// `sawUsagePayload` flips when any usage payload was parsed.
 			let streamFinishedAt: number | undefined;
 			let sawUsagePayload = false;
+			let refusalMessage: string | undefined;
 			const timedOpenaiStream = iterateWithIdleTimeout(openaiStream, {
 				idleTimeoutMs,
 				firstItemTimeoutMs: firstEventTimeoutMs,
@@ -970,6 +971,11 @@ export const streamOpenAICompletions: StreamFunction<"openai-completions"> = (
 					// multiple aliases for the same reasoning text.
 					const reasoningFields = ["reasoning_content", "reasoning", "reasoning_text"];
 					const deltaRecord = choice.delta as Record<string, unknown>;
+					const refusalDelta = deltaRecord.refusal;
+					if (typeof refusalDelta === "string" && refusalDelta.length > 0) {
+						refusalMessage = refusalDelta;
+						if (!firstTokenTime) firstTokenTime = Date.now();
+					}
 					let foundReasoningField: string | undefined;
 					let foundReasoningDelta = "";
 					for (const field of reasoningFields) {
@@ -1160,6 +1166,12 @@ export const streamOpenAICompletions: StreamFunction<"openai-completions"> = (
 			// provider and correctly keep `stop`.)
 			if (output.stopReason === "stop" && output.content.some(b => b.type === "toolCall")) {
 				output.stopReason = "toolUse";
+			}
+
+			if (refusalMessage) {
+				output.stopReason = "error";
+				output.stopDetails = { type: "refusal", explanation: refusalMessage };
+				output.errorMessage = `Refusal: ${refusalMessage}`;
 			}
 
 			const firstEventTimeoutError = abortTracker.getLocalAbortReason();

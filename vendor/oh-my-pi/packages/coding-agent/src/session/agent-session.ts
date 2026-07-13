@@ -310,6 +310,11 @@ import {
 	stripImagesFromMessage,
 	USER_INTERRUPT_LABEL,
 } from "./messages";
+import {
+	decideRefusalReroute,
+	REFUSAL_REROUTE_ANNOTATION,
+	type RefusalRerouteDecision,
+} from "./refusal-reroute-policy";
 import type { SessionContext } from "./session-context";
 import {
 	getLatestCompactionEntry,
@@ -11522,14 +11527,23 @@ export class AgentSession {
 		const contextWindow = this.model?.contextWindow ?? 0;
 		if (isContextOverflow(message, contextWindow)) return false;
 
-		if (this.#isAnthropicOutputContentFilterError(message.errorMessage)) return true;
-		if (this.#isClassifierRefusal(message)) return true;
+		if (this.#isAnthropicOutputContentFilterError(message.errorMessage)) {
+			return !this.#refusalHasUnsafeReplayContent(message);
+		}
+		if (this.#refusalRerouteDecision(message).reroute) {
+			return !this.#refusalHasUnsafeReplayContent(message);
+		}
 		if (this.#streamInterruptedAfterObservableOutput(message)) return false;
 		if (this.#isStaleOpenAIResponsesReplayError(message)) return true;
 
 		const err = message.errorMessage;
 		return this.#isTransientErrorMessage(err) || isUsageLimitError(err);
 	}
+	#refusalHasUnsafeReplayContent(message: AssistantMessage): boolean {
+		if (message.stopDetails?.type === STREAM_INTERRUPTED_AFTER_CONTENT_STOP_DETAIL) return true;
+		return message.content.some(block => block.type === "toolCall");
+	}
+
 	#streamInterruptedAfterObservableOutput(message: AssistantMessage): boolean {
 		if (message.stopDetails?.type === STREAM_INTERRUPTED_AFTER_CONTENT_STOP_DETAIL) return true;
 		for (const block of message.content) {
@@ -11562,10 +11576,14 @@ export class AgentSession {
 		);
 	}
 
-	#isClassifierRefusal(message: AssistantMessage): boolean {
-		if (message.stopReason !== "error") return false;
-		const stopType = message.stopDetails?.type;
-		return stopType === "refusal" || stopType === "sensitive";
+	#refusalRerouteDecision(message: AssistantMessage): RefusalRerouteDecision {
+		const latestUser = this.agent.state.messages.findLast(candidate => candidate.role === "user");
+		const latestUserText = latestUser ? this.#extractUserMessageText(latestUser.content) : undefined;
+		return decideRefusalReroute({
+			stopType: message.stopReason === "error" ? message.stopDetails?.type : undefined,
+			latestUserText,
+			fallbackPinned: this.#activeRetryFallback?.pinned === true,
+		});
 	}
 
 	#isTransientErrorMessage(errorMessage: string): boolean {
@@ -11868,7 +11886,7 @@ export class AgentSession {
 	async #handleRetryableError(message: AssistantMessage): Promise<boolean> {
 		const retrySettings = this.settings.getGroup("retry");
 		if (!retrySettings.enabled) return false;
-		const classifierRefusal = this.#isClassifierRefusal(message);
+		const classifierRefusal = this.#refusalRerouteDecision(message).reroute;
 		const generation = this.#promptGeneration;
 		this.#retryAttempt++;
 		const errorMessage = message.errorMessage || "Unknown error";
@@ -12017,7 +12035,7 @@ export class AgentSession {
 			attempt: this.#retryAttempt,
 			maxAttempts: retrySettings.maxRetries,
 			delayMs,
-			errorMessage,
+			errorMessage: classifierRefusal ? `${REFUSAL_REROUTE_ANNOTATION} ${errorMessage}` : errorMessage,
 		});
 
 		// Remove error message from agent state (keep in session for history)

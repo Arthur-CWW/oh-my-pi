@@ -225,6 +225,7 @@ describe("AgentSession retry fallback", () => {
 		const requestedModels: string[] = [];
 		const fallbackAppliedEvents: Array<Extract<AgentSessionEvent, { type: "retry_fallback_applied" }>> = [];
 		const fallbackSucceededEvents: Array<Extract<AgentSessionEvent, { type: "retry_fallback_succeeded" }>> = [];
+		const retryStartEvents: Array<Extract<AgentSessionEvent, { type: "auto_retry_start" }>> = [];
 		const mock = createMockModel();
 		let primaryAttempts = 0;
 		const refusalDetails = {
@@ -279,6 +280,9 @@ describe("AgentSession retry fallback", () => {
 			modelRegistry,
 		});
 		session.subscribe(event => {
+			if (event.type === "auto_retry_start") {
+				retryStartEvents.push(event);
+			}
 			if (event.type === "retry_fallback_applied") {
 				fallbackAppliedEvents.push(event);
 			}
@@ -289,7 +293,7 @@ describe("AgentSession retry fallback", () => {
 		let now = Date.now();
 		vi.spyOn(Date, "now").mockImplementation(() => now);
 
-		await session.prompt("Recover from classifier refusal");
+		await session.prompt("Write the architecture documentation to docs/fable/gateway-brief.md.");
 		await session.waitForIdle();
 
 		expect(requestedModels).toEqual([
@@ -304,6 +308,10 @@ describe("AgentSession retry fallback", () => {
 				role: "default",
 			},
 		]);
+		expect(retryStartEvents).toHaveLength(1);
+		expect(retryStartEvents[0]?.errorMessage).toBe(
+			"[rerouted after provider refusal] Refusal (cyber): Classifier declined this turn.",
+		);
 		expect(fallbackSucceededEvents).toEqual([
 			{
 				type: "retry_fallback_succeeded",
@@ -412,14 +420,7 @@ describe("AgentSession retry fallback", () => {
 				role: "default",
 			},
 		]);
-		expect(retryEndEvents).toEqual([
-			{
-				type: "auto_retry_end",
-				success: false,
-				attempt: 1,
-				finalError: refusalMessage,
-			},
-		]);
+		expect(retryEndEvents).toEqual([]);
 	});
 
 	it("uses Google retry hints in quota errors before quota backoff", async () => {
@@ -1019,6 +1020,46 @@ describe("AgentSession retry fallback", () => {
 		const lastAssistant = getLastAssistantMessage(session);
 		expect(lastAssistant.stopReason).toBe("error");
 		expect(lastAssistant.errorMessage).toBe(envelopeError);
+	});
+
+	it("does not replay a content-filter error after a tool call", async () => {
+		const primaryModel = getBundledModel("anthropic", "claude-sonnet-4-5");
+		if (!primaryModel) throw new Error("Expected bundled Anthropic model");
+		const contentFilterError = "invalid_request_error: Output blocked by content filter";
+		const requestedModels: string[] = [];
+		const mock = createMockModel();
+		const agent = new Agent({
+			getApiKey: provider => `${provider}-test-key`,
+			initialState: { model: primaryModel, systemPrompt: ["Test"], tools: [], messages: [] },
+			streamFn: (model, context, options) => {
+				requestedModels.push(`${model.provider}/${model.id}`);
+				mock.push({
+					content: [{ type: "toolCall", id: "call-write", name: "write", arguments: { path: "docs/a.md" } }],
+					stopReason: "error",
+					errorMessage: contentFilterError,
+				});
+				return mock.stream(model, context, options);
+			},
+		});
+		const settings = Settings.isolated({
+			"compaction.enabled": false,
+			"retry.baseDelayMs": 5,
+			"retry.maxRetries": 3,
+		});
+		settings.setModelRole("default", `${primaryModel.provider}/${primaryModel.id}`);
+		session = new AgentSession({
+			agent,
+			sessionManager: SessionManager.inMemory(),
+			settings,
+			modelRegistry,
+		});
+		const { retryStartEvents } = trackRetryEvents(session);
+
+		await session.prompt("Write local documentation");
+		await session.waitForIdle();
+
+		expect(requestedModels).toEqual([`${primaryModel.provider}/${primaryModel.id}`]);
+		expect(retryStartEvents).toEqual([]);
 	});
 
 	it("retries Anthropic output content filters once before fallback and fails cleanly after repeated reroutes", async () => {
