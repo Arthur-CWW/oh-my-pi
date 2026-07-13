@@ -115,6 +115,102 @@ export interface RouteResolutionInput extends Omit<TimelineInput, "id" | "kind" 
   readonly id: string; readonly changeKind: string; readonly lane: string; readonly provider: string; readonly upstreamProvider?: string; readonly model: string; readonly accountKind: string; readonly accountRef?: string; readonly accountProvenance: string; readonly effort: string; readonly winningLayer: string; readonly constraints: string; readonly consultedSources: string; readonly overriddenValues: string; readonly fallbackFromResolutionId?: string; readonly revertedFromResolutionId?: string; readonly advisorMode: string; readonly rawDecisionArtifactId?: string; readonly candidates: readonly RouteCandidateInput[]; readonly advisors: readonly RouteAdvisorInput[]; readonly artifacts: readonly RouteArtifactInput[]; readonly timeline: TimelineInput
 }
 
+export interface OperationalEventInput {
+  readonly eventId: string
+  readonly eventKind: "runnerEvent" | "diagnosticOccurrence" | "diagnosticProjection"
+  readonly occurredAt: number
+  readonly observedAt: number
+  readonly producer: string
+  readonly payloadVersion: 1
+  readonly sourceKind: string
+  readonly sourceId: string
+  readonly sourceSequence: number
+  readonly sourceDigest: string
+  readonly buildDigest?: string
+  readonly runnerInstanceId?: string
+  readonly sessionId?: string
+  readonly branchId?: string
+  readonly turnId?: string
+  readonly entryId?: string
+  readonly agentId?: string
+  readonly parentAgentId?: string
+  readonly taskId?: string
+  readonly packetId?: string
+  readonly viewId?: string
+  readonly controllerEpoch?: number
+  readonly ownerEpoch?: string
+  readonly revision?: number
+  readonly sequence?: number
+  readonly sessionRevision?: number
+  readonly durableSequence?: number
+  readonly commandId?: string
+  readonly correlationId?: string
+  readonly causationId?: string
+  readonly inputId?: string
+  readonly attemptId?: string
+  readonly routeResolutionId?: string
+  readonly quotaDecisionId?: string
+  readonly toolCallId?: string
+  readonly diagnosticId?: string
+  readonly regressionId?: string
+  readonly redactionPolicyId?: string
+  readonly payload: string
+}
+
+export interface DiagnosticArtifactInput {
+  readonly ordinal: number
+  readonly role: string
+  readonly artifactId: string
+  readonly sha256: string
+  readonly redactionPolicyId: string
+}
+
+export interface DiagnosticOccurrenceInput {
+  readonly operational: OperationalEventInput
+  readonly diagnosticId: string
+  readonly occurredAt: number
+  readonly failureClass: string
+  readonly phase: string
+  readonly message: string
+  readonly requestFingerprint?: string
+  readonly buildDigest?: string
+  readonly runnerInstanceId?: string
+  readonly runtimeIdentity: string
+  readonly configHash?: string
+  readonly manifestHash?: string
+  readonly sessionId?: string
+  readonly branchId?: string
+  readonly turnId?: string
+  readonly entryId?: string
+  readonly agentId?: string
+  readonly routeResolutionId?: string
+  readonly inputId?: string
+  readonly attemptId?: string
+  readonly ownerEpoch?: string
+  readonly explicitRoute?: boolean
+  readonly outcome?: string
+  readonly causeDiagnosticId?: string
+  readonly retryOfAttemptId?: string
+  readonly fallbackResolutionId?: string
+  readonly interventionCommandId?: string
+  readonly regressionId?: string
+  readonly redactionPolicyId: string
+  readonly payloadVersion: 1
+  readonly artifacts: readonly DiagnosticArtifactInput[]
+}
+
+export interface DiagnosticProjectionInput {
+  readonly operational: OperationalEventInput
+  readonly projectionEventId: string
+  readonly diagnosticId: string
+  readonly occurredAt: number
+  readonly state: "unread" | "acknowledged" | "resolved" | "reopened"
+  readonly actor?: string
+  readonly commandId?: string
+  readonly sourceEntryId: string
+  readonly payloadVersion: 1
+}
+
 export interface ProviderCallInput {
   readonly id: string
   readonly ts: number
@@ -213,6 +309,9 @@ export type BatchRow =
   | { readonly kind: "artifact"; readonly payload: ArtifactContent & ArtifactMeta }
   | { readonly kind: "agentTimeline"; readonly payload: TimelineInput }
   | { readonly kind: "routeResolution"; readonly payload: RouteResolutionInput }
+  | { readonly kind: "runnerEvent"; readonly payload: OperationalEventInput }
+  | { readonly kind: "diagnosticOccurrence"; readonly payload: DiagnosticOccurrenceInput }
+  | { readonly kind: "diagnosticProjection"; readonly payload: DiagnosticProjectionInput }
 
 export interface BatchResult {
   readonly inserted: number
@@ -371,6 +470,12 @@ function insertBatchRow(db: LedgerDb, row: BatchRow): InsertResult {
       return insertAgentTimeline(db, row.payload)
     case "routeResolution":
       return insertRouteResolution(db, row.payload)
+    case "runnerEvent":
+      return insertOperationalEvent(db, row.payload)
+    case "diagnosticOccurrence":
+      return insertDiagnosticOccurrence(db, row.payload)
+    case "diagnosticProjection":
+      return insertDiagnosticProjection(db, row.payload)
   }
 }
 
@@ -530,6 +635,374 @@ function insertProviderCall(db: LedgerDb, input: ProviderCallInput): InsertResul
   return { inserted: result.length > 0 }
 }
 
+interface OperationalEventStoredRow {
+  readonly eventId: string
+  readonly eventKind: string
+  readonly occurredAt: number
+  readonly observedAt: number
+  readonly producer: string
+  readonly payloadVersion: number
+  readonly sourceKind: string
+  readonly sourceId: string
+  readonly sourceSequence: number | null
+  readonly sourceDigest: string
+  readonly buildDigest: string | null
+  readonly runnerInstanceId: string | null
+  readonly sessionId: string | null
+  readonly branchId: string | null
+  readonly turnId: string | null
+  readonly entryId: string | null
+  readonly agentId: string | null
+  readonly parentAgentId: string | null
+  readonly taskId: string | null
+  readonly packetId: string | null
+  readonly viewId: string | null
+  readonly controllerEpoch: number | null
+  readonly ownerEpoch: string | null
+  readonly revision: number | null
+  readonly sequence: number | null
+  readonly sessionRevision: number | null
+  readonly durableSequence: number | null
+  readonly commandId: string | null
+  readonly correlationId: string | null
+  readonly causationId: string | null
+  readonly inputId: string | null
+  readonly attemptId: string | null
+  readonly routeResolutionId: string | null
+  readonly quotaDecisionId: string | null
+  readonly toolCallId: string | null
+  readonly diagnosticId: string | null
+  readonly regressionId: string | null
+  readonly redactionPolicyId: string | null
+  readonly payload: string
+}
+
+interface OperationalSourceStoredRow {
+  readonly sourceDigest: string
+  readonly lastSourceSequence: number | null
+  readonly lastOccurredAt: number | null
+  readonly lastObservedAt: number
+  readonly gapFromSequence: number | null
+  readonly gapToSequence: number | null
+}
+
+interface DiagnosticArtifactStoredRow {
+  readonly ordinal: number
+  readonly role: string
+  readonly artifactId: string
+  readonly sha256: string
+  readonly redactionPolicyId: string
+}
+
+function rawSqlite(db: LedgerDb): Database {
+  return (db as LedgerDb & { readonly session: { readonly client: Database } }).session.client
+}
+
+function insertOperationalEvent(db: LedgerDb, input: OperationalEventInput): InsertResult {
+  const existingByEventId = rawSqlite(db).query<OperationalEventStoredRow, [string]>("SELECT * FROM operational_events WHERE eventId = ?").get(input.eventId)
+  if (existingByEventId !== null && existingByEventId !== undefined) {
+    if (operationalEventMatches(existingByEventId, input)) {
+      return { inserted: false }
+    }
+    throw new Error("Operational event idempotency conflict")
+  }
+  const existingBySource = rawSqlite(db).query<OperationalEventStoredRow, [string, string, number]>("SELECT * FROM operational_events WHERE sourceKind = ? AND sourceId = ? AND sourceSequence = ?").get(input.sourceKind, input.sourceId, input.sourceSequence)
+  if (existingBySource !== null && existingBySource !== undefined) {
+    if (operationalEventMatches(existingBySource, input)) {
+      return { inserted: false }
+    }
+    throw new Error("Operational source sequence conflict")
+  }
+  rawSqlite(db).query("INSERT INTO operational_events (eventId, eventKind, occurredAt, observedAt, producer, payloadVersion, sourceKind, sourceId, sourceSequence, sourceDigest, buildDigest, runnerInstanceId, sessionId, branchId, turnId, entryId, agentId, parentAgentId, taskId, packetId, viewId, controllerEpoch, ownerEpoch, revision, sequence, sessionRevision, durableSequence, commandId, correlationId, causationId, inputId, attemptId, routeResolutionId, quotaDecisionId, toolCallId, diagnosticId, regressionId, redactionPolicyId, payload) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(
+    input.eventId,
+    input.eventKind,
+    input.occurredAt,
+    input.observedAt,
+    input.producer,
+    input.payloadVersion,
+    input.sourceKind,
+    input.sourceId,
+    input.sourceSequence,
+    input.sourceDigest,
+    input.buildDigest ?? null,
+    input.runnerInstanceId ?? null,
+    input.sessionId ?? null,
+    input.branchId ?? null,
+    input.turnId ?? null,
+    input.entryId ?? null,
+    input.agentId ?? null,
+    input.parentAgentId ?? null,
+    input.taskId ?? null,
+    input.packetId ?? null,
+    input.viewId ?? null,
+    input.controllerEpoch ?? null,
+    input.ownerEpoch ?? null,
+    input.revision ?? null,
+    input.sequence ?? null,
+    input.sessionRevision ?? null,
+    input.durableSequence ?? null,
+    input.commandId ?? null,
+    input.correlationId ?? null,
+    input.causationId ?? null,
+    input.inputId ?? null,
+    input.attemptId ?? null,
+    input.routeResolutionId ?? null,
+    input.quotaDecisionId ?? null,
+    input.toolCallId ?? null,
+    input.diagnosticId ?? null,
+    input.regressionId ?? null,
+    input.redactionPolicyId ?? null,
+    input.payload,
+  )
+  updateOperationalSource(db, input)
+  return { inserted: true }
+}
+
+function insertDiagnosticOccurrence(db: LedgerDb, input: DiagnosticOccurrenceInput): InsertResult {
+  const eventInsert = insertOperationalEvent(db, input.operational)
+  if (!eventInsert.inserted) {
+    const existingArtifacts = rawSqlite(db).query<DiagnosticArtifactStoredRow, [string]>("SELECT ordinal, role, artifactId, sha256, redactionPolicyId FROM diagnostic_artifacts WHERE diagnosticId = ? ORDER BY ordinal").all(input.diagnosticId)
+    if (diagnosticArtifactsMatch(existingArtifacts, input.artifacts)) {
+      return { inserted: false }
+    }
+    throw new Error("Diagnostic occurrence artifact conflict")
+  }
+  rawSqlite(db).query("INSERT INTO diagnostic_occurrences (diagnosticId, occurredAt, failureClass, phase, message, requestFingerprint, buildDigest, runnerInstanceId, runtimeIdentity, configHash, manifestHash, sessionId, branchId, turnId, entryId, agentId, routeResolutionId, inputId, attemptId, ownerEpoch, explicitRoute, outcome, causeDiagnosticId, retryOfAttemptId, fallbackResolutionId, interventionCommandId, regressionId, redactionPolicyId, payloadVersion) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(
+    input.diagnosticId,
+    input.occurredAt,
+    input.failureClass,
+    input.phase,
+    input.message,
+    input.requestFingerprint ?? null,
+    input.buildDigest ?? null,
+    input.runnerInstanceId ?? null,
+    input.runtimeIdentity,
+    input.configHash ?? null,
+    input.manifestHash ?? null,
+    input.sessionId ?? null,
+    input.branchId ?? null,
+    input.turnId ?? null,
+    input.entryId ?? null,
+    input.agentId ?? null,
+    input.routeResolutionId ?? null,
+    input.inputId ?? null,
+    input.attemptId ?? null,
+    input.ownerEpoch ?? null,
+    input.explicitRoute === undefined ? null : input.explicitRoute ? 1 : 0,
+    input.outcome ?? null,
+    input.causeDiagnosticId ?? null,
+    input.retryOfAttemptId ?? null,
+    input.fallbackResolutionId ?? null,
+    input.interventionCommandId ?? null,
+    input.regressionId ?? null,
+    input.redactionPolicyId,
+    input.payloadVersion,
+  )
+  for (const artifact of input.artifacts) {
+    const existingArtifact = db.select().from(artifacts).where(eq(artifacts.id, artifact.artifactId)).get()
+    if (existingArtifact !== undefined && existingArtifact.sha256 !== artifact.sha256) {
+      throw new Error("Diagnostic artifact digest mismatch")
+    }
+    rawSqlite(db).query("INSERT INTO diagnostic_artifacts (diagnosticId, ordinal, role, artifactId, sha256, redactionPolicyId) VALUES (?, ?, ?, ?, ?, ?)").run(
+      input.diagnosticId,
+      artifact.ordinal,
+      artifact.role,
+      artifact.artifactId,
+      artifact.sha256,
+      artifact.redactionPolicyId,
+    )
+  }
+  return { inserted: true }
+}
+
+function insertDiagnosticProjection(db: LedgerDb, input: DiagnosticProjectionInput): InsertResult {
+  const eventInsert = insertOperationalEvent(db, input.operational)
+  if (!eventInsert.inserted) {
+    return { inserted: false }
+  }
+  rawSqlite(db).query("INSERT INTO diagnostic_projection_events (projectionEventId, diagnosticId, occurredAt, state, actor, commandId, sourceEntryId, payloadVersion) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(
+    input.projectionEventId,
+    input.diagnosticId,
+    input.occurredAt,
+    input.state,
+    input.actor ?? null,
+    input.commandId ?? null,
+    input.sourceEntryId,
+    input.payloadVersion,
+  )
+  return { inserted: true }
+}
+
+function operationalEventMatches(row: OperationalEventStoredRow, input: OperationalEventInput): boolean {
+  return row.eventId === input.eventId &&
+    row.eventKind === input.eventKind &&
+    row.occurredAt === input.occurredAt &&
+    row.observedAt === input.observedAt &&
+    row.producer === input.producer &&
+    row.payloadVersion === input.payloadVersion &&
+    row.sourceKind === input.sourceKind &&
+    row.sourceId === input.sourceId &&
+    row.sourceSequence === input.sourceSequence &&
+    row.sourceDigest === input.sourceDigest &&
+    row.buildDigest === (input.buildDigest ?? null) &&
+    row.runnerInstanceId === (input.runnerInstanceId ?? null) &&
+    row.sessionId === (input.sessionId ?? null) &&
+    row.branchId === (input.branchId ?? null) &&
+    row.turnId === (input.turnId ?? null) &&
+    row.entryId === (input.entryId ?? null) &&
+    row.agentId === (input.agentId ?? null) &&
+    row.parentAgentId === (input.parentAgentId ?? null) &&
+    row.taskId === (input.taskId ?? null) &&
+    row.packetId === (input.packetId ?? null) &&
+    row.viewId === (input.viewId ?? null) &&
+    row.controllerEpoch === (input.controllerEpoch ?? null) &&
+    row.ownerEpoch === (input.ownerEpoch ?? null) &&
+    row.revision === (input.revision ?? null) &&
+    row.sequence === (input.sequence ?? null) &&
+    row.sessionRevision === (input.sessionRevision ?? null) &&
+    row.durableSequence === (input.durableSequence ?? null) &&
+    row.commandId === (input.commandId ?? null) &&
+    row.correlationId === (input.correlationId ?? null) &&
+    row.causationId === (input.causationId ?? null) &&
+    row.inputId === (input.inputId ?? null) &&
+    row.attemptId === (input.attemptId ?? null) &&
+    row.routeResolutionId === (input.routeResolutionId ?? null) &&
+    row.quotaDecisionId === (input.quotaDecisionId ?? null) &&
+    row.toolCallId === (input.toolCallId ?? null) &&
+    row.diagnosticId === (input.diagnosticId ?? null) &&
+    row.regressionId === (input.regressionId ?? null) &&
+    row.redactionPolicyId === (input.redactionPolicyId ?? null) &&
+    row.payload === input.payload
+}
+
+function diagnosticArtifactsMatch(rows: readonly DiagnosticArtifactStoredRow[], artifactsInput: readonly DiagnosticArtifactInput[]): boolean {
+  return rows.length === artifactsInput.length && rows.every((row, index) => {
+    const artifact = artifactsInput[index]
+    return artifact !== undefined &&
+      row.ordinal === artifact.ordinal &&
+      row.role === artifact.role &&
+      row.artifactId === artifact.artifactId &&
+      row.sha256 === artifact.sha256 &&
+      row.redactionPolicyId === artifact.redactionPolicyId
+  })
+}
+
+function updateOperationalSource(db: LedgerDb, input: OperationalEventInput): void {
+  const sqlite = rawSqlite(db)
+  const current = sqlite.query<OperationalSourceStoredRow, [string, string]>("SELECT sourceDigest, lastSourceSequence, lastOccurredAt, lastObservedAt, gapFromSequence, gapToSequence FROM operational_sources WHERE sourceKind = ? AND sourceId = ?").get(input.sourceKind, input.sourceId)
+  const sequences = sqlite.query<{ sourceSequence: number }, [string, string]>("SELECT sourceSequence FROM operational_events WHERE sourceKind = ? AND sourceId = ? AND sourceSequence IS NOT NULL ORDER BY sourceSequence").all(input.sourceKind, input.sourceId)
+  let expectedSequence = 0
+  let gapFromSequence: number | null = null
+  let gapToSequence: number | null = null
+  for (const row of sequences) {
+    if (gapFromSequence === null && row.sourceSequence > expectedSequence) {
+      gapFromSequence = expectedSequence
+      gapToSequence = row.sourceSequence - 1
+    }
+    expectedSequence = Math.max(expectedSequence, row.sourceSequence + 1)
+  }
+  if (current === null || current === undefined) {
+    sqlite.query("INSERT INTO operational_sources (sourceKind, sourceId, sourceDigest, lastSourceSequence, lastOccurredAt, lastObservedAt, gapFromSequence, gapToSequence, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").run(
+      input.sourceKind,
+      input.sourceId,
+      input.sourceDigest,
+      input.sourceSequence,
+      input.occurredAt,
+      input.observedAt,
+      gapFromSequence,
+      gapToSequence,
+      gapFromSequence === null ? "ok" : "gap",
+    )
+    return
+  }
+  const lastSourceSequence = current.lastSourceSequence === null ? input.sourceSequence : Math.max(current.lastSourceSequence, input.sourceSequence)
+  const updateDigest = current.lastSourceSequence === null || input.sourceSequence >= current.lastSourceSequence
+  sqlite.query("UPDATE operational_sources SET sourceDigest = ?, lastSourceSequence = ?, lastOccurredAt = ?, lastObservedAt = ?, gapFromSequence = ?, gapToSequence = ?, status = ? WHERE sourceKind = ? AND sourceId = ?").run(
+    updateDigest ? input.sourceDigest : current.sourceDigest,
+    lastSourceSequence,
+    updateDigest ? input.occurredAt : current.lastOccurredAt,
+    Math.max(current.lastObservedAt, input.observedAt),
+    gapFromSequence,
+    gapToSequence,
+    gapFromSequence === null ? "ok" : "gap",
+    input.sourceKind,
+    input.sourceId,
+  )
+}
+
+function timelineValues(input: TimelineInput) {
+  const { artifacts: timelineArtifacts, ...row } = input
+  return { ...row, agentSessionId: input.agentSessionId ?? null, parentSessionId: input.parentSessionId ?? null, parentAgentId: input.parentAgentId ?? null, taskId: input.taskId ?? null, packetId: input.packetId ?? null, branchId: input.branchId ?? null, turnId: input.turnId ?? null, fromState: input.fromState ?? null, toState: input.toState ?? null, routeResolutionId: input.routeResolutionId ?? null, reason: input.reason ?? null, errorClass: input.errorClass ?? null }
+}
+
+function routeValues(input: RouteResolutionInput) {
+  const { candidates, advisors, artifacts: routeArtifacts, timeline, ...row } = input
+  return { ...row, agentSessionId: input.agentSessionId ?? null, parentSessionId: input.parentSessionId ?? null, parentAgentId: input.parentAgentId ?? null, taskId: input.taskId ?? null, packetId: input.packetId ?? null, branchId: input.branchId ?? null, turnId: input.turnId ?? null, reason: input.reason ?? null, upstreamProvider: input.upstreamProvider ?? null, accountRef: input.accountRef ?? null, fallbackFromResolutionId: input.fallbackFromResolutionId ?? null, revertedFromResolutionId: input.revertedFromResolutionId ?? null, rawDecisionArtifactId: input.rawDecisionArtifactId ?? null }
+}
+
+function timelineMatches(db: LedgerDb, row: AgentTimelineEventRow, input: TimelineInput): boolean {
+  const expected = timelineValues(input)
+  const artifacts = db.select().from(routeEventArtifacts).where(and(eq(routeEventArtifacts.ownerKind, "agentEvent"), eq(routeEventArtifacts.ownerId, input.id))).orderBy(routeEventArtifacts.ordinal).all()
+  return row.id === expected.id && row.ts === expected.ts && row.sourceSessionId === expected.sourceSessionId && row.sourceSeq === expected.sourceSeq && row.agentId === expected.agentId && row.agentSeq === expected.agentSeq && row.agentSessionId === expected.agentSessionId && row.parentSessionId === expected.parentSessionId && row.parentAgentId === expected.parentAgentId && row.taskId === expected.taskId && row.packetId === expected.packetId && row.branchId === expected.branchId && row.turnId === expected.turnId && row.kind === expected.kind && row.fromState === expected.fromState && row.toState === expected.toState && row.routeResolutionId === expected.routeResolutionId && row.reason === expected.reason && row.errorClass === expected.errorClass && row.detail === expected.detail && row.payloadVersion === expected.payloadVersion && JSON.stringify(artifacts.map((artifact) => [artifact.ordinal, artifact.role, artifact.artifactId])) === JSON.stringify(input.artifacts.map((artifact) => [artifact.ordinal, artifact.role, artifact.artifactId]))
+}
+
+function routeMatches(db: LedgerDb, row: RouteResolutionRow, input: RouteResolutionInput): boolean {
+  const expected = routeValues(input)
+  const candidates = db.select().from(routeCandidates).where(eq(routeCandidates.routeResolutionId, input.id)).orderBy(routeCandidates.ordinal).all()
+  const advisors = db.select().from(routeAdvisors).where(eq(routeAdvisors.routeResolutionId, input.id)).orderBy(routeAdvisors.ordinal).all()
+  const artifacts = db.select().from(routeEventArtifacts).where(and(eq(routeEventArtifacts.ownerKind, "routeResolution"), eq(routeEventArtifacts.ownerId, input.id))).orderBy(routeEventArtifacts.ordinal).all()
+  return row.id === expected.id && row.ts === expected.ts && row.sourceSessionId === expected.sourceSessionId && row.sourceSeq === expected.sourceSeq && row.agentId === expected.agentId && row.agentSeq === expected.agentSeq && row.agentSessionId === expected.agentSessionId && row.parentSessionId === expected.parentSessionId && row.parentAgentId === expected.parentAgentId && row.taskId === expected.taskId && row.packetId === expected.packetId && row.branchId === expected.branchId && row.turnId === expected.turnId && row.changeKind === expected.changeKind && row.reason === expected.reason && row.lane === expected.lane && row.provider === expected.provider && row.upstreamProvider === expected.upstreamProvider && row.model === expected.model && row.accountKind === expected.accountKind && row.accountRef === expected.accountRef && row.accountProvenance === expected.accountProvenance && row.effort === expected.effort && row.winningLayer === expected.winningLayer && row.constraints === expected.constraints && row.consultedSources === expected.consultedSources && row.overriddenValues === expected.overriddenValues && row.fallbackFromResolutionId === expected.fallbackFromResolutionId && row.revertedFromResolutionId === expected.revertedFromResolutionId && row.advisorMode === expected.advisorMode && row.rawDecisionArtifactId === expected.rawDecisionArtifactId && row.payloadVersion === expected.payloadVersion && JSON.stringify(candidates.map((candidate) => [candidate.ordinal, candidate.lane, candidate.provider, candidate.model, candidate.accountKind, candidate.accountRef, candidate.effort, candidate.disposition, candidate.fallbackOrdinal, candidate.rejectionCode, candidate.rejectionReason, candidate.failedConstraintIds])) === JSON.stringify(input.candidates.map((candidate) => [candidate.ordinal, candidate.lane, candidate.provider, candidate.model, candidate.accountKind, candidate.accountRef ?? null, candidate.effort, candidate.disposition, candidate.fallbackOrdinal ?? null, candidate.rejectionCode ?? null, candidate.rejectionReason ?? null, candidate.failedConstraintIds])) && JSON.stringify(advisors.map((advisor) => [advisor.ordinal, advisor.advisorAgentId, advisor.purpose, advisor.lane, advisor.provider, advisor.model, advisor.accountKind, advisor.accountRef, advisor.accountProvenance, advisor.effort, advisor.winningLayer, advisor.independenceRequired, advisor.rawAdviceArtifactId])) === JSON.stringify(input.advisors.map((advisor) => [advisor.ordinal, advisor.advisorAgentId ?? null, advisor.purpose, advisor.lane, advisor.provider, advisor.model, advisor.accountKind, advisor.accountRef ?? null, advisor.accountProvenance, advisor.effort, advisor.winningLayer, advisor.independenceRequired, advisor.rawAdviceArtifactId ?? null])) && JSON.stringify(artifacts.map((artifact) => [artifact.ordinal, artifact.role, artifact.artifactId])) === JSON.stringify(input.artifacts.map((artifact) => [artifact.ordinal, artifact.role, artifact.artifactId]))
+}
+
+function insertProviderCall(db: LedgerDb, input: ProviderCallInput): InsertResult {
+  const result = db.insert(providerCalls).values({
+    id: input.id,
+    ts: input.ts,
+    sessionId: input.sessionId,
+    branchId: input.branchId ?? null,
+    packetId: input.packetId ?? null,
+    provider: input.provider,
+    operation: input.operation,
+    inputHash: input.inputHash,
+    rawRequestArtifact: input.rawRequestArtifact ?? null,
+    latencyMs: input.latencyMs,
+    outcome: input.outcome,
+    errorClass: input.errorClass ?? null,
+    cost: input.cost ?? null,
+    usage: input.usage ?? null,
+  }).onConflictDoNothing().returning({ id: providerCalls.id }).all()
+  return { inserted: result.length > 0 }
+}
+
+function insertArtifact(db: LedgerDb, content: ArtifactContent, meta: ArtifactMeta): PutArtifactResult {
+  const material = artifactMaterial(content)
+  const sha256 = createHash("sha256").update(material.bytes).digest("hex")
+  const id = `artifact_${sha256.slice(0, 32)}`
+  const result = db.insert(artifacts).values({
+    id,
+    ts: meta.ts,
+    sessionId: meta.sessionId ?? null,
+    kind: meta.kind,
+    contentPath: material.path,
+    contentInline: material.inline,
+    sha256,
+    bytes: material.bytes.byteLength,
+    retention: meta.retention,
+    meta: meta.meta,
+  }).onConflictDoNothing().returning({ id: artifacts.id }).all()
+  return { id, sha256, bytes: material.bytes.byteLength, inserted: result.length > 0 }
+}
+
+function artifactMaterial(content: ArtifactContent): { readonly bytes: Uint8Array; readonly inline: string | null; readonly path: string | null } {
+  if (content.path !== undefined) {
+    return { bytes: readFileSync(content.path), inline: null, path: content.path }
+  }
+  if (typeof content.content === "string") {
+    return { bytes: Buffer.from(content.content), inline: content.content, path: null }
+  }
+  return { bytes: content.content, inline: Buffer.from(content.content).toString("utf8"), path: null }
+}
+
 function insertArtifact(db: LedgerDb, content: ArtifactContent, meta: ArtifactMeta): PutArtifactResult {
   const material = artifactMaterial(content)
   const sha256 = createHash("sha256").update(material.bytes).digest("hex")
@@ -665,11 +1138,11 @@ function artifactEffect<A>(operation: string, run: () => A): Effect.Effect<A, Ar
 }
 
 function storageError(operation: string, cause: unknown, context?: string): StorageError {
-  return new StorageError({ operation, message: errorMessage(cause), cause: errorMessage(cause), context })
+  return new StorageError({ operation, message: errorMessage(cause), cause: errorMessage(cause), context: context ?? "" })
 }
 
 function artifactError(operation: string, cause: unknown, context?: string): ArtifactError {
-  return new ArtifactError({ operation, message: errorMessage(cause), cause: errorMessage(cause), context })
+  return new ArtifactError({ operation, message: errorMessage(cause), cause: errorMessage(cause), context: context ?? "" })
 }
 
 function errorMessage(cause: unknown): string {

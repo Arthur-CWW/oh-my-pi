@@ -9,9 +9,12 @@ import {
   type ArtifactMeta,
   type BatchRow,
   type BranchInput,
+  type DiagnosticOccurrenceInput,
+  type DiagnosticProjectionInput,
   type EventInput,
   LedgerStore,
   type ModelCallInput,
+  type OperationalEventInput,
   type ProviderCallInput,
   type SessionInput,
   type TurnInput,
@@ -19,7 +22,7 @@ import {
   type RouteResolutionInput,
 } from "./ledger"
 import { type JsonValue, JsonValueSchema, type KnownOutboxKind, OutboxEnvelopeSchema, type OutboxEnvelope } from "./outbox"
-import { AgentTimelinePayloadV1Schema, type AgentTimelinePayloadV1, type JsonObject, RouteResolutionPayloadV1Schema, type RouteResolutionPayloadV1 } from "./omp-events"
+import { AgentTimelinePayloadV1Schema, type AgentTimelinePayloadV1, DiagnosticOccurrencePayloadV1Schema, DiagnosticProjectionPayloadV1Schema, type DiagnosticOccurrencePayloadV1, type DiagnosticProjectionPayloadV1, type JsonObject, RouteResolutionPayloadV1Schema, type RouteResolutionPayloadV1, RunnerEventPayloadV1Schema, type RunnerEventPayloadV1 } from "./omp-events"
 
 const DEFAULT_BATCH_SIZE = 500
 
@@ -37,6 +40,7 @@ const NullableString = Schema.NullOr(Schema.String)
 const NullableNumber = Schema.NullOr(Schema.Number)
 const OptionalString = Schema.optionalKey(NullableString)
 const OptionalNumber = Schema.optionalKey(NullableNumber)
+const sha256Pattern = /^[0-9a-f]{64}$/
 
 const SessionPayloadSchema = Schema.Struct({
   id: OptionalString,
@@ -182,6 +186,9 @@ type ArtifactPayload = Schema.Schema.Type<typeof ArtifactPayloadSchema>
 
 type AgentTimelinePayload = AgentTimelinePayloadV1
 type RouteResolutionPayload = RouteResolutionPayloadV1
+type RunnerEventPayload = RunnerEventPayloadV1
+type DiagnosticOccurrencePayload = DiagnosticOccurrencePayloadV1
+type DiagnosticProjectionPayload = DiagnosticProjectionPayloadV1
 
 type RowMapping = {
   readonly row: BatchRow
@@ -340,6 +347,30 @@ function mapKnownEnvelopeRow(envelope: OutboxEnvelope, kind: KnownOutboxKind, ra
         return payloadErrorEvent(envelope, rawLine, errorMessage(cause))
       }
     }
+    case "runnerEvent": {
+      if (payloadVersion(envelope.payload) !== 1) return { row: genericEvent(envelope, rawLine), malformed: false }
+      try {
+        return { row: { kind, payload: runnerEventInput(envelope, Schema.decodeUnknownSync(RunnerEventPayloadV1Schema)(envelope.payload)) }, malformed: false }
+      } catch (cause) {
+        return payloadErrorEvent(envelope, rawLine, errorMessage(cause))
+      }
+    }
+    case "diagnosticOccurrence": {
+      if (payloadVersion(envelope.payload) !== 1) return { row: genericEvent(envelope, rawLine), malformed: false }
+      try {
+        return { row: { kind, payload: diagnosticOccurrenceInput(envelope, Schema.decodeUnknownSync(DiagnosticOccurrencePayloadV1Schema)(envelope.payload)) }, malformed: false }
+      } catch (cause) {
+        return payloadErrorEvent(envelope, rawLine, errorMessage(cause))
+      }
+    }
+    case "diagnosticProjection": {
+      if (payloadVersion(envelope.payload) !== 1) return { row: genericEvent(envelope, rawLine), malformed: false }
+      try {
+        return { row: { kind, payload: diagnosticProjectionInput(envelope, Schema.decodeUnknownSync(DiagnosticProjectionPayloadV1Schema)(envelope.payload)) }, malformed: false }
+      } catch (cause) {
+        return payloadErrorEvent(envelope, rawLine, errorMessage(cause))
+      }
+    }
   }
 }
 
@@ -459,6 +490,133 @@ function routeResolutionInput(envelope: OutboxEnvelope, payload: RouteResolution
   return { id: payload.resolutionId, ts: payload.occurredAt, sourceSessionId: envelope.sessionId, sourceSeq: envelope.seq, agentId: payload.agentId, agentSeq: payload.agentSeq, agentSessionId: payload.agentSessionId ?? undefined, parentSessionId: payload.parentSessionId ?? undefined, parentAgentId: payload.parentAgentId ?? undefined, taskId: payload.taskId ?? undefined, packetId: payload.packetId ?? undefined, branchId: payload.branchId ?? undefined, turnId: payload.turnId ?? undefined, changeKind: payload.changeKind, reason: payload.reason ?? undefined, lane: payload.route.lane, provider: payload.route.provider, upstreamProvider: payload.route.upstreamProvider ?? undefined, model: payload.route.model, accountKind: payload.route.account.kind, accountRef: payload.route.account.ref ?? undefined, accountProvenance: canonicalJson(payload.route.account.provenance), effort: payload.route.effort, winningLayer: payload.provenance.winningLayer, constraints: canonicalJson(payload.provenance.constraints), consultedSources: canonicalJson(payload.provenance.consultedSources), overriddenValues: canonicalJson(payload.provenance.overriddenValues), fallbackFromResolutionId: payload.fallbackFromResolutionId ?? undefined, revertedFromResolutionId: payload.revertedFromResolutionId ?? undefined, advisorMode: payload.advisors.length === 0 ? "none" : "composed", rawDecisionArtifactId: payload.rawDecisionArtifactId ?? undefined, candidates: payload.candidates.map((candidate) => ({ ordinal: candidate.ordinal, lane: candidate.lane, provider: candidate.provider, model: candidate.model, accountKind: candidate.account.kind, accountRef: candidate.account.ref ?? undefined, effort: candidate.effort, disposition: candidate.disposition, fallbackOrdinal: candidate.fallbackOrdinal ?? undefined, rejectionCode: candidate.rejectionCode ?? undefined, rejectionReason: candidate.rejectionReason ?? undefined, failedConstraintIds: canonicalJson(candidate.failedConstraintIds) })), advisors: payload.advisors.map((advisor) => ({ ordinal: advisor.ordinal, advisorAgentId: advisor.advisorAgentId ?? undefined, purpose: advisor.purpose, lane: advisor.lane, provider: advisor.provider, model: advisor.model, accountKind: advisor.account.kind, accountRef: advisor.account.ref ?? undefined, accountProvenance: canonicalJson(advisor.account.provenance), effort: advisor.effort, winningLayer: advisor.winningLayer, independenceRequired: advisor.independenceRequired, rawAdviceArtifactId: advisor.rawAdviceArtifactId ?? undefined })), artifacts: payload.artifacts.map((artifact, ordinal) => ({ ...artifact, ordinal })), timeline, payloadVersion: 1 }
 }
 
+function runnerEventInput(envelope: OutboxEnvelope, payload: RunnerEventPayload): OperationalEventInput {
+  validateRunnerEvent(envelope, payload)
+  return operationalEventInput("runnerEvent", envelope, payload.eventId, envelope.ts, {
+    buildDigest: payload.runnerIdentity.buildRevision.digest,
+    runnerInstanceId: payload.runnerIdentity.runnerInstance.runnerInstanceId,
+    sessionId: payload.sessionId,
+    ownerEpoch: payload.ownerEpoch,
+    revision: payload.revision,
+    sequence: payload.sequence,
+    sessionRevision: payload.sessionRevision ?? undefined,
+    commandId: payload.commandId,
+    correlationId: payload.correlationId,
+    causationId: payload.causationId ?? undefined,
+    inputId: payload.inputId ?? undefined,
+    attemptId: payload.attemptId ?? undefined,
+    routeResolutionId: payload.routeResolutionId ?? undefined,
+    quotaDecisionId: payload.quotaDecisionId ?? undefined,
+    toolCallId: payload.toolCallId ?? undefined,
+    entryId: payload.transcriptEntryId ?? undefined,
+    viewId: payload.viewId ?? undefined,
+    controllerEpoch: payload.controllerEpoch,
+    durableSequence: payload.durableSequence ?? undefined,
+    payload: canonicalJson(payload),
+  })
+}
+
+function diagnosticOccurrenceInput(envelope: OutboxEnvelope, payload: DiagnosticOccurrencePayload): DiagnosticOccurrenceInput {
+  validateDiagnosticOccurrence(envelope, payload)
+  return {
+    operational: operationalEventInput("diagnosticOccurrence", envelope, payload.diagnosticId, payload.occurredAt, {
+      buildDigest: payload.buildDigest ?? undefined,
+      runnerInstanceId: payload.runnerInstanceId ?? undefined,
+      sessionId: payload.sessionId ?? undefined,
+      branchId: payload.branchId ?? undefined,
+      turnId: payload.turnId ?? undefined,
+      entryId: payload.entryId ?? undefined,
+      agentId: payload.agentId ?? undefined,
+      ownerEpoch: payload.ownerEpoch ?? undefined,
+      inputId: payload.inputId ?? undefined,
+      attemptId: payload.attemptId ?? undefined,
+      routeResolutionId: payload.routeResolutionId ?? undefined,
+      diagnosticId: payload.diagnosticId,
+      regressionId: payload.regressionId ?? undefined,
+      redactionPolicyId: payload.redactionPolicyId,
+      payload: canonicalJson(payload),
+    }),
+    diagnosticId: payload.diagnosticId,
+    occurredAt: payload.occurredAt,
+    failureClass: payload.failureClass,
+    phase: payload.phase,
+    message: payload.message,
+    requestFingerprint: payload.requestFingerprint ?? undefined,
+    buildDigest: payload.buildDigest ?? undefined,
+    runnerInstanceId: payload.runnerInstanceId ?? undefined,
+    runtimeIdentity: payload.runtimeIdentity,
+    configHash: payload.configHash ?? undefined,
+    manifestHash: payload.manifestHash ?? undefined,
+    sessionId: payload.sessionId ?? undefined,
+    branchId: payload.branchId ?? undefined,
+    turnId: payload.turnId ?? undefined,
+    entryId: payload.entryId ?? undefined,
+    agentId: payload.agentId ?? undefined,
+    routeResolutionId: payload.routeResolutionId ?? undefined,
+    inputId: payload.inputId ?? undefined,
+    attemptId: payload.attemptId ?? undefined,
+    ownerEpoch: payload.ownerEpoch ?? undefined,
+    explicitRoute: payload.explicitRoute ?? undefined,
+    outcome: payload.outcome ?? undefined,
+    causeDiagnosticId: payload.causeDiagnosticId ?? undefined,
+    retryOfAttemptId: payload.retryOfAttemptId ?? undefined,
+    fallbackResolutionId: payload.fallbackResolutionId ?? undefined,
+    interventionCommandId: payload.interventionCommandId ?? undefined,
+    regressionId: payload.regressionId ?? undefined,
+    redactionPolicyId: payload.redactionPolicyId,
+    payloadVersion: 1,
+    artifacts: payload.artifacts.map((artifact, ordinal) => ({
+      ordinal,
+      role: artifact.role,
+      artifactId: artifact.artifactId,
+      sha256: artifact.sha256,
+      redactionPolicyId: artifact.redactionPolicyId,
+    })),
+  }
+}
+
+function diagnosticProjectionInput(envelope: OutboxEnvelope, payload: DiagnosticProjectionPayload): DiagnosticProjectionInput {
+  validateDiagnosticProjection(envelope, payload)
+  return {
+    operational: operationalEventInput("diagnosticProjection", envelope, payload.projectionEventId, payload.occurredAt, {
+      sessionId: envelope.sessionId,
+      commandId: payload.commandId ?? undefined,
+      diagnosticId: payload.diagnosticId,
+      payload: canonicalJson(payload),
+    }),
+    projectionEventId: payload.projectionEventId,
+    diagnosticId: payload.diagnosticId,
+    occurredAt: payload.occurredAt,
+    state: payload.state,
+    actor: payload.actor ?? undefined,
+    commandId: payload.commandId ?? undefined,
+    sourceEntryId: payload.sourceEntryId,
+    payloadVersion: 1,
+  }
+}
+
+function operationalEventInput(
+  eventKind: OperationalEventInput["eventKind"],
+  envelope: OutboxEnvelope,
+  eventId: string,
+  occurredAt: number,
+  fields: Omit<OperationalEventInput, "eventId" | "eventKind" | "occurredAt" | "observedAt" | "producer" | "payloadVersion" | "sourceKind" | "sourceId" | "sourceSequence" | "sourceDigest">,
+): OperationalEventInput {
+  return {
+    eventId,
+    eventKind,
+    occurredAt,
+    observedAt: envelope.ts,
+    producer: "omp.outbox",
+    payloadVersion: 1,
+    sourceKind: "outbox",
+    sourceId: envelope.sessionId,
+    sourceSequence: envelope.seq,
+    sourceDigest: sourceDigest(envelope),
+    ...fields,
+  }
+}
+
 function genericPayloadOrError(envelope: OutboxEnvelope, rawLine: string, message: string): RowMapping {
   return payloadVersion(envelope.payload) !== 1
     ? { row: genericEvent(envelope, rawLine), malformed: false }
@@ -483,6 +641,17 @@ function canonicalValue(value: JsonValue): JsonValue {
   if (Array.isArray(value)) return value.map(canonicalValue)
   if (!isJsonObject(value)) return value
   return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonicalValue(value[key])]))
+}
+
+function sourceDigest(envelope: OutboxEnvelope): string {
+  return createHash("sha256").update(canonicalJson({
+    v: envelope.v,
+    kind: envelope.kind,
+    sessionId: envelope.sessionId,
+    seq: envelope.seq,
+    ts: envelope.ts,
+    payload: envelope.payload,
+  })).digest("hex")
 }
 
 function validateTimeline(envelope: OutboxEnvelope, payload: AgentTimelinePayload): void {
@@ -534,6 +703,100 @@ function validateRoute(envelope: OutboxEnvelope, payload: RouteResolutionPayload
     (["model_change", "thinking_change", "account_change", "hotswap", "fallback", "revert", "advisor_change"].includes(payload.changeKind) && payload.reason === null) ||
     (payload.advisors.length === 0 && payload.changeKind === "advisor_change" && payload.reason === null)
   ) throw new Error("Invalid route resolution payload")
+}
+
+function validateRunnerEvent(envelope: OutboxEnvelope, payload: RunnerEventPayload): void {
+  validateSourceSequence(envelope)
+  requireNonEmpty(payload.kind, "runnerEvent.kind")
+  requireNonEmpty(payload.eventId, "runnerEvent.eventId")
+  requireNonEmpty(payload.commandId, "runnerEvent.commandId")
+  requireNonEmpty(payload.correlationId, "runnerEvent.correlationId")
+  requireNonEmpty(payload.ownerEpoch, "runnerEvent.ownerEpoch")
+  requireNonEmpty(payload.sessionId, "runnerEvent.sessionId")
+  requireNonEmpty(payload.runnerIdentity.buildRevision.version, "runnerEvent.buildRevision.version")
+  validateSha256(payload.runnerIdentity.buildRevision.digest, "runnerEvent.buildRevision.digest")
+  requireNonEmpty(payload.runnerIdentity.runnerInstance.runnerInstanceId, "runnerEvent.runnerInstanceId")
+  validateNonNegativeInteger(payload.runnerIdentity.runnerInstance.startedAt, "runnerEvent.runnerStartedAt")
+  validateNonNegativeInteger(payload.revision, "runnerEvent.revision")
+  validateNonNegativeInteger(payload.sequence, "runnerEvent.sequence")
+  validateNonNegativeInteger(payload.controllerEpoch, "runnerEvent.controllerEpoch")
+  validateNullableInteger(payload.sessionRevision, "runnerEvent.sessionRevision")
+  validateNullableInteger(payload.durableSequence, "runnerEvent.durableSequence")
+  validateNullableInteger(payload.transcriptPosition, "runnerEvent.transcriptPosition")
+  validateNullableInteger(payload.targetGeneration, "runnerEvent.targetGeneration")
+  validateNullableInteger(payload.targetOperationGeneration, "runnerEvent.targetOperationGeneration")
+  if (payload.sessionId !== envelope.sessionId) {
+    throw new Error("Invalid runner event payload")
+  }
+}
+
+function validateDiagnosticOccurrence(envelope: OutboxEnvelope, payload: DiagnosticOccurrencePayload): void {
+  validateSourceSequence(envelope)
+  requireNonEmpty(payload.diagnosticId, "diagnosticOccurrence.diagnosticId")
+  requireNonEmpty(payload.failureClass, "diagnosticOccurrence.failureClass")
+  requireNonEmpty(payload.phase, "diagnosticOccurrence.phase")
+  requireNonEmpty(payload.message, "diagnosticOccurrence.message")
+  requireNonEmpty(payload.runtimeIdentity, "diagnosticOccurrence.runtimeIdentity")
+  requireNonEmpty(payload.redactionPolicyId, "diagnosticOccurrence.redactionPolicyId")
+  validateNullableSha256(payload.buildDigest, "diagnosticOccurrence.buildDigest")
+  validateNullableSha256(payload.requestFingerprint, "diagnosticOccurrence.requestFingerprint")
+  validateNullableSha256(payload.configHash, "diagnosticOccurrence.configHash")
+  validateNullableSha256(payload.manifestHash, "diagnosticOccurrence.manifestHash")
+  payload.artifacts.forEach((artifact, index) => {
+    requireNonEmpty(artifact.role, `diagnosticOccurrence.artifacts[${index}].role`)
+    requireNonEmpty(artifact.artifactId, `diagnosticOccurrence.artifacts[${index}].artifactId`)
+    requireNonEmpty(artifact.redactionPolicyId, `diagnosticOccurrence.artifacts[${index}].redactionPolicyId`)
+    validateSha256(artifact.sha256, `diagnosticOccurrence.artifacts[${index}].sha256`)
+  })
+  if (payload.occurredAt !== envelope.ts) {
+    throw new Error("Invalid diagnostic occurrence payload")
+  }
+}
+
+function validateDiagnosticProjection(envelope: OutboxEnvelope, payload: DiagnosticProjectionPayload): void {
+  validateSourceSequence(envelope)
+  requireNonEmpty(payload.projectionEventId, "diagnosticProjection.projectionEventId")
+  requireNonEmpty(payload.diagnosticId, "diagnosticProjection.diagnosticId")
+  requireNonEmpty(payload.sourceEntryId, "diagnosticProjection.sourceEntryId")
+  if (payload.occurredAt !== envelope.ts) {
+    throw new Error("Invalid diagnostic projection payload")
+  }
+}
+
+function validateSourceSequence(envelope: OutboxEnvelope): void {
+  if (!Number.isInteger(envelope.seq) || envelope.seq < 0) {
+    throw new Error("Invalid outbox source sequence")
+  }
+}
+
+function validateNonNegativeInteger(value: number, field: string): void {
+  if (!Number.isInteger(value) || value < 0) {
+    throw new Error(`invalid ${field}`)
+  }
+}
+
+function validateNullableInteger(value: number | null, field: string): void {
+  if (value !== null) {
+    validateNonNegativeInteger(value, field)
+  }
+}
+
+function requireNonEmpty(value: string, field: string): void {
+  if (value.length === 0) {
+    throw new Error(`invalid ${field}`)
+  }
+}
+
+function validateSha256(value: string, field: string): void {
+  if (!sha256Pattern.test(value)) {
+    throw new Error(`invalid ${field}`)
+  }
+}
+
+function validateNullableSha256(value: string | null, field: string): void {
+  if (value !== null) {
+    validateSha256(value, field)
+  }
 }
 
 function rawRequestArtifactInput(envelope: OutboxEnvelope, payload: ModelCallPayload): RawRequestArtifactInput | undefined {
@@ -621,7 +884,7 @@ function malformedEvent(filePath: string, lineNumber: number, rawLine: string, m
 }
 
 function isKnownOutboxKind(kind: string): kind is KnownOutboxKind {
-  return kind === "session" || kind === "branch" || kind === "turn" || kind === "event" || kind === "modelCall" || kind === "providerCall" || kind === "artifact" || kind === "agentTimeline" || kind === "routeResolution"
+  return kind === "session" || kind === "branch" || kind === "turn" || kind === "event" || kind === "modelCall" || kind === "providerCall" || kind === "artifact" || kind === "agentTimeline" || kind === "routeResolution" || kind === "runnerEvent" || kind === "diagnosticOccurrence" || kind === "diagnosticProjection"
 }
 
 function rowId(envelope: OutboxEnvelope): string {

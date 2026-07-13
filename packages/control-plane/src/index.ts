@@ -1,5 +1,5 @@
 export { ArtifactError, StorageError } from "./errors"
-export { LEDGER_SCHEMA_VERSION, migrateLedger, migration0001Sql, migration0002Sql, migration0003Sql, migration0004Sql, migration0005Sql, migration0006Sql, setDurabilityPragmas } from "./migrate"
+export { LEDGER_SCHEMA_VERSION, migrateLedger, migration0001Sql, migration0002Sql, migration0003Sql, migration0004Sql, migration0005Sql, migration0006Sql, migration0010Sql, setDurabilityPragmas } from "./migrate"
 export {
   LedgerStore,
   defaultLedgerPath,
@@ -216,3 +216,17 @@ export {
   exportFrontierSvg,
   type FrontierSvgProjection,
 } from "./evidence-export"
+
+export {
+  queryOperationalCanaries,
+  queryOperationalDiagnostics,
+  queryOperationalReleases,
+  queryOperationalRoutes,
+  queryOperationalSessions,
+  type OperationalCanaryDto,
+  type OperationalDiagnosticDto,
+  type OperationalQueryOptions,
+  type OperationalReleaseDto,
+  type OperationalRouteDto,
+  type OperationalSessionDto,
+} from "./operational-query"

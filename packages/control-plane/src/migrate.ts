@@ -11,7 +11,7 @@ interface UserVersionRow {
   user_version: number
 }
 
-export const LEDGER_SCHEMA_VERSION = 7
+export const LEDGER_SCHEMA_VERSION = 10
 
 export const migration0001Sql = `
 CREATE TABLE IF NOT EXISTS sessions (
@@ -563,6 +563,35 @@ CREATE INDEX model_calls_route_resolution_idx ON model_calls (routeResolutionId)
 PRAGMA user_version = 7;
 `
 
+const migration0010Statements = [
+  "CREATE TABLE operational_events (eventId TEXT PRIMARY KEY, eventKind TEXT NOT NULL, occurredAt INTEGER NOT NULL, observedAt INTEGER NOT NULL, producer TEXT NOT NULL, payloadVersion INTEGER NOT NULL, sourceKind TEXT NOT NULL, sourceId TEXT NOT NULL, sourceSequence INTEGER, sourceDigest TEXT NOT NULL, buildDigest TEXT, runnerInstanceId TEXT, sessionId TEXT, branchId TEXT, turnId TEXT, entryId TEXT, agentId TEXT, parentAgentId TEXT, taskId TEXT, packetId TEXT, viewId TEXT, controllerEpoch INTEGER, ownerEpoch TEXT, revision INTEGER, sequence INTEGER, sessionRevision INTEGER, durableSequence INTEGER, commandId TEXT, correlationId TEXT, causationId TEXT, inputId TEXT, attemptId TEXT, routeResolutionId TEXT, quotaDecisionId TEXT, toolCallId TEXT, diagnosticId TEXT, canaryRunId TEXT, promotionId TEXT, regressionId TEXT, redactionPolicyId TEXT, payload TEXT NOT NULL)",
+  "CREATE UNIQUE INDEX operational_events_source_unique_idx ON operational_events (sourceKind, sourceId, sourceSequence) WHERE sourceSequence IS NOT NULL",
+  "CREATE INDEX operational_events_session_revision_idx ON operational_events (sessionId, revision, occurredAt)",
+  "CREATE INDEX operational_events_runner_sequence_idx ON operational_events (runnerInstanceId, sequence, occurredAt)",
+  "CREATE INDEX operational_events_command_idx ON operational_events (commandId, occurredAt)",
+  "CREATE INDEX operational_events_input_attempt_idx ON operational_events (inputId, attemptId, occurredAt)",
+  "CREATE INDEX operational_events_route_idx ON operational_events (routeResolutionId, occurredAt)",
+  "CREATE INDEX operational_events_diagnostic_idx ON operational_events (diagnosticId, occurredAt)",
+  "CREATE INDEX operational_events_canary_idx ON operational_events (canaryRunId, occurredAt)",
+  "CREATE INDEX operational_events_promotion_idx ON operational_events (promotionId, occurredAt)",
+  "CREATE INDEX operational_events_observed_lag_idx ON operational_events (observedAt, occurredAt)",
+  "CREATE TABLE operational_sources (sourceKind TEXT NOT NULL, sourceId TEXT NOT NULL, sourceDigest TEXT NOT NULL, lastSourceSequence INTEGER, lastOccurredAt INTEGER, lastObservedAt INTEGER NOT NULL, gapFromSequence INTEGER, gapToSequence INTEGER, status TEXT NOT NULL, PRIMARY KEY (sourceKind, sourceId))",
+  "CREATE TABLE diagnostic_occurrences (diagnosticId TEXT PRIMARY KEY, occurredAt INTEGER NOT NULL, failureClass TEXT NOT NULL, phase TEXT NOT NULL, message TEXT NOT NULL, requestFingerprint TEXT, buildDigest TEXT, runnerInstanceId TEXT, runtimeIdentity TEXT NOT NULL, configHash TEXT, manifestHash TEXT, sessionId TEXT, branchId TEXT, turnId TEXT, entryId TEXT, agentId TEXT, routeResolutionId TEXT, inputId TEXT, attemptId TEXT, ownerEpoch TEXT, explicitRoute INTEGER, outcome TEXT, causeDiagnosticId TEXT, retryOfAttemptId TEXT, fallbackResolutionId TEXT, interventionCommandId TEXT, regressionId TEXT, redactionPolicyId TEXT NOT NULL, payloadVersion INTEGER NOT NULL)",
+  "CREATE TABLE diagnostic_artifacts (diagnosticId TEXT NOT NULL, ordinal INTEGER NOT NULL, role TEXT NOT NULL, artifactId TEXT NOT NULL, sha256 TEXT NOT NULL, redactionPolicyId TEXT NOT NULL, PRIMARY KEY (diagnosticId, ordinal))",
+  "CREATE TABLE diagnostic_projection_events (projectionEventId TEXT PRIMARY KEY, diagnosticId TEXT NOT NULL, occurredAt INTEGER NOT NULL, state TEXT NOT NULL CHECK (state IN ('unread', 'acknowledged', 'resolved', 'reopened')), actor TEXT, commandId TEXT, sourceEntryId TEXT, payloadVersion INTEGER NOT NULL)",
+  "CREATE TABLE canary_runs (canaryRunId TEXT PRIMARY KEY, receiptDigest TEXT NOT NULL UNIQUE, buildDigest TEXT NOT NULL, version TEXT NOT NULL, runnerInstanceId TEXT NOT NULL, fixtureSessionId TEXT NOT NULL, ownerEpoch TEXT NOT NULL, commandId TEXT NOT NULL, startedAt INTEGER NOT NULL, stoppedAt INTEGER NOT NULL, initialSnapshotRevision INTEGER NOT NULL, finalSnapshotRevision INTEGER NOT NULL, mutationAppliedExactlyOnce INTEGER NOT NULL, leaseReleased INTEGER NOT NULL, leaseReacquired INTEGER NOT NULL, jsonlPersisted INTEGER NOT NULL, queuePersisted INTEGER NOT NULL, artifactId TEXT NOT NULL)",
+  "CREATE TABLE release_transactions (promotionId TEXT PRIMARY KEY, operation TEXT NOT NULL, occurredAt INTEGER NOT NULL, fromBuildDigest TEXT, toBuildDigest TEXT NOT NULL, receiptDigest TEXT, registryBeforeDigest TEXT NOT NULL, registryAfterDigest TEXT NOT NULL, transactionArtifactId TEXT NOT NULL)",
+  "CREATE TABLE release_registry_observations (observationId TEXT PRIMARY KEY, observedAt INTEGER NOT NULL, stableBuildDigest TEXT, previousBuildDigest TEXT, candidateBuildDigest TEXT, receiptDigest TEXT, sourceDigest TEXT NOT NULL, artifactId TEXT NOT NULL)",
+  "PRAGMA user_version = 10",
+] as const
+
+export const migration0010Sql = `
+BEGIN IMMEDIATE;
+${migration0010Statements.map((statement) => `${statement};`).join("\n")}
+COMMIT;
+`
+
+
 
 export function setDurabilityPragmas(sqlite: LedgerSqliteConnection): void {
   sqlite.exec("PRAGMA journal_mode = WAL")
@@ -593,5 +622,15 @@ export function migrateLedger(sqlite: LedgerSqliteConnection): void {
   }
   if (currentVersion < 7) {
     sqlite.exec(migration0007Sql)
+  }
+  if (currentVersion < 10) {
+    try {
+      sqlite.exec("BEGIN IMMEDIATE")
+      for (const statement of migration0010Statements) sqlite.exec(statement)
+      sqlite.exec("COMMIT")
+    } catch (cause) {
+      try { sqlite.exec("ROLLBACK") } catch { /* no active transaction */ }
+      throw cause
+    }
   }
 }

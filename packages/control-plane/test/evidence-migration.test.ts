@@ -123,13 +123,13 @@ afterAll(() => {
   rmSync(tmpDir, { recursive: true, force: true })
 })
 
-test("fresh ledger reaches v7 with the additive evidence and route schemas", () => {
+test("fresh ledger reaches v10 with additive evidence and operational schemas", () => {
   const sqlite = new Database(freshPath)
   try {
     migrateLedger(sqlite)
 
-    expect(LEDGER_SCHEMA_VERSION).toBe(7)
-    expect(sqlite.query<VersionRow, []>("PRAGMA user_version").get()?.user_version).toBe(7)
+    expect(LEDGER_SCHEMA_VERSION).toBe(10)
+    expect(sqlite.query<VersionRow, []>("PRAGMA user_version").get()?.user_version).toBe(10)
 
     const freshTableNames = sqlite.query<NameRow, []>("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all().map((row) => row.name)
     const freshIndexNames = sqlite.query<NameRow, []>("SELECT name FROM sqlite_master WHERE type = 'index' ORDER BY name").all().map((row) => row.name)
@@ -165,7 +165,7 @@ test("fresh ledger reaches v7 with the additive evidence and route schemas", () 
   }
 })
 
-test("v5 ledger preserves legacy rows and views through v6 evidence migration and final v7 migration", () => {
+test("v5 ledger preserves legacy rows and views through the v10 operational migration", () => {
   const sqlite = new Database(upgradePath)
   try {
     sqlite.exec(migration0001Sql)
@@ -201,7 +201,7 @@ test("v5 ledger preserves legacy rows and views through v6 evidence migration an
 
     migrateLedger(sqlite)
 
-    expect(sqlite.query<VersionRow, []>("PRAGMA user_version").get()?.user_version).toBe(7)
+    expect(sqlite.query<VersionRow, []>("PRAGMA user_version").get()?.user_version).toBe(10)
 
     const upgradeIndexNames = sqlite.query<NameRow, []>("SELECT name FROM sqlite_master WHERE type = 'index' ORDER BY name").all().map((row) => row.name)
     for (const [table, columns] of Object.entries(evidenceTableColumns)) {

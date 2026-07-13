@@ -333,3 +333,106 @@ export const RouteResolutionPayloadV1Schema = Schema.Struct({ ...EventLinkageFie
   artifacts: Schema.Array(ArtifactHandleSchema),
 })
 export type RouteResolutionPayloadV1 = Schema.Schema.Type<typeof RouteResolutionPayloadV1Schema>
+
+const NullableIntSchema = Schema.Union([Schema.Int, Schema.Null])
+const NullableBooleanSchema = Schema.Union([Schema.Boolean, Schema.Null])
+
+export const RunnerIdentityPayloadV1Schema = Schema.Struct({
+  buildRevision: Schema.Struct({
+    digest: Schema.String,
+    version: Schema.String,
+  }),
+  runnerInstance: Schema.Struct({
+    runnerInstanceId: Schema.String,
+    startedAt: Schema.Int,
+  }),
+})
+export type RunnerIdentityPayloadV1 = Schema.Schema.Type<typeof RunnerIdentityPayloadV1Schema>
+
+export const RunnerEventPayloadV1Schema = Schema.Struct({
+  payloadVersion: Schema.Literal(1),
+  runnerIdentity: RunnerIdentityPayloadV1Schema,
+  sessionId: Schema.String,
+  ownerEpoch: Schema.String,
+  kind: Schema.String,
+  eventId: Schema.String,
+  commandId: Schema.String,
+  correlationId: Schema.String,
+  causationId: NullableStringSchema,
+  revision: Schema.Int,
+  sequence: Schema.Int,
+  sessionRevision: NullableIntSchema,
+  controllerEpoch: Schema.Int,
+  viewId: NullableStringSchema,
+  inputId: NullableStringSchema,
+  durableSequence: NullableIntSchema,
+  attemptId: NullableStringSchema,
+  routeResolutionId: NullableStringSchema,
+  quotaDecisionId: NullableStringSchema,
+  toolCallId: NullableStringSchema,
+  transcriptEntryId: NullableStringSchema,
+  transcriptLeafId: NullableStringSchema,
+  transcriptPosition: NullableIntSchema,
+  targetGeneration: NullableIntSchema,
+  targetCommandId: NullableStringSchema,
+  targetOperationGeneration: NullableIntSchema,
+  detail: JsonValueSchema,
+})
+export type RunnerEventPayloadV1 = Schema.Schema.Type<typeof RunnerEventPayloadV1Schema>
+
+export const DiagnosticArtifactLinkPayloadV1Schema = Schema.Struct({
+  role: Schema.String,
+  artifactId: Schema.String,
+  sha256: Schema.String,
+  redactionPolicyId: Schema.String,
+})
+export type DiagnosticArtifactLinkPayloadV1 = Schema.Schema.Type<typeof DiagnosticArtifactLinkPayloadV1Schema>
+
+export const DiagnosticOccurrencePayloadV1Schema = Schema.Struct({
+  payloadVersion: Schema.Literal(1),
+  diagnosticId: Schema.String,
+  occurredAt: Schema.Int,
+  failureClass: Schema.String,
+  phase: Schema.String,
+  message: Schema.String,
+  requestFingerprint: NullableStringSchema,
+  buildDigest: NullableStringSchema,
+  runnerInstanceId: NullableStringSchema,
+  runtimeIdentity: Schema.String,
+  configHash: NullableStringSchema,
+  manifestHash: NullableStringSchema,
+  sessionId: NullableStringSchema,
+  branchId: NullableStringSchema,
+  turnId: NullableStringSchema,
+  entryId: NullableStringSchema,
+  agentId: NullableStringSchema,
+  routeResolutionId: NullableStringSchema,
+  inputId: NullableStringSchema,
+  attemptId: NullableStringSchema,
+  ownerEpoch: NullableStringSchema,
+  explicitRoute: NullableBooleanSchema,
+  outcome: NullableStringSchema,
+  causeDiagnosticId: NullableStringSchema,
+  retryOfAttemptId: NullableStringSchema,
+  fallbackResolutionId: NullableStringSchema,
+  interventionCommandId: NullableStringSchema,
+  regressionId: NullableStringSchema,
+  redactionPolicyId: Schema.String,
+  artifacts: Schema.Array(DiagnosticArtifactLinkPayloadV1Schema),
+})
+export type DiagnosticOccurrencePayloadV1 = Schema.Schema.Type<typeof DiagnosticOccurrencePayloadV1Schema>
+
+export const DiagnosticProjectionStateSchema = Schema.Literals(["unread", "acknowledged", "resolved", "reopened"])
+export type DiagnosticProjectionState = Schema.Schema.Type<typeof DiagnosticProjectionStateSchema>
+
+export const DiagnosticProjectionPayloadV1Schema = Schema.Struct({
+  payloadVersion: Schema.Literal(1),
+  projectionEventId: Schema.String,
+  diagnosticId: Schema.String,
+  occurredAt: Schema.Int,
+  state: DiagnosticProjectionStateSchema,
+  actor: NullableStringSchema,
+  commandId: NullableStringSchema,
+  sourceEntryId: Schema.String,
+})
+export type DiagnosticProjectionPayloadV1 = Schema.Schema.Type<typeof DiagnosticProjectionPayloadV1Schema>

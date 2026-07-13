@@ -224,6 +224,197 @@ export const routeAdvisors = sqliteTable("route_advisors", { routeResolutionId: 
 export const routeEventArtifacts = sqliteTable("route_event_artifacts", { ownerKind: text("ownerKind").notNull(), ownerId: text("ownerId").notNull(), ordinal: integer("ordinal").notNull(), role: text("role").notNull(), artifactId: text("artifactId").notNull() }, (table) => [primaryKey({ columns: [table.ownerKind, table.ownerId, table.ordinal] }), index("route_event_artifacts_artifact_idx").on(table.artifactId), index("route_event_artifacts_owner_role_idx").on(table.ownerKind, table.ownerId, table.role)])
 
 
+export const operationalEvents = sqliteTable(
+  "operational_events",
+  {
+    eventId: text("eventId").primaryKey(),
+    eventKind: text("eventKind").notNull(),
+    occurredAt: integer("occurredAt").notNull(),
+    observedAt: integer("observedAt").notNull(),
+    producer: text("producer").notNull(),
+    payloadVersion: integer("payloadVersion").notNull(),
+    sourceKind: text("sourceKind").notNull(),
+    sourceId: text("sourceId").notNull(),
+    sourceSequence: integer("sourceSequence"),
+    sourceDigest: text("sourceDigest").notNull(),
+    buildDigest: text("buildDigest"),
+    runnerInstanceId: text("runnerInstanceId"),
+    sessionId: text("sessionId"),
+    branchId: text("branchId"),
+    turnId: text("turnId"),
+    entryId: text("entryId"),
+    agentId: text("agentId"),
+    parentAgentId: text("parentAgentId"),
+    taskId: text("taskId"),
+    packetId: text("packetId"),
+    viewId: text("viewId"),
+    controllerEpoch: integer("controllerEpoch"),
+    ownerEpoch: text("ownerEpoch"),
+    revision: integer("revision"),
+    sequence: integer("sequence"),
+    sessionRevision: integer("sessionRevision"),
+    durableSequence: integer("durableSequence"),
+    commandId: text("commandId"),
+    correlationId: text("correlationId"),
+    causationId: text("causationId"),
+    inputId: text("inputId"),
+    attemptId: text("attemptId"),
+    routeResolutionId: text("routeResolutionId"),
+    quotaDecisionId: text("quotaDecisionId"),
+    toolCallId: text("toolCallId"),
+    diagnosticId: text("diagnosticId"),
+    canaryRunId: text("canaryRunId"),
+    promotionId: text("promotionId"),
+    regressionId: text("regressionId"),
+    redactionPolicyId: text("redactionPolicyId"),
+    payload: text("payload").notNull(),
+  },
+  (table) => [
+    uniqueIndex("operational_events_source_unique_idx").on(table.sourceKind, table.sourceId, table.sourceSequence).where(sql`${table.sourceSequence} IS NOT NULL`),
+    index("operational_events_session_revision_idx").on(table.sessionId, table.revision, table.occurredAt),
+    index("operational_events_runner_sequence_idx").on(table.runnerInstanceId, table.sequence, table.occurredAt),
+    index("operational_events_command_idx").on(table.commandId, table.occurredAt),
+    index("operational_events_input_attempt_idx").on(table.inputId, table.attemptId, table.occurredAt),
+    index("operational_events_route_idx").on(table.routeResolutionId, table.occurredAt),
+    index("operational_events_diagnostic_idx").on(table.diagnosticId, table.occurredAt),
+    index("operational_events_canary_idx").on(table.canaryRunId, table.occurredAt),
+    index("operational_events_promotion_idx").on(table.promotionId, table.occurredAt),
+    index("operational_events_observed_lag_idx").on(table.observedAt, table.occurredAt),
+  ],
+)
+
+export const operationalSources = sqliteTable(
+  "operational_sources",
+  {
+    sourceKind: text("sourceKind").notNull(),
+    sourceId: text("sourceId").notNull(),
+    sourceDigest: text("sourceDigest").notNull(),
+    lastSourceSequence: integer("lastSourceSequence"),
+    lastOccurredAt: integer("lastOccurredAt"),
+    lastObservedAt: integer("lastObservedAt").notNull(),
+    gapFromSequence: integer("gapFromSequence"),
+    gapToSequence: integer("gapToSequence"),
+    status: text("status").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.sourceKind, table.sourceId] })],
+)
+
+export const diagnosticOccurrences = sqliteTable(
+  "diagnostic_occurrences",
+  {
+    diagnosticId: text("diagnosticId").primaryKey(),
+    occurredAt: integer("occurredAt").notNull(),
+    failureClass: text("failureClass").notNull(),
+    phase: text("phase").notNull(),
+    message: text("message").notNull(),
+    requestFingerprint: text("requestFingerprint"),
+    buildDigest: text("buildDigest"),
+    runnerInstanceId: text("runnerInstanceId"),
+    runtimeIdentity: text("runtimeIdentity").notNull(),
+    configHash: text("configHash"),
+    manifestHash: text("manifestHash"),
+    sessionId: text("sessionId"),
+    branchId: text("branchId"),
+    turnId: text("turnId"),
+    entryId: text("entryId"),
+    agentId: text("agentId"),
+    routeResolutionId: text("routeResolutionId"),
+    inputId: text("inputId"),
+    attemptId: text("attemptId"),
+    ownerEpoch: text("ownerEpoch"),
+    explicitRoute: integer("explicitRoute", { mode: "boolean" }),
+    outcome: text("outcome"),
+    causeDiagnosticId: text("causeDiagnosticId"),
+    retryOfAttemptId: text("retryOfAttemptId"),
+    fallbackResolutionId: text("fallbackResolutionId"),
+    interventionCommandId: text("interventionCommandId"),
+    regressionId: text("regressionId"),
+    redactionPolicyId: text("redactionPolicyId").notNull(),
+    payloadVersion: integer("payloadVersion").notNull(),
+  },
+)
+
+export const diagnosticArtifacts = sqliteTable(
+  "diagnostic_artifacts",
+  {
+    diagnosticId: text("diagnosticId").notNull(),
+    ordinal: integer("ordinal").notNull(),
+    role: text("role").notNull(),
+    artifactId: text("artifactId").notNull(),
+    sha256: text("sha256").notNull(),
+    redactionPolicyId: text("redactionPolicyId").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.diagnosticId, table.ordinal] })],
+)
+
+export const diagnosticProjectionEvents = sqliteTable(
+  "diagnostic_projection_events",
+  {
+    projectionEventId: text("projectionEventId").primaryKey(),
+    diagnosticId: text("diagnosticId").notNull(),
+    occurredAt: integer("occurredAt").notNull(),
+    state: text("state").notNull(),
+    actor: text("actor"),
+    commandId: text("commandId"),
+    sourceEntryId: text("sourceEntryId"),
+    payloadVersion: integer("payloadVersion").notNull(),
+  },
+)
+
+export const canaryRuns = sqliteTable(
+  "canary_runs",
+  {
+    canaryRunId: text("canaryRunId").primaryKey(),
+    receiptDigest: text("receiptDigest").notNull().unique(),
+    buildDigest: text("buildDigest").notNull(),
+    version: text("version").notNull(),
+    runnerInstanceId: text("runnerInstanceId").notNull(),
+    fixtureSessionId: text("fixtureSessionId").notNull(),
+    ownerEpoch: text("ownerEpoch").notNull(),
+    commandId: text("commandId").notNull(),
+    startedAt: integer("startedAt").notNull(),
+    stoppedAt: integer("stoppedAt").notNull(),
+    initialSnapshotRevision: integer("initialSnapshotRevision").notNull(),
+    finalSnapshotRevision: integer("finalSnapshotRevision").notNull(),
+    mutationAppliedExactlyOnce: integer("mutationAppliedExactlyOnce", { mode: "boolean" }).notNull(),
+    leaseReleased: integer("leaseReleased", { mode: "boolean" }).notNull(),
+    leaseReacquired: integer("leaseReacquired", { mode: "boolean" }).notNull(),
+    jsonlPersisted: integer("jsonlPersisted", { mode: "boolean" }).notNull(),
+    queuePersisted: integer("queuePersisted", { mode: "boolean" }).notNull(),
+    artifactId: text("artifactId").notNull(),
+  },
+)
+
+export const releaseTransactions = sqliteTable(
+  "release_transactions",
+  {
+    promotionId: text("promotionId").primaryKey(),
+    operation: text("operation").notNull(),
+    occurredAt: integer("occurredAt").notNull(),
+    fromBuildDigest: text("fromBuildDigest"),
+    toBuildDigest: text("toBuildDigest").notNull(),
+    receiptDigest: text("receiptDigest"),
+    registryBeforeDigest: text("registryBeforeDigest").notNull(),
+    registryAfterDigest: text("registryAfterDigest").notNull(),
+    transactionArtifactId: text("transactionArtifactId").notNull(),
+  },
+)
+
+export const releaseRegistryObservations = sqliteTable(
+  "release_registry_observations",
+  {
+    observationId: text("observationId").primaryKey(),
+    observedAt: integer("observedAt").notNull(),
+    stableBuildDigest: text("stableBuildDigest"),
+    previousBuildDigest: text("previousBuildDigest"),
+    candidateBuildDigest: text("candidateBuildDigest"),
+    receiptDigest: text("receiptDigest"),
+    sourceDigest: text("sourceDigest").notNull(),
+    artifactId: text("artifactId").notNull(),
+  },
+)
+
+
 export const evidenceSources = sqliteTable(
   "evidence_sources",
   {
@@ -464,6 +655,14 @@ export const ledgerTables = {
   routeCandidates,
   routeAdvisors,
   routeEventArtifacts,
+  operationalEvents,
+  operationalSources,
+  diagnosticOccurrences,
+  diagnosticArtifacts,
+  diagnosticProjectionEvents,
+  canaryRuns,
+  releaseTransactions,
+  releaseRegistryObservations,
   evidenceSources,
   metricDefinitions,
   benchmarkCatalog,
@@ -498,3 +697,11 @@ export type RouteResolutionRow = typeof routeResolutions.$inferSelect
 export type RouteCandidateRow = typeof routeCandidates.$inferSelect
 export type RouteAdvisorRow = typeof routeAdvisors.$inferSelect
 export type RouteEventArtifactRow = typeof routeEventArtifacts.$inferSelect
+export type OperationalEventRow = typeof operationalEvents.$inferSelect
+export type OperationalSourceRow = typeof operationalSources.$inferSelect
+export type DiagnosticOccurrenceRow = typeof diagnosticOccurrences.$inferSelect
+export type DiagnosticArtifactRow = typeof diagnosticArtifacts.$inferSelect
+export type DiagnosticProjectionEventRow = typeof diagnosticProjectionEvents.$inferSelect
+export type CanaryRunRow = typeof canaryRuns.$inferSelect
+export type ReleaseTransactionRow = typeof releaseTransactions.$inferSelect
+export type ReleaseRegistryObservationRow = typeof releaseRegistryObservations.$inferSelect

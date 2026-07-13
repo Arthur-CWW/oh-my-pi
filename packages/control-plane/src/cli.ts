@@ -18,13 +18,16 @@ import {
 } from "./routing"
 import { seedRoutingStore, type RoutingSeedResult } from "./routing-seed"
 import type { EventRow, LaneStateRow, ModelCallRow, RoutingObservationRow } from "./schema"
+import { queryOperationalCanaries, queryOperationalDiagnostics, queryOperationalReleases, queryOperationalRoutes, queryOperationalSessions, type OperationalCanaryDto, type OperationalDiagnosticDto, type OperationalQueryOptions, type OperationalReleaseDto, type OperationalRouteDto, type OperationalSessionDto } from "./operational-query"
 import { queryUsageByAgent, queryUsageByLaneHour, queryUsageBySession, type UsageByAgentRow, type UsageByLaneHourRow, type UsageBySessionRow } from "./stats"
 
-type Command = StatusCommand | ModelCallsCommand | EventsCommand | IngestCommand | RoutingCommand | StatsCommand
+type Command = StatusCommand | ModelCallsCommand | EventsCommand | IngestCommand | RoutingCommand | StatsCommand | OpsCommand
 
 type RoutingCommand = RoutingObserveCommand | RoutingLanesCommand | RoutingBriefCommand | RoutingLogCommand | RoutingSeedCommand
 
 type StatsCommand = StatsLanesCommand | StatsAgentsCommand | StatsSessionsCommand
+
+type OpsCommand = OpsSessionsCommand | OpsRoutesCommand | OpsDiagnosticsCommand | OpsCanariesCommand | OpsReleasesCommand
 
 interface BaseCommand {
   readonly dbPath: string
@@ -91,6 +94,31 @@ interface StatsSessionsCommand extends BaseCommand {
   readonly sinceTs?: number
 }
 
+interface OpsSessionsCommand extends BaseCommand {
+  readonly name: "ops-sessions"
+  readonly options: OperationalQueryOptions
+}
+
+interface OpsRoutesCommand extends BaseCommand {
+  readonly name: "ops-routes"
+  readonly options: OperationalQueryOptions
+}
+
+interface OpsDiagnosticsCommand extends BaseCommand {
+  readonly name: "ops-diagnostics"
+  readonly options: OperationalQueryOptions
+}
+
+interface OpsCanariesCommand extends BaseCommand {
+  readonly name: "ops-canaries"
+  readonly options: OperationalQueryOptions
+}
+
+interface OpsReleasesCommand extends BaseCommand {
+  readonly name: "ops-releases"
+  readonly options: OperationalQueryOptions
+}
+
 interface RoutingObserveResult {
   readonly id: string
   readonly inserted: boolean
@@ -122,6 +150,16 @@ export async function runCli(argv: readonly string[] = Bun.argv.slice(2)): Promi
       return runEvents(parsed)
     case "ingest":
       return runIngest(parsed)
+    case "ops-sessions":
+      return runOpsSessions(parsed)
+    case "ops-routes":
+      return runOpsRoutes(parsed)
+    case "ops-diagnostics":
+      return runOpsDiagnostics(parsed)
+    case "ops-canaries":
+      return runOpsCanaries(parsed)
+    case "ops-releases":
+      return runOpsReleases(parsed)
     case "routing-observe":
       return runRoutingObserve(parsed)
     case "routing-lanes":
@@ -210,6 +248,26 @@ function runRoutingLog(command: RoutingLogCommand): Promise<number> {
   return runStorageProgram(program, command.json, renderRoutingLogTable)
 }
 
+function runOpsSessions(command: OpsSessionsCommand): Promise<number> {
+  return runStorageProgram(queryOperationalSessions(command.dbPath, command.options), command.json, renderOperationalSessionsTable)
+}
+
+function runOpsRoutes(command: OpsRoutesCommand): Promise<number> {
+  return runStorageProgram(queryOperationalRoutes(command.dbPath, command.options), command.json, renderOperationalRoutesTable)
+}
+
+function runOpsDiagnostics(command: OpsDiagnosticsCommand): Promise<number> {
+  return runStorageProgram(queryOperationalDiagnostics(command.dbPath, command.options), command.json, renderOperationalDiagnosticsTable)
+}
+
+function runOpsCanaries(command: OpsCanariesCommand): Promise<number> {
+  return runStorageProgram(queryOperationalCanaries(command.dbPath, command.options), command.json, renderOperationalCanariesTable)
+}
+
+function runOpsReleases(command: OpsReleasesCommand): Promise<number> {
+  return runStorageProgram(queryOperationalReleases(command.dbPath, command.options), command.json, renderOperationalReleasesTable)
+}
+
 function runStatsLanes(command: StatsLanesCommand): Promise<number> {
   const program = queryUsageByLaneHour(command.dbPath, { sinceTs: command.sinceTs })
   return runStorageProgram(program, command.json, renderStatsLanesTable)
@@ -267,6 +325,8 @@ function parseCommand(argv: readonly string[]): Command | CliUsageError {
       return parseRouting(argv.slice(1), base)
     case "stats":
       return parseStats(argv.slice(1), base)
+    case "ops":
+      return parseOps(argv.slice(1), base)
     default:
       return usage(`unknown command: ${commandName}`)
   }
@@ -802,6 +862,51 @@ function parseStatsSubcommand(argv: readonly string[], base: BaseCommand, name: 
   return { name, dbPath, json, sinceTs } as StatsCommand
 }
 
+function parseOps(argv: readonly string[], base: BaseCommand): OpsCommand | CliUsageError {
+  const subcommand = argv[0]
+  const names = {
+    sessions: "ops-sessions",
+    routes: "ops-routes",
+    diagnostics: "ops-diagnostics",
+    canaries: "ops-canaries",
+    releases: "ops-releases",
+  } as const
+  if (subcommand === undefined || !(subcommand in names)) {
+    return usage("ops requires a subcommand: sessions|routes|diagnostics|canaries|releases")
+  }
+  let dbPath = base.dbPath
+  let json = base.json
+  let limit = 50
+  const args = argv.slice(1)
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index]
+    if (arg === "--json") {
+      json = true
+    } else if (arg === "--db") {
+      const value = requiredValue(args, index, "--db")
+      if (value instanceof CliUsageError) return value
+      dbPath = value
+      index += 1
+    } else if (arg?.startsWith("--db=")) {
+      dbPath = arg.slice("--db=".length)
+    } else if (arg === "--limit") {
+      const value = requiredValue(args, index, "--limit")
+      if (value instanceof CliUsageError) return value
+      const parsed = parseLimit(value)
+      if (parsed instanceof CliUsageError) return parsed
+      limit = parsed
+      index += 1
+    } else if (arg?.startsWith("--limit=")) {
+      const parsed = parseLimit(arg.slice("--limit=".length))
+      if (parsed instanceof CliUsageError) return parsed
+      limit = parsed
+    } else {
+      return usage(`unknown ops ${subcommand} option: ${arg}`)
+    }
+  }
+  return { name: names[subcommand as keyof typeof names], dbPath, json, options: { limit } }
+}
+
 function requiredValue(argv: readonly string[], index: number, flag: string): string | CliUsageError {
   const value = argv[index + 1]
   if (value === undefined || value.startsWith("--")) return usage(`${flag} requires a value`)
@@ -937,6 +1042,84 @@ function renderRoutingSeedTable(result: RoutingSeedResult): string {
   )
 }
 
+function renderOperationalSessionsTable(rows: readonly OperationalSessionDto[]): string {
+  return renderTable(["session", "runners", "routes", "diagnostics", "lagMs", "stale", "gap", "missingLinks"], rows.map((row) => [
+    row.sessionId,
+    row.runnerInstanceIds.length,
+    row.routeCount,
+    row.diagnosticCount,
+    row.lagMs,
+    String(row.stale),
+    String(row.gap),
+    row.missingLinks.join(","),
+  ]))
+}
+
+function renderOperationalRoutesTable(rows: readonly OperationalRouteDto[]): string {
+  return renderTable(["resolution", "session", "agent", "revision", "lane", "provider", "model", "kind", "lagMs", "stale", "gap", "missingLinks"], rows.map((row) => [
+    row.routeResolutionId,
+    row.sourceSessionId,
+    row.agentId,
+    row.agentSeq,
+    row.lane,
+    row.provider,
+    row.model,
+    row.changeKind,
+    row.lagMs,
+    String(row.stale),
+    String(row.gap),
+    row.missingLinks.join(","),
+  ]))
+}
+
+function renderOperationalDiagnosticsTable(rows: readonly OperationalDiagnosticDto[]): string {
+  return renderTable(["diagnostic", "session", "kind", "phase", "state", "artifacts", "lagMs", "stale", "gap", "missingLinks"], rows.map((row) => [
+    row.diagnosticId,
+    row.sessionId ?? "",
+    row.failureClass,
+    row.phase,
+    row.projectionState ?? "",
+    row.artifactCount,
+    row.lagMs,
+    String(row.stale),
+    String(row.gap),
+    row.missingLinks.join(","),
+  ]))
+}
+
+function renderOperationalCanariesTable(rows: readonly OperationalCanaryDto[]): string {
+  return renderTable(["canary", "version", "build", "runner", "session", "promotions", "lagMs", "stale", "gap", "missingLinks", "mismatches"], rows.map((row) => [
+    row.canaryRunId,
+    row.version,
+    row.buildDigest,
+    row.runnerInstanceId,
+    row.fixtureSessionId,
+    row.releasePromotionIds.length,
+    row.lagMs,
+    String(row.stale),
+    String(row.gap),
+    row.missingLinks.join(","),
+    row.mismatches.join(","),
+  ]))
+}
+
+function renderOperationalReleasesTable(rows: readonly OperationalReleaseDto[]): string {
+  return renderTable(["promotion", "kind", "fromBuild", "toBuild", "canary", "registry", "lagMs", "stale", "gap", "missingLinks", "mismatches"], rows.map((row) => [
+    row.promotionId,
+    row.operation,
+    row.fromBuildDigest ?? "",
+    row.toBuildDigest,
+    row.canaryRunId ?? "",
+    row.registryObservationId ?? "",
+    row.lagMs,
+    String(row.stale),
+    String(row.gap),
+    row.missingLinks.join(","),
+    row.mismatches.join(","),
+  ]))
+}
+
+
 function renderStatsLanesTable(rows: readonly UsageByLaneHourRow[]): string {
   return renderTable(
     ["lane", "hourBucket", "calls", "tokensIn", "tokensOut", "cacheRead", "cost", "avgLatencyMs", "tokensPerMinute", "tokensPerSecond", "avgTtftMs", "reasoningTokens"],
@@ -1021,7 +1204,7 @@ function writeJsonError(error: CliFailure): void {
 }
 
 function usage(message: string): CliUsageError {
-  return new CliUsageError(`${message}. usage: control-plane <status|model-calls|events|ingest|routing|stats> [--db <path>] [--json]`)
+  return new CliUsageError(`${message}. usage: control-plane <status|model-calls|events|ingest|routing|stats|ops> [--db <path>] [--json]`)
 }
 
 if (import.meta.main) {
