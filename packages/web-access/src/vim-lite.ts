@@ -56,9 +56,7 @@ type Snapshot = { text: string; cursor: Pos }
 type VisualRange = { start: number; end: number; linewise: boolean; startLine: number; endLine: number }
 type LayoutSegment = { line: number; startCol: number; endCol: number; text: string; hasCursor: boolean }
 type ExpandedPaste = { marker: string; content: string; start: number; end: number }
-type ChromeEditorCompat = {
-  setChromeMode?(mode: "horizontal"): void
-}
+type ChromeEditorCompat = { setChromeMode?(mode: "horizontal"): void }
 
 const MAX_COUNT = 999
 const MAX_HISTORY = 300
