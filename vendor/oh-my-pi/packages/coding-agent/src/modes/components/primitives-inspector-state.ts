@@ -1,4 +1,6 @@
-export type PrimitiveCategoryId = "tools" | "skills" | "feeds" | "memories" | "stores" | "session";
+export const PRIMITIVE_CATEGORY_IDS = ["tools", "skills", "feeds", "memories", "stores", "session"] as const;
+
+export type PrimitiveCategoryId = (typeof PRIMITIVE_CATEGORY_IDS)[number];
 
 export interface PrimitiveInspectorItem {
 	readonly id: string;
@@ -28,15 +30,27 @@ export interface PrimitiveInspectorState {
 	readonly detailOffset: number;
 }
 
-export function createPrimitiveInspectorState(): PrimitiveInspectorState {
+export function createPrimitiveInspectorState(
+	categories: readonly PrimitiveInspectorCategory[] = [],
+	initialCategory?: PrimitiveCategoryId,
+): PrimitiveInspectorState {
+	const categoryIndex =
+		initialCategory === undefined ? 0 : categories.findIndex(category => category.id === initialCategory);
 	return {
-		depth: 0,
-		categoryIndex: 0,
+		depth: categoryIndex >= 0 && initialCategory !== undefined ? 1 : 0,
+		categoryIndex: categoryIndex >= 0 ? categoryIndex : 0,
 		itemIndex: 0,
 		filterQuery: "",
 		filterEditing: false,
 		detailOffset: 0,
 	};
+}
+
+export function resolvePrimitiveCategory(input: string): PrimitiveCategoryId | undefined {
+	const normalized = input.trim().toLowerCase();
+	if (!normalized) return undefined;
+	const matches = PRIMITIVE_CATEGORY_IDS.filter(category => category.startsWith(normalized));
+	return matches.length === 1 ? matches[0] : undefined;
 }
 
 function matchesFilter(item: { readonly label: string; readonly summary?: string }, query: string): boolean {
@@ -85,7 +99,10 @@ export function movePrimitiveSelection(
 	if (state.depth === 2) {
 		return { ...state, detailOffset: Math.max(0, state.detailOffset + delta) };
 	}
-	const count = state.depth === 0 ? visiblePrimitiveCategories(categories, state).length : visiblePrimitiveItems(categories, state).length;
+	const count =
+		state.depth === 0
+			? visiblePrimitiveCategories(categories, state).length
+			: visiblePrimitiveItems(categories, state).length;
 	if (count === 0) return state;
 	const current = state.depth === 0 ? state.categoryIndex : state.itemIndex;
 	const next = (current + delta + count) % count;
@@ -129,5 +146,11 @@ export function beginPrimitiveFilter(state: PrimitiveInspectorState): PrimitiveI
 }
 
 export function updatePrimitiveFilter(state: PrimitiveInspectorState, query: string): PrimitiveInspectorState {
-	return { ...state, filterQuery: query, categoryIndex: state.depth === 0 ? 0 : state.categoryIndex, itemIndex: 0, detailOffset: 0 };
+	return {
+		...state,
+		filterQuery: query,
+		categoryIndex: state.depth === 0 ? 0 : state.categoryIndex,
+		itemIndex: 0,
+		detailOffset: 0,
+	};
 }

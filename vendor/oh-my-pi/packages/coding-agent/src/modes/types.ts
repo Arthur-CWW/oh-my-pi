@@ -31,6 +31,7 @@ import type { EvalExecutionComponent } from "./components/eval-execution";
 import type { HookEditorComponent } from "./components/hook-editor";
 import type { HookInputComponent } from "./components/hook-input";
 import type { HookSelectorComponent, HookSelectorOptions } from "./components/hook-selector";
+import type { PrimitiveCategoryId } from "./components/primitives-inspector-state";
 import type { StatusLineComponent } from "./components/status-line";
 import type { ToolExecutionHandle } from "./components/tool-execution";
 import type { TranscriptContainer } from "./components/transcript-container";
@@ -336,7 +337,7 @@ export interface InteractiveModeContext {
 	showHookConfirm(title: string, message: string): Promise<boolean>;
 	showDebugSelector(): Promise<void>;
 	showAgentHub(options?: { requireContent?: boolean }): void;
-	showPrimitivesInspector(): Promise<void>;
+	showPrimitivesInspector(initialCategory?: PrimitiveCategoryId): Promise<void>;
 	resetObserverRegistry(): void;
 
 	// Input handling

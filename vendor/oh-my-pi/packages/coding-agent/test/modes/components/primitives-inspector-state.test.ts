@@ -1,17 +1,20 @@
 import { describe, expect, test } from "bun:test";
+import { PRIMITIVES_INSPECTOR_SLASH_COMMAND } from "../../../src/modes/components/primitives-inspector-command";
 import {
 	beginPrimitiveFilter,
 	createPrimitiveInspectorState,
 	drillIntoPrimitive,
 	movePrimitiveSelection,
+	type PrimitiveInspectorCategory,
+	resolvePrimitiveCategory,
 	selectedPrimitiveCategory,
 	selectedPrimitiveItem,
-	type PrimitiveInspectorCategory,
 	unwindPrimitiveInspector,
 	updatePrimitiveFilter,
 	visiblePrimitiveCategories,
 	visiblePrimitiveItems,
 } from "../../../src/modes/components/primitives-inspector-state";
+import type { InteractiveModeContext } from "../../../src/modes/types";
 
 const categories: readonly PrimitiveInspectorCategory[] = [
 	{
@@ -47,7 +50,9 @@ const categories: readonly PrimitiveInspectorCategory[] = [
 describe("primitives inspector category projection", () => {
 	test("projects live and unavailable categories without inventing rows", () => {
 		const state = createPrimitiveInspectorState();
-		expect(visiblePrimitiveCategories(categories, state).map(category => [category.label, category.items.length])).toEqual([
+		expect(
+			visiblePrimitiveCategories(categories, state).map(category => [category.label, category.items.length]),
+		).toEqual([
 			["Tools", 2],
 			["Feeds", 2],
 			["Memories", 0],
@@ -63,6 +68,44 @@ describe("primitives inspector category projection", () => {
 		const itemFiltered = updatePrimitiveFilter(feeds, "page-hash");
 		expect(visiblePrimitiveItems(categories, itemFiltered).map(item => item.id)).toEqual(["codex"]);
 		expect(selectedPrimitiveItem(categories, itemFiltered)?.summary).toContain("2 items");
+	});
+});
+
+describe("primitives inspector opening", () => {
+	test("resolves unique category prefixes case-insensitively", () => {
+		expect(resolvePrimitiveCategory("TOO")).toBe("tools");
+		expect(resolvePrimitiveCategory("SeSs")).toBe("session");
+		expect(resolvePrimitiveCategory("not-a-category")).toBeUndefined();
+	});
+
+	test("starts drilled into the requested category", () => {
+		const state = createPrimitiveInspectorState(categories, "feeds");
+		expect(state.depth).toBe(1);
+		expect(selectedPrimitiveCategory(categories, state)?.id).toBe("feeds");
+		expect(visiblePrimitiveItems(categories, state).map(item => item.id)).toEqual(["omp", "codex"]);
+	});
+
+	test("reports unknown categories while opening at the category list", async () => {
+		const statuses: string[] = [];
+		let openedCategory: string | undefined = "sentinel";
+		const handleTui = PRIMITIVES_INSPECTOR_SLASH_COMMAND.handleTui;
+		if (!handleTui) throw new Error("Inspector command has no TUI handler");
+		await handleTui(
+			{ name: "inspect", args: "bogus", text: "/inspect bogus" },
+			{
+				ctx: {
+					editor: { setText: () => {} },
+					showStatus: (message: string) => statuses.push(message),
+					showPrimitivesInspector: async (initialCategory?: string) => {
+						openedCategory = initialCategory;
+					},
+				} as unknown as InteractiveModeContext,
+			},
+		);
+		expect(openedCategory).toBeUndefined();
+		expect(statuses).toHaveLength(1);
+		expect(statuses[0]).toContain("Valid categories: tools, skills, feeds, memories, stores, session.");
+		expect(statuses[0]).not.toContain("\n");
 	});
 });
 

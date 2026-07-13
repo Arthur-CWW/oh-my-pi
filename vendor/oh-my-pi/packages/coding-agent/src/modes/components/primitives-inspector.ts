@@ -10,26 +10,29 @@ import { buildFeedsListViewModel, renderFeedResource, resolveFeedSurfacePaths } 
 import { resolveMemoryBackend } from "../../memory-backend";
 import type { Tool } from "../../tools";
 import { replaceTabs, truncateToWidth } from "../../tools/render-utils";
-import type { InteractiveModeContext } from "../types";
 import { theme } from "../theme/theme";
-import { matchesAppInterrupt } from "../utils/keybinding-matchers";
+import type { InteractiveModeContext } from "../types";
 import { computeContextBreakdown } from "../utils/context-usage";
+import { matchesAppInterrupt } from "../utils/keybinding-matchers";
 import { DynamicBorder } from "./dynamic-border";
 import {
 	beginPrimitiveFilter,
 	createPrimitiveInspectorState,
 	drillIntoPrimitive,
 	movePrimitiveSelection,
-	selectedPrimitiveCategory,
-	selectedPrimitiveItem,
+	type PrimitiveCategoryId,
 	type PrimitiveInspectorCategory,
 	type PrimitiveInspectorItem,
 	type PrimitiveInspectorState,
+	selectedPrimitiveCategory,
+	selectedPrimitiveItem,
 	unwindPrimitiveInspector,
 	updatePrimitiveFilter,
 	visiblePrimitiveCategories,
 	visiblePrimitiveItems,
 } from "./primitives-inspector-state";
+
+export type { PrimitiveCategoryId } from "./primitives-inspector-state";
 
 const CatalogStoreSchema = Schema.Struct({
 	path: Schema.String,
@@ -131,9 +134,14 @@ async function buildFeedCategory(cwd: string): Promise<PrimitiveInspectorCategor
 					id: row.name,
 					label: row.name,
 					summary: `${row.kind} · ${row.itemCount} items · ${row.lastSyncAt ?? "never synced"}`,
-					detail: [`feed://${row.name}`, `Target: ${row.target}`, `Cadence: ${row.cadence}`, "", "Digest tail", tail].join(
-						"\n",
-					),
+					detail: [
+						`feed://${row.name}`,
+						`Target: ${row.target}`,
+						`Cadence: ${row.cadence}`,
+						"",
+						"Digest tail",
+						tail,
+					].join("\n"),
 				};
 			}),
 		);
@@ -187,7 +195,9 @@ async function buildMemoryCategory(ctx: InteractiveModeContext): Promise<Primiti
 						},
 					]
 				: [],
-			unavailableDetail: status.active ? undefined : status.message ?? status.error ?? "Memory backend is disabled.",
+			unavailableDetail: status.active
+				? undefined
+				: (status.message ?? status.error ?? "Memory backend is disabled."),
 		};
 	} catch (error) {
 		return {
@@ -206,7 +216,7 @@ function parseDataStoreCatalog(text: string): unknown {
 	let current: Record<string, string> | undefined;
 	let blockKey: string | undefined;
 	for (const line of text.split(/\r?\n/)) {
-		const item = /^  - ([\w-]+):\s*(.*)$/.exec(line);
+		const item = /^ {2}- ([\w-]+):\s*(.*)$/.exec(line);
 		if (item) {
 			current = {};
 			stores.push(current);
@@ -214,14 +224,14 @@ function parseDataStoreCatalog(text: string): unknown {
 			blockKey = undefined;
 			continue;
 		}
-		const field = /^    ([\w-]+):\s*(.*)$/.exec(line);
+		const field = /^ {4}([\w-]+):\s*(.*)$/.exec(line);
 		if (field && current) {
 			blockKey = field[2] === ">-" || field[2] === "|" ? field[1] : undefined;
 			current[field[1]!] = blockKey ? "" : field[2]!;
 			continue;
 		}
 		if (blockKey && current) {
-			const continuation = /^      (.*)$/.exec(line);
+			const continuation = /^ {6}(.*)$/.exec(line);
 			if (continuation) {
 				current[blockKey] = `${current[blockKey]}${current[blockKey] ? " " : ""}${continuation[1]}`.trim();
 				continue;
@@ -232,7 +242,9 @@ function parseDataStoreCatalog(text: string): unknown {
 	return { stores };
 }
 
-async function readDataStoreCatalog(cwd: string): Promise<{ readonly path: string; readonly value: unknown } | undefined> {
+async function readDataStoreCatalog(
+	cwd: string,
+): Promise<{ readonly path: string; readonly value: unknown } | undefined> {
 	let directory = path.resolve(cwd);
 	for (;;) {
 		const catalogPath = path.join(directory, "catalog", "data-stores.yml");
@@ -355,15 +367,16 @@ export class PrimitivesInspectorOverlayComponent extends Container {
 	readonly #inspectKeys: readonly KeyId[];
 	readonly #onDone: () => void;
 	readonly #requestRender: () => void;
-	#state: PrimitiveInspectorState = createPrimitiveInspectorState();
+	#state: PrimitiveInspectorState;
 	#showHelp = false;
 
-	constructor(deps: InspectorDeps) {
+	constructor(deps: InspectorDeps, initialCategory?: PrimitiveCategoryId) {
 		super();
 		this.#categories = deps.categories;
 		this.#inspectKeys = deps.inspectKeys;
 		this.#onDone = deps.onDone;
 		this.#requestRender = deps.requestRender;
+		this.#state = createPrimitiveInspectorState(this.#categories, initialCategory);
 	}
 
 	handleInput(keyData: string): void {
@@ -479,7 +492,8 @@ export class PrimitivesInspectorOverlayComponent extends Container {
 			for (let index = 0; index < items.length; index++) {
 				const item = items[index]!;
 				const marker = item.id === activeItem?.id ? theme.fg("accent", ">") : " ";
-				const enabled = item.enabled === undefined ? "" : item.enabled ? theme.fg("success", " on") : theme.fg("dim", " off");
+				const enabled =
+					item.enabled === undefined ? "" : item.enabled ? theme.fg("success", " on") : theme.fg("dim", " off");
 				right.push(`${marker} ${item.label}${enabled}`);
 				right.push(`    ${theme.fg("dim", item.summary)}`);
 			}
@@ -504,7 +518,10 @@ export class PrimitivesInspectorOverlayComponent extends Container {
 	}
 }
 
-export async function showPrimitivesInspectorOverlay(ctx: InteractiveModeContext): Promise<void> {
+export async function showPrimitivesInspectorOverlay(
+	ctx: InteractiveModeContext,
+	initialCategory?: PrimitiveCategoryId,
+): Promise<void> {
 	let categories: readonly PrimitiveInspectorCategory[];
 	try {
 		categories = await projectPrimitivesInspectorCategories(ctx);
@@ -518,12 +535,15 @@ export async function showPrimitivesInspectorOverlay(ctx: InteractiveModeContext
 		ctx.ui.setFocus(ctx.editor);
 		ctx.ui.requestRender();
 	};
-	const inspector = new PrimitivesInspectorOverlayComponent({
-		categories,
-		inspectKeys: ctx.keybindings.getKeys("app.primitives.inspect"),
-		onDone: done,
-		requestRender: () => ctx.ui.requestRender(),
-	});
+	const inspector = new PrimitivesInspectorOverlayComponent(
+		{
+			categories,
+			inspectKeys: ctx.keybindings.getKeys("app.primitives.inspect"),
+			onDone: done,
+			requestRender: () => ctx.ui.requestRender(),
+		},
+		initialCategory,
+	);
 	overlayHandle = ctx.ui.showOverlay(inspector, {
 		anchor: "bottom-center",
 		width: "100%",

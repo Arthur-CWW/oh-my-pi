@@ -129,3 +129,7 @@ Generated `.tmp` directories inside package tests/builds, vendored trees, `.venv
 ## Executed 2026-07-13: ratchet re-baseline after gated wave
 
 `file-size-baseline.json` regenerated once at wave end (122 frozen files): six files legitimately grew inside union-gated, reviewed slices (twitter full-sync worker +15, input-controller +1, builtin-registry +13 for /feeds, task executor +3 / index +39 for admission+revive, tui editor +37 for paste expansion) and agent-hub.ts's ceiling DROPPED 3397→3387 after the roster extraction. Re-baselining is a coordinator-gated, dated action — never done silently per-slice.
+
+## Executed 2026-07-13 (2nd): interactive-mode re-baseline
+
+`interactive-mode.ts` re-frozen at 4030 (+5 over the earlier freeze) for the reviewed `/inspect <category>` wiring after a real -1 import fold; no 6-line compaction existed without style churn. Debt recorded: interactive-mode.ts is the NEXT extraction target on touch (selector/overlay bridge cluster is the candidate boundary). Second dated exception today — a third in one day means the ratchet default is wrong, revisit then.
