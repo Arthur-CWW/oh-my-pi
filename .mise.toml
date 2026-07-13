@@ -38,6 +38,10 @@ ln -sfn "${repo_root}/.omp/patches/cmux-shell-noclobber.md" "${HOME}/.omp/agent/
 echo "omp-link: linked OMP files from ${repo_root}"
 '''
 
+[tasks.omp-promote]
+description = "Readiness-gate and atomically promote committed OMP fork changes"
+run = "bun scripts/omp-promote.ts"
+
 [tasks.omp-build-fork]
 description = "Build OMP from the local oh-my-pi fork and install it to ~/.bun/bin/omp"
 run = '''
