@@ -697,7 +697,7 @@ export interface CancelEphemeralTurnReceipt {
 }
 
 export interface ActiveSessionOperationSnapshot {
-	readonly kind: "shake" | "handoff" | "reload";
+	readonly kind: "shake" | "handoff" | "reload" | "hostTransition";
 	readonly commandId: string;
 	readonly operationGeneration: number;
 	readonly startedSessionRevision: number;

@@ -1,8 +1,12 @@
 import * as path from "node:path";
+import { Effect } from "effect";
 import { postmortem } from "@oh-my-pi/pi-utils";
 import { CollabHost, collabDisplayName } from "../collab/host";
 import { DEFAULT_RELAY_URL } from "../collab/protocol";
+import { buildRestartSpawnSpec, handoffRestartProcess } from "../cli/restart-session";
 import type { SessionRunner } from "../runner/session-runner";
+import { startSessionControlTarget, type SessionControlTarget } from "../session/session-control-target";
+import type { SessionOwnershipHandle } from "../session/session-ownership";
 import {
 	createUniqueRevisionLoader,
 	DisposableTerminalHost,
@@ -58,6 +62,9 @@ export interface RunDisposableInteractiveModeOptions {
 	readonly collabHost?: boolean;
 	/** Relay used by the collaboration host. Flag wins over environment, then the public default. */
 	readonly collabRelay?: string;
+	/** Live ownership enables the external session control target. */
+	readonly ownership?: SessionOwnershipHandle;
+	readonly cwd?: string;
 }
 
 const BUILTIN_RICH_REVISION: DisposableTerminalRevision = {
@@ -91,7 +98,9 @@ export async function runDisposableInteractiveMode(
 		await collabHost.start(options.collabRelay ?? process.env.OMP_COLLAB_RELAY ?? DEFAULT_RELAY_URL);
 		process.stderr.write(`Collab URL: ${collabHost.link}\nCollab web URL: ${collabHost.webLink}\n`);
 	}
+	let controlTarget: SessionControlTarget | undefined;
 	const unregisterCleanup = postmortem.register("disposable-terminal-host", async () => {
+		await controlTarget?.stop();
 		await collabHost?.stop();
 		await terminalHost.stop();
 	});
@@ -101,6 +110,39 @@ export async function runDisposableInteractiveMode(
 	try {
 		const revision = resolveRevision ? await resolveRevision() : BUILTIN_RICH_REVISION;
 		await terminalHost.reload(revision);
+		if (options.ownership) {
+			const ownership = options.ownership;
+			controlTarget = await startSessionControlTarget({
+				ownership,
+				actions: {
+					status: command => Effect.runPromise(Effect.scoped(runner.applySessionControl(command))),
+					pause: command => Effect.runPromise(Effect.scoped(runner.applySessionControl(command))).then(() => undefined),
+					resume: command => Effect.runPromise(Effect.scoped(runner.applySessionControl(command))).then(() => undefined),
+					setModel: (_selector, command) => Effect.runPromise(Effect.scoped(runner.applySessionControl(command))),
+					compact: (_instructions, command) => Effect.runPromise(Effect.scoped(runner.applySessionControl(command))),
+					restart: async () => {
+						await collabHost?.stop();
+						await terminalHost.stop();
+						await handoffRestartProcess(
+							buildRestartSpawnSpec({
+								sessionId: ownership.sessionId,
+								cwd: options.cwd ?? process.cwd(),
+							}),
+							ownership,
+							async () => {
+								await Effect.runPromise(Effect.scoped(runner.stop()));
+								return [];
+							},
+						);
+					},
+					stop: async () => {
+						await collabHost?.stop();
+						await terminalHost.stop();
+						await Effect.runPromise(Effect.scoped(runner.stop()));
+					},
+				},
+			});
+		}
 		started = true;
 		intent = await terminalHost.completion;
 	} catch (error) {
@@ -113,6 +155,7 @@ export async function runDisposableInteractiveMode(
 	}
 
 	try {
+		await controlTarget?.stop();
 		await collabHost?.stop();
 		await terminalHost.stop();
 	} catch (error) {

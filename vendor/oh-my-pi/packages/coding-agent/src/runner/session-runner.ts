@@ -333,7 +333,8 @@ interface EventDetails {
 		| RunHandoffCommand
 		| CancelHandoffCommand
 		| SetCheckpointStateCommand
-		| ReloadSessionCommand;
+		| ReloadSessionCommand
+		| PrepareHostTransitionCommand;
 	readonly controllerEpoch: number;
 	readonly viewId?: string;
 	readonly inputId?: string;
@@ -4413,9 +4414,9 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 					kind: "runCompaction",
 					commandId: command.commandId,
 					correlationId: command.commandId,
-					expectedSessionRevision: current.sessionRevision,
+					expectedSessionRevision: current.sessionRevision as RunCompactionCommand["expectedSessionRevision"],
 					viewId: controller.viewId,
-					controllerEpoch: controller.epoch,
+					controllerEpoch: controller.epoch as RunCompactionCommand["controllerEpoch"],
 					customInstructions: command.intent.instructions,
 				});
 			}
