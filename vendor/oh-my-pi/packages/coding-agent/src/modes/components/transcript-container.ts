@@ -1,7 +1,6 @@
 import {
 	type Component,
 	Container,
-	isTranscriptVirtualizationEnabled,
 	type NativeScrollbackCommittedRows,
 	type NativeScrollbackLiveRegion,
 	type RenderStablePrefix,
@@ -65,6 +64,12 @@ interface FinalizableBlock {
 	 * never mutate post-finalize simply omit the method.
 	 */
 	getTranscriptBlockVersion?(): number;
+	/**
+	 * Optional mutation signal for versioned blocks. Registered by the owning
+	 * transcript so cached finalized prefixes validate only blocks that actually
+	 * changed instead of polling every historical version on each animation frame.
+	 */
+	setTranscriptBlockInvalidator?(invalidator: (() => void) | undefined): void;
 	/**
 	 * Whether a still-live block's visually settled leading rows are durable —
 	 * guaranteed to survive the block's remaining transitions (finalize,
@@ -174,6 +179,8 @@ export interface TranscriptRetentionMetrics {
 	/** The prefix cache has a scalar seam and zero segment references. */
 	historyPrefixCacheEntries: 0 | 1;
 	historyPrefixSegmentRefs: 0;
+	/** Versioned blocks awaiting validation on the next compose. */
+	dirtyVersionedBlocks: number;
 }
 
 interface LiveCommitState {
@@ -495,6 +502,10 @@ export class TranscriptContainer
 	// consumes the report and re-bases the baseline). Out-of-band renders
 	// between engine frames lower it; they can never inflate it.
 	#stableRowsFloor = 0;
+	/** Versioned blocks that changed since the last successful compose. */
+	#dirtyVersionedBlocks = new Set<Component>();
+	/** True when a cached prefix contains a versioned block without push invalidation. */
+	#hasUntrackedVersionedPrefix = false;
 	/**
 	 * Optional render-only diagnostic projection. Rich children remain mounted
 	 * so streaming/event-controller state continues to advance while raw mode is
@@ -504,11 +515,15 @@ export class TranscriptContainer
 	override addChild(component: Component): void {
 		// Structural history changes can alter every following separator/offset.
 		this.#historyPrefix = undefined;
+		const versioned = component as Component & FinalizableBlock;
+		versioned.setTranscriptBlockInvalidator?.(() => this.#dirtyVersionedBlocks.add(component));
 		super.addChild(component);
 	}
 
 	override removeChild(component: Component): void {
 		this.#historyPrefix = undefined;
+		(component as Component & FinalizableBlock).setTranscriptBlockInvalidator?.(undefined);
+		this.#dirtyVersionedBlocks.delete(component);
 		super.removeChild(component);
 	}
 
@@ -523,6 +538,11 @@ export class TranscriptContainer
 	override clear(): void {
 		this.#generation++;
 		this.#historyPrefix = undefined;
+		this.#hasUntrackedVersionedPrefix = false;
+		for (const child of this.children) {
+			(child as Component & FinalizableBlock).setTranscriptBlockInvalidator?.(undefined);
+		}
+		this.#dirtyVersionedBlocks.clear();
 		super.clear();
 	}
 
@@ -538,10 +558,6 @@ export class TranscriptContainer
 		this.invalidate();
 	}
 	#usableHistoryPrefix(width: number, childCount: number): HistoryPrefixCache | undefined {
-		if (!isTranscriptVirtualizationEnabled()) {
-			this.#historyPrefix = undefined;
-			return undefined;
-		}
 		const cache = this.#historyPrefix;
 		if (
 			cache === undefined ||
@@ -555,33 +571,49 @@ export class TranscriptContainer
 			return undefined;
 		}
 
-		// Finalized components may deliberately update after completion. The
-		// canonical segment records hold the version and identity; retaining a
-		// second prefix slice would duplicate O(history) references every frame.
-		for (let i = 0; i < cache.childCount; i++) {
-			const segment = this.#segments[i];
-			const child = this.children[i];
-			if (
-				segment === undefined ||
-				child === undefined ||
-				segment.component !== child ||
-				!isBlockFinalized(child) ||
-				(segment.version === undefined
-					? segment.startRow + segment.rowCount > this.#committedRows
-					: getBlockVersion(child) !== segment.version)
-			) {
-				this.#historyPrefix = undefined;
-				return undefined;
+		// Structural mutations invalidate the prefix eagerly. Versioned blocks
+		// with push invalidation only need validation when they reported a change;
+		// retain the compatibility scan for third-party blocks implementing only
+		// getTranscriptBlockVersion().
+		if (this.#hasUntrackedVersionedPrefix) {
+			for (let i = 0; i < cache.childCount; i++) {
+				const child = this.children[i]!;
+				const segment = this.#segments[i];
+				if (
+					segment === undefined ||
+					segment.component !== child ||
+					!isBlockFinalized(child) ||
+					(segment.version === undefined
+						? segment.startRow + segment.rowCount > this.#committedRows
+						: getBlockVersion(child) !== segment.version)
+				) {
+					this.#historyPrefix = undefined;
+					return undefined;
+				}
+			}
+		} else {
+			for (const child of this.#dirtyVersionedBlocks) {
+				// The active tail immediately follows the cached prefix in the common
+				// animation path; reject it in O(1) instead of indexOf() over history.
+				if (this.children[cache.childCount] === child) continue;
+				const i = this.children.indexOf(child);
+				if (i < 0 || i >= cache.childCount) continue;
+				const segment = this.#segments[i];
+				if (
+					segment === undefined ||
+					segment.component !== child ||
+					!isBlockFinalized(child) ||
+					getBlockVersion(child) !== segment.version
+				) {
+					this.#historyPrefix = undefined;
+					return undefined;
+				}
 			}
 		}
 		return cache;
 	}
 
 	#rememberHistoryPrefix(segments: readonly BlockSegment[], width: number): void {
-		if (!isTranscriptVirtualizationEnabled()) {
-			this.#historyPrefix = undefined;
-			return;
-		}
 		// The final block remains the repaintable seam even once it has finalized.
 		// Versionless blocks can join only after native scrollback has committed
 		// them; before then their render() remains their only mutation signal.
@@ -590,6 +622,7 @@ export class TranscriptContainer
 			this.#historyPrefix = undefined;
 			return;
 		}
+		this.#hasUntrackedVersionedPrefix = false;
 		for (let i = 0; i < childCount; i++) {
 			const segment = segments[i]!;
 			const version = getBlockVersion(segment.component);
@@ -601,6 +634,12 @@ export class TranscriptContainer
 			) {
 				this.#historyPrefix = undefined;
 				return;
+			}
+			if (
+				version !== undefined &&
+				(segment.component as Component & FinalizableBlock).setTranscriptBlockInvalidator === undefined
+			) {
+				this.#hasUntrackedVersionedPrefix = true;
 			}
 		}
 		this.#historyPrefix = {
@@ -646,6 +685,7 @@ export class TranscriptContainer
 			liveSnapshotRowRefs,
 			historyPrefixCacheEntries: this.#historyPrefix === undefined ? 0 : 1,
 			historyPrefixSegmentRefs: 0,
+			dirtyVersionedBlocks: this.#dirtyVersionedBlocks.size,
 		};
 	}
 
@@ -987,6 +1027,7 @@ export class TranscriptContainer
 		this.#segments = segments;
 		if (historyPrefix === undefined) this.#rememberHistoryPrefix(segments, width);
 		this.#stableRowsFloor = Math.min(stableFloorBefore, stableRows, row);
+		this.#dirtyVersionedBlocks.clear();
 		return lines;
 	}
 }

@@ -51,6 +51,7 @@ export class AssistantMessageComponent extends Container {
 	 * turn's `agent_start`, late tool-result images, and async Kitty conversions.
 	 */
 	#blockVersion = 0;
+	#transcriptBlockInvalidator: (() => void) | undefined;
 	/** Whether the last updateContent carried an in-flight streaming partial; such
 	 *  renders bypass the markdown module LRU (see Markdown.transientRenderCache). */
 	#lastUpdateTransient = false;
@@ -173,6 +174,10 @@ export class AssistantMessageComponent extends Container {
 
 	getTranscriptBlockVersion(): number {
 		return this.#blockVersion;
+	}
+
+	setTranscriptBlockInvalidator(invalidator: (() => void) | undefined): void {
+		this.#transcriptBlockInvalidator = invalidator;
 	}
 
 	markTranscriptBlockFinalized(): void {
@@ -394,6 +399,7 @@ export class AssistantMessageComponent extends Container {
 
 	updateContent(message: AssistantMessage, opts?: { transient?: boolean }): void {
 		this.#blockVersion++;
+		this.#transcriptBlockInvalidator?.();
 		this.#lastMessage = message;
 		this.#lastUpdateTransient = opts?.transient === true;
 

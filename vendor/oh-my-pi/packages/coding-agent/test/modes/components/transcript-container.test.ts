@@ -106,8 +106,10 @@ class CountingFinalizedBlock implements Component {
 // and reports each mutation through the transcript block version protocol.
 class VersionedFinalizedBlock implements Component {
 	renderCount = 0;
+	versionReadCount = 0;
 	#lines: string[];
 	#version = 0;
+	#invalidator: (() => void) | undefined;
 
 	constructor(lines: string[]) {
 		this.#lines = lines;
@@ -116,6 +118,7 @@ class VersionedFinalizedBlock implements Component {
 	mutate(lines: string[]): void {
 		this.#lines = lines;
 		this.#version++;
+		this.#invalidator?.();
 	}
 
 	isTranscriptBlockFinalized(): boolean {
@@ -123,7 +126,12 @@ class VersionedFinalizedBlock implements Component {
 	}
 
 	getTranscriptBlockVersion(): number {
+		this.versionReadCount++;
 		return this.#version;
+	}
+
+	setTranscriptBlockInvalidator(invalidator: (() => void) | undefined): void {
+		this.#invalidator = invalidator;
 	}
 
 	invalidate(): void {}
@@ -439,9 +447,33 @@ describe("TranscriptContainer", () => {
 
 			// A post-finalize version bump must abandon the cached prefix immediately,
 			// rather than leaving the old history bytes above the live seam.
+
 			first.mutate(["first-updated"]);
 			expect(container.render(40)).toEqual(["first-updated", "", "second", "", "tail-1"]);
 			expect([first.renderCount, second.renderCount]).toEqual([2, 2]);
+		});
+	});
+	it("does not poll every finalized version when only the live tail animates", () => {
+		withEnvPatch({ PI_TRANSCRIPT_VIRTUALIZATION: "true" }, () => {
+			const container = new TranscriptContainer();
+			const history = Array.from(
+				{ length: 5_000 },
+				(_, index) => new VersionedFinalizedBlock([`history-${index}`]),
+			);
+			const tail = new VersionedFinalizedBlock(["tail-0"]);
+			for (const block of history) container.addChild(block);
+			container.addChild(tail);
+			container.render(80);
+			for (const block of history) block.versionReadCount = 0;
+
+			for (let frame = 1; frame <= 2_000; frame++) {
+				tail.mutate([`tail-${frame}`]);
+				container.render(80);
+			}
+
+			expect(history.reduce((total, block) => total + block.versionReadCount, 0)).toBe(0);
+			expect(container.render(80).at(-1)).toBe("tail-2000");
+			expect(container.getRetentionMetrics().dirtyVersionedBlocks).toBe(0);
 		});
 	});
 
@@ -503,16 +535,14 @@ describe("TranscriptContainer", () => {
 		expect(history.renderCount).toBe(1);
 	});
 
-	it("retains no prefix cache entries by default (virtualization disabled)", () => {
-		withEnvPatch({ PI_TRANSCRIPT_VIRTUALIZATION: undefined }, () => {
-			const container = new TranscriptContainer();
-			for (let i = 0; i < 10; i++) container.addChild(new VersionedFinalizedBlock([`history-${i}`]));
-			container.addChild(new StreamingBlock(["tail"]));
+	it("enables finalized-prefix reuse by default", () => {
+		const container = new TranscriptContainer();
+		for (let i = 0; i < 10; i++) container.addChild(new VersionedFinalizedBlock([`history-${i}`]));
+		container.addChild(new StreamingBlock(["tail"]));
 
-			container.render(80);
-			const retention = container.getRetentionMetrics();
-			expect(retention.historyPrefixCacheEntries).toBe(0);
-		});
+		container.render(80);
+		const retention = container.getRetentionMetrics();
+		expect(retention.historyPrefixCacheEntries).toBe(1);
 	});
 
 	it("keeps ANSI-rendered assistant history byte-identical behind a changing tail", () => {
@@ -847,6 +877,7 @@ describe("TranscriptContainer renderViewportTail", () => {
 			liveSnapshotRowRefs: 0,
 			historyPrefixCacheEntries: 0,
 			historyPrefixSegmentRefs: 0,
+			dirtyVersionedBlocks: 0,
 		});
 	});
 });

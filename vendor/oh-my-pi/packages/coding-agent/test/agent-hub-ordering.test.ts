@@ -278,6 +278,31 @@ describe("Agent hub row ordering", () => {
 		hub.dispose();
 	});
 
+	it("forgets departed external peer identities across long polling sessions", () => {
+		geometry = stubStdoutGeometry(120);
+		const now = vi.spyOn(Date, "now");
+		now.mockReturnValue(Date.parse("2026-07-03T00:00:00.000Z"));
+		const lastSeen = new Date(Date.now()).toISOString();
+		const agents = new AgentRegistry();
+		let peers = [externalPeer("external:0", "peer-0", lastSeen, "idle")];
+		const externalIrc: AgentHubExternalPeerDataSource = {
+			listPeers: () => peers,
+		};
+		const hub = makeHub(agents, { externalIrc });
+
+		for (let index = 1; index <= 2_000; index++) {
+			peers = [externalPeer(`external:${index}`, `peer-${index}`, lastSeen, "idle")];
+			agents.register({ id: `refresh-${index}`, displayName: "refresh", kind: "sub", session: liveSession() });
+			agents.unregister(`refresh-${index}`);
+			hub.render(120);
+			expect(hub.getRetentionMetrics().externalOrderEntries).toBe(1);
+		}
+
+		expect(renderedText(hub)).toContain("peer-2000");
+		expect(renderedText(hub)).not.toContain("peer-0");
+		hub.dispose();
+		expect(hub.getRetentionMetrics().externalOrderEntries).toBe(0);
+	});
 	it("shows unknown state when external peer state is absent", () => {
 		geometry = stubStdoutGeometry(120);
 		const now = vi.spyOn(Date, "now");

@@ -288,7 +288,7 @@ describe("Agent hub Enter activation", () => {
 		hub.dispose();
 	});
 
-	it("releases parsed transcript entries and components on every chat close", async () => {
+	it("bounds the selected transcript tail and releases it across repeated Hub lifecycles", async () => {
 		using tempDir = TempDir.createSync("@omp-agent-hub-retention-");
 		const sessionFile = `${tempDir.path()}/Worker.jsonl`;
 		const timestamp = "2026-07-12T00:00:00.000Z";
@@ -300,32 +300,36 @@ describe("Agent hub Enter activation", () => {
 			message: { role: "user", content: `retained message ${index}`, timestamp: Date.parse(timestamp) + index },
 		}));
 		await Bun.write(sessionFile, `${entries.map(entry => JSON.stringify(entry)).join("\n")}\n`);
-		const { hub } = makeHub(async () => {}, { sessionFile });
 
 		for (let cycle = 0; cycle < 25; cycle++) {
-			hub.openChat(AGENT_ID);
+			const { hub } = makeHub(async () => {}, { sessionFile });
 			expect(renderedText(hub)).toContain("retained message 1999");
 			expect(hub.getRetentionMetrics()).toMatchObject({
 				cachedTranscriptEntries: 200,
 				materializedChatComponents: 200,
 				liveTimers: 1,
 			});
+
+			hub.openChat(AGENT_ID);
 			hub.handleInput("\x1b");
 			expect(hub.getRetentionMetrics()).toMatchObject({
 				cachedTranscriptEntries: 0,
 				materializedChatComponents: 0,
 				liveTimers: 1,
 			});
-		}
 
-		hub.dispose();
-		expect(hub.getRetentionMetrics()).toMatchObject({
-			cachedTranscriptEntries: 0,
-			materializedChatComponents: 0,
-			externalIdentityRows: 0,
-			externalOrderEntries: 0,
-			liveTimers: 0,
-		});
+			hub.dispose();
+			expect(hub.getRetentionMetrics()).toMatchObject({
+				activeIdentities: 0,
+				activeSearchFieldEntries: 0,
+				observerEntries: 0,
+				cachedTranscriptEntries: 0,
+				materializedChatComponents: 0,
+				externalIdentityRows: 0,
+				externalOrderEntries: 0,
+				liveTimers: 0,
+			});
+		}
 	});
 	it("does not promote archived session journals into the active roster", async () => {
 		using tempDir = TempDir.createSync("@omp-agent-hub-persisted-");

@@ -741,7 +741,10 @@ export class AgentHubOverlayComponent extends Container {
 			externalOrderEntries: this.#externalOrder.size,
 			cachedTranscriptEntries: this.#transcriptCache?.entries.length ?? 0,
 			materializedChatComponents: this.#chatLog.children.length,
-			liveTimers: Number(this.#ageTimer !== undefined) + Number(this.#chatRefreshTimer !== undefined),
+			liveTimers:
+				Number(this.#ageTimer !== undefined) +
+				Number(this.#projectionTimer !== undefined) +
+				Number(this.#chatRefreshTimer !== undefined),
 		};
 	}
 
@@ -779,6 +782,20 @@ export class AgentHubOverlayComponent extends Container {
 		this.#pendingRegistryEvents = [];
 		this.#registryRefs.clear();
 		for (const bucket of Object.values(this.#refsByStatus)) bucket.clear();
+		this.#activeSearchFields.clear();
+		this.#treeDepthById.clear();
+		this.#hiddenDescendantsById.clear();
+		this.#foldedAgentIds.clear();
+		this.#groupStartIndexes = [];
+		this.#sectionStarts = [];
+		this.#editor.setText("");
+		this.#tableFilterQuery = "";
+		this.#chatSearchQuery = "";
+		this.#notice = undefined;
+		this.#chatAgentId = undefined;
+		this.#chatArchived = undefined;
+		this.#chatExternal = undefined;
+		this.#selectedAgentKey = undefined;
 	}
 
 	override render(width: number): readonly string[] {
@@ -1282,16 +1299,18 @@ export class AgentHubOverlayComponent extends Container {
 			this.#previewRenderedHeight = lines.length;
 			return lines;
 		}
-		const leftWidth = Math.floor(width / 2);
-		const rightWidth = width - leftWidth;
+		const laneWidth = width - 1;
+		const leftWidth = Math.floor(laneWidth / 2);
+		const rightWidth = laneWidth - leftWidth;
 		const transcript = this.#renderTranscriptPreview(rightWidth, targetHeight, false);
 		const inspector = this.#renderInspectorPreview(leftWidth, targetHeight);
 		const lines: string[] = [];
 		for (let index = 0; index < targetHeight; index++) {
 			const left = inspector[index] ?? "";
 			const right = transcript[index] ?? "";
+			const leftContent = truncateToWidth(left, leftWidth);
 			lines.push(
-				`${truncateToWidth(left, leftWidth)}${padding(Math.max(0, leftWidth - visibleWidth(left)))}${right}`,
+				`${leftContent}${padding(Math.max(0, leftWidth - visibleWidth(leftContent)))}${theme.fg("dim", "│")}${right}`,
 			);
 		}
 		this.#previewRenderedHeight = lines.length;
