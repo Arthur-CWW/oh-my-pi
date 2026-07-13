@@ -10,10 +10,8 @@ import {
 	TUI,
 } from "@oh-my-pi/pi-tui";
 import type { WorkflowModeSnapshot } from "../session/session-entries";
-import type {
-	DisposableTerminalHostCallbacks,
-	DisposableTerminalView,
-} from "./disposable-terminal-host";
+import { handleReloadTuiCommand, RELOAD_TUI_COMMAND, RELOAD_TUI_DESCRIPTION } from "../slash-commands/reload-tui";
+import type { DisposableTerminalHostCallbacks, DisposableTerminalView } from "./disposable-terminal-host";
 import type { TerminalSessionController } from "./terminal-session-controller";
 
 const identity = (text: string): string => text;
@@ -227,8 +225,8 @@ export function createDisposableTerminalView(
 
 	const submit = async (text: string): Promise<void> => {
 		if (!acceptingInput || !callbacks.isCurrentEpoch()) return;
-		if (text === "/reload-tui") {
-			requestHostReload();
+		if (text === `/${RELOAD_TUI_COMMAND}`) {
+			handleReloadTuiCommand({ requestHostReload }, setFeedback);
 			return;
 		}
 		const first = text[0];
@@ -267,7 +265,7 @@ export function createDisposableTerminalView(
 			statusText = new Text("", 1, 0);
 			feedbackText = new Text("", 1, 0);
 			const helpText = new Text(
-				"Disposable TUI · /reload-tui · Esc interrupt · Ctrl-D exit · Ctrl-L redraw\n" +
+				`Disposable TUI · /${RELOAD_TUI_COMMAND} (${RELOAD_TUI_DESCRIPTION}) · Esc interrupt · Ctrl-D exit · Ctrl-L redraw\n` +
 					"Pending input management unavailable in disposable TUI · Agent Hub unavailable in disposable TUI",
 				1,
 				0,

@@ -16,11 +16,12 @@ import type {
 import type { CompactOptions } from "../extensibility/extensions/types";
 import type { MCPManager } from "../mcp";
 import type { PlanApprovalDetails } from "../plan-mode/approved-plan";
-import type { AgentSession } from "../session/agent-session";
+import type { AgentSession as InteractiveRuntimeSession } from "../session/agent-session";
 import type { HistoryStorage } from "../session/history-storage";
 import type { SessionContext } from "../session/session-context";
-import type { SessionManager } from "../session/session-manager";
+import type { SessionManager as InteractiveJournalService } from "../session/session-manager";
 import type { ShakeMode } from "../session/shake-types";
+import type { TuiHostCapabilities } from "../slash-commands/reload-tui";
 import type { LspStartupServerInfo } from "../tools";
 import type { EventBus } from "../utils/event-bus";
 import type { AssistantMessageComponent } from "./components/assistant-message";
@@ -111,10 +112,10 @@ export interface InteractiveModeContext {
 
 	// Session access
 	errorInbox: ErrorInbox;
-	session: AgentSession;
-	sessionManager: SessionManager;
+	get session(): InteractiveRuntimeSession;
+	get sessionManager(): InteractiveJournalService;
 	/** Session the transcript/editor/status are attached to: the focused agent's, else `session`. */
-	readonly viewSession: AgentSession;
+	get viewSession(): InteractiveRuntimeSession;
 	/** Id of the focused agent, undefined when the main session is attached. */
 	readonly focusedAgentId: string | undefined;
 	/** Focus the main view on an agent's live session (delegates to SessionFocusController.focusAgent). */
@@ -128,13 +129,15 @@ export interface InteractiveModeContext {
 	clearTransientSessionUi(): void;
 	settings: Settings;
 	keybindings: KeybindingsManager;
-	agent: AgentSession["agent"];
+	get agent(): InteractiveRuntimeSession["agent"];
 	historyStorage?: HistoryStorage;
 	mcpManager?: MCPManager;
 	lspServers?: LspStartupServerInfo[];
 	titleSystemPrompt?: string;
 	collabHost?: CollabHost;
 	collabGuest?: CollabGuestLink;
+	/** Capabilities supplied by the active terminal host, when one supports them. */
+	readonly tuiHost?: TuiHostCapabilities;
 	eventController: EventController;
 	eventBus?: EventBus;
 
@@ -189,7 +192,11 @@ export interface InteractiveModeContext {
 	// Lifecycle
 	init(options?: InteractiveModeInitOptions): Promise<void>;
 	playWelcomeIntro(): void;
-	shutdown(options?: { childPolicy?: ChildShutdownPolicy; persistSession?: boolean; exitProcess?: boolean }): Promise<void>;
+	shutdown(options?: {
+		childPolicy?: ChildShutdownPolicy;
+		persistSession?: boolean;
+		exitProcess?: boolean;
+	}): Promise<void>;
 	checkShutdownRequested(): Promise<void>;
 
 	// Extension UI integration

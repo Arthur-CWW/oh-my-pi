@@ -4,6 +4,7 @@ import type { PythonResult } from "../eval/py/executor";
 import type { BashResult } from "../exec/bash-executor";
 import { IrcBus } from "../irc/bus";
 import type { InteractiveHostIntent } from "../modes/interactive-host-intent";
+import { captureRestartChildManifest } from "../session/restart-child-manifest";
 import { writeRestartHandoff } from "../session/session-ownership";
 import { type AgentSession, type AgentSessionEvent, PromptOperationConflictError } from "../session/agent-session";
 import {
@@ -2239,7 +2240,11 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 				return { intent, cancelled: false };
 			case "restartProcess": {
 				await resources.sessionManager.flush();
-				await writeRestartHandoff(resources.ownership, []);
+				const childManifest = await captureRestartChildManifest(
+					resources.session,
+					resources.ownership.ownerEpoch,
+				);
+				await writeRestartHandoff(resources.ownership, childManifest);
 				return {
 					intent,
 					cancelled: false,

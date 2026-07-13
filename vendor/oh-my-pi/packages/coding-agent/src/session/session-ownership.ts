@@ -94,6 +94,7 @@ export interface SessionOwnershipOptions {
 	readonly root?: string;
 	readonly suppliedEpoch?: string;
 	readonly suppliedSocket?: string;
+	readonly suppliedReservation?: boolean;
 }
 
 export interface SessionOwnershipAcquisitionOptions extends SessionOwnershipOptions {
@@ -1055,7 +1056,14 @@ export async function acquireSessionOwnership(
 		throw new ExternalSessionOwnerUnverifiable("owner_record_corrupt");
 	const location = await leaseLocation(sessionFile, sessionId, options.root);
 	if (options.suppliedEpoch) {
-		const lease = await readLease(location);
+		let lease = await readLease(location);
+		if (options.suppliedReservation) {
+			const deadline = Date.now() + 5_000;
+			while ((lease === null || lease === "corrupt") && Date.now() < deadline) {
+				await new Promise(resolve => setTimeout(resolve, 25));
+				lease = await readLease(location);
+			}
+		}
 		if (
 			lease === null ||
 			lease === "corrupt" ||

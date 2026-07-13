@@ -87,7 +87,7 @@ export async function runDisposableInteractiveMode(
 	}
 	const resolveRevision = absoluteManifestPath
 		? () => resolveDisposableTuiManifest(absoluteManifestPath)
-		: undefined;
+		: async () => BUILTIN_RICH_REVISION;
 	const terminalHost = new DisposableTerminalHost({
 		runner,
 		loader: absoluteManifestPath ? createUniqueRevisionLoader() : createBuiltinLoader(options.defaultFactory!),

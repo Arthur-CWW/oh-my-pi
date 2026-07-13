@@ -301,9 +301,13 @@ export class ExtensionUiController {
 		leadingSpacer: boolean,
 	): void {
 		container.clear();
-
 		if (widgets.size === 0) {
-			if (spacerWhenEmpty) {
+			// Compact status lines already occupy their own row directly above the
+			// editor. Do not retain an empty spacer row when an above-editor widget
+			// is removed; the leading spacer for a real widget remains intentional.
+			const omitEmptyAboveSpacer =
+				container === this.ctx.hookWidgetContainerAbove && this.ctx.statusLine.isBorderless();
+			if (spacerWhenEmpty && !omitEmptyAboveSpacer) {
 				container.addChild(new Spacer(1));
 			}
 			return;

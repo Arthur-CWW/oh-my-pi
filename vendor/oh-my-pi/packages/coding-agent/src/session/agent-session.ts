@@ -1261,6 +1261,8 @@ export class AgentSession {
 	#durableQueueDrainPromise: Promise<void> | undefined;
 	/** A terminal drain remains due after a turn_end raced outer prompt recovery. */
 	#durableQueueDrainPending = false;
+	/** Durable external control gate. Pending inputs remain queued until an explicit resume. */
+	#sessionControlPaused = false;
 	#durableOwnershipLostError: SessionOwnershipLostError | undefined;
 	#ownershipLossUnsubscribe: (() => void) | undefined;
 	fileSnapshotStore?: InMemorySnapshotStore;
@@ -7148,6 +7150,10 @@ export class AgentSession {
 			if (suppressOwnershipLoss) return;
 			throw this.#durableOwnershipLostError;
 		}
+		if (this.#sessionControlPaused) {
+			this.#durableQueueDrainPending = true;
+			return;
+		}
 		if (this.isStreaming || this.#activeDurableInputId) return;
 		const queue = await this.#durableInputQueue;
 		if (!queue) return;
@@ -7158,7 +7164,7 @@ export class AgentSession {
 			if (suppressOwnershipLoss) return;
 			throw this.#durableOwnershipLostError;
 		}
-		if (this.isStreaming || this.#activeDurableInputId) {
+		if (this.#sessionControlPaused || this.isStreaming || this.#activeDurableInputId) {
 			this.#releaseDurableAdmissionMaintenance();
 			return;
 		}
@@ -7523,7 +7529,7 @@ export class AgentSession {
 	}
 
 	#scheduleDurableQueueDrainAfterIdle(): void {
-		if (this.#isDisposed || this.#durableOwnershipLostError) return;
+		if (this.#isDisposed || this.#durableOwnershipLostError || this.#sessionControlPaused) return;
 		this.#durableQueueDrainPending = true;
 		if (this.#durableQueueDrainScheduled) return;
 		this.#startDurableQueueDrainAfterIdle();
@@ -7533,6 +7539,7 @@ export class AgentSession {
 		if (
 			this.#isDisposed ||
 			this.#durableOwnershipLostError ||
+			this.#sessionControlPaused ||
 			this.#durableQueueDrainScheduled ||
 			!this.#durableQueueDrainPending
 		) {
@@ -7543,7 +7550,7 @@ export class AgentSession {
 		drainTask = this.agent
 			.waitForIdle()
 			.then(async () => {
-				if (this.#isDisposed || this.#durableOwnershipLostError) return;
+				if (this.#isDisposed || this.#durableOwnershipLostError || this.#sessionControlPaused) return;
 				// AgentCore may be idle before the outer prompt's recovery/finally
 				// releases its in-flight count. Leave the intent for #endInFlight
 				// instead of recursively prompting during that recovery.
@@ -7564,6 +7571,7 @@ export class AgentSession {
 					this.#durableQueueDrainPending &&
 					!this.#isDisposed &&
 					!this.#durableOwnershipLostError &&
+					!this.#sessionControlPaused &&
 					!this.isStreaming &&
 					!this.#activeDurableInputId
 				) {
@@ -7600,7 +7608,7 @@ export class AgentSession {
 	 * Gate for idle-path queued-message auto-continue. See `#scheduleIdleQueueDrain` for rationale.
 	 */
 	#canAutoContinueForFollowUp(): boolean {
-		if (this.isStreaming) return false;
+		if (this.#sessionControlPaused || this.isStreaming) return false;
 		if (this.isRetrying) return false;
 		const messages = this.agent.state.messages;
 		const last = messages[messages.length - 1];
@@ -7649,6 +7657,9 @@ export class AgentSession {
 	}
 
 	async #promptQueuedHiddenNextTurnMessages(): Promise<void> {
+		if (this.#sessionControlPaused) {
+			return;
+		}
 		if (this.#pendingNextTurnMessages.length === 0) {
 			return;
 		}
@@ -8130,6 +8141,25 @@ export class AgentSession {
 	// `tasks.todoClearDelay` setting is now inert; completed tasks survive
 	// until the next explicit `todo` call removes them via `rm`/`drop`.
 
+	/** Pause or resume durable admission without discarding queued work. */
+	async setSessionControlPaused(paused: boolean): Promise<void> {
+		if (this.#sessionControlPaused === paused) return;
+		this.#sessionControlPaused = paused;
+		if (paused) {
+			this.#durableQueueDrainPending = true;
+			if (this.isStreaming || this.#activeDurableInputId) {
+				await this.abort({ reason: USER_INTERRUPT_LABEL });
+			}
+			return;
+		}
+		this.#scheduleDurableQueueDrainAfterIdle();
+		this.#scheduleIdleQueueDrain();
+	}
+
+	get sessionControlPaused(): boolean {
+		return this.#sessionControlPaused;
+	}
+
 	/**
 	 * Abort current operation and wait for agent to become idle.
 	 *
@@ -8138,6 +8168,7 @@ export class AgentSession {
 	 * the transcript can distinguish a deliberate user interrupt from an opaque
 	 * abort. Omit it for internal/lifecycle aborts.
 	 */
+
 	async abort(options?: { goalReason?: "interrupted" | "internal"; reason?: string }): Promise<void> {
 		const userInterrupt = options?.reason === USER_INTERRUPT_LABEL;
 		if (userInterrupt) this.#advisorAutoResumeSuppressed = true;
@@ -8692,6 +8723,15 @@ export class AgentSession {
 		const patterns = this.settings.get("enabledModels");
 		if (!patterns || patterns.length === 0) return all;
 		return filterAvailableModelsByEnabledPatterns(all, patterns, this.#modelRegistry);
+	}
+
+	/** Apply a provider/model selector through the same session mutation path as the TUI. */
+	async setModelBySelector(selector: string): Promise<void> {
+		const slash = selector.indexOf("/");
+		if (slash <= 0 || slash === selector.length - 1) throw new Error(`Invalid model selector: ${selector}`);
+		const model = this.#modelRegistry.find(selector.slice(0, slash), selector.slice(slash + 1));
+		if (!model) throw new Error(`Model not found: ${selector}`);
+		await this.setModelExplicitRuntime(model, "default", { selector });
 	}
 
 	// =========================================================================

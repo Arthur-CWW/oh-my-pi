@@ -59,6 +59,7 @@ import type { ExtensionUIContext } from "./extensibility/extensions/types";
 import { scheduleMarketplaceAutoUpdate } from "./extensibility/plugins/marketplace-auto-update";
 import type { MCPManager } from "./mcp";
 import { InteractiveMode } from "./modes/interactive-mode";
+import { createRichDisposableTerminalViewFactory } from "./modes/disposable-interactive-view";
 import { runDisposableInteractiveMode } from "./modes/run-disposable-interactive-mode";
 import type { PrintModeOptions } from "./modes/print-mode";
 import { CURRENT_SETUP_VERSION } from "./modes/setup-version";
@@ -80,6 +81,7 @@ import {
 	type SessionScanSkippedFile,
 } from "./session/session-listing";
 import { SessionManager } from "./session/session-manager";
+import { startSessionControlTarget } from "./session/session-control-target";
 import {
 	ExternalSessionOwner,
 	ExternalSessionOwnerUnverifiable,
@@ -429,33 +431,17 @@ export function createAcpSessionFactory(args: AcpSessionFactoryOptions): AcpSess
 }
 
 async function runInteractiveMode(
+	mode: InteractiveMode,
 	session: AgentSession,
-	version: string,
-	changelogMarkdown: string | undefined,
 	notifs: (InteractiveModeNotify | null)[],
 	versionCheckPromise: Promise<string | undefined>,
 	initialMessages: string[],
-	setExtensionUIContext: (uiContext: ExtensionUIContext, hasUI: boolean) => void,
-	lspServers: LspStartupServerInfo[] | undefined,
-	mcpManager: MCPManager | undefined,
 	resuming: boolean,
 	forceSetupWizard: boolean,
-	eventBus?: EventBus,
 	initialMessage?: string,
 	initialImages?: ImageContent[],
-	titleSystemPrompt?: string,
 	joinLink?: string,
 ): Promise<void> {
-	const mode = new InteractiveMode(
-		session,
-		version,
-		changelogMarkdown,
-		setExtensionUIContext,
-		lspServers,
-		mcpManager,
-		eventBus,
-		titleSystemPrompt,
-	);
 
 	// Cold-launch gate: the full setup wizard (every scene + the overlay and
 	// their TUI/OAuth/search/theme deps) is heavy, yet the common case only needs
@@ -676,6 +662,7 @@ export async function createSessionManager(
 	activeSettings: Settings = settings,
 	askToForkSession: SessionPrompt = promptForkSession,
 	askToMoveSession: SessionPrompt = promptMoveSession,
+	requirePersistent = false,
 ): Promise<SessionManager | undefined> {
 	if (parsed.fork) {
 		if (parsed.noSession) {
@@ -697,6 +684,9 @@ export async function createSessionManager(
 	}
 
 	if (parsed.noSession) {
+		if (requirePersistent) {
+			throw new SessionResolutionError("Interactive mode requires session persistence; --no-session is not supported");
+		}
 		return SessionManager.inMemory();
 	}
 	if (typeof parsed.resume === "string") {
@@ -781,8 +771,8 @@ export async function createSessionManager(
 		}
 		return manager;
 	}
-	// Default case (new session) returns undefined, SDK will create one
-	return undefined;
+	// SessionRunner owns ordinary interactive sessions and requires a durable journal before ownership acquisition.
+	return requirePersistent ? SessionManager.create(cwd, parsed.sessionDir) : undefined;
 }
 
 /** Discover SYSTEM.md file if no CLI system prompt was provided */
@@ -1145,6 +1135,9 @@ export async function runRootCommand(
 			parsedArgs,
 			cwd,
 			settingsInstance,
+			promptForkSession,
+			promptMoveSession,
+			isInteractive,
 		);
 	} catch (error: unknown) {
 		if (error instanceof SessionResolutionError) {
@@ -1240,11 +1233,7 @@ export async function runRootCommand(
 	// prompt/tool initialization observes the header authority immediately.
 	// SessionManager.create is allocation-only here; persistence still begins
 	// after ownership and normal session creation.
-	if (
-		!sessionManager &&
-		(startupWorkstream.workstream || (isInteractive && parsedArgs.tuiBundleManifest !== undefined)) &&
-		!isResumingLaunch
-	) {
+	if (!sessionManager && startupWorkstream.workstream && !isResumingLaunch) {
 		sessionManager = SessionManager.create(cwd, parsedArgs.sessionDir);
 	}
 
@@ -1261,6 +1250,7 @@ export async function runRootCommand(
 				{
 					suppliedEpoch: process.env.OMP_SESSION_OWNER_EPOCH,
 					suppliedSocket: process.env.OMP_SESSION_OWNER_SOCKET,
+					suppliedReservation: process.env.OMP_SESSION_OWNER_RESERVATION === "1",
 					buildRevision: runnerIdentity.buildRevision,
 					runnerInstanceIdentity: runnerIdentity.runnerInstance,
 				},
@@ -1398,39 +1388,32 @@ export async function runRootCommand(
 			version: VERSION,
 		});
 
-		if (isInteractive && parsedArgs.tuiBundleManifest !== undefined) {
-			if (!sessionManager || !ownership || !runnerIdentity) {
-				throw new Error("Disposable TUI requires a persistent session; --no-session is not supported");
-			}
-			const { runner } = await logger.time("createSessionRunner", createSessionRunner, {
-				...sessionOptions,
-				eventBus,
-				preloadedExtensions: extensionsResult,
-				sessionManager,
-				ownership,
-				runnerIdentity,
-				mailboxCapacity: DISPOSABLE_TUI_MAILBOX_CAPACITY,
-				eventCapacity: DISPOSABLE_TUI_EVENT_CAPACITY,
-				childStopPolicy: "detach",
-			});
-			modelRegistry.refreshInBackground();
-			stopStartupWatchdog();
-			logger.endTiming();
-			await runDisposableInteractiveMode(runner, {
-				manifestPath: parsedArgs.tuiBundleManifest,
-				collabHost: parsedArgs.collabHost,
-				collabRelay: parsedArgs.collabRelay,
-			});
-			stopThemeWatcher();
-			await postmortem.quit(0);
-			return;
-		}
-
-		const { session, setToolUIContext, modelFallbackMessage, lspServers, mcpManager } = await createSession({
-			...sessionOptions,
-			eventBus,
-			preloadedExtensions: extensionsResult,
-		});
+		let interactiveRunner: Awaited<ReturnType<typeof createSessionRunner>>["runner"] | undefined;
+		const sessionResult = isInteractive
+			? await (async () => {
+					if (!sessionManager || !ownership || !runnerIdentity) {
+						throw new Error("Interactive TUI requires a persistent session; --no-session is not supported");
+					}
+					const result = await logger.time("createSessionRunner", createSessionRunner, {
+						...sessionOptions,
+						eventBus,
+						preloadedExtensions: extensionsResult,
+						sessionManager,
+						ownership,
+						runnerIdentity,
+						mailboxCapacity: DISPOSABLE_TUI_MAILBOX_CAPACITY,
+						eventCapacity: DISPOSABLE_TUI_EVENT_CAPACITY,
+						childStopPolicy: "detach",
+					});
+					interactiveRunner = result.runner;
+					return result;
+				})()
+			: await createSession({
+					...sessionOptions,
+					eventBus,
+					preloadedExtensions: extensionsResult,
+				});
+		const { session, setToolUIContext, modelFallbackMessage, lspServers, mcpManager } = sessionResult;
 		await applyStartupWorkstream(session.sessionManager, startupWorkstream, !isResumingLaunch);
 
 		if (parsedArgs.apiKey && !sessionOptions.model && session.model) {
@@ -1552,25 +1535,39 @@ export async function runRootCommand(
 
 			stopStartupWatchdog();
 			logger.endTiming();
-			await runInteractiveMode(
+			if (!interactiveRunner || !ownership) throw new Error("Interactive runner was not initialized");
+			const fullFactory = createRichDisposableTerminalViewFactory({
 				session,
-				VERSION,
+				version: VERSION,
 				changelogMarkdown,
-				notifs,
-				versionCheckPromise,
-				initialArgs.messages,
 				setToolUIContext,
 				lspServers,
 				mcpManager,
-				Boolean(parsedArgs.continue || parsedArgs.resume || parsedArgs.fork),
-				deps.forceSetupWizard === true,
 				eventBus,
-				initialMessage,
-				initialImages,
 				titleSystemPrompt,
-				parsedArgs.join,
-			);
-			await ownership?.release();
+				runMode: mode =>
+					runInteractiveMode(
+						mode,
+						session,
+						notifs,
+						versionCheckPromise,
+						initialArgs.messages,
+						Boolean(parsedArgs.continue || parsedArgs.resume || parsedArgs.fork),
+						deps.forceSetupWizard === true,
+						initialMessage,
+						initialImages,
+						parsedArgs.join,
+					),
+			});
+			await runDisposableInteractiveMode(interactiveRunner, {
+				...(parsedArgs.tuiBundleManifest === undefined
+					? { defaultFactory: fullFactory }
+					: { manifestPath: parsedArgs.tuiBundleManifest }),
+				collabHost: parsedArgs.collabHost,
+				collabRelay: parsedArgs.collabRelay,
+				ownership,
+				cwd,
+			});
 		} else {
 			// Branch-only single-shot runner: keep print-mode code out of normal interactive startup.
 			stopStartupWatchdog();

@@ -585,6 +585,11 @@ export interface CreateSessionRunnerResult {
 	extensionsResult: LoadExtensionsResult;
 	setToolUIContext: (uiContext: ExtensionUIContext, hasUI: boolean) => void;
 	modelFallbackMessage?: string;
+	/** Live session and local services used by the full disposable terminal factory. */
+	session: AgentSession;
+	mcpManager?: MCPManager;
+	lspServers?: LspStartupServerInfo[];
+	eventBus: EventBus;
 }
 
 export type DialectFormat = "auto" | "native" | Dialect;
@@ -3017,8 +3022,12 @@ export async function createSessionRunner(options: CreateSessionRunnerOptions): 
 		};
 		return {
 			runner,
+			session: sessionResult.session,
 			extensionsResult: sessionResult.extensionsResult,
 			setToolUIContext: sessionResult.setToolUIContext,
+			mcpManager: sessionResult.mcpManager,
+			lspServers: sessionResult.lspServers,
+			eventBus: sessionResult.eventBus,
 			modelFallbackMessage: sessionResult.modelFallbackMessage,
 		};
 	} catch (error) {

@@ -32,6 +32,16 @@ function buildForkArgs(fork: string, noSession = false): Args {
 	};
 }
 
+function buildInteractiveArgs(noSession = false): Args {
+	return {
+		noSession: noSession || undefined,
+		messages: [],
+		fileArgs: [],
+		unknownFlags: new Map(),
+		unrecognizedFlags: [],
+	};
+}
+
 const stubSettings = { get: () => undefined } as unknown as Settings;
 
 describe("createSessionManager — missing session (#2084)", () => {
@@ -88,6 +98,34 @@ describe("createSessionManager — missing session (#2084)", () => {
 			name: "SessionResolutionError",
 			message: "--fork requires session persistence",
 			hint: undefined,
+		});
+	});
+
+	it("creates a durable manager when the interactive runner requires persistence", async () => {
+		const manager = await createSessionManager(
+			buildInteractiveArgs(),
+			"/current/project",
+			stubSettings,
+			undefined,
+			undefined,
+			true,
+		);
+		expect(manager?.getSessionFile()).toBeDefined();
+	});
+
+	it("rejects --no-session when the interactive runner requires persistence", async () => {
+		await expect(
+			createSessionManager(
+				buildInteractiveArgs(true),
+				"/current/project",
+				stubSettings,
+				undefined,
+				undefined,
+				true,
+			),
+		).rejects.toMatchObject({
+			name: "SessionResolutionError",
+			message: "Interactive mode requires session persistence; --no-session is not supported",
 		});
 	});
 });

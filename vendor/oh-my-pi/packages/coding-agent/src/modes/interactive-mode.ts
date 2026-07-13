@@ -87,6 +87,7 @@ import type { SessionContext } from "../session/session-context";
 import { getRecentSessions } from "../session/session-listing";
 import type { SessionManager } from "../session/session-manager";
 import type { ShakeMode } from "../session/shake-types";
+import type { TuiHostCapabilities } from "../slash-commands/reload-tui";
 import { BUILTIN_SLASH_COMMAND_RESERVED_NAMES, BUILTIN_SLASH_COMMANDS } from "../slash-commands/builtin-registry";
 import { formatDuration } from "../slash-commands/helpers/format";
 import { STTController, type SttState } from "../stt";
@@ -369,6 +370,7 @@ export class InteractiveMode implements InteractiveModeContext {
 	agent: Agent;
 	historyStorage?: HistoryStorage;
 	titleSystemPrompt?: string;
+	readonly tuiHost?: TuiHostCapabilities;
 
 	ui: TUI;
 	chatContainer: TranscriptContainer;
@@ -541,6 +543,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		mcpManager?: MCPManager,
 		eventBus?: EventBus,
 		titleSystemPrompt?: string,
+		tuiHost?: TuiHostCapabilities,
 	) {
 		this.session = session;
 		this.sessionManager = session.sessionManager;
@@ -560,6 +563,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.mcpManager = mcpManager;
 		this.#eventBus = eventBus;
 		this.titleSystemPrompt = titleSystemPrompt;
+		this.tuiHost = tuiHost;
 		if (eventBus) {
 			this.#eventBusUnsubscribers.push(
 				eventBus.on(LSP_STARTUP_EVENT_CHANNEL, data => {

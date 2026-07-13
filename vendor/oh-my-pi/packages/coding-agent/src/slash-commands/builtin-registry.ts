@@ -7,13 +7,9 @@ import { getOAuthProviders } from "@oh-my-pi/pi-ai/oauth";
 import { setNextRequestDebugPath } from "@oh-my-pi/pi-ai/utils/request-debug";
 import type { AutocompleteItem } from "@oh-my-pi/pi-tui";
 import { APP_NAME, setProjectDir, VERSION } from "@oh-my-pi/pi-utils";
-import {
-	acquireRestartSessionOwnership,
-	buildRestartSpawnSpec,
-	handoffRestartProcess,
-} from "../cli/restart-session";
+import { acquireRestartSessionOwnership, buildRestartSpawnSpec, handoffRestartProcess } from "../cli/restart-session";
 import { COLLAB_GUEST_ALLOWED_COMMANDS } from "../collab/guest";
-import { CollabHost } from "../collab/host";
+import type { CollabHost } from "../collab/host";
 import type { SettingPath, SettingValue } from "../config/settings";
 import { settings } from "../config/settings";
 import {
@@ -33,18 +29,13 @@ import {
 import { resolveMemoryBackend } from "../memory-backend";
 import { theme } from "../modes/theme/theme";
 import type { InteractiveModeContext } from "../modes/types";
-import { AgentRegistry, MAIN_AGENT_ID } from "../registry/agent-registry";
 import type { AgentSession, FreshSessionResult } from "../session/agent-session";
-import type { RestartChildManifestEntryV1, SessionOwnershipHandle } from "../session/session-ownership";
 import { decodeSessionWorkstream, type SessionWorkstream } from "../session/session-entries";
+import { captureRestartChildManifest } from "../session/restart-child-manifest";
 import { SessionManager } from "../session/session-manager";
+import type { SessionOwnershipHandle } from "../session/session-ownership";
 import { formatShakeSummary, type ShakeMode } from "../session/shake-types";
 import { urlHyperlinkAlways } from "../tui";
-import {
-	appendChildRestartRecord,
-	isTerminalChildLifecycleState,
-	latestChildLifecycleRecord,
-} from "../task/child-lifecycle";
 import { getChangelogPath, parseChangelog } from "../utils/changelog";
 import { buildContextReportText } from "./helpers/context-report";
 import { formatDuration } from "./helpers/format";
@@ -57,6 +48,7 @@ import { launchStatsDashboard, parseStatsDashboardArgs } from "./helpers/stats-d
 import { handleTodoAcp } from "./helpers/todo";
 import { buildUsageReportText } from "./helpers/usage-report";
 import { parseMarketplaceInstallArgs, parsePluginScopeArgs } from "./marketplace-install-parser";
+import { handleReloadTuiCommand, RELOAD_TUI_COMMAND, RELOAD_TUI_DESCRIPTION } from "./reload-tui";
 import type {
 	BuiltinSlashCommand,
 	ParsedSlashCommand,
@@ -185,54 +177,8 @@ const shutdownHandlerTui = (_command: ParsedSlashCommand, runtime: TuiSlashComma
 async function captureRestartChildrenAfterShutdown(
 	ctx: InteractiveModeContext,
 	predecessorOwnerEpoch: string,
-): Promise<readonly RestartChildManifestEntryV1[]> {
-	const supervisedJobIds = new Set(
-		ctx.session.asyncJobManager
-			?.getRunningJobs({ ownerId: MAIN_AGENT_ID })
-			.filter(job => job.type === "task" && !job.isolated)
-			.map(job => job.id) ?? [],
-	);
-	const children = AgentRegistry.global()
-		.list()
-		.filter(
-			ref =>
-				(ref.parentId === MAIN_AGENT_ID || supervisedJobIds.has(ref.id)) &&
-				(ref.status === "running" || ref.status === "parked") &&
-				typeof ref.sessionFile === "string",
-		)
-		.map(ref => ({
-			agentId: ref.id,
-			state: ref.status as "running" | "parked",
-			journalPath: ref.sessionFile!,
-			sessionManager: ref.session?.sessionManager,
-		}));
-
-	const manifest: RestartChildManifestEntryV1[] = [];
-	for (const child of children) {
-		const manager = child.sessionManager ?? (await SessionManager.open(child.journalPath));
-		try {
-			const lifecycle = latestChildLifecycleRecord(manager.getEntries());
-			if (!lifecycle || isTerminalChildLifecycleState(lifecycle.state)) continue;
-			appendChildRestartRecord(manager, {
-				version: 1,
-				agentId: child.agentId,
-				predecessorOwnerEpoch,
-				state: child.state,
-				queueCheckpoint: null,
-				status: "pending",
-				updatedAt: new Date().toISOString(),
-			});
-			await manager.flush();
-			manifest.push({
-				agentId: child.agentId,
-				state: child.state,
-				journalPath: child.journalPath,
-				queueCheckpoint: null,
-			});
-		} finally {
-			if (!child.sessionManager) await manager.close();
-		}
-	}
+) {
+	const manifest = await captureRestartChildManifest(ctx.session, predecessorOwnerEpoch);
 	await ctx.shutdown({ childPolicy: "restart", persistSession: false, exitProcess: false });
 	return manifest;
 }
@@ -263,7 +209,6 @@ export async function ensureRestartSessionOwnership(sessionManager: SessionManag
 	// Follow-up: bind ownership eagerly when lazy session-file creation chooses its path.
 	return ownership;
 }
-
 
 async function restartHandlerTui(
 	_command: ParsedSlashCommand,
@@ -1470,6 +1415,14 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<SlashCommandSpec> = [
 		name: "restart",
 		description: "Restart OMP and resume this session",
 		handleTui: restartHandlerTui,
+	},
+	{
+		name: RELOAD_TUI_COMMAND,
+		description: RELOAD_TUI_DESCRIPTION,
+		handleTui: (_command, runtime) => {
+			handleReloadTuiCommand(runtime.ctx.tuiHost, runtime.ctx.showWarning);
+			runtime.ctx.editor.setText("");
+		},
 	},
 	{
 		name: "new",
