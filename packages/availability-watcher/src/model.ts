@@ -39,7 +39,6 @@ export const AvailabilityStateSchema = Schema.Struct({
   perSource: Schema.Record(Schema.String, Schema.Struct({
     lastItemAt: Schema.String,
     lastResetMentionAt: Schema.optional(Schema.String),
-    lastResetQuote: Schema.optional(Schema.String),
   })),
 })
 export type AvailabilityState = typeof AvailabilityStateSchema.Type

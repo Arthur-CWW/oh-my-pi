@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "maxAccountsPerTick": 3,
+  "delayMs": 2000,
+  "jitterMs": 4000,
+  "mirrors": [
+    {
+      "url": "https://nitter.net",
+      "capacity": 6,
+      "refillPerHour": 6
+    },
+    {
+      "url": "https://nitter.poast.org",
+      "capacity": 6,
+      "refillPerHour": 6
+    }
+  ],
+  "tiers": {
+    "corpus": {
+      "cadenceMinutes": 1440,
+      "pagesPerTick": 1
+    },
+    "news": {
+      "cadenceMinutes": 60,
+      "pagesPerTick": 1
+    }
+  },
+  "accounts": [
+    { "handle": "pleometric", "tier": "corpus" },
+    { "handle": "teortaxestex", "tier": "corpus" },
+    { "handle": "thsottiaux", "tier": "news" },
+    { "handle": "repligate", "tier": "corpus" },
+    { "handle": "max_paperclips", "tier": "corpus" },
+    { "handle": "voooooogel", "tier": "corpus" },
+    { "handle": "_xjdr", "tier": "corpus" },
+    { "handle": "ludwigABAP", "tier": "corpus" },
+    { "handle": "lumpenspace", "tier": "corpus" },
+    { "handle": "deepfates", "tier": "corpus" }
+  ]
+}

@@ -4,10 +4,10 @@ import {
   createEndpointSource,
   createNitterSource,
   NITTER_DEFAULT_BASE_URL,
-  PublicSourceCache,
   type PublicRecord,
   type PublicSourceAdapter,
-  syncPublicSources,
+  type PublicSourceRequest,
+  type SourcePage,
 } from "@wirebabel/twitter-archive"
 import { Schema } from "effect"
 import {
@@ -56,6 +56,7 @@ export interface SyncReport {
 
 interface FeedStateRow {
   content_hash: string | null
+  cursor: string | null
   last_synced_at: string | null
   last_working_adapter: string | null
 }
@@ -78,26 +79,41 @@ export class FeedStateStore {
       CREATE TABLE IF NOT EXISTS feed_state (
         feed_name TEXT PRIMARY KEY,
         content_hash TEXT,
+        cursor TEXT,
         last_synced_at TEXT,
         last_working_adapter TEXT
       );
+      DROP TABLE IF EXISTS public_source_records;
+      DROP TABLE IF EXISTS public_source_state;
     `)
+    try {
+      this.database.exec("ALTER TABLE feed_state ADD COLUMN cursor TEXT")
+    } catch (error) {
+      if (!/duplicate column name/i.test(errorMessage(error))) throw error
+    }
   }
   close(): void { this.database.close() }
   hasProcessed(feed: string, item: FeedItem): boolean {
     return this.database.query("SELECT 1 FROM processed_items WHERE feed_name=? AND (item_key=? OR item_url=?)").get(feed, item.id, item.url) !== null
   }
-  markProcessed(feed: string, candidate: CandidateFact, processedAt: string): void {
-    this.database.query("INSERT OR IGNORE INTO processed_items(feed_name,item_key,item_url,processed_at) VALUES(?,?,?,?)").run(feed, candidate.itemId, candidate.url, processedAt)
+  claimProcessed(feed: string, candidate: CandidateFact, processedAt: string): boolean {
+    const result = this.database.query("INSERT OR IGNORE INTO processed_items(feed_name,item_key,item_url,processed_at) VALUES(?,?,?,?)").run(feed, candidate.itemId, candidate.url, processedAt)
+    return result.changes === 1
+  }
+  releaseClaims(candidates: readonly CandidateFact[]): void {
+    const remove = this.database.prepare("DELETE FROM processed_items WHERE feed_name=? AND item_key=? AND item_url=?")
+    this.database.transaction(() => {
+      for (const candidate of candidates) remove.run(candidate.source, candidate.itemId, candidate.url)
+    })()
   }
   state(feed: string): FeedStateRow | undefined {
-    return this.database.query("SELECT content_hash,last_synced_at,last_working_adapter FROM feed_state WHERE feed_name=?").get(feed) as FeedStateRow | undefined
+    return this.database.query("SELECT content_hash,cursor,last_synced_at,last_working_adapter FROM feed_state WHERE feed_name=?").get(feed) as FeedStateRow | undefined
   }
-  setState(feed: string, values: { contentHash?: string; syncedAt: string; lastWorkingAdapter?: string }): void {
-    this.database.query(`INSERT INTO feed_state(feed_name,content_hash,last_synced_at,last_working_adapter) VALUES(?,?,?,?)
+  setState(feed: string, values: { contentHash?: string; cursor?: string | null; syncedAt: string; lastWorkingAdapter?: string }): void {
+    this.database.query(`INSERT INTO feed_state(feed_name,content_hash,cursor,last_synced_at,last_working_adapter) VALUES(?,?,?,?,?)
       ON CONFLICT(feed_name) DO UPDATE SET content_hash=COALESCE(excluded.content_hash,feed_state.content_hash),
-      last_synced_at=excluded.last_synced_at,last_working_adapter=COALESCE(excluded.last_working_adapter,feed_state.last_working_adapter)`)
-      .run(feed, values.contentHash ?? null, values.syncedAt, values.lastWorkingAdapter ?? null)
+      cursor=excluded.cursor,last_synced_at=excluded.last_synced_at,last_working_adapter=COALESCE(excluded.last_working_adapter,feed_state.last_working_adapter)`)
+      .run(feed, values.contentHash ?? null, values.cursor ?? null, values.syncedAt, values.lastWorkingAdapter ?? null)
   }
 }
 
@@ -119,7 +135,7 @@ export async function syncFeeds(settings: SyncSettings = {}): Promise<SyncReport
   const fetchedItems = new Map<string, FeedItem[]>()
   try {
     for (const feed of registry.feeds) {
-      const fetched = await fetchFeed(feed, store, databasePath, now, settings.fetch ?? fetch, settings.dryRun ?? false)
+      const fetched = await fetchFeed(feed, store, now, settings.fetch ?? fetch, settings.dryRun ?? false)
       fetchedItems.set(feed.name, fetched.items)
       const classifier = classifierProfiles[feed.classifierProfile]
       if (!classifier) throw new Error(`Unknown classifier profile: ${feed.classifierProfile}`)
@@ -127,7 +143,11 @@ export async function syncFeeds(settings: SyncSettings = {}): Promise<SyncReport
       for (const item of fetched.items) {
         if (store.hasProcessed(feed.name, item)) continue
         const candidate = classifier(item)
-        if (candidate) { candidates.push(candidate); candidateCount++ }
+        if (!candidate) continue
+        if (settings.dryRun || store.claimProcessed(feed.name, candidate, nowIso)) {
+          candidates.push(candidate)
+          candidateCount++
+        }
       }
       diagnostics.push({ feed: feed.name, fetched: fetched.items.length, candidates: candidateCount, failures: fetched.failures })
       if (feed !== registry.feeds.at(-1)) await sleepWithJitter(750, 250)
@@ -135,8 +155,12 @@ export async function syncFeeds(settings: SyncSettings = {}): Promise<SyncReport
     if (settings.dryRun) return { candidates, appended: 0, diagnostics }
 
     if (candidates.length > 0) {
-      await appendCandidateRows(settings.documentPath ?? defaultDocumentPath, candidates)
-      for (const candidate of candidates) store.markProcessed(candidate.source, candidate, nowIso)
+      try {
+        await appendCandidateRows(settings.documentPath ?? defaultDocumentPath, candidates)
+      } catch (error) {
+        store.releaseClaims(candidates)
+        throw error
+      }
     }
     await writeMachineState(settings.machineStatePath ?? defaultMachineStatePath, fetchedItems, candidates, nowIso)
     return { candidates, appended: candidates.length, diagnostics }
@@ -145,28 +169,30 @@ export async function syncFeeds(settings: SyncSettings = {}): Promise<SyncReport
   }
 }
 
-async function fetchFeed(feed: FeedConfigEntry, store: FeedStateStore, dbPath: string, now: Date, fetcher: typeof fetch, dryRun: boolean): Promise<{ items: FeedItem[]; failures: string[] }> {
+async function fetchFeed(feed: FeedConfigEntry, store: FeedStateStore, now: Date, fetcher: typeof fetch, dryRun: boolean): Promise<{ items: FeedItem[]; failures: string[] }> {
   if (feed.kind === "page-hash") return fetchPageHash(feed, store, now, fetcher, dryRun)
-  const publicCache = new PublicSourceCache(dbPath)
-  try {
-    const adapters = orderedAdapters(feed, store.state(feed.name)?.last_working_adapter ?? undefined)
-    const result = await syncPublicSources(publicCache, adapters, {
-      handles: [feed.kind === "nitter-handle" ? feed.target : feed.name],
-      cadence: feed.cadence,
-      fetch: (url, init) => fetcher(url, { headers: { "user-agent": "agents-availability-watcher/0.1 (respectful hourly/daily polling)", ...init?.headers } }),
-      now,
-    })
-    const handle = feed.kind === "nitter-handle" ? feed.target : feed.name
-    const records = publicCache.search({ handle, limit: 10_000 })
-    const working = adapters.find((adapter) => publicCache.sourceState(adapter.id, handle)?.last_synced_at === now.toISOString())
-    store.setState(feed.name, { syncedAt: now.toISOString(), lastWorkingAdapter: working?.id })
-    return {
-      items: records.map((record) => publicRecordToItem(feed, record)),
-      failures: result.failures.flatMap((failure) => failure.errors),
+  const handle = feed.kind === "nitter-handle" ? feed.target : feed.name
+  const state = store.state(feed.name)
+  const cadenceMs = feed.cadence === "daily" ? 86_400_000 : 3_600_000
+  if (state?.last_synced_at && now.getTime() - Date.parse(state.last_synced_at) < cadenceMs) return { items: [], failures: [] }
+
+  const adapters = orderedAdapters(feed, state?.last_working_adapter ?? undefined)
+  const failures: string[] = []
+  const publicFetch = (url: string, init?: { headers?: Record<string, string> }) => fetcher(url, {
+    headers: { "user-agent": "agents-availability-watcher/0.1 (respectful hourly/daily polling)", ...init?.headers },
+  })
+  for (const adapter of adapters) {
+    const cursor = adapter.id === state?.last_working_adapter ? state?.cursor ?? undefined : undefined
+    const input: PublicSourceRequest = { handle, cursor, fetch: publicFetch }
+    try {
+      const page = await retryAdapterFetch(adapter, input)
+      if (!dryRun) store.setState(feed.name, { cursor: page.cursor, syncedAt: now.toISOString(), lastWorkingAdapter: adapter.id })
+      return { items: page.records.map((record) => publicRecordToItem(feed, record)), failures }
+    } catch (error) {
+      failures.push(`${adapter.id}: ${errorMessage(error)}`)
     }
-  } finally {
-    publicCache.close()
   }
+  return { items: [], failures }
 }
 
 function orderedAdapters(feed: FeedConfigEntry, preferred?: string): PublicSourceAdapter[] {
@@ -191,6 +217,17 @@ function validatePublicAdapter(adapter: PublicSourceAdapter): PublicSourceAdapte
       return { ...page, records: usable }
     },
   }
+}
+async function retryAdapterFetch(adapter: PublicSourceAdapter, input: PublicSourceRequest): Promise<SourcePage> {
+  let lastError: unknown
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try { return await adapter.fetch(input) }
+    catch (error) {
+      lastError = error
+      if (attempt < 2) await sleepWithJitter(750 * 2 ** attempt, 250)
+    }
+  }
+  throw lastError
 }
 
 async function fetchPageHash(feed: FeedConfigEntry, store: FeedStateStore, now: Date, fetcher: typeof fetch, dryRun: boolean): Promise<{ items: FeedItem[]; failures: string[] }> {
@@ -238,12 +275,12 @@ async function writeMachineState(path: string, itemsBySource: ReadonlyMap<string
   for (const [source, items] of itemsBySource) {
     const latest = [...items].sort((a, b) => b.observedAt.localeCompare(a.observedAt))[0]
     const previous = perSource[source]
-    perSource[source] = { lastItemAt: latest?.observedAt ?? previous?.lastItemAt ?? nowIso, lastResetMentionAt: previous?.lastResetMentionAt, lastResetQuote: previous?.lastResetQuote }
+    perSource[source] = { lastItemAt: latest?.observedAt ?? previous?.lastItemAt ?? nowIso, lastResetMentionAt: previous?.lastResetMentionAt }
   }
   for (const candidate of candidates) if (RESET_PATTERN.test(candidate.matchedTerms.join(" "))) {
     const previous = perSource[candidate.source]
     if (previous?.lastResetMentionAt && previous.lastResetMentionAt >= candidate.observedAt) continue
-    perSource[candidate.source] = { lastItemAt: previous?.lastItemAt ?? candidate.observedAt, lastResetMentionAt: candidate.observedAt, lastResetQuote: candidate.quote }
+    perSource[candidate.source] = { lastItemAt: previous?.lastItemAt ?? candidate.observedAt, lastResetMentionAt: candidate.observedAt }
   }
   await Bun.write(path, `${JSON.stringify({ lastSyncAt: nowIso, perSource }, null, 2)}\n`)
 }

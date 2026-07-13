@@ -1,9 +1,10 @@
+import { Database } from "bun:sqlite"
 import { afterEach, describe, expect, test } from "bun:test"
 import { rm } from "node:fs/promises"
 import { join } from "node:path"
 import { parsePublicNitter } from "@wirebabel/twitter-archive"
-import { appendCandidateRows, syncFeeds } from "../src/engine"
-import { classifierProfiles, type FeedItem } from "../src/model"
+import { appendCandidateRows, FeedStateStore, syncFeeds } from "../src/engine"
+import { classifierProfiles, type CandidateFact, type FeedItem } from "../src/model"
 
 const fixture = (name: string) => Bun.file(join(import.meta.dir, "fixtures", name)).text()
 const temporaryPaths: string[] = []
@@ -70,6 +71,42 @@ describe("feed synchronization", () => {
     expect(second.appended).toBe(0)
     expect(await Bun.file(documentPath).text()).toBe(afterFirst)
     expect(fetches).toBe(1)
+    const machineState = await Bun.file(machineStatePath).text()
+    expect(machineState).not.toContain("reset everyone's Codex usage limits")
+    expect(machineState).not.toContain("lastResetQuote")
+    const database = new Database(databasePath)
+    try {
+      const tables = database.query("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all() as Array<{ name: string }>
+      expect(tables.map(({ name }) => name)).toEqual(["feed_state", "processed_items"])
+      expect(database.query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='public_source_records'").get()).toBeNull()
+    } finally {
+      database.close()
+    }
+  })
+
+  test("atomically claims each delivery key once across concurrent stores", async () => {
+    const directory = join(import.meta.dir, `.tmp-${crypto.randomUUID()}`)
+    temporaryPaths.push(directory)
+    const databasePath = join(directory, "state", "feeds.sqlite")
+    await Bun.write(join(directory, "state", ".keep"), "")
+    const first = new FeedStateStore(databasePath)
+    const second = new FeedStateStore(databasePath)
+    const candidate: CandidateFact = {
+      source: "thsottiaux",
+      itemId: "tweet-1",
+      observedAt: "2026-07-13T00:00:00.000Z",
+      handle: "thsottiaux",
+      quote: "reset",
+      url: "https://example.test/tweet-1",
+      matchedTerms: ["reset"],
+    }
+    try {
+      expect(first.claimProcessed("thsottiaux", candidate, candidate.observedAt)).toBeTrue()
+      expect(second.claimProcessed("thsottiaux", candidate, candidate.observedAt)).toBeFalse()
+    } finally {
+      first.close()
+      second.close()
+    }
   })
 
   test("page-hash feeds classify recorded page content once", async () => {
