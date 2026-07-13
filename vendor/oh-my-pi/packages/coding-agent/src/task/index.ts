@@ -46,34 +46,35 @@ import "../tools/review";
 import type { AsyncJobManager } from "../async";
 import type { LocalProtocolOptions } from "../internal-urls";
 import { loadOverallPlanReference } from "../plan-mode/plan-handoff";
-import { AgentRegistry, MAIN_AGENT_ID } from "../registry/agent-registry";
+import type { ReviveAdmissionAcquirer } from "../registry/agent-lifecycle";
 import type { AgentQuotaAdmission } from "../registry/agent-registry";
+import { AgentRegistry, MAIN_AGENT_ID } from "../registry/agent-registry";
 import { generateCommitMessage } from "../utils/commit-message-generator";
 import * as git from "../utils/git";
 import { type DiscoveryResult, discoverAgents, getAgent } from "./discovery";
 import { runSubprocess } from "./executor";
 import { generateTaskName } from "./name-generator";
 import { AgentOutputManager } from "./output-manager";
-import { mapWithConcurrencyLimit, Semaphore } from "./parallel";
+import { mapWithConcurrencyLimit, REVIVE_ADMISSION_WAIT_MS, resolveSpawnConcurrency, Semaphore } from "./parallel";
 import {
-	QUOTA_ADMISSION_CUSTOM_TYPE,
-	QuotaAdmissionController,
 	createQuotaAdmissionStateRecord,
 	latestQuotaAdmissionState,
+	QUOTA_ADMISSION_CUSTOM_TYPE,
+	QuotaAdmissionController,
 	type QuotaModel,
 } from "./quota-admission";
+import { renderResult, renderCall as renderTaskCall } from "./render";
+import { repairTaskParams } from "./repair-args";
+import { appendSpawnRouteResolution } from "./route-events";
 import {
 	admitSpawnRoute,
 	blockSpawnRoute,
 	reconcileSpawnRouteAuthFallback,
 	rerouteSpawnRoute,
 	resolveSpawnRoute,
-	toSpawnRouteReceipt,
 	type SpawnRouteDecision,
+	toSpawnRouteReceipt,
 } from "./route-resolution";
-import { appendSpawnRouteResolution } from "./route-events";
-import { renderResult, renderCall as renderTaskCall } from "./render";
-import { repairTaskParams } from "./repair-args";
 import {
 	applyNestedPatches,
 	captureBaseline,
@@ -533,6 +534,39 @@ function discoverAgentsForCreate(cwd: string): Promise<DiscoveryResult> {
 	return pending;
 }
 
+export async function acquireReviveAdmissionSlot(
+	semaphore: Semaphore,
+	agentId: string,
+	waitMs = REVIVE_ADMISSION_WAIT_MS,
+): Promise<(() => void) | undefined> {
+	const signal = AbortSignal.timeout(waitMs);
+	try {
+		await semaphore.acquire(queueDepth => {
+			logger.info("Task revival deferred by live-child admission", { agentId, queueDepth });
+		}, signal);
+	} catch (error) {
+		if (!signal.aborted) throw error;
+		/*
+		 * IRC reserves a parked recipient's mailbox entry before ensureLive().
+		 * A child holding the last slot may itself be waiting for that recipient,
+		 * so an unbounded FIFO wait would wedge the lineage. After one bounded
+		 * wait we bypass admission with a warning: the reserved message survives,
+		 * and the tree is guaranteed to make progress within this bound.
+		 */
+		logger.warn("Task revival bypassing saturated live-child admission after bounded wait", {
+			agentId,
+			waitMs,
+		});
+		return undefined;
+	}
+	let released = false;
+	return () => {
+		if (released) return;
+		released = true;
+		semaphore.release();
+	};
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Tool Class
 // ═══════════════════════════════════════════════════════════════════════════
@@ -597,11 +631,14 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 	/** Schedule-time route decisions keyed by agentId, consumed by #runSpawn to avoid duplicate work. */
 	#preResolvedModels = new Map<string, SpawnRouteDecision>();
 	/**
-	 * One semaphore per TaskTool instance (i.e. per session): bounds concurrent
-	 * subagents across parallel `task` calls within the session. Sized from
-	 * `task.maxConcurrency` at first use; later setting changes do not resize it.
+	 * The sole admission limiter for this session's children. A positive
+	 * `task.maxLiveChildren` narrows the historical `task.maxConcurrency`
+	 * ceiling. Each child session owns a separate TaskTool and therefore a
+	 * separate budget: nested spawns cannot deadlock behind their parent's
+	 * occupied slot.
 	 */
 	#spawnSemaphore: Semaphore | undefined;
+	readonly #reviveAdmission: ReviveAdmissionAcquirer | undefined;
 
 	get parameters(): TaskToolSchemaInstance {
 		const isolationEnabled = this.session.settings.get("task.isolation.mode") !== "none";
@@ -634,14 +671,28 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 	) {
 		this.#blockedAgent = $env.PI_BLOCKED_AGENT;
 		this.#discoveredAgents = discoveredAgents;
+		if (this.session.settings.get("task.maxLiveChildren") > 0) {
+			this.#reviveAdmission = agentId => acquireReviveAdmissionSlot(this.#getSpawnSemaphore(), agentId);
+		}
 	}
 
 	#isBatchEnabled(): boolean {
 		return this.session.settings.get("task.batch");
 	}
 	#getSpawnSemaphore(): Semaphore {
-		this.#spawnSemaphore ??= new Semaphore(this.session.settings.get("task.maxConcurrency"));
+		this.#spawnSemaphore ??= new Semaphore(
+			resolveSpawnConcurrency(
+				this.session.settings.get("task.maxConcurrency"),
+				this.session.settings.get("task.maxLiveChildren"),
+			),
+		);
 		return this.#spawnSemaphore;
+	}
+
+	async #acquireSpawnSlot(agentId: string): Promise<void> {
+		await this.#getSpawnSemaphore().acquire(queueDepth => {
+			logger.info("Task spawn deferred by live-child admission", { agentId, queueDepth });
+		});
 	}
 
 	#resolveSpawnRoute(agentName: string, effectiveAgent: AgentDefinition, params: TaskParams): SpawnRouteDecision {
@@ -1095,9 +1146,9 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 			"task",
 			agentId,
 			async ({ jobId: ownJobId, signal: runSignal, reportProgress, markRunning }) => {
+				await this.#acquireSpawnSlot(agentId);
 				const startedAt = Date.now();
 				const semaphore = this.#getSpawnSemaphore();
-				await semaphore.acquire();
 				if (runSignal.aborted) {
 					semaphore.release();
 					progress.status = "aborted";
@@ -1202,7 +1253,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 	): Promise<AgentToolResult<TaskToolDetails>> {
 		const semaphore = this.#getSpawnSemaphore();
 		if (spawnItems.length === 1) {
-			await semaphore.acquire();
+			await this.#acquireSpawnSlot(spawnItems[0].id?.trim() || params.agent || "subagent");
 			try {
 				return await this.#executeSync(
 					toolCallId,
@@ -1237,7 +1288,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 			spawnItems,
 			spawnItems.length,
 			async (item, index, workerSignal) => {
-				await semaphore.acquire();
+				await this.#acquireSpawnSlot(item.id?.trim() || `${params.agent || "subagent"}-${index + 1}`);
 				try {
 					const itemOnUpdate: AgentToolUpdateCallback<TaskToolDetails> | undefined = onUpdate
 						? update => {
@@ -1632,6 +1683,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 				parentSessionFile: sessionFile,
 				parentSessionId: this.session.getSessionId?.() ?? undefined,
 				parentAgentId: this.session.getAgentId?.() ?? undefined,
+				...(this.#reviveAdmission ? { acquireReviveSlot: this.#reviveAdmission } : {}),
 				parentWorkstream: this.session.sessionManager?.getWorkstream(),
 				persistArtifacts: !!artifactsDir,
 				artifactsDir: effectiveArtifactsDir,

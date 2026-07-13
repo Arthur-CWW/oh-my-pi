@@ -13,19 +13,30 @@
 import { logger } from "@oh-my-pi/pi-utils";
 import { AsyncJobManager } from "../async/job-manager";
 import type { AgentSession } from "../session/agent-session";
-import { isTerminalChildLifecycleState, latestChildLifecycleRecord, transitionChildLifecycleRecord } from "../task/child-lifecycle";
+import {
+	isTerminalChildLifecycleState,
+	latestChildLifecycleRecord,
+	transitionChildLifecycleRecord,
+} from "../task/child-lifecycle";
 import { appendLifecycleEvent } from "../task/route-events";
-import { AgentRegistry, MAIN_AGENT_ID, type AgentRef, type RegistryEvent } from "./agent-registry";
+import { type AgentRef, AgentRegistry, MAIN_AGENT_ID, type RegistryEvent } from "./agent-registry";
 
 export type SessionSubscriptionRegistrar = (unsubscribe: () => void) => void;
 
 export type AgentReviver = (registerSubscription: SessionSubscriptionRegistrar) => Promise<AgentSession>;
+export type ReviveAdmissionRelease = () => void;
+export type ReviveAdmissionAcquirer = (agentId: string) => Promise<ReviveAdmissionRelease | undefined>;
 
 export interface AdoptOptions {
 	/** TTL before an idle agent is parked. <= 0 disables parking. */
 	idleTtlMs: number;
 	/** Recreates a live AgentSession from the ref's sessionFile. Absent => not resumable after park (e.g. isolated runs). */
 	revive?: AgentReviver;
+	/**
+	 * Acquire the originating parent's live-child slot before rebuilding this
+	 * session. Undefined means admission is disabled or deliberately bypassed.
+	 */
+	acquireReviveSlot?: ReviveAdmissionAcquirer;
 	/** Child-owned listener for the currently attached live session. */
 	sessionSubscription?: () => void;
 }
@@ -33,6 +44,8 @@ export interface AdoptOptions {
 interface AdoptedAgent {
 	idleTtlMs: number;
 	revive?: AgentReviver;
+	acquireReviveSlot?: ReviveAdmissionAcquirer;
+	admissionRelease?: ReviveAdmissionRelease;
 	sessionSubscription?: () => void;
 	timer?: NodeJS.Timeout;
 }
@@ -50,7 +63,7 @@ export type StaleOrphanReconcileResult =
 				| "persistence_failed"
 				| "changed_during_reconcile"
 				| "dispose_failed";
-		};
+	  };
 
 export class AgentLifecycleManager {
 	static #global: AgentLifecycleManager | undefined;
@@ -72,6 +85,8 @@ export class AgentLifecycleManager {
 				clearTimeout(adopted.timer);
 				adopted.sessionSubscription?.();
 				adopted.sessionSubscription = undefined;
+				adopted.admissionRelease?.();
+				adopted.admissionRelease = undefined;
 			}
 			current.#adopted.clear();
 			current.#revivals.clear();
@@ -109,9 +124,11 @@ export class AgentLifecycleManager {
 		const existing = this.#adopted.get(id);
 		clearTimeout(existing?.timer);
 		existing?.sessionSubscription?.();
+		existing?.admissionRelease?.();
 		const adopted: AdoptedAgent = {
 			idleTtlMs: opts.idleTtlMs,
 			revive: opts.revive,
+			acquireReviveSlot: opts.acquireReviveSlot,
 			sessionSubscription: opts.sessionSubscription,
 		};
 		this.#adopted.set(id, adopted);
@@ -229,6 +246,8 @@ export class AgentLifecycleManager {
 		clearTimeout(adopted?.timer);
 		adopted?.sessionSubscription?.();
 		if (adopted) adopted.sessionSubscription = undefined;
+		adopted?.admissionRelease?.();
+		if (adopted) adopted.admissionRelease = undefined;
 		this.#adopted.delete(id);
 		await this.#parkings.get(id);
 		await revival?.catch(() => undefined);
@@ -264,6 +283,8 @@ export class AgentLifecycleManager {
 		for (const adopted of this.#adopted.values()) {
 			adopted.sessionSubscription?.();
 			adopted.sessionSubscription = undefined;
+			adopted.admissionRelease?.();
+			adopted.admissionRelease = undefined;
 		}
 		this.#adopted.clear();
 		this.#revivals.clear();
@@ -346,6 +367,8 @@ export class AgentLifecycleManager {
 		// Only a replacement ref/session may take ownership away from this park.
 		if (this.#registry.get(id) !== ref || ref.session !== session) return;
 		this.#registry.detachSession(id);
+		adopted.admissionRelease?.();
+		adopted.admissionRelease = undefined;
 	}
 
 	#hasLiveWork(id: string, session: AgentSession): "live_async_job" | "live_model_turn" | undefined {
@@ -410,7 +433,10 @@ export class AgentLifecycleManager {
 		try {
 			await session.dispose({ scope: "child" });
 		} catch (error) {
-			logger.warn("AgentLifecycleManager.reconcileStaleOrphan: session dispose failed", { id, error: String(error) });
+			logger.warn("AgentLifecycleManager.reconcileStaleOrphan: session dispose failed", {
+				id,
+				error: String(error),
+			});
 		}
 		// Once disposal begins, this session cannot safely remain discoverable.
 		// Only a replacement ref/session may take ownership away from this park.
@@ -431,12 +457,18 @@ export class AgentLifecycleManager {
 			adopted.sessionSubscription?.();
 			adopted.sessionSubscription = unsubscribe;
 		};
+		let releaseAdmission: ReviveAdmissionRelease | undefined;
 		let session: AgentSession;
 		try {
+			// Admission happens while the ref is still parked. If acquisition
+			// fails, IRC's reserve-before-revive mailbox entry remains durable
+			// and a later send/retry can revive the same adopted child.
+			releaseAdmission = await adopted.acquireReviveSlot?.(id);
 			session = await adopted.revive!(registerSubscription);
 		} catch (error) {
 			adopted.sessionSubscription?.();
 			adopted.sessionSubscription = undefined;
+			releaseAdmission?.();
 			throw error;
 		}
 		const ref = this.#registry.get(id);
@@ -444,6 +476,7 @@ export class AgentLifecycleManager {
 			adopted.sessionSubscription?.();
 			adopted.sessionSubscription = undefined;
 			await session.dispose({ scope: "child" });
+			releaseAdmission?.();
 			throw new Error(`Agent "${id}" was released or replaced while reviving.`);
 		}
 		const sessionManager = session.sessionManager;
@@ -461,6 +494,7 @@ export class AgentLifecycleManager {
 			} catch (disposeError) {
 				logger.warn("AgentLifecycleManager.revive: session dispose failed", { id, error: String(disposeError) });
 			}
+			releaseAdmission?.();
 			throw error;
 		}
 		if (
@@ -471,8 +505,12 @@ export class AgentLifecycleManager {
 			adopted.sessionSubscription?.();
 			adopted.sessionSubscription = undefined;
 			await session.dispose({ scope: "child" });
+			releaseAdmission?.();
 			throw new Error(`Agent "${id}" was released or replaced while reviving.`);
 		}
+		// A successful revive owns the slot until it parks or is released,
+		// matching a fresh spawn's lifetime. Every failure above releases it.
+		adopted.admissionRelease = releaseAdmission;
 		if (!ref.session) this.#registry.attachSession(id, session, sessionFile);
 		this.#registry.setStatus(id, "idle");
 		return session;
@@ -497,6 +535,8 @@ export class AgentLifecycleManager {
 			clearTimeout(adopted.timer);
 			adopted.sessionSubscription?.();
 			adopted.sessionSubscription = undefined;
+			adopted.admissionRelease?.();
+			adopted.admissionRelease = undefined;
 			this.#adopted.delete(event.ref.id);
 			return;
 		}

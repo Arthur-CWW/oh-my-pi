@@ -9,6 +9,7 @@ import { AgentRegistry } from "../src/registry/agent-registry";
 import { AgentSession } from "../src/session/agent-session";
 import { AuthStorage } from "../src/session/auth-storage";
 import { SessionManager } from "../src/session/session-manager";
+import { resolveSpawnConcurrency, Semaphore } from "../src/task/parallel";
 
 const CHILD_COUNTS = [1, 100, 300] as const;
 const PHASES = ["baseline", "live-idle", "parked-settled", "revived", "reparked"] as const;
@@ -57,8 +58,15 @@ interface BenchmarkOutput {
 	runtime: { arch: string; bun: string; revision: string; os: string; osRelease: string };
 	samples: LifecycleMemorySample[];
 	summary: LifecycleBenchmarkSummary;
+	fanoutAdmission: FanoutAdmissionSummary;
 }
 
+export interface FanoutAdmissionSummary {
+	cap: number;
+	completed: number;
+	peakLiveSessions: number;
+	spawns: number;
+}
 interface ChildHarness {
 	id: string;
 }
@@ -254,6 +262,32 @@ async function runWorker(childCount: number): Promise<WorkerResult> {
 	return { samples };
 }
 
+export async function runFanoutAdmissionScenario(spawns = 12, cap = 4): Promise<FanoutAdmissionSummary> {
+	const admission = new Semaphore(resolveSpawnConcurrency(32, cap));
+	let liveSessions = 0;
+	let peakLiveSessions = 0;
+	const completed = await Promise.all(
+		Array.from({ length: spawns }, async (_, index) => {
+			await admission.acquire();
+			liveSessions++;
+			peakLiveSessions = Math.max(peakLiveSessions, liveSessions);
+			try {
+				await Promise.resolve();
+				return index;
+			} finally {
+				liveSessions--;
+				admission.release();
+			}
+		}),
+	);
+	if (peakLiveSessions > cap || completed.length !== spawns) {
+		throw new Error(
+			`Live-child admission failed: peak=${peakLiveSessions}, cap=${cap}, completed=${completed.length}/${spawns}`,
+		);
+	}
+	return { cap, completed: completed.length, peakLiveSessions, spawns };
+}
+
 async function runParent(): Promise<BenchmarkOutput> {
 	const samples: LifecycleMemorySample[] = [];
 	for (const childCount of CHILD_COUNTS) {
@@ -276,6 +310,7 @@ async function runParent(): Promise<BenchmarkOutput> {
 	}
 	const summary = summarizeSamples(samples);
 	assertParkedDescriptorSlope(summary);
+	const fanoutAdmission = await runFanoutAdmissionScenario();
 	return {
 		benchmark: "cold-park-lifecycle-memory",
 		childCounts: CHILD_COUNTS,
@@ -287,6 +322,7 @@ async function runParent(): Promise<BenchmarkOutput> {
 			osRelease: os.release(),
 		},
 		samples,
+		fanoutAdmission,
 		summary,
 	};
 }

@@ -169,6 +169,7 @@ const HOST_DEFAULTED_SETTING_PATHS: SettingPath[] = [
 	"task.eager",
 	"task.batch",
 	"task.maxConcurrency",
+	"task.maxLiveChildren",
 	"task.maxRecursionDepth",
 	"task.disabledAgents",
 	"task.agentModelOverrides",

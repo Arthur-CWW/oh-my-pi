@@ -28,7 +28,7 @@ import type { MCPManager } from "../mcp/manager";
 import type { MnemopiSessionState } from "../mnemopi/state";
 import subagentSystemPromptTemplate from "../prompts/system/subagent-system-prompt.md" with { type: "text" };
 import submitReminderTemplate from "../prompts/system/subagent-yield-reminder.md" with { type: "text" };
-import { AgentLifecycleManager } from "../registry/agent-lifecycle";
+import { AgentLifecycleManager, type ReviveAdmissionAcquirer } from "../registry/agent-lifecycle";
 import type { AgentQuotaAdmission } from "../registry/agent-registry";
 
 import { AgentRegistry, MAIN_AGENT_ID } from "../registry/agent-registry";
@@ -37,8 +37,8 @@ import type { AgentSession, AgentSessionEvent } from "../session/agent-session";
 import type { ArtifactManager } from "../session/artifacts";
 import type { AuthStorage } from "../session/auth-storage";
 import { SKILL_PROMPT_MESSAGE_TYPE, USER_INTERRUPT_LABEL } from "../session/messages";
-import { SessionManager } from "../session/session-manager";
 import type { SessionWorkstream } from "../session/session-entries";
+import { SessionManager } from "../session/session-manager";
 import { truncateTail } from "../session/streaming-output";
 import { parseThinkingLevel } from "../thinking";
 import type { ContextFileEntry } from "../tools";
@@ -310,6 +310,8 @@ export interface ExecutorOptions {
 	parentSessionId?: string;
 	/** Direct parent agent identity for registry lineage and restart capture. */
 	parentAgentId?: string;
+	/** Parent-local admission lease used when this child is later revived. */
+	acquireReviveSlot?: ReviveAdmissionAcquirer;
 	persistArtifacts?: boolean;
 	artifactsDir?: string;
 	eventBus?: EventBus;
@@ -2626,6 +2628,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 					lifecycle.adopt(id, {
 						idleTtlMs: agentIdleTtlMs,
 						revive: reviveSession ?? undefined,
+						acquireReviveSlot: options.acquireReviveSlot,
 						sessionSubscription: sessionStatusSubscription,
 					});
 					sessionStatusSubscription = undefined;

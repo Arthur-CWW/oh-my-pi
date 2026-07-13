@@ -10,10 +10,13 @@
 - Added default-on OpenAI Codex weekly-quota saved-reset redemption with per-window idempotency, a one-reset-per-24-hours safety cap, structured audit logs, and session notices for every outcome.
 - Added the local append-only Fable refusal corpus and `omp refusals` commands for redacted evidence, verdicts, aggregate stats, and no-tools replay of false positives.
 
+- Added `task.maxLiveChildren` FIFO admission control to bound peak live in-process subagents without charging queued time against child runtime limits.
 - Per-spawn `model` override for `task` tool items: each spawn item accepts an optional `model` selector that takes priority over agent-level `task.agentModelOverrides`. Invalid overrides are rejected at schedule time with a formatted error listing available models, and spawn receipts now include a resolved model chain (e.g., `explore → "Rust specialist" → openai/gpt-5.2:high`).
+- Agent Hub now projects subagents as a collapsible parent/child roster tree with lineage-preserving search, descendant rollups, and depth-aware sibling navigation.
 
 ### Fixed
 
+- Fixed the token-rate status segment to show a high-contrast live main-session badge only during active streaming turns.
 - Registered `/reload-tui` in the shared slash-command registry and delegated runner-backed disposable-view reloads through the typed host capability, with an actionable legacy-view notice.
 - IRC sends now reserve parked-agent messages before revival and follow replacement identities across revive races, preventing dropped messages and `released or replaced while reviving` failures.
 - Ask-tool waits now publish `waiting_input` IRC presence while they are blocking for user input, then restore the prior state on answer or abort.

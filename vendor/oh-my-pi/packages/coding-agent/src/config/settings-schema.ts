@@ -161,7 +161,8 @@ export type StatusLineSegmentId =
 	| "cache_hit"
 	| "session_name"
 	| "usage"
-	| "collab";
+	| "collab"
+	| "memory";
 
 /** Submenu choice metadata. */
 export type SubmenuOption<V extends string = string> = {
@@ -513,6 +514,12 @@ export const SETTINGS_SCHEMA = {
 			label: "Color-Blind Mode",
 			description: "Use blue instead of green for diff additions",
 		},
+	},
+
+	"ui.memoryWatermarkBytes": {
+		type: "number",
+		default: 4 * 1024 ** 3,
+		description: "Show a restart hint in the status line when coordinator RSS reaches this many bytes; 0 disables it",
 	},
 
 	// Status line
@@ -3735,6 +3742,32 @@ export const SETTINGS_SCHEMA = {
 				{ value: "16", label: "16 tasks" },
 				{ value: "32", label: "32 tasks" },
 				{ value: "64", label: "64 tasks" },
+			],
+		},
+	},
+
+	/**
+	 * Maximum concurrently live in-process children owned by one session.
+	 * The explicit default of 0 disables this additional narrowing and keeps
+	 * the historical `task.maxConcurrency` effective behavior unchanged.
+	 */
+	"task.maxLiveChildren": {
+		type: "number",
+		default: 0,
+		ui: {
+			tab: "tasks",
+			group: "Subagents",
+			label: "Max Live Children",
+			description:
+				"Cap live in-process child sessions per parent (0 keeps the Max Concurrent Tasks limit). Deferred spawns queue FIFO.",
+			options: [
+				{ value: "0", label: "Use task concurrency" },
+				{ value: "1", label: "1 child" },
+				{ value: "2", label: "2 children" },
+				{ value: "4", label: "4 children" },
+				{ value: "8", label: "8 children" },
+				{ value: "16", label: "16 children" },
+				{ value: "32", label: "32 children" },
 			],
 		},
 	},

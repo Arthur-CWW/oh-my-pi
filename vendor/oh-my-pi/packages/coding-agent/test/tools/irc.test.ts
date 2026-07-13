@@ -8,6 +8,8 @@ import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry
 import { AgentSession, type AgentSessionEvent } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import type { CustomMessage } from "@oh-my-pi/pi-coding-agent/session/messages";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
+import { acquireReviveAdmissionSlot } from "@oh-my-pi/pi-coding-agent/task";
+import { Semaphore } from "@oh-my-pi/pi-coding-agent/task/parallel";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { IrcTool } from "@oh-my-pi/pi-coding-agent/tools/irc";
 
@@ -205,6 +207,49 @@ describe("IRC", () => {
 			expect(delivery?.queuedAt).toBeLessThanOrEqual(delivery?.deliveredAt ?? 0);
 			expect(delivery?.deliveredAt).toBeLessThanOrEqual(delivery?.readAt ?? 0);
 			expect(bus.peerDeliverySummary("0-Parked")).toMatchObject({ pendingCount: 0, undeliveredCount: 0 });
+		});
+
+		it("defers a saturated revival, then delivers its reserved message after a slot frees", async () => {
+			const admission = new Semaphore(1);
+			await admission.acquire();
+			const sub = makeFakeSession();
+			sub.setOutcome("woken");
+			registry.register({ id: "0-Deferred", displayName: "task", kind: "sub", session: null, status: "parked" });
+			AgentLifecycleManager.global().adopt("0-Deferred", {
+				idleTtlMs: 0,
+				acquireReviveSlot: agentId => acquireReviveAdmissionSlot(admission, agentId, 1_000),
+				revive: async () => sub.session,
+			});
+
+			const sending = bus.send({ from: "0-Holder", to: "0-Deferred", body: "reserved while waiting" });
+			await Promise.resolve();
+			expect(sub.delivered).toEqual([]);
+			expect(bus.unreadCount("0-Deferred")).toBe(1);
+
+			admission.release();
+			expect(await sending).toEqual({ to: "0-Deferred", outcome: "revived" });
+			expect(sub.delivered.map(message => message.body)).toEqual(["reserved while waiting"]);
+		});
+
+		it("bounds circular revival admission so a slot-holder waiting on the recipient cannot wedge", async () => {
+			const admission = new Semaphore(1);
+			await admission.acquire();
+			const sub = makeFakeSession();
+			sub.setOutcome("woken");
+			registry.register({ id: "0-Circular", displayName: "task", kind: "sub", session: null, status: "parked" });
+			AgentLifecycleManager.global().adopt("0-Circular", {
+				idleTtlMs: 0,
+				acquireReviveSlot: agentId => acquireReviveAdmissionSlot(admission, agentId, 10),
+				revive: async () => sub.session,
+			});
+
+			// 0-Holder owns the only slot and waits for this delivery. The
+			// bounded admission falls back to bypass, allowing the reply path.
+			const receipt = await bus.send({ from: "0-Holder", to: "0-Circular", body: "please reply" });
+
+			expect(receipt).toEqual({ to: "0-Circular", outcome: "revived" });
+			expect(sub.delivered.map(message => message.body)).toEqual(["please reply"]);
+			admission.release();
 		});
 
 		it("reserves a send racing park and delivers exactly once after revival", async () => {
@@ -508,6 +553,34 @@ describe("IRC", () => {
 			});
 			expect(delivery?.failedAt).toBeGreaterThanOrEqual(delivery?.queuedAt ?? Number.POSITIVE_INFINITY);
 			expect(bus.peerDeliverySummary("0-Parked")).toMatchObject({ pendingCount: 0, undeliveredCount: 1 });
+		});
+
+		it("keeps the reserved message when revival admission itself fails", async () => {
+			let reviverRuns = 0;
+			registry.register({
+				id: "0-AdmissionFailed",
+				displayName: "task",
+				kind: "sub",
+				session: null,
+				status: "parked",
+			});
+			AgentLifecycleManager.global().adopt("0-AdmissionFailed", {
+				idleTtlMs: 0,
+				acquireReviveSlot: async () => {
+					throw new Error("admission cancelled");
+				},
+				revive: async () => {
+					reviverRuns++;
+					return makeFakeSession().session;
+				},
+			});
+
+			const receipt = await bus.send({ from: "0-Main", to: "0-AdmissionFailed", body: "keep me" });
+
+			expect(receipt).toEqual({ to: "0-AdmissionFailed", outcome: "failed", error: "admission cancelled" });
+			expect(registry.get("0-AdmissionFailed")).toMatchObject({ status: "parked", session: null });
+			expect(bus.inbox("0-AdmissionFailed", { peek: true }).map(message => message.body)).toEqual(["keep me"]);
+			expect(reviverRuns).toBe(0);
 		});
 	});
 

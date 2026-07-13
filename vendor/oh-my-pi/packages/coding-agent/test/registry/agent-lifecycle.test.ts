@@ -5,6 +5,7 @@ import { AgentRegistry, MAIN_AGENT_ID } from "@oh-my-pi/pi-coding-agent/registry
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { appendChildLifecycleRecord, type ChildLifecycleState } from "@oh-my-pi/pi-coding-agent/task/child-lifecycle";
+import { Semaphore } from "@oh-my-pi/pi-coding-agent/task/parallel";
 
 interface SessionStub {
 	session: AgentSession;
@@ -110,7 +111,14 @@ describe("AgentLifecycleManager", () => {
 		const id = "WindowRecorderPod";
 		const sessionFile = "/tmp/WindowRecorderPod.jsonl";
 		const stub = makeTerminalSessionStub(id, sessionFile);
-		registry.register({ id, displayName: "recorder", kind: "sub", session: stub.session, sessionFile, status: "running" });
+		registry.register({
+			id,
+			displayName: "recorder",
+			kind: "sub",
+			session: stub.session,
+			sessionFile,
+			status: "running",
+		});
 		let unsubscribed = 0;
 		lifecycle.adopt(id, { idleTtlMs: TTL, sessionSubscription: () => unsubscribed++ });
 		expect(lifecycle.resourceCountsForTests()).toEqual({ liveSessions: 1, subscriptions: 1, timers: 1 });
@@ -129,7 +137,14 @@ describe("AgentLifecycleManager", () => {
 		const stub = makeTerminalSessionStub(id, sessionFile, "completed", async () => {
 			registry.setStatus(id, "idle");
 		});
-		registry.register({ id, displayName: "recorder", kind: "sub", session: stub.session, sessionFile, status: "running" });
+		registry.register({
+			id,
+			displayName: "recorder",
+			kind: "sub",
+			session: stub.session,
+			sessionFile,
+			status: "running",
+		});
 
 		expect(await lifecycle.reconcileStaleOrphan(id)).toEqual({ reconciled: true });
 		expect(registry.get(id)).toEqual(expect.objectContaining({ status: "parked", session: null }));
@@ -139,7 +154,14 @@ describe("AgentLifecycleManager", () => {
 		const id = "WindowRecorderPod";
 		const sessionFile = "/tmp/WindowRecorderPod.jsonl";
 		const stub = makeTerminalSessionStub(id, sessionFile);
-		registry.register({ id, displayName: "recorder", kind: "sub", session: stub.session, sessionFile, status: "running" });
+		registry.register({
+			id,
+			displayName: "recorder",
+			kind: "sub",
+			session: stub.session,
+			sessionFile,
+			status: "running",
+		});
 		stub.setStreaming(true);
 
 		expect(await lifecycle.reconcileStaleOrphan(id)).toEqual({ reconciled: false, reason: "live_model_turn" });
@@ -148,10 +170,15 @@ describe("AgentLifecycleManager", () => {
 		const manager = new AsyncJobManager({ onJobComplete: async () => {} });
 		AsyncJobManager.setInstance(manager);
 		const gate = deferred();
-		manager.register("task", "recording", async () => {
-			await gate.promise;
-			return "done";
-		}, { ownerId: id });
+		manager.register(
+			"task",
+			"recording",
+			async () => {
+				await gate.promise;
+				return "done";
+			},
+			{ ownerId: id },
+		);
 
 		expect(await lifecycle.reconcileStaleOrphan(id)).toEqual({ reconciled: false, reason: "live_async_job" });
 		expect(stub.disposeCalls()).toBe(0);
@@ -171,7 +198,10 @@ describe("AgentLifecycleManager", () => {
 			status: "running",
 		});
 
-		expect(await lifecycle.reconcileStaleOrphan(id)).toEqual({ reconciled: false, reason: "missing_terminal_evidence" });
+		expect(await lifecycle.reconcileStaleOrphan(id)).toEqual({
+			reconciled: false,
+			reason: "missing_terminal_evidence",
+		});
 		expect(stub.disposeCalls()).toBe(0);
 	});
 
@@ -179,7 +209,14 @@ describe("AgentLifecycleManager", () => {
 		const id = "WindowRecorderPod";
 		const sessionFile = "/tmp/WindowRecorderPod.jsonl";
 		const stub = makeTerminalSessionStub(id, sessionFile);
-		registry.register({ id, displayName: "recorder", kind: "sub", session: stub.session, sessionFile, status: "running" });
+		registry.register({
+			id,
+			displayName: "recorder",
+			kind: "sub",
+			session: stub.session,
+			sessionFile,
+			status: "running",
+		});
 		const flushStarted = Promise.withResolvers<void>();
 		const flushGate = deferred();
 		vi.spyOn(stub.session.sessionManager, "flush").mockImplementation(async () => {
@@ -200,7 +237,14 @@ describe("AgentLifecycleManager", () => {
 		const id = "WindowRecorderPod";
 		const sessionFile = "/tmp/WindowRecorderPod.jsonl";
 		const stub = makeTerminalSessionStub(id, sessionFile);
-		registry.register({ id, displayName: "recorder", kind: "sub", session: stub.session, sessionFile, status: "running" });
+		registry.register({
+			id,
+			displayName: "recorder",
+			kind: "sub",
+			session: stub.session,
+			sessionFile,
+			status: "running",
+		});
 		const flushStarted = Promise.withResolvers<void>();
 		const flushGate = deferred();
 		vi.spyOn(stub.session.sessionManager, "flush").mockImplementation(async () => {
@@ -213,10 +257,15 @@ describe("AgentLifecycleManager", () => {
 		const reconciling = lifecycle.reconcileStaleOrphan(id);
 		await flushStarted.promise;
 		const jobGate = deferred();
-		manager.register("task", "recording", async () => {
-			await jobGate.promise;
-			return "done";
-		}, { ownerId: id });
+		manager.register(
+			"task",
+			"recording",
+			async () => {
+				await jobGate.promise;
+				return "done";
+			},
+			{ ownerId: id },
+		);
 		flushGate.resolve();
 
 		expect(await reconciling).toEqual({ reconciled: false, reason: "live_async_job" });
@@ -302,6 +351,44 @@ describe("AgentLifecycleManager", () => {
 		expect(ref?.status).toBe("idle");
 		expect(ref?.session).toBe(revived.session);
 		expect(ref?.sessionFile).toBe("/tmp/3-Sub.jsonl");
+	});
+
+	it("keeps a failed admission-wait parked and releases admission when revival fails", async () => {
+		const revived = makeSessionStub();
+		const admission = new Semaphore(1);
+		let failAdmission = true;
+		let reviverRuns = 0;
+		registry.register({
+			id: "3a-Sub",
+			displayName: "task",
+			kind: "sub",
+			session: null,
+			sessionFile: "/tmp/3a-Sub.jsonl",
+			status: "parked",
+		});
+		lifecycle.adopt("3a-Sub", {
+			idleTtlMs: 0,
+			acquireReviveSlot: async () => {
+				if (failAdmission) throw new Error("admission aborted");
+				await admission.acquire();
+				return () => admission.release();
+			},
+			revive: async () => {
+				reviverRuns++;
+				throw new Error("reviver failed");
+			},
+		});
+
+		await expect(lifecycle.ensureLive("3a-Sub")).rejects.toThrow("admission aborted");
+		expect(registry.get("3a-Sub")).toMatchObject({ status: "parked", session: null });
+		expect(reviverRuns).toBe(0);
+
+		failAdmission = false;
+		await expect(lifecycle.ensureLive("3a-Sub")).rejects.toThrow("reviver failed");
+		expect(registry.get("3a-Sub")).toMatchObject({ status: "parked", session: null });
+		await admission.acquire();
+		admission.release();
+		expect(revived.disposeCalls()).toBe(0);
 	});
 
 	it("concurrent ensureLive calls during a slow revive coalesce into one reviver run", async () => {
@@ -498,7 +585,6 @@ describe("AgentLifecycleManager", () => {
 		expect(registry.get("7-Sub")?.status).toBe("parked");
 		expect(registry.get("7-Sub")?.session).toBeNull();
 	});
-
 
 	it("idleTtlMs <= 0 adopts without a timer: the agent never parks", async () => {
 		vi.useFakeTimers();
