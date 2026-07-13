@@ -8,11 +8,13 @@
 - Added opt-in ambient main-session labels (`irc.ambientRename.enabled`, 5-minute `irc.ambientRename.intervalMs` default), preserving explicit peer names while using the `smol` role for stale automatic labels.
 - Added an opt-in, jittered 90-minute feed watcher for model-availability and usage-limit announcements, with durable cursors, conditional RSS requests, Nitter/RSS Bridge fallback, `smol` batch classification, availability-ledger updates, and session/IRC notices.
 - Added default-on OpenAI Codex weekly-quota saved-reset redemption with per-window idempotency, a one-reset-per-24-hours safety cap, structured audit logs, and session notices for every outcome.
+- Added the local append-only Fable refusal corpus and `omp refusals` commands for redacted evidence, verdicts, aggregate stats, and no-tools replay of false positives.
 
 - Per-spawn `model` override for `task` tool items: each spawn item accepts an optional `model` selector that takes priority over agent-level `task.agentModelOverrides`. Invalid overrides are rejected at schedule time with a formatted error listing available models, and spawn receipts now include a resolved model chain (e.g., `explore → "Rust specialist" → openai/gpt-5.2:high`).
 
 ### Fixed
 
+- Registered `/reload-tui` in the shared slash-command registry and delegated runner-backed disposable-view reloads through the typed host capability, with an actionable legacy-view notice.
 - IRC sends now reserve parked-agent messages before revival and follow replacement identities across revive races, preventing dropped messages and `released or replaced while reviving` failures.
 - Ask-tool waits now publish `waiting_input` IRC presence while they are blocking for user input, then restore the prior state on answer or abort.
 - Fixed one-shot `omp irc` CLI commands hanging after opening the external IRC SQLite bus by closing CLI-owned bus handles after each command.

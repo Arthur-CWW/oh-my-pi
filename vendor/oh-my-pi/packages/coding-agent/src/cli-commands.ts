@@ -26,6 +26,7 @@ export const commands: CommandEntry[] = [
 	{ name: "gallery", load: () => import("./commands/gallery").then(m => m.default) },
 	{ name: "grievances", load: () => import("./commands/grievances").then(m => m.default) },
 	{ name: "install", load: () => import("./commands/install").then(m => m.default) },
+	{ name: "refusals", load: () => import("./commands/refusals").then(m => m.default) },
 	{ name: "irc", load: () => import("./commands/irc").then(m => m.default) },
 	{ name: "join", load: () => import("./commands/join").then(m => m.default) },
 	{ name: "models", load: () => import("./commands/models").then(m => m.default) },
