@@ -76,8 +76,10 @@ import {
 } from "../utils/keybinding-matchers";
 import { createAdvisorMessageCard } from "./advisor-message";
 import {
+	agentHistoryRank,
 	cycleVisibleAgentSibling,
 	expandAgentAncestors,
+	isHistoricalAgent,
 	projectAgentRoster,
 } from "./agent-hub-roster";
 import { AssistantMessageComponent } from "./assistant-message";
@@ -566,9 +568,8 @@ export class AgentHubOverlayComponent extends Container {
 	#cockpitPreview = true;
 	#previewRenderedHeight = 0;
 	#showTerminalAgents = false;
+	#showHistoricalAgents = true;
 	#hiddenTerminalCount = 0;
-	#showRunningOnly = false;
-	#focusRestoreSelectedKey: string | undefined;
 	#statusCounts: Record<AgentStatus, number> = { running: 0, idle: 0, parked: 0, aborted: 0 };
 	#sectionStarts: Array<{ index: number; label: string }> = [];
 	#notice: string | undefined;
@@ -582,7 +583,6 @@ export class AgentHubOverlayComponent extends Container {
 	#filterDirty = true;
 	#searchFieldsDirty = true;
 	#archivedRows: readonly ArchivedDirectChildDescriptor[] = [];
-	#showArchivedChildren = false;
 	#archivedLoadToken = 0;
 	#archiveSourceSessionFile: string | undefined;
 
@@ -717,6 +717,7 @@ export class AgentHubOverlayComponent extends Container {
 		this.#rebuildObserverSnapshot();
 		this.#initializeRegistryProjection();
 		this.#refreshRows();
+		this.#loadArchivedRows();
 		// Oldest active agent is first; external peers remain informational.
 		if (this.#visibleActiveRows.length > 0) {
 			this.#selectedRow = 0;
@@ -914,10 +915,7 @@ export class AgentHubOverlayComponent extends Container {
 	}
 
 	#onDataChange(): void {
-		if (
-			this.#showArchivedChildren &&
-			this.#archiveSourceSessionFile !== this.#registry.get(MAIN_AGENT_ID)?.sessionFile
-		) {
+		if (this.#archiveSourceSessionFile !== this.#registry.get(MAIN_AGENT_ID)?.sessionFile) {
 			this.#loadArchivedRows();
 		}
 		this.#refreshRows();
@@ -1017,7 +1015,7 @@ export class AgentHubOverlayComponent extends Container {
 				aborted: this.#refsByStatus.aborted.size,
 			};
 			const rows = [...this.#orderedStatus("running"), ...this.#orderedStatus("idle")];
-			if (this.#tableFilterQuery) rows.push(...this.#orderedStatus("parked"));
+			if (this.#showHistoricalAgents || this.#tableFilterQuery) rows.push(...this.#orderedStatus("parked"));
 			if (this.#showTerminalAgents) rows.push(...this.#orderedStatus("aborted"));
 			this.#rows = rows;
 			this.#statusCounts = counts;
@@ -1079,22 +1077,22 @@ export class AgentHubOverlayComponent extends Container {
 		const runningAll = this.#orderedStatus("running");
 		const idleAll = this.#orderedStatus("idle");
 		const running = matches(runningAll);
-		const idleRows = this.#showRunningOnly ? [] : matches(idleAll);
+		const idleRows = matches(idleAll);
 		const recentCompleted: AgentRef[] = [];
 		const idle: AgentRef[] = [];
 		for (const ref of idleRows) {
 			if (this.#turnStatus?.(ref.id)?.state === "completed") {
-				if (recentCompleted.length < RECENT_COMPLETED_LIMIT) recentCompleted.push(ref);
+				if (this.#showHistoricalAgents && recentCompleted.length < RECENT_COMPLETED_LIMIT)
+					recentCompleted.push(ref);
 			} else idle.push(ref);
 		}
-		const parked = this.#showRunningOnly || !q ? [] : matches(this.#orderedStatus("parked"));
-		const terminal =
-			this.#showRunningOnly || !this.#showTerminalAgents ? [] : matches(this.#orderedStatus("aborted"));
+		const parked = this.#showHistoricalAgents ? matches(this.#orderedStatus("parked")) : [];
+		const terminal = !this.#showTerminalAgents ? [] : matches(this.#orderedStatus("aborted"));
 		const sections = [
 			["Running", running],
 			["Idle / needs attention", idle],
 			["Recent completed", recentCompleted],
-			["Parked matches", parked],
+			["Parked history", parked],
 			["Terminal", terminal],
 		] as const;
 		const eligible = sections.flatMap(([, refs]) => refs);
@@ -1109,11 +1107,16 @@ export class AgentHubOverlayComponent extends Container {
 				parentId = parent.parentId;
 			}
 		}
-		const statusRank: Record<AgentStatus, number> = { running: 0, idle: 1, parked: 2, aborted: 3 };
 		const projectRefs = [...includedIds]
 			.map(id => this.#registryRefs.get(id))
 			.filter((ref): ref is AgentRef => ref !== undefined)
-			.sort((a, b) => statusRank[a.status] - statusRank[b.status] || a.spawnIndex - b.spawnIndex || a.id.localeCompare(b.id));
+			.sort(
+				(a, b) =>
+					agentHistoryRank(a, this.#turnStatus?.(a.id)?.state === "completed") -
+						agentHistoryRank(b, this.#turnStatus?.(b.id)?.state === "completed") ||
+					a.spawnIndex - b.spawnIndex ||
+					a.id.localeCompare(b.id),
+			);
 		const selectedId = this.#selectedAgentKey?.startsWith("agent:")
 			? this.#selectedAgentKey.slice("agent:".length)
 			: undefined;
@@ -1141,10 +1144,10 @@ export class AgentHubOverlayComponent extends Container {
 				}
 			}
 		}
-		const filteredArchived = this.#showArchivedChildren
-			? this.#archivedRows.filter(row => !q || this.#matchesArchivedFilter(row, q)).slice(0, RECENT_COMPLETED_LIMIT)
-			: [];
-		this.#visibleArchivedRows = this.#showRunningOnly ? [] : filteredArchived;
+		const filteredArchived = this.#archivedRows
+			.filter(row => !q || this.#matchesArchivedFilter(row, q))
+			.slice(0, RECENT_COMPLETED_LIMIT);
+		this.#visibleArchivedRows = this.#showHistoricalAgents ? filteredArchived : [];
 		if (this.#visibleArchivedRows.length > 0) {
 			this.#sectionStarts.push({
 				index: this.#visibleActiveRows.length,
@@ -1154,35 +1157,16 @@ export class AgentHubOverlayComponent extends Container {
 		const filteredExternal = q
 			? this.#externalRows.filter(row => this.#matchesExternalFilter(row, q))
 			: this.#externalRows;
-		this.#visibleExternalRows = this.#showRunningOnly ? [] : filteredExternal;
+		this.#visibleExternalRows = filteredExternal;
 		this.#filterDirty = false;
 		this.#resolveSelection();
 	}
 
-	#toggleRunningOnly(): void {
-		if (this.#showRunningOnly) {
-			const restoreKey = this.#focusRestoreSelectedKey;
-			this.#focusRestoreSelectedKey = undefined;
-			this.#showRunningOnly = false;
-			this.#filterDirty = true;
-			this.#applyFilter();
-			if (restoreKey) {
-				const index = this.#findTableIndex(restoreKey);
-				if (index >= 0) {
-					this.#selectedRow = index;
-					this.#selectedAgentKey = restoreKey;
-				}
-			}
-			return;
-		}
-		this.#focusRestoreSelectedKey = this.#selectedTableKey();
-		this.#showRunningOnly = true;
-		this.#filterDirty = true;
-		this.#applyFilter();
-		if (this.#totalTableRows() === 0) return;
-		if (this.#focusRestoreSelectedKey && this.#findTableIndex(this.#focusRestoreSelectedKey) >= 0) return;
-		this.#selectedRow = 0;
-		this.#selectedAgentKey = this.#selectedTableKey();
+	#toggleHistoricalAgents(): void {
+		this.#showHistoricalAgents = !this.#showHistoricalAgents;
+		this.#orderedRegistryGeneration = -1;
+		this.#refreshRows();
+		this.#syncSelectedPreview();
 	}
 
 	#matchesTableFilter(ref: AgentRef, q: string): boolean {
@@ -1475,8 +1459,6 @@ export class AgentHubOverlayComponent extends Container {
 			this.#archivedLoadToken++;
 			this.#archiveSourceSessionFile = undefined;
 			this.#archivedRows = [];
-			this.#applyFilter();
-			this.#requestRender();
 			return;
 		}
 		this.#archivedRows = [];
@@ -1487,7 +1469,6 @@ export class AgentHubOverlayComponent extends Container {
 			.then(rows => {
 				if (
 					token !== this.#archivedLoadToken ||
-					!this.#showArchivedChildren ||
 					this.#registry.get(MAIN_AGENT_ID)?.sessionFile !== parentSessionFile
 				)
 					return;
@@ -1597,17 +1578,19 @@ export class AgentHubOverlayComponent extends Container {
 	// Table view
 	// ========================================================================
 
-	#focusHiddenCount(): number {
-		if (!this.#showRunningOnly) return 0;
+	#historicalHiddenCount(): number {
+		if (this.#showHistoricalAgents) return 0;
 		const q = this.#tableFilterQuery.toLowerCase();
-		let hidden = 0;
-		for (const ref of this.#registryRefs.values()) {
-			if (ref.status !== "running" && (!q || this.#matchesTableFilter(ref, q))) hidden++;
+		let hidden = q ? 0 : this.#statusCounts.parked;
+		const refs = q ? this.#registryRefs.values() : this.#refsByStatus.idle.values();
+		for (const ref of refs) {
+			if (
+				isHistoricalAgent(ref, this.#turnStatus?.(ref.id)?.state === "completed") &&
+				(!q || this.#matchesTableFilter(ref, q))
+			)
+				hidden++;
 		}
-		if (this.#showArchivedChildren) {
-			hidden += this.#archivedRows.filter(row => !q || this.#matchesArchivedFilter(row, q)).length;
-		}
-		hidden += this.#externalRows.filter(row => !q || this.#matchesExternalFilter(row, q)).length;
+		hidden += this.#archivedRows.filter(row => !q || this.#matchesArchivedFilter(row, q)).length;
 		return hidden;
 	}
 
@@ -1624,10 +1607,11 @@ export class AgentHubOverlayComponent extends Container {
 			: "";
 		const terminalIndicator =
 			this.#hiddenTerminalCount > 0 ? theme.fg("dim", ` · ${this.#hiddenTerminalCount} terminal hidden`) : "";
-		const archiveIndicator = this.#showArchivedChildren ? theme.fg("dim", " · archived") : "";
-		const focusIndicator = this.#showRunningOnly ? theme.fg("dim", ` · ${this.#focusHiddenCount()} hidden`) : "";
+		const historyIndicator = this.#showHistoricalAgents
+			? ""
+			: theme.fg("dim", ` · ${this.#historicalHiddenCount()} hidden`);
 		lines.push(
-			` ${theme.fg("accent", "Agent Hub")}${theme.fg("dim", " · tree")}${counts ? theme.fg("dim", `${theme.sep.dot}${counts}`) : ""}${terminalIndicator}${archiveIndicator}${focusIndicator}${filterIndicator}`,
+			` ${theme.fg("accent", "Agent Hub")}${theme.fg("dim", " · tree")}${counts ? theme.fg("dim", `${theme.sep.dot}${counts}`) : ""}${terminalIndicator}${historyIndicator}${filterIndicator}`,
 		);
 		lines.push(...new DynamicBorder().render(width));
 		const previewHeight = Math.max(
@@ -1645,8 +1629,8 @@ export class AgentHubOverlayComponent extends Container {
 			lines.push(...new DynamicBorder().render(width));
 		}
 		const totalRows = this.#totalTableRows();
-		if (totalRows === 0 && this.#showRunningOnly)
-			lines.push(` ${theme.fg("dim", "No running subagents · . to show all")}`);
+		if (totalRows === 0 && !this.#showHistoricalAgents)
+			lines.push(` ${theme.fg("dim", "No active subagents · . to show history")}`);
 		else if (totalRows === 0 && this.#statusCounts.parked > 0 && !this.#tableFilterQuery) {
 			lines.push(` ${theme.fg("dim", `Parked (${this.#statusCounts.parked}) · / to search and expand`)}`);
 		} else if (totalRows === 0 && !this.#tableFilterQuery)
@@ -1686,16 +1670,14 @@ export class AgentHubOverlayComponent extends Container {
 			}
 			if (end < totalRows) lines.push(` ${theme.fg("dim", `… ${totalRows - end} more`)}`);
 		}
-		if (!this.#showRunningOnly && !this.#tableFilterQuery && this.#statusCounts.parked > 0) {
-			lines.push(` ${theme.fg("dim", `Parked (${this.#statusCounts.parked}) collapsed · / to search and expand`)}`);
-		}
+
 		if (this.#notice) lines.push(` ${theme.fg("error", sanitizeLine(this.#notice, Math.max(10, width - 2)))}`);
 		if (this.#tableFilterEditing)
 			lines.push(` ${theme.fg("accent", "/")}${this.#tableFilterQuery}${theme.fg("accent", "▏")}`);
 		lines.push("");
-		const focusHint = this.#showRunningOnly ? ". show all" : ". running only";
+		const historyHint = this.#showHistoricalAgents ? ". hide history" : ". show history";
 		lines.push(
-			` ${theme.fg("dim", `SCROLL j/k,ctrl-u/d,g/G:preview  n/p:agent  i:input  Enter:attach  /:filter  h/l or ←/→:fold  [ ]:sibling  H/L:root  ?:legend  ${focusHint}  Esc/q:close`)}`,
+			` ${theme.fg("dim", `SCROLL j/k,ctrl-u/d,g/G:preview  n/p:agent  i:input  Enter:attach  /:filter  h/l or ←/→:fold  [ ]:sibling  H/L:root  ?:legend  ${historyHint}  Esc/q:close`)}`,
 		);
 		lines.push(...new DynamicBorder().render(width));
 		return lines;
@@ -1730,8 +1712,12 @@ export class AgentHubOverlayComponent extends Container {
 		const lines: string[] = [];
 		lines.push(` ${theme.fg("accent", "Legend & Details (press ? to hide)")}`);
 		lines.push(`   ${theme.fg("success", "S")} = Subscription model  ${theme.fg("warning", "A")} = Auth/Paid model`);
-		lines.push(`   ${theme.fg("dim", "/")} search · ${theme.fg("dim", "i/Esc")} input/navigation mode`);
-		lines.push(`   ${theme.fg("dim", "h/l or ←/→")} collapse/expand · ${theme.fg("dim", "[ / ]")} cycle siblings · ${theme.fg("dim", "v")} rich/plain preview`);
+		lines.push(
+			`   ${theme.fg("dim", "/")} search · ${theme.fg("dim", ".")} show/hide history · ${theme.fg("dim", "i/Esc")} input/navigation mode`,
+		);
+		lines.push(
+			`   ${theme.fg("dim", "h/l or ←/→")} collapse/expand · ${theme.fg("dim", "[ / ]")} cycle siblings · ${theme.fg("dim", "v")} rich/plain preview`,
+		);
 
 		const selectedRow = this.#selectedRowData();
 		if (selectedRow) {
@@ -1761,7 +1747,7 @@ export class AgentHubOverlayComponent extends Container {
 			const count = this.#statusCounts[status];
 			if (count > 0) parts.push(`${count} ${status}`);
 		}
-		if (this.#showArchivedChildren) parts.push(`${this.#archivedRows.length} archived`);
+		if (this.#archivedRows.length > 0) parts.push(`${this.#archivedRows.length} archived`);
 		if (this.#externalRows.length > 0) parts.push(`${this.#externalRows.length} external`);
 		return parts.join(theme.sep.dot);
 	}
@@ -1932,7 +1918,7 @@ export class AgentHubOverlayComponent extends Container {
 
 		if (this.#handleViewerNavigation(keyData)) return;
 		if (keyData === ".") {
-			this.#toggleRunningOnly();
+			this.#toggleHistoricalAgents();
 			this.#requestRender();
 			return;
 		}
@@ -2009,18 +1995,6 @@ export class AgentHubOverlayComponent extends Container {
 		}
 		if (keyData === "q") {
 			this.#onDone();
-			return;
-		}
-		if (keyData === "c") {
-			this.#showArchivedChildren = !this.#showArchivedChildren;
-			if (this.#showArchivedChildren) this.#loadArchivedRows();
-			else {
-				this.#archivedLoadToken++;
-				this.#archiveSourceSessionFile = undefined;
-				this.#archivedRows = [];
-			}
-			this.#applyFilter();
-			this.#requestRender();
 			return;
 		}
 		if (keyData === "r") {

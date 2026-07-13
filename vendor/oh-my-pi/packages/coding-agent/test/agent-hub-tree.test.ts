@@ -3,7 +3,7 @@ import { IrcBus } from "@oh-my-pi/pi-coding-agent/irc/bus";
 import { AgentHubOverlayComponent } from "@oh-my-pi/pi-coding-agent/modes/components/agent-hub";
 import { SessionObserverRegistry } from "@oh-my-pi/pi-coding-agent/modes/session-observer-registry";
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
-import { AgentRegistry, MAIN_AGENT_ID } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
+import { AgentRegistry, type AgentStatus, MAIN_AGENT_ID } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 
 function liveSession(): AgentSession {
@@ -11,8 +11,8 @@ function liveSession(): AgentSession {
 	return session as AgentSession;
 }
 
-function add(registry: AgentRegistry, id: string, parentId = MAIN_AGENT_ID): void {
-	registry.register({ id, displayName: id, kind: "sub", parentId, session: liveSession(), status: "running" });
+function add(registry: AgentRegistry, id: string, parentId = MAIN_AGENT_ID, status: AgentStatus = "running"): void {
+	registry.register({ id, displayName: id, kind: "sub", parentId, session: liveSession(), status });
 }
 
 function makeHub(registry: AgentRegistry): AgentHubOverlayComponent {
@@ -32,9 +32,16 @@ function text(hub: AgentHubOverlayComponent): string {
 }
 
 function selectedId(hub: AgentHubOverlayComponent): string | undefined {
-	const line = hub.render(120).map(Bun.stripANSI).find(rendered => rendered.startsWith(" ❯ "));
+	const line = hub
+		.render(120)
+		.map(Bun.stripANSI)
+		.find(rendered => rendered.startsWith(" ❯ "));
 	if (!line) return undefined;
-	return line.slice(23).trim().replace(/^(?:(?:│ |  )*(?:├|└) • )/, "").split(/\s+/)[0];
+	return line
+		.slice(23)
+		.trim()
+		.replace(/^(?:(?:│ |  )*(?:├|└) • )/, "")
+		.split(/\s+/)[0];
 }
 
 function rosterLines(hub: AgentHubOverlayComponent): string[] {
@@ -97,6 +104,23 @@ describe("Agent Hub nested roster tree", () => {
 		const rendered = text(hub);
 		expect(rendered).toContain("(+2 · 2 run)");
 		expect(rendered).not.toContain("Alpha.One Alpha.One");
+		hub.dispose();
+	});
+
+	it("removes hidden historical children from collapsed parent rollups", () => {
+		useGeometry();
+		const registry = new AgentRegistry();
+		add(registry, "Alpha");
+		add(registry, "Alpha.Live", "Alpha");
+		add(registry, "Alpha.Parked", "Alpha", "parked");
+		const hub = makeHub(registry);
+
+		hub.handleInput("h");
+		expect(text(hub)).toContain("(+2 · 1 run)");
+		hub.handleInput(".");
+		const activeOnly = text(hub);
+		expect(activeOnly).toContain("(+1 · 1 run)");
+		expect(activeOnly).not.toContain("Alpha.Parked");
 		hub.dispose();
 	});
 

@@ -1,5 +1,18 @@
 import type { AgentRef } from "../../registry/agent-registry";
 
+/** A finished registry row that the Hub's history toggle may omit. */
+export function isHistoricalAgent(ref: AgentRef, completed: boolean): boolean {
+	return ref.status === "parked" || completed;
+}
+
+/** Group active work before completed and parked history while preserving spawn order within each group. */
+export function agentHistoryRank(ref: AgentRef, completed: boolean): number {
+	if (ref.status === "running") return 0;
+	if (ref.status === "idle") return completed ? 2 : 1;
+	if (ref.status === "parked") return 3;
+	return 4;
+}
+
 export interface AgentRosterRollup {
 	descendants: number;
 	running: number;
@@ -53,7 +66,8 @@ function buildTopology(refs: readonly AgentRef[]): AgentRosterTopology {
 	const parentById = new Map<string, string | undefined>();
 	const childrenByParent = new Map<string | undefined, AgentRef[]>();
 	for (const ref of orderedRefs) {
-		const parentId = ref.parentId !== undefined && byId.has(ref.parentId) && !cycleIds.has(ref.id) ? ref.parentId : undefined;
+		const parentId =
+			ref.parentId !== undefined && byId.has(ref.parentId) && !cycleIds.has(ref.id) ? ref.parentId : undefined;
 		parentById.set(ref.id, parentId);
 		const children = childrenByParent.get(parentId);
 		if (children) children.push(ref);
@@ -62,7 +76,10 @@ function buildTopology(refs: readonly AgentRef[]): AgentRosterTopology {
 	return { refs: orderedRefs, parentById, childrenByParent };
 }
 
-function includedIds(topology: AgentRosterTopology, matchedIds: ReadonlySet<string> | undefined): Set<string> | undefined {
+function includedIds(
+	topology: AgentRosterTopology,
+	matchedIds: ReadonlySet<string> | undefined,
+): Set<string> | undefined {
 	if (matchedIds === undefined) return undefined;
 	const included = new Set<string>();
 	for (const id of matchedIds) {

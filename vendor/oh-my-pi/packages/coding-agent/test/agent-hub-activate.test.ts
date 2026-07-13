@@ -392,7 +392,6 @@ describe("Agent hub Enter activation", () => {
 			externalIrc: null,
 		});
 
-		hub.handleInput("c");
 		await waitForRenderedText(hub, "Archived");
 		hub.handleInput("\r");
 		const opened = renderedText(hub);
@@ -464,7 +463,6 @@ describe("Agent hub Enter activation", () => {
 			externalIrc: null,
 		});
 
-		hub.handleInput("c");
 		await waitForRenderedText(hub, "Newest");
 		hub.handleInput("\r");
 		expect(renderedText(hub)).toContain("Agent Hub > Newest");

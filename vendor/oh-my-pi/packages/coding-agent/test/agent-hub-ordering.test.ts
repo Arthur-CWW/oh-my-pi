@@ -91,7 +91,13 @@ async function writeDirectChildJournal(options: {
 	thinkingLevel?: string;
 }): Promise<void> {
 	const entries = [
-		{ type: "session", version: CURRENT_SESSION_VERSION, id: options.agentId, timestamp: options.updatedAt, cwd: "/tmp" },
+		{
+			type: "session",
+			version: CURRENT_SESSION_VERSION,
+			id: options.agentId,
+			timestamp: options.updatedAt,
+			cwd: "/tmp",
+		},
 		{
 			type: "session_init",
 			id: "init",
@@ -338,7 +344,7 @@ describe("Agent hub row ordering", () => {
 		hub.dispose();
 	});
 
-	it("hides archived children by default and shows terminal and legacy journals newest first after c", async () => {
+	it("shows archived terminal and legacy journals newest first by default", async () => {
 		geometry = stubStdoutGeometry(120);
 		using tempDir = TempDir.createSync("@omp-agent-hub-archive-order-");
 		const parentFile = `${tempDir.path()}/Main.jsonl`;
@@ -367,7 +373,14 @@ describe("Agent hub row ordering", () => {
 		});
 
 		const agents = new AgentRegistry();
-		agents.register({ id: "Main", displayName: "main", kind: "main", session: null, sessionFile: parentFile, status: "parked" });
+		agents.register({
+			id: "Main",
+			displayName: "main",
+			kind: "main",
+			session: null,
+			sessionFile: parentFile,
+			status: "parked",
+		});
 		const hub = new AgentHubOverlayComponent({
 			observers: new SessionObserverRegistry(),
 			hubKeys: [],
@@ -379,9 +392,7 @@ describe("Agent hub row ordering", () => {
 			externalIrc: null,
 		});
 
-		expect(renderedText(hub)).not.toContain("Newest");
 		expect(agents.list().map(ref => ref.id)).toEqual(["Main"]);
-		hub.handleInput("c");
 		await waitForRenderedText(hub, "Newest");
 
 		expect(renderedAgentIds(hub)).toEqual(["Newest", "Failure", "Legacy"]);
@@ -444,13 +455,17 @@ describe("Agent hub row ordering", () => {
 
 		// Test adjacent variant distinction (claude-sonnet-4-5 vs claude-opus-4-5)
 		sessionsList[0].progress.resolvedModel = "anthropic/claude-sonnet-4-5";
-		const sonnetLine = Bun.stripANSI(hub.render(120).find(candidate => Bun.stripANSI(candidate).includes("Worker")) || "");
+		const sonnetLine = Bun.stripANSI(
+			hub.render(120).find(candidate => Bun.stripANSI(candidate).includes("Worker")) || "",
+		);
 		const sonnetModelCol = sonnetLine.slice(3, 3 + 14);
 		expect(sonnetModelCol.startsWith("A AN")).toBe(true);
 		expect(sonnetModelCol.includes("4.5So")).toBe(true);
 
 		sessionsList[0].progress.resolvedModel = "anthropic/claude-opus-4-5";
-		const opusLine = Bun.stripANSI(hub.render(120).find(candidate => Bun.stripANSI(candidate).includes("Worker")) || "");
+		const opusLine = Bun.stripANSI(
+			hub.render(120).find(candidate => Bun.stripANSI(candidate).includes("Worker")) || "",
+		);
 		const opusModelCol = opusLine.slice(3, 3 + 14);
 		expect(opusModelCol.startsWith("A AN")).toBe(true);
 		expect(opusModelCol.includes("4.5Op")).toBe(true);

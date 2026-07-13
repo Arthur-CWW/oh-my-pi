@@ -5,7 +5,10 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
 import * as fs from "node:fs/promises";
 import { IrcBus } from "@oh-my-pi/pi-coding-agent/irc/bus";
-import { AgentHubOverlayComponent } from "@oh-my-pi/pi-coding-agent/modes/components/agent-hub";
+import {
+	AgentHubOverlayComponent,
+	type AgentHubTurnStatus,
+} from "@oh-my-pi/pi-coding-agent/modes/components/agent-hub";
 import { SessionObserverRegistry } from "@oh-my-pi/pi-coding-agent/modes/session-observer-registry";
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import { AgentRegistry, type AgentStatus } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
@@ -42,7 +45,11 @@ function stubStdoutGeometry(cols: number): GeometryStub {
 
 function makeHub(
 	agents: AgentRegistry,
-	options: { focusAgent?: (id: string) => Promise<void>; initialAgentId?: string } = {},
+	options: {
+		focusAgent?: (id: string) => Promise<void>;
+		initialAgentId?: string;
+		turnStatus?: (agentId: string) => AgentHubTurnStatus | undefined;
+	} = {},
 ) {
 	let doneCalls = 0;
 	const hub = new AgentHubOverlayComponent({
@@ -55,8 +62,9 @@ function makeHub(
 		registry: agents,
 		irc: new IrcBus(agents),
 		focusAgent: options.focusAgent ?? (async () => {}),
-		initialAgentId: options.initialAgentId,
 		externalIrc: null,
+		turnStatus: options.turnStatus,
+		initialAgentId: options.initialAgentId,
 	});
 	return { hub, doneCalls: () => doneCalls };
 }
@@ -257,46 +265,58 @@ describe("Agent Hub selection and filter", () => {
 		hub.dispose();
 	});
 
-	it("toggles running-only focus with hidden counts and stable selection restore", () => {
+	it("toggles historical rows with hidden counts and migrates selection to the nearest visible row", () => {
 		geometry = stubStdoutGeometry(120);
 		const agents = new AgentRegistry();
 		registerAgent(agents, "Alpha", "running");
 		registerAgent(agents, "Beta", "idle");
 		registerAgent(agents, "Gamma", "parked");
-		const { hub } = makeHub(agents);
+		registerAgent(agents, "Delta", "idle");
+		const { hub } = makeHub(agents, {
+			turnStatus: id => (id === "Beta" ? { inputId: "done", state: "completed", canCancel: false } : undefined),
+		});
 
+		expect(renderedAgentIds(hub)).toEqual(["Alpha", "Delta", "Beta", "Gamma"]);
+		expect(renderedText(hub)).toContain(". hide history");
+		hub.handleInput("n");
 		hub.handleInput("n");
 		expect(selectedAgentId(hub)).toBe("Beta");
-		hub.handleInput(".");
-		expect(renderedAgentIds(hub)).toEqual(["Alpha"]);
-		expect(selectedAgentId(hub)).toBe("Alpha");
-		expect(renderedText(hub)).toContain("2 hidden");
-		expect(renderedText(hub)).toContain(". show all");
 
 		hub.handleInput(".");
-		expect(renderedAgentIds(hub)).toEqual(["Alpha", "Beta"]);
-		expect(selectedAgentId(hub)).toBe("Beta");
-		expect(renderedText(hub)).toContain(". running only");
+		expect(renderedAgentIds(hub)).toEqual(["Alpha", "Delta"]);
+		expect(selectedAgentId(hub)).toBe("Delta");
+		expect(renderedText(hub)).toContain("2 hidden");
+		expect(renderedText(hub)).toContain(". show history");
+
+		hub.handleInput(".");
+		expect(renderedAgentIds(hub)).toEqual(["Alpha", "Delta", "Beta", "Gamma"]);
+		expect(selectedAgentId(hub)).toBe("Delta");
+		expect(renderedText(hub)).toContain(". hide history");
+		hub.handleInput("?");
+		expect(renderedText(hub)).toContain(". show/hide history");
+		hub.handleInput("?");
 
 		hub.handleInput("/");
 		hub.handleInput(".");
 		expect(renderedText(hub)).toContain("/.");
-		expect(renderedText(hub)).toContain(". running only");
+		expect(renderedText(hub)).toContain(". hide history");
 		hub.handleInput("\x1b");
 		hub.handleInput("\x1b");
 		hub.dispose();
 	});
 
-	it("renders the explicit empty running-only state", () => {
+	it("renders the explicit empty active-history state", () => {
 		geometry = stubStdoutGeometry(120);
 		const agents = new AgentRegistry();
-		registerAgent(agents, "Idle", "idle");
+		registerAgent(agents, "Completed", "idle");
 		registerAgent(agents, "Parked", "parked");
-		const { hub } = makeHub(agents);
+		const { hub } = makeHub(agents, {
+			turnStatus: id => (id === "Completed" ? { inputId: "done", state: "completed", canCancel: false } : undefined),
+		});
 
 		hub.handleInput(".");
 		const text = renderedText(hub);
-		expect(text).toContain("No running subagents · . to show all");
+		expect(text).toContain("No active subagents · . to show history");
 		expect(text).toContain("2 hidden");
 		hub.dispose();
 	});
@@ -563,8 +583,13 @@ describe("Agent Hub selection and filter", () => {
 		});
 		const { hub } = makeHub(agents);
 
-		hub.handleInput("c");
 		await waitForRenderedText(hub, "FinishedBuild");
+		expect(renderedAgentIds(hub)).toEqual(["FinishedBuild", "FailedAuth", "LegacyWorker"]);
+
+		hub.handleInput(".");
+		expect(renderedAgentIds(hub)).toEqual([]);
+		expect(renderedText(hub)).toContain("3 hidden");
+		hub.handleInput(".");
 		expect(renderedAgentIds(hub)).toEqual(["FinishedBuild", "FailedAuth", "LegacyWorker"]);
 
 		hub.handleInput("/");
@@ -619,7 +644,7 @@ describe("Agent Hub selection and filter", () => {
 		expect(selectedAgentId(hub)).toBe("Beta");
 
 		hub.handleInput("\x1b");
-		hub.handleInput("n");
+		hub.handleInput("p");
 		hub.handleInput("\r");
 		expect(focusedId()).toBe("Gamma");
 
