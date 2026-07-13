@@ -426,6 +426,7 @@ export class Editor implements Component, Focusable {
 	// Paste tracking for large pastes
 	#pastes: Map<number, string> = new Map();
 	#pasteCounter: number = 0;
+	#pasteMarkerRe = /\[Paste #([1-9]\d*)(?:, (?:\+\d+ lines|\d+ chars))?\]/g;
 
 	/** Optional pattern matching atomic placeholder tokens (e.g. `[Image #1, 800x600]` or
 	 *  `[Paste #2, +30 lines]`) that the editor treats as indivisible: a backspace or forward-delete
@@ -1066,6 +1067,11 @@ export class Editor implements Component, Focusable {
 		// Undo
 		if (kb.matches(data, "tui.editor.undo")) {
 			this.#applyUndo();
+			return;
+		}
+
+		// Enter on a collapsed paste expands it in place instead of submitting.
+		if (kb.matches(data, "tui.editor.expandPaste") && this.expandPasteAtCursor()) {
 			return;
 		}
 
@@ -1710,6 +1716,37 @@ export class Editor implements Component, Focusable {
 		this.#withUndoSuspended(() => {
 			this.#storePasteMarker(content, content.split("\n").length);
 		});
+	}
+
+	/**
+	 * Expand the collapsed paste marker under (or immediately before) the cursor.
+	 *
+	 * The raw content is inserted directly rather than replayed through paste handling,
+	 * so a large expansion stays editable instead of immediately collapsing again.
+	 */
+	expandPasteAtCursor(): boolean {
+		const line = this.#state.lines[this.#state.cursorLine] ?? "";
+		this.#pasteMarkerRe.lastIndex = 0;
+		for (;;) {
+			const match = this.#pasteMarkerRe.exec(line);
+			if (match === null) return false;
+			const markerStart = match.index;
+			const markerEnd = markerStart + match[0].length;
+			if (this.#state.cursorCol < markerStart) return false;
+			if (this.#state.cursorCol > markerEnd) continue;
+
+			const pasteId = Number(match[1]);
+			const pasteContent = this.#pastes.get(pasteId);
+			if (pasteContent === undefined) return false;
+
+			this.#historyIndex = -1;
+			this.#resetKillSequence();
+			this.#recordUndoState();
+			this.#state.lines[this.#state.cursorLine] = line.slice(0, markerStart) + line.slice(markerEnd);
+			this.#setCursorCol(markerStart);
+			this.#withUndoSuspended(() => this.#insertTextAtCursor(pasteContent));
+			return true;
+		}
 	}
 
 	// All the editor methods from before...

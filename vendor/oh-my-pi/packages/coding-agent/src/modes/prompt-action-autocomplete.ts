@@ -34,6 +34,7 @@ interface PromptActionAutocompleteOptions {
 	copyCurrentLine: () => void;
 	copyPrompt: () => void;
 	undo: (prefix: string) => void;
+	expandPaste: () => void;
 	moveCursorToMessageEnd: () => void;
 	moveCursorToMessageStart: () => void;
 	moveCursorToLineStart: () => void;
@@ -225,6 +226,13 @@ export function createPromptActionAutocompleteProvider(
 			description: formatKeyHints(editorKeybindings.getKeys("tui.editor.undo")),
 			keywords: ["undo", "revert", "edit", "history"],
 			execute: options.undo,
+		},
+		{
+			id: "expand-paste",
+			label: "Expand paste for editing",
+			description: formatKeyHints(editorKeybindings.getKeys("tui.editor.expandPaste")),
+			keywords: ["paste", "expand", "edit", "inline", "marker"],
+			execute: options.expandPaste,
 		},
 		{
 			id: "cursor-message-end",

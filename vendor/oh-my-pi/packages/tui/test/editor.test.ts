@@ -2057,6 +2057,42 @@ describe("Editor component", () => {
 			expect(editor.getExpandedText()).toBe(pastedText);
 		});
 
+		it("expands a paste pill in place for editing and submits the edited raw text", () => {
+			const editor = new Editor(defaultEditorTheme);
+			const pastedText = Array.from({ length: 12 }, (_, i) => `line ${i + 1}`).join("\n");
+			let submitted = "";
+			editor.onSubmit = text => {
+				submitted = text;
+			};
+
+			editor.pasteText(pastedText);
+			editor.moveToLineStart();
+			for (let i = 0; i < 5; i++) editor.handleInput("\x1b[C");
+			editor.handleInput("\r");
+
+			expect(editor.getText()).toBe(pastedText);
+			editor.handleInput("!");
+			expect(editor.getText()).toBe(`${pastedText}!`);
+			expect(editor.getText()).not.toContain("[Paste #");
+
+			editor.handleInput("\r");
+			expect(submitted).toBe(`${pastedText}!`);
+		});
+
+		it("restores the paste pill when expansion is undone", () => {
+			const editor = new Editor(defaultEditorTheme);
+			const pastedText = Array.from({ length: 12 }, (_, i) => `line ${i + 1}`).join("\n");
+
+			editor.pasteText(pastedText);
+			const marker = editor.getText();
+			editor.handleInput("\r");
+			expect(editor.getText()).toBe(pastedText);
+
+			editor.handleInput("\x1b[45;5u");
+			expect(editor.getText()).toBe(marker);
+			expect(editor.getExpandedText()).toBe(pastedText);
+		});
+
 		it("submits large pasted content literally", () => {
 			const editor = new Editor(defaultEditorTheme);
 			const pastedText = [
@@ -2078,7 +2114,8 @@ describe("Editor component", () => {
 			};
 
 			editor.handleInput(`\x1b[200~${pastedText}\x1b[201~`);
-			editor.handleInput("\r");
+			editor.handleInput("\r"); // expand the paste pill
+			editor.handleInput("\r"); // submit the expanded text
 
 			expect(submitted).toBe(pastedText);
 		});
@@ -2194,7 +2231,8 @@ describe("Editor component", () => {
 			expect(editor.getText()).toMatch(/^\[Paste #\d+, \+\d+ lines\]$/);
 			expect(editor.getExpandedText()).toBe(wrapped);
 
-			editor.handleInput("\r");
+			editor.handleInput("\r"); // expand the paste pill
+			editor.handleInput("\r"); // submit the expanded text
 			expect(submitted).toBe(wrapped);
 		});
 	});

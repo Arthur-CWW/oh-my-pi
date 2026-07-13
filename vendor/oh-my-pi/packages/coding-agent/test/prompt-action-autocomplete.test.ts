@@ -10,6 +10,7 @@ describe("prompt action autocomplete", () => {
 				"tui.editor.cursorLineStart": { defaultKeys: ["home", "f6"], description: "Move cursor to line start" },
 				"tui.editor.cursorLineEnd": { defaultKeys: "f7", description: "Move cursor to line end" },
 				"tui.editor.undo": { defaultKeys: "f8", description: "Undo" },
+				"tui.editor.expandPaste": { defaultKeys: "enter", description: "Expand paste marker for editing" },
 			}),
 		);
 	});
@@ -29,6 +30,7 @@ describe("prompt action autocomplete", () => {
 			copyCurrentLine: () => {},
 			copyPrompt: () => {},
 			undo: () => {},
+			expandPaste: () => {},
 			moveCursorToMessageEnd: () => {},
 			moveCursorToMessageStart: () => {},
 			moveCursorToLineStart: () => {},
@@ -42,6 +44,7 @@ describe("prompt action autocomplete", () => {
 			"Copy current line",
 			"Copy whole prompt",
 			"Undo",
+			"Expand paste for editing",
 			"Move cursor to end of message",
 			"Move cursor to beginning of message",
 			"Move cursor to beginning of line",
@@ -56,6 +59,7 @@ describe("prompt action autocomplete", () => {
 		);
 		expect(suggestions?.items.find(item => item.label === "Move cursor to end of line")?.description).toBe("F7");
 		expect(suggestions?.items.find(item => item.label === "Undo")?.description).toBe("F8");
+		expect(suggestions?.items.find(item => item.label === "Expand paste for editing")?.description).toBe("Enter");
 	});
 
 	it("passes the typed trigger to undo and leaves text removal to the editor", async () => {
@@ -71,6 +75,7 @@ describe("prompt action autocomplete", () => {
 				undoCalls += 1;
 				undoPrefix = prefix;
 			},
+			expandPaste: () => {},
 			moveCursorToMessageEnd: () => {},
 			moveCursorToMessageStart: () => {},
 			moveCursorToLineStart: () => {},
@@ -101,6 +106,7 @@ describe("prompt action autocomplete", () => {
 			copyCurrentLine: () => {},
 			copyPrompt: () => {},
 			undo: () => {},
+			expandPaste: () => {},
 			moveCursorToMessageEnd: () => {},
 			moveCursorToMessageStart: () => {},
 			moveCursorToLineStart: () => {},
@@ -119,6 +125,7 @@ describe("prompt action autocomplete", () => {
 			copyCurrentLine: () => {},
 			copyPrompt: () => {},
 			undo: () => {},
+			expandPaste: () => {},
 			moveCursorToMessageEnd: () => {},
 			moveCursorToMessageStart: () => {},
 			moveCursorToLineStart: () => {},
@@ -138,6 +145,7 @@ describe("prompt action autocomplete", () => {
 			copyCurrentLine: () => {},
 			copyPrompt: () => {},
 			undo: () => {},
+			expandPaste: () => {},
 			moveCursorToMessageEnd: () => {},
 			moveCursorToMessageStart: () => {},
 			moveCursorToLineStart: () => {},

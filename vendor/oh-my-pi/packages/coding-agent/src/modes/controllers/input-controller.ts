@@ -1454,6 +1454,7 @@ export class InputController {
 			copyCurrentLine: () => this.handleCopyCurrentLine(),
 			copyPrompt: () => this.handleCopyPrompt(),
 			undo: prefix => this.ctx.editor.undoPastTransientText(prefix),
+			expandPaste: () => this.ctx.editor.expandPasteAtCursor(),
 			moveCursorToMessageEnd: () => this.ctx.editor.moveToMessageEnd(),
 			moveCursorToMessageStart: () => this.ctx.editor.moveToMessageStart(),
 			moveCursorToLineStart: () => this.ctx.editor.moveToLineStart(),
