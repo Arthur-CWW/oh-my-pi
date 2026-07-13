@@ -193,6 +193,12 @@ import { ExtensionToolWrapper } from "../extensibility/extensions/wrapper";
 import type { HookCommandContext } from "../extensibility/hooks/types";
 import type { Skill, SkillWarning } from "../extensibility/skills";
 import { expandSlashCommand, type FileSlashCommand } from "../extensibility/slash-commands";
+import {
+	FeedWatcher,
+	type FeedWatcherCompletion,
+	type FeedWatcherOptions,
+	parseFeedWatcherSources,
+} from "../feed-watcher";
 import { GoalRuntime } from "../goals/runtime";
 import type { Goal, GoalModeState } from "../goals/state";
 import type { HindsightSessionState } from "../hindsight/state";
@@ -518,6 +524,14 @@ export interface AgentSessionConfig {
 	ambientAgentRenamer?: Omit<AmbientAgentRenamerOptions, "bus" | "complete"> & {
 		bus?: AmbientAgentRenamerOptions["bus"];
 		complete?: AmbientRenameCompletion;
+	};
+	/** Test seams for the opt-in announcement feed watcher. Production callers leave this unset. */
+	feedWatcher?: Omit<FeedWatcherOptions, "fetch" | "complete" | "notice" | "irc" | "sources"> & {
+		fetch?: FeedWatcherOptions["fetch"];
+		complete?: FeedWatcherCompletion;
+		sources?: FeedWatcherOptions["sources"];
+		notice?: FeedWatcherOptions["notice"];
+		irc?: FeedWatcherOptions["irc"];
 	};
 	/** Tool registry for LSP and settings */
 	toolRegistry?: Map<string, AgentTool>;
@@ -1364,6 +1378,7 @@ export class AgentSession {
 	#ircExternalPeerName: string | undefined;
 	#ircExternalPeerState: Exclude<IrcExternalPeerState, "unknown"> | undefined;
 	#ambientAgentRenamer: AmbientAgentRenamer | undefined;
+	#feedWatcher: FeedWatcher | undefined;
 	// Agent identity (registry id) used for IRC routing and job ownership.
 	#agentId: string | undefined;
 	#agentKind: "main" | "sub" = "main";
@@ -1844,15 +1859,50 @@ export class AgentSession {
 				complete:
 					options?.complete ??
 					(async promptText => {
-						const result = await runEvalCompletion(
-							{ prompt: promptText, model: "smol" },
-							{ session: this },
-						);
+						const result = await runEvalCompletion({ prompt: promptText, model: "smol" }, { session: this });
 						return result.text;
 					}),
 				intervalMs: options?.intervalMs ?? this.settings.get("irc.ambientRename.intervalMs"),
 			});
 			this.#ambientAgentRenamer.start();
+		}
+		if (this.#agentKind === "main" && this.settings.get("feedWatcher.enabled")) {
+			const options = config.feedWatcher;
+			this.#feedWatcher = new FeedWatcher({
+				...options,
+				sources: options?.sources ?? parseFeedWatcherSources(this.settings.get("feedWatcher.sourcesJson") ?? ""),
+				fetch:
+					options?.fetch ??
+					(async request => {
+						const response = await fetch(request.url, { headers: request.headers });
+						return {
+							status: response.status,
+							body: await response.text(),
+							headers: {
+								etag: response.headers.get("etag") ?? undefined,
+								"last-modified": response.headers.get("last-modified") ?? undefined,
+							},
+						};
+					}),
+				complete:
+					options?.complete ??
+					(async promptText => {
+						const result = await runEvalCompletion({ prompt: promptText, model: "smol" }, { session: this });
+						return result.text;
+					}),
+				notice: options?.notice ?? (message => this.emitNotice("info", message, "feed-watcher")),
+				irc:
+					options?.irc ??
+					(message => {
+						void IrcBus.global().send({
+							from: this.#agentId ?? "FeedWatcher",
+							to: "Main",
+							body: message,
+						});
+					}),
+				intervalMs: options?.intervalMs ?? this.settings.get("feedWatcher.intervalMs"),
+			});
+			this.#feedWatcher.start();
 		}
 		this.#providerSessionId = config.providerSessionId;
 		this.agent.setAssistantMessageEventInterceptor((message, assistantMessageEvent) => {
@@ -2754,7 +2804,8 @@ export class AgentSession {
 					await this.sessionManager.appendDurableCustomMessageEntry(
 						{
 							customType: event.message.customType,
-							content: typeof event.message.content === "string" ? event.message.content : [...event.message.content],
+							content:
+								typeof event.message.content === "string" ? event.message.content : [...event.message.content],
 							display: event.message.display,
 							details: event.message.details as JsonValue | undefined,
 							attribution: event.message.attribution ?? "agent",
@@ -4189,6 +4240,8 @@ export class AgentSession {
 		this.#ownershipLossUnsubscribe = undefined;
 		this.#ambientAgentRenamer?.stop();
 		this.#ambientAgentRenamer = undefined;
+		this.#feedWatcher?.stop();
+		this.#feedWatcher = undefined;
 		if (this.#durableRateLimitRetryTimer) {
 			clearTimeout(this.#durableRateLimitRetryTimer);
 			this.#durableRateLimitRetryTimer = undefined;
@@ -6829,7 +6882,12 @@ export class AgentSession {
 							entry.next.phase === "active" &&
 							entry.next.goalId === goalId,
 					);
-				if (!activeGoalEntry || currentMode.kind !== "goal" || currentMode.phase !== "active" || currentMode.goalId !== goalId) {
+				if (
+					!activeGoalEntry ||
+					currentMode.kind !== "goal" ||
+					currentMode.phase !== "active" ||
+					currentMode.goalId !== goalId
+				) {
 					throw new Error(`Goal workflow ${goalId} is not the active workflow`);
 				}
 				previous = activeGoalEntry.previous;
@@ -7102,10 +7160,7 @@ export class AgentSession {
 		try {
 			const queued = await queue.list({ states: ["queued"] });
 			const appendOnly = queued[0];
-			if (
-				appendOnly?.payload.kind === "custom" &&
-				appendOnly.payload.disposition === "append"
-			) {
+			if (appendOnly?.payload.kind === "custom" && appendOnly.payload.disposition === "append") {
 				const appendPayload = appendOnly.payload;
 				const alreadyPersisted = this.sessionManager.hasDurableCustomMessage(appendOnly.inputId);
 				const alreadyInContext = this.#hasDurableCustomDeliveryInContext(appendOnly.inputId, appendPayload.message);
@@ -12766,8 +12821,7 @@ export class AgentSession {
 			}
 		}
 
-		const previousGoalState =
-			this.buildDisplaySessionContext().goalState ?? this.getGoalModeState();
+		const previousGoalState = this.buildDisplaySessionContext().goalState ?? this.getGoalModeState();
 		const previousGoalRuntimeSnapshot = this.#goalRuntime.snapshot;
 		this.#disconnectFromAgent();
 		await this.abort();
@@ -13541,7 +13595,11 @@ export class AgentSession {
 					result: "transport-error",
 					error: String(error),
 				});
-				this.emitNotice("error", "Codex auto-redeem failed before confirmation; no retry will be attempted.", "codex-auto-reset");
+				this.emitNotice(
+					"error",
+					"Codex auto-redeem failed before confirmation; no retry will be attempted.",
+					"codex-auto-reset",
+				);
 				return false;
 			}
 			logger.info("codex-auto-reset audit", {

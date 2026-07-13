@@ -3410,6 +3410,39 @@ export const SETTINGS_SCHEMA = {
 		},
 	},
 
+	"feedWatcher.enabled": {
+		type: "boolean",
+		default: false,
+		ui: {
+			tab: "tools",
+			group: "Execution",
+			label: "Feed Watcher",
+			description: "Monitor configured announcement feeds for model availability and usage-limit changes.",
+		},
+	},
+
+	"feedWatcher.intervalMs": {
+		type: "number",
+		default: 5_400_000,
+		ui: {
+			tab: "tools",
+			group: "Execution",
+			label: "Feed Watch Interval",
+			description: "Milliseconds between low-frequency announcement feed checks (with jitter).",
+		},
+	},
+
+	"feedWatcher.sourcesJson": {
+		type: "string",
+		default:
+			'[{"id":"thsottiaux","kind":"nitter","handle":"thsottiaux","question":"codex/ChatGPT Pro usage limits, resets, bonus credits, or Fable/model availability announcements?"},{"id":"openai-news","kind":"rss","url":"https://openai.com/news/rss.xml","question":"OpenAI model availability announcements, especially Fable, launch windows, extensions, or end dates?"}]',
+		ui: {
+			tab: "tools",
+			group: "Execution",
+			label: "Feed Watch Sources",
+			description: "JSON list of RSS or Nitter sources with an id, source location, and relevance question.",
+		},
+	},
 	"bash.autoBackground.thresholdMs": {
 		type: "number",
 		default: 60_000,
