@@ -1,4 +1,155 @@
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
+import { getSessionsDir } from "@oh-my-pi/pi-utils";
 import type { AgentRef } from "../../registry/agent-registry";
+
+export interface DurableJournalModel {
+	modelId?: string;
+	thinkingLevel?: string | null;
+}
+
+export function durableModelSelector(model: DurableJournalModel | undefined): string | undefined {
+	return model?.modelId ? `${model.modelId}${model.thinkingLevel ? `:${model.thinkingLevel}` : ""}` : undefined;
+}
+
+export interface JournalMetadataIo {
+	mtimeMs(sessionFile: string): Promise<number>;
+	readText(sessionFile: string): Promise<string>;
+}
+
+const journalMetadataIo: JournalMetadataIo = {
+	mtimeMs: async sessionFile => (await fs.stat(sessionFile)).mtimeMs,
+	readText: sessionFile => fs.readFile(sessionFile, "utf8"),
+};
+
+function durableJournalModel(text: string): DurableJournalModel | undefined {
+	let modelId: string | undefined;
+	let thinkingLevel: string | null | undefined;
+	for (const line of text.split("\n")) {
+		if (!line.trim()) continue;
+		let entry: Record<string, unknown>;
+		try {
+			entry = JSON.parse(line) as Record<string, unknown>;
+		} catch {
+			continue;
+		}
+		if (entry.type === "session_init" && typeof entry.subagent === "object" && entry.subagent !== null) {
+			const metadata = entry.subagent as Record<string, unknown>;
+			if (typeof metadata.model === "string" && metadata.model) modelId = metadata.model;
+			if (metadata.thinkingLevel === null || typeof metadata.thinkingLevel === "string")
+				thinkingLevel = metadata.thinkingLevel;
+		} else if (entry.type === "model_change" && typeof entry.model === "string" && entry.model) {
+			modelId = entry.model;
+		} else if (
+			entry.type === "thinking_level_change" &&
+			(entry.thinkingLevel === null || typeof entry.thinkingLevel === "string")
+		) {
+			thinkingLevel = entry.thinkingLevel;
+		}
+	}
+	return modelId === undefined && thinkingLevel === undefined ? undefined : { modelId, thinkingLevel };
+}
+
+/** Durable model metadata, cached by journal path and mtime so renders remain filesystem-free. */
+export class DurableJournalModelCache {
+	readonly #cache = new Map<string, { mtimeMs: number; model: DurableJournalModel | undefined }>();
+	readonly #io: JournalMetadataIo;
+
+	constructor(io: JournalMetadataIo = journalMetadataIo) {
+		this.#io = io;
+	}
+
+	peek(sessionFile: string | null | undefined): DurableJournalModel | undefined {
+		return sessionFile ? this.#cache.get(sessionFile)?.model : undefined;
+	}
+
+	async load(sessionFile: string): Promise<DurableJournalModel | undefined> {
+		let mtimeMs: number;
+		try {
+			mtimeMs = await this.#io.mtimeMs(sessionFile);
+		} catch {
+			return undefined;
+		}
+		const cached = this.#cache.get(sessionFile);
+		if (cached?.mtimeMs === mtimeMs) return cached.model;
+		let model: DurableJournalModel | undefined;
+		try {
+			model = durableJournalModel(await this.#io.readText(sessionFile));
+		} catch {
+			return undefined;
+		}
+		this.#cache.set(sessionFile, { mtimeMs, model });
+		return model;
+	}
+}
+
+export interface AutomationJournalRow {
+	agentId: string;
+	childSessionFile: string;
+	state: "legacy";
+	updatedAt: string;
+}
+
+/** Discover journals written by task/automations.ts without scanning ordinary project session directories. */
+export async function listAutomationJournalRows(
+	sessionsDir?: string,
+	parentSessionFile?: string,
+): Promise<AutomationJournalRow[]> {
+	const root = sessionsDir ?? getSessionsDir();
+	const relativeParent = parentSessionFile ? path.relative(root, parentSessionFile) : undefined;
+	if (!sessionsDir && (!relativeParent || relativeParent.startsWith("..") || path.isAbsolute(relativeParent)))
+		return [];
+	let directories: Array<{ name: string; isDirectory(): boolean }>;
+	try {
+		directories = await fs.readdir(root, { withFileTypes: true });
+	} catch {
+		return [];
+	}
+	const rows: AutomationJournalRow[] = [];
+	for (const directory of directories) {
+		if (!directory.isDirectory() || !directory.name.startsWith("automation-")) continue;
+		const slug = directory.name.slice("automation-".length);
+		if (!slug) continue;
+		const sessionFile = path.join(root, directory.name, `${slug}.jsonl`);
+		try {
+			const [text, stat] = await Promise.all([
+				Bun.file(sessionFile)
+					.slice(0, 64 * 1024)
+					.text(),
+				fs.stat(sessionFile),
+			]);
+			let name: string | undefined;
+			let automation = false;
+			for (const line of text.split("\n")) {
+				if (!line.trim()) continue;
+				let entry: Record<string, unknown>;
+				try {
+					entry = JSON.parse(line) as Record<string, unknown>;
+				} catch {
+					continue;
+				}
+				if (entry.type === "session" && typeof entry.title === "string" && entry.title.startsWith("automation: "))
+					name = entry.title.slice("automation: ".length);
+				if (entry.type === "custom" && entry.customType === "automation") {
+					automation = true;
+					const data = entry.data as Record<string, unknown> | undefined;
+					if (typeof data?.name === "string") name = data.name;
+				}
+			}
+			if (automation) {
+				rows.push({
+					agentId: `automation: ${name ?? slug}`,
+					childSessionFile: sessionFile,
+					state: "legacy",
+					updatedAt: stat.mtime.toISOString(),
+				});
+			}
+		} catch {}
+	}
+	return rows.sort(
+		(left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.agentId.localeCompare(right.agentId),
+	);
+}
 
 /** A finished registry row that the Hub's history toggle may omit. */
 export function isHistoricalAgent(ref: AgentRef, completed: boolean): boolean {
@@ -94,7 +245,7 @@ function includedIds(
 }
 
 function subtreeRollups(
-	topology: AgentRosterTopology,
+	_topology: AgentRosterTopology,
 	visibleChildrenByParent: ReadonlyMap<string | undefined, readonly AgentRef[]>,
 ): Map<string, AgentRosterRollup> {
 	const rollups = new Map<string, AgentRosterRollup>();

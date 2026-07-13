@@ -23,10 +23,10 @@ import { Container, Editor, matchesKey, padding, ScrollView, Text, type TUI, vis
 import { formatAge, formatBytes, formatDuration, formatNumber, getProjectDir, logger } from "@oh-my-pi/pi-utils";
 import type { AdvisorMessageDetails } from "../../advisor";
 import { COLLAB_PROMPT_MESSAGE_TYPE } from "../../collab/protocol";
-import type { CollabPromptDetails } from "../collab-presentation-types";
 import type { KeyId } from "../../config/keybindings";
 import { settings } from "../../config/settings";
 import type { MessageRenderer } from "../../extensibility/extensions/types";
+import { type ArchivedDirectChildDescriptor, listArchivedDirectChildren } from "../../internal-urls/history-protocol";
 import { IrcBus } from "../../irc/bus";
 import {
 	IRC_EXTERNAL_STALE_MS,
@@ -36,6 +36,7 @@ import {
 	isIrcExternalPeerFresh,
 } from "../../irc/bus-external";
 import { watchSiblingTranscript } from "../../irc/sibling-session";
+import { decodeJournalEntries, JOURNAL_TAIL_BYTES, readJournalTailChunk } from "../../journal/projection";
 import { AgentLifecycleManager } from "../../registry/agent-lifecycle";
 import {
 	type AgentRef,
@@ -44,8 +45,6 @@ import {
 	MAIN_AGENT_ID,
 	type RegistryEvent,
 } from "../../registry/agent-registry";
-import { decodeJournalEntries, JOURNAL_TAIL_BYTES, readJournalTailChunk } from "../../journal/projection";
-import { listArchivedDirectChildren, type ArchivedDirectChildDescriptor } from "../../internal-urls/history-protocol";
 import type { AgentSession } from "../../session/agent-session";
 import {
 	BACKGROUND_TAN_DISPATCH_MESSAGE_TYPE,
@@ -61,6 +60,7 @@ import type { SessionMessageEntry } from "../../session/session-entries";
 import { createIrcMessageCard } from "../../tools/irc";
 import { replaceTabs, shortenPath, TRUNCATE_LENGTHS, truncateToWidth } from "../../tools/render-utils";
 import { canonicalizeMessage, normalizeThinkingDisplay } from "../../utils/thinking-display";
+import type { CollabPromptDetails } from "../collab-presentation-types";
 import type { ObservableSession, SessionObserverRegistry } from "../session-observer-registry";
 import { getEditorTheme, theme } from "../theme/theme";
 import {
@@ -78,8 +78,11 @@ import { createAdvisorMessageCard } from "./advisor-message";
 import {
 	agentHistoryRank,
 	cycleVisibleAgentSibling,
+	DurableJournalModelCache,
+	durableModelSelector,
 	expandAgentAncestors,
 	isHistoricalAgent,
+	listAutomationJournalRows,
 	projectAgentRoster,
 } from "./agent-hub-roster";
 import { AssistantMessageComponent } from "./assistant-message";
@@ -499,6 +502,7 @@ export interface AgentHubDeps {
 	externalSessionId?: string;
 	/** Legacy construction field; archive discovery always uses Main's current sessionFile. */
 	parentSessionFile?: string | null;
+	sessionsDir?: string;
 }
 
 export interface AgentHubRetentionMetrics {
@@ -584,7 +588,9 @@ export class AgentHubOverlayComponent extends Container {
 	#searchFieldsDirty = true;
 	#archivedRows: readonly ArchivedDirectChildDescriptor[] = [];
 	#archivedLoadToken = 0;
-	#archiveSourceSessionFile: string | undefined;
+	#archiveSourceSessionFile: string | null | undefined = null;
+	#sessionsDir: string | undefined;
+	#journalModels = new DurableJournalModelCache();
 
 	#foldedAgentIds = new Set<string>();
 	#treeDepthById = new Map<string, number>();
@@ -687,6 +693,7 @@ export class AgentHubOverlayComponent extends Container {
 		this.#hideThinkingBlock = deps.hideThinkingBlock;
 		this.#expandKeys = deps.expandKeys ?? ["ctrl+o"];
 		this.#focusAgent = deps.focusAgent;
+		this.#sessionsDir = deps.sessionsDir;
 
 		this.#editor = new Editor(getEditorTheme());
 		this.#editor.setMaxHeight(4);
@@ -716,8 +723,7 @@ export class AgentHubOverlayComponent extends Container {
 
 		this.#rebuildObserverSnapshot();
 		this.#initializeRegistryProjection();
-		this.#refreshRows();
-		this.#loadArchivedRows();
+		this.#onDataChange();
 		// Oldest active agent is first; external peers remain informational.
 		if (this.#visibleActiveRows.length > 0) {
 			this.#selectedRow = 0;
@@ -919,6 +925,11 @@ export class AgentHubOverlayComponent extends Container {
 			this.#loadArchivedRows();
 		}
 		this.#refreshRows();
+		const sessionFiles = [...this.#registryRefs.values()].flatMap(ref => (ref.sessionFile ? [ref.sessionFile] : []));
+		if (sessionFiles.length > 0)
+			void Promise.all(sessionFiles.map(sessionFile => this.#journalModels.load(sessionFile))).then(() =>
+				this.#requestRender(),
+			);
 		if (this.#view === "chat") {
 			if (!this.#chatArchived) {
 				this.#attachLiveSession();
@@ -1047,7 +1058,6 @@ export class AgentHubOverlayComponent extends Container {
 		return true;
 	}
 
-
 	#cycleSibling(direction: -1 | 1): boolean {
 		const selected = this.#selectedInternalRef();
 		if (!selected) return false;
@@ -1120,8 +1130,7 @@ export class AgentHubOverlayComponent extends Container {
 		const selectedId = this.#selectedAgentKey?.startsWith("agent:")
 			? this.#selectedAgentKey.slice("agent:".length)
 			: undefined;
-		if (!q && selectedId)
-			this.#foldedAgentIds = expandAgentAncestors(projectRefs, this.#foldedAgentIds, selectedId);
+		if (!q && selectedId) this.#foldedAgentIds = expandAgentAncestors(projectRefs, this.#foldedAgentIds, selectedId);
 		const projected = projectAgentRoster(projectRefs, this.#foldedAgentIds, includedIds, Boolean(q));
 		this.#visibleActiveRows = projected.map(row => row.ref);
 		const sectionById = new Map<string, (typeof sections)[number]>();
@@ -1454,29 +1463,35 @@ export class AgentHubOverlayComponent extends Container {
 	}
 
 	#loadArchivedRows(): void {
-		const parentSessionFile = this.#registry.get(MAIN_AGENT_ID)?.sessionFile;
-		if (!parentSessionFile) {
-			this.#archivedLoadToken++;
+		const parentSessionFile = this.#registry.get(MAIN_AGENT_ID)?.sessionFile ?? undefined;
+		if (!parentSessionFile && !this.#sessionsDir) {
 			this.#archiveSourceSessionFile = undefined;
 			this.#archivedRows = [];
+			this.#archivedLoadToken++;
 			return;
 		}
 		this.#archivedRows = [];
 		this.#applyFilter();
 		this.#archiveSourceSessionFile = parentSessionFile;
 		const token = ++this.#archivedLoadToken;
-		void listArchivedDirectChildren(parentSessionFile)
-			.then(rows => {
+		void Promise.all([
+			parentSessionFile ? listArchivedDirectChildren(parentSessionFile) : Promise.resolve([]),
+			listAutomationJournalRows(this.#sessionsDir, parentSessionFile),
+		])
+			.then(([children, automations]) => {
 				if (
 					token !== this.#archivedLoadToken ||
 					this.#registry.get(MAIN_AGENT_ID)?.sessionFile !== parentSessionFile
 				)
 					return;
-				this.#archivedRows = rows;
+				this.#archivedRows = [...children, ...automations].sort(
+					(left, right) =>
+						right.updatedAt.localeCompare(left.updatedAt) || left.agentId.localeCompare(right.agentId),
+				);
 				this.#applyFilter();
 				this.#requestRender();
 			})
-			.catch(error => logger.debug("Agent hub: completed child history unavailable", { error: String(error) }));
+			.catch(error => logger.debug("Agent hub: historical journals unavailable", { error: String(error) }));
 	}
 
 	#loadExternalRows(): ExternalPeerRow[] {
@@ -1771,7 +1786,11 @@ export class AgentHubOverlayComponent extends Container {
 				? `${this.#transcriptCache.model}${this.#transcriptCache.thinking ? `:${this.#transcriptCache.thinking}` : ""}`
 				: undefined;
 		const model =
-			observed?.progress?.resolvedModel ?? cachedRoute ?? ref.recovery?.hotswapModel ?? ref.recovery?.model;
+			observed?.progress?.resolvedModel ??
+			cachedRoute ??
+			ref.recovery?.hotswapModel ??
+			ref.recovery?.model ??
+			durableModelSelector(this.#journalModels.peek(ref.sessionFile));
 		const row = renderHubColumns({
 			width: Math.max(10, width - 1),
 			model,
@@ -1794,7 +1813,7 @@ export class AgentHubOverlayComponent extends Container {
 			width: Math.max(10, width - 1),
 			model,
 			state: formatArchivedState(row.state),
-			name: `${theme.bold(replaceTabs(row.agentId))} ${theme.fg("dim", "read-only")}`,
+			name: `${theme.bold(replaceTabs(row.agentId))} ${theme.fg("dim", row.agentId.startsWith("automation: ") ? "automation · read-only" : "read-only")}`,
 			age,
 		});
 		return truncateToWidth(` ${cursor} ${rendered}`, Math.max(10, width - 1));
@@ -2156,8 +2175,7 @@ export class AgentHubOverlayComponent extends Container {
 		const innerWidth = Math.max(20, width - 2);
 		const editorLines = this.#chatSearchEditing
 			? [` ${theme.fg("accent", "/")}${this.#chatSearchQuery}${theme.fg("accent", "▏")}`]
-			: this.#chatArchived ||
-				  (this.#chatExternal ? !this.#externalInputActive : this.#cockpitMode !== "input")
+			: this.#chatArchived || (this.#chatExternal ? !this.#externalInputActive : this.#cockpitMode !== "input")
 				? []
 				: this.#editor.render(innerWidth);
 		const noticeLine = this.#notice
@@ -2175,9 +2193,7 @@ export class AgentHubOverlayComponent extends Container {
 			: this.#chatLog.render(innerWidth).length > 0
 				? this.#chatLog.render(innerWidth)
 				: [theme.fg("dim", "No messages yet.")];
-		const contentLines = this.#plainPreview
-			? richContentLines.map(line => Bun.stripANSI(line))
-			: richContentLines;
+		const contentLines = this.#plainPreview ? richContentLines.map(line => Bun.stripANSI(line)) : richContentLines;
 
 		// Cache rendered lines for transcript search
 		this.#chatRenderedContent = contentLines;
@@ -2243,10 +2259,7 @@ export class AgentHubOverlayComponent extends Container {
 		const turnStatus = this.#chatAgentId ? this.#turnStatus?.(this.#chatAgentId) : undefined;
 		if (turnStatus) lines.push(` ${this.#formatTurnStatus(turnStatus)}`);
 		const reviveHint = ref?.status === "parked" ? "  R:revive" : "";
-		const inputHint =
-			this.#cockpitMode === "input"
-				? "Ctrl+Enter:queue  Esc:navigation"
-				: "i:input  Esc/h/⌫:back";
+		const inputHint = this.#cockpitMode === "input" ? "Ctrl+Enter:queue  Esc:navigation" : "i:input  Esc/h/⌫:back";
 		lines.push(
 			` ${theme.fg("dim", `${inputHint}  q:close  [/] prev/next  v:rich/plain  ctrl-s n/p:cycle${reviveHint}${searchHint}  ${this.#expandKeys[0] ?? "ctrl+o"}:expand  j/k:scroll  ctrl-u/d:page  g/G:top/end`)}`,
 		);
@@ -2311,7 +2324,9 @@ export class AgentHubOverlayComponent extends Container {
 		const parts: string[] = [];
 		if (stats.length > 0 || (progress?.toolCount ?? 0) > 0) {
 			const toolCountStat =
-				progress && progress.toolCount > 0 ? `${formatNumber(progress.toolCount)} ${theme.icon.extensionTool}` : undefined;
+				progress && progress.toolCount > 0
+					? `${formatNumber(progress.toolCount)} ${theme.icon.extensionTool}`
+					: undefined;
 			const statSegments = [toolCountStat, ...stats].filter((segment): segment is string => Boolean(segment));
 			parts.push(theme.fg("dim", statSegments.join(theme.sep.dot)));
 		}

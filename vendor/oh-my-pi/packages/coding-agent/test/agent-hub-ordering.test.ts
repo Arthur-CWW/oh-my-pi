@@ -4,6 +4,7 @@
  */
 import { afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
 import * as fs from "node:fs/promises";
+import * as path from "node:path";
 import { IrcBus } from "@oh-my-pi/pi-coding-agent/irc/bus";
 import {
 	type AgentHubExternalPeer,
@@ -12,10 +13,10 @@ import {
 } from "@oh-my-pi/pi-coding-agent/modes/components/agent-hub";
 import { SessionObserverRegistry } from "@oh-my-pi/pi-coding-agent/modes/session-observer-registry";
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
-import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
+import { AgentRegistry, MAIN_AGENT_ID } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
+import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { CURRENT_SESSION_VERSION } from "@oh-my-pi/pi-coding-agent/session/session-entries";
 import { CHILD_LIFECYCLE_CUSTOM_TYPE, type ChildLifecycleState } from "@oh-my-pi/pi-coding-agent/task/child-lifecycle";
-import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { TempDir } from "@oh-my-pi/pi-utils";
 
 interface GeometryStub {
@@ -51,7 +52,11 @@ function stubStdoutGeometry(cols: number): GeometryStub {
 
 function makeHub(
 	agents: AgentRegistry,
-	options: { externalIrc?: AgentHubExternalPeerDataSource | null; externalSessionId?: string } = {},
+	options: {
+		externalIrc?: AgentHubExternalPeerDataSource | null;
+		externalSessionId?: string;
+		sessionsDir?: string;
+	} = {},
 ) {
 	return new AgentHubOverlayComponent({
 		observers: new SessionObserverRegistry(),
@@ -63,6 +68,7 @@ function makeHub(
 		focusAgent: async () => {},
 		externalIrc: options.externalIrc ?? null,
 		externalSessionId: options.externalSessionId,
+		sessionsDir: options.sessionsDir,
 	});
 }
 
@@ -138,6 +144,40 @@ async function writeDirectChildJournal(options: {
 					},
 				]
 			: []),
+	];
+	await Bun.write(options.file, `${entries.map(entry => JSON.stringify(entry)).join("\n")}\n`);
+}
+
+async function writeDurableSubagentJournal(options: {
+	file: string;
+	agentId: string;
+	parentSessionFile: string;
+	model: string;
+	thinkingLevel: string;
+}): Promise<void> {
+	const timestamp = "2026-07-13T01:00:00.000Z";
+	const entries = [
+		{ type: "session", version: CURRENT_SESSION_VERSION, id: options.agentId, timestamp, cwd: "/tmp" },
+		{
+			type: "session_init",
+			id: "init",
+			parentId: null,
+			timestamp,
+			systemPrompt: "child",
+			task: "durable badge test",
+			tools: [],
+			subagent: {
+				agentId: options.agentId,
+				parentSessionFile: options.parentSessionFile,
+				parentSessionId: "parent",
+				displayName: options.agentId,
+				model: options.model,
+				thinkingLevel: options.thinkingLevel,
+				taskDepth: 1,
+				parentTaskPrefix: options.agentId,
+				isolated: false,
+			},
+		},
 	];
 	await Bun.write(options.file, `${entries.map(entry => JSON.stringify(entry)).join("\n")}\n`);
 }
@@ -341,6 +381,119 @@ describe("Agent hub row ordering", () => {
 
 		expect(rendered).not.toContain("external peers");
 		expect(rendered).toContain("no subagents yet");
+		hub.dispose();
+	});
+
+	it("lists automation journals as tagged history and opens their persisted transcript", async () => {
+		geometry = stubStdoutGeometry(120);
+		using tempDir = TempDir.createSync("@omp-agent-hub-automation-");
+		const directory = path.join(tempDir.path(), "automation-nightly-check");
+		const sessionFile = path.join(directory, "nightly-check.jsonl");
+		await fs.mkdir(directory);
+		const timestamp = "2026-07-13T02:00:00.000Z";
+		const entries = [
+			{
+				type: "session",
+				version: CURRENT_SESSION_VERSION,
+				id: "automation-nightly-check",
+				title: "automation: Nightly Check",
+				titleSource: "user",
+				timestamp,
+				cwd: "/tmp",
+			},
+			{
+				type: "custom",
+				id: "automation",
+				parentId: null,
+				timestamp,
+				customType: "automation",
+				data: { name: "Nightly Check", schedule: "daily 02:00", lane: "default" },
+			},
+			{
+				type: "message",
+				id: "result",
+				parentId: "automation",
+				timestamp,
+				message: { role: "user", content: "automation transcript body", timestamp: Date.parse(timestamp) },
+			},
+		];
+		await Bun.write(sessionFile, `${entries.map(entry => JSON.stringify(entry)).join("\n")}\n`);
+		const hub = makeHub(new AgentRegistry(), { sessionsDir: tempDir.path() });
+
+		await waitForRenderedText(hub, "automation: Nightly Check");
+		expect(renderedText(hub)).toContain("automation · read-only");
+		hub.handleInput(".");
+		expect(renderedText(hub)).not.toContain("automation: Nightly Check");
+		expect(renderedText(hub)).toContain("1 hidden");
+		hub.handleInput(".");
+		await waitForRenderedText(hub, "automation: Nightly Check");
+		hub.handleInput("\r");
+		expect(renderedText(hub)).toContain("automation transcript body");
+		hub.dispose();
+	});
+
+	it("shows a parked child's model badge from durable session_init metadata", async () => {
+		geometry = stubStdoutGeometry(120);
+		using tempDir = TempDir.createSync("@omp-agent-hub-parked-model-");
+		const sessionFile = path.join(tempDir.path(), "Worker.jsonl");
+		await writeDurableSubagentJournal({
+			file: sessionFile,
+			agentId: "Worker",
+			parentSessionFile: path.join(tempDir.path(), "Main.jsonl"),
+			model: "openai-codex/gpt-5.6-terra",
+			thinkingLevel: "high",
+		});
+		const agents = new AgentRegistry();
+		agents.register({
+			id: "Worker",
+			displayName: "Worker",
+			kind: "sub",
+			parentId: MAIN_AGENT_ID,
+			session: null,
+			sessionFile,
+			status: "parked",
+		});
+		const hub = makeHub(agents);
+
+		await waitForRenderedText(hub, "5.6Tr");
+		const row = renderedText(hub)
+			.split("\n")
+			.find(line => line.includes("Worker"));
+		expect(row?.slice(3, 17)).toContain("S OX");
+		expect(row?.slice(3, 17)).toContain("h");
+		hub.dispose();
+	});
+
+	it("shows a grandchild model badge from its own durable journal", async () => {
+		geometry = stubStdoutGeometry(120);
+		using tempDir = TempDir.createSync("@omp-agent-hub-grandchild-model-");
+		const sessionFile = path.join(tempDir.path(), "Parent.Child.jsonl");
+		await writeDurableSubagentJournal({
+			file: sessionFile,
+			agentId: "Parent.Child",
+			parentSessionFile: path.join(tempDir.path(), "Parent.jsonl"),
+			model: "anthropic/claude-opus-4-5",
+			thinkingLevel: "medium",
+		});
+		const agents = new AgentRegistry();
+		agents.register({ id: "Parent", displayName: "Parent", kind: "sub", session: null, status: "running" });
+		agents.register({
+			id: "Parent.Child",
+			displayName: "Child",
+			kind: "sub",
+			parentId: "Parent",
+			session: null,
+			sessionFile,
+			status: "parked",
+		});
+		const hub = makeHub(agents);
+
+		await waitForRenderedText(hub, "4.5Op");
+		const row = renderedText(hub)
+			.split("\n")
+			.find(line => line.includes("Parent.Child"));
+		expect(row?.slice(3, 17)).toContain("A AN");
+		expect(row?.slice(3, 17)).toContain("m");
 		hub.dispose();
 	});
 

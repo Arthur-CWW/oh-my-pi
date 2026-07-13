@@ -2,17 +2,13 @@ import { describe, expect, it } from "bun:test";
 import {
 	agentAncestorPath,
 	cycleVisibleAgentSibling,
+	DurableJournalModelCache,
 	expandAgentAncestors,
 	projectAgentRoster,
 } from "@oh-my-pi/pi-coding-agent/modes/components/agent-hub-roster";
-import { AgentRegistry, MAIN_AGENT_ID, type AgentStatus } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
+import { AgentRegistry, type AgentStatus, MAIN_AGENT_ID } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 
-function add(
-	registry: AgentRegistry,
-	id: string,
-	parentId?: string,
-	status: AgentStatus = "running",
-): void {
+function add(registry: AgentRegistry, id: string, parentId?: string, status: AgentStatus = "running"): void {
 	registry.register({ id, displayName: id, kind: "sub", parentId, session: null, status });
 }
 
@@ -29,13 +25,7 @@ function nestedRefs() {
 describe("Agent Hub roster projection", () => {
 	it("preserves root and sibling order while flattening two nested levels", () => {
 		const rows = projectAgentRoster(nestedRefs(), new Set());
-		expect(rows.map(row => row.ref.id)).toEqual([
-			"Alpha",
-			"Alpha.One",
-			"Alpha.One.Leaf",
-			"Alpha.Two",
-			"Beta",
-		]);
+		expect(rows.map(row => row.ref.id)).toEqual(["Alpha", "Alpha.One", "Alpha.One.Leaf", "Alpha.Two", "Beta"]);
 		expect(rows.map(row => row.guide)).toEqual(["", "├ • ", "│ └ • ", "└ • ", ""]);
 	});
 
@@ -86,5 +76,39 @@ describe("Agent Hub roster projection", () => {
 			["Alpha", 0],
 			["Beta", 0],
 		]);
+	});
+
+	it("caches durable journal model metadata by session file and mtime", async () => {
+		let mtimeMs = 1;
+		let reads = 0;
+		let model = "openai-codex/gpt-5.6-terra";
+		const cache = new DurableJournalModelCache({
+			mtimeMs: async () => mtimeMs,
+			readText: async () => {
+				reads++;
+				return `${JSON.stringify({
+					type: "session_init",
+					subagent: { model, thinkingLevel: "high" },
+				})}\n`;
+			},
+		});
+
+		expect(await cache.load("/sessions/Worker.jsonl")).toEqual({
+			modelId: "openai-codex/gpt-5.6-terra",
+			thinkingLevel: "high",
+		});
+		expect(await cache.load("/sessions/Worker.jsonl")).toEqual({
+			modelId: "openai-codex/gpt-5.6-terra",
+			thinkingLevel: "high",
+		});
+		expect(reads).toBe(1);
+
+		mtimeMs = 2;
+		model = "anthropic/claude-opus-4-5";
+		expect(await cache.load("/sessions/Worker.jsonl")).toEqual({
+			modelId: "anthropic/claude-opus-4-5",
+			thinkingLevel: "high",
+		});
+		expect(reads).toBe(2);
 	});
 });
