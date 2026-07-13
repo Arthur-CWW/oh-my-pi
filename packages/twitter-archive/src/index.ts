@@ -169,3 +169,5 @@ export * from "./backfill-worker"
 export * from "./queued-backfill-worker"
 export * from "./dev-ui-server"
 export * from "./dev-ui-markdown"
+
+export * from "./public-source"

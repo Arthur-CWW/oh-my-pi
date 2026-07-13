@@ -1,0 +1,14 @@
+{
+  "data": [
+    {
+      "id": "tweet-102",
+      "author": "Thomas Sottiaux",
+      "handle": "thsottiaux",
+      "timestamp": "2026-07-13T08:00:00.000Z",
+      "text": "Cursor resumes without replaying older pages.",
+      "links": ["https://x.com/thsottiaux/status/102"],
+      "sourceUrl": "https://api.example/thsottiaux"
+    }
+  ],
+  "cursor": "next-103"
+}

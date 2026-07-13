@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>@thsottiaux</title>
+    <item>
+      <guid>tweet-101</guid>
+      <author>Thomas Sottiaux (@thsottiaux)</author>
+      <pubDate>Sun, 12 Jul 2026 10:00:00 GMT</pubDate>
+      <link>https://x.com/thsottiaux/status/101</link>
+      <description><![CDATA[Agents need durable evidence. https://example.com/evidence]]></description>
+    </item>
+    <item>
+      <guid>tweet-100</guid>
+      <author>Thomas Sottiaux (@thsottiaux)</author>
+      <pubDate>Sat, 11 Jul 2026 09:00:00 GMT</pubDate>
+      <link>https://x.com/thsottiaux/status/100</link>
+      <description><![CDATA[Public source archives should be local-first.]]></description>
+    </item>
+  </channel>
+</rss>

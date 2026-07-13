@@ -14,7 +14,15 @@
     "smoke:nitter:communalai": "bun src/nitter-smoke.ts",
     "worker:nitter": "bun src/backfill-worker.ts",
     "worker:nitter:queued": "bun src/queued-backfill-worker.ts --daemon",
-    "worker:nitter:queued:once": "bun src/queued-backfill-worker.ts --once"
+    "worker:nitter:queued:once": "bun src/queued-backfill-worker.ts --once",
+    "corpus:sync": "bun src/corpus/cli.ts sync",
+    "corpus:backfill": "bun src/corpus/cli.ts backfill",
+    "corpus:search": "bun src/corpus/cli.ts search",
+    "corpus:status": "bun src/corpus/cli.ts status",
+    "public-source:sync": "bun src/public-source-cli.ts sync",
+    "public-source:import": "bun src/public-source-cli.ts import",
+    "public-source:search": "bun src/public-source-cli.ts search",
+    "public-source:report": "bun src/public-source-cli.ts report"
   },
   "dependencies": {
     "@radix-ui/react-popover": "^1.1.15",
