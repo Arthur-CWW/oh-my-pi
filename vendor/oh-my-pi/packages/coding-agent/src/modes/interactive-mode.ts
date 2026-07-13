@@ -3234,6 +3234,9 @@ export class InteractiveMode implements InteractiveModeContext {
 			logger.warn("Failed to refresh slash command state for custom editor", { error: String(error) });
 		});
 
+		// A replacement editor starts with pi-tui's bordered defaults. Restore the
+		// active layout authority before any status/accent refresh can decorate it.
+		this.#syncEditorBorderMode();
 		this.updateEditorBorderColor();
 		this.updateEditorTopBorder();
 		this.ui.requestRender();
