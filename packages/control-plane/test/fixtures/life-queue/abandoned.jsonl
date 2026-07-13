@@ -1,0 +1,4 @@
+{"type":"session","version":3,"id":"abandoned-session","timestamp":"2026-07-01T00:00:00.000Z","cwd":"/tmp/project"}
+{"type":"message","id":"user-1","timestamp":"2026-07-01T00:01:00.000Z","message":{"role":"user","content":[{"type":"text","text":"Investigate the broken deployment and preserve enough context for another agent to resume this very long request safely"}]}}
+{"type":"message","id":"assistant-1","timestamp":"2026-07-01T00:02:00.000Z","stopReason":"toolUse","message":{"role":"assistant","content":[{"type":"toolCall","name":"read"}]}}
+{"type":"message","id":"tool-1","timestamp":"2026-07-01T00:03:00.000Z","message":{"role":"toolResult","content":[{"type":"text","text":"partial evidence"}]}}

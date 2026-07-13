@@ -230,3 +230,6 @@ export {
   type OperationalRouteDto,
   type OperationalSessionDto,
 } from "./operational-query"
+export { openQueueStore, QueueStore, type QueueFilters, type QueueInsertResult, type QueueItemInput, type QueueStoreShape } from "./life-queue"
+export { lifeQueueItems, QueueItemSchema, QueuePrioritySchema, QueueSourceSchema, QueueStatusSchema, type QueueItem, type QueuePriority, type QueueSource, type QueueStatus } from "./life-queue-schema"
+export { scanAbandonedSessions, type SessionScanOptions, type SessionScanResult } from "./life-queue-scanner"

@@ -20,6 +20,7 @@ import { seedRoutingStore, type RoutingSeedResult } from "./routing-seed"
 import type { EventRow, LaneStateRow, ModelCallRow, RoutingObservationRow } from "./schema"
 import { queryOperationalCanaries, queryOperationalDiagnostics, queryOperationalReleases, queryOperationalRoutes, queryOperationalSessions, type OperationalCanaryDto, type OperationalDiagnosticDto, type OperationalQueryOptions, type OperationalReleaseDto, type OperationalRouteDto, type OperationalSessionDto } from "./operational-query"
 import { queryUsageByAgent, queryUsageByLaneHour, queryUsageBySession, type UsageByAgentRow, type UsageByLaneHourRow, type UsageBySessionRow } from "./stats"
+import { runQueueCli } from "./queue-cli"
 
 type Command = StatusCommand | ModelCallsCommand | EventsCommand | IngestCommand | RoutingCommand | StatsCommand | OpsCommand
 
@@ -135,6 +136,7 @@ class CliUsageError {
 }
 
 export async function runCli(argv: readonly string[] = Bun.argv.slice(2)): Promise<number> {
+  if (argv[0] === "queue") return runQueueCli(argv.slice(1))
   const parsed = parseCommand(argv)
   if (parsed instanceof CliUsageError) {
     writeJsonError({ class: "UsageError", error: parsed.message })
@@ -1204,7 +1206,7 @@ function writeJsonError(error: CliFailure): void {
 }
 
 function usage(message: string): CliUsageError {
-  return new CliUsageError(`${message}. usage: control-plane <status|model-calls|events|ingest|routing|stats|ops> [--db <path>] [--json]`)
+  return new CliUsageError(`${message}. usage: control-plane <status|model-calls|events|ingest|routing|stats|ops|queue> [--db <path>] [--json]`)
 }
 
 if (import.meta.main) {

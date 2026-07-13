@@ -16,6 +16,26 @@ bun src/cli.ts routing brief --db test/.tmp/routing.sqlite --lane openai-codex/g
 
 `routing observe` accepts caller-supplied `--id` for idempotent `INSERT OR IGNORE`; without it the CLI generates a UUID-backed id. `routing seed` is idempotent and installs the 2026-07-03 temperament hypotheses plus the 2026-07-07 current account state.
 
+## Life queue
+
+The life queue is durable shared state in the control-plane SQLite database. Queue writes are low-rate direct writes, separate from the daemon-owned event ledger.
+
+```sh
+bun src/cli.ts queue add --title "Follow up" --intent "Reach a resolution" --priority p1 --source manual --context-packet path/to/packet
+bun src/cli.ts queue list --status paused --source session-scan
+bun src/cli.ts queue show <id>
+bun src/cli.ts queue start <id>
+bun src/cli.ts queue pause <id>
+bun src/cli.ts queue done <id>
+bun src/cli.ts queue drop <id>
+bun src/cli.ts queue triage
+bun src/cli.ts queue scan-sessions
+```
+
+`queue triage` lists inbox items oldest-first. `queue list` filters by `--priority`, `--source`, `--status`, and `--owning-agent`; add `--oldest-first`, `--limit`, or `--json` as needed.
+
+The abandoned-session intake scans top-level `.jsonl` and `.jsonl.zst` session logs under `~/.omp/agent/sessions/-agents/`. Its v0 heuristic treats a session as abandoned when its newest recorded timestamp is more than 48 hours old and its final message is not an error-free assistant message with `stopReason: "stop"`. Thus a final user/tool message, aborted or errored assistant message, or missing final message is considered resumable. It derives an at-most-80-character title from the first user message without an LLM call and uses `session:<session-id>` as the queue id, making reruns idempotent.
+
 ## GPT-5.6 release evidence
 
 The package-local curator converts `../../local/gpt56-release-evidence.json` into the reproducible typed fixture. It retains only exact numeric observations, preserves extraction provenance, and records known gaps in notes rather than inventing values.
