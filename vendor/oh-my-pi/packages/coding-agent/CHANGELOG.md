@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- Added a main-view `:` command prompt with `wrap`, `rich`, and `version` commands, including tab completion and immediate transcript reflow.
 - Effect v4 beta.92 alignment probe covering service layers, typed failures, scoped cleanup/interruption, bounded queues, and deterministic test-clock scheduling.
 - Added workstream session classification via `--workstream`, `OMP_WORKSTREAM`, exact `streams/<slug>` launch-directory inference, and live `/session workstream`, `/session adhoc`, and `/session unclassify` commands while preserving resumed-session metadata.
 - Added opt-in ambient main-session labels (`irc.ambientRename.enabled`, 5-minute `irc.ambientRename.intervalMs` default), preserving explicit peer names while using the `smol` role for stale automatic labels.
@@ -16,6 +17,7 @@
 
 ### Fixed
 
+- Session-control restarts now prepare the same runner host transition as `/restart`, preserve disposable `--session-dir` journals by resuming their exact file, re-exec the rollout-selected binary in place, and surface pre-exec failures instead of silently exiting.
 - Fixed the token-rate status segment to show a high-contrast live main-session badge only during active streaming turns.
 - Registered `/reload-tui` in the shared slash-command registry and delegated runner-backed disposable-view reloads through the typed host capability, with an actionable legacy-view notice.
 - IRC sends now reserve parked-agent messages before revival and follow replacement identities across revive races, preventing dropped messages and `released or replaced while reviving` failures.

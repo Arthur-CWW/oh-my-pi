@@ -26,9 +26,10 @@ function harness(
 	let controllerEpoch = 0;
 	const closedControllers: number[] = [];
 	const runner = {
-		stop: () => Effect.sync(() => {
-			runnerStops++;
-		}),
+		stop: () =>
+			Effect.sync(() => {
+				runnerStops++;
+			}),
 	} as unknown as SessionRunner;
 	const host = new DisposableTerminalHost({
 		runner,
@@ -50,6 +51,9 @@ function harness(
 						sessionId: "session-b",
 						cwd: "/tmp",
 					},
+					...(intent.kind === "restartProcess"
+						? { restartSpawn: { executable: "/bin/omp", args: ["--resume", "session-b"], cwd: "/tmp" } }
+						: {}),
 					cancelled: false,
 					replayed: false,
 				}),
@@ -59,7 +63,13 @@ function harness(
 			} as TerminalSessionController;
 		},
 	});
-	return { host, closedControllers, get runnerStops() { return runnerStops; } };
+	return {
+		host,
+		closedControllers,
+		get runnerStops() {
+			return runnerStops;
+		},
+	};
 }
 
 describe("DisposableTerminalHost", () => {
@@ -81,8 +91,12 @@ describe("DisposableTerminalHost", () => {
 					callbacks.assertCurrentEpoch();
 					observations.push({ name: "A", identity: sessionIdentity, completed });
 				},
-				quiesce: async () => { lifecycle.push("A:quiesce"); },
-				dispose: async () => { lifecycle.push("A:dispose"); },
+				quiesce: async () => {
+					lifecycle.push("A:quiesce");
+				},
+				dispose: async () => {
+					lifecycle.push("A:dispose");
+				},
 			}),
 			B: (_controller, callbacks) => ({
 				run: async () => {
@@ -90,8 +104,12 @@ describe("DisposableTerminalHost", () => {
 					await heldTurn;
 					observations.push({ name: "B", identity: sessionIdentity, completed });
 				},
-				quiesce: async () => { lifecycle.push("B:quiesce"); },
-				dispose: async () => { lifecycle.push("B:dispose"); },
+				quiesce: async () => {
+					lifecycle.push("B:quiesce");
+				},
+				dispose: async () => {
+					lifecycle.push("B:dispose");
+				},
 			}),
 		};
 		const state = harness({ load: async revision => factories[revision.cacheKey]! });
@@ -136,9 +154,15 @@ describe("DisposableTerminalHost", () => {
 				load: async revision => (_controller, hostCallbacks) => {
 					callbacks.push(hostCallbacks);
 					return {
-						run: async () => { lifecycle.push(`${revision.cacheKey}:run`); },
-						quiesce: async () => { lifecycle.push(`${revision.cacheKey}:quiesce`); },
-						dispose: async () => { lifecycle.push(`${revision.cacheKey}:dispose`); },
+						run: async () => {
+							lifecycle.push(`${revision.cacheKey}:run`);
+						},
+						quiesce: async () => {
+							lifecycle.push(`${revision.cacheKey}:quiesce`);
+						},
+						dispose: async () => {
+							lifecycle.push(`${revision.cacheKey}:dispose`);
+						},
 					};
 				},
 			},
@@ -217,8 +241,12 @@ describe("DisposableTerminalHost", () => {
 				callbacks = hostCallbacks;
 				return {
 					run: async () => {},
-					quiesce: async () => { lifecycle.push("view:quiesce"); },
-					dispose: async () => { lifecycle.push("view:dispose"); },
+					quiesce: async () => {
+						lifecycle.push("view:quiesce");
+					},
+					dispose: async () => {
+						lifecycle.push("view:dispose");
+					},
 				};
 			},
 		});
@@ -234,13 +262,44 @@ describe("DisposableTerminalHost", () => {
 		expect(state.host.preparedTransition?.intent).toEqual(intent);
 	});
 
+	test("routes external restart through the prepared host transition before stopping", async () => {
+		const lifecycle: string[] = [];
+		const state = harness({
+			load: async () => () => ({
+				run: async () => {},
+				quiesce: async () => {
+					lifecycle.push("view:quiesce");
+				},
+				dispose: async () => {
+					lifecycle.push("view:dispose");
+				},
+			}),
+		});
+		await state.host.reload({ specifier: "sample", cacheKey: "A" });
+
+		const receipt = await state.host.transition({ kind: "restartProcess" });
+
+		expect(receipt.intent).toEqual({ kind: "restartProcess" });
+		expect(receipt.restartSpawn).toEqual({
+			executable: "/bin/omp",
+			args: ["--resume", "session-b"],
+			cwd: "/tmp",
+		});
+		expect(lifecycle).toEqual(["view:quiesce", "view:dispose"]);
+		expect(state.closedControllers).toEqual([1]);
+		expect(state.runnerStops).toBe(1);
+		expect(await state.host.completion).toEqual({ kind: "restartProcess" });
+	});
+
 	test("reattaches the known-good revision when loading or initializing fails", async () => {
 		const runs: string[] = [];
 		let aFactoryCalls = 0;
 		const a: DisposableTerminalViewFactory = () => {
 			aFactoryCalls++;
 			return {
-				run: async () => { runs.push("A"); },
+				run: async () => {
+					runs.push("A");
+				},
 				quiesce: async () => {},
 				dispose: async () => {},
 			};
@@ -248,11 +307,14 @@ describe("DisposableTerminalHost", () => {
 		const state = harness({
 			load: async revision => {
 				if (revision.cacheKey === "load-failure") throw new Error("load failed");
-				if (revision.cacheKey === "init-failure") return () => ({
-					run: async () => { throw new Error("init failed"); },
-					quiesce: async () => {},
-					dispose: async () => {},
-				});
+				if (revision.cacheKey === "init-failure")
+					return () => ({
+						run: async () => {
+							throw new Error("init failed");
+						},
+						quiesce: async () => {},
+						dispose: async () => {},
+					});
 				return a;
 			},
 		});
@@ -303,7 +365,7 @@ describe("DisposableTerminalHost", () => {
 		let scopeCloses = 0;
 		const runner = {
 			stop: () =>
-				Effect.gen(function*() {
+				Effect.gen(function* () {
 					runnerStops++;
 					yield* Effect.addFinalizer(() =>
 						Effect.sync(() => {
@@ -355,7 +417,8 @@ describe("DisposableTerminalHost", () => {
 		temporaryDirectories.push(directory);
 		const moduleA = join(directory, "view.hash-a.ts");
 		const moduleB = join(directory, "view.hash-b.ts");
-		const source = (behavior: string) => `export const createDisposableTerminalView = (_controller, callbacks) => ({ run: async () => { globalThis.__ompRevisionBehavior = ${JSON.stringify(behavior)}; callbacks.assertCurrentEpoch(); }, quiesce: async () => {}, dispose: async () => {} });\n`;
+		const source = (behavior: string) =>
+			`export const createDisposableTerminalView = (_controller, callbacks) => ({ run: async () => { globalThis.__ompRevisionBehavior = ${JSON.stringify(behavior)}; callbacks.assertCurrentEpoch(); }, quiesce: async () => {}, dispose: async () => {} });\n`;
 		await writeFile(moduleA, source("A"));
 		await writeFile(moduleB, source("B"));
 		const state = harness(createUniqueRevisionLoader());

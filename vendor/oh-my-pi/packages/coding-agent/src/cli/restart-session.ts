@@ -2,10 +2,10 @@ import {
 	acquireSessionOwnership,
 	ExternalSessionOwner,
 	ExternalSessionOwnerUnverifiable,
-	type SessionOwnershipAcquisitionOptions,
 	type RestartChildManifestEntryV1,
-	writeRestartHandoff,
+	type SessionOwnershipAcquisitionOptions,
 	type SessionOwnershipHandle,
+	writeRestartHandoff,
 } from "../session/session-ownership";
 import { OPTIONAL_VALUE_FLAGS, STRING_VALUE_FLAGS } from "./flag-tables";
 
@@ -113,7 +113,6 @@ export interface RestartSpawnSpec {
 	env?: Record<string, string | undefined>;
 }
 
-
 function isBunVirtualEntry(arg: string): boolean {
 	return arg.startsWith("/$bunfs/");
 }
@@ -176,13 +175,21 @@ export async function acquireRestartSessionOwnership(
 	return acquireSessionOwnership(sessionFile, sessionId, options);
 }
 
-
 /**
  * Retire this process's direct session lease, then atomically replace its
  * process image. Keeping the same PID preserves the PTY foreground process
  * group and tmux pane ownership while execve guarantees the replacement image
  * was installed before any old-process exit can occur.
  */
+export function replaceRestartProcess(spec: RestartSpawnSpec, predecessorOwnerEpoch?: string): void {
+	const env = predecessorOwnerEpoch
+		? { ...(spec.env ?? Bun.env), [RESTART_OWNER_EPOCH_ENV]: predecessorOwnerEpoch }
+		: (spec.env ?? Bun.env);
+	if (!process.execve) throw new Error("restart requires process.execve support");
+	process.chdir(spec.cwd);
+	process.execve(spec.executable, [spec.executable, ...spec.args], env);
+}
+
 export async function handoffRestartProcess(
 	spec: RestartSpawnSpec,
 	ownership: SessionOwnershipHandle | undefined,
@@ -192,8 +199,5 @@ export async function handoffRestartProcess(
 	const capturedManifest = await teardown?.();
 	if (ownership) await writeRestartHandoff(ownership, capturedManifest ?? childManifest);
 	await ownership?.release();
-	const env = ownership ? { ...(spec.env ?? Bun.env), [RESTART_OWNER_EPOCH_ENV]: ownership.ownerEpoch } : spec.env ?? Bun.env;
-	if (!process.execve) throw new Error("restart requires process.execve support");
-	process.chdir(spec.cwd);
-	process.execve(spec.executable, [spec.executable, ...spec.args], env);
+	replaceRestartProcess(spec, ownership?.ownerEpoch);
 }

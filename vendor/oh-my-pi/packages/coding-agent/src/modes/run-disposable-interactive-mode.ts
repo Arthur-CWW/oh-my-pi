@@ -1,11 +1,11 @@
 import * as path from "node:path";
-import { Effect } from "effect";
 import { postmortem } from "@oh-my-pi/pi-utils";
+import { Effect } from "effect";
+import { buildRestartSpawnSpec, replaceRestartProcess } from "../cli/restart-session";
 import { CollabHost, collabDisplayName } from "../collab/host";
 import { DEFAULT_RELAY_URL } from "../collab/protocol";
-import { buildRestartSpawnSpec, handoffRestartProcess } from "../cli/restart-session";
 import type { SessionRunner } from "../runner/session-runner";
-import { startSessionControlTarget, type SessionControlTarget } from "../session/session-control-target";
+import { type SessionControlTarget, startSessionControlTarget } from "../session/session-control-target";
 import type { SessionOwnershipHandle } from "../session/session-ownership";
 import {
 	createUniqueRevisionLoader,
@@ -116,24 +116,27 @@ export async function runDisposableInteractiveMode(
 				ownership,
 				actions: {
 					status: command => Effect.runPromise(Effect.scoped(runner.applySessionControl(command))),
-					pause: command => Effect.runPromise(Effect.scoped(runner.applySessionControl(command))).then(() => undefined),
-					resume: command => Effect.runPromise(Effect.scoped(runner.applySessionControl(command))).then(() => undefined),
+					pause: command =>
+						Effect.runPromise(Effect.scoped(runner.applySessionControl(command))).then(() => undefined),
+					resume: command =>
+						Effect.runPromise(Effect.scoped(runner.applySessionControl(command))).then(() => undefined),
 					setModel: (_selector, command) => Effect.runPromise(Effect.scoped(runner.applySessionControl(command))),
-					compact: (_instructions, command) => Effect.runPromise(Effect.scoped(runner.applySessionControl(command))),
-					restart: async () => {
+					compact: (_instructions, command) =>
+						Effect.runPromise(Effect.scoped(runner.applySessionControl(command))),
+					restart: async (command, commit) => {
 						await collabHost?.stop();
-						await terminalHost.stop();
-						await handoffRestartProcess(
-							buildRestartSpawnSpec({
-								sessionId: ownership.sessionId,
-								cwd: options.cwd ?? process.cwd(),
-							}),
-							ownership,
-							async () => {
-								await Effect.runPromise(Effect.scoped(runner.stop()));
-								return [];
-							},
-						);
+						const receipt = await terminalHost.transition({ kind: "restartProcess" });
+						if (!receipt.restartSpawn) {
+							throw new Error("Restart transition did not produce a process spawn specification");
+						}
+						const restartSpawn = buildRestartSpawnSpec({
+							sessionId: ownership.sessionFile,
+							cwd: options.cwd ?? process.cwd(),
+							executable:
+								command.intent.kind === "restart" ? command.intent.executable : receipt.restartSpawn.executable,
+						});
+						commit();
+						replaceRestartProcess(restartSpawn, ownership.ownerEpoch);
 					},
 					stop: async () => {
 						await collabHost?.stop();

@@ -1,16 +1,16 @@
-import type { SessionOwnershipHandle } from "./session-ownership";
 import {
 	SessionControlBus,
 	type SessionControlCommand,
 	type SessionControlResult,
 	stopConfirmationToken,
 } from "./session-control";
+import type { SessionOwnershipHandle } from "./session-ownership";
 
 export interface SessionControlTargetActions {
 	readonly status: (command: SessionControlCommand) => SessionControlResult | Promise<SessionControlResult>;
 	readonly pause: (command: SessionControlCommand) => void | Promise<void>;
 	readonly resume: (command: SessionControlCommand) => void | Promise<void>;
-	readonly restart: (command: SessionControlCommand) => void | Promise<void>;
+	readonly restart: (command: SessionControlCommand, commit: () => void) => void | Promise<void>;
 	readonly setModel: (
 		selector: string,
 		command: SessionControlCommand,
@@ -110,22 +110,32 @@ export async function startSessionControlTarget(options: SessionControlTargetOpt
 					bus.complete(command.commandId, ownership.ownerEpoch, actionResult(command, result));
 					return;
 				}
-				case "restart":
+				case "restart": {
 					terminalAction = true;
-					bus.complete(command.commandId, ownership.ownerEpoch, actionResult(command));
-					await actions.restart(command);
+					let committed = false;
+					await actions.restart(command, () => {
+						bus.complete(command.commandId, ownership.ownerEpoch, actionResult(command));
+						committed = true;
+					});
+					if (!committed) throw new Error("Restart action returned without replacing the process");
 					return;
+				}
 				case "stop": {
 					const expected = stopConfirmationToken(ownership.sessionId, ownership.ownerEpoch);
 					if (command.intent.confirmationToken !== expected) throw new Error("Invalid stop confirmation token");
 					terminalAction = true;
-					bus.complete(command.commandId, ownership.ownerEpoch, actionResult(command));
 					await actions.stop(command);
+					bus.complete(command.commandId, ownership.ownerEpoch, actionResult(command));
 					return;
 				}
 			}
 		} catch (error) {
-			if (!terminalAction) bus.fail(command.commandId, ownership.ownerEpoch, error);
+			if (terminalAction) {
+				const receipt = bus.getReceipt(command.commandId);
+				if (receipt?.state !== "applied") bus.fail(command.commandId, ownership.ownerEpoch, error);
+				throw error;
+			}
+			bus.fail(command.commandId, ownership.ownerEpoch, error);
 		}
 	};
 

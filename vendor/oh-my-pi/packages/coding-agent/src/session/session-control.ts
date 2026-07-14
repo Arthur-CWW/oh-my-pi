@@ -27,7 +27,7 @@ const IntentSchema = Schema.Union([
 	Schema.Struct({ kind: Schema.Literal("status") }),
 	Schema.Struct({ kind: Schema.Literal("pause") }),
 	Schema.Struct({ kind: Schema.Literal("resume") }),
-	Schema.Struct({ kind: Schema.Literal("restart") }),
+	Schema.Struct({ kind: Schema.Literal("restart"), executable: NonEmptyStringSchema }),
 	Schema.Struct({ kind: Schema.Literal("setModel"), selector: NonEmptyStringSchema }),
 	Schema.Struct({ kind: Schema.Literal("compact"), instructions: Schema.optional(NonEmptyStringSchema) }),
 	Schema.Struct({ kind: Schema.Literal("stop"), confirmationToken: NonEmptyStringSchema }),
@@ -211,7 +211,8 @@ export class SessionControlBus {
 				)
 				.get({ $commandId: command.commandId });
 			if (existing) {
-				if (existing.command_json !== commandJson) throw new Error(`Conflicting reuse of control command ${command.commandId}`);
+				if (existing.command_json !== commandJson)
+					throw new Error(`Conflicting reuse of control command ${command.commandId}`);
 				const receipt = this.getReceipt(command.commandId);
 				if (!receipt) throw new Error(`Control command ${command.commandId} is missing its receipt`);
 				return receipt;
@@ -277,7 +278,8 @@ export class SessionControlBus {
 				"UPDATE control_receipts SET state='applied', completed_at=$at, result_json=$result, error=NULL WHERE command_id=$commandId AND target_owner_epoch=$ownerEpoch AND state='acknowledged'",
 			)
 			.run({ $at: completedAt, $result: JSON.stringify(result), $commandId: commandId, $ownerEpoch: ownerEpoch });
-		if (updated.changes !== 1) throw new Error(`Control command ${commandId} is not acknowledged by owner ${ownerEpoch}`);
+		if (updated.changes !== 1)
+			throw new Error(`Control command ${commandId} is not acknowledged by owner ${ownerEpoch}`);
 		return this.getReceipt(commandId)!;
 	}
 
@@ -288,8 +290,14 @@ export class SessionControlBus {
 			.query(
 				"UPDATE control_receipts SET state='failed', completed_at=$at, result_json=NULL, error=$error WHERE command_id=$commandId AND target_owner_epoch=$ownerEpoch AND state='acknowledged'",
 			)
-			.run({ $at: completedAt, $error: message || "Unknown control failure", $commandId: commandId, $ownerEpoch: ownerEpoch });
-		if (updated.changes !== 1) throw new Error(`Control command ${commandId} is not acknowledged by owner ${ownerEpoch}`);
+			.run({
+				$at: completedAt,
+				$error: message || "Unknown control failure",
+				$commandId: commandId,
+				$ownerEpoch: ownerEpoch,
+			});
+		if (updated.changes !== 1)
+			throw new Error(`Control command ${commandId} is not acknowledged by owner ${ownerEpoch}`);
 		return this.getReceipt(commandId)!;
 	}
 

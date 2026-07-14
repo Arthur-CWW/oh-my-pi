@@ -76,7 +76,6 @@ export async function executeRolloutPlan(
 	return { restarted };
 }
 
-
 async function executableDigest(): Promise<string> {
 	const hash = createHash("sha256");
 	for await (const chunk of fs.createReadStream(process.execPath)) hash.update(chunk);
@@ -112,6 +111,7 @@ export interface RunRolloutOptions {
 	readonly controlBus?: SessionControlBus;
 	readonly targetDigest?: string;
 	readonly targetVersion?: string;
+	readonly targetExecutable?: string;
 	readonly initiatorPids?: ReadonlySet<number>;
 	readonly initiatorSessionIds?: ReadonlySet<string>;
 	readonly dryRun?: boolean;
@@ -127,6 +127,7 @@ export async function runRollout(options: RunRolloutOptions = {}): Promise<Rollo
 	try {
 		const targetDigest = options.targetDigest ?? (await executableDigest());
 		const targetVersion = options.targetVersion ?? VERSION;
+		const targetExecutable = options.targetExecutable ?? process.execPath;
 		const initiators = options.initiatorPids ?? (await ancestorPids());
 		const peers = bus.listPeers();
 		const entries = createRolloutPlan(peers, targetDigest, initiators, options.initiatorSessionIds);
@@ -135,7 +136,9 @@ export async function runRollout(options: RunRolloutOptions = {}): Promise<Rollo
 		const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
 		const sourceInstanceId = randomUUID();
 		const result = await executeRolloutPlan(entries, async plannedPeer => {
-			const current = (bus.listPeers({ includeStale: true }).find(peer => peer.sessionId === plannedPeer.sessionId) ?? plannedPeer) as RolloutPeer;
+			const current = (bus
+				.listPeers({ includeStale: true })
+				.find(peer => peer.sessionId === plannedPeer.sessionId) ?? plannedPeer) as RolloutPeer;
 			if (current.state === "working") throw new Error("session became working before restart");
 			if (current.state !== "idle" && current.state !== "waiting_input") {
 				throw new Error(`session entered unsafe state ${current.state}`);
@@ -147,27 +150,38 @@ export async function runRollout(options: RunRolloutOptions = {}): Promise<Rollo
 			controlBus.request({
 				schemaVersion: 1,
 				commandId,
-				source: { kind: "local-cli", instanceId: sourceInstanceId, pid: process.pid, ...(process.getuid ? { uid: process.getuid() } : {}) },
+				source: {
+					kind: "local-cli",
+					instanceId: sourceInstanceId,
+					pid: process.pid,
+					...(process.getuid ? { uid: process.getuid() } : {}),
+				},
 				sessionId: current.controlSessionId ?? current.sessionId,
 				targetOwnerEpoch: current.ownerEpoch,
 				requestedAt: new Date().toISOString(),
-				intent: { kind: "restart" },
+				intent: { kind: "restart", executable: targetExecutable },
 			});
 			const receipt = await controlBus.waitForTerminal(commandId, { timeoutMs, pollIntervalMs });
 			if (receipt.state === "failed") throw new Error(receipt.error ?? "restart control command failed");
 			const deadline = Date.now() + timeoutMs;
 			for (;;) {
-				const recovered = bus.listPeers({ includeStale: true }).find(peer =>
-					peer.sessionId === (current.controlSessionId ?? current.sessionId) || peer.sessionFile === current.sessionFile,
-				);
+				const recovered = bus
+					.listPeers({ includeStale: true })
+					.find(
+						peer =>
+							peer.sessionId === (current.controlSessionId ?? current.sessionId) ||
+							peer.sessionFile === current.sessionFile,
+					);
 				if (
 					recovered &&
 					Date.parse(recovered.lastSeen) > baselineHeartbeat &&
 					recovered.ownerEpoch !== current.ownerEpoch &&
 					recovered.buildDigest === targetDigest &&
 					(!recovered.version || recovered.version === targetVersion)
-				) return;
-				if (Date.now() >= deadline) throw new Error(`timed out waiting for recovery on ${targetDigest.slice(0, 12)}`);
+				)
+					return;
+				if (Date.now() >= deadline)
+					throw new Error(`timed out waiting for recovery on ${targetDigest.slice(0, 12)}`);
 				await Bun.sleep(Math.min(pollIntervalMs, Math.max(1, deadline - Date.now())));
 			}
 		});
@@ -179,16 +193,28 @@ export async function runRollout(options: RunRolloutOptions = {}): Promise<Rollo
 }
 
 function printSummary(summary: RolloutSummary, dryRun: boolean): void {
-	process.stdout.write(`rollout target ${summary.targetDigest} (${summary.targetVersion})${dryRun ? " [dry-run]" : ""}\n`);
+	process.stdout.write(
+		`rollout target ${summary.targetDigest} (${summary.targetVersion})${dryRun ? " [dry-run]" : ""}\n`,
+	);
 	for (const entry of summary.entries) {
 		const identity = `${entry.peer.name} session=${entry.peer.sessionId} pid=${entry.peer.pid} state=${entry.peer.state} version=${entry.peer.version ?? "unknown"} digest=${entry.peer.buildDigest ?? "unknown"}`;
-		if (entry.action === "skip") process.stdout.write(`skip ${identity} reason=${SKIP_REASON_REPORT[entry.reason]}\n`);
+		if (entry.action === "skip")
+			process.stdout.write(`skip ${identity} reason=${SKIP_REASON_REPORT[entry.reason]}\n`);
 		else {
-			const outcome = summary.restarted.includes(entry.peer.sessionId) ? "restarted" : summary.failed?.sessionId === entry.peer.sessionId ? "failed" : dryRun ? "would-restart" : "untouched";
+			const outcome = summary.restarted.includes(entry.peer.sessionId)
+				? "restarted"
+				: summary.failed?.sessionId === entry.peer.sessionId
+					? "failed"
+					: dryRun
+						? "would-restart"
+						: "untouched";
 			process.stdout.write(`${outcome} ${identity}\n`);
 		}
 	}
-	if (summary.failed) process.stderr.write(`rollout aborted at ${summary.failed.name} (${summary.failed.sessionId}): ${summary.failed.error}; remaining sessions untouched\n`);
+	if (summary.failed)
+		process.stderr.write(
+			`rollout aborted at ${summary.failed.name} (${summary.failed.sessionId}): ${summary.failed.error}; remaining sessions untouched\n`,
+		);
 }
 
 export default class RolloutCommand extends Command {

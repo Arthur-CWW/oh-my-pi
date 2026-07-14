@@ -2,13 +2,10 @@ import { pathToFileURL } from "node:url";
 import { Effect, Exit, Scope } from "effect";
 import type { PrepareHostTransitionReceipt } from "../runner/protocol";
 import type { SessionRunner } from "../runner/session-runner";
-import {
-	createTerminalSessionController,
-	type TerminalSessionController,
-} from "./terminal-session-controller";
 import type { InteractiveHostIntent } from "./interactive-host-intent";
-export type { InteractiveHostIntent };
+import { createTerminalSessionController, type TerminalSessionController } from "./terminal-session-controller";
 
+export type { InteractiveHostIntent };
 
 export interface DisposableTerminalHostCallbacks {
 	readonly epoch: number;
@@ -139,12 +136,21 @@ export class DisposableTerminalHost {
 					try {
 						this.#active = await this.#activate(previous.revision, previous.factory);
 					} catch (fallbackError) {
-						throw new AggregateError([error, fallbackError], "Revision load failed and fallback could not reattach");
+						throw new AggregateError(
+							[error, fallbackError],
+							"Revision load failed and fallback could not reattach",
+						);
 					}
 				}
 				throw error;
 			}
 		});
+	}
+
+	transition(intent: InteractiveHostIntent): Promise<PrepareHostTransitionReceipt> {
+		const active = this.#active;
+		if (!active || this.#stopped) return Promise.reject(new Error("Disposable terminal host is stopped"));
+		return this.#prepareTransition(active.epoch, intent);
 	}
 
 	stop(): Promise<void> {
@@ -246,7 +252,9 @@ export class DisposableTerminalHost {
 					reject(new Error("Disposable terminal reload is not configured"));
 					return;
 				}
-				void this.#resolveRevision().then(revision => this.reload(revision)).then(resolve, reject);
+				void this.#resolveRevision()
+					.then(revision => this.reload(revision))
+					.then(resolve, reject);
 			});
 		});
 	}
@@ -264,7 +272,11 @@ export class DisposableTerminalHost {
 	}
 
 	#requestTransition(epoch: number, intent: InteractiveHostIntent): Promise<void> {
-		const { promise, resolve, reject } = Promise.withResolvers<void>();
+		return this.#prepareTransition(epoch, intent).then(() => undefined);
+	}
+
+	#prepareTransition(epoch: number, intent: InteractiveHostIntent): Promise<PrepareHostTransitionReceipt> {
+		const { promise, resolve, reject } = Promise.withResolvers<PrepareHostTransitionReceipt>();
 		queueMicrotask(() => {
 			const active = this.#active;
 			if (active?.epoch !== epoch || this.#stopped) {
@@ -275,12 +287,12 @@ export class DisposableTerminalHost {
 				.prepareHostTransition(intent)
 				.then(receipt => {
 					if (receipt.cancelled) {
-						resolve();
+						resolve(receipt);
 						return;
 					}
 					this.#preparedTransition = receipt;
 					this.#exitIntent = receipt.intent;
-					return this.stop().then(resolve);
+					return this.stop().then(() => resolve(receipt));
 				})
 				.catch(reject);
 		});
