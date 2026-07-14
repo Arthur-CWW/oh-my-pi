@@ -263,6 +263,7 @@ export async function promote(config: Config = configFromEnvironment()): Promise
 		console.log(`digest ${digest}`);
 		console.log(`version ${revision.version}`);
 		console.log(`receipt ${receiptDisplay} ${receiptDigest}`);
+		await run([stable, "rollout", "--auto"], config.repoRoot);
 	} finally {
 		if (noteTemporary) await fs.rm(noteTemporary, { force: true });
 		if (worktreeAdded && worktree) {

@@ -12754,11 +12754,6 @@ export class AgentSession {
 		return messages;
 	}
 
-	/**
-	 * Persist any IRC asides that missed their step-boundary injection (the
-	 * message landed after the turn's last aside drain). Called at the start
-	 * of the next prompt so the model still sees them.
-	 */
 	#registerExternalIrcPeer(): { bus: IrcExternalBus; sessionId: string; name: string } {
 		const cwd = this.sessionManager.getCwd();
 		const sessionId = this.#ircExternalSessionId ?? `${cwd}:${process.pid}`;
@@ -12772,6 +12767,7 @@ export class AgentSession {
 			});
 		this.#ircExternalPeerName = name;
 		const bus = IrcExternalBus.global();
+		const ownership = this.sessionManager.getSessionOwnership();
 		bus.registerPeer({
 			sessionId,
 			name,
@@ -12779,6 +12775,9 @@ export class AgentSession {
 			pid: process.pid,
 			explicitName: Boolean(this.settings.get("irc.peerName")?.trim()),
 			sessionFile: this.sessionManager.getSessionFile() ?? undefined,
+			ownerEpoch: ownership?.ownerEpoch,
+			buildDigest: ownership?.buildRevision.digest,
+			version: ownership?.buildRevision.version,
 		});
 		return { bus, sessionId, name };
 	}

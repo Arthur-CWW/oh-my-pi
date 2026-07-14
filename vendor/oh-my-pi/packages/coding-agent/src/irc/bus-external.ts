@@ -19,6 +19,9 @@ export interface IrcExternalPeer {
 	/** True when the operator supplied irc.peerName; ambient automation must preserve it. */
 	explicitName?: boolean;
 	sessionFile?: string;
+	ownerEpoch?: string;
+	buildDigest?: string;
+	version?: string;
 }
 
 export interface IrcExternalMessage {
@@ -40,6 +43,9 @@ interface PeerRow {
 	state_ts: string | null;
 	explicit_name: number;
 	session_file: string | null;
+	owner_epoch: string | null;
+	build_digest: string | null;
+	version: string | null;
 }
 
 interface MessageRow {
@@ -63,6 +69,9 @@ export interface IrcExternalRegistration {
 	pid?: number;
 	explicitName?: boolean;
 	sessionFile?: string;
+	ownerEpoch?: string;
+	buildDigest?: string;
+	version?: string;
 }
 
 export const IRC_EXTERNAL_STALE_MS = 10 * 60 * 1000;
@@ -133,6 +142,9 @@ function toPeer(row: PeerRow): IrcExternalPeer {
 		stateTs: row.state_ts,
 		explicitName: row.explicit_name === 1,
 		sessionFile: row.session_file ?? undefined,
+		ownerEpoch: row.owner_epoch ?? undefined,
+		buildDigest: row.build_digest ?? undefined,
+		version: row.version ?? undefined,
 	};
 }
 
@@ -183,6 +195,15 @@ export class IrcExternalBus {
 		if (!columns.has("session_file")) {
 			this.#db.run("ALTER TABLE peers ADD COLUMN session_file TEXT");
 		}
+		if (!columns.has("owner_epoch")) {
+			this.#db.run("ALTER TABLE peers ADD COLUMN owner_epoch TEXT");
+		}
+		if (!columns.has("build_digest")) {
+			this.#db.run("ALTER TABLE peers ADD COLUMN build_digest TEXT");
+		}
+		if (!columns.has("version")) {
+			this.#db.run("ALTER TABLE peers ADD COLUMN version TEXT");
+		}
 	}
 	#ensureMessageOriginColumn(): void {
 		const columns = new Set(
@@ -199,7 +220,7 @@ export class IrcExternalBus {
 	#getPeerBySessionId(sessionId: string): IrcExternalPeer | undefined {
 		const row = this.#db
 			.query<PeerRow, { $sessionId: string }>(
-				"SELECT session_id, name, cwd, pid, last_seen, state, state_ts, explicit_name, session_file FROM peers WHERE session_id = $sessionId",
+				"SELECT session_id, name, cwd, pid, last_seen, state, state_ts, explicit_name, session_file, owner_epoch, build_digest, version FROM peers WHERE session_id = $sessionId",
 			)
 			.get({ $sessionId: sessionId });
 		return row ? toPeer(row) : undefined;
@@ -220,7 +241,10 @@ export class IrcExternalBus {
 				state TEXT NOT NULL DEFAULT 'unknown',
 				state_ts TEXT,
 				explicit_name INTEGER NOT NULL DEFAULT 0,
-				session_file TEXT
+				session_file TEXT,
+				owner_epoch TEXT,
+				build_digest TEXT,
+				version TEXT
 			)
 		`);
 		this.#ensurePeerStateColumns();
@@ -248,15 +272,18 @@ export class IrcExternalBus {
 		const lastSeen = nowIso();
 		this.#db
 			.query(
-				`INSERT INTO peers (session_id, name, cwd, pid, last_seen, explicit_name, session_file)
-				 VALUES ($sessionId, $name, $cwd, $pid, $lastSeen, $explicitName, $sessionFile)
+				`INSERT INTO peers (session_id, name, cwd, pid, last_seen, explicit_name, session_file, owner_epoch, build_digest, version)
+				 VALUES ($sessionId, $name, $cwd, $pid, $lastSeen, $explicitName, $sessionFile, $ownerEpoch, $buildDigest, $version)
 				 ON CONFLICT(session_id) DO UPDATE SET
 					name = CASE WHEN peers.explicit_name = 1 THEN peers.name ELSE excluded.name END,
 					cwd = excluded.cwd,
 					pid = excluded.pid,
 					last_seen = excluded.last_seen,
 					explicit_name = MAX(peers.explicit_name, excluded.explicit_name),
-					session_file = COALESCE(excluded.session_file, peers.session_file)`,
+					session_file = COALESCE(excluded.session_file, peers.session_file),
+					owner_epoch = excluded.owner_epoch,
+					build_digest = excluded.build_digest,
+					version = excluded.version`,
 			)
 			.run({
 				$sessionId: peer.sessionId,
@@ -266,6 +293,9 @@ export class IrcExternalBus {
 				$lastSeen: lastSeen,
 				$explicitName: peer.explicitName ? 1 : 0,
 				$sessionFile: peer.sessionFile ?? null,
+				$ownerEpoch: peer.ownerEpoch ?? null,
+				$buildDigest: peer.buildDigest ?? null,
+				$version: peer.version ?? null,
 			});
 		return (
 			this.#getPeerBySessionId(peer.sessionId) ?? {
@@ -277,6 +307,10 @@ export class IrcExternalBus {
 				state: "unknown",
 				stateTs: null,
 				explicitName: Boolean(peer.explicitName),
+				sessionFile: peer.sessionFile,
+				ownerEpoch: peer.ownerEpoch,
+				buildDigest: peer.buildDigest,
+				version: peer.version,
 			}
 		);
 	}
@@ -322,7 +356,7 @@ export class IrcExternalBus {
 		const staleMs = options.staleMs ?? IRC_EXTERNAL_STALE_MS;
 		return this.#db
 			.query<PeerRow, []>(
-				"SELECT session_id, name, cwd, pid, last_seen, state, state_ts, explicit_name, session_file FROM peers ORDER BY last_seen DESC",
+				"SELECT session_id, name, cwd, pid, last_seen, state, state_ts, explicit_name, session_file, owner_epoch, build_digest, version FROM peers ORDER BY last_seen DESC",
 			)
 			.all()
 			.filter(
@@ -336,7 +370,7 @@ export class IrcExternalBus {
 	findPeerByName(name: string, options: { excludeSessionId?: string } = {}): IrcExternalPeer | undefined {
 		const rows = this.#db
 			.query<PeerRow, { $name: string }>(
-				"SELECT session_id, name, cwd, pid, last_seen, state, state_ts, explicit_name, session_file FROM peers WHERE name = $name ORDER BY last_seen DESC",
+				"SELECT session_id, name, cwd, pid, last_seen, state, state_ts, explicit_name, session_file, owner_epoch, build_digest, version FROM peers WHERE name = $name ORDER BY last_seen DESC",
 			)
 			.all({ $name: name });
 		const row = rows.find(
