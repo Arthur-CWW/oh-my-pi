@@ -4,15 +4,17 @@ import { Command, Flags } from "@oh-my-pi/pi-utils/cli";
 import { VERSION } from "@oh-my-pi/pi-utils/dirs";
 import { IrcExternalBus, type IrcExternalPeer } from "../irc/bus-external";
 import { SessionControlBus } from "./session-control";
+import { parseSessionListHeaderPrefix } from "./session-listing";
 import { inspectSessionOwnership } from "./session-ownership";
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 const DEFAULT_POLL_INTERVAL_MS = 100;
 
 type SkipReason = "working" | "unsafe-state" | "initiator" | "already-current" | "missing-control-identity";
+type RolloutPeer = IrcExternalPeer & { readonly controlSessionId?: string };
 export type RolloutPlanEntry =
-	| { readonly action: "restart"; readonly peer: IrcExternalPeer }
-	| { readonly action: "skip"; readonly peer: IrcExternalPeer; readonly reason: SkipReason };
+	| { readonly action: "restart"; readonly peer: RolloutPeer }
+	| { readonly action: "skip"; readonly peer: RolloutPeer; readonly reason: SkipReason };
 
 export interface RolloutSummary {
 	readonly targetDigest: string;
@@ -23,7 +25,7 @@ export interface RolloutSummary {
 }
 
 export function createRolloutPlan(
-	peers: readonly IrcExternalPeer[],
+	peers: readonly RolloutPeer[],
 	targetDigest: string,
 	initiatorPids: ReadonlySet<number>,
 	initiatorSessionIds: ReadonlySet<string> = new Set(),
@@ -44,7 +46,7 @@ export function createRolloutPlan(
 
 export async function executeRolloutPlan(
 	entries: readonly RolloutPlanEntry[],
-	restart: (peer: IrcExternalPeer) => Promise<void>,
+	restart: (peer: RolloutPeer) => Promise<void>,
 ): Promise<{ restarted: string[]; failed?: RolloutSummary["failed"] }> {
 	const restarted: string[] = [];
 	for (const entry of entries) {
@@ -66,12 +68,15 @@ export async function executeRolloutPlan(
 	return { restarted };
 }
 
-async function enrichPeerIdentity(peer: IrcExternalPeer): Promise<IrcExternalPeer> {
+async function enrichPeerIdentity(peer: IrcExternalPeer): Promise<RolloutPeer> {
 	if ((peer.ownerEpoch && peer.buildDigest && peer.version) || !peer.sessionFile) return peer;
-	const ownership = await inspectSessionOwnership(peer.sessionFile, peer.sessionId);
+	const header = parseSessionListHeaderPrefix(await Bun.file(peer.sessionFile).slice(0, 64 * 1024).text());
+	if (!header) return peer;
+	const ownership = await inspectSessionOwnership(peer.sessionFile, header.id);
 	if (ownership.status !== "live") return peer;
 	return {
 		...peer,
+		controlSessionId: header.id,
 		ownerEpoch: peer.ownerEpoch ?? ownership.lease.ownerEpoch,
 		buildDigest: peer.buildDigest ?? ownership.lease.buildRevision?.digest,
 		version: peer.version ?? ownership.lease.buildRevision?.version,
@@ -151,7 +156,7 @@ export async function runRollout(options: RunRolloutOptions = {}): Promise<Rollo
 				schemaVersion: 1,
 				commandId,
 				source: { kind: "local-cli", instanceId: sourceInstanceId, pid: process.pid, ...(process.getuid ? { uid: process.getuid() } : {}) },
-				sessionId: current.sessionId,
+				sessionId: current.controlSessionId ?? current.sessionId,
 				targetOwnerEpoch: current.ownerEpoch,
 				requestedAt: new Date().toISOString(),
 				intent: { kind: "restart" },
@@ -160,7 +165,9 @@ export async function runRollout(options: RunRolloutOptions = {}): Promise<Rollo
 			if (receipt.state === "failed") throw new Error(receipt.error ?? "restart control command failed");
 			const deadline = Date.now() + timeoutMs;
 			for (;;) {
-				const recovered = bus.listPeers({ includeStale: true }).find(peer => peer.sessionId === current.sessionId);
+				const recovered = bus.listPeers({ includeStale: true }).find(peer =>
+					peer.sessionId === (current.controlSessionId ?? current.sessionId) || peer.sessionFile === current.sessionFile,
+				);
 				if (
 					recovered &&
 					Date.parse(recovered.lastSeen) > baselineHeartbeat &&

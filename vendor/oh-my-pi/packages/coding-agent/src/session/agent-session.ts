@@ -12756,7 +12756,8 @@ export class AgentSession {
 
 	#registerExternalIrcPeer(): { bus: IrcExternalBus; sessionId: string; name: string } {
 		const cwd = this.sessionManager.getCwd();
-		const sessionId = this.#ircExternalSessionId ?? `${cwd}:${process.pid}`;
+		const ownership = this.sessionManager.getSessionOwnership();
+		const sessionId = this.#ircExternalSessionId ?? ownership?.sessionId ?? `${cwd}:${process.pid}`;
 		this.#ircExternalSessionId = sessionId;
 		const name =
 			this.#ircExternalPeerName ??
@@ -12767,7 +12768,6 @@ export class AgentSession {
 			});
 		this.#ircExternalPeerName = name;
 		const bus = IrcExternalBus.global();
-		const ownership = this.sessionManager.getSessionOwnership();
 		bus.registerPeer({
 			sessionId,
 			name,

@@ -284,7 +284,7 @@ function extractFirstUserMessageFromPrefix(content: string): string | undefined 
 	return undefined;
 }
 
-interface SessionListHeader {
+export interface SessionListHeader {
 	type: "session";
 	id: string;
 	cwd?: string;
@@ -350,6 +350,9 @@ function parseSessionListHeader(
 	}
 
 	return undefined;
+}
+export function parseSessionListHeaderPrefix(content: string): SessionListHeader | undefined {
+	return parseSessionListHeader(content, parseJsonlLenient<Record<string, unknown>>(content));
 }
 
 function getSessionListWorkerCount(fileCount: number): number {
