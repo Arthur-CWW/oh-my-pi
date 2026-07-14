@@ -45,13 +45,13 @@ export function parseBuildRevision(value: string): BuildRevision {
 	return revision as unknown as BuildRevision;
 }
 
-interface CommandResult {
+export interface PromotionCommandResult {
 	exitCode: number;
 	stdout: string;
 	stderr: string;
 }
 
-async function command(argv: string[], cwd: string, env: NodeJS.ProcessEnv = process.env): Promise<CommandResult> {
+async function command(argv: string[], cwd: string, env: NodeJS.ProcessEnv = process.env): Promise<PromotionCommandResult> {
 	const child = Bun.spawn(argv, { cwd, env, stdout: "pipe", stderr: "pipe" });
 	const [exitCode, stdout, stderr] = await Promise.all([
 		child.exited,
@@ -68,6 +68,26 @@ async function run(argv: string[], cwd: string, env: NodeJS.ProcessEnv = process
 		throw new Error(`${argv.join(" ")} failed (exit ${result.exitCode})${detail ? `: ${detail}` : ""}`);
 	}
 	return result.stdout.trim();
+}
+
+export interface PromotionReport {
+	readonly blessedLine: string;
+	readonly rolloutStdout: string;
+	readonly incompleteLine?: string;
+}
+
+export function composePromotionReport(
+	version: string,
+	digest: string,
+	rollout: Pick<PromotionCommandResult, "exitCode" | "stdout" | "stderr">,
+): PromotionReport {
+	const report: PromotionReport = {
+		blessedLine: `BLESSED ${version} ${digest}`,
+		rolloutStdout: rollout.stdout,
+	};
+	if (rollout.exitCode === 0) return report;
+	const reason = rollout.stderr.trim() || rollout.stdout.trim() || `rollout exited with code ${rollout.exitCode}`;
+	return { ...report, incompleteLine: `ROLLOUT incomplete: ${reason}` };
 }
 
 async function readBuildRevision(binary: string, cwd: string): Promise<BuildRevision> {
@@ -193,6 +213,13 @@ async function writePromotionNote(temporary: string, digest: string, version: st
 	await fs.writeFile(temporary, `${lines.join("\n")}\n`, { flag: "wx", mode: 0o600 });
 }
 
+class RolloutIncompleteError extends Error {
+	constructor(readonly reportLine: string) {
+		super(reportLine);
+		this.name = "RolloutIncompleteError";
+	}
+}
+
 export async function promote(config: Config = configFromEnvironment()): Promise<void> {
 	const stable = path.join(config.binDir, "omp");
 	const linkEnvironment = {
@@ -260,10 +287,21 @@ export async function promote(config: Config = configFromEnvironment()): Promise
 		await run(["bash", linkScript, "bless", digest, receiptPath], fork, { ...linkEnvironment, OMP_LINK_REPO_ROOT: fork });
 		await fs.rename(noteTemporary, notePath);
 		noteTemporary = undefined;
+		const blessedReport = composePromotionReport(revision.version, digest, { exitCode: 0, stdout: "", stderr: "" });
+		console.log(blessedReport.blessedLine);
 		console.log(`digest ${digest}`);
 		console.log(`version ${revision.version}`);
 		console.log(`receipt ${receiptDisplay} ${receiptDigest}`);
-		await run([stable, "rollout", "--auto"], config.repoRoot);
+		let rollout: PromotionCommandResult;
+		try {
+			rollout = await command([stable, "rollout", "--auto"], config.repoRoot);
+		} catch (error) {
+			const reason = error instanceof Error ? error.message : String(error);
+			throw new RolloutIncompleteError(`ROLLOUT incomplete: ${reason}`);
+		}
+		const rolloutReport = composePromotionReport(revision.version, digest, rollout);
+		if (rolloutReport.rolloutStdout) process.stdout.write(rolloutReport.rolloutStdout);
+		if (rolloutReport.incompleteLine) throw new RolloutIncompleteError(rolloutReport.incompleteLine);
 	} finally {
 		if (noteTemporary) await fs.rm(noteTemporary, { force: true });
 		if (worktreeAdded && worktree) {
@@ -281,7 +319,7 @@ export async function promote(config: Config = configFromEnvironment()): Promise
 
 if (import.meta.main) {
 	promote().catch(error => {
-		console.error(`omp-promote: ${error instanceof Error ? error.message : String(error)}`);
+		console.error(error instanceof RolloutIncompleteError ? error.reportLine : `ERROR task failed: ${error instanceof Error ? error.message : String(error)}`);
 		process.exitCode = 1;
 	});
 }

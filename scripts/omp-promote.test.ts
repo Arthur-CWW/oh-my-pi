@@ -5,6 +5,7 @@ import * as path from "node:path";
 import {
 	acquirePromotionLock,
 	blessedCommitFromVersion,
+	composePromotionReport,
 	decidePromotion,
 	parseBuildRevision,
 } from "./omp-promote";
@@ -47,6 +48,31 @@ describe("blessed build identity", () => {
 	it("rejects versions without an authoritative fork commit", () => {
 		expect(() => blessedCommitFromVersion("16.0.1")).toThrow("no fork commit suffix");
 		expect(() => blessedCommitFromVersion("16.0.1+fork.not-a-commit")).toThrow("no fork commit suffix");
+	});
+});
+
+describe("promotion reporting", () => {
+	it("reports a successful bless before relaying rollout stdout", () => {
+		expect(composePromotionReport("16.0.1+fork.abc1234", "a".repeat(64), {
+			exitCode: 0,
+			stdout: "rollout target abc\nrestarted peer\n",
+			stderr: "",
+		})).toEqual({
+			blessedLine: `BLESSED 16.0.1+fork.abc1234 ${"a".repeat(64)}`,
+			rolloutStdout: "rollout target abc\nrestarted peer\n",
+		});
+	});
+
+	it("separates a rollout failure from the successful bless", () => {
+		expect(composePromotionReport("16.0.1+fork.abc1234", "b".repeat(64), {
+			exitCode: 1,
+			stdout: "rollout target def\n",
+			stderr: "rollout aborted at peer-2: recovery timeout\n",
+		})).toEqual({
+			blessedLine: `BLESSED 16.0.1+fork.abc1234 ${"b".repeat(64)}`,
+			rolloutStdout: "rollout target def\n",
+			incompleteLine: "ROLLOUT incomplete: rollout aborted at peer-2: recovery timeout",
+		});
 	});
 });
 

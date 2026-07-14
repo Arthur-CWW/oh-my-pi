@@ -32,6 +32,21 @@ function register(
 	});
 	bus.updatePeerState(sessionId, state);
 }
+function registerLegacy(
+	bus: IrcExternalBus,
+	sessionId: string,
+	pid: number,
+	state: "working" | "waiting_input" | "idle",
+): void {
+	bus.registerPeer({
+		sessionId,
+		name: `peer-${sessionId}`,
+		cwd: `/tmp/${sessionId}`,
+		pid,
+	});
+	bus.updatePeerState(sessionId, state);
+}
+
 
 afterEach(async () => {
 	for (const root of cleanupRoots.splice(0)) await fs.rm(root, { recursive: true, force: true });
@@ -65,6 +80,24 @@ describe("staged session rollout", () => {
 			bus.close();
 		}
 	});
+
+	it("skips legacy peers without sending a restart command", async () => {
+		const bus = await fixtureBus();
+		try {
+			registerLegacy(bus, "legacy", 106, "idle");
+			const plan = createRolloutPlan(bus.listPeers(), "target", new Set());
+			expect(plan).toEqual([{ action: "skip", peer: expect.objectContaining({ sessionId: "legacy" }), reason: "legacy" }]);
+			const calls: string[] = [];
+			const result = await executeRolloutPlan(plan, async peer => {
+				calls.push(peer.sessionId);
+			});
+			expect(calls).toEqual([]);
+			expect(result).toEqual({ restarted: [] });
+		} finally {
+			bus.close();
+		}
+	});
+
 
 	it("restarts one at a time and aborts the untouched remainder on first failure", async () => {
 		const bus = await fixtureBus();

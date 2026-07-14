@@ -4,17 +4,23 @@ import { Command, Flags } from "@oh-my-pi/pi-utils/cli";
 import { VERSION } from "@oh-my-pi/pi-utils/dirs";
 import { IrcExternalBus, type IrcExternalPeer } from "../irc/bus-external";
 import { SessionControlBus } from "./session-control";
-import { parseSessionListHeaderPrefix } from "./session-listing";
-import { inspectSessionOwnership } from "./session-ownership";
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 const DEFAULT_POLL_INTERVAL_MS = 100;
 
-type SkipReason = "working" | "unsafe-state" | "initiator" | "already-current" | "missing-control-identity";
+type SkipReason = "working" | "unsafe-state" | "initiator" | "already-current" | "legacy";
 type RolloutPeer = IrcExternalPeer & { readonly controlSessionId?: string };
 export type RolloutPlanEntry =
 	| { readonly action: "restart"; readonly peer: RolloutPeer }
 	| { readonly action: "skip"; readonly peer: RolloutPeer; readonly reason: SkipReason };
+
+const SKIP_REASON_REPORT: Record<SkipReason, string> = {
+	working: "working",
+	"unsafe-state": "unsafe-state",
+	initiator: "initiator",
+	"already-current": "already-current",
+	legacy: "legacy binary — restart manually once; future rollouts will manage it",
+};
 
 export interface RolloutSummary {
 	readonly targetDigest: string;
@@ -34,12 +40,14 @@ export function createRolloutPlan(
 		if (initiatorPids.has(peer.pid) || initiatorSessionIds.has(peer.sessionId)) {
 			return { action: "skip", peer, reason: "initiator" };
 		}
+		if (!peer.ownerEpoch || !peer.buildDigest || !peer.version) {
+			return { action: "skip", peer, reason: "legacy" };
+		}
 		if (peer.buildDigest === targetDigest) return { action: "skip", peer, reason: "already-current" };
 		if (peer.state === "working") return { action: "skip", peer, reason: "working" };
 		if (peer.state !== "idle" && peer.state !== "waiting_input") {
 			return { action: "skip", peer, reason: "unsafe-state" };
 		}
-		if (!peer.ownerEpoch) return { action: "skip", peer, reason: "missing-control-identity" };
 		return { action: "restart", peer };
 	});
 }
@@ -68,20 +76,6 @@ export async function executeRolloutPlan(
 	return { restarted };
 }
 
-async function enrichPeerIdentity(peer: IrcExternalPeer): Promise<RolloutPeer> {
-	if ((peer.ownerEpoch && peer.buildDigest && peer.version) || !peer.sessionFile) return peer;
-	const header = parseSessionListHeaderPrefix(await Bun.file(peer.sessionFile).slice(0, 64 * 1024).text());
-	if (!header) return peer;
-	const ownership = await inspectSessionOwnership(peer.sessionFile, header.id);
-	if (ownership.status !== "live") return peer;
-	return {
-		...peer,
-		controlSessionId: header.id,
-		ownerEpoch: peer.ownerEpoch ?? ownership.lease.ownerEpoch,
-		buildDigest: peer.buildDigest ?? ownership.lease.buildRevision?.digest,
-		version: peer.version ?? ownership.lease.buildRevision?.version,
-	};
-}
 
 async function executableDigest(): Promise<string> {
 	const hash = createHash("sha256");
@@ -134,16 +128,14 @@ export async function runRollout(options: RunRolloutOptions = {}): Promise<Rollo
 		const targetDigest = options.targetDigest ?? (await executableDigest());
 		const targetVersion = options.targetVersion ?? VERSION;
 		const initiators = options.initiatorPids ?? (await ancestorPids());
-		const peers = await Promise.all(bus.listPeers().map(enrichPeerIdentity));
+		const peers = bus.listPeers();
 		const entries = createRolloutPlan(peers, targetDigest, initiators, options.initiatorSessionIds);
 		if (options.dryRun) return { targetDigest, targetVersion, entries, restarted: [] };
 		const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 		const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
 		const sourceInstanceId = randomUUID();
 		const result = await executeRolloutPlan(entries, async plannedPeer => {
-			const current = await enrichPeerIdentity(
-				bus.listPeers({ includeStale: true }).find(peer => peer.sessionId === plannedPeer.sessionId) ?? plannedPeer,
-			);
+			const current = (bus.listPeers({ includeStale: true }).find(peer => peer.sessionId === plannedPeer.sessionId) ?? plannedPeer) as RolloutPeer;
 			if (current.state === "working") throw new Error("session became working before restart");
 			if (current.state !== "idle" && current.state !== "waiting_input") {
 				throw new Error(`session entered unsafe state ${current.state}`);
@@ -190,7 +182,7 @@ function printSummary(summary: RolloutSummary, dryRun: boolean): void {
 	process.stdout.write(`rollout target ${summary.targetDigest} (${summary.targetVersion})${dryRun ? " [dry-run]" : ""}\n`);
 	for (const entry of summary.entries) {
 		const identity = `${entry.peer.name} session=${entry.peer.sessionId} pid=${entry.peer.pid} state=${entry.peer.state} version=${entry.peer.version ?? "unknown"} digest=${entry.peer.buildDigest ?? "unknown"}`;
-		if (entry.action === "skip") process.stdout.write(`skip ${identity} reason=${entry.reason}\n`);
+		if (entry.action === "skip") process.stdout.write(`skip ${identity} reason=${SKIP_REASON_REPORT[entry.reason]}\n`);
 		else {
 			const outcome = summary.restarted.includes(entry.peer.sessionId) ? "restarted" : summary.failed?.sessionId === entry.peer.sessionId ? "failed" : dryRun ? "would-restart" : "untouched";
 			process.stdout.write(`${outcome} ${identity}\n`);
