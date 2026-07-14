@@ -17,7 +17,7 @@ Status values: `active`, `next`, `blocked`, `done`, `parked`.
 | T-2026-06-10-071 | Continue Slotok V1 done-goal implementation loop | Codex | Active; follow the canonical plan or source named in the task history. |
 | T-2026-06-19-001 | Build OMP Discord agent-server bridge | Codex | Active; follow the canonical plan or source named in the task history. |
 | T-2026-06-09-005 | Split `packages/web-access` into focused agent-tool/skill packages | Codex | Active; follow the canonical plan or source named in the task history. |
-| T-2026-07-11-001 | Stabilize OMP runtime before further feature work | Arthur conversation / Harness | Active. All continuation slices landed 2026-07-14 overnight; focused union green. Results: `docs/fable/handoffs/2026-07-14-omp-overnight-continuation-results.md`. Remaining: promotion/rollout + quota-reset all-clear broadcast (watcher: tmux `codex-usage-watch`). |
+| T-2026-07-11-001 | Stabilize OMP runtime before further feature work | Arthur conversation / Harness | Active. Overnight slices landed + focused union green; **promoted/blessed `16.0.1+fork.67d50d148fb0`** (receipt `940533…`). Results: `docs/fable/handoffs/2026-07-14-omp-overnight-continuation-results.md`. Remaining: restart running sessions onto the new binary; communal.ai codex credential needs re-login or removal (see friction 2026-07-15); HR-113/HR-114 queued. |
 | T-2026-07-03-001 | Bootstrap sharded Fable session: Companion | Fable | Active; follow the canonical plan or source named in the task history. |
 
 ## Next

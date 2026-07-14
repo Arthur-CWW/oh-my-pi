@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test";
+import { createHash } from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -7,8 +8,10 @@ import {
 	blessedCommitFromVersion,
 	composePromotionReport,
 	decidePromotion,
-	promotionBuildEnvironment,
 	parseBuildRevision,
+	parseInstalledVersion,
+	promotionBuildEnvironment,
+	readInstalledBuildRevision,
 } from "./omp-promote";
 
 const roots: string[] = [];
@@ -49,6 +52,24 @@ describe("blessed build identity", () => {
 		expect(parseBuildRevision(JSON.stringify({ buildDigest: "a".repeat(64), version: `16.0.1+fork.${commit}` }))).toEqual({
 			buildDigest: "a".repeat(64),
 			version: `16.0.1+fork.${commit}`,
+		});
+	});
+
+	it("reads an installed binary via --version without invoking the candidate-only revision probe", async () => {
+		const root = await temporaryRoot();
+		const binary = path.join(root, "omp");
+		const contents = "installed binary bytes";
+		await fs.writeFile(binary, contents);
+		const invocations: Array<{ argv: string[]; cwd: string }> = [];
+		const revision = await readInstalledBuildRevision(binary, root, async (argv, cwd) => {
+			invocations.push({ argv, cwd });
+			return "omp/16.0.1+fork.492695a5acfc";
+		});
+		expect(invocations).toEqual([{ argv: [binary, "--version"], cwd: root }]);
+		expect(parseInstalledVersion("omp/16.0.1+fork.492695a5acfc")).toBe("16.0.1+fork.492695a5acfc");
+		expect(revision).toEqual({
+			buildDigest: createHash("sha256").update(contents).digest("hex"),
+			version: "16.0.1+fork.492695a5acfc",
 		});
 	});
 

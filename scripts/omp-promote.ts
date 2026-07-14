@@ -35,7 +35,7 @@ export function parseBuildRevision(value: string): BuildRevision {
 	try {
 		parsed = JSON.parse(value);
 	} catch {
-		throw new Error("stable binary returned invalid build revision JSON");
+		throw new Error("candidate binary returned invalid build revision JSON");
 	}
 	if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("invalid build revision");
 	const revision = parsed as Record<string, unknown>;
@@ -43,6 +43,12 @@ export function parseBuildRevision(value: string): BuildRevision {
 	if (typeof revision.buildDigest !== "string" || !SHA256.test(revision.buildDigest)) throw new Error("invalid build digest");
 	if (typeof revision.version !== "string" || revision.version.length === 0) throw new Error("invalid build version");
 	return revision as unknown as BuildRevision;
+}
+
+export function parseInstalledVersion(value: string): string {
+	const match = /^omp\/(\S+)$/.exec(value);
+	if (!match) throw new Error("stable binary returned invalid version");
+	return match[1];
 }
 
 export function promotionBuildEnvironment(environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
@@ -96,8 +102,18 @@ export function composePromotionReport(
 	return { ...report, incompleteLine: `ROLLOUT incomplete: ${reason}` };
 }
 
-async function readBuildRevision(binary: string, cwd: string): Promise<BuildRevision> {
+async function readCandidateBuildRevision(binary: string, cwd: string): Promise<BuildRevision> {
 	return parseBuildRevision(await run([binary, "--runner-build-revision"], cwd));
+}
+
+export async function readInstalledBuildRevision(
+	binary: string,
+	cwd: string,
+	invoke: (argv: string[], cwd: string) => Promise<string> = run,
+): Promise<BuildRevision> {
+	const version = parseInstalledVersion(await invoke([binary, "--version"], cwd));
+	const buildDigest = await sha256(binary);
+	return { buildDigest, version };
 }
 
 async function sha256(file: string): Promise<string> {
@@ -239,7 +255,7 @@ export async function promote(config: Config = configFromEnvironment()): Promise
 	let noteTemporary: string | undefined;
 	try {
 		const head = await run(["git", "rev-parse", "HEAD"], config.repoRoot);
-		const stableRevision = await readBuildRevision(stable, config.repoRoot);
+		const stableRevision = await readInstalledBuildRevision(stable, config.repoRoot);
 		const blessedCommit = blessedCommitFromVersion(stableRevision.version);
 		const initialDecision = decidePromotion(await vendorChanged(config.repoRoot, blessedCommit, head), "not-run");
 		if (initialDecision.kind === "noop") {
@@ -266,7 +282,7 @@ export async function promote(config: Config = configFromEnvironment()): Promise
 		const digest = await sha256(builtBinary);
 		await run(["bash", linkScript, "candidate", builtBinary], fork, { ...linkEnvironment, OMP_LINK_REPO_ROOT: fork });
 		const candidate = path.join(config.binDir, ".omp-releases", `omp-${digest}`);
-		const revision = await readBuildRevision(candidate, fork);
+		const revision = await readCandidateBuildRevision(candidate, fork);
 		if (revision.buildDigest !== digest) throw new Error("materialized candidate identity does not match its digest");
 
 		const receiptDir = path.join(config.repoRoot, "vendor", "oh-my-pi", "local");
