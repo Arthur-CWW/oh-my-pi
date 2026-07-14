@@ -18,6 +18,7 @@ import type { Settings } from "../config/settings";
 import type { RenderResultOptions } from "../extensibility/custom-tools/types";
 import { IrcBus, type IrcDeliveryReceipt, type IrcDeliveryRecord, type IrcMessage } from "../irc/bus";
 import { getIrcExternalPeerDisplayState, IrcExternalBus, resolveIrcExternalPeerName } from "../irc/bus-external";
+import { renderTranscriptBodyLines } from "../modes/components/transcript-body";
 import type { Theme } from "../modes/theme/theme";
 import ircDescription from "../prompts/tools/irc.md" with { type: "text" };
 import type { AgentRegistry } from "../registry/agent-registry";
@@ -28,7 +29,6 @@ import {
 	createCachedComponent,
 	formatBadge,
 	formatErrorDetail,
-	getPreviewLines,
 	PREVIEW_LIMITS,
 	replaceTabs,
 	type ToolUIColor,
@@ -510,10 +510,6 @@ function normalizeIrcTimeoutMs(value: number): number {
 
 type IrcRenderArgs = Partial<IrcParams>;
 
-const BODY_LINES_COLLAPSED = 2;
-const BODY_LINES_EXPANDED = 12;
-const BODY_LINE_WIDTH = 100;
-
 const PEER_STATUS_ORDER: Record<string, number> = {
 	running: 0,
 	working: 0,
@@ -575,31 +571,6 @@ function textContent(result: { content: Array<{ type: string; text?: string }> }
 	return result.content.find(part => part.type === "text")?.text?.trim() ?? "";
 }
 
-/**
- * Quote-bordered message body preview. `tone` separates outbound text (dim)
- * from received text (toolOutput); a trailing dim counter marks elided lines.
- */
-function bodyLines(
-	body: string,
-	expanded: boolean,
-	theme: Theme,
-	options: { indent?: string; tone?: "dim" | "toolOutput"; collapsedLines?: number } = {},
-): string[] {
-	const indent = options.indent ?? "";
-	const tone = options.tone ?? "toolOutput";
-	const max = expanded ? BODY_LINES_EXPANDED : (options.collapsedLines ?? BODY_LINES_COLLAPSED);
-	const total = body.split("\n").filter(line => line.trim()).length;
-	const quote = theme.fg("dim", theme.md.quoteBorder);
-	const lines = getPreviewLines(body, max, BODY_LINE_WIDTH, Ellipsis.Unicode).map(
-		line => `${indent}${quote} ${theme.fg(tone, replaceTabs(line))}`,
-	);
-	const hidden = total - Math.min(total, max);
-	if (hidden > 0) {
-		lines.push(`${indent}${quote} ${theme.fg("dim", `… +${hidden} more ${hidden === 1 ? "line" : "lines"}`)}`);
-	}
-	return lines;
-}
-
 /** Header title carrying the op direction: `IRC ➤ peer` out, `IRC ⟵ peer` in. */
 function callTitle(args: IrcRenderArgs | undefined, theme: Theme): string {
 	switch (args?.op) {
@@ -646,6 +617,7 @@ export function createIrcMessageCard(
 	},
 	getExpanded: () => boolean,
 	uiTheme: Theme,
+	getWrap?: () => boolean,
 ): Component {
 	const from = card.from?.trim() || "?";
 	const title =
@@ -664,10 +636,19 @@ export function createIrcMessageCard(
 		getExpanded,
 		(width, expanded) => {
 			const lines = [renderStatusLine({ iconOverride: ircGlyph(uiTheme), title, meta }, uiTheme)];
+			const wrap = getWrap?.() ?? false;
 			if (body.trim()) {
-				lines.push(...bodyLines(body, expanded, uiTheme, { indent: "  ", collapsedLines: 3 }));
+				lines.push(
+					...renderTranscriptBodyLines(body, expanded, uiTheme, {
+						indent: "  ",
+						collapsedLines: 3,
+						wrapWidth: wrap ? Math.max(1, width - 4) : undefined,
+					}),
+				);
 			}
-			return lines.map(line => truncateToWidth(line, width, Ellipsis.Unicode));
+			return wrap
+				? [truncateToWidth(lines[0], width, Ellipsis.Unicode), ...lines.slice(1)]
+				: lines.map(line => truncateToWidth(line, width, Ellipsis.Unicode));
 		},
 		{ paddingX: 1 },
 	);
@@ -717,7 +698,7 @@ function renderSendResult(
 	const lines = [renderStatusLine({ ...icon, title, meta }, theme)];
 
 	const sent = args?.message?.trim();
-	if (sent) lines.push(...bodyLines(sent, expanded, theme, { indent: "  ", tone: "dim" }));
+	if (sent) lines.push(...renderTranscriptBodyLines(sent, expanded, theme, { indent: "  ", tone: "dim" }));
 
 	if (receipts.length > 1 || failedCount > 0) {
 		lines.push(
@@ -746,7 +727,7 @@ function renderSendResult(
 		lines.push(
 			`  ${theme.fg("dim", theme.nav.back)} ${theme.fg("accent", waited.from)}${age ? ` ${theme.fg("dim", age)}` : ""}`,
 		);
-		lines.push(...bodyLines(waited.body, expanded, theme, { indent: "  " }));
+		lines.push(...renderTranscriptBodyLines(waited.body, expanded, theme, { indent: "  " }));
 	} else if (timedOut) {
 		lines.push(`  ${theme.fg("warning", "No reply yet — they may answer later; check inbox or wait again.")}`);
 	}
@@ -775,7 +756,7 @@ function renderWaitResult(
 	if (waited.replyTo) meta.push("reply");
 	return [
 		renderStatusLine({ iconOverride: ircGlyph(theme), title: `IRC ${theme.nav.back} ${waited.from}`, meta }, theme),
-		...bodyLines(waited.body, expanded, theme, { indent: "  " }),
+		...renderTranscriptBodyLines(waited.body, expanded, theme, { indent: "  " }),
 	];
 }
 
@@ -802,7 +783,7 @@ function renderInboxResult(
 				const age = messageAge(msg.ts);
 				const replyBadge = msg.replyTo ? ` ${formatBadge("reply", "muted", theme)}` : "";
 				const head = `${theme.fg("accent", msg.from)}${age ? ` ${theme.fg("dim", age)}` : ""}${replyBadge}`;
-				return [head, ...bodyLines(msg.body, expanded, theme, { collapsedLines: 1 })];
+				return [head, ...renderTranscriptBodyLines(msg.body, expanded, theme, { collapsedLines: 1 })];
 			},
 		},
 		theme,
@@ -885,7 +866,13 @@ export const ircToolRenderer = {
 			renderStatusLine({ icon: "pending", title: callTitle(args, uiTheme), meta: callMeta(args) }, uiTheme),
 		];
 		if (args?.op === "send" && args.message?.trim()) {
-			lines.push(...bodyLines(args.message, false, uiTheme, { indent: "  ", tone: "dim", collapsedLines: 1 }));
+			lines.push(
+				...renderTranscriptBodyLines(args.message, false, uiTheme, {
+					indent: "  ",
+					tone: "dim",
+					collapsedLines: 1,
+				}),
+			);
 		}
 		return new Text(lines.join("\n"), 0, 0);
 	},

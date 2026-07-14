@@ -145,6 +145,8 @@ export interface InteractiveModeContext {
 	// State
 	isInitialized: boolean;
 	transcriptMode: TranscriptMode;
+	transcriptWrap: boolean;
+	richTranscript: boolean;
 	isBashMode: boolean;
 	toolOutputExpanded: boolean;
 	todoExpanded: boolean;

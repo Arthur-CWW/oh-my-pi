@@ -301,7 +301,6 @@ export class EventController {
 				// addMessageToChat lets later events (assistant message_start, tool execution
 				// start/end) append their components first and scramble transcript order /
 				// live-region block boundaries. addMessageToChat materializes clickable image
-				// links via the synchronous putBlobSync fallback, so no await is needed here.
 				this.ctx.addMessageToChat(event.message);
 			}
 			if (wasOptimistic) {
@@ -333,6 +332,7 @@ export class EventController {
 				() => this.ctx.ui.requestComponentRender(streamingComponent),
 				this.ctx.viewSession.extensionRunner?.getAssistantThinkingRenderers(),
 				this.ctx.ui.imageBudget,
+				this.ctx.richTranscript,
 			);
 			this.ctx.streamingComponent = streamingComponent;
 			this.ctx.streamingMessage = event.message;

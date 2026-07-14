@@ -55,10 +55,10 @@ export class AssistantMessageComponent extends Container {
 	/** Whether the last updateContent carried an in-flight streaming partial; such
 	 *  renders bypass the markdown module LRU (see Markdown.transientRenderCache). */
 	#lastUpdateTransient = false;
-	// Fast-path state: reuse Markdown children when message shape is stable during streaming.
+	// Fast-path state: reuse text renderers when message shape is stable during streaming.
 	#fastPathKey: string | undefined;
 	#fastPathItems:
-		| Array<{ md: Markdown; contentIndex: number; blockType: "text" | "thinking"; lastText: string }>
+		| Array<{ component: Markdown | Text; contentIndex: number; blockType: "text" | "thinking"; lastText: string }>
 		| undefined;
 	/** Live "thinking" pulse shown in place of a hidden thinking block while it
 	 *  streams; undefined when not animating. Driven by {@link #thinkingDotsTimer}. */
@@ -72,6 +72,7 @@ export class AssistantMessageComponent extends Container {
 		private readonly onImageUpdate?: () => void,
 		private readonly thinkingRenderers: readonly AssistantThinkingRenderer[] = [],
 		private readonly imageBudget?: ImageBudget,
+		private richRendering = true,
 	) {
 		super();
 		this.#transcriptBlockFinalized = message !== undefined;
@@ -100,6 +101,14 @@ export class AssistantMessageComponent extends Container {
 
 	setHideThinkingBlock(hide: boolean): void {
 		this.hideThinkingBlock = hide;
+	}
+
+	setRichRendering(rich: boolean): void {
+		if (this.richRendering === rich) return;
+		this.richRendering = rich;
+		this.#fastPathKey = undefined;
+		this.#fastPathItems = undefined;
+		if (this.#lastMessage) this.updateContent(this.#lastMessage, { transient: this.#lastUpdateTransient });
 	}
 
 	override dispose(): void {
@@ -310,7 +319,7 @@ export class AssistantMessageComponent extends Container {
 	}
 
 	#computeShapeKey(message: AssistantMessage): string {
-		const parts: string[] = [`htb:${this.hideThinkingBlock ? 1 : 0}`];
+		const parts: string[] = [`htb:${this.hideThinkingBlock ? 1 : 0}`, `rich:${this.richRendering ? 1 : 0}`];
 		for (const content of message.content) {
 			if (content.type === "text") {
 				parts.push(canonicalizeMessage(content.text) ? "T1" : "T0");
@@ -370,9 +379,9 @@ export class AssistantMessageComponent extends Container {
 			return false;
 		}
 		const transient = opts?.transient === true;
-		// Shape is identical — setText only on Markdown children whose source changed.
+		// Shape is identical — update only children whose source changed.
 		for (const item of this.#fastPathItems) {
-			item.md.transientRenderCache = transient;
+			if (item.component instanceof Markdown) item.component.transientRenderCache = transient;
 			const content = message.content[item.contentIndex];
 			if (!content) {
 				this.#fastPathKey = undefined;
@@ -390,7 +399,7 @@ export class AssistantMessageComponent extends Container {
 				return false;
 			}
 			if (newText !== item.lastText) {
-				item.md.setText(newText);
+				item.component.setText(newText);
 				item.lastText = newText;
 			}
 		}
@@ -415,10 +424,10 @@ export class AssistantMessageComponent extends Container {
 		this.#contentContainer.clear();
 		this.#thinkingDots = undefined;
 
-		// Determine if we should capture Markdown instances for next fast path
+		// Capture text renderer instances for the next fast path.
 		const shouldCapture = this.#canFastPath(message);
 		const captureItems:
-			| Array<{ md: Markdown; contentIndex: number; blockType: "text" | "thinking"; lastText: string }>
+			| Array<{ component: Markdown | Text; contentIndex: number; blockType: "text" | "thinking"; lastText: string }>
 			| undefined = shouldCapture ? [] : undefined;
 
 		const hasVisibleContent = message.content.some(
@@ -434,10 +443,12 @@ export class AssistantMessageComponent extends Container {
 			if (content.type === "text" && canonicalizeMessage(content.text)) {
 				// Set paddingY=0 to avoid extra spacing before tool executions
 				const trimmed = content.text.trim();
-				const md = new Markdown(trimmed, 1, 0, getMarkdownTheme());
-				md.transientRenderCache = this.#lastUpdateTransient;
-				this.#contentContainer.addChild(md);
-				captureItems?.push({ md, contentIndex: i, blockType: "text", lastText: trimmed });
+				const component = this.richRendering
+					? new Markdown(trimmed, 1, 0, getMarkdownTheme())
+					: new Text(trimmed, 1, 0);
+				if (component instanceof Markdown) component.transientRenderCache = this.#lastUpdateTransient;
+				this.#contentContainer.addChild(component);
+				captureItems?.push({ component, contentIndex: i, blockType: "text", lastText: trimmed });
 			} else if (content.type === "thinking") {
 				const thinkingText = normalizeThinkingDisplay(content.thinking);
 				if (!thinkingText) continue;
@@ -456,13 +467,15 @@ export class AssistantMessageComponent extends Container {
 					);
 
 				// Thinking traces in thinkingText color, italic
-				const md = new Markdown(thinkingText, 1, 0, getMarkdownTheme(), {
-					color: (text: string) => theme.fg("thinkingText", text),
-					italic: true,
-				});
-				md.transientRenderCache = this.#lastUpdateTransient;
-				this.#contentContainer.addChild(md);
-				captureItems?.push({ md, contentIndex: i, blockType: "thinking", lastText: thinkingText });
+				const component = this.richRendering
+					? new Markdown(thinkingText, 1, 0, getMarkdownTheme(), {
+							color: (text: string) => theme.fg("thinkingText", text),
+							italic: true,
+						})
+					: new Text(theme.fg("thinkingText", thinkingText), 1, 0);
+				if (component instanceof Markdown) component.transientRenderCache = this.#lastUpdateTransient;
+				this.#contentContainer.addChild(component);
+				captureItems?.push({ component, contentIndex: i, blockType: "thinking", lastText: thinkingText });
 				this.#appendThinkingExtensions(i, thinkingIndex, thinkingText);
 				thinkingIndex += 1;
 				if (hasVisibleContentAfter) {

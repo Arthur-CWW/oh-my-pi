@@ -1,0 +1,40 @@
+
+╭─── omp v16.0.1 ──────────────────────────────────────────────────────────────────────────────────╮
+│                          │ Tips                                                                  │
+│      Welcome back!       │ ? for keyboard shortcuts                                              │
+│                          │ # for prompt actions                                                  │
+│       ▀██████████▀       │ / for commands                                                        │
+│        ╘██    ██         │ ! to run bash                                                         │
+│         ██    ██         │ $ to run python                                                       │
+│         ██    ██         │ ───────────────────────────────────────────────────────────────────── │
+│        ▄██▄  ▄██▄        │ LSP Servers                                                           │
+│                          │ No LSP servers                                                        │
+│         Unknown          │                                                                       │
+│         Unknown          │                                                                       │
+│                          │                                                                       │
+│                          │ ───────────────────────────────────────────────────────────────────── │
+│                          │ Recent sessions                                                       │
+│                          │ • Untitled · 10:00 AM (just now)                                      │
+│                          │                                                                       │
+│                          │                                                                       │
+│                          │                                                                       │
+│                          │                                                                       │
+╰──────────────────────────┴───────────────────────────────────────────────────────────────────────╯
+ Tip: Try task isolation to create CoW worktrees
+
+ ✉ IRC ⟵ WrapProof 2h ago
+   ▏ word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word
+
+ Warning: No models available. Use /login or set an API key environment variable. Then use /model to select a model.
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Update Available
+ New version 16.5.0 is available. Run: omp update
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+ Transcript wrapping: on
+
+╭── π  > ⬢ no-model > 🗑 omp-command-mode-proof/work > ◫ ?/0 ⟲ ▶────────────────────────────────────────────────────────────────────────────────────────────────╮
+╰─                                                                                                                                                            ─╯
+
+

@@ -388,9 +388,10 @@ export class InteractiveMode implements InteractiveModeContext {
 	hookWidgetContainerAbove: Container;
 	hookWidgetContainerBelow: Container;
 	statusLine: StatusLineComponent;
-
 	isInitialized = false;
 	transcriptMode: TranscriptMode = "rich";
+	transcriptWrap = false;
+	richTranscript = true;
 	isBashMode = false;
 	toolOutputExpanded = false;
 	todoExpanded = false;

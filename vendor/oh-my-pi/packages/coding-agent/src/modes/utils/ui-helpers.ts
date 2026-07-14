@@ -3,7 +3,6 @@ import type { AssistantMessage, ImageContent, Message, Usage } from "@oh-my-pi/p
 import { type Component, Spacer, Text, TruncatedText } from "@oh-my-pi/pi-tui";
 import type { AdvisorMessageDetails } from "../../advisor";
 import { COLLAB_PROMPT_MESSAGE_TYPE } from "../../collab/protocol";
-import type { CollabPromptDetails } from "../collab-presentation-types";
 import { settings } from "../../config/settings";
 import { getFileSnapshotStore } from "../../edit/file-snapshot-store";
 import { createAdvisorMessageCard } from "../../modes/components/advisor-message";
@@ -49,6 +48,7 @@ import type { SessionContext } from "../../session/session-context";
 import { createIrcMessageCard } from "../../tools/irc";
 import { formatBytes, formatDuration } from "../../tools/render-utils";
 import { canonicalizeMessage, normalizeThinkingDisplay } from "../../utils/thinking-display";
+import type { CollabPromptDetails } from "../collab-presentation-types";
 
 type TextBlock = { type: "text"; text: string };
 interface RenderInitialMessagesOptions {
@@ -239,6 +239,7 @@ export class UiHelpers {
 							},
 							() => this.ctx.toolOutputExpanded,
 							theme,
+							() => this.ctx.transcriptWrap,
 						);
 						this.ctx.chatContainer.addChild(card);
 						return [card];
@@ -317,7 +318,12 @@ export class UiHelpers {
 							message,
 							this.ctx.viewSession.sessionManager.putBlobSync.bind(this.ctx.viewSession.sessionManager),
 						);
-					const userComponent = new UserMessageComponent(textContent, isSynthetic, imageLinks);
+					const userComponent = new UserMessageComponent(
+						textContent,
+						isSynthetic,
+						imageLinks,
+						this.ctx.richTranscript,
+					);
 					this.ctx.chatContainer.addChild(userComponent);
 					if (options?.populateHistory && message.role === "user" && !isSynthetic) {
 						this.ctx.editor.addToHistory(textContent);
@@ -333,6 +339,7 @@ export class UiHelpers {
 					() => this.ctx.ui.requestComponentRender(assistantComponent),
 					this.ctx.viewSession.extensionRunner?.getAssistantThinkingRenderers(),
 					this.ctx.ui.imageBudget,
+					this.ctx.richTranscript,
 				);
 				this.ctx.chatContainer.addChild(assistantComponent);
 				break;
@@ -681,7 +688,11 @@ export class UiHelpers {
 			durablePayloadCounts.set(key, (durablePayloadCounts.get(key) ?? 0) + 1);
 		}
 		const durableInputs = durableProjection.filter(
-			input => input.state !== "admitted" && input.state !== "running" && input.state !== "completed" && input.state !== "cancelled",
+			input =>
+				input.state !== "admitted" &&
+				input.state !== "running" &&
+				input.state !== "completed" &&
+				input.state !== "cancelled",
 		);
 
 		const legacyEntries: Array<{ deliveryClass: "steer" | "followUp"; text: string }> = [];
