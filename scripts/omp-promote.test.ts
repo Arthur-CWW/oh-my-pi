@@ -7,6 +7,7 @@ import {
 	blessedCommitFromVersion,
 	composePromotionReport,
 	decidePromotion,
+	promotionBuildEnvironment,
 	parseBuildRevision,
 } from "./omp-promote";
 
@@ -20,6 +21,12 @@ async function temporaryRoot(): Promise<string> {
 
 afterEach(async () => {
 	await Promise.all(roots.splice(0).map(root => fs.rm(root, { recursive: true, force: true })));
+});
+
+describe("promotion build environment", () => {
+	it("lets the fork rust-toolchain pin override an ambient toolchain", () => {
+		expect(promotionBuildEnvironment({ HOME: "/tmp/home", RUSTUP_TOOLCHAIN: "stable" })).toEqual({ HOME: "/tmp/home" });
+	});
 });
 
 describe("promotion decision", () => {

@@ -45,6 +45,12 @@ export function parseBuildRevision(value: string): BuildRevision {
 	return revision as unknown as BuildRevision;
 }
 
+export function promotionBuildEnvironment(environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+	const buildEnvironment = { ...environment };
+	delete buildEnvironment.RUSTUP_TOOLCHAIN;
+	return buildEnvironment;
+}
+
 export interface PromotionCommandResult {
 	exitCode: number;
 	stdout: string;
@@ -250,7 +256,7 @@ export async function promote(config: Config = configFromEnvironment()): Promise
 		if ((await fs.lstat(path.join(fork, "node_modules"))).isSymbolicLink()) {
 			throw new Error("isolated install produced a symlinked node_modules");
 		}
-		await run(["bun", "run", "build:native"], fork);
+		await run(["bun", "run", "build:native"], fork, promotionBuildEnvironment(process.env));
 		await run(["bun", "--cwd=packages/coding-agent", "run", "generate"], fork);
 		await run(["bun", "--cwd=packages/coding-agent", "run", "check:types"], fork);
 		await run(["bun", "test", "scripts/link-omp.test.ts"], fork);
