@@ -437,6 +437,75 @@ describe("VimLiteEditor", () => {
     press(editor, "gx")
     expect(editor.getText()).toBe(`${pasted}\n[Paste #1, +12 lines]`)
   })
+
+  test("za expands the paste pill at the normal cursor and renders raw text", () => {
+    const editor = createEditor()
+    const pasted = largePasteText()
+
+    editor.handleInput(`\x1b[200~${pasted}\x1b[201~`)
+    editor.handleInput("\x1b")
+    press(editor, "za")
+
+    expect(editor.getText()).toBe(pasted)
+    expect(renderContentLines(editor)).toContain("line-12")
+  })
+
+  test("za collapse preserves edits as the expanded paste content", () => {
+    const editor = createEditor()
+    const pasted = largePasteText()
+
+    editor.handleInput(`\x1b[200~${pasted}\x1b[201~`)
+    editor.handleInput("\x1b")
+    press(editor, "za")
+    press(editor, "gg0i")
+    press(editor, "edited-")
+    editor.handleInput("\x1b")
+    press(editor, "za")
+
+    expect(editor.getText()).toBe("[Paste #1, +12 lines]")
+    expect(editor.getExpandedText()).toBe(`edited-${pasted}`)
+  })
+
+  test("za collapse and expansion both round-trip through undo and redo", () => {
+    const editor = createEditor()
+    const pasted = largePasteText()
+    const marker = "[Paste #1, +12 lines]"
+
+    editor.handleInput(`\x1b[200~${pasted}\x1b[201~`)
+    editor.handleInput("\x1b")
+    press(editor, "za")
+    expect(editor.getText()).toBe(pasted)
+    press(editor, "u")
+    expect(editor.getText()).toBe(marker)
+    press(editor, "\x12")
+    expect(editor.getText()).toBe(pasted)
+
+    press(editor, "gg0i")
+    press(editor, "edited-")
+    editor.handleInput("\x1b")
+    press(editor, "za")
+    press(editor, "u")
+    expect(editor.getText()).toBe(`edited-${pasted}`)
+    press(editor, "\x12")
+    expect(editor.getText()).toBe(marker)
+    expect(editor.getExpandedText()).toBe(`edited-${pasted}`)
+  })
+
+  test("za is a no-op without a paste at the normal cursor", () => {
+    const editor = createEditor()
+    editor.setText("plain text")
+    editor.handleInput("\x1b")
+    const before = renderSnapshot(editor)
+    press(editor, "za")
+    expect(editor.getText()).toBe("plain text")
+    expect(renderSnapshot(editor)).toBe(before)
+
+    const visual = createEditor()
+    visual.setText("plain text")
+    visual.handleInput("\x1b")
+    press(visual, "vza")
+    expect(visual.getText()).toBe("plain text")
+  })
   test("normal mode line motions stay logical before word motions on wrapped input", () => {
     const editor = createEditor()
     editor.setText(`${`firstword ${"longword ".repeat(12)}tail`}\nsecond alpha beta\nthird gamma delta`)
