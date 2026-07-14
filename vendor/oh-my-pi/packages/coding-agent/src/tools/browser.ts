@@ -223,6 +223,8 @@ export class BrowserTool implements AgentTool<typeof browserSchema, BrowserToolD
 		signal?: AbortSignal,
 	): Promise<AgentToolResult<BrowserToolDetails>> {
 		const kind = resolveBrowserKind(params, this.session);
+		const sessionId = this.session.getSessionId?.();
+		if (!sessionId) throw new ToolError("Browser launch requires an active session ID");
 		details.browser = kind.kind;
 
 		// If a tab with this name already exists on a different browser kind, fail fast — caller must close first.
@@ -236,6 +238,7 @@ export class BrowserTool implements AgentTool<typeof browserSchema, BrowserToolD
 		const browser = await untilAborted(signal, () =>
 			acquireBrowser(kind, {
 				cwd: this.session.cwd,
+				sessionId,
 				viewport: params.viewport
 					? {
 							width: params.viewport.width,

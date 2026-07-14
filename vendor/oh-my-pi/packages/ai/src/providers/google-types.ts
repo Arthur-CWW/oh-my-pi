@@ -36,7 +36,7 @@ export type FunctionCallingConfigMode = "MODE_UNSPECIFIED" | "AUTO" | "NONE" | "
 /** Mirror of `@google/genai`'s `ThinkingLevel` string enum. */
 export type ThinkingLevel = "THINKING_LEVEL_UNSPECIFIED" | "MINIMAL" | "LOW" | "MEDIUM" | "HIGH";
 
-/** Inline base64-encoded data part. */
+/** Inline base64-encoded image or video data part. */
 export interface InlineDataPart {
 	mimeType: string;
 	data: string;

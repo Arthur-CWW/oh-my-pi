@@ -31,9 +31,10 @@ import {
 	type SubmitReviewDetails,
 } from "../tools/review";
 import { framedBlock, renderStatusLine } from "../tui";
+import { COLLAPSED_AGENT_LIMIT, formatTaskId, renderTaskCallLines } from "./render-rows";
 import { repairDoubleEncodedJsonString } from "./repair-args";
 import { subprocessToolRegistry } from "./subprocess-tool-registry";
-import type { AgentProgress, SingleResult, TaskItem, TaskParams, TaskToolDetails } from "./types";
+import type { AgentProgress, SingleResult, TaskParams, TaskToolDetails } from "./types";
 
 /** Render context threaded in from `ToolExecutionComponent.#buildRenderContext`. */
 interface TaskRenderContext {
@@ -172,12 +173,7 @@ function formatJsonScalar(value: unknown, _theme: Theme): string {
 	return "";
 }
 
-export function formatTaskId(id: string): string {
-	// Ids are name-based (e.g. "Anna", "Anna-2"); a "." separates nesting levels
-	// (e.g. "Anna.Bob"). Render the hierarchy with a ">" breadcrumb.
-	const segments = id.split(".");
-	return segments.length < 2 ? id : segments.join(">");
-}
+export { formatTaskId } from "./render-rows";
 
 const MISSING_YIELD_WARNING_PREFIX = "SYSTEM WARNING: Subagent exited without calling yield tool";
 
@@ -524,67 +520,6 @@ function formatOutputInline(data: unknown, theme: Theme, maxWidth = 80): string 
 	}
 
 	return `Output: ${pairs.join(", ")}`;
-}
-
-/**
- * Render the call preview lines for the single spawned agent. The
- * args stream in token by token, so every field access is defensive.
- */
-function renderTaskCallLines(args: Partial<TaskParams> | undefined, theme: Theme): string[] {
-	if (!args) return [];
-	const bullet = theme.fg("dim", "•");
-	const lines: string[] = [];
-
-	const rawId = typeof args.id === "string" ? args.id.trim() : "";
-	const idLabel = rawId ? formatTaskId(rawId) : "";
-	const desc = typeof args.description === "string" ? args.description.trim() : "";
-	if (idLabel || desc) {
-		let line = `${bullet} ${theme.fg("accent", theme.bold(idLabel || "agent"))}`;
-		if (desc) {
-			line += `: ${theme.fg("muted", truncateToWidth(replaceTabs(desc), 64))}`;
-		}
-		lines.push(line);
-	}
-	lines.push(...renderTaskItemLines(args.tasks, theme));
-	return lines;
-}
-
-/**
- * Agent rows shown per collapsed task list; the rest fold into a single
- * `… N more agents` summary line (expand uncaps).
- */
-const COLLAPSED_AGENT_LIMIT = 4;
-
-/**
- * Render the per-item list (`id` + ui `description`) for a batch call's
- * streaming preview. The args stream in token by token, so the array grows
- * over time and trailing entries may be partially parsed — every field access
- * is defensive.
- */
-function renderTaskItemLines(tasks: TaskItem[] | undefined, theme: Theme): string[] {
-	if (!Array.isArray(tasks) || tasks.length === 0) return [];
-
-	const bullet = theme.fg("dim", "•");
-	const cap = Math.min(tasks.length, COLLAPSED_AGENT_LIMIT);
-	const lines: string[] = [];
-	for (let i = 0; i < cap; i++) {
-		const task = tasks[i] as Partial<TaskItem> | undefined;
-		const rawId = typeof task?.id === "string" ? task.id.trim() : "";
-		const idLabel = rawId ? formatTaskId(rawId) : `#${i + 1}`;
-		let line = `${bullet} ${theme.fg("accent", theme.bold(idLabel))}`;
-		const desc = typeof task?.description === "string" ? task.description.trim() : "";
-		if (desc) {
-			line += `: ${theme.fg("muted", truncateToWidth(replaceTabs(desc), 64))}`;
-		}
-		if (task?.isolated === true) {
-			line += theme.fg("dim", " [isolated]");
-		}
-		lines.push(line);
-	}
-	if (cap < tasks.length) {
-		lines.push(`${bullet} ${theme.fg("dim", formatMoreItems(tasks.length - cap, "agent"))}`);
-	}
-	return lines;
 }
 
 /** One renderable frame section: optional label, body rows, leading divider. */
@@ -1181,6 +1116,57 @@ function renderAgentResult(
 
 	return lines;
 }
+interface CachedProgressRows {
+	theme: Theme;
+	expanded: boolean;
+	spinnerFrame?: number;
+	frozen: boolean;
+	showResolvedModelBadge: boolean;
+	lines: readonly string[];
+}
+
+const progressRowsBySnapshot = new WeakMap<AgentProgress, CachedProgressRows>();
+let progressRowRebuilds = 0;
+
+export function getTaskProgressRenderPerformanceCounters(): { rowRebuilds: number } {
+	return { rowRebuilds: progressRowRebuilds };
+}
+
+export function resetTaskProgressRenderPerformanceCounters(): void {
+	progressRowRebuilds = 0;
+}
+
+function renderCachedAgentProgress(
+	progress: AgentProgress,
+	expanded: boolean,
+	theme: Theme,
+	spinnerFrame: number | undefined,
+	frozen: boolean,
+): readonly string[] {
+	const showResolvedModelBadge = settings.get("task.showResolvedModelBadge");
+	const cached = progressRowsBySnapshot.get(progress);
+	if (
+		cached &&
+		cached.theme === theme &&
+		cached.expanded === expanded &&
+		cached.spinnerFrame === spinnerFrame &&
+		cached.frozen === frozen &&
+		cached.showResolvedModelBadge === showResolvedModelBadge
+	) {
+		return cached.lines;
+	}
+	const lines = renderAgentProgress(progress, "", "  ", expanded, theme, spinnerFrame, frozen);
+	progressRowsBySnapshot.set(progress, {
+		theme,
+		expanded,
+		spinnerFrame,
+		frozen,
+		showResolvedModelBadge,
+		lines,
+	});
+	progressRowRebuilds++;
+	return lines;
+}
 
 /**
  * Order live progress entries so finished agents render first — sorted by
@@ -1343,7 +1329,7 @@ export function renderResult(
 				lines.push(formatHiddenProgressLine(ordered.slice(0, ordered.length - visible.length), theme));
 			}
 			for (const progress of visible) {
-				lines.push(...renderAgentProgress(progress, "", "  ", expanded, theme, spinnerFrame, frozen));
+				lines.push(...renderCachedAgentProgress(progress, expanded, theme, spinnerFrame, frozen));
 			}
 		} else if (details.results && details.results.length > 0) {
 			const ordered = orderResultsForDisplay(details.results);

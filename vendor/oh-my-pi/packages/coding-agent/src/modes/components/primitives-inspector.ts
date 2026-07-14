@@ -449,7 +449,7 @@ export class PrimitivesInspectorOverlayComponent extends Container {
 				"h/←          back",
 				"/            filter current level",
 				"Esc          clear filter, unwind one level, then close",
-				"alt+i        toggle inspector (also /inspect)",
+				"alt+i        toggle inspector (also :inspect)",
 				"?            close this help",
 				"",
 				"Read-only v0: this surface never mutates tools, skills, feeds, memories, stores, or settings.",
@@ -511,7 +511,7 @@ export class PrimitivesInspectorOverlayComponent extends Container {
 			lines.push(` ${leftCell} ${theme.fg("dim", "│")} ${rightCell}`);
 		}
 		lines.push(
-			` ${theme.fg("dim", "j/k navigate · l/Enter drill · h back · / filter · Esc unwind · ? help · /inspect or alt+i toggle")}`,
+			` ${theme.fg("dim", "j/k navigate · l/Enter drill · h back · / filter · Esc unwind · ? help · :inspect or alt+i toggle")}`,
 		);
 		lines.push(...new DynamicBorder().render(safeWidth));
 		return lines;

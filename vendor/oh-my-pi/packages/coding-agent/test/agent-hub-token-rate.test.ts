@@ -19,6 +19,17 @@ function journalMessage(message: object, id: string): string {
 function renderText(hub: AgentHubOverlayComponent, width = 160): string {
 	return Bun.stripANSI(hub.render(width).join("\n"));
 }
+
+async function waitForText(hub: AgentHubOverlayComponent, expected: string): Promise<string> {
+	const deadline = Date.now() + 1_000;
+	let rendered = renderText(hub);
+	while (!rendered.includes(expected)) {
+		if (Date.now() >= deadline) throw new Error(`Timed out waiting for ${expected}`);
+		await Bun.sleep(10);
+		rendered = renderText(hub);
+	}
+	return rendered;
+}
 async function fixture(
 	options: { status?: AgentStatus; output?: number; duration?: number; liveEvidence?: boolean } = {},
 ) {
@@ -220,8 +231,7 @@ describe("Agent Hub live token rate preview", () => {
 
 			await view.completeLive("handoff sentinel");
 			view.emit({ type: "message_end", message: { role: "assistant" } });
-			await Bun.sleep(100);
-			const completed = renderText(view.hub);
+			const completed = await waitForText(view.hub, "handoff sentinel");
 			expect(completed.split("handoff sentinel")).toHaveLength(2);
 		} finally {
 			await view.dispose();
@@ -254,16 +264,15 @@ describe("Agent Hub live token rate preview", () => {
 		}
 	});
 
-	it("never renders editor contents in the cockpit preview", async () => {
+	it("keeps the cockpit preview read-only when i or printable text is pressed", async () => {
 		const view = await fixture();
 		try {
 			view.hub.handleInput("i");
 			for (const character of "EDITOR_SENTINEL") view.hub.handleInput(character);
-			const inputMode = renderText(view.hub, 160);
-			expect(inputMode).toContain("INPUT");
-			expect(inputMode).not.toContain("EDITOR_SENTINEL");
-			view.hub.handleInput("\u001b");
-			expect(renderText(view.hub, 120)).not.toContain("EDITOR_SENTINEL");
+			const preview = renderText(view.hub, 160);
+			expect(preview).not.toContain("INPUT");
+			expect(preview).not.toContain("EDITOR_SENTINEL");
+			expect(preview).not.toContain("Ctrl+Enter");
 		} finally {
 			await view.dispose();
 		}
@@ -272,7 +281,7 @@ describe("Agent Hub live token rate preview", () => {
 	it("falls back to completed transcript usage when the live state has no assistant evidence", async () => {
 		const view = await fixture({ duration: 1_000, liveEvidence: false });
 		try {
-			expect(renderText(view.hub)).toContain("10.0 tok/s");
+			expect(await waitForText(view.hub, "10.0 tok/s")).toContain("10.0 tok/s");
 		} finally {
 			await view.dispose();
 		}
@@ -298,20 +307,17 @@ describe("Agent Hub live token rate preview", () => {
 		}
 	});
 
-	it("opens agent pages in navigation mode and Esc exits one level", async () => {
+	it("opens agent pages read-only and Esc exits one level", async () => {
 		const view = await fixture();
 		try {
 			view.hub.handleInput("\r");
-			expect(renderText(view.hub)).toContain("i:input");
-			for (const character of "IGNORED_IN_NAV") view.hub.handleInput(character);
-			expect(renderText(view.hub)).not.toContain("IGNORED_IN_NAV");
-
+			const opened = renderText(view.hub);
+			expect(opened).not.toContain("i:input");
+			expect(opened).not.toContain("Ctrl+Enter");
 			view.hub.handleInput("i");
-			for (const character of "DRAFT_IN_INPUT") view.hub.handleInput(character);
-			expect(renderText(view.hub)).toContain("DRAFT_IN_INPUT");
-			view.hub.handleInput("\u001b");
+			view.hub.handleInput("x");
 			expect(renderText(view.hub)).not.toContain("DRAFT_IN_INPUT");
-			expect(renderText(view.hub)).toContain("Agent Hub > RateWorker");
+
 			view.hub.handleInput("\u001b");
 			expect(renderText(view.hub)).toContain("Agent Hub · tree");
 			expect(view.onDone).not.toHaveBeenCalled();
@@ -322,15 +328,17 @@ describe("Agent Hub live token rate preview", () => {
 		}
 	});
 
-	it("lists search, modal, cycling, and rich/plain bindings in the keymap overlay", async () => {
+	it("lists read-only scrolling, search, cycling, and rich/plain bindings in the keymap overlay", async () => {
 		const view = await fixture();
 		try {
 			view.hub.handleInput("?");
 			const legend = renderText(view.hub);
 			expect(legend).toContain("/ search");
-			expect(legend).toContain("i/Esc input/navigation mode");
+			expect(legend).toContain("J scroll five lines down");
+			expect(legend).toContain("K scroll five lines up");
 			expect(legend).toContain("[ / ] cycle siblings");
 			expect(legend).toContain("v rich/plain preview");
+			expect(legend).not.toContain("input/navigation mode");
 		} finally {
 			await view.dispose();
 		}

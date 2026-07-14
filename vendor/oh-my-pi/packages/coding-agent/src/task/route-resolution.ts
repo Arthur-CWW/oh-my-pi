@@ -1,6 +1,7 @@
 import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { Api, Model } from "@oh-my-pi/pi-ai";
-import { resolveConfiguredModelPatterns, resolveModelOverride, type ModelLookupRegistry } from "../config/model-resolver";
+import { resolveModelOverride, type ModelLookupRegistry } from "../config/model-resolver";
+import { resolveConfiguredModelPatterns } from "../config/role-resolution";
 import { MODEL_ROLE_IDS } from "../config/model-roles";
 import type { Settings } from "../config/settings";
 import type { AgentQuotaAdmission } from "../registry/agent-registry";

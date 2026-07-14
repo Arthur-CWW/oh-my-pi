@@ -4,10 +4,10 @@ import { getSupportedEfforts } from "@oh-my-pi/pi-catalog/model-thinking";
 import { modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
 import { logger, toError } from "@oh-my-pi/pi-utils";
 import {
-	extractExplicitThinkingSelector,
 	isBlockedSubagentModel,
 	resolveModelOverride,
 } from "../config/model-resolver";
+import { extractExplicitThinkingSelector } from "../config/role-resolution";
 import type { Settings } from "../config/settings";
 import { AgentLifecycleManager } from "../registry/agent-lifecycle";
 import { resolveAgentRef } from "../registry/agent-ref";

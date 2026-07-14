@@ -9,7 +9,8 @@ import {
 	type Context,
 	type CursorExecHandlers,
 	type CursorToolResultHandler,
-	type ImageContent,
+	type MediaContent,
+	type TextContent,
 	type Message,
 	type Model,
 	type ProviderSessionState,
@@ -17,8 +18,8 @@ import {
 	type ServiceTier,
 	type SimpleStreamOptions,
 	streamSimple,
-	type TextContent,
 	type ThinkingBudgets,
+	type UserContent,
 	type ToolChoice,
 	type ToolResultMessage,
 } from "@oh-my-pi/pi-ai";
@@ -874,10 +875,10 @@ export class Agent {
 	/** Send a prompt with an AgentMessage */
 	async prompt(message: AgentMessage | AgentMessage[], options?: AgentPromptOptions): Promise<void>;
 	async prompt(input: string, options?: AgentPromptOptions): Promise<void>;
-	async prompt(input: string, images?: ImageContent[], options?: AgentPromptOptions): Promise<void>;
+	async prompt(input: string, attachments?: MediaContent[], options?: AgentPromptOptions): Promise<void>;
 	async prompt(
 		input: string | AgentMessage | AgentMessage[],
-		imagesOrOptions?: ImageContent[] | AgentPromptOptions,
+		attachmentsOrOptions?: MediaContent[] | AgentPromptOptions,
 		options?: AgentPromptOptions,
 	) {
 		if (this.#state.isStreaming) {
@@ -889,21 +890,21 @@ export class Agent {
 
 		let msgs: AgentMessage[];
 		let promptOptions: AgentPromptOptions | undefined;
-		let images: ImageContent[] | undefined;
+		let attachments: MediaContent[] | undefined;
 
 		if (Array.isArray(input)) {
 			msgs = input;
-			promptOptions = imagesOrOptions as AgentPromptOptions | undefined;
+			promptOptions = attachmentsOrOptions as AgentPromptOptions | undefined;
 		} else if (typeof input === "string") {
-			if (Array.isArray(imagesOrOptions)) {
-				images = imagesOrOptions;
+			if (Array.isArray(attachmentsOrOptions)) {
+				attachments = attachmentsOrOptions;
 				promptOptions = options;
 			} else {
-				promptOptions = imagesOrOptions;
+				promptOptions = attachmentsOrOptions;
 			}
-			const content: Array<TextContent | ImageContent> = [{ type: "text", text: input }];
-			if (images && images.length > 0) {
-				content.push(...images);
+			const content: UserContent[] = [{ type: "text", text: input }];
+			if (attachments && attachments.length > 0) {
+				content.push(...attachments);
 			}
 			msgs = [
 				{
@@ -914,7 +915,7 @@ export class Agent {
 			];
 		} else {
 			msgs = [input];
-			promptOptions = imagesOrOptions as AgentPromptOptions | undefined;
+			promptOptions = attachmentsOrOptions as AgentPromptOptions | undefined;
 		}
 
 		await this.#runLoop(msgs, promptOptions);
@@ -1237,7 +1238,7 @@ export class Agent {
 		let length = 0;
 		for (const block of message.content) {
 			if (block.type === "text") {
-				length += (block as TextContent).text.length;
+				length += block.text.length;
 			}
 		}
 		return length;

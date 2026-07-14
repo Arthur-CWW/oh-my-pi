@@ -1,5 +1,5 @@
 import * as fs from "node:fs/promises";
-import type { ImageContent, Model } from "@oh-my-pi/pi-ai";
+import type { ImageContent, MediaContent, Model } from "@oh-my-pi/pi-ai";
 import { formatBytes, readImageMetadata, SUPPORTED_IMAGE_MIME_TYPES } from "@oh-my-pi/pi-utils";
 import { resolveReadPath } from "../tools/path-utils";
 import { formatDimensionNote, type ImageResizeOptions, resizeImage } from "./image-resize";
@@ -105,6 +105,23 @@ export async function normalizeModelContextImages(
 		}
 	}
 	return normalized;
+}
+
+/**
+ * Normalize only image attachments before model dispatch. Video blocks are
+ * preserved by reference and are never decoded, resized, or copied.
+ */
+export async function normalizeModelContextAttachments(
+	attachments: MediaContent[] | undefined,
+	options?: NormalizeModelContextImagesOptions,
+): Promise<MediaContent[] | undefined> {
+	if (!attachments || attachments.length === 0) return undefined;
+	const images = attachments.filter((attachment): attachment is ImageContent => attachment.type === "image");
+	if (images.length === 0) return attachments;
+	const normalizedImages = await normalizeModelContextImages(images, options);
+	if (!normalizedImages || normalizedImages.every((image, index) => image === images[index])) return attachments;
+	let imageIndex = 0;
+	return attachments.map(attachment => (attachment.type === "image" ? normalizedImages[imageIndex++]! : attachment));
 }
 
 export async function loadImageInput(options: LoadImageInputOptions): Promise<LoadedImageInput | null> {

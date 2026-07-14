@@ -121,7 +121,7 @@ describe("AuthBrokerRefresher", () => {
 		expect(storage.exportSnapshot().credentials).toHaveLength(0);
 	});
 
-	test("keeps credentials on transient failures (timeout/network)", async () => {
+	test("keeps credentials on a direct ENOTFOUND refresh failure", async () => {
 		const now = 1_700_000_000_000;
 		store!.saveOAuth("anthropic", {
 			access: "old",
@@ -129,7 +129,43 @@ describe("AuthBrokerRefresher", () => {
 			expires: now + 60_000,
 			accountId: "a",
 		});
-		vi.spyOn(oauthUtils, "refreshOAuthToken").mockRejectedValue(new Error("fetch failed: ECONNREFUSED"));
+		const networkFailure = Object.assign(new Error("getaddrinfo ENOTFOUND api.anthropic.com"), {
+			code: "ENOTFOUND",
+		});
+		vi.spyOn(oauthUtils, "refreshOAuthToken").mockRejectedValue(networkFailure);
+
+		storage = new AuthStorage(store!);
+		const disableEvents: string[] = [];
+		storage.onCredentialDisabled(event => {
+			disableEvents.push(event.disabledCause);
+		});
+		await storage.reload();
+		const refresher = new AuthBrokerRefresher({
+			storage,
+			refreshSkewMs: 5 * 60_000,
+			now: () => now,
+		});
+		await refresher.tick();
+
+		expect(disableEvents).toHaveLength(0);
+		expect(storage.exportSnapshot().credentials).toHaveLength(1);
+	});
+
+	test("keeps credentials on a 401 wrapping a transient network cause", async () => {
+		const now = 1_700_000_000_000;
+		store!.saveOAuth("anthropic", {
+			access: "old",
+			refresh: "old-refresh",
+			expires: now + 60_000,
+			accountId: "a",
+		});
+		const networkCause = Object.assign(new Error("getaddrinfo ENOTFOUND api.anthropic.com"), {
+			code: "ENOTFOUND",
+		});
+		const fetchFailure = new Error("fetch failed", { cause: networkCause });
+		vi.spyOn(oauthUtils, "refreshOAuthToken").mockRejectedValue(
+			new Error("HTTP 401 unauthorized", { cause: fetchFailure }),
+		);
 
 		storage = new AuthStorage(store!);
 		const disableEvents: string[] = [];

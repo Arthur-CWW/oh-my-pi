@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import { serializeConversation } from "@oh-my-pi/pi-agent-core/compaction/utils";
-import type { Message } from "@oh-my-pi/pi-ai";
+import { serializeConversation, serializeConversationWithVideos } from "@oh-my-pi/pi-agent-core/compaction/utils";
+import type { Message, VideoContent } from "@oh-my-pi/pi-ai";
 
 describe("serializeConversation", () => {
 	it("truncates long tool results in serialized summaries", () => {
@@ -74,5 +74,30 @@ describe("serializeConversation", () => {
 
 		expect(result).not.toContain("truncated");
 		expect(result).toContain(longText);
+	});
+	it("preserves chronological video blocks alongside ordinal transcript markers", () => {
+		const firstVideo: VideoContent = { type: "video", data: "AAECAw==", mimeType: "video/mp4" };
+		const secondVideo: VideoContent = { type: "video", data: "BAUGBw==", mimeType: "video/webm" };
+		const messages: Message[] = [
+			{
+				role: "user",
+				content: [{ type: "text", text: "First clip" }, firstVideo],
+				timestamp: 1,
+			},
+			{
+				role: "user",
+				content: [{ type: "text", text: "Second clip" }, secondVideo],
+				timestamp: 2,
+			},
+		];
+
+		const serialized = serializeConversationWithVideos(messages);
+
+		expect(serialized.videos).toEqual([firstVideo, secondVideo]);
+		expect(serialized.videos[0]).toBe(firstVideo);
+		expect(serialized.videos[1]).toBe(secondVideo);
+		expect(serialized.text).toContain("[Video attachment 1 is attached to this summary request]");
+		expect(serialized.text).toContain("[Video attachment 2 is attached to this summary request]");
+		expect(serialized.text.indexOf("Video attachment 1")).toBeLessThan(serialized.text.indexOf("Video attachment 2"));
 	});
 });

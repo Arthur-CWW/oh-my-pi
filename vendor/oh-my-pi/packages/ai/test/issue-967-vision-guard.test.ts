@@ -282,4 +282,19 @@ describe("issue #967 vision guard", () => {
 			],
 		});
 	});
+	it("fails closed for video content outside the native Google Antigravity lane", () => {
+		const model = makeModel("google-generative-ai", "google");
+		const context: Context = {
+			messages: [
+				{
+					role: "user",
+					content: [{ type: "video", mimeType: "video/mp4", data: "AA==" }],
+					timestamp: 1,
+				},
+			],
+		};
+
+		expect(() => convertGoogleMessages(model, context)).toThrow(/does not support native video input/);
+	});
+
 });

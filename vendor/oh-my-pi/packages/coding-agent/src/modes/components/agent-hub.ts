@@ -1,25 +1,10 @@
-/**
- * Agent Hub overlay component.
- *
- * One overlay, two views:
- * - Table view: every registered agent except Main (Main IS the ambient
- *   chat), live from the global AgentRegistry — status, unread irc count,
- *   current/last task, last activity. Select with j/k; Enter focuses live agents
- *   and opens parked agents read-only; `r` revives a parked agent, `x` aborts +
- *   releases one.
- * - Chat view: per-agent transcript (incremental session-file tail, absorbed
- *   from the old session observer overlay) plus an input line. `R` revives the
- *   parked agent explicitly; submitting a message also revives a parked agent,
- *   then lands in the agent's persisted history via the normal prompt path.
- *
- * Replaces the old SessionObserverOverlayComponent (ctrl+s observer).
- */
+/** Tree roster with bounded sibling transcript and selected-session inspector. */
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { AgentMessage, AgentTool } from "@oh-my-pi/pi-agent-core";
 import type { Usage } from "@oh-my-pi/pi-ai";
-import { Container, Editor, matchesKey, padding, ScrollView, Text, type TUI, visibleWidth } from "@oh-my-pi/pi-tui";
+import { Container, matchesKey, padding, ScrollView, Text, type TUI, visibleWidth } from "@oh-my-pi/pi-tui";
 import { formatAge, formatBytes, formatDuration, formatNumber, getProjectDir, logger } from "@oh-my-pi/pi-utils";
 import type { AdvisorMessageDetails } from "../../advisor";
 import { COLLAB_PROMPT_MESSAGE_TYPE } from "../../collab/protocol";
@@ -32,11 +17,13 @@ import {
 	IRC_EXTERNAL_STALE_MS,
 	IrcExternalBus,
 	type IrcExternalPeer,
+	type IrcExternalPeerDisplayState,
 	type IrcExternalPeerState,
 	isIrcExternalPeerFresh,
 } from "../../irc/bus-external";
 import { watchSiblingTranscript } from "../../irc/sibling-session";
-import { decodeJournalEntries, JOURNAL_TAIL_BYTES, readJournalTailChunk } from "../../journal/projection";
+import type { JournalTailChunk } from "../../journal/projection";
+import { decodeJournalEntries, JOURNAL_TAIL_BYTES } from "../../journal/projection";
 import { AgentLifecycleManager } from "../../registry/agent-lifecycle";
 import {
 	type AgentRef,
@@ -61,20 +48,45 @@ import { createIrcMessageCard } from "../../tools/irc";
 import { replaceTabs, shortenPath, TRUNCATE_LENGTHS, truncateToWidth } from "../../tools/render-utils";
 import { canonicalizeMessage, normalizeThinkingDisplay } from "../../utils/thinking-display";
 import type { CollabPromptDetails } from "../collab-presentation-types";
+import { resolveViewerScrollDelta } from "../interaction-registry";
 import type { ObservableSession, SessionObserverRegistry } from "../session-observer-registry";
-import { getEditorTheme, theme } from "../theme/theme";
+import {
+	DEFAULT_TRANSCRIPT_DISPLAY_CONTEXT,
+	type TranscriptDisplayContext,
+} from "../transcript-display";
+import { theme } from "../theme/theme";
 import {
 	matchesAppInterrupt,
 	matchesNavigationBottom,
 	matchesNavigationDown,
-	matchesNavigationPageDown,
-	matchesNavigationPageUp,
 	matchesNavigationTop,
 	matchesNavigationUp,
 	matchesSelectDown,
 	matchesSelectUp,
 } from "../utils/keybinding-matchers";
 import { createAdvisorMessageCard } from "./advisor-message";
+import {
+	AgentHubViewerSequence,
+	applyAgentHubViewerSequenceAction,
+} from "./agent-hub-viewer-sequence";
+import { AgentHubFoldSequence } from "./agent-hub-fold-sequence";
+import { renderAgentHubChatFooter, renderAgentHubFooter, renderAgentHubHelp } from "./agent-hub-interaction-help";
+import {
+	AgentHubJournalTailCache,
+	recordAgentHubProjectionRebuild,
+} from "./agent-hub-performance";
+import type { AgentHubRolloutDataSource, AgentHubRolloutPeerIdentity } from "./agent-hub-rollout-state";
+import {
+	EMPTY_AGENT_HUB_SELECTED_LIVE_STATE,
+	type AgentHubSelectedLiveState,
+	type AgentHubSelectedStateItem,
+	type AgentHubTurnStatus,
+	formatAgentHubTurnStatus,
+	projectAgentHubRowActivity,
+	projectAgentHubSelectedState,
+	renderAgentHubSelectedState,
+	reduceAgentHubSelectedLiveState,
+} from "./agent-hub-selected-state";
 import {
 	agentHistoryRank,
 	abbreviateResolvedModel,
@@ -110,42 +122,28 @@ import { TranscriptBlock, TranscriptContainer } from "./transcript-container";
 import { createUsageRowBlock } from "./usage-row";
 import { UserMessageComponent } from "./user-message";
 
-/** Lines per page for PageUp/PageDown */
-const PAGE_SIZE = 15;
-/** Refresh cadence for the relative-time column */
 const AGE_TICK_MS = 5_000;
-/** Debounce for live-session transcript refreshes */
 const CHAT_REFRESH_DEBOUNCE_MS = 80;
-/** Double-tap window for the left-left "go to parent" gesture (matches the editor's). */
+const PROJECTION_WINDOW_MS = 16;
 const LEFT_TAP_WINDOW_MS = 500;
-/** Completed journal rows shown without an explicit archive expansion. */
 const RECENT_COMPLETED_LIMIT = 20;
-/** Maximum bytes retained while glancing at a transcript in the cockpit. */
 const PREVIEW_TAIL_BYTES = JOURNAL_TAIL_BYTES;
-/** Maximum parsed message entries retained for the selected preview. */
 const PREVIEW_MAX_ENTRIES = 200;
-/** Wide cockpit breakpoint: two independently scrollable 80-column lanes. */
 const DUAL_LANE_MIN_WIDTH = 160;
-/** Smallest useful inspector/transcript track when narrow cockpits stack them. */
 const STACKED_LANE_MIN_HEIGHT = 6;
-/** Bounded roster strip left below the full-height cockpit preview. */
 const ROSTER_STRIP_HEIGHT = 9;
-/** Hub title and footer chrome outside the preview and roster tracks. */
 const HUB_CHROME_HEIGHT = 6;
 const INSPECTOR_PROMPT_MAX_CHARS = 32 * 1024;
 const INSPECTOR_DELIVERY_LIMIT = 20;
 
-/** Compute the max content width for the current terminal, accounting for chrome. */
 function contentWidth(): number {
 	return Math.max(TRUNCATE_LENGTHS.SHORT, (process.stdout.columns || 80) - 6);
 }
 
-/** Sanitize a line for TUI display: replace tabs, then truncate to viewport width. */
 function sanitizeLine(text: string, maxWidth?: number): string {
 	return truncateToWidth(replaceTabs(text), maxWidth ?? contentWidth());
 }
 
-/** Compact glyph + state label, colored per theme status conventions. */
 function statusBadge(status: AgentStatus): string {
 	switch (status) {
 		case "running":
@@ -160,7 +158,7 @@ function statusBadge(status: AgentStatus): string {
 }
 
 export type AgentHubExternalPeerState = IrcExternalPeerState;
-type AgentHubExternalPeerDisplayState = AgentHubExternalPeerState | "disconnected";
+type AgentHubExternalPeerDisplayState = IrcExternalPeerDisplayState;
 
 /** Hub-side peer view: tolerates rows from older bus versions that lack state columns. */
 export type AgentHubExternalPeer = Omit<IrcExternalPeer, "state" | "stateTs"> & {
@@ -170,7 +168,6 @@ export type AgentHubExternalPeer = Omit<IrcExternalPeer, "state" | "stateTs"> & 
 
 export interface AgentHubExternalPeerDataSource {
 	listPeers(options?: { excludeSessionId?: string; staleMs?: number; includeStale?: boolean }): AgentHubExternalPeer[];
-	sendMessage?(args: { fromPeer: string; toPeer: string; body: string; origin?: "agent" | "user" }): number;
 }
 
 interface ExternalPeerRow {
@@ -319,67 +316,39 @@ function renderHubColumns(options: {
 	return `${model}${state}${name}${extras.map(value => `${COLUMN_GAP}${value}`).join("")}`;
 }
 
-/** Guest-side proxy for hub actions executed on the collab host. */
 export interface AgentHubRemote {
-	chat(id: string, text: string): void;
 	kill(id: string): void;
 	revive(id: string): void;
 	/** Mirrors readFileIncremental: text from fromByte (complete JSONL lines), newSize = next fromByte base; null = unavailable. */
 	readTranscript(id: string, fromByte: number): Promise<{ text: string; newSize: number } | null>;
 }
 
-/** Typed admission projection supplied by the queue owner; never inferred from transcript text. */
-export interface AgentHubTurnStatus {
-	inputId: string;
-	state: "queued" | "admitted" | "running" | "completed" | "failed-rate-limit" | "cancelled";
-	resetAt?: number;
-	reroutedProvider?: string;
-	originalModel?: string;
-	reroutedModel?: string;
-	canCancel: boolean;
-	/** Shared quota-pool telemetry for display only; scheduling stays with the queue owner. */
-	ratePerHour?: number;
-	projectedEmptyAt?: number;
-	deficitPerHour?: number;
-	provider?: string;
-	decisionReason?: string;
-	quotaPoolId?: string;
-	limitWindowId?: string;
-}
 
 export interface AgentHubDeps {
-	/** Progress/status snapshot source (task lifecycle + progress channels). */
 	observers: SessionObserverRegistry;
-	/** Keys that toggle the hub closed from inside (app.agents.hub + app.session.observe). */
 	hubKeys: KeyId[];
 	onDone: () => void;
 	requestRender: () => void;
-	/** Injectable for tests; defaults to the process-global registry. */
 	registry?: AgentRegistry;
-	/** Injectable for tests; defaults to the process-global lifecycle manager. */
 	lifecycle?: AgentLifecycleManager;
-	/** Injectable for tests; defaults to the process-global bus. */
 	irc?: IrcBus;
-	/** TUI handle for transcript components; tests omit it and get a render-only stub. */
 	ui?: TUI;
-	/** Tool lookup for transcript renderers (labels, custom render functions). */
 	getTool?: (name: string) => AgentTool | undefined;
-	/** Extension message renderers for custom messages in the transcript. */
 	getMessageRenderer?: (customType: string) => MessageRenderer | undefined;
-	/** Cwd used by tool renderers for path shortening; defaults to the project dir. */
 	cwd?: string;
-	/** Mirrors the main transcript's thinking-block visibility. */
 	hideThinkingBlock?: () => boolean;
-	/** Keys toggling tool output expansion (app.tools.expand). */
 	expandKeys?: KeyId[];
 	/** Focus the main view on this agent's live session (ctx.focusAgentSession). When absent (collab guest, tests), Enter opens the in-hub chat view instead. */
 	focusAgent?: (id: string) => Promise<void>;
-	/** Agent currently attached in the main view; the cockpit opens with this row selected. */
 	initialAgentId?: string;
 	/** Collab guest: route actions/transcripts to the host instead of local sessions. */
 	remote?: AgentHubRemote;
 	/** Queue/admission projection for the selected agent, if the host exposes one. */
 	turnStatus?: (agentId: string) => AgentHubTurnStatus | undefined;
+	/** Stable presentation state shared by transcript renderers by reference. */
+	transcriptDisplay?: TranscriptDisplayContext;
+	/** Journal-backed rollout state; null explicitly disables rollout reads. */
+	rollout?: AgentHubRolloutDataSource | null;
 	/** Cross-session IRC bus reader for sibling OMP instances; null disables it for deterministic tests. */
 	externalIrc?: AgentHubExternalPeerDataSource | null;
 	/** Current external IRC session id; defaults to the session registration convention `${cwd}:${pid}`. */
@@ -390,25 +359,16 @@ export interface AgentHubDeps {
 }
 
 export interface AgentHubRetentionMetrics {
-	/** Ordered active identities, the minimum state needed for virtual navigation. */
 	activeIdentities: number;
-	/** Lowercased filter buffers; retained only while a table filter is active. */
 	activeSearchFieldEntries: number;
-	/** Observer identity index, not a rendered row buffer. */
 	observerEntries: number;
 	externalIdentityRows: number;
 	archivedIdentityRows: number;
-	/** Materialized roster rows are capped by the terminal viewport. */
 	materializedRows: number;
-	/** Stable-order identities retained by external-peer polling. */
 	externalOrderEntries: number;
-	/** Parsed journal messages retained only while a chat transcript is open. */
 	cachedTranscriptEntries: number;
-	/** Transcript components retained only while a chat transcript is open. */
 	materializedChatComponents: number;
-	/** Full finalized-prefix scans performed by the shared transcript projection. */
 	previewFinalizedPrefixScans: number;
-	/** The age interval plus an optional debounced chat refresh. */
 	liveTimers: number;
 }
 export class AgentHubOverlayComponent extends Container {
@@ -425,6 +385,8 @@ export class AgentHubOverlayComponent extends Container {
 	#ageTimer: NodeJS.Timeout | undefined;
 	#projectionTimer: NodeJS.Timeout | undefined;
 	#pendingRegistryEvents: RegistryEvent[] = [];
+	#observerProjectionDirty = false;
+	#pendingJournalAgentIds = new Set<string>();
 	#registryRefs = new Map<string, AgentRef>();
 	#refsByStatus: Record<AgentStatus, Map<string, AgentRef>> = {
 		running: new Map(),
@@ -434,12 +396,13 @@ export class AgentHubOverlayComponent extends Container {
 	};
 	#remote: AgentHubRemote | undefined;
 	#turnStatus: ((agentId: string) => AgentHubTurnStatus | undefined) | undefined;
+	#transcriptDisplay: TranscriptDisplayContext;
+	#rollout: AgentHubRolloutDataSource | null;
+	#selectedLiveState: AgentHubSelectedLiveState = EMPTY_AGENT_HUB_SELECTED_LIVE_STATE;
 	#remoteFetchInFlight = false;
-	/** Invalidates stale in-flight fetch callbacks after openChat resets the cache. */
 	#remoteFetchToken = 0;
 	#remoteTranscriptUnavailable = false;
 
-	// Table state
 	#view: "table" | "chat" = "table";
 	#rows: AgentRef[] = [];
 	/** Lowercased immutable-at-invalidation search field for each ordered active ref. */
@@ -453,8 +416,6 @@ export class AgentHubOverlayComponent extends Container {
 	#selectedRow = 0;
 	#selectedAgentKey: string | undefined;
 	#tableScrollOffset = 0;
-	/** Modal cockpit state: scroll is the default; input forwards text to the selected agent. */
-	#cockpitMode: "scroll" | "input" = "scroll";
 	#cockpitPreview = true;
 	#previewRenderedHeight = 0;
 	#showTerminalAgents = false;
@@ -463,7 +424,6 @@ export class AgentHubOverlayComponent extends Container {
 	#statusCounts: Record<AgentStatus, number> = { running: 0, idle: 0, parked: 0, aborted: 0 };
 	#sectionStarts: Array<{ index: number; label: string }> = [];
 	#notice: string | undefined;
-	// Table roster filter (/ key)
 	#tableFilterQuery = "";
 	#tableFilterEditing = false;
 	/** Filtered identities, not eagerly-built row objects; rows materialize at the viewport only. */
@@ -477,6 +437,7 @@ export class AgentHubOverlayComponent extends Container {
 	#archiveSourceSessionFile: string | null | undefined = null;
 	#sessionsDir: string | undefined;
 	#journalModels = new DurableJournalModelCache();
+	#journalTails = new AgentHubJournalTailCache();
 
 	#foldedAgentIds = new Set<string>();
 	#treeDepthById = new Map<string, number>();
@@ -484,18 +445,14 @@ export class AgentHubOverlayComponent extends Container {
 	#hiddenDescendantsById = new Map<string, number>();
 	#hiddenRunningById = new Map<string, number>();
 	#groupStartIndexes: number[] = [];
-	/** Vim `g` prefix is scoped to the table so a lone `g` never jumps. */
-	#tableGotoPrefixActive = false;
+	#foldSequence = new AgentHubFoldSequence();
 	#showLegend = false;
-	// Chat state
 	#chatAgentId: string | undefined;
 	#chatArchived: ArchivedDirectChildDescriptor | undefined;
 	#chatExternal: AgentHubExternalPeer | undefined;
-	#externalInputActive = false;
-	#siblingWatchDispose: (() => void) | undefined;
-	#editor: Editor;
 	#sessionUnsubscribe: (() => void) | undefined;
 	#attachedSession: AgentSession | undefined;
+	#siblingWatchDispose: (() => void) | undefined;
 	#chatRefreshTimer: NodeJS.Timeout | undefined;
 	#transcriptCache:
 		| {
@@ -525,18 +482,17 @@ export class AgentHubOverlayComponent extends Container {
 	#pendingUsage: Usage | undefined;
 	#chatWaitingPoll: ToolExecutionComponent | null = null;
 	#chatExpandables: Array<{ setExpanded(expanded: boolean): void }> = [];
+	#chatRichRenderables: Array<{ setRichRendering(rich: boolean): void }> = [];
 	#chatExpanded = false;
 	#plainPreview = false;
 	#liveAssistantComponent: AssistantMessageComponent | undefined;
 	#chatPlaceholder: string | undefined;
-	// Chat transcript search (/ key in chat view)
 	#chatSearchQuery = "";
 	#chatSearchEditing = false;
 	#chatSearchMatches: number[] = [];
 	#chatSearchMatchIndex = -1;
 	#chatRenderedContent: readonly string[] = [];
 
-	// Viewport state
 	#scrollOffset = 0;
 	#lastMaxScroll = 0;
 	#viewportHeight = 20;
@@ -545,11 +501,12 @@ export class AgentHubOverlayComponent extends Container {
 	#inspectorFocused = false;
 	#inspectorScrollOffset = 0;
 	#inspectorLastMaxScroll = 0;
+	#inspectorViewportHeight = 20;
 	#dualLaneActive = false;
 
 	#detailPrefixActive = false;
-	/** Vim `g` prefix is scoped to transcript navigation and only armed outside the editor. */
-	#viewerGotoPrefixActive = false;
+	/** Vim `g` prefix is scoped to transcript navigation. */
+	#viewerSequence = new AgentHubViewerSequence();
 	#viewerHeaderLines: string[] = [];
 	#lastLeftTap = 0;
 
@@ -566,6 +523,8 @@ export class AgentHubOverlayComponent extends Container {
 		this.#hubKeys = deps.hubKeys;
 		this.#remote = deps.remote;
 		this.#turnStatus = deps.turnStatus;
+		this.#transcriptDisplay = deps.transcriptDisplay ?? DEFAULT_TRANSCRIPT_DISPLAY_CONTEXT;
+		this.#rollout = deps.rollout ?? null;
 		this.#ui =
 			deps.ui ??
 			({
@@ -582,37 +541,34 @@ export class AgentHubOverlayComponent extends Container {
 		this.#focusAgent = deps.focusAgent;
 		this.#sessionsDir = deps.sessionsDir;
 
-		this.#editor = new Editor(getEditorTheme());
-		this.#editor.setMaxHeight(4);
-		this.#editor.onSubmit = text => this.#submitChatMessage(text);
 
 		this.#unsubscribers.push(
 			this.#registry.onChange(event => {
 				this.#pendingRegistryEvents.push({ ...event, ref: { ...event.ref } });
+				this.#pendingJournalAgentIds.add(event.ref.id);
 				this.#registryGeneration++;
 				this.#scheduleProjection();
 			}),
 		);
 		this.#unsubscribers.push(
 			this.#observers.onChange(() => {
-				this.#rebuildObserverSnapshot();
-				this.#onDataChange();
+				this.#observerProjectionDirty = true;
+				this.#scheduleProjection();
 			}),
 		);
 		this.#ageTimer = setInterval(() => {
-			// Relative ages are read at render time. Only external peers have an
-			// independent snapshot that may need filter invalidation here.
+			// Relative ages are the only unconditional clock-driven content.
+			// Keep the invalidation scoped to the Hub instead of composing the full TUI.
 			if (this.#refreshExternalRows() && this.#filterDirty) this.#applyFilter();
-			if (this.#chatExternal) this.#scheduleChatRefresh();
-			this.#requestRender();
+			this.#ui.requestComponentRender(this);
 		}, AGE_TICK_MS);
 		this.#ageTimer.unref?.();
 
 		this.#rebuildObserverSnapshot();
 		this.#initializeRegistryProjection();
 		this.#onDataChange();
-		// Oldest active agent is first; external peers remain informational.
-		if (this.#visibleActiveRows.length > 0) {
+		// Prefer the oldest active agent, but external-only rosters still preview their selected sibling.
+		if (this.#totalTableRows() > 0) {
 			this.#selectedRow = 0;
 			this.#selectedAgentKey = this.#selectedTableKey();
 			const initialIndex = deps.initialAgentId ? this.#findTableIndex(`agent:${deps.initialAgentId}`) : -1;
@@ -668,6 +624,9 @@ export class AgentHubOverlayComponent extends Container {
 		this.#siblingWatchDispose?.();
 		this.#siblingWatchDispose = undefined;
 		this.#detachLiveSession();
+		this.#rollout?.close?.();
+		this.#selectedLiveState = EMPTY_AGENT_HUB_SELECTED_LIVE_STATE;
+		this.#foldSequence.reset();
 		this.#resetChatLog();
 		this.#transcriptCache = undefined;
 		this.#chatRenderedContent = [];
@@ -690,7 +649,6 @@ export class AgentHubOverlayComponent extends Container {
 		this.#foldedAgentIds.clear();
 		this.#groupStartIndexes = [];
 		this.#sectionStarts = [];
-		this.#editor.setText("");
 		this.#tableFilterQuery = "";
 		this.#chatSearchQuery = "";
 		this.#notice = undefined;
@@ -701,7 +659,6 @@ export class AgentHubOverlayComponent extends Container {
 	}
 
 	override render(width: number): readonly string[] {
-		this.#flushProjection();
 		return this.#view === "table" ? this.#renderTable(width) : this.#renderChat(width);
 	}
 
@@ -724,6 +681,7 @@ export class AgentHubOverlayComponent extends Container {
 	openChat(id: string): void {
 		if (!this.#registry.get(id)) return;
 		this.#view = "chat";
+		this.#foldSequence.reset();
 		this.#chatArchived = undefined;
 		this.#chatAgentId = id;
 		this.#chatExternal = undefined;
@@ -736,8 +694,6 @@ export class AgentHubOverlayComponent extends Container {
 		this.#scrollOffset = 0;
 		this.#wasAtBottom = true;
 		this.#lastLeftTap = 0;
-		this.#cockpitMode = "scroll";
-		this.#editor.setText("");
 		this.#attachLiveSession();
 		this.#rebuildChatContent();
 		this.#requestRender();
@@ -746,6 +702,7 @@ export class AgentHubOverlayComponent extends Container {
 	/** Open a persisted completed child transcript without registering or reviving it. */
 	#openArchivedChat(row: ArchivedDirectChildDescriptor): void {
 		this.#view = "chat";
+		this.#foldSequence.reset();
 		this.#detachLiveSession();
 		this.#chatAgentId = row.agentId;
 		this.#chatArchived = row;
@@ -759,26 +716,22 @@ export class AgentHubOverlayComponent extends Container {
 		this.#scrollOffset = 0;
 		this.#wasAtBottom = true;
 		this.#lastLeftTap = 0;
-		this.#cockpitMode = "scroll";
-		this.#editor.setText("");
 		this.#rebuildChatContent();
 		this.#requestRender();
 	}
 	#openExternalChat(peer: AgentHubExternalPeer): void {
 		this.#view = "chat";
+		this.#foldSequence.reset();
 		this.#detachLiveSession();
 		this.#siblingWatchDispose?.();
 		this.#chatAgentId = peer.name || peer.sessionId;
 		this.#chatArchived = undefined;
 		this.#chatExternal = peer;
-		this.#externalInputActive = false;
 		this.#notice = undefined;
 		this.#transcriptCache = undefined;
 		this.#resetChatLog();
 		this.#scrollOffset = 0;
 		this.#wasAtBottom = true;
-		this.#cockpitMode = "scroll";
-		this.#editor.setText("");
 		if (peer.sessionFile) {
 			this.#siblingWatchDispose = watchSiblingTranscript(peer.sessionFile, () => this.#scheduleChatRefresh());
 		}
@@ -796,33 +749,41 @@ export class AgentHubOverlayComponent extends Container {
 			this.#projectionTimer = undefined;
 			this.#flushProjection();
 			this.#requestRender();
-		}, 0);
+		}, PROJECTION_WINDOW_MS);
 		this.#projectionTimer.unref?.();
 	}
 
 	#flushProjection(): void {
-		if (this.#pendingRegistryEvents.length === 0) return;
+		if (this.#pendingRegistryEvents.length === 0 && !this.#observerProjectionDirty) return;
 		const events = this.#pendingRegistryEvents;
 		this.#pendingRegistryEvents = [];
 		for (const event of events) this.#applyRegistryEvent(event);
-		this.#onDataChange();
+		if (this.#observerProjectionDirty) {
+			this.#observerProjectionDirty = false;
+			this.#rebuildObserverSnapshot();
+		}
+		const journalAgentIds = this.#pendingJournalAgentIds;
+		this.#pendingJournalAgentIds = new Set();
+		recordAgentHubProjectionRebuild();
+		this.#onDataChange(journalAgentIds);
 	}
 
-	#onDataChange(): void {
+	#onDataChange(journalAgentIds: ReadonlySet<string> = new Set(this.#registryRefs.keys())): void {
 		if (this.#archiveSourceSessionFile !== this.#registry.get(MAIN_AGENT_ID)?.sessionFile) {
 			this.#loadArchivedRows();
 		}
 		this.#refreshRows();
-		const sessionFiles = [...this.#registryRefs.values()].flatMap(ref => (ref.sessionFile ? [ref.sessionFile] : []));
+		const sessionFiles = [...journalAgentIds].flatMap(id => {
+			const sessionFile = this.#registryRefs.get(id)?.sessionFile;
+			return sessionFile ? [sessionFile] : [];
+		});
 		if (sessionFiles.length > 0)
 			void Promise.all(sessionFiles.map(sessionFile => this.#journalModels.load(sessionFile))).then(() =>
 				this.#requestRender(),
 			);
-		if (this.#view === "chat") {
-			if (!this.#chatArchived) {
-				this.#attachLiveSession();
-				this.#scheduleChatRefresh();
-			}
+		if (this.#view === "chat" && !this.#chatArchived) {
+			this.#attachLiveSession();
+			this.#scheduleChatRefresh(false);
 		}
 	}
 
@@ -870,10 +831,13 @@ export class AgentHubOverlayComponent extends Container {
 		return true;
 	}
 
-	/** Poll the independent external bus; only a real snapshot change invalidates filtering. */
 	#refreshExternalRows(): boolean {
 		const externalRows = this.#loadExternalRows();
 		if (this.#sameExternalRows(this.#externalRows, externalRows)) return false;
+		const selectedExternal = this.#chatExternal
+			? externalRows.find(row => row.peer.sessionId === this.#chatExternal?.sessionId)
+			: undefined;
+		if (selectedExternal) this.#chatExternal = selectedExternal.peer;
 		this.#externalRows = externalRows;
 		this.#filterDirty = true;
 		return true;
@@ -904,7 +868,6 @@ export class AgentHubOverlayComponent extends Container {
 		);
 	}
 
-	/** Rebuild displayed identities only from expanded status buckets. */
 	#refreshRows(): void {
 		if (this.#orderedRegistryGeneration !== this.#registryGeneration) {
 			const counts: Record<AgentStatus, number> = {
@@ -936,11 +899,11 @@ export class AgentHubOverlayComponent extends Container {
 		// and the overflow marker share this budget with the selectable rows.
 		return Math.max(3, Math.min(ROSTER_STRIP_HEIGHT - 3, (process.stdout.rows || 40) - 7));
 	}
-	#setSelectedFold(expand: boolean): boolean {
-		const selected = this.#selectedInternalRef();
-		if (!selected || !this.#rows.some(ref => ref.parentId === selected.id)) return false;
-		if (expand) this.#foldedAgentIds.delete(selected.id);
-		else this.#foldedAgentIds.add(selected.id);
+	#toggleFold(agentId: string, expand?: boolean): boolean {
+		if (!this.#registryRefs.has(agentId) || !this.#rows.some(ref => ref.parentId === agentId)) return false;
+		const shouldExpand = expand ?? this.#foldedAgentIds.has(agentId);
+		if (shouldExpand) this.#foldedAgentIds.delete(agentId);
+		else this.#foldedAgentIds.add(agentId);
 		this.#filterDirty = true;
 		this.#applyFilter();
 		return true;
@@ -1086,13 +1049,15 @@ export class AgentHubOverlayComponent extends Container {
 
 	/** Resolve #selectedRow from the stable #selectedAgentKey against visible rows. */
 	#resolveSelection(): void {
+		const previousKey = this.#selectedAgentKey;
 		const totalVisible = this.#totalTableRows();
 		if (totalVisible === 0) {
 			this.#selectedRow = 0;
+			if (previousKey) this.#foldSequence.reset();
 			return;
 		}
-		if (this.#selectedAgentKey) {
-			const idx = this.#findTableIndex(this.#selectedAgentKey);
+		if (previousKey) {
+			const idx = this.#findTableIndex(previousKey);
 			if (idx >= 0) {
 				this.#selectedRow = idx;
 				return;
@@ -1100,10 +1065,13 @@ export class AgentHubOverlayComponent extends Container {
 		}
 		this.#selectedRow = Math.min(this.#selectedRow, totalVisible - 1);
 		this.#selectedAgentKey = this.#selectedTableKey();
+		if (this.#selectedAgentKey !== previousKey) this.#foldSequence.reset();
 	}
 
 	#syncSelectedKey(): void {
-		this.#selectedAgentKey = this.#selectedTableKey();
+		const key = this.#selectedTableKey();
+		if (key !== this.#selectedAgentKey) this.#foldSequence.reset();
+		this.#selectedAgentKey = key;
 	}
 
 	#moveTableSelection(delta: number): void {
@@ -1119,31 +1087,75 @@ export class AgentHubOverlayComponent extends Container {
 	#syncSelectedPreview(): void {
 		if (!this.#cockpitPreview) return;
 		const row = this.#selectedAgentRow();
-		const nextId =
-			row?.kind === "active" ? row.ref.id : row?.kind === "archived" ? row.descriptor.agentId : undefined;
+		const external = this.#selectedExternalRow()?.peer;
+		const nextId = external
+			? external.name || external.sessionId
+			: row?.kind === "active"
+				? row.ref.id
+				: row?.kind === "archived"
+					? row.descriptor.agentId
+					: undefined;
 		const nextArchive = row?.kind === "archived" ? row.descriptor : undefined;
-		if (nextId === this.#chatAgentId && nextArchive === this.#chatArchived) return;
+		if (
+			nextId === this.#chatAgentId &&
+			nextArchive === this.#chatArchived &&
+			external?.sessionId === this.#chatExternal?.sessionId
+		)
+			return;
+		this.#foldSequence.reset();
 		this.#detachLiveSession();
+		this.#siblingWatchDispose?.();
+		this.#siblingWatchDispose = undefined;
 		this.#resetChatLog();
 		this.#transcriptCache = undefined;
 		this.#chatAgentId = nextId;
 		this.#chatArchived = nextArchive;
+		this.#chatExternal = external;
 		this.#scrollOffset = 0;
 		this.#wasAtBottom = true;
 		this.#inspectorScrollOffset = 0;
 		this.#inspectorFocused = false;
-
 		this.#chatSearchQuery = "";
 		this.#chatSearchMatches = [];
-		this.#editor.setText("");
 		if (!nextId) {
 			this.#viewerHeaderLines = [];
 			return;
 		}
+		if (external?.sessionFile)
+			this.#siblingWatchDispose = watchSiblingTranscript(external.sessionFile, () => this.#scheduleChatRefresh());
 		this.#attachLiveSession();
 		this.#rebuildChatContent();
 	}
 
+	#selectedStateItems(): AgentHubSelectedStateItem[] {
+		const ref =
+			!this.#chatExternal && !this.#chatArchived && this.#chatAgentId
+				? this.#registry.get(this.#chatAgentId)
+				: undefined;
+		const external = this.#chatExternal;
+		const identity: AgentHubRolloutPeerIdentity | undefined = external
+			? { sessionId: external.sessionId, sessionFile: external.sessionFile }
+			: ref
+				? { sessionId: ref.sessionId, sessionFile: ref.sessionFile }
+				: this.#chatArchived
+					? { sessionFile: this.#chatArchived.childSessionFile }
+					: undefined;
+		return projectAgentHubSelectedState({
+			ref,
+			observed: ref ? this.#observableFor(ref.id) : undefined,
+			external: external
+				? {
+						state: displayedExternalPeerState(external),
+						sessionId: external.sessionId,
+						buildDigest: external.buildDigest,
+						version: external.version,
+					}
+				: undefined,
+			turnStatus: ref ? this.#turnStatus?.(ref.id) : undefined,
+			live: this.#selectedLiveState,
+			rollout: identity ? this.#rollout?.latestForPeer(identity) : undefined,
+		});
+	}
 	#renderPreview(width: number, targetHeight: number): string[] {
 		if (!this.#chatAgentId) {
 			this.#dualLaneActive = false;
@@ -1189,21 +1201,25 @@ export class AgentHubOverlayComponent extends Container {
 
 	#renderTranscriptPreview(width: number, targetHeight: number, trackHeight = true): string[] {
 		const innerWidth = Math.max(20, width - 2);
+		for (const component of this.#chatRichRenderables) component.setRichRendering(this.#transcriptDisplay.richTranscript);
+		this.#liveAssistantComponent?.setRichRendering(this.#transcriptDisplay.richTranscript);
 		const richRendered = this.#chatPlaceholder
 			? [theme.fg("dim", this.#chatPlaceholder)]
 			: this.#chatLog.render(innerWidth);
 		const rendered = this.#plainPreview ? richRendered.map(line => Bun.stripANSI(line)) : richRendered;
 		const content = rendered.length > 0 ? rendered : [theme.fg("dim", "No messages yet.")];
-		this.#viewportHeight = Math.max(1, targetHeight - 2);
+		const summary = this.#dualLaneActive
+			? undefined
+			: renderAgentHubSelectedState(this.#selectedStateItems(), innerWidth)[0];
+		this.#viewportHeight = Math.max(1, targetHeight - 2 - Number(summary !== undefined));
 		this.#lastMaxScroll = Math.max(0, content.length - this.#viewportHeight);
 		if (this.#wasAtBottom && !this.#chatSearchQuery) this.#scrollOffset = this.#lastMaxScroll;
 		this.#scrollOffset = Math.max(0, Math.min(this.#scrollOffset, this.#lastMaxScroll));
 		this.#chatRenderedContent = content;
 		const focus = this.#dualLaneActive && !this.#inspectorFocused ? theme.fg("accent", "●") : "";
-		const mode = this.#cockpitMode === "input" ? theme.fg("accent", "INPUT") : theme.fg("dim", "SCROLL");
 		const rate = this.#tokenRateBadge();
-		const rateBadge = rate ? `  ${rate}` : "";
-		const lines = [` ${focus}${theme.fg("accent", "Preview transcript")}  ${mode}${rateBadge}`];
+		const lines = [` ${focus}${theme.fg("accent", "Preview transcript")}${rate ? `  ${rate}` : ""}`];
+		if (summary) lines.push(` ${summary}`);
 		for (const row of content.slice(this.#scrollOffset, this.#scrollOffset + this.#viewportHeight))
 			lines.push(` ${row}`);
 		while (lines.length < targetHeight - 1) lines.push("");
@@ -1213,16 +1229,22 @@ export class AgentHubOverlayComponent extends Container {
 	}
 
 	#renderInspectorPreview(width: number, targetHeight: number): string[] {
-		const observed = this.#chatAgentId ? this.#observerById.get(this.#chatAgentId) : undefined;
 		const innerWidth = Math.max(20, width - 2);
-		const content = this.#inspectorLines(observed, innerWidth);
-		const viewportHeight = Math.max(1, targetHeight - 2);
-		this.#inspectorLastMaxScroll = Math.max(0, content.length - viewportHeight);
+		const details = this.#inspectorLines(
+			!this.#chatExternal && !this.#chatArchived && this.#chatAgentId
+				? this.#observerById.get(this.#chatAgentId)
+				: undefined,
+			innerWidth,
+		);
+		const summaries = renderAgentHubSelectedState(this.#selectedStateItems(), innerWidth);
+		const content = summaries.length ? [...summaries, "", ...details] : details;
+		this.#inspectorViewportHeight = Math.max(1, targetHeight - 2);
+		this.#inspectorLastMaxScroll = Math.max(0, content.length - this.#inspectorViewportHeight);
 		this.#inspectorScrollOffset = Math.max(0, Math.min(this.#inspectorScrollOffset, this.#inspectorLastMaxScroll));
 		const focus = this.#inspectorFocused ? theme.fg("accent", "●") : "";
 		const label = this.#inspectorSection[0].toUpperCase() + this.#inspectorSection.slice(1);
 		const lines = [` ${focus}${theme.fg("accent", label)} ${theme.fg("dim", "[ / ] section")}`];
-		for (const row of content.slice(this.#inspectorScrollOffset, this.#inspectorScrollOffset + viewportHeight))
+		for (const row of content.slice(this.#inspectorScrollOffset, this.#inspectorScrollOffset + this.#inspectorViewportHeight))
 			lines.push(` ${sanitizeLine(row, innerWidth)}`);
 		while (lines.length < targetHeight - 1) lines.push("");
 		lines.push(...new DynamicBorder().render(width));
@@ -1434,25 +1456,27 @@ export class AgentHubOverlayComponent extends Container {
 		}
 	}
 
-	/** Subscribe to the chat agent's live session (if any) for transcript refreshes. Idempotent per session. */
 	#attachLiveSession(): void {
-		// Remote and completed-child rows carry no live session handle.
-		if (this.#remote || this.#chatArchived) return;
+		if (this.#remote || this.#chatArchived || this.#chatExternal) return;
 		const session = this.#chatAgentId ? (this.#registry.get(this.#chatAgentId)?.session ?? undefined) : undefined;
 		if (session === this.#attachedSession) return;
 		this.#detachLiveSession();
 		if (!session) return;
 		this.#attachedSession = session;
 		this.#sessionUnsubscribe = session.subscribe(event => {
+			const live = reduceAgentHubSelectedLiveState(this.#selectedLiveState, event);
+			if (live !== this.#selectedLiveState) {
+				this.#selectedLiveState = live;
+				this.#requestRender();
+			}
 			if (
 				event.type === "message_start" ||
 				event.type === "message_update" ||
 				event.type === "message_end" ||
 				event.type === "tool_execution_end" ||
 				event.type === "agent_end"
-			) {
+			)
 				this.#scheduleChatRefresh();
-			}
 		});
 	}
 
@@ -1460,9 +1484,19 @@ export class AgentHubOverlayComponent extends Container {
 		this.#sessionUnsubscribe?.();
 		this.#sessionUnsubscribe = undefined;
 		this.#attachedSession = undefined;
+		this.#selectedLiveState = EMPTY_AGENT_HUB_SELECTED_LIVE_STATE;
 	}
 
-	#scheduleChatRefresh(): void {
+	#selectedJournalPath(): string | undefined {
+		if (this.#chatExternal?.sessionFile) return this.#chatExternal.sessionFile;
+		if (this.#chatArchived) return this.#chatArchived.childSessionFile;
+		if (!this.#remote && this.#chatAgentId) return this.#registry.get(this.#chatAgentId)?.sessionFile ?? undefined;
+		return undefined;
+	}
+
+	#scheduleChatRefresh(invalidateJournal = true): void {
+		const sessionFile = this.#selectedJournalPath();
+		if (invalidateJournal && sessionFile) this.#journalTails.invalidate(sessionFile);
 		if (this.#chatRefreshTimer) return;
 		this.#chatRefreshTimer = setTimeout(() => {
 			this.#chatRefreshTimer = undefined;
@@ -1528,7 +1562,7 @@ export class AgentHubOverlayComponent extends Container {
 		);
 		lines.push(...this.#renderPreview(width, previewHeight));
 		if (this.#showLegend) {
-			lines.push(...this.#renderLegend(width));
+			lines.push(...renderAgentHubHelp(width, this.#inspectorFocused ? "hub.inspector" : "hub.table"));
 			lines.push(...new DynamicBorder().render(width));
 		}
 		const totalRows = this.#totalTableRows();
@@ -1578,72 +1612,18 @@ export class AgentHubOverlayComponent extends Container {
 		if (this.#tableFilterEditing)
 			lines.push(` ${theme.fg("accent", "/")}${this.#tableFilterQuery}${theme.fg("accent", "▏")}`);
 		lines.push("");
-		const historyHint = this.#showHistoricalAgents ? ". hide history" : ". show history";
 		lines.push(
-			` ${theme.fg("dim", `SCROLL j/k,ctrl-u/d,g/G:preview  n/p:agent  i:input  Enter:attach  /:filter  h/l or ←/→:fold  [ ]:sibling  H/L:root  ?:legend  ${historyHint}  Esc/q:close`)}`,
+			renderAgentHubFooter({
+				width,
+				surface: this.#inspectorFocused ? "hub.inspector" : "hub.table",
+				mode: this.#tableFilterEditing ? "filter" : "normal",
+				extra: this.#tableFilterQuery ? ["n/N:next/previous match"] : undefined,
+			}),
 		);
 		lines.push(...new DynamicBorder().render(width));
 		return lines;
 	}
 
-	#selectedRowData(): { id: string; model?: string } | undefined {
-		const active = this.#selectedInternalRef();
-		if (active) {
-			const observed = this.#observerById.get(active.id);
-			const cachedRoute =
-				this.#transcriptCache?.path === active.sessionFile && this.#transcriptCache?.model
-					? `${this.#transcriptCache.model}${this.#transcriptCache.thinking ? `:${this.#transcriptCache.thinking}` : ""}`
-					: undefined;
-			const model = observed?.progress?.resolvedModel ?? cachedRoute;
-			return { id: active.id, model };
-		}
-		const archived = this.#selectedArchivedRow();
-		if (archived) {
-			const model = archived.modelId
-				? `${archived.modelId}${archived.thinkingLevel ? `:${archived.thinkingLevel}` : ""}`
-				: undefined;
-			return { id: archived.agentId, model };
-		}
-		const external = this.#selectedExternalRow();
-		if (external) {
-			return { id: external.peer.name || external.peer.sessionId };
-		}
-		return undefined;
-	}
-
-	#renderLegend(width: number): string[] {
-		const lines: string[] = [];
-		lines.push(` ${theme.fg("accent", "Legend & Details (press ? to hide)")}`);
-		lines.push(`   ${theme.fg("success", "S")} = Subscription model  ${theme.fg("warning", "A")} = Auth/Paid model`);
-		lines.push(
-			`   ${theme.fg("dim", "/")} search · ${theme.fg("dim", ".")} show/hide history · ${theme.fg("dim", "i/Esc")} input/navigation mode`,
-		);
-		lines.push(
-			`   ${theme.fg("dim", "h/l or ←/→")} collapse/expand · ${theme.fg("dim", "[ / ]")} cycle siblings · ${theme.fg("dim", "v")} rich/plain preview`,
-		);
-
-		const selectedRow = this.#selectedRowData();
-		if (selectedRow) {
-			lines.push(` ${theme.fg("dim", "Selected Agent:")} ${theme.bold(selectedRow.id)}`);
-			if (selectedRow.model) {
-				const parts = parseResolvedModel(selectedRow.model);
-				const authStr = SUBSCRIPTION_MODEL_PROVIDERS.has(parts.provider ?? "")
-					? "Subscription (S)"
-					: "Auth/Paid (A)";
-				const effortStr = parts.thinking ? parts.thinking : "none";
-				lines.push(`   ${theme.fg("dim", "Provider:")} ${parts.provider ?? "none"}`);
-				lines.push(`   ${theme.fg("dim", "Model:")}    ${parts.id}`);
-				lines.push(`   ${theme.fg("dim", "Auth:")}     ${authStr}`);
-				lines.push(`   ${theme.fg("dim", "Effort:")}   ${effortStr}`);
-			} else {
-				lines.push(`   ${theme.fg("dim", "Model:")}    none`);
-			}
-		} else {
-			lines.push(`   No agent selected.`);
-		}
-		// Pad/truncate legend lines to width
-		return lines.map(line => sanitizeLine(line, Math.max(10, width - 2)));
-	}
 	#statusSummary(): string {
 		const parts: string[] = [];
 		for (const status of ["running", "idle", "parked", "aborted"] as const) {
@@ -1661,7 +1641,7 @@ export class AgentHubOverlayComponent extends Container {
 		const context =
 			ref.parentId === MAIN_AGENT_ID ? "MAIN CONTEXT" : ref.parentId ? "GROUP CONTEXT" : "SEPARATE/HUB-ONLY";
 		const observed = this.#observableFor(ref.id);
-		const task = observed?.description ?? observed?.progress?.task;
+		const task = projectAgentHubRowActivity(ref, observed);
 		const age = formatAge(Math.max(1, Math.round((Date.now() - ref.lastActivity) / 1000)));
 		const unread = this.#irc.unreadCount(ref.id);
 		const hiddenDescendants = this.#hiddenDescendantsById.get(ref.id);
@@ -1721,17 +1701,6 @@ export class AgentHubOverlayComponent extends Container {
 	}
 
 	#handleTableInput(keyData: string): void {
-		const gotoTop = matchesNavigationTop(keyData) && this.#tableGotoPrefixActive;
-		this.#tableGotoPrefixActive = false;
-		if (matchesNavigationTop(keyData) && !gotoTop) {
-			this.#tableGotoPrefixActive = true;
-			return;
-		}
-		if (gotoTop) {
-			this.#moveTableSelection(-this.#selectedRow);
-			this.#requestRender();
-			return;
-		}
 
 		// Filter editing mode: capture keystrokes for the filter query
 		if (this.#tableFilterEditing) {
@@ -1769,25 +1738,19 @@ export class AgentHubOverlayComponent extends Container {
 			}
 			return;
 		}
-		if (this.#cockpitMode === "input") {
-			if (matchesAppInterrupt(keyData)) {
-				this.#cockpitMode = "scroll";
+		if (this.#dualLaneActive && this.#inspectorFocused) {
+			if (this.#handleInspectorNavigation(keyData)) return;
+		} else if (this.#handleViewerNavigation(keyData)) return;
+		const fold = this.#foldSequence.handle(
+			keyData,
+			this.#selectedInternalRef()?.id,
+			matchesAppInterrupt(keyData),
+		);
+		if (fold.kind !== "unhandled") {
+			if (fold.kind === "toggle") {
+				this.#toggleFold(fold.agentId);
 				this.#requestRender();
-				return;
 			}
-			if (matchesKey(keyData, "ctrl+enter")) {
-				this.#submitChatMessage(this.#editor.getText(), true);
-				return;
-			}
-			this.#editor.handleInput(keyData);
-			this.#requestRender();
-			return;
-		}
-		if (keyData === "i" && this.#chatAgentId && !this.#chatArchived) {
-			this.#scrollOffset = this.#lastMaxScroll;
-			this.#wasAtBottom = true;
-			this.#cockpitMode = "input";
-			this.#requestRender();
 			return;
 		}
 		if (keyData === "v") {
@@ -1812,18 +1775,20 @@ export class AgentHubOverlayComponent extends Container {
 			return;
 		}
 		if (keyData === "h" || matchesKey(keyData, "left")) {
-			if (!this.#setSelectedFold(false) && this.#dualLaneActive) this.#inspectorFocused = true;
+			if (
+				!this.#toggleFold(this.#selectedInternalRef()?.id ?? "", false) &&
+				this.#dualLaneActive
+			)
+				this.#inspectorFocused = true;
 			this.#requestRender();
 			return;
 		}
 		if (keyData === "l" || matchesKey(keyData, "right")) {
-			if (!this.#setSelectedFold(true) && this.#dualLaneActive) this.#inspectorFocused = false;
+			if (!this.#toggleFold(this.#selectedInternalRef()?.id ?? "", true) && this.#dualLaneActive)
+				this.#inspectorFocused = false;
 			this.#requestRender();
 			return;
 		}
-		if (this.#dualLaneActive && this.#inspectorFocused && this.#handleInspectorNavigation(keyData)) return;
-
-		if (this.#handleViewerNavigation(keyData)) return;
 		if (keyData === ".") {
 			this.#toggleHistoricalAgents();
 			this.#requestRender();
@@ -1857,13 +1822,6 @@ export class AgentHubOverlayComponent extends Container {
 			this.#requestRender();
 			return;
 		}
-		// j/k and Ctrl+U/Ctrl+D belong to the preview in cockpit scroll mode.
-
-		if (matchesNavigationBottom(keyData)) {
-			this.#moveTableSelection(this.#totalTableRows());
-			this.#requestRender();
-			return;
-		}
 		if (this.#tableFilterQuery && keyData === "n") {
 			this.#moveTableSelection(1);
 			this.#requestRender();
@@ -1875,6 +1833,7 @@ export class AgentHubOverlayComponent extends Container {
 			return;
 		}
 		if (keyData === "/") {
+			this.#foldSequence.reset();
 			this.#tableFilterEditing = true;
 			this.#tableFilterQuery = "";
 			this.#rebuildActiveSearchFields();
@@ -2063,24 +2022,23 @@ export class AgentHubOverlayComponent extends Container {
 		const innerWidth = Math.max(20, width - 2);
 		const editorLines = this.#chatSearchEditing
 			? [` ${theme.fg("accent", "/")}${this.#chatSearchQuery}${theme.fg("accent", "▏")}`]
-			: this.#chatArchived || (this.#chatExternal ? !this.#externalInputActive : this.#cockpitMode !== "input")
-				? []
-				: this.#editor.render(innerWidth);
+			: [];
 		const noticeLine = this.#notice
 			? ` ${theme.fg("error", sanitizeLine(this.#notice, Math.max(10, width - 2)))}`
 			: undefined;
-		const footerLines = this.#buildChatFooterLines();
+		const footerLines = this.#buildChatFooterLines(width);
+		const selectedSummary = renderAgentHubSelectedState(this.#selectedStateItems(), innerWidth)[0];
 
-		// Header: border + headerLines + border; footer: notice? + editor + footer + border
-		const headerChrome = this.#viewerHeaderLines.length + 2;
+		const headerChrome = this.#viewerHeaderLines.length + 2 + Number(selectedSummary !== undefined);
 		const footerChrome = editorLines.length + footerLines.length + (noticeLine ? 1 : 0) + 1;
 		this.#viewportHeight = Math.max(5, termHeight - headerChrome - footerChrome);
 
+		for (const component of this.#chatRichRenderables) component.setRichRendering(this.#transcriptDisplay.richTranscript);
+		this.#liveAssistantComponent?.setRichRendering(this.#transcriptDisplay.richTranscript);
+		const renderedContent = this.#chatPlaceholder ? [] : this.#chatLog.render(innerWidth);
 		const richContentLines: readonly string[] = this.#chatPlaceholder
 			? [theme.fg("dim", this.#chatPlaceholder)]
-			: this.#chatLog.render(innerWidth).length > 0
-				? this.#chatLog.render(innerWidth)
-				: [theme.fg("dim", "No messages yet.")];
+			: renderedContent.length > 0 ? renderedContent : [theme.fg("dim", "No messages yet.")];
 		const contentLines = this.#plainPreview ? richContentLines.map(line => Bun.stripANSI(line)) : richContentLines;
 
 		// Cache rendered lines for transcript search
@@ -2101,6 +2059,7 @@ export class AgentHubOverlayComponent extends Container {
 			const suffix = hi === 0 ? searchIndicator : "";
 			lines.push(` ${this.#viewerHeaderLines[hi]}${suffix}`);
 		}
+		if (selectedSummary) lines.push(` ${selectedSummary}`);
 		lines.push(...new DynamicBorder().render(width));
 
 		if (contentLines.length <= this.#viewportHeight) {
@@ -2126,56 +2085,41 @@ export class AgentHubOverlayComponent extends Container {
 		return lines;
 	}
 
-	#buildChatFooterLines(): string[] {
-		const lines: string[] = [];
-		const searchHint = this.#chatSearchQuery ? "  n/N:match" : "  /:search";
-		if (this.#chatArchived) {
-			const archived = this.#chatArchived;
-			const route = archived.modelId
-				? `${archived.modelId}${archived.thinkingLevel ? `:${archived.thinkingLevel}` : ""}`
-				: "route unavailable";
-			lines.push(` ${theme.fg("dim", `${archived.state} archived · ${route} · read-only`)}`);
-			lines.push(
-				` ${theme.fg("dim", `Esc/h/⌫:back  q:close  [/] prev/next  ctrl-s n/p:cycle${searchHint}  j/k:scroll  ctrl-u/d:page  g/G:top/end`)}`,
-			);
-			return lines;
-		}
-		const observed = this.#chatAgentId ? this.#observableFor(this.#chatAgentId) : undefined;
-		const ref = this.#chatAgentId ? this.#registry.get(this.#chatAgentId) : undefined;
-		const statsLine = this.#buildStatsLine(observed);
-		if (statsLine) lines.push(` ${statsLine}`);
-		const turnStatus = this.#chatAgentId ? this.#turnStatus?.(this.#chatAgentId) : undefined;
-		if (turnStatus) lines.push(` ${this.#formatTurnStatus(turnStatus)}`);
-		const reviveHint = ref?.status === "parked" ? "  R:revive" : "";
-		const inputHint = this.#cockpitMode === "input" ? "Ctrl+Enter:queue  Esc:navigation" : "i:input  Esc/h/⌫:back";
-		lines.push(
-			` ${theme.fg("dim", `${inputHint}  q:close  [/] prev/next  v:rich/plain  ctrl-s n/p:cycle${reviveHint}${searchHint}  ${this.#expandKeys[0] ?? "ctrl+o"}:expand  j/k:scroll  ctrl-u/d:page  g/G:top/end`)}`,
-		);
-		return lines;
+	#buildChatFooterLines(width: number): string[] {
+		const searchHint = this.#chatSearchQuery ? "n/N:next/previous match" : undefined;
+		if (this.#chatArchived)
+			return renderAgentHubChatFooter({
+				width,
+				filterEditing: this.#chatSearchEditing,
+				showHelp: this.#showLegend,
+				archive: this.#chatArchived,
+				extra: [searchHint, "Ctrl+S n/p:cycle", "h/Backspace:back"],
+			});
+		const internalId = !this.#chatExternal ? this.#chatAgentId : undefined;
+		const ref = internalId ? this.#registry.get(internalId) : undefined;
+		const statsLine = this.#buildStatsLine(internalId ? this.#observableFor(internalId) : undefined);
+		const turnStatus = internalId ? this.#turnStatus?.(internalId) : undefined;
+		return renderAgentHubChatFooter({
+			width,
+			filterEditing: this.#chatSearchEditing,
+			showHelp: this.#showLegend,
+			status: [statsLine, turnStatus ? formatAgentHubTurnStatus(turnStatus, contentWidth()) : ""],
+			extra: [
+				"h/Backspace:back",
+				searchHint,
+				"Ctrl+S n/p:cycle",
+				ref?.status === "parked" ? "R:revive" : undefined,
+				`${this.#expandKeys[0] ?? "Ctrl+O"}:expand`,
+			],
+		});
 	}
 
-	#formatTurnStatus(status: AgentHubTurnStatus): string {
-		const details = [
-			status.provider ? `provider:${sanitizeLine(status.provider, 24)}` : undefined,
-			status.reroutedProvider ? `rerouted:${sanitizeLine(status.reroutedProvider, 24)}` : undefined,
-			status.originalModel ? `model:${sanitizeLine(status.originalModel, 24)}` : undefined,
-			status.reroutedModel ? `rerouted-model:${sanitizeLine(status.reroutedModel, 24)}` : undefined,
-			status.ratePerHour !== undefined ? `rate:${status.ratePerHour}/h` : undefined,
-			status.projectedEmptyAt ? `empty:${new Date(status.projectedEmptyAt).toLocaleTimeString()}` : undefined,
-			status.resetAt ? `reset:${new Date(status.resetAt).toLocaleTimeString()}` : undefined,
-			status.deficitPerHour !== undefined ? `deficit:${status.deficitPerHour}/h` : undefined,
-			status.decisionReason ? `reason:${sanitizeLine(status.decisionReason, 32)}` : undefined,
-			status.quotaPoolId ? `pool:${sanitizeLine(status.quotaPoolId, 16)}` : undefined,
-			status.limitWindowId ? `window:${sanitizeLine(status.limitWindowId, 16)}` : undefined,
-			status.canCancel ? "cancellable" : undefined,
-		].filter((detail): detail is string => detail !== undefined);
-		const color =
-			status.state === "failed-rate-limit" ? "error" : status.state === "cancelled" ? "warning" : "accent";
-		return theme.fg(color, `${status.state}${details.length ? ` · ${details.join(" · ")}` : ""}`);
-	}
 
 	#tokenRateBadge(): string | undefined {
-		const ref = this.#chatAgentId ? this.#registry.get(this.#chatAgentId) : undefined;
+		const ref =
+			!this.#chatExternal && !this.#chatArchived && this.#chatAgentId
+				? this.#registry.get(this.#chatAgentId)
+				: undefined;
 		if (ref?.status !== "running") return undefined;
 
 		const state = ref.session?.state;
@@ -2227,7 +2171,7 @@ export class AgentHubOverlayComponent extends Container {
 	/** Rebuild the chat header and sync transcript components from new entries */
 	#rebuildChatContent(): void {
 		const id = this.#chatAgentId;
-		const ref = id ? this.#registry.get(id) : undefined;
+		const ref = id && !this.#chatExternal && !this.#chatArchived ? this.#registry.get(id) : undefined;
 
 		// Load transcript first so model info is available for the header
 		let messageEntries: SessionMessageEntry[] | null = null;
@@ -2317,7 +2261,6 @@ export class AgentHubOverlayComponent extends Container {
 	}
 
 	#handleChatInput(keyData: string): void {
-		const editorEmpty = this.#editor.getText().trim() === "";
 		if (this.#chatSearchEditing) {
 			if (matchesKey(keyData, "enter") || keyData === "\r" || keyData === "\n") {
 				this.#chatSearchEditing = false;
@@ -2349,31 +2292,17 @@ export class AgentHubOverlayComponent extends Container {
 			}
 			return;
 		}
+		if (keyData === "?") {
+			this.#showLegend = !this.#showLegend;
+			this.#requestRender();
+			return;
+		}
 		if (this.#chatExternal) {
-			this.#handleExternalChatInput(keyData);
+			this.#handleReadOnlyChatInput(keyData);
 			return;
 		}
 		if (this.#chatArchived) {
 			this.#handleReadOnlyChatInput(keyData);
-			return;
-		}
-		if (this.#cockpitMode === "input") {
-			if (matchesAppInterrupt(keyData)) {
-				this.#cockpitMode = "scroll";
-				this.#requestRender();
-				return;
-			}
-			if (matchesKey(keyData, "ctrl+enter")) {
-				this.#submitChatMessage(this.#editor.getText(), true);
-				return;
-			}
-			this.#editor.handleInput(keyData);
-			this.#requestRender();
-			return;
-		}
-		if (keyData === "i") {
-			this.#cockpitMode = "input";
-			this.#requestRender();
 			return;
 		}
 		if (keyData === "v") {
@@ -2468,44 +2397,6 @@ export class AgentHubOverlayComponent extends Container {
 		if (this.#handleViewerNavigation(keyData)) return;
 	}
 
-	#handleExternalChatInput(keyData: string): void {
-		if (!this.#externalInputActive) {
-			if (keyData === "i") {
-				this.#externalInputActive = true;
-				this.#editor.setText("");
-				this.#notice = "IRC input · Ctrl+Enter sends as User";
-				this.#requestRender();
-				return;
-			}
-			this.#handleReadOnlyChatInput(keyData);
-			return;
-		}
-		if (matchesAppInterrupt(keyData)) {
-			this.#externalInputActive = false;
-			this.#editor.setText("");
-			this.#notice = undefined;
-			this.#requestRender();
-			return;
-		}
-		if (matchesKey(keyData, "ctrl+enter")) {
-			const body = this.#editor.getText().trim();
-			const peer = this.#chatExternal;
-			const bus = this.#resolveExternalBus();
-			if (!body || !peer || !bus?.sendMessage) return;
-			try {
-				bus.sendMessage({ fromPeer: this.#externalSessionId, toPeer: peer.name, body, origin: "user" });
-				this.#editor.setText("");
-				this.#externalInputActive = false;
-				this.#notice = `Sent to ${peer.name} as User`;
-			} catch (error) {
-				this.#notice = error instanceof Error ? error.message : String(error);
-			}
-			this.#requestRender();
-			return;
-		}
-		this.#editor.handleInput(keyData);
-		this.#requestRender();
-	}
 	#handleReadOnlyChatInput(keyData: string): void {
 		if (matchesAppInterrupt(keyData)) {
 			if (this.#chatSearchQuery) {
@@ -2641,16 +2532,14 @@ export class AgentHubOverlayComponent extends Container {
 	}
 
 	#closeChat(): void {
-		// Restore selection to the agent or completed child we just drilled into.
+		this.#foldSequence.reset();
 		if (this.#chatExternal) this.#selectedAgentKey = `external:${this.#chatExternal.sessionId}`;
 		else if (this.#chatArchived) this.#selectedAgentKey = `archived:${this.#chatArchived.childSessionFile}`;
 		else if (this.#chatAgentId) this.#selectedAgentKey = `agent:${this.#chatAgentId}`;
-		this.#cockpitMode = "scroll";
 		this.#view = "table";
 		this.#chatAgentId = undefined;
 		this.#chatArchived = undefined;
 		this.#chatExternal = undefined;
-		this.#externalInputActive = false;
 		this.#siblingWatchDispose?.();
 		this.#siblingWatchDispose = undefined;
 		this.#notice = undefined;
@@ -2670,53 +2559,26 @@ export class AgentHubOverlayComponent extends Container {
 		this.#requestRender();
 	}
 
-	#submitChatMessage(text: string, queue = false): void {
-		const id = this.#chatAgentId;
-		const trimmed = text.trim();
-		if (!id || !trimmed) return;
-		this.#editor.setText("");
-		this.#notice = undefined;
-		if (this.#remote) {
-			// Remote queue intent requires the host's typed submission transport.
-			// Until it is exposed, preserve normal remote submission rather than
-			// fabricating a queue status locally.
-			this.#remote.chat(id, trimmed);
-			this.#scheduleChatRefresh();
-			this.#requestRender();
-			return;
-		}
-		void (async () => {
-			try {
-				// Revives a parked agent; returns the live session for running/idle.
-				const session = await this.#lifecycle().ensureLive(id);
-				this.#attachLiveSession();
-				if (queue) {
-					await session.sendUserMessage(trimmed, { deliverAs: "followUp" });
-				} else {
-					// A normal send lets admission choose direct or queued delivery.
-					await session.prompt(trimmed, { streamingBehavior: "steer" });
-				}
-			} catch (error) {
-				this.#notice = error instanceof Error ? error.message : String(error);
-			}
-			this.#scheduleChatRefresh();
-			this.#requestRender();
-		})();
-		this.#requestRender();
-	}
 
 	/** Viewport scrolling for the chat transcript. Returns true when handled. */
 	#handleViewerNavigation(keyData: string): boolean {
-		const gotoTop = matchesNavigationTop(keyData) && this.#viewerGotoPrefixActive;
-		this.#viewerGotoPrefixActive = false;
-		if (matchesNavigationTop(keyData) && !gotoTop) {
-			this.#viewerGotoPrefixActive = true;
-			return true;
-		}
-		if (gotoTop) {
-			this.#scrollOffset = 0;
-			this.#wasAtBottom = this.#lastMaxScroll === 0;
-			this.#requestRender();
+		const sequence = this.#viewerSequence.handle(keyData, {
+			prefix: matchesNavigationTop(keyData),
+			down: matchesNavigationDown(keyData),
+			up: matchesNavigationUp(keyData),
+			displayRows: this.#transcriptDisplay.transcriptWrap,
+			interrupt: matchesAppInterrupt(keyData),
+		});
+		if (sequence.kind !== "unhandled") {
+			if (sequence.kind !== "pending" && sequence.kind !== "cancelled") {
+				this.#scrollOffset = applyAgentHubViewerSequenceAction(
+					this.#scrollOffset,
+					this.#lastMaxScroll,
+					sequence,
+				);
+				this.#wasAtBottom = this.#scrollOffset >= this.#lastMaxScroll;
+				this.#requestRender();
+			}
 			return true;
 		}
 		const maxScroll = this.#lastMaxScroll;
@@ -2725,29 +2587,17 @@ export class AgentHubOverlayComponent extends Container {
 			this.#wasAtBottom = this.#scrollOffset >= maxScroll;
 			this.#requestRender();
 		};
-		if (matchesNavigationDown(keyData) || matchesSelectDown(keyData)) {
+		const delta = resolveViewerScrollDelta(keyData, this.#viewportHeight);
+		if (delta !== undefined) {
+			scrollBy(delta);
+			return true;
+		}
+		if (matchesSelectDown(keyData)) {
 			scrollBy(1);
 			return true;
 		}
-		if (matchesNavigationUp(keyData) || matchesSelectUp(keyData)) {
+		if (matchesSelectUp(keyData)) {
 			scrollBy(-1);
-			return true;
-		}
-
-		if (matchesNavigationPageDown(keyData)) {
-			scrollBy(Math.max(1, Math.floor(this.#viewportHeight / 2)));
-			return true;
-		}
-		if (matchesNavigationPageUp(keyData)) {
-			scrollBy(-Math.max(1, Math.floor(this.#viewportHeight / 2)));
-			return true;
-		}
-		if (matchesKey(keyData, "pageDown")) {
-			scrollBy(PAGE_SIZE);
-			return true;
-		}
-		if (matchesKey(keyData, "pageUp")) {
-			scrollBy(-PAGE_SIZE);
 			return true;
 		}
 		if (matchesNavigationBottom(keyData)) {
@@ -2761,13 +2611,27 @@ export class AgentHubOverlayComponent extends Container {
 	}
 	/** Viewport scrolling for the spawn-packet inspector. */
 	#handleInspectorNavigation(keyData: string): boolean {
-		let delta: number | undefined;
-		if (matchesNavigationDown(keyData) || matchesSelectDown(keyData)) delta = 1;
-		else if (matchesNavigationUp(keyData) || matchesSelectUp(keyData)) delta = -1;
-		else if (matchesNavigationPageDown(keyData)) delta = Math.max(1, Math.floor(this.#viewportHeight / 2));
-		else if (matchesNavigationPageUp(keyData)) delta = -Math.max(1, Math.floor(this.#viewportHeight / 2));
-		else if (matchesKey(keyData, "pageDown")) delta = PAGE_SIZE;
-		else if (matchesKey(keyData, "pageUp")) delta = -PAGE_SIZE;
+		const sequence = this.#viewerSequence.handle(keyData, {
+			prefix: matchesNavigationTop(keyData),
+			down: matchesNavigationDown(keyData),
+			up: matchesNavigationUp(keyData),
+			displayRows: true,
+			interrupt: matchesAppInterrupt(keyData),
+		});
+		if (sequence.kind !== "unhandled") {
+			if (sequence.kind !== "pending" && sequence.kind !== "cancelled") {
+				this.#inspectorScrollOffset = applyAgentHubViewerSequenceAction(
+					this.#inspectorScrollOffset,
+					this.#inspectorLastMaxScroll,
+					sequence,
+				);
+				this.#requestRender();
+			}
+			return true;
+		}
+		let delta = resolveViewerScrollDelta(keyData, this.#inspectorViewportHeight);
+		if (delta === undefined && matchesSelectDown(keyData)) delta = 1;
+		else if (delta === undefined && matchesSelectUp(keyData)) delta = -1;
 		else if (matchesNavigationBottom(keyData)) {
 			this.#inspectorScrollOffset = this.#inspectorLastMaxScroll;
 			this.#requestRender();
@@ -2782,11 +2646,6 @@ export class AgentHubOverlayComponent extends Container {
 		return true;
 	}
 
-	// ========================================================================
-	// Transcript assembly — the same components as the main session transcript
-	// (mirrors UiHelpers.renderSessionContext / addMessageToChat).
-	// ========================================================================
-
 	/** Tear down transcript components (sealing pending spinners) and reset build state. */
 	#resetChatLog(): void {
 		for (const pending of this.#chatPendingTools.values()) pending.seal();
@@ -2796,6 +2655,7 @@ export class AgentHubOverlayComponent extends Container {
 		this.#pendingUsage = undefined;
 		this.#chatWaitingPoll = null;
 		this.#chatExpandables = [];
+		this.#chatRichRenderables = [];
 		this.#liveAssistantComponent = undefined;
 		this.#chatLog.dispose();
 		this.#chatLog.clear();
@@ -2814,7 +2674,6 @@ export class AgentHubOverlayComponent extends Container {
 		}
 	}
 
-	/** Project the live Agent state through the same assistant component as Main. */
 	#syncStreamingAssistant(ref: AgentRef | undefined): void {
 		const streamMessage = ref?.status === "running" ? ref.session?.state?.streamMessage : undefined;
 		if (!streamMessage || streamMessage.role !== "assistant") {
@@ -2827,6 +2686,9 @@ export class AgentHubOverlayComponent extends Container {
 				undefined,
 				this.#hideThinkingBlock?.() ?? false,
 				() => this.#requestRender(),
+				undefined,
+				undefined,
+				this.#transcriptDisplay.richTranscript,
 			);
 		}
 		this.#liveAssistantComponent.updateContent(message, { transient: true });
@@ -2835,7 +2697,6 @@ export class AgentHubOverlayComponent extends Container {
 		this.#chatPlaceholder = undefined;
 	}
 
-	/** Append components for entries not yet materialized. Rebuilds from scratch when the cache was replaced (agent switch, file rotation). */
 	#syncChatComponents(entries: SessionMessageEntry[]): void {
 		if (this.#chatEntriesRef !== entries) {
 			this.#resetChatLog();
@@ -2845,10 +2706,6 @@ export class AgentHubOverlayComponent extends Container {
 			this.#appendChatMessage(entries[i].message);
 		}
 		this.#chatBuiltCount = entries.length;
-		// Flush the trailing turn's usage row only once its tools are materialized.
-		// A read (or any tool) whose toolResult lands in a later debounced sync stays
-		// pending in #chatReadArgs / #chatPendingTools; flushing now would emit the
-		// row above it. The sync that drains the maps flushes it below the tools.
 		if (this.#chatReadArgs.size === 0 && this.#chatPendingTools.size === 0) {
 			this.#flushPendingUsage();
 		}
@@ -2858,8 +2715,11 @@ export class AgentHubOverlayComponent extends Container {
 		component.setExpanded(this.#chatExpanded);
 		this.#chatExpandables.push(component);
 	}
+	#trackRich<T extends { setRichRendering(rich: boolean): void }>(component: T): T {
+		this.#chatRichRenderables.push(component);
+		return component;
+	}
 
-	/** A `job` poll showing all-running is displaced by the next `job` call (mirrors the rebuild path). */
 	#resolveWaitingPoll(nextToolName?: string): void {
 		const previous = this.#chatWaitingPoll;
 		if (!previous) return;
@@ -2918,7 +2778,11 @@ export class AgentHubOverlayComponent extends Container {
 									.join("");
 				if (textContent) {
 					const isSynthetic = message.role === "developer" ? true : (message.synthetic ?? false);
-					this.#chatLog.addChild(new UserMessageComponent(textContent, isSynthetic));
+					this.#chatLog.addChild(
+						this.#trackRich(
+							new UserMessageComponent(textContent, isSynthetic, undefined, this.#transcriptDisplay.richTranscript),
+						),
+					);
 				}
 				break;
 			}
@@ -2960,8 +2824,10 @@ export class AgentHubOverlayComponent extends Container {
 						const size = typeof file.byteSize === "number" ? formatBytes(file.byteSize) : "unknown size";
 						suffix = `(skipped: ${size})`;
 					} else {
-						suffix = file.image
-							? "(image)"
+						suffix = file.attachment
+							? file.attachment.type === "video"
+								? "(video)"
+								: "(image)"
 							: file.lineCount === undefined
 								? "(unknown lines)"
 								: `(${file.lineCount} lines)`;
@@ -2981,8 +2847,15 @@ export class AgentHubOverlayComponent extends Container {
 	}
 
 	#appendAssistantMessage(message: Extract<AgentMessage, { role: "assistant" }>): void {
-		const assistantComponent = new AssistantMessageComponent(message, this.#hideThinkingBlock?.() ?? false, () =>
-			this.#requestRender(),
+		const assistantComponent = this.#trackRich(
+			new AssistantMessageComponent(
+				message,
+				this.#hideThinkingBlock?.() ?? false,
+				() => this.#requestRender(),
+				undefined,
+				undefined,
+				this.#transcriptDisplay.richTranscript,
+			),
 		);
 		this.#chatLog.addChild(assistantComponent);
 
@@ -3043,6 +2916,7 @@ export class AgentHubOverlayComponent extends Container {
 					editFuzzyThreshold: settings.get("edit.fuzzyThreshold"),
 					editAllowFuzzy: settings.get("edit.fuzzyMatch"),
 					liveRegion: this.#chatLog,
+					transcriptDisplay: this.#transcriptDisplay,
 				},
 				this.#getTool?.(content.name),
 				this.#ui,
@@ -3173,6 +3047,7 @@ export class AgentHubOverlayComponent extends Container {
 				},
 				() => this.#chatExpanded,
 				theme,
+				this.#transcriptDisplay,
 			);
 			this.#chatLog.addChild(card);
 			return;
@@ -3204,24 +3079,46 @@ export class AgentHubOverlayComponent extends Container {
 	}
 
 	#loadTranscript(sessionFile: string): SessionMessageEntry[] | null {
-		if (this.#transcriptCache && this.#transcriptCache.path !== sessionFile) {
-			this.#transcriptCache = undefined;
+		if (this.#transcriptCache?.path !== sessionFile) {
+			this.#transcriptCache = { path: sessionFile, bytesRead: 0, entries: [] };
 		}
 
-		const fromByte = this.#transcriptCache?.bytesRead ?? 0;
-		const result = readJournalTailChunk(sessionFile, fromByte, PREVIEW_TAIL_BYTES);
+		const fromByte = this.#transcriptCache.bytesRead;
+		const cached = this.#journalTails.peek(sessionFile, fromByte);
+		if (cached === undefined) {
+			void this.#journalTails
+				.load(sessionFile, fromByte, PREVIEW_TAIL_BYTES)
+				.then(result => this.#applyTranscriptChunk(sessionFile, fromByte, result));
+			return this.#transcriptCache.entries;
+		}
+		if (!cached) return null;
+		if (cached.newSize < fromByte) {
+			this.#transcriptCache = { path: sessionFile, bytesRead: 0, entries: [] };
+			this.#journalTails.invalidate(sessionFile);
+			void this.#journalTails
+				.load(sessionFile, 0, PREVIEW_TAIL_BYTES)
+				.then(result => this.#applyTranscriptChunk(sessionFile, 0, result));
+			return this.#transcriptCache.entries;
+		}
+		this.#ingestTranscriptChunk(sessionFile, cached.text, cached.fromByte);
+		return this.#transcriptCache.entries;
+	}
+
+	#applyTranscriptChunk(sessionFile: string, fromByte: number, result: JournalTailChunk | null): void {
+		if (this.#transcriptCache?.path !== sessionFile || this.#transcriptCache.bytesRead !== fromByte) return;
 		if (!result) {
 			logger.debug("Agent hub: failed to read session file", { path: sessionFile });
-			return this.#transcriptCache?.entries ?? null;
+			this.#requestRender();
+			return;
 		}
-
 		if (result.newSize < fromByte) {
-			this.#transcriptCache = undefined;
-			return this.#loadTranscript(sessionFile);
+			this.#transcriptCache = { path: sessionFile, bytesRead: 0, entries: [] };
+			this.#journalTails.invalidate(sessionFile);
+		} else {
+			this.#ingestTranscriptChunk(sessionFile, result.text, result.fromByte);
 		}
-
-		this.#ingestTranscriptChunk(sessionFile, result.text, result.fromByte);
-		return this.#transcriptCache?.entries ?? null;
+		this.#rebuildChatContent();
+		this.#ui.requestComponentRender(this);
 	}
 
 	/** Parse a complete-line JSONL chunk into the transcript cache and advance bytesRead. Shared by the local file and remote paths. */

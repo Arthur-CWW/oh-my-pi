@@ -7,12 +7,14 @@
 
 import {
 	type ApiKey,
+	contextHasVideo,
 	type AssistantMessage,
 	type FetchImpl,
 	type Message,
 	type MessageAttribution,
 	type Model,
 	ProviderHttpError,
+	supportsNativeVideoInput,
 	type Tool,
 	type Usage,
 	withAuth,
@@ -43,13 +45,14 @@ import compactionUpdateSummaryPrompt from "./prompts/compaction-update-summary.m
 import handoffDocumentPrompt from "./prompts/handoff-document.md" with { type: "text" };
 
 import {
+	buildSummaryContent,
 	computeFileLists,
 	createFileOps,
 	extractFileOpsFromMessage,
 	type FileOperations,
-	SUMMARIZATION_SYSTEM_PROMPT,
-	serializeConversation,
+	serializeConversationWithVideos,
 	stripReadSelector,
+	SUMMARIZATION_SYSTEM_PROMPT,
 	upsertFileOperations,
 } from "./utils";
 
@@ -255,6 +258,12 @@ export function resolveThresholdTokens(contextWindow: number, settings: Compacti
 const IMAGE_TOKEN_ESTIMATE = 1200;
 
 /**
+ * Video duration is unavailable here, so this is only a nonzero control-flow
+ * floor. It deliberately does not claim to estimate provider-billed tokens.
+ */
+export const VIDEO_TOKEN_CONTROL_FLOW_FLOOR = 1;
+
+/**
  * Estimate token count for a message using cl100k_base via the native
  * tokenizer. This is not Claude's first-party tokenizer (Anthropic doesn't
  * publish one) but is within ~5–10% across English/code text.
@@ -270,14 +279,17 @@ export function estimateTokens(message: AgentMessage): number {
 	}
 
 	switch (message.role) {
-		case "user": {
-			const content = (message as { content: string | Array<{ type: string; text?: string }> }).content;
+		case "user":
+		case "developer": {
+			const content = message.content;
 			if (typeof content === "string") {
 				fragments.push(content);
-			} else if (Array.isArray(content)) {
+			} else {
 				for (const block of content) {
 					if (block.type === "text" && block.text) {
 						fragments.push(block.text);
+					} else if (block.type === "video") {
+						extra += VIDEO_TOKEN_CONTROL_FLOW_FLOOR;
 					}
 				}
 			}
@@ -307,6 +319,7 @@ export function estimateTokens(message: AgentMessage): number {
 			}
 			break;
 		}
+		case "custom":
 		case "hookMessage":
 		case "toolResult": {
 			if (typeof message.content === "string") {
@@ -317,6 +330,8 @@ export function estimateTokens(message: AgentMessage): number {
 						fragments.push(block.text);
 					} else if (block.type === "image") {
 						extra += IMAGE_TOKEN_ESTIMATE;
+					} else if (block.type === "video") {
+						extra += VIDEO_TOKEN_CONTROL_FLOW_FLOOR;
 					}
 				}
 			}
@@ -604,13 +619,12 @@ export async function generateSummary(
 		basePrompt = `${basePrompt}\n\nAdditional focus: ${customInstructions}`;
 	}
 
-	// Serialize conversation to text so model doesn't try to continue it
 	// Convert to LLM messages first (handles custom app messages when caller provides a transformer).
 	const llmMessages = (options?.convertToLlm ?? defaultConvertToLlm)(currentMessages);
-	const conversationText = serializeConversation(llmMessages, preferredDialect(model.id));
+	const conversation = serializeConversationWithVideos(llmMessages, preferredDialect(model.id));
 
 	// Build the prompt with conversation wrapped in tags
-	let promptText = `<conversation>\n${conversationText}\n</conversation>\n\n`;
+	let promptText = `<conversation>\n${conversation.text}\n</conversation>\n\n`;
 	if (previousSummary) {
 		promptText += `<previous-summary>\n${previousSummary}\n</previous-summary>\n\n`;
 	}
@@ -620,12 +634,12 @@ export async function generateSummary(
 	const summarizationMessages = [
 		{
 			role: "user" as const,
-			content: [{ type: "text" as const, text: promptText }],
+			content: buildSummaryContent(promptText, conversation.videos),
 			timestamp: Date.now(),
 		},
 	];
 
-	if (options?.remoteEndpoint) {
+	if (options?.remoteEndpoint && conversation.videos.length === 0) {
 		const remote = await requestRemoteCompaction(
 			options.remoteEndpoint,
 			{
@@ -755,16 +769,16 @@ async function generateShortSummary(
 ): Promise<string> {
 	const maxTokens = Math.min(512, Math.floor(0.2 * reserveTokens));
 	const llmMessages = (options?.convertToLlm ?? defaultConvertToLlm)(recentMessages);
-	const conversationText = serializeConversation(llmMessages, preferredDialect(model.id));
+	const conversation = serializeConversationWithVideos(llmMessages, preferredDialect(model.id));
 
-	let promptText = `<conversation>\n${conversationText}\n</conversation>\n\n`;
+	let promptText = `<conversation>\n${conversation.text}\n</conversation>\n\n`;
 	if (historySummary) {
 		promptText += `<previous-summary>\n${historySummary}\n</previous-summary>\n\n`;
 	}
 	promptText += formatAdditionalContext(options?.extraContext);
 	promptText += SHORT_SUMMARY_PROMPT;
 
-	if (options?.remoteEndpoint) {
+	if (options?.remoteEndpoint && conversation.videos.length === 0) {
 		const remote = await requestRemoteCompaction(
 			options.remoteEndpoint,
 			{
@@ -781,7 +795,13 @@ async function generateShortSummary(
 		model,
 		{
 			systemPrompt: [SUMMARIZATION_SYSTEM_PROMPT],
-			messages: [{ role: "user", content: [{ type: "text", text: promptText }], timestamp: Date.now() }],
+			messages: [
+				{
+					role: "user",
+					content: buildSummaryContent(promptText, conversation.videos),
+					timestamp: Date.now(),
+				},
+			],
 		},
 		{
 			maxTokens,
@@ -980,17 +1000,25 @@ export async function compact(
 		thinkingLevel: options?.thinkingLevel,
 		fetch: options?.fetch,
 	};
+	const summaryHistory = [...messagesToSummarize, ...turnPrefixMessages, ...recentMessages];
+	const llmSummaryHistory = (summaryOptions.convertToLlm ?? defaultConvertToLlm)(summaryHistory);
+	const summaryHasVideo = contextHasVideo({ messages: llmSummaryHistory });
+	if (summaryHasVideo && !supportsNativeVideoInput(model)) {
+		throw new Error(
+			`Compaction requires native video input, but ${model.provider}/${model.id} is not video-capable. Select the configured vision model.`,
+		);
+	}
+	if (summaryHasVideo) summaryOptions.remoteEndpoint = undefined;
 
 	let preserveData = withOpenAiRemoteCompactionPreserveData(previousPreserveData, undefined);
-	if (settings.remoteEnabled !== false && shouldUseOpenAiRemoteCompaction(model)) {
+	if (!summaryHasVideo && settings.remoteEnabled !== false && shouldUseOpenAiRemoteCompaction(model)) {
 		const previousRemoteCompaction = getPreservedOpenAiRemoteCompactionData(previousPreserveData);
-		const remoteMessages = [...messagesToSummarize, ...turnPrefixMessages, ...recentMessages];
 		const previousReplacementHistory =
 			previousRemoteCompaction?.provider === model.provider
 				? previousRemoteCompaction.replacementHistory
 				: undefined;
 		const remoteHistory = buildOpenAiNativeHistory(
-			(summaryOptions.convertToLlm ?? defaultConvertToLlm)(remoteMessages),
+			llmSummaryHistory,
 			model,
 			previousReplacementHistory,
 		);
@@ -1079,6 +1107,7 @@ export async function compact(
 			initiatorOverride: summaryOptions.initiatorOverride,
 			metadata: summaryOptions.metadata,
 			telemetry: summaryOptions.telemetry,
+			convertToLlm: summaryOptions.convertToLlm,
 			// Same propagation as summaryOptions above — generateShortSummary
 			// resolves its own reasoning via resolveCompactionEffort.
 			thinkingLevel: options?.thinkingLevel,
@@ -1118,12 +1147,12 @@ async function generateTurnPrefixSummary(
 	const maxTokens = Math.floor(0.5 * reserveTokens); // Smaller budget for turn prefix
 
 	const llmMessages = (options?.convertToLlm ?? defaultConvertToLlm)(messages);
-	const conversationText = serializeConversation(llmMessages, preferredDialect(model.id));
-	const promptText = `<conversation>\n${conversationText}\n</conversation>\n\n${TURN_PREFIX_SUMMARIZATION_PROMPT}`;
+	const conversation = serializeConversationWithVideos(llmMessages, preferredDialect(model.id));
+	const promptText = `<conversation>\n${conversation.text}\n</conversation>\n\n${TURN_PREFIX_SUMMARIZATION_PROMPT}`;
 	const summarizationMessages = [
 		{
 			role: "user" as const,
-			content: [{ type: "text" as const, text: promptText }],
+			content: buildSummaryContent(promptText, conversation.videos),
 			timestamp: Date.now(),
 		},
 	];

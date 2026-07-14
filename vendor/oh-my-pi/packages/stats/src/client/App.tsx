@@ -41,14 +41,16 @@ export default function App() {
 	const [syncing, setSyncing] = useState(false);
 	const [activeTab, setActiveTab] = useState<Tab>("overview");
 	const [timeRange, setTimeRange] = useState<TimeRange>("24h");
+	const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
 	const loadRecentLists = useCallback(async () => {
 		try {
 			const [requests, errors] = await Promise.all([getRecentRequests(50), getRecentErrors(50)]);
 			setRecentRequests(requests);
 			setRecentErrors(errors);
-		} catch (err) {
-			console.error(err);
+			setErrorMessage(null);
+		} catch (error) {
+			setErrorMessage(error instanceof Error ? error.message : "Unable to load recent stats");
 		}
 	}, []);
 
@@ -56,21 +58,16 @@ export default function App() {
 		try {
 			if (activeTab === "models") {
 				setModelStats(await getModelDashboardStats(timeRange));
-				return;
-			}
-			if (activeTab === "costs") {
+			} else if (activeTab === "costs") {
 				setCostStats(await getCostDashboardStats(timeRange));
-				return;
-			}
-			if (activeTab === "behavior") {
+			} else if (activeTab === "behavior") {
 				setBehaviorStats(await getBehaviorDashboardStats(timeRange));
-				return;
-			}
-			if (activeTab === "overview") {
+			} else if (activeTab === "overview") {
 				setOverviewStats(await getOverviewStats(timeRange));
 			}
-		} catch (err) {
-			console.error(err);
+			setErrorMessage(null);
+		} catch (error) {
+			setErrorMessage(error instanceof Error ? error.message : "Unable to load dashboard stats");
 		}
 	}, [activeTab, timeRange]);
 
@@ -79,6 +76,8 @@ export default function App() {
 		try {
 			await sync();
 			await Promise.all([loadActiveTabStats(), loadRecentLists()]);
+		} catch (error) {
+			setErrorMessage(error instanceof Error ? error.message : "Unable to sync stats");
 		} finally {
 			setSyncing(false);
 		}
@@ -107,6 +106,11 @@ export default function App() {
 					timeRange={timeRange}
 					onTimeRangeChange={setTimeRange}
 				/>
+				{errorMessage && (
+					<div role="alert" className="mb-4 rounded border border-red-500/40 bg-red-500/10 px-4 py-3 text-red-300">
+						{errorMessage}
+					</div>
+				)}
 
 				{activeTab === "overview" && (
 					<div className="space-y-6 animate-fade-in">

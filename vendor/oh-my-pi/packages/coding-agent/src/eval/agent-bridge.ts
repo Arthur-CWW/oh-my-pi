@@ -6,7 +6,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { logger, prompt, Snowflake } from "@oh-my-pi/pi-utils";
 import { z } from "zod/v4";
-import { resolveAgentModelPatterns } from "../config/model-resolver";
+import { resolveAgentModelPatterns } from "../config/role-resolution";
 import type { LocalProtocolOptions } from "../internal-urls";
 import { MCPManager } from "../mcp/manager";
 import subagentUserPromptTemplate from "../prompts/system/subagent-user-prompt.md" with { type: "text" };

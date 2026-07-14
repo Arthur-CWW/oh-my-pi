@@ -15,7 +15,15 @@ export {
 	syncAllSessions,
 } from "./aggregator";
 export { closeDb } from "./db";
-export { startServer } from "./server";
+export {
+	startServer,
+	waitForStatsHealth,
+	type StatsErrorPayload,
+	type StatsHealth,
+	type StatsServer,
+	type StatsVersion,
+	type WaitForStatsHealthOptions,
+} from "./server";
 export type {
 	AggregatedStats,
 	DashboardStats,

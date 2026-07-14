@@ -1,7 +1,7 @@
 import { buildModel } from "./build";
 import { readModelCache, writeModelCache } from "./model-cache";
 import { type GeneratedProvider, getBundledModels } from "./models";
-import type { Api, Model, ModelSpec, Provider } from "./types";
+import type { Api, Model, ModelInput, ModelSpec, Provider } from "./types";
 import { isRecord } from "./utils";
 import { collapseBuiltModelVariants } from "./variant-collapse";
 
@@ -304,7 +304,7 @@ function retainModelIds<TApi extends Api>(
  * arms calling `resolveProviderModels` with the same `staticModels` array)
  * skip the JSON+hash work after the first call.
  */
-const MODEL_CACHE_FINGERPRINT_VERSION = "merge-v3";
+const MODEL_CACHE_FINGERPRINT_VERSION = "merge-v4";
 const kStaticFingerprint = Symbol("model-manager.staticFingerprint");
 type ModelArrayWithFingerprint = readonly Model<Api>[] & { [kStaticFingerprint]?: string };
 function fingerprintStatic<TApi extends Api>(
@@ -325,7 +325,9 @@ function fingerprintStatic<TApi extends Api>(
 }
 
 function mergeDynamicModel<TApi extends Api>(existingModel: Model<TApi>, dynamicModel: Model<TApi>): Model<TApi> {
-	const supportsImage = existingModel.input.includes("image") || dynamicModel.input.includes("image");
+	const input: ModelInput[] = ["text"];
+	if (existingModel.input.includes("image") || dynamicModel.input.includes("image")) input.push("image");
+	if (dynamicModel.input.includes("video")) input.push("video");
 	// Re-build from spec stage: sparse compat comes from `compatConfig` (the
 	// verbatim override vocabulary), never the resolved `compat` record.
 	return buildModel({
@@ -333,7 +335,7 @@ function mergeDynamicModel<TApi extends Api>(existingModel: Model<TApi>, dynamic
 		...dynamicModel,
 		name: preferDiscoveryName(dynamicModel.name, existingModel.name, dynamicModel.id),
 		reasoning: existingModel.reasoning || dynamicModel.reasoning,
-		input: supportsImage ? ["text", "image"] : ["text"],
+		input,
 		cost: {
 			input: preferDiscoveryCost(dynamicModel.cost.input, existingModel.cost.input),
 			output: preferDiscoveryCost(dynamicModel.cost.output, existingModel.cost.output),
@@ -443,13 +445,13 @@ function isModelLike(value: unknown): value is ModelSpec<Api> {
 	return true;
 }
 
-function isModelInputArray(value: unknown): value is ("text" | "image")[] {
+function isModelInputArray(value: unknown): value is ModelInput[] {
 	if (!Array.isArray(value) || value.length === 0) {
 		return false;
 	}
 	for (let i = 0; i < value.length; i++) {
 		const item = value[i];
-		if (item !== "text" && item !== "image") {
+		if (item !== "text" && item !== "image" && item !== "video") {
 			return false;
 		}
 	}

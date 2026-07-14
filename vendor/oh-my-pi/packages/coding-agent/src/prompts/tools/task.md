@@ -12,6 +12,10 @@
 - Coordinate with agents via `irc` using their ids. Agents reach you and their siblings live the same way.
 {{/if}}
 
+<spawn-decision>
+{{#if ircEnabled}}- Before spawning a retry, continuation, or `NameResume`/`Name-2` variant, check `irc` op:"list". If the prior agent is idle or parked, send it one `irc` message by id; revive it in place with full context instead of spawning a duplicate.{{/if}}
+</spawn-decision>
+
 <lifecycle>
 - Finished agents stay alive: `idle` first, then `parked` after a TTL.{{#if ircEnabled}} Both remain addressable and revivable: messaging one via `irc` wakes it and runs your message as a follow-up turn. **Prefer messaging an agent that already holds the relevant context over spawning fresh** — check `irc` op:"list" for candidates.{{/if}}
 - `history://<id>` is the agent's transcript; `agent://<id>` its latest output artifact.

@@ -519,7 +519,7 @@ describe("owners-v1 OMP guard", () => {
 			expect(result.ownerKind).toBe("agent-mux");
 			expect(result.current).toBe(true);
 			expect(result.view?.ownerEpoch).toBe(suppliedEpoch);
-			expect((await fs.stat(path.join(path.dirname(claim), "queue-v2"))).isDirectory()).toBe(true);
+			expect((await fs.stat(path.join(path.dirname(claim), "queue-v3"))).isDirectory()).toBe(true);
 			await expect(fs.stat(path.join(isolatedHome, ".agent-mux"))).rejects.toMatchObject({ code: "ENOENT" });
 		} finally {
 			if (server) await closeServer(server);

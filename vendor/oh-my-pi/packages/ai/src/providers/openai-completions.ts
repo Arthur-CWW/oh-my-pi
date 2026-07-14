@@ -1821,17 +1821,23 @@ export function convertMessages(
 							type: "text",
 							text,
 						} satisfies ChatCompletionContentPartText);
-					} else if (supportsImages) {
-						content.push({
-							type: "image_url",
-							image_url: {
-								url: `data:${item.mimeType};base64,${item.data}`,
-								// Chat Completions has no "original"; omit it (provider default).
-								...(item.detail && item.detail !== "original" ? { detail: item.detail } : {}),
-							},
-						} satisfies ChatCompletionContentPartImage);
+					} else if (item.type === "image") {
+						if (supportsImages) {
+							content.push({
+								type: "image_url",
+								image_url: {
+									url: `data:${item.mimeType};base64,${item.data}`,
+									// Chat Completions has no "original"; omit it (provider default).
+									...(item.detail && item.detail !== "original" ? { detail: item.detail } : {}),
+								},
+							} satisfies ChatCompletionContentPartImage);
+						} else {
+							omittedImages = true;
+						}
 					} else {
-						omittedImages = true;
+						throw new Error(
+							`Model ${model.provider}/${model.id} does not support native video input. Select the video-capable pi/vision model.`,
+						);
 					}
 				}
 				if (omittedImages) {

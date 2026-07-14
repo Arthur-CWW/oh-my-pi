@@ -103,7 +103,7 @@ export class AuthBrokerRefresher {
 			await this.#storage.refreshCredentialById(id);
 		} catch (error) {
 			const errorMsg = String(error);
-			if (isDefinitiveOAuthFailure(errorMsg)) {
+			if (isDefinitiveOAuthFailure(error instanceof Error ? error : errorMsg)) {
 				logger.warn("auth-broker refresh failed definitively; disabling credential", {
 					id,
 					error: errorMsg,

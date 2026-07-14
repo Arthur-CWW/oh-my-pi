@@ -1048,7 +1048,7 @@ export class CommandController {
 
 	/**
 	 * TUI handler for `/shake`. `elide` drops heavy structural content and
-	 * `images` strips image blocks. Rebuilds the chat and reports counts.
+	 * `media` strips image and video blocks. Rebuilds the chat and reports counts.
 	 */
 	async handleShakeCommand(mode: ShakeMode): Promise<void> {
 		let result: ShakeResult;
@@ -1059,7 +1059,7 @@ export class CommandController {
 			return;
 		}
 
-		const dropped = result.toolResultsDropped + result.blocksDropped + (result.imagesDropped ?? 0);
+		const dropped = result.toolResultsDropped + result.blocksDropped + (result.mediaDropped ?? 0);
 		if (dropped === 0) {
 			this.ctx.showStatus("Nothing to shake.");
 			return;

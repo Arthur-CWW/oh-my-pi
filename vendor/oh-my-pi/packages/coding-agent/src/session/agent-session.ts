@@ -54,6 +54,7 @@ import {
 	estimateTokens,
 	generateBranchSummary,
 	generateHandoff,
+	prepareBranchEntries,
 	prepareCompaction,
 	resolveThresholdTokens,
 	type SessionEntry,
@@ -74,6 +75,7 @@ import type {
 	AssistantMessage,
 	Context,
 	ImageContent,
+	MediaContent,
 	Message,
 	MessageAttribution,
 	Model,
@@ -90,6 +92,7 @@ import type {
 	ToolChoice,
 	Usage,
 	UsageReport,
+	UserContent,
 } from "@oh-my-pi/pi-ai";
 import {
 	calculateRateLimitBackoffMs,
@@ -97,17 +100,18 @@ import {
 	deriveClaudeDeviceId,
 	Effort,
 	isContextOverflow,
+	isTransientNetworkError,
 	isUsageLimitError,
 	parseRateLimitReason,
 	resolveServiceTier,
 	streamSimple,
+	supportsNativeVideoInput,
 } from "@oh-my-pi/pi-ai";
 import { getSupportedEfforts } from "@oh-my-pi/pi-catalog/model-thinking";
 import { modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
 import { countTokens, MacOSPowerAssertion } from "@oh-my-pi/pi-natives";
 import {
 	extractRetryHint,
-	formatDuration,
 	getAgentDbPath,
 	getInstallId,
 	isBunTestRuntime,
@@ -137,7 +141,6 @@ import type { Rule } from "../capability/rule";
 import { shouldEnableAppendOnlyContext } from "../config/append-only-context-mode";
 import type { ModelRegistry } from "../config/model-registry";
 import {
-	extractExplicitThinkingSelector,
 	filterAvailableModelsByEnabledPatterns,
 	formatModelSelectorValue,
 	formatModelString,
@@ -149,14 +152,15 @@ import {
 } from "../config/model-resolver";
 import { MODEL_ROLE_IDS } from "../config/model-roles";
 import { expandPromptTemplate, type PromptTemplate } from "../config/prompt-templates";
+import { extractExplicitThinkingSelector } from "../config/role-resolution";
 import type { Settings, SkillsSettings } from "../config/settings";
 import { onAppendOnlyModeChanged } from "../config/settings";
 import { RawSseDebugBuffer } from "../debug/raw-sse-buffer";
 import { loadCapability } from "../discovery";
 import { expandApplyPatchToEntries, normalizeDiff, normalizeToLF, ParseError, previewPatch, stripBom } from "../edit";
 import { getFileSnapshotStore } from "../edit/file-snapshot-store";
-import { disposeVmContextsByOwner } from "../eval/js/context-manager";
 import { runEvalCompletion } from "../eval/completion-bridge";
+import { disposeVmContextsByOwner } from "../eval/js/context-manager";
 import { namespaceSessionId as namespacePythonSessionId } from "../eval/py";
 import {
 	disposeKernelSessionsByOwner,
@@ -235,6 +239,7 @@ import planModeToolDecisionReminderPrompt from "../prompts/system/plan-mode-tool
 import ttsrInterruptTemplate from "../prompts/system/ttsr-interrupt.md" with { type: "text" };
 import ttsrToolReminderTemplate from "../prompts/system/ttsr-tool-reminder.md" with { type: "text" };
 import unexpectedStopRetryTemplate from "../prompts/system/unexpected-stop-retry.md" with { type: "text" };
+import { AgentRegistry } from "../registry/agent-registry";
 import {
 	deobfuscateSessionContext,
 	obfuscateProviderContext,
@@ -265,6 +270,8 @@ import {
 	selectDiscoverableToolNamesByServer,
 } from "../tool-discovery/tool-index";
 import { assertEditableFile } from "../tools/auto-generated-guard";
+import { disposeAllBrowsers } from "../tools/browser/registry";
+import { releaseAllTabs } from "../tools/browser/tab-supervisor";
 import type { CheckpointState } from "../tools/checkpoint";
 import { outputMeta } from "../tools/output-meta";
 import { normalizeLocalScheme, resolveToCwd } from "../tools/path-utils";
@@ -276,38 +283,44 @@ import { parseCommandArgs } from "../utils/command-args";
 import { type EditMode, resolveEditMode } from "../utils/edit-mode";
 import { resolveFileDisplayMode } from "../utils/file-display-mode";
 import { extractFileMentions, generateFileMentionMessages } from "../utils/file-mentions";
-import { normalizeModelContextImages } from "../utils/image-loading";
 import { buildNamedToolChoice, isToolChoiceActive } from "../utils/tool-choice";
 import type { AuthStorage } from "./auth-storage";
 import type { ClientBridge, ClientBridgePermissionOption, ClientBridgePermissionOutcome } from "./client-bridge";
 import {
-	type CodexAutoRedeemRedeemDecision,
 	defaultCodexAutoRedeemCoordinator,
-	evaluateCodexAutoRedeem,
-	shouldEvaluateCodexAutoRedeem,
-	shouldPromptCodexAutoRedeem,
+	fetchCodexUsageReports,
+	listCodexResetCredits,
+	redeemCodexResetCredit,
+	runCodexAutoRedeem,
 } from "./codex-auto-reset";
 import {
-	type DurableCustomPayload,
-	type JsonValue,
+	type CustomInputPayload,
 	type DurableInputAdmissionReceipt,
 	type DurableInputCommandMetadata,
 	type DurableInputMutationReceipt,
-	type DurableInputPayload,
 	DurableInputQueue,
 	type DurableInputState,
 	type DurableQueuedInput,
+	type JsonValue,
 	SessionOwnershipLostError,
+	type UserInputPayload,
 } from "./durable-input-queue";
+import { appendErrorInboxEvent } from "./error-inbox-ledger";
+import {
+	canRequestFallbackApproval,
+	type FallbackApprovalAction,
+	FallbackApprovalGate,
+	type FallbackApprovalProposal,
+	formatFallbackApprovalNotice,
+	type RetryCause,
+} from "./fallback-approval";
 import {
 	type BashExecutionMessage,
 	type CustomMessage,
 	convertToLlm,
 	type PythonExecutionMessage,
-	readQueueChipText,
 	SILENT_ABORT_MARKER,
 	SKILL_PROMPT_MESSAGE_TYPE,
-	stripImagesFromMessage,
 	USER_INTERRUPT_LABEL,
 } from "./messages";
 import {
@@ -329,8 +342,8 @@ import type {
 	SessionCommandReceipt,
 	SetModelSessionCommand,
 	SetThinkingSessionCommand,
-	TransitionGoalModeSessionCommand,
 	TransitionGoalModeRequest,
+	TransitionGoalModeSessionCommand,
 	TransitionPlanModeSessionCommand,
 	WorkflowChangeEntry,
 	WorkflowModeSnapshot,
@@ -339,6 +352,29 @@ import type {
 import { EPHEMERAL_MODEL_CHANGE_ROLE } from "./session-entries";
 import { formatSessionHistoryMarkdown } from "./session-history-format";
 import { type SessionManager, SessionStateCommandInFlightError } from "./session-manager";
+import {
+	type ActiveRetryFallbackState,
+	compactionPreparationHasVideo,
+	findRetryFallbackCandidates,
+	formatRetryFallbackSelector,
+	getRetryFallbackEffectiveChain,
+	messagesHaveVideo,
+	normalizeAgentMessageImages,
+	normalizeAttachmentsForModel,
+	normalizeMessageContentImages,
+	parseRetryFallbackSelector,
+	queueChipText,
+	type RestoredQueuedMessage,
+	type RetryFallbackChains,
+	type RetryFallbackRevertPolicy,
+	type RetryFallbackSelector,
+	resolveCompactionModelCandidates,
+	resolveRetryFallbackRole,
+	selectRetryFallbackCandidate,
+	stripMediaFromBranch,
+	toRestoredQueuedMessage,
+	validateRetryFallbackChains,
+} from "./session-media";
 import type { ShakeMode, ShakeResult } from "./shake-types";
 import { ToolChoiceQueue } from "./tool-choice-queue";
 import { classifyUnexpectedStop, isUnexpectedStopCandidate } from "./unexpected-stop-classifier";
@@ -362,8 +398,17 @@ export type AgentSessionEvent =
 			/** True when compaction was skipped for a benign reason (no model, no candidates, nothing to compact). */
 			skipped?: boolean;
 	  }
-	| { type: "auto_retry_start"; attempt: number; maxAttempts: number; delayMs: number; errorMessage: string }
+	| {
+			type: "auto_retry_start";
+			cause: RetryCause;
+			attempt: number;
+			maxAttempts: number;
+			delayMs: number;
+			errorMessage: string;
+	  }
 	| { type: "auto_retry_end"; success: boolean; attempt: number; finalError?: string }
+	| { type: "retry_fallback_approval_requested"; proposal: FallbackApprovalProposal }
+	| { type: "retry_fallback_approval_resolved"; proposal: FallbackApprovalProposal; action: FallbackApprovalAction }
 	| { type: "retry_fallback_applied"; from: string; to: string; role: string }
 	| { type: "retry_fallback_succeeded"; model: string; role: string }
 	| { type: "ttsr_triggered"; rules: Rule[] }
@@ -387,6 +432,8 @@ const UNEXPECTED_STOP_MAX_RETRIES = 3;
 const UNEXPECTED_STOP_TIMEOUT_MS = 4000;
 const EMPTY_STOP_MAX_RETRIES = 3;
 const RETRY_BACKOFF_MAX_DELAY_MS = 8_000;
+const NETWORK_RETRY_BACKOFF_BASE_DELAY_MS = 2_000;
+const NETWORK_RETRY_BACKOFF_MAX_DELAY_MS = 30_000;
 export type CommandMetadataChangedListener = () => void | Promise<void>;
 export type AsyncJobSnapshotItem = Pick<AsyncJob, "id" | "type" | "status" | "label" | "startTime">;
 
@@ -403,6 +450,15 @@ const SHAKE_RECOVERY_BAND = 0.8;
 
 function calculateRetryBackoffDelayMs(baseDelayMs: number, attempt: number): number {
 	const cappedDelayMs = Math.min(Math.max(0, baseDelayMs) * 2 ** Math.max(0, attempt - 1), RETRY_BACKOFF_MAX_DELAY_MS);
+	const jitter = 1 - Math.random() * RETRY_BACKOFF_JITTER_RATIO;
+	return cappedDelayMs * jitter;
+}
+
+function calculateNetworkRetryBackoffDelayMs(attempt: number): number {
+	const cappedDelayMs = Math.min(
+		NETWORK_RETRY_BACKOFF_BASE_DELAY_MS * 2 ** Math.max(0, attempt - 1),
+		NETWORK_RETRY_BACKOFF_MAX_DELAY_MS,
+	);
 	const jitter = 1 - Math.random() * RETRY_BACKOFF_JITTER_RATIO;
 	return cappedDelayMs * jitter;
 }
@@ -622,7 +678,7 @@ export interface AgentSessionConfig {
 }
 
 const kDurableAdmittedPrompt = Symbol("durable-admitted-prompt");
-const kNormalizedPromptImages = Symbol("normalized-prompt-images");
+const kNormalizedPromptAttachments = Symbol("normalized-prompt-attachments");
 
 export interface PromptOperationSnapshot {
 	readonly generation: number;
@@ -649,8 +705,8 @@ export class PromptOperationConflictError extends Error {
 export interface PromptOptions {
 	/** Whether to expand file-based prompt templates (default: true) */
 	expandPromptTemplates?: boolean;
-	/** Image attachments */
-	images?: ImageContent[];
+	/** Media attachments */
+	attachments?: MediaContent[];
 	/** When streaming, how to queue the message: "steer" (interrupt) or "followUp" (wait). */
 	streamingBehavior?: "steer" | "followUp";
 	/** Optional tool choice override for the next LLM call. */
@@ -671,7 +727,7 @@ export interface PromptOptions {
 
 type InternalPromptOptions = PromptOptions & {
 	[kDurableAdmittedPrompt]?: true;
-	[kNormalizedPromptImages]?: ImageContent[];
+	[kNormalizedPromptAttachments]?: MediaContent[];
 };
 
 type DurableAttemptJournalState =
@@ -820,47 +876,6 @@ export interface FreshSessionResult {
 // ============================================================================
 
 /** Standard thinking levels */
-
-type RetryFallbackChains = Record<string, string[]>;
-
-type RetryFallbackRevertPolicy = "never" | "cooldown-expiry";
-
-interface RetryFallbackSelector {
-	raw: string;
-	provider: string;
-	id: string;
-	thinkingLevel: ThinkingLevel | undefined;
-}
-
-interface ActiveRetryFallbackState {
-	role: string;
-	originalSelector: string;
-	originalThinkingLevel: ConfiguredThinkingLevel | undefined;
-	lastAppliedFallbackThinkingLevel: ConfiguredThinkingLevel | undefined;
-	pinned: boolean;
-}
-
-function parseRetryFallbackSelector(selector: string): RetryFallbackSelector | undefined {
-	const trimmed = selector.trim();
-	if (!trimmed) return undefined;
-	const parsed = parseModelString(trimmed);
-	if (!parsed) return undefined;
-	return {
-		raw: trimmed,
-		provider: parsed.provider,
-		id: parsed.id,
-		thinkingLevel: parsed.thinkingLevel,
-	};
-}
-
-function formatRetryFallbackSelector(model: Model, thinkingLevel: ThinkingLevel | undefined): string {
-	const selector = formatModelString(model);
-	return thinkingLevel ? `${selector}:${thinkingLevel}` : selector;
-}
-
-function formatRetryFallbackBaseSelector(selector: RetryFallbackSelector): string {
-	return `${selector.provider}/${selector.id}`;
-}
 
 const EPHEMERAL_REPLY_MAX_BYTES = 4096;
 
@@ -1140,9 +1155,6 @@ function extractPermissionLocations(
 // AgentSession Class
 // ============================================================================
 
-/** Entry returned by {@link AgentSession.clearQueue} / {@link AgentSession.popLastQueuedMessage}. */
-export type RestoredQueuedMessage = { text: string; images?: ImageContent[] };
-
 const DURABLE_PENDING_INPUT_STATES: readonly DurableInputState[] = Object.freeze([
 	"queued",
 	"admitted",
@@ -1150,22 +1162,6 @@ const DURABLE_PENDING_INPUT_STATES: readonly DurableInputState[] = Object.freeze
 	"uncertain",
 	"failed-rate-limit",
 ]);
-
-function queuedTextContent(message: AgentMessage): string | undefined {
-	if (!("content" in message)) return undefined;
-	const content = message.content;
-	if (typeof content === "string") return content;
-	return content.find((part): part is TextContent => part.type === "text")?.text;
-}
-
-function queuedImageContent(message: AgentMessage): ImageContent[] | undefined {
-	if (!("content" in message) || typeof message.content === "string") return undefined;
-	const images = message.content.filter(
-		(part): part is ImageContent =>
-			part.type === "image" && typeof part.data === "string" && typeof part.mimeType === "string",
-	);
-	return images.length > 0 ? images : undefined;
-}
 
 function isDisplayableQueuedMessage(message: AgentMessage): boolean {
 	return !(message.role === "custom" && message.display === false);
@@ -1214,19 +1210,6 @@ function resolveAdvisorSelection(
 		}
 	}
 	return resolveRoleSelection(["advisor"], settings, availableModels, modelRegistry);
-}
-
-function queueChipText(message: AgentMessage): string {
-	if (message.role === "custom") {
-		return readQueueChipText(message.details) ?? queuedTextContent(message) ?? "";
-	}
-	const text = queuedTextContent(message) ?? "";
-	if (text) return text;
-	return queuedImageContent(message) ? "[Image]" : "";
-}
-
-function toRestoredQueuedMessage(message: AgentMessage): RestoredQueuedMessage {
-	return { text: queueChipText(message), images: queuedImageContent(message) };
 }
 
 export type SessionDisposeScope = "root" | "child";
@@ -1336,10 +1319,12 @@ export class AgentSession {
 	// Retry state
 	#retryAbortController: AbortController | undefined = undefined;
 	#retryAttempt = 0;
+	#transientNetworkRetryStartedAtMs: number | undefined = undefined;
 	#retryPromise: Promise<void> | undefined = undefined;
 	#retryResolve: (() => void) | undefined = undefined;
 	#activeRetryFallback: ActiveRetryFallbackState | undefined = undefined;
 	#contentFilterRerouteFailures = 0;
+	#pendingFallbackApproval = false;
 	// Todo completion reminder state
 	#todoReminderCount = 0;
 	/**
@@ -1484,7 +1469,7 @@ export class AgentSession {
 	#promptInFlightCount = 0;
 	/** Associates provider-delivered custom message objects with their durable transcript identity. */
 	#durableCustomDeliveries = new WeakMap<CustomMessage, { inputId: string; inputRevision: number }>();
-	#hasDurableCustomDeliveryInContext(inputId: string, payload: DurableCustomPayload["message"]): boolean {
+	#hasDurableCustomDeliveryInContext(inputId: string, payload: CustomInputPayload["message"]): boolean {
 		return this.agent.state.messages.some(message => {
 			if (message.role !== "custom") return false;
 			if (this.#durableCustomDeliveries.get(message)?.inputId === inputId) return true;
@@ -2250,7 +2235,11 @@ export class AgentSession {
 		// maintenance runs. Use an LLM summary even when the primary session is
 		// configured for snapcompact.
 		const availableModels = this.#modelRegistry.getAvailable();
-		const candidates = this.#resolveCompactionModelCandidates(advisorModel, availableModels);
+		const candidates = this.#resolveCompactionModelCandidates(
+			advisorModel,
+			availableModels,
+			compactionPreparationHasVideo(preparation),
+		);
 		if (candidates.length === 0) {
 			// No compaction candidates, fallback to re-prime
 			return true;
@@ -2315,6 +2304,19 @@ export class AgentSession {
 
 	getAgentId(): string | undefined {
 		return this.#agentId;
+	}
+
+	async emitFallbackApprovalNotice(proposal: FallbackApprovalProposal): Promise<void> {
+		await this.#emitSessionEvent({ type: "retry_fallback_approval_requested", proposal });
+		await this.sendCustomMessage(
+			{
+				customType: "fallback:approval-required",
+				content: `<system-warning>${formatFallbackApprovalNotice(proposal)}</system-warning>`,
+				display: false,
+				attribution: "agent",
+			},
+			{ deliverAs: "nextTurn" },
+		);
 	}
 
 	beginExternalIrcWaitingInput(): () => void {
@@ -3054,6 +3056,7 @@ export class AgentSession {
 
 	/** Resolve the pending retry promise */
 	#resolveRetry(): void {
+		this.#transientNetworkRetryStartedAtMs = undefined;
 		if (this.#retryResolve) {
 			this.#retryResolve();
 			this.#retryResolve = undefined;
@@ -4085,6 +4088,7 @@ export class AgentSession {
 		} else if (event.type === "auto_retry_start") {
 			await this.#extensionRunner.emit({
 				type: "auto_retry_start",
+				cause: event.cause,
 				attempt: event.attempt,
 				maxAttempts: event.maxAttempts,
 				delayMs: event.delayMs,
@@ -4336,6 +4340,14 @@ export class AgentSession {
 		await disposeKernelSessionsByOwner(this.#evalKernelOwnerId);
 		await disposeVmContextsByOwner(this.#evalKernelOwnerId);
 		if (scope === "root") await shutdownTinyTitleClient();
+		if (scope === "root") {
+			try {
+				await releaseAllTabs({ kill: true });
+				await disposeAllBrowsers();
+			} catch (error) {
+				logger.warn("Failed to dispose browser processes during session shutdown", { error: String(error) });
+			}
+		}
 		this.#releasePowerAssertion();
 		await this.sessionManager.close();
 		this.#closeAllProviderSessions("dispose");
@@ -5946,31 +5958,6 @@ export class AgentSession {
 		};
 	}
 
-	#normalizeImagesForModel(images: ImageContent[] | undefined): Promise<ImageContent[] | undefined> {
-		return normalizeModelContextImages(images, { model: this.model });
-	}
-
-	async #normalizeMessageContentImages(
-		content: string | (TextContent | ImageContent)[],
-	): Promise<string | (TextContent | ImageContent)[]> {
-		if (typeof content === "string") return content;
-		const images = content.filter((part): part is ImageContent => part.type === "image");
-		if (images.length === 0) return content;
-		const normalizedImages = await this.#normalizeImagesForModel(images);
-		if (!normalizedImages) return content;
-		let imageIndex = 0;
-		return content.map(part => (part.type === "image" ? normalizedImages[imageIndex++]! : part));
-	}
-
-	async #normalizeAgentMessageImages<T extends AgentMessage>(message: T): Promise<T> {
-		if (!("content" in message)) return message;
-		const content = message.content;
-		if (typeof content !== "string" && !Array.isArray(content)) return message;
-		const normalized = await this.#normalizeMessageContentImages(content as string | (TextContent | ImageContent)[]);
-		if (normalized === content) return message;
-		return { ...message, content: normalized } as T;
-	}
-
 	#magicKeywordEnabled(keyword: "orchestrate" | "ultrathink" | "workflow"): boolean {
 		return this.settings.get("magicKeywords.enabled") && this.settings.get(`magicKeywords.${keyword}`);
 	}
@@ -6067,9 +6054,9 @@ export class AgentSession {
 		) {
 			const queue = await this.#durableInputQueue;
 			if (!queue) throw this.#durableInputQueueError ?? new Error("Durable input queue is unavailable");
-			const normalizedImages = await this.#normalizeImagesForModel(options?.images);
+			const normalizedAttachments = await normalizeAttachmentsForModel(options?.attachments, this.model);
 			try {
-				await queue.enqueue({ text: expandedText, images: normalizedImages, deliveryClass: "followUp" });
+				await queue.enqueue({ text: expandedText, attachments: normalizedAttachments, deliveryClass: "followUp" });
 				await this.#refreshDurableQueuedInputProjection(queue);
 				await this.#drainDurableTerminalInputQueue();
 			} catch (error) {
@@ -6097,9 +6084,9 @@ export class AgentSession {
 				throw new AgentBusyError();
 			}
 			if (options.streamingBehavior === "followUp") {
-				await this.#queueUserMessage(expandedText, options?.images, "followUp");
+				await this.#queueUserMessage(expandedText, options?.attachments, "followUp");
 			} else {
-				await this.#queueUserMessage(expandedText, options?.images, "steer");
+				await this.#queueUserMessage(expandedText, options?.attachments, "steer");
 			}
 			// Steer/follow-up the keyword notices alongside the queued user message.
 			for (const notice of keywordNotices) {
@@ -6117,18 +6104,19 @@ export class AgentSession {
 		const operationGeneration = ++this.#promptOperationGeneration;
 		const operationPromptGeneration = this.#promptGeneration;
 		this.#promptOperationActive = true;
-		let normalizedImages: ImageContent[] | undefined;
+		let normalizedAttachments: MediaContent[] | undefined;
 		try {
-			normalizedImages =
-				internalOptions?.[kNormalizedPromptImages] ?? (await this.#normalizeImagesForModel(options?.images));
+			normalizedAttachments =
+				internalOptions?.[kNormalizedPromptAttachments] ??
+				(await normalizeAttachmentsForModel(options?.attachments, this.model));
 		} catch (error) {
 			if (this.#promptOperationGeneration === operationGeneration) this.#promptOperationActive = false;
 			throw error;
 		}
 
-		const userContent: (TextContent | ImageContent)[] = [{ type: "text", text: expandedText }];
-		if (normalizedImages) {
-			userContent.push(...normalizedImages);
+		const userContent: UserContent[] = [{ type: "text", text: expandedText }];
+		if (normalizedAttachments) {
+			userContent.push(...normalizedAttachments);
 		}
 
 		const promptAttribution = options?.attribution ?? (options?.synthetic ? "agent" : "user");
@@ -6152,7 +6140,7 @@ export class AgentSession {
 		try {
 			await this.#promptWithMessage(message, expandedText, {
 				...options,
-				images: normalizedImages,
+				attachments: normalizedAttachments,
 				prependMessages: preludeMessages.length > 0 ? preludeMessages : undefined,
 				promptOperationGeneration: operationGeneration,
 				promptGeneration: operationPromptGeneration,
@@ -6224,7 +6212,7 @@ export class AgentSession {
 	async #promptWithMessage(
 		message: AgentMessage,
 		expandedText: string,
-		options?: Pick<PromptOptions, "toolChoice" | "images" | "skipCompactionCheck"> & {
+		options?: Pick<PromptOptions, "toolChoice" | "attachments" | "skipCompactionCheck"> & {
 			prependMessages?: AgentMessage[];
 			appendMessages?: AgentMessage[];
 			promptOperationGeneration?: number;
@@ -6333,7 +6321,7 @@ export class AgentSession {
 					snapshotStore: getFileSnapshotStore(this),
 				});
 				for (const fileMentionMessage of fileMentionMessages) {
-					messages.push(await this.#normalizeAgentMessageImages(fileMentionMessage));
+					messages.push(await normalizeAgentMessageImages(fileMentionMessage, this.model));
 				}
 			}
 
@@ -6343,7 +6331,7 @@ export class AgentSession {
 			if (this.#extensionRunner) {
 				const result = await this.#extensionRunner.emitBeforeAgentStart(
 					expandedText,
-					options?.images,
+					options?.attachments,
 					beforeAgentStartSystemPrompt,
 				);
 				if (result?.messages) {
@@ -6351,16 +6339,19 @@ export class AgentSession {
 						"attribution" in message ? message.attribution : undefined;
 					for (const msg of result.messages) {
 						messages.push(
-							await this.#normalizeAgentMessageImages({
-								role: "custom",
-								customType: msg.customType,
-								content: msg.content,
-								display: msg.display,
-								details: msg.details,
-								attribution:
-									msg.attribution ?? promptAttribution ?? (message.role === "user" ? "user" : "agent"),
-								timestamp: Date.now(),
-							}),
+							await normalizeAgentMessageImages(
+								{
+									role: "custom",
+									customType: msg.customType,
+									content: msg.content,
+									display: msg.display,
+									details: msg.details,
+									attribution:
+										msg.attribution ?? promptAttribution ?? (message.role === "user" ? "user" : "agent"),
+									timestamp: Date.now(),
+								},
+								this.model,
+							),
 						);
 					}
 				}
@@ -6551,40 +6542,40 @@ export class AgentSession {
 	/**
 	 * Queue a steering message to interrupt the agent mid-run.
 	 */
-	async steer(text: string, images?: ImageContent[]): Promise<void> {
+	async steer(text: string, attachments?: MediaContent[]): Promise<void> {
 		if (text.startsWith("/")) {
 			this.#throwIfExtensionCommand(text);
 		}
 
 		const expandedText = expandPromptTemplate(text, [...this.#promptTemplates]);
-		await this.#queueUserMessage(expandedText, images, "steer");
+		await this.#queueUserMessage(expandedText, attachments, "steer");
 	}
 
 	/**
 	 * Queue a follow-up message to process after the agent would otherwise stop.
 	 */
-	async followUp(text: string, images?: ImageContent[]): Promise<void> {
+	async followUp(text: string, attachments?: MediaContent[]): Promise<void> {
 		if (text.startsWith("/")) {
 			this.#throwIfExtensionCommand(text);
 		}
 
 		const expandedText = expandPromptTemplate(text, [...this.#promptTemplates]);
-		await this.#queueUserMessage(expandedText, images, "followUp");
+		await this.#queueUserMessage(expandedText, attachments, "followUp");
 	}
 
 	async #queueUserMessage(
 		text: string,
-		images: ImageContent[] | undefined,
+		attachments: MediaContent[] | undefined,
 		mode: "steer" | "followUp",
 	): Promise<void> {
 		// A queued user message is a deliberate resume; re-enable advisor auto-resume
 		// that a user interrupt suppressed.
 		this.#advisorAutoResumeSuppressed = false;
-		const normalizedImages = await this.#normalizeImagesForModel(images);
+		const normalizedAttachments = await normalizeAttachmentsForModel(attachments, this.model);
 		const durableQueue = await this.#durableInputQueue;
 		if (durableQueue) {
 			try {
-				await durableQueue.enqueue({ text, images: normalizedImages, deliveryClass: mode });
+				await durableQueue.enqueue({ text, attachments: normalizedAttachments, deliveryClass: mode });
 				await this.#refreshDurableQueuedInputProjection(durableQueue);
 				await this.#drainDurableTerminalInputQueue();
 			} catch (error) {
@@ -6596,8 +6587,8 @@ export class AgentSession {
 		if (this.#durableInputQueueRequired) {
 			throw this.#durableInputQueueError ?? new Error("Durable input queue is unavailable");
 		}
-		const content: (TextContent | ImageContent)[] = [{ type: "text", text }];
-		if (normalizedImages?.length) content.push(...normalizedImages);
+		const content: UserContent[] = [{ type: "text", text }];
+		if (normalizedAttachments?.length) content.push(...normalizedAttachments);
 		if (mode === "followUp") {
 			this.agent.followUp({
 				role: "user",
@@ -6623,10 +6614,10 @@ export class AgentSession {
 				? Object.freeze({
 						kind: "user" as const,
 						text: item.payload.text,
-						images:
-							item.payload.images === undefined
+						attachments:
+							item.payload.attachments === undefined
 								? undefined
-								: Object.freeze(item.payload.images.map(image => Object.freeze({ ...image }))),
+								: Object.freeze(item.payload.attachments.map(attachment => Object.freeze({ ...attachment }))),
 					})
 				: Object.freeze({
 						...item.payload,
@@ -7102,8 +7093,8 @@ export class AgentSession {
 				this.#durableCustomDeliveries.set(message, { inputId: item.inputId, inputRevision: item.revision });
 				return message;
 			}
-			const content: (TextContent | ImageContent)[] = [{ type: "text", text: item.payload.text }];
-			if (item.payload.images) content.push(...item.payload.images);
+			const content: UserContent[] = [{ type: "text", text: item.payload.text }];
+			if (item.payload.attachments) content.push(...item.payload.attachments);
 			return {
 				role: "user",
 				content,
@@ -7169,8 +7160,7 @@ export class AgentSession {
 			return;
 		}
 		try {
-			const queued = await queue.list({ states: ["queued"] });
-			const appendOnly = queued[0];
+			const appendOnly = await queue.appendOnlyPrefix();
 			if (appendOnly?.payload.kind === "custom" && appendOnly.payload.disposition === "append") {
 				const appendPayload = appendOnly.payload;
 				const alreadyPersisted = this.sessionManager.hasDurableCustomMessage(appendOnly.inputId);
@@ -7290,12 +7280,12 @@ export class AgentSession {
 					else if (item.payload.deliverAs === "followUp" && this.isStreaming) this.agent.followUp(customMessage);
 					else await this.agent.prompt(customMessage);
 				} else {
-					const images = item.payload.images ? [...item.payload.images] : undefined;
+					const attachments = item.payload.attachments ? [...item.payload.attachments] : undefined;
 					await this.prompt(item.payload.text, {
 						expandPromptTemplates: false,
-						images,
+						attachments,
 						[kDurableAdmittedPrompt]: true,
-						[kNormalizedPromptImages]: images,
+						[kNormalizedPromptAttachments]: attachments,
 						skipCompactionCheck: true,
 					} as InternalPromptOptions);
 				}
@@ -7754,7 +7744,7 @@ export class AgentSession {
 			attribution: message.attribution ?? "agent",
 			timestamp: Date.now(),
 		};
-		const normalizedAppMessage = await this.#normalizeAgentMessageImages(appMessage);
+		const normalizedAppMessage = await normalizeAgentMessageImages(appMessage, this.model);
 		if (options?.deliveryLease && !options.deliveryLease.claim(normalizedAppMessage)) return false;
 		if (!this.#durableInputQueueRequired) {
 			return this.#sendCustomMessageWithoutDurableQueue(normalizedAppMessage, message, options);
@@ -7853,34 +7843,34 @@ export class AgentSession {
 	 * @param options.deliverAs Delivery mode: "steer" or "followUp"
 	 */
 	async sendUserMessage(
-		content: string | (TextContent | ImageContent)[],
+		content: string | UserContent[],
 		options?: { deliverAs?: "steer" | "followUp" },
 	): Promise<void> {
 		let text: string;
-		let images: ImageContent[] | undefined;
+		let attachments: MediaContent[] | undefined;
 		if (typeof content === "string") {
 			text = content;
 		} else {
 			const textParts: string[] = [];
-			images = [];
+			attachments = [];
 			for (const part of content) {
 				if (part.type === "text") textParts.push(part.text);
-				else images.push(part);
+				else attachments.push(part);
 			}
 			text = textParts.join("");
-			if (images.length === 0) images = undefined;
+			if (attachments.length === 0) attachments = undefined;
 		}
 		if (options?.deliverAs === "steer") {
-			await this.#queueUserMessage(text, images, "steer");
+			await this.#queueUserMessage(text, attachments, "steer");
 			return;
 		}
 		if (options?.deliverAs === "followUp") {
-			await this.#queueUserMessage(text, images, "followUp");
+			await this.#queueUserMessage(text, attachments, "followUp");
 			return;
 		}
 		await this.prompt(text, {
 			expandPromptTemplates: false,
-			images,
+			attachments,
 		});
 	}
 
@@ -7889,8 +7879,20 @@ export class AgentSession {
 		command: DurableInputCommandMetadata,
 	): Promise<DurableInputAdmissionReceipt> {
 		const queue = await this.#getDurableInputQueueForMutation();
+		let normalizedInput = input;
+		if (input.kind === "custom") {
+			if (typeof input.message.content !== "string" && input.message.content.some(part => part.type === "image")) {
+				const content = await normalizeMessageContentImages([...input.message.content], this.model);
+				normalizedInput = { ...input, message: { ...input.message, content } };
+			}
+		} else if (input.attachments?.some(attachment => attachment.type === "image")) {
+			normalizedInput = {
+				...input,
+				attachments: await normalizeAttachmentsForModel([...input.attachments], this.model),
+			};
+		}
 		try {
-			const receipt = await queue.enqueueCommand(input, command);
+			const receipt = await queue.enqueueCommand(normalizedInput, command);
 			await this.#refreshDurableQueuedInputProjection(queue);
 			if (!receipt.replayed) this.#scheduleDurableQueueDrainAfterIdle();
 			return receipt;
@@ -7901,7 +7903,7 @@ export class AgentSession {
 	}
 
 	async acceptDurableCustomMessage(
-		payload: Omit<DurableCustomPayload, "disposition">,
+		payload: Omit<CustomInputPayload, "disposition">,
 		command: DurableInputCommandMetadata,
 	): Promise<DurableInputAdmissionReceipt> {
 		const queue = await this.#getDurableInputQueueForMutation();
@@ -7910,11 +7912,19 @@ export class AgentSession {
 			if (prior.item.payload.kind !== "custom") {
 				throw new Error(`Runner command ${command.commandId} was not a custom-message command`);
 			}
-			return this.acceptDurableInput(prior.item.payload, command);
+			return this.acceptDurableInput(
+				{
+					...payload,
+					deliverAs: prior.item.payload.deliverAs,
+					triggerTurn: prior.item.payload.triggerTurn,
+					disposition: prior.item.payload.disposition,
+				},
+				command,
+			);
 		}
 		const clientDeferred =
 			payload.triggerTurn && this.#clientBridge?.deferAgentInitiatedTurns && !this.#allowAcpAgentInitiatedTurns;
-		const disposition: DurableCustomPayload["disposition"] = this.isStreaming
+		const disposition: CustomInputPayload["disposition"] = this.isStreaming
 			? "provider"
 			: payload.triggerTurn && !clientDeferred
 				? "provider"
@@ -7932,12 +7942,18 @@ export class AgentSession {
 	async editDurableInputCommand(
 		inputId: string,
 		expectedItemRevision: number,
-		payload: DurableInputPayload,
+		payload: UserInputPayload,
 		command: DurableInputCommandMetadata,
 	): Promise<DurableInputMutationReceipt> {
 		const queue = await this.#getDurableInputQueueForMutation();
+		const normalizedPayload = payload.attachments?.some(attachment => attachment.type === "image")
+			? {
+					...payload,
+					attachments: await normalizeAttachmentsForModel([...payload.attachments], this.model),
+				}
+			: payload;
 		try {
-			const receipt = await queue.editCommand(inputId, expectedItemRevision, payload, command);
+			const receipt = await queue.editCommand(inputId, expectedItemRevision, normalizedPayload, command);
 			await this.#refreshDurableQueuedInputProjection(queue);
 			return receipt;
 		} catch (error) {
@@ -7988,11 +8004,17 @@ export class AgentSession {
 	async editQueuedInput(
 		inputId: string,
 		expectedRevision: number,
-		payload: DurableInputPayload,
+		payload: UserInputPayload,
 	): Promise<DurableQueuedInput> {
 		const queue = await this.#getDurableInputQueueForMutation();
+		const normalizedPayload = payload.attachments?.some(attachment => attachment.type === "image")
+			? {
+					...payload,
+					attachments: await normalizeAttachmentsForModel([...payload.attachments], this.model),
+				}
+			: payload;
 		try {
-			const item = await queue.edit(inputId, expectedRevision, payload);
+			const item = await queue.edit(inputId, expectedRevision, normalizedPayload);
 			await this.#refreshDurableQueuedInputProjection(queue);
 			return this.#freezeDurableQueuedInput(item);
 		} catch (error) {
@@ -9087,44 +9109,20 @@ export class AgentSession {
 	}
 
 	/**
-	 * Strip image content blocks from every message on the current branch and
-	 * persist the rewrite. Walks `SessionManager.getBranch()` in place — both
-	 * `SessionMessageEntry.message` and `CustomMessageEntry.content` arrays
-	 * are mutated, then `rewriteEntries` durably commits the new shape. The
-	 * agent's runtime view is rebuilt from the freshly-mutated entries so any
-	 * provider sessions caching message identity (Codex Responses) are torn
-	 * down to force a clean replay on the next turn.
+	 * Strip image and video content blocks from every message on the current
+	 * branch and persist the rewrite. Walks `SessionManager.getBranch()` in
+	 * place — both `SessionMessageEntry.message` and
+	 * `CustomMessageEntry.content` arrays are mutated, then `rewriteEntries`
+	 * durably commits the new shape. The agent's runtime view is rebuilt from
+	 * the freshly-mutated entries so provider sessions caching message identity
+	 * are torn down to force a clean replay on the next turn.
 	 *
-	 * No-op when the branch carries no images; returns `{ removed: 0 }` and
-	 * skips the disk rewrite.
+	 * No-op when the branch carries no media; returns `{ removed: 0 }` and skips
+	 * the disk rewrite.
 	 */
-	async dropImages(): Promise<{ removed: number }> {
+	async dropMedia(): Promise<{ removed: number }> {
 		const branchEntries = this.sessionManager.getBranch();
-		let removed = 0;
-		for (const entry of branchEntries) {
-			if (entry.type === "message") {
-				removed += stripImagesFromMessage(entry.message);
-				continue;
-			}
-			if (entry.type === "custom_message" && typeof entry.content !== "string") {
-				const kept: typeof entry.content = [];
-				let dropped = 0;
-				for (const part of entry.content) {
-					if (part.type === "image") {
-						dropped++;
-					} else {
-						kept.push(part);
-					}
-				}
-				if (dropped > 0) {
-					if (kept.length === 0) {
-						kept.push({ type: "text", text: "[image removed]" });
-					}
-					entry.content = kept;
-					removed += dropped;
-				}
-			}
-		}
+		const removed = stripMediaFromBranch(branchEntries);
 		if (removed === 0) {
 			return { removed: 0 };
 		}
@@ -9139,20 +9137,20 @@ export class AgentSession {
 	/**
 	 * Surgically reduce context by dropping heavy content ("shake").
 	 *
-	 * - `images` delegates to {@link dropImages}.
+	 * - `media` delegates to {@link dropMedia}.
 	 * - `elide` replaces whole tool-call results and large fenced/XML blocks
 	 *   with short placeholders that embed an `artifact://` recovery link.
 	 *
 	 * Mutates the branch in place, persists via `rewriteEntries`, replays the
 	 * rebuilt context through the agent, and tears down provider sessions that
-	 * cache message identity — same rewrite contract as {@link dropImages}.
+	 * cache message identity — same rewrite contract as {@link dropMedia}.
 	 *
 	 * No-op (zero counts) when nothing is eligible.
 	 */
 	async shake(mode: ShakeMode, opts: { config?: ShakeConfig; signal?: AbortSignal } = {}): Promise<ShakeResult> {
-		if (mode === "images") {
-			const { removed } = await this.dropImages();
-			return { mode, toolResultsDropped: 0, blocksDropped: 0, imagesDropped: removed, tokensFreed: 0 };
+		if (mode === "media") {
+			const { removed } = await this.dropMedia();
+			return { mode, toolResultsDropped: 0, blocksDropped: 0, mediaDropped: removed, tokensFreed: 0 };
 		}
 
 		const config = this.#withPlanProtection(opts.config ?? AGGRESSIVE_SHAKE_CONFIG);
@@ -9256,6 +9254,7 @@ export class AgentSession {
 				}
 				throw new Error("Nothing to compact (session too small)");
 			}
+			const requiresVideo = compactionPreparationHasVideo(preparation);
 
 			let hookCompaction: CompactionResult | undefined;
 			let fromExtension = false;
@@ -9275,6 +9274,11 @@ export class AgentSession {
 				}
 
 				if (result?.compaction) {
+					if (requiresVideo) {
+						throw new Error(
+							"Extension-provided compaction cannot replace video-bearing history without a native-video summary request.",
+						);
+					}
 					hookCompaction = result.compaction;
 					fromExtension = true;
 				}
@@ -9287,11 +9291,13 @@ export class AgentSession {
 			// both take the summarizer path (the latter loudly).
 			const wantsSnapcompact =
 				compactionPrep.kind !== "fromHook" && compactionSettings.strategy === "snapcompact" && !customInstructions;
-			const snapcompactReady = wantsSnapcompact && this.model.input.includes("image");
+			const snapcompactReady = wantsSnapcompact && !requiresVideo && this.model.input.includes("image");
 			if (wantsSnapcompact && !snapcompactReady) {
 				this.emitNotice(
 					"warning",
-					`snapcompact needs a vision-capable model (${this.model.id} is text-only) — using an LLM summary instead`,
+					requiresVideo
+						? "snapcompact is image-only — using a native-video LLM summary instead"
+						: `snapcompact needs a vision-capable model (${this.model.id} is text-only) — using an LLM summary instead`,
 					"compaction",
 				);
 			}
@@ -9567,13 +9573,30 @@ export class AgentSession {
 				throw new Error("Handoff cancelled");
 			}
 
-			const model = this.model;
-			if (!model) {
+			const currentModel = this.model;
+			if (!currentModel) {
 				throw new Error("No model selected for handoff");
 			}
-			const apiKey = await this.#modelRegistry.getApiKey(model, this.sessionId);
-			if (!apiKey) {
-				throw new Error(`No API key for ${model.provider}`);
+			const requiresVideo = messagesHaveVideo(this.agent.state.messages);
+			const candidates = this.#resolveCompactionModelCandidates(
+				currentModel,
+				this.#modelRegistry.getAvailable(),
+				requiresVideo,
+			);
+			let model: Model | undefined;
+			for (const candidate of candidates) {
+				const apiKey = await this.#modelRegistry.getApiKey(candidate, this.sessionId);
+				if (apiKey) {
+					model = candidate;
+					break;
+				}
+			}
+			if (!model) {
+				throw new Error(
+					requiresVideo
+						? "Handoff requires an authenticated native-video model configured for the vision role."
+						: "No authenticated model is available for handoff.",
+				);
 			}
 
 			const rawHandoffText = await generateHandoff(
@@ -10624,7 +10647,7 @@ export class AgentSession {
 					files: message.files.map(file => ({
 						path: file.path,
 						content: file.content,
-						image: file.image,
+						attachment: file.attachment,
 					})),
 				};
 			default:
@@ -10637,10 +10660,6 @@ export class AgentSession {
 			JSON.stringify(previousMessages.map(message => this.#normalizeSessionMessageForProviderReplay(message))) !==
 			JSON.stringify(nextMessages.map(message => this.#normalizeSessionMessageForProviderReplay(message)))
 		);
-	}
-
-	#getModelKey(model: Model): string {
-		return `${model.provider}/${model.id}`;
 	}
 
 	#formatRoleModelValue(
@@ -10694,36 +10713,26 @@ export class AgentSession {
 		});
 	}
 
-	#getCompactionModelCandidates(availableModels: Model[]): Model[] {
-		return this.#resolveCompactionModelCandidates(this.model, availableModels);
+	#getCompactionModelCandidates(availableModels: Model[], preparation: CompactionPreparation): Model[] {
+		return this.#resolveCompactionModelCandidates(
+			this.model,
+			availableModels,
+			compactionPreparationHasVideo(preparation),
+		);
 	}
 
-	#resolveCompactionModelCandidates(preferredModel: Model | null | undefined, availableModels: Model[]): Model[] {
-		const candidates: Model[] = [];
-		const seen = new Set<string>();
-
-		const addCandidate = (model: Model | undefined): void => {
-			if (!model) return;
-			const key = this.#getModelKey(model);
-			if (seen.has(key)) return;
-			seen.add(key);
-			candidates.push(model);
-		};
-
-		addCandidate(preferredModel ?? undefined);
-		for (const role of MODEL_ROLE_IDS) {
-			addCandidate(this.#resolveRoleModelFull(role, availableModels, preferredModel ?? undefined).model);
-		}
-
-		const sortedByContext = [...availableModels].sort((a, b) => (b.contextWindow ?? 0) - (a.contextWindow ?? 0));
-		for (const model of sortedByContext) {
-			if (!seen.has(this.#getModelKey(model))) {
-				addCandidate(model);
-				break;
-			}
-		}
-
-		return candidates;
+	#resolveCompactionModelCandidates(
+		preferredModel: Model | null | undefined,
+		availableModels: Model[],
+		requiresVideo: boolean,
+	): Model[] {
+		return resolveCompactionModelCandidates({
+			preferredModel,
+			availableModels,
+			requiresVideo,
+			roleIds: MODEL_ROLE_IDS,
+			resolveRoleModel: (role, models, current) => this.#resolveRoleModelFull(role, models, current).model,
+		});
 	}
 	#isCompactionAuthFailure(error: unknown): boolean {
 		if (!(error instanceof Error)) return false;
@@ -10757,7 +10766,7 @@ export class AgentSession {
 		signal: AbortSignal,
 		options?: SummaryOptions,
 	): Promise<CompactionResult> {
-		const candidates = this.#getCompactionModelCandidates(this.#modelRegistry.getAvailable());
+		const candidates = this.#getCompactionModelCandidates(this.#modelRegistry.getAvailable(), preparation);
 		const telemetry = resolveTelemetry(this.agent.telemetry, this.sessionId);
 
 		for (const candidate of candidates) {
@@ -10954,20 +10963,23 @@ export class AgentSession {
 		// "overflow" forces context-full because the input itself is broken — a handoff
 		// LLM call would hit the same overflow. "incomplete" is an output-side problem,
 		// so a handoff request on the existing context is still viable. Snapcompact is
-		// safe for every reason (it makes no LLM call at all) but requires a vision
-		// model to be worth anything — fall back to context-full otherwise.
+		// image-only, so video context must take a native-video summarizer path.
+		const requiresVideo = messagesHaveVideo(this.agent.state.messages);
 		let action: "context-full" | "handoff" | "snapcompact" =
 			compactionSettings.strategy === "handoff" && reason !== "overflow" ? "handoff" : "context-full";
 		if (compactionSettings.strategy === "snapcompact") {
-			if (this.model?.input.includes("image")) {
+			if (!requiresVideo && this.model?.input.includes("image")) {
 				action = "snapcompact";
 			} else {
-				logger.warn("Snapcompact compaction requires a vision-capable model; falling back to context-full", {
+				logger.warn("Snapcompact cannot compact the current media context; falling back to context-full", {
 					model: this.model?.id,
+					requiresVideo,
 				});
 				this.emitNotice(
 					"warning",
-					`snapcompact needs a vision-capable model (${this.model?.id ?? "unknown"} is text-only) — using an LLM summary instead`,
+					requiresVideo
+						? "snapcompact is image-only — using a native-video LLM summary instead"
+						: `snapcompact needs a vision-capable model (${this.model?.id ?? "unknown"} is text-only) — using an LLM summary instead`,
 					"compaction",
 				);
 			}
@@ -11066,6 +11078,7 @@ export class AgentSession {
 				}
 				return false;
 			}
+			const preparationHasVideo = compactionPreparationHasVideo(preparation);
 
 			let hookCompaction: CompactionResult | undefined;
 			let fromExtension = false;
@@ -11092,6 +11105,11 @@ export class AgentSession {
 				}
 
 				if (hookResult?.compaction) {
+					if (preparationHasVideo) {
+						throw new Error(
+							"Extension-provided compaction cannot replace video-bearing history without a native-video summary request.",
+						);
+					}
 					hookCompaction = hookResult.compaction;
 					fromExtension = true;
 				}
@@ -11153,7 +11171,7 @@ export class AgentSession {
 				details = snapcompactResult.details;
 				preserveData = { ...(compactionPrep.preserveData ?? {}), ...(snapcompactResult.preserveData ?? {}) };
 			} else {
-				const candidates = this.#getCompactionModelCandidates(availableModels);
+				const candidates = this.#getCompactionModelCandidates(availableModels, preparation);
 				const retrySettings = this.settings.getGroup("retry");
 				const telemetry = resolveTelemetry(this.agent.telemetry, this.sessionId);
 				let compactResult: CompactionResult | undefined;
@@ -11628,7 +11646,9 @@ export class AgentSession {
 
 	#isTransientErrorMessage(errorMessage: string): boolean {
 		return (
-			this.#isTransientEnvelopeErrorMessage(errorMessage) || this.#isTransientTransportErrorMessage(errorMessage)
+			isTransientNetworkError(errorMessage) ||
+			this.#isTransientEnvelopeErrorMessage(errorMessage) ||
+			this.#isTransientTransportErrorMessage(errorMessage)
 		);
 	}
 
@@ -11638,11 +11658,6 @@ export class AgentSession {
 	}
 
 	#isTransientTransportErrorMessage(errorMessage: string): boolean {
-		// Match: overloaded_error, provider returned error, rate limit, 429, 500, 502, 503, 504,
-		// service unavailable, provider-suggested retry, network/connection/socket errors, fetch failed,
-		// gateway upstream failures, terminated, retry delay exceeded, Bun HTTP/2 stream resets
-		// (RST_STREAM / REFUSED_STREAM / ENHANCE_YOUR_CALM, surfaced verbatim from
-		// src/http/h2_client/dispatch.zig)
 		return (
 			isUnexpectedSocketCloseMessage(errorMessage) ||
 			/overloaded|provider.?returned.?error|rate.?limit|too many requests|429|500|502|503|504|service.?unavailable|server.?error|internal.?error|retry your request|network.?error|connection.?error|connection.?refused|other side closed|fetch failed|upstream.?connect|upstream.?request.?failed|reset before headers|socket hang up|timed? out|timeout|terminated|retry delay|stream stall|no error details in response|HTTP2(?:StreamReset|RefusedStream|EnhanceYourCalm)|malformed.?function.?call/i.test(
@@ -11652,50 +11667,20 @@ export class AgentSession {
 	}
 
 	#getRetryFallbackChains(): RetryFallbackChains {
-		const configuredChains = this.settings.get("retry.fallbackChains");
+		const configuredChains = this.settings.get("retry.proposableFallbackChains");
 		if (!configuredChains || typeof configuredChains !== "object") return {};
 		return configuredChains as RetryFallbackChains;
 	}
 
 	#validateRetryFallbackChains(): void {
-		const configuredChains = this.settings.get("retry.fallbackChains");
-		if (configuredChains === undefined) return;
-		if (!configuredChains || typeof configuredChains !== "object" || Array.isArray(configuredChains)) {
-			const msg = "retry.fallbackChains must be a mapping of role names to selector arrays.";
-			logger.warn(msg);
-			this.configWarnings.push(msg);
-			return;
-		}
-
-		for (const [role, chain] of Object.entries(configuredChains)) {
-			if (!Array.isArray(chain)) {
-				const msg = `Fallback chain for role '${role}' must be an array of selector strings.`;
-				logger.warn(msg);
-				this.configWarnings.push(msg);
-				continue;
-			}
-			for (const selectorStr of chain) {
-				if (typeof selectorStr !== "string") {
-					const msg = `Fallback chain for role '${role}' contains a non-string selector.`;
-					logger.warn(msg);
-					this.configWarnings.push(msg);
-					continue;
-				}
-				const parsed = parseRetryFallbackSelector(selectorStr);
-				if (!parsed) {
-					const msg = `Invalid fallback selector format in role '${role}': ${selectorStr}`;
-					logger.warn(msg);
-					this.configWarnings.push(msg);
-					continue;
-				}
-				const exists = this.#modelRegistry.find(parsed.provider, parsed.id);
-				if (!exists) {
-					const msg = `Fallback chain for role '${role}' references unknown model: ${selectorStr}`;
-					logger.warn(msg);
-					this.configWarnings.push(msg);
-				}
-			}
-		}
+		validateRetryFallbackChains({
+			configuredChains: this.settings.get("retry.proposableFallbackChains"),
+			modelExists: (provider, id) => Boolean(this.#modelRegistry.find(provider, id)),
+			reportWarning: message => {
+				logger.warn(message);
+				this.configWarnings.push(message);
+			},
+		});
 	}
 
 	#getRetryFallbackRevertPolicy(): RetryFallbackRevertPolicy {
@@ -11725,44 +11710,20 @@ export class AgentSession {
 	}
 
 	#resolveRetryFallbackRole(currentSelector: string): string | undefined {
-		const parsedCurrent = parseRetryFallbackSelector(currentSelector);
-		if (!parsedCurrent) return undefined;
-		const currentBaseSelector = formatRetryFallbackBaseSelector(parsedCurrent);
-		for (const role of Object.keys(this.#getRetryFallbackChains())) {
-			const primarySelector = this.#getRetryFallbackPrimarySelector(role);
-			if (!primarySelector) continue;
-			if (primarySelector.raw === currentSelector) return role;
-			if (formatRetryFallbackBaseSelector(primarySelector) === currentBaseSelector) return role;
-		}
-		return undefined;
+		return resolveRetryFallbackRole(currentSelector, Object.keys(this.#getRetryFallbackChains()), role =>
+			this.#getRetryFallbackPrimarySelector(role),
+		);
 	}
 
 	#getRetryFallbackEffectiveChain(role: string): RetryFallbackSelector[] {
-		const primarySelector = this.#getRetryFallbackPrimarySelector(role);
-		if (!primarySelector) return [];
-		const chain = [primarySelector];
-		const seen = new Set<string>([primarySelector.raw]);
-		for (const selector of this.#getRetryFallbackChains()[role] ?? []) {
-			const parsed = parseRetryFallbackSelector(selector);
-			if (!parsed || seen.has(parsed.raw)) continue;
-			seen.add(parsed.raw);
-			chain.push(parsed);
-		}
-		return chain;
+		return getRetryFallbackEffectiveChain(
+			this.#getRetryFallbackPrimarySelector(role),
+			this.#getRetryFallbackChains()[role] ?? [],
+		);
 	}
 
 	#findRetryFallbackCandidates(role: string, currentSelector: string): RetryFallbackSelector[] {
-		const chain = this.#getRetryFallbackEffectiveChain(role);
-		if (chain.length <= 1) return [];
-		const parsedCurrent = parseRetryFallbackSelector(currentSelector);
-		const currentBaseSelector = parsedCurrent ? formatRetryFallbackBaseSelector(parsedCurrent) : undefined;
-		const exactIndex = chain.findIndex(selector => selector.raw === currentSelector);
-		if (exactIndex >= 0) return chain.slice(exactIndex + 1);
-		const baseIndex = currentBaseSelector
-			? chain.findIndex(selector => formatRetryFallbackBaseSelector(selector) === currentBaseSelector)
-			: -1;
-		if (baseIndex >= 0) return chain.slice(baseIndex + 1);
-		return chain.slice(1);
+		return findRetryFallbackCandidates(this.#getRetryFallbackEffectiveChain(role), currentSelector);
 	}
 
 	async #applyRetryFallbackCandidate(
@@ -11774,6 +11735,9 @@ export class AgentSession {
 		const candidate = this.#modelRegistry.find(selector.provider, selector.id);
 		if (!candidate) {
 			throw new Error(`Retry fallback model not found: ${selector.raw}`);
+		}
+		if (messagesHaveVideo(this.agent.state.messages) && !supportsNativeVideoInput(candidate)) {
+			throw new Error(`Retry fallback ${selector.raw} cannot accept the pending video context`);
 		}
 		const apiKey = await this.#modelRegistry.getApiKey(candidate, this.sessionId);
 		if (!apiKey) {
@@ -11809,21 +11773,154 @@ export class AgentSession {
 		});
 	}
 
-	async #tryRetryModelFallback(currentSelector: string, options?: { pinFallback?: boolean }): Promise<boolean> {
+	async #selectRetryModelFallback(currentSelector: string) {
 		const role = this.#activeRetryFallback?.role ?? this.#resolveRetryFallbackRole(currentSelector);
-		if (!role) return false;
+		return selectRetryFallbackCandidate({
+			requiresVideo: messagesHaveVideo(this.agent.state.messages),
+			currentSelector,
+			role,
+			visionSelector: this.#getRetryFallbackPrimarySelector("vision"),
+			fallbackSelectors: role ? this.#findRetryFallbackCandidates(role, currentSelector) : [],
+			isSuppressed: selector => this.#isRetryFallbackSelectorSuppressed(selector),
+			findModel: selector => this.#modelRegistry.find(selector.provider, selector.id),
+			hasApiKey: async model => Boolean(await this.#modelRegistry.getApiKey(model, this.sessionId)),
+		});
+	}
 
-		for (const selector of this.#findRetryFallbackCandidates(role, currentSelector)) {
-			if (this.#isRetryFallbackSelectorSuppressed(selector)) continue;
-			const candidate = this.#modelRegistry.find(selector.provider, selector.id);
-			if (!candidate) continue;
-			const apiKey = await this.#modelRegistry.getApiKey(candidate, this.sessionId);
-			if (!apiKey) continue;
-			await this.#applyRetryFallbackCandidate(role, selector, currentSelector, options);
+	#isSubagentFallbackAutoApproveActive(): boolean {
+		if (this.#agentKind !== "sub") return false;
+		const configuredUntil = this.settings.get("retry.subagentFallbackAutoApproveUntil");
+		if (!configuredUntil) return false;
+		const expiresAt = Date.parse(configuredUntil);
+		return Number.isFinite(expiresAt) && expiresAt > Date.now();
+	}
+
+	async #requestRetryFallbackApproval(
+		currentSelector: string,
+		cause: RetryCause,
+		generation: number,
+	): Promise<boolean> {
+		if (!canRequestFallbackApproval(this.#agentKind, true) || !this.#agentId || this.#pendingFallbackApproval)
+			return false;
+		const ref = AgentRegistry.global().get(this.#agentId);
+		const parentAgentId = ref?.parentId;
+		if (!parentAgentId) return false;
+		const selected = await this.#selectRetryModelFallback(currentSelector);
+		if (!selected) return false;
+
+		const latestUser = this.agent.state.messages.findLast(message => message.role === "user");
+		const taskContext = latestUser
+			? this.#extractUserMessageText(latestUser.content).replace(/\s+/g, " ").trim().slice(0, 512)
+			: "(task context unavailable)";
+		const proposal: FallbackApprovalProposal = {
+			agentId: this.#agentId,
+			parentAgentId,
+			sourceModel: currentSelector,
+			proposedModel: selected.selector.raw,
+			cause,
+			taskContext,
+			requestedAt: Date.now(),
+		};
+		if (this.#isSubagentFallbackAutoApproveActive()) {
+			await this.#applyRetryFallbackCandidate(selected.role, selected.selector, currentSelector);
+			await this.#emitSessionEvent({
+				type: "retry_fallback_approval_resolved",
+				proposal,
+				action: { kind: "approve" },
+			});
+			const messages = this.agent.state.messages;
+			if (messages.length > 0 && messages[messages.length - 1].role === "assistant") {
+				this.agent.replaceMessages(messages.slice(0, -1));
+			}
+			this.#resolveRetry();
+			this.#scheduleAgentContinue({ delayMs: 1, generation });
 			return true;
 		}
 
-		return false;
+		const accepted = FallbackApprovalGate.global().request(proposal, async action => {
+			this.#pendingFallbackApproval = false;
+			await this.#emitSessionEvent({ type: "retry_fallback_approval_resolved", proposal, action });
+			if (action.kind === "abort") {
+				const attempt = this.#retryAttempt;
+				this.#retryAttempt = 0;
+				await this.#emitSessionEvent({
+					type: "auto_retry_end",
+					success: false,
+					attempt,
+					finalError: "Fallback aborted by parent orchestrator.",
+				});
+				this.#resolveRetry();
+				return;
+			}
+			if (action.kind === "wait") {
+				await this.#emitSessionEvent({
+					type: "auto_retry_start",
+					cause,
+					attempt: this.#retryAttempt,
+					maxAttempts: this.settings.get("retry.maxRetries"),
+					delayMs: action.timeoutMs,
+					errorMessage: `Parent chose to retry ${proposal.sourceModel}.`,
+				});
+				void scheduler.wait(action.timeoutMs).then(() => {
+					this.#resolveRetry();
+					this.#scheduleAgentContinue({ delayMs: 1, generation });
+				});
+				return;
+			}
+
+			const selector =
+				action.kind === "approve" ? selected.selector : parseRetryFallbackSelector(action.model.trim());
+			if (!selector)
+				throw new Error(`Invalid approved fallback model: ${action.kind === "choose" ? action.model : ""}`);
+			const role =
+				action.kind === "approve" ? selected.role : (this.#resolveRetryFallbackRole(currentSelector) ?? "explicit");
+			await this.#applyRetryFallbackCandidate(role, selector, currentSelector);
+			this.#resolveRetry();
+			const receipt = await IrcBus.global().send({
+				from: parentAgentId,
+				to: proposal.agentId,
+				body: `Fallback approved: continue the same task on ${selector.raw}.`,
+			});
+			if (receipt.outcome === "failed") this.#scheduleAgentContinue({ delayMs: 1, generation });
+		});
+		if (!accepted) return false;
+
+		this.#pendingFallbackApproval = true;
+		const messages = this.agent.state.messages;
+		if (messages.length > 0 && messages[messages.length - 1].role === "assistant") {
+			this.agent.replaceMessages(messages.slice(0, -1));
+		}
+		await this.#emitSessionEvent({ type: "retry_fallback_approval_requested", proposal });
+		const parentSession = AgentRegistry.global().get(parentAgentId)?.session;
+		if (parentSession) {
+			const now = Date.now();
+			const notice = formatFallbackApprovalNotice(proposal);
+			appendErrorInboxEvent(parentSession.sessionManager, {
+				id: `fallback-approval:${proposal.agentId}:${proposal.requestedAt}`,
+				firstTimestamp: now,
+				lastTimestamp: now,
+				message: notice,
+				count: 1,
+				source: "retry",
+				category: "fallback-approval",
+				agent: proposal.agentId,
+				model: proposal.sourceModel,
+				retry: true,
+				action: {
+					kind: "resolve_fallback_approval",
+					agentId: proposal.agentId,
+					sourceModel: proposal.sourceModel,
+					proposedModel: proposal.proposedModel,
+					cause: proposal.cause,
+					taskContext: proposal.taskContext,
+					options: ["wait", "approve", "choose", "abort"],
+				},
+				unread: true,
+				resolved: false,
+			});
+			await parentSession.emitFallbackApprovalNotice(proposal);
+		}
+		return true;
 	}
 
 	async #maybeRestoreRetryFallbackPrimary(): Promise<void> {
@@ -11855,6 +11952,7 @@ export class AgentSession {
 
 		const primaryModel = this.#modelRegistry.find(originalSelector.provider, originalSelector.id);
 		if (!primaryModel) return;
+		if (messagesHaveVideo(this.agent.state.messages) && !supportsNativeVideoInput(primaryModel)) return;
 		const apiKey = await this.#modelRegistry.getApiKey(primaryModel, this.sessionId);
 		if (!apiKey) return;
 
@@ -11928,8 +12026,27 @@ export class AgentSession {
 		if (!retrySettings.enabled) return false;
 		const classifierRefusal = this.#refusalRerouteDecision(message).reroute;
 		const generation = this.#promptGeneration;
-		this.#retryAttempt++;
 		const errorMessage = message.errorMessage || "Unknown error";
+		const transientNetwork = isTransientNetworkError(errorMessage);
+		const networkHoldMs = Math.max(0, retrySettings.networkHoldMs);
+		let networkElapsedMs = 0;
+		if (transientNetwork) {
+			const now = Date.now();
+			this.#transientNetworkRetryStartedAtMs ??= now;
+			networkElapsedMs = Math.max(0, now - this.#transientNetworkRetryStartedAtMs);
+		} else if (this.#transientNetworkRetryStartedAtMs !== undefined) {
+			this.#transientNetworkRetryStartedAtMs = undefined;
+			this.#retryAttempt = 0;
+		}
+		this.#retryAttempt++;
+		const retryCause =
+			transientNetwork ||
+			isUsageLimitError(errorMessage) ||
+			/\brate.?limit\b|too many requests|\b429\b/i.test(errorMessage)
+				? transientNetwork
+					? "network"
+					: "rate-limit"
+				: "provider";
 		const contentFilterBlocked = this.#isAnthropicOutputContentFilterError(errorMessage);
 		if (contentFilterBlocked && this.#activeRetryFallback) {
 			this.#contentFilterRerouteFailures++;
@@ -11955,27 +12072,33 @@ export class AgentSession {
 			this.#retryResolve = resolve;
 		}
 
-		if (this.#retryAttempt > retrySettings.maxRetries) {
-			// Max retries exceeded, emit final failure and reset
+		const networkWindowExpired = transientNetwork && (networkHoldMs === 0 || networkElapsedMs >= networkHoldMs);
+		const retryLimitReached = !transientNetwork && this.#retryAttempt > retrySettings.maxRetries;
+		if (networkWindowExpired || retryLimitReached) {
 			await this.#emitSessionEvent({
 				type: "auto_retry_end",
 				success: false,
-				attempt: this.#retryAttempt - 1,
-				finalError: contentFilterBlocked ? this.#contentFilterFailureMessage() : message.errorMessage,
+				attempt: transientNetwork ? this.#retryAttempt : this.#retryAttempt - 1,
+				finalError: transientNetwork
+					? `Provider unreachable (network/DNS) after retrying for ${networkHoldMs}ms. Last error: ${errorMessage}`
+					: contentFilterBlocked
+						? this.#contentFilterFailureMessage()
+						: message.errorMessage,
 			});
 			this.#retryAttempt = 0;
 			this.#contentFilterRerouteFailures = 0;
-			this.#resolveRetry(); // Resolve so waitForRetry() completes
+			this.#resolveRetry();
 			return false;
 		}
 
 		const staleOpenAIResponsesReplayError = this.#isStaleOpenAIResponsesReplayError(message);
 		const parsedRetryAfterMs = this.#parseRetryAfterMsFromError(errorMessage);
-		let delayMs = staleOpenAIResponsesReplayError
-			? 0
-			: calculateRetryBackoffDelayMs(retrySettings.baseDelayMs, this.#retryAttempt);
+		let delayMs = transientNetwork
+			? Math.min(calculateNetworkRetryBackoffDelayMs(this.#retryAttempt), networkHoldMs - networkElapsedMs)
+			: staleOpenAIResponsesReplayError
+				? 0
+				: calculateRetryBackoffDelayMs(retrySettings.baseDelayMs, this.#retryAttempt);
 		let switchedCredential = false;
-		let switchedModel = false;
 		// Set when a usage-limit error pinned the wait to credential
 		// availability — suppresses the generic retry-after bump below.
 		let usageLimitWaitMs: number | undefined;
@@ -11998,7 +12121,7 @@ export class AgentSession {
 			if (outcome.switched) {
 				switchedCredential = true;
 				delayMs = 0;
-			} else if (await this.#maybeAutoRedeemCodexReset()) {
+			} else if (!this.#isSubagentFallbackAutoApproveActive() && (await this.#maybeAutoRedeemCodexReset())) {
 				// A live usage-limit 429 on the active Codex account, with a banked
 				// reset and the opt-in setting on: spend the reset and retry
 				// immediately instead of waiting out the window. Runs after the
@@ -12027,21 +12150,36 @@ export class AgentSession {
 			}
 		}
 
+		const requiresVideo = messagesHaveVideo(this.agent.state.messages);
 		const currentSelector = this.model ? formatRetryFallbackSelector(this.model, this.thinkingLevel) : undefined;
-		if (!staleOpenAIResponsesReplayError && !switchedCredential && currentSelector) {
-			if (retrySettings.modelFallback && (!contentFilterBlocked || this.#retryAttempt > 1)) {
-				if (!classifierRefusal) {
-					this.#noteRetryFallbackCooldown(currentSelector, parsedRetryAfterMs, errorMessage);
+		if (!transientNetwork && !staleOpenAIResponsesReplayError && !switchedCredential && currentSelector) {
+			if (retrySettings.fallbackApproval && (!contentFilterBlocked || this.#retryAttempt > 1)) {
+				const approvalRequested = await this.#requestRetryFallbackApproval(currentSelector, retryCause, generation);
+				if (approvalRequested) {
+					if (!classifierRefusal) {
+						this.#noteRetryFallbackCooldown(currentSelector, parsedRetryAfterMs, errorMessage);
+					}
+					return true;
 				}
-				switchedModel = await this.#tryRetryModelFallback(currentSelector, { pinFallback: classifierRefusal });
 			}
-			if (switchedModel) {
-				delayMs = 0;
-			} else if (usageLimitWaitMs === undefined && parsedRetryAfterMs && parsedRetryAfterMs > delayMs) {
+			if (usageLimitWaitMs === undefined && parsedRetryAfterMs && parsedRetryAfterMs > delayMs) {
 				delayMs = parsedRetryAfterMs;
 			}
 		}
-		if (classifierRefusal && !switchedModel) {
+		if (requiresVideo && (!this.model || !supportsNativeVideoInput(this.model))) {
+			const attempt = this.#retryAttempt;
+			this.#retryAttempt = 0;
+			this.#contentFilterRerouteFailures = 0;
+			await this.#emitSessionEvent({
+				type: "auto_retry_end",
+				success: false,
+				attempt,
+				finalError: "Retry stopped because no native-video model is available for the pending context.",
+			});
+			this.#resolveRetry();
+			return false;
+		}
+		if (classifierRefusal) {
 			this.#retryAttempt = 0;
 			this.#contentFilterRerouteFailures = 0;
 			this.#resolveRetry();
@@ -12056,7 +12194,7 @@ export class AgentSession {
 		// assistant error message is preserved in agent state so the caller
 		// can act on it.
 		const maxDelayMs = retrySettings.maxDelayMs;
-		if (maxDelayMs > 0 && delayMs > maxDelayMs && !switchedCredential && !switchedModel) {
+		if (!transientNetwork && maxDelayMs > 0 && delayMs > maxDelayMs && !switchedCredential) {
 			const attempt = this.#retryAttempt;
 			this.#retryAttempt = 0;
 			this.#contentFilterRerouteFailures = 0;
@@ -12072,8 +12210,11 @@ export class AgentSession {
 
 		await this.#emitSessionEvent({
 			type: "auto_retry_start",
+			cause: retryCause,
 			attempt: this.#retryAttempt,
-			maxAttempts: retrySettings.maxRetries,
+			maxAttempts: transientNetwork
+				? Math.max(retrySettings.maxRetries, this.#retryAttempt)
+				: retrySettings.maxRetries,
 			delayMs,
 			errorMessage: classifierRefusal ? `${REFUSAL_REROUTE_ANNOTATION} ${errorMessage}` : errorMessage,
 		});
@@ -12123,6 +12264,8 @@ export class AgentSession {
 	 */
 	abortRetry(): void {
 		this.#retryAbortController?.abort();
+		if (this.#agentId) FallbackApprovalGate.global().cancel(this.#agentId);
+		this.#pendingFallbackApproval = false;
 		// Note: _retryAttempt is reset in the catch block of _autoRetry
 		this.#resolveRetry();
 	}
@@ -12181,6 +12324,7 @@ export class AgentSession {
 
 		// Reset retry budget for a fresh attempt
 		this.#retryAttempt = 0;
+		this.#transientNetworkRetryStartedAtMs = undefined;
 		this.#contentFilterRerouteFailures = 0;
 
 		// Re-attempt the turn
@@ -13221,6 +13365,8 @@ export class AgentSession {
 			entriesToSummarize,
 			userWantsSummary: options.summarize ?? false,
 		};
+		const branchMessages = options.summarize ? prepareBranchEntries(entriesToSummarize).messages : [];
+		const branchRequiresVideo = options.summarize === true && messagesHaveVideo(branchMessages);
 
 		// Set up abort controller for summarization
 		this.#branchSummaryAbortController = new AbortController();
@@ -13240,6 +13386,11 @@ export class AgentSession {
 			}
 
 			if (result?.summary && options.summarize) {
+				if (branchRequiresVideo) {
+					throw new Error(
+						"Extension-provided branch summaries cannot replace video-bearing history without a native-video summary request.",
+					);
+				}
 				hookSummary = result.summary;
 				fromExtension = true;
 			}
@@ -13249,12 +13400,25 @@ export class AgentSession {
 		let summaryText: string | undefined;
 		let summaryDetails: unknown;
 		if (options.summarize && entriesToSummarize.length > 0 && !hookSummary) {
-			const model = this.model!;
-			const apiKey = await this.#modelRegistry.getApiKey(model, this.sessionId);
-			if (!apiKey) {
-				throw new Error(`No API key for ${model.provider}`);
-			}
 			const branchSummarySettings = this.settings.getGroup("branchSummary");
+			const candidates = this.#resolveCompactionModelCandidates(
+				this.model,
+				this.#modelRegistry.getAvailable(),
+				branchRequiresVideo,
+			);
+			let model: Model | undefined;
+			for (const candidate of candidates) {
+				if (!(await this.#modelRegistry.getApiKey(candidate, this.sessionId))) continue;
+				model = candidate;
+				break;
+			}
+			if (!model) {
+				throw new Error(
+					branchRequiresVideo
+						? "Branch summarization requires an authenticated native-video model configured for the vision role."
+						: "No authenticated model is available for branch summarization.",
+				);
+			}
 			const result = await generateBranchSummary(entriesToSummarize, {
 				model,
 				apiKey: this.#modelRegistry.resolver(model, this.sessionId),
@@ -13507,204 +13671,27 @@ export class AgentSession {
 	}
 
 	async fetchUsageReports(signal?: AbortSignal): Promise<UsageReport[] | null> {
-		const authStorage = this.#modelRegistry.authStorage;
-		if (!authStorage.fetchUsageReports) return null;
-		return authStorage.fetchUsageReports({
-			baseUrlResolver: provider => this.#modelRegistry.getProviderBaseUrl?.(provider),
-			signal,
-		});
+		return fetchCodexUsageReports(this.#modelRegistry, signal);
 	}
 
-	/**
-	 * Redeem one saved Codex rate-limit reset for a specific account, injecting
-	 * the provider base URL like {@link AgentSession.fetchUsageReports}. Powers
-	 * the `/usage reset` command and auto-redeem. Never throws for business
-	 * outcomes — inspect the returned `code`.
-	 */
 	async redeemResetCredit(target: ResetCreditTarget, signal?: AbortSignal): Promise<ResetCreditRedeemOutcome> {
-		return this.#modelRegistry.authStorage.redeemResetCredit({
-			target,
-			baseUrlResolver: provider => this.#modelRegistry.getProviderBaseUrl?.(provider),
-			signal,
-		});
+		return redeemCodexResetCredit(this.#modelRegistry, target, signal);
 	}
 
-	/**
-	 * List saved Codex rate-limit resets per stored account, fetched live from
-	 * the dedicated credits endpoint (bypasses the usage cache). Powers the
-	 * `/usage reset` account selector.
-	 */
 	async listResetCredits(signal?: AbortSignal): Promise<ResetCreditAccountStatus[]> {
-		return this.#modelRegistry.authStorage.listResetCredits({
-			sessionId: this.sessionId,
-			baseUrlResolver: provider => this.#modelRegistry.getProviderBaseUrl?.(provider),
-			signal,
-		});
-	}
-	async #confirmCodexAutoRedeem(decision: CodexAutoRedeemRedeemDecision): Promise<boolean> {
-		const runner = this.#extensionRunner;
-		if (!runner?.hasUI()) {
-			this.emitNotice(
-				"warning",
-				"Codex saved reset is eligible, but auto-redeem is unset and no prompt UI is available. Run `/usage reset` or set codexResets.autoRedeem.",
-				"codex-auto-reset",
-			);
-			return false;
-		}
-
-		const who = decision.target.email ?? decision.target.accountId ?? "the active account";
-		const resetLabel = decision.availableCount === 1 ? "reset" : "resets";
-		try {
-			const choice = await runner
-				.getUIContext()
-				.select(
-					`Do you wanna redeem your reset?\n${who} is blocked by the weekly Codex limit for about ${formatDuration(decision.remainingMs)}. Spend 1 of ${decision.availableCount} saved ${resetLabel}?`,
-					[
-						{
-							label: "Yes",
-							description: "Redeem now and remember yes for future eligible Codex weekly blocks.",
-						},
-						{
-							label: "No",
-							description: "Do not auto-redeem saved Codex resets.",
-						},
-					],
-				);
-			if (choice === "Yes") {
-				this.settings.set("codexResets.autoRedeem", "yes");
-				return true;
-			}
-			if (choice === "No") {
-				this.settings.set("codexResets.autoRedeem", "no");
-			}
-		} catch (error) {
-			logger.warn("codex-auto-reset prompt failed", { error: String(error) });
-		}
-		return false;
+		return listCodexResetCredits(this.#modelRegistry, this.sessionId, signal);
 	}
 
-	/**
-	 * Auto-redeem hook for {@link AgentSession.#handleRetryableError}'s
-	 * usage-limit branch. Returns `true` only when a saved Codex reset was
-	 * actually spent (so the caller retries immediately). The "unset" mode is
-	 * reactive but asks before spending; "yes" skips that prompt, and "no" avoids
-	 * the eligibility IO entirely. The decision remains heavily gated — see
-	 * `./codex-auto-reset` and the design in `local://autoreset-spec.md`.
-	 * Per-account in-flight dedup lets concurrent sessions adopt one redeem
-	 * instead of double-spending.
-	 */
 	async #maybeAutoRedeemCodexReset(coordinator = defaultCodexAutoRedeemCoordinator): Promise<boolean> {
-		const cfg = this.settings.getGroup("codexResets");
-		const model = this.model;
-		// Cheap exits before any IO.
-		if (!shouldEvaluateCodexAutoRedeem(cfg.autoRedeem) || !model || model.provider !== "openai-codex") return false;
-		const authStorage = this.#modelRegistry.authStorage;
-		// Capture identity BEFORE awaits: markUsageLimitReached leaves the
-		// usage-limit session credential sticky, so this names the blocked account.
-		const identity = authStorage.getOAuthAccountIdentity("openai-codex", this.sessionId);
-		const accountKey = (identity?.accountId ?? identity?.email)?.trim().toLowerCase();
-		if (!accountKey) return false;
-		const existing = coordinator.inFlightByAccount.get(accountKey);
-		if (existing) return existing;
-
-		const run = (async (): Promise<boolean> => {
-			const reports = await this.fetchUsageReports();
-			const decision = evaluateCodexAutoRedeem({
-				nowMs: Date.now(),
-				provider: model.provider,
-				modelId: model.id,
-				settings: {
-					autoRedeem: true,
-					minBlockedMinutes: Math.max(0, cfg.minBlockedMinutes),
-					keepCredits: Math.max(0, Math.trunc(cfg.keepCredits)),
-				},
-				identity,
-				reports,
-				attemptedBlockKeys: coordinator.attemptedBlockKeys,
-				lastAttemptAtByAccount: coordinator.lastAttemptAtByAccount,
-			});
-			if (!decision.redeem) {
-				logger.debug("codex-auto-reset: skipped", { reason: decision.reason });
-				return false;
-			}
-			if (shouldPromptCodexAutoRedeem(cfg.autoRedeem) && !(await this.#confirmCodexAutoRedeem(decision))) {
-				return false;
-			}
-			// Commit the attempt BEFORE acting so this block can never re-enter.
-			coordinator.attemptedBlockKeys.add(decision.blockKey);
-			coordinator.lastAttemptAtByAccount.set(decision.accountKey, Date.now());
-			const who = decision.target.email ?? decision.target.accountId ?? "the active account";
-			let outcome: ResetCreditRedeemOutcome;
-			try {
-				outcome = await authStorage.redeemResetCredit({
-					target: decision.target,
-					baseUrlResolver: provider => this.#modelRegistry.getProviderBaseUrl?.(provider),
-					// Not tied to the retry abort controller: aborting a consume
-					// mid-flight leaves credit state unknown.
-					signal: AbortSignal.timeout(15_000),
-				});
-			} catch (error) {
-				logger.info("codex-auto-reset audit", {
-					at: new Date().toISOString(),
-					action: "POST /wham/rate-limit-reset-credits/consume",
-					account: decision.accountKey,
-					window: decision.blockKey,
-					result: "transport-error",
-					error: String(error),
-				});
-				this.emitNotice(
-					"error",
-					"Codex auto-redeem failed before confirmation; no retry will be attempted.",
-					"codex-auto-reset",
-				);
-				return false;
-			}
-			logger.info("codex-auto-reset audit", {
-				at: new Date().toISOString(),
-				action: "POST /wham/rate-limit-reset-credits/consume",
-				account: decision.accountKey,
-				window: decision.blockKey,
-				result: outcome.code,
-			});
-			switch (outcome.code) {
-				case "reset": {
-					const left = Math.max(0, decision.availableCount - 1);
-					this.emitNotice(
-						"info",
-						`Auto-redeemed a saved Codex rate-limit reset for ${who} (${left} left); retrying now.`,
-						"codex-auto-reset",
-					);
-					void this.fetchUsageReports();
-					return true;
-				}
-				case "already_redeemed":
-					this.emitNotice(
-						"warning",
-						"A saved Codex reset was already redeemed elsewhere; waiting for the window.",
-						"codex-auto-reset",
-					);
-					return false;
-				case "no_credit":
-					this.emitNotice(
-						"warning",
-						"Codex auto-redeem found no saved reset credit; automatic reset remains stopped for this window.",
-						"codex-auto-reset",
-					);
-					return false;
-				case "nothing_to_reset":
-					this.emitNotice(
-						"warning",
-						"Codex reset reported nothing to reset; auto-redeem suppressed for this window.",
-						"codex-auto-reset",
-					);
-					return false;
-				default:
-					this.emitNotice("warning", `Codex auto-redeem failed (${outcome.code}).`, "codex-auto-reset");
-					return false;
-			}
-		})().finally(() => coordinator.inFlightByAccount.delete(accountKey));
-		coordinator.inFlightByAccount.set(accountKey, run);
-		return run;
+		return runCodexAutoRedeem({
+			modelRegistry: this.#modelRegistry,
+			settings: this.settings,
+			model: this.model,
+			sessionId: this.sessionId,
+			extensionRunner: this.#extensionRunner,
+			noticeSink: this,
+			coordinator,
+		});
 	}
 
 	/**

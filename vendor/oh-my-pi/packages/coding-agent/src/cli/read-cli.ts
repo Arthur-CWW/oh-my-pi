@@ -5,6 +5,12 @@
  * prints the resulting content blocks exactly as the model would receive them
  * (including truncation/limit notices appended by the meta-notice wrapper).
  */
+import {
+	decodedBase64ByteLength,
+	type ImageContent,
+	type TextContent,
+	type VideoContent,
+} from "@oh-my-pi/pi-ai";
 import { getProjectDir } from "@oh-my-pi/pi-utils";
 import chalk from "chalk";
 import { Settings } from "../config/settings";
@@ -39,7 +45,8 @@ export async function runReadCommand(cmd: ReadCommandArgs): Promise<void> {
 	try {
 		const result = await tool.execute("omp-read", { path: cmd.path });
 
-		for (const block of result.content) {
+		const blocks: readonly (TextContent | ImageContent | VideoContent)[] = result.content;
+		for (const block of blocks) {
 			if (block.type === "text") {
 				process.stdout.write(block.text);
 				if (!block.text.endsWith("\n")) process.stdout.write("\n");
@@ -47,6 +54,11 @@ export async function runReadCommand(cmd: ReadCommandArgs): Promise<void> {
 				const decodedBytes = Buffer.from(block.data, "base64").byteLength;
 				process.stdout.write(
 					chalk.dim(`[image content: ${block.mimeType}, ${decodedBytes} bytes base64-decoded]\n`),
+				);
+			} else {
+				const decodedBytes = decodedBase64ByteLength(block.data);
+				process.stdout.write(
+					chalk.dim(`[video content: ${block.mimeType}, ${decodedBytes} bytes base64-decoded]\n`),
 				);
 			}
 		}

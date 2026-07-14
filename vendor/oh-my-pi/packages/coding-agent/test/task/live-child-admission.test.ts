@@ -308,13 +308,23 @@ describe("live child admission", () => {
 		});
 		const admitted: string[] = [];
 		const gates = new Map<string, Deferred>();
+		let live = 0;
+		let peakLive = 0;
+		let releaseImmediately = false;
 		vi.spyOn(executorModule, "runSubprocess").mockImplementation(async options => {
 			const id = options.id ?? "?";
 			admitted.push(id);
+			live++;
+			peakLive = Math.max(peakLive, live);
 			const gate = deferred();
 			gates.set(id, gate);
-			await gate.promise;
-			return makeResult(id);
+			if (releaseImmediately) gate.resolve();
+			try {
+				await gate.promise;
+				return makeResult(id);
+			} finally {
+				live--;
+			}
 		});
 
 		const manager = new AsyncJobManager({ onJobComplete: () => {} });
@@ -327,7 +337,7 @@ describe("live child admission", () => {
 				}),
 			);
 
-			const result = await tool.execute("tc-fifo", {
+			await tool.execute("tc-fifo", {
 				agent: "task",
 				context: "shared context",
 				tasks: [
@@ -338,22 +348,24 @@ describe("live child admission", () => {
 				],
 			} as TaskParams);
 
-			await pollUntil(() => admitted.length >= 2);
-			expect(admitted.slice(0, 2)).toEqual(["A", "B"]);
+			await pollUntil(() => admitted.length === 2);
+			expect(new Set(admitted)).toEqual(new Set(["A", "B"]));
 
-			for (const id of ["A", "B"]) {
-				gates.get(id)!.resolve();
-			}
+			gates.get("A")!.resolve();
+			await pollUntil(() => admitted.length === 3);
+			expect(admitted[2]).toBe("C");
 
+			gates.get("B")!.resolve();
 			await pollUntil(() => admitted.length === 4);
-			expect(admitted).toEqual(["A", "B", "C", "D"]);
+			expect(admitted[3]).toBe("D");
 
-			for (const id of ["C", "D"]) {
-				gates.get(id)!.resolve();
-			}
-
+			gates.get("C")!.resolve();
+			gates.get("D")!.resolve();
 			await manager.waitForAll();
+			expect(peakLive).toBe(2);
 		} finally {
+			releaseImmediately = true;
+			for (const gate of gates.values()) gate.resolve();
 			await manager.dispose({ timeoutMs: 1000 });
 		}
 	});

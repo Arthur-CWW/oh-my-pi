@@ -6,6 +6,7 @@ import { getResolvedThemeColors, getThemeExportColors } from "../../modes/theme/
 import type { SessionEntry, SessionHeader } from "../../session/session-entries";
 import { loadJournalProjection } from "../../journal/projection";
 import { SessionManager } from "../../session/session-manager";
+import { redactVideoPayloads } from "../media-redaction";
 import templateCss from "./template.css" with { type: "text" };
 import templateHtml from "./template.html" with { type: "text" };
 import templateJs from "./template.js" with { type: "text" };
@@ -271,9 +272,11 @@ async function collectSubSessionsFromDir(
 /** Generate HTML from bundled template with runtime substitutions. */
 async function generateHtml(sessionData: SessionData, themeName?: string): Promise<string> {
 	const themeVars = await generateThemeVars(themeName);
+	const exportData = structuredClone(sessionData);
+	redactVideoPayloads(exportData);
 	const lightweightSubSessions: Record<string, SubSession> = {};
 	const payloadElements: string[] = [];
-	for (const [key, subSession] of Object.entries(sessionData.subSessions ?? {})) {
+	for (const [key, subSession] of Object.entries(exportData.subSessions ?? {})) {
 		const payloadId = `subsession-payload-${payloadElements.length}`;
 		const compressed = Bun.gzipSync(new TextEncoder().encode(JSON.stringify(subSession.entries)));
 		payloadElements.push(
@@ -282,7 +285,7 @@ async function generateHtml(sessionData: SessionData, themeName?: string): Promi
 		lightweightSubSessions[key] = { ...subSession, entries: [], payloadId, entryCount: subSession.entries.length };
 	}
 	const initialData: SessionData = {
-		...sessionData,
+		...exportData,
 		subSessions: Object.keys(lightweightSubSessions).length > 0 ? lightweightSubSessions : undefined,
 	};
 	const sessionDataBase64 = Buffer.from(

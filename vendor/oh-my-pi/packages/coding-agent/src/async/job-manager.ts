@@ -1,4 +1,5 @@
 import { logger } from "@oh-my-pi/pi-utils";
+import { ProgressCoalescer } from "./progress-coalescer";
 
 const DELIVERY_RETRY_BASE_MS = 500;
 const DELIVERY_RETRY_MAX_MS = 30_000;
@@ -239,7 +240,7 @@ export class AsyncJobManager {
 	 */
 	escalateCompletion(jobId: string): boolean {
 		const job = this.#jobs.get(jobId);
-		if (!job?.group || job.group.reporting !== "hub") return false;
+		if (job?.group?.reporting !== "hub") return false;
 		if (job.status !== "completed" && job.status !== "failed") return false;
 		job.group.reporting = "main";
 		const text = job.resultText ?? job.errorText;
@@ -311,17 +312,8 @@ export class AsyncJobManager {
 			isolated: options?.isolated === true,
 		};
 
-		const reportProgress = async (text: string, details?: Record<string, unknown>): Promise<void> => {
-			if (!options?.onProgress) return;
-			try {
-				await options.onProgress(text, details);
-			} catch (error) {
-				logger.warn("Async job progress callback failed", {
-					jobId: id,
-					error: error instanceof Error ? error.message : String(error),
-				});
-			}
-		};
+		const progress = new ProgressCoalescer(id, options?.onProgress);
+		const reportProgress = progress.report.bind(progress);
 		job.promise = (async () => {
 			try {
 				const text = await run({
@@ -332,6 +324,7 @@ export class AsyncJobManager {
 						job.queued = false;
 					},
 				});
+				await progress.flush();
 				if (job.status === "cancelled") {
 					this.#scheduleEviction(id);
 					return;
@@ -342,6 +335,7 @@ export class AsyncJobManager {
 				this.#enqueueDelivery(id, text);
 				this.#scheduleEviction(id);
 			} catch (error) {
+				await progress.flush();
 				if (job.status === "cancelled") {
 					this.#scheduleEviction(id);
 					return;

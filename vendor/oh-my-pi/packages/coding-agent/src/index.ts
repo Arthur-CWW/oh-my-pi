@@ -7,6 +7,7 @@ export { Container, Markdown, Spacer, Text } from "@oh-my-pi/pi-tui";
 // Logging
 export { getAgentDir, logger, VERSION } from "@oh-my-pi/pi-utils";
 export * from "./config/keybindings";
+export * from "./config/model-availability";
 export * from "./config/model-registry";
 // Prompt templates
 export type * from "./config/prompt-templates";

@@ -13,10 +13,12 @@ import {
 import type {
 	AssistantMessage,
 	ImageContent,
+	MediaContent,
 	Message,
 	MessageAttribution,
 	TextContent,
 	UserMessage,
+	UserContent,
 } from "@oh-my-pi/pi-ai";
 import { prompt } from "@oh-my-pi/pi-utils";
 import userInterjectionTemplate from "../prompts/steering/user-interjection.md" with { type: "text" };
@@ -163,7 +165,7 @@ function renderSteeringEnvelope(message: string): string {
 	return prompt.render(userInterjectionTemplate, { message });
 }
 
-function getArrayContentText(content: (TextContent | ImageContent)[]): string {
+function getArrayContentText(content: (TextContent | MediaContent)[]): string {
 	let firstText: string | undefined;
 	let textParts: string[] | undefined;
 	for (const part of content) {
@@ -180,14 +182,14 @@ function getArrayContentText(content: (TextContent | ImageContent)[]): string {
 	return textParts === undefined ? (firstText ?? "") : textParts.join("\n");
 }
 
-function getArrayContentImages(content: (TextContent | ImageContent)[]): ImageContent[] {
-	let images: ImageContent[] | undefined;
+function getArrayContentMedia(content: (TextContent | MediaContent)[]): MediaContent[] {
+	let attachments: MediaContent[] | undefined;
 	for (const part of content) {
-		if (part.type !== "image") continue;
-		if (images === undefined) images = [];
-		images.push(part);
+		if (part.type === "text") continue;
+		if (attachments === undefined) attachments = [];
+		attachments.push(part);
 	}
-	return images ?? [];
+	return attachments ?? [];
 }
 
 function wrapSteeringUserMessage(message: UserMessage): UserMessage {
@@ -198,8 +200,8 @@ function wrapSteeringUserMessage(message: UserMessage): UserMessage {
 
 	const text = getArrayContentText(message.content);
 	if (text.length === 0) return message;
-	const content: (TextContent | ImageContent)[] = [{ type: "text", text: renderSteeringEnvelope(text) }];
-	content.push(...getArrayContentImages(message.content));
+	const content: (TextContent | MediaContent)[] = [{ type: "text", text: renderSteeringEnvelope(text) }];
+	content.push(...getArrayContentMedia(message.content));
 	return { ...userMessageWithoutSteering(message), content };
 }
 
@@ -226,60 +228,63 @@ export function wrapSteeringForModel(messages: AgentMessage[]): AgentMessage[] {
 	return wrappedMessages ?? messages;
 }
 
-/** Result of filtering image blocks out of a `(TextContent | ImageContent)[]` array. */
-interface StripContentResult {
-	content: (TextContent | ImageContent)[];
+/** Result of replacing media blocks in an array content field. */
+interface StripContentResult<T extends TextContent | MediaContent> {
+	content: T[];
 	removed: number;
 }
 
-function stripImagesFromArrayContent(content: (TextContent | ImageContent)[]): StripContentResult {
+function stripMediaFromArrayContent(
+	content: (TextContent | ImageContent)[],
+): StripContentResult<TextContent | ImageContent>;
+function stripMediaFromArrayContent(
+	content: (TextContent | MediaContent)[],
+): StripContentResult<TextContent | MediaContent>;
+function stripMediaFromArrayContent(
+	content: (TextContent | MediaContent)[],
+): StripContentResult<TextContent | MediaContent> {
 	let removed = 0;
-	const kept: (TextContent | ImageContent)[] = [];
-	for (const part of content) {
-		if (part.type === "image") {
-			removed++;
-		} else {
-			kept.push(part);
+	let stripped: (TextContent | MediaContent)[] | undefined;
+	for (let index = 0; index < content.length; index++) {
+		const part = content[index];
+		if (part.type === "text") {
+			stripped?.push(part);
+			continue;
 		}
+		if (!stripped) stripped = content.slice(0, index);
+		stripped.push({ type: "text", text: part.type === "video" ? "[video omitted]" : "[image omitted]" });
+		removed++;
 	}
-	if (removed === 0) {
-		return { content, removed };
-	}
-	// Avoid emitting an empty `content` array — providers reject zero-block user/tool
-	// messages and the LLM still needs to see *something* where the image used to be.
-	if (kept.length === 0) {
-		kept.push({ type: "text", text: "[image removed]" });
-	}
-	return { content: kept, removed };
+	return { content: stripped ?? content, removed };
 }
 
 /**
- * Strip image content blocks from `message` in place. Returns the count of
- * images removed across `content` (every role that carries `ImageContent`) and
- * any tool-result `details.images` payload. Callers MUST rewrite session
- * entries (`SessionManager.rewriteEntries`) and replay them through
+ * Replace media content blocks in `message` with type-specific omission
+ * markers. Returns the count removed across every media-bearing role and any
+ * tool-result `details.images` payload. Callers MUST rewrite session entries
+ * (`SessionManager.rewriteEntries`) and replay them through
  * `Agent.replaceMessages` afterwards so persisted state and provider-side
- * caches stay aligned with the mutated tree — `stripImagesFromMessage` is a
+ * caches stay aligned with the mutated tree — `stripMediaFromMessage` is a
  * pure local mutation and intentionally does neither.
  */
-export function stripImagesFromMessage(message: AgentMessage): number {
+export function stripMediaFromMessage(message: AgentMessage): number {
 	switch (message.role) {
 		case "user":
 		case "developer":
 		case "custom":
 		case "hookMessage": {
 			if (typeof message.content === "string") return 0;
-			const { content, removed } = stripImagesFromArrayContent(message.content);
+			const { content, removed } = stripMediaFromArrayContent(message.content);
 			if (removed > 0) {
-				// All four roles type `content` as `string | (TextContent | ImageContent)[]`;
-				// TypeScript can't narrow the assignment across the union, so cast once.
+				// These roles share array content but TypeScript cannot narrow the
+				// assignment across the custom-message union, so cast once.
 				(message as { content: typeof content }).content = content;
 			}
 			return removed;
 		}
 		case "toolResult": {
 			let removed = 0;
-			const { content, removed: contentRemoved } = stripImagesFromArrayContent(message.content);
+			const { content, removed: contentRemoved } = stripMediaFromArrayContent(message.content);
 			if (contentRemoved > 0) {
 				message.content = content;
 				removed += contentRemoved;
@@ -306,10 +311,12 @@ export function stripImagesFromMessage(message: AgentMessage): number {
 		case "fileMention": {
 			let removed = 0;
 			for (const file of message.files) {
-				if (file.image) {
-					file.image = undefined;
-					removed++;
-				}
+				const attachment = file.attachment;
+				if (!attachment) continue;
+				const marker = attachment.type === "video" ? "[video omitted]" : "[image omitted]";
+				file.attachment = undefined;
+				file.content = file.content ? `${file.content}\n${marker}` : marker;
+				removed++;
 			}
 			return removed;
 		}
@@ -357,7 +364,7 @@ export interface PythonExecutionMessage {
 export interface CustomMessage<T = unknown> {
 	role: "custom";
 	customType: string;
-	content: string | (TextContent | ImageContent)[];
+	content: string | UserContent[];
 	display: boolean;
 	details?: T;
 	/** Who initiated this message for billing/attribution semantics. */
@@ -371,7 +378,7 @@ export interface CustomMessage<T = unknown> {
 export interface HookMessage<T = unknown> {
 	role: "hookMessage";
 	customType: string;
-	content: string | (TextContent | ImageContent)[];
+	content: string | UserContent[];
 	display: boolean;
 	details?: T;
 	/** Who initiated this message for billing/attribution semantics. */
@@ -392,7 +399,7 @@ export interface FileMentionMessage {
 		byteSize?: number;
 		/** Why the file contents were omitted from auto-read. */
 		skippedReason?: "tooLarge";
-		image?: ImageContent;
+		attachment?: MediaContent;
 	}>;
 	timestamp: number;
 }
@@ -514,10 +521,10 @@ export function convertToLlm(messages: AgentMessage[]): Message[] {
 							return `<file path="${file.path}">${inner}</file>`;
 						})
 						.join("\n");
-					const content: (TextContent | ImageContent)[] = [{ type: "text" as const, text: fileContents }];
+					const content: (TextContent | MediaContent)[] = [{ type: "text" as const, text: fileContents }];
 					for (const file of m.files) {
-						if (file.image) {
-							content.push(file.image);
+						if (file.attachment) {
+							content.push(file.attachment);
 						}
 					}
 					return {

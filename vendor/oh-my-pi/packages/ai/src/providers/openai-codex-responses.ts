@@ -37,6 +37,7 @@ import {
 	type Tool,
 	type ToolCall,
 	type ToolChoice,
+	type UserContent,
 } from "../types";
 import {
 	createOpenAIResponsesHistoryPayload,
@@ -3397,7 +3398,7 @@ function convertMessages(model: Model<"openai-codex-responses">, context: Contex
 
 function normalizeInputMessageContent(
 	model: Model<"openai-codex-responses">,
-	content: string | Array<{ type: "text"; text: string } | { type: "image"; mimeType: string; data: string }>,
+	content: string | UserContent[],
 ): ResponseInputContent[] {
 	if (typeof content === "string") {
 		if (!content || content.trim() === "") return [];

@@ -7,6 +7,7 @@ import {
 	type AssistantMessage,
 	type AssistantMessageEvent,
 	type Context,
+	assertContextVideoInputSupported,
 	EventStream,
 	isZodSchema,
 	streamSimple,
@@ -1073,6 +1074,7 @@ async function streamAssistantResponse(
 
 	try {
 		return await runInActiveSpan(chatSpan, async () => {
+			if (streamFn) assertContextVideoInputSupported(config.model, llmContext);
 			let response = await streamFunction(config.model, llmContext, {
 				...config,
 				// Hand streamSimple a resolver so its central auth-retry policy can

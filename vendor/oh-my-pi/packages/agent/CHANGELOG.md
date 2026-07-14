@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Compaction, retry, handoff, advisor, and branch-summary paths now preserve video blocks and require a native-capable route; media shake uses type-specific omission markers.
+- Native-video end-to-end proof covered 3/3 parsed, attachment-verified outputs; semantic quality is not release-grade (0/3 semantic passes), so media preservation/compaction correctness is distinct from factual-quality release gating.
+
 ## [16.0.1] - 2026-06-15
 
 ### Fixed

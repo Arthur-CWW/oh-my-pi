@@ -122,7 +122,9 @@ import type {
 	Tool,
 	ToolCall,
 	ToolResultMessage,
+	UserContent,
 } from "../types";
+import { assertContextVideoInputSupported } from "../video-input";
 import { normalizeSystemPrompts } from "../utils";
 import { AssistantMessageEventStream } from "../utils/event-stream";
 import { parseStreamingJson } from "../utils/json-parse";
@@ -305,6 +307,7 @@ export const streamCursor: StreamFunction<"cursor-agent"> = (
 	context: Context,
 	options?: CursorOptions,
 ): AssistantMessageEventStream => {
+	assertContextVideoInputSupported(model, context);
 	const stream = new AssistantMessageEventStream();
 
 	(async () => {
@@ -2205,7 +2208,7 @@ function hasUserMessageImages(msg: Message): boolean {
 
 type CursorRootPromptContentPart = { type: "text"; text: string } | { type: "image"; image: string; mediaType: string };
 
-function buildCursorRootPromptContent(content: string | (TextContent | ImageContent)[]): CursorRootPromptContentPart[] {
+function buildCursorRootPromptContent(content: string | UserContent[]): CursorRootPromptContentPart[] {
 	if (typeof content === "string") {
 		const text = content.trim();
 		return text ? [{ type: "text", text }] : [];
@@ -2217,14 +2220,18 @@ function buildCursorRootPromptContent(content: string | (TextContent | ImageCont
 			if (text) {
 				parts.push({ type: "text", text });
 			}
-		} else {
+		} else if (item.type === "image") {
 			parts.push({ type: "image", image: item.data, mediaType: item.mimeType });
+		} else {
+			throw new Error(
+				"Video input reached Cursor without native video support. Select the video-capable pi/vision model.",
+			);
 		}
 	}
 	return parts;
 }
 
-function cursorUserContentKey(content: string | (TextContent | ImageContent)[]): string {
+function cursorUserContentKey(content: string | UserContent[]): string {
 	if (typeof content === "string") {
 		return content.trim();
 	}
@@ -2480,7 +2487,7 @@ export function buildCursorHistoryForTest(
 	return { rootPromptMessagesJson, turnUserMessagesJson, turnStepMessagesJson };
 }
 function createCursorUserMessage(
-	content: string | (TextContent | ImageContent)[],
+	content: string | UserContent[],
 	text: string,
 	messageId = crypto.randomUUID(),
 ) {
@@ -2498,7 +2505,7 @@ function createCursorUserMessage(
 	});
 }
 
-function extractImages(content: (TextContent | ImageContent)[]) {
+function extractImages(content: UserContent[]) {
 	return content
 		.filter((item): item is ImageContent => item.type === "image")
 		.map(image =>
@@ -2537,7 +2544,7 @@ function buildGrpcRequest(
 	const activeMessage = context.messages[activeUserMessageIndex];
 	const activeUserMessage =
 		activeMessage?.role === "user" || activeMessage?.role === "developer" ? activeMessage : undefined;
-	let userContent: string | (TextContent | ImageContent)[] | undefined;
+	let userContent: string | UserContent[] | undefined;
 	let userText = "";
 	let hasUserImages = false;
 	if (activeUserMessage?.role === "user" || activeUserMessage?.role === "developer") {
@@ -2655,10 +2662,10 @@ function buildGrpcRequest(
 	return { requestBytes, blobStore, conversationState };
 }
 
-function hasImages(content: (TextContent | ImageContent)[]): boolean {
+function hasImages(content: UserContent[]): boolean {
 	return content.some(item => item.type === "image");
 }
-function extractText(content: (TextContent | ImageContent)[]): string {
+function extractText(content: UserContent[]): string {
 	return content
 		.filter((c): c is TextContent => c.type === "text")
 		.map(c => c.text)

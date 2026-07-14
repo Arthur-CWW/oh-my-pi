@@ -6,10 +6,10 @@
  * so the agent doesn't need to read them manually.
  */
 import * as fs from "node:fs/promises";
-import path from "node:path";
+import * as path from "node:path";
 import { formatHashlineHeader, formatNumberedLines, type SnapshotStore } from "@oh-my-pi/hashline";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
-import type { ImageContent } from "@oh-my-pi/pi-ai";
+import { MAX_ANTIGRAVITY_INLINE_VIDEO_BYTES, type ImageContent } from "@oh-my-pi/pi-ai";
 import { formatAge, formatBytes, readImageMetadata } from "@oh-my-pi/pi-utils";
 import { canonicalSnapshotKey } from "../edit/file-snapshot-store";
 import { normalizeToLF } from "../edit/normalize";
@@ -22,6 +22,7 @@ import {
 } from "../session/streaming-output";
 import { resolveReadPath } from "../tools/path-utils";
 import { formatDimensionNote, resizeImage } from "./image-resize";
+import { videoMimeTypeForExtension } from "./video-loading";
 
 /** Regex to match @filepath patterns in text */
 const FILE_MENTION_REGEX = /@([^\s@]+)/g;
@@ -193,13 +194,35 @@ export async function generateFileMentionMessages(
 	const files: FileMentionMessage["files"] = [];
 
 	for (const filePath of filePaths) {
+		const videoMimeType = videoMimeTypeForExtension(path.extname(filePath));
 		const resolvedPath = await resolveMentionPath(filePath, cwd);
 		if (!resolvedPath) {
+			if (videoMimeType) throw new Error(`Video attachment was not found or is unreadable: ${filePath}`);
 			continue;
 		}
 		const absolutePath = resolveReadPath(resolvedPath, cwd);
 		try {
 			const stat = await Bun.file(absolutePath).stat();
+			if (videoMimeType) {
+				if (!stat.isFile()) {
+					throw new Error(`Invalid video attachment (not a regular file): ${absolutePath}`);
+				}
+				if (stat.size === 0) {
+					throw new Error(`Invalid video attachment (empty file): ${absolutePath}`);
+				}
+				if (stat.size >= MAX_ANTIGRAVITY_INLINE_VIDEO_BYTES) {
+					throw new Error(
+						`Video attachment is too large (${formatBytes(stat.size)}; inline limit is under ${formatBytes(MAX_ANTIGRAVITY_INLINE_VIDEO_BYTES)}). Antigravity Files API upload is unavailable: ${absolutePath}`,
+					);
+				}
+				const buffer = await fs.readFile(absolutePath);
+				files.push({
+					path: resolvedPath,
+					content: "",
+					attachment: { type: "video", mimeType: videoMimeType, data: buffer.toBase64() },
+				});
+				continue;
+			}
 			if (stat.isDirectory()) {
 				const { output, lineCount } = await buildDirectoryListing(absolutePath);
 				files.push({ path: resolvedPath, content: output, lineCount });
@@ -241,7 +264,7 @@ export async function generateFileMentionMessages(
 					}
 				}
 
-				files.push({ path: resolvedPath, content: dimensionNote ?? "", image });
+				files.push({ path: resolvedPath, content: dimensionNote ?? "", attachment: image });
 				continue;
 			}
 
@@ -264,8 +287,9 @@ export async function generateFileMentionMessages(
 				output = `${formatHashlineHeader(resolvedPath, tag)}\n${formatNumberedLines(output)}`;
 			}
 			files.push({ path: resolvedPath, content: output, lineCount });
-		} catch {
-			// File doesn't exist or isn't readable - skip silently
+		} catch (error) {
+			if (videoMimeType) throw error;
+			// Non-video files that don't exist or aren't readable are skipped silently.
 		}
 	}
 

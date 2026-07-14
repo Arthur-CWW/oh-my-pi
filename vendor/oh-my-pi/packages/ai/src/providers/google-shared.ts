@@ -20,6 +20,7 @@ import type {
 	Tool,
 	ToolCall,
 } from "../types";
+import { assertContextVideoInputSupported } from "../video-input";
 import { normalizeSystemPrompts } from "../utils";
 import { AssistantMessageEventStream } from "../utils/event-stream";
 import { finalizeErrorMessage, type RawHttpRequestDump } from "../utils/http-inspector";
@@ -159,6 +160,7 @@ function isGemini3Model(modelId: string): boolean {
  * Convert internal messages to Gemini Content[] format.
  */
 export function convertMessages<T extends GoogleApiType>(model: Model<T>, context: Context): Content[] {
+	assertContextVideoInputSupported(model, context);
 	const contents: Content[] = [];
 	const normalizeToolCallId = (id: string): string => {
 		if (!requiresToolCallId(model.id)) return id;
@@ -197,15 +199,24 @@ export function convertMessages<T extends GoogleApiType>(model: Model<T>, contex
 						const text = item.text.toWellFormed();
 						if (text.trim().length === 0) continue;
 						parts.push({ text });
-					} else if (supportsImages) {
+					} else if (item.type === "image") {
+						if (supportsImages) {
+							parts.push({
+								inlineData: {
+									mimeType: item.mimeType,
+									data: item.data,
+								},
+							});
+						} else {
+							omittedImages = true;
+						}
+					} else if (item.type === "video") {
 						parts.push({
 							inlineData: {
 								mimeType: item.mimeType,
 								data: item.data,
 							},
 						});
-					} else {
-						omittedImages = true;
 					}
 				}
 				if (omittedImages) {

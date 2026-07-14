@@ -11,17 +11,17 @@ Read this first in the next orchestrator session. Then read:
 
 - OMP is a shared workspace. Agent transcript/journal is truth; Arthur sees switchable, prettified, interactive projections.
 - Prefer direct manipulation and playable proof over logs. For high-dimensional/nondeterministic work: distributions, pairwise tournaments, metamorphic properties, pinned probes, seeded simulations, interactive maps.
-- TUI grammar should be globally vim-native: normal-mode first, `i` to insert, `Esc` unwinds one level, `:` for long-tail TUI commands, `?` teaches everything.
-- Agent Hub is "tmux for agents": nested child tree, `[`/`]` sibling cycling, `.` toggles historical agents, click/`gd` navigation, durable model badges, streaming preview.
+- TUI grammar is normal-mode-first on viewer surfaces: writable full-TUI/editor surfaces use `i` for insert; `Esc` unwinds one level; `j`/`k` move one line, `J`/`K` move five lines, `g`/`G` jump ends, `za` folds, `[`/`]` cycle siblings, `/` searches, `?` teaches, and `:` opens TUI commands. The read-only Hub preview accepts no message input or follow-up—no `i`, `Ctrl-Enter`, or queued follow-up; `Enter` attaches the selected session in the full TUI. `u`/`d` and `Ctrl-U`/`Ctrl-D` are half-page aliases there, while `PgUp`/`PgDn` remain full-page actions.
+- Agent Hub is "tmux for agents": nested child tree, `[`/`]` sibling cycling, `.` toggles historical agents, click/`gd` navigation, durable model badges, selected-child streaming preview, rollout state, and contextual help.
 - Widescreen right half is a Matuschak-style **peripheral field**, not a detail inspector: stable handles, preattentive pulses, focus-following bloom, residue trail, "what wants me".
-- Route by decision entropy × blast radius × mistake legibility. Sol owns core/integral/taste-heavy work. Luna handles low-entropy, cheap, legible peripheral work and may be spawned by Sol. Other weak subscriptions are use-up lanes. Gemini Pro/Flash reserved for video understanding/decomposition.
+- Roles, providers, model IDs, APIs, and execution lanes remain distinct. Gemini Antigravity is reserved for video understanding/decomposition; native inline video uses only `google-antigravity/gemini-3.5-flash` and strict `<100MB` payloads.
 - Do not let durable handoffs/research live only in `local://`; it is session-scoped. Durable docs go under `docs/`.
 
 ## Current git / binary state
 
 - Current branch: `main`.
-- Repo HEAD after committing this handoff: `4eb8d0be` (docs-only); latest blessed fork-touching source commit: `492695a5`.
-- Installed binary: `omp/16.0.1+fork.492695a5acfc`, digest `0e4534c2e1be33c995e4b85296d2919092c1ca115bd2a04aabc469c81d685d62`.
+- Previously promoted fork-touching source remains `492695a5`; installed binary remains `omp/16.0.1+fork.492695a5acfc`, digest `0e4534c2e1be33c995e4b85296d2919092c1ca115bd2a04aabc469c81d685d62`.
+- The focused overhaul changes documented below are current source/working-tree status, not a claim that the installed blessed binary already contains them; promotion follows the final focused proof gate.
 - Final promotion succeeded in 106.81s. Receipt: `vendor/oh-my-pi/local/readiness-receipt-0e4534c2e1be33c995e4b85296d2919092c1ca115bd2a04aabc469c81d685d62.json` (receipt SHA-256 `5648b36c…`). Rollout correctly skipped this working session and another working dotfiles session; one legacy dotfiles peer needs one manual restart.
 - Promotion bug fixed at `492695a5`: ambient `RUSTUP_TOOLCHAIN=1.97.0` overrode `vendor/oh-my-pi/rust-toolchain.toml` (nightly-2026-04-29), causing `#![feature(alloc_error_hook)]` failure. Promotion now removes the ambient override for native builds; 10 promotion tests and ratchets pass.
 - Prior blessed releases are retained additively under `~/.bun/bin/.omp-releases/`; rollback remains available.
@@ -30,20 +30,23 @@ Read this first in the next orchestrator session. Then read:
 
 ### Agent Hub / navigation
 
-- `f5f45008` — `.` toggles historical/finished agents, visible hidden-count indicator.
-- `9a214d23` + `851bd597` — nested spawn tree; automation rows; parked/grandchild model badges fall back to durable journal metadata.
-- `c699e9b5` — selected child's live assistant tail streams in preview through the real component, byte-bounded, no finalized-prefix rescans. Live proof: `local/proofs/agent-hub-stream/`.
-- `3af911f3` / related Hub slice — live `N.N tok/s`, editor-free preview, `/` search/backspace fix, normal-mode default, `v` rich/plain, help overlay. Live proof: `local/proofs/agent-hub-tokrate/round2/` (36.8 / 21.4 tok/s).
-- `agent-hub.ts` shrank below the ratchet after roster extraction.
+- `.` toggles historical/finished agents, with a visible hidden-count indicator; nested spawn trees preserve parent lineage and durable model badges.
+- Selected-child preview streams a byte-bounded assistant tail without finalized-prefix rescans; selected state and rollout phases are journal-backed projections, not a second authority.
+- Hub preview is strictly read-only: no `i`, message input, `Ctrl-Enter`, or follow-up. `Enter` attaches the selected session in the full TUI; `j`/`k` move one line, `J`/`K` five lines, `u`/`d` and `Ctrl-U`/`Ctrl-D` half a page, `PgUp`/`PgDn` a full page, `g`/`G` to the ends, `/` search, `?` help, `v` rich/plain, `za` fold, and `[`/`]` cycle siblings.
+- `v` switches rich/plain preview; roster rows remain intentionally single-line while transcript and tool-result bodies honor the shared display state.
+- `agent-hub.ts` remains below its line-count ratchet after roster extraction.
 
 ### Main TUI / editor
 
-- `3937cb29` — fixed vim visual-mode duplicate first/last rows; test first reproduced Arthur's exact `[1,1,2,3,3]` rendering. Live extension is a symlink to source.
-- `f09c4a0d` — normal-mode `za` toggles `[Paste #N]` fold expansion; edits survive re-collapse; undo-safe; helpers extracted to `vim-lite-paste.ts`; 23/23 tests; vim-lite shrank to 1714 lines.
-- `7ae59d86` — `:` command mode with `:wrap`, `:rich`, `:version`; unknown-command feedback. Current honest wrap scope: main IRC transcript cards only; IRC tool send/await/wait/roster/pending-result and final result rows still truncate. Proof: `local/proofs/command-mode/`.
-- Ctrl+Q issue diagnosed: Arthur's global config had `interruptMode: wait`; reset to `immediate`. Remaining design issue: session selector persists this globally without telling the user (friction row).
-- `3f4f6d22` — `/version` view model / command; blessed status, source commit, digest, session start time.
-- `eeda0a0f` + `1e490931` — `/inspect`; categories Tools / Skills / Feeds / Memories / Stores / Session; `/inspect tools`, `/inspect feeds` jump directly. Proof: `local/proofs/primitives-inspector/`.
+- Vim visual-mode duplicate first/last rows are fixed; normal-mode `za` folds `[Paste #N]` pills and preserves edits through re-collapse.
+- The registry-backed `:` popup now exposes `:commands`, `:wrap`, `:rich`, and `:version`; completion, focus restoration, and unknown-command feedback are explicit. Colon is for TUI/view-local projection commands and shortcuts; slash remains the durable/mixed/session/runtime/model/queue namespace.
+- `:wrap` and `:rich` cover IRC communication and tool-result body surfaces; receipts, errors, metadata, and roster rows remain bounded single-line projections.
+- `Ctrl-Q` is the direct cancellation cutover for active work (including focused children); `Ctrl-Enter` is the follow-up queue action. The old global `interruptMode` explanation is no longer the binding contract.
+- `/version` and `/inspect` retain their durable/runtime surfaces; `?` and `:commands` project help from the shared interaction registry.
+### Native video
+
+- Typed media now flows through startup/file mentions, prompts, durable queues, session persistence, compaction, and provider conversion.
+- Native inline video is strict: only the Antigravity provider/model lane accepts it, payloads must be valid allowed-MIME base64 under `100MB`, and oversized or unsupported input fails explicitly. Frame-sampling evaluation remains a separate fallback, not native video.
 
 ### Memory / performance
 
@@ -61,7 +64,7 @@ Read this first in the next orchestrator session. Then read:
 - `1a35eabb` — post-commit hook triggers background promotion for commits touching `vendor/oh-my-pi/`; 2h automation is the backstop. Global `core.hooksPath=~/.config/git/hooks` had shadowed local hooks; global post-commit is now a dispatcher to repo-local hooks.
 - `8c7de0dd`, `185d6576`, `2a1fc555`, `50ec6048` — `omp rollout`, external-peer build/version metadata, sequential safe rollout, working/legacy skips, honest `BLESSED` vs `ROLLOUT incomplete` reporting, fixed same-PID restart.
 - `492695a5` — promotion native build honors fork nightly toolchain.
-- Important transient seen earlier: post-commit promotions sometimes failed `git worktree add` with `.git/index: Not a directory` during concurrent git activity; a direct retry succeeded. The shared promotion lock prevents duplicate promoters but does not serialize unrelated git operations. If this recurs, make worktree snapshot creation retry boundedly on transient index errors.
+- Vendor sync is manifest-v2 and typed: the current manifest has 21 entries (NCode removed), pins are a no-I/O boundary, and tracked entries require exact upstream/remote/branch identity with clean fast-forward proof. The typed daily `--apply` path is active; the latest live apply updated codex, plugins, cua, chrome-devtools, and whisper, left cmux blocked by a dirty tree, and left pins untouched. Unit Git fixtures remain blocked by Bun-test EBADF.
 
 ### Feeds / Twitter / data visibility
 
@@ -73,7 +76,7 @@ Read this first in the next orchestrator session. Then read:
   - `news`: recent-only, cadence-based, no thread/media archaeology (thsottiaux belongs here).
 - Corpus seeds recovered from prior sessions: pleometric, teortaxestex, repligate, max_paperclips, voooooogel, _xjdr, ludwigABAP, lumpenspace, deepfates.
 - Full-sync proof: thsottiaux 1→591 (historical work was done before the policy clarification; do not repeat it), pleometric 85→655 +163 media.
-- `33879563`: `scripts/vendor-sync.ts`, `catalog/vendors.yml`, ff-only/dry-run default. 22 entries. `vendor/oh-my-pi` pinned forever. Daily automation remains dry-run until Arthur reviews the manifest.
+- `33879563` — `scripts/vendor-sync.ts`, `catalog/vendors.yml`, and the manifest-v2 policy. The current manifest has 21 entries (NCode removed); `vendor/oh-my-pi` remains pinned forever. The latest live `--apply` updated codex, plugins, cua, chrome-devtools, and whisper, while cmux was blocked by a dirty tree and pins were untouched. Unit Git fixtures remain a Bun-test EBADF residual.
 
 ### Automations / life queue
 
@@ -82,32 +85,34 @@ Read this first in the next orchestrator session. Then read:
   - twitter-sync every 45m, enabled, Luna.
   - availability-sync every 1h, enabled, Luna.
   - omp-immutable-promotion every 2h, enabled, Luna (backstop to post-commit hook).
-  - vendor-sync daily@06:00, enabled but prompt is dry-run pending manifest approval.
+  - vendor-sync daily@06:00, enabled with typed `--apply` active; the latest live apply updated codex, plugins, cua, chrome-devtools, and whisper, while cmux was blocked by a dirty tree and pins were untouched. Unit Git fixtures remain blocked by Bun-test EBADF.
   - refund-pursuit daily@09:00, disabled pending Arthur review; case and packet are private at `local/refund-case/`.
 - `682b052b`: life queue in `packages/control-plane`; abandoned-session intake recovered 43 paused/resumable items.
 
 ## Verification summary
 
-Latest observed union before the handoff:
+Latest observed focused evidence:
 
-- Coding-agent: 120 pass, 0 fail, 389 expectations across 12 focused files; package typecheck clean.
-- vim-lite: 23 pass, 0 fail, 84 expectations.
-- vendor/promote: 12 pass, 0 fail; promotion tests later expanded to 10 and passed after toolchain fix.
-- Ratchets: file-size, root-litter, twin-parser all green.
-- Agent Hub streaming preview: 83/83 Hub tests; real preview frames changed 6 seconds apart.
-- Restart path: 56 focused tests + live round3 same-PID two-peer proof.
+- `packages/catalog`, `packages/ai`, and `packages/agent` typechecks passed.
+- `packages/coding-agent` typecheck passed after the final fix.
+- Consolidated focused gate: 400 pass, 1 skip; automations: 15/15; all focused TUI and video suites passed.
+- Native-video live transport proof is complete: 3/3 structured JSON results parsed with exact MP4 byte/SHA-256 verification, `attachmentVerified=true`, `framesPassed=0`, and `rawMediaCopied=false`; see `data/provider-evals/video-understanding/runs/antigravity-native-sam-20260714e/combined-summary.json`. This proves transport and attachment handling, not semantic quality: `semanticQualityReleaseGrade=false` with 0/3 semantic passes because of impossible timestamps, source-ID drift, and hallucinated numeric claims; see `data/provider-evals/video-understanding/runs/antigravity-native-sam-20260714e/quality-report.md`.
+- Selector availability flicker is fixed by auth-generation/CAS fencing and stale-refresh suppression.
+- Agent resource/error aggregation is landed: failed non-cancelled children aggregate in typed `ErrorInbox` records with transcript/final-output recovery links; `agent://` retains a `history://` pointer and invalid `agents://` suggests the singular protocol.
+- Vendor unit Git fixtures still fail under Bun-test with EBADF; cmux apply remains blocked by a dirty tree; pins remain untouched.
 
 ## Primary unresolved work (priority order)
 
-1. **Current session fleet bootstrap:** every session started before `50ec6048` needs one manual restart. Thereafter, post-bless rollout manages capable idle/waiting sessions; working sessions are skipped (no deferred safe-boundary command exists yet).
-2. **120-request child decapitation:** PrimitivesInspector, WrapRichCommands, VendorSync, AutomationsDefectFix, and RestartPathDebugger all hit the soft request budget after useful work, often yielding no final output. Fresh finisher pattern recovered disk work, but this is a systemic tax. Need checkpoint-before-budget / automatic partial-yield, or raise/request-budget based on packet class. Taxonomy class: child cancellation output loss.
-3. **Revived-agent wake-drop:** 2/2 parked agents read injected directives then silently parked without work/reply; fresh spawns succeeded. Likely injection-to-turn boundary / revive handling. High-severity friction row.
-4. **Wrap coverage:** extend `:wrap` from main IRC transcript cards to the remaining transcript/tool-result render surfaces; do not wrap roster single-line rows unless designed separately.
+1. **Native-video semantic quality gate:** `semanticQualityReleaseGrade=false` (0/3 semantic passes); impossible timestamps, source-ID drift, and hallucinated numeric claims remain in `data/provider-evals/video-understanding/runs/antigravity-native-sam-20260714e/quality-report.md`. Fix prompt/schema/evidence grounding before release.
+2. **Vendor residuals:** typed daily `--apply` is active for the 21-entry manifest, but cmux remains blocked by a dirty tree and unit Git fixtures remain blocked by Bun-test EBADF; pins remain untouched.
+3. **Current session fleet bootstrap:** sessions started before the fixed restart/promotion revisions still need one manual restart; working sessions remain safely skipped.
+4. **Revived-agent wake-drop:** parked-agent IRC revival can still consume a turn without work/reply; fresh spawns remain the workaround.
 5. **Peripheral field + browser component layer:** design is captured, not built. Recommended first browser component: side-by-side subagent run comparison (prompt/packet/route/timeline/outcome).
-6. **Worker-pool echo stub:** still incomplete and misleading under `vendor/oh-my-pi/packages/coding-agent/src/task/subagent-worker-*`; either delete (recommended) or extract the real TaskTool execution contract. Do not present it as implemented.
+6. **Worker-pool echo stub:** still incomplete and misleading under `vendor/oh-my-pi/packages/coding-agent/src/task/subagent-worker-*`; either delete or extract the real TaskTool execution contract. Do not present it as implemented.
 7. **cmux nine-finding slice:** preserved but not independently reverified in this session.
 8. **Storage decisions requiring Arthur:** `local/voiceink-store-backup-20260713` (~8.3GB); personal screenshots → private store; root `fix.js`; worker-pool stub deletion.
-9. **Refund automation:** enable only after Arthur reviews `local/refund-case/automation-packet.md`; it is draft-gated and must never send without explicit approval.
+9. **NCode external residual:** active NCode integrations are removed from the agents repo and user-local OMP surfaces; an external dotfiles residual remains until its owner responds.
+10. **Refund automation:** enable only after Arthur reviews `local/refund-case/automation-packet.md`; it is draft-gated and must never send without explicit approval.
 
 ## Systemic lessons from this session
 

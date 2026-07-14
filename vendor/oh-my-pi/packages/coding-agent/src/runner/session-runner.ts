@@ -1276,7 +1276,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 						resources.session.acceptDurableInput(
 							{
 								text: command.payload.text,
-								images: command.payload.images,
+								attachments: command.payload.attachments,
 								deliveryClass: command.payload.deliveryClass,
 							},
 							{
@@ -1406,7 +1406,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 						resources.session.editDurableInputCommand(
 							command.inputId,
 							command.itemRevision,
-							{ text: command.payload.text, images: command.payload.images },
+							{ text: command.payload.text, attachments: command.payload.attachments },
 							{
 								schemaVersion: 1,
 								commandId: command.commandId,
@@ -1628,9 +1628,9 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 												mode: result.mode,
 												toolResultsDropped: result.toolResultsDropped,
 												blocksDropped: result.blocksDropped,
-												...(result.imagesDropped === undefined
+												...(result.mediaDropped === undefined
 													? {}
-													: { imagesDropped: result.imagesDropped }),
+													: { mediaDropped: result.mediaDropped }),
 												tokensFreed: result.tokensFreed,
 												...(result.artifactId === undefined ? {} : { artifactId: result.artifactId }),
 											},

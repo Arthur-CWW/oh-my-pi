@@ -136,6 +136,8 @@ describe("task.batch schema gating", () => {
 		const off = await TaskTool.create(createSession({ settings: { "task.batch": false } }));
 		expect(off.description).toContain("Spawns ONE subagent per call to work in the background");
 		expect(off.description).not.toContain("`context`: shared background");
+		expect(off.description).toContain("Before spawning a retry, continuation, or `NameResume`/`Name-2` variant");
+		expect(off.description).toContain("revive it in place with full context instead of spawning a duplicate");
 
 		const offSync = await TaskTool.create(
 			createSession({ settings: { "async.enabled": false, "task.batch": false } }),
@@ -279,7 +281,7 @@ describe("task.batch spawning", () => {
 
 		expect(alphaJob!.status).toBe("completed");
 		expect(betaJob!.status).toBe("completed");
-		expect(alphaJob!.resultText).toContain("Alpha is now idle");
+		expect(alphaJob!.resultText).toContain("history://Alpha");
 		expect(betaJob!.resultText).toContain("history://Beta");
 
 		expect(seen).toHaveLength(2);

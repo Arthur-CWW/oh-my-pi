@@ -26,6 +26,7 @@ import { $ } from "bun";
 import type { SecretObfuscator } from "../secrets/obfuscator";
 import type { SessionManager } from "../session/session-manager";
 import { buildSessionData, type SessionData } from "./html";
+import { redactVideoPayloads } from "./media-redaction";
 
 export { DEFAULT_SHARE_URL };
 
@@ -74,8 +75,11 @@ export interface ShareSessionResult {
 
 /** Build the snapshot that gets sealed and uploaded, redacted when an obfuscator is provided. */
 export function buildShareSnapshot(sm: SessionManager, options?: ShareSessionOptions): SessionData {
-	const data = buildSessionData(sm, options?.state);
-	return options?.obfuscator?.hasSecrets() ? options.obfuscator.obfuscateObject(data) : data;
+	const built = buildSessionData(sm, options?.state);
+	const redacted = structuredClone(built);
+	const data = options?.obfuscator?.hasSecrets() ? options.obfuscator.obfuscateObject(redacted) : redacted;
+	redactVideoPayloads(data);
+	return data;
 }
 
 /** Share the session; tries a secret gist first, then the share server. */
@@ -125,12 +129,13 @@ interface SealedSession {
 
 /** Seal `data`, trimming content until the sealed blob fits `maxBytes`. Exported for tests. */
 export async function sealToFit(key: CryptoKey, data: SessionData, maxBytes: number): Promise<SealedSession> {
-	let sealed = await sealSessionData(key, data);
+	// Always work on a copy so progressively destructive size trimming cannot mutate the caller.
+	const working = structuredClone(data);
+	redactVideoPayloads(working);
+	let sealed = await sealSessionData(key, working);
 	if (sealed.byteLength <= maxBytes) return { sealed, truncated: false };
 
-	// Work on a deep copy; the caller may re-fit the original at another budget.
-	const working = structuredClone(data);
-	stripImagePayloads(working);
+	stripLargeImagePayloads(working);
 	sealed = await sealSessionData(key, working);
 	if (sealed.byteLength <= maxBytes) return { sealed, truncated: true };
 
@@ -166,8 +171,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null;
 }
 
-/** Replace inline image payloads (image blocks + data: URLs) with tiny placeholders, in place. */
-function stripImagePayloads(value: unknown): void {
+/** Remove large inline images when fitting an oversized share. */
+function stripLargeImagePayloads(value: unknown): void {
 	if (Array.isArray(value)) {
 		for (let i = 0; i < value.length; i++) {
 			const item: unknown = value[i];
@@ -175,18 +180,22 @@ function stripImagePayloads(value: unknown): void {
 				value[i] = { type: "text", text: IMAGE_OMITTED_TEXT };
 				continue;
 			}
-			stripImagePayloads(item);
+			stripLargeImagePayloads(item);
 		}
 		return;
 	}
 	if (!isRecord(value)) return;
-	for (const k in value) {
-		const v = value[k];
-		if (typeof v === "string") {
-			if (v.length > 1024 && v.startsWith("data:")) value[k] = BLANK_IMAGE_DATA_URL;
+	for (const key in value) {
+		const item = value[key];
+		if (typeof item === "string") {
+			if (item.length > 1024 && item.startsWith("data:")) value[key] = BLANK_IMAGE_DATA_URL;
 			continue;
 		}
-		stripImagePayloads(v);
+		if (isRecord(item) && item.type === "image" && typeof item.data === "string" && item.data.length > 1024) {
+			delete value[key];
+			continue;
+		}
+		stripLargeImagePayloads(item);
 	}
 }
 

@@ -17,7 +17,7 @@ import {
 import { getProjectDir, logger, sanitizeText } from "@oh-my-pi/pi-utils";
 import { EDIT_MODE_STRATEGIES, type EditMode, type PerFileDiffPreview } from "../../edit";
 import type { Theme } from "../../modes/theme/theme";
-import { getThemeEpoch, theme } from "../../modes/theme/theme";
+import { theme } from "../../modes/theme/theme";
 import { BASH_DEFAULT_PREVIEW_LINES } from "../../tools/bash";
 import { EVAL_DEFAULT_PREVIEW_LINES } from "../../tools/eval";
 import { isWaitingPollDetails } from "../../tools/job";
@@ -37,6 +37,8 @@ import { TODO_STRIKE_TOTAL_FRAMES } from "../../tools/todo";
 import { isFramedBlockComponent, renderStatusLine } from "../../tui";
 import { sanitizeWithOptionalSixelPassthrough } from "../../utils/sixel";
 import { renderDiff } from "./diff";
+import { createToolRenderState, deriveToolDisplayMemoKey, syncToolRenderState, ToolDisplayMemo, type ToolRenderState } from "./tool-execution-render-state";
+import { DEFAULT_TRANSCRIPT_DISPLAY_CONTEXT, type TranscriptDisplayContext } from "../transcript-display";
 
 /**
  * Drop trailing removal/hunk-header lines that appear in a streaming diff
@@ -129,6 +131,8 @@ export interface ToolExecutionOptions {
 	/** Live-region probe used to settle detached task progress once the block
 	 * leaves the repaintable transcript region. */
 	liveRegion?: TranscriptLiveRegionProbe;
+	/** Stable transcript presentation settings shared by reference with the TUI. */
+	transcriptDisplay?: TranscriptDisplayContext;
 }
 
 export interface ToolExecutionHandle {
@@ -183,21 +187,9 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 	#snapshots?: SnapshotStore;
 	#isPartial = true;
 	#resultVersion = 0;
-	#lastDisplayKey: string | undefined;
-	// Bumped whenever a render input that #rebuildDisplay consumes but the memo
-	// key cannot cheaply hash changes: streamed call args, the async edit-diff
-	// preview, and Kitty PNG conversions. Folded into the dirty key so those
-	// updates are not swallowed by the memo (see #updateDisplay).
 	#displayInputVersion = 0;
-	// Set once #rebuildDisplay has populated the display. Replaces a
-	// #contentBox.children.length probe so the memo fast-path also covers the
-	// #contentText fallback path (which leaves #contentBox empty).
-	#displayBuilt = false;
-	// Number of Image children the last rebuild emitted. Only when this is > 0 does
-	// the memo key fold in viewport-dependent image sizing (resolveImageOptions),
-	// so a terminal resize re-shapes image-bearing results to rescale them without
-	// forcing the common image-free result to re-shape on every resize tick.
 	#renderedImageCount = 0;
+	#displayMemo = new ToolDisplayMemo();
 	#tool?: AgentTool;
 	#ui: TUI;
 	#cwd: string;
@@ -235,23 +227,18 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 	// follow-up `job` call can displace it instead of stacking another
 	// "waiting on N jobs" frame. Cleared by `seal()`.
 	#displaceable = false;
+	// Once detached from the transcript live region, background-task progress is
+	// history: keep it static and ignore later partial snapshots.
+	#backgroundTaskFrozen = false;
 	// Probe into the owning transcript (absent outside the interactive
 	// transcript, e.g. in tests): whether this block is still repaintable.
 	#liveRegion?: TranscriptLiveRegionProbe;
+	#transcriptDisplay: TranscriptDisplayContext = DEFAULT_TRANSCRIPT_DISPLAY_CONTEXT;
 	// One-way latch for a detached (`async.state === "running"`) task block
 	// that left the transcript live region: its rows are commit-eligible
 	// history, so progress renders static gray and further partial snapshots are
 	// dropped (see #maybeFreezeBackgroundTask).
-	#backgroundTaskFrozen = false;
-	#renderState: {
-		spinnerFrame?: number;
-		expanded: boolean;
-		isPartial: boolean;
-		renderContext?: Record<string, unknown>;
-	} = {
-		expanded: false,
-		isPartial: true,
-	};
+	#renderState: ToolRenderState = createToolRenderState(DEFAULT_TRANSCRIPT_DISPLAY_CONTEXT);
 
 	constructor(
 		toolName: string,
@@ -270,6 +257,8 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 		this.#editAllowFuzzy = options.editAllowFuzzy;
 		this.#snapshots = options.snapshots;
 		this.#liveRegion = options.liveRegion;
+		this.#transcriptDisplay = options.transcriptDisplay ?? DEFAULT_TRANSCRIPT_DISPLAY_CONTEXT;
+		this.#renderState.transcriptDisplay = this.#transcriptDisplay;
 		this.#tool = tool;
 		this.#ui = ui;
 		this.#cwd = cwd;
@@ -712,33 +701,25 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 	}
 
 	#updateDisplay(): void {
-		// `TERMINAL.imageProtocol` is resolved by an async capability probe during
-		// TUI startup, so a result rendered before it lands must re-shape once it
-		// does (it gates Image children vs text fallback in #rebuildDisplay); keyed
-		// here for the same reason markdown.ts keys its render cache on it.
-		const key = `${this.#resultVersion}|${this.#expanded}|${this.#isPartial}|${this.#spinnerFrame ?? "-"}|${this.#showImages}|${getThemeEpoch()}|${this.#displayInputVersion}|${this.#backgroundTaskFrozen}|${TERMINAL.imageProtocol ?? "-"}|${this.#imageSizeKey()}`;
-		if (key === this.#lastDisplayKey && this.#displayBuilt) return;
-		this.#lastDisplayKey = key;
-
-		this.#rebuildDisplay();
-		this.#displayBuilt = true;
-	}
-
-	// Viewport-/settings-dependent image sizing folded into the memo key only when
-	// the last rebuild actually emitted images, so a terminal resize re-shapes an
-	// image-bearing result (to rescale it) without re-shaping every image-free
-	// result on each resize tick.
-	#imageSizeKey(): string {
-		if (this.#renderedImageCount === 0) return "-";
-		const o = resolveImageOptions();
-		return `${o.maxWidthCells}:${o.maxHeightCells ?? "-"}`;
+		syncToolRenderState(
+			this.#renderState,
+			this.#expanded,
+			this.#isPartial,
+			this.#spinnerFrame,
+			this.#transcriptDisplay,
+		);
+		const key = deriveToolDisplayMemoKey(
+			this.#renderState,
+			this.#resultVersion,
+			this.#showImages,
+			this.#displayInputVersion,
+			this.#backgroundTaskFrozen,
+			this.#renderedImageCount,
+		);
+		this.#displayMemo.update(key, () => this.#rebuildDisplay());
 	}
 
 	#rebuildDisplay(): void {
-		// Sync shared mutable render state for component closures
-		this.#renderState.expanded = this.#expanded;
-		this.#renderState.isPartial = this.#isPartial;
-		this.#renderState.spinnerFrame = this.#spinnerFrame;
 
 		// Non-self-framing tools (custom/extension renderers and the generic
 		// fallback) get a padded, state-tinted block — built-ins that draw their
@@ -783,15 +764,16 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 			// Render result component if we have a result
 			if (this.#result && tool.renderResult) {
 				try {
-					const renderResult = tool.renderResult as (
-						result: { content: Array<{ type: string; text?: string }>; details?: unknown; isError?: boolean },
-						options: { expanded: boolean; isPartial: boolean; spinnerFrame?: number },
-						theme: Theme,
-						args?: unknown,
-					) => Component;
-					const resultComponent = renderResult(
+					const resultComponent = (
+						tool.renderResult as (
+							result: { content: Array<{ type: string; text?: string }>; details?: unknown; isError?: boolean },
+							options: ToolRenderState,
+							theme: Theme,
+							args?: unknown,
+						) => unknown
+					)(
 						{
-							content: this.#result.content as any,
+							content: this.#result.content,
 							details: this.#result.details,
 							isError: this.#result.isError,
 						},
@@ -799,7 +781,7 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 						theme,
 						this.#args,
 					);
-					if (resultComponent) this.#contentBox.addChild(resultComponent);
+					if (resultComponent) this.#contentBox.addChild(resultComponent as Component);
 				} catch (err) {
 					logger.warn("Tool renderer failed", { tool: this.#toolName, error: String(err) });
 					// Fall back to showing raw output on error

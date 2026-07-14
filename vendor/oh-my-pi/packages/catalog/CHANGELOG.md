@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added native-video capability metadata for Antigravity discovery, dynamic model merges, and effort-family collapse; the configured native route is `google-antigravity/gemini-3.5-flash`.
+- Live native-video transport proof covered 3/3 structured results with exact attachment verification; semantic quality remains non-release-grade (0/3 semantic passes), so transport success is not a quality verdict.
+- Generated OpenAI Codex entries now import the vendored Codex model bundle, record its commit and effective/compact window derivations, and separately label live account eligibility and OMP-only pricing/output/visibility policy.
+
 ## [16.0.1] - 2026-06-15
 
 ### Added

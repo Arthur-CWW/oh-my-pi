@@ -303,7 +303,7 @@ describe("Agent hub Enter activation", () => {
 
 		for (let cycle = 0; cycle < 25; cycle++) {
 			const { hub } = makeHub(async () => {}, { sessionFile });
-			expect(renderedText(hub)).toContain("retained message 1999");
+			await waitForRenderedText(hub, "retained message 1999");
 			expect(hub.getRetentionMetrics()).toMatchObject({
 				cachedTranscriptEntries: 200,
 				materializedChatComponents: 200,
@@ -394,6 +394,7 @@ describe("Agent hub Enter activation", () => {
 
 		await waitForRenderedText(hub, "Archived");
 		hub.handleInput("\r");
+		await waitForRenderedText(hub, "archived transcript body");
 		const opened = renderedText(hub);
 		expect(opened).toContain("archived transcript body");
 		expect(opened).toContain("openai-codex/gpt-5.6-terra:high");

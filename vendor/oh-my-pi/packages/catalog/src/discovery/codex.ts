@@ -28,7 +28,7 @@ const codexModelEntrySchema = z
 		additional_speed_tiers: z.unknown().optional(), service_tiers: z.unknown().optional(), default_service_tier: z.unknown().optional(), availability_nux: z.unknown().optional(), upgrade: z.unknown().optional(), base_instructions: z.unknown().optional(), model_messages: z.unknown().optional(), include_skills_usage_instructions: z.unknown().optional(),
 		supports_reasoning_summaries: z.unknown().optional(), default_reasoning_summary: z.unknown().optional(), support_verbosity: z.unknown().optional(), default_verbosity: z.unknown().optional(),
 		apply_patch_tool_type: z.unknown().optional(), web_search_tool_type: z.unknown().optional(), truncation_policy: z.unknown().optional(), supports_parallel_tool_calls: z.unknown().optional(), supports_image_detail_original: z.unknown().optional(),
-		experimental_supported_tools: z.unknown().optional(), input_modalities: z.unknown().optional(), supports_search_tool: z.unknown().optional(), use_responses_lite: z.unknown().optional(), auto_review_model_override: z.unknown().optional(), tool_mode: z.unknown().optional(), multi_agent_version: z.unknown().optional(), prefer_websockets: z.unknown().optional(),
+		experimental_supported_tools: z.unknown().optional(), input_modalities: z.unknown().optional(), supports_search_tool: z.unknown().optional(), use_responses_lite: z.unknown().optional(), auto_review_model_override: z.unknown().optional(), tool_mode: z.unknown().optional(), multi_agent_version: z.unknown().optional(), prefer_websockets: z.unknown().optional(), minimal_client_version: z.unknown().optional(), available_in_plans: z.unknown().optional(), reasoning_summary_format: z.unknown().optional(),
 	})
 	.loose();
 
@@ -217,7 +217,7 @@ function isAbortError(error: unknown): error is Error {
 	return error instanceof Error && error.name === "AbortError";
 }
 
-function normalizeCodexModels(payload: unknown, baseUrl: string): ModelSpec<"openai-codex-responses">[] | null {
+export function normalizeCodexModels(payload: unknown, baseUrl: string): ModelSpec<"openai-codex-responses">[] | null {
 	const parsedResponse = codexModelsResponseSchema.safeParse(payload);
 	if (!parsedResponse.success) {
 		return null;
@@ -308,6 +308,7 @@ function normalizeCodexCapabilities(payload: CodexModelEntry, contextWindowSourc
 	assignStringList(capability, "additionalSpeedTiers", payload.additional_speed_tiers); assignServiceTiers(capability, payload.service_tiers); assignString(capability, "defaultServiceTier", payload.default_service_tier); assignNux(capability, payload.availability_nux); assignUpgrade(capability, payload.upgrade); assignString(capability, "baseInstructions", payload.base_instructions); assignModelMessages(capability, payload.model_messages); assignBoolean(capability, "includeSkillsUsageInstructions", payload.include_skills_usage_instructions);
 	assignBoolean(capability, "supportsReasoningSummaries", payload.supports_reasoning_summaries); assignString(capability, "defaultReasoningSummary", payload.default_reasoning_summary); assignBoolean(capability, "supportsVerbosity", payload.support_verbosity); assignString(capability, "defaultVerbosity", payload.default_verbosity); assignString(capability, "applyPatchToolType", payload.apply_patch_tool_type); assignString(capability, "webSearchToolType", payload.web_search_tool_type); assignTruncationPolicy(capability, payload.truncation_policy); assignBoolean(capability, "supportsParallelToolCalls", payload.supports_parallel_tool_calls); assignBoolean(capability, "supportsImageDetailOriginal", payload.supports_image_detail_original);
 	assignPositive(capability, "maxContextWindow", payload.max_context_window); assignPositive(capability, "autoCompactTokenLimit", payload.auto_compact_token_limit); assignString(capability, "compactionHash", payload.comp_hash); assignPositive(capability, "effectiveContextWindowPercent", payload.effective_context_window_percent); assignStringList(capability, "experimentalSupportedTools", payload.experimental_supported_tools); assignBoolean(capability, "supportsSearchTool", payload.supports_search_tool); assignBoolean(capability, "useResponsesLite", payload.use_responses_lite); assignString(capability, "autoReviewModelOverride", payload.auto_review_model_override); assignString(capability, "toolMode", payload.tool_mode); assignString(capability, "multiAgentVersion", payload.multi_agent_version);
+	assignString(capability, "minimalClientVersion", payload.minimal_client_version); assignStringList(capability, "availableInPlans", payload.available_in_plans); assignString(capability, "reasoningSummaryFormat", payload.reasoning_summary_format);
 	if (toNonEmptyString(payload.multi_agent_version) === "v2") capability.supportsUltraOrchestration = true;
 	return capability;
 }

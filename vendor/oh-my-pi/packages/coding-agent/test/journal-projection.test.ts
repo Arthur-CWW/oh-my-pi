@@ -6,6 +6,7 @@ import {
 	decodeJournalEntries,
 	projectJournalEntries,
 	readJournalTailChunk,
+	readJournalTailChunkAsync,
 } from "@oh-my-pi/pi-coding-agent/journal/projection";
 
 const roots: string[] = [];
@@ -34,6 +35,15 @@ describe("journal projection", () => {
 		const journal = path.join(root, "session.jsonl");
 		await fs.writeFile(journal, `discard-${"x".repeat(64)}\n{"type":"message","id":"kept"}\npartial`);
 		const chunk = readJournalTailChunk(journal, 0, 50);
+		expect(chunk?.text).toBe('{"type":"message","id":"kept"}\n');
+		expect(chunk?.newSize).toBeGreaterThan(chunk?.fromByte ?? 0);
+	});
+
+	it("reads bounded tail chunks asynchronously for render-adjacent consumers", async () => {
+		const root = await tempRoot();
+		const journal = path.join(root, "session.jsonl");
+		await fs.writeFile(journal, `discard-${"x".repeat(64)}\n{"type":"message","id":"kept"}\npartial`);
+		const chunk = await readJournalTailChunkAsync(journal, 0, 50);
 		expect(chunk?.text).toBe('{"type":"message","id":"kept"}\n');
 		expect(chunk?.newSize).toBeGreaterThan(chunk?.fromByte ?? 0);
 	});

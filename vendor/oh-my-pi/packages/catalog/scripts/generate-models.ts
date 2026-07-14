@@ -14,10 +14,14 @@ import { AuthStorage, type OAuthAccess, SqliteAuthCredentialStore } from "@oh-my
 import type { OAuthProvider } from "@oh-my-pi/pi-ai/oauth/types";
 import { getGitLabDuoModels } from "@oh-my-pi/pi-ai/providers/gitlab-duo";
 import { $env } from "@oh-my-pi/pi-utils";
-import { fetchAntigravityDiscoveryModels } from "../src/discovery/antigravity";
+import {
+	applyAntigravityNativeVideoInputOverride,
+	fetchAntigravityDiscoveryModels,
+} from "../src/discovery/antigravity";
 import { fetchCodexModels } from "../src/discovery/codex";
 import { createModelManager } from "../src/model-manager";
 import prevModelsJson from "../src/models.json" with { type: "json" };
+import codexBundleJson from "../../../../openai/codex/codex-rs/models-manager/models.json" with { type: "json" };
 import { toModelSpec } from "../src/provider-models/bundled-references";
 import {
 	allowsUnauthenticatedCatalogDiscovery,
@@ -39,6 +43,7 @@ import type { ModelSpec } from "../src/types";
 import { cleanModelName } from "../src/utils";
 import { collapseEffortVariantsAcrossProviders } from "../src/variant-collapse";
 import { JWT_CLAIM_PATH } from "../src/wire/codex";
+import { applyCodexBundle } from "./codex-bundle";
 import {
 	applyCanonicalLimitFallback,
 	applyGeneratedModelPolicies,
@@ -47,6 +52,7 @@ import {
 } from "./generated-policies";
 
 const packageRoot = path.join(import.meta.dir, "..");
+const codexRoot = path.join(packageRoot, "..", "..", "..", "openai", "codex");
 
 /**
  * Local/self-hosted providers (Ollama, vLLM, LM Studio, LiteLLM). Their model
@@ -389,10 +395,10 @@ function extractCodexAccountId(accessToken: string): string | null {
 	}
 }
 
-async function fetchCodexDiscoveryModels(): Promise<ModelSpec<"openai-codex-responses">[]> {
+async function fetchCodexDiscoveryModels(): Promise<ModelSpec<"openai-codex-responses">[] | null> {
 	const access = await getOAuthAccessFromStorage("openai-codex");
 	if (!access) {
-		return [];
+		return null;
 	}
 	try {
 		console.log("Fetching models from Codex API...");
@@ -404,7 +410,7 @@ async function fetchCodexDiscoveryModels(): Promise<ModelSpec<"openai-codex-resp
 		});
 		if (codexDiscovery === null) {
 			console.warn("Codex API fetch failed");
-			return [];
+			return null;
 		}
 		if (codexDiscovery.models.length > 0) {
 			console.log(`Fetched ${codexDiscovery.models.length} models from Codex API`);
@@ -413,8 +419,28 @@ async function fetchCodexDiscoveryModels(): Promise<ModelSpec<"openai-codex-resp
 		return [];
 	} catch (error) {
 		console.error("Failed to fetch Codex models:", error);
-		return [];
+		return null;
 	}
+}
+
+async function resolveCodexBundleCommit(): Promise<string> {
+	const child = Bun.spawn(["git", "-C", codexRoot, "rev-parse", "HEAD"], {
+		stdout: "pipe",
+		stderr: "pipe",
+	});
+	const [stdout, stderr, exitCode] = await Promise.all([
+		new Response(child.stdout).text(),
+		new Response(child.stderr).text(),
+		child.exited,
+	]);
+	if (exitCode !== 0) {
+		throw new Error(`Unable to resolve vendored Codex commit: ${stderr.trim()}`);
+	}
+	const commit = stdout.trim();
+	if (!/^[0-9a-f]{40}$/.test(commit)) {
+		throw new Error(`Invalid vendored Codex commit: ${commit}`);
+	}
+	return commit;
 }
 
 async function generateModels() {
@@ -454,22 +480,22 @@ async function generateModels() {
 	// applyAnthropicCatalogPolicy.
 	allModels.push(...ANTHROPIC_CURATED_FALLBACK_MODELS);
 
-	const specialDiscoverySources = [
-		{ label: "Antigravity", fetch: fetchAntigravityModels },
-		{ label: "Codex", fetch: fetchCodexDiscoveryModels },
+	const [antigravityModels, codexLiveModels, codexBundleCommit] = await Promise.all([
+		fetchAntigravityModels(),
+		fetchCodexDiscoveryModels(),
+		resolveCodexBundleCommit(),
+	]);
+	const specialDiscoveries = [
+		{ label: "Antigravity", models: antigravityModels },
+		{ label: "Codex", models: codexLiveModels ?? [] },
 	] as const;
-	const specialDiscoveries = await Promise.all(
-		specialDiscoverySources.map(async source => ({
-			label: source.label,
-			models: await source.fetch(),
-		})),
-	);
 	for (const discovery of specialDiscoveries) {
 		if (discovery.models.length > 0) {
 			console.log(`Added ${discovery.models.length} models from ${discovery.label} discovery`);
 			allModels.push(...discovery.models);
 		}
 	}
+	applyCodexBundle(allModels, codexBundleJson, codexBundleCommit, codexLiveModels);
 
 	const modelsDevAuthoritativeProviders = new Set<string>();
 	for (const model of modelsDevModels) {
@@ -517,6 +543,11 @@ async function generateModels() {
 		const name = cleanModelName(model.name);
 		return name === model.name ? model : { ...model, name };
 	});
+	// Reapply provider evidence to previous-snapshot fallbacks before variant
+	// collapse; the shared predicate rejects logical entries with unproven routes.
+	for (const model of allModels) {
+		applyAntigravityNativeVideoInputOverride(model);
+	}
 	applyGeneratedModelPolicies(allModels);
 	linkOpenAIPromotionTargets(allModels);
 	// Collapse effort-tier variants AFTER the policy re-bake: live-discovery

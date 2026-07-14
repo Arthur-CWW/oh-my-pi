@@ -5,7 +5,7 @@ export const DEFAULT_STATS_DASHBOARD_PORT = 3847;
 
 interface StatsDashboardServer {
 	port: number;
-	stop: () => void;
+	stop: () => Promise<void>;
 }
 
 export interface StatsDashboardArgs {
@@ -65,6 +65,16 @@ export async function launchStatsDashboard(args: StatsDashboardArgs): Promise<St
 	}
 
 	const url = `http://localhost:${activeStatsServer.port}`;
+	try {
+		await stats.waitForStatsHealth(url);
+	} catch (error) {
+		await activeStatsServer.stop();
+		activeStatsServer = undefined;
+		throw new Error(
+			`Stats dashboard startup failed: ${error instanceof Error ? error.message : String(error)}`,
+			{ cause: error },
+		);
+	}
 	openUtils.openPath(url);
 
 	const serverLine = requestedPortIgnored
@@ -77,9 +87,9 @@ export async function launchStatsDashboard(args: StatsDashboardArgs): Promise<St
 	};
 }
 
-export function stopStatsDashboard(): void {
+export async function stopStatsDashboard(): Promise<void> {
 	if (!activeStatsServer) return;
-	activeStatsServer.stop();
+	const server = activeStatsServer;
 	activeStatsServer = undefined;
-	stats.closeDb();
+	await server.stop();
 }

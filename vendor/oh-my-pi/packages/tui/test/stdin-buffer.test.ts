@@ -455,6 +455,23 @@ describe("StdinBuffer", () => {
 			expect(emittedSequences).toEqual([]);
 		});
 
+		it("treats an unmarked multiline read as one paste", () => {
+			processInput("line1\nline2\nline3");
+
+			expect(emittedPaste).toEqual(["line1\nline2\nline3"]);
+			expect(emittedSequences).toEqual([]);
+		});
+
+		it("keeps trailing and separate Enter reads on the key path", () => {
+			processInput("first\r");
+			processInput("\r");
+			processInput("second");
+			processInput("\r");
+
+			expect(emittedPaste).toEqual([]);
+			expect(emittedSequences).toEqual(["f", "i", "r", "s", "t", "\r", "\r", "s", "e", "c", "o", "n", "d", "\r"]);
+		});
+
 		it("should handle paste with unicode", () => {
 			processInput("\x1b[200~Hello \u4e16\u754c \u{1f389}\x1b[201~");
 

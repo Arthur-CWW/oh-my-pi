@@ -1,5 +1,5 @@
 import { AgentRegistry } from "../../registry/agent-registry";
-import type { AgentHubTurnStatus } from "../components/agent-hub";
+import type { AgentHubTurnStatus } from "../components/agent-hub-selected-state";
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import { PASTE_CODE_LOGIN_PROVIDERS } from "@oh-my-pi/pi-ai";
 import { getOAuthProviders } from "@oh-my-pi/pi-ai/oauth";
@@ -22,7 +22,6 @@ import {
 import {
 	getAvailableThemes,
 	getSymbolTheme,
-	previewTheme,
 	setColorBlindMode,
 	setSymbolPreset,
 	setTheme,
@@ -52,6 +51,7 @@ import { shortenPath } from "../../tools/render-utils";
 import { copyToClipboard } from "../../utils/clipboard";
 import { setSessionTerminalTitle } from "../../utils/title-generator";
 import { AgentDashboard } from "../components/agent-dashboard";
+import { createAgentHubRolloutDataSource } from "../components/agent-hub-rollout-state";
 import { AgentHubOverlayComponent } from "../components/agent-hub";
 import { AssistantMessageComponent } from "../components/assistant-message";
 import { CopySelectorComponent } from "../components/copy-selector";
@@ -63,14 +63,15 @@ import { OAuthSelectorComponent } from "../components/oauth-selector";
 import { PluginSelectorComponent } from "../components/plugin-selector";
 import { ResetUsageSelectorComponent } from "../components/reset-usage-selector";
 import { SessionSelectorComponent } from "../components/session-selector";
-import { SettingsSelectorComponent } from "../components/settings-selector";
 import { ToolExecutionComponent } from "../components/tool-execution";
 import { TranscriptBlock } from "../components/transcript-container";
 import { TreeSelectorComponent } from "../components/tree-selector";
 import { UserMessageSelectorComponent } from "../components/user-message-selector";
 import type { SessionObserverRegistry } from "../session-observer-registry";
+import type { TranscriptDisplayContext } from "../transcript-display";
 import { computeContextBreakdown } from "../utils/context-usage";
 import { buildCopyTargets } from "../utils/copy-targets";
+import { createSettingsSelector } from "./settings-selector-construction";
 
 const MANUAL_LOGIN_TIP = "Tip: You can complete pairing with /login <redirect URL>.";
 
@@ -139,70 +140,11 @@ export class SelectorController {
 				this.ctx.ui.setFocus(this.ctx.editor);
 				this.ctx.ui.requestRender();
 			};
-			const selector = new SettingsSelectorComponent(
-				{
-					availableThinkingLevels: [...this.ctx.session.getAvailableThinkingLevels()],
-					thinkingLevel: this.ctx.session.thinkingLevel,
-					availableThemes,
-					cwd: getProjectDir(),
-					model: this.ctx.session.model,
-					imageBudget: this.ctx.ui.imageBudget,
-					requestRender: () => this.ctx.ui.requestRender(),
-				},
-				{
-					onChange: (id, value) => this.handleSettingChange(id, value),
-					onThemePreview: async themeName => {
-						const result = await previewTheme(themeName);
-						if (result.success) {
-							this.ctx.statusLine.invalidate();
-							this.ctx.updateEditorTopBorder();
-							this.ctx.ui.invalidate();
-							this.ctx.ui.requestRender();
-						}
-					},
-					onStatusLinePreview: previewSettings => {
-						// Update status line with preview settings
-						this.ctx.statusLine.updateSettings({
-							preset: settings.get("statusLine.preset"),
-							leftSegments: settings.get("statusLine.leftSegments"),
-							rightSegments: settings.get("statusLine.rightSegments"),
-							separator: settings.get("statusLine.separator"),
-							showHookStatus: settings.get("statusLine.showHookStatus"),
-							sessionAccent: settings.get("statusLine.sessionAccent"),
-							transparent: settings.get("statusLine.transparent"),
-							...previewSettings,
-						});
-						this.ctx.updateEditorTopBorder();
-						this.ctx.ui.requestRender();
-					},
-					getStatusLinePreview: () => {
-						// Return the rendered status line for inline preview
-						const availableWidth = this.ctx.editor.getTopBorderAvailableWidth(this.ctx.ui.terminal.columns);
-						return this.ctx.statusLine.getTopBorder(availableWidth).content;
-					},
-					onPluginsChanged: async () => {
-						const projectPath = await resolveActiveProjectRegistryPath(this.ctx.sessionManager.getCwd());
-						clearPluginRootsAndCaches(projectPath ? [projectPath] : undefined);
-						await this.ctx.refreshSlashCommandState();
-						await this.ctx.session.refreshSshTool({ activateIfAvailable: true });
-						this.ctx.ui.requestRender();
-					},
-					onCancel: () => {
-						done();
-						// Restore status line to saved settings
-						this.ctx.statusLine.updateSettings({
-							preset: settings.get("statusLine.preset"),
-							leftSegments: settings.get("statusLine.leftSegments"),
-							rightSegments: settings.get("statusLine.rightSegments"),
-							separator: settings.get("statusLine.separator"),
-							showHookStatus: settings.get("statusLine.showHookStatus"),
-							sessionAccent: settings.get("statusLine.sessionAccent"),
-							transparent: settings.get("statusLine.transparent"),
-						});
-						this.ctx.updateEditorTopBorder();
-						this.ctx.ui.requestRender();
-					},
-				},
+			const selector = createSettingsSelector(
+				this.ctx,
+				availableThemes,
+				(id, value) => this.handleSettingChange(id, value),
+				done,
 			);
 			overlayHandle = this.ctx.ui.showOverlay(selector, {
 				anchor: "bottom-center",
@@ -1277,6 +1219,15 @@ export class SelectorController {
 		};
 
 		const registry = AgentRegistry.global();
+		const ctx = this.ctx;
+		const transcriptDisplay: TranscriptDisplayContext = {
+			get transcriptWrap() {
+				return ctx.transcriptWrap;
+			},
+			get richTranscript() {
+				return ctx.richTranscript;
+			},
+		};
 		hub = new AgentHubOverlayComponent({
 			observers,
 			hubKeys,
@@ -1285,6 +1236,8 @@ export class SelectorController {
 			requestRender: () => this.ctx.ui.requestRender(),
 			registry,
 			turnStatus: (agentId: string) => getAgentHubTurnStatus(registry, agentId),
+			transcriptDisplay,
+			rollout: createAgentHubRolloutDataSource(),
 			ui: this.ctx.ui,
 			getTool: name => this.ctx.session.getToolByName(name),
 			getMessageRenderer: type => this.ctx.session.extensionRunner?.getMessageRenderer(type),

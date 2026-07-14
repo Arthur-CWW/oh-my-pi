@@ -56,7 +56,7 @@ describe("processFileArguments", () => {
 
 		const result = await processFileArguments([pdfPath], { autoResizeImages: false });
 
-		expect(result.images).toEqual([]);
+		expect(result.attachments).toEqual([]);
 		expect(result.text).toContain("Hello PDF from issue 1401");
 		expect(result.text).not.toContain("%PDF-1.4");
 		expect(result.text).not.toContain("stream");

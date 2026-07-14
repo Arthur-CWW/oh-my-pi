@@ -20,6 +20,8 @@ export interface BuiltinSlashCommand {
 	subcommands?: SubcommandDef[];
 	/** Static inline hint when command takes a simple argument (no subcommands). */
 	inlineHint?: string;
+	/** Namespace exposed to TUI slash completion; ACP always receives the full spec registry. */
+	tuiNamespace?: "slash" | "colon";
 }
 
 /** Parsed slash-command text after stripping the leading "/". */

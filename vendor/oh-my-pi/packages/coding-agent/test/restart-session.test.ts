@@ -12,8 +12,8 @@ import {
 	handoffRestartProcess,
 	RESTART_API_KEY_ENV,
 } from "../src/cli/restart-session";
-import { acquireSessionOwnership, inspectSessionOwnership, readRestartHandoff } from "../src/session/session-ownership";
 import { SessionManager } from "../src/session/session-manager";
+import { acquireSessionOwnership, inspectSessionOwnership, readRestartHandoff } from "../src/session/session-ownership";
 import { ensureRestartSessionOwnership } from "../src/slash-commands/builtin-registry";
 
 type HandoffReceipt = {

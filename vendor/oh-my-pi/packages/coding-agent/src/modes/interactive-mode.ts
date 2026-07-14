@@ -2,7 +2,6 @@
  * Interactive mode for the coding agent.
  * Handles TUI rendering and user interaction, delegating business logic to AgentSession.
  */
-import { randomUUID } from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import {
@@ -13,7 +12,7 @@ import {
 	ThinkingLevel,
 } from "@oh-my-pi/pi-agent-core";
 import type { CompactionOutcome } from "@oh-my-pi/pi-agent-core/compaction";
-import type { AssistantMessage, ImageContent, Message, Model, UsageReport } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, ImageContent, MediaContent, Message, Model, UsageReport } from "@oh-my-pi/pi-ai";
 import { modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
 import type {
 	Component,
@@ -92,11 +91,9 @@ import { formatDuration } from "../slash-commands/helpers/format";
 import type { TuiHostCapabilities } from "../slash-commands/reload-tui";
 import { STTController, type SttState } from "../stt";
 import { discoverTitleSystemPromptFile, resolvePromptInput } from "../system-prompt";
-import { formatTaskId } from "../task/render";
 import type { LspStartupServerInfo } from "../tools";
 import { isImageProviderPreference, setPreferredImageProvider } from "../tools/image-gen";
 import { normalizeLocalScheme } from "../tools/path-utils";
-import { replaceTabs, TRUNCATE_LENGTHS, truncateToWidth } from "../tools/render-utils";
 import { setAutoQaConsentHandler } from "../tools/report-tool-issue";
 import { type ResolveToolDetails, runResolveInvocation } from "../tools/resolve";
 import { formatPhaseDisplayName, selectStickyTodoWindow, todoMatchesAnyDescription } from "../tools/todo";
@@ -127,6 +124,8 @@ import { PlanReviewOverlay } from "./components/plan-review-overlay";
 import { type PrimitiveCategoryId, showPrimitivesInspectorOverlay } from "./components/primitives-inspector";
 import { RawSemanticTranscriptComponent } from "./components/raw-semantic-transcript";
 import { StatusLineComponent } from "./components/status-line";
+import { SubagentHudRenderer } from "./components/subagent-hud";
+export { renderSubagentHudLines } from "./components/subagent-hud";
 import type { ToolExecutionHandle } from "./components/tool-execution";
 import { TranscriptContainer } from "./components/transcript-container";
 import { WelcomeComponent, type LspServerInfo as WelcomeLspServerInfo } from "./components/welcome";
@@ -152,10 +151,19 @@ import {
 	parseLoopLimitArgs,
 } from "./loop-limit";
 import { OAuthManualInputManager } from "./oauth-manual-input";
-import type { ObservableSession } from "./session-observer-registry";
 import { SessionObserverRegistry } from "./session-observer-registry";
 import { runProviderSetupWizard } from "./setup-wizard/lazy";
 import { interruptHint } from "./shared";
+import {
+	countSubmissionImages,
+	createPendingSubmission,
+	createSubmissionUserMessage,
+	type PendingSubmissionInput,
+	type SubmittedInputRestoreHost,
+	restoreSubmittedInput,
+	recordLocalSubmission as trackLocalSubmission,
+	runWithLocalSubmission,
+} from "./submitted-input";
 import { type ShimmerPalette, shimmerEnabled, shimmerSegments, shimmerText } from "./theme/shimmer";
 import type { Theme } from "./theme/theme";
 import {
@@ -300,8 +308,8 @@ export interface InteractiveModeOptions {
 	modelFallbackMessage?: string;
 	/** Initial message to send */
 	initialMessage?: string;
-	/** Initial images to include with the message */
-	initialImages?: ImageContent[];
+	/** Initial media to include with the message */
+	initialAttachments?: MediaContent[];
 	/** Additional initial messages to queue */
 	initialMessages?: string[];
 }
@@ -323,47 +331,8 @@ class StatusContainer extends Container implements NativeScrollbackLiveRegion {
  *  before it auto-clears, mirroring the todo HUD's auto-clear timer. */
 const MODEL_CYCLE_TRACK_CLEAR_MS = 4000;
 
-/**
- * Build the anchored subagent HUD block: a bold accent "Subagents" header plus
- * one hooked row per running agent in the same `Id: description` shape the
- * inline task rows use (muted task preview when no description was given).
- * Only detached background spawns are listed: a sync task call blocks the
- * parent turn and its inline tool block already renders progress live, and
- * eval `agent()` spawns are rendered by their own eval cell tree.
- * Returns an empty array when nothing is running so the container can clear.
- */
-export function renderSubagentHudLines(sessions: ObservableSession[], columns: number): string[] {
-	const running = sessions.filter(
-		session => session.kind === "subagent" && session.status === "active" && session.detached === true,
-	);
-	if (running.length === 0) return [];
 
-	const indent = "  ";
-	const hook = theme.tree.hook;
-	const dot = theme.styledSymbol("status.done", "accent");
-	const lines = ["", indent + theme.bold(theme.fg("accent", "Subagents"))];
-	running.forEach((session, index) => {
-		const prefix = `${indent}${index === 0 ? hook : " "} `;
-		const displayId = formatTaskId(session.id);
-		let line = `${prefix}${dot} ${theme.fg("accent", theme.bold(displayId))}`;
-		const description = session.description?.trim() || session.progress?.description?.trim();
-		if (description) {
-			const budget = Math.max(TRUNCATE_LENGTHS.SHORT, columns - visibleWidth(prefix) - visibleWidth(displayId) - 6);
-			line += `${theme.fg("accent", ":")} ${theme.fg("accent", truncateToWidth(replaceTabs(description), budget))}`;
-		} else {
-			// No spawn description: fall back to a muted task preview, same as
-			// the inline task rows when a row has no label.
-			const taskPreview = session.progress?.task?.trim();
-			if (taskPreview) {
-				line += ` ${theme.fg("muted", truncateToWidth(replaceTabs(taskPreview), TRUNCATE_LENGTHS.SHORT))}`;
-			}
-		}
-		lines.push(line);
-	});
-	return lines;
-}
-
-export class InteractiveMode implements InteractiveModeContext {
+export class InteractiveMode implements InteractiveModeContext, SubmittedInputRestoreHost {
 	session: AgentSession;
 	sessionManager: SessionManager;
 	settings: Settings;
@@ -529,6 +498,7 @@ export class InteractiveMode implements InteractiveModeContext {
 	#voicePreviousUseTerminalCursor: boolean | null = null;
 	#resizeHandler?: () => void;
 	#observerRegistry: SessionObserverRegistry;
+	readonly #subagentHudRenderer = new SubagentHudRenderer();
 	#eventBus?: EventBus;
 	#eventBusUnsubscribers: Array<() => void> = [];
 	#rawSemanticTranscript: RawSemanticTranscriptComponent;
@@ -793,15 +763,16 @@ export class InteractiveMode implements InteractiveModeContext {
 		}
 		this.#observerRegistry.setMainSession(this.sessionManager.getSessionFile() ?? undefined);
 		this.#observerRegistry.onChange(() => {
+			const sessions = this.#observerRegistry.getSessions();
 			this.statusLine.setSubagentCount(this.#observerRegistry.getActiveSubagentCount());
 			// Auto-checkmark todos whose matching subagent just succeeded, then
 			// re-render so the running override (the static "live" glyph when a
 			// subagent is doing the work for a still-pending todo) updates as
 			// subagents start, finish, or fail.
-			this.#reconcileTodosWithSubagents();
+			this.#reconcileTodosWithSubagents(sessions);
 			this.#syncTodoAutoClearTimer();
-			this.#renderTodoList();
-			this.#renderSubagentList();
+			this.#renderTodoList(sessions);
+			this.#renderSubagentList(sessions);
 			this.ui.requestRender();
 		});
 
@@ -1173,63 +1144,28 @@ export class InteractiveMode implements InteractiveModeContext {
 	}
 
 	recordLocalSubmission(text: string, imageCount = 0): () => void {
-		if (this.isKnownSlashCommand(text)) {
-			return () => {};
-		}
-		const signature = `${text}\u0000${imageCount}`;
-		this.locallySubmittedUserSignatures.add(signature);
-		let disposed = false;
-		return () => {
-			if (disposed) return;
-			disposed = true;
-			this.locallySubmittedUserSignatures.delete(signature);
-		};
+		return trackLocalSubmission(
+			this.locallySubmittedUserSignatures,
+			this.isKnownSlashCommand(text),
+			text,
+			imageCount,
+		);
 	}
 
 	async withLocalSubmission<T>(text: string, fn: () => Promise<T>, options?: { imageCount?: number }): Promise<T> {
 		const dispose = this.recordLocalSubmission(text, options?.imageCount ?? 0);
-		try {
-			return await fn();
-		} catch (err) {
-			dispose();
-			throw err;
-		}
+		return runWithLocalSubmission(dispose, fn);
 	}
 
-	startPendingSubmission(input: {
-		text: string;
-		images?: ImageContent[];
-		imageLinks?: (string | undefined)[];
-		customType?: string;
-		display?: boolean;
-		streamingBehavior?: "steer" | "followUp";
-	}): SubmittedUserInput {
-		const submission: SubmittedUserInput = {
-			submissionId: randomUUID(),
-			text: input.text,
-			images: input.images,
-			imageLinks: input.imageLinks,
-			customType: input.customType,
-			display: input.display,
-			streamingBehavior: input.streamingBehavior,
-			cancelled: false,
-			started: false,
-		};
+	startPendingSubmission(input: PendingSubmissionInput): SubmittedUserInput {
+		const submission = createPendingSubmission(input);
 		this.#pendingSubmittedInput = submission;
 		if (!submission.customType) {
 			this.#resetGoalContinuationSuppression();
-			const imageCount = submission.images?.length ?? 0;
+			const imageCount = countSubmissionImages(submission);
 			this.optimisticUserMessageSignature = `${submission.text}\u0000${imageCount}`;
 			this.#pendingSubmissionDispose = this.recordLocalSubmission(submission.text, imageCount);
-			this.addMessageToChat(
-				{
-					role: "user",
-					content: [{ type: "text", text: submission.text }, ...(submission.images ?? [])],
-					attribution: "user",
-					timestamp: Date.now(),
-				},
-				{ imageLinks: input.imageLinks },
-			);
+			this.addMessageToChat(createSubmissionUserMessage(submission), { imageLinks: input.imageLinks });
 		} else {
 			this.optimisticUserMessageSignature = undefined;
 			this.#pendingSubmissionDispose = undefined;
@@ -1260,11 +1196,9 @@ export class InteractiveMode implements InteractiveModeContext {
 			this.#stopLoadingAnimation(true);
 		}
 		if (!submission.customType) {
-			this.pendingImages = submission.images ? [...submission.images] : [];
-			this.pendingImageLinks = submission.imageLinks ? [...submission.imageLinks] : [];
-			this.editor.imageLinks = this.pendingImageLinks;
-			this.rebuildChatFromMessages();
-			this.editor.setText(submission.text);
+			if (restoreSubmittedInput(this, submission)) {
+				this.showError("Video attachments cannot be restored to the editor; attach them again before retrying");
+			}
 		}
 		this.updateEditorBorderColor();
 		this.ui.requestRender();
@@ -1289,7 +1223,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		return true;
 	}
 
-	finishPendingSubmission(input: SubmittedUserInput): void {
+	finishPendingSubmission(input: SubmittedUserInput, failed = false): void {
 		const wasPendingSubmission = this.#pendingSubmittedInput === input;
 		const pendingSubmissionDispose = this.#pendingSubmissionDispose;
 		if (wasPendingSubmission) {
@@ -1300,7 +1234,19 @@ export class InteractiveMode implements InteractiveModeContext {
 			this.#goalContinuationTurnInFlight = false;
 		}
 
-		if (wasPendingSubmission && !this.session.isStreaming && !this.streamingComponent) {
+		if (failed && wasPendingSubmission && !input.customType) {
+			this.optimisticUserMessageSignature = undefined;
+			pendingSubmissionDispose?.();
+			this.#pendingWorkingMessage = undefined;
+			if (this.loadingAnimation) {
+				this.#stopLoadingAnimation(true);
+			}
+			if (restoreSubmittedInput(this, input)) {
+				this.showWarning("Video attachments were not accepted; attach them again before retrying");
+			}
+			this.updateEditorBorderColor();
+			this.ui.requestRender();
+		} else if (wasPendingSubmission && !this.session.isStreaming && !this.streamingComponent) {
 			this.optimisticUserMessageSignature = undefined;
 			pendingSubmissionDispose?.();
 			this.#pendingWorkingMessage = undefined;
@@ -1403,7 +1349,6 @@ export class InteractiveMode implements InteractiveModeContext {
 	}
 
 	updateEditorTopBorder(): void {
-		// In borderless mode, status renders as standalone row — skip top border
 		if (this.statusLine.isBorderless()) return;
 		const availableWidth = this.editor.getTopBorderAvailableWidth(this.ui.terminal.columns);
 		const topBorder = this.statusLine.getTopBorder(availableWidth);
@@ -1431,15 +1376,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		if (!this.optimisticUserMessageSignature) return;
 		const submission = this.#pendingSubmittedInput;
 		if (!submission || submission.cancelled || submission.customType) return;
-		this.addMessageToChat(
-			{
-				role: "user",
-				content: [{ type: "text", text: submission.text }, ...(submission.images ?? [])],
-				attribution: "user",
-				timestamp: Date.now(),
-			},
-			{ imageLinks: submission.imageLinks },
-		);
+		this.addMessageToChat(createSubmissionUserMessage(submission), { imageLinks: submission.imageLinks });
 	}
 
 	#formatTodoLine(todo: TodoItem, prefix: string, matched: boolean): string {
@@ -1460,9 +1397,9 @@ export class InteractiveMode implements InteractiveModeContext {
 		}
 	}
 
-	#getActiveSubagentDescriptions(): string[] {
+	#getActiveSubagentDescriptions(sessions = this.#observerRegistry.getSessions()): string[] {
 		const out: string[] = [];
-		for (const session of this.#observerRegistry.getSessions()) {
+		for (const session of sessions) {
 			if (session.kind !== "subagent") continue;
 			if (session.status !== "active") continue;
 			const candidate =
@@ -1482,9 +1419,9 @@ export class InteractiveMode implements InteractiveModeContext {
 	 *
 	 * Idempotent: only flips open tasks, never re-touches completed ones.
 	 */
-	#reconcileTodosWithSubagents(): void {
+	#reconcileTodosWithSubagents(sessions = this.#observerRegistry.getSessions()): void {
 		const completedDescs: string[] = [];
-		for (const session of this.#observerRegistry.getSessions()) {
+		for (const session of sessions) {
 			if (session.kind !== "subagent") continue;
 			if (session.status !== "completed") continue;
 			const candidate =
@@ -1592,7 +1529,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		return active ?? nonEmpty[nonEmpty.length - 1];
 	}
 
-	#renderTodoList(): void {
+	#renderTodoList(sessions = this.#observerRegistry.getSessions()): void {
 		this.todoContainer.clear();
 		const phases = this.todoPhases.filter(phase => phase.tasks.length > 0);
 		if (phases.length === 0) return;
@@ -1600,7 +1537,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		const hook = theme.tree.hook;
 		const lines = ["", indent + theme.bold(theme.fg("accent", "Todos"))];
 
-		const activeDescs = this.#getActiveSubagentDescriptions();
+		const activeDescs = this.#getActiveSubagentDescriptions(sessions);
 		// A pending todo "lights up" (accent + running glyph) when an in-flight
 		// subagent is doing its work, matched by normalized content overlap.
 		const isMatched = (todo: TodoItem): boolean =>
@@ -1643,9 +1580,9 @@ export class InteractiveMode implements InteractiveModeContext {
 	 * on spawn and the whole block clears itself once the last subagent leaves
 	 * the "active" state.
 	 */
-	#renderSubagentList(): void {
+	#renderSubagentList(sessions = this.#observerRegistry.getSessions()): void {
 		this.subagentContainer.clear();
-		const lines = renderSubagentHudLines(this.#observerRegistry.getSessions(), this.ui.terminal.columns);
+		const lines = this.#subagentHudRenderer.render(sessions, this.ui.terminal.columns);
 		if (lines.length === 0) return;
 		this.subagentContainer.addChild(new Text(lines.join("\n"), 1, 0));
 	}
@@ -2870,7 +2807,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		const rest = tokens.slice(1);
 		if (verb === "clear") {
 			if (rest.length > 0) {
-				this.showStatus("Usage: /errors clear");
+				this.showStatus("Usage: :errors clear");
 				return;
 			}
 			this.errorInbox.clear();
@@ -2879,7 +2816,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		}
 		if (verb === "resolve") {
 			if (rest.length !== 1) {
-				this.showStatus("Usage: /errors resolve \u003cid\u003e");
+				this.showStatus("Usage: :errors resolve \u003cid\u003e");
 				return;
 			}
 			const id = rest[0];
@@ -2893,7 +2830,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		}
 
 		if (verb !== "") {
-			this.showStatus("Usage: /errors [clear | resolve \u003cid\u003e]");
+			this.showStatus("Usage: :errors [clear | resolve \u003cid\u003e]");
 			return;
 		}
 

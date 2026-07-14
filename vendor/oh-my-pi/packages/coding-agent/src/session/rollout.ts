@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import { Command, Flags } from "@oh-my-pi/pi-utils/cli";
 import { VERSION } from "@oh-my-pi/pi-utils/dirs";
 import { IrcExternalBus, type IrcExternalPeer } from "../irc/bus-external";
+import { RolloutJournal, type RolloutPeerPhase } from "./rollout-journal";
 import { SessionControlBus } from "./session-control";
 
 const DEFAULT_TIMEOUT_MS = 60_000;
@@ -109,6 +110,7 @@ async function ancestorPids(): Promise<Set<number>> {
 export interface RunRolloutOptions {
 	readonly bus?: IrcExternalBus;
 	readonly controlBus?: SessionControlBus;
+	readonly rolloutJournal?: RolloutJournal;
 	readonly targetDigest?: string;
 	readonly targetVersion?: string;
 	readonly targetExecutable?: string;
@@ -120,75 +122,136 @@ export interface RunRolloutOptions {
 }
 
 export async function runRollout(options: RunRolloutOptions = {}): Promise<RolloutSummary> {
-	const bus = options.bus ?? new IrcExternalBus();
-	const controlBus = options.controlBus ?? new SessionControlBus();
 	const ownsBus = options.bus === undefined;
 	const ownsControlBus = options.controlBus === undefined;
+	const ownsRolloutJournal = options.rolloutJournal === undefined;
+	let bus = options.bus;
+	let controlBus = options.controlBus;
+	let rolloutJournal = options.rolloutJournal;
 	try {
+		bus ??= new IrcExternalBus();
+		controlBus ??= new SessionControlBus();
+		rolloutJournal ??= new RolloutJournal(controlBus.dbPath);
+		const activeBus = bus;
+		const activeControlBus = controlBus;
+		const activeRolloutJournal = rolloutJournal;
 		const targetDigest = options.targetDigest ?? (await executableDigest());
 		const targetVersion = options.targetVersion ?? VERSION;
 		const targetExecutable = options.targetExecutable ?? process.execPath;
 		const initiators = options.initiatorPids ?? (await ancestorPids());
-		const peers = bus.listPeers();
+		const peers = activeBus.listPeers();
 		const entries = createRolloutPlan(peers, targetDigest, initiators, options.initiatorSessionIds);
 		if (options.dryRun) return { targetDigest, targetVersion, entries, restarted: [] };
 		const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 		const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
 		const sourceInstanceId = randomUUID();
-		const result = await executeRolloutPlan(entries, async plannedPeer => {
-			const current = (bus
-				.listPeers({ includeStale: true })
-				.find(peer => peer.sessionId === plannedPeer.sessionId) ?? plannedPeer) as RolloutPeer;
-			if (current.state === "working") throw new Error("session became working before restart");
-			if (current.state !== "idle" && current.state !== "waiting_input") {
-				throw new Error(`session entered unsafe state ${current.state}`);
-			}
-			if (!current.ownerEpoch) throw new Error("session has no control owner epoch");
-			if (current.buildDigest === targetDigest) return;
-			const baselineHeartbeat = Date.parse(current.lastSeen);
-			const commandId = randomUUID();
-			controlBus.request({
-				schemaVersion: 1,
-				commandId,
-				source: {
-					kind: "local-cli",
-					instanceId: sourceInstanceId,
-					pid: process.pid,
-					...(process.getuid ? { uid: process.getuid() } : {}),
-				},
-				sessionId: current.controlSessionId ?? current.sessionId,
-				targetOwnerEpoch: current.ownerEpoch,
-				requestedAt: new Date().toISOString(),
-				intent: { kind: "restart", executable: targetExecutable },
+		const rolloutId = randomUUID();
+		activeRolloutJournal.beginRun({ rolloutId, targetDigest, targetVersion });
+		const updatePeer = (
+			peer: RolloutPeer,
+			phase: RolloutPeerPhase,
+			detail: { readonly reason?: string; readonly error?: string } = {},
+		): void => {
+			activeRolloutJournal.updatePeer({
+				rolloutId,
+				sessionId: peer.sessionId,
+				...(peer.sessionFile ? { sessionFile: peer.sessionFile } : {}),
+				name: peer.name || peer.sessionId,
+				phase,
+				...detail,
 			});
-			const receipt = await controlBus.waitForTerminal(commandId, { timeoutMs, pollIntervalMs });
-			if (receipt.state === "failed") throw new Error(receipt.error ?? "restart control command failed");
-			const deadline = Date.now() + timeoutMs;
-			for (;;) {
-				const recovered = bus
+		};
+		for (const entry of entries) {
+			if (entry.action === "skip") updatePeer(entry.peer, "skipped", { reason: entry.reason });
+			else updatePeer(entry.peer, "planned");
+		}
+		const result = await executeRolloutPlan(entries, async plannedPeer => {
+			let current = plannedPeer;
+			try {
+				current = (activeBus
 					.listPeers({ includeStale: true })
-					.find(
-						peer =>
-							peer.sessionId === (current.controlSessionId ?? current.sessionId) ||
-							peer.sessionFile === current.sessionFile,
-					);
-				if (
-					recovered &&
-					Date.parse(recovered.lastSeen) > baselineHeartbeat &&
-					recovered.ownerEpoch !== current.ownerEpoch &&
-					recovered.buildDigest === targetDigest &&
-					(!recovered.version || recovered.version === targetVersion)
-				)
+					.find(peer => peer.sessionId === plannedPeer.sessionId) ?? plannedPeer) as RolloutPeer;
+				if (current.state === "working") throw new Error("session became working before restart");
+				if (current.state !== "idle" && current.state !== "waiting_input") {
+					throw new Error(`session entered unsafe state ${current.state}`);
+				}
+				if (!current.ownerEpoch) throw new Error("session has no control owner epoch");
+				if (current.buildDigest === targetDigest) {
+					updatePeer(current, "skipped", { reason: "already-current" });
 					return;
-				if (Date.now() >= deadline)
-					throw new Error(`timed out waiting for recovery on ${targetDigest.slice(0, 12)}`);
-				await Bun.sleep(Math.min(pollIntervalMs, Math.max(1, deadline - Date.now())));
+				}
+				const baselineHeartbeat = Date.parse(current.lastSeen);
+				const commandId = randomUUID();
+				updatePeer(current, "requested");
+				activeControlBus.request({
+					schemaVersion: 1,
+					commandId,
+					source: {
+						kind: "local-cli",
+						instanceId: sourceInstanceId,
+						pid: process.pid,
+						...(process.getuid ? { uid: process.getuid() } : {}),
+					},
+					sessionId: current.controlSessionId ?? current.sessionId,
+					targetOwnerEpoch: current.ownerEpoch,
+					requestedAt: new Date().toISOString(),
+					intent: { kind: "restart", executable: targetExecutable },
+				});
+				const receipt = await activeControlBus.waitForTerminal(commandId, {
+					timeoutMs,
+					pollIntervalMs,
+					onReceipt: next => {
+						if (next.state === "requested") updatePeer(current, "requested");
+						else if (next.state === "acknowledged") updatePeer(current, "acknowledged");
+						else if (next.state === "applied") updatePeer(current, "applied");
+						else updatePeer(current, "failed", { error: next.error ?? "restart control command failed" });
+					},
+				});
+				if (receipt.state === "failed") throw new Error(receipt.error ?? "restart control command failed");
+				const deadline = Date.now() + timeoutMs;
+				for (;;) {
+					const recovered = activeBus
+						.listPeers({ includeStale: true })
+						.find(
+							peer =>
+								peer.sessionId === (current.controlSessionId ?? current.sessionId) ||
+								peer.sessionFile === current.sessionFile,
+						);
+					if (
+						recovered &&
+						Date.parse(recovered.lastSeen) > baselineHeartbeat &&
+						recovered.ownerEpoch !== current.ownerEpoch &&
+						recovered.buildDigest === targetDigest &&
+						(!recovered.version || recovered.version === targetVersion)
+					) {
+						updatePeer({ ...current, sessionFile: recovered.sessionFile ?? current.sessionFile }, "recovered");
+						return;
+					}
+					if (Date.now() >= deadline)
+						throw new Error(`timed out waiting for recovery on ${targetDigest.slice(0, 12)}`);
+					await Bun.sleep(Math.min(pollIntervalMs, Math.max(1, deadline - Date.now())));
+				}
+			} catch (error) {
+				updatePeer(current, "failed", { error: error instanceof Error ? error.message : String(error) });
+				throw error;
 			}
 		});
+		if (result.failed) {
+			for (const entry of entries) {
+				if (
+					entry.action === "restart" &&
+					entry.peer.sessionId !== result.failed.sessionId &&
+					!result.restarted.includes(entry.peer.sessionId)
+				) {
+					updatePeer(entry.peer, "skipped", { reason: "rollout-aborted" });
+				}
+			}
+		}
 		return { targetDigest, targetVersion, entries, ...result };
 	} finally {
-		if (ownsControlBus) controlBus.close();
-		if (ownsBus) bus.close();
+		if (ownsRolloutJournal) rolloutJournal?.close();
+		if (ownsControlBus) controlBus?.close();
+		if (ownsBus) bus?.close();
 	}
 }
 

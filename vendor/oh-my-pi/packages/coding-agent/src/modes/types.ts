@@ -1,6 +1,6 @@
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { CompactionOutcome } from "@oh-my-pi/pi-agent-core/compaction";
-import type { AssistantMessage, ImageContent, Message, UsageReport } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, ImageContent, MediaContent, Message, UsageReport } from "@oh-my-pi/pi-ai";
 import type { Component, Container, EditorTheme, Loader, Spacer, Text, TUI } from "@oh-my-pi/pi-tui";
 import type { CollabGuestLink } from "../collab/guest";
 import type { CollabHost } from "../collab/host";
@@ -46,7 +46,7 @@ export type SubmittedUserInput = {
 	 *  the same id are one admission, even across a turn-boundary race. */
 	submissionId?: string;
 	text: string;
-	images?: ImageContent[];
+	attachments?: MediaContent[];
 	imageLinks?: (string | undefined)[];
 	customType?: string;
 	/** Route through `session.prompt(text, { synthetic: true })` so the text lands
@@ -240,7 +240,7 @@ export interface InteractiveModeContext {
 	ensureLoadingAnimation(): void;
 	startPendingSubmission(input: {
 		text: string;
-		images?: ImageContent[];
+		attachments?: MediaContent[];
 		imageLinks?: (string | undefined)[];
 		customType?: string;
 		display?: boolean;
@@ -248,7 +248,7 @@ export interface InteractiveModeContext {
 	}): SubmittedUserInput;
 	cancelPendingSubmission(): boolean;
 	markPendingSubmissionStarted(input: SubmittedUserInput): boolean;
-	finishPendingSubmission(input: SubmittedUserInput): void;
+	finishPendingSubmission(input: SubmittedUserInput, failed?: boolean): void;
 	/**
 	 * Marks a locally-initiated user submission so the eventual `message_start`
 	 * event for that user message does not clobber the editor draft (see #783).

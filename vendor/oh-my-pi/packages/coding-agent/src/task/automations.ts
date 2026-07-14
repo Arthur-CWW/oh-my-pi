@@ -12,11 +12,13 @@ import type { MCPManager } from "../mcp/manager";
 import { createAgentSession, discoverAuthStorage } from "../sdk";
 import type { AgentSession } from "../session/agent-session";
 import { SessionManager } from "../session/session-manager";
+import { DEFAULT_MAX_BYTES, TailBuffer } from "../session/streaming-output";
 import { extractLastAssistantText } from "./executor";
 
 export const AUTOMATIONS_FILENAME = "automations.yml";
 export const AUTOMATION_LEDGER_FILENAME = "ledger.jsonl";
 export const AUTOMATION_SUMMARY_MAX_CHARS = 200;
+export const AUTOMATION_COMMAND_OUTPUT_MAX_BYTES = DEFAULT_MAX_BYTES;
 export const DEFAULT_AUTOMATION_LANE = "smol";
 export const DAEMON_CHECK_INTERVAL_MS = 60_000;
 export const DAEMON_MAX_JITTER_MS = 15_000;
@@ -28,6 +30,7 @@ const AutomationEntrySchema = Schema.Struct({
 	model: Schema.optional(Schema.String),
 	prompt: Schema.optional(Schema.String),
 	packet: Schema.optional(Schema.String),
+	command: Schema.optional(Schema.Array(Schema.String)),
 	cwd: Schema.String,
 	enabled: Schema.optional(Schema.Boolean),
 });
@@ -37,30 +40,68 @@ const AutomationRegistrySchema = Schema.Union([
 	Schema.Struct({ automations: Schema.Array(AutomationEntrySchema) }),
 ]);
 
-const AutomationLedgerEntrySchema = Schema.Struct({
+const AutomationLedgerBaseSchema = {
 	runAt: Schema.Number,
 	durationMs: Schema.Number,
 	status: Schema.Literals(["succeeded", "failed"]),
 	sessionFile: Schema.String,
 	outputSummary: Schema.String,
+};
+
+const AgentAutomationLedgerEntrySchema = Schema.Struct(AutomationLedgerBaseSchema);
+const CommandAutomationLedgerEntrySchema = Schema.Struct({
+	...AutomationLedgerBaseSchema,
+	command: Schema.Array(Schema.String),
+	exitCode: Schema.NullOr(Schema.Number),
+	stdout: Schema.String,
+	stderr: Schema.String,
+	stdoutTruncated: Schema.Boolean,
+	stderrTruncated: Schema.Boolean,
 });
+const AutomationLedgerEntrySchema = Schema.Union([
+	AgentAutomationLedgerEntrySchema,
+	CommandAutomationLedgerEntrySchema,
+]);
 
 export type AutomationSchedule =
 	| { readonly kind: "interval"; readonly intervalMs: number }
 	| { readonly kind: "daily"; readonly hour: number; readonly minute: number };
 
-export interface AutomationEntry {
+interface AutomationEntryBase {
 	readonly name: string;
 	readonly schedule: string;
-	readonly lane: string;
-	readonly model?: string;
-	readonly prompt?: string;
-	readonly packet?: string;
 	readonly cwd: string;
 	readonly enabled: boolean;
 }
 
-export interface AutomationLedgerEntry {
+export interface PromptAutomationEntry extends AutomationEntryBase {
+	readonly lane: string;
+	readonly model?: string;
+	readonly prompt: string;
+	readonly packet?: never;
+	readonly command?: never;
+}
+
+export interface PacketAutomationEntry extends AutomationEntryBase {
+	readonly lane: string;
+	readonly model?: string;
+	readonly prompt?: never;
+	readonly packet: string;
+	readonly command?: never;
+}
+
+export interface CommandAutomationEntry extends AutomationEntryBase {
+	readonly lane?: never;
+	readonly model?: never;
+	readonly prompt?: never;
+	readonly packet?: never;
+	readonly command: readonly string[];
+}
+
+export type AutomationEntry = PromptAutomationEntry | PacketAutomationEntry | CommandAutomationEntry;
+type AgentAutomationEntry = PromptAutomationEntry | PacketAutomationEntry;
+
+interface AutomationLedgerEntryBase {
 	readonly runAt: number;
 	readonly durationMs: number;
 	readonly status: "succeeded" | "failed";
@@ -68,8 +109,38 @@ export interface AutomationLedgerEntry {
 	readonly outputSummary: string;
 }
 
-export interface AutomationRunResult extends AutomationLedgerEntry {
+export interface AgentAutomationLedgerEntry extends AutomationLedgerEntryBase {
+	readonly command?: never;
+	readonly exitCode?: never;
+	readonly stdout?: never;
+	readonly stderr?: never;
+	readonly stdoutTruncated?: never;
+	readonly stderrTruncated?: never;
+}
+
+export interface CommandAutomationLedgerEntry extends AutomationLedgerEntryBase {
+	readonly command: readonly string[];
+	readonly exitCode: number | null;
+	readonly stdout: string;
+	readonly stderr: string;
+	readonly stdoutTruncated: boolean;
+	readonly stderrTruncated: boolean;
+}
+
+export type AutomationLedgerEntry = AgentAutomationLedgerEntry | CommandAutomationLedgerEntry;
+
+export type AutomationRunResult = AutomationLedgerEntry & {
 	readonly name: string;
+};
+
+export class AutomationRunError extends Error {
+	readonly result: AutomationRunResult;
+
+	constructor(result: AutomationRunResult, cause: unknown) {
+		super(cause instanceof Error ? cause.message : String(cause), { cause });
+		this.name = "AutomationRunError";
+		this.result = result;
+	}
 }
 
 export interface AutomationRunOptions {
@@ -79,11 +150,11 @@ export interface AutomationRunOptions {
 	readonly nowMs?: () => number;
 	readonly createSession?: typeof createAgentSession;
 	readonly discoverAuth?: typeof discoverAuthStorage;
+	readonly signal?: AbortSignal;
 }
 
 
 export interface AutomationDaemonOptions extends AutomationRunOptions {
-	readonly signal?: AbortSignal;
 	readonly sleep?: (durationMs: number, signal?: AbortSignal) => Promise<void>;
 	readonly random?: () => number;
 	readonly checkIntervalMs?: number;
@@ -91,6 +162,7 @@ export interface AutomationDaemonOptions extends AutomationRunOptions {
 	readonly maxCycles?: number;
 	readonly onRun?: (entry: AutomationEntry) => void | Promise<void>;
 	readonly run?: (entry: AutomationEntry) => Promise<AutomationRunResult>;
+	readonly onError?: (entry: AutomationEntry, error: unknown) => void | Promise<void>;
 }
 
 function cleanRequired(value: string, field: string, name?: string): string {
@@ -120,24 +192,41 @@ export function parseAutomationSchedule(value: string): AutomationSchedule {
 
 function normalizeAutomationEntry(decoded: Schema.Schema.Type<typeof AutomationEntrySchema>): AutomationEntry {
 	const name = cleanRequired(decoded.name, "name");
-	const prompt = decoded.prompt?.trim();
-	const packet = decoded.packet?.trim();
-	if (Boolean(prompt) === Boolean(packet)) {
-		throw new Error(`Automation ${name}: exactly one of prompt or packet is required`);
+	const payloadCount =
+		Number(decoded.prompt !== undefined) +
+		Number(decoded.packet !== undefined) +
+		Number(decoded.command !== undefined);
+	if (payloadCount !== 1) {
+		throw new Error(`Automation ${name}: exactly one of prompt or packet or command is required`);
 	}
-	const lane = decoded.lane?.trim() || DEFAULT_AUTOMATION_LANE;
-	const model = decoded.model?.trim() || undefined;
-	parseAutomationSchedule(decoded.schedule);
-	return {
+	const schedule = decoded.schedule.trim();
+	parseAutomationSchedule(schedule);
+	const base = {
 		name,
-		schedule: decoded.schedule.trim(),
-		lane,
-		model,
-		prompt: prompt || undefined,
-		packet: packet || undefined,
+		schedule,
 		cwd: path.resolve(cleanRequired(decoded.cwd, "cwd", name)),
 		enabled: decoded.enabled ?? true,
 	};
+	if (decoded.command !== undefined) {
+		if (decoded.command.length === 0) throw new Error(`Automation ${name}: command must not be empty`);
+		if (decoded.lane !== undefined || decoded.model !== undefined) {
+			throw new Error(`Automation ${name}: lane and model are only valid for prompt or packet automations`);
+		}
+		const command = decoded.command.map((argument, index) => {
+			if (argument.trim().length === 0) {
+				throw new Error(`Automation ${name}: command[${index}] must not be empty`);
+			}
+			return argument;
+		});
+		return { ...base, command };
+	}
+	const lane = decoded.lane?.trim() || DEFAULT_AUTOMATION_LANE;
+	const model = decoded.model?.trim() || undefined;
+	if (decoded.prompt !== undefined) {
+		return { ...base, lane, model, prompt: cleanRequired(decoded.prompt, "prompt", name) };
+	}
+	if (decoded.packet === undefined) throw new Error(`Automation ${name}: packet is required`);
+	return { ...base, lane, model, packet: cleanRequired(decoded.packet, "packet", name) };
 }
 
 export function decodeAutomationRegistry(input: unknown): AutomationEntry[] {
@@ -206,6 +295,29 @@ function decodeAutomationLedgerEntry(input: unknown): AutomationLedgerEntry {
 	if (decoded.outputSummary.length > AUTOMATION_SUMMARY_MAX_CHARS) {
 		throw new Error(`Automation ledger outputSummary exceeds ${AUTOMATION_SUMMARY_MAX_CHARS} characters`);
 	}
+	if ("command" in decoded) {
+		if (decoded.command.length === 0 || decoded.command.some(argument => argument.trim().length === 0)) {
+			throw new Error("Automation ledger command must contain nonempty arguments");
+		}
+		if (
+			decoded.exitCode !== null &&
+			(!Number.isSafeInteger(decoded.exitCode) || decoded.exitCode < 0)
+		) {
+			throw new Error("Automation ledger exitCode must be a non-negative safe integer or null");
+		}
+		const expectedStatus = decoded.exitCode === 0 ? "succeeded" : "failed";
+		if (decoded.status !== expectedStatus) {
+			throw new Error(`Automation ledger command exitCode requires ${expectedStatus} status`);
+		}
+		if (
+			Buffer.byteLength(decoded.stdout, "utf8") > AUTOMATION_COMMAND_OUTPUT_MAX_BYTES ||
+			Buffer.byteLength(decoded.stderr, "utf8") > AUTOMATION_COMMAND_OUTPUT_MAX_BYTES
+		) {
+			throw new Error(
+				`Automation ledger command output exceeds ${AUTOMATION_COMMAND_OUTPUT_MAX_BYTES} bytes per stream`,
+			);
+		}
+	}
 	return decoded;
 }
 
@@ -272,9 +384,89 @@ function capSummary(value: string | undefined): string {
 		: normalized.slice(0, AUTOMATION_SUMMARY_MAX_CHARS);
 }
 
-async function readAutomationPrompt(entry: AutomationEntry): Promise<string> {
-	if (entry.prompt) return entry.prompt;
-	const packetPath = path.resolve(entry.cwd, entry.packet!);
+interface BoundedCommandOutput {
+	readonly text: string;
+	readonly truncated: boolean;
+}
+
+interface CommandExecutionResult {
+	readonly exitCode: number;
+	readonly stdout: string;
+	readonly stderr: string;
+	readonly stdoutTruncated: boolean;
+	readonly stderrTruncated: boolean;
+}
+
+async function captureCommandOutput(stream: ReadableStream<Uint8Array>): Promise<BoundedCommandOutput> {
+	const tail = new TailBuffer(AUTOMATION_COMMAND_OUTPUT_MAX_BYTES);
+	const decoder = new TextDecoder();
+	const reader = stream.getReader();
+	let totalBytes = 0;
+	try {
+		while (true) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			const chunk = decoder.decode(value, { stream: true });
+			totalBytes += Buffer.byteLength(chunk, "utf8");
+			tail.append(chunk);
+		}
+		const finalChunk = decoder.decode();
+		totalBytes += Buffer.byteLength(finalChunk, "utf8");
+		tail.append(finalChunk);
+	} finally {
+		reader.releaseLock();
+	}
+	const text = tail.text();
+	return { text, truncated: totalBytes > tail.bytes() };
+}
+
+async function executeAutomationCommand(
+	entry: CommandAutomationEntry,
+	signal?: AbortSignal,
+): Promise<CommandExecutionResult> {
+	const process = Bun.spawn({
+		cmd: Array.from(entry.command),
+		cwd: entry.cwd,
+		stdin: "ignore",
+		stdout: "pipe",
+		stderr: "pipe",
+		windowsHide: true,
+		signal,
+	});
+	const [stdout, stderr, exitCode] = await Promise.all([
+		captureCommandOutput(process.stdout),
+		captureCommandOutput(process.stderr),
+		process.exited,
+	]);
+	return {
+		exitCode,
+		stdout: stdout.text,
+		stderr: stderr.text,
+		stdoutTruncated: stdout.truncated,
+		stderrTruncated: stderr.truncated,
+	};
+}
+
+function formatCommandFailure(
+	entry: CommandAutomationEntry,
+	result: CommandExecutionResult,
+	aborted: boolean,
+): string {
+	const lines = [
+		`Automation ${entry.name} command ${aborted ? "was aborted" : "failed"} with exit code ${result.exitCode}: ${JSON.stringify(entry.command)}`,
+	];
+	if (result.stderr) {
+		lines.push(`stderr${result.stderrTruncated ? " (truncated tail)" : ""}:\n${result.stderr}`);
+	}
+	if (result.stdout) {
+		lines.push(`stdout${result.stdoutTruncated ? " (truncated tail)" : ""}:\n${result.stdout}`);
+	}
+	return lines.join("\n");
+}
+
+async function readAutomationPrompt(entry: AgentAutomationEntry): Promise<string> {
+	if (entry.prompt !== undefined) return entry.prompt;
+	const packetPath = path.resolve(entry.cwd, entry.packet);
 	try {
 		return await Bun.file(packetPath).text();
 	} catch (error) {
@@ -297,62 +489,80 @@ export async function runAutomationOnce(
 		suppressBreadcrumb: true,
 	});
 	await sessionManager.setSessionName(`automation: ${entry.name}`, "user");
-	sessionManager.appendCustomEntry("automation", {
-		name: entry.name,
-		schedule: entry.schedule,
-		lane: entry.lane,
-	});
+	sessionManager.appendCustomEntry(
+		"automation",
+		entry.command
+			? { name: entry.name, schedule: entry.schedule, command: entry.command }
+			: { name: entry.name, schedule: entry.schedule, lane: entry.lane, model: entry.model },
+	);
 	const createSession = options.createSession ?? createAgentSession;
 	let session: AgentSession | undefined;
 	let mcpManager: MCPManager | undefined;
 	let authStorage: AuthStorage | undefined;
 	let status: AutomationLedgerEntry["status"] = "succeeded";
 	let summary = "";
+	let failure: unknown;
+	let commandResult: CommandExecutionResult | undefined;
 	let finalRecord: AutomationLedgerEntry | undefined;
 	try {
-		const settings = await Settings.init({ cwd: entry.cwd, agentDir: runtimeAgentDir });
-		authStorage = await (options.discoverAuth ?? discoverAuthStorage)(runtimeAgentDir);
-		const modelRegistry = new ModelRegistry(authStorage, path.join(runtimeAgentDir, "models.yml"));
-		const requestedSelector = entry.model ?? entry.lane;
-		const roleSelector =
-			entry.model === undefined && MODEL_ROLE_IDS.includes(requestedSelector as (typeof MODEL_ROLE_IDS)[number])
-				? `pi/${requestedSelector}`
-				: requestedSelector;
-		const resolution = await resolveModelOverrideWithAuthFallback([roleSelector], undefined, modelRegistry, settings);
-		if (!resolution.model) {
-			const availableRoles: string[] = [];
-			for (const role of getKnownRoleIds(settings)) {
-				const candidate = await resolveModelOverrideWithAuthFallback([`pi/${role}`], undefined, modelRegistry, settings);
-				if (candidate.model) availableRoles.push(role);
+		if (entry.command) {
+			commandResult = await executeAutomationCommand(entry, options.signal);
+			if (commandResult.exitCode !== 0) {
+				throw new Error(formatCommandFailure(entry, commandResult, options.signal?.aborted === true));
 			}
-			const candidates =
-				availableRoles.length > 0 ? ` Available roles: ${availableRoles.join(", ")}.` : " No automation roles are available.";
-			throw new Error(`No available model for automation lane ${JSON.stringify(requestedSelector)}.${candidates}`);
+			summary = capSummary(commandResult.stdout || commandResult.stderr || "Command succeeded");
+		} else {
+			const settings = await Settings.init({ cwd: entry.cwd, agentDir: runtimeAgentDir });
+			authStorage = await (options.discoverAuth ?? discoverAuthStorage)(runtimeAgentDir);
+			const modelRegistry = new ModelRegistry(authStorage, path.join(runtimeAgentDir, "models.yml"));
+			const requestedSelector = entry.model ?? entry.lane;
+			const roleSelector =
+				entry.model === undefined && MODEL_ROLE_IDS.includes(requestedSelector as (typeof MODEL_ROLE_IDS)[number])
+					? `pi/${requestedSelector}`
+					: requestedSelector;
+			const resolution = await resolveModelOverrideWithAuthFallback([roleSelector], undefined, modelRegistry, settings);
+			if (!resolution.model) {
+				const availableRoles: string[] = [];
+				for (const role of getKnownRoleIds(settings)) {
+					const candidate = await resolveModelOverrideWithAuthFallback(
+						[`pi/${role}`],
+						undefined,
+						modelRegistry,
+						settings,
+					);
+					if (candidate.model) availableRoles.push(role);
+				}
+				const candidates =
+					availableRoles.length > 0
+						? ` Available roles: ${availableRoles.join(", ")}.`
+						: " No automation roles are available.";
+				throw new Error(`No available model for automation lane ${JSON.stringify(requestedSelector)}.${candidates}`);
+			}
+			const created = await createSession({
+				cwd: entry.cwd,
+				agentDir: runtimeAgentDir,
+				authStorage,
+				modelRegistry,
+				settings,
+				model: resolution.model,
+				thinkingLevel: resolution.thinkingLevel,
+				sessionManager,
+				hasUI: false,
+				agentId: `Automation-${automationSlug(entry.name)}`,
+				agentDisplayName: `automation: ${entry.name}`,
+			});
+			session = created.session;
+			mcpManager = created.mcpManager;
+			await session.prompt(await readAutomationPrompt(entry), {
+				attribution: "agent",
+				expandPromptTemplates: false,
+			});
+			summary = capSummary(extractLastAssistantText(session));
 		}
-		const created = await createSession({
-			cwd: entry.cwd,
-			agentDir: runtimeAgentDir,
-			authStorage,
-			modelRegistry,
-			settings,
-			model: resolution.model,
-			thinkingLevel: resolution.thinkingLevel,
-			sessionManager,
-			hasUI: false,
-			agentId: `Automation-${automationSlug(entry.name)}`,
-			agentDisplayName: `automation: ${entry.name}`,
-		});
-		session = created.session;
-		mcpManager = created.mcpManager;
-		await session.prompt(await readAutomationPrompt(entry), {
-			attribution: "agent",
-			expandPromptTemplates: false,
-		});
-		summary = capSummary(extractLastAssistantText(session));
 	} catch (error) {
 		status = "failed";
 		summary = capSummary(error instanceof Error ? error.message : String(error));
-		throw error;
+		failure = error;
 	} finally {
 		try {
 			if (session) await session.dispose();
@@ -363,17 +573,31 @@ export async function runAutomationOnce(
 				authStorage?.close();
 			}
 		}
-		await sessionManager.flush();
-		finalRecord = {
+		const commonRecord: AutomationLedgerEntryBase = {
 			runAt,
 			durationMs: Math.max(0, now() - runAt),
 			status,
 			sessionFile,
 			outputSummary: summary,
 		};
+		finalRecord = entry.command
+			? {
+					...commonRecord,
+					command: entry.command,
+					exitCode: commandResult?.exitCode ?? null,
+					stdout: commandResult?.stdout ?? "",
+					stderr: commandResult?.stderr ?? "",
+					stdoutTruncated: commandResult?.stdoutTruncated ?? false,
+					stderrTruncated: commandResult?.stderrTruncated ?? false,
+				}
+			: commonRecord;
+		sessionManager.appendCustomEntry("automation-result", finalRecord);
+		await sessionManager.flush();
 		await appendAutomationLedger(entry, finalRecord, agentDir);
 	}
-	return { name: entry.name, ...finalRecord! };
+	const result: AutomationRunResult = { name: entry.name, ...finalRecord! };
+	if (failure !== undefined) throw new AutomationRunError(result, failure);
+	return result;
 }
 
 async function abortableSleep(durationMs: number, signal?: AbortSignal): Promise<void> {
@@ -413,8 +637,9 @@ export async function runAutomationDaemon(options: AutomationDaemonOptions = {})
 			await options.onRun?.(entry);
 			try {
 				await (options.run ? options.run(entry) : runAutomationOnce(entry, options));
-			} catch {
-				// The failed run is journaled; continue supervising the remaining jobs.
+			} catch (error) {
+				// The failed run is journaled; report it and continue supervising the remaining jobs.
+				await options.onError?.(entry, error);
 			}
 		}
 		if (!options.signal?.aborted && (options.maxCycles === undefined || cycles < options.maxCycles)) {

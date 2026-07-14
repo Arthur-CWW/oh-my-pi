@@ -97,12 +97,44 @@ export interface CodexModelCapabilities {
 	autoReviewModelOverride?: string;
 	toolMode?: string;
 	multiAgentVersion?: string;
+	minimalClientVersion?: string;
+	availableInPlans?: readonly string[];
+	reasoningSummaryFormat?: string;
 	/** Codex client-side Ultra orchestration capability, never inferred from efforts. */
 	supportsUltraOrchestration?: boolean;
 	/** Provenance for values that may be absent from the current endpoint. */
 	contextWindowSource?: "endpoint" | "fallback";
 	maxTokensSource?: "endpoint" | "fallback";
 	costSource?: "endpoint" | "fallback";
+}
+
+/** Provenance for an OpenAI Codex model assembled into the generated catalog. */
+export interface CodexCatalogProvenance {
+	codexBundled: {
+		source: "vendored-codex-models-json";
+		path: string;
+		commit: string;
+		rawContextWindow: number;
+		effectiveContextWindowPercent: number;
+		effectiveInputTokens: number;
+		autoCompactTokenLimit: number;
+		metadata: CodexModelCapabilities;
+	};
+	liveAccountEligibility: {
+		source: "live-account-catalog";
+		status: "listed" | "not-listed" | "not-queried";
+		officialPickerParity: boolean;
+	};
+	ompPolicy: {
+		source: "omp-policy";
+		visibility: "picker" | "bundled/direct-only";
+		pricing: "omp-policy";
+		maxOutput: {
+			value: number;
+			source: "omp-fallback";
+			sentToEndpoint: false;
+		};
+	};
 }
 
 // `Provider` is any provider-id string; `KnownProvider` (re-exported above) enumerates
@@ -451,6 +483,8 @@ export type CompatOf<TApi extends Api> = TApi extends "openai-completions"
 			? ResolvedAnthropicCompat
 			: undefined;
 
+export type ModelInput = "text" | "image" | "video";
+
 // Model interface for the unified model system
 export interface Model<TApi extends Api = Api> {
 	id: string;
@@ -468,7 +502,7 @@ export interface Model<TApi extends Api = Api> {
 	provider: Provider;
 	baseUrl: string;
 	reasoning: boolean;
-	input: ("text" | "image")[];
+	input: ModelInput[];
 	/**
 	 * Native provider tool-call support. `false` is the only unsupported signal:
 	 * `true` and `undefined` both mean callers may use native tools. Catalog and
@@ -524,6 +558,8 @@ export interface Model<TApi extends Api = Api> {
 	thinking?: ThinkingConfig;
 	/** Live authenticated Codex model capability metadata. */
 	codex?: CodexModelCapabilities;
+	/** Separately labeled bundled/live/policy provenance for generated Codex entries. */
+	codexCatalog?: CodexCatalogProvenance;
 	/** Whether the model is intentionally excluded from picker UIs but remains resolvable. */
 	hidden?: boolean;
 	/**

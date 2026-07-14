@@ -11,7 +11,7 @@
  * `ls`/`find` use the cache when fresh (`online-if-uncached`); only `refresh`
  * forces the network (`online`).
  */
-import type { Api, Model, ReasoningEffort } from "@oh-my-pi/pi-ai";
+import type { Api, Model, ModelInput, ReasoningEffort } from "@oh-my-pi/pi-ai";
 import { getSupportedEfforts } from "@oh-my-pi/pi-catalog/model-thinking";
 import { formatNumber, getProjectDir } from "@oh-my-pi/pi-utils";
 import chalk from "chalk";
@@ -73,7 +73,7 @@ interface ModelJson {
 	reasoning: boolean;
 	/** Supported thinking efforts when the model thinks, otherwise null. */
 	thinking: readonly ReasoningEffort[] | null;
-	input: ("text" | "image")[];
+	input: ModelInput[];
 	cost: Model<Api>["cost"];
 }
 

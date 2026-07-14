@@ -1,4 +1,5 @@
 import type { AppKeybinding, KeybindingsManager } from "../../config/keybindings";
+import { renderInteractionMarkdown } from "../interaction-registry";
 
 export interface HotkeysMarkdownBindings {
 	keybindings: Pick<KeybindingsManager, "getDisplayString">;
@@ -9,6 +10,14 @@ function appKey(bindings: HotkeysMarkdownBindings, action: AppKeybinding): strin
 }
 
 export function buildHotkeysMarkdown(bindings: HotkeysMarkdownBindings): string {
+	const interactionMarkdown = renderInteractionMarkdown(
+		[
+			{ title: "Read-only viewer", surfaces: ["viewer"] },
+			{ title: "Agent Hub", surfaces: ["hub.table", "hub.chat", "hub.inspector"] },
+			{ title: "Command line", surfaces: ["command-line"], modes: ["input", "completion"] },
+		],
+		action => bindings.keybindings.getDisplayString(action) || "Disabled",
+	);
 	return [
 		"**Navigation**",
 		"| Key | Action |",
@@ -17,10 +26,8 @@ export function buildHotkeysMarkdown(bindings: HotkeysMarkdownBindings): string 
 		"| `Option+Left/Right` | Move by word |",
 		"| `Ctrl+A` / `Home` / `Cmd+Left` | Start of line |",
 		"| `Ctrl+E` / `End` / `Cmd+Right` | End of line |",
-		"| `j` / `k` | Scroll the Agent Hub preview (or move through selectors) outside text entry |",
-		"| `n` / `p` | Select next / previous agent in the Agent Hub cockpit |",
-		"| `gg` / `G` | Jump to start / end of transcript scrollback |",
-		"| `Ctrl+D` / `Ctrl+U` | Scroll transcript preview by half a page outside text entry |",
+		"",
+		interactionMarkdown,
 		"",
 		"**Editing**",
 		"| Key | Action |",
@@ -56,7 +63,7 @@ export function buildHotkeysMarkdown(bindings: HotkeysMarkdownBindings): string 
 		`| \`${appKey(bindings, "app.clipboard.pasteImage")}\` | Paste image or text from clipboard |`,
 		"| Hold `Space` | Speech-to-text (push-to-talk): hold to record, release to transcribe |",
 		`| \`${appKey(bindings, "app.agents.hub")}\` / \`${appKey(bindings, "app.session.observe")}\` / double-tap \`←\` (empty editor) | Open the agent hub |`,
-		`| \`${appKey(bindings, "app.primitives.inspect")}\` / \`/inspect\` | Open the read-only primitives inspector |`,
+		`| \`${appKey(bindings, "app.primitives.inspect")}\` / \`:inspect\` | Open the read-only primitives inspector |`,
 		"| `#` | Open prompt actions |",
 		"| `/` | Slash commands |",
 		"| `!` | Run bash command |",

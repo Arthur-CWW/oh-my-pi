@@ -417,7 +417,7 @@ if (action === "first") {
 		const { ctx, editor } = createControllerContext(harness.session, harness.sessionManager, harness.settings, commandSink);
 		let submittedTurn;
 		ctx.onInputCallback = submission => {
-			submittedTurn = harness.session.prompt(submission.text, { images: submission.images });
+			submittedTurn = harness.session.prompt(submission.text, { attachments: submission.attachments });
 		};
 		const controller = new InputController(ctx);
 		controller.setupEditorSubmitHandler();
@@ -494,7 +494,7 @@ if (action === "first") {
 		let submittedTurn;
 		ctx.onInputCallback = submission => {
 			submittedTurn = harness.session.prompt(submission.text, {
-				images: submission.images,
+				attachments: submission.attachments,
 				streamingBehavior: submission.streamingBehavior,
 			});
 		};
@@ -961,7 +961,7 @@ describe("AgentSession durable input queue process replacement", () => {
 		const ownersRoot = path.join(fixture.home, ".agent-mux", "owners-v1");
 		const [queueKey] = await fs.readdir(ownersRoot);
 		if (!queueKey) throw new Error("durable queue root missing");
-		const queueRoot = path.join(ownersRoot, queueKey, "queue-v2");
+		const queueRoot = path.join(ownersRoot, queueKey, "queue-v3");
 		const initialHead = JSON.parse(await fs.readFile(path.join(queueRoot, "head.json"), "utf8")) as { epoch: string };
 		const initialSegment = path.join(queueRoot, "segments", `${initialHead.epoch}.jsonl`);
 		const initialSegmentBytes = (await fs.stat(initialSegment)).size;

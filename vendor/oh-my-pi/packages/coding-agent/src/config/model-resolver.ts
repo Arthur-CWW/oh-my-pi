@@ -32,6 +32,16 @@ import MODEL_PRIO from "../priority.json" with { type: "json" };
 import { clampAutoThinkingEffort, parseThinkingLevel, resolveThinkingLevelForModel } from "../thinking";
 import { isAuthenticated, kNoAuth, type ModelRegistry } from "./model-registry";
 import { MODEL_ROLE_IDS, type ModelRole } from "./model-roles";
+import {
+	DEFAULT_MODEL_ROLE,
+	describeModelRoleSource,
+	expandRoleAlias,
+	formatUnknownModelRoleError,
+	isKnownModelRole,
+	parseExplicitModelRoleReference,
+	resolveConfiguredModelPatterns,
+	splitThinkingSuffix,
+} from "./role-resolution";
 import type { Settings } from "./settings";
 
 /**
@@ -85,21 +95,6 @@ export interface ScopedModel {
 	explicitThinkingLevel: boolean;
 }
 
-/**
- * Split a trailing `:<level>` thinking selector off a model pattern.
- *
- * `level` is set only when the suffix parses as a valid thinking level, in
- * which case `base` has the suffix stripped; otherwise `base` is the input.
- * `minColonIndex` requires the colon to appear strictly after that index —
- * role-alias callers pass `PREFIX_MODEL_ROLE.length` so the base is at least
- * as long as the `pi/` prefix.
- */
-function splitThinkingSuffix(pattern: string, minColonIndex = -1): { base: string; level?: ThinkingLevel } {
-	const colonIdx = pattern.lastIndexOf(":");
-	if (colonIdx <= minColonIndex) return { base: pattern };
-	const level = parseThinkingLevel(pattern.slice(colonIdx + 1));
-	return level ? { base: pattern.slice(0, colonIdx), level } : { base: pattern };
-}
 
 /**
  * Parse a model string in "provider/modelId" format.
@@ -672,79 +667,6 @@ export function parseModelPattern(
 	return direct;
 }
 
-const PREFIX_MODEL_ROLE = "pi/";
-const DEFAULT_MODEL_ROLE = "default";
-
-
-function normalizeModelPatternList(value: string | string[] | undefined): string[] {
-	if (!value) return [];
-	const patterns = Array.isArray(value) ? value : value.split(",");
-	return patterns.map(pattern => pattern.trim()).filter(Boolean);
-}
-
-function isSessionInheritedAgentPattern(value: string): boolean {
-	return value === DEFAULT_MODEL_ROLE || value === `${PREFIX_MODEL_ROLE}${DEFAULT_MODEL_ROLE}` || value === "pi/task";
-}
-
-function shouldInheritDefaultBeforePriority(role: ModelRole): boolean {
-	return role === "smol" || role === "slow" || role === "designer";
-}
-
-function appendThinkingLevel(patterns: string[], thinkingLevel?: ThinkingLevel): string[] {
-	return thinkingLevel ? patterns.map(pattern => `${pattern}:${thinkingLevel}`) : patterns;
-}
-
-function getExplicitRoleAlias(value: string): { role: ModelRole; thinkingLevel?: ThinkingLevel } | undefined {
-	if (!value.startsWith(PREFIX_MODEL_ROLE)) return undefined;
-	const { base, level } = splitThinkingSuffix(value, PREFIX_MODEL_ROLE.length);
-	const role = MODEL_ROLE_IDS.find(candidate => candidate === base.slice(PREFIX_MODEL_ROLE.length));
-	return role ? { role, thinkingLevel: level } : undefined;
-}
-
-function getRolePriorityPatterns(role: ModelRole): string[] {
-	return normalizeModelPatternList(MODEL_PRIO[role as keyof typeof MODEL_PRIO]);
-}
-
-function resolveRolePatterns(role: ModelRole, settings: Settings | undefined, visited: ReadonlySet<ModelRole>): string[] {
-	if (visited.has(role)) return getRolePriorityPatterns(role);
-
-	const nextVisited = new Set(visited);
-	nextVisited.add(role);
-	const configured = normalizeModelPatternList(settings?.getModelRole(role));
-	if (configured.length > 0) return resolveConfiguredModelPatterns(configured, settings, nextVisited);
-
-	if (role === "task") return [];
-	if (shouldInheritDefaultBeforePriority(role)) {
-		const inherited = normalizeModelPatternList(settings?.getModelRole(DEFAULT_MODEL_ROLE));
-		if (inherited.length > 0) {
-			const resolved = resolveConfiguredModelPatterns(inherited, settings, nextVisited);
-			if (resolved.length > 0) return resolved;
-		}
-	}
-	return getRolePriorityPatterns(role);
-}
-
-/**
- * Expand a role alias like "pi/smol" to configured or deterministic fallback
- * model patterns. Only an explicit `pi/<role>` is a role alias here; bare
- * model strings remain concrete selectors for the task-input boundary.
- */
-export function expandRoleAlias(value: string, settings?: Settings): string {
-	const resolved = resolveConfiguredModelPatterns(value, settings);
-	return resolved[0] ?? value;
-}
-
-export function resolveConfiguredModelPatterns(
-	value: string | string[] | undefined,
-	settings?: Settings,
-	visited: ReadonlySet<ModelRole> = new Set(),
-): string[] {
-	return normalizeModelPatternList(value).flatMap(pattern => {
-		const alias = getExplicitRoleAlias(pattern);
-		if (!alias) return [pattern];
-		return appendThinkingLevel(resolveRolePatterns(alias.role, settings, visited), alias.thinkingLevel);
-	});
-}
 
 function resolveExplicitThinkingLevelForModel(
 	model: Model<Api>,
@@ -752,49 +674,10 @@ function resolveExplicitThinkingLevelForModel(
 ): ThinkingLevel | undefined {
 	const resolved = resolveThinkingLevelForModel(model, thinkingLevel);
 	if (resolved !== undefined) return resolved;
-	if (!model.reasoning || thinkingLevel === undefined || thinkingLevel === ThinkingLevel.Inherit) return undefined;
+	if (thinkingLevel === undefined || thinkingLevel === ThinkingLevel.Inherit) return undefined;
+	if (!model.reasoning) return thinkingLevel;
 	return clampAutoThinkingEffort(model, thinkingLevel);
 }
-/**
- * Distinct model-routing inputs in descending precedence. Each tier expands
- * independently, so an empty higher tier cannot mask a usable lower tier.
- */
-export interface AgentModelPatternResolutionOptions {
-	explicitModel?: string | string[];
-	temporaryModel?: string | string[];
-	taskOrRoleModel?: string | string[];
-	streamModel?: string | string[];
-	globalFallbackModel?: string | string[];
-	settings?: Settings;
-}
-
-export function resolveAgentModelPatterns(options: AgentModelPatternResolutionOptions): string[] {
-	const { explicitModel, temporaryModel, taskOrRoleModel, streamModel, globalFallbackModel, settings } = options;
-
-	for (const value of [explicitModel, temporaryModel]) {
-		const patterns = resolveConfiguredModelPatterns(value, settings);
-		if (patterns.length > 0) return patterns;
-	}
-
-	const normalizedTaskOrRolePatterns = normalizeModelPatternList(taskOrRoleModel);
-	const taskOrRolePatterns = resolveConfiguredModelPatterns(taskOrRoleModel, settings);
-	const singleTaskOrRolePattern =
-		normalizedTaskOrRolePatterns.length === 1 ? normalizedTaskOrRolePatterns[0] : undefined;
-	const taskOrRoleInheritsSessionModel = singleTaskOrRolePattern
-		? isSessionInheritedAgentPattern(singleTaskOrRolePattern)
-		: false;
-	if (taskOrRolePatterns.length > 0) {
-		if (!taskOrRoleInheritsSessionModel || singleTaskOrRolePattern === "pi/task") return taskOrRolePatterns;
-	}
-
-	for (const value of [streamModel, globalFallbackModel]) {
-		const patterns = resolveConfiguredModelPatterns(value, settings);
-		if (patterns.length > 0) return patterns;
-	}
-
-	return [];
-}
-
 /**
  * Resolve a model role value into a concrete model and thinking metadata.
  */
@@ -848,30 +731,6 @@ export function resolveModelRoleValue(
 	return { model: undefined, thinkingLevel: undefined, explicitThinkingLevel: false, warning };
 }
 
-export function extractExplicitThinkingSelector(
-	value: string | undefined,
-	settings?: Settings,
-): ThinkingLevel | undefined {
-	if (!value) return undefined;
-	const normalized = value.trim();
-	if (!normalized || normalized === DEFAULT_MODEL_ROLE) return undefined;
-
-	const visited = new Set<string>();
-	let current = normalized;
-	while (!visited.has(current)) {
-		visited.add(current);
-		const thinkingSelector = splitThinkingSuffix(current, PREFIX_MODEL_ROLE.length).level;
-		if (thinkingSelector) {
-			return thinkingSelector;
-		}
-		const expanded = expandRoleAlias(current, settings).trim();
-		if (!expanded || expanded === current) break;
-		if (expanded === DEFAULT_MODEL_ROLE) return undefined;
-		current = expanded;
-	}
-
-	return undefined;
-}
 
 /**
  * Resolve a model identifier or pattern to a Model instance.
@@ -1292,8 +1151,9 @@ export function resolveCliModel(options: {
 	cliModel?: string;
 	modelRegistry: CliModelRegistry;
 	preferences?: ModelMatchPreferences;
+	settings?: Settings;
 }): ResolveCliModelResult {
-	const { cliProvider, cliModel, modelRegistry, preferences } = options;
+	const { cliProvider, cliModel, modelRegistry, preferences, settings } = options;
 
 	if (!cliModel) {
 		return { model: undefined, selector: undefined, warning: undefined, error: undefined };
@@ -1306,6 +1166,50 @@ export function resolveCliModel(options: {
 			selector: undefined,
 			warning: undefined,
 			error: "No models available. Check your installation or add models to models.json.",
+		};
+	}
+
+	const trimmedModel = cliModel.trim();
+	const roleReference = !cliProvider ? parseExplicitModelRoleReference(trimmedModel) : undefined;
+	if (roleReference) {
+		const role = roleReference.role;
+		if (!isKnownModelRole(role, settings)) {
+			return {
+				model: undefined,
+				selector: undefined,
+				thinkingLevel: undefined,
+				warning: undefined,
+				error: formatUnknownModelRoleError(trimmedModel, settings),
+			};
+		}
+
+		const resolved = resolveModelRoleValue(trimmedModel, availableModels, {
+			settings,
+			matchPreferences: preferences,
+			modelRegistry,
+		});
+		if (!resolved.model) {
+			const configuredSelector = settings?.resolveModelRole(role).effectiveSelector;
+			const roleSource = describeModelRoleSource(settings, role);
+			const selectorDetail = configuredSelector ? ` selector "${configuredSelector}"` : "";
+			return {
+				model: undefined,
+				selector: undefined,
+				thinkingLevel: undefined,
+				warning: resolved.warning,
+				error: `Model role "${trimmedModel}" from ${roleSource}${selectorDetail} did not match an available model. Run "omp models" to see available models.`,
+			};
+		}
+
+		return {
+			model: resolved.model,
+			selector: formatModelSelectorValue(
+				formatModelString(resolved.model),
+				resolved.explicitThinkingLevel ? resolved.thinkingLevel : undefined,
+			),
+			thinkingLevel: resolved.thinkingLevel,
+			warning: resolved.warning,
+			error: undefined,
 		};
 	}
 
@@ -1324,7 +1228,7 @@ export function resolveCliModel(options: {
 		};
 	}
 
-	const trimmedModel = cliModel.trim();
+
 	if (!provider) {
 		const lower = trimmedModel.toLowerCase();
 		// When input has provider/id format (e.g. "zai/glm-5"), prefer decomposed

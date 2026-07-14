@@ -76,7 +76,7 @@ describe("/handoff command", () => {
 
 		expect(statusContainer.children).toHaveLength(1);
 		expect(ctx.editor.onEscape).toBe(originalOnEscape);
-		ctx.editor.onEscape?.();
+		ctx.editor.onEscape?.("escape");
 		expect(abortHandoff).toHaveBeenCalledTimes(1);
 
 		handoffDone.resolve({ document: "## Goal\nContinue" });

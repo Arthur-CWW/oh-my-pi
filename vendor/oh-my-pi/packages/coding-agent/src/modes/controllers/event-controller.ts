@@ -1,10 +1,9 @@
 import { INTENT_FIELD } from "@oh-my-pi/pi-agent-core";
 import { calculatePromptTokens } from "@oh-my-pi/pi-agent-core/compaction/compaction";
-import type { AssistantMessage, ImageContent } from "@oh-my-pi/pi-ai";
+import { type AssistantMessage, type ImageContent, isTransientNetworkError } from "@oh-my-pi/pi-ai";
 import { type Component, Loader, TERMINAL } from "@oh-my-pi/pi-tui";
 import { extractTextContent } from "../../commit/utils";
 import { settings } from "../../config/settings";
-import { getFileSnapshotStore } from "../../edit/file-snapshot-store";
 import { AssistantMessageComponent } from "../../modes/components/assistant-message";
 import {
 	ReadToolGroupComponent,
@@ -24,6 +23,7 @@ import type { ResolveToolDetails } from "../../tools/resolve";
 import { vocalizer } from "../../tts/vocalizer";
 import { canonicalizeMessage, normalizeThinkingDisplay } from "../../utils/thinking-display";
 import { interruptHint } from "../shared";
+import { addToolExecutionComponent } from "./tool-execution-construction";
 import { StreamingRevealController } from "./streaming-reveal";
 import { ToolArgsRevealController } from "./tool-args-reveal";
 
@@ -107,6 +107,8 @@ export class EventController {
 			auto_compaction_end: e => this.#handleAutoCompactionEnd(e),
 			auto_retry_start: e => this.#handleAutoRetryStart(e),
 			auto_retry_end: e => this.#handleAutoRetryEnd(e),
+			retry_fallback_approval_requested: e => this.#handleRetryFallbackApprovalRequested(e),
+			retry_fallback_approval_resolved: async () => {},
 			retry_fallback_applied: e => this.#handleRetryFallbackApplied(e),
 			retry_fallback_succeeded: e => this.#handleRetryFallbackSucceeded(e),
 			ttsr_triggered: e => this.#handleTtsrTriggered(e),
@@ -119,7 +121,11 @@ export class EventController {
 				this.ctx.updateEditorBorderColor();
 				this.ctx.ui.requestRender();
 			},
-			goal_updated: async () => {},
+			goal_updated: async () => {
+				this.ctx.statusLine.invalidate();
+				this.ctx.updateEditorTopBorder();
+				this.ctx.ui.requestRender();
+			},
 		} satisfies AgentSessionEventHandlers;
 	}
 
@@ -233,8 +239,6 @@ export class EventController {
 			await this.ctx.init();
 		}
 
-		this.ctx.statusLine.invalidate();
-		this.ctx.updateEditorTopBorder();
 
 		const run = this.#handlers[event.type] as (e: AgentSessionEvent) => Promise<void>;
 		await run(event);
@@ -549,24 +553,13 @@ export class EventController {
 				if (!this.ctx.pendingTools.has(content.id)) {
 					this.#resolveDisplaceablePoll(content.name);
 					this.#resetReadGroup();
-					const tool = this.ctx.viewSession.getToolByName(content.name);
-					const component = new ToolExecutionComponent(
+					const component = addToolExecutionComponent(
+						this.ctx,
 						content.name,
 						renderArgs,
-						{
-							snapshots: getFileSnapshotStore(this.ctx.viewSession),
-							showImages: settings.get("terminal.showImages"),
-							editFuzzyThreshold: settings.get("edit.fuzzyThreshold"),
-							editAllowFuzzy: settings.get("edit.fuzzyMatch"),
-						},
-						tool,
-						this.ctx.ui,
-						this.ctx.sessionManager.getCwd(),
 						content.id,
+						false,
 					);
-					component.setExpanded(this.ctx.toolOutputExpanded);
-					this.ctx.chatContainer.addChild(component);
-					this.ctx.pendingTools.set(content.id, component);
 					this.#toolArgsReveal.bind(content.id, component);
 				} else {
 					const component = this.ctx.pendingTools.get(content.id);
@@ -688,6 +681,7 @@ export class EventController {
 					status: event.message.errorStatus,
 					session: this.ctx.sessionManager.getSessionId(),
 					category: event.message.stopDetails?.category ?? event.message.stopDetails?.type ?? "provider",
+					errorClass: isTransientNetworkError(event.message.errorMessage) ? "network" : undefined,
 					code: event.message.stopDetails?.type,
 					operation: "turn",
 				});
@@ -717,25 +711,13 @@ export class EventController {
 			}
 
 			this.#resetReadGroup();
-			const tool = this.ctx.viewSession.getToolByName(event.toolName);
-			const component = new ToolExecutionComponent(
+			addToolExecutionComponent(
+				this.ctx,
 				event.toolName,
 				event.args,
-				{
-					snapshots: getFileSnapshotStore(this.ctx.viewSession),
-					showImages: settings.get("terminal.showImages"),
-					editFuzzyThreshold: settings.get("edit.fuzzyThreshold"),
-					editAllowFuzzy: settings.get("edit.fuzzyMatch"),
-					liveRegion: this.ctx.chatContainer,
-				},
-				tool,
-				this.ctx.ui,
-				this.ctx.sessionManager.getCwd(),
 				event.toolCallId,
+				true,
 			);
-			component.setExpanded(this.ctx.toolOutputExpanded);
-			this.ctx.chatContainer.addChild(component);
-			this.ctx.pendingTools.set(event.toolCallId, component);
 			this.ctx.ui.requestRender();
 		}
 	}
@@ -1012,13 +994,18 @@ export class EventController {
 	async #handleAutoRetryStart(event: Extract<AgentSessionEvent, { type: "auto_retry_start" }>): Promise<void> {
 		this.#stopWorkingLoader();
 		this.ctx.statusContainer.clear();
-		const delaySeconds = Math.round(event.delayMs / 1000);
+		const delaySeconds = Math.max(0, Math.round(event.delayMs / 1000));
+		const retryMessage =
+			event.cause === "network"
+				? `Provider unreachable (network/DNS), retrying ${delaySeconds}s… (esc to cancel)`
+				: event.cause === "rate-limit"
+					? `Rate limited, retrying (${event.attempt}/${event.maxAttempts}) in ${delaySeconds}s… (esc to cancel)`
+					: `Provider error, retrying (${event.attempt}/${event.maxAttempts}) in ${delaySeconds}s… (esc to cancel)`;
 		this.ctx.retryLoader = new Loader(
 			this.ctx.ui,
 			spinner => theme.fg("warning", spinner),
 			text => theme.fg("muted", text),
-			`Retrying (${event.attempt}/${event.maxAttempts}) in ${delaySeconds}s… (esc to cancel)`,
-			getSymbolTheme().spinnerFrames,
+			retryMessage,
 		);
 		this.ctx.statusContainer.addChild(this.ctx.retryLoader);
 		this.ctx.ui.requestRender();
@@ -1033,6 +1020,18 @@ export class EventController {
 		if (!event.success) {
 			this.ctx.showError(`Retry failed after ${event.attempt} attempts: ${event.finalError || "Unknown error"}`);
 		}
+		this.ctx.ui.requestRender();
+	}
+
+	async #handleRetryFallbackApprovalRequested(
+		event: Extract<AgentSessionEvent, { type: "retry_fallback_approval_requested" }>,
+	): Promise<void> {
+		const proposal = event.proposal;
+		this.#stopWorkingLoader();
+		this.ctx.statusContainer.clear();
+		this.ctx.showWarning(
+			`Fallback approval required for ${proposal.agentId}: ${proposal.sourceModel} -> ${proposal.proposedModel} (${proposal.cause}). Options: wait with timeout, approve proposed, choose explicit model, or abort.`,
+		);
 		this.ctx.ui.requestRender();
 	}
 

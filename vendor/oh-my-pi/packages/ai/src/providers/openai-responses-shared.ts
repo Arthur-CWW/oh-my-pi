@@ -16,6 +16,7 @@ import {
 	type ThinkingContent,
 	type ToolCall,
 	type ToolResultMessage,
+	type UserContent,
 } from "../types";
 import { normalizeResponsesToolCallId } from "../utils";
 import type { AssistantMessageEventStream } from "../utils/event-stream";
@@ -270,7 +271,7 @@ export function repairOrphanResponsesToolCalls(input: ResponseInput): ResponseIn
 }
 
 export function convertResponsesInputContent(
-	content: string | Array<TextContent | ImageContent>,
+	content: string | UserContent[],
 	supportsImages: boolean,
 ): ResponseInputContent[] | undefined {
 	if (typeof content === "string") {

@@ -40,10 +40,9 @@ import { getConfigDirs } from "../../config";
 import type { ModelRegistry } from "../../config/model-registry";
 import {
 	formatModelString,
-	resolveAgentModelPatterns,
-	resolveConfiguredModelPatterns,
 	resolveModelOverride,
 } from "../../config/model-resolver";
+import { resolveAgentModelPatterns, resolveConfiguredModelPatterns } from "../../config/role-resolution";
 import { Settings } from "../../config/settings";
 import agentCreationArchitectPrompt from "../../prompts/system/agent-creation-architect.md" with { type: "text" };
 import agentCreationUserPrompt from "../../prompts/system/agent-creation-user.md" with { type: "text" };

@@ -1,9 +1,9 @@
 import { Container, type SelectItem, SelectList, Spacer, Text } from "@oh-my-pi/pi-tui";
 import { getSelectListTheme, theme } from "../theme/theme";
-import type { DiagnosticAction, DiagnosticEvent } from "../utils/error-inbox";
+import type { DiagnosticEvent, FocusCmuxOwnerAction } from "../utils/error-inbox";
 import { CMUX_OWNER_UNAVAILABLE_MESSAGE, type FocusCmuxOwnerResult } from "../utils/cmux-owner-navigation";
 import { DynamicBorder } from "./dynamic-border";
-export type DiagnosticActionHandler = (action: DiagnosticAction) => Promise<FocusCmuxOwnerResult>;
+export type DiagnosticActionHandler = (action: FocusCmuxOwnerAction) => Promise<FocusCmuxOwnerResult>;
 
 export interface ErrorSelectorOptions {
 	readonly onAction?: DiagnosticActionHandler;
@@ -11,9 +11,24 @@ export interface ErrorSelectorOptions {
 }
 
 
+function isOpenFleetIncident(err: DiagnosticEvent): boolean {
+	return !err.resolved && err.source === "fleet" && err.category === "fleet-incident" && err.status === "open";
+}
+
+export function formatDiagnosticLabel(err: DiagnosticEvent): string {
+	const time = new Date(err.lastTimestamp).toISOString();
+	let label = `[${time}]`;
+	if (err.source) label += ` ${err.source}:`;
+	if (err.count > 1) label += ` (x${err.count})`;
+
+	if (err.resolved) return `[resolved] ${label}`;
+	const incidentPrefix = isOpenFleetIncident(err) ? "[incident open] " : "";
+	return err.unread ? `[unread] ${incidentPrefix}${label}` : `${incidentPrefix}${label}`;
+}
+
 export function formatDiagnosticDetail(err: DiagnosticEvent | null, actionMessage?: string): string {
 	if (!err) return "";
-	let out = "";
+	let out = isOpenFleetIncident(err) ? `${theme.bold("[incident open]")}\n` : "";
 	if (err.count > 1) {
 		out += theme.bold(`Occurrences: `) + `${err.count} (first: ${new Date(err.firstTimestamp).toISOString()}, last: ${new Date(err.lastTimestamp).toISOString()})\n`;
 	} else {
@@ -63,7 +78,7 @@ export function formatDiagnosticDetail(err: DiagnosticEvent | null, actionMessag
 	if (err.action) {
 		out += "\n" + theme.fg("dim", "Focus active cmux session: Enter   Close: Esc");
 	} else if (!err.resolved) {
-		out += "\n" + theme.fg("dim", `Resolve: /errors resolve ${err.id}   Close: Esc/Enter`);
+		out += "\n" + theme.fg("dim", `Resolve: :errors resolve ${err.id}   Close: Esc/Enter`);
 	}
 
 	return out.trimEnd();
@@ -78,12 +93,7 @@ export class ErrorSelectorComponent extends Container {
 		const byId = new Map<string, DiagnosticEvent>(errors.map(e => [e.id, e]));
 
 		const items: SelectItem[] = errors.map(err => {
-			const time = new Date(err.lastTimestamp).toISOString();
-			let label = `[${time}]`;
-			if (err.source) label += ` ${err.source}:`;
-			if (err.count > 1) label += ` (x${err.count})`;
-			if (err.resolved) label = `[resolved] ${label}`;
-			else if (err.unread) label = `[unread] ${label}`;
+			const label = formatDiagnosticLabel(err);
 			return {
 				value: err.id,
 				label: label,
@@ -105,7 +115,7 @@ export class ErrorSelectorComponent extends Container {
 		this.#selectList = new SelectList(items, Math.min(items.length, 10), getSelectListTheme());
 		this.#selectList.onSelect = item => {
 			const selected = byId.get(item.value);
-			if (!selected?.action || !options.onAction) {
+			if (selected?.action?.kind !== "focus_cmux_owner" || !options.onAction) {
 				onDismiss();
 				return;
 			}

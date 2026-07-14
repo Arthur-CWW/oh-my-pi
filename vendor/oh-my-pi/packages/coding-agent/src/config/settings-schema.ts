@@ -35,6 +35,14 @@ import {
 } from "../tts/models";
 import { EDIT_MODES } from "../utils/edit-mode";
 import { SEARCH_PROVIDER_OPTIONS, SEARCH_PROVIDER_PREFERENCES, type SearchProviderId } from "../web/search/types";
+import {
+	AUTH_FALLBACK_SETTINGS_SCHEMA,
+	CODEX_RESET_SETTINGS_SCHEMA,
+	type CodexResetsSettings,
+	RETRY_FALLBACK_SETTINGS_SCHEMA,
+} from "./fallback-settings-schema";
+
+export type { CodexAutoRedeemMode } from "./fallback-settings-schema";
 
 /** Unified settings schema - single source of truth for all settings.
  *
@@ -335,6 +343,7 @@ export const SETTINGS_SCHEMA = {
 		values: ["auto", "manual"] as const,
 		default: "auto",
 	},
+	...AUTH_FALLBACK_SETTINGS_SCHEMA,
 
 	autoResume: {
 		type: "boolean",
@@ -1124,6 +1133,17 @@ export const SETTINGS_SCHEMA = {
 	},
 
 	"retry.baseDelayMs": { type: "number", default: 500 },
+	"retry.networkHoldMs": {
+		type: "number",
+		default: 180_000,
+		ui: {
+			tab: "model",
+			group: "Retry & Fallback",
+			label: "Network Retry Hold",
+			description:
+				"How long, in ms, transient network and DNS failures retry the current provider/model before surfacing an error.",
+		},
+	},
 	"retry.maxDelayMs": {
 		type: "number",
 		default: 5 * 60 * 1000,
@@ -1135,36 +1155,7 @@ export const SETTINGS_SCHEMA = {
 				"Maximum wait between retries, in ms. When the provider asks us to wait longer than this and no credential or model fallback succeeds, the request fails fast instead of sleeping (e.g. 3-hour Anthropic rate-limit windows).",
 		},
 	},
-	"retry.modelFallback": {
-		type: "boolean",
-		default: true,
-		ui: {
-			tab: "model",
-			group: "Retry & Fallback",
-			label: "Retry Model Fallback",
-			description: "Allow retry recovery to switch to configured fallback models",
-		},
-	},
-	"retry.fallbackChains": { type: "record", default: {} as Record<string, string[]> },
-	"retry.fallbackRevertPolicy": {
-		type: "enum",
-		values: ["cooldown-expiry", "never"] as const,
-		default: "cooldown-expiry",
-		ui: {
-			tab: "model",
-			group: "Retry & Fallback",
-			label: "Fallback Revert Policy",
-			description: "When to return to the primary model after a fallback",
-			options: [
-				{
-					value: "cooldown-expiry",
-					label: "Cooldown expiry",
-					description: "Return to the primary model after its suppression window ends",
-				},
-				{ value: "never", label: "Never", description: "Stay on the fallback model until manually changed" },
-			],
-		},
-	},
+	...RETRY_FALLBACK_SETTINGS_SCHEMA,
 
 	// ────────────────────────────────────────────────────────────────────────
 	// Interaction
@@ -3851,6 +3842,51 @@ export const SETTINGS_SCHEMA = {
 		},
 	},
 
+	"incidents.enabled": {
+		type: "boolean",
+		default: true,
+		ui: {
+			tab: "tasks",
+			group: "Subagents",
+			label: "Fleet Incident Detection",
+			description: "Detect correlated transient network failures across subagents as fleet incidents.",
+		},
+	},
+
+	"incidents.windowMs": {
+		type: "number",
+		default: 120_000,
+		ui: {
+			tab: "tasks",
+			group: "Subagents",
+			label: "Fleet Incident Window",
+			description: "Time window in milliseconds for correlating same-class failures across distinct subagents.",
+			options: [
+				{ value: "30000", label: "30 seconds" },
+				{ value: "60000", label: "1 minute" },
+				{ value: "120000", label: "2 minutes", description: "Default" },
+				{ value: "300000", label: "5 minutes" },
+			],
+		},
+	},
+
+	"incidents.threshold": {
+		type: "number",
+		default: 3,
+		ui: {
+			tab: "tasks",
+			group: "Subagents",
+			label: "Fleet Incident Threshold",
+			description: "Distinct subagents with same-class failures required to open a fleet incident.",
+			options: [
+				{ value: "2", label: "2 agents" },
+				{ value: "3", label: "3 agents", description: "Default" },
+				{ value: "4", label: "4 agents" },
+				{ value: "5", label: "5 agents" },
+			],
+		},
+	},
+
 	"task.disabledAgents": {
 		type: "array",
 		default: [] as string[],
@@ -4312,48 +4348,7 @@ export const SETTINGS_SCHEMA = {
 		},
 	},
 	// Codex saved rate-limit resets (auto-redeem)
-	"codexResets.autoRedeem": {
-		type: "enum",
-		values: ["unset", "yes", "no"] as const,
-		default: "yes" as const,
-		ui: {
-			tab: "providers",
-			group: "Services",
-			label: "Codex Auto-Redeem Saved Resets",
-			description:
-				"When a turn is blocked by the Codex weekly limit on the active account and no other account is available, automatically spend one eligible saved reset. yes is the default, unset asks before spending, and no disables the check. Requires retries enabled.",
-			options: [
-				{
-					value: "unset",
-					label: "Unset",
-					description: "Check eligibility, then ask before spending the first saved reset.",
-				},
-				{ value: "yes", label: "Yes", description: "Spend eligible saved resets without prompting." },
-				{ value: "no", label: "No", description: "Do not run the saved-reset auto-redeem check." },
-			],
-		},
-	},
-	"codexResets.minBlockedMinutes": {
-		type: "number",
-		default: 60,
-		ui: {
-			tab: "providers",
-			group: "Services",
-			label: "Codex Auto-Redeem Min Block",
-			description:
-				"Only auto-redeem when the natural weekly reset is at least this many minutes away (don't spend a ~30-day credit to save a short wait).",
-		},
-	},
-	"codexResets.keepCredits": {
-		type: "number",
-		default: 0,
-		ui: {
-			tab: "providers",
-			group: "Services",
-			label: "Codex Auto-Redeem Reserve",
-			description: "Never auto-spend below this many saved resets (0 = the last credit may be spent automatically).",
-		},
-	},
+	...CODEX_RESET_SETTINGS_SCHEMA,
 	"provider.appendOnlyContext": {
 		type: "enum",
 		values: ["auto", "on", "off"] as const,
@@ -4624,10 +4619,18 @@ export interface RetrySettings {
 	enabled: boolean;
 	maxRetries: number;
 	baseDelayMs: number;
+	networkHoldMs: number;
 	maxDelayMs: number;
-	modelFallback: boolean;
-	fallbackChains: Record<string, string[]>;
+	fallbackApproval: boolean;
+	proposableFallbackChains: Record<string, string[]>;
+	subagentFallbackAutoApproveUntil: string;
 	fallbackRevertPolicy: "cooldown-expiry" | "never";
+}
+
+export interface IncidentsSettings {
+	enabled: boolean;
+	windowMs: number;
+	threshold: number;
 }
 
 export interface MemoriesSettings {
@@ -4743,19 +4746,13 @@ export interface ShellMinimizerSettings {
 	sourceOutlineLevel: "default" | "aggressive";
 	legacyFilters: boolean | undefined;
 }
-export type CodexAutoRedeemMode = "unset" | "yes" | "no";
-
-export interface CodexResetsSettings {
-	autoRedeem: CodexAutoRedeemMode;
-	minBlockedMinutes: number;
-	keepCredits: number;
-}
 
 /** Map group prefix -> typed settings interface */
 export interface GroupTypeMap {
 	compaction: CompactionSettings;
 	contextPromotion: ContextPromotionSettings;
 	retry: RetrySettings;
+	incidents: IncidentsSettings;
 	memories: MemoriesSettings;
 	branchSummary: BranchSummarySettings;
 	skills: SkillsSettings;

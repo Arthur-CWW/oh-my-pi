@@ -2,7 +2,7 @@
  * Shared utilities for compaction and branch summarization.
  */
 
-import type { Message, ToolCall } from "@oh-my-pi/pi-ai";
+import type { Message, ToolCall, UserContent, VideoContent } from "@oh-my-pi/pi-ai";
 import { type Dialect, getDialectDefinition } from "@oh-my-pi/pi-ai/dialect";
 import { formatGroupedPaths, prompt } from "@oh-my-pi/pi-utils";
 import type { AgentMessage } from "../types";
@@ -184,6 +184,65 @@ function truncateForSummary(text: string, maxChars: number): string {
 	return `${text.slice(0, maxChars)}\n\n[... ${truncatedChars} more characters truncated]`;
 }
 
+export interface SerializedConversation {
+	text: string;
+	/** Original video blocks in chronological order; base64 payloads are never copied. */
+	videos: VideoContent[];
+}
+
+/**
+ * Replace videos with ordinal transcript markers while retaining the original
+ * blocks for attachment to the summary request.
+ */
+function extractConversationVideos(messages: Message[]): { messages: Message[]; videos: VideoContent[] } {
+	const videos: VideoContent[] = [];
+	let markedMessages: Message[] | undefined;
+	for (let messageIndex = 0; messageIndex < messages.length; messageIndex++) {
+		const message = messages[messageIndex];
+		if ((message.role !== "user" && message.role !== "developer") || typeof message.content === "string") {
+			markedMessages?.push(message);
+			continue;
+		}
+
+		let content: UserContent[] | undefined;
+		for (let blockIndex = 0; blockIndex < message.content.length; blockIndex++) {
+			const block = message.content[blockIndex];
+			if (block.type !== "video") {
+				content?.push(block);
+				continue;
+			}
+			if (!content) content = message.content.slice(0, blockIndex);
+			videos.push(block);
+			content.push({
+				type: "text",
+				text: `[Video attachment ${videos.length} is attached to this summary request]`,
+			});
+		}
+
+		if (!content) {
+			markedMessages?.push(message);
+			continue;
+		}
+		if (!markedMessages) markedMessages = messages.slice(0, messageIndex);
+		markedMessages.push({ ...message, content });
+	}
+	return { messages: markedMessages ?? messages, videos };
+}
+
+/** Serialize a transcript and retain its chronological videos for a native summary request. */
+export function serializeConversationWithVideos(messages: Message[], dialect?: Dialect): SerializedConversation {
+	const extracted = extractConversationVideos(messages);
+	return {
+		text: serializeConversation(extracted.messages, dialect),
+		videos: extracted.videos,
+	};
+}
+
+/** Build one native summary user message body without cloning media payloads. */
+export function buildSummaryContent(text: string, videos: readonly VideoContent[]): UserContent[] {
+	return [{ type: "text", text }, ...videos];
+}
+
 /**
  * Serialize LLM messages to text for summarization.
  * This prevents the model from treating it as a conversation to continue.
@@ -228,7 +287,7 @@ export function serializeConversation(messages: Message[], dialect?: Dialect): s
 
 	const parts: string[] = [];
 	for (const msg of messages) {
-		if (msg.role === "user") {
+		if (msg.role === "user" || msg.role === "developer") {
 			const content =
 				typeof msg.content === "string"
 					? msg.content
@@ -236,7 +295,7 @@ export function serializeConversation(messages: Message[], dialect?: Dialect): s
 							.filter((c): c is { type: "text"; text: string } => c.type === "text")
 							.map(c => c.text)
 							.join("");
-			if (content) parts.push(`[User]: ${content}`);
+			if (content) parts.push(`[${msg.role === "user" ? "User" : "Developer"}]: ${content}`);
 		} else if (msg.role === "assistant") {
 			const textParts: string[] = [];
 			const thinkingParts: string[] = [];

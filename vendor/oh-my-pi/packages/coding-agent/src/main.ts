@@ -9,7 +9,7 @@ import * as fsSync from "node:fs";
 import * as os from "node:os";
 import { createInterface } from "node:readline/promises";
 import { EventLoopKeepalive } from "@oh-my-pi/pi-agent-core";
-import type { ImageContent } from "@oh-my-pi/pi-ai";
+import type { MediaContent } from "@oh-my-pi/pi-ai";
 import {
 	$env,
 	getLogPath,
@@ -24,8 +24,7 @@ import chalk from "chalk";
 import { reset as resetCapabilities } from "./capability";
 import { type Args, reportUnrecognizedFlags } from "./cli/args";
 import { applyExtensionFlags, type ExtensionFlagSink } from "./cli/extension-flags";
-import { processFileArguments } from "./cli/file-processor";
-import { buildInitialMessage } from "./cli/initial-message";
+import { prepareInitialInput, submitInitialPrompts } from "./cli/initial-input";
 import { selectSession } from "./cli/session-picker";
 import { applyStartupCwd } from "./cli/startup-cwd";
 import {
@@ -61,6 +60,7 @@ import type { MCPManager } from "./mcp";
 import { InteractiveMode } from "./modes/interactive-mode";
 import { createRichDisposableTerminalViewFactory } from "./modes/disposable-interactive-view";
 import { runDisposableInteractiveMode } from "./modes/run-disposable-interactive-mode";
+import { focusLiveCmuxOwner } from "./modes/utils/cmux-owner-navigation";
 import type { PrintModeOptions } from "./modes/print-mode";
 import { CURRENT_SETUP_VERSION } from "./modes/setup-version";
 import { initTheme, stopThemeWatcher } from "./modes/theme/theme";
@@ -314,6 +314,7 @@ export async function submitInteractiveInput(
 		return;
 	}
 
+	let failed = false;
 	try {
 		using _keepalive = new EventLoopKeepalive();
 		// Honor the submission's queue intent, defaulting to followUp. Reading
@@ -357,13 +358,14 @@ export async function submitInteractiveInput(
 				userInitiated: input.userInitiated,
 			});
 		} else {
-			await session.prompt(input.text, { images: input.images, streamingBehavior });
+			await session.prompt(input.text, { attachments: input.attachments, streamingBehavior });
 		}
 	} catch (error: unknown) {
+		failed = true;
 		const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
 		mode.showError(errorMessage);
 	} finally {
-		mode.finishPendingSubmission(input);
+		mode.finishPendingSubmission(input, failed);
 		await mode.checkShutdownRequested();
 	}
 }
@@ -440,7 +442,7 @@ async function runInteractiveMode(
 	resuming: boolean,
 	forceSetupWizard: boolean,
 	initialMessage?: string,
-	initialImages?: ImageContent[],
+	initialAttachments?: MediaContent[],
 	joinLink?: string,
 ): Promise<void> {
 
@@ -503,25 +505,7 @@ async function runInteractiveMode(
 		await executeBuiltinSlashCommand(`/join ${joinLink}`, { ctx: mode });
 	}
 
-	if (initialMessage !== undefined) {
-		try {
-			using _keepalive = new EventLoopKeepalive();
-			await session.prompt(initialMessage, { images: initialImages });
-		} catch (error: unknown) {
-			const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
-			mode.showError(errorMessage);
-		}
-	}
-
-	for (const message of initialMessages) {
-		try {
-			using _keepalive = new EventLoopKeepalive();
-			await session.prompt(message);
-		} catch (error: unknown) {
-			const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
-			mode.showError(errorMessage);
-		}
-	}
+	await submitInitialPrompts(mode, session, initialMessages, initialMessage, initialAttachments);
 
 	while (true) {
 		const input = await mode.getUserInput();
@@ -841,12 +825,13 @@ async function buildSessionOptions(
 			cliModel: parsed.model,
 			modelRegistry,
 			preferences: modelMatchPreferences,
+			settings: activeSettings,
 		});
 		if (resolved.warning) {
 			process.stderr.write(`${chalk.yellow(`Warning: ${resolved.warning}`)}\n`);
 		}
 		if (resolved.error) {
-			if (!parsed.provider && !parsed.model.includes(":")) {
+			if (!parsed.provider && !parsed.model.includes(":") && !parsed.model.startsWith("pi/")) {
 				// Model not found in built-in registry — defer resolution to after extensions load
 				// (extensions may register additional providers/models via registerProvider)
 				options.modelPattern = parsed.model;
@@ -1258,7 +1243,20 @@ export async function runRootCommand(
 			);
 			sessionManager.bindSessionOwnership(ownership);
 		} catch (error) {
-			if (error instanceof ExternalSessionOwner || error instanceof ExternalSessionOwnerUnverifiable) {
+			if (error instanceof ExternalSessionOwner) {
+				const focus = await focusLiveCmuxOwner(
+					sessionManager.getSessionFile() as string,
+					sessionManager.getSessionId(),
+				);
+				if (focus.kind === "focused") return;
+				const detail =
+					focus.kind === "failed"
+						? `; unable to focus cmux owner: ${focus.reason}`
+						: "; cmux owner view is unavailable";
+				process.stderr.write(`${chalk.red(`Error: ${error.message}${detail}`)}\n`);
+				return;
+			}
+			if (error instanceof ExternalSessionOwnerUnverifiable) {
 				process.stderr.write(`${chalk.red(`Error: ${error.message}`)}\n`);
 				return;
 			}
@@ -1367,20 +1365,11 @@ export async function runRootCommand(
 		if (reportUnrecognizedFlags(initialArgs)) {
 			process.exit(2);
 		}
-		const processedFiles =
-			initialArgs.fileArgs.length > 0
-				? await logger.time("processFileArguments", () =>
-						processFileArguments(initialArgs.fileArgs, {
-							autoResizeImages: settingsInstance.get("images.autoResize"),
-						}),
-					)
-				: undefined;
-		const { initialMessage, initialImages } = buildInitialMessage({
-			parsed: initialArgs,
-			fileText: processedFiles?.text,
-			fileImages: processedFiles?.images,
-			stdinContent: pipedInput,
-		});
+		const { initialMessage, initialAttachments } = await prepareInitialInput(
+			initialArgs,
+			pipedInput,
+			settingsInstance.get("images.autoResize"),
+		);
 
 		maybeShowStartupSplash({
 			isInteractive,
@@ -1477,10 +1466,11 @@ export async function runRootCommand(
 					restartHandoff.predecessorOwnerEpoch,
 				);
 			}
-			if (restartedTurn) {
+			if (adoption.adopted.length > 0) {
+				const revivableIds = adoption.adopted.map(child => child.id).join(", ");
 				notifs.push({
 					kind: "info",
-					message: "A subagent turn interrupted by restart was resumed from its journal.",
+					message: `${restartedTurn ? "Interrupted subagent turn resumed. " : ""}Revivable children: ${revivableIds}. Send a child one \`irc\` message by id to resume it in place.`,
 				});
 			}
 		}
@@ -1556,7 +1546,7 @@ export async function runRootCommand(
 						Boolean(parsedArgs.continue || parsedArgs.resume || parsedArgs.fork),
 						deps.forceSetupWizard === true,
 						initialMessage,
-						initialImages,
+						initialAttachments,
 						parsedArgs.join,
 					),
 			});
@@ -1577,7 +1567,7 @@ export async function runRootCommand(
 				mode,
 				messages: initialArgs.messages,
 				initialMessage,
-				initialImages,
+				initialAttachments,
 			});
 			if ($env.PI_TIMING) {
 				logger.printTimings();

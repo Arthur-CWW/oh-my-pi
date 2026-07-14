@@ -290,6 +290,17 @@ function extractCompleteSequences(buffer: string): { sequences: string[]; remain
 	return { sequences, remainder: "" };
 }
 
+/**
+ * Attach the decoder and enable bracketed paste before releasing stdin.
+ * Input accumulated before startup can then only flow through the buffer.
+ */
+export function startBufferedStdin(onData: (data: string) => void, enableBracketedPaste: () => void): void {
+	process.stdin.setEncoding("utf8");
+	process.stdin.on("data", onData);
+	enableBracketedPaste();
+	process.stdin.resume();
+}
+
 export type StdinBufferOptions = {
 	/**
 	 * Maximum time to wait for sequence completion (default: 75ms).
@@ -349,6 +360,20 @@ export class StdinBuffer extends EventEmitter<StdinBufferEventMap> {
 		this.#pasteByteLimit = options.pasteByteLimit ?? PASTE_MAX_BYTES;
 	}
 
+	/**
+	 * A raw terminal paste can be queued before bracketed-paste mode is enabled.
+	 * Treat a single escape-free read containing an embedded line break as one
+	 * paste. A normal typed line followed by Enter has only a trailing CR and
+	 * stays on the ordinary key path; separate Enter reads stay separate too.
+	 */
+	#isUnbracketedMultilineChunk(data: string): boolean {
+		if (this.#buffer.length > 0 || this.#pasteMode || data.includes(ESC)) return false;
+		const lineBreak = data.search(/\r\n|[\r\n]/);
+		if (lineBreak < 0) return false;
+		const lineBreakLength = data.startsWith("\r\n", lineBreak) ? 2 : 1;
+		return lineBreak + lineBreakLength < data.length;
+	}
+
 	process(data: string | Buffer): void {
 		// Handle high-byte conversion (for compatibility with parseKeypress)
 		// If buffer has single byte > 127, convert to ESC + (byte - 128)
@@ -362,6 +387,12 @@ export class StdinBuffer extends EventEmitter<StdinBufferEventMap> {
 			}
 		} else {
 			str = data;
+		}
+
+		if (this.#isUnbracketedMultilineChunk(str)) {
+			this.#pendingKittyPrintableCodepoint = undefined;
+			this.emit("paste", str);
+			return;
 		}
 
 		if (this.#flushDeferral && this.#isFreshEscapeAfterDeferredFlush(str)) {

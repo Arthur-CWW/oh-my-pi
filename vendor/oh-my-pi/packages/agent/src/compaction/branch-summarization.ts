@@ -5,7 +5,7 @@
  * a summary of the branch being left so context isn't lost.
  */
 
-import type { ApiKey, Model } from "@oh-my-pi/pi-ai";
+import { type ApiKey, contextHasVideo, type Model, supportsNativeVideoInput } from "@oh-my-pi/pi-ai";
 import { preferredDialect } from "@oh-my-pi/pi-catalog/identity";
 import { prompt } from "@oh-my-pi/pi-utils";
 import { type AgentTelemetry, instrumentedCompleteSimple } from "../telemetry";
@@ -22,13 +22,14 @@ import {
 import branchSummaryPrompt from "./prompts/branch-summary.md" with { type: "text" };
 import branchSummaryPreamble from "./prompts/branch-summary-preamble.md" with { type: "text" };
 import {
+	buildSummaryContent,
 	computeFileLists,
 	createFileOps,
 	extractFileOpsFromMessage,
 	type FileOperations,
-	SUMMARIZATION_SYSTEM_PROMPT,
-	serializeConversation,
+	serializeConversationWithVideos,
 	stripReadSelector,
+	SUMMARIZATION_SYSTEM_PROMPT,
 	upsertFileOperations,
 } from "./utils";
 
@@ -288,19 +289,24 @@ export async function generateBranchSummary(
 		return { summary: "No content to summarize" };
 	}
 
-	// Transform to LLM-compatible messages, then serialize to text
-	// Serialization prevents the model from treating it as a conversation to continue
+	// Transform to LLM-compatible messages, then serialize while retaining
+	// chronological video blocks for the native summary request.
 	const llmMessages = (options.convertToLlm ?? defaultConvertToLlm)(messages);
-	const conversationText = serializeConversation(llmMessages, preferredDialect(model.id));
+	if (contextHasVideo({ messages: llmMessages }) && !supportsNativeVideoInput(model)) {
+		return {
+			error: `Branch summarization requires native video input, but ${model.provider}/${model.id} is not video-capable. Select the configured vision model.`,
+		};
+	}
+	const conversation = serializeConversationWithVideos(llmMessages, preferredDialect(model.id));
 
 	// Build prompt
 	const instructions = customInstructions || BRANCH_SUMMARY_PROMPT;
-	const promptText = `<conversation>\n${conversationText}\n</conversation>\n\n${instructions}`;
+	const promptText = `<conversation>\n${conversation.text}\n</conversation>\n\n${instructions}`;
 
 	const summarizationMessages = [
 		{
 			role: "user" as const,
-			content: [{ type: "text" as const, text: promptText }],
+			content: buildSummaryContent(promptText, conversation.videos),
 			timestamp: Date.now(),
 		},
 	];

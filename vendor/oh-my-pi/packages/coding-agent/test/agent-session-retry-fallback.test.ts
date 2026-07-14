@@ -2,13 +2,21 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import * as path from "node:path";
 import { scheduler } from "node:timers/promises";
 import { Agent } from "@oh-my-pi/pi-agent-core";
-import { type AssistantMessage, Effort, type Model, type ProviderSessionState } from "@oh-my-pi/pi-ai";
+import {
+	type AssistantMessage,
+	Effort,
+	type Model,
+	type ProviderSessionState,
+	type VideoContent,
+} from "@oh-my-pi/pi-ai";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
+import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { writeModelCache } from "@oh-my-pi/pi-catalog/model-cache";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import { AgentSession, type AgentSessionEvent } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
@@ -16,6 +24,11 @@ import { TempDir } from "@oh-my-pi/pi-utils";
 
 type AutoRetryStartEvent = Extract<AgentSessionEvent, { type: "auto_retry_start" }>;
 type AutoRetryEndEvent = Extract<AgentSessionEvent, { type: "auto_retry_end" }>;
+type FallbackApprovalResolvedEvent = Extract<AgentSessionEvent, { type: "retry_fallback_approval_resolved" }>;
+
+const FALLBACK_SUBAGENT_ID = "RetryFallbackTestChild";
+const FALLBACK_AUTO_APPROVE_UNTIL = "9999-12-31T23:59:59.999Z";
+const FALLBACK_SUBAGENT_CONFIG = { agentId: FALLBACK_SUBAGENT_ID, agentKind: "sub" as const };
 
 function trackRetryEvents(session: AgentSession): {
 	retryStartEvents: AutoRetryStartEvent[];
@@ -40,6 +53,45 @@ function getLastAssistantMessage(session: AgentSession): AssistantMessage {
 		throw new Error("Expected final assistant message");
 	}
 	return lastMessage;
+}
+
+function createDnsFetchError(): TypeError {
+	const cause = new Error("getaddrinfo ENOTFOUND chatgpt.com") as Error & { code: string };
+	cause.code = "ENOTFOUND";
+	return new TypeError("fetch failed", { cause });
+}
+
+function createFetchBackedAgent(
+	primaryModel: Model,
+	requestedModels: string[],
+	fetchAttempt: () => Promise<void>,
+): Agent {
+	const mock = createMockModel();
+	return new Agent({
+		getApiKey: provider => `${provider}-test-key`,
+		initialState: {
+			model: primaryModel,
+			systemPrompt: ["Test"],
+			tools: [],
+			messages: [],
+		},
+		streamFn: (model, context, options) => {
+			requestedModels.push(`${model.provider}/${model.id}`);
+			const stream = new AssistantMessageEventStream();
+			void (async () => {
+				try {
+					await fetchAttempt();
+					mock.push({ content: ["Recovered on the same model"] });
+					const inner = mock.stream(model, context, options);
+					for await (const event of inner) stream.push(event);
+					if (!stream.done) stream.end(await inner.result());
+				} catch (error) {
+					stream.fail(error);
+				}
+			})();
+			return stream;
+		},
+	});
 }
 
 function createFallbackAgent(primaryModel: Model, requestedModels: string[]): Agent {
@@ -97,6 +149,14 @@ describe("AgentSession retry fallback", () => {
 		// (default 5-minute suppression) so state never leaks between tests.
 		modelRegistry = sharedRegistry;
 		modelRegistry.clearSuppressedSelectors();
+		AgentRegistry.resetGlobalForTests();
+		AgentRegistry.global().register({
+			id: FALLBACK_SUBAGENT_ID,
+			displayName: FALLBACK_SUBAGENT_ID,
+			kind: "sub",
+			parentId: "Main",
+			session: null,
+		});
 	});
 
 	afterEach(async () => {
@@ -120,6 +180,7 @@ describe("AgentSession retry fallback", () => {
 		const retryEndEvents: Array<Extract<AgentSessionEvent, { type: "auto_retry_end" }>> = [];
 		const fallbackAppliedEvents: Array<Extract<AgentSessionEvent, { type: "retry_fallback_applied" }>> = [];
 		const fallbackSucceededEvents: Array<Extract<AgentSessionEvent, { type: "retry_fallback_succeeded" }>> = [];
+		const fallbackApprovalEvents: FallbackApprovalResolvedEvent[] = [];
 
 		const mock = createMockModel();
 		const agent = new Agent({
@@ -148,7 +209,8 @@ describe("AgentSession retry fallback", () => {
 		const settings = Settings.isolated({
 			"compaction.enabled": false,
 			"retry.baseDelayMs": 5,
-			"retry.fallbackChains": {
+			"retry.subagentFallbackAutoApproveUntil": FALLBACK_AUTO_APPROVE_UNTIL,
+			"retry.proposableFallbackChains": {
 				default: [
 					`${firstFallback.provider}/${firstFallback.id}`,
 					`${secondFallback.provider}/${secondFallback.id}`,
@@ -162,6 +224,7 @@ describe("AgentSession retry fallback", () => {
 			sessionManager: SessionManager.inMemory(),
 			settings,
 			modelRegistry,
+			...FALLBACK_SUBAGENT_CONFIG,
 		});
 
 		session.subscribe(event => {
@@ -177,6 +240,9 @@ describe("AgentSession retry fallback", () => {
 			if (event.type === "retry_fallback_succeeded") {
 				fallbackSucceededEvents.push(event);
 			}
+			if (event.type === "retry_fallback_approval_resolved") {
+				fallbackApprovalEvents.push(event);
+			}
 		});
 
 		await session.prompt("Recover from rate limits");
@@ -189,7 +255,25 @@ describe("AgentSession retry fallback", () => {
 		]);
 		expect(session.model?.provider).toBe(secondFallback.provider);
 		expect(session.model?.id).toBe(secondFallback.id);
-		expect(retryStartEvents.map(event => event.delayMs)).toEqual([0, 0]);
+		expect(retryStartEvents).toEqual([]);
+		expect(
+			fallbackApprovalEvents.map(event => ({
+				sourceModel: event.proposal.sourceModel,
+				proposedModel: event.proposal.proposedModel,
+				action: event.action,
+			})),
+		).toEqual([
+			{
+				sourceModel: `${primaryModel.provider}/${primaryModel.id}`,
+				proposedModel: `${firstFallback.provider}/${firstFallback.id}`,
+				action: { kind: "approve" },
+			},
+			{
+				sourceModel: `${firstFallback.provider}/${firstFallback.id}`,
+				proposedModel: `${secondFallback.provider}/${secondFallback.id}`,
+				action: { kind: "approve" },
+			},
+		]);
 		expect(fallbackAppliedEvents).toEqual([
 			{
 				type: "retry_fallback_applied",
@@ -226,6 +310,7 @@ describe("AgentSession retry fallback", () => {
 		const fallbackAppliedEvents: Array<Extract<AgentSessionEvent, { type: "retry_fallback_applied" }>> = [];
 		const fallbackSucceededEvents: Array<Extract<AgentSessionEvent, { type: "retry_fallback_succeeded" }>> = [];
 		const retryStartEvents: Array<Extract<AgentSessionEvent, { type: "auto_retry_start" }>> = [];
+		const fallbackApprovalEvents: FallbackApprovalResolvedEvent[] = [];
 		const mock = createMockModel();
 		let primaryAttempts = 0;
 		const refusalDetails = {
@@ -266,10 +351,11 @@ describe("AgentSession retry fallback", () => {
 			"compaction.enabled": false,
 			"retry.baseDelayMs": 5,
 			"retry.maxRetries": 1,
-			"retry.fallbackChains": {
+			"retry.subagentFallbackAutoApproveUntil": FALLBACK_AUTO_APPROVE_UNTIL,
+			"retry.proposableFallbackChains": {
 				default: [`${fallbackModel.provider}/${fallbackModel.id}`],
 			},
-			"retry.fallbackRevertPolicy": "cooldown-expiry",
+			"retry.fallbackRevertPolicy": "never",
 		});
 		settings.setModelRole("default", `${primaryModel.provider}/${primaryModel.id}`);
 
@@ -278,6 +364,7 @@ describe("AgentSession retry fallback", () => {
 			sessionManager: SessionManager.inMemory(),
 			settings,
 			modelRegistry,
+			...FALLBACK_SUBAGENT_CONFIG,
 		});
 		session.subscribe(event => {
 			if (event.type === "auto_retry_start") {
@@ -288,6 +375,9 @@ describe("AgentSession retry fallback", () => {
 			}
 			if (event.type === "retry_fallback_succeeded") {
 				fallbackSucceededEvents.push(event);
+			}
+			if (event.type === "retry_fallback_approval_resolved") {
+				fallbackApprovalEvents.push(event);
 			}
 		});
 		let now = Date.now();
@@ -308,10 +398,15 @@ describe("AgentSession retry fallback", () => {
 				role: "default",
 			},
 		]);
-		expect(retryStartEvents).toHaveLength(1);
-		expect(retryStartEvents[0]?.errorMessage).toBe(
-			"[rerouted after provider refusal] Refusal (cyber): Classifier declined this turn.",
-		);
+		expect(fallbackApprovalEvents).toHaveLength(1);
+		expect(fallbackApprovalEvents[0]).toMatchObject({
+			proposal: {
+				sourceModel: `${primaryModel.provider}/${primaryModel.id}`,
+				proposedModel: `${fallbackModel.provider}/${fallbackModel.id}`,
+				cause: "provider",
+			},
+			action: { kind: "approve" },
+		});
 		expect(fallbackSucceededEvents).toEqual([
 			{
 				type: "retry_fallback_succeeded",
@@ -381,7 +476,8 @@ describe("AgentSession retry fallback", () => {
 			"compaction.enabled": false,
 			"retry.baseDelayMs": 5,
 			"retry.maxRetries": 1,
-			"retry.fallbackChains": {
+			"retry.subagentFallbackAutoApproveUntil": FALLBACK_AUTO_APPROVE_UNTIL,
+			"retry.proposableFallbackChains": {
 				default: [
 					`${firstFallback.provider}/${firstFallback.id}`,
 					`${secondFallback.provider}/${secondFallback.id}`,
@@ -395,6 +491,7 @@ describe("AgentSession retry fallback", () => {
 			sessionManager: SessionManager.inMemory(),
 			settings,
 			modelRegistry,
+			...FALLBACK_SUBAGENT_CONFIG,
 		});
 		session.subscribe(event => {
 			if (event.type === "retry_fallback_applied") {
@@ -471,6 +568,7 @@ describe("AgentSession retry fallback", () => {
 		expect(requestedModels).toEqual([`${model.provider}/${model.id}`, `${model.provider}/${model.id}`]);
 		expect(retryStartEvents).toHaveLength(1);
 		expect(retryStartEvents[0]).toMatchObject({
+			cause: "rate-limit",
 			attempt: 1,
 			maxAttempts: 1,
 			delayMs: 50,
@@ -515,8 +613,7 @@ describe("AgentSession retry fallback", () => {
 			"compaction.enabled": false,
 			"retry.baseDelayMs": 5,
 			"retry.maxRetries": 1,
-			"retry.modelFallback": false,
-			"retry.fallbackChains": {
+			"retry.proposableFallbackChains": {
 				default: [`${fallbackModel.provider}/${fallbackModel.id}`],
 			},
 		});
@@ -774,7 +871,7 @@ describe("AgentSession retry fallback", () => {
 			"compaction.enabled": false,
 			"retry.baseDelayMs": 5,
 			"retry.maxRetries": 1,
-			"retry.fallbackChains": {
+			"retry.proposableFallbackChains": {
 				default: [`${fallbackModel.provider}/${fallbackModel.id}`],
 			},
 		});
@@ -855,7 +952,7 @@ describe("AgentSession retry fallback", () => {
 			"compaction.enabled": false,
 			"retry.baseDelayMs": 5,
 			"retry.maxRetries": 1,
-			"retry.fallbackChains": {
+			"retry.proposableFallbackChains": {
 				default: [`${fallbackModel.provider}/${fallbackModel.id}`],
 			},
 		});
@@ -987,7 +1084,7 @@ describe("AgentSession retry fallback", () => {
 			"compaction.enabled": false,
 			"retry.baseDelayMs": 5,
 			"retry.maxRetries": 1,
-			"retry.fallbackChains": {
+			"retry.proposableFallbackChains": {
 				default: [`${fallbackModel.provider}/${fallbackModel.id}`],
 			},
 		});
@@ -1074,6 +1171,7 @@ describe("AgentSession retry fallback", () => {
 		const cleanFailure = "Anthropic content filter blocked subagent output after fallback retries.";
 		const requestedModels: string[] = [];
 		const fallbackAppliedEvents: Array<Extract<AgentSessionEvent, { type: "retry_fallback_applied" }>> = [];
+		const fallbackApprovalEvents: FallbackApprovalResolvedEvent[] = [];
 		const mock = createMockModel({ handler: () => ({ throw: contentFilterError }) });
 		const agent = new Agent({
 			getApiKey: provider => `${provider}-test-key`,
@@ -1093,7 +1191,8 @@ describe("AgentSession retry fallback", () => {
 			"compaction.enabled": false,
 			"retry.baseDelayMs": 5,
 			"retry.maxRetries": 3,
-			"retry.fallbackChains": {
+			"retry.subagentFallbackAutoApproveUntil": FALLBACK_AUTO_APPROVE_UNTIL,
+			"retry.proposableFallbackChains": {
 				default: [
 					`${firstFallback.provider}/${firstFallback.id}`,
 					`${secondFallback.provider}/${secondFallback.id}`,
@@ -1107,11 +1206,15 @@ describe("AgentSession retry fallback", () => {
 			sessionManager: SessionManager.inMemory(),
 			settings,
 			modelRegistry,
+			...FALLBACK_SUBAGENT_CONFIG,
 		});
 		const { retryStartEvents, retryEndEvents } = trackRetryEvents(session);
 		session.subscribe(event => {
 			if (event.type === "retry_fallback_applied") {
 				fallbackAppliedEvents.push(event);
+			}
+			if (event.type === "retry_fallback_approval_resolved") {
+				fallbackApprovalEvents.push(event);
 			}
 		});
 
@@ -1138,10 +1241,24 @@ describe("AgentSession retry fallback", () => {
 				role: "default",
 			},
 		]);
-		expect(retryStartEvents.map(event => event.errorMessage)).toEqual([
-			contentFilterError,
-			contentFilterError,
-			contentFilterError,
+		expect(retryStartEvents.map(event => event.errorMessage)).toEqual([contentFilterError]);
+		expect(
+			fallbackApprovalEvents.map(event => ({
+				sourceModel: event.proposal.sourceModel,
+				proposedModel: event.proposal.proposedModel,
+				action: event.action,
+			})),
+		).toEqual([
+			{
+				sourceModel: `${primaryModel.provider}/${primaryModel.id}`,
+				proposedModel: `${firstFallback.provider}/${firstFallback.id}`,
+				action: { kind: "approve" },
+			},
+			{
+				sourceModel: `${firstFallback.provider}/${firstFallback.id}`,
+				proposedModel: `${secondFallback.provider}/${secondFallback.id}`,
+				action: { kind: "approve" },
+			},
 		]);
 		expect(retryEndEvents).toEqual([
 			{
@@ -1217,7 +1334,8 @@ describe("AgentSession retry fallback", () => {
 		const settings = Settings.isolated({
 			"compaction.enabled": false,
 			"retry.baseDelayMs": 5,
-			"retry.fallbackChains": {
+			"retry.subagentFallbackAutoApproveUntil": FALLBACK_AUTO_APPROVE_UNTIL,
+			"retry.proposableFallbackChains": {
 				default: [`${fallbackModel.provider}/${fallbackModel.id}`],
 			},
 			"retry.fallbackRevertPolicy": "cooldown-expiry",
@@ -1229,6 +1347,7 @@ describe("AgentSession retry fallback", () => {
 			sessionManager: SessionManager.inMemory(),
 			settings,
 			modelRegistry,
+			...FALLBACK_SUBAGENT_CONFIG,
 		});
 		let now = Date.now();
 		vi.spyOn(Date, "now").mockImplementation(() => now);
@@ -1278,7 +1397,8 @@ describe("AgentSession retry fallback", () => {
 		const settings = Settings.isolated({
 			"compaction.enabled": false,
 			"retry.baseDelayMs": 5,
-			"retry.fallbackChains": {
+			"retry.subagentFallbackAutoApproveUntil": FALLBACK_AUTO_APPROVE_UNTIL,
+			"retry.proposableFallbackChains": {
 				default: [`${fallbackModel.provider}/${fallbackModel.id}`],
 			},
 			"retry.fallbackRevertPolicy": "cooldown-expiry",
@@ -1291,6 +1411,7 @@ describe("AgentSession retry fallback", () => {
 			settings,
 			modelRegistry,
 			thinkingLevel: Effort.High,
+			...FALLBACK_SUBAGENT_CONFIG,
 		});
 		let now = Date.now();
 		vi.spyOn(Date, "now").mockImplementation(() => now);
@@ -1341,7 +1462,7 @@ describe("AgentSession retry fallback", () => {
 
 		const settings = Settings.isolated({
 			"compaction.enabled": false,
-			"retry.fallbackChains": { default: ["ollama-cloud/deepseek-v4-pro"] },
+			"retry.proposableFallbackChains": { default: ["ollama-cloud/deepseek-v4-pro"] },
 		});
 		settings.setModelRole("default", `${primaryModel.provider}/${primaryModel.id}`);
 		const agent = new Agent({
@@ -1432,4 +1553,189 @@ describe("AgentSession retry fallback", () => {
 		}
 		expect(contentBlock.text).toBe("Recovered after Gemini malformed function call");
 	});
+	it("never chooses a text/image-only retry fallback for pending video context", async () => {
+		const bundledVideoModel = getBundledModel("google-antigravity", "gemini-3-pro");
+		const imageOnlyFallback = getBundledModel("google-antigravity", "claude-sonnet-4-5");
+		if (!bundledVideoModel || !imageOnlyFallback) {
+			throw new Error("Expected bundled Antigravity models to exist");
+		}
+		const primaryModel: Model = { ...bundledVideoModel, input: ["text", "image", "video"] };
+		authStorage.setRuntimeApiKey("google-antigravity", "antigravity-test-key");
+
+		const requestedModels: string[] = [];
+		const mock = createMockModel();
+		let primaryAttempts = 0;
+		const agent = new Agent({
+			getApiKey: provider => `${provider}-test-key`,
+			initialState: { model: primaryModel, systemPrompt: ["Test"], tools: [], messages: [] },
+			streamFn: (requestedModel, context, options) => {
+				requestedModels.push(`${requestedModel.provider}/${requestedModel.id}`);
+				if (requestedModel.provider !== primaryModel.provider || requestedModel.id !== primaryModel.id) {
+					throw new Error(`Unexpected text/image-only retry fallback: ${requestedModel.provider}/${requestedModel.id}`);
+				}
+				if (primaryAttempts++ === 0) {
+					mock.push({ throw: "rate limit exceeded retry-after-ms=1" });
+				} else {
+					mock.push({ content: ["Recovered with native video model"] });
+				}
+				return mock.stream(requestedModel, context, options);
+			},
+		});
+		const settings = Settings.isolated({
+			"compaction.enabled": false,
+			"retry.baseDelayMs": 5,
+			"retry.maxRetries": 1,
+			"retry.proposableFallbackChains": {
+				default: [`${imageOnlyFallback.provider}/${imageOnlyFallback.id}`],
+			},
+		});
+		settings.setModelRole("default", `${primaryModel.provider}/${primaryModel.id}`);
+		session = new AgentSession({
+			agent,
+			sessionManager: SessionManager.inMemory(),
+			settings,
+			modelRegistry,
+		});
+		const { retryStartEvents, retryEndEvents } = trackRetryEvents(session);
+		const video: VideoContent = { type: "video", data: "AAECAw==", mimeType: "video/mp4" };
+		const videoMessage = {
+			role: "user" as const,
+			content: [{ type: "text" as const, text: "Inspect this clip" }, video],
+			timestamp: Date.now(),
+		};
+		session.agent.appendMessage(videoMessage);
+		session.sessionManager.appendMessage(videoMessage);
+
+		await session.prompt("Recover without dropping the clip");
+		await session.waitForIdle();
+
+		expect(requestedModels).toEqual([
+			`${primaryModel.provider}/${primaryModel.id}`,
+			`${primaryModel.provider}/${primaryModel.id}`,
+		]);
+		expect(requestedModels).not.toContain(`${imageOnlyFallback.provider}/${imageOnlyFallback.id}`);
+		expect(session.model?.provider).toBe(primaryModel.provider);
+		expect(session.model?.id).toBe(primaryModel.id);
+		expect(retryStartEvents).toHaveLength(1);
+		expect(retryEndEvents).toHaveLength(1);
+		expect(retryEndEvents[0]?.success).toBe(true);
+		expect(
+			session.agent.state.messages.some(
+				message =>
+					message.role === "user" &&
+					typeof message.content !== "string" &&
+					message.content.some(block => block.type === "video" && block === video),
+			),
+		).toBe(true);
+	});
+
+	it("recovers on the same model after a simulated three-minute DNS outage", async () => {
+		const primaryModel = getBundledModel("anthropic", "claude-sonnet-4-5");
+		const fallbackModel = getBundledModel("openai", "gpt-4o-mini");
+		if (!primaryModel || !fallbackModel) throw new Error("Expected bundled retry models to exist");
+
+		let now = 0;
+		let fetchAttempts = 0;
+		const fetchAttempt = vi.fn(async () => {
+			fetchAttempts++;
+			if (fetchAttempts <= 6) {
+				now += 30_000;
+				throw createDnsFetchError();
+			}
+		});
+		const requestedModels: string[] = [];
+		const agent = createFetchBackedAgent(primaryModel, requestedModels, fetchAttempt);
+		const settings = Settings.isolated({
+			"compaction.enabled": false,
+			"retry.maxRetries": 1,
+			"retry.networkHoldMs": 180_000,
+			"retry.proposableFallbackChains": {
+				default: [`${fallbackModel.provider}/${fallbackModel.id}`],
+			},
+		});
+		settings.setModelRole("default", `${primaryModel.provider}/${primaryModel.id}`);
+		session = new AgentSession({
+			agent,
+			sessionManager: SessionManager.inMemory(),
+			settings,
+			modelRegistry,
+		});
+		vi.spyOn(Date, "now").mockImplementation(() => now);
+		const waitSpy = vi.spyOn(scheduler, "wait").mockResolvedValue(undefined);
+		const { retryStartEvents, retryEndEvents } = trackRetryEvents(session);
+		const fallbackAppliedEvents: Array<Extract<AgentSessionEvent, { type: "retry_fallback_applied" }>> = [];
+		session.subscribe(event => {
+			if (event.type === "retry_fallback_applied") fallbackAppliedEvents.push(event);
+		});
+
+		await session.prompt("Recover after DNS");
+		await session.waitForIdle();
+
+		expect(now).toBe(180_000);
+		expect(fetchAttempt).toHaveBeenCalledTimes(7);
+		expect(requestedModels).toHaveLength(7);
+		expect(new Set(requestedModels)).toEqual(new Set([`${primaryModel.provider}/${primaryModel.id}`]));
+		expect(fallbackAppliedEvents).toEqual([]);
+		expect(retryStartEvents).toHaveLength(6);
+		expect(retryStartEvents.every(event => event.cause === "network")).toBe(true);
+		expect(retryEndEvents).toEqual([{ type: "auto_retry_end", success: true, attempt: 6 }]);
+		expect(session.model?.provider).toBe(primaryModel.provider);
+		expect(session.model?.id).toBe(primaryModel.id);
+		expect(waitSpy).toHaveBeenCalled();
+	});
+
+	it("holds a three-minute DNS outage past maxRetries, then surfaces a network-specific failure", async () => {
+		const primaryModel = getBundledModel("anthropic", "claude-sonnet-4-5");
+		const fallbackModel = getBundledModel("openai", "gpt-4o-mini");
+		if (!primaryModel || !fallbackModel) throw new Error("Expected bundled retry models to exist");
+
+		let now = 0;
+		const fetchAttempt = vi.fn(async () => {
+			now += 30_000;
+			throw createDnsFetchError();
+		});
+		const requestedModels: string[] = [];
+		const agent = createFetchBackedAgent(primaryModel, requestedModels, fetchAttempt);
+		const settings = Settings.isolated({
+			"compaction.enabled": false,
+			"retry.maxRetries": 1,
+			"retry.networkHoldMs": 180_000,
+			"retry.proposableFallbackChains": {
+				default: [`${fallbackModel.provider}/${fallbackModel.id}`],
+			},
+		});
+		settings.setModelRole("default", `${primaryModel.provider}/${primaryModel.id}`);
+		session = new AgentSession({
+			agent,
+			sessionManager: SessionManager.inMemory(),
+			settings,
+			modelRegistry,
+		});
+		vi.spyOn(Date, "now").mockImplementation(() => now);
+		vi.spyOn(Math, "random").mockReturnValue(0);
+		vi.spyOn(scheduler, "wait").mockResolvedValue(undefined);
+		const { retryStartEvents, retryEndEvents } = trackRetryEvents(session);
+		const fallbackAppliedEvents: Array<Extract<AgentSessionEvent, { type: "retry_fallback_applied" }>> = [];
+		session.subscribe(event => {
+			if (event.type === "retry_fallback_applied") fallbackAppliedEvents.push(event);
+		});
+
+		await session.prompt("Wait out DNS");
+		await session.waitForIdle();
+
+		expect(now).toBeGreaterThanOrEqual(180_000);
+		expect(fetchAttempt.mock.calls.length).toBeGreaterThan(2);
+		expect(new Set(requestedModels)).toEqual(new Set([`${primaryModel.provider}/${primaryModel.id}`]));
+		expect(fallbackAppliedEvents).toEqual([]);
+		expect(retryStartEvents.length).toBeGreaterThan(1);
+		expect(retryStartEvents.every(event => event.cause === "network")).toBe(true);
+		expect(retryEndEvents).toHaveLength(1);
+		expect(retryEndEvents[0]).toMatchObject({
+			success: false,
+			finalError: expect.stringContaining("Provider unreachable (network/DNS)"),
+		});
+		expect(session.model?.provider).toBe(primaryModel.provider);
+		expect(session.model?.id).toBe(primaryModel.id);
+	});
+
 });

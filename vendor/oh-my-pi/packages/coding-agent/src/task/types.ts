@@ -328,6 +328,7 @@ export interface AgentProgress {
 	 * provider quota.
 	 */
 	retryState?: {
+		cause: "network" | "rate-limit" | "provider";
 		attempt: number;
 		maxAttempts: number;
 		delayMs: number;

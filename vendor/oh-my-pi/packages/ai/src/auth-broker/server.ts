@@ -583,10 +583,21 @@ export function startAuthBroker(opts: AuthBrokerServerOptions): AuthBrokerServer
 					if (!parsed.ok) return parsed.response;
 					const cause =
 						parsed.data.cause && parsed.data.cause.length > 0 ? parsed.data.cause : "disabled via auth-broker";
-					const ok = opts.storage.disableCredentialById(id, cause);
-					if (!ok) {
-						logger.info("auth-broker disable miss", { id, peer, cause });
-						return json(404, { error: `No credential with id=${id}` });
+					const expectedData = parsed.data.expectedData;
+					if (expectedData !== undefined) {
+						await opts.storage.reload();
+						const ok = await opts.storage.disableCredentialByIdIfSnapshotMatches(id, expectedData, cause);
+						if (!ok) {
+							logger.info("auth-broker conditional disable lost CAS", { id, peer, cause });
+							const response: CredentialDisableResponse = { ok: false };
+							return json(200, response);
+						}
+					} else {
+						const ok = opts.storage.disableCredentialById(id, cause);
+						if (!ok) {
+							logger.info("auth-broker disable miss", { id, peer, cause });
+							return json(404, { error: `No credential with id=${id}` });
+						}
 					}
 					logger.info("auth-broker credential disabled", { id, peer, cause });
 					const response: CredentialDisableResponse = { ok: true };

@@ -4,7 +4,7 @@ import * as fs from "node:fs/promises";
 import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
-import { focusCmuxOwner } from "../../../src/modes/utils/cmux-owner-navigation";
+import { focusCmuxOwner, focusLiveCmuxOwner } from "../../../src/modes/utils/cmux-owner-navigation";
 import {
 	acquireSessionOwnership,
 	inspectLiveSessionOwnerView,
@@ -59,7 +59,7 @@ async function closeServer(server: net.Server): Promise<void> {
 
 async function liveOwner(
 	cmuxSocketPath: string,
-): Promise<{ handle: SessionOwnershipHandle; root: string; sessionFile: string }> {
+): Promise<{ handle: SessionOwnershipHandle; root: string; sessionFile: string; viewFile: string }> {
 	const temp = await fs.mkdtemp(path.join(os.tmpdir(), "omp-cmux-owner-navigation-"));
 	const root = path.join(temp, "owners");
 	const sessionFile = path.join(temp, "session.jsonl");
@@ -71,8 +71,9 @@ async function liveOwner(
 	});
 	const canonical = await fs.realpath(sessionFile);
 	const key = createHash("sha256").update(`${canonical}\0session-1`).digest("hex");
+	const viewFile = path.join(root, "owners-v1", key, "claim", "view.json");
 	await fs.writeFile(
-		path.join(root, "owners-v1", key, "claim", "view.json"),
+		viewFile,
 		JSON.stringify({
 			version: 1,
 			ownerEpoch: handle.ownerEpoch,
@@ -87,7 +88,7 @@ async function liveOwner(
 		await handle.release();
 		await fs.rm(temp, { recursive: true, force: true });
 	});
-	return { handle, root, sessionFile };
+	return { handle, root, sessionFile, viewFile };
 }
 
 describe("focusCmuxOwner", () => {
@@ -112,18 +113,10 @@ describe("focusCmuxOwner", () => {
 
 		expect(await inspectSessionOwnership(owner.sessionFile, "session-1", { root: owner.root })).toMatchObject({ status: "live" });
 		expect(await inspectLiveSessionOwnerView(owner.sessionFile, "session-1", { root: owner.root })).toBeDefined();
-		const result = await focusCmuxOwner(
-			{
-				kind: "focus_cmux_owner",
-				sessionFile: owner.sessionFile,
-				sessionId: "session-1",
-				lostOwnerEpoch: "epoch-old",
-			},
-			{
-				ownershipRoot: owner.root,
-				env: { CMUX_SOCKET_PATH: socketPath, CMUX_SOCKET_PASSWORD: "secret" },
-			},
-		);
+		const result = await focusLiveCmuxOwner(owner.sessionFile, "session-1", {
+			ownershipRoot: owner.root,
+			env: { CMUX_SOCKET_PATH: socketPath, CMUX_SOCKET_PASSWORD: "secret" },
+		});
 
 		expect(result).toEqual({ kind: "focused" });
 		expect(lines[0]).toBe("auth secret");
@@ -149,7 +142,17 @@ describe("focusCmuxOwner", () => {
 			sessionId: "session-1",
 			lostOwnerEpoch: owner.handle.ownerEpoch,
 		};
+		expect(
+			await focusLiveCmuxOwner(owner.sessionFile, "session-1", {
+				ownershipRoot: owner.root,
+				excludedOwnerEpoch: owner.handle.ownerEpoch,
+			}),
+		).toEqual({ kind: "unavailable" });
 		expect(await focusCmuxOwner(action, { ownershipRoot: owner.root })).toEqual({ kind: "unavailable" });
+		await fs.rm(owner.viewFile);
+		expect(await focusLiveCmuxOwner(owner.sessionFile, "session-1", { ownershipRoot: owner.root })).toEqual({
+			kind: "unavailable",
+		});
 		await owner.handle.release();
 		expect(await focusCmuxOwner({ ...action, lostOwnerEpoch: "epoch-old" }, { ownershipRoot: owner.root })).toEqual({
 			kind: "unavailable",

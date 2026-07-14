@@ -66,23 +66,28 @@ export class AgentOutputManager {
 	}
 
 	/** Pick the first free name (base, then `base-2`, `base-3`, …) and reserve it. */
-	#allocateUnique(id: string): string {
+	#allocateUnique(id: string, unavailable?: (candidate: string) => boolean): string {
 		let candidate = id;
-		for (let n = 2; this.#taken.has(candidate); n++) {
+		let qualified = this.#parentPrefix ? `${this.#parentPrefix}.${candidate}` : candidate;
+		for (let n = 2; this.#taken.has(candidate) || unavailable?.(qualified) === true; n++) {
 			candidate = `${id}-${n}`;
+			qualified = this.#parentPrefix ? `${this.#parentPrefix}.${candidate}` : candidate;
 		}
 		this.#taken.add(candidate);
-		return this.#parentPrefix ? `${this.#parentPrefix}.${candidate}` : candidate;
+		return qualified;
 	}
 
 	/**
 	 * Allocate a unique ID.
 	 *
+	 * `unavailable` lets runtime owners reserve identities that have no output
+	 * artifact yet, such as a currently running registry agent.
+	 *
 	 * @param id Requested ID (e.g., "Anna")
 	 * @returns Unique ID ("Anna" first, then "Anna-2", "Anna-3", …)
 	 */
-	async allocate(id: string): Promise<string> {
+	async allocate(id: string, unavailable?: (candidate: string) => boolean): Promise<string> {
 		await this.#ensureInitialized();
-		return this.#allocateUnique(id);
+		return this.#allocateUnique(id, unavailable);
 	}
 }

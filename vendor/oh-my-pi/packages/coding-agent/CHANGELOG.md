@@ -10,12 +10,25 @@
 - Added an opt-in, jittered 90-minute feed watcher for model-availability and usage-limit announcements, with durable cursors, conditional RSS requests, Nitter/RSS Bridge fallback, `smol` batch classification, availability-ledger updates, and session/IRC notices.
 - Added default-on OpenAI Codex weekly-quota saved-reset redemption with per-window idempotency, a one-reset-per-24-hours safety cap, structured audit logs, and session notices for every outcome.
 - Added the local append-only Fable refusal corpus and `omp refusals` commands for redacted evidence, verdicts, aggregate stats, and no-tools replay of false positives.
+- Added default-on fleet incident detection for correlated transient network failures, with one IRC/ErrorInbox notice, shared session-control state, connectivity-probed clearing, and journaled automatic child salvage.
 
 - Added `task.maxLiveChildren` FIFO admission control to bound peak live in-process subagents without charging queued time against child runtime limits.
 - Per-spawn `model` override for `task` tool items: each spawn item accepts an optional `model` selector that takes priority over agent-level `task.agentModelOverrides`. Invalid overrides are rejected at schedule time with a formatted error listing available models, and spawn receipts now include a resolved model chain (e.g., `explore → "Rust specialist" → openai/gpt-5.2:high`).
 - Agent Hub now projects subagents as a collapsible parent/child roster tree with lineage-preserving search, descendant rollups, and depth-aware sibling navigation.
 
+- Added typed durable video attachments across file mentions, prompts, queues, persistence, compaction, and provider dispatch.
+- Added the registry-backed `:` popup/`:commands`, strict read-only Hub preview, normal-mode navigation, and one-source Neovim viewer help.
+
+### Changed
+
+- IRC communication and tool-result bodies now honor `:wrap`/`:rich` while receipts, errors, metadata, and roster rows remain bounded single-line projections.
+- Task spawning now refuses revivable `NameResume`/exact-id duplicates, warns on running or archived matches with in-band IRC/history guidance, preserves live registry ids during allocation, and reports resume-in-place or transcript-salvage instructions after task failures and restarts.
+- `Ctrl-Q` is direct cancellation (including focused-child return); `Ctrl-Enter` remains the follow-up queue action in the attached full TUI. Typed command automation and vendor-sync v2 policy plumbing are available, and the typed daily vendor `--apply` path is active for the current 21-entry manifest (NCode removed); the latest apply updated codex, plugins, cua, chrome-devtools, and whisper, left cmux blocked by a dirty tree, and left pins untouched.
 ### Fixed
+- Fixed custom model validation to accept subscription-backed `auth: oauth` providers without requiring an API key.
+- Selecting a session already owned by a verified live cmux surface now activates that workspace and surface instead of failing with `Session is controlled by external owner`.
+- Agent resource/error aggregation now records failed non-cancelled child jobs as typed, redacted `ErrorInbox` records with transcript/final-output recovery links; `agent://` exposes final output with a `history://` pointer, while invalid `agents://` suggests the singular protocol.
+- Transient DNS/socket failures now hold the current provider/model lane with jittered retries for a configurable 3-minute window, report network-specific retry status and ErrorInbox classes, and avoid killing task subagents on brief network outages.
 
 - Session-control restarts now prepare the same runner host transition as `/restart`, preserve disposable `--session-dir` journals by resuming their exact file, re-exec the rollout-selected binary in place, and surface pre-exec failures instead of silently exiting.
 - Fixed the token-rate status segment to show a high-contrast live main-session badge only during active streaming turns.
@@ -23,9 +36,10 @@
 - IRC sends now reserve parked-agent messages before revival and follow replacement identities across revive races, preventing dropped messages and `released or replaced while reviving` failures.
 - Ask-tool waits now publish `waiting_input` IRC presence while they are blocking for user input, then restore the prior state on answer or abort.
 - Fixed one-shot `omp irc` CLI commands hanging after opening the external IRC SQLite bus by closing CLI-owned bus handles after each command.
-- Agent Hub now opens parked-agent history read-only on Enter instead of reviving the agent, with `R` as the explicit revive shortcut from the history view.
+- Agent Hub preview is strictly read-only on entry; `Enter` attaches the selected session in the full TUI, while `R` explicitly revives a parked child.
 - Fixed session resume/listing recovery for JSONL journals where a title metadata record was written before the session header, and changed synchronous first-write rewrites to use atomic replacement instead of in-place truncation.
 - Suppressed GPT-5.6's whitespace-only HTML comment separators in displayed/ACP-forwarded thinking while preserving raw session reasoning, final text, fenced literals, non-empty comments, and split-stream live/replay parity.
+- Fixed model-selector availability flicker by fencing auth refreshes with credential-generation CAS and ignoring stale registry refresh responses.
 
 ## [16.0.1] - 2026-06-15
 

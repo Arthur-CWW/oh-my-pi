@@ -27,7 +27,7 @@ import {
 } from "../extensibility/plugins/marketplace";
 import { resolveMemoryBackend } from "../memory-backend";
 import { theme } from "../modes/theme/theme";
-import { PRIMITIVES_INSPECTOR_SLASH_COMMAND } from "../modes/components/primitives-inspector-command";
+import { TUI_COLON_COMMAND_NAMES } from "../modes/command-registry";
 import type { InteractiveModeContext } from "../modes/types";
 import type { AgentSession, FreshSessionResult } from "../session/agent-session";
 import { decodeSessionWorkstream, type SessionWorkstream } from "../session/session-entries";
@@ -350,8 +350,8 @@ async function handleDebugSubcommand(
 function parseShakeMode(args: string): ShakeMode | { error: string } {
 	const verb = args.trim().toLowerCase();
 	if (verb === "" || verb === "elide") return "elide";
-	if (verb === "images") return "images";
-	return { error: `Unknown /shake mode "${verb}". Use elide or images.` };
+	if (verb === "media") return "media";
+	return { error: `Unknown /shake mode "${verb}". Use elide or media.` };
 }
 
 function formatSessionWorkstream(workstream: SessionWorkstream | undefined): string {
@@ -406,14 +406,6 @@ export async function executeSessionClassificationCommand(
 
 const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<SlashCommandSpec> = [
 	{
-		name: "errors",
-		description: "View recent errors or clear history",
-		allowArgs: true,
-		handleTui: (command, runtime) => {
-			runtime.ctx.handleErrorsCommand(command.args);
-		},
-	},
-	{
 		name: "settings",
 		description: "Open settings menu",
 		handleTui: (_command, runtime) => {
@@ -421,7 +413,6 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<SlashCommandSpec> = [
 			runtime.ctx.editor.setText("");
 		},
 	},
-	PRIMITIVES_INSPECTOR_SLASH_COMMAND,
 	{
 		name: "setup",
 		aliases: ["providers"],
@@ -750,6 +741,7 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<SlashCommandSpec> = [
 	},
 	{
 		name: "dump",
+	tuiNamespace: "colon",
 		description: "Copy session transcript to clipboard",
 		acpDescription: "Return full transcript as plain text",
 		inlineHint: "[raw]",
@@ -759,11 +751,6 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<SlashCommandSpec> = [
 			const text = runtime.session.formatSessionAsText({ compact: !isRaw });
 			await runtime.output(text || "No messages to dump yet.");
 			return commandConsumed();
-		},
-		handleTui: (command, runtime) => {
-			const isRaw = command.args.trim().toLowerCase() === "raw";
-			runtime.ctx.handleDumpCommand(isRaw);
-			runtime.ctx.editor.setText("");
 		},
 	},
 	{
@@ -962,14 +949,6 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<SlashCommandSpec> = [
 		},
 	},
 	{
-		name: "copy",
-		description: "Pick text or code from the conversation to copy",
-		handleTui: (_command, runtime) => {
-			runtime.ctx.showCopySelector();
-			runtime.ctx.editor.setText("");
-		},
-	},
-	{
 		name: "todo",
 		description: "View or modify the agent's todo list",
 		acpDescription: "Manage todos",
@@ -1070,6 +1049,7 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<SlashCommandSpec> = [
 	},
 	{
 		name: "jobs",
+	tuiNamespace: "colon",
 		description: "Show async background jobs status",
 		acpDescription: "Show background jobs",
 		handle: async (_command, runtime) => {
@@ -1098,10 +1078,6 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<SlashCommandSpec> = [
 			}
 			await runtime.output(lines.join("\n"));
 			return commandConsumed();
-		},
-		handleTui: async (_command, runtime) => {
-			await runtime.ctx.handleJobsCommand();
-			runtime.ctx.editor.setText("");
 		},
 	},
 	FEEDS_COMMAND_SPEC,
@@ -1169,6 +1145,7 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<SlashCommandSpec> = [
 	},
 	{
 		name: "changelog",
+	tuiNamespace: "colon",
 		description: "Show changelog entries",
 		acpDescription: "Show changelog",
 		acpInputHint: "[full]",
@@ -1191,22 +1168,10 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<SlashCommandSpec> = [
 			);
 			return commandConsumed();
 		},
-		handleTui: async (command, runtime) => {
-			const showFull = command.args.split(/\s+/).filter(Boolean).includes("full");
-			await runtime.ctx.handleChangelogCommand(showFull);
-			runtime.ctx.editor.setText("");
-		},
-	},
-	{
-		name: "hotkeys",
-		description: "Show all keyboard shortcuts",
-		handleTui: (_command, runtime) => {
-			runtime.ctx.handleHotkeysCommand();
-			runtime.ctx.editor.setText("");
-		},
 	},
 	{
 		name: "tools",
+	tuiNamespace: "colon",
 		description: "Show tools currently visible to the agent",
 		acpDescription: "Show available tools",
 		handle: async (_command, runtime) => {
@@ -1219,22 +1184,15 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<SlashCommandSpec> = [
 			await runtime.output(all.map(name => `${active.includes(name) ? "*" : "-"} ${name}`).join("\n"));
 			return commandConsumed();
 		},
-		handleTui: (_command, runtime) => {
-			runtime.ctx.handleToolsCommand();
-			runtime.ctx.editor.setText("");
-		},
 	},
 	{
 		name: "context",
+	tuiNamespace: "colon",
 		description: "Show estimated context usage breakdown",
 		acpDescription: "Show context usage",
 		handle: async (_command, runtime) => {
 			await runtime.output(buildContextReportText(runtime));
 			return commandConsumed();
-		},
-		handleTui: (_command, runtime) => {
-			runtime.ctx.handleContextCommand();
-			runtime.ctx.editor.setText("");
 		},
 	},
 	{
@@ -1502,9 +1460,9 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<SlashCommandSpec> = [
 		acpDescription: "Shake heavy content out of the conversation context",
 		subcommands: [
 			{ name: "elide", description: "Strip tool results + large blocks (default)" },
-			{ name: "images", description: "Strip image blocks" },
+			{ name: "media", description: "Strip image and video blocks" },
 		],
-		acpInputHint: "[elide|images]",
+		acpInputHint: "[elide|media]",
 		allowArgs: true,
 		handle: async (command, runtime) => {
 			const mode = parseShakeMode(command.args);
@@ -2413,15 +2371,15 @@ function buildStaticInlineHint(hint: string): (argumentText: string) => string |
 }
 
 /** Builtin command metadata used for slash-command autocomplete and help text. */
-export const BUILTIN_SLASH_COMMAND_DEFS: ReadonlyArray<BuiltinSlashCommand> = BUILTIN_SLASH_COMMAND_REGISTRY.map(
-	command => ({
+export const BUILTIN_SLASH_COMMAND_DEFS: ReadonlyArray<BuiltinSlashCommand> = BUILTIN_SLASH_COMMAND_REGISTRY
+	.filter(command => command.tuiNamespace !== "colon")
+	.map(command => ({
 		name: command.name,
 		aliases: command.aliases,
 		description: command.description,
 		subcommands: command.subcommands,
 		inlineHint: command.inlineHint,
-	}),
-);
+	}));
 
 /**
  * Materialized builtin slash commands with completion functions derived from
@@ -2471,6 +2429,11 @@ export async function executeBuiltinSlashCommand(
 	if (!parsed) return false;
 
 	const command = BUILTIN_SLASH_COMMAND_LOOKUP.get(parsed.name);
+	if (TUI_COLON_COMMAND_NAMES.has(parsed.name) || command?.tuiNamespace === "colon") {
+		runtime.ctx.showStatus(`Use :${parsed.name} in the TUI`);
+		runtime.ctx.editor.setText("");
+		return true;
+	}
 	if (!command) return false;
 	if (parsed.args.length > 0 && !command.allowArgs) {
 		return false;

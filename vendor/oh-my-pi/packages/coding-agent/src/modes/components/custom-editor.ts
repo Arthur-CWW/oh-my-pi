@@ -28,7 +28,7 @@ type ConfigurableEditorAction = Extract<
 >;
 
 const DEFAULT_ACTION_KEYS: Record<ConfigurableEditorAction, KeyId[]> = {
-	"app.interrupt": ["escape"],
+	"app.interrupt": ["escape", "ctrl+q"],
 	"app.clear": ["ctrl+c"],
 	"app.exit": ["ctrl+d"],
 	"app.suspend": ["ctrl+z"],
@@ -229,7 +229,7 @@ export class CustomEditor extends Editor {
 		}, CustomEditor.SHIMMER_FRAME_MS);
 		this.#shimmerTimer.unref?.();
 	}
-	onEscape?: () => void;
+	onEscape?: (key: KeyId) => void;
 	onClear?: () => void;
 	onExit?: () => void;
 	onDisplayReset?: () => void;
@@ -306,7 +306,7 @@ export class CustomEditor extends Editor {
 		}
 	}
 
-	#matchesAction(canonical: string | undefined, action: ConfigurableEditorAction): boolean {
+	#matchesAction(canonical: string | undefined, action: ConfigurableEditorAction): canonical is KeyId {
 		return canonical !== undefined && (this.#actionMatchKeys.get(action)?.has(canonical) ?? false);
 	}
 
@@ -428,6 +428,13 @@ export class CustomEditor extends Editor {
 		const parsedKey = parseKey(data);
 		const canonical = parsedKey !== undefined ? canonicalKeyId(parsedKey) : undefined;
 
+		// Ctrl+Q always reaches the direct-interrupt lifecycle before any
+		// configurable action or local editor overlay can claim the key.
+		if (canonical === "ctrl+q" && this.onEscape) {
+			this.onEscape(canonical);
+			return;
+		}
+
 		// Left-arrow on an empty editor: surface for the agent-hub double-tap
 		// gesture. Plain "left" only — modified arrows and any in-text cursor
 		// movement fall through to normal handling.
@@ -518,15 +525,14 @@ export class CustomEditor extends Editor {
 				return;
 			}
 
-			// Intercept configured interrupt shortcut.
-			// When the autocomplete popup is visible, ESC's first job is to dismiss
-			// the popup — let super.handleInput() route it to #cancelAutocomplete().
-			// The user can press ESC again afterward to fire the global interrupt
-			// handler. This matches the standard TUI/IDE pattern and prevents a
-			// single ESC from both closing an @ completion and aborting an active
-			// agent run (#1655).
-			if (this.#matchesAction(canonical, "app.interrupt") && this.onEscape && !this.isShowingAutocomplete()) {
-				this.onEscape();
+			// Escape remains context-sensitive: autocomplete dismisses first,
+			// then the controller unwinds or interrupts the active context.
+			if (
+				this.#matchesAction(canonical, "app.interrupt") &&
+				this.onEscape &&
+				!this.isShowingAutocomplete()
+			) {
+				this.onEscape(canonical);
 				return;
 			}
 

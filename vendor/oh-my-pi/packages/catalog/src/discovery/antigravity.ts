@@ -1,5 +1,5 @@
 import { z } from "zod/v4";
-import type { ModelSpec } from "../types";
+import type { ModelInput, ModelSpec } from "../types";
 import { toPositiveNumber } from "../utils";
 import { ANTIGRAVITY_VARIANT_COLLAPSE_TABLE, collapseEffortVariants } from "../variant-collapse";
 import { getAntigravityUserAgent } from "../wire/gemini-headers";
@@ -13,6 +13,61 @@ const FETCH_AVAILABLE_MODELS_PATH = "/v1internal:fetchAvailableModels";
 const DEFAULT_CONTEXT_WINDOW = 200_000;
 const DEFAULT_MAX_TOKENS = 64_000;
 const ANTIGRAVITY_DISCOVERY_DENYLIST = new Set(["chat_20706", "chat_23310", "gemini-2.5-pro"]);
+
+/**
+ * Exact Antigravity wire ids with provider-scoped native video proof.
+ *
+ * 2026-07-14 live proof: a 1,685-byte MP4 sent through the production
+ * `streamGoogleGeminiCli` path to `google-antigravity/gemini-3.5-flash`
+ * returned HTTP 200 and exactly "red", with one request and no fallback.
+ * Keep this list explicit: removing an id revokes the override for that
+ * backing deployment, and similarly named models must not inherit it.
+ */
+const ANTIGRAVITY_NATIVE_VIDEO_INPUT_OVERRIDE: ReadonlySet<string> = new Set([
+	"gemini-3.5-flash-extra-low",
+	"gemini-3.5-flash-low",
+	"gemini-3-flash-agent",
+]);
+
+/**
+ * Applies the provider-scoped override to exact raw ids or a collapsed
+ * logical entry whose complete backing route remains inside the proven set.
+ */
+export function applyAntigravityNativeVideoInputOverride<TModel extends ModelSpec>(model: TModel): TModel {
+	if (model.provider !== "google-antigravity" || model.input.includes("video")) {
+		return model;
+	}
+	let proven = ANTIGRAVITY_NATIVE_VIDEO_INPUT_OVERRIDE.has(model.id);
+	if (!proven && model.id === "gemini-3.5-flash") {
+		proven = hasOnlyProvenVideoBackingIds(model);
+	}
+	if (proven) {
+		model.input.push("video");
+	}
+	return model;
+}
+
+function hasOnlyProvenVideoBackingIds(model: ModelSpec): boolean {
+	let foundBackingId = false;
+	if (model.requestModelId !== undefined) {
+		foundBackingId = true;
+		if (!ANTIGRAVITY_NATIVE_VIDEO_INPUT_OVERRIDE.has(model.requestModelId)) {
+			return false;
+		}
+	}
+	const routing = model.thinking?.effortRouting;
+	if (routing !== undefined) {
+		for (const effort in routing) {
+			const target = routing[effort as keyof typeof routing];
+			if (target === undefined) continue;
+			foundBackingId = true;
+			if (!ANTIGRAVITY_NATIVE_VIDEO_INPUT_OVERRIDE.has(target)) {
+				return false;
+			}
+		}
+	}
+	return foundBackingId;
+}
 
 /**
  * Raw model metadata returned by Antigravity's `fetchAvailableModels` endpoint.
@@ -216,24 +271,28 @@ export async function fetchAntigravityDiscoveryModels(
 				continue;
 			}
 
-			const supportsImages = model.supportsImages === true;
-			models.push({
-				id: modelId,
-				name: model.displayName || modelId,
-				api: "google-gemini-cli",
-				provider: "google-antigravity",
-				baseUrl: endpoint,
-				reasoning: model.supportsThinking === true,
-				input: supportsImages ? ["text", "image"] : ["text"],
-				cost: {
-					input: 0,
-					output: 0,
-					cacheRead: 0,
-					cacheWrite: 0,
-				},
-				contextWindow: toPositiveNumber(model.maxTokens, DEFAULT_CONTEXT_WINDOW),
-				maxTokens: toPositiveNumber(model.maxOutputTokens, DEFAULT_MAX_TOKENS),
-			});
+			const input: ModelInput[] = ["text"];
+			if (model.supportsImages === true) input.push("image");
+			if (model.supportsVideo === true) input.push("video");
+			models.push(
+				applyAntigravityNativeVideoInputOverride({
+					id: modelId,
+					name: model.displayName || modelId,
+					api: "google-gemini-cli",
+					provider: "google-antigravity",
+					baseUrl: endpoint,
+					reasoning: model.supportsThinking === true,
+					input,
+					cost: {
+						input: 0,
+						output: 0,
+						cacheRead: 0,
+						cacheWrite: 0,
+					},
+					contextWindow: toPositiveNumber(model.maxTokens, DEFAULT_CONTEXT_WINDOW),
+					maxTokens: toPositiveNumber(model.maxOutputTokens, DEFAULT_MAX_TOKENS),
+				}),
+			);
 		}
 
 		// Collapse effort-tier variants at the source so runtime discovery,

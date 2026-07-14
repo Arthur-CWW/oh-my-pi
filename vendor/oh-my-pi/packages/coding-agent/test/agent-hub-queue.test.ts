@@ -1,12 +1,10 @@
-/**
- * Hub Ctrl+Enter contract: a local live agent sends through the durable
- * follow-up API and exposes the host-provided queue/admission projection.
- */
+/** Hub preview stays read-only while still projecting host queue/admission state. */
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { IrcBus } from "@oh-my-pi/pi-coding-agent/irc/bus";
 import { IrcExternalBus } from "@oh-my-pi/pi-coding-agent/irc/bus-external";
 import { AgentHubOverlayComponent } from "@oh-my-pi/pi-coding-agent/modes/components/agent-hub";
+import { formatAgentHubTurnStatus } from "@oh-my-pi/pi-coding-agent/modes/components/agent-hub-selected-state";
 import { getAgentHubTurnStatus } from "@oh-my-pi/pi-coding-agent/modes/controllers/selector-controller";
 import { SessionObserverRegistry } from "@oh-my-pi/pi-coding-agent/modes/session-observer-registry";
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
@@ -19,7 +17,7 @@ import { Container } from "@oh-my-pi/pi-tui";
 
 const AGENT_ID = "Worker";
 
-describe("Agent hub queued follow-up", () => {
+describe("Agent hub queue projection", () => {
 	beforeAll(() => {
 		initTheme();
 	});
@@ -35,11 +33,8 @@ describe("Agent hub queued follow-up", () => {
 		resetSettingsForTest();
 	});
 
-	it("queues Ctrl+Enter through the durable session and renders admission status", async () => {
-		const delivered = Promise.withResolvers<void>();
-		const sendUserMessage = vi.fn(async () => {
-			delivered.resolve();
-		});
+	it("does not dispatch follow-ups from the read-only preview and renders admission status", async () => {
+		const sendUserMessage = vi.fn(async () => {});
 		const sessionStub: Pick<AgentSession, "subscribe" | "sendUserMessage"> = {
 			subscribe: () => () => {},
 			sendUserMessage,
@@ -69,7 +64,8 @@ describe("Agent hub queued follow-up", () => {
 			},
 		});
 
-		expect(getAgentHubTurnStatus(registry, AGENT_ID)).toMatchObject({
+		const turnStatus = getAgentHubTurnStatus(registry, AGENT_ID);
+		expect(turnStatus).toMatchObject({
 			provider: "chosen-provider",
 			reroutedProvider: "chosen-provider",
 			originalModel: "chosen-provider/luna",
@@ -93,23 +89,24 @@ describe("Agent hub queued follow-up", () => {
 		hub.handleInput("i");
 		for (const character of "follow up message") hub.handleInput(character);
 		hub.handleInput("\x1b[13;5u");
-		await delivered.promise;
 
-		expect(sendUserMessage).toHaveBeenCalledWith("follow up message", { deliverAs: "followUp" });
-
+		expect(sendUserMessage).not.toHaveBeenCalled();
 		const rendered = Bun.stripANSI(hub.render(120).join("\n"));
 		expect(rendered).toContain("running");
 		expect(rendered).toContain("rerouted:chosen-provider");
-		expect(rendered).toContain("reset:");
-		expect(rendered).toContain("provider:chosen-provider");
-		expect(rendered).toContain("rate:42/h");
-		expect(rendered).toContain("empty:");
-		expect(rendered).toContain("deficit:7/h");
-		expect(rendered).toContain("model:chosen-provider/luna");
-		expect(rendered).toContain("rerouted-model:chosen-provider/sol");
-		expect(rendered).toContain("reason:prefer healthy fallback");
-		expect(rendered).toContain("pool:pool-a");
-		expect(rendered).toContain("window:hourly");
+		expect(turnStatus).toBeDefined();
+		const formattedStatus = Bun.stripANSI(formatAgentHubTurnStatus(turnStatus!, 1_000));
+		expect(formattedStatus).toContain("provider:chosen-provider");
+		expect(formattedStatus).toContain("rerouted:chosen-provider");
+		expect(formattedStatus).toContain("model:chosen-provider/luna");
+		expect(formattedStatus).toContain("rerouted-model:chosen-provider/sol");
+		expect(formattedStatus).toContain("rate:42/h");
+		expect(formattedStatus).toContain("empty:");
+		expect(formattedStatus).toContain("reset:");
+		expect(formattedStatus).toContain("deficit:7/h");
+		expect(formattedStatus).toContain("reason:prefer healthy fallback");
+		expect(formattedStatus).toContain("pool:pool-a");
+		expect(formattedStatus).toContain("window:hourly");
 
 		hub.dispose();
 		await lifecycle.dispose();

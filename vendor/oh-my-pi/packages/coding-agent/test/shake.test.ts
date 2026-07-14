@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import * as path from "node:path";
 import { Agent } from "@oh-my-pi/pi-agent-core";
-import type { AssistantMessage, ImageContent, ToolResultMessage } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, ImageContent, MediaContent, ToolResultMessage } from "@oh-my-pi/pi-ai";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
@@ -123,23 +123,24 @@ describe("AgentSession shake", () => {
 		});
 	});
 
-	describe("images", () => {
-		it("mirrors dropImages and reports the removed image count", async () => {
+	describe("media", () => {
+		it("strips image and video media and reports the removed media count", async () => {
 			const png: ImageContent = { type: "image", data: "iVBORw0KGgo", mimeType: "image/png" };
+			const video: MediaContent = { type: "video", data: "AAECAw==", mimeType: "video/mp4" };
 			sessionManager.appendMessage({
 				role: "user",
-				content: [{ type: "text", text: "look" }, png],
+				content: [{ type: "text", text: "look" }, png, video],
 				timestamp: Date.now(),
 			});
 
-			const result = await session.shake("images");
+			const result = await session.shake("media");
 
-			expect(result.mode).toBe("images");
-			expect(result.imagesDropped).toBe(1);
+			expect(result.mode).toBe("media");
+			expect(result.mediaDropped).toBe(2);
 			const branch = sessionManager.getBranch();
 			const userMsg = branch.find(e => e.type === "message" && (e.message as { role?: string }).role === "user");
 			const content = (userMsg as { message: { content: unknown } }).message.content as Array<{ type: string }>;
-			expect(content.some(b => b.type === "image")).toBe(false);
+			expect(content.some(block => block.type === "image" || block.type === "video")).toBe(false);
 		});
 	});
 

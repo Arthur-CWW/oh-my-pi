@@ -13,7 +13,7 @@ import {
 } from "@oh-my-pi/pi-agent-core/compaction/compaction";
 import * as ai from "@oh-my-pi/pi-ai";
 import { encodeTextSignatureV1 } from "@oh-my-pi/pi-ai/providers/openai-responses-shared";
-import type { AssistantMessage, Model, ProviderPayload, Usage } from "@oh-my-pi/pi-ai/types";
+import type { AssistantMessage, Model, ProviderPayload, Usage, VideoContent } from "@oh-my-pi/pi-ai/types";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { buildSessionContext } from "@oh-my-pi/pi-coding-agent/session/session-context";
 import type {
@@ -53,6 +53,15 @@ function createMockUsage(input: number, output: number, cacheRead = 0, cacheWrit
 
 function createUserMessage(text: string): AgentMessage {
 	return { role: "user", content: text, timestamp: Date.now() };
+}
+function createVideoUserMessage(text: string, video: VideoContent): AgentMessage {
+	return { role: "user", content: [{ type: "text", text }, video], timestamp: Date.now() };
+}
+
+function createVideoCapableModel(): Model {
+	const base = getBundledModel("google-antigravity", "gemini-3-pro");
+	if (!base) throw new Error("Expected bundled Antigravity Gemini model to exist");
+	return { ...base, input: ["text", "image", "video"] };
 }
 
 function createAssistantMessage(text: string, usage?: Usage): AssistantMessage {
@@ -371,6 +380,70 @@ describe("remote compaction setting", () => {
 		expect(completeSpy).toHaveBeenCalledTimes(3);
 		expect(result.summary).toContain("Local history summary");
 		expect(result.shortSummary).toBe("Local short summary");
+	});
+
+	it("sends chronological videos to local summaries and bypasses text-only remote compaction", async () => {
+		const model = createVideoCapableModel();
+		const firstVideo: VideoContent = { type: "video", data: "AAECAw==", mimeType: "video/mp4" };
+		const retainedVideo: VideoContent = { type: "video", data: "BAUGBw==", mimeType: "video/webm" };
+		const entries: SessionEntry[] = [
+			createMessageEntry(createUserMessage("Older history")),
+			createMessageEntry(createAssistantMessage("Older answer", createMockUsage(0, 100, 9000, 0))),
+			createMessageEntry(createVideoUserMessage("First clip", firstVideo)),
+			createMessageEntry(createVideoUserMessage("Retained clip", retainedVideo)),
+		];
+		const preparation = prepareCompaction(entries, {
+			...DEFAULT_COMPACTION_SETTINGS,
+			keepRecentTokens: 1,
+			remoteEnabled: true,
+			remoteEndpoint: "https://compaction.example.test/summarize",
+		});
+		if (!preparation) throw new Error("Expected video compaction preparation");
+
+		const fetchHandler = vi.fn(
+			async (_input, _init) =>
+				new Response(JSON.stringify({ summary: "remote summary must not be used" }), {
+					status: 200,
+					headers: { "Content-Type": "application/json" },
+				}),
+		);
+		const fetchSpy = mockFetch(fetchHandler);
+		const completeSpy = vi
+			.spyOn(ai, "completeSimple")
+			.mockResolvedValueOnce(createAssistantMessage("Local history summary"))
+			.mockResolvedValueOnce(createAssistantMessage("Local retained summary"));
+
+		await compact(preparation, model, "test-api-key", undefined, undefined, { fetch: fetchSpy });
+
+		expect(fetchHandler).not.toHaveBeenCalled();
+		expect(completeSpy).toHaveBeenCalledTimes(2);
+		const historyContent = completeSpy.mock.calls[0]?.[1]?.messages[0]?.content;
+		const retainedContent = completeSpy.mock.calls[1]?.[1]?.messages[0]?.content;
+		expect(historyContent).toEqual([expect.objectContaining({ type: "text" }), firstVideo]);
+		expect(retainedContent).toEqual([expect.objectContaining({ type: "text" }), retainedVideo]);
+	});
+
+	it("leaves video-bearing history unchanged when the selected model is incapable", async () => {
+		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+		if (!model) throw new Error("Expected bundled anthropic model to exist");
+		const video: VideoContent = { type: "video", data: "AAECAw==", mimeType: "video/mp4" };
+		const entries: SessionEntry[] = [
+			createMessageEntry(createUserMessage("Older history")),
+			createMessageEntry(createAssistantMessage("Older answer", createMockUsage(0, 100, 9000, 0))),
+			createMessageEntry(createVideoUserMessage("Retained clip", video)),
+		];
+		const preparation = prepareCompaction(entries, {
+			...DEFAULT_COMPACTION_SETTINGS,
+			keepRecentTokens: 1,
+		});
+		if (!preparation) throw new Error("Expected video compaction preparation");
+		const before = entries.map(entry => JSON.stringify(entry));
+		const completeSpy = vi.spyOn(ai, "completeSimple");
+
+		await expect(compact(preparation, model, "test-api-key")).rejects.toThrow("native video input");
+
+		expect(entries.map(entry => JSON.stringify(entry))).toEqual(before);
+		expect(completeSpy).not.toHaveBeenCalled();
 	});
 
 	it("preserves prior compaction items and encrypted reasoning for OpenAI remote compaction", async () => {

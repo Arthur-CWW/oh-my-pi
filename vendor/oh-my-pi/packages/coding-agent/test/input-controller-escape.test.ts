@@ -8,7 +8,7 @@ import { USER_INTERRUPT_LABEL } from "@oh-my-pi/pi-coding-agent/session/messages
 type Spy = Mock<(...args: unknown[]) => unknown>;
 type StartPendingSubmissionSpy = Mock<InteractiveModeContext["startPendingSubmission"]>;
 type FakeEditor = {
-	onEscape?: () => void;
+	onEscape?: (key?: string) => void;
 	onSubmit?: (text: string) => Promise<void>;
 	onClear?: () => void;
 	onExit?: () => void;
@@ -37,12 +37,12 @@ type FakeEditor = {
 
 function createSubmission(input: {
 	text: string;
-	images?: InteractiveModeContext["pendingImages"];
+	attachments?: SubmittedUserInput["attachments"];
 	imageLinks?: InteractiveModeContext["pendingImageLinks"];
 }): SubmittedUserInput {
 	return {
 		text: input.text,
-		images: input.images,
+		attachments: input.attachments,
 		imageLinks: input.imageLinks,
 		cancelled: false,
 		started: false,
@@ -104,7 +104,7 @@ function createContext(): {
 	const startPendingSubmission = vi.fn(
 		(input: {
 			text: string;
-			images?: InteractiveModeContext["pendingImages"];
+			attachments?: SubmittedUserInput["attachments"];
 			imageLinks?: InteractiveModeContext["pendingImageLinks"];
 		}) => {
 			ensureLoadingAnimation();
@@ -160,6 +160,8 @@ function createContext(): {
 			clearQueue,
 			getQueuedMessages,
 			prompt,
+			getQueuedInputProjection: () => [],
+			cancelQueuedInput: vi.fn(),
 		} as unknown as InteractiveModeContext["session"],
 		viewSession: {
 			isCompacting: false,
@@ -171,6 +173,7 @@ function createContext(): {
 		} as unknown as InteractiveModeContext["viewSession"],
 		sessionManager: {
 			getSessionName: () => "existing session",
+			getSessionFile: () => undefined,
 			flushSync: vi.fn(),
 		} as unknown as InteractiveModeContext["sessionManager"],
 		keybindings: {
@@ -270,7 +273,7 @@ describe("InputController escape behavior", () => {
 
 		expect(spies.startPendingSubmission).toHaveBeenCalledWith({
 			text: "hello",
-			images: undefined,
+			attachments: undefined,
 			imageLinks: undefined,
 			streamingBehavior: "steer",
 		});
@@ -318,19 +321,19 @@ describe("InputController escape behavior", () => {
 		expect(editor.getText()).toBe("");
 	});
 
-	it("falls back to aborting the active session when no pending optimistic submission exists", () => {
+	it("falls back to aborting the active session when no pending optimistic submission exists", async () => {
 		const { ctx, editor, spies } = createContext();
 		ctx.loadingAnimation = {} as InteractiveModeContext["loadingAnimation"];
 		const controller = new InputController(ctx);
 
 		controller.setupKeyHandlers();
 		editor.onEscape?.();
+		await Promise.resolve();
+		await Promise.resolve();
 
 		expect(spies.cancelPendingSubmission).toHaveBeenCalledTimes(1);
-		expect(spies.clearQueue).toHaveBeenCalledTimes(1);
+		expect(spies.clearQueue).not.toHaveBeenCalled();
 		expect(spies.abort).toHaveBeenCalledTimes(1);
-		// The Esc interrupt threads a user-facing reason so the aborted turn and its
-		// synthetic tool results read as a deliberate interrupt, not "Request was aborted".
 		expect(spies.abort).toHaveBeenCalledWith({ reason: USER_INTERRUPT_LABEL });
 	});
 

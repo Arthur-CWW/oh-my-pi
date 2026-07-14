@@ -250,7 +250,7 @@ describe("Agent hub row ordering", () => {
 		AgentRegistry.resetGlobalForTests();
 	});
 
-	it("keeps activity updates in place and appends sequential registrations", () => {
+	it("keeps activity updates in place and appends sequential registrations", async () => {
 		geometry = stubStdoutGeometry(120);
 		const now = vi.spyOn(Date, "now");
 		const agents = new AgentRegistry();
@@ -269,11 +269,13 @@ describe("Agent hub row ordering", () => {
 		agents.setActivity("A", "updated");
 		expect(renderedAgentIds(hub)).toEqual(["A", "B", "C"]);
 		agents.setStatus("A", "idle");
+		await waitForRenderedText(hub, "○ IDLE A");
 		expect(renderedAgentIds(hub)).toEqual(["B", "C", "A"]);
 		expect(renderedText(hub)).toContain("○ IDLE A");
 
 		now.mockReturnValue(5000);
 		agents.register({ id: "D", displayName: "Delta", kind: "sub", session: liveSession() });
+		await waitForRenderedText(hub, "Delta");
 		expect(renderedAgentIds(hub)).toEqual(["B", "C", "D", "A"]);
 		hub.dispose();
 	});
@@ -290,7 +292,7 @@ describe("Agent hub row ordering", () => {
 		hub.dispose();
 	});
 
-	it("keeps external peers in first-seen order and appends newcomers", () => {
+	it("keeps external peers in first-seen order and appends newcomers", async () => {
 		geometry = stubStdoutGeometry(120);
 		const now = vi.spyOn(Date, "now");
 		now.mockReturnValue(Date.parse("2026-07-03T00:00:00.000Z"));
@@ -319,12 +321,13 @@ describe("Agent hub row ordering", () => {
 			externalPeer("external:gamma", "gamma", lastSeen, "waiting_input"),
 		];
 		agents.register({ id: "refresh", displayName: "Refresh", kind: "sub", session: liveSession() });
+		await waitForRenderedText(hub, "gamma");
 
 		expect(renderedExternalPeerNames(hub)).toEqual(["alpha", "beta", "gamma"]);
 		hub.dispose();
 	});
 
-	it("forgets departed external peer identities across long polling sessions", () => {
+	it("forgets departed external peer identities across long polling sessions", async () => {
 		geometry = stubStdoutGeometry(120);
 		const now = vi.spyOn(Date, "now");
 		now.mockReturnValue(Date.parse("2026-07-03T00:00:00.000Z"));
@@ -340,9 +343,9 @@ describe("Agent hub row ordering", () => {
 			peers = [externalPeer(`external:${index}`, `peer-${index}`, lastSeen, "idle")];
 			agents.register({ id: `refresh-${index}`, displayName: "refresh", kind: "sub", session: liveSession() });
 			agents.unregister(`refresh-${index}`);
-			hub.render(120);
-			expect(hub.getRetentionMetrics().externalOrderEntries).toBe(1);
 		}
+		await waitForRenderedText(hub, "peer-2000");
+		expect(hub.getRetentionMetrics().externalOrderEntries).toBe(1);
 
 		expect(renderedText(hub)).toContain("peer-2000");
 		expect(renderedText(hub)).not.toContain("peer-0");
@@ -428,6 +431,7 @@ describe("Agent hub row ordering", () => {
 		hub.handleInput(".");
 		await waitForRenderedText(hub, "automation: Nightly Check");
 		hub.handleInput("\r");
+		await waitForRenderedText(hub, "automation transcript body");
 		expect(renderedText(hub)).toContain("automation transcript body");
 		hub.dispose();
 	});

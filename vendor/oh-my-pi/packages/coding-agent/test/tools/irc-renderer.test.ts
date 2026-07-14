@@ -1,17 +1,32 @@
 import { describe, expect, it } from "bun:test";
+import { visibleWidth } from "@oh-my-pi/pi-tui";
 import type { IrcMessage } from "@oh-my-pi/pi-coding-agent/irc/bus";
 import { getThemeByName } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
+import type { TranscriptDisplayContext } from "@oh-my-pi/pi-coding-agent/modes/transcript-display";
 import { type IrcDetails, ircToolRenderer } from "@oh-my-pi/pi-coding-agent/tools/irc";
 import { sanitizeText } from "@oh-my-pi/pi-utils";
 
 async function theme() {
-	const t = await getThemeByName("dark");
-	expect(t).toBeDefined();
-	return t!;
+	const uiTheme = await getThemeByName("dark");
+	expect(uiTheme).toBeDefined();
+	expect(uiTheme?.getSymbolPreset()).toBeDefined();
+	return uiTheme!;
 }
 
+const display = (overrides: Partial<TranscriptDisplayContext> = {}): TranscriptDisplayContext => ({
+	transcriptWrap: false,
+	richTranscript: true,
+	...overrides,
+});
+
+const rawLines = (component: { render: (w: number) => readonly string[] }, width = 200) => [...component.render(width)];
+
 const lines = (component: { render: (w: number) => readonly string[] }, width = 200) =>
-	sanitizeText(component.render(width).join("\n")).split("\n");
+	rawLines(component, width).map(sanitizeText);
+
+const expectWidthBounded = (rendered: readonly string[], width: number) => {
+	for (const line of rendered) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+};
 
 const msg = (overrides: Partial<IrcMessage>): IrcMessage => ({
 	id: "7181122334455667789",
@@ -38,7 +53,7 @@ describe("ircToolRenderer send", () => {
 						waited: msg({ body: "go ahead, auth.ts is yours." }),
 					} satisfies IrcDetails,
 				},
-				{ expanded: false, isPartial: false },
+				{ expanded: false, isPartial: false, transcriptDisplay: display() },
 				uiTheme,
 				{ op: "send", to: "AuthLoader", message: "Are you done with auth.ts?", await: true },
 			),
@@ -65,7 +80,7 @@ describe("ircToolRenderer send", () => {
 						],
 					} satisfies IrcDetails,
 				},
-				{ expanded: false, isPartial: false },
+				{ expanded: false, isPartial: false, transcriptDisplay: display() },
 				uiTheme,
 				{ op: "send", to: "all", message: "heads up" },
 			),
@@ -93,7 +108,7 @@ describe("ircToolRenderer send", () => {
 						waited: null,
 					} satisfies IrcDetails,
 				},
-				{ expanded: false, isPartial: false },
+				{ expanded: false, isPartial: false, transcriptDisplay: display() },
 				uiTheme,
 				{ op: "send", to: "AuthLoader", message: "ping", await: true },
 			),
@@ -111,7 +126,7 @@ describe("ircToolRenderer send", () => {
 					details: { op: "send", from: "Main" } satisfies IrcDetails,
 					isError: true,
 				},
-				{ expanded: false, isPartial: false },
+				{ expanded: false, isPartial: false, transcriptDisplay: display() },
 				uiTheme,
 				{ op: "send" },
 			),
@@ -129,7 +144,7 @@ describe("ircToolRenderer wait", () => {
 					content: [{ type: "text", text: "" }],
 					details: { op: "wait", from: "Main", waited: msg({}) } satisfies IrcDetails,
 				},
-				{ expanded: false, isPartial: false },
+				{ expanded: false, isPartial: false, transcriptDisplay: display() },
 				uiTheme,
 				{ op: "wait", from: "AuthLoader" },
 			),
@@ -146,7 +161,7 @@ describe("ircToolRenderer wait", () => {
 					content: [{ type: "text", text: "No message from AuthLoader within 2m." }],
 					details: { op: "wait", from: "Main", waited: null } satisfies IrcDetails,
 				},
-				{ expanded: false, isPartial: false },
+				{ expanded: false, isPartial: false, transcriptDisplay: display() },
 				uiTheme,
 				{ op: "wait", from: "AuthLoader" },
 			),
@@ -172,7 +187,7 @@ describe("ircToolRenderer inbox", () => {
 						],
 					} satisfies IrcDetails,
 				},
-				{ expanded: false, isPartial: false },
+				{ expanded: false, isPartial: false, transcriptDisplay: display() },
 				uiTheme,
 				{ op: "inbox", peek: true },
 			),
@@ -217,7 +232,7 @@ describe("ircToolRenderer list", () => {
 						],
 					} satisfies IrcDetails,
 				},
-				{ expanded: false, isPartial: false },
+				{ expanded: false, isPartial: false, transcriptDisplay: display() },
 				uiTheme,
 				{ op: "list" },
 			),
@@ -256,7 +271,7 @@ describe("ircToolRenderer list", () => {
 						],
 					} satisfies IrcDetails,
 				},
-				{ expanded: false, isPartial: false },
+				{ expanded: false, isPartial: false, transcriptDisplay: display() },
 				uiTheme,
 				{ op: "list" },
 			),
@@ -268,6 +283,213 @@ describe("ircToolRenderer list", () => {
 	});
 });
 
+describe("ircToolRenderer transcript display", () => {
+	const width = 34;
+	const body =
+		"**bold** alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima mike november tail-token";
+
+	it("applies wrapping and rich rendering to pending, final, awaited, wait, and inbox bodies", async () => {
+		const uiTheme = await theme();
+		const cases = [
+			{
+				render: (transcriptDisplay: TranscriptDisplayContext, expanded: boolean) =>
+					ircToolRenderer.renderCall(
+						{ op: "send", to: "AuthLoader", message: body },
+						{ expanded, isPartial: false, transcriptDisplay },
+						uiTheme,
+					),
+			},
+			{
+				render: (transcriptDisplay: TranscriptDisplayContext, expanded: boolean) =>
+					ircToolRenderer.renderResult(
+						{
+							content: [{ type: "text", text: "" }],
+							details: {
+								op: "send",
+								from: "Main",
+								to: "AuthLoader",
+								receipts: [{ to: "AuthLoader", outcome: "revived" }],
+							} satisfies IrcDetails,
+						},
+						{ expanded, isPartial: false, transcriptDisplay },
+						uiTheme,
+						{ op: "send", to: "AuthLoader", message: body },
+					),
+			},
+			{
+				render: (transcriptDisplay: TranscriptDisplayContext, expanded: boolean) =>
+					ircToolRenderer.renderResult(
+						{
+							content: [{ type: "text", text: "" }],
+							details: {
+								op: "send",
+								from: "Main",
+								to: "AuthLoader",
+								receipts: [{ to: "AuthLoader", outcome: "injected" }],
+								waited: msg({ body }),
+							} satisfies IrcDetails,
+						},
+						{ expanded, isPartial: false, transcriptDisplay },
+						uiTheme,
+						{ op: "send", to: "AuthLoader", message: "short request", await: true },
+					),
+			},
+			{
+				render: (transcriptDisplay: TranscriptDisplayContext, expanded: boolean) =>
+					ircToolRenderer.renderResult(
+						{
+							content: [{ type: "text", text: "" }],
+							details: { op: "wait", from: "Main", waited: msg({ body }) } satisfies IrcDetails,
+						},
+						{ expanded, isPartial: false, transcriptDisplay },
+						uiTheme,
+						{ op: "wait", from: "AuthLoader" },
+					),
+			},
+			{
+				render: (transcriptDisplay: TranscriptDisplayContext, expanded: boolean) =>
+					ircToolRenderer.renderResult(
+						{
+							content: [{ type: "text", text: "" }],
+							details: {
+								op: "inbox",
+								from: "Main",
+								inbox: [msg({ body })],
+							} satisfies IrcDetails,
+						},
+						{ expanded, isPartial: false, transcriptDisplay },
+						uiTheme,
+						{ op: "inbox", peek: true },
+					),
+			},
+		];
+
+		for (const testCase of cases) {
+			const wrapOff = rawLines(
+				testCase.render(display({ transcriptWrap: false, richTranscript: false }), false),
+				width,
+			);
+			const wrapOffPlain = wrapOff.map(sanitizeText).join("\n");
+			expectWidthBounded(wrapOff, width);
+			expect(wrapOffPlain).toContain("…");
+			expect(wrapOffPlain).toContain("**bold**");
+			expect(wrapOffPlain).not.toContain("tail-token");
+
+			const wrappedPlain = rawLines(
+				testCase.render(display({ transcriptWrap: true, richTranscript: false }), false),
+				width,
+			);
+			const wrappedPlainText = wrappedPlain.map(sanitizeText).join("\n");
+			expectWidthBounded(wrappedPlain, width);
+			expect(wrappedPlain.length).toBeGreaterThan(wrapOff.length);
+			expect(wrappedPlainText).toContain("**bold**");
+			expect(wrappedPlainText).toContain("tail-token");
+
+			const wrappedRich = rawLines(
+				testCase.render(display({ transcriptWrap: true, richTranscript: true }), false),
+				width,
+			);
+			const wrappedRichText = wrappedRich.map(sanitizeText).join("\n");
+			expectWidthBounded(wrappedRich, width);
+			expect(wrappedRichText).toContain("bold");
+			expect(wrappedRichText).toContain("tail-token");
+			expect(wrappedRichText).not.toContain("**bold**");
+			expect(wrappedRich.join("\n")).not.toBe(wrappedPlain.join("\n"));
+		}
+	});
+
+	it("keeps headers, receipts, timeouts, inbox heads, and roster rows single-line", async () => {
+		const uiTheme = await theme();
+		const transcriptDisplay = display({ transcriptWrap: true, richTranscript: false });
+
+		const send = lines(
+			ircToolRenderer.renderResult(
+				{
+					content: [{ type: "text", text: "" }],
+					details: {
+						op: "send",
+						from: "Main",
+						to: "AuthLoader",
+						receipts: [{ to: "AuthLoader", outcome: "revived" }],
+					} satisfies IrcDetails,
+				},
+				{ expanded: true, isPartial: false, transcriptDisplay },
+				uiTheme,
+				{ op: "send", to: "AuthLoader", message: body },
+			),
+			width,
+		);
+		expectWidthBounded(send, width);
+		expect(send.filter(line => line.includes("AuthLoader")).length).toBe(1);
+		expect(send.filter(line => line.includes("revived")).length).toBe(1);
+
+		const timeout = lines(
+			ircToolRenderer.renderResult(
+				{
+					content: [{ type: "text", text: "No message from AuthLoader within 2m." }],
+					details: { op: "wait", from: "Main", waited: null } satisfies IrcDetails,
+				},
+				{ expanded: true, isPartial: false, transcriptDisplay },
+				uiTheme,
+				{ op: "wait", from: "AuthLoader" },
+			),
+			width,
+		);
+		expectWidthBounded(timeout, width);
+		expect(timeout).toHaveLength(2);
+		expect(timeout[0]).toContain("timed out");
+
+		const inbox = lines(
+			ircToolRenderer.renderResult(
+				{
+					content: [{ type: "text", text: "" }],
+					details: {
+						op: "inbox",
+						from: "Main",
+						inbox: [msg({ body })],
+					} satisfies IrcDetails,
+				},
+				{ expanded: true, isPartial: false, transcriptDisplay },
+				uiTheme,
+				{ op: "inbox", peek: true },
+			),
+			width,
+		);
+		expectWidthBounded(inbox, width);
+		expect(inbox.filter(line => line.includes("AuthLoader")).length).toBe(1);
+
+		const roster = lines(
+			ircToolRenderer.renderResult(
+				{
+					content: [{ type: "text", text: "" }],
+					details: {
+						op: "list",
+						from: "Main",
+						peers: [
+							{
+								id: "AuthLoader",
+								displayName: "task",
+								kind: "sub",
+								status: "running",
+								parentId: "Main",
+								unread: 0,
+								lastActivity: Date.now() - 5_000,
+								activity: "checking auth",
+							},
+						],
+					} satisfies IrcDetails,
+				},
+				{ expanded: true, isPartial: false, transcriptDisplay },
+				uiTheme,
+				{ op: "list" },
+			),
+			width,
+		);
+		expectWidthBounded(roster, width);
+		expect(roster.filter(line => line.includes("AuthLoader")).length).toBe(1);
+	});
+});
+
 describe("ircToolRenderer body truncation", () => {
 	it("collapses long bodies with an elision counter and expands on demand", async () => {
 		const uiTheme = await theme();
@@ -276,14 +498,14 @@ describe("ircToolRenderer body truncation", () => {
 		const result = { content: [{ type: "text", text: "" }], details };
 
 		const collapsed = lines(
-			ircToolRenderer.renderResult(result, { expanded: false, isPartial: false }, uiTheme, { op: "wait" }),
+			ircToolRenderer.renderResult(result, { expanded: false, isPartial: false, transcriptDisplay: display() }, uiTheme, { op: "wait" }),
 		);
 		expect(collapsed.some(line => line.includes("reply line 2"))).toBe(true);
 		expect(collapsed.some(line => line.includes("reply line 3"))).toBe(false);
 		expect(collapsed.some(line => line.includes("+4 more lines"))).toBe(true);
 
 		const expanded = lines(
-			ircToolRenderer.renderResult(result, { expanded: true, isPartial: false }, uiTheme, { op: "wait" }),
+			ircToolRenderer.renderResult(result, { expanded: true, isPartial: false, transcriptDisplay: display() }, uiTheme, { op: "wait" }),
 		);
 		expect(expanded.some(line => line.includes("reply line 6"))).toBe(true);
 		expect(expanded.some(line => line.includes("more lines"))).toBe(false);

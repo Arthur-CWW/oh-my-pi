@@ -17,10 +17,8 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import path from "node:path";
 import type { AgentTool, AgentToolResult, AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
-import type { Usage } from "@oh-my-pi/pi-ai";
 import { $env, logger, prompt, Snowflake } from "@oh-my-pi/pi-utils";
 import type { ToolSession } from "..";
-import { resolveModelOverrideWithAuthFallback, resolveModelRoleValue } from "../config/model-resolver";
 import { MCPManager } from "../mcp/manager";
 import type { Theme } from "../modes/theme/theme";
 import planModeSubagentPrompt from "../prompts/system/plan-mode-subagent.md" with { type: "text" };
@@ -45,9 +43,10 @@ import {
 import "../tools/review";
 import type { AsyncJobManager } from "../async";
 import type { LocalProtocolOptions } from "../internal-urls";
+import { type ArchivedDirectChildDescriptor, listArchivedDirectChildren } from "../internal-urls/history-protocol";
 import { loadOverallPlanReference } from "../plan-mode/plan-handoff";
-import type { ReviveAdmissionAcquirer } from "../registry/agent-lifecycle";
-import type { AgentQuotaAdmission } from "../registry/agent-registry";
+import { AgentLifecycleManager, type ReviveAdmissionAcquirer } from "../registry/agent-lifecycle";
+import type { AgentStatus } from "../registry/agent-registry";
 import { AgentRegistry, MAIN_AGENT_ID } from "../registry/agent-registry";
 import { generateCommitMessage } from "../utils/commit-message-generator";
 import * as git from "../utils/git";
@@ -56,25 +55,25 @@ import { runSubprocess } from "./executor";
 import { generateTaskName } from "./name-generator";
 import { AgentOutputManager } from "./output-manager";
 import { mapWithConcurrencyLimit, REVIVE_ADMISSION_WAIT_MS, resolveSpawnConcurrency, Semaphore } from "./parallel";
-import {
-	createQuotaAdmissionStateRecord,
-	latestQuotaAdmissionState,
-	QUOTA_ADMISSION_CUSTOM_TYPE,
-	QuotaAdmissionController,
-	type QuotaModel,
-} from "./quota-admission";
+import { ProgressAggregator } from "./progress-aggregator";
+import { addUsageTotals, createUsageTotals } from "./progress-usage";
 import { renderResult, renderCall as renderTaskCall } from "./render";
 import { repairTaskParams } from "./repair-args";
 import { appendSpawnRouteResolution } from "./route-events";
+import { type SpawnRouteDecision, toSpawnRouteReceipt } from "./route-resolution";
 import {
-	admitSpawnRoute,
-	blockSpawnRoute,
-	reconcileSpawnRouteAuthFallback,
-	rerouteSpawnRoute,
-	resolveSpawnRoute,
-	type SpawnRouteDecision,
-	toSpawnRouteReceipt,
-} from "./route-resolution";
+	applyQuotaAdmission,
+	applyTaskAuthFallback,
+	formatModelChain,
+	formatTaskRouteError,
+	resolveTaskSpawnRoute,
+} from "./spawn-route";
+import {
+	recordFinalizedSubagentFailure,
+	recordThrownSubagentFailure,
+	TaskJobError,
+	updateFinalizedSubagentProgress,
+} from "./subagent-failure";
 import {
 	applyNestedPatches,
 	captureBaseline,
@@ -111,92 +110,12 @@ function renderSubagentUserPrompt(assignment: string): string {
 	});
 }
 
-function createUsageTotals(): Usage {
-	return {
-		input: 0,
-		output: 0,
-		cacheRead: 0,
-		cacheWrite: 0,
-		totalTokens: 0,
-		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-	};
-}
-
-function addUsageTotals(target: Usage, usage: Partial<Usage>): void {
-	const input = usage.input ?? 0;
-	const output = usage.output ?? 0;
-	const cacheRead = usage.cacheRead ?? 0;
-	const cacheWrite = usage.cacheWrite ?? 0;
-	const totalTokens = usage.totalTokens ?? input + output + cacheRead + cacheWrite;
-	const cost =
-		usage.cost ??
-		({
-			input: 0,
-			output: 0,
-			cacheRead: 0,
-			cacheWrite: 0,
-			total: 0,
-		} satisfies Usage["cost"]);
-
-	target.input += input;
-	target.output += output;
-	target.cacheRead += cacheRead;
-	target.cacheWrite += cacheWrite;
-	target.totalTokens += totalTokens;
-	target.cost.input += cost.input;
-	target.cost.output += cost.output;
-	target.cost.cacheRead += cost.cacheRead;
-	target.cost.cacheWrite += cost.cacheWrite;
-	target.cost.total += cost.total;
-}
-
-function formatResolvedModelSelector(
-	model: { provider: string; id: string },
-	thinkingLevel: string | undefined,
-	explicitThinkingLevel: boolean,
-): string {
-	return explicitThinkingLevel && thinkingLevel
-		? `${model.provider}/${model.id}:${thinkingLevel}`
-		: `${model.provider}/${model.id}`;
-}
-
-export function formatModelChain(
-	agentName: string,
-	role: string | undefined,
-	resolvedModel: string | undefined,
-	source?: string,
-): string | undefined {
-	if (!resolvedModel) return undefined;
-	const route = source ? ` [${source}]` : "";
-	const roleLabel = role?.trim();
-	return roleLabel
-		? `${agentName} → "${roleLabel}" → ${resolvedModel}${route}`
-		: `${agentName} → ${resolvedModel}${route}`;
-}
-
-export function formatAvailableModels(models: ReadonlyArray<{ provider: string; id: string }>): string {
-	if (models.length === 0) return "none";
-	const limit = 20;
-	const listed = models.slice(0, limit).map(model => `${model.provider}/${model.id}`);
-	return models.length > limit ? `${listed.join(", ")}, … (${models.length - limit} more)` : listed.join(", ");
-}
-
-export function formatInvalidModelOverrideError(args: {
-	agentName: string;
-	requested: string | string[];
-	resolvedPatterns: string[];
-	availableModels: ReadonlyArray<{ provider: string; id: string }>;
-}): string {
-	const requested = Array.isArray(args.requested) ? args.requested.join(", ") : args.requested;
-	const resolved = args.resolvedPatterns.length > 0 ? args.resolvedPatterns.join(", ") : "none";
-	return `Invalid model override for task agent "${args.agentName}": ${requested}. Resolved selector${args.resolvedPatterns.length === 1 ? "" : "s"}: ${resolved}; no available model matched. Valid model selectors include: ${formatAvailableModels(args.availableModels)}.`;
-}
-
 // Re-export types and utilities
 export { loadBundledAgents as BUNDLED_AGENTS } from "./agents";
 export { discoverCommands, expandCommand, getCommand } from "./commands";
 export { discoverAgents, getAgent } from "./discovery";
 export { AgentOutputManager } from "./output-manager";
+export { formatAvailableModels, formatInvalidModelOverrideError, formatModelChain } from "./spawn-route";
 export type {
 	AgentDefinition,
 	AgentProgress,
@@ -500,8 +419,135 @@ export function composeSpawnAdvisory(args: {
 	);
 }
 
-/** Sentinel for async jobs whose subagent finished with a failing result; progress is already updated. */
-class TaskJobError extends Error {}
+const CONTINUATION_ID_SUFFIXES = ["Resume", "Retry", "Continue", "Redo", "Finish"] as const;
+const LEADING_CONTINUATION_WORDS = ["resume", "retry", "continue", "redo", "finish"] as const;
+const COMPACT_AGENT_ID = /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/;
+const DEDUPE_ID_SUFFIX = /-\d+$/;
+
+export type SpawnIdentityMatchKind = "exact" | "continuation" | "dedupe";
+
+export interface SpawnIdentityCandidate {
+	id: string;
+	status: AgentStatus | ArchivedDirectChildDescriptor["state"];
+	revivable: boolean;
+	archived: boolean;
+}
+
+export interface SpawnIdentityMatch {
+	candidate: SpawnIdentityCandidate;
+	kind: SpawnIdentityMatchKind;
+	refuse: boolean;
+	requestedId?: string;
+}
+
+function compactSpawnIdentifiers(item: TaskItem): string[] {
+	const identifiers: string[] = [];
+	for (const value of [item.id, item.description, item.assignment]) {
+		const trimmed = value?.trim();
+		if (trimmed && COMPACT_AGENT_ID.test(trimmed) && !identifiers.includes(trimmed)) identifiers.push(trimmed);
+	}
+	return identifiers;
+}
+
+function classifySpawnIdentifier(requested: string, existing: string): SpawnIdentityMatchKind | undefined {
+	if (requested === existing) return "exact";
+	for (const suffix of CONTINUATION_ID_SUFFIXES) {
+		if (requested === `${existing}${suffix}` || requested === `${existing}-${suffix}`) return "continuation";
+	}
+	const requestedBase = requested.replace(DEDUPE_ID_SUFFIX, "");
+	const existingBase = existing.replace(DEDUPE_ID_SUFFIX, "");
+	return requested !== existing && requestedBase === existingBase ? "dedupe" : undefined;
+}
+
+function startsWithContinuationIntent(text: string | undefined, existing: string): boolean {
+	const normalized = text?.trim().toLowerCase();
+	if (!normalized) return false;
+	const target = existing.toLowerCase();
+	for (const action of LEADING_CONTINUATION_WORDS) {
+		const prefix = `${action} ${target}`;
+		if (normalized === prefix || normalized.startsWith(`${prefix} `) || normalized.startsWith(`${prefix}:`))
+			return true;
+	}
+	return false;
+}
+
+/** Pick the strongest cheap identity collision without fuzzy semantic matching. */
+export function findSpawnIdentityMatch(
+	item: TaskItem,
+	candidates: readonly SpawnIdentityCandidate[],
+): SpawnIdentityMatch | undefined {
+	const identifiers = compactSpawnIdentifiers(item);
+	let best: { match: SpawnIdentityMatch; score: number } | undefined;
+	for (const candidate of candidates) {
+		let kind: SpawnIdentityMatchKind | undefined;
+		for (const identifier of identifiers) {
+			kind = classifySpawnIdentifier(identifier, candidate.id);
+			if (kind) break;
+		}
+		if (
+			!kind &&
+			(startsWithContinuationIntent(item.description, candidate.id) ||
+				startsWithContinuationIntent(item.assignment, candidate.id))
+		) {
+			kind = "continuation";
+		}
+		if (!kind) continue;
+		const refuse =
+			candidate.revivable &&
+			(candidate.status === "idle" || candidate.status === "parked") &&
+			(kind === "exact" || kind === "continuation");
+		const score = (refuse ? 10 : 0) + (kind === "exact" ? 3 : kind === "continuation" ? 2 : 1);
+		if (!best || score > best.score) {
+			best = {
+				match: {
+					candidate,
+					kind,
+					refuse,
+					...(item.id?.trim() ? { requestedId: item.id.trim() } : {}),
+				},
+				score,
+			};
+		}
+	}
+	return best?.match;
+}
+
+export function renderSpawnIdentityNotice(match: SpawnIdentityMatch): string {
+	const { candidate } = match;
+	const requested = match.requestedId ? `agent \`${match.requestedId}\`` : "this spawn";
+	const relation =
+		match.kind === "exact"
+			? "the same id as"
+			: match.kind === "continuation"
+				? "a continuation of"
+				: "a deduped id of";
+	const state = `${candidate.archived ? "archived, " : ""}${candidate.status}${candidate.revivable ? ", revivable" : ""}`;
+	const ircGuidance =
+		`Use \`irc\` with \`op:"send", to:"${candidate.id}", message:"<follow-up>"\` instead; ` +
+		`read history://${candidate.id} for its context.`;
+	if (match.refuse) {
+		return (
+			`Spawn refused: ${requested} is ${relation} existing agent \`${candidate.id}\` (${state}). ` +
+			`${ircGuidance} One message resumes it in place with context intact.`
+		);
+	}
+	if (candidate.status === "running") {
+		return (
+			`Warning: ${requested} is ${relation} running agent \`${candidate.id}\`. The spawn will proceed, ` +
+			`but this duplicates live work. ${ircGuidance}`
+		);
+	}
+	if (candidate.revivable) {
+		return (
+			`Warning: ${requested} is ${relation} existing agent \`${candidate.id}\` (${state}). ` +
+			`The spawn will proceed. ${ircGuidance}`
+		);
+	}
+	return (
+		`Warning: ${requested} is ${relation} terminated agent \`${candidate.id}\` (${state}). ` +
+		`The spawn will proceed. Salvage prior context from history://${candidate.id} first.`
+	);
+}
 
 /**
  * Process-level memo for create-time agent discovery, keyed by resolved cwd.
@@ -566,10 +612,6 @@ export async function acquireReviveAdmissionSlot(
 		semaphore.release();
 	};
 }
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Tool Class
-// ═══════════════════════════════════════════════════════════════════════════
 
 /**
  * Task tool - Delegate tasks to specialized agents.
@@ -695,153 +737,39 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 		});
 	}
 
-	#resolveSpawnRoute(agentName: string, effectiveAgent: AgentDefinition, params: TaskParams): SpawnRouteDecision {
-		const agentModelOverrides = this.session.settings.get("task.agentModelOverrides");
-		const parentActiveSelector = this.session.getActiveModelString?.();
-		return resolveSpawnRoute({
-			spawnExplicit: params.model,
-			sessionExplicit: this.session.getExplicitModelString?.(),
-			sessionTemporary: this.session.getTemporaryModelString?.(),
-			agentModelOverride: agentModelOverrides[agentName],
-			agentFrontmatter: effectiveAgent.model,
-			sessionInherited: parentActiveSelector,
-			globalDefault: this.session.settings.getModelRole("default"),
-			settings: this.session.settings,
-			modelRegistry: this.session.modelRegistry,
-			parentActiveSelector,
-		});
-	}
-
-	#quotaModel(decision: SpawnRouteDecision): QuotaModel | undefined {
-		const route = decision.route;
-		return route ? { providerId: route.provider, modelId: route.model, selector: route.selector } : undefined;
-	}
-
-	#quotaCandidates(decision: SpawnRouteDecision, primary: QuotaModel | undefined): QuotaModel[] {
-		const modelRegistry = this.session.modelRegistry;
-		if (!modelRegistry || !primary || decision.explicit) return [];
-		const available = modelRegistry.getAvailable();
-		const candidates: QuotaModel[] = [];
-		for (const pattern of decision.resolvedPatterns) {
-			const resolved = resolveModelRoleValue(pattern, available, {
-				settings: this.session.settings,
-				modelRegistry,
-			});
-			if (!resolved.model) continue;
-			if (resolved.model.provider === primary.providerId && resolved.model.id === primary.modelId) continue;
-			const selector = formatResolvedModelSelector(
-				resolved.model,
-				resolved.thinkingLevel,
-				resolved.explicitThinkingLevel,
-			);
-			candidates.push({ providerId: resolved.model.provider, modelId: resolved.model.id, selector });
-		}
-		return candidates;
-	}
-
-	#quotaAdmissionSettings() {
-		return {
-			enabled: this.session.settings.get("quotaAdmission.enabled"),
-			reservePercent: this.session.settings.get("quotaAdmission.reservePercent"),
-			emaAlpha: this.session.settings.get("quotaAdmission.emaAlpha"),
-			hysteresisPercent: this.session.settings.get("quotaAdmission.hysteresisPercent"),
-		};
-	}
-
-	async #applyQuotaAdmission(decision: SpawnRouteDecision, signal?: AbortSignal): Promise<SpawnRouteDecision> {
-		const quotaModel = this.#quotaModel(decision);
-		if (!quotaModel || !this.session.authStorage) return decision;
-		const state = this.session.sessionManager
-			? latestQuotaAdmissionState(this.session.sessionManager.getEntries())
-			: undefined;
-		const controller = new QuotaAdmissionController(this.#quotaAdmissionSettings(), state);
-		const reports = await this.session.authStorage
-			.fetchUsageReports({
-				baseUrlResolver: provider => this.session.modelRegistry?.getProviderBaseUrl?.(provider),
-				signal,
-			})
-			.catch(error => {
-				logger.debug("task: quota admission usage fetch failed", { error: String(error) });
-				return null;
-			});
-		if (reports?.length) controller.observeReports(reports);
-		const quotaDecision = controller.admit(quotaModel, this.#quotaCandidates(decision, quotaModel));
-		this.session.sessionManager?.appendCustomEntry(
-			QUOTA_ADMISSION_CUSTOM_TYPE,
-			createQuotaAdmissionStateRecord(controller.state, quotaDecision.atMs),
-		);
-		const quotaAdmission: AgentQuotaAdmission = {
-			originalProvider: quotaDecision.model.providerId,
-			reroutedProvider: quotaDecision.outcome === "reroute" ? quotaDecision.routedModel?.providerId : undefined,
-			originalModel: quotaDecision.model.selector,
-			reroutedModel: quotaDecision.outcome === "reroute" ? quotaDecision.routedModel?.selector : undefined,
-			ratePerHour: quotaDecision.ratePerHour,
-			projectedEmptyAt: quotaDecision.projectedEmptyAt,
-			resetAt: quotaDecision.resetAt,
-			deficitPerHour: quotaDecision.deficitPerHour,
-			decisionReason: quotaDecision.reason,
-			quotaPoolId: quotaDecision.poolId,
-			limitWindowId: quotaDecision.windowId,
-		};
-		if (quotaDecision.outcome === "admit") return admitSpawnRoute(decision, quotaAdmission);
-		if (quotaDecision.outcome === "block" || !quotaDecision.routedModel) {
-			return blockSpawnRoute(decision, {
-				kind: "quota_admission_blocked",
-				selector: quotaModel.selector,
-				reason: quotaDecision.reason,
-				resetAt: quotaDecision.resetAt,
-			});
-		}
-		return rerouteSpawnRoute(decision, quotaDecision.routedModel, quotaAdmission, quotaDecision.reason);
-	}
-
-	async #applyAuthFallback(decision: SpawnRouteDecision): Promise<SpawnRouteDecision> {
-		const modelRegistry = this.session.modelRegistry;
-		if (decision.explicit || decision.invalid || decision.block || !decision.route || !modelRegistry) return decision;
-		const resolution = await resolveModelOverrideWithAuthFallback(
-			[...decision.resolvedPatterns],
-			decision.parentActiveSelector,
-			modelRegistry,
-			this.session.settings,
-		);
-		if (!resolution.authFallbackUsed || !resolution.model) return decision;
-		logger.warn("Task route lacks working credentials; reconciling route to parent session model", {
-			requested: decision.route.selector,
-			parentModel: decision.parentActiveSelector,
-			resolvedProvider: resolution.model.provider,
-			resolvedModel: resolution.model.id,
-		});
-		return reconcileSpawnRouteAuthFallback(
-			decision,
-			resolution.model,
-			resolution.thinkingLevel,
-			resolution.explicitThinkingLevel,
-		);
-	}
-
-	#routeError(agentName: string, decision: SpawnRouteDecision): string | undefined {
-		if (decision.invalid) {
-			return formatInvalidModelOverrideError({
-				agentName,
-				requested: [...decision.invalid.requested],
-				resolvedPatterns: [...decision.invalid.patterns],
-				availableModels: this.session.modelRegistry?.getAvailable() ?? [],
-			});
-		}
-		if (decision.block) {
-			const reason = decision.block.reason ? ` (${decision.block.reason})` : "";
-			const reset = decision.block.resetAt ? ` Reset at ${new Date(decision.block.resetAt).toISOString()}.` : "";
-			return `Quota admission blocked ${decision.block.selector}${reason}.${reset}`;
-		}
-		return undefined;
-	}
-
 	/**
 	 * Create a TaskTool instance with async agent discovery.
 	 */
 	static async create(session: ToolSession): Promise<TaskTool> {
 		const { agents } = await discoverAgentsForCreate(session.cwd);
 		return new TaskTool(session, agents);
+	}
+
+	async #spawnIdentityCandidates(): Promise<SpawnIdentityCandidate[]> {
+		const registry = AgentRegistry.global();
+		const ownerId = this.session.getAgentId?.();
+		const refs = registry.list();
+		const candidates: SpawnIdentityCandidate[] = refs
+			.filter(ref => ref.kind === "sub" && ref.id !== ownerId)
+			.map(ref => ({
+				id: ref.id,
+				status: ref.status,
+				revivable: AgentLifecycleManager.global().canResumeInPlace(ref.id),
+				archived: false,
+			}));
+		const parentSessionFile = this.session.getSessionFile();
+		if (!parentSessionFile) return candidates;
+		const registeredIds = new Set(refs.map(ref => ref.id));
+		for (const child of await listArchivedDirectChildren(parentSessionFile)) {
+			if (registeredIds.has(child.agentId)) continue;
+			candidates.push({
+				id: child.agentId,
+				status: child.state,
+				revivable: false,
+				archived: true,
+			});
+		}
+		return candidates;
 	}
 
 	async execute(
@@ -866,11 +794,24 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 			this.session.taskDepth ?? 0,
 		);
 		const ircEnabled = isIrcEnabled(this.session.settings, this.session.taskDepth ?? 0);
+		const identityCandidates = await this.#spawnIdentityCandidates();
+		const identityMatches = spawnItems
+			.map(item => findSpawnIdentityMatch(item, identityCandidates))
+			.filter((match): match is SpawnIdentityMatch => match !== undefined);
+		const refusedIdentity = identityMatches.find(match => match.refuse);
+		if (refusedIdentity) {
+			return {
+				content: [{ type: "text", text: renderSpawnIdentityNotice(refusedIdentity) }],
+				details: { projectAgentsDir: null, results: [], totalDurationMs: 0 },
+			};
+		}
+		const identityAdvisory =
+			identityMatches.length > 0 ? identityMatches.map(renderSpawnIdentityNotice).join("\n\n") : undefined;
 		// Coordination only makes sense when the siblings keep running after this
 		// call returns (async). In the sync fallback they have already completed,
 		// so a "coordinate while they run" hint would misfire.
 		const willRunAsync = !!manager && selectedAgent?.blocking !== true;
-		const advisory = this.session.suppressSpawnAdvisory
+		const spawnAdvisory = this.session.suppressSpawnAdvisory
 			? undefined
 			: composeSpawnAdvisory({
 					agentName: params.agent,
@@ -879,6 +820,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 					ircEnabled,
 					willRunAsync,
 				});
+		const advisory = [identityAdvisory, spawnAdvisory].filter(Boolean).join("\n\n") || undefined;
 		// Returns a fresh result (copied content array, copied text part) rather
 		// than mutating the caller's — task results are short-lived here, but an
 		// in-place edit on a shared/cached AgentToolResult would be a hidden trap.
@@ -912,15 +854,15 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 		for (const item of spawnItems) {
 			const spawnParams = spawnParamsFor(params, item);
 			let routeDecision = selectedAgent
-				? this.#resolveSpawnRoute(agentLabel, selectedAgent, spawnParams)
+				? resolveTaskSpawnRoute(this.session, agentLabel, selectedAgent, spawnParams)
 				: undefined;
 			if (routeDecision && !routeDecision.invalid) {
-				routeDecision = await this.#applyQuotaAdmission(routeDecision, signal);
+				routeDecision = await applyQuotaAdmission(this.session, routeDecision, signal);
 			}
 			if (routeDecision && !routeDecision.invalid && !routeDecision.block) {
-				routeDecision = await this.#applyAuthFallback(routeDecision);
+				routeDecision = await applyTaskAuthFallback(this.session, routeDecision);
 			}
-			const routeError = routeDecision ? this.#routeError(agentLabel, routeDecision) : undefined;
+			const routeError = routeDecision ? formatTaskRouteError(this.session, agentLabel, routeDecision) : undefined;
 			if (routeError) {
 				return withAdvisory({
 					content: [
@@ -947,7 +889,10 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 		for (let index = 0; index < spawnItems.length; index++) {
 			const item = spawnItems[index];
 			const routeDecision = routeDecisions[index];
-			const agentId = await outputManager.allocate(item.id?.trim() || generateTaskName());
+			const agentId = await outputManager.allocate(
+				item.id?.trim() || generateTaskName(),
+				candidate => AgentRegistry.global().get(candidate) !== undefined,
+			);
 			const assignment = (item.assignment ?? "").trim();
 			spawns.push({
 				agentId,
@@ -1105,12 +1050,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 		});
 	}
 
-	/**
-	 * Register one background job that runs a single spawn to completion and
-	 * delivers its yield text. The job body mirrors the sync path; `buildDetails`
-	 * supplies the (possibly batch-shared) progress snapshot and `onSettled`
-	 * feeds the caller's aggregate counters.
-	 */
+	/** Register one background spawn job and feed its progress into the caller's aggregate snapshot. */
 	#registerSpawnJob(options: {
 		manager: AsyncJobManager;
 		toolCallId: string;
@@ -1135,12 +1075,26 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 			onUpdate,
 			onSettled,
 		} = options;
-		const buildFollowUpHint = (aborted: boolean): string => {
-			if (aborted) {
-				return `\n\n${agentId} was aborted — transcript at history://${agentId}`;
+		const buildFollowUpHint = (interrupted: boolean): string => {
+			const ref = AgentRegistry.global().get(agentId);
+			const addressable =
+				(ref?.status === "running" || ref?.status === "idle") && ref.session !== null
+					? true
+					: ref?.status === "parked" && AgentLifecycleManager.global().canResumeInPlace(agentId);
+			if (!addressable) {
+				const reason = interrupted ? " after the interruption" : "";
+				return (
+					`\n\n${agentId} is no longer addressable${reason}. ` +
+					`Salvage its transcript at history://${agentId} before spawning replacement work.`
+				);
 			}
-			const followUp = ircEnabled ? "message it via `irc` to follow up; " : "";
-			return `\n\n${agentId} is now idle — ${followUp}transcript at history://${agentId}`;
+			const state = interrupted ? "after the interruption" : "after this job";
+			const send = ircEnabled ? "Send" : "When `irc` is available, send";
+			return (
+				`\n\n${agentId} remains addressable ${state}. ${send} one \`irc\` message ` +
+				`(\`op:"send", to:"${agentId}"\`) to resume it in place with context intact; ` +
+				`transcript at history://${agentId}`
+			);
 		};
 		return manager.register(
 			"task",
@@ -1173,19 +1127,15 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 					);
 					const finalText = result.content.find(part => part.type === "text")?.text ?? "(no output)";
 					const singleResult = result.details?.results[0];
-					// A missing result means the sync path failed at the tool level
-					// (results: []) — treat it as a failure, not success.
-					const resultFailed = !singleResult || (singleResult.aborted ?? false) || singleResult.exitCode !== 0;
-					progress.status = singleResult?.aborted ? "aborted" : resultFailed ? "failed" : "completed";
-					progress.durationMs = singleResult?.durationMs ?? Math.max(0, Date.now() - startedAt);
-					progress.tokens = singleResult?.tokens ?? 0;
-					progress.requests = singleResult?.requests ?? 0;
-					progress.contextTokens = singleResult?.contextTokens;
-					progress.contextWindow = singleResult?.contextWindow;
-					progress.cost = singleResult?.usage?.cost.total ?? 0;
-					progress.extractedToolData = singleResult?.extractedToolData;
-					progress.retryFailure = singleResult?.retryFailure;
-					progress.retryState = undefined;
+					const resultFailed = recordFinalizedSubagentFailure(
+						this.session.sessionManager,
+						agentId,
+						ownJobId,
+						singleResult,
+						runSignal.aborted,
+						AgentRegistry.global().get(agentId) !== undefined,
+					);
+					updateFinalizedSubagentProgress(progress, singleResult, resultFailed, startedAt);
 					onSettled?.(resultFailed);
 					const statusText = resultFailed
 						? `Background task ${agentId} failed.`
@@ -1208,6 +1158,16 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 					if (error instanceof TaskJobError) {
 						throw error;
 					}
+					const message = error instanceof Error ? error.message : String(error);
+					const ref = AgentRegistry.global().get(agentId);
+					recordThrownSubagentFailure(
+						this.session.sessionManager,
+						agentId,
+						ownJobId,
+						message,
+						runSignal.aborted,
+						ref !== undefined,
+					);
 					progress.status = "failed";
 					progress.durationMs = Math.max(0, Date.now() - startedAt);
 					onSettled?.(true);
@@ -1217,8 +1177,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 						content: [{ type: "text", text: statusText }],
 						details: buildDetails("failed", ownJobId),
 					});
-					const message = error instanceof Error ? error.message : String(error);
-					const hint = AgentRegistry.global().get(agentId) ? buildFollowUpHint(false) : "";
+					const hint = buildFollowUpHint(false);
 					throw new TaskJobError(`${message}${hint}`);
 				} finally {
 					semaphore.release();
@@ -1269,20 +1228,17 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 		}
 
 		const startTime = Date.now();
-		const latestProgress = new Map<number, AgentProgress>();
-		const emitCombined = () => {
+		const progressAggregator = new ProgressAggregator(progress => {
 			onUpdate?.({
 				content: [{ type: "text", text: `Running ${spawnItems.length} agents...` }],
 				details: {
 					projectAgentsDir: null,
 					results: [],
 					totalDurationMs: Date.now() - startTime,
-					progress: Array.from(latestProgress.entries())
-						.sort((a, b) => a[0] - b[0])
-						.map(([, progress]) => progress),
+					progress: [...progress],
 				},
 			});
-		};
+		});
 
 		const { results: payloads } = await mapWithConcurrencyLimit(
 			spawnItems,
@@ -1294,8 +1250,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 						? update => {
 								const progress = update.details?.progress?.[0];
 								if (progress) {
-									latestProgress.set(index, { ...progress, index });
-									emitCombined();
+									progressAggregator.update(index, { ...progress, index });
 								}
 							}
 						: undefined;
@@ -1313,6 +1268,8 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 			},
 			signal,
 		);
+		progressAggregator.flush();
+		progressAggregator.dispose();
 
 		const results: SingleResult[] = [];
 		const contentParts: string[] = [];
@@ -1449,12 +1406,12 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 				}
 			: agent;
 
-		let routeDecision = preResolved ?? this.#resolveSpawnRoute(agentName, effectiveAgent, params);
+		let routeDecision = preResolved ?? resolveTaskSpawnRoute(this.session, agentName, effectiveAgent, params);
 		if (!preResolved && !routeDecision.invalid) {
-			routeDecision = await this.#applyQuotaAdmission(routeDecision, signal);
+			routeDecision = await applyQuotaAdmission(this.session, routeDecision, signal);
 		}
-		routeDecision = await this.#applyAuthFallback(routeDecision);
-		const routeError = this.#routeError(agentName, routeDecision);
+		routeDecision = await applyTaskAuthFallback(this.session, routeDecision);
+		const routeError = formatTaskRouteError(this.session, agentName, routeDecision);
 		if (routeError) {
 			const blockedEntry: SingleResult = {
 				index: spawnIndex,
@@ -1575,7 +1532,10 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 			} else {
 				const outputManager =
 					this.session.agentOutputManager ?? new AgentOutputManager(this.session.getArtifactsDir ?? (() => null));
-				agentId = await outputManager.allocate(params.id?.trim() || generateTaskName());
+				agentId = await outputManager.allocate(
+					params.id?.trim() || generateTaskName(),
+					candidate => AgentRegistry.global().get(candidate) !== undefined,
+				);
 			}
 			if (this.session.sessionManager && routeReceipt) {
 				appendSpawnRouteResolution(

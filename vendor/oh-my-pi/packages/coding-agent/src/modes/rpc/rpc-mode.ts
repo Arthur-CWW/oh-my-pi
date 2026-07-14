@@ -713,7 +713,7 @@ export async function runRpcMode(
 					if ("prompt" in builtinResult) {
 						watchAndReportLocalOnlyPromptResult({
 							id,
-							startPrompt: () => session.prompt(builtinResult.prompt, { images: command.images }),
+							startPrompt: () => session.prompt(builtinResult.prompt, { attachments: command.images }),
 							output,
 							onError: promptError => output(error(id, "prompt", promptError.message)),
 							extensionUserMessageTracker,
@@ -730,7 +730,7 @@ export async function runRpcMode(
 					id,
 					startPrompt: () =>
 						session.prompt(command.message, {
-							images: command.images,
+							attachments: command.images,
 							streamingBehavior: command.streamingBehavior,
 						}),
 					output,
@@ -758,7 +758,7 @@ export async function runRpcMode(
 			case "abort_and_prompt": {
 				await session.abort({ reason: USER_INTERRUPT_LABEL });
 				session
-					.prompt(command.message, { images: command.images })
+					.prompt(command.message, { attachments: command.images })
 					.catch(e => output(error(id, "abort_and_prompt", e.message)));
 				return success(id, "abort_and_prompt");
 			}

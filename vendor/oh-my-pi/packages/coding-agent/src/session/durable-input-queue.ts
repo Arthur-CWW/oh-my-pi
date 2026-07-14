@@ -2,7 +2,33 @@ import { createHash, randomUUID } from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 
-import type { ImageContent, MessageAttribution } from "@oh-my-pi/pi-ai";
+import {
+	type MediaContent,
+	type MessageAttribution,
+	type VideoMimeType,
+} from "@oh-my-pi/pi-ai";
+import { getBlobsDir } from "@oh-my-pi/pi-utils";
+import { type BlobRef, BlobStore } from "./blob-store";
+import {
+	decodeInputPayload,
+	decodeJsonValue,
+	externalizePayload,
+	hydrateItem,
+} from "./durable-media-codec";
+import {
+	isPositiveSafeInteger,
+	isRecord,
+	structurallyEqual,
+} from "./durable-queue-decode";
+import {
+	decodeCommandMetadata,
+	decodeHead,
+	decodeRecord,
+	isDeliveryClass,
+	type QueueHead,
+	type QueueRecord,
+	QUEUE_VERSION,
+} from "./durable-queue-record-codec";
 
 import {
 	inspectLiveSessionOwnerDetails,
@@ -11,7 +37,6 @@ import {
 	type SessionOwnershipHandle,
 } from "./session-ownership";
 
-const QUEUE_VERSION = 2 as const;
 const HEAD_FILE = "head.json";
 const HEADS_DIR = "heads";
 const SEGMENTS_DIR = "segments";
@@ -48,13 +73,32 @@ export type JsonValue =
 	| readonly JsonValue[]
 	| { readonly [key: string]: JsonValue };
 
+export type DurableMediaContent =
+	| {
+			readonly type: "image";
+			readonly data: BlobRef;
+			readonly mimeType: string;
+			readonly detail?: "auto" | "low" | "high" | "original";
+	  }
+	| {
+			readonly type: "video";
+			readonly data: BlobRef;
+			readonly mimeType: VideoMimeType;
+	  };
+
+export interface UserInputPayload {
+	readonly kind?: "user";
+	readonly text: string;
+	readonly attachments: readonly MediaContent[] | undefined;
+}
+
 export interface DurableUserPayload {
 	readonly kind?: "user";
 	readonly text: string;
-	readonly images: readonly ImageContent[] | undefined;
+	readonly attachments: readonly DurableMediaContent[] | undefined;
 }
 
-export interface DurableCustomPayload {
+export interface CustomInputPayload {
 	readonly kind: "custom";
 	readonly message: {
 		readonly customType: string;
@@ -62,7 +106,7 @@ export interface DurableCustomPayload {
 			| string
 			| readonly (
 					| { readonly type: "text"; readonly text: string }
-					| { readonly type: "image"; readonly data: string; readonly mimeType: string }
+					| MediaContent
 			  )[];
 		readonly display: boolean;
 		readonly details?: JsonValue;
@@ -73,15 +117,35 @@ export interface DurableCustomPayload {
 	readonly disposition: "provider" | "append";
 }
 
+export interface DurableCustomPayload {
+	readonly kind: "custom";
+	readonly message: {
+		readonly customType: string;
+		readonly content:
+			| string
+			| readonly (
+					| { readonly type: "text"; readonly text: string }
+					| DurableMediaContent
+			  )[];
+		readonly display: boolean;
+		readonly details?: JsonValue;
+		readonly attribution: MessageAttribution;
+	};
+	readonly deliverAs: "steer" | "followUp" | "nextTurn";
+	readonly triggerTurn: boolean;
+	readonly disposition: "provider" | "append";
+}
+
+export type InputPayload = UserInputPayload | CustomInputPayload;
 export type DurableInputPayload = DurableUserPayload | DurableCustomPayload;
 export type DurableInputEnqueue =
 	| {
 			readonly kind?: undefined;
 			readonly text: string;
-			readonly images?: readonly ImageContent[];
+			readonly attachments?: readonly MediaContent[];
 			readonly deliveryClass: DurableInputDeliveryClass;
 	  }
-	| DurableCustomPayload;
+	| CustomInputPayload;
 
 export interface DurableInputCommandMetadata {
 	readonly schemaVersion: 1;
@@ -140,14 +204,10 @@ export interface DurableQueuedInput {
 	readonly attempts: readonly DurableInputAttempt[];
 }
 
-interface QueueHead {
-	readonly version: typeof QUEUE_VERSION;
-	readonly epoch: string;
-	readonly ownershipEpoch?: string;
-	readonly predecessor?: string;
-	readonly predecessorBytes?: number;
-	readonly adoptedAt: number;
-}
+export type HydratedQueuedInput = Omit<DurableQueuedInput, "payload"> & {
+	readonly payload: InputPayload;
+};
+
 
 export class SessionOwnershipLostError extends Error {
 	readonly sessionId: string;
@@ -222,88 +282,6 @@ interface WriterLock {
 	readonly createdAt: number;
 }
 
-type QueueRecord =
-	| {
-			readonly version: typeof QUEUE_VERSION;
-			readonly type: "enqueue";
-			readonly id: string;
-			readonly text?: string;
-			readonly images?: readonly ImageContent[];
-			readonly payload?: DurableInputPayload;
-			readonly sequence?: number;
-			readonly deliveryClass?: DurableInputDeliveryClass;
-			readonly revision?: number;
-			readonly command?: DurableInputCommandMetadata;
-			readonly runnerRevision?: number;
-			readonly ownerEpoch: string;
-	  }
-	| {
-			readonly version: typeof QUEUE_VERSION;
-			readonly type: "revision";
-			readonly inputId: string;
-			readonly revision: number;
-			readonly payload: DurableInputPayload;
-			readonly command?: DurableInputCommandMetadata;
-			readonly runnerRevision?: number;
-			readonly ownerEpoch: string;
-	  }
-	| {
-			readonly version: typeof QUEUE_VERSION;
-			readonly type: "state";
-			readonly id: string;
-			readonly state: DurableInputState;
-			readonly revision?: number;
-			readonly command?: DurableInputCommandMetadata;
-			readonly runnerRevision?: number;
-			readonly ownerEpoch: string;
-	  }
-	| {
-			readonly version: typeof QUEUE_VERSION;
-			readonly type: "attempt";
-			readonly id: string;
-			readonly inputId: string;
-			readonly revision?: number;
-			readonly ownerEpoch: string;
-	  }
-	| {
-			readonly version: typeof QUEUE_VERSION;
-			readonly type: "request-start";
-			readonly attemptId: string;
-			readonly inputId: string;
-			readonly ownerEpoch: string;
-	  }
-	| {
-			readonly version: typeof QUEUE_VERSION;
-			readonly type: "terminal";
-			readonly attemptId: string;
-			readonly inputId: string;
-			readonly state: "completed" | "failed-rate-limit";
-			readonly retryAt?: number;
-			readonly ownerEpoch: string;
-	  }
-	| {
-			readonly version: typeof QUEUE_VERSION;
-			readonly type: "requeue";
-			readonly inputId: string;
-			readonly ownerEpoch: string;
-	  }
-	| {
-			readonly version: typeof QUEUE_VERSION;
-			readonly type: "adopt";
-			readonly ownerEpoch: string;
-			readonly previousEpoch: string | undefined;
-	  };
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isValidState(value: unknown): value is DurableInputState {
-	return (
-		typeof value === "string" &&
-		["queued", "admitted", "running", "uncertain", "completed", "failed-rate-limit", "cancelled"].includes(value)
-	);
-}
 
 function processStartFingerprint(pid: number): string | undefined {
 	const result = Bun.spawnSync({
@@ -362,53 +340,6 @@ function decodeWriterLock(value: unknown): WriterLock | undefined {
 	};
 }
 
-function isPositiveSafeInteger(value: unknown): value is number {
-	return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
-}
-
-function isDeliveryClass(value: unknown): value is DurableInputDeliveryClass {
-	return value === "steer" || value === "followUp";
-}
-
-export function decodeJsonValue(value: unknown): JsonValue | undefined {
-	const seen = new Set<object>();
-	const decode = (candidate: unknown): JsonValue | undefined => {
-		if (
-			candidate === null ||
-			typeof candidate === "string" ||
-			typeof candidate === "boolean" ||
-			(typeof candidate === "number" && Number.isFinite(candidate))
-		) {
-			return candidate as null | string | boolean | number;
-		}
-		if (typeof candidate !== "object") return undefined;
-		if (seen.has(candidate)) return undefined;
-		seen.add(candidate);
-		try {
-			if (Array.isArray(candidate)) {
-				const result: JsonValue[] = [];
-				for (const element of candidate) {
-					const decoded = decode(element);
-					if (decoded === undefined) return undefined;
-					result.push(decoded);
-				}
-				return result;
-			}
-			const prototype = Object.getPrototypeOf(candidate);
-			if (prototype !== Object.prototype && prototype !== null) return undefined;
-			const result: Record<string, JsonValue> = {};
-			for (const [key, element] of Object.entries(candidate)) {
-				const decoded = decode(element);
-				if (decoded === undefined) return undefined;
-				result[key] = decoded;
-			}
-			return result;
-		} finally {
-			seen.delete(candidate);
-		}
-	};
-	return decode(value);
-}
 
 export function cloneJsonValue(value: JsonValue): JsonValue {
 	const decoded = decodeJsonValue(value);
@@ -429,289 +360,7 @@ export function jsonValuesEqual(left: JsonValue, right: JsonValue): boolean {
 	return leftKeys.every(key => jsonValuesEqual(left[key] as JsonValue, right[key] as JsonValue));
 }
 
-export function decodeDurableCustomPayload(value: unknown): DurableCustomPayload | undefined {
-	if (
-		!isRecord(value) ||
-		value.kind !== "custom" ||
-		!isRecord(value.message) ||
-		typeof value.message.customType !== "string" ||
-		typeof value.message.display !== "boolean" ||
-		(value.message.attribution !== "user" && value.message.attribution !== "agent") ||
-		(value.deliverAs !== "steer" && value.deliverAs !== "followUp" && value.deliverAs !== "nextTurn") ||
-		typeof value.triggerTurn !== "boolean" ||
-		(value.disposition !== "provider" && value.disposition !== "append")
-	) {
-		return undefined;
-	}
-	let content: DurableCustomPayload["message"]["content"];
-	if (typeof value.message.content === "string") {
-		content = value.message.content;
-	} else if (
-		Array.isArray(value.message.content) &&
-		value.message.content.every(
-			block =>
-				isRecord(block) &&
-				((block.type === "text" && typeof block.text === "string") ||
-					(block.type === "image" && typeof block.data === "string" && typeof block.mimeType === "string")),
-		)
-	) {
-		content = value.message.content.map(block =>
-			block.type === "text"
-				? { type: "text", text: block.text as string }
-				: { type: "image", data: block.data as string, mimeType: block.mimeType as string },
-		);
-	} else {
-		return undefined;
-	}
-	const details =
-		value.message.details === undefined ? undefined : decodeJsonValue(value.message.details);
-	if (value.message.details !== undefined && details === undefined) return undefined;
-	return {
-		kind: "custom",
-		message: {
-			customType: value.message.customType,
-			content,
-			display: value.message.display,
-			...(details === undefined ? {} : { details }),
-			attribution: value.message.attribution,
-		},
-		deliverAs: value.deliverAs,
-		triggerTurn: value.triggerTurn,
-		disposition: value.disposition,
-	};
-}
 
-function decodePayload(value: unknown): DurableInputPayload | undefined {
-	const custom = decodeDurableCustomPayload(value);
-	if (custom) return custom;
-	if (!isRecord(value) || (value.kind !== undefined && value.kind !== "user") || typeof value.text !== "string") {
-		return undefined;
-	}
-	return {
-		...(value.kind === "user" ? { kind: "user" as const } : {}),
-		text: value.text,
-		images: Array.isArray(value.images) ? (value.images as ImageContent[]) : undefined,
-	};
-}
-
-function decodeCommandMetadata(value: unknown): DurableInputCommandMetadata | undefined {
-	if (!isRecord(value)) return undefined;
-	const hasCausationId = Object.hasOwn(value, "causationId");
-	if (
-		Object.keys(value).length !== (hasCausationId ? 7 : 6) ||
-		!Object.hasOwn(value, "schemaVersion") ||
-		!Object.hasOwn(value, "commandId") ||
-		!Object.hasOwn(value, "correlationId") ||
-		!Object.hasOwn(value, "viewId") ||
-		!Object.hasOwn(value, "controllerEpoch") ||
-		!Object.hasOwn(value, "expectedRevision") ||
-		value.schemaVersion !== 1 ||
-		typeof value.commandId !== "string" ||
-		typeof value.correlationId !== "string" ||
-		(value.causationId !== undefined && typeof value.causationId !== "string") ||
-		typeof value.viewId !== "string" ||
-		!Number.isSafeInteger(value.controllerEpoch) ||
-		(value.controllerEpoch as number) < 0 ||
-		!Number.isSafeInteger(value.expectedRevision) ||
-		(value.expectedRevision as number) < 0
-	) {
-		return undefined;
-	}
-	return {
-		schemaVersion: 1,
-		commandId: value.commandId,
-		correlationId: value.correlationId,
-		...(value.causationId === undefined ? {} : { causationId: value.causationId as string }),
-		viewId: value.viewId,
-		controllerEpoch: value.controllerEpoch as number,
-		expectedRevision: value.expectedRevision as number,
-	};
-}
-
-function structurallyEqual(left: unknown, right: unknown): boolean {
-	if (Object.is(left, right)) return true;
-	if (Array.isArray(left) || Array.isArray(right)) {
-		if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) return false;
-		return left.every((value, index) => structurallyEqual(value, right[index]));
-	}
-	if (!isRecord(left) || !isRecord(right)) return false;
-	const leftKeys = Object.keys(left).filter(key => left[key] !== undefined);
-	const rightKeys = Object.keys(right).filter(key => right[key] !== undefined);
-	if (leftKeys.length !== rightKeys.length) return false;
-	return leftKeys.every(
-		key => Object.hasOwn(right, key) && right[key] !== undefined && structurallyEqual(left[key], right[key]),
-	);
-}
-
-function decodeRecord(value: unknown): QueueRecord | undefined {
-	if (
-		!isRecord(value) ||
-		value.version !== QUEUE_VERSION ||
-		typeof value.type !== "string" ||
-		typeof value.ownerEpoch !== "string"
-	) {
-		return undefined;
-	}
-	switch (value.type) {
-		case "enqueue": {
-			const command = value.command === undefined ? undefined : decodeCommandMetadata(value.command);
-			const payload = value.payload === undefined ? undefined : decodePayload(value.payload);
-			const legacy = value.payload === undefined && typeof value.text === "string";
-			if (
-				typeof value.id !== "string" ||
-				(!legacy && payload === undefined) ||
-				(value.payload !== undefined && payload === undefined) ||
-				(value.sequence !== undefined && !isPositiveSafeInteger(value.sequence)) ||
-				(value.deliveryClass !== undefined && !isDeliveryClass(value.deliveryClass)) ||
-				(value.revision !== undefined && !isPositiveSafeInteger(value.revision)) ||
-				(value.command !== undefined && command === undefined) ||
-				(value.runnerRevision !== undefined && !isPositiveSafeInteger(value.runnerRevision)) ||
-				(command === undefined) !== (value.runnerRevision === undefined)
-			) {
-				return undefined;
-			}
-			return {
-				version: QUEUE_VERSION,
-				type: "enqueue",
-				id: value.id,
-				...(legacy ? { text: value.text as string } : {}),
-				...(legacy && Array.isArray(value.images) ? { images: value.images as ImageContent[] } : {}),
-				...(payload === undefined ? {} : { payload }),
-				...(value.sequence === undefined ? {} : { sequence: value.sequence as number }),
-				...(value.deliveryClass === undefined
-					? {}
-					: { deliveryClass: value.deliveryClass as DurableInputDeliveryClass }),
-				...(value.revision === undefined ? {} : { revision: value.revision as number }),
-				...(command === undefined ? {} : { command }),
-				...(value.runnerRevision === undefined ? {} : { runnerRevision: value.runnerRevision as number }),
-				ownerEpoch: value.ownerEpoch,
-			};
-		}
-		case "revision": {
-			const payload = decodePayload(value.payload);
-			const command = value.command === undefined ? undefined : decodeCommandMetadata(value.command);
-			if (
-				typeof value.inputId !== "string" ||
-				!isPositiveSafeInteger(value.revision) ||
-				!payload ||
-				(value.command !== undefined && command === undefined) ||
-				(value.runnerRevision !== undefined && !isPositiveSafeInteger(value.runnerRevision)) ||
-				(command === undefined) !== (value.runnerRevision === undefined)
-			) {
-				return undefined;
-			}
-			return {
-				version: QUEUE_VERSION,
-				type: "revision",
-				inputId: value.inputId,
-				revision: value.revision,
-				payload,
-				...(command === undefined ? {} : { command }),
-				...(value.runnerRevision === undefined ? {} : { runnerRevision: value.runnerRevision as number }),
-				ownerEpoch: value.ownerEpoch,
-			};
-		}
-		case "state": {
-			const command = value.command === undefined ? undefined : decodeCommandMetadata(value.command);
-			if (
-				typeof value.id !== "string" ||
-				!isValidState(value.state) ||
-				(value.revision !== undefined && !isPositiveSafeInteger(value.revision)) ||
-				(value.command !== undefined && command === undefined) ||
-				(value.runnerRevision !== undefined && !isPositiveSafeInteger(value.runnerRevision)) ||
-				(command === undefined) !== (value.runnerRevision === undefined) ||
-				(command !== undefined && value.revision === undefined)
-			) {
-				return undefined;
-			}
-			return {
-				version: QUEUE_VERSION,
-				type: "state",
-				id: value.id,
-				state: value.state,
-				...(value.revision === undefined ? {} : { revision: value.revision as number }),
-				...(command === undefined ? {} : { command }),
-				...(value.runnerRevision === undefined ? {} : { runnerRevision: value.runnerRevision as number }),
-				ownerEpoch: value.ownerEpoch,
-			};
-		}
-		case "attempt":
-			if (
-				typeof value.id !== "string" ||
-				typeof value.inputId !== "string" ||
-				(value.revision !== undefined && !isPositiveSafeInteger(value.revision))
-			) {
-				return undefined;
-			}
-			return {
-				version: QUEUE_VERSION,
-				type: "attempt",
-				id: value.id,
-				inputId: value.inputId,
-				...(value.revision === undefined ? {} : { revision: value.revision as number }),
-				ownerEpoch: value.ownerEpoch,
-			};
-		case "request-start":
-			if (typeof value.attemptId !== "string" || typeof value.inputId !== "string") return undefined;
-			return {
-				version: QUEUE_VERSION,
-				type: "request-start",
-				attemptId: value.attemptId,
-				inputId: value.inputId,
-				ownerEpoch: value.ownerEpoch,
-			};
-		case "terminal":
-			if (
-				typeof value.attemptId !== "string" ||
-				typeof value.inputId !== "string" ||
-				(value.state !== "completed" && value.state !== "failed-rate-limit")
-			) {
-				return undefined;
-			}
-			return {
-				version: QUEUE_VERSION,
-				type: "terminal",
-				attemptId: value.attemptId,
-				inputId: value.inputId,
-				state: value.state,
-				retryAt: typeof value.retryAt === "number" && Number.isFinite(value.retryAt) ? value.retryAt : undefined,
-				ownerEpoch: value.ownerEpoch,
-			};
-		case "requeue":
-			if (typeof value.inputId !== "string") return undefined;
-			return { version: QUEUE_VERSION, type: "requeue", inputId: value.inputId, ownerEpoch: value.ownerEpoch };
-		case "adopt":
-			return {
-				version: QUEUE_VERSION,
-				type: "adopt",
-				ownerEpoch: value.ownerEpoch,
-				previousEpoch: typeof value.previousEpoch === "string" ? value.previousEpoch : undefined,
-			};
-		default:
-			return undefined;
-	}
-}
-
-function decodeHead(value: unknown): QueueHead | undefined {
-	if (
-		!isRecord(value) ||
-		value.version !== QUEUE_VERSION ||
-		typeof value.epoch !== "string" ||
-		(typeof value.predecessor !== "string" && value.predecessor !== undefined) ||
-		(typeof value.predecessorBytes !== "number" && value.predecessorBytes !== undefined) ||
-		typeof value.adoptedAt !== "number"
-	) {
-		return undefined;
-	}
-	return {
-		version: QUEUE_VERSION,
-		epoch: value.epoch,
-		ownershipEpoch: typeof value.ownershipEpoch === "string" ? value.ownershipEpoch : undefined,
-		predecessor: typeof value.predecessor === "string" ? value.predecessor : undefined,
-		predecessorBytes: typeof value.predecessorBytes === "number" ? value.predecessorBytes : undefined,
-		adoptedAt: value.adoptedAt,
-	};
-}
 
 async function canonicalSessionFile(sessionFile: string): Promise<string> {
 	return path.join(await fs.realpath(path.dirname(sessionFile)), path.basename(sessionFile));
@@ -730,6 +379,7 @@ function queueKey(sessionFile: string, sessionId: string): string {
 export class DurableInputQueue {
 	readonly #root: string;
 	readonly #ownership: SessionOwnershipHandle;
+	readonly #blobs: BlobStore;
 	#activeEpoch: string;
 	#tail: Promise<void> = Promise.resolve();
 	#adopted = false;
@@ -741,13 +391,14 @@ export class DurableInputQueue {
 	private constructor(root: string, ownership: SessionOwnershipHandle, activeEpoch: string) {
 		this.#root = root;
 		this.#ownership = ownership;
+		this.#blobs = new BlobStore(getBlobsDir());
 		this.#activeEpoch = activeEpoch;
 	}
 
 	static async open(ownership: SessionOwnershipHandle, root?: string): Promise<DurableInputQueue> {
 		root = resolveAgentMuxRoot(root);
 		const sessionFile = await canonicalSessionFile(ownership.sessionFile);
-		const queueRoot = path.join(root, "owners-v1", queueKey(sessionFile, ownership.sessionId), "queue-v2");
+		const queueRoot = path.join(root, "owners-v1", queueKey(sessionFile, ownership.sessionId), "queue-v3");
 		await fs.mkdir(path.join(queueRoot, SEGMENTS_DIR), { recursive: true });
 		await fs.mkdir(path.join(queueRoot, HEADS_DIR), { recursive: true });
 		const initialEpoch = randomUUID();
@@ -774,10 +425,13 @@ export class DurableInputQueue {
 		return this.#exclusive(() =>
 			this.#withWriterLock(async () => {
 				await this.#assertOwner();
-				const payload = decodePayload(input.kind === "custom" ? input : { text: input.text, images: input.images });
-				if (!payload || (input.kind !== "custom" && !isDeliveryClass(input.deliveryClass))) {
+				const decoded = decodeInputPayload(
+					input.kind === "custom" ? input : { text: input.text, attachments: input.attachments },
+				);
+				if (!decoded || (input.kind !== "custom" && !isDeliveryClass(input.deliveryClass))) {
 					throw new DurableInputQueueConflictError("Invalid durable input queue enqueue payload");
 				}
+				const payload = await externalizePayload(this.#blobs, decoded);
 				const deliveryClass =
 					input.kind === "custom" ? (input.deliverAs === "steer" ? "steer" : "followUp") : input.deliveryClass;
 				const sequence =
@@ -795,7 +449,7 @@ export class DurableInputQueue {
 					version: QUEUE_VERSION,
 					type: "enqueue",
 					id: item.inputId,
-					...(payload.kind === "custom" ? { payload } : { text: payload.text, images: payload.images }),
+					payload,
 					sequence: item.sequence,
 					deliveryClass: item.deliveryClass,
 					revision: item.revision,
@@ -814,10 +468,13 @@ export class DurableInputQueue {
 			this.#withWriterLock(async () => {
 				await this.#assertOwner();
 				const decodedCommand = decodeCommandMetadata(command);
-				const payload = decodePayload(input.kind === "custom" ? input : { text: input.text, images: input.images });
-				if (!decodedCommand || !payload || (input.kind !== "custom" && !isDeliveryClass(input.deliveryClass))) {
+				const decoded = decodeInputPayload(
+					input.kind === "custom" ? input : { text: input.text, attachments: input.attachments },
+				);
+				if (!decodedCommand || !decoded || (input.kind !== "custom" && !isDeliveryClass(input.deliveryClass))) {
 					throw new DurableInputQueueConflictError("Invalid durable input command admission");
 				}
+				const payload = await externalizePayload(this.#blobs, decoded);
 				const deliveryClass =
 					input.kind === "custom" ? (input.deliverAs === "steer" ? "steer" : "followUp") : input.deliveryClass;
 				await this.#rebuildCommandIndexLocked();
@@ -854,7 +511,7 @@ export class DurableInputQueue {
 					version: QUEUE_VERSION,
 					type: "enqueue",
 					id: item.inputId,
-					...(payload.kind === "custom" ? { payload } : { text: payload.text, images: payload.images }),
+					payload,
 					sequence: item.sequence,
 					deliveryClass: item.deliveryClass,
 					revision: item.revision,
@@ -1096,13 +753,15 @@ export class DurableInputQueue {
 		});
 	}
 
-	async edit(inputId: string, expectedRevision: number, payload: DurableInputPayload): Promise<DurableQueuedInput> {
+	async edit(inputId: string, expectedRevision: number, payload: UserInputPayload): Promise<DurableQueuedInput> {
 		return this.#exclusive(() =>
 			this.#withWriterLock(async () => {
 				await this.#assertOwner();
-				if (payload.kind === "custom" || typeof payload.text !== "string") {
-					throw new DurableInputQueueConflictError(`Custom durable inputs cannot be edited: ${inputId}`);
+				const decoded = decodeInputPayload(payload);
+				if (!decoded || decoded.kind === "custom") {
+					throw new DurableInputQueueConflictError(`Invalid durable input queue edit: ${inputId}`);
 				}
+				const durablePayload = await externalizePayload(this.#blobs, decoded);
 				const item = (await this.#items()).find(candidate => candidate.inputId === inputId);
 				if (!item) throw new DurableInputQueueConflictError(`Durable input queue item not found: ${inputId}`);
 				if (item.state !== "queued" || item.revision !== expectedRevision) {
@@ -1114,10 +773,10 @@ export class DurableInputQueue {
 					type: "revision",
 					inputId,
 					revision,
-					payload,
+					payload: durablePayload,
 					ownerEpoch: this.#activeEpoch,
 				});
-				return { ...item, revision, payload };
+				return { ...item, revision, payload: durablePayload };
 			}),
 		);
 	}
@@ -1153,21 +812,18 @@ export class DurableInputQueue {
 	async editCommand(
 		inputId: string,
 		expectedItemRevision: number,
-		payload: DurableInputPayload,
+		payload: UserInputPayload,
 		command: DurableInputCommandMetadata,
 	): Promise<DurableInputMutationReceipt> {
 		const result = await this.#exclusive(() =>
 			this.#withWriterLock(async () => {
 				await this.#assertOwner();
 				const decodedCommand = decodeCommandMetadata(command);
-				if (
-					!decodedCommand ||
-					!isPositiveSafeInteger(expectedItemRevision) ||
-					payload.kind === "custom" ||
-					typeof payload.text !== "string"
-				) {
-					throw new DurableInputQueueConflictError(`Custom durable inputs cannot be edited: ${inputId}`);
+				const decoded = decodeInputPayload(payload);
+				if (!decodedCommand || !decoded || decoded.kind === "custom" || !isPositiveSafeInteger(expectedItemRevision)) {
+					throw new DurableInputQueueConflictError(`Invalid durable input queue edit: ${inputId}`);
 				}
+				const durablePayload = await externalizePayload(this.#blobs, decoded);
 				await this.#rebuildCommandIndexLocked();
 				const existing = this.#commandReceipts.get(command.commandId);
 				if (existing) {
@@ -1176,7 +832,7 @@ export class DurableInputQueue {
 						existing.item.inputId !== inputId ||
 						existing.item.revision !== expectedItemRevision + 1 ||
 						existing.item.state !== "queued" ||
-						!structurallyEqual(existing.item.payload, payload)
+						!structurallyEqual(existing.item.payload, durablePayload)
 					) {
 						throw new DurableInputCommandConflictError(command.commandId);
 					}
@@ -1196,14 +852,14 @@ export class DurableInputQueue {
 				if (item.state !== "queued") {
 					throw new DurableInputQueueConflictError(`Durable input queue edit conflict: ${inputId}`);
 				}
-				const nextItem = { ...item, revision: item.revision + 1, payload };
+				const nextItem = { ...item, revision: item.revision + 1, payload: durablePayload };
 				const runnerRevision = this.#latestRunnerRevision + 1;
 				await this.#appendLocked({
 					version: QUEUE_VERSION,
 					type: "revision",
 					inputId,
 					revision: nextItem.revision,
-					payload,
+					payload: durablePayload,
 					command: decodedCommand,
 					runnerRevision,
 					ownerEpoch: this.#activeEpoch,
@@ -1295,7 +951,7 @@ export class DurableInputQueue {
 	async admitNext(
 		boundary: "tool" | "terminal" = "terminal",
 		now: number = Date.now(),
-	): Promise<DurableQueuedInput | undefined> {
+	): Promise<HydratedQueuedInput | undefined> {
 		return this.#exclusive(() =>
 			this.#withWriterLock(async () => {
 				await this.#assertOwner();
@@ -1322,6 +978,7 @@ export class DurableInputQueue {
 				) {
 					return undefined;
 				}
+				const { payload: hydratedPayload } = await hydrateItem(this.#blobs, item);
 				const attemptId = randomUUID();
 				await this.#appendLocked({
 					version: QUEUE_VERSION,
@@ -1333,6 +990,7 @@ export class DurableInputQueue {
 				});
 				return {
 					...item,
+					payload: hydratedPayload,
 					state: "admitted",
 					attempts: [
 						...item.attempts,
@@ -1421,6 +1079,25 @@ export class DurableInputQueue {
 		});
 	}
 
+	/** Returns and hydrates the append-only item at the FIFO head without changing its state. */
+	async appendOnlyPrefix(): Promise<HydratedQueuedInput | undefined> {
+		return this.#exclusive(async () => {
+			await this.#assertOwner();
+			const item = (await this.#items()).find(
+				candidate => candidate.state === "queued" || candidate.state === "failed-rate-limit",
+			);
+			if (
+				item?.state !== "queued" ||
+				item.payload.kind !== "custom" ||
+				item.payload.disposition !== "append" ||
+				item.attempts.length !== 0
+			) {
+				return undefined;
+			}
+			return hydrateItem(this.#blobs, item);
+		});
+	}
+
 	/**
 	 * Completes a transcript-first append obligation without fabricating a
 	 * provider attempt. Repeating the same completion after commit is a no-op.
@@ -1468,7 +1145,7 @@ export class DurableInputQueue {
 	 * provider-bound item is waiting, or when a caller explicitly starts the
 	 * next turn.
 	 */
-	async deferredCustomPrefix(explicitNextTurnStart = false): Promise<DurableQueuedInput | undefined> {
+	async deferredCustomPrefix(explicitNextTurnStart = false): Promise<HydratedQueuedInput | undefined> {
 		return this.#exclusive(async () => {
 			await this.#assertOwner();
 			const items = await this.#items();
@@ -1502,7 +1179,7 @@ export class DurableInputQueue {
 					(candidate.payload.deliverAs !== "nextTurn" || candidate.payload.triggerTurn)
 				);
 			});
-			return explicitNextTurnStart || laterProviderBound ? item : undefined;
+			return explicitNextTurnStart || laterProviderBound ? hydrateItem(this.#blobs, item) : undefined;
 		});
 	}
 
@@ -1904,7 +1581,7 @@ export class DurableInputQueue {
 		for (const record of records) {
 			if (record.type === "adopt") continue;
 			if (record.type === "enqueue") {
-				const sequence = record.sequence ?? lastSequence + 1;
+				const sequence = record.sequence;
 				if (!isPositiveSafeInteger(sequence) || sequence <= lastSequence) {
 					throw new Error(`Corrupt durable input queue sequence: ${record.id}`);
 				}
@@ -1912,23 +1589,14 @@ export class DurableInputQueue {
 				const item: DurableQueuedInput = {
 					inputId: record.id,
 					sequence,
-					deliveryClass: record.deliveryClass ?? "followUp",
-					revision: record.revision ?? 1,
-					payload: record.payload ?? { text: record.text as string, images: record.images },
+					deliveryClass: record.deliveryClass,
+					revision: record.revision,
+					payload: record.payload,
 					state: "queued",
 					attempts: [],
 				};
 				if (!items.has(record.id)) items.set(record.id, item);
-				if (record.command) {
-					if (
-						record.sequence === undefined ||
-						record.deliveryClass === undefined ||
-						record.revision === undefined
-					) {
-						throw new Error(`Corrupt durable input command admission: ${record.id}`);
-					}
-					indexCommand(record.command, record.runnerRevision, item);
-				}
+				if (record.command) indexCommand(record.command, record.runnerRevision, item);
 				continue;
 			}
 			if (record.type === "revision") {
@@ -1960,7 +1628,7 @@ export class DurableInputQueue {
 				const attempt: DurableInputAttempt = {
 					id: record.id,
 					inputId: record.inputId,
-					revision: record.revision ?? 1,
+					revision: record.revision,
 					state: "admitted",
 				};
 				const item = items.get(record.inputId);
@@ -2031,15 +1699,7 @@ export class DurableInputQueue {
 		for (const record of records) {
 			if (record.type === "adopt") continue;
 			if (record.type === "enqueue") {
-				const hasSchemaFields =
-					record.sequence !== undefined || record.deliveryClass !== undefined || record.revision !== undefined;
-				if (
-					hasSchemaFields &&
-					(record.sequence === undefined || record.deliveryClass === undefined || record.revision === undefined)
-				) {
-					throw new Error(`Corrupt durable input queue enqueue schema: ${record.id}`);
-				}
-				const sequence = record.sequence ?? lastSequence + 1;
+				const sequence = record.sequence;
 				if (!isPositiveSafeInteger(sequence) || sequence <= lastSequence) {
 					throw new Error(`Corrupt durable input queue sequence: ${record.id}`);
 				}
@@ -2048,9 +1708,9 @@ export class DurableInputQueue {
 					items.set(record.id, {
 						inputId: record.id,
 						sequence,
-						deliveryClass: record.deliveryClass ?? "followUp",
-						revision: record.revision ?? 1,
-						payload: record.payload ?? { text: record.text as string, images: record.images },
+						deliveryClass: record.deliveryClass,
+						revision: record.revision,
+						payload: record.payload,
 						state: "queued",
 						attempts: [],
 					});
@@ -2077,7 +1737,7 @@ export class DurableInputQueue {
 				const attempt: DurableInputAttempt = {
 					id: record.id,
 					inputId: record.inputId,
-					revision: record.revision ?? 1,
+					revision: record.revision,
 					state: "admitted",
 				};
 				attempts.set(record.id, attempt);

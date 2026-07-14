@@ -70,7 +70,7 @@ const CHILD_SOURCE = [
 	'  const followUp = await queue.enqueue({ text: "follow up", deliveryClass: "followUp" });',
 	'  const steer = await queue.enqueue({ text: "steer now", deliveryClass: "steer" });',
 	'  const neighbour = await queue.enqueue({ text: "cancel me", deliveryClass: "followUp" });',
-	'  const revised = await queue.edit(followUp.inputId, followUp.revision, { text: "follow up revised", images: undefined });',
+	'  const revised = await queue.edit(followUp.inputId, followUp.revision, { text: "follow up revised", attachments: undefined });',
 	"  const cancelled = await queue.cancel(neighbour.inputId);",
 	"  console.log(JSON.stringify({ followUp: { inputId: revised.inputId, sequence: revised.sequence, revision: revised.revision }, steer: { inputId: steer.inputId, sequence: steer.sequence, revision: steer.revision }, cancelled: { inputId: cancelled.inputId, sequence: cancelled.sequence, state: cancelled.state } }));",
 	'} else if (action === "adopt-order-and-deliver") {',
@@ -84,6 +84,16 @@ const CHILD_SOURCE = [
 	"  }",
 	"  const items = await queue.list();",
 	"  console.log(JSON.stringify({ adopted: adopted.map(item => ({ inputId: item.inputId, sequence: item.sequence, revision: item.revision })), captured: { inputId: captured.inputId, sequence: captured.sequence }, tool: tool ? { inputId: tool.inputId, sequence: tool.sequence } : null, terminal, items: items.map(item => ({ inputId: item.inputId, sequence: item.sequence, revision: item.revision, state: item.state, attempts: item.attempts.map(attempt => attempt.id) })) }));",
+	'} else if (action === "media-seed") {',
+	'  const sharedData = Buffer.from([11, 12, 13, 14]).toString("base64");',
+	'  const item = await queue.enqueue({ text: "persist mixed media", attachments: [{ type: "image", mimeType: "image/png", data: sharedData }, { type: "video", mimeType: "video/mp4", data: sharedData }], deliveryClass: "followUp" });',
+	'  const attachments = "attachments" in item.payload ? item.payload.attachments : undefined;',
+	'  console.log(JSON.stringify({ inputId: item.inputId, sequence: item.sequence, refs: attachments?.map(attachment => attachment.data) }));',
+	'} else if (action === "media-resume") {',
+	"  const before = await queue.replayQueued();",
+	"  const admitted = await queue.admitNext();",
+	'  if (!admitted) throw new Error("media input was not admitted");',
+	"  console.log(JSON.stringify({ adopted: adopted.length, before: before.length, inputId: admitted.inputId, sequence: admitted.sequence, payload: admitted.payload }));",
 	'} else if (action === "enqueue-once") {',
 	'  const item = await queue.enqueue({ text: process.env.TEXT ?? "concurrent", deliveryClass: "followUp" });',
 	"  console.log(JSON.stringify({ inputId: item.inputId, sequence: item.sequence }));",
@@ -110,7 +120,7 @@ const CHILD_SOURCE = [
 '  const metadata = { schemaVersion: 1, commandId, correlationId: "correlation-" + commandId, viewId: "view-a", controllerEpoch: 1, expectedRevision };',
 '  try {',
 '    const receipt = operation === "edit"',
-'      ? await queue.editCommand(inputId, expectedItemRevision, { text: process.env.TEXT ?? "edited", images: undefined }, metadata)',
+	'      ? await queue.editCommand(inputId, expectedItemRevision, { text: process.env.TEXT ?? "edited", attachments: undefined }, metadata)',
 '      : await queue.cancelCommand(inputId, expectedItemRevision, metadata);',
 '    console.log(JSON.stringify({ status: "accepted", inputId: receipt.item.inputId, itemRevision: receipt.item.revision, state: receipt.item.state, text: receipt.item.payload.text, runnerRevision: receipt.runnerRevision, replayed: receipt.replayed, latestRunnerRevision: await queue.getLatestRunnerRevision() }));',
 '  } catch (error) {',
@@ -175,7 +185,7 @@ describe("durable input queue process replacement", () => {
 		});
 		const [queueKey] = await fs.readdir(path.join(root, "owners-v1"));
 		if (!queueKey) throw new Error("queue root missing");
-		const queueRoot = path.join(root, "owners-v1", queueKey, "queue-v2");
+		const queueRoot = path.join(root, "owners-v1", queueKey, "queue-v3");
 		const firstHead = JSON.parse(await fs.readFile(path.join(queueRoot, "head.json"), "utf8")) as { epoch: string };
 		const firstSegment = path.join(queueRoot, "segments", `${firstHead.epoch}.jsonl`);
 		const firstSegmentBytes = (await fs.stat(firstSegment)).size;
@@ -204,6 +214,42 @@ describe("durable input queue process replacement", () => {
 			replay: 0,
 		});
 	});
+	it("hydrates deduplicated mixed media bytes after process restart", async () => {
+		const root = await fs.mkdtemp(path.join(os.tmpdir(), "omp-queue-media-process-"));
+		roots.push(root);
+		const sessionFile = path.join(root, "parent.jsonl");
+		await fs.writeFile(sessionFile, "");
+		const seeded = (await runChild({
+			ROOT: root,
+			SESSION_FILE: sessionFile,
+			EPOCH: "epoch-a",
+			ACTION: "media-seed",
+		})) as { inputId: string; sequence: number; refs: string[] };
+		expect(seeded.sequence).toBe(1);
+		expect(seeded.refs).toHaveLength(2);
+		expect(seeded.refs[0]).toMatch(/^blob:sha256:[0-9a-f]{64}$/);
+		expect(seeded.refs[1]).toBe(seeded.refs[0]);
+
+		const resumed = await runChild({
+			ROOT: root,
+			SESSION_FILE: sessionFile,
+			EPOCH: "epoch-b",
+			ACTION: "media-resume",
+		});
+		expect(resumed).toMatchObject({
+			adopted: 1,
+			before: 1,
+			inputId: seeded.inputId,
+			sequence: 1,
+			payload: {
+				text: "persist mixed media",
+				attachments: [
+					{ type: "image", mimeType: "image/png", data: "CwwNDg==" },
+					{ type: "video", mimeType: "video/mp4", data: "CwwNDg==" },
+				],
+			},
+		});
+	});
 
 	it("preserves edited identities through replacement and admits frozen backlog in boundary order", async () => {
 		const root = await fs.mkdtemp(path.join(os.tmpdir(), "omp-queue-process-"));
@@ -224,7 +270,7 @@ describe("durable input queue process replacement", () => {
 		expect(seeded.followUp.revision).toBe(2);
 		const [queueKey] = await fs.readdir(path.join(root, "owners-v1"));
 		if (!queueKey) throw new Error("queue root missing");
-		const queueRoot = path.join(root, "owners-v1", queueKey, "queue-v2");
+		const queueRoot = path.join(root, "owners-v1", queueKey, "queue-v3");
 		const firstHead = JSON.parse(await fs.readFile(path.join(queueRoot, "head.json"), "utf8")) as { epoch: string };
 		const frozenSegment = path.join(queueRoot, "segments", `${firstHead.epoch}.jsonl`);
 		const frozenBytes = (await fs.stat(frozenSegment)).size;
@@ -358,7 +404,7 @@ describe("durable input queue process replacement", () => {
 		expect([left.sequence, right.sequence].sort((a, b) => a - b)).toEqual([1, 2]);
 		const [queueKey] = await fs.readdir(path.join(root, "owners-v1"));
 		if (!queueKey) throw new Error("queue root missing");
-		const queueRoot = path.join(root, "owners-v1", queueKey, "queue-v2");
+		const queueRoot = path.join(root, "owners-v1", queueKey, "queue-v3");
 		const head = JSON.parse(await fs.readFile(path.join(queueRoot, "head.json"), "utf8")) as {
 			epoch: string;
 			ownershipEpoch: string;
@@ -428,7 +474,7 @@ describe("durable input queue process replacement", () => {
 
 		const [queueKey] = await fs.readdir(path.join(root, "owners-v1"));
 		if (!queueKey) throw new Error("queue root missing");
-		const queueRoot = path.join(root, "owners-v1", queueKey, "queue-v2");
+		const queueRoot = path.join(root, "owners-v1", queueKey, "queue-v3");
 		const head = JSON.parse(await fs.readFile(path.join(queueRoot, "head.json"), "utf8")) as { epoch: string };
 		const records = (await fs.readFile(path.join(queueRoot, "segments", `${head.epoch}.jsonl`), "utf8"))
 			.trim()
@@ -489,7 +535,7 @@ describe("durable input queue process replacement", () => {
 
 		const [queueKey] = await fs.readdir(path.join(root, "owners-v1"));
 		if (!queueKey) throw new Error("queue root missing");
-		const queueRoot = path.join(root, "owners-v1", queueKey, "queue-v2");
+		const queueRoot = path.join(root, "owners-v1", queueKey, "queue-v3");
 		const head = JSON.parse(await fs.readFile(path.join(queueRoot, "head.json"), "utf8")) as { epoch: string };
 		const records = (await fs.readFile(path.join(queueRoot, "segments", `${head.epoch}.jsonl`), "utf8"))
 			.trim()
@@ -541,7 +587,7 @@ describe("durable input queue process replacement", () => {
 		});
 		const [key] = await fs.readdir(path.join(root, "owners-v1"));
 		if (!key) throw new Error("queue root missing");
-		const queueRoot = path.join(root, "owners-v1", key, "queue-v2");
+		const queueRoot = path.join(root, "owners-v1", key, "queue-v3");
 		const head = JSON.parse(await fs.readFile(path.join(queueRoot, "head.json"), "utf8")) as { epoch: string };
 		const records = (await fs.readFile(path.join(queueRoot, "segments", `${head.epoch}.jsonl`), "utf8"))
 			.trim()

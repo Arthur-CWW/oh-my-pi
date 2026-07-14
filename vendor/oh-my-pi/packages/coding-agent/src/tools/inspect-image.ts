@@ -1,11 +1,11 @@
 import type { AgentTool, AgentToolContext, AgentToolResult, AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
 import { instrumentedCompleteSimple, resolveTelemetry } from "@oh-my-pi/pi-agent-core";
-import { type Api, completeSimple, type Model, type ToolExample } from "@oh-my-pi/pi-ai";
+import { completeSimple, type ToolExample } from "@oh-my-pi/pi-ai";
 import { prompt } from "@oh-my-pi/pi-utils";
 import { z } from "zod/v4";
 import { extractTextContent } from "../commit/utils";
 
-import { expandRoleAlias, getModelMatchPreferences, resolveModelFromString } from "../config/model-resolver";
+import { parseModelString } from "../config/model-resolver";
 import inspectImageDescription from "../prompts/tools/inspect-image.md" with { type: "text" };
 import inspectImageSystemPromptTemplate from "../prompts/tools/inspect-image-system.md" with { type: "text" };
 import {
@@ -94,26 +94,28 @@ export class InspectImageTool implements AgentTool<typeof inspectImageSchema, In
 			throw new ToolError("Model registry is unavailable for inspect_image.");
 		}
 
-		const availableModels = modelRegistry.getAvailable();
-		if (availableModels.length === 0) {
-			throw new ToolError("No models available for inspect_image.");
+		const visionSelector = this.session.settings.getModelRole("vision")?.trim();
+		if (!visionSelector) {
+			throw new ToolError(
+				"modelRoles.vision must configure a provider-qualified image-capable model for inspect_image.",
+			);
 		}
 
-		const matchPreferences = getModelMatchPreferences(this.session.settings);
-		const resolvePattern = (pattern: string | undefined): Model<Api> | undefined => {
-			if (!pattern) return undefined;
-			const expanded = expandRoleAlias(pattern, this.session.settings);
-			return resolveModelFromString(expanded, availableModels, matchPreferences, modelRegistry);
-		};
+		const parsedVisionSelector = parseModelString(visionSelector);
+		if (!parsedVisionSelector || parsedVisionSelector.thinkingLevel) {
+			throw new ToolError(
+				`Configured modelRoles.vision selector "${visionSelector}" must be an exact provider/model selector without an effort suffix.`,
+			);
+		}
 
-		const activeModelPattern = this.session.getActiveModelString?.() ?? this.session.getModelString?.();
-		const model =
-			resolvePattern("pi/vision") ??
-			resolvePattern("pi/default") ??
-			resolvePattern(activeModelPattern) ??
-			availableModels[0];
+		const model = modelRegistry
+			.getAvailable()
+			.find(
+				candidate =>
+					candidate.provider === parsedVisionSelector.provider && candidate.id === parsedVisionSelector.id,
+			);
 		if (!model) {
-			throw new ToolError("Unable to resolve a model for inspect_image.");
+			throw new ToolError(`Configured vision model ${visionSelector} is unavailable.`);
 		}
 
 		if (!model.input.includes("image")) {
@@ -125,7 +127,7 @@ export class InspectImageTool implements AgentTool<typeof inspectImageSchema, In
 		const apiKey = await modelRegistry.getApiKey(model);
 		if (!apiKey) {
 			throw new ToolError(
-				`No API key available for ${model.provider}/${model.id}. Configure credentials for this provider or choose another vision-capable model.`,
+				`No API key available for configured vision model ${model.provider}/${model.id}. Configure credentials for this provider.`,
 			);
 		}
 

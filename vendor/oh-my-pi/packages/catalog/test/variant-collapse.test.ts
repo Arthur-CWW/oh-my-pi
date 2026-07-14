@@ -3,7 +3,10 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
-import { fetchAntigravityDiscoveryModels } from "@oh-my-pi/pi-catalog/discovery/antigravity";
+import {
+	applyAntigravityNativeVideoInputOverride,
+	fetchAntigravityDiscoveryModels,
+} from "@oh-my-pi/pi-catalog/discovery/antigravity";
 import { Effort } from "@oh-my-pi/pi-catalog/effort";
 import { stripThinkingVariantToken } from "@oh-my-pi/pi-catalog/identity/family";
 import { resolveProviderModels } from "@oh-my-pi/pi-catalog/model-manager";
@@ -462,6 +465,35 @@ describe("merge-point collapsing (resolveProviderModels)", () => {
 });
 
 describe("antigravity discovery collapsing", () => {
+	it("keeps the logical override only while every routed backing id is proven", () => {
+		const routed = {
+			off: "gemini-3.5-flash-extra-low",
+			minimal: "gemini-3-flash-agent",
+			low: "gemini-3.5-flash-extra-low",
+			medium: "gemini-3.5-flash-extra-low",
+			high: "gemini-3.5-flash-low",
+		};
+		const proven = memberSpec("gemini-3.5-flash", {
+			requestModelId: "gemini-3.5-flash-extra-low",
+			thinking: {
+				mode: "google-level",
+				efforts: [Effort.Minimal, Effort.Low, Effort.Medium, Effort.High],
+				effortRouting: routed,
+			},
+		});
+		expect(applyAntigravityNativeVideoInputOverride(proven).input).toEqual(["text", "image", "video"]);
+
+		const unproven = memberSpec("gemini-3.5-flash", {
+			requestModelId: "gemini-3.5-flash-extra-low",
+			thinking: {
+				mode: "google-level",
+				efforts: [Effort.Minimal, Effort.Low, Effort.Medium, Effort.High],
+				effortRouting: { ...routed, high: "gemini-3.5-flash-preview" },
+			},
+		});
+		expect(applyAntigravityNativeVideoInputOverride(unproven).input).toEqual(["text", "image"]);
+	});
+
 	const payload = {
 		models: {
 			"gemini-3.5-flash-extra-low": {
@@ -484,6 +516,11 @@ describe("antigravity discovery collapsing", () => {
 				supportsImages: true,
 				thinkingBudget: 10_000,
 			},
+			"gemini-3.5-flash-preview": {
+				displayName: "Gemini 3.5 Flash Preview",
+				supportsThinking: true,
+				supportsImages: true,
+			},
 			"claude-sonnet-4-6": { displayName: "Claude Sonnet 4.6", supportsThinking: true, supportsImages: true },
 			"claude-sonnet-4-6-thinking": {
 				displayName: "Claude Sonnet 4.6 Thinking",
@@ -502,17 +539,27 @@ describe("antigravity discovery collapsing", () => {
 		{ preconnect: fetch.preconnect },
 	);
 
-	it("returns collapsed logical entries and keeps the denylist", async () => {
+	it("promotes video only for the exact proven Antigravity family when discovery omits it", async () => {
 		const models = await fetchAntigravityDiscoveryModels({ token: "t", endpoint: "https://cca.test", fetcher });
 
-		expect(models?.map(m => m.id).sort()).toEqual(["claude-sonnet-4-6", "gemini-2.5-flash", "gemini-3.5-flash"]);
+		expect(models?.map(m => m.id).sort()).toEqual([
+			"claude-sonnet-4-6",
+			"gemini-2.5-flash",
+			"gemini-3.5-flash",
+			"gemini-3.5-flash-preview",
+		]);
 		const flash = models?.find(m => m.id === "gemini-3.5-flash");
+		expect(flash?.input).toEqual(["text", "image", "video"]);
 		expect(flash?.requestModelId).toBe("gemini-3.5-flash-extra-low");
 		expect(flash?.thinking?.effortRouting?.[Effort.High]).toBe("gemini-3.5-flash-low");
 		expect(flash?.thinking?.effortRouting?.[Effort.Minimal]).toBe("gemini-3-flash-agent");
 		expect(flash?.thinking?.suppressWhenOff).toBe(true);
+		// The override is an exact wire-id list, not a family-name heuristic.
+		expect(models?.find(m => m.id === "gemini-3.5-flash-preview")?.input).toEqual(["text", "image"]);
+		expect(models?.find(m => m.id === "claude-sonnet-4-6")?.input).not.toContain("video");
 		// The 2.5 pair collapses instead of denylisting the -thinking twin.
 		const flash25 = models?.find(m => m.id === "gemini-2.5-flash");
+		expect(flash25?.input).not.toContain("video");
 		expect(flash25?.thinking?.effortRouting?.[Effort.High]).toBe("gemini-2.5-flash-thinking");
 		expect(flash25?.thinking?.effortRouting?.off).toBe("gemini-2.5-flash");
 	});
@@ -530,5 +577,6 @@ describe("antigravity discovery collapsing", () => {
 		expect(flash?.baseUrl).toBe("https://cca.test");
 		expect(flash?.requestModelId).toBe("gemini-3.5-flash-extra-low");
 		expect(flash?.thinking?.effortRouting?.off).toBe("gemini-3.5-flash-extra-low");
+		expect(flash?.input).toEqual(["text", "image"]);
 	});
 });

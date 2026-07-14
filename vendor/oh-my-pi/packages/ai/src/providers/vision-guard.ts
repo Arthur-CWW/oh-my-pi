@@ -1,25 +1,37 @@
 import { isDashscopeCompatibleModeUrl } from "@oh-my-pi/pi-catalog/hosts";
 import { isQwenModelId } from "@oh-my-pi/pi-catalog/identity";
 
-import type { ImageContent, Model, TextContent } from "../types";
+import type { ImageContent, Model, TextContent, UserContent } from "../types";
 
 export const NON_VISION_IMAGE_PLACEHOLDER = "[image omitted: model does not support vision]";
 
 export function partitionVisionContent(
-	content: ReadonlyArray<TextContent | ImageContent>,
+	content: ReadonlyArray<UserContent>,
 	supportsImages: boolean,
 ): {
 	textBlocks: TextContent[];
 	imageBlocks: ImageContent[];
 	omittedImages: boolean;
 } {
-	const textBlocks = content.filter((block): block is TextContent => block.type === "text");
-	const imageBlocks = content.filter((block): block is ImageContent => block.type === "image");
-	return {
-		textBlocks,
-		imageBlocks: supportsImages ? imageBlocks : [],
-		omittedImages: !supportsImages && imageBlocks.length > 0,
-	};
+	const textBlocks: TextContent[] = [];
+	const imageBlocks: ImageContent[] = [];
+	let omittedImages = false;
+	for (const block of content) {
+		if (block.type === "text") {
+			textBlocks.push(block);
+		} else if (block.type === "image") {
+			if (supportsImages) {
+				imageBlocks.push(block);
+			} else {
+				omittedImages = true;
+			}
+		} else {
+			throw new Error(
+				"Video input reached a provider without native video support. Select the video-capable pi/vision model.",
+			);
+		}
+	}
+	return { textBlocks, imageBlocks, omittedImages };
 }
 
 export function joinTextWithImagePlaceholder(text: string, omittedImages: boolean): string {

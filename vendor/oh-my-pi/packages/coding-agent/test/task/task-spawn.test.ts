@@ -75,6 +75,24 @@ function deferred(): Deferred {
 	return { promise, resolve };
 }
 
+function registerRevivableParked(id: string): void {
+	AgentRegistry.global().register({
+		id,
+		displayName: id,
+		kind: "sub",
+		parentId: "Main",
+		session: null,
+		sessionFile: `/tmp/${id}.jsonl`,
+		status: "parked",
+	});
+	AgentLifecycleManager.global().adopt(id, {
+		idleTtlMs: 0,
+		revive: async () => {
+			throw new Error("revive should not run in this test");
+		},
+	});
+}
+
 async function pollUntil(predicate: () => boolean, timeoutMs = 2000): Promise<void> {
 	const start = Date.now();
 	while (!predicate()) {
@@ -114,7 +132,9 @@ describe("task spawn routing", () => {
 		const gate = deferred();
 		const runSpy = vi.spyOn(executorModule, "runSubprocess").mockImplementation(async options => {
 			await gate.promise;
-			return makeResult(options.id ?? "?");
+			const id = options.id ?? "?";
+			registerRevivableParked(id);
+			return makeResult(id);
 		});
 
 		const manager = createManager();
@@ -142,11 +162,181 @@ describe("task spawn routing", () => {
 		await job!.promise;
 
 		expect(job!.status).toBe("completed");
-		expect(job!.resultText).toContain("Spawnling is now idle");
-		expect(job!.resultText).toContain("message it via `irc` to follow up");
+		expect(job!.resultText).toContain("Spawnling remains addressable after this job");
+		expect(job!.resultText).toContain('op:"send", to:"Spawnling"');
 		expect(job!.resultText).toContain("history://Spawnling");
 		expect(runSpy).toHaveBeenCalledTimes(1);
 		expect(runSpy.mock.calls[0]?.[0]?.parentAgentId).toBe("Main");
+	});
+
+	it("refuses a NameResume duplicate when the parked agent can be revived", async () => {
+		vi.spyOn(discoveryModule, "discoverAgents").mockResolvedValue({
+			agents: [taskAgent],
+			projectAgentsDir: null,
+		});
+		const runSpy = vi.spyOn(executorModule, "runSubprocess");
+		const registry = AgentRegistry.global();
+		registry.register({
+			id: "Foo",
+			displayName: "Foo",
+			kind: "sub",
+			parentId: "Main",
+			session: null,
+			sessionFile: "/tmp/Foo.jsonl",
+			status: "parked",
+		});
+		AgentLifecycleManager.global().adopt("Foo", {
+			idleTtlMs: 0,
+			revive: async () => {
+				throw new Error("revive should not run during duplicate detection");
+			},
+		});
+
+		const manager = createManager();
+		const tool = await TaskTool.create(createSession({ manager, agentId: "Main" }));
+		const result = await tool.execute("tc-resume-duplicate", {
+			agent: "task",
+			id: "FooResume",
+			assignment: "Continue Foo's work.",
+		} as TaskParams);
+
+		const text = getFirstText(result);
+		expect(text).toContain("Spawn refused");
+		expect(text).toContain("existing agent `Foo` (parked, revivable)");
+		expect(text).toContain('op:"send", to:"Foo"');
+		expect(text).toContain("history://Foo");
+		expect(text).toContain("resumes it in place with context intact");
+		expect(runSpy).not.toHaveBeenCalled();
+		expect(manager.getAllJobs()).toHaveLength(0);
+	});
+
+	it("refuses an exact revivable id instead of silently allocating a dedupe suffix", async () => {
+		vi.spyOn(discoveryModule, "discoverAgents").mockResolvedValue({
+			agents: [taskAgent],
+			projectAgentsDir: null,
+		});
+		const registry = AgentRegistry.global();
+		registry.register({
+			id: "Foo",
+			displayName: "Foo",
+			kind: "sub",
+			parentId: "Main",
+			session: null,
+			sessionFile: "/tmp/Foo.jsonl",
+			status: "parked",
+		});
+		AgentLifecycleManager.global().adopt("Foo", {
+			idleTtlMs: 0,
+			revive: async () => {
+				throw new Error("revive should not run during duplicate detection");
+			},
+		});
+
+		const manager = createManager();
+		const tool = await TaskTool.create(createSession({ manager, agentId: "Main" }));
+		const result = await tool.execute("tc-exact-duplicate", {
+			agent: "task",
+			id: "Foo",
+			assignment: "Repeat Foo's work.",
+		} as TaskParams);
+
+		const text = getFirstText(result);
+		expect(text).toContain("Spawn refused");
+		expect(text).toContain("agent `Foo` is the same id as existing agent `Foo`");
+		expect(text).not.toContain("Foo-2");
+		expect(manager.getAllJobs()).toHaveLength(0);
+	});
+
+	it("warns on a running exact match and allocates around its live registry id", async () => {
+		vi.spyOn(discoveryModule, "discoverAgents").mockResolvedValue({
+			agents: [taskAgent],
+			projectAgentsDir: null,
+		});
+		vi.spyOn(executorModule, "runSubprocess").mockImplementation(async options => makeResult(options.id ?? "?"));
+		AgentRegistry.global().register({
+			id: "Foo",
+			displayName: "Foo",
+			kind: "sub",
+			parentId: "Main",
+			session: null,
+			status: "running",
+		});
+
+		const manager = createManager();
+		const tool = await TaskTool.create(createSession({ manager, agentId: "Main" }));
+		const result = await tool.execute("tc-running-duplicate", {
+			agent: "task",
+			id: "Foo",
+			assignment: "Repeat Foo's work.",
+		} as TaskParams);
+
+		const text = getFirstText(result);
+		expect(text).toContain("Spawned agent `Foo-2`");
+		expect(text).toContain("running agent `Foo`");
+		expect(text).toContain("duplicates live work");
+		expect(text).toContain('op:"send", to:"Foo"');
+		await manager.getJob(result.details!.async!.jobId)!.promise;
+	});
+
+	it("delivers resume-in-place guidance when a started task job fails", async () => {
+		vi.spyOn(discoveryModule, "discoverAgents").mockResolvedValue({
+			agents: [taskAgent],
+			projectAgentsDir: null,
+		});
+		vi.spyOn(executorModule, "runSubprocess").mockImplementation(async options => {
+			const id = options.id ?? "?";
+			registerRevivableParked(id);
+			return makeResult(id, {
+				exitCode: 1,
+				output: "Worker failed.",
+				error: "provider failed",
+			});
+		});
+
+		const manager = createManager();
+		const tool = await TaskTool.create(createSession({ manager, agentId: "Main" }));
+		const result = await tool.execute("tc-failed-delivery", {
+			agent: "task",
+			id: "FailingWorker",
+			assignment: "Attempt the work.",
+		} as TaskParams);
+		const job = manager.getJob(result.details!.async!.jobId)!;
+		await job.promise;
+
+		expect(job.status).toBe("failed");
+		expect(job.errorText).toContain("FailingWorker remains addressable after this job");
+		expect(job.errorText).toContain('op:"send", to:"FailingWorker"');
+		expect(job.errorText).toContain("resume it in place with context intact");
+		expect(job.errorText).toContain("history://FailingWorker");
+	});
+
+	it("delivers transcript salvage guidance when a failed agent is no longer addressable", async () => {
+		vi.spyOn(discoveryModule, "discoverAgents").mockResolvedValue({
+			agents: [taskAgent],
+			projectAgentsDir: null,
+		});
+		vi.spyOn(executorModule, "runSubprocess").mockImplementation(async options =>
+			makeResult(options.id ?? "?", {
+				exitCode: 1,
+				output: "Worker terminated.",
+				error: "cancelled",
+			}),
+		);
+
+		const manager = createManager();
+		const tool = await TaskTool.create(createSession({ manager, agentId: "Main" }));
+		const result = await tool.execute("tc-terminated-delivery", {
+			agent: "task",
+			id: "TerminatedWorker",
+			assignment: "Attempt the work.",
+		} as TaskParams);
+		const job = manager.getJob(result.details!.async!.jobId)!;
+		await job.promise;
+
+		expect(job.status).toBe("failed");
+		expect(job.errorText).toContain("TerminatedWorker is no longer addressable");
+		expect(job.errorText).toContain("Salvage its transcript at history://TerminatedWorker");
+		expect(job.errorText).not.toContain('op:"send", to:"TerminatedWorker"');
 	});
 
 

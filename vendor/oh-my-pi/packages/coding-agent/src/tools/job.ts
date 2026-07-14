@@ -13,6 +13,7 @@ import { AgentRegistry, MAIN_AGENT_ID } from "../registry/agent-registry";
 import { type HotswapResult, hotswapAgentModel } from "../task/hotswap";
 import { Ellipsis, Hasher, type RenderCache, renderStatusLine, renderTreeList, truncateToWidth } from "../tui";
 import type { ToolSession } from "./index";
+import { resolveFallbackApproval } from "./job-fallback-approval";
 import {
 	formatBadge,
 	formatDuration,
@@ -32,6 +33,15 @@ const jobSchema = z.object({
 	interrupt: z.array(z.string()).optional().describe("job ids to interrupt without killing the agent"),
 	interruptReason: z.string().optional().describe("why the job is being interrupted"),
 	list: z.boolean().optional().describe("snapshot all jobs"),
+	fallbackApproval: z
+		.object({
+			id: z.string().describe("stable child id with a pending fallback proposal"),
+			action: z.enum(["wait", "approve", "choose", "abort"]),
+			timeoutMs: z.number().nonnegative().optional().describe("wait time before retrying the source model"),
+			model: z.string().optional().describe("explicit model selector for the choose action"),
+		})
+		.optional()
+		.describe("resolve a child fallback proposal without respawning it"),
 	setModel: z
 		.object({
 			id: z.string().describe("current Main session or stable descendant id to hot-swap"),
@@ -130,6 +140,21 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 		// consumers without an agent id see everything (legacy behavior).
 		const ownerId = this.session.getAgentId?.() ?? undefined;
 		const ownerFilter = ownerId ? { ownerId } : undefined;
+
+		if (params.fallbackApproval) {
+			if (
+				params.setModel ||
+				params.list ||
+				params.cancel?.length ||
+				params.interrupt?.length ||
+				params.poll?.length
+			) {
+				throw new ToolError(
+					"`fallbackApproval` cannot be combined with `setModel`, `list`, `poll`, `cancel`, or `interrupt`.",
+				);
+			}
+			return resolveFallbackApproval(ownerId, params.fallbackApproval);
+		}
 
 		if (params.setModel) {
 			if (params.list || params.cancel?.length || params.interrupt?.length || params.poll?.length) {
@@ -500,6 +525,12 @@ interface JobRenderArgs {
 	interrupt?: string[];
 	interruptReason?: string;
 	list?: boolean;
+	fallbackApproval?: {
+		id: string;
+		action: "wait" | "approve" | "choose" | "abort";
+		timeoutMs?: number;
+		model?: string;
+	};
 	setModel?: { id: string; model: string; reason?: string };
 }
 
@@ -564,6 +595,7 @@ function flattenStructuredPreview(text: string): string {
 function describeTarget(args: JobRenderArgs | undefined): string {
 	if (args?.list) return "background jobs";
 	if (args?.setModel) return `swap model of ${args.setModel.id}`;
+	if (args?.fallbackApproval) return `resolve fallback for ${args.fallbackApproval.id}`;
 	const poll = args?.poll ?? [];
 	const cancel = args?.cancel ?? [];
 	const interrupt = args?.interrupt ?? [];
@@ -599,7 +631,10 @@ export const jobToolRenderer = {
 
 		if (jobs.length === 0) {
 			const fallback = result.content?.find(c => c.type === "text")?.text || "No jobs to process";
-			const icon: ToolUIStatus = args?.setModel && !fallback.startsWith("Hot-swap failed:") ? "success" : "warning";
+			const icon: ToolUIStatus =
+				(args?.setModel && !fallback.startsWith("Hot-swap failed:")) || args?.fallbackApproval
+					? "success"
+					: "warning";
 			const header = renderStatusLine({ icon, title: describeTarget(args) || "Job" }, uiTheme);
 			return new Text([header, formatEmptyMessage(fallback, uiTheme)].join("\n"), 0, 0);
 		}

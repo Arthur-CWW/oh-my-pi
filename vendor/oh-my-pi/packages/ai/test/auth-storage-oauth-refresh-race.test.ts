@@ -10,6 +10,7 @@ import {
 	SqliteAuthCredentialStore,
 } from "@oh-my-pi/pi-ai/auth-storage";
 import * as oauthUtils from "@oh-my-pi/pi-ai/registry/oauth";
+import type { OAuthCredentials } from "@oh-my-pi/pi-ai/registry/oauth/types";
 import { withEnv } from "./helpers";
 
 const SUPPRESS_ANTHROPIC_ENV = {
@@ -191,6 +192,46 @@ describe("AuthStorage OAuth refresh race", () => {
 				expect(stored[0].credential.access).toBe("fresh-access-from-peer");
 			}
 		});
+	});
+
+	test("reports provider refresh lifecycle around the actual async request", async () => {
+		if (!store) throw new Error("test setup failed");
+		const refreshStarted = Promise.withResolvers<void>();
+		const refreshResult = Promise.withResolvers<OAuthCredentials>();
+		await authStorage!.set("anthropic", {
+			type: "oauth",
+			access: "expired-access",
+			refresh: "refresh-token",
+			expires: Date.now() - 60_000,
+		});
+		authStorage = new AuthStorage(store, {
+			refreshOAuthCredential: async () => {
+				refreshStarted.resolve();
+				return refreshResult.promise;
+			},
+		});
+		await authStorage.reload();
+		const observedStates: string[][] = [];
+		const unsubscribe = authStorage.onGenerationChanged(() => {
+			observedStates.push([...authStorage!.getRefreshState().refreshingProviders]);
+		});
+
+		await withEnv(SUPPRESS_ANTHROPIC_ENV, async () => {
+			const request = authStorage!.getApiKey("anthropic", "refresh-lifecycle");
+			await refreshStarted.promise;
+			expect(authStorage!.getRefreshState().refreshingProviders).toEqual(["anthropic"]);
+			refreshResult.resolve({
+				access: "fresh-access",
+				refresh: "fresh-refresh",
+				expires: Date.now() + 60 * 60_000,
+			});
+			expect(await request).toBe("fresh-access");
+		});
+
+		expect(authStorage.getRefreshState().refreshingProviders).toEqual([]);
+		expect(observedStates).toContainEqual(["anthropic"]);
+		expect(observedStates.at(-1)).toEqual([]);
+		unsubscribe();
 	});
 
 	test("still disables when the failure is real (no concurrent rotation)", async () => {

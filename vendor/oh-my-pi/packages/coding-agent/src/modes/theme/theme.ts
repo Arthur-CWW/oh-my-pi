@@ -18,7 +18,7 @@ import { z } from "zod/v4";
 import darkThemeJson from "./dark.json" with { type: "json" };
 import { defaultThemes } from "./defaults";
 import lightThemeJson from "./light.json" with { type: "json" };
-import { resolveMermaidAscii } from "./mermaid-cache";
+import { getCachedMarkdownTheme } from "./markdown-theme-cache";
 
 export { getLanguageFromPath } from "../../utils/lang-from-path";
 
@@ -2738,56 +2738,30 @@ export function highlightCode(code: string, lang?: string, highlightTheme: Theme
 	return (highlighted ?? code).split("\n");
 }
 
-export function getSymbolTheme(): SymbolTheme {
-	const preset = theme.getSymbolPreset();
-
+export function getSymbolTheme(symbolTheme: Theme = theme): SymbolTheme {
+	const preset = symbolTheme.getSymbolPreset();
 	return {
-		cursor: theme.nav.cursor,
+		cursor: symbolTheme.nav.cursor,
 		inputCursor: preset === "ascii" ? "|" : "▏",
-		boxRound: theme.boxRound,
-		boxSharp: theme.boxSharp,
-		table: theme.boxSharp,
-		quoteBorder: theme.md.quoteBorder,
-		hrChar: theme.md.hrChar,
-		colorSwatch: theme.md.colorSwatch,
-		spinnerFrames: theme.getSpinnerFrames("activity"),
+		boxRound: symbolTheme.boxRound,
+		boxSharp: symbolTheme.boxSharp,
+		table: symbolTheme.boxSharp,
+		quoteBorder: symbolTheme.md.quoteBorder,
+		hrChar: symbolTheme.md.hrChar,
+		colorSwatch: symbolTheme.md.colorSwatch,
+		spinnerFrames: symbolTheme.getSpinnerFrames("activity"),
 	};
 }
 
-let cachedMarkdownTheme: MarkdownTheme | undefined;
-let cachedMarkdownThemeEpoch = -1;
-
-export function getMarkdownTheme(): MarkdownTheme {
-	if (cachedMarkdownTheme !== undefined && cachedMarkdownThemeEpoch === themeEpoch) {
-		return cachedMarkdownTheme;
-	}
-	const markdownTheme: MarkdownTheme = {
-		heading: (text: string) => theme.fg("mdHeading", text),
-		link: (text: string) => theme.fg("mdLink", text),
-		linkUrl: (text: string) => theme.fg("mdLinkUrl", text),
-		code: (text: string) => theme.fg("mdCode", text),
-		codeBlock: (text: string) => theme.fg("mdCodeBlock", text),
-		codeBlockBorder: (text: string) => theme.fg("mdCodeBlockBorder", text),
-		quote: (text: string) => theme.fg("mdQuote", text),
-		quoteBorder: (text: string) => theme.fg("mdQuoteBorder", text),
-		hr: (text: string) => theme.fg("mdHr", text),
-		listBullet: (text: string) => theme.fg("mdListBullet", text),
-		bold: (text: string) => theme.bold(text),
-		italic: (text: string) => theme.italic(text),
-		underline: (text: string) => theme.underline(text),
-		strikethrough: (text: string) => chalk.strikethrough(text),
-		symbols: getSymbolTheme(),
-		resolveMermaidAscii,
-		highlightCode: (code: string, lang?: string): string[] => {
-			const validLang = lang && nativeSupportsLanguage(lang) ? lang : undefined;
-			const highlighted = highlightCached(code, validLang, theme);
-			if (highlighted !== null) return highlighted.split("\n");
-			return code.split("\n").map(line => theme.fg("mdCodeBlock", line));
-		},
-	};
-	cachedMarkdownTheme = markdownTheme;
-	cachedMarkdownThemeEpoch = themeEpoch;
-	return markdownTheme;
+export function getMarkdownTheme(sourceTheme: Theme = theme): MarkdownTheme {
+	return getCachedMarkdownTheme(
+		sourceTheme,
+		theme,
+		themeEpoch,
+		getSymbolTheme,
+		highlightCached,
+		nativeSupportsLanguage,
+	);
 }
 
 export function getSelectListTheme(): SelectListTheme {

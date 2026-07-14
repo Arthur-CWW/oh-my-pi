@@ -1,7 +1,7 @@
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
-import type { ImageContent, MessageAttribution, ServiceTier, TextContent } from "@oh-my-pi/pi-ai";
+import type { MessageAttribution, ServiceTier, UserContent } from "@oh-my-pi/pi-ai";
 
-export const CURRENT_SESSION_VERSION = 3;
+export const CURRENT_SESSION_VERSION = 4;
 
 export const EPHEMERAL_MODEL_CHANGE_ROLE = "fallback";
 
@@ -526,7 +526,7 @@ export function decodeDurableDeliveryIdentity(value: unknown): DurableDeliveryId
 export interface CustomMessageEntry<T = unknown> extends SessionEntryBase {
 	type: "custom_message";
 	customType: string;
-	content: string | (TextContent | ImageContent)[];
+	content: string | UserContent[];
 	details?: T;
 	display: boolean;
 	/** Who initiated this message for billing/attribution semantics. */

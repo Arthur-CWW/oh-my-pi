@@ -7,11 +7,10 @@
  * matches the provider and the `/context` panel instead of an independent
  * estimate that drifted past 100%.
  *
- * `getTopBorder()` runs on every agent event (event-controller.ts), so the
- * breakdown is memoized: it re-queries `getContextUsage()` only when an input
- * it depends on changes (a new/grown message, a replaced message array, or the
- * model's context window). A stable conversation must not re-query on every
- * redraw — that per-event recompute is what previously froze large sessions.
+ * Border reads are cached, and the breakdown itself is memoized: it re-queries
+ * `getContextUsage()` only when an input it depends on changes (a new/grown
+ * message, a replaced message array, or the model's context window). A stable
+ * conversation must not re-query on repeated redraws.
  */
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";

@@ -174,7 +174,7 @@ const ordinaryQueuedInputs = (await injectedQueue.list())
   .filter(item => item.inputId !== first.item.inputId && item.payload.kind !== "custom")
   .map(item => ({ text: item.payload.text, deliveryClass: item.deliveryClass, revision: item.revision, state: item.state }));
 const [injectedOwnerDirectory] = await fs.readdir(path.join(injectedMuxRoot, "owners-v1"));
-const injectedSegmentsRoot = path.join(injectedMuxRoot, "owners-v1", injectedOwnerDirectory, "queue-v2", "segments");
+const injectedSegmentsRoot = path.join(injectedMuxRoot, "owners-v1", injectedOwnerDirectory, "queue-v3", "segments");
 const injectedSegmentNames = await fs.readdir(injectedSegmentsRoot);
 const injectedRecords = (await Promise.all(injectedSegmentNames.map(name => fs.readFile(path.join(injectedSegmentsRoot, name), "utf8"))))
   .flatMap(text => text.trim().split("\n").filter(Boolean).map(line => JSON.parse(line)));
@@ -212,7 +212,7 @@ const standaloneSession = new AgentSession({
   modelRegistry,
 });
 const ownerDirectories = await fs.readdir(path.join(defaultMuxRoot, "owners-v1"));
-const standaloneQueueHead = path.join(defaultMuxRoot, "owners-v1", ownerDirectories[0], "queue-v2", "head.json");
+const standaloneQueueHead = path.join(defaultMuxRoot, "owners-v1", ownerDirectories[0], "queue-v3", "head.json");
 let standaloneQueueHeadExists = false;
 for (let attempt = 0; attempt < 100 && !standaloneQueueHeadExists; attempt++) {
   try {

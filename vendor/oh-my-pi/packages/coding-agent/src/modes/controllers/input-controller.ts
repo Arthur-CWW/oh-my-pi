@@ -1,7 +1,7 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import type { ImageContent } from "@oh-my-pi/pi-ai";
-import { type AutocompleteProvider, matchesKey, type SlashCommand } from "@oh-my-pi/pi-tui";
+import type { ImageContent, MediaContent } from "@oh-my-pi/pi-ai";
+import { type AutocompleteProvider, type SlashCommand } from "@oh-my-pi/pi-tui";
 import { $env, isEnoent, logger, sanitizeText } from "@oh-my-pi/pi-utils";
 import { isSettingsInitialized, settings } from "../../config/settings";
 import { resolveLocalRoot } from "../../internal-urls";
@@ -29,6 +29,7 @@ import { ensureSupportedImageInput, ImageInputTooLargeError, loadImageInput } fr
 import { resizeImage } from "../../utils/image-resize";
 import { generateSessionTitle, setSessionTerminalTitle } from "../../utils/title-generator";
 import { diagnosticInputFromError } from "../utils/error-inbox";
+import { InputInterruptController } from "./input-interrupt-controller";
 
 interface Expandable {
 	setExpanded(expanded: boolean): void;
@@ -36,6 +37,15 @@ interface Expandable {
 
 function isExpandable(obj: unknown): obj is Expandable {
 	return typeof obj === "object" && obj !== null && "setExpanded" in obj && typeof obj.setExpanded === "function";
+}
+
+function countImageAttachments(attachments: readonly MediaContent[] | undefined): number {
+	if (!attachments) return 0;
+	let count = 0;
+	for (const attachment of attachments) {
+		if (attachment.type === "image") count++;
+	}
+	return count;
 }
 
 /** Minimal contract for any component that can receive a paste payload directly. */
@@ -58,16 +68,6 @@ const TINY_TITLE_PROGRESS_DONE_TTL_MS = 3_000;
 // events for seconds. Only reveal the bar once a still-incomplete event arrives after
 // this grace window, so an already-downloaded model never flashes the bar.
 const TINY_TITLE_PROGRESS_REVEAL_DELAY_MS = 1_000;
-// Double-tap ← on an empty editor opens the Agent Hub (and, in a focused
-// subagent view, ←← returns to the main session). The second tap must land
-// inside this window. The lower bound rejects terminal-synthesized arrow-key
-// bursts: "click to move cursor" / pointer features in iTerm2, WezTerm, kitty,
-// and tmux emit several arrow keys in a single stdin read (sub-millisecond
-// apart) on a stray click, which used to pop the hub with no key ever pressed.
-// Three or more rapid taps are likewise treated as a burst, not a gesture. A
-// deliberate human double-tap is always tens of milliseconds apart.
-const LEFT_DOUBLE_TAP_MIN_GAP_MS = 40;
-const LEFT_DOUBLE_TAP_MAX_GAP_MS = 500;
 const QUIT_COMMAND_RE = /^\/(?:exit|quit)(?:\s|$)/;
 
 export class InputController {
@@ -78,14 +78,14 @@ export class InputController {
 			readImage: typeof readImageFromClipboard;
 			readText: typeof readTextFromClipboard;
 		} = { readImage: readImageFromClipboard, readText: readTextFromClipboard },
-	) {}
+	) {
+		this.#interruptController = new InputInterruptController(ctx, async () => {
+			await this.restoreQueuedMessagesToEditor();
+		});
+	}
 
 	#enhancedPaste?: EnhancedPasteController;
-	#focusedLeftTapListenerInstalled = false;
-	// Tap counter for the double-← gesture; reset whenever a quiet gap
-	// (>= LEFT_DOUBLE_TAP_MAX_GAP_MS) starts a fresh sequence. See
-	// #detectLeftDoubleTap.
-	#leftTapCount = 0;
+	readonly #interruptController: InputInterruptController;
 	// Sequential index for `local://attachment-N` references created by the large-paste local-file
 	// action. Seeded from 0 and bumped past any existing attachment files in #attachPasteAsFile.
 	#attachmentCounter = 0;
@@ -139,25 +139,17 @@ export class InputController {
 
 	setupKeyHandlers(): void {
 		this.ctx.editor.setActionKeys("app.interrupt", this.ctx.keybindings.getKeys("app.interrupt"));
-		if (!this.#focusedLeftTapListenerInstalled) {
-			this.#focusedLeftTapListenerInstalled = true;
-			this.ctx.ui.addInputListener(data => {
-				if (!this.ctx.focusedAgentId) return undefined;
-				if (!matchesKey(data, "left")) return undefined;
-				if (this.ctx.editor.getText().trim()) return undefined;
-				this.#handleFocusedLeftTap();
-				return { consume: true };
-			});
-		}
+		this.#interruptController.installFocusedLeftTapListener();
 		installCommandLine(this.ctx);
-		this.ctx.editor.onEscape = () => {
-			// Active context maintenance owns Esc: auto/manual compaction,
-			// handoff generation, and auto-retry backoff all advertise
-			// "(esc to cancel)". Dispatch on live session state instead of
-			// swapping onEscape handlers — interleaved start/end events used
-			// to clobber the single saved-handler slot (auto-compaction start
-			// → /compact → auto end → manual finally), leaving Esc wired to a
-			// stale no-op closure until restart.
+		this.ctx.editor.onEscape = key => {
+			if (key === "ctrl+q") {
+				this.#interruptController.interrupt();
+				return;
+			}
+
+			// Active context maintenance owns Escape. Dispatch on live session
+			// state instead of swapping handlers: interleaved start/end events
+			// otherwise clobber the single saved-handler slot.
 			const viewSession = this.ctx.viewSession;
 			let aborted = false;
 			if (viewSession.isCompacting) {
@@ -196,14 +188,13 @@ export class InputController {
 				return;
 			}
 			if (this.ctx.focusedAgentId) {
-				// Esc never interrupts the focused agent's turn: clear typed text,
-				// else return the view to the main session. Interrupt via empty
-				// steer-flush submit if needed.
+				// Escape never interrupts the focused agent's turn: clear typed
+				// text, or return to the main session. Ctrl+Q interrupts directly.
 				if (this.ctx.editor.getText().trim()) {
 					this.ctx.editor.setText("");
 					this.ctx.ui.requestRender();
 				} else {
-					this.#handleFocusPromise(this.ctx.unfocusSession(), "Failed to return to the main session");
+					this.#interruptController.unfocus();
 				}
 				return; // double-escape backtrack (/tree, /branch) stays main-only
 			}
@@ -337,17 +328,11 @@ export class InputController {
 		}
 		for (const key of this.ctx.keybindings.getKeys("app.message.followUp")) {
 			this.ctx.editor.setCustomKeyHandler(key, () => {
-				if (this.ctx.focusedAgentId && key.toLowerCase() === "ctrl+q") {
-					this.#handleFocusPromise(this.#pauseFocusedAgent(), "Failed to pause the focused agent");
-					return;
-				}
 				void this.handleFollowUp();
 			});
 		}
 		for (const key of this.ctx.keybindings.getKeys("app.agents.returnToParent")) {
-			this.ctx.editor.setCustomKeyHandler(key, () =>
-				this.#handleFocusPromise(this.#returnToFocusedParent(), "Failed to return to the parent session"),
-			);
+			this.ctx.editor.setCustomKeyHandler(key, () => this.#interruptController.returnToFocusedParent());
 		}
 		for (const key of this.ctx.keybindings.getKeys("app.stt.toggle")) {
 			this.ctx.editor.setCustomKeyHandler(key, () => void this.ctx.handleSTTToggle());
@@ -377,15 +362,7 @@ export class InputController {
 		// Focused ←← intentionally matches Esc. From the main session the gesture
 		// stays inert when there are no subagents (requireContent); the explicit
 		// hub key still opens the empty roster.
-		this.ctx.editor.onLeftAtStart = () => {
-			if (this.ctx.focusedAgentId) {
-				this.#handleFocusedLeftTap();
-				return;
-			}
-			if (this.#detectLeftDoubleTap()) {
-				this.ctx.showAgentHub({ requireContent: true });
-			}
-		};
+		this.ctx.editor.onLeftAtStart = () => this.#interruptController.handleLeftAtStart();
 
 		this.#setupEnhancedPaste();
 
@@ -401,63 +378,6 @@ export class InputController {
 		};
 	}
 
-	#handleFocusedLeftTap(): void {
-		if (this.#detectLeftDoubleTap()) {
-			this.#handleFocusPromise(this.ctx.unfocusSession(), "Failed to return to the main session");
-		}
-	}
-
-	#handleFocusPromise(promise: Promise<void>, message: string): void {
-		void promise.catch(error => {
-			this.ctx.showError(`${message}: ${error instanceof Error ? error.message : String(error)}`);
-		});
-	}
-
-	async #pauseFocusedAgent(): Promise<void> {
-		const id = this.ctx.focusedAgentId;
-		if (!id) return;
-		const target = this.ctx.viewSession;
-		if (target.isStreaming) {
-			await target.abort({ reason: USER_INTERRUPT_LABEL });
-			await this.#returnToFocusedParent(`Interrupted ${id}; returned to parent with draft preserved`);
-			return;
-		}
-		await this.#returnToFocusedParent(`Returned to parent from ${id} with draft preserved`);
-	}
-
-	async #returnToFocusedParent(status = "Returned to parent with draft preserved"): Promise<void> {
-		if (!this.ctx.focusedAgentId) return;
-		await this.ctx.focusParentSession();
-		this.ctx.showStatus(status);
-	}
-
-	/**
-	 * Detect a deliberate double-← gesture, rejecting terminal-synthesized arrow
-	 * bursts. Returns true only on the *second* tap of a fresh sequence when it
-	 * lands a human-plausible interval after the first
-	 * (`[LEFT_DOUBLE_TAP_MIN_GAP_MS, LEFT_DOUBLE_TAP_MAX_GAP_MS)`). Taps closer
-	 * than the lower bound, or any third-and-later tap before a quiet gap, are a
-	 * burst and never fire — so a stray click that makes the terminal emit a run
-	 * of ← keys can no longer pop the Agent Hub.
-	 */
-	#detectLeftDoubleTap(): boolean {
-		const now = Date.now();
-		const sinceLast = now - this.ctx.lastLeftTapTime;
-		this.ctx.lastLeftTapTime = now;
-		if (sinceLast >= LEFT_DOUBLE_TAP_MAX_GAP_MS) {
-			// Quiet gap: this tap starts a fresh sequence.
-			this.#leftTapCount = 1;
-			return false;
-		}
-		this.#leftTapCount += 1;
-		if (this.#leftTapCount === 2 && sinceLast >= LEFT_DOUBLE_TAP_MIN_GAP_MS) {
-			// Exactly two taps, the second a human-plausible interval after the first.
-			this.#leftTapCount = 0;
-			this.ctx.lastLeftTapTime = 0;
-			return true;
-		}
-		return false;
-	}
 
 	#setupEnhancedPaste(): void {
 		if (this.#enhancedPaste) return;
@@ -539,11 +459,12 @@ export class InputController {
 			}
 
 			const runner = this.ctx.session.extensionRunner;
-			let inputImages = this.ctx.pendingImages.length > 0 ? [...this.ctx.pendingImages] : undefined;
+			let inputAttachments: MediaContent[] | undefined =
+				this.ctx.pendingImages.length > 0 ? [...this.ctx.pendingImages] : undefined;
 			let inputImageLinks = this.ctx.pendingImageLinks.length > 0 ? [...this.ctx.pendingImageLinks] : undefined;
 
 			if (runner?.hasHandlers("input")) {
-				const result = await runner.emitInput(text, inputImages, "interactive");
+				const result = await runner.emitInput(text, inputAttachments, "interactive");
 				if (result?.handled) {
 					this.ctx.editor.setText("");
 					this.ctx.pendingImages = [];
@@ -551,13 +472,22 @@ export class InputController {
 					this.ctx.editor.imageLinks = undefined;
 					return;
 				}
-				if (result?.text !== undefined) {
-					text = result.text.trim();
+				if (Array.isArray(result?.input)) {
+					this.ctx.showError(
+						"Input extensions cannot return structured content in interactive mode; return text and attachments instead",
+					);
+					return;
 				}
-				if (result?.images !== undefined) {
-					inputImages = result.images;
+				if (typeof result?.input === "string") {
+					text = result.input.trim();
+				}
+				if (result?.attachments !== undefined) {
+					inputAttachments = [...result.attachments];
+					const imageAttachments = inputAttachments.filter(
+						(attachment): attachment is ImageContent => attachment.type === "image",
+					);
 					inputImageLinks = await materializeImageReferenceLinks(
-						inputImages,
+						imageAttachments,
 						this.ctx.sessionManager.putBlob.bind(this.ctx.sessionManager),
 					);
 				}
@@ -619,7 +549,9 @@ export class InputController {
 				const command = isExcluded ? text.slice(2).trim() : text.slice(1).trim();
 				if (command) {
 					if (this.ctx.session.isBashRunning) {
-						this.ctx.showWarning("A bash command is already running. Press Esc to cancel it first.");
+						this.ctx.showWarning(
+							`A bash command is already running. Press ${this.ctx.keybindings.getDisplayString("app.interrupt")} to cancel it first.`,
+						);
 						this.ctx.editor.setText(text);
 						return;
 					}
@@ -637,7 +569,9 @@ export class InputController {
 				const code = isExcluded ? text.slice(2).trim() : text.slice(1).trim();
 				if (code) {
 					if (this.ctx.session.isEvalRunning) {
-						this.ctx.showWarning("A Python execution is already running. Press Esc to cancel it first.");
+						this.ctx.showWarning(
+							`A Python execution is already running. Press ${this.ctx.keybindings.getDisplayString("app.interrupt")} to cancel it first.`,
+						);
 						this.ctx.editor.setText(text);
 						return;
 					}
@@ -659,13 +593,14 @@ export class InputController {
 			// Capture through its durable queue immediately rather than keeping a
 			// controller-side buffer that could be lost before compaction resumes.
 			if (this.ctx.session.isCompacting) {
-				const images = inputImages && inputImages.length > 0 ? [...inputImages] : undefined;
-				const content = images ? [{ type: "text" as const, text }, ...images] : text;
+				const attachments = inputAttachments?.length ? [...inputAttachments] : undefined;
+				const imageCount = countImageAttachments(attachments);
+				const content = attachments ? [{ type: "text" as const, text }, ...attachments] : text;
 				try {
 					await this.ctx.withLocalSubmission(
 						text,
 						() => this.ctx.session.sendUserMessage(content, { deliverAs: "steer" }),
-						{ imageCount: images?.length ?? 0 },
+						{ imageCount },
 					);
 					this.ctx.editor.addToHistory(text);
 					this.ctx.editor.setText("");
@@ -674,6 +609,16 @@ export class InputController {
 					this.ctx.pendingImageLinks = [];
 				} catch (error) {
 					this.ctx.showError(diagnosticInputFromError(error, this.ctx.sessionManager.getSessionFile()));
+					const imageAttachments =
+						attachments?.filter((attachment): attachment is ImageContent => attachment.type === "image") ?? [];
+					this.ctx.pendingImages = imageAttachments;
+					this.ctx.pendingImageLinks = inputImageLinks
+						? [...inputImageLinks]
+						: imageAttachments.map(() => undefined);
+					this.ctx.editor.imageLinks = this.ctx.pendingImageLinks;
+					if (attachments?.some(attachment => attachment.type === "video")) {
+						this.ctx.showWarning("Video attachments were not accepted; attach them again before retrying");
+					}
 				}
 				this.ctx.updatePendingMessagesDisplay();
 				this.ctx.ui.requestRender();
@@ -686,18 +631,33 @@ export class InputController {
 				this.ctx.editor.addToHistory(text);
 				this.ctx.editor.setText("");
 				this.ctx.editor.imageLinks = undefined;
-				const images = inputImages && inputImages.length > 0 ? [...inputImages] : undefined;
+				const attachments = inputAttachments?.length ? [...inputAttachments] : undefined;
+				const imageAttachments =
+					attachments?.filter((attachment): attachment is ImageContent => attachment.type === "image") ?? [];
 				this.ctx.pendingImages = [];
 				this.ctx.pendingImageLinks = [];
 				// Record the signature so the queued message's eventual delivery
 				// (a user-role `message_start` event) leaves any draft the user has
 				// typed since queuing intact. Same protection as #783, applied to
 				// the streaming/queue path.
-				await this.ctx.withLocalSubmission(
-					text,
-					() => this.ctx.session.prompt(text, { streamingBehavior: "steer", images }),
-					{ imageCount: images?.length ?? 0 },
-				);
+				try {
+					await this.ctx.withLocalSubmission(
+						text,
+						() => this.ctx.session.prompt(text, { streamingBehavior: "steer", attachments }),
+						{ imageCount: imageAttachments.length },
+					);
+				} catch (error) {
+					this.ctx.editor.setText(text);
+					this.ctx.pendingImages = imageAttachments;
+					this.ctx.pendingImageLinks = inputImageLinks
+						? [...inputImageLinks]
+						: imageAttachments.map(() => undefined);
+					this.ctx.editor.imageLinks = this.ctx.pendingImageLinks;
+					this.ctx.showError(diagnosticInputFromError(error, this.ctx.sessionManager.getSessionFile()));
+					if (attachments?.some(attachment => attachment.type === "video")) {
+						this.ctx.showWarning("Video attachments were not accepted; attach them again before retrying");
+					}
+				}
 				this.ctx.updatePendingMessagesDisplay();
 				this.ctx.ui.requestRender();
 				return;
@@ -750,7 +710,7 @@ export class InputController {
 			if (this.ctx.onInputCallback) {
 				// Include any pending images from clipboard paste
 				this.ctx.editor.imageLinks = undefined;
-				const images = inputImages && inputImages.length > 0 ? [...inputImages] : undefined;
+				const attachments = inputAttachments?.length ? [...inputAttachments] : undefined;
 				this.ctx.pendingImages = [];
 				this.ctx.pendingImageLinks = [];
 
@@ -762,7 +722,7 @@ export class InputController {
 				// AgentBusyError on that race.
 				const submission = this.ctx.startPendingSubmission({
 					text,
-					images,
+					attachments,
 					imageLinks: inputImageLinks,
 					streamingBehavior: "steer",
 				});
@@ -777,22 +737,25 @@ export class InputController {
 				// immediately when the session is resumable, and a retry/continue
 				// run picks it up at loop start otherwise.
 				this.ctx.editor.imageLinks = undefined;
-				const images = inputImages && inputImages.length > 0 ? [...inputImages] : undefined;
+				const attachments = inputAttachments?.length ? [...inputAttachments] : undefined;
 				this.ctx.pendingImages = [];
 				this.ctx.pendingImageLinks = [];
 				try {
-					await this.ctx.withLocalSubmission(text, () => this.ctx.session.steer(text, images), {
-						imageCount: images?.length ?? 0,
+					await this.ctx.withLocalSubmission(text, () => this.ctx.session.steer(text, attachments), {
+						imageCount: countImageAttachments(attachments),
 					});
 				} catch (error) {
-					// Don't lose the message: hand the text and images back to the
-					// editor so the user can retry (e.g. steer() rejecting an
-					// extension command).
+					// The editor can restore images, but not extension-provided videos.
 					this.ctx.editor.setText(text);
-					if (images && images.length > 0) {
-						this.ctx.pendingImages = [...images];
-						this.ctx.pendingImageLinks = inputImageLinks ? [...inputImageLinks] : images.map(() => undefined);
-						this.ctx.editor.imageLinks = this.ctx.pendingImageLinks;
+					const imageAttachments =
+						attachments?.filter((attachment): attachment is ImageContent => attachment.type === "image") ?? [];
+					this.ctx.pendingImages = imageAttachments;
+					this.ctx.pendingImageLinks = inputImageLinks
+						? [...inputImageLinks]
+						: imageAttachments.map(() => undefined);
+					this.ctx.editor.imageLinks = this.ctx.pendingImageLinks;
+					if (attachments?.some(attachment => attachment.type === "video")) {
+						this.ctx.showWarning("Video attachments were not accepted; attach them again before retrying");
 					}
 					this.ctx.showError(diagnosticInputFromError(error, this.ctx.sessionManager.getSessionFile()));
 				}
@@ -835,7 +798,7 @@ export class InputController {
 							await target.sendUserMessage(content, { deliverAs: "followUp" });
 						}
 					: async () => {
-							await target.prompt(text, { streamingBehavior, images });
+							await target.prompt(text, { streamingBehavior, attachments: images });
 						};
 			await this.ctx.withLocalSubmission(text, submit, { imageCount: images?.length ?? 0 });
 		} catch (error) {
@@ -1123,33 +1086,34 @@ export class InputController {
 			.filter(item => item.state === "queued")
 			.toSorted((left, right) => left.sequence - right.sequence);
 		const newest = queued.at(-1);
-		if (!newest || !("text" in newest.payload)) return 0;
+		if (!newest || !("text" in newest.payload) || newest.payload.attachments?.length) {
+			if (options?.abort) void this.ctx.session.abort({ reason: USER_INTERRUPT_LABEL });
+			return 0;
+		}
 
 		const group = [newest];
 		for (let index = queued.length - 2; index >= 0; index--) {
 			const item = queued[index]!;
-			if (item.deliveryClass !== newest.deliveryClass || !("text" in item.payload)) break;
+			if (
+				item.deliveryClass !== newest.deliveryClass ||
+				!("text" in item.payload) ||
+				item.payload.attachments?.length
+			)
+				break;
 			group.unshift(item);
 		}
 		for (const item of group) {
 			await this.ctx.session.cancelQueuedInput(item.inputId);
 		}
 
-		const queuedImages = group.flatMap(item => ("text" in item.payload ? (item.payload.images ?? []) : []));
 		const parts: string[] = [];
 		let imageOffset = this.ctx.pendingImages.length;
 		for (const item of group) {
 			if (!("text" in item.payload)) continue;
 			parts.push(shiftImageMarkers(item.payload.text, imageOffset));
-			imageOffset += item.payload.images?.length ?? 0;
 		}
 		const currentText = options?.currentText ?? this.ctx.editor.getText();
 		this.ctx.editor.setText([parts.join("\n\n"), currentText].filter(text => text.trim()).join("\n\n"));
-		if (queuedImages.length > 0) {
-			this.ctx.pendingImages.push(...queuedImages);
-			this.ctx.pendingImageLinks.push(...queuedImages.map(() => undefined));
-			this.ctx.editor.imageLinks = this.ctx.pendingImageLinks;
-		}
 		this.ctx.updatePendingMessagesDisplay();
 		if (options?.abort) void this.ctx.session.abort({ reason: USER_INTERRUPT_LABEL });
 		this.ctx.ui.requestRender();

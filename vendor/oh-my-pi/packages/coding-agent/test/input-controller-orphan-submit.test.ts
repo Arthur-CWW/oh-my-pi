@@ -110,6 +110,7 @@ function createContext() {
 	};
 }
 
+
 describe("InputController orphaned submit", () => {
 	it("queues an idle submit with no input waiter as a steer instead of dropping it", async () => {
 		const { ctx, editor, spies } = createContext();
@@ -174,7 +175,7 @@ describe("InputController orphaned submit", () => {
 			sequence: 1,
 			deliveryClass: "steer" as const,
 			revision: 1,
-			payload: { text: "queued with image", images: [image] },
+			payload: { text: "queued with image", attachments: [image] },
 			state: "queued" as const,
 			attempts: [],
 		};
@@ -190,3 +191,4 @@ describe("InputController orphaned submit", () => {
 		expect(ctx.pendingImageLinks).toEqual([undefined]);
 	});
 });
+

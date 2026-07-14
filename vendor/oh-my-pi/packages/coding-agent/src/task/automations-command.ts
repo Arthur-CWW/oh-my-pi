@@ -1,6 +1,7 @@
 import { Args, Command, Flags } from "@oh-my-pi/pi-utils/cli";
 import {
 	type AutomationEntry,
+	AutomationRunError,
 	getAutomationLedgerPath,
 	isAutomationDue,
 	latestAutomationRun,
@@ -27,8 +28,19 @@ function printRows(headers: readonly string[], rows: readonly (readonly string[]
 	}
 }
 
+function reportAutomationFailure(error: AutomationRunError, json: boolean): void {
+	if (json) {
+		process.stdout.write(`${JSON.stringify(error.result)}\n`);
+	} else {
+		process.stderr.write(
+			`${error.result.name}: failed (${error.result.durationMs}ms)\n${error.message}\n`,
+		);
+	}
+	process.exitCode = error.result.exitCode ?? 1;
+}
+
 export default class Automations extends Command {
-	static description = "Run and supervise headless, resumable agent automations";
+	static description = "Run and supervise scheduled prompt, packet, or command automations";
 
 	static args = {
 		action: Args.string({
@@ -62,11 +74,11 @@ export default class Automations extends Command {
 					return;
 				}
 				printRows(
-					["NAME", "SCHEDULE", "LANE/MODEL", "ENABLED", "CWD"],
+					["NAME", "SCHEDULE", "TYPE/LANE/MODEL", "ENABLED", "CWD"],
 					entries.map(entry => [
 						entry.name,
 						entry.schedule,
-						entry.model ?? entry.lane,
+						entry.command ? "command" : entry.model ?? entry.lane,
 						entry.enabled ? "yes" : "no",
 						entry.cwd,
 					]),
@@ -74,12 +86,17 @@ export default class Automations extends Command {
 				return;
 			}
 			case "run": {
-				const result = await runAutomationOnce(findAutomation(entries, args.name));
-				if (flags.json) process.stdout.write(`${JSON.stringify(result)}\n`);
-				else
-					process.stdout.write(
-						`${result.name}: ${result.status} (${result.durationMs}ms)\n${result.outputSummary}\n`,
-					);
+				try {
+					const result = await runAutomationOnce(findAutomation(entries, args.name));
+					if (flags.json) process.stdout.write(`${JSON.stringify(result)}\n`);
+					else
+						process.stdout.write(
+							`${result.name}: ${result.status} (${result.durationMs}ms)\n${result.outputSummary}\n`,
+						);
+				} catch (error) {
+					if (!(error instanceof AutomationRunError)) throw error;
+					reportAutomationFailure(error, flags.json);
+				}
 				return;
 			}
 			case "status": {
@@ -118,7 +135,13 @@ export default class Automations extends Command {
 				process.once("SIGINT", abort);
 				process.once("SIGTERM", abort);
 				try {
-					await runAutomationDaemon({ signal: controller.signal });
+					await runAutomationDaemon({
+						signal: controller.signal,
+						onError: (entry, error) => {
+							const message = error instanceof Error ? error.message : String(error);
+							process.stderr.write(`${entry.name}: failed\n${message}\n`);
+						},
+					});
 				} catch (error) {
 					if (!controller.signal.aborted) throw error;
 				} finally {

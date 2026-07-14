@@ -15,7 +15,7 @@ afterEach(async () => {
 function createInput(overrides: Partial<SubmittedUserInput> = {}): SubmittedUserInput {
 	return {
 		text: "hello",
-		images: undefined,
+		attachments: undefined,
 		cancelled: false,
 		started: false,
 		...overrides,
@@ -128,7 +128,7 @@ describe("submitInteractiveInput", () => {
 
 		await submitInteractiveInput(mode, session, input);
 
-		expect(session.prompt).toHaveBeenCalledWith("loop prompt", { images: undefined, streamingBehavior: "followUp" });
+		expect(session.prompt).toHaveBeenCalledWith("loop prompt", { attachments: undefined, streamingBehavior: "followUp" });
 		expect(mode.showError).not.toHaveBeenCalled();
 	});
 
@@ -149,7 +149,7 @@ describe("submitInteractiveInput", () => {
 		await submitInteractiveInput(mode, session, input);
 
 		expect(session.prompt).toHaveBeenCalledWith("interrupt now", {
-			images: undefined,
+			attachments: undefined,
 			streamingBehavior: "steer",
 		});
 		expect(mode.showError).not.toHaveBeenCalled();
@@ -201,7 +201,7 @@ describe("submitInteractiveInput", () => {
 
 		await submitInteractiveInput(mode, session, input);
 
-		expect(session.prompt).toHaveBeenCalledWith("loop prompt", { images: undefined, streamingBehavior: "followUp" });
+		expect(session.prompt).toHaveBeenCalledWith("loop prompt", { attachments: undefined, streamingBehavior: "followUp" });
 		expect(session.promptCustomMessage).not.toHaveBeenCalled();
 		expect(mode.finishPendingSubmission).toHaveBeenCalledWith(input);
 		expect(mode.showError).not.toHaveBeenCalled();

@@ -19,6 +19,12 @@ import stealthHardwareScript from "../puppeteer/11_stealth_hardware.txt" with { 
 import stealthCodecsScript from "../puppeteer/12_stealth_codecs.txt" with { type: "text" };
 import stealthWorkerScript from "../puppeteer/13_stealth_worker.txt" with { type: "text" };
 import { ToolError } from "../tool-errors";
+import {
+	prepareOwnedBrowserProfile,
+	recordOwnedBrowserPid,
+	removeOwnedBrowserProfile,
+	type OwnedBrowserProfile,
+} from "./process-ownership";
 
 export const DEFAULT_VIEWPORT = { width: 1365, height: 768, deviceScaleFactor: 1.25 };
 
@@ -238,10 +244,17 @@ function resolveSystemChromium(): string | undefined {
 
 export interface LaunchHeadlessOptions {
 	headless: boolean;
+	sessionId: string;
 	viewport?: { width: number; height: number; deviceScaleFactor?: number };
 }
 
-export async function launchHeadlessBrowser(opts: LaunchHeadlessOptions): Promise<Browser> {
+export interface HeadlessBrowserLaunch {
+	browser: Browser;
+	ownership: OwnedBrowserProfile;
+	pid?: number;
+}
+
+export async function launchHeadlessBrowser(opts: LaunchHeadlessOptions): Promise<HeadlessBrowserLaunch> {
 	const vp = opts.viewport ?? DEFAULT_VIEWPORT;
 	const initialViewport = {
 		width: vp.width,
@@ -269,14 +282,24 @@ export async function launchHeadlessBrowser(opts: LaunchHeadlessOptions): Promis
 	if (ignoreCert === "true" || ignoreCert === "1" || ignoreCert === "yes" || ignoreCert === "on") {
 		launchArgs.push("--ignore-certificate-errors");
 	}
-	return await puppeteer.launch({
-		headless: opts.headless,
-		defaultViewport: opts.headless ? initialViewport : null,
-		executablePath: await ensureChromiumExecutable(),
-		args: launchArgs,
-		ignoreDefaultArgs: [...STEALTH_IGNORE_DEFAULT_ARGS],
-		protocolTimeout: BROWSER_PROTOCOL_TIMEOUT_MS,
-	});
+	const ownership = await prepareOwnedBrowserProfile(opts.sessionId);
+	try {
+		const browser = await puppeteer.launch({
+			headless: opts.headless,
+			defaultViewport: opts.headless ? initialViewport : null,
+			executablePath: await ensureChromiumExecutable(),
+			userDataDir: ownership.profileDir,
+			args: launchArgs,
+			ignoreDefaultArgs: [...STEALTH_IGNORE_DEFAULT_ARGS],
+			protocolTimeout: BROWSER_PROTOCOL_TIMEOUT_MS,
+		});
+		const pid = browser.process()?.pid;
+		await recordOwnedBrowserPid(ownership, pid ?? null);
+		return { browser, ownership, ...(pid === undefined ? {} : { pid }) };
+	} catch (error) {
+		await removeOwnedBrowserProfile(ownership);
+		throw error;
+	}
 }
 
 export async function applyViewport(

@@ -8,7 +8,7 @@ import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { writeModelCache } from "@oh-my-pi/pi-catalog/model-cache";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
+import { AuthStorage, SqliteAuthCredentialStore } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { Snowflake } from "@oh-my-pi/pi-utils";
 
 describe("ModelRegistry", () => {
@@ -1596,6 +1596,102 @@ describe("ModelRegistry", () => {
 		});
 	});
 
+	describe("auth refresh availability lifecycle", () => {
+		test("retains visible Codex rows only while an unsettled auth refresh is stale", async () => {
+			const refreshStarted = Promise.withResolvers<void>();
+			const allowRefresh = Promise.withResolvers<void>();
+			const refreshStore = new SqliteAuthCredentialStore(new Database(":memory:"));
+			const refreshAuth = new AuthStorage(refreshStore, {
+				refreshOAuthCredential: async (_provider, _credentialId, credential) => {
+					refreshStarted.resolve();
+					await allowRefresh.promise;
+					return {
+						...credential,
+						access: "refreshed-access",
+						refresh: "refreshed-refresh",
+						expires: Date.now() + 60 * 60_000,
+					};
+				},
+			});
+			try {
+				await refreshAuth.set("openai-codex", [
+					{
+						type: "oauth",
+						access: "expired-access",
+						refresh: "expired-refresh",
+						expires: Date.now() - 60_000,
+						accountId: "codex-refresh-test",
+					},
+				]);
+				const registry = new ModelRegistry(refreshAuth, modelsJsonPath);
+				const codexIds = (snapshot: ReturnType<ModelRegistry["getAvailabilitySnapshot"]>) =>
+					snapshot.models
+						.filter(model => model.provider === "openai-codex" && (model.id === "gpt-5.5" || model.id === "gpt-5.6-sol"))
+						.map(model => model.id)
+						.sort();
+				const transitions: Array<{ refreshing: readonly string[]; stale: readonly string[]; ids: string[] }> = [];
+				registry.onAvailabilityChanged(snapshot => {
+					transitions.push({
+						refreshing: snapshot.refreshingProviders,
+						stale: snapshot.staleProviders,
+						ids: codexIds(snapshot),
+					});
+				});
+
+				expect(codexIds(registry.getAvailabilitySnapshot())).toEqual(["gpt-5.5", "gpt-5.6-sol"]);
+
+				const refresh = refreshAuth.getApiKey("openai-codex");
+				await refreshStarted.promise;
+				refreshStore.deleteAuthCredentialsForProvider("openai-codex", "transient reload gap");
+				await refreshAuth.reload();
+				const stale = registry.getAvailabilitySnapshot();
+				expect(codexIds(stale)).toEqual(["gpt-5.5", "gpt-5.6-sol"]);
+				expect(stale.refreshingProviders).toContain("openai-codex");
+				expect(stale.staleProviders).toEqual(["openai-codex"]);
+
+				await refreshAuth.set("openai-codex", [
+					{
+						type: "oauth",
+						access: "peer-access",
+						refresh: "peer-refresh",
+						expires: Date.now() + 60 * 60_000,
+						accountId: "codex-refresh-test",
+					},
+				]);
+				const recovered = registry.getAvailabilitySnapshot();
+				expect(codexIds(recovered)).toEqual(["gpt-5.5", "gpt-5.6-sol"]);
+				expect(recovered.refreshingProviders).toEqual(["openai-codex"]);
+				expect(recovered.staleProviders).toEqual([]);
+
+				allowRefresh.resolve();
+				await refresh;
+				const settled = registry.getAvailabilitySnapshot();
+				expect(codexIds(settled)).toEqual(["gpt-5.5", "gpt-5.6-sol"]);
+				expect(settled.refreshingProviders).toEqual([]);
+				expect(settled.staleProviders).toEqual([]);
+
+				await refreshAuth.remove("openai-codex");
+				const loggedOut = registry.getAvailabilitySnapshot();
+				expect(codexIds(loggedOut)).toEqual([]);
+				expect(loggedOut.refreshingProviders).toEqual([]);
+				expect(loggedOut.staleProviders).toEqual([]);
+				expect(transitions).toEqual([
+					{ refreshing: ["openai-codex"], stale: [], ids: ["gpt-5.5", "gpt-5.6-sol"] },
+					{
+						refreshing: ["openai-codex"],
+						stale: ["openai-codex"],
+						ids: ["gpt-5.5", "gpt-5.6-sol"],
+					},
+					{ refreshing: ["openai-codex"], stale: [], ids: ["gpt-5.5", "gpt-5.6-sol"] },
+					{ refreshing: [], stale: [], ids: ["gpt-5.5", "gpt-5.6-sol"] },
+					{ refreshing: [], stale: [], ids: [] },
+				]);
+			} finally {
+				refreshAuth.close();
+			}
+		});
+	});
+
 	describe("disabled provider filtering", () => {
 		test("getAvailable and getDiscoverableProviders exclude disabled providers from settings", async () => {
 			writeRawModelsJson({
@@ -1756,6 +1852,8 @@ describe("ModelRegistry", () => {
 		let defaultOAuth: ModelRegistry;
 		let apiKeyOptOut: ModelRegistry;
 		let nonAnthropic: ModelRegistry;
+		let keylessCodexOAuth: ModelRegistry;
+		let defaultMissingApiKey: ModelRegistry;
 		const proxyAnthropicModels = [
 			{
 				id: "claude-sonnet-4-5",
@@ -1828,6 +1926,25 @@ describe("ModelRegistry", () => {
 					},
 				},
 			});
+			keylessCodexOAuth = await build({
+				providers: {
+					"custom-codex": {
+						baseUrl: "https://codex.example.com/v1",
+						api: "openai-codex-responses",
+						auth: "oauth",
+						models: [{ id: "custom-codex-model" }],
+					},
+				},
+			});
+			defaultMissingApiKey = await build({
+				providers: {
+					"custom-api-key": {
+						baseUrl: "https://api-key.example.com/v1",
+						api: "openai-completions",
+						models: [{ id: "custom-api-key-model" }],
+					},
+				},
+			});
 		});
 		afterAll(() => oauthAuth.close());
 
@@ -1853,6 +1970,19 @@ describe("ModelRegistry", () => {
 			const model = nonAnthropic.find("proxy-openai", "gpt-5");
 			expect(model).toBeDefined();
 			expect(model?.isOAuth).toBeUndefined();
+		});
+		test("loads a keyless custom openai-codex provider with auth: oauth", () => {
+			expect(keylessCodexOAuth.getError()).toBeUndefined();
+			const model = keylessCodexOAuth.find("custom-codex", "custom-codex-model");
+			expect(model).toBeDefined();
+			expect(model?.isOAuth).toBe(true);
+		});
+
+		test("default auth mode rejects custom models without an API key", () => {
+			expect(defaultMissingApiKey.getError()?.message).toContain(
+				'Provider custom-api-key: "apiKey" is required when defining custom models unless auth is "none" or "oauth".',
+			);
+			expect(defaultMissingApiKey.find("custom-api-key", "custom-api-key-model")).toBeUndefined();
 		});
 	});
 
@@ -2073,7 +2203,13 @@ describe("ModelRegistry", () => {
 		});
 
 		test("loads cached special provider discovery models on startup", () => {
-			expect(specialCache.find("google-antigravity", "gemini-3.5-flash-low")?.maxTokens).toBe(8_192);
+			const generatedFlash = specialCache.find("google-antigravity", "gemini-3.5-flash");
+			const cachedFlashVariant = specialCache.find("google-antigravity", "gemini-3.5-flash-low");
+			expect(generatedFlash).toBeDefined();
+			expect(cachedFlashVariant).toBeDefined();
+			// The cache fixture seeds the raw `-low` member, while the bundled
+			// catalog owns the collapsed logical model and its current limits.
+			expect(cachedFlashVariant?.maxTokens).toBe(generatedFlash?.maxTokens);
 			expect(specialCache.find("google-gemini-cli", "gemini-3.5-flash")?.maxTokens).toBe(16_384);
 			expect(specialCache.find("openai-codex", "gpt-5.4-codex-pro")?.maxTokens).toBe(128_000);
 		});

@@ -5,7 +5,7 @@ import type * as fs1 from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
-import type { ImageContent, Model, TextContent, TSchema } from "@oh-my-pi/pi-ai";
+import type { Model, TSchema, UserContent } from "@oh-my-pi/pi-ai";
 import type { KeyId } from "@oh-my-pi/pi-tui";
 import { hasFsCode, isEacces, isEnoent, logger } from "@oh-my-pi/pi-utils";
 import { z } from "zod/v4";
@@ -206,10 +206,7 @@ class ConcreteExtensionAPI implements ExtensionAPI, IExtensionRuntime {
 		this.runtime.sendMessage(message, options);
 	}
 
-	sendUserMessage(
-		content: string | (TextContent | ImageContent)[],
-		options?: { deliverAs?: "steer" | "followUp" },
-	): void {
+	sendUserMessage(content: string | UserContent[], options?: { deliverAs?: "steer" | "followUp" }): void {
 		this.runtime.sendUserMessage(content, options);
 	}
 

@@ -91,6 +91,7 @@ export class RemoteAuthCredentialStore implements AuthCredentialStore {
 	#cache: Map<string, CacheEntry> = new Map();
 	#usageCache?: UsageCacheEntry;
 	#usageInflight?: Promise<UsageReport[] | null>;
+	#credentialsChangedListeners: Set<() => void> = new Set();
 	#closed = false;
 	/**
 	 * `true` once the SSE consumer received its first frame and hasn't dropped
@@ -122,12 +123,30 @@ export class RemoteAuthCredentialStore implements AuthCredentialStore {
 		this.#snapshot = snapshot;
 		this.#generation = generation;
 		this.#snapshotReceivedAt = Date.now();
+		this.#notifyCredentialsChanged();
 		const onSnapshot = this.#onSnapshot;
 		if (!onSnapshot) return;
 		try {
 			onSnapshot(snapshot, generation);
 		} catch (error) {
 			logger.debug("auth-broker snapshot callback failed", { error: String(error) });
+		}
+	}
+
+	onCredentialsChanged(listener: () => void): () => void {
+		this.#credentialsChangedListeners.add(listener);
+		return () => {
+			this.#credentialsChangedListeners.delete(listener);
+		};
+	}
+
+	#notifyCredentialsChanged(): void {
+		for (const listener of [...this.#credentialsChangedListeners]) {
+			try {
+				listener();
+			} catch (error) {
+				logger.debug("auth-broker credential snapshot listener failed", { error: String(error) });
+			}
 		}
 	}
 
@@ -224,6 +243,7 @@ export class RemoteAuthCredentialStore implements AuthCredentialStore {
 		this.#snapshot = { ...this.#snapshot, generation, serverNowMs, refresher, credentials };
 		this.#generation = generation;
 		this.#snapshotReceivedAt = Date.now();
+		this.#notifyCredentialsChanged();
 	}
 
 	#removeStreamCredential(id: number, refresher: RefresherSchedule, generation: number, serverNowMs: number): void {
@@ -231,6 +251,7 @@ export class RemoteAuthCredentialStore implements AuthCredentialStore {
 		this.#snapshot = { ...this.#snapshot, generation, serverNowMs, refresher, credentials };
 		this.#generation = generation;
 		this.#snapshotReceivedAt = Date.now();
+		this.#notifyCredentialsChanged();
 	}
 
 	/** Re-hydrate the in-memory snapshot from the broker. */
@@ -263,16 +284,15 @@ export class RemoteAuthCredentialStore implements AuthCredentialStore {
 		for (const entry of this.#snapshot.credentials) {
 			if (entry.id !== id) continue;
 			entry.credential = credential as typeof entry.credential;
+			this.#notifyCredentialsChanged();
 			return;
 		}
 	}
 
-	deleteAuthCredential(id: number, disabledCause: string): void {
-		this.#removeCredentialById(id);
-		// Fire-and-forget: tell the broker to persist the disable.
-		this.#client.disableCredential(id, disabledCause).catch(error => {
-			logger.warn("auth-broker disable propagation failed", { id, error: String(error) });
-		});
+	deleteAuthCredential(_id: number, _disabledCause: string): void {
+		throw new Error(
+			"RemoteAuthCredentialStore requires an awaited broker disable; use the asynchronous credential mutation path.",
+		);
 	}
 
 	async deleteAuthCredentialRemote(id: number, disabledCause: string): Promise<boolean> {
@@ -284,10 +304,20 @@ export class RemoteAuthCredentialStore implements AuthCredentialStore {
 		return true;
 	}
 
-	tryDisableAuthCredentialIfMatches(id: number, _expectedData: string, disabledCause: string): boolean {
-		const found = this.#snapshot.credentials.find(entry => entry.id === id);
+	async tryDisableAuthCredentialIfMatches(
+		id: number,
+		expectedData: string,
+		disabledCause: string,
+	): Promise<boolean> {
+		const found = this.#snapshot.credentials.some(entry => entry.id === id);
 		if (!found) return false;
-		this.deleteAuthCredential(id, disabledCause);
+		const response = await this.#client.disableCredential(id, disabledCause, undefined, expectedData);
+		if (!response.ok) {
+			await this.refreshSnapshot();
+			return false;
+		}
+		this.#removeCredentialById(id);
+		this.#maybeRefreshSnapshot("conditional disable credential");
 		return true;
 	}
 
@@ -412,27 +442,32 @@ export class RemoteAuthCredentialStore implements AuthCredentialStore {
 		const others = this.#snapshot.credentials.filter(entry => entry.provider !== provider);
 		const incoming = entries.map(entry => ({ ...entry, rotatesInMs: null }));
 		this.#snapshot = { ...this.#snapshot, credentials: [...others, ...incoming] };
+		this.#notifyCredentialsChanged();
 	}
 	#applyCredentialEntry(entry: AuthCredentialSnapshotEntry): void {
 		const incoming = { ...entry, rotatesInMs: null };
 		const index = this.#snapshot.credentials.findIndex(candidate => candidate.id === entry.id);
 		if (index === -1) {
 			this.#snapshot = { ...this.#snapshot, credentials: [...this.#snapshot.credentials, incoming] };
+			this.#notifyCredentialsChanged();
 			return;
 		}
 		const credentials = [...this.#snapshot.credentials];
 		credentials[index] = incoming;
 		this.#snapshot = { ...this.#snapshot, credentials };
+		this.#notifyCredentialsChanged();
 	}
 
 	#removeProviderEntries(provider: string): void {
 		const next = this.#snapshot.credentials.filter(entry => entry.provider !== provider);
 		this.#snapshot = { ...this.#snapshot, credentials: next };
+		this.#notifyCredentialsChanged();
 	}
 
 	#removeCredentialById(id: number): void {
 		const next = this.#snapshot.credentials.filter(entry => entry.id !== id);
 		this.#snapshot = { ...this.#snapshot, credentials: next };
+		this.#notifyCredentialsChanged();
 	}
 
 	/**
@@ -586,6 +621,7 @@ export class RemoteAuthCredentialStore implements AuthCredentialStore {
 		this.#closed = true;
 		this.#backgroundAbort.abort();
 		this.#cache.clear();
+		this.#credentialsChangedListeners.clear();
 	}
 }
 

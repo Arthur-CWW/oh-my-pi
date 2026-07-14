@@ -140,6 +140,15 @@ export class AgentLifecycleManager {
 		return this.#adopted.has(id);
 	}
 
+	/** True when an idle or parked agent can accept a follow-up turn in place. */
+	canResumeInPlace(id: string): boolean {
+		const ref = this.#registry.get(id);
+		const adopted = this.#adopted.get(id);
+		if (!ref || !adopted) return false;
+		if (ref.status === "idle") return ref.session !== null;
+		return ref.status === "parked" && adopted.revive !== undefined;
+	}
+
 	/** True while {@link park} is disposing this agent's session (lets dispose hooks distinguish park from teardown). */
 	isParking(id: string): boolean {
 		return this.#parkings.has(id);

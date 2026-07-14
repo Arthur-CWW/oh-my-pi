@@ -62,7 +62,9 @@ import type {
 	ThinkingBudgets,
 	ToolChoice,
 } from "./types";
+import { assertContextVideoInputSupported } from "./video-input";
 import { AssistantMessageEventStream } from "./utils/event-stream";
+import { isTransientNetworkError } from "./utils/network-error";
 import { withRequestDebugFetch } from "./utils/request-debug";
 
 function isGoogleVertexAuthenticatedModel(model: Model<Api>): boolean {
@@ -228,6 +230,7 @@ export function stream<TApi extends Api>(
 	context: Context,
 	options?: OptionsForApi<TApi>,
 ): AssistantMessageEventStream {
+	assertContextVideoInputSupported(model, context);
 	const requestOptions = withRequestDebugFetch(options as StreamOptions | undefined) as
 		| OptionsForApi<TApi>
 		| undefined;
@@ -342,6 +345,8 @@ function extractStatusFromAssistantError(message: AssistantMessage): number | un
 }
 
 function isRetryableUpstreamError(error: unknown, status: number | undefined, message: string | undefined): boolean {
+	const networkError = error instanceof Error ? error : message;
+	if (networkError !== undefined && isTransientNetworkError(networkError)) return false;
 	// 401 means the credential is bad. Usage-limit phrasing (Codex's
 	// "You have hit your ChatGPT usage limit", Anthropic's "usage_limit_reached",
 	// Google's "resource_exhausted") means this account is parked but a
@@ -349,7 +354,6 @@ function isRetryableUpstreamError(error: unknown, status: number | undefined, me
 	// rotatable via `onAuthError` — the auth-gateway maps the former to
 	// `invalidateCredentialMatching` and the latter to `markUsageLimitReached`.
 	if (status === 401) return true;
-	void error;
 	return !!message && isUsageLimitError(message);
 }
 
@@ -370,6 +374,7 @@ export function streamSimple<TApi extends Api>(
 	context: Context,
 	options?: SimpleStreamOptions,
 ): AssistantMessageEventStream {
+	assertContextVideoInputSupported(model, context);
 	const requestOptions = withRequestDebugFetch(options);
 	const apiKeyResolver = isApiKeyResolver(requestOptions?.apiKey) ? requestOptions.apiKey : undefined;
 	if (apiKeyResolver) {

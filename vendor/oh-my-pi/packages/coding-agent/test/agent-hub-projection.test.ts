@@ -1,10 +1,19 @@
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
 import { afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
 import { IrcBus } from "@oh-my-pi/pi-coding-agent/irc/bus";
 import { AgentHubOverlayComponent } from "@oh-my-pi/pi-coding-agent/modes/components/agent-hub";
+import {
+	getAgentHubPerfCounters,
+	resetAgentHubPerfCounters,
+} from "@oh-my-pi/pi-coding-agent/modes/components/agent-hub-performance";
 import { SessionObserverRegistry } from "@oh-my-pi/pi-coding-agent/modes/session-observer-registry";
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 
+
+const tempRoots: string[] = [];
 function hubFor(registry: AgentRegistry, requestRender = () => {}): AgentHubOverlayComponent {
 	return new AgentHubOverlayComponent({
 		observers: new SessionObserverRegistry(),
@@ -37,9 +46,10 @@ function registryWithParked(count: number): AgentRegistry {
 }
 
 beforeAll(async () => initTheme());
-afterEach(() => {
+afterEach(async () => {
 	vi.useRealTimers();
 	AgentRegistry.resetGlobalForTests();
+	await Promise.all(tempRoots.splice(0).map(root => fs.rm(root, { recursive: true, force: true })));
 });
 
 describe("Agent Hub sectioned projection", () => {
@@ -76,15 +86,21 @@ describe("Agent Hub sectioned projection", () => {
 		hub.dispose();
 	});
 
-	it("batches a transition burst into one render request", () => {
+	it("batches a transition burst into one projection rebuild and render request per window", () => {
 		vi.useFakeTimers();
-		const registry = registryWithParked(50);
+		const registry = registryWithParked(120);
 		let renders = 0;
 		const hub = hubFor(registry, () => renders++);
-		for (let index = 1; index <= 20; index++) registry.setStatus(`parked-${index}`, "idle");
-		vi.advanceTimersByTime(0);
+		resetAgentHubPerfCounters();
+		for (let index = 1; index <= 100; index++) registry.setStatus(`parked-${index}`, "idle");
+		hub.render(120);
+		expect(getAgentHubPerfCounters()).toEqual({ journalReads: 0, projectionRebuilds: 0 });
+		vi.advanceTimersByTime(15);
+		expect(renders).toBe(0);
+		vi.advanceTimersByTime(1);
 		expect(renders).toBe(1);
-		expect(text(hub)).toContain("Idle / needs attention (20)");
+		expect(getAgentHubPerfCounters()).toEqual({ journalReads: 0, projectionRebuilds: 1 });
+		expect(text(hub)).toContain("Idle / needs attention (100)");
 		hub.dispose();
 	});
 
@@ -111,5 +127,48 @@ describe("Agent Hub sectioned projection", () => {
 		const values = measurements.map(row => row.microseconds);
 		expect(Math.max(...values)).toBeLessThan(2_000);
 		expect(Math.max(...values) / Math.max(1, Math.min(...values))).toBeLessThan(5);
+	});
+
+	it("keeps selected journal tail I/O async and single-flight across a render burst", async () => {
+		const root = await fs.mkdtemp(path.join(os.tmpdir(), "agent-hub-projection-"));
+		tempRoots.push(root);
+		const sessionFile = path.join(root, "child.jsonl");
+		await Bun.write(
+			sessionFile,
+			`${JSON.stringify({
+				type: "message",
+				id: "message-1",
+				parentId: null,
+				timestamp: new Date().toISOString(),
+				message: {
+					role: "user",
+					content: [{ type: "text", text: "cached tail" }],
+					timestamp: Date.now(),
+				},
+			})}\n`,
+		);
+		const registry = new AgentRegistry();
+		registry.register({
+			id: "selected",
+			displayName: "selected",
+			kind: "sub",
+			session: null,
+			sessionFile,
+			status: "running",
+		});
+		resetAgentHubPerfCounters();
+		const hub = hubFor(registry);
+		expect(getAgentHubPerfCounters().journalReads).toBe(1);
+		hub.openChat("selected");
+		resetAgentHubPerfCounters();
+		for (let index = 0; index < 100; index++) hub.render(120);
+		expect(getAgentHubPerfCounters()).toEqual({ journalReads: 0, projectionRebuilds: 0 });
+		const deadline = Date.now() + 1_000;
+		while (!text(hub).includes("cached tail")) {
+			if (Date.now() >= deadline) throw new Error("Timed out waiting for cached journal tail");
+			await Bun.sleep(10);
+		}
+		expect(getAgentHubPerfCounters().journalReads).toBe(0);
+		hub.dispose();
 	});
 });

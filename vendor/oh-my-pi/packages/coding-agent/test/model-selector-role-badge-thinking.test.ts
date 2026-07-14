@@ -3,12 +3,11 @@ import { stripVTControlCharacters } from "node:util";
 import type { Model } from "@oh-my-pi/pi-ai";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
-import type { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
+import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import {
-	classifyModelSelectorItem,
-	ModelSelectorComponent,
-} from "@oh-my-pi/pi-coding-agent/modes/components/model-selector";
+import { classifyModelSelectorItem } from "@oh-my-pi/pi-coding-agent/modes/components/model-selector-availability";
+import { ModelSelectorComponent } from "@oh-my-pi/pi-coding-agent/modes/components/model-selector";
+import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { getThemeByName, setThemeInstance } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import type { TUI } from "@oh-my-pi/pi-tui";
 
@@ -24,6 +23,7 @@ function createSelector(model: Model, settings: Settings): ModelSelectorComponen
 	} as unknown as ModelRegistry;
 	const ui = {
 		requestRender: vi.fn(),
+		requestComponentRender: vi.fn(),
 	} as unknown as TUI;
 
 	return new ModelSelectorComponent(
@@ -70,22 +70,30 @@ function createScopedSelector(
 	models: Model[],
 	settings: Settings,
 	onSelect: (model: Model) => void,
-	options?: { temporaryOnly?: boolean; currentContextTokens?: number },
+	options?: {
+		temporaryOnly?: boolean;
+		currentContextTokens?: number;
+		initialSearchInput?: string;
+		modelRegistry?: ModelRegistry;
+	},
 ): ModelSelectorComponent {
-	const modelRegistry = {
-		getAll: () => models,
-		getDiscoverableProviders: () => [],
-		getCanonicalModelSelections: () => [],
-	} as unknown as ModelRegistry;
+	const modelRegistry =
+		options?.modelRegistry ??
+		({
+			getAll: () => models,
+			getDiscoverableProviders: () => [],
+			getCanonicalModelSelections: () => [],
+		} as unknown as ModelRegistry);
 	const ui = {
 		requestRender: vi.fn(),
+		requestComponentRender: vi.fn(),
 	} as unknown as TUI;
 	return new ModelSelectorComponent(
 		ui,
 		undefined,
 		settings,
 		modelRegistry,
-		models.map(model => ({ model })),
+		options?.modelRegistry ? [] : models.map(model => ({ model })),
 		model => onSelect(model),
 		() => {},
 		options,
@@ -202,23 +210,46 @@ describe("ModelSelector role badge thinking display", () => {
 		expect(selected).toEqual(["a-small"]);
 	});
 
-	test("warns but selects every GPT-5.6 Codex model over its context window", async () => {
+	test("warns but selects every authenticated GPT-5.6 Codex model over its context window", async () => {
 		installTestTheme();
-		for (const id of ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]) {
-			const selected: string[] = [];
-			const selector = createScopedSelector(
-				[createContextTestModel(id, 1_050_000)],
-				Settings.isolated({}),
-				model => selected.push(model.id),
-				{ temporaryOnly: true, currentContextTokens: 1_050_001 },
-			);
-			await Bun.sleep(0);
-			installTestTheme();
+		const authStorage = await AuthStorage.create(":memory:");
+		await authStorage.set("openai-codex", {
+			type: "oauth",
+			access: "selector-test-access",
+			refresh: "selector-test-refresh",
+			expires: Date.now() + 60 * 60_000,
+			accountId: "selector-test",
+		});
+		const modelRegistry = new ModelRegistry(authStorage);
+		await modelRegistry.refresh("offline");
+		expect(modelRegistry.getAvailabilitySnapshot().refreshingProviders).toEqual([]);
 
-			const rendered = normalizeRenderedText(selector.render(220).join("\n"));
-			expect(rendered).toContain(`${id} ⚠ context 1.1m > 1.1m — will compact on switch`);
-			selector.handleInput("\n");
-			expect(selected).toEqual([id]);
+		try {
+			for (const id of ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]) {
+				const selected: string[] = [];
+				const selector = createScopedSelector([], Settings.isolated({}), model => selected.push(model.id), {
+					modelRegistry,
+					temporaryOnly: true,
+					initialSearchInput: id,
+					currentContextTokens: 1_050_001,
+				});
+				await Bun.sleep(0);
+				installTestTheme();
+
+				const rendered = normalizeRenderedText(selector.render(220).join("\n"));
+				const expectedWarning = classifyModelSelectorItem({
+					currentContextTokens: 1_050_001,
+					contextWindow: 1_050_000,
+				}).contextWarning;
+				expect(expectedWarning).toBeDefined();
+				expect(expectedWarning).toContain(" > ");
+				expect(rendered).toContain(id);
+				expect(rendered).toContain(expectedWarning!);
+				selector.handleInput("\n");
+				expect(selected).toEqual([id]);
+			}
+		} finally {
+			authStorage.close();
 		}
 	});
 
@@ -255,11 +286,19 @@ describe("ModelSelector role badge thinking display", () => {
 			refreshProvider: vi.fn(async () => {}),
 			getError: () => undefined,
 			getAvailable: () => [cachedModel],
+			getAvailabilitySnapshot: () => ({
+				generation: 1,
+				models: [cachedModel],
+				refreshingProviders: [],
+				staleProviders: [],
+			}),
+			onAvailabilityChanged: () => () => {},
 			getDiscoverableProviders: () => [],
 			getCanonicalModelSelections: () => [],
 		} as unknown as ModelRegistry;
 		const ui = {
 			requestRender: vi.fn(),
+			requestComponentRender: vi.fn(),
 		} as unknown as TUI;
 
 		const selector = new ModelSelectorComponent(
@@ -294,11 +333,19 @@ describe("ModelSelector role badge thinking display", () => {
 			refreshProvider: vi.fn(async () => {}),
 			getError: () => undefined,
 			getAvailable: () => availableModels,
+			getAvailabilitySnapshot: () => ({
+				generation: 1,
+				models: availableModels,
+				refreshingProviders: [],
+				staleProviders: [],
+			}),
+			onAvailabilityChanged: () => () => {},
 			getDiscoverableProviders: () => [],
 			getCanonicalModelSelections: () => [],
 		} as unknown as ModelRegistry;
 		const ui = {
 			requestRender: vi.fn(),
+			requestComponentRender: vi.fn(),
 		} as unknown as TUI;
 
 		const selector = new ModelSelectorComponent(
@@ -339,6 +386,13 @@ describe("ModelSelector role badge thinking display", () => {
 			refreshProvider,
 			getError: () => undefined,
 			getAvailable: () => availableModels,
+			getAvailabilitySnapshot: () => ({
+				generation: 1,
+				models: availableModels,
+				refreshingProviders: [],
+				staleProviders: [],
+			}),
+			onAvailabilityChanged: () => () => {},
 			getDiscoverableProviders: () => ["ollama-cloud"],
 			getCanonicalModelSelections: () => [],
 			getProviderDiscoveryState: () => ({
@@ -351,6 +405,7 @@ describe("ModelSelector role badge thinking display", () => {
 		} as unknown as ModelRegistry;
 		const ui = {
 			requestRender: vi.fn(),
+			requestComponentRender: vi.fn(),
 		} as unknown as TUI;
 
 		const selector = new ModelSelectorComponent(
@@ -401,6 +456,13 @@ describe("ModelSelector role badge thinking display", () => {
 			refreshProvider,
 			getError: () => undefined,
 			getAvailable: () => availableModels,
+			getAvailabilitySnapshot: () => ({
+				generation: 1,
+				models: availableModels,
+				refreshingProviders: [],
+				staleProviders: [],
+			}),
+			onAvailabilityChanged: () => () => {},
 			getDiscoverableProviders: () => ["ollama-cloud"],
 			getCanonicalModelSelections: () => [],
 			getProviderDiscoveryState: () => ({
@@ -413,6 +475,7 @@ describe("ModelSelector role badge thinking display", () => {
 		} as unknown as ModelRegistry;
 		const ui = {
 			requestRender: vi.fn(),
+			requestComponentRender: vi.fn(),
 		} as unknown as TUI;
 
 		const selector = new ModelSelectorComponent(
@@ -456,5 +519,96 @@ describe("ModelSelector role badge thinking display", () => {
 		const finalRendered = normalizeRenderedText(selector.render(220).join("\n"));
 		expect(finalRendered).toContain("deepseek-v4-pro");
 		expect(finalRendered).not.toContain("Refreshing OLLAMA CLOUD in background");
+	});
+
+	test("renders registry auth-refresh snapshots without dropping Codex rows", () => {
+		installTestTheme();
+		const settings = Settings.isolated({});
+		const gpt55 = getBundledModel("openai-codex", "gpt-5.5");
+		const gpt56 = getBundledModel("openai-codex", "gpt-5.6-sol");
+		if (!gpt55 || !gpt56) throw new Error("Expected bundled Codex GPT-5.5 and GPT-5.6 models");
+		const models = [gpt55, gpt56];
+		const refreshGate = Promise.withResolvers<void>();
+		let snapshot = {
+			generation: 1,
+			models,
+			refreshingProviders: [] as readonly string[],
+			staleProviders: [] as readonly string[],
+		};
+		let availabilityListener: ((next: typeof snapshot) => void) | undefined;
+		const modelRegistry = {
+			getAll: () => models,
+			refresh: () => refreshGate.promise,
+			getError: () => undefined,
+			getAvailabilitySnapshot: () => snapshot,
+			onAvailabilityChanged: (listener: (next: typeof snapshot) => void) => {
+				availabilityListener = listener;
+				return () => {
+					availabilityListener = undefined;
+				};
+			},
+			getDiscoverableProviders: () => [],
+			getCanonicalModelSelections: () => [],
+		} as unknown as ModelRegistry;
+		const requestComponentRender = vi.fn();
+		const ui = {
+			requestRender: vi.fn(),
+			requestComponentRender,
+		} as unknown as TUI;
+		const selector = new ModelSelectorComponent(
+			ui,
+			undefined,
+			settings,
+			modelRegistry,
+			[],
+			() => {},
+			() => {},
+		);
+
+		snapshot = {
+			generation: 2,
+			models,
+			refreshingProviders: ["openai-codex"],
+			staleProviders: ["openai-codex"],
+		};
+		availabilityListener?.(snapshot);
+		const staleRendered = normalizeRenderedText(selector.render(220).join("\n"));
+		expect(staleRendered).toContain("gpt-5.5");
+		expect(staleRendered).toContain("gpt-5.6-sol");
+		expect(staleRendered).toContain("[stale — refreshing auth]");
+		expect(requestComponentRender).toHaveBeenCalledTimes(1);
+
+		snapshot = {
+			generation: 3,
+			models,
+			refreshingProviders: ["openai-codex"],
+			staleProviders: [],
+		};
+		availabilityListener?.(snapshot);
+		const recoveredRendered = normalizeRenderedText(selector.render(220).join("\n"));
+		expect(recoveredRendered).toContain("[refreshing auth]");
+		expect(recoveredRendered).not.toContain("[stale — refreshing auth]");
+
+		snapshot = {
+			generation: 4,
+			models,
+			refreshingProviders: [],
+			staleProviders: [],
+		};
+		availabilityListener?.(snapshot);
+		expect(normalizeRenderedText(selector.render(220).join("\n"))).not.toContain("[refreshing auth]");
+
+		snapshot = {
+			generation: 5,
+			models: [],
+			refreshingProviders: [],
+			staleProviders: [],
+		};
+		availabilityListener?.(snapshot);
+		const loggedOutRendered = normalizeRenderedText(selector.render(220).join("\n"));
+		expect(loggedOutRendered).not.toContain("gpt-5.5");
+		expect(loggedOutRendered).not.toContain("gpt-5.6-sol");
+		expect(loggedOutRendered).toContain("No matching models");
+		expect(requestComponentRender).toHaveBeenCalledTimes(4);
 	});
 });

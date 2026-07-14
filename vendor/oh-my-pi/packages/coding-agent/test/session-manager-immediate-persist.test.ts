@@ -103,6 +103,48 @@ describe("SessionManager immediate JSONL persistence", () => {
 		expect(messageRole(entries[3] ?? {})).toBe("user");
 		expect(messageContent(entries[3] ?? {})).toBe("written immediately");
 	});
+	it("externalizes mixed media before writing JSONL and hydrates bytes on reopen", async () => {
+		const cwd = makeTempDir("@pi-media-persist-cwd-");
+		const sessionDir = path.join(cwd, "sessions");
+		const manager = SessionManager.create(cwd, sessionDir);
+		const sessionFile = manager.getSessionFile();
+		if (!sessionFile) throw new Error("Expected a persisted session file path");
+
+		manager.appendMessage(assistantMessage("seed"));
+		const imageData = Buffer.alloc(1024, 17).toString("base64");
+		const videoData = Buffer.from([18, 19, 20, 21]).toString("base64");
+		manager.appendMessage({
+			role: "user",
+			content: [
+				{ type: "text", text: "persist these" },
+				{ type: "image", mimeType: "image/png", detail: "high", data: imageData },
+				{ type: "video", mimeType: "video/mp4", data: videoData },
+			],
+			timestamp: Date.now(),
+		});
+		await manager.close();
+
+		const persisted = readJsonl(sessionFile).find(entry => messageRole(entry) === "user");
+		const persistedContent = messageContent(persisted ?? {});
+		expect(persistedContent).toEqual([
+			{ type: "text", text: "persist these" },
+			expect.objectContaining({ type: "image", mimeType: "image/png", detail: "high", data: expect.stringMatching(/^blob:sha256:[0-9a-f]{64}$/) }),
+			expect.objectContaining({ type: "video", mimeType: "video/mp4", data: expect.stringMatching(/^blob:sha256:[0-9a-f]{64}$/) }),
+		]);
+
+		const reopened = await SessionManager.open(sessionFile, sessionDir);
+		const hydrated = reopened.getEntries().find(entry => entry.type === "message" && entry.message.role === "user");
+		expect(hydrated).toMatchObject({
+			message: {
+				content: [
+					{ type: "text", text: "persist these" },
+					{ type: "image", mimeType: "image/png", detail: "high", data: imageData },
+					{ type: "video", mimeType: "video/mp4", data: videoData },
+				],
+			},
+		});
+		await reopened.close();
+	});
 
 	it("uses atomic synchronous rewrite when the first assistant turn materializes the file", async () => {
 		const cwd = makeTempDir("@pi-atomic-cwd-");

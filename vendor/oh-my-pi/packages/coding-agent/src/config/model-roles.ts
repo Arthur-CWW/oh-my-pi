@@ -29,6 +29,7 @@ export const MODEL_ROLES: Record<ModelRole, ModelRoleInfo> = {
 	default: { tag: "DEFAULT", name: "Default", color: "success" },
 	smol: { tag: "SMOL", name: "Fast", color: "warning" },
 	slow: { tag: "SLOW", name: "Thinking", color: "accent" },
+	// Capability role for image inspection; model effort remains an independent setting.
 	vision: { tag: "VISION", name: "Vision", color: "error" },
 	plan: { tag: "PLAN", name: "Architect", color: "muted" },
 	designer: { tag: "DESIGNER", name: "Designer", color: "muted" },

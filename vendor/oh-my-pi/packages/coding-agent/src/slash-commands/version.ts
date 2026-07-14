@@ -109,6 +109,7 @@ export async function handleVersionCommand(
 
 export const VERSION_COMMAND_SPEC: SlashCommandSpec = {
 	name: "version",
+	tuiNamespace: "colon",
 	description: "Show binary, source, and session version details",
 	acpDescription: "Show binary and source version details",
 	handle: handleVersionCommand,

@@ -116,6 +116,7 @@ describe("Agent Hub route provenance", () => {
 		const hub = makeHub(registry, observers);
 
 		eventBus.emit(TASK_SUBAGENT_PROGRESS_CHANNEL, progressPayload(INITIAL_MODEL, "spawn_explicit"));
+		await Bun.sleep(20);
 		hub.openChat(AGENT_ID);
 		expect(renderedText(hub)).toContain(INITIAL_MODEL);
 		expect(renderedText(hub)).toContain("[spawn_explicit]");

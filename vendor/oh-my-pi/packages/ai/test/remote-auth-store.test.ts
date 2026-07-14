@@ -139,6 +139,80 @@ describe("RemoteAuthCredentialStore + AuthStorage integration", () => {
 		remoteStore.close();
 	});
 
+	test("conditional remote disable cannot clobber a peer-rotated token", async () => {
+		const brokerClient = new AuthBrokerClient({ url: handle!.url, token });
+		const initialResult = await brokerClient.fetchSnapshot();
+		if (initialResult.status !== 200) throw new Error("expected snapshot");
+		const initialEntry = initialResult.snapshot.credentials[0];
+		if (!initialEntry || initialEntry.credential.type !== "oauth") {
+			throw new Error("expected OAuth credential");
+		}
+		const remoteStore = new RemoteAuthCredentialStore({
+			client: brokerClient,
+			initialSnapshot: initialResult.snapshot,
+			streamSnapshots: false,
+		});
+		const { type: _type, ...staleRedactedCredential } = initialEntry.credential;
+		const expectedData = JSON.stringify(staleRedactedCredential);
+
+		serverStore!.updateAuthCredential(initialEntry.id, {
+			type: "oauth",
+			access: "peer-rotated-access",
+			refresh: "peer-rotated-refresh",
+			expires: Date.now() + 60 * 60_000,
+			accountId: "account-1",
+			email: "a@example.com",
+		});
+		await serverStorage!.reload();
+
+		const disabled = await remoteStore.tryDisableAuthCredentialIfMatches(
+			initialEntry.id,
+			expectedData,
+			"stale remote refresh failed",
+		);
+
+		expect(disabled).toBe(false);
+		const active = serverStore!.listAuthCredentials("anthropic");
+		expect(active).toHaveLength(1);
+		expect(active[0]?.id).toBe(initialEntry.id);
+		expect(active[0]?.credential.type).toBe("oauth");
+		if (active[0]?.credential.type === "oauth") {
+			expect(active[0].credential.access).toBe("peer-rotated-access");
+			expect(active[0].credential.refresh).toBe("peer-rotated-refresh");
+		}
+		const refreshedRemote = remoteStore.listAuthCredentials("anthropic");
+		expect(refreshedRemote).toHaveLength(1);
+		if (refreshedRemote[0]?.credential.type === "oauth") {
+			expect(refreshedRemote[0].credential.access).toBe("peer-rotated-access");
+		}
+		remoteStore.close();
+	});
+
+	test("conditional remote disable succeeds for the unchanged snapshot", async () => {
+		const brokerClient = new AuthBrokerClient({ url: handle!.url, token });
+		const initialResult = await brokerClient.fetchSnapshot();
+		if (initialResult.status !== 200) throw new Error("expected snapshot");
+		const initialEntry = initialResult.snapshot.credentials[0];
+		if (!initialEntry) throw new Error("expected credential");
+		const remoteStore = new RemoteAuthCredentialStore({
+			client: brokerClient,
+			initialSnapshot: initialResult.snapshot,
+			streamSnapshots: false,
+		});
+		const { type: _type, ...redactedCredential } = initialEntry.credential;
+
+		const disabled = await remoteStore.tryDisableAuthCredentialIfMatches(
+			initialEntry.id,
+			JSON.stringify(redactedCredential),
+			"confirmed stale remote refresh",
+		);
+
+		expect(disabled).toBe(true);
+		expect(serverStore!.listAuthCredentials("anthropic")).toEqual([]);
+		expect(remoteStore.listAuthCredentials("anthropic")).toEqual([]);
+		remoteStore.close();
+	});
+
 	test("RemoteAuthCredentialStore rejects writes from the client", () => {
 		const remoteStore = new RemoteAuthCredentialStore({
 			client: new AuthBrokerClient({ url: handle!.url, token }),
@@ -147,6 +221,7 @@ describe("RemoteAuthCredentialStore + AuthStorage integration", () => {
 		expect(() => remoteStore.upsertAuthCredentialForProvider("anthropic", { type: "api_key", key: "x" })).toThrow(
 			/read-only/,
 		);
+		expect(() => remoteStore.deleteAuthCredential(1, "x")).toThrow(/awaited broker disable/);
 		expect(() => remoteStore.deleteAuthCredentialsForProvider("anthropic", "x")).toThrow(/read-only/);
 		remoteStore.close();
 	});

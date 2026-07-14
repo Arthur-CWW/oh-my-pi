@@ -6,7 +6,7 @@
  */
 
 /** Mode selector for `AgentSession.shake`. */
-export type ShakeMode = "elide" | "images";
+export type ShakeMode = "elide" | "media";
 
 /** Outcome of an `AgentSession.shake` run. */
 export interface ShakeResult {
@@ -15,8 +15,8 @@ export interface ShakeResult {
 	toolResultsDropped: number;
 	/** Large fenced/XML blocks dropped. */
 	blocksDropped: number;
-	/** Image blocks removed (images mode only). */
-	imagesDropped?: number;
+	/** Image and video blocks removed (media mode only). */
+	mediaDropped?: number;
 	/** Estimated context tokens reclaimed. */
 	tokensFreed: number;
 	/** Session artifact holding the dropped originals, when persisted. */
@@ -25,11 +25,11 @@ export interface ShakeResult {
 
 /** One-line operator summary of a {@link ShakeResult} (shared by TUI + ACP). */
 export function formatShakeSummary(result: ShakeResult): string {
-	if (result.mode === "images") {
-		const n = result.imagesDropped ?? 0;
+	if (result.mode === "media") {
+		const n = result.mediaDropped ?? 0;
 		return n === 0
-			? "No images found in this session."
-			: `Dropped ${n} image${n === 1 ? "" : "s"} from this session.`;
+			? "No media found in this session."
+			: `Dropped ${n} media attachment${n === 1 ? "" : "s"} from this session.`;
 	}
 	const parts: string[] = [];
 	if (result.toolResultsDropped > 0) {

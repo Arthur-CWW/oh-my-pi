@@ -5,15 +5,13 @@ import type {
 	Api,
 	AssistantMessage,
 	Context,
-	DeveloperMessage,
 	Message,
 	Model,
 	StreamFunction,
 	StreamOptions,
 	Tool,
 	ToolChoice,
-	ToolResultMessage,
-	UserMessage,
+	UserContent,
 } from "../types";
 import { normalizeSystemPrompts } from "../utils";
 import { AssistantMessageEventStream } from "../utils/event-stream";
@@ -160,7 +158,7 @@ function selectToolsForToolChoice(tools: Tool[] | undefined, toolChoice: ToolCho
 	return [];
 }
 
-function toPlainContent(content: string | Array<{ type: "text" | "image"; text?: string; data?: string }>): {
+function toPlainContent(content: string | UserContent[]): {
 	content: string;
 	images?: string[];
 } {
@@ -176,6 +174,11 @@ function toPlainContent(content: string | Array<{ type: "text" | "image"; text?:
 		if (block.type === "image" && typeof block.data === "string") {
 			images.push(block.data);
 		}
+		if (block.type === "video") {
+			throw new Error(
+				"Video input reached Ollama without native video support. Select the video-capable pi/vision model.",
+			);
+		}
 	}
 	return {
 		content: textParts.join("\n"),
@@ -185,15 +188,15 @@ function toPlainContent(content: string | Array<{ type: "text" | "image"; text?:
 
 function convertMessage(message: Message): OllamaMessage {
 	if (message.role === "user") {
-		const converted = toPlainContent(message.content as UserMessage["content"]);
+		const converted = toPlainContent(message.content);
 		return { role: "user", ...converted };
 	}
 	if (message.role === "developer") {
-		const converted = toPlainContent(message.content as DeveloperMessage["content"]);
+		const converted = toPlainContent(message.content);
 		return { role: "system", ...converted };
 	}
 	if (message.role === "toolResult") {
-		const converted = toPlainContent(message.content as ToolResultMessage["content"]);
+		const converted = toPlainContent(message.content);
 		return {
 			role: "tool",
 			tool_name: message.toolName,

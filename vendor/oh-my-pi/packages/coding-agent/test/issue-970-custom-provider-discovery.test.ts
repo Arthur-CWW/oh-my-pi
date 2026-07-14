@@ -5,7 +5,8 @@ import * as path from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { writeModelCache } from "@oh-my-pi/pi-catalog/model-cache";
-import type { ModelRegistry, ProviderDiscoveryState } from "@oh-my-pi/pi-coding-agent/config/model-registry";
+import type { ProviderDiscoveryState } from "@oh-my-pi/pi-coding-agent/config/model-availability";
+import type { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { ModelRegistry as ModelRegistryImpl } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { ModelSelectorComponent } from "@oh-my-pi/pi-coding-agent/modes/components/model-selector";
@@ -33,12 +34,19 @@ async function createSelector(state: ProviderDiscoveryState): Promise<ModelSelec
 		refreshProvider: async () => {},
 		getError: () => undefined,
 		getAvailable: () => [],
+		getAvailabilitySnapshot: () => ({
+			generation: 1,
+			models: [],
+			refreshingProviders: [],
+			staleProviders: [],
+		}),
+		onAvailabilityChanged: () => () => {},
 		getAll: () => [],
 		getDiscoverableProviders: () => [state.provider],
 		getCanonicalModelSelections: () => [],
 		getProviderDiscoveryState: () => state,
 	} as unknown as ModelRegistry;
-	const ui = { requestRender: vi.fn() } as unknown as TUI;
+	const ui = { requestRender: vi.fn(), requestComponentRender: vi.fn() } as unknown as TUI;
 	const selector = new ModelSelectorComponent(
 		ui,
 		undefined,

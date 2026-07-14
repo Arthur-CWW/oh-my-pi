@@ -18,11 +18,11 @@ import { z } from "zod/v4";
 import { extractTextContent, extractToolCall, parseJsonPayload } from "../commit/utils";
 
 import {
-	expandRoleAlias,
 	formatModelString,
 	getModelMatchPreferences,
 	resolveModelFromString,
 } from "../config/model-resolver";
+import { expandRoleAlias } from "../config/role-resolution";
 import type { ToolSession } from "../tools";
 import { ToolError } from "../tools/tool-errors";
 import { withBridgeTimeoutPause } from "./bridge-timeout";

@@ -8,7 +8,7 @@
  */
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import { INTENT_FIELD } from "@oh-my-pi/pi-agent-core";
-import type { AssistantMessage, ImageContent, TextContent, ToolResultMessage } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, MediaContent, TextContent, ToolResultMessage } from "@oh-my-pi/pi-ai";
 import type {
 	BashExecutionMessage,
 	BranchSummaryMessage,
@@ -55,13 +55,13 @@ function oneLine(text: string, max = PRIMARY_ARG_MAX): string {
 	return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
 }
 
-/** Join the text blocks of a string-or-blocks content field. Images become `[image]`. */
-function contentToText(content: string | readonly (TextContent | ImageContent)[]): string {
+/** Join text blocks from a content field. Media payloads become safe labels. */
+function contentToText(content: string | readonly (TextContent | MediaContent)[]): string {
 	if (typeof content === "string") return content;
 	const parts: string[] = [];
 	for (const block of content) {
 		if (block.type === "text") parts.push(block.text);
-		else parts.push("[image]");
+		else parts.push(block.type === "image" ? "[image]" : "[video]");
 	}
 	return parts.join("\n");
 }

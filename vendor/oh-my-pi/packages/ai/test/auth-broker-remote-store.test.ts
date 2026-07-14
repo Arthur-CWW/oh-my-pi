@@ -81,6 +81,9 @@ describe("RemoteAuthCredentialStore SSE integration", () => {
 
 		// 1. Initial snapshot frame populates the local store.
 		await waitUntil(() => remote!.snapshot.credentials.length === 1);
+		const clientStorage = new AuthStorage(remote!);
+		await clientStorage.reload();
+		expect(clientStorage.listStoredCredentials("anthropic")).toHaveLength(1);
 		const initialEntry = remote!.snapshot.credentials[0];
 		expect(initialEntry.provider).toBe("anthropic");
 		expect(initialEntry.credential.type).toBe("oauth");
@@ -93,6 +96,7 @@ describe("RemoteAuthCredentialStore SSE integration", () => {
 		// 2. Server-side upsert is delivered as an `entry` frame.
 		storage!.upsertCredential("anthropic", mintOAuthCredential("b", Date.now() + 120_000));
 		await waitUntil(() => remote!.snapshot.credentials.length === 2);
+		await waitUntil(() => clientStorage.listStoredCredentials("anthropic").length === 2);
 		expect(remote!.snapshot.generation).toBeGreaterThan(initialGeneration);
 		const accessTokens = remote!.snapshot.credentials
 			.filter(entry => entry.credential.type === "oauth")
@@ -108,7 +112,9 @@ describe("RemoteAuthCredentialStore SSE integration", () => {
 		const disabled = storage!.disableCredentialById(bId!, "revoked by test");
 		expect(disabled).toBe(true);
 		await waitUntil(() => remote!.snapshot.credentials.length === 1);
+		await waitUntil(() => clientStorage.listStoredCredentials("anthropic").length === 1);
 		expect(remote!.snapshot.credentials[0].id).not.toBe(bId);
+		clientStorage.close();
 	});
 
 	test("calls onSnapshot for broker snapshots but not the constructor snapshot", async () => {

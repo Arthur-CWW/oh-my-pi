@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added typed `VideoContent`/`MediaContent` and fail-closed native-video conversion. Antigravity accepts only valid allowed-MIME inline base64 under `100MB`; unsupported providers/models reject video explicitly.
+- Live native-video transport proof covered 3/3 structured results with exact MP4 verification and zero extracted frames; `semanticQualityReleaseGrade=false` (0/3 semantic passes) because of impossible timestamps, source-ID drift, and hallucinated numeric claims. See `data/provider-evals/video-understanding/runs/antigravity-native-sam-20260714e/quality-report.md`.
+
+### Fixed
+
+- Classified transient DNS/socket failures through one shared typed error helper so auth retry and OAuth refresh paths preserve credentials instead of rotating or disabling them during infrastructure outages.
+
 ## [16.0.1] - 2026-06-15
 
 ### Added

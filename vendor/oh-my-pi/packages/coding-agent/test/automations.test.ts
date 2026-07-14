@@ -5,6 +5,8 @@ import * as path from "node:path";
 import { SessionManager } from "../src/session/session-manager";
 import { createAgentSession, discoverAuthStorage } from "../src/sdk";
 import {
+	AUTOMATION_COMMAND_OUTPUT_MAX_BYTES,
+	AutomationRunError,
 	type AutomationEntry,
 	type AutomationRunResult,
 	appendAutomationLedger,
@@ -58,6 +60,10 @@ const ENTRY: AutomationEntry = {
 	enabled: true,
 };
 
+function commandEntry(name: string, command: readonly string[], cwd: string): AutomationEntry {
+	return { name, schedule: "1h", cwd, enabled: true, command };
+}
+
 describe("automation schedules", () => {
 	it("computes interval due times and resists backward clock skew", () => {
 		expect(parseAutomationSchedule("30m")).toEqual({ kind: "interval", intervalMs: 1_800_000 });
@@ -107,6 +113,33 @@ describe("automation registry", () => {
 		).toThrow();
 	});
 
+	it("decodes command argv literally and enforces command exclusivity", () => {
+		const command = [process.execPath, "-e", "process.stdout.write('ok')", "argument with spaces"];
+		const [entry] = decodeAutomationRegistry([{ name: "argv", schedule: "1h", command, cwd: "." }]);
+		expect(entry).toEqual({ name: "argv", schedule: "1h", cwd: process.cwd(), enabled: true, command });
+		expect(() => decodeAutomationRegistry([{ name: "empty", schedule: "1h", command: [], cwd: "." }])).toThrow(
+			"command must not be empty",
+		);
+		expect(() =>
+			decodeAutomationRegistry([{ name: "blank", schedule: "1h", command: ["echo", "  "], cwd: "." }]),
+		).toThrow("command[1] must not be empty");
+		expect(() =>
+			decodeAutomationRegistry([{ name: "prompt", schedule: "1h", command, prompt: "also run", cwd: "." }]),
+		).toThrow("exactly one of prompt or packet or command");
+		expect(() =>
+			decodeAutomationRegistry([{ name: "packet", schedule: "1h", command, packet: "job.md", cwd: "." }]),
+		).toThrow("exactly one of prompt or packet or command");
+		expect(() =>
+			decodeAutomationRegistry([{ name: "lane", schedule: "1h", command, lane: "smol", cwd: "." }]),
+		).toThrow("lane and model are only valid for prompt or packet automations");
+		expect(() =>
+			decodeAutomationRegistry([{ name: "model", schedule: "1h", command, model: "local/model", cwd: "." }]),
+		).toThrow("lane and model are only valid for prompt or packet automations");
+		expect(() =>
+			decodeAutomationRegistry([{ name: "string", schedule: "1h", command: "echo hi", cwd: "." }]),
+		).toThrow();
+	});
+
 	it("loads a registry from the profile agent directory", async () => {
 		const agentDir = await makeTempDir();
 		await Bun.write(
@@ -134,6 +167,112 @@ describe("automation ledger and daemon", () => {
 		expect(await readAutomationLedger(ENTRY, agentDir)).toEqual([
 			{ runAt: 100, durationMs: 25, status: "succeeded", sessionFile: "/tmp/session.jsonl", outputSummary: "ok" },
 			{ runAt: 200, durationMs: 10, status: "failed", sessionFile: "/tmp/session.jsonl", outputSummary: "no" },
+		]);
+	});
+
+	it("runs a real command without model setup and records exit 0 success", async () => {
+		const root = await makeTempDir();
+		const sessionsDir = path.join(root, "sessions");
+		const entry = commandEntry("command-success", [process.execPath, "-e", "process.stdout.write('COMMAND_OK')"], root);
+		const result = await runAutomationOnce(entry, {
+			agentDir: root,
+			sessionsDir,
+			nowMs: () => 1_000,
+			discoverAuth: async () => {
+				throw new Error("command automation must not discover auth");
+			},
+			createSession: async () => {
+				throw new Error("command automation must not create an agent session");
+			},
+		});
+		expect(result).toMatchObject({
+			name: entry.name,
+			status: "succeeded",
+			command: entry.command,
+			exitCode: 0,
+			stdout: "COMMAND_OK",
+			stderr: "",
+			stdoutTruncated: false,
+			stderrTruncated: false,
+		});
+		expect(await readAutomationLedger(entry, root)).toEqual([expect.objectContaining({ status: "succeeded", exitCode: 0 })]);
+	});
+
+	it("reports nonzero command exits as typed failures with the CLI status code", async () => {
+		const root = await makeTempDir();
+		const entry = commandEntry(
+			"command-failure",
+			[process.execPath, "-e", "process.stdout.write('OUT');process.stderr.write('ERR');process.exit(7)"],
+			root,
+		);
+		let thrown: unknown;
+		try {
+			await runAutomationOnce(entry, { agentDir: root, sessionsDir: path.join(root, "sessions"), nowMs: () => 1_000 });
+		} catch (error) {
+			thrown = error;
+		}
+		expect(thrown).toBeInstanceOf(AutomationRunError);
+		if (!(thrown instanceof AutomationRunError)) throw new Error("expected AutomationRunError");
+		expect(thrown.result).toMatchObject({
+			name: entry.name,
+			status: "failed",
+			command: entry.command,
+			exitCode: 7,
+			stdout: "OUT",
+			stderr: "ERR",
+			stdoutTruncated: false,
+			stderrTruncated: false,
+		});
+		expect(thrown.message).toContain("exit code 7");
+		expect(await readAutomationLedger(entry, root)).toEqual([expect.objectContaining({ status: "failed", exitCode: 7 })]);
+	});
+
+	it("bounds both command output streams and marks truncation", async () => {
+		const root = await makeTempDir();
+		const entry = commandEntry(
+			"command-output-cap",
+			[
+				process.execPath,
+				"-e",
+				"const output='x'.repeat(60000);process.stdout.write(output);process.stderr.write(output)",
+			],
+			root,
+		);
+		const result = await runAutomationOnce(entry, { agentDir: root, sessionsDir: path.join(root, "sessions"), nowMs: () => 1_000 });
+		expect(result.status).toBe("succeeded");
+		if (result.command === undefined) throw new Error("Expected command automation result");
+		expect(Buffer.byteLength(result.stdout, "utf8")).toBeLessThanOrEqual(AUTOMATION_COMMAND_OUTPUT_MAX_BYTES);
+		expect(Buffer.byteLength(result.stderr, "utf8")).toBeLessThanOrEqual(AUTOMATION_COMMAND_OUTPUT_MAX_BYTES);
+		expect(result.stdoutTruncated).toBe(true);
+		expect(result.stderrTruncated).toBe(true);
+	});
+
+	it("continues supervising a healthy command after a failed command", async () => {
+		const root = await makeTempDir();
+		const bad = commandEntry("command-bad", [process.execPath, "-e", "process.exit(9)"], root);
+		const healthy = commandEntry("command-healthy", [process.execPath, "-e", "process.stdout.write('HEALTHY')"], root);
+		await Bun.write(path.join(root, "automations.yml"), `automations: ${JSON.stringify([bad, healthy])}\n`);
+		const runs: string[] = [];
+		const errors: string[] = [];
+		await runAutomationDaemon({
+			agentDir: root,
+			sessionsDir: path.join(root, "sessions"),
+			nowMs: () => 1_000,
+			maxCycles: 1,
+			checkIntervalMs: 0,
+			maxJitterMs: 0,
+			onRun: entry => {
+				runs.push(entry.name);
+			},
+			onError: (entry, error) => {
+				errors.push(`${entry.name}:${error instanceof AutomationRunError ? error.result.exitCode : "unknown"}`);
+			},
+		});
+		expect(runs).toEqual(["command-bad", "command-healthy"]);
+		expect(errors).toEqual(["command-bad:9"]);
+		expect(await readAutomationLedger(bad, root)).toEqual([expect.objectContaining({ status: "failed", exitCode: 9 })]);
+		expect(await readAutomationLedger(healthy, root)).toEqual([
+			expect.objectContaining({ status: "succeeded", exitCode: 0, stdout: "HEALTHY" }),
 		]);
 	});
 

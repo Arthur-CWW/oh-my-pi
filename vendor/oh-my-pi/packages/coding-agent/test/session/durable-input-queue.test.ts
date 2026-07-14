@@ -5,8 +5,6 @@ import * as path from "node:path";
 
 import {
 	cloneJsonValue,
-	decodeDurableCustomPayload,
-	decodeJsonValue,
 	DurableInputCommandConflictError,
 	DurableInputItemRevisionConflictError,
 	DurableInputQueue,
@@ -16,6 +14,10 @@ import {
 	jsonValuesEqual,
 	SessionOwnershipLostError,
 } from "@oh-my-pi/pi-coding-agent/session/durable-input-queue";
+import {
+	decodeDurableCustomPayload,
+	decodeJsonValue,
+} from "@oh-my-pi/pi-coding-agent/session/durable-media-codec";
 import { acquireSessionOwnership, type SessionOwnershipHandle } from "@oh-my-pi/pi-coding-agent/session/session-ownership";
 
 const roots: string[] = [];
@@ -105,7 +107,7 @@ function command(
 async function queueRoot(root: string): Promise<string> {
 	const [key] = await fs.readdir(path.join(root, "owners-v1"));
 	if (!key) throw new Error("Durable input queue root missing");
-	return path.join(root, "owners-v1", key, "queue-v2");
+	return path.join(root, "owners-v1", key, "queue-v3");
 }
 
 afterEach(async () => {
@@ -120,6 +122,138 @@ describe("durable input queue", () => {
 			DurableInputQueue.open(owner.handle, root),
 		]);
 		expect((await first.getStatus()).activeEpoch).toBe((await second.getStatus()).activeEpoch);
+	});
+	it("externalizes mixed image/video attachments, deduplicates bytes, and drains them after reopen", async () => {
+		const { root, session, owner } = await fixture("epoch-video");
+		const queue = await DurableInputQueue.open(owner.handle, root);
+		await queue.adopt();
+		const sharedData = Buffer.from([0, 1, 2, 3, 4]).toString("base64");
+		const secondData = Buffer.from([5, 6, 7, 8]).toString("base64");
+
+		const queued = await queue.enqueue({
+			text: "inspect these media files",
+			attachments: [
+				{ type: "image", mimeType: "image/png", detail: "high", data: sharedData },
+				{ type: "video", mimeType: "video/mp4", data: sharedData },
+			],
+			deliveryClass: "followUp",
+		});
+		const second = await queue.enqueue({
+			text: "inspect the second clip",
+			attachments: [{ type: "video", mimeType: "video/mp4", data: secondData }],
+			deliveryClass: "followUp",
+		});
+		const durableAttachments = "attachments" in queued.payload ? queued.payload.attachments : undefined;
+		const firstDurable = durableAttachments?.[0];
+		const secondDurable = durableAttachments?.[1];
+		if (!firstDurable || !secondDurable) throw new Error("durable media attachments missing");
+		expect(firstDurable).toMatchObject({ type: "image", mimeType: "image/png", detail: "high" });
+		expect(secondDurable).toMatchObject({ type: "video", mimeType: "video/mp4" });
+		expect(firstDurable.data).toMatch(/^blob:sha256:[0-9a-f]{64}$/);
+		expect(secondDurable.data).toBe(firstDurable.data);
+
+		owner.current = false;
+		const nextOwner = replacement(session, "epoch-video-reopened");
+		const reopened = await DurableInputQueue.open(nextOwner.handle, root);
+		const adopted = await reopened.adopt();
+		expect(adopted.map(item => item.inputId)).toEqual([queued.inputId, second.inputId]);
+		expect(adopted.map(item => item.sequence)).toEqual([queued.sequence, second.sequence]);
+
+		const firstAdmitted = await reopened.admitNext();
+		expect(firstAdmitted?.payload).toEqual({
+			text: "inspect these media files",
+			attachments: [
+				{ type: "image", mimeType: "image/png", detail: "high", data: sharedData },
+				{ type: "video", mimeType: "video/mp4", data: sharedData },
+			],
+		});
+		const firstAttempt = firstAdmitted?.attempts.at(-1);
+		if (!firstAdmitted || !firstAttempt) throw new Error("first media attempt missing");
+		await reopened.markRequestStarted(firstAdmitted.inputId, firstAttempt.id);
+		await reopened.completeAttempt(firstAdmitted.inputId, firstAttempt.id);
+		const secondAdmitted = await reopened.admitNext();
+		expect(secondAdmitted?.payload).toEqual({
+			text: "inspect the second clip",
+			attachments: [{ type: "video", mimeType: "video/mp4", data: secondData }],
+		});
+		const secondAttempt = secondAdmitted?.attempts.at(-1);
+		if (!secondAdmitted || !secondAttempt) throw new Error("second media attempt missing");
+		await reopened.markRequestStarted(secondAdmitted.inputId, secondAttempt.id);
+		await reopened.completeAttempt(secondAdmitted.inputId, secondAttempt.id);
+		expect(await reopened.admitNext()).toBeUndefined();
+	});
+	it("fails closed for malformed media MIME types and blob references", async () => {
+		const malformedMimeFixture = await fixture("epoch-malformed-mime");
+		const malformedMimeQueue = await DurableInputQueue.open(malformedMimeFixture.owner.handle, malformedMimeFixture.root);
+		await malformedMimeQueue.adopt();
+		const malformedMimeRoot = await queueRoot(malformedMimeFixture.root);
+		const { activeEpoch: malformedMimeEpoch } = await malformedMimeQueue.getStatus();
+		await fs.appendFile(
+			path.join(malformedMimeRoot, "segments", `${malformedMimeEpoch}.jsonl`),
+			`${JSON.stringify({
+				version: 3,
+				type: "enqueue",
+				id: "malformed-mime",
+				payload: {
+					text: "invalid MIME",
+					attachments: [{ type: "video", data: `blob:sha256:${"a".repeat(64)}`, mimeType: "video/not-supported" }],
+				},
+				sequence: 1,
+				deliveryClass: "followUp",
+				revision: 1,
+				ownerEpoch: malformedMimeEpoch,
+			})}\n`,
+		);
+		await expect(malformedMimeQueue.replayQueued()).rejects.toThrow("Corrupt durable input queue segment");
+
+		const malformedRefFixture = await fixture("epoch-malformed-ref");
+		const malformedRefQueue = await DurableInputQueue.open(malformedRefFixture.owner.handle, malformedRefFixture.root);
+		await malformedRefQueue.adopt();
+		const malformedRefRoot = await queueRoot(malformedRefFixture.root);
+		const { activeEpoch: malformedRefEpoch } = await malformedRefQueue.getStatus();
+		await fs.appendFile(
+			path.join(malformedRefRoot, "segments", `${malformedRefEpoch}.jsonl`),
+			`${JSON.stringify({
+				version: 3,
+				type: "enqueue",
+				id: "malformed-ref",
+				payload: {
+					text: "invalid ref",
+					attachments: [{ type: "video", data: `blob:sha256:${"A".repeat(64)}`, mimeType: "video/mp4" }],
+				},
+				sequence: 1,
+				deliveryClass: "followUp",
+				revision: 1,
+				ownerEpoch: malformedRefEpoch,
+			})}\n`,
+		);
+		await expect(malformedRefQueue.replayQueued()).rejects.toThrow("Corrupt durable input queue segment");
+	});
+
+	it("fails hydration when a durable media blob is missing", async () => {
+		const { root, owner } = await fixture("epoch-missing-blob");
+		const queue = await DurableInputQueue.open(owner.handle, root);
+		await queue.adopt();
+		const rootPath = await queueRoot(root);
+		const { activeEpoch } = await queue.getStatus();
+		await fs.appendFile(
+			path.join(rootPath, "segments", `${activeEpoch}.jsonl`),
+			`${JSON.stringify({
+				version: 3,
+				type: "enqueue",
+				id: "missing-blob",
+				payload: {
+					text: "missing media",
+					attachments: [{ type: "image", data: `blob:sha256:${"f".repeat(64)}`, mimeType: "image/png" }],
+				},
+				sequence: 1,
+				deliveryClass: "followUp",
+				revision: 1,
+				ownerEpoch: activeEpoch,
+			})}\n`,
+		);
+
+		await expect(queue.admitNext()).rejects.toThrow("Missing blob");
 	});
 
 	it("shares AGENT_MUX_DIR with the default ownership lease root", async () => {
@@ -325,7 +459,16 @@ describe("durable input queue", () => {
 		const segmentA = path.join(queuePath, "segments", `${headValue.predecessor}.jsonl`);
 		await fs.appendFile(
 			segmentA,
-			`${JSON.stringify({ version: 2, type: "enqueue", id: "stale-1", text: "stale", ownerEpoch: headValue.predecessor })}\n`,
+			`${JSON.stringify({
+				version: 3,
+				type: "enqueue",
+				id: "stale-1",
+				payload: { text: "stale", attachments: undefined },
+				sequence: 3,
+				deliveryClass: "followUp",
+				revision: 1,
+				ownerEpoch: headValue.predecessor,
+			})}\n`,
 		);
 
 		const ownerC = replacement(session, "epoch-c");
@@ -402,14 +545,14 @@ describe("durable input queue", () => {
 			root,
 			"owners-v1",
 			path.basename(await fs.readdir(path.join(root, "owners-v1")).then(dirs => dirs[0])),
-			"queue-v2",
+			"queue-v3",
 		);
 		const headText = await fs.readFile(path.join(queueRoot, "head.json"), "utf8");
 		const segmentPath = path.join(queueRoot, "segments", `${JSON.parse(headText).epoch}.jsonl`);
 
 		// Corrupt the first enqueue record but keep the second intact
 		const lines = (await fs.readFile(segmentPath, "utf8")).split("\n");
-		lines[1] = '{ "version": 2, "type": "enqueue", "corrupt'; // line 0 is adopt, line 1 is first enqueue
+		lines[1] = '{ "version": 3, "type": "enqueue", "corrupt'; // line 0 is adopt, line 1 is first enqueue
 		await fs.writeFile(segmentPath, lines.join("\n"));
 
 		const nextOwner = replacement(session, "epoch-b");
@@ -429,14 +572,13 @@ describe("durable input queue", () => {
 			root,
 			"owners-v1",
 			path.basename(await fs.readdir(path.join(root, "owners-v1")).then(dirs => dirs[0])),
-			"queue-v2",
+			"queue-v3",
 		);
 		const headText = await fs.readFile(path.join(queueRoot, "head.json"), "utf8");
 		const segmentPath = path.join(queueRoot, "segments", `${JSON.parse(headText).epoch}.jsonl`);
 
 		// Append a partial tail
-		await fs.appendFile(segmentPath, '{ "version": 2, "type": "enqueue", "id": "partial');
-
+		await fs.appendFile(segmentPath, '{ "version": 3, "type": "enqueue", "id": "partial');
 		const nextOwner = replacement(session, "epoch-b");
 		const currentQueue = await DurableInputQueue.open(nextOwner.handle, root);
 		const adopted = await currentQueue.adopt();
@@ -445,7 +587,7 @@ describe("durable input queue", () => {
 			{ id: first.inputId, text: "first" },
 		]);
 	});
-	it("synthesizes immutable defaults for legacy v2 enqueue records", async () => {
+	it("rejects enqueue records missing the queue-v3 immutable fields", async () => {
 		const { root, owner } = await fixture("epoch-a");
 		const queue = await DurableInputQueue.open(owner.handle, root);
 		await queue.adopt();
@@ -453,28 +595,18 @@ describe("durable input queue", () => {
 		const rootPath = await queueRoot(root);
 		await fs.appendFile(
 			path.join(rootPath, "segments", `${activeEpoch}.jsonl`),
-			`${JSON.stringify({ version: 2, type: "enqueue", id: "legacy-a", text: "first", ownerEpoch: activeEpoch })}\n${JSON.stringify({ version: 2, type: "enqueue", id: "legacy-b", text: "second", ownerEpoch: activeEpoch })}\n`,
+			`${JSON.stringify({
+				version: 3,
+				type: "enqueue",
+				id: "missing-fields",
+				payload: { text: "invalid", attachments: undefined },
+				ownerEpoch: activeEpoch,
+			})}\n`,
 		);
 
-		expect(await queue.replayQueued()).toMatchObject([
-			{
-				inputId: "legacy-a",
-				sequence: 1,
-				deliveryClass: "followUp",
-				revision: 1,
-				payload: { text: "first" },
-			},
-			{
-				inputId: "legacy-b",
-				sequence: 2,
-				deliveryClass: "followUp",
-				revision: 1,
-				payload: { text: "second" },
-			},
-		]);
+		await expect(queue.replayQueued()).rejects.toThrow("Corrupt durable input queue segment");
 	});
-
-	it("replays mixed legacy and revisioned records across predecessor segments in sequence order", async () => {
+	it("replays queue-v3 records across predecessor segments in sequence order", async () => {
 		const { root, session, owner: ownerA } = await fixture("epoch-a");
 		const queueA = await DurableInputQueue.open(ownerA.handle, root);
 		await queueA.adopt();
@@ -482,7 +614,16 @@ describe("durable input queue", () => {
 		const { activeEpoch: epochA } = await queueA.getStatus();
 		await fs.appendFile(
 			path.join(rootPath, "segments", `${epochA}.jsonl`),
-			`${JSON.stringify({ version: 2, type: "enqueue", id: "legacy-a", text: "legacy", ownerEpoch: epochA })}\n`,
+			`${JSON.stringify({
+				version: 3,
+				type: "enqueue",
+				id: "legacy-a",
+				payload: { text: "legacy", attachments: undefined },
+				sequence: 1,
+				deliveryClass: "followUp",
+				revision: 1,
+				ownerEpoch: epochA,
+			})}\n`,
 		);
 		ownerA.current = false;
 
@@ -492,7 +633,16 @@ describe("durable input queue", () => {
 		const { activeEpoch: epochB } = await queueB.getStatus();
 		await fs.appendFile(
 			path.join(rootPath, "segments", `${epochB}.jsonl`),
-			`${JSON.stringify({ version: 2, type: "enqueue", id: "modern-b", text: "modern", sequence: 2, deliveryClass: "steer", revision: 1, ownerEpoch: epochB })}\n`,
+			`${JSON.stringify({
+				version: 3,
+				type: "enqueue",
+				id: "modern-b",
+				payload: { text: "modern", attachments: undefined },
+				sequence: 2,
+				deliveryClass: "steer",
+				revision: 1,
+				ownerEpoch: epochB,
+			})}\n`,
 		);
 
 		expect((await queueB.replayQueued()).map(item => [item.inputId, item.sequence, item.deliveryClass])).toEqual([
@@ -511,11 +661,11 @@ describe("durable input queue", () => {
 		await fs.appendFile(
 			path.join(rootPath, "segments", `${activeEpoch}.jsonl`),
 			`${JSON.stringify({
-				version: 2,
+				version: 3,
 				type: "revision",
 				inputId: item.inputId,
 				revision: 2,
-				payload: { text: "revised" },
+				payload: { text: "revised", attachments: undefined },
 				ownerEpoch: activeEpoch,
 			})}\n`,
 		);
@@ -539,7 +689,7 @@ describe("durable input queue", () => {
 		const { activeEpoch: sequenceEpoch } = await sequenceQueue.getStatus();
 		await fs.appendFile(
 			path.join(sequenceRoot, "segments", `${sequenceEpoch}.jsonl`),
-			`${JSON.stringify({ version: 2, type: "enqueue", id: "bad-sequence", text: "bad", sequence: 0, deliveryClass: "steer", revision: 1, ownerEpoch: sequenceEpoch })}\n`,
+			`${JSON.stringify({ version: 3, type: "enqueue", id: "bad-sequence", payload: { text: "bad", attachments: undefined }, sequence: 0, deliveryClass: "steer", revision: 1, ownerEpoch: sequenceEpoch })}\n`,
 		);
 		await expect(sequenceQueue.replayQueued()).rejects.toThrow("Corrupt durable input queue segment");
 
@@ -552,11 +702,11 @@ describe("durable input queue", () => {
 		await fs.appendFile(
 			path.join(revisionRoot, "segments", `${revisionEpoch}.jsonl`),
 			`${JSON.stringify({
-				version: 2,
+				version: 3,
 				type: "revision",
 				inputId: item.inputId,
 				revision: 3,
-				payload: { text: "skipped revision" },
+				payload: { text: "skipped revision", attachments: undefined },
 				ownerEpoch: revisionEpoch,
 			})}\n`,
 		);
@@ -702,8 +852,8 @@ describe("durable input queue", () => {
 		await queue.adopt();
 
 		const input = await queue.enqueue({ text: "original", deliveryClass: "followUp" });
-		await queue.edit(input.inputId, 1, { text: "revised", images: undefined });
-		await expect(queue.edit(input.inputId, 1, { text: "stale", images: undefined })).rejects.toThrow();
+		await queue.edit(input.inputId, 1, { text: "revised", attachments: undefined });
+		await expect(queue.edit(input.inputId, 1, { text: "stale", attachments: undefined })).rejects.toThrow();
 		expect(await queue.get(input.inputId)).toMatchObject({
 			inputId: input.inputId,
 			revision: 2,
@@ -711,7 +861,7 @@ describe("durable input queue", () => {
 		});
 
 		await queue.admitNext("terminal");
-		await expect(queue.edit(input.inputId, 2, { text: "too late", images: undefined })).rejects.toThrow();
+		await expect(queue.edit(input.inputId, 2, { text: "too late", attachments: undefined })).rejects.toThrow();
 	});
 
 	it("allows cancellation before request start but rejects it afterward", async () => {
@@ -738,7 +888,7 @@ describe("durable input queue", () => {
 		const firstQueue = await DurableInputQueue.open(owner.handle, root);
 		await firstQueue.adopt();
 		const input = await firstQueue.enqueue({ text: "original", deliveryClass: "steer" });
-		await firstQueue.edit(input.inputId, input.revision, { text: "revised", images: undefined });
+		await firstQueue.edit(input.inputId, input.revision, { text: "revised", attachments: undefined });
 		owner.current = false;
 
 		const nextOwner = replacement(session, "epoch-b");
@@ -757,7 +907,7 @@ describe("durable input queue", () => {
 				sequence: input.sequence,
 				deliveryClass: "steer",
 				revision: 2,
-				payload: { text: "revised", images: undefined },
+			payload: { text: "revised", attachments: undefined },
 			},
 		]);
 	});
@@ -902,13 +1052,13 @@ describe("durable input queue", () => {
 		const edited = await queue.editCommand(
 			first.item.inputId,
 			first.item.revision,
-			{ text: "edited", images: undefined },
+			{ text: "edited", attachments: undefined },
 			editMetadata,
 		);
 		const replay = await queue.editCommand(
 			first.item.inputId,
 			first.item.revision,
-			{ images: undefined, text: "edited" },
+			{ attachments: undefined, text: "edited" },
 			editMetadata,
 		);
 		expect(replay).toEqual({ ...edited, replayed: true });
@@ -916,7 +1066,7 @@ describe("durable input queue", () => {
 			queue.editCommand(
 				first.item.inputId,
 				first.item.revision,
-				{ text: "changed", images: undefined },
+				{ text: "changed", attachments: undefined },
 				editMetadata,
 			),
 		).rejects.toBeInstanceOf(DurableInputCommandConflictError);
@@ -924,7 +1074,7 @@ describe("durable input queue", () => {
 			queue.editCommand(
 				first.item.inputId,
 				edited.item.revision,
-				{ text: "stale runner", images: undefined },
+				{ text: "stale runner", attachments: undefined },
 				command("stale-runner-edit", 1),
 			),
 		).rejects.toBeInstanceOf(DurableInputRunnerRevisionConflictError);
@@ -932,7 +1082,7 @@ describe("durable input queue", () => {
 			queue.editCommand(
 				first.item.inputId,
 				first.item.revision,
-				{ text: "stale item", images: undefined },
+				{ text: "stale item", attachments: undefined },
 				command("stale-item-edit", 2),
 			),
 		).rejects.toBeInstanceOf(DurableInputItemRevisionConflictError);
@@ -1007,7 +1157,7 @@ describe("durable input queue", () => {
 		const left = await queue.enqueue({ text: "left", deliveryClass: "followUp" });
 		const right = await queue.enqueue({ text: "right", deliveryClass: "followUp" });
 		const outcomes = await Promise.allSettled([
-			queue.editCommand(left.inputId, left.revision, { text: "winner", images: undefined }, command("edit", 0)),
+			queue.editCommand(left.inputId, left.revision, { text: "winner", attachments: undefined }, command("edit", 0)),
 			queue.cancelCommand(right.inputId, right.revision, command("cancel", 0)),
 		]);
 		expect(outcomes.filter(outcome => outcome.status === "fulfilled")).toHaveLength(1);
@@ -1017,7 +1167,7 @@ describe("durable input queue", () => {
 
 		const revisionBeforeLegacy = await queue.getLatestRunnerRevision();
 		const legacy = await queue.enqueue({ text: "legacy", deliveryClass: "followUp" });
-		const legacyEdited = await queue.edit(legacy.inputId, legacy.revision, { text: "legacy edit", images: undefined });
+		const legacyEdited = await queue.edit(legacy.inputId, legacy.revision, { text: "legacy edit", attachments: undefined });
 		await queue.cancel(legacyEdited.inputId);
 		expect(await queue.getLatestRunnerRevision()).toBe(revisionBeforeLegacy);
 	});
@@ -1039,7 +1189,7 @@ describe("durable input queue", () => {
 		await queue.editCommand(
 			input.inputId,
 			input.revision,
-			{ text: "edited", images: undefined },
+			{ text: "edited", attachments: undefined },
 			command("edit-event", 0),
 		);
 		await reentrant;
@@ -1058,7 +1208,6 @@ describe("durable input queue", () => {
 				customType: "notice",
 				content: [
 					{ type: "text", text: "hello" },
-					{ type: "image", data: "base64", mimeType: "image/png" },
 				],
 				display: true,
 				details: { z: [1, null, true], a: { nested: "value" } },
@@ -1076,7 +1225,7 @@ describe("durable input queue", () => {
 		const reopened = await DurableInputQueue.open(nextOwner.handle, root);
 		await reopened.adopt();
 		expect((await reopened.replayQueued()).map(item => item.payload)).toEqual([
-			{ text: "legacy", images: undefined },
+			{ text: "legacy", attachments: undefined },
 			custom,
 		]);
 	});
@@ -1181,7 +1330,7 @@ describe("durable input queue", () => {
 			.split("\n")
 			.map(line => JSON.parse(line) as { type: string });
 		expect(records.map(record => record.type)).toEqual(["enqueue", "state"]);
-		await expect(queue.edit(appended.inputId, appended.revision, { text: "no", images: undefined })).rejects.toThrow();
+		await expect(queue.edit(appended.inputId, appended.revision, { text: "no", attachments: undefined })).rejects.toThrow();
 	});
 	it("releases a deferred next-turn custom prefix only for a later provider-bound item", async () => {
 		const { root, session, owner } = await fixture("epoch-a");

@@ -98,7 +98,8 @@ export class InternalUrlRouter {
 			const available = Array.from(this.#handlers.keys())
 				.map(s => `${s}://`)
 				.join(", ");
-			throw new Error(`Unknown protocol: ${scheme}://\nSupported: ${available || "none"}`);
+			const hint = scheme === "agents" ? "\nDid you mean agent://?" : "";
+			throw new Error(`Unknown protocol: ${scheme}://${hint}\nSupported: ${available || "none"}`);
 		}
 
 		const resource = await handler.resolve(parsed as InternalUrl, context);

@@ -9,11 +9,14 @@ import {
 	streamGoogleGeminiCli,
 } from "@oh-my-pi/pi-ai/providers/google-gemini-cli";
 import { getOAuthApiKey } from "@oh-my-pi/pi-ai/registry/oauth";
-import type { AssistantMessageEvent, Context, FetchImpl, Model, TJsonSchema } from "@oh-my-pi/pi-ai/types";
+import type { AssistantMessageEvent, Context, FetchImpl, Model, TJsonSchema, UserContent } from "@oh-my-pi/pi-ai/types";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import type { ModelSpec } from "@oh-my-pi/pi-catalog/types";
 
-function createModel(provider: "google-gemini-cli" | "google-antigravity"): Model<"google-gemini-cli"> {
+function createModel(
+	provider: "google-gemini-cli" | "google-antigravity",
+	input: Array<"text" | "image" | "video"> = ["text"],
+): Model<"google-gemini-cli"> {
 	return buildModel({
 		id: provider === "google-antigravity" ? "gemini-3-flash" : "gemini-2.5-flash",
 		name: provider,
@@ -21,7 +24,7 @@ function createModel(provider: "google-gemini-cli" | "google-antigravity"): Mode
 		provider,
 		baseUrl: "https://example.com",
 		reasoning: false,
-		input: ["text"],
+		input,
 		cost: {
 			input: 0,
 			output: 0,
@@ -171,6 +174,44 @@ describe("Google Gemini CLI alignment", () => {
 		expect(payload.userAgent).toBe("antigravity");
 		expect(payload.requestId).toMatch(/^agent-/);
 	});
+	it("preserves text, image, and video order as Google inlineData parts", () => {
+		const model = createModel("google-antigravity", ["text", "image", "video"]);
+		const content: UserContent[] = [
+			{ type: "text", text: "before" },
+			{ type: "image", mimeType: "image/png", data: "AA==" },
+			{ type: "video", mimeType: "video/mp4", data: "AA==" },
+			{ type: "text", text: "after" },
+		];
+		const payload = buildRequest(
+			model,
+			{
+				messages: [{ role: "user", content, timestamp: 1 }],
+			},
+			"proj-123",
+			{},
+			true,
+		) as {
+			request: {
+				contents: Array<{
+					role: string;
+					parts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }>;
+				}>;
+			};
+		};
+
+		expect(payload.request.contents).toEqual([
+			{
+				role: "user",
+				parts: [
+					{ text: "before" },
+					{ inlineData: { mimeType: "image/png", data: "AA==" } },
+					{ inlineData: { mimeType: "video/mp4", data: "AA==" } },
+					{ text: "after" },
+				],
+			},
+		]);
+	});
+
 
 	it("strips patternProperties when antigravity rewrites tools to legacy parameters", () => {
 		const model = createModel("google-antigravity");

@@ -6,7 +6,7 @@ import type { DurableQueuedInput } from "@oh-my-pi/pi-coding-agent/session/durab
 import manualContinuePrompt from "../src/prompts/system/manual-continue.md" with { type: "text" };
 
 type FakeEditor = {
-	onEscape?: () => void;
+	onEscape?: (key?: string) => void;
 	onClear?: () => void;
 	onExit?: () => void;
 	onDisplayReset?: () => void;
@@ -65,7 +65,7 @@ async function createContext() {
 		"app.transcript.rawToggle": ["alt+v"],
 		"app.model.selectTemporary": ["ctrl+y"],
 		"app.model.select": ["alt+m"],
-		"app.message.followUp": ["ctrl+q", "ctrl+enter"],
+		"app.message.followUp": ["ctrl+enter"],
 		"app.agents.returnToParent": ["alt+shift+left"],
 	};
 	const customHandlers = new Map<string, () => void>();
@@ -86,6 +86,7 @@ async function createContext() {
 	const abort = vi.fn(async () => {});
 	const sendUserMessage = vi.fn(async () => {});
 	const hardCancel = vi.fn();
+	const cancelPendingSubmission = vi.fn(() => false);
 	const focusParentSession = vi.fn(async () => {});
 	const toggleTranscriptMode = vi.fn();
 	const showStatus = vi.fn();
@@ -168,6 +169,7 @@ async function createContext() {
 				throw err;
 			}
 		},
+		cancelPendingSubmission,
 		updatePendingMessagesDisplay,
 		isBashMode: false,
 		isPythonMode: false,
@@ -203,6 +205,7 @@ async function createContext() {
 			prompt,
 			updatePendingMessagesDisplay,
 			sendUserMessage,
+			cancelPendingSubmission,
 			requestRender,
 			abort,
 			hardCancel,
@@ -284,7 +287,7 @@ describe("InputController keybinding setup", () => {
 				sequence: 2,
 				deliveryClass: "steer",
 				revision: 1,
-				payload: { text: "older steer", images: undefined },
+				payload: { text: "older steer", attachments: undefined },
 				state: "queued",
 				attempts: [],
 			},
@@ -293,7 +296,7 @@ describe("InputController keybinding setup", () => {
 				sequence: 8,
 				deliveryClass: "followUp",
 				revision: 1,
-				payload: { text: "first follow-up", images: undefined },
+				payload: { text: "first follow-up", attachments: undefined },
 				state: "queued",
 				attempts: [],
 			},
@@ -302,7 +305,7 @@ describe("InputController keybinding setup", () => {
 				sequence: 9,
 				deliveryClass: "followUp",
 				revision: 4,
-				payload: { text: "latest follow-up", images: undefined },
+				payload: { text: "latest follow-up", attachments: undefined },
 				state: "queued",
 				attempts: [],
 			},
@@ -327,7 +330,7 @@ describe("InputController keybinding setup", () => {
 				sequence: 7,
 				deliveryClass: "followUp",
 				revision: 3,
-				payload: { text: "first", images: undefined },
+				payload: { text: "first", attachments: undefined },
 				state: "queued",
 				attempts: [],
 			},
@@ -336,7 +339,7 @@ describe("InputController keybinding setup", () => {
 				sequence: 8,
 				deliveryClass: "followUp",
 				revision: 3,
-				payload: { text: "second", images: undefined },
+				payload: { text: "second", attachments: undefined },
 				state: "queued",
 				attempts: [],
 			},
@@ -352,7 +355,7 @@ describe("InputController keybinding setup", () => {
 		expect(spies.prompt).toHaveBeenCalledTimes(1);
 		expect(spies.prompt).toHaveBeenCalledWith("edited combined payload", {
 			streamingBehavior: "steer",
-			images: undefined,
+			attachments: undefined,
 		});
 		expect(editor.getText()).toBe("");
 	});
@@ -436,8 +439,8 @@ describe("InputController keybinding setup", () => {
 		}
 	});
 
-	it("Ctrl+Q softly interrupts a running focused child, preserves its draft, and returns to its parent", async () => {
-		const { InputController, ctx, editor, customHandlers, spies } = await createContext();
+	it("Ctrl+Q directly interrupts a focused child and starts returning to its parent immediately", async () => {
+		const { InputController, ctx, editor, spies } = await createContext();
 		const session = ctx.session as unknown as { isStreaming: boolean };
 		session.isStreaming = true;
 		(ctx as unknown as { focusedAgentId?: string }).focusedAgentId = "Worker";
@@ -445,42 +448,58 @@ describe("InputController keybinding setup", () => {
 		const controller = new InputController(ctx);
 		controller.setupKeyHandlers();
 
-		customHandlers.get("ctrl+q")?.();
-		await Promise.resolve();
-		await Promise.resolve();
+		editor.onEscape?.("ctrl+q");
 
 		expect(spies.abort).toHaveBeenCalledWith({ reason: "Interrupted by user" });
 		expect(spies.hardCancel).not.toHaveBeenCalled();
 		expect(spies.focusParentSession).toHaveBeenCalledTimes(1);
 		expect(editor.getText()).toBe("keep this draft");
+		await Promise.resolve();
 		expect(spies.showStatus).toHaveBeenCalledWith("Interrupted Worker; returned to parent with draft preserved");
 	});
 
-	it("Ctrl+Q returns from an idle focused child without interrupting or clearing its draft", async () => {
-		const { InputController, ctx, editor, customHandlers, spies } = await createContext();
-		(ctx as unknown as { focusedAgentId?: string }).focusedAgentId = "Worker";
-		editor.setText("resume me later");
+	it("Ctrl+Q restores the main session queue before aborting instead of submitting a follow-up", async () => {
+		const { InputController, ctx, editor, spies } = await createContext();
+		const session = ctx.session as unknown as { isStreaming: boolean };
+		session.isStreaming = true;
+		const projection: DurableProjectionItem[] = [
+			{
+				inputId: "follow-1",
+				sequence: 1,
+				deliveryClass: "followUp",
+				revision: 1,
+				payload: { text: "restore me", attachments: undefined },
+				state: "queued",
+				attempts: [],
+			},
+		];
+		const seam = installDurableInputSeam(ctx, projection);
 		const controller = new InputController(ctx);
 		controller.setupKeyHandlers();
 
-		customHandlers.get("ctrl+q")?.();
+		editor.onEscape?.("ctrl+q");
+		await Promise.resolve();
 		await Promise.resolve();
 
-		expect(spies.abort).not.toHaveBeenCalled();
-		expect(spies.focusParentSession).toHaveBeenCalledTimes(1);
-		expect(editor.getText()).toBe("resume me later");
+		expect(spies.cancelPendingSubmission).toHaveBeenCalledTimes(1);
+		expect(spies.abort).toHaveBeenCalledWith({ reason: "Interrupted by user" });
+		expect(seam.cancelledIds()).toEqual(["follow-1"]);
+		expect(editor.getText()).toBe("restore me");
+		expect(spies.sendUserMessage).not.toHaveBeenCalled();
 	});
 
-	it("Ctrl+Q retains its main-session follow-up behavior", async () => {
+	it("Ctrl+Enter retains follow-up submission", async () => {
 		const { InputController, ctx, editor, customHandlers, spies } = await createContext();
 		editor.setText("main follow-up");
 		const controller = new InputController(ctx);
 		controller.setupKeyHandlers();
 
-		customHandlers.get("ctrl+q")?.();
-		await new Promise(resolve => setTimeout(resolve, 0));
+		customHandlers.get("ctrl+enter")?.();
+		await Promise.resolve();
+		await Promise.resolve();
 
 		expect(spies.sendUserMessage).toHaveBeenCalledWith("main follow-up", { deliverAs: "followUp" });
+		expect(spies.abort).not.toHaveBeenCalled();
 		expect(spies.focusParentSession).not.toHaveBeenCalled();
 	});
 

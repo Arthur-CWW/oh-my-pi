@@ -42,6 +42,7 @@ import type {
 	ToolCall,
 	ToolResultMessage,
 	Usage,
+	UserContent,
 } from "../types";
 import { resolveServiceTier } from "../types";
 import { isRecord, normalizeSystemPrompts, normalizeToolCallId, resolveCacheRetention } from "../utils";
@@ -808,11 +809,21 @@ async function resizeAnthropicManyImageBlock(block: ImageContent): Promise<Image
 	}
 }
 
-async function resizeAnthropicManyImageContent(
+function resizeAnthropicManyImageContent(
 	content: (TextContent | ImageContent)[],
 	state: { resized: number },
 	limit: ResizeLimiter,
-): Promise<(TextContent | ImageContent)[]> {
+): Promise<(TextContent | ImageContent)[]>;
+function resizeAnthropicManyImageContent(
+	content: UserContent[],
+	state: { resized: number },
+	limit: ResizeLimiter,
+): Promise<UserContent[]>;
+async function resizeAnthropicManyImageContent(
+	content: UserContent[],
+	state: { resized: number },
+	limit: ResizeLimiter,
+): Promise<UserContent[]> {
 	let changed = false;
 	const next = await Promise.all(
 		content.map(async block => {
@@ -890,10 +901,7 @@ type AnthropicToolResultContent =
 /**
  * Convert content blocks to Anthropic API format
  */
-function convertContentBlocks(
-	content: (TextContent | ImageContent)[],
-	supportsImages = true,
-): AnthropicToolResultContent {
+function convertContentBlocks(content: UserContent[], supportsImages = true): AnthropicToolResultContent {
 	const blocks: Array<
 		| { type: "text"; text: string }
 		| {
@@ -915,6 +923,12 @@ function convertContentBlocks(
 			sawText = true;
 			blocks.push({ type: "text", text });
 			continue;
+		}
+
+		if (block.type === "video") {
+			throw new Error(
+				"Video input reached Anthropic without native video support. Select the video-capable pi/vision model.",
+			);
 		}
 
 		if (!supportsImages) {

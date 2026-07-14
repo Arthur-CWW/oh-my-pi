@@ -60,6 +60,7 @@ import {
 import { makeSessionRunnerLive } from "../../src/runner/session-runner";
 import { AgentSession } from "../../src/session/agent-session";
 import { AuthStorage } from "../../src/session/auth-storage";
+import { isBlobRef } from "../../src/session/blob-store";
 import { DurableInputQueue } from "../../src/session/durable-input-queue";
 import { convertToLlm } from "../../src/session/messages";
 import {
@@ -413,7 +414,7 @@ describe("live SessionRunner", () => {
 		);
 	});
 
-	it("decodes and persists steer and follow-up image payloads", async () => {
+	it("decodes and persists steer and follow-up attachment payloads", async () => {
 		const fixture = await createLiveFixture();
 		await Effect.runPromise(
 			Effect.scoped(
@@ -427,7 +428,7 @@ describe("live SessionRunner", () => {
 						kind: "submitInput",
 						viewId: attached.viewId,
 						controllerEpoch: attached.controllerEpoch,
-						payload: { text: "steer image", images: [image], deliveryClass: "steer" },
+						payload: { text: "steer image", attachments: [image], deliveryClass: "steer" },
 					});
 					yield* Effect.promise(() => fixture.session.waitForIdle());
 					const followUp = yield* attached.submitInput({
@@ -435,21 +436,28 @@ describe("live SessionRunner", () => {
 						kind: "submitInput",
 						viewId: attached.viewId,
 						controllerEpoch: attached.controllerEpoch,
-						payload: { text: "follow-up image", images: [image], deliveryClass: "followUp" },
+						payload: { text: "follow-up image", attachments: [image], deliveryClass: "followUp" },
 					});
 					yield* Effect.promise(() => fixture.session.waitForIdle());
 					const snapshot = yield* runner.snapshot();
 					expect(snapshot.items.find(item => item.inputId === steer.inputId)?.deliveryClass).toBe("steer");
 					const steerItem = snapshot.items.find(item => item.inputId === steer.inputId);
-					expect(steerItem && "images" in steerItem.payload ? steerItem.payload.images : undefined).toEqual([
-						image,
-					]);
+					if (!steerItem || !("attachments" in steerItem.payload) || !steerItem.payload.attachments) {
+						throw new Error("persisted steer attachments missing");
+					}
+					const steerAttachment = steerItem.payload.attachments[0];
+					if (!steerAttachment) throw new Error("persisted steer attachment missing");
+					expect(steerAttachment).toMatchObject({ type: "image", mimeType: "image/png" });
+					expect(isBlobRef(steerAttachment.data)).toBe(true);
 					expect(snapshot.items.find(item => item.inputId === followUp.inputId)?.deliveryClass).toBe("followUp");
 					const followUpItem = snapshot.items.find(item => item.inputId === followUp.inputId);
-					expect(
-						followUpItem && "images" in followUpItem.payload ? followUpItem.payload.images : undefined,
-					).toEqual([image]);
-					yield* runner.stop();
+					if (!followUpItem || !("attachments" in followUpItem.payload) || !followUpItem.payload.attachments) {
+						throw new Error("persisted follow-up attachments missing");
+					}
+					const followUpAttachment = followUpItem.payload.attachments[0];
+					if (!followUpAttachment) throw new Error("persisted follow-up attachment missing");
+					expect(followUpAttachment).toMatchObject({ type: "image", mimeType: "image/png" });
+					expect(followUpAttachment.data).toBe(steerAttachment.data);
 				}),
 			),
 		);
@@ -515,7 +523,7 @@ describe("live SessionRunner", () => {
 						itemRevision: 1,
 						payload: {
 							text: "after edit",
-							images: [{ type: "image" as const, data: "ZWRpdA==", mimeType: "image/jpeg" }],
+							attachments: [{ type: "image" as const, data: "ZWRpdA==", mimeType: "image/jpeg" }],
 						},
 					};
 					const edited = yield* attached.editQueuedInput(editCommand);
@@ -1731,9 +1739,9 @@ describe("live SessionRunner", () => {
 		const normalizationGate = new Promise<void>(resolve => {
 			releaseNormalization = resolve;
 		});
-		vi.spyOn(imageLoading, "normalizeModelContextImages").mockImplementation(async images => {
+		vi.spyOn(imageLoading, "normalizeModelContextAttachments").mockImplementation(async attachments => {
 			await normalizationGate;
-			return images;
+			return attachments;
 		});
 		const scope = Scope.makeUnsafe("sequential");
 		const run = <A, E>(effect: Effect.Effect<A, E, Scope.Scope>) => Effect.runPromise(Scope.provide(scope)(effect));
@@ -1743,7 +1751,7 @@ describe("live SessionRunner", () => {
 			const cachedGeneration = controller.snapshot().session.promptOperation.generation;
 			const prompt = fixture.session.prompt("new live operation", {
 				synthetic: true,
-				images: [{ type: "image", data: "AA==", mimeType: "image/png" }],
+				attachments: [{ type: "image", data: "AA==", mimeType: "image/png" }],
 			});
 			while (!fixture.session.promptOperation.active) {
 				await new Promise(resolve => setTimeout(resolve, 1));
@@ -1772,9 +1780,9 @@ describe("live SessionRunner", () => {
 		const normalizationGate = new Promise<void>(resolve => {
 			releaseNormalization = resolve;
 		});
-		vi.spyOn(imageLoading, "normalizeModelContextImages").mockImplementation(async images => {
+		vi.spyOn(imageLoading, "normalizeModelContextAttachments").mockImplementation(async attachments => {
 			await normalizationGate;
-			return images;
+			return attachments;
 		});
 		await Effect.runPromise(
 			Effect.scoped(
@@ -1784,7 +1792,7 @@ describe("live SessionRunner", () => {
 					if (controller.capability !== "controller") throw new Error("expected controller");
 					const prompt = fixture.session.prompt("normalize then interrupt", {
 						synthetic: true,
-						images: [{ type: "image", data: "AA==", mimeType: "image/png" }],
+						attachments: [{ type: "image", data: "AA==", mimeType: "image/png" }],
 					});
 					yield* Effect.promise(async () => {
 						while (!fixture.session.promptOperation.active) await new Promise(resolve => setTimeout(resolve, 1));

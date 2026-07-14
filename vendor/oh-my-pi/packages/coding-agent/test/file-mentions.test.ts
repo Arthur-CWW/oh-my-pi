@@ -35,6 +35,45 @@ describe("generateFileMentionMessages path resolution", () => {
 		expect(message.files[0]?.content).toContain("export const x = 1;");
 	});
 
+	test("attaches supported video mentions in input order", async () => {
+		const cwd = await createTempDir();
+		const fixtures = [
+			["clip.mp4", "video/mp4"],
+			["clip.mov", "video/quicktime"],
+			["clip.m4v", "video/x-m4v"],
+			["clip.webm", "video/webm"],
+		] as const;
+		const data = Buffer.from([0, 1, 2, 3]).toBase64();
+		for (const [name] of fixtures) {
+			await Bun.write(path.join(cwd, name), Buffer.from([0, 1, 2, 3]));
+		}
+
+		const messages = await generateFileMentionMessages(
+			fixtures.map(([name]) => name),
+			cwd,
+			{ autoResizeImages: false },
+		);
+		expect(messages).toHaveLength(1);
+		const message = messages[0];
+		if (message?.role !== "fileMention") {
+			throw new Error("expected file mention message");
+		}
+		expect(message.files).toEqual(
+			fixtures.map(([name, mimeType]) => ({
+				path: name,
+				content: "",
+				attachment: { type: "video", mimeType, data },
+			})),
+		);
+	});
+
+	test("rejects empty video mentions before reading them", async () => {
+		const cwd = await createTempDir();
+		await Bun.write(path.join(cwd, "empty.mp4"), "");
+
+		await expect(generateFileMentionMessages(["empty.mp4"], cwd)).rejects.toThrow(/empty file/);
+	});
+
 	test("lists an exact directory path", async () => {
 		const cwd = await createTempDir();
 		await fs.mkdir(path.join(cwd, "src"), { recursive: true });

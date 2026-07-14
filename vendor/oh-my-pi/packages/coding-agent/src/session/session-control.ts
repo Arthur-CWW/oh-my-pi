@@ -89,7 +89,7 @@ interface PausedRow {
 	owner_epoch: string;
 }
 
-const DEFAULT_DB_PATH =
+export const SESSION_CONTROL_DB_PATH =
 	process.env.OMP_SESSION_CONTROL_DB ?? path.join(os.homedir(), ".omp", "agent", "session-control.sqlite");
 const nowIso = (): string => new Date().toISOString();
 const currentUid = (): number | undefined => process.getuid?.();
@@ -119,12 +119,13 @@ function decodeReceiptRow(row: ReceiptRow): SessionControlReceipt {
 export interface SessionControlWaitOptions {
 	readonly timeoutMs?: number;
 	readonly pollIntervalMs?: number;
+	readonly onReceipt?: (receipt: SessionControlReceipt) => void;
 }
 
 export class SessionControlBus {
 	readonly #db: Database;
 
-	constructor(readonly dbPath: string = DEFAULT_DB_PATH) {
+	constructor(readonly dbPath: string = SESSION_CONTROL_DB_PATH) {
 		fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 		this.#db = new Database(dbPath);
 		this.#db.run("PRAGMA busy_timeout = 3000");
@@ -314,9 +315,14 @@ export class SessionControlBus {
 		const timeoutMs = options.timeoutMs ?? 30_000;
 		const intervalMs = options.pollIntervalMs ?? 25;
 		const deadline = Date.now() + timeoutMs;
+		let previousState: SessionControlReceiptState | undefined;
 		for (;;) {
 			const receipt = this.getReceipt(commandId);
 			if (!receipt) throw new Error(`Unknown control command ${commandId}`);
+			if (receipt.state !== previousState) {
+				previousState = receipt.state;
+				options.onReceipt?.(receipt);
+			}
 			if (receipt.state === "applied" || receipt.state === "failed") return receipt;
 			if (Date.now() >= deadline) throw new Error(`Timed out waiting for control command ${commandId}`);
 			await Bun.sleep(Math.min(intervalMs, Math.max(1, deadline - Date.now())));

@@ -47,7 +47,6 @@ function registerLegacy(
 	bus.updatePeerState(sessionId, state);
 }
 
-
 afterEach(async () => {
 	for (const root of cleanupRoots.splice(0)) await fs.rm(root, { recursive: true, force: true });
 });
@@ -86,7 +85,9 @@ describe("staged session rollout", () => {
 		try {
 			registerLegacy(bus, "legacy", 106, "idle");
 			const plan = createRolloutPlan(bus.listPeers(), "target", new Set());
-			expect(plan).toEqual([{ action: "skip", peer: expect.objectContaining({ sessionId: "legacy" }), reason: "legacy" }]);
+			expect(plan).toEqual([
+				{ action: "skip", peer: expect.objectContaining({ sessionId: "legacy" }), reason: "legacy" },
+			]);
 			const calls: string[] = [];
 			const result = await executeRolloutPlan(plan, async peer => {
 				calls.push(peer.sessionId);
@@ -97,7 +98,6 @@ describe("staged session rollout", () => {
 			bus.close();
 		}
 	});
-
 
 	it("restarts one at a time and aborts the untouched remainder on first failure", async () => {
 		const bus = await fixtureBus();

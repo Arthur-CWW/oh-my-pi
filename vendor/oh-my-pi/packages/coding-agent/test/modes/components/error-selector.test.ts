@@ -1,6 +1,10 @@
 import { beforeAll, describe, expect, mock, test } from "bun:test";
 import { stripVTControlCharacters } from "node:util";
-import { ErrorSelectorComponent, formatDiagnosticDetail } from "../../../src/modes/components/error-selector";
+import {
+	ErrorSelectorComponent,
+	formatDiagnosticDetail,
+	formatDiagnosticLabel,
+} from "../../../src/modes/components/error-selector";
 import { initTheme } from "../../../src/modes/theme/theme";
 import type { DiagnosticEvent } from "../../../src/modes/utils/error-inbox";
 import type { FocusCmuxOwnerResult } from "../../../src/modes/utils/cmux-owner-navigation";
@@ -45,7 +49,7 @@ describe("ErrorSelectorComponent", () => {
 		expect(content).toContain("2. Cause 2");
 		expect(content).toContain("Unread: true");
 		expect(content).toContain("Resolved: false");
-		expect(content).toContain("Resolve: /errors resolve err-1");
+		expect(content).toContain("Resolve: :errors resolve err-1");
 	});
 
 	test("formatDiagnosticDetail handles missing fields gracefully", () => {
@@ -71,6 +75,32 @@ describe("ErrorSelectorComponent", () => {
 		const selector = new ErrorSelectorComponent([dummyEvent, resolved, read], mock());
 		const text = renderText(selector);
 		expect(text).toContain("[unread]");
+		expect(text).toContain("[resolved]");
+	});
+
+	test("open fleet incidents are distinct without overriding unread or resolved state", () => {
+		const openIncident: DiagnosticEvent = {
+			...dummyEvent,
+			id: "incident-open",
+			source: "fleet",
+			category: "fleet-incident",
+			status: "open",
+		};
+		const closedIncident: DiagnosticEvent = {
+			...openIncident,
+			id: "incident-closed",
+			status: "closed",
+			resolved: true,
+		};
+
+		expect(formatDiagnosticLabel(openIncident)).toStartWith("[unread] [incident open] ");
+		expect(formatDiagnosticDetail(openIncident)).toContain("[incident open]");
+		expect(formatDiagnosticLabel(closedIncident)).toStartWith("[resolved] ");
+		expect(formatDiagnosticLabel(closedIncident)).not.toContain("[incident open]");
+		expect(formatDiagnosticLabel(dummyEvent)).toStartWith("[unread] ");
+
+		const text = renderText(new ErrorSelectorComponent([openIncident, closedIncident], mock()));
+		expect(text).toContain("[unread] [incident open]");
 		expect(text).toContain("[resolved]");
 	});
 

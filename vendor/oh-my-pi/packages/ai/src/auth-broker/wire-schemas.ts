@@ -185,6 +185,7 @@ export const credentialRefreshResponseSchema = z
 export const credentialDisableRequestSchema = z
 	.object({
 		cause: z.string().optional(),
+		expectedData: z.string().optional(),
 	})
 	.strict();
 

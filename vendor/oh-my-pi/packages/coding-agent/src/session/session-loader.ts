@@ -1,11 +1,11 @@
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import { getBlobsDir, isEnoent, logger } from "@oh-my-pi/pi-utils";
 import { decodeJournalEntries } from "../journal/projection";
-import { BlobStore, isBlobRef, resolveImageData, resolveImageDataUrl } from "./blob-store";
+import { BlobStore, isBlobRef, isImageDataUrl, parseBlobRef } from "./blob-store";
 import { buildSessionContext, resolveSessionLeaf } from "./session-context";
 import type { FileEntry, SessionEntry, SessionHeader } from "./session-entries";
 import { migrateToCurrentVersion } from "./session-migrations";
-import { isImageBlock } from "./session-persistence";
+import { isMediaContent } from "./session-persistence";
 import { FileSessionStorage, type SessionStorage } from "./session-storage";
 
 /** Exported for compaction.test.ts */
@@ -65,57 +65,65 @@ export async function loadEntriesFromFile(
 }
 
 /**
- * Resolve blob references in loaded entries, restoring both session image blocks and persisted
- * provider image URLs back to the inline data expected by downstream transports. Mutates entries in place.
+ * Resolve persisted media blob references recursively before any entry is used
+ * to rebuild provider context. Missing, malformed, or content-mismatched blobs
+ * are fatal because forwarding a blob reference as base64 silently corrupts
+ * resumed model history.
  */
 function hasImageUrl(value: unknown): value is { image_url: string } {
 	return typeof value === "object" && value !== null && "image_url" in value && typeof value.image_url === "string";
 }
 
-async function resolvePersistedImageUrlRefs(value: unknown, blobStore: BlobStore): Promise<void> {
+async function readVerifiedBlob(blobStore: BlobStore, ref: string, location: string): Promise<Buffer> {
+	const hash = parseBlobRef(ref);
+	if (!hash || !/^[0-9a-f]{64}$/.test(hash)) {
+		throw new Error(`Invalid media blob reference at ${location}: ${ref}`);
+	}
+	const buffer = await blobStore.get(hash);
+	if (!buffer) throw new Error(`Missing media blob ${hash} referenced at ${location}`);
+	const actualHash = new Bun.SHA256().update(buffer).digest("hex");
+	if (actualHash !== hash) {
+		throw new Error(`Corrupt media blob ${hash} referenced at ${location}: content hash is ${actualHash}`);
+	}
+	return buffer;
+}
+
+function childLocation(parent: string, key: string): string {
+	return /^[A-Za-z_$][\w$]*$/.test(key) ? `${parent}.${key}` : `${parent}[${JSON.stringify(key)}]`;
+}
+
+async function resolvePersistedMediaRefs(value: unknown, blobStore: BlobStore, location: string): Promise<void> {
 	if (Array.isArray(value)) {
-		await Promise.all(value.map(item => resolvePersistedImageUrlRefs(item, blobStore)));
+		await Promise.all(value.map((item, index) => resolvePersistedMediaRefs(item, blobStore, `${location}[${index}]`)));
+		return;
+	}
+	if (typeof value !== "object" || value === null) return;
+
+	const record = value as Record<string, unknown>;
+	if (record.type === "image" || record.type === "video") {
+		if (!isMediaContent(value)) throw new Error(`Invalid persisted ${record.type} content at ${location}`);
+		if (isBlobRef(value.data)) {
+			value.data = (await readVerifiedBlob(blobStore, value.data, `${location}.data`)).toString("base64");
+		}
 		return;
 	}
 
-	if (typeof value !== "object" || value === null) return;
-
 	if (hasImageUrl(value) && isBlobRef(value.image_url)) {
-		value.image_url = await resolveImageDataUrl(blobStore, value.image_url);
+		const imageUrlLocation = childLocation(location, "image_url");
+		const restored = (await readVerifiedBlob(blobStore, value.image_url, imageUrlLocation)).toString("utf8");
+		if (!isImageDataUrl(restored)) throw new Error(`Corrupt persisted image data URL at ${imageUrlLocation}`);
+		value.image_url = restored;
 	}
 
-	await Promise.all(Object.values(value).map(item => resolvePersistedImageUrlRefs(item, blobStore)));
+	await Promise.all(
+		Object.entries(value).map(([key, item]) =>
+			resolvePersistedMediaRefs(item, blobStore, childLocation(location, key)),
+		),
+	);
 }
 
 export async function resolveBlobRefsInEntries(entries: FileEntry[], blobStore: BlobStore): Promise<void> {
-	const promises: Promise<void>[] = [];
-
-	for (const entry of entries) {
-		if (entry.type === "session") continue;
-
-		let contentArray: unknown[] | undefined;
-		if (entry.type === "message" && "content" in entry.message && Array.isArray(entry.message.content)) {
-			contentArray = entry.message.content;
-		} else if (entry.type === "custom_message" && Array.isArray(entry.content)) {
-			contentArray = entry.content;
-		}
-
-		if (contentArray) {
-			for (const block of contentArray) {
-				if (isImageBlock(block) && isBlobRef(block.data)) {
-					promises.push(
-						resolveImageData(blobStore, block.data).then(resolved => {
-							block.data = resolved;
-						}),
-					);
-				}
-			}
-		}
-
-		promises.push(resolvePersistedImageUrlRefs(entry, blobStore));
-	}
-
-	await Promise.all(promises);
+	await Promise.all(entries.map((entry, index) => resolvePersistedMediaRefs(entry, blobStore, `entries[${index}]`)));
 }
 
 /**

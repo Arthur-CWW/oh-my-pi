@@ -6,42 +6,30 @@ import type { InteractiveHostIntent } from "../modes/interactive-host-intent";
 import type { DurableQueuedInput } from "../session/durable-input-queue";
 import type { SessionEntry, SessionHeader, WorkflowModeSnapshot } from "../session/session-entries";
 import type { TodoPhase } from "../tools/todo";
+import { InputPayloadSchema, MediaContentSchema } from "./attachment-schema";
+import {
+	BuildRevisionSchema,
+	type BuildRevision,
+	RunnerIdentitySchema,
+	type RunnerIdentity,
+	RunnerInstanceIdentitySchema,
+	type RunnerInstanceIdentity,
+	TimestampSchema,
+} from "./identity-schema";
 import { InvalidRunnerCommandError, RunnerRevisionConflictError } from "./errors";
 
 export * from "./errors";
+export { MediaContentSchema } from "./attachment-schema";
+export {
+	BuildRevisionSchema,
+	type BuildRevision,
+	RunnerIdentitySchema,
+	type RunnerIdentity,
+	RunnerInstanceIdentitySchema,
+	type RunnerInstanceIdentity,
+} from "./identity-schema";
 
 export const RUNNER_SCHEMA_VERSION = 1 as const;
-
-const ContentDigestSchema = Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]{64}$/)));
-
-const UUIDSchema = Schema.String.pipe(
-	Schema.check(Schema.isPattern(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i)),
-);
-
-const TimestampSchema = Schema.String.pipe(
-	Schema.refine((value): value is string => {
-		const milliseconds = Date.parse(value);
-		return Number.isFinite(milliseconds) && new Date(milliseconds).toISOString() === value;
-	}),
-);
-
-export const BuildRevisionSchema = Schema.Struct({
-	digest: ContentDigestSchema,
-	version: Schema.String.pipe(Schema.check(Schema.isMinLength(1), Schema.isTrimmed())),
-});
-export type BuildRevision = typeof BuildRevisionSchema.Type;
-
-export const RunnerInstanceIdentitySchema = Schema.Struct({
-	runnerInstanceId: UUIDSchema,
-	startedAt: TimestampSchema,
-});
-export type RunnerInstanceIdentity = typeof RunnerInstanceIdentitySchema.Type;
-
-export const RunnerIdentitySchema = Schema.Struct({
-	buildRevision: BuildRevisionSchema,
-	runnerInstance: RunnerInstanceIdentitySchema,
-});
-export type RunnerIdentity = typeof RunnerIdentitySchema.Type;
 
 export const decodeBuildRevision = (input: unknown): BuildRevision =>
 	Schema.decodeUnknownSync(BuildRevisionSchema)(input, { onExcessProperty: "error" });
@@ -67,18 +55,6 @@ export const ItemRevisionSchema = Schema.Int.pipe(
 	Schema.brand("ItemRevision"),
 );
 
-export const ImageContentSchema = Schema.Struct({
-	type: Schema.Literal("image"),
-	data: Schema.String,
-	mimeType: Schema.String,
-});
-export type RunnerImageContent = typeof ImageContentSchema.Type;
-
-const InputPayloadSchema = Schema.Struct({
-	text: Schema.String,
-	images: Schema.optional(Schema.Array(ImageContentSchema)),
-});
-
 const CommandMetadataSchema = {
 	schemaVersion: Schema.Literal(RUNNER_SCHEMA_VERSION),
 	commandId: Schema.String,
@@ -94,14 +70,14 @@ export const SubmitInputCommandSchema = Schema.Struct({
 	controllerEpoch: ControllerEpochSchema,
 	payload: Schema.Struct({
 		text: Schema.String,
-		images: Schema.optional(Schema.Array(ImageContentSchema)),
+		attachments: Schema.optional(Schema.Array(MediaContentSchema)),
 		deliveryClass: Schema.Literals(["steer", "followUp"]),
 	}),
 });
 
 const CustomContentPartSchema = Schema.Union([
 	Schema.Struct({ type: Schema.Literal("text"), text: Schema.String }),
-	ImageContentSchema,
+	MediaContentSchema,
 ]);
 
 export const SubmitCustomMessageCommandSchema = Schema.Struct({
@@ -384,7 +360,7 @@ export const RunShakeCommandSchema = Schema.Struct({
 	...LiveCommandMetadataSchema,
 	kind: Schema.Literal("runShake"),
 	expectedSessionRevision: RunnerRevisionSchema,
-	mode: Schema.Literals(["elide", "images"]),
+	mode: Schema.Literals(["elide", "media"]),
 });
 
 export const CancelShakeCommandSchema = Schema.Struct({
@@ -712,10 +688,10 @@ export interface RunShakeReceipt {
 	readonly completedSessionRevision: number;
 	readonly replayed: boolean;
 	readonly result: {
-		readonly mode: "elide" | "images";
+		readonly mode: "elide" | "media";
 		readonly toolResultsDropped: number;
 		readonly blocksDropped: number;
-		readonly imagesDropped?: number;
+		readonly mediaDropped?: number;
 		readonly tokensFreed: number;
 		readonly artifactId?: string;
 	};
@@ -948,7 +924,7 @@ export type RunnerEventDelivery =
 
 export const decodeSubmitInputCommand = (input: unknown): SubmitInputCommand => {
 	try {
-		return Schema.decodeUnknownSync(SubmitInputCommandSchema)(input);
+		return Schema.decodeUnknownSync(SubmitInputCommandSchema)(input, { onExcessProperty: "error" });
 	} catch (error) {
 		throw new InvalidRunnerCommandError({ issue: error instanceof Error ? error.message : "Invalid submit command" });
 	}
@@ -964,7 +940,9 @@ const isJsonValue = (value: unknown): boolean => {
 
 export const decodeSubmitCustomMessageCommand = (input: unknown): SubmitCustomMessageCommand => {
 	try {
-		const command = Schema.decodeUnknownSync(SubmitCustomMessageCommandSchema)(input);
+		const command = Schema.decodeUnknownSync(SubmitCustomMessageCommandSchema)(input, {
+			onExcessProperty: "error",
+		});
 		if (command.payload.message.details !== undefined && !isJsonValue(command.payload.message.details)) {
 			throw new Error("Custom message details must be JSON");
 		}
@@ -978,7 +956,7 @@ export const decodeSubmitCustomMessageCommand = (input: unknown): SubmitCustomMe
 
 export const decodeEditQueuedInputCommand = (input: unknown): EditQueuedInputCommand => {
 	try {
-		return Schema.decodeUnknownSync(EditQueuedInputCommandSchema)(input);
+		return Schema.decodeUnknownSync(EditQueuedInputCommandSchema)(input, { onExcessProperty: "error" });
 	} catch (error) {
 		throw new InvalidRunnerCommandError({ issue: error instanceof Error ? error.message : "Invalid edit command" });
 	}

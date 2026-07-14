@@ -328,7 +328,7 @@ async function readQueueHead(root: string): Promise<Record<string, unknown>> {
 			return JSON.parse(await fs.readFile(target, "utf8")) as Record<string, unknown>;
 		}
 	}
-	throw new Error(`queue-v2/head.json not found under ${root}`);
+	throw new Error(`queue-v3/head.json not found under ${root}`);
 }
 
 async function createCanaryCandidate(root: string): Promise<{ candidate: string; digest: string }> {

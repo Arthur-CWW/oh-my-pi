@@ -31,6 +31,25 @@ const STATUS_MAP: Record<string, ObservableSession["status"]> = {
 	aborted: "aborted",
 };
 
+
+interface PendingSessionUpdate {
+	id: string;
+	agent?: string;
+	description?: string;
+	status?: ObservableSession["status"];
+	sessionFile?: string;
+	parentToolCallId?: string;
+	detached?: boolean;
+	index?: number;
+	progress?: AgentProgress;
+}
+
+export interface SessionObserverPerformanceCounters {
+	snapshotUpdates: number;
+	notificationFlushes: number;
+	projectionRebuilds: number;
+}
+
 export class SessionObserverRegistry {
 	#sessions = new Map<string, ObservableSession>();
 	#listeners = new Set<() => void>();
@@ -38,6 +57,14 @@ export class SessionObserverRegistry {
 	#sortOrderById = new Map<string, number>();
 	#parentSortOrderById = new Map<string, number>();
 	#nextSortOrder = 0;
+	#pendingUpdates = new Map<string, PendingSessionUpdate>();
+	#flushTimer: ReturnType<typeof setTimeout> | undefined;
+	#sortedProjection: ObservableSession[] | undefined;
+	#performanceCounters: SessionObserverPerformanceCounters = {
+		snapshotUpdates: 0,
+		notificationFlushes: 0,
+		projectionRebuilds: 0,
+	};
 
 	/** Add a change listener. Returns unsubscribe function. */
 	onChange(cb: () => void): () => void {
@@ -46,7 +73,72 @@ export class SessionObserverRegistry {
 	}
 
 	#notifyListeners(): void {
+		this.#performanceCounters.notificationFlushes++;
 		for (const cb of this.#listeners) cb();
+	}
+
+	#scheduleFlush(): void {
+		if (this.#flushTimer !== undefined) return;
+		this.#flushTimer = setTimeout(() => {
+			this.#flushTimer = undefined;
+			this.#applyPendingUpdates();
+			this.#notifyListeners();
+		}, 0);
+	}
+
+	#applyPendingUpdates(): void {
+		if (this.#pendingUpdates.size === 0) return;
+		for (const update of this.#pendingUpdates.values()) {
+			const existing = this.#sessions.get(update.id);
+			this.#sessions.set(update.id, {
+				id: update.id,
+				kind: "subagent",
+				label: update.description ?? existing?.label ?? `Subagent #${update.index}`,
+				agent: update.agent ?? existing?.agent,
+				description: update.description ?? existing?.description,
+				status: update.status ?? existing?.status ?? "active",
+				sessionFile: update.sessionFile ?? existing?.sessionFile,
+				parentToolCallId: update.parentToolCallId ?? existing?.parentToolCallId,
+				detached: update.detached ?? existing?.detached,
+				index: update.index ?? existing?.index,
+				lastUpdate: Date.now(),
+				progress: update.progress ?? existing?.progress,
+			});
+			this.#performanceCounters.snapshotUpdates++;
+		}
+		this.#pendingUpdates.clear();
+		this.#sortedProjection = undefined;
+	}
+
+	#queueUpdate(update: PendingSessionUpdate): void {
+		const pending = this.#pendingUpdates.get(update.id);
+		this.#pendingUpdates.set(
+			update.id,
+			pending
+				? {
+						id: update.id,
+						agent: update.agent ?? pending.agent,
+						description: update.description ?? pending.description,
+						status: update.status ?? pending.status,
+						sessionFile: update.sessionFile ?? pending.sessionFile,
+						parentToolCallId: update.parentToolCallId ?? pending.parentToolCallId,
+						detached: update.detached ?? pending.detached,
+						index: update.index ?? pending.index,
+						progress: update.progress ?? pending.progress,
+					}
+				: update,
+		);
+		this.#scheduleFlush();
+	}
+
+	getPerformanceCounters(): Readonly<SessionObserverPerformanceCounters> {
+		return { ...this.#performanceCounters };
+	}
+
+	resetPerformanceCounters(): void {
+		this.#performanceCounters.snapshotUpdates = 0;
+		this.#performanceCounters.notificationFlushes = 0;
+		this.#performanceCounters.projectionRebuilds = 0;
 	}
 
 	#ensureSortOrder(id: string): number {
@@ -85,10 +177,13 @@ export class SessionObserverRegistry {
 			sessionFile: sessionFile ?? existing?.sessionFile,
 			lastUpdate: Date.now(),
 		});
-		this.#notifyListeners();
+		this.#sortedProjection = undefined;
+		this.#scheduleFlush();
 	}
 
 	getSessions(): ObservableSession[] {
+		this.#applyPendingUpdates();
+		if (this.#sortedProjection) return this.#sortedProjection;
 		const sessions = [...this.#sessions.values()];
 		sessions.sort((a, b) => {
 			if (a.kind === "main" && b.kind !== "main") return -1;
@@ -104,10 +199,13 @@ export class SessionObserverRegistry {
 
 			return this.#getStableOrder(a) - this.#getStableOrder(b);
 		});
+		this.#performanceCounters.projectionRebuilds++;
+		this.#sortedProjection = sessions;
 		return sessions;
 	}
 
 	getActiveSubagentCount(): number {
+		this.#applyPendingUpdates();
 		let count = 0;
 		for (const s of this.#sessions.values()) {
 			if (s.kind === "subagent" && s.status === "active") count++;
@@ -118,19 +216,25 @@ export class SessionObserverRegistry {
 	/** Clear all tracked sessions (e.g. on session switch). Keeps EventBus subscriptions and listeners. */
 	resetSessions(): void {
 		this.#sessions.clear();
+		this.#pendingUpdates.clear();
 		this.#sortOrderById.clear();
 		this.#parentSortOrderById.clear();
 		this.#nextSortOrder = 0;
-		this.#notifyListeners();
+		this.#sortedProjection = undefined;
+		this.#scheduleFlush();
 	}
 
 	dispose(): void {
 		for (const unsub of this.#eventBusUnsubscribers) unsub();
 		this.#eventBusUnsubscribers = [];
+		if (this.#flushTimer !== undefined) clearTimeout(this.#flushTimer);
+		this.#flushTimer = undefined;
+		this.#pendingUpdates.clear();
 		this.#sessions.clear();
 		this.#sortOrderById.clear();
 		this.#parentSortOrderById.clear();
 		this.#nextSortOrder = 0;
+		this.#sortedProjection = undefined;
 		this.#listeners.clear();
 	}
 
@@ -147,31 +251,16 @@ export class SessionObserverRegistry {
 
 				const sortOrder = this.#ensureSortOrder(payload.id);
 				this.#ensureParentSortOrder(payload.parentToolCallId, sortOrder);
-				const existing = this.#sessions.get(payload.id);
-				if (existing) {
-					existing.status = status;
-					existing.lastUpdate = Date.now();
-					existing.index = payload.index;
-					existing.parentToolCallId = payload.parentToolCallId ?? existing.parentToolCallId;
-					existing.detached = payload.detached ?? existing.detached;
-					if (payload.description) existing.description = payload.description;
-					if (payload.sessionFile) existing.sessionFile = payload.sessionFile;
-				} else {
-					this.#sessions.set(payload.id, {
-						id: payload.id,
-						kind: "subagent",
-						label: payload.description ?? `Subagent #${payload.index}`,
-						agent: payload.agent,
-						description: payload.description,
-						status,
-						sessionFile: payload.sessionFile,
-						parentToolCallId: payload.parentToolCallId,
-						detached: payload.detached,
-						index: payload.index,
-						lastUpdate: Date.now(),
-					});
-				}
-				this.#notifyListeners();
+				this.#queueUpdate({
+					id: payload.id,
+					agent: payload.agent,
+					description: payload.description,
+					status,
+					sessionFile: payload.sessionFile,
+					parentToolCallId: payload.parentToolCallId,
+					detached: payload.detached,
+					index: payload.index,
+				});
 			}),
 		);
 
@@ -180,35 +269,18 @@ export class SessionObserverRegistry {
 				const payload = data as SubagentProgressPayload;
 				const progress = payload.progress;
 				const id = progress.id;
-				const existing = this.#sessions.get(id);
-
 				const sortOrder = this.#ensureSortOrder(id);
 				this.#ensureParentSortOrder(payload.parentToolCallId, sortOrder);
-				if (existing) {
-					existing.lastUpdate = Date.now();
-					existing.index = payload.index;
-					existing.parentToolCallId = payload.parentToolCallId ?? existing.parentToolCallId;
-					existing.detached = payload.detached ?? existing.detached;
-					existing.progress = progress;
-					if (progress.description) existing.description = progress.description;
-					if (payload.sessionFile) existing.sessionFile = payload.sessionFile;
-				} else {
-					this.#sessions.set(id, {
-						id,
-						kind: "subagent",
-						label: progress.description ?? `Subagent #${payload.index}`,
-						agent: payload.agent,
-						description: progress.description,
-						status: "active",
-						sessionFile: payload.sessionFile,
-						parentToolCallId: payload.parentToolCallId,
-						detached: payload.detached,
-						index: payload.index,
-						lastUpdate: Date.now(),
-						progress,
-					});
-				}
-				this.#notifyListeners();
+				this.#queueUpdate({
+					id,
+					agent: payload.agent,
+					description: progress.description,
+					sessionFile: payload.sessionFile,
+					parentToolCallId: payload.parentToolCallId,
+					detached: payload.detached,
+					index: payload.index,
+					progress,
+				});
 			}),
 		);
 	}

@@ -100,6 +100,7 @@ const COMPACTION_END = {
 } as unknown as AgentSessionEvent;
 const RETRY_START = {
 	type: "auto_retry_start",
+	cause: "provider",
 	attempt: 1,
 	maxAttempts: 3,
 	delayMs: 1000,
@@ -173,5 +174,30 @@ describe("EventController loader recovery after overflow maintenance", () => {
 		await controller.handleEvent(AGENT_START);
 		expect(ctx.loadingAnimation).toBeDefined();
 		expect(statusContainer.children).toContain(ctx.loadingAnimation);
+	});
+	it("renders each retry cause distinctly in the status loader", async () => {
+		const { ctx } = createContext();
+		const controller = new EventController(ctx);
+		const cases = [
+			{ cause: "network" as const, text: "Provider unreachable (network/DNS), retrying 1s" },
+			{ cause: "rate-limit" as const, text: "Rate limited, retrying (1/3) in 1s" },
+			{ cause: "provider" as const, text: "Provider error, retrying (1/3) in 1s" },
+		];
+
+		for (const retryCase of cases) {
+			const event: Extract<AgentSessionEvent, { type: "auto_retry_start" }> = {
+				type: "auto_retry_start",
+				cause: retryCase.cause,
+				attempt: 1,
+				maxAttempts: 3,
+				delayMs: 1_000,
+				errorMessage: "overloaded",
+			};
+			await controller.handleEvent(event);
+			const loader = ctx.retryLoader;
+			expect(loader).toBeDefined();
+			expect(loader?.render(240).join("\n")).toContain(retryCase.text);
+			await controller.handleEvent({ type: "auto_retry_end", success: true, attempt: 1 });
+		}
 	});
 });

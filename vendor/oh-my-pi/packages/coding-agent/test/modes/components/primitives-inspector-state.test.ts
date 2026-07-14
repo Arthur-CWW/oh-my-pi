@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { PRIMITIVES_INSPECTOR_SLASH_COMMAND } from "../../../src/modes/components/primitives-inspector-command";
 import {
 	beginPrimitiveFilter,
 	createPrimitiveInspectorState,
@@ -14,7 +13,6 @@ import {
 	visiblePrimitiveCategories,
 	visiblePrimitiveItems,
 } from "../../../src/modes/components/primitives-inspector-state";
-import type { InteractiveModeContext } from "../../../src/modes/types";
 
 const categories: readonly PrimitiveInspectorCategory[] = [
 	{
@@ -85,27 +83,16 @@ describe("primitives inspector opening", () => {
 		expect(visiblePrimitiveItems(categories, state).map(item => item.id)).toEqual(["omp", "codex"]);
 	});
 
-	test("reports unknown categories while opening at the category list", async () => {
-		const statuses: string[] = [];
-		let openedCategory: string | undefined = "sentinel";
-		const handleTui = PRIMITIVES_INSPECTOR_SLASH_COMMAND.handleTui;
-		if (!handleTui) throw new Error("Inspector command has no TUI handler");
-		await handleTui(
-			{ name: "inspect", args: "bogus", text: "/inspect bogus" },
-			{
-				ctx: {
-					editor: { setText: () => {} },
-					showStatus: (message: string) => statuses.push(message),
-					showPrimitivesInspector: async (initialCategory?: string) => {
-						openedCategory = initialCategory;
-					},
-				} as unknown as InteractiveModeContext,
-			},
-		);
-		expect(openedCategory).toBeUndefined();
-		expect(statuses).toHaveLength(1);
-		expect(statuses[0]).toContain("Valid categories: tools, skills, feeds, memories, stores, session.");
-		expect(statuses[0]).not.toContain("\n");
+	test("keeps the category list open for unknown categories", () => {
+		const category = resolvePrimitiveCategory("bogus");
+		const state = createPrimitiveInspectorState(categories, category);
+		expect(category).toBeUndefined();
+		expect(state.depth).toBe(0);
+		expect(visiblePrimitiveCategories(categories, state).map(candidate => candidate.id)).toEqual([
+			"tools",
+			"feeds",
+			"memories",
+		]);
 	});
 });
 

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Effect, Exit, Scope } from "effect";
+import type { MediaContent } from "@oh-my-pi/pi-ai";
 import type {
 	CancelCompactionReceipt,
 	CancelEphemeralTurnReceipt,
@@ -19,7 +20,6 @@ import type {
 	RunLocalOperationReceipt,
 	RunnerCheckpointState,
 	RunnerCommandReceipt,
-	RunnerImageContent,
 	RunShakeReceipt,
 	SetActiveToolsReceipt,
 	SetCheckpointStateReceipt,
@@ -88,7 +88,7 @@ import type { TodoPhase } from "../tools/todo";
 
 export interface TerminalSubmitIntent {
 	readonly text: string;
-	readonly images?: ReadonlyArray<RunnerImageContent>;
+	readonly attachments?: ReadonlyArray<MediaContent>;
 	readonly deliveryClass: "steer" | "followUp";
 	readonly commandId?: string;
 	readonly correlationId?: string;
@@ -106,7 +106,7 @@ export interface TerminalEditIntent {
 	readonly inputId: string;
 	readonly itemRevision: number;
 	readonly text: string;
-	readonly images?: ReadonlyArray<RunnerImageContent>;
+	readonly attachments?: ReadonlyArray<MediaContent>;
 	readonly commandId?: string;
 	readonly correlationId?: string;
 	readonly causationId?: string;
@@ -541,7 +541,7 @@ export async function createTerminalSessionController(
 								controllerEpoch: view!.epoch,
 								payload: {
 									text: intent.text,
-									...(intent.images === undefined ? {} : { images: [...intent.images] }),
+									...(intent.attachments === undefined ? {} : { attachments: [...intent.attachments] }),
 									deliveryClass: intent.deliveryClass,
 								},
 							}),
@@ -583,7 +583,7 @@ export async function createTerminalSessionController(
 								itemRevision: intent.itemRevision,
 								payload: {
 									text: intent.text,
-									...(intent.images === undefined ? {} : { images: [...intent.images] }),
+									...(intent.attachments === undefined ? {} : { attachments: [...intent.attachments] }),
 								},
 							}),
 						),

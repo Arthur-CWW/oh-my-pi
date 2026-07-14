@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="data:,">
+  <title>Video Evaluation Viewer</title>
+  <style>
+    :root { color-scheme: dark; font: 14px system-ui, sans-serif; background: #101114; color: #eef0f5; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-width: 320px; }
+    button { background: #282c35; color: inherit; border: 1px solid #4b5262; border-radius: 5px; padding: 7px 10px; cursor: pointer; }
+    button:hover { border-color: #8f9bb2; }
+    button:disabled { cursor: wait; opacity: .65; }
+    button.active { background: #256d4b; border-color: #56c28a; }
+    header { height: 52px; position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 8px; padding: 8px 14px; background: #181a20; border-bottom: 1px solid #30333d; }
+    header .spacer { flex: 1; }
+    #status { color: #aab0be; }
+    #status.error { color: #ff949d; }
+    .layout { display: grid; grid-template-columns: 240px minmax(0, 1fr); height: calc(100vh - 52px); }
+    nav { overflow: auto; padding: 10px; border-right: 1px solid #30333d; background: #14161b; }
+    nav button { display: block; width: 100%; margin-bottom: 6px; overflow: hidden; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+    main { min-width: 0; overflow: auto; padding: 14px; }
+    h2 { margin: 0 0 4px; }
+    h3 { margin: 0 0 8px; }
+    .meta { margin: 0 0 12px; color: #aab0be; overflow-wrap: anywhere; }
+    .lanes { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(320px, 1fr); gap: 14px; }
+    .panel { min-width: 0; padding: 12px; background: #181a20; border: 1px solid #30333d; border-radius: 7px; }
+    video { display: block; width: 100%; max-height: 58vh; background: #000; }
+    .rubric { display: grid; gap: 9px; }
+    .rubric-check { padding: 10px; background: #111318; border: 1px solid #30333d; border-radius: 5px; }
+    .rubric-check p { margin: 0 0 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .decision { display: flex; flex-wrap: wrap; gap: 5px; }
+    .decision button { font-size: 12px; padding: 5px 8px; }
+    details { margin-top: 12px; }
+    pre { max-height: 34vh; overflow: auto; padding: 9px; background: #0c0d10; border-radius: 4px; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .empty { color: #aab0be; }
+    @media (max-width: 900px) {
+      header { height: auto; flex-wrap: wrap; }
+      .layout { grid-template-columns: 1fr; height: auto; min-height: calc(100vh - 52px); }
+      nav { display: flex; gap: 6px; overflow-x: auto; border-right: 0; border-bottom: 1px solid #30333d; }
+      nav button { width: auto; min-width: 180px; margin: 0; }
+      .lanes { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <strong>Video Evaluation Viewer</strong>
+    <span id="run"></span>
+    <span class="spacer"></span>
+    <button id="prev" type="button">← Previous</button>
+    <button id="next" type="button">Next →</button>
+    <span id="position"></span>
+    <span id="status" role="status" aria-live="polite">Loading…</span>
+  </header>
+  <div class="layout">
+    <nav id="clips" aria-label="Clips"></nav>
+    <main id="app"></main>
+  </div>
+  <script>
+    const state = { data: null, index: 0, labels: new Map() };
+    const app = document.querySelector('#app');
+    const clips = document.querySelector('#clips');
+    const status = document.querySelector('#status');
+    const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
+
+    async function api(path, options) {
+      const response = await fetch(path, options);
+      if (!response.ok) throw new Error((await response.text()) || `${response.status} ${response.statusText}`);
+      return response.json();
+    }
+
+    function errorDetails(error) {
+      return error instanceof Error ? { message: error.message, stack: error.stack } : { message: String(error) };
+    }
+
+    function reportClientError(error, extra = {}) {
+      void fetch('/api/client-errors', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ ...errorDetails(error), ...extra, ts: Date.now() }),
+      }).catch(() => {});
+    }
+
+    function setStatus(message, isError = false) {
+      status.textContent = message;
+      status.classList.toggle('error', isError);
+    }
+
+    function checksFor(clip) {
+      const parsed = clip.parsed && typeof clip.parsed === 'object' ? clip.parsed : {};
+      const statistics = Array.isArray(parsed.statistics_extracted) ? parsed.statistics_extracted : [];
+      const violations = Array.isArray(clip.provider?.semanticValidation?.violations) ? clip.provider.semanticValidation.violations : [];
+      const requirements = Array.isArray(parsed.pipeline_failures_to_watch) ? parsed.pipeline_failures_to_watch : [];
+      return [
+        ...statistics.map((item, index) => ({ id: `statistic-${index}`, group: 'Extracted claim', detail: item })),
+        ...violations.map((item, index) => ({ id: `structural-${index}`, group: 'Structural check', detail: item })),
+        ...requirements.map((item, index) => ({ id: `requirement-${index}`, group: 'Pipeline requirement', detail: item })),
+      ];
+    }
+
+    function checkMarkup(check) {
+      const detail = typeof check.detail === 'string' ? check.detail : JSON.stringify(check.detail, null, 2);
+      const key = `${state.data.clips[state.index].clipId}:${check.id}`;
+      const selected = state.labels.get(key);
+      return `<article class="rubric-check" data-check="${check.id}"><p><strong>${escapeHtml(check.group)}</strong>\n${escapeHtml(detail)}</p><div class="decision">${['pass', 'partial', 'fail', 'unsupported'].map((label) => `<button type="button" data-label="${label}" class="${selected === label ? 'active' : ''}">${label}</button>`).join('')}</div></article>`;
+    }
+
+    async function submitLabel(button, checkId, label) {
+      const clip = state.data.clips[state.index];
+      const controls = button.closest('.decision');
+      for (const control of controls.querySelectorAll('button')) control.disabled = true;
+      setStatus('Saving…');
+      try {
+        await api('/api/labels', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ clipId: clip.clipId, lane: 'native', dimension: 'rubric', checkId, label, ts: Date.now() }),
+        });
+        state.labels.set(`${clip.clipId}:${checkId}`, label);
+        for (const control of controls.querySelectorAll('button')) control.classList.toggle('active', control.dataset.label === label);
+        setStatus(`Saved ${label} in place`);
+      } catch (error) {
+        setStatus(`Save failed: ${errorDetails(error).message}`, true);
+        reportClientError(error, { context: 'label-post', clipId: clip.clipId, checkId });
+      } finally {
+        for (const control of controls.querySelectorAll('button')) control.disabled = false;
+      }
+    }
+
+    function render() {
+      const data = state.data;
+      if (!data.clips.length) {
+        clips.innerHTML = '';
+        app.innerHTML = '<p class="empty">No clips are present in the active evaluation run.</p>';
+        document.querySelector('#position').textContent = '0 / 0';
+        setStatus('Loaded');
+        return;
+      }
+      const clip = data.clips[state.index];
+      const checks = checksFor(clip);
+      document.querySelector('#run').textContent = `· ${data.runId}`;
+      document.querySelector('#position').textContent = `${state.index + 1} / ${data.clips.length}`;
+      clips.innerHTML = data.clips.map((item, index) => `<button type="button" data-index="${index}" class="${index === state.index ? 'active' : ''}" title="${escapeHtml(item.clipId)}">${escapeHtml(item.clipId)}</button>`).join('');
+      app.innerHTML = `<h2>${escapeHtml(clip.clipId)}</h2><p class="meta">${Number(clip.durationSeconds).toFixed(2)}s · ${clip.width}×${clip.height} · ${escapeHtml(clip.videoPath)}</p><div class="lanes"><section class="panel"><h3>Source clip</h3><video controls preload="metadata" src="/artifact?path=${encodeURIComponent(clip.videoPath)}"></video><details><summary>Parsed output</summary><pre>${escapeHtml(JSON.stringify(clip.parsed ?? {}, null, 2))}</pre></details></section><section class="panel"><h3>Rubric checks (${checks.length})</h3><div class="rubric">${checks.length ? checks.map(checkMarkup).join('') : '<p class="empty">No checks are available for this clip.</p>'}</div></section></div>`;
+      for (const button of clips.querySelectorAll('[data-index]')) button.addEventListener('click', () => { state.index = Number(button.dataset.index); render(); });
+      for (const button of app.querySelectorAll('[data-label]')) button.addEventListener('click', () => { const checkId = button.closest('[data-check]').dataset.check; void submitLabel(button, checkId, button.dataset.label); });
+      setStatus(`Loaded ${checks.length} checks`);
+    }
+
+    function move(delta) {
+      if (!state.data?.clips.length) return;
+      state.index = (state.index + delta + state.data.clips.length) % state.data.clips.length;
+      render();
+    }
+
+    document.querySelector('#prev').addEventListener('click', () => move(-1));
+    document.querySelector('#next').addEventListener('click', () => move(1));
+    document.addEventListener('keydown', (event) => {
+      if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
+      if (event.key === 'n') move(1);
+      if (event.key === 'p') move(-1);
+    });
+    window.addEventListener('error', (event) => reportClientError(event.error ?? event.message, { context: 'window.error', source: event.filename, line: event.lineno, column: event.colno }));
+    window.addEventListener('unhandledrejection', (event) => reportClientError(event.reason, { context: 'unhandledrejection' }));
+
+    api('/api/data').then((data) => { state.data = data; render(); }).catch((error) => {
+      app.textContent = `Unable to load evaluation data: ${errorDetails(error).message}`;
+      setStatus('Load failed', true);
+      reportClientError(error, { context: 'data-load' });
+    });
+  </script>
+</body>
+</html>

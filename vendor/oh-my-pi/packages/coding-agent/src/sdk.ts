@@ -112,6 +112,7 @@ import { type AgentQuotaAdmission, AgentRegistry, MAIN_AGENT_ID } from "./regist
 import type { SessionRunner } from "./runner/session-runner";
 import { makeSessionRunnerLive } from "./runner/session-runner";
 import type { RunnerIdentity } from "./runner/protocol";
+import { createBlockedMediaConverter } from "./sdk-media-content";
 import {
 	collectEnvSecrets,
 	deobfuscateSessionContext,
@@ -234,6 +235,7 @@ type McpNotificationEntry = {
 	serverName: string;
 	uri: string;
 };
+
 
 function buildAsyncResultBatchMessage(entries: AsyncResultEntry[]): CustomMessage<AsyncResultDetails> | null {
 	if (entries.length === 0) return null;
@@ -1009,6 +1011,7 @@ function createCustomToolsExtension(tools: CustomTool[]): ExtensionFactory {
 			runOnSession(
 				{
 					reason: "auto_retry_start",
+					cause: event.cause,
 					attempt: event.attempt,
 					maxAttempts: event.maxAttempts,
 					delayMs: event.delayMs,
@@ -2409,37 +2412,10 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 
 		const slashCommands = await slashCommandsPromise;
 
-		// Create convertToLlm wrapper that filters images if blockImages is enabled (defense-in-depth)
-		const convertToLlmWithBlockImages = (messages: AgentMessage[]): Message[] => {
-			const converted = convertToLlm(messages);
-			// Check setting dynamically so mid-session changes take effect
-			if (!settings.get("images.blockImages")) {
-				return converted;
-			}
-			// Filter out ImageContent from all messages, replacing with text placeholder
-			return converted.map(msg => {
-				if (msg.role === "user" || msg.role === "toolResult") {
-					const content = msg.content;
-					if (Array.isArray(content)) {
-						const hasImages = content.some(c => c.type === "image");
-						if (hasImages) {
-							const filteredContent = content
-								.map(c =>
-									c.type === "image" ? { type: "text" as const, text: "Image reading is disabled." } : c,
-								)
-								.filter((c, i, arr) => {
-									// Dedupe consecutive "Image reading is disabled." texts
-									if (!(c.type === "text" && c.text === "Image reading is disabled." && i > 0)) return true;
-									const prev = arr[i - 1];
-									return !(prev.type === "text" && prev.text === "Image reading is disabled.");
-								});
-							return { ...msg, content: filteredContent };
-						}
-					}
-				}
-				return msg;
-			});
-		};
+		const convertToLlmWithBlockImages = createBlockedMediaConverter(
+			convertToLlm,
+			() => settings.get("images.blockImages"),
+		);
 
 		// Final convertToLlm: chain block-images filter with secret obfuscation
 		const convertToLlmFinal = (messages: AgentMessage[]): Message[] => {

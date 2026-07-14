@@ -97,6 +97,7 @@ export function googleGeminiCliModelManagerOptions(
 							...m,
 							provider: "google-gemini-cli" as const,
 							baseUrl: endpoint,
+							input: m.input.filter(input => input !== "video"),
 						}));
 					},
 				}

@@ -82,7 +82,7 @@ export function getDefaultPasteImageKeys(platform: NodeJS.Platform = process.pla
 export const KEYBINDINGS = {
 	...TUI_KEYBINDINGS,
 	"app.interrupt": {
-		defaultKeys: "escape",
+		defaultKeys: ["escape", "ctrl+q"],
 		description: "Interrupt current operation",
 	},
 	"app.clear": {
@@ -162,10 +162,7 @@ export const KEYBINDINGS = {
 		description: "Open external editor",
 	},
 	"app.message.followUp": {
-		// Ctrl+Enter is preserved for terminals that deliver it (Kitty/iTerm2/WezTerm/Ghostty),
-		// but Windows Terminal does not emit a distinct event for Ctrl+Enter — Ctrl+Q is listed
-		// first so the default binding works there without remapping (#1903).
-		defaultKeys: ["ctrl+q", "ctrl+enter"],
+		defaultKeys: "ctrl+enter",
 		description: "Send follow-up message",
 	},
 	"app.message.dequeue": {
@@ -498,37 +495,7 @@ function migrateKeybindingsConfigFile(agentDir: string): void {
 	loadKeybindingsConfig(readPath, writeBackPath);
 }
 
-const FOLLOW_UP_KEYBINDING: AppKeybinding = "app.message.followUp";
-const WINDOWS_FOLLOW_UP_FALLBACK_KEY: KeyId = "ctrl+q";
-function keyListIncludes(keys: KeyId | KeyId[] | undefined, target: KeyId): boolean {
-	if (keys === undefined) return false;
-	const keyList = Array.isArray(keys) ? keys : [keys];
-	for (const key of keyList) {
-		if (key.toLowerCase() === target) return true;
-	}
-	return false;
-}
-
-function userBindingClaimsKey(config: KeybindingsConfig, target: KeyId, except: Keybinding): boolean {
-	for (const [keybinding, keys] of Object.entries(config)) {
-		if (!(keybinding in KEYBINDINGS)) continue;
-		if (keybinding === except) continue;
-		if (keyListIncludes(keys, target)) return true;
-	}
-	return false;
-}
-
-function removeKey(keys: KeyId[], target: KeyId): KeyId[] {
-	return keys.filter(key => key !== target);
-}
-
-function keyConfigValue(keys: KeyId[]): KeyId | KeyId[] {
-	if (keys.length === 1) {
-		const key = keys[0];
-		if (key !== undefined) return key;
-	}
-	return [...keys];
-}
+const DIRECT_INTERRUPT_KEY: KeyId = "ctrl+q";
 
 /**
  * Manages all keybindings (app + TUI).
@@ -536,12 +503,10 @@ function keyConfigValue(keys: KeyId[]): KeyId | KeyId[] {
  */
 export class KeybindingsManager extends TuiKeybindingsManager {
 	#configPath: string | undefined;
-	#userBindings: KeybindingsConfig;
 
 	constructor(userBindings: KeybindingsConfig = {}, configPath?: string) {
 		super(KEYBINDINGS, userBindings);
 		this.#configPath = configPath;
-		this.#userBindings = userBindings;
 	}
 
 	/**
@@ -573,26 +538,24 @@ export class KeybindingsManager extends TuiKeybindingsManager {
 		this.setUserBindings(config);
 	}
 
-	setUserBindings(userBindings: KeybindingsConfig): void {
-		this.#userBindings = userBindings;
-		super.setUserBindings(userBindings);
-	}
-
 	getKeys(keybinding: Keybinding): KeyId[] {
 		const keys = super.getKeys(keybinding);
-		if (keybinding === FOLLOW_UP_KEYBINDING) {
-			if (this.#userBindings[FOLLOW_UP_KEYBINDING] !== undefined) return keys;
-			if (!userBindingClaimsKey(this.#userBindings, WINDOWS_FOLLOW_UP_FALLBACK_KEY, FOLLOW_UP_KEYBINDING)) {
-				return keys;
-			}
-			return removeKey(keys, WINDOWS_FOLLOW_UP_FALLBACK_KEY);
+		if (keybinding === "app.message.followUp") {
+			return keys.filter(key => key.toLowerCase() !== DIRECT_INTERRUPT_KEY);
 		}
-		return keys;
+		if (
+			keybinding !== "app.interrupt" ||
+			keys.some(key => key.toLowerCase() === DIRECT_INTERRUPT_KEY)
+		) {
+			return keys;
+		}
+		return [...keys, DIRECT_INTERRUPT_KEY];
 	}
 
 	getResolvedBindings(): KeybindingsConfig {
 		const resolved = super.getResolvedBindings();
-		resolved[FOLLOW_UP_KEYBINDING] = keyConfigValue(this.getKeys(FOLLOW_UP_KEYBINDING));
+		resolved["app.interrupt"] = this.getKeys("app.interrupt");
+		resolved["app.message.followUp"] = this.getKeys("app.message.followUp");
 		return resolved;
 	}
 

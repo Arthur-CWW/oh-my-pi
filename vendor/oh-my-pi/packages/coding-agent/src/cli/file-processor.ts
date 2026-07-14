@@ -1,15 +1,16 @@
 /**
- * Process @file CLI arguments into text, document content, and image attachments
+ * Process @file CLI arguments into text, document content, and media attachments
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { ImageContent } from "@oh-my-pi/pi-ai";
+import { MAX_ANTIGRAVITY_INLINE_VIDEO_BYTES, type ImageContent, type MediaContent } from "@oh-my-pi/pi-ai";
 import { getProjectDir, isEnoent, readImageMetadata } from "@oh-my-pi/pi-utils";
 import chalk from "chalk";
 import { resolveReadPath } from "../tools/path-utils";
 import { formatBytes } from "../tools/render-utils";
 import { formatDimensionNote, resizeImage } from "../utils/image-resize";
 import { convertFileWithMarkit } from "../utils/markit";
+import { videoMimeTypeForExtension } from "../utils/video-loading";
 
 // Keep CLI startup responsive and avoid OOM when users pass huge files.
 // If a file exceeds these limits, we include it as a path-only <file/> block.
@@ -19,7 +20,7 @@ const CONVERTIBLE_EXTENSIONS = new Set([".pdf", ".doc", ".docx", ".ppt", ".pptx"
 
 export interface ProcessedFiles {
 	text: string;
-	images: ImageContent[];
+	attachments: MediaContent[];
 }
 
 export interface ProcessFileOptions {
@@ -27,27 +28,42 @@ export interface ProcessFileOptions {
 	autoResizeImages?: boolean;
 }
 
-/** Process @file arguments into text, document content, and image attachments */
+/** Process @file arguments into text, document content, and media attachments */
 export async function processFileArguments(fileArgs: string[], options?: ProcessFileOptions): Promise<ProcessedFiles> {
 	const autoResizeImages = options?.autoResizeImages ?? true;
 	let text = "";
-	const images: ImageContent[] = [];
+	const attachments: MediaContent[] = [];
 
 	for (const fileArg of fileArgs) {
 		// Expand and resolve path (handles ~ expansion and macOS screenshot Unicode spaces)
 		const absolutePath = path.resolve(resolveReadPath(fileArg, getProjectDir()));
 
 		const stat = fs.statSync(absolutePath, { throwIfNoEntry: false });
+		const ext = path.extname(absolutePath).toLowerCase();
+		const videoMimeType = videoMimeTypeForExtension(ext);
 		if (!stat) {
 			console.error(chalk.red(`Error: File not found: ${absolutePath}`));
 			process.exit(1);
 		}
 
-		const imageMetadata = await readImageMetadata(absolutePath);
+		if (videoMimeType) {
+			if (!stat.isFile()) {
+				throw new Error(`Invalid video attachment (not a regular file): ${absolutePath}`);
+			}
+			if (stat.size === 0) {
+				throw new Error(`Invalid video attachment (empty file): ${absolutePath}`);
+			}
+			if (stat.size >= MAX_ANTIGRAVITY_INLINE_VIDEO_BYTES) {
+				throw new Error(
+					`Video attachment is too large (${formatBytes(stat.size)}; inline limit is under ${formatBytes(MAX_ANTIGRAVITY_INLINE_VIDEO_BYTES)}). Antigravity Files API upload is unavailable: ${absolutePath}`,
+				);
+			}
+		}
+
+		const imageMetadata = videoMimeType ? undefined : await readImageMetadata(absolutePath);
 		const mimeType = imageMetadata?.mimeType;
-		const ext = path.extname(absolutePath).toLowerCase();
 		const maxBytes = mimeType ? MAX_CLI_IMAGE_BYTES : MAX_CLI_TEXT_BYTES;
-		if (stat.size > maxBytes) {
+		if (!videoMimeType && stat.size > maxBytes) {
 			console.error(
 				chalk.yellow(`Warning: Skipping file contents (too large: ${formatBytes(stat.size)}): ${absolutePath}`),
 			);
@@ -70,7 +86,10 @@ export async function processFileArguments(fileArgs: string[], options?: Process
 			continue;
 		}
 
-		if (mimeType) {
+		if (videoMimeType) {
+			attachments.push({ type: "video", mimeType: videoMimeType, data: buffer.toBase64() });
+			text += `<file name="${absolutePath}"></file>\n`;
+		} else if (mimeType) {
 			// Handle image file
 			const base64Content = buffer.toBase64();
 			let attachment: ImageContent;
@@ -101,7 +120,7 @@ export async function processFileArguments(fileArgs: string[], options?: Process
 				};
 			}
 
-			images.push(attachment);
+			attachments.push(attachment);
 
 			// Add text reference to image with optional dimension note
 			if (dimensionNote) {
@@ -129,5 +148,5 @@ export async function processFileArguments(fileArgs: string[], options?: Process
 		}
 	}
 
-	return { text, images };
+	return { text, attachments };
 }

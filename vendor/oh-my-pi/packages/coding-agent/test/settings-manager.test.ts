@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { Effort } from "@oh-my-pi/pi-ai";
-import { resolveAgentModelPatterns } from "@oh-my-pi/pi-coding-agent/config/model-resolver";
+import { resolveAgentModelPatterns } from "@oh-my-pi/pi-coding-agent/config/role-resolution";
 import {
 	getDefault,
 	getEnumValues,
@@ -65,6 +65,13 @@ describe("Settings", () => {
 		it("keeps eight inline images live by default", async () => {
 			const settings = await Settings.init({ cwd: projectDir, agentDir });
 			expect(settings.get("tui.maxInlineImages")).toBe(8);
+		});
+
+		it("enables fleet incident detection with the documented window and threshold", async () => {
+			const settings = await Settings.init({ cwd: projectDir, agentDir });
+			expect(settings.get("incidents.enabled")).toBe(true);
+			expect(settings.get("incidents.windowMs")).toBe(120_000);
+			expect(settings.get("incidents.threshold")).toBe(3);
 		});
 
 		it("normalizes malformed modelRoles while loading a resumable configuration", async () => {

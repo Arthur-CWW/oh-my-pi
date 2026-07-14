@@ -2,7 +2,7 @@ import { dlopen, FFIType, ptr } from "bun:ffi";
 import * as fs from "node:fs";
 import { $env, isBunTestRuntime, logger } from "@oh-my-pi/pi-utils";
 import { setKittyProtocolActive } from "./keys";
-import { StdinBuffer } from "./stdin-buffer";
+import { startBufferedStdin, StdinBuffer } from "./stdin-buffer";
 import { NotifyProtocol, setCellDimensions, setOsc99Supported, TERMINAL } from "./terminal-capabilities";
 
 const TERMINAL_PROGRESS_KEEPALIVE_MS = 1000;
@@ -544,11 +544,8 @@ export class ProcessTerminal implements Terminal {
 		// case stop() was called and start() is invoked again.
 		this.#acquireTerminal();
 
-		process.stdin.setEncoding("utf8");
-		process.stdin.resume();
-
-		// Enable bracketed paste mode - terminal will wrap pastes in \x1b[200~ ... \x1b[201~
-		this.#safeWrite("\x1b[?2004h");
+		this.#setupStdinBuffer();
+		startBufferedStdin(this.#stdinDataHandler!, () => this.#safeWrite("\x1b[?2004h"));
 
 		// Set up resize handler immediately. The OS refreshes process.stdout
 		// dimensions before firing `resize`, so it is authoritative for geometry:
@@ -1083,8 +1080,6 @@ export class ProcessTerminal implements Terminal {
 	 * handles the case where the response arrives split across multiple stdin events.
 	 */
 	#queryAndEnableKittyProtocol(): void {
-		this.#setupStdinBuffer();
-		process.stdin.on("data", this.#stdinDataHandler!);
 		// Progressive enhancement query: CSI ?u asks the terminal for its current
 		// kitty keyboard flags (no side effect on the stack); the DA1 sentinel
 		// guarantees a reply even from terminals that ignore CSI ?u.

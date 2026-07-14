@@ -37,8 +37,19 @@
  * stateful piece is the {@link CodexAutoRedeemCoordinator} container, whose
  * read-only views are passed in so the predicate itself stays deterministic.
  */
-import type { OAuthAccountIdentity, ResetCreditTarget, UsageReport } from "@oh-my-pi/pi-ai";
+import type {
+	Model,
+	OAuthAccountIdentity,
+	ResetCreditAccountStatus,
+	ResetCreditRedeemOutcome,
+	ResetCreditTarget,
+	UsageReport,
+} from "@oh-my-pi/pi-ai";
+import { formatDuration, logger } from "@oh-my-pi/pi-utils";
+import type { ModelRegistry } from "../config/model-registry";
+import type { Settings } from "../config/settings";
 import type { CodexAutoRedeemMode } from "../config/settings-schema";
+import type { ExtensionRunner } from "../extensibility/extensions";
 import { reportMatchesActiveAccount } from "../slash-commands/helpers/active-oauth-account";
 
 /** Weekly window counts as exhausted at `usedFraction >= 0.999` (used_percent >= 99.9). */
@@ -200,3 +211,208 @@ export const defaultCodexAutoRedeemCoordinator: CodexAutoRedeemCoordinator = {
 	lastAttemptAtByAccount: new Map(),
 	inFlightByAccount: new Map(),
 };
+
+export async function fetchCodexUsageReports(
+	modelRegistry: ModelRegistry,
+	signal?: AbortSignal,
+): Promise<UsageReport[] | null> {
+	const authStorage = modelRegistry.authStorage;
+	if (!authStorage.fetchUsageReports) return null;
+	return authStorage.fetchUsageReports({
+		baseUrlResolver: provider => modelRegistry.getProviderBaseUrl?.(provider),
+		signal,
+	});
+}
+
+export function redeemCodexResetCredit(
+	modelRegistry: ModelRegistry,
+	target: ResetCreditTarget,
+	signal?: AbortSignal,
+): Promise<ResetCreditRedeemOutcome> {
+	return modelRegistry.authStorage.redeemResetCredit({
+		target,
+		baseUrlResolver: provider => modelRegistry.getProviderBaseUrl?.(provider),
+		signal,
+	});
+}
+
+export function listCodexResetCredits(
+	modelRegistry: ModelRegistry,
+	sessionId: string,
+	signal?: AbortSignal,
+): Promise<ResetCreditAccountStatus[]> {
+	return modelRegistry.authStorage.listResetCredits({
+		sessionId,
+		baseUrlResolver: provider => modelRegistry.getProviderBaseUrl?.(provider),
+		signal,
+	});
+}
+
+export interface CodexAutoRedeemNoticeSink {
+	emitNotice(level: "info" | "warning" | "error", message: string, source?: string): void;
+}
+
+export interface CodexAutoRedeemRuntime {
+	modelRegistry: ModelRegistry;
+	settings: Settings;
+	model: Model | undefined;
+	sessionId: string;
+	extensionRunner: ExtensionRunner | undefined;
+	noticeSink: CodexAutoRedeemNoticeSink;
+	coordinator?: CodexAutoRedeemCoordinator;
+}
+
+async function confirmCodexAutoRedeem(
+	runtime: CodexAutoRedeemRuntime,
+	decision: CodexAutoRedeemRedeemDecision,
+): Promise<boolean> {
+	const runner = runtime.extensionRunner;
+	if (!runner?.hasUI()) {
+		runtime.noticeSink.emitNotice(
+			"warning",
+			"Codex saved reset is eligible, but auto-redeem is unset and no prompt UI is available. Run `/usage reset` or set codexResets.autoRedeem.",
+			"codex-auto-reset",
+		);
+		return false;
+	}
+
+	const who = decision.target.email ?? decision.target.accountId ?? "the active account";
+	const resetLabel = decision.availableCount === 1 ? "reset" : "resets";
+	try {
+		const choice = await runner
+			.getUIContext()
+			.select(
+				`Do you wanna redeem your reset?\n${who} is blocked by the weekly Codex limit for about ${formatDuration(decision.remainingMs)}. Spend 1 of ${decision.availableCount} saved ${resetLabel}?`,
+				[
+					{
+						label: "Yes",
+						description: "Redeem now and remember yes for future eligible Codex weekly blocks.",
+					},
+					{
+						label: "No",
+						description: "Do not auto-redeem saved Codex resets.",
+					},
+				],
+			);
+		if (choice === "Yes") {
+			runtime.settings.set("codexResets.autoRedeem", "yes");
+			return true;
+		}
+		if (choice === "No") runtime.settings.set("codexResets.autoRedeem", "no");
+	} catch (error) {
+		logger.warn("codex-auto-reset prompt failed", { error: String(error) });
+	}
+	return false;
+}
+
+export async function runCodexAutoRedeem(runtime: CodexAutoRedeemRuntime): Promise<boolean> {
+	const cfg = runtime.settings.getGroup("codexResets");
+	const model = runtime.model;
+	if (
+		runtime.settings.get("auth.codexUsageReset") === "manual" ||
+		!shouldEvaluateCodexAutoRedeem(cfg.autoRedeem) ||
+		!model ||
+		model.provider !== "openai-codex"
+	) {
+		return false;
+	}
+	const authStorage = runtime.modelRegistry.authStorage;
+	const identity = authStorage.getOAuthAccountIdentity("openai-codex", runtime.sessionId);
+	const accountKey = (identity?.accountId ?? identity?.email)?.trim().toLowerCase();
+	if (!accountKey) return false;
+	const coordinator = runtime.coordinator ?? defaultCodexAutoRedeemCoordinator;
+	const existing = coordinator.inFlightByAccount.get(accountKey);
+	if (existing) return existing;
+
+	const run = (async (): Promise<boolean> => {
+		const reports = await fetchCodexUsageReports(runtime.modelRegistry);
+		const decision = evaluateCodexAutoRedeem({
+			nowMs: Date.now(),
+			provider: model.provider,
+			modelId: model.id,
+			settings: {
+				autoRedeem: true,
+				minBlockedMinutes: Math.max(0, cfg.minBlockedMinutes),
+				keepCredits: Math.max(0, Math.trunc(cfg.keepCredits)),
+			},
+			identity,
+			reports,
+			attemptedBlockKeys: coordinator.attemptedBlockKeys,
+			lastAttemptAtByAccount: coordinator.lastAttemptAtByAccount,
+		});
+		if (!decision.redeem) {
+			logger.debug("codex-auto-reset: skipped", { reason: decision.reason });
+			return false;
+		}
+		if (shouldPromptCodexAutoRedeem(cfg.autoRedeem) && !(await confirmCodexAutoRedeem(runtime, decision))) {
+			return false;
+		}
+		coordinator.attemptedBlockKeys.add(decision.blockKey);
+		coordinator.lastAttemptAtByAccount.set(decision.accountKey, Date.now());
+		const who = decision.target.email ?? decision.target.accountId ?? "the active account";
+		let outcome: ResetCreditRedeemOutcome;
+		try {
+			outcome = await redeemCodexResetCredit(runtime.modelRegistry, decision.target, AbortSignal.timeout(15_000));
+		} catch (error) {
+			logger.info("codex-auto-reset audit", {
+				at: new Date().toISOString(),
+				action: "POST /wham/rate-limit-reset-credits/consume",
+				account: decision.accountKey,
+				window: decision.blockKey,
+				result: "transport-error",
+				error: String(error),
+			});
+			runtime.noticeSink.emitNotice(
+				"error",
+				"Codex auto-redeem failed before confirmation; no retry will be attempted.",
+				"codex-auto-reset",
+			);
+			return false;
+		}
+		logger.info("codex-auto-reset audit", {
+			at: new Date().toISOString(),
+			action: "POST /wham/rate-limit-reset-credits/consume",
+			account: decision.accountKey,
+			window: decision.blockKey,
+			result: outcome.code,
+		});
+		switch (outcome.code) {
+			case "reset": {
+				const left = Math.max(0, decision.availableCount - 1);
+				runtime.noticeSink.emitNotice(
+					"info",
+					`Auto-redeemed a saved Codex rate-limit reset for ${who} (${left} left); retrying now.`,
+					"codex-auto-reset",
+				);
+				void fetchCodexUsageReports(runtime.modelRegistry);
+				return true;
+			}
+			case "already_redeemed":
+				runtime.noticeSink.emitNotice(
+					"warning",
+					"A saved Codex reset was already redeemed elsewhere; waiting for the window.",
+					"codex-auto-reset",
+				);
+				return false;
+			case "no_credit":
+				runtime.noticeSink.emitNotice(
+					"warning",
+					"Codex auto-redeem found no saved reset credit; automatic reset remains stopped for this window.",
+					"codex-auto-reset",
+				);
+				return false;
+			case "nothing_to_reset":
+				runtime.noticeSink.emitNotice(
+					"warning",
+					"Codex reset reported nothing to reset; auto-redeem suppressed for this window.",
+					"codex-auto-reset",
+				);
+				return false;
+			default:
+				runtime.noticeSink.emitNotice("warning", `Codex auto-redeem failed (${outcome.code}).`, "codex-auto-reset");
+				return false;
+		}
+	})().finally(() => coordinator.inFlightByAccount.delete(accountKey));
+	coordinator.inFlightByAccount.set(accountKey, run);
+	return run;
+}

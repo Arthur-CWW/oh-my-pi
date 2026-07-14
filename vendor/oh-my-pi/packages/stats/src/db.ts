@@ -41,6 +41,13 @@ const BACKFILL_PENDING = "pending";
 const USER_MESSAGES_BACKFILL_KEY = "user_messages_v6";
 const USER_MESSAGE_LINKS_REPAIR_KEY = "user_message_links_v1";
 const PRIORITY_PREMIUM_REQUESTS_BACKFILL_KEY = "premium_requests_priority_v1";
+const COST_BACKFILL_KEY = "cost_backfill_version";
+// Bump whenever catalog fallback or family/alias pricing rules change.
+const COST_BACKFILL_VERSION = "2";
+const CODEX_LUNA_COST: ModelCost = { input: 1, output: 6, cacheRead: 0.1, cacheWrite: 1.25 };
+const CODEX_SOL_COST: ModelCost = { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 6.25 };
+const CODEX_TERRA_COST: ModelCost = { input: 2.5, output: 15, cacheRead: 0.25, cacheWrite: 3.125 };
+const CODEX_GPT_5_5_COST: ModelCost = { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 0 };
 function shouldResetBackfill(value: string | undefined): boolean {
 	return value !== BACKFILL_COMPLETE && value !== BACKFILL_PENDING;
 }
@@ -199,20 +206,37 @@ function getBundledModelCost(provider: string, modelId: string): ModelCost | nul
 	return model?.cost ?? null;
 }
 
+function getCodexFamilyCost(modelId: string): ModelCost | null {
+	switch (modelId) {
+		case "gpt-5-codex-mini":
+		case "gpt-5.6-luna":
+			return CODEX_LUNA_COST;
+		case "gpt-5.6":
+		case "gpt-5.6-sol":
+			return CODEX_SOL_COST;
+		case "gpt-5.6-terra":
+			return CODEX_TERRA_COST;
+		case "gpt-5.5":
+			return CODEX_GPT_5_5_COST;
+		default:
+			return null;
+	}
+}
+
 function getCatalogCost(provider: string, modelId: string): ModelCost | null {
 	const primaryCost = getBundledModelCost(provider, modelId);
 	if (primaryCost && hasBillableCost(primaryCost)) {
 		return primaryCost;
 	}
 
-	if (provider === "openai-codex") {
-		const openAICost = getBundledModelCost("openai", modelId);
-		if (openAICost && hasBillableCost(openAICost)) {
-			return openAICost;
-		}
+	if (provider !== "openai-codex") return null;
+
+	const openAICost = getBundledModelCost("openai", modelId);
+	if (openAICost && hasBillableCost(openAICost)) {
+		return openAICost;
 	}
 
-	return null;
+	return getCodexFamilyCost(modelId);
 }
 
 function calculateCatalogCost(provider: string, modelId: string, tokens: CostTokens): UsageCost | null {
@@ -242,6 +266,11 @@ function resolveStoredCost(stats: MessageStats): UsageCost {
 }
 
 function backfillMissingCatalogCosts(database: Database): void {
+	const recordedVersion = database
+		.prepare("SELECT value FROM meta WHERE key = ?")
+		.get(COST_BACKFILL_KEY) as { value: string } | null;
+	if (recordedVersion?.value === COST_BACKFILL_VERSION) return;
+
 	const rows = database
 		.prepare(`
 			SELECT id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens
@@ -249,13 +278,14 @@ function backfillMissingCatalogCosts(database: Database): void {
 			WHERE cost_total = 0 AND total_tokens > 0
 		`)
 		.all() as CostBackfillRow[];
-
-	if (rows.length === 0) return;
-
 	const update = database.prepare(`
 		UPDATE messages
 		SET cost_input = ?, cost_output = ?, cost_cache_read = ?, cost_cache_write = ?, cost_total = ?
 		WHERE id = ?
+	`);
+	const recordVersion = database.prepare(`
+		INSERT INTO meta (key, value) VALUES (?, ?)
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value
 	`);
 
 	const applyBackfill = database.transaction(() => {
@@ -271,6 +301,7 @@ function backfillMissingCatalogCosts(database: Database): void {
 
 			update.run(cost.input, cost.output, cost.cacheRead, cost.cacheWrite, cost.total, row.id);
 		}
+		recordVersion.run(COST_BACKFILL_KEY, COST_BACKFILL_VERSION);
 	});
 
 	applyBackfill();

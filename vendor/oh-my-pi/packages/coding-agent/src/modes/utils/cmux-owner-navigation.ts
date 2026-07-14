@@ -13,6 +13,7 @@ export type FocusCmuxOwnerResult =
 export interface FocusCmuxOwnerOptions {
 	readonly ownershipRoot?: string;
 	readonly env?: Readonly<Record<string, string | undefined>>;
+	readonly excludedOwnerEpoch?: string;
 }
 
 function errorReason(error: unknown): string {
@@ -20,16 +21,17 @@ function errorReason(error: unknown): string {
 	return reason.replace(/[.\s]+$/, "") || "unknown error";
 }
 
-/** Revalidates the live owner capability before focusing its cmux workspace and surface. */
-export async function focusCmuxOwner(
-	action: FocusCmuxOwnerAction,
+/** Revalidates a live owner view before focusing its cmux workspace and surface. */
+export async function focusLiveCmuxOwner(
+	sessionFile: string,
+	sessionId: string,
 	options: FocusCmuxOwnerOptions = {},
 ): Promise<FocusCmuxOwnerResult> {
 	try {
-		const view = await inspectLiveSessionOwnerView(action.sessionFile, action.sessionId, {
+		const view = await inspectLiveSessionOwnerView(sessionFile, sessionId, {
 			root: options.ownershipRoot,
 		});
-		if (!view || view.ownerEpoch === action.lostOwnerEpoch) return { kind: "unavailable" };
+		if (!view || view.ownerEpoch === options.excludedOwnerEpoch) return { kind: "unavailable" };
 
 		const env = options.env ?? process.env;
 		const password = view.cmux.socketPath === env.CMUX_SOCKET_PATH ? env.CMUX_SOCKET_PASSWORD || undefined : undefined;
@@ -44,4 +46,15 @@ export async function focusCmuxOwner(
 	} catch (error) {
 		return { kind: "failed", reason: errorReason(error) };
 	}
+}
+
+/** Revalidates the current owner before focusing it, rejecting the lost diagnostic epoch. */
+export async function focusCmuxOwner(
+	action: FocusCmuxOwnerAction,
+	options: FocusCmuxOwnerOptions = {},
+): Promise<FocusCmuxOwnerResult> {
+	return focusLiveCmuxOwner(action.sessionFile, action.sessionId, {
+		...options,
+		excludedOwnerEpoch: action.lostOwnerEpoch,
+	});
 }

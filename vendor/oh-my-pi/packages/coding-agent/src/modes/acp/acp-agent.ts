@@ -738,7 +738,7 @@ export class AcpAgent implements Agent {
 		});
 		if (builtinResult !== false) {
 			if ("prompt" in builtinResult) {
-				await record.session.prompt(builtinResult.prompt, { images });
+				await record.session.prompt(builtinResult.prompt, { attachments: images });
 				return;
 			}
 			const promptTurn = record.promptTurn;
@@ -754,7 +754,7 @@ export class AcpAgent implements Agent {
 		}
 
 		const extensionPromptBaseline = new Set(record.extensionUserMessageTasks);
-		const agentInvoked = await record.session.prompt(text, { images });
+		const agentInvoked = await record.session.prompt(text, { attachments: images });
 		// Extension and custom-TS commands are handled locally inside session.prompt().
 		// An ACP extension command can still call pi.sendUserMessage(), which starts
 		// an async nested prompt through the extension runtime. Keep the ACP turn

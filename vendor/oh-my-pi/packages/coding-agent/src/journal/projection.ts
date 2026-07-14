@@ -74,3 +74,43 @@ export function readJournalTailChunk(
 		return null;
 	}
 }
+
+/** Async counterpart for render-adjacent consumers. File metadata and bytes are read without blocking the TUI thread. */
+export async function readJournalTailChunkAsync(
+	filePath: string,
+	fromByte = 0,
+	maxBytes = JOURNAL_TAIL_BYTES,
+): Promise<JournalTailChunk | null> {
+	try {
+		const stat = await fs.promises.stat(filePath);
+		if (!stat.isFile()) return null;
+		if (stat.size <= fromByte) return { text: "", fromByte, newSize: stat.size };
+		const start = fromByte === 0 ? Math.max(0, stat.size - maxBytes) : fromByte;
+		const length = stat.size - start;
+		const handle = await fs.promises.open(filePath, "r");
+		const buffer = Buffer.allocUnsafe(length);
+		let bytesRead = 0;
+		try {
+			while (bytesRead < length) {
+				const read = await handle.read(buffer, bytesRead, length - bytesRead, start + bytesRead);
+				if (read.bytesRead === 0) break;
+				bytesRead += read.bytesRead;
+			}
+		} finally {
+			await handle.close();
+		}
+		let text = buffer.subarray(0, bytesRead).toString("utf8");
+		let actualStart = start;
+		if (fromByte === 0 && start > 0) {
+			const newline = text.indexOf("\n");
+			if (newline < 0) return { text: "", fromByte: stat.size, newSize: stat.size };
+			actualStart += Buffer.byteLength(text.slice(0, newline + 1));
+			text = text.slice(newline + 1);
+		}
+		const finalNewline = text.lastIndexOf("\n");
+		if (finalNewline < 0) return { text: "", fromByte: actualStart, newSize: stat.size };
+		return { text: text.slice(0, finalNewline + 1), fromByte: actualStart, newSize: stat.size };
+	} catch {
+		return null;
+	}
+}

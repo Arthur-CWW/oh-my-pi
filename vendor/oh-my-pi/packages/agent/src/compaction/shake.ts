@@ -13,7 +13,7 @@
 import type { TextContent, ToolResultMessage } from "@oh-my-pi/pi-ai";
 import { countTokens } from "@oh-my-pi/pi-natives";
 import type { AgentMessage } from "../types";
-import { estimateTokens } from "./compaction";
+import { estimateTokens, VIDEO_TOKEN_CONTROL_FLOW_FLOOR } from "./compaction";
 import type { CustomMessageEntry, SessionEntry, SessionMessageEntry } from "./entries";
 import {
 	collectToolCallsById,
@@ -106,7 +106,9 @@ function entryTokens(entry: SessionEntry): number {
 		const content = entry.content;
 		if (typeof content === "string") return content.length === 0 ? 0 : countTokens(content);
 		const fragments = content.filter((block): block is TextContent => block.type === "text").map(block => block.text);
-		return fragments.length === 0 ? 0 : countTokens(fragments);
+		const videoFloor =
+			content.filter(block => block.type === "video").length * VIDEO_TOKEN_CONTROL_FLOW_FLOOR;
+		return videoFloor + (fragments.length === 0 ? 0 : countTokens(fragments));
 	}
 	return 0;
 }

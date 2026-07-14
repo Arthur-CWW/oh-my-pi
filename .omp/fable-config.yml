@@ -11,20 +11,25 @@ modelRoles:
   plan: openai-codex/gpt-5.6-sol:high
   advisor: openai-codex/gpt-5.6-sol:high
   designer: anthropic/claude-opus-4-6
-  vision: google-antigravity/gemini-3.5-flash-low
+  vision: google-antigravity/gemini-3.5-flash
 
-# Retry chains are restricted to built-in model roles.
+# Failing subagents may propose these chains; the parent must explicitly approve
+# every switch. Main/orchestrator sessions never auto-apply them.
 retry:
-  modelFallback: true
+  fallbackApproval: true
   fallbackRevertPolicy: cooldown-expiry
-  fallbackChains:
+  # Temporary quota-exhaustion posture: subagents only. Delete or move this
+  # timestamp into the past to restore approval round-trips.
+  subagentFallbackAutoApproveUntil: "2026-07-14T21:49:33Z"
+  proposableFallbackChains:
+    task:
+      - kimi-code/kimi-for-coding
+      - anthropic/claude-opus-4-6
     smol:
       - openai-codex/gpt-5.6-sol:high
       - kimi-code/kimi-for-coding
     designer:
       - openai-codex/gpt-5.6-sol:high
-    vision:
-      - kimi-code/kimi-for-coding
 
 advisor:
   enabled: false
@@ -34,6 +39,12 @@ advisor:
 serviceTier: none
 auth:
   codexRefresh: manual
+  codexUsageReset: manual
+
+# New runtime master gate plus the installed runtime's existing policy key.
+# Keeping both manual/no prevents saved-reset redemption across the cutover.
+codexResets:
+  autoRedeem: "no"
 
 task:
   enableLsp: true

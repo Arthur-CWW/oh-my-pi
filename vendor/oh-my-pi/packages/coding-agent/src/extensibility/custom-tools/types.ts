@@ -23,6 +23,7 @@ import type { ExecOptions, ExecResult } from "../../exec/exec";
 import type { HookUIContext } from "../../extensibility/hooks/types";
 import type * as PiCodingAgent from "../../index";
 import type { Theme } from "../../modes/theme/theme";
+import type { TranscriptDisplayContext } from "../../modes/transcript-display";
 import type { ReadonlySessionManager } from "../../session/session-manager";
 import type { TodoItem } from "../../tools/todo";
 import type * as TypeBox from "../typebox";
@@ -119,6 +120,7 @@ export type CustomToolSessionEvent =
 	  }
 	| {
 			reason: "auto_retry_start";
+			cause: "network" | "rate-limit" | "provider";
 			attempt: number;
 			maxAttempts: number;
 			delayMs: number;
@@ -149,6 +151,8 @@ export interface RenderResultOptions {
 	isPartial: boolean;
 	/** Current spinner frame index for animated elements (0-9, only provided during partial results) */
 	spinnerFrame?: number;
+	/** Stable transcript presentation settings, shared by reference with the owning TUI. */
+	transcriptDisplay?: TranscriptDisplayContext;
 }
 
 export type CustomToolResult<TDetails = any> = AgentToolResult<TDetails>;

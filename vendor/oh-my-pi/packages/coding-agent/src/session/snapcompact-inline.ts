@@ -14,7 +14,14 @@
  * estimate (`estimateInlineSavings`) so the two can never disagree.
  */
 
-import type { Context, ImageContent, Model, TextContent, ToolResultMessage, UserMessage } from "@oh-my-pi/pi-ai";
+import type {
+	Context,
+	ImageContent,
+	Model,
+	TextContent,
+	ToolResultMessage,
+	UserContent,
+} from "@oh-my-pi/pi-ai";
 import { countTokens } from "@oh-my-pi/pi-natives";
 import * as snapcompact from "@oh-my-pi/snapcompact";
 import contextFramesNote from "../prompts/system/snapcompact-context-frames-note.md" with { type: "text" };
@@ -501,25 +508,29 @@ export class SnapcompactInlineTransformer {
 
 		let systemPrompt = context.systemPrompt;
 		if (plan.systemPrompt && userIndex >= 0 && systemPromptTarget) {
-			const hash = Bun.hash(systemPromptTarget.text);
-			let cached = this.#systemCache;
-			if (!cached || cached.hash !== hash) {
-				cached = {
-					hash,
-					frames: snapcompact.renderMany(systemPromptTarget.text, { shape, maxFrames: MAX_SYSTEM_PROMPT_FRAMES }),
+			const original = messages[userIndex];
+			if (original?.role === "user") {
+				const originalContent: UserContent[] =
+					typeof original.content === "string" ? [{ type: "text", text: original.content }] : original.content;
+				const hash = Bun.hash(systemPromptTarget.text);
+				let cached = this.#systemCache;
+				if (!cached || cached.hash !== hash) {
+					cached = {
+						hash,
+						frames: snapcompact.renderMany(systemPromptTarget.text, {
+							shape,
+							maxFrames: MAX_SYSTEM_PROMPT_FRAMES,
+						}),
+					};
+					this.#systemCache = cached;
+				}
+				messages[userIndex] = {
+					...original,
+					content: [{ type: "text", text: systemPromptTarget.userNote }, ...cached.frames, ...originalContent],
 				};
-				this.#systemCache = cached;
+				systemPrompt = systemPromptTarget.replacement;
+				changed = true;
 			}
-			const frames = cached.frames;
-			const original = messages[userIndex] as UserMessage;
-			const originalContent: (TextContent | ImageContent)[] =
-				typeof original.content === "string" ? [{ type: "text", text: original.content }] : original.content;
-			messages[userIndex] = {
-				...original,
-				content: [{ type: "text", text: systemPromptTarget.userNote }, ...frames, ...originalContent],
-			};
-			systemPrompt = systemPromptTarget.replacement;
-			changed = true;
 		}
 
 		if (!changed) return context;

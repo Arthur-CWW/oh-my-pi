@@ -652,6 +652,64 @@ async function probeLease(lease: SessionLeaseV1, identity?: OwnerIdentitySidecar
 	return result.promise;
 }
 
+async function attemptBindMuxReservation(
+	socketPath: string,
+	epoch: string,
+	sessionFile: string,
+	sessionId: string,
+): Promise<boolean> {
+	const result = Promise.withResolvers<boolean>();
+	const socket = net.createConnection(socketPath);
+	let body = "";
+	let settled = false;
+	const finish = (value: boolean): void => {
+		if (settled) return;
+		settled = true;
+		socket.destroy();
+		result.resolve(value);
+	};
+	const timeout = setTimeout(() => finish(false), 1_000);
+	socket.once("error", () => {
+		clearTimeout(timeout);
+		finish(false);
+	});
+	socket.on("data", chunk => {
+		body += chunk.toString();
+		const newline = body.indexOf("\n");
+		if (newline < 0) return;
+		clearTimeout(timeout);
+		try {
+			const message: unknown = JSON.parse(body.slice(0, newline));
+			finish(
+				isRecord(message) &&
+					Object.keys(message).length === 2 &&
+					message.t === "ack" &&
+					message.operation === "bindReservation",
+			);
+		} catch {
+			finish(false);
+		}
+	});
+	socket.once("connect", () =>
+		socket.write(`${JSON.stringify({ t: "bindReservation", epoch, sessionFile, sessionId })}\n`),
+	);
+	return result.promise;
+}
+
+async function bindMuxReservation(
+	socketPath: string,
+	epoch: string,
+	sessionFile: string,
+	sessionId: string,
+): Promise<boolean> {
+	const deadline = Date.now() + 5_000;
+	do {
+		if (await attemptBindMuxReservation(socketPath, epoch, sessionFile, sessionId)) return true;
+		await new Promise(resolve => setTimeout(resolve, 25));
+	} while (Date.now() < deadline);
+	return false;
+}
+
 function processIdentity(): ProcessIdentity {
 	return (
 		processIdentityFor(process.pid) ?? { bootId: "unavailable", pid: process.pid, startFingerprint: "unavailable" }
@@ -1056,14 +1114,14 @@ export async function acquireSessionOwnership(
 		throw new ExternalSessionOwnerUnverifiable("owner_record_corrupt");
 	const location = await leaseLocation(sessionFile, sessionId, options.root);
 	if (options.suppliedEpoch) {
-		let lease = await readLease(location);
 		if (options.suppliedReservation) {
-			const deadline = Date.now() + 5_000;
-			while ((lease === null || lease === "corrupt") && Date.now() < deadline) {
-				await new Promise(resolve => setTimeout(resolve, 25));
-				lease = await readLease(location);
-			}
+			if (
+				typeof options.suppliedSocket !== "string" ||
+				!(await bindMuxReservation(options.suppliedSocket, options.suppliedEpoch, sessionFile, sessionId))
+			)
+				throw new ExternalSessionOwnerUnverifiable("external_owner_unverifiable");
 		}
+		const lease = await readLease(location);
 		if (
 			lease === null ||
 			lease === "corrupt" ||

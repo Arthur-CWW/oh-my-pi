@@ -33,6 +33,31 @@ describe("AsyncJobManager", () => {
 		expect(manager.getJob(jobId)?.status).toBe("completed");
 	});
 
+	test("coalesces a same-turn progress burst to the latest snapshot", async () => {
+		const progressEvents: Array<{ text: string; sequence?: unknown }> = [];
+		const manager = new AsyncJobManager({ onJobComplete: async () => {} });
+		manager.register(
+			"task",
+			"bursting task",
+			async ({ reportProgress }) => {
+				const pending: Promise<void>[] = [];
+				for (let sequence = 0; sequence < 100; sequence++) {
+					pending.push(reportProgress(`step ${sequence}`, { sequence }));
+				}
+				await Promise.all(pending);
+				return "done";
+			},
+			{
+				onProgress: async (text, details) => {
+					progressEvents.push({ text, sequence: details?.sequence });
+				},
+			},
+		);
+
+		await manager.waitForAll();
+		expect(progressEvents).toEqual([{ text: "step 99", sequence: 99 }]);
+	});
+
 	test("snapshots future group reporting and explicitly escalates a hub completion", async () => {
 		const reports: string[] = [];
 		const manager = new AsyncJobManager({

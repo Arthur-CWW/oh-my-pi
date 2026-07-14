@@ -1,6 +1,6 @@
 import type { ImageContent } from "@oh-my-pi/pi-ai";
 import { logger } from "@oh-my-pi/pi-utils";
-import { type BlobPutResult, blobExtensionForImageMimeType } from "../session/blob-store";
+import { type BlobPutResult, blobExtensionForMimeType } from "../session/blob-store";
 import { fileHyperlink } from "../tui/hyperlink";
 
 /** Matches `[Image #N]`/`[Image #N, WxH]` and `[Paste #N, +X lines]`/`[Paste #N, Y chars]` tokens.
@@ -83,7 +83,7 @@ async function materializeImageReferenceLinkAsync(
 ): Promise<string | undefined> {
 	try {
 		const result = await putBlob(Buffer.from(image.data, "base64"), {
-			extension: blobExtensionForImageMimeType(image.mimeType),
+			extension: blobExtensionForMimeType(image.mimeType),
 		});
 		return result.displayPath;
 	} catch (error) {
@@ -103,7 +103,7 @@ function materializeImageReferenceLink(
 ): string | undefined {
 	try {
 		const result = putBlob(Buffer.from(image.data, "base64"), {
-			extension: blobExtensionForImageMimeType(image.mimeType),
+			extension: blobExtensionForMimeType(image.mimeType),
 		});
 		return result.displayPath;
 	} catch (error) {

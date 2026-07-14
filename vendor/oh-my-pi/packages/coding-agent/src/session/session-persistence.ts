@@ -1,7 +1,8 @@
+import { isVideoMimeType, type MediaContent, type VideoContent } from "@oh-my-pi/pi-ai";
 import {
 	type BlobStore,
-	externalizeImageDataSync,
 	externalizeImageDataUrlSync,
+	externalizeMediaDataSync,
 	isBlobRef,
 	isImageDataUrl,
 } from "./blob-store";
@@ -11,7 +12,6 @@ const MAX_PERSIST_CHARS = 500_000;
 const TRUNCATION_NOTICE = "\n\n[Session persistence truncated large content]";
 /** Minimum base64 length to externalize to blob store (skip tiny inline images) */
 const BLOB_EXTERNALIZE_THRESHOLD = 1024;
-const TEXT_CONTENT_KEY = "content";
 
 function truncateString(value: string, maxLength: number): string {
 	if (value.length <= maxLength) return value;
@@ -25,28 +25,55 @@ function truncateString(value: string, maxLength: number): string {
 	return truncated;
 }
 
-export function isImageBlock(value: unknown): value is { type: "image"; data: string; mimeType?: string } {
+
+function isVideoContent(value: unknown): value is VideoContent {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+	const media = value as Record<string, unknown>;
 	return (
-		typeof value === "object" &&
-		value !== null &&
-		"type" in value &&
-		(value as { type?: string }).type === "image" &&
-		"data" in value &&
-		typeof (value as { data?: string }).data === "string"
+		media.type === "video" &&
+		typeof media.data === "string" &&
+		typeof media.mimeType === "string" &&
+		isVideoMimeType(media.mimeType)
 	);
 }
 
+export function isMediaContent(value: unknown): value is MediaContent {
+	if (isVideoContent(value)) return true;
+	if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+	const media = value as Record<string, unknown>;
+	return (
+		media.type === "image" &&
+		typeof media.data === "string" &&
+		typeof media.mimeType === "string" &&
+		(media.detail === undefined ||
+			media.detail === "auto" ||
+			media.detail === "low" ||
+			media.detail === "high" ||
+			media.detail === "original")
+	);
+}
+
+function externalizeMediaContent(media: MediaContent, blobStore: BlobStore): MediaContent {
+	if (isBlobRef(media.data)) return media;
+	if (media.type === "image") {
+		if (media.data.length < BLOB_EXTERNALIZE_THRESHOLD) return media;
+		return { ...media, data: externalizeMediaDataSync(blobStore, media.data, media.mimeType) };
+	}
+	return { ...media, data: externalizeMediaDataSync(blobStore, media.data, media.mimeType) };
+}
+
 /**
- * Recursively truncate large strings in an object for session persistence.
- * - Truncates any oversized string fields (key-agnostic)
- * - Replaces oversized image blocks with text notices
- * - Updates lineCount when content is truncated
- * - Returns original object if no changes needed (structural sharing)
+ * Recursively prepare an entry for session persistence.
+ * - Externalizes typed video content unconditionally
+ * - Externalizes typed image content above the inline threshold
+ * - Truncates oversized non-media string fields
+ * - Updates lineCount when textual content is truncated
+ * - Returns the original object if no changes are needed (structural sharing)
  *
  * Runs in one synchronous tick so an OOM/SIGKILL landing right after a persist
- * call returns cannot lose the entry. Image externalization happens via the
- * synchronous blob-store path (`fs.writeFileSync`), so blob bytes are in the
- * kernel page cache before the JSONL line referencing them is written.
+ * call returns cannot lose the entry. Media externalization uses the synchronous
+ * blob-store path, so blob bytes are in the kernel page cache before the JSONL
+ * line referencing them is written.
  */
 function truncateForPersistence(obj: unknown, blobStore: BlobStore, key?: string): unknown {
 	if (obj === null || obj === undefined) return obj;
@@ -67,28 +94,25 @@ function truncateForPersistence(obj: unknown, blobStore: BlobStore, key?: string
 		return obj;
 	}
 
+	if (typeof obj === "object" && obj !== null && !Array.isArray(obj)) {
+		const type = (obj as { type?: unknown }).type;
+		if (type === "image" || type === "video") {
+			if (!isMediaContent(obj)) throw new TypeError(`Invalid typed ${type} content in session entry`);
+			return externalizeMediaContent(obj, blobStore);
+		}
+	}
+
 	if (Array.isArray(obj)) {
 		let changed = false;
 		const result: unknown[] = new Array(obj.length);
 		for (let i = 0; i < obj.length; i++) {
 			const item = obj[i];
-			if (
-				key === TEXT_CONTENT_KEY &&
-				isImageBlock(item) &&
-				!isBlobRef(item.data) &&
-				item.data.length >= BLOB_EXTERNALIZE_THRESHOLD
-			) {
-				changed = true;
-				result[i] = { ...item, data: externalizeImageDataSync(blobStore, item.data, item.mimeType) };
-				continue;
-			}
-			const newItem = truncateForPersistence(item, blobStore, key);
+			const newItem = truncateForPersistence(item, blobStore);
 			if (newItem !== item) changed = true;
 			result[i] = newItem;
 		}
 		return changed ? result : obj;
 	}
-
 	if (typeof obj === "object") {
 		let changed = false;
 		const entries: Array<readonly [string, unknown]> = [];

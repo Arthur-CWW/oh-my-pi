@@ -2,8 +2,9 @@ import type { Dirent } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { isEnoent } from "@oh-my-pi/pi-utils";
+import { APP_NAME, isEnoent, VERSION } from "@oh-my-pi/pi-utils";
 import { $ } from "bun";
+import type { Database } from "bun:sqlite";
 import {
 	getBehaviorDashboardStats,
 	getCostDashboardStats,
@@ -16,6 +17,7 @@ import {
 	getTotalMessageCount,
 	syncAllSessions,
 } from "./aggregator";
+import { closeDb, initDb } from "./db";
 import { decodeEmbeddedClientArchive } from "./embedded-client";
 import embeddedClientArchiveTxt from "./embedded-client.generated.txt";
 
@@ -37,6 +39,108 @@ const USE_EMBEDDED_CLIENT = EMBEDDED_CLIENT_ARCHIVE !== null || IS_PREBUILT;
 
 const EMBEDDED_CLIENT_DIR_ROOT = path.join(os.tmpdir(), "omp-stats-client");
 let embeddedClientDirPromise: Promise<string> | null = null;
+
+export interface StatsServer {
+	port: number;
+	stop: () => Promise<void>;
+}
+
+export interface StatsHealth {
+	status: "ok";
+	db: "ready";
+}
+
+export interface StatsVersion {
+	name: string;
+	version: string;
+	runtime: { name: "bun"; version: string };
+	provenance: {
+		compiled: boolean;
+		bundled: boolean;
+		forkHash: string | null;
+	};
+}
+
+export interface StatsErrorPayload {
+	error: {
+		code: "BAD_REQUEST" | "NOT_FOUND" | "DB_UNAVAILABLE" | "INTERNAL_ERROR";
+		message: string;
+	};
+}
+
+let dbInitPromise: Promise<Database> | null = null;
+
+function ensureDbReady(): Promise<Database> {
+	if (!dbInitPromise) {
+		dbInitPromise = initDb().catch(error => {
+			dbInitPromise = null;
+			throw error;
+		});
+	}
+	return dbInitPromise;
+}
+
+async function closeStatsDb(): Promise<void> {
+	const pendingInit = dbInitPromise;
+	if (pendingInit) {
+		try {
+			await pendingInit;
+		} catch {
+			// A failed initialization has no open database to close.
+		}
+	}
+	closeDb();
+	if (dbInitPromise === pendingInit) dbInitPromise = null;
+}
+
+function errorResponse(status: number, code: StatsErrorPayload["error"]["code"], message: string): Response {
+	return Response.json({ error: { code, message } } satisfies StatsErrorPayload, { status });
+}
+
+function validateServerPort(port: number): void {
+	if (!Number.isInteger(port) || port < 0 || port > 65_535) {
+		throw new Error(`Invalid stats server port "${String(port)}"; expected an integer from 0 to 65535`);
+	}
+}
+
+export interface WaitForStatsHealthOptions {
+	attempts?: number;
+	intervalMs?: number;
+	requestTimeoutMs?: number;
+}
+
+export async function waitForStatsHealth(
+	baseUrl: string,
+	options: WaitForStatsHealthOptions = {},
+): Promise<StatsHealth> {
+	const attempts = options.attempts ?? 20;
+	const intervalMs = options.intervalMs ?? 50;
+	const requestTimeoutMs = options.requestTimeoutMs ?? 500;
+	if (!Number.isInteger(attempts) || attempts < 1) throw new Error("Health check attempts must be a positive integer");
+	if (!Number.isFinite(intervalMs) || intervalMs < 0) throw new Error("Health check interval must be non-negative");
+	if (!Number.isFinite(requestTimeoutMs) || requestTimeoutMs < 1) {
+		throw new Error("Health check request timeout must be positive");
+	}
+
+	const healthUrl = new URL("/healthz", baseUrl).href;
+	let lastFailure = "no response";
+	for (let attempt = 1; attempt <= attempts; attempt++) {
+		try {
+			const response = await fetch(healthUrl, { signal: AbortSignal.timeout(requestTimeoutMs) });
+			if (response.ok) {
+				const health = (await response.json()) as Partial<StatsHealth>;
+				if (health.status === "ok" && health.db === "ready") return health as StatsHealth;
+				lastFailure = "invalid readiness payload";
+			} else {
+				lastFailure = `HTTP ${response.status}`;
+			}
+		} catch (error) {
+			lastFailure = error instanceof Error ? error.message : String(error);
+		}
+		if (attempt < attempts && intervalMs > 0) await Bun.sleep(intervalMs);
+	}
+	throw new Error(`Stats server did not become healthy at ${healthUrl} after ${attempts} attempts (${lastFailure})`);
+}
 
 function sanitizeArchivePath(archivePath: string): string | null {
 	const normalized = archivePath.replaceAll("\\", "/").replace(/^\.\//, "");
@@ -243,9 +347,9 @@ async function handleApi(req: Request): Promise<Response> {
 
 	if (path.startsWith("/api/request/")) {
 		const id = path.split("/").pop();
-		if (!id) return new Response("Bad Request", { status: 400 });
-		const details = await getRequestDetails(parseInt(id, 10));
-		if (!details) return new Response("Not Found", { status: 404 });
+		if (!id || !/^\d+$/.test(id)) return errorResponse(400, "BAD_REQUEST", "Request id must be an integer");
+		const details = await getRequestDetails(Number(id));
+		if (!details) return errorResponse(404, "NOT_FOUND", `Request ${id} was not found`);
 		return Response.json(details);
 	}
 
@@ -255,7 +359,7 @@ async function handleApi(req: Request): Promise<Response> {
 		return Response.json({ ...result, totalMessages: count });
 	}
 
-	return new Response("Not Found", { status: 404 });
+	return errorResponse(404, "NOT_FOUND", `No stats API route exists for ${path}`);
 }
 
 /**
@@ -283,57 +387,81 @@ async function handleStatic(requestPath: string): Promise<Response> {
 /**
  * Start the HTTP server.
  */
-export async function startServer(port = 3847): Promise<{ port: number; stop: () => void }> {
-	await ensureClientBuild();
+export async function startServer(port = 3847): Promise<StatsServer> {
+	validateServerPort(port);
+	try {
+		await ensureClientBuild();
+	} catch (error) {
+		const detail = error instanceof Error ? error.message : String(error);
+		throw new Error(`Unable to prepare the stats dashboard client: ${detail}`, { cause: error });
+	}
 
-	const server = Bun.serve({
-		port,
-		async fetch(req) {
-			const url = new URL(req.url);
-			const path = url.pathname;
+	let server: ReturnType<typeof Bun.serve>;
+	try {
+		server = Bun.serve({
+			port,
+			async fetch(req) {
+				const url = new URL(req.url);
+				const requestPath = url.pathname;
+				const corsHeaders = {
+					"Access-Control-Allow-Origin": "*",
+					"Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+					"Access-Control-Allow-Headers": "Content-Type",
+				};
 
-			// CORS headers for local development
-			const corsHeaders = {
-				"Access-Control-Allow-Origin": "*",
-				"Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-				"Access-Control-Allow-Headers": "Content-Type",
-			};
+				if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
-			if (req.method === "OPTIONS") {
-				return new Response(null, { headers: corsHeaders });
-			}
+				try {
+					let response: Response;
+					if (requestPath === "/version") {
+						response = Response.json({
+							name: APP_NAME,
+							version: VERSION,
+							runtime: { name: "bun", version: Bun.version },
+							provenance: {
+								compiled: IS_BUN_COMPILED,
+								bundled: Boolean(process.env.PI_BUNDLED || Bun.env.PI_BUNDLED),
+								forkHash: process.env.PI_FORK_HASH?.trim() || null,
+							},
+						} satisfies StatsVersion);
+					} else if (requestPath === "/healthz") {
+						const database = await ensureDbReady();
+						database.query("SELECT 1 AS ready").get();
+						response = Response.json({ status: "ok", db: "ready" } satisfies StatsHealth);
+					} else if (requestPath.startsWith("/api/")) {
+						await ensureDbReady();
+						response = await handleApi(req);
+					} else {
+						response = await handleStatic(requestPath);
+					}
 
-			try {
-				let response: Response;
-
-				if (path.startsWith("/api/")) {
-					response = await handleApi(req);
-				} else {
-					response = await handleStatic(path);
+					const headers = new Headers(response.headers);
+					for (const [key, value] of Object.entries(corsHeaders)) headers.set(key, value);
+					return new Response(response.body, { status: response.status, headers });
+				} catch (error) {
+					console.error("Stats server request failed:", error);
+					const databaseFailure = requestPath === "/healthz" && dbInitPromise === null;
+					return errorResponse(
+						databaseFailure ? 503 : 500,
+						databaseFailure ? "DB_UNAVAILABLE" : "INTERNAL_ERROR",
+						error instanceof Error ? error.message : "Unknown stats server error",
+					);
 				}
+			},
+		});
+	} catch (error) {
+		const detail = error instanceof Error ? error.message : String(error);
+		throw new Error(`Unable to start the stats server on port ${port}: ${detail}`, { cause: error });
+	}
 
-				// Add CORS headers to all responses
-				const headers = new Headers(response.headers);
-				for (const [key, value] of Object.entries(corsHeaders)) {
-					headers.set(key, value);
-				}
-
-				return new Response(response.body, {
-					status: response.status,
-					headers,
-				});
-			} catch (error) {
-				console.error("Server error:", error);
-				return Response.json(
-					{ error: error instanceof Error ? error.message : "Unknown error" },
-					{ status: 500, headers: corsHeaders },
-				);
-			}
-		},
-	});
-
+	let stopped = false;
 	return {
 		port: server.port ?? port,
-		stop: () => server.stop(),
+		async stop() {
+			if (stopped) return;
+			stopped = true;
+			await server.stop(true);
+			await closeStatsDb();
+		},
 	};
 }

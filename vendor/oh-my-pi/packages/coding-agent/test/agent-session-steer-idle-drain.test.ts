@@ -135,7 +135,7 @@ describe("AgentSession steer idle drain", () => {
 		expect(continueSpy).toHaveBeenCalledTimes(1);
 	});
 
-	it("round-trips queued images through clearQueue for editor restoration", async () => {
+	it("round-trips queued image attachments through clearQueue for editor restoration", async () => {
 		// Non-resumable state so the idle drain stays out of the way.
 		await createSession([{ role: "user", content: "hello", timestamp: Date.now() }]);
 		const image = { type: "image" as const, data: "abc", mimeType: "image/png" };
@@ -143,7 +143,7 @@ describe("AgentSession steer idle drain", () => {
 		await session.steer("with image", [image]);
 
 		const { steering } = session.clearQueue();
-		expect(steering).toEqual([{ text: "with image", images: [image] }]);
+		expect(steering).toEqual([{ text: "with image", attachments: [image] }]);
 		expect(session.agent.hasQueuedMessages()).toBe(false);
 	});
 });

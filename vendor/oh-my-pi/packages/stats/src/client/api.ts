@@ -10,56 +10,83 @@ import type {
 
 const API_BASE = "/api";
 
-export async function getStats(range = "24h"): Promise<DashboardStats> {
-	const res = await fetch(`${API_BASE}/stats?range=${encodeURIComponent(range)}`);
-	if (!res.ok) throw new Error("Failed to fetch stats");
-	return res.json() as Promise<DashboardStats>;
+interface ErrorPayload {
+	error?: {
+		code?: string;
+		message?: string;
+	};
 }
 
-export async function getOverviewStats(range = "24h"): Promise<OverviewStats> {
-	const res = await fetch(`${API_BASE}/stats/overview?range=${encodeURIComponent(range)}`);
-	if (!res.ok) throw new Error("Failed to fetch overview stats");
-	return res.json() as Promise<OverviewStats>;
+export class StatsApiError extends Error {
+	constructor(
+		readonly code: string,
+		message: string,
+		readonly status: number,
+	) {
+		super(message);
+		this.name = "StatsApiError";
+	}
 }
 
-export async function getModelDashboardStats(range = "24h"): Promise<ModelDashboardStats> {
-	const res = await fetch(`${API_BASE}/stats/model-dashboard?range=${encodeURIComponent(range)}`);
-	if (!res.ok) throw new Error("Failed to fetch model stats");
-	return res.json() as Promise<ModelDashboardStats>;
+async function request<T>(url: string): Promise<T> {
+	let response: Response;
+	try {
+		response = await fetch(url);
+	} catch (error) {
+		throw new StatsApiError(
+			"NETWORK_ERROR",
+			error instanceof Error ? error.message : "Unable to reach the stats server",
+			0,
+		);
+	}
+	if (!response.ok) {
+		let payload: ErrorPayload | undefined;
+		try {
+			payload = (await response.json()) as ErrorPayload;
+		} catch {
+			// Older or intermediary HTTP errors may not have a JSON body.
+		}
+		throw new StatsApiError(
+			payload?.error?.code ?? "HTTP_ERROR",
+			payload?.error?.message ?? `Stats request failed with HTTP ${response.status}`,
+			response.status,
+		);
+	}
+	return response.json() as Promise<T>;
 }
 
-export async function getCostDashboardStats(range = "24h"): Promise<CostDashboardStats> {
-	const res = await fetch(`${API_BASE}/stats/costs?range=${encodeURIComponent(range)}`);
-	if (!res.ok) throw new Error("Failed to fetch cost stats");
-	return res.json() as Promise<CostDashboardStats>;
+export function getStats(range = "24h"): Promise<DashboardStats> {
+	return request(`${API_BASE}/stats?range=${encodeURIComponent(range)}`);
 }
 
-export async function getRecentRequests(limit = 50): Promise<MessageStats[]> {
-	const res = await fetch(`${API_BASE}/stats/recent?limit=${limit}`);
-	if (!res.ok) throw new Error("Failed to fetch recent requests");
-	return res.json() as Promise<MessageStats[]>;
+export function getOverviewStats(range = "24h"): Promise<OverviewStats> {
+	return request(`${API_BASE}/stats/overview?range=${encodeURIComponent(range)}`);
 }
 
-export async function getRecentErrors(limit = 50): Promise<MessageStats[]> {
-	const res = await fetch(`${API_BASE}/stats/errors?limit=${limit}`);
-	if (!res.ok) throw new Error("Failed to fetch recent errors");
-	return res.json() as Promise<MessageStats[]>;
+export function getModelDashboardStats(range = "24h"): Promise<ModelDashboardStats> {
+	return request(`${API_BASE}/stats/model-dashboard?range=${encodeURIComponent(range)}`);
 }
 
-export async function getRequestDetails(id: number): Promise<RequestDetails> {
-	const res = await fetch(`${API_BASE}/request/${id}`);
-	if (!res.ok) throw new Error("Failed to fetch request details");
-	return res.json() as Promise<RequestDetails>;
+export function getCostDashboardStats(range = "24h"): Promise<CostDashboardStats> {
+	return request(`${API_BASE}/stats/costs?range=${encodeURIComponent(range)}`);
 }
 
-export async function sync(): Promise<any> {
-	const res = await fetch(`${API_BASE}/sync`);
-	if (!res.ok) throw new Error("Failed to sync");
-	return res.json();
+export function getRecentRequests(limit = 50): Promise<MessageStats[]> {
+	return request(`${API_BASE}/stats/recent?limit=${limit}`);
 }
 
-export async function getBehaviorDashboardStats(range = "24h"): Promise<BehaviorDashboardStats> {
-	const res = await fetch(`${API_BASE}/stats/behavior?range=${encodeURIComponent(range)}`);
-	if (!res.ok) throw new Error("Failed to fetch behavior stats");
-	return res.json() as Promise<BehaviorDashboardStats>;
+export function getRecentErrors(limit = 50): Promise<MessageStats[]> {
+	return request(`${API_BASE}/stats/errors?limit=${limit}`);
+}
+
+export function getRequestDetails(id: number): Promise<RequestDetails> {
+	return request(`${API_BASE}/request/${id}`);
+}
+
+export function sync(): Promise<unknown> {
+	return request(`${API_BASE}/sync`);
+}
+
+export function getBehaviorDashboardStats(range = "24h"): Promise<BehaviorDashboardStats> {
+	return request(`${API_BASE}/stats/behavior?range=${encodeURIComponent(range)}`);
 }

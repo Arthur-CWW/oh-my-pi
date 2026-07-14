@@ -1,15 +1,16 @@
 import { randomUUID } from "node:crypto";
 import { SessionOwnershipLostError } from "../../session/durable-input-queue";
 import type { SessionEntry } from "../../session/session-entries";
-
-export interface FocusCmuxOwnerAction {
-	readonly kind: "focus_cmux_owner";
-	readonly sessionFile: string;
-	readonly sessionId: string;
-	readonly lostOwnerEpoch: string;
-}
-
-export type DiagnosticAction = FocusCmuxOwnerAction;
+import { appendErrorInboxEvent } from "../../session/error-inbox-ledger";
+import type { DiagnosticAction, DiagnosticEvent, DiagnosticEventInput } from "../../session/error-inbox-ledger";
+import type { SubagentFailureClass } from "../../task/subagent-failure";
+export type {
+	DiagnosticAction,
+	DiagnosticEvent,
+	DiagnosticEventInput,
+	FocusCmuxOwnerAction,
+	ResolveFallbackApprovalAction,
+} from "../../session/error-inbox-ledger";
 
 export function diagnosticInputFromError(error: unknown, sessionFile: string | null | undefined): string | DiagnosticEventInput {
 	const message = error instanceof Error ? error.message : String(error);
@@ -27,70 +28,67 @@ export function diagnosticInputFromError(error: unknown, sessionFile: string | n
 
 function decodeDiagnosticAction(value: unknown): DiagnosticAction | undefined {
 	if (!isObject(value)) return undefined;
-	const keys = Object.keys(value);
+	if (value.kind === "focus_cmux_owner") {
+		if (
+			Object.keys(value).length !== 4 ||
+			typeof value.sessionFile !== "string" ||
+			typeof value.sessionId !== "string" ||
+			typeof value.lostOwnerEpoch !== "string" ||
+			value.sessionFile.length === 0 ||
+			value.sessionId.length === 0 ||
+			value.lostOwnerEpoch.length === 0
+		) {
+			return undefined;
+		}
+		return {
+			kind: value.kind,
+			sessionFile: value.sessionFile,
+			sessionId: value.sessionId,
+			lostOwnerEpoch: value.lostOwnerEpoch,
+		};
+	}
 	if (
-		keys.length !== 4 ||
-		value.kind !== "focus_cmux_owner" ||
-		typeof value.sessionFile !== "string" ||
-		typeof value.sessionId !== "string" ||
-		typeof value.lostOwnerEpoch !== "string" ||
-		value.sessionFile.length === 0 ||
-		value.sessionId.length === 0 ||
-		value.lostOwnerEpoch.length === 0
+		value.kind !== "resolve_fallback_approval" ||
+		Object.keys(value).length !== 7 ||
+		typeof value.agentId !== "string" ||
+		typeof value.sourceModel !== "string" ||
+		typeof value.proposedModel !== "string" ||
+		(value.cause !== "network" && value.cause !== "rate-limit" && value.cause !== "provider") ||
+		typeof value.taskContext !== "string" ||
+		!Array.isArray(value.options) ||
+		value.options.join(",") !== "wait,approve,choose,abort"
 	) {
 		return undefined;
 	}
 	return {
 		kind: value.kind,
-		sessionFile: value.sessionFile,
-		sessionId: value.sessionId,
-		lostOwnerEpoch: value.lostOwnerEpoch,
+		agentId: value.agentId,
+		sourceModel: value.sourceModel,
+		proposedModel: value.proposedModel,
+		cause: value.cause,
+		taskContext: value.taskContext,
+		options: ["wait", "approve", "choose", "abort"],
 	};
 }
 
 function isSameAction(a: DiagnosticAction | undefined, b: DiagnosticAction | undefined): boolean {
 	if (a === b) return true;
-	if (!a || !b) return false;
-	return (
-		a.kind === b.kind &&
-		a.sessionFile === b.sessionFile &&
-		a.sessionId === b.sessionId &&
-		a.lostOwnerEpoch === b.lostOwnerEpoch
-	);
+	if (!a || !b || a.kind !== b.kind) return false;
+	if (a.kind === "focus_cmux_owner" && b.kind === "focus_cmux_owner") {
+		return a.sessionFile === b.sessionFile && a.sessionId === b.sessionId && a.lostOwnerEpoch === b.lostOwnerEpoch;
+	}
+	if (a.kind === "resolve_fallback_approval" && b.kind === "resolve_fallback_approval") {
+		return (
+			a.agentId === b.agentId &&
+			a.sourceModel === b.sourceModel &&
+			a.proposedModel === b.proposedModel &&
+			a.cause === b.cause &&
+			a.taskContext === b.taskContext
+		);
+	}
+	return false;
 }
 
-export interface DiagnosticEvent {
-	id: string;
-	firstTimestamp: number;
-	lastTimestamp: number;
-	message: string;
-	count: number;
-
-	source?: string;
-	category?: string;
-	provider?: string;
-	model?: string;
-	session?: string;
-	agent?: string;
-	tool?: string;
-	job?: string;
-	operation?: string;
-	status?: number | string;
-	code?: string;
-	retry?: boolean;
-	reset?: number;
-	requestFingerprint?: string;
-	logPointer?: string;
-	causeChain?: string[];
-
-	action?: DiagnosticAction;
-	unread: boolean;
-	resolved: boolean;
-}
-
-export type DiagnosticEventInput = Omit<DiagnosticEvent, "id" | "firstTimestamp" | "lastTimestamp" | "count" | "unread" | "resolved"> & {
-	id?: string;
-};
 
 export const DEDUPE_WINDOW_MS = 60 * 1000; // 1 minute window for deduping
 
@@ -127,6 +125,26 @@ function optionalString(data: Record<string, unknown>, key: string): string | un
 	if (val === undefined) return undefined;
 	if (typeof val !== "string") throw new DecoderError(`${key} must be a string or undefined`);
 	return val;
+}
+
+function optionalSubagentFailureClass(
+	data: Record<string, unknown>,
+	key: string,
+): SubagentFailureClass | undefined {
+	const val = optionalString(data, key);
+	if (val === undefined) return undefined;
+	if (
+		val === "failed" ||
+		val === "timeout" ||
+		val === "budget" ||
+		val === "network" ||
+		val === "provider" ||
+		val === "schema" ||
+		val === "no-yield"
+	) {
+		return val;
+	}
+	throw new DecoderError(`${key} must be a recognized subagent failure class or undefined`);
 }
 
 function optionalFiniteNumber(data: Record<string, unknown>, key: string): number | undefined {
@@ -180,6 +198,7 @@ function decodeUiErrorV2(data: Record<string, unknown>): DiagnosticEvent {
 		message,
 		count,
 		source: optionalString(data, "source"),
+		errorClass: optionalSubagentFailureClass(data, "errorClass"),
 		category: optionalString(data, "category"),
 		provider: optionalString(data, "provider"),
 		model: optionalString(data, "model"),
@@ -194,6 +213,9 @@ function decodeUiErrorV2(data: Record<string, unknown>): DiagnosticEvent {
 		reset: optionalFiniteNumber(data, "reset"),
 		requestFingerprint: optionalString(data, "requestFingerprint"),
 		logPointer: optionalString(data, "logPointer"),
+		historyUri: optionalString(data, "historyUri"),
+		finalOutputUri: optionalString(data, "finalOutputUri"),
+		finalOutputAvailable: optionalBoolean(data, "finalOutputAvailable"),
 		causeChain: optionalStringArray(data, "causeChain"),
 		action: decodeDiagnosticAction(data.action),
 		unread,
@@ -328,6 +350,7 @@ export class ErrorInbox {
 			existing.message === message &&
 			existing.source === details.source &&
 			existing.category === details.category &&
+			existing.errorClass === details.errorClass &&
 			existing.provider === details.provider &&
 			existing.model === details.model &&
 			existing.session === details.session &&
@@ -341,6 +364,9 @@ export class ErrorInbox {
 			existing.reset === details.reset &&
 			existing.requestFingerprint === details.requestFingerprint &&
 			existing.logPointer === details.logPointer &&
+			existing.historyUri === details.historyUri &&
+			existing.finalOutputUri === details.finalOutputUri &&
+			existing.finalOutputAvailable === details.finalOutputAvailable &&
 			isSameCauseChain(existing.causeChain, details.causeChain) &&
 			isSameAction(existing.action, details.action) &&
 			now >= existing.lastTimestamp &&
@@ -367,6 +393,7 @@ export class ErrorInbox {
 				resolved: false,
 				source: details.source,
 				category: details.category,
+				errorClass: details.errorClass,
 				provider: details.provider,
 				model: details.model,
 				session: details.session,
@@ -380,6 +407,9 @@ export class ErrorInbox {
 				reset: details.reset,
 				requestFingerprint: details.requestFingerprint,
 				logPointer: details.logPointer,
+				historyUri: details.historyUri,
+				finalOutputUri: details.finalOutputUri,
+				finalOutputAvailable: details.finalOutputAvailable,
 				causeChain: details.causeChain,
 				action: details.action,
 			};
@@ -389,11 +419,7 @@ export class ErrorInbox {
 			}
 		}
 
-		try {
-			this.#sessionManager.appendCustomEntry("ui_error", { ...record, version: 2 });
-		} catch {
-			// Persistence failure must never recursively surface as a new error.
-		}
+		appendErrorInboxEvent(this.#sessionManager, record);
 	}
 
 	/**
@@ -424,11 +450,7 @@ export class ErrorInbox {
 		};
 		this.#errors[idx] = resolvedEvent;
 
-		try {
-			this.#sessionManager.appendCustomEntry("ui_error", { ...resolvedEvent, version: 2 });
-		} catch {
-			// Persistence failure must never recursively surface as a new error.
-		}
+		appendErrorInboxEvent(this.#sessionManager, resolvedEvent);
 		return true;
 	}
 }

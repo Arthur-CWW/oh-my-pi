@@ -13,11 +13,8 @@ import { createChallengeResponse, importRoomKey } from "./crypto";
 import { CollabSocket } from "./relay-client";
 
 export const COLLAB_GUEST_ALLOWED_COMMANDS: Record<string, true> = {
-	dump: true,
 	export: true,
-	copy: true,
 	help: true,
-	hotkeys: true,
 	theme: true,
 	settings: true,
 	leave: true,

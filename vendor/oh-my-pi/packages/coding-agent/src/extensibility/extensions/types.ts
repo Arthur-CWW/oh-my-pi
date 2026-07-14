@@ -21,12 +21,14 @@ import type {
 	AssistantMessageEventStream,
 	Context,
 	ImageContent,
+	MediaContent,
 	Model,
 	ModelSpec,
 	ProviderResponseMetadata,
 	SimpleStreamOptions,
 	Static,
 	TextContent,
+	UserContent,
 	TSchema,
 } from "@oh-my-pi/pi-ai";
 import type { OAuthCredentials, OAuthLoginCallbacks } from "@oh-my-pi/pi-ai/oauth/types";
@@ -524,8 +526,8 @@ export interface AfterProviderResponseEvent extends ProviderResponseMetadata {
 /** Fired after user submits prompt but before agent loop. */
 export interface BeforeAgentStartEvent {
 	type: "before_agent_start";
-	prompt: string;
-	images?: ImageContent[];
+	prompt: string | UserContent[];
+	attachments?: MediaContent[];
 	systemPrompt: string[];
 }
 
@@ -632,8 +634,8 @@ export interface UserPythonEvent {
 /** Fired when the user submits input (interactive mode only). */
 export interface InputEvent {
 	type: "input";
-	text: string;
-	images?: ImageContent[];
+	input: string | UserContent[];
+	attachments?: MediaContent[];
 	source: "interactive" | "rpc" | "extension";
 }
 
@@ -846,10 +848,10 @@ export type { ToolCallEventResult } from "../shared-events";
 export interface InputEventResult {
 	/** If true, the input was handled and should not continue through normal flow */
 	handled?: boolean;
-	/** Replace the input text */
-	text?: string;
-	/** Replace any pending images */
-	images?: ImageContent[];
+	/** Replace the input */
+	input?: string | UserContent[];
+	/** Replace any pending attachments */
+	attachments?: MediaContent[];
 }
 
 /** Result from user_bash event handler */
@@ -1079,10 +1081,7 @@ export interface ExtensionAPI {
 	): void;
 
 	/** Send a user message to the agent, or queue it when deliverAs is set. */
-	sendUserMessage(
-		content: string | (TextContent | ImageContent)[],
-		options?: { deliverAs?: "steer" | "followUp" },
-	): void;
+	sendUserMessage(content: string | UserContent[], options?: { deliverAs?: "steer" | "followUp" }): void;
 
 	/** Append a custom entry to the session for state persistence (not sent to LLM). */
 	appendEntry<T = unknown>(customType: string, data?: T): void;
@@ -1270,7 +1269,7 @@ export type SendMessageHandler = <T = unknown>(
 ) => void;
 
 export type SendUserMessageHandler = (
-	content: string | (TextContent | ImageContent)[],
+	content: string | UserContent[],
 	options?: { deliverAs?: "steer" | "followUp" },
 ) => void;
 

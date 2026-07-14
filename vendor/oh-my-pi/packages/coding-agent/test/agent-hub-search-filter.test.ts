@@ -5,10 +5,8 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
 import * as fs from "node:fs/promises";
 import { IrcBus } from "@oh-my-pi/pi-coding-agent/irc/bus";
-import {
-	AgentHubOverlayComponent,
-	type AgentHubTurnStatus,
-} from "@oh-my-pi/pi-coding-agent/modes/components/agent-hub";
+import { AgentHubOverlayComponent } from "@oh-my-pi/pi-coding-agent/modes/components/agent-hub";
+import type { AgentHubTurnStatus } from "@oh-my-pi/pi-coding-agent/modes/components/agent-hub-selected-state";
 import { SessionObserverRegistry } from "@oh-my-pi/pi-coding-agent/modes/session-observer-registry";
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import { AgentRegistry, type AgentStatus } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
@@ -246,20 +244,14 @@ describe("Agent Hub selection and filter", () => {
 		hub.dispose();
 	});
 
-	it("keeps scroll and input modes modal", () => {
+	it("keeps the table preview read-only", () => {
 		geometry = stubStdoutGeometry(120);
 		const agents = new AgentRegistry();
 		registerAgent(agents, "Alpha");
 		registerAgent(agents, "Beta");
 		const { hub } = makeHub(agents);
-		hub.handleInput("j");
-		expect(selectedAgentId(hub)).toBe("Alpha");
 		hub.handleInput("i");
-		expect(renderedText(hub)).toContain("INPUT");
-		hub.handleInput("n");
-		expect(selectedAgentId(hub)).toBe("Alpha");
-		hub.handleInput("\x1b");
-		expect(renderedText(hub)).toContain("SCROLL");
+		expect(renderedText(hub)).not.toContain("INPUT");
 		hub.handleInput("n");
 		expect(selectedAgentId(hub)).toBe("Beta");
 		hub.dispose();
@@ -277,7 +269,6 @@ describe("Agent Hub selection and filter", () => {
 		});
 
 		expect(renderedAgentIds(hub)).toEqual(["Alpha", "Delta", "Beta", "Gamma"]);
-		expect(renderedText(hub)).toContain(". hide history");
 		hub.handleInput("n");
 		hub.handleInput("n");
 		expect(selectedAgentId(hub)).toBe("Beta");
@@ -286,20 +277,17 @@ describe("Agent Hub selection and filter", () => {
 		expect(renderedAgentIds(hub)).toEqual(["Alpha", "Delta"]);
 		expect(selectedAgentId(hub)).toBe("Delta");
 		expect(renderedText(hub)).toContain("2 hidden");
-		expect(renderedText(hub)).toContain(". show history");
 
 		hub.handleInput(".");
 		expect(renderedAgentIds(hub)).toEqual(["Alpha", "Delta", "Beta", "Gamma"]);
 		expect(selectedAgentId(hub)).toBe("Delta");
-		expect(renderedText(hub)).toContain(". hide history");
 		hub.handleInput("?");
-		expect(renderedText(hub)).toContain(". show/hide history");
+		expect(renderedText(hub)).toContain(". toggle agent history");
 		hub.handleInput("?");
 
 		hub.handleInput("/");
 		hub.handleInput(".");
 		expect(renderedText(hub)).toContain("/.");
-		expect(renderedText(hub)).toContain(". hide history");
 		hub.handleInput("\x1b");
 		hub.handleInput("\x1b");
 		hub.dispose();
@@ -321,7 +309,7 @@ describe("Agent Hub selection and filter", () => {
 		hub.dispose();
 	});
 
-	it("preserves selection by stable ID when agents are added", () => {
+	it("preserves selection by stable ID when agents are added", async () => {
 		geometry = stubStdoutGeometry(120);
 		vi.spyOn(Date, "now").mockReturnValue(1_000);
 		const agents = new AgentRegistry();
@@ -332,6 +320,7 @@ describe("Agent Hub selection and filter", () => {
 		// Default selects Alpha, the oldest registration.
 		// Add a newcomer — Alpha must remain selected by its stable key.
 		registerAgent(agents, "Gamma");
+		await waitForRenderedText(hub, "Gamma");
 		expect(renderedAgentIds(hub)).toEqual(["Alpha", "Beta", "Gamma"]);
 		expect(selectedAgentId(hub)).toBe("Alpha");
 
@@ -339,6 +328,7 @@ describe("Agent Hub selection and filter", () => {
 		hub.handleInput("n");
 		expect(selectedAgentId(hub)).toBe("Beta");
 		registerAgent(agents, "Delta");
+		await waitForRenderedText(hub, "Delta");
 		expect(renderedAgentIds(hub)).toEqual(["Alpha", "Beta", "Gamma", "Delta"]);
 		expect(selectedAgentId(hub)).toBe("Beta");
 
@@ -447,19 +437,18 @@ describe("Agent Hub selection and filter", () => {
 
 		hub.dispose();
 	});
-	it("treats vim navigation letters as filter text while text entry is focused", () => {
+	it("treats lowercase and uppercase navigation letters as filter text while entry is focused", () => {
 		geometry = stubStdoutGeometry(120);
 		const agents = new AgentRegistry();
 		registerAgent(agents, "Alpha");
-		registerAgent(agents, "JkWorker");
+		registerAgent(agents, "JkJKWorker");
 		const { hub } = makeHub(agents);
 
 		hub.handleInput("/");
-		hub.handleInput("j");
-		hub.handleInput("k");
+		for (const character of "jkJK") hub.handleInput(character);
 
-		expect(renderedText(hub)).toContain("/jk");
-		expect(renderedAgentIds(hub)).toEqual(["JkWorker"]);
+		expect(renderedText(hub)).toContain("/jkJK");
+		expect(renderedAgentIds(hub)).toEqual(["JkJKWorker"]);
 		hub.dispose();
 	});
 
@@ -777,24 +766,27 @@ describe("Agent Hub transcript search", () => {
 		hub.dispose();
 	});
 
-	it("footer shows search and filter hints", () => {
+	it("footers show contextual search hints", () => {
 		geometry = stubStdoutGeometry(120);
 		const agents = new AgentRegistry();
 		registerAgent(agents, "Worker", "parked");
 
 		const { hub } = makeHub(agents);
 
-		// Table view footer should mention /:filter
+		// Normal table and chat footers expose search; filter-mode details are contextual.
 		let text = renderedText(hub);
-		expect(text).toContain("/:filter");
-		expect(text).toContain("g/G:");
+		expect(text).toContain("/:search");
+		hub.handleInput("/");
+		text = renderedText(hub);
+		expect(text).toContain("text:enter filter text");
+		expect(text).toContain("Esc:clear filter and return");
+		hub.handleInput("\x1b");
 
 		// Enter on parked agent opens chat view (not focusAgent)
 		revealParked(hub, "Worker");
 		hub.handleInput("\r");
 		text = renderedText(hub);
 		expect(text).toContain("/:search");
-		expect(text).toContain("g/G:");
 
 		hub.dispose();
 	});

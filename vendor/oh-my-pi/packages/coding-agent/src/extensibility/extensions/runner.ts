@@ -2,7 +2,13 @@
  * Extension runner - executes extensions and manages their lifecycle.
  */
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
-import type { CredentialDisabledEvent, ImageContent, Model, ProviderResponseMetadata } from "@oh-my-pi/pi-ai";
+import type {
+	CredentialDisabledEvent,
+	MediaContent,
+	Model,
+	ProviderResponseMetadata,
+	UserContent,
+} from "@oh-my-pi/pi-ai";
 import type { KeyId } from "@oh-my-pi/pi-tui";
 import { logger } from "@oh-my-pi/pi-utils";
 import type { ModelRegistry } from "../../config/model-registry";
@@ -11,11 +17,16 @@ import type { MemoryRuntimeContext } from "../../memory-backend";
 import { type Theme, theme } from "../../modes/theme/theme";
 import type { SessionManager } from "../../session/session-manager";
 import { createExtensionModelQuery } from "./model-api";
+import {
+	type BeforeAgentStartCombinedResult,
+	runBeforeAgentStartAttachmentAdapters,
+	runInputAttachmentAdapters,
+} from "./attachment-event-adapters";
 import type {
 	AfterProviderResponseEvent,
-	AssistantThinkingRenderer,
 	BeforeAgentStartEvent,
 	BeforeAgentStartEventResult,
+	AssistantThinkingRenderer,
 	BeforeProviderRequestEvent,
 	BeforeProviderRequestEventResult,
 	CompactOptions,
@@ -56,11 +67,6 @@ import type {
 	UserPythonEventResult,
 } from "./types";
 
-/** Combined result from all before_agent_start handlers */
-interface BeforeAgentStartCombinedResult {
-	messages?: NonNullable<BeforeAgentStartEventResult["message"]>[];
-	systemPrompt?: string[];
-}
 
 export type ExtensionErrorListener = (error: ExtensionError) => void;
 
@@ -775,28 +781,25 @@ export class ExtensionRunner {
 
 	/** Emit input event. Transforms chain, "handled" short-circuits. */
 	async emitInput(
-		text: string,
-		images: ImageContent[] | undefined,
+		input: string | UserContent[],
+		attachments: MediaContent[] | undefined,
 		source: "interactive" | "rpc" | "extension",
 	): Promise<InputEventResult> {
 		const ctx = this.createContext();
-		let currentText = text;
-		let currentImages = images;
-
-		for (const ext of this.extensions) {
-			for (const handler of ext.handlers.get("input") ?? []) {
-				const event: InputEvent = { type: "input", text: currentText, images: currentImages, source };
-				const result = (await this.#runHandlerWithTimeout(handler, event, ctx, ext, extensionHandlerTimeoutMs)) as
-					| InputEventResult
-					| undefined;
-				if (result?.handled) return result;
-				if (result?.text !== undefined) {
-					currentText = result.text;
-					currentImages = result.images ?? currentImages;
-				}
-			}
-		}
-		return currentText !== text || currentImages !== images ? { text: currentText, images: currentImages } : {};
+		return runInputAttachmentAdapters({
+			extensions: this.extensions,
+			input,
+			attachments,
+			source,
+			runHandler: async (extension, handlerIndex, event) =>
+				(await this.#runHandlerWithTimeout(
+					extension.handlers.get("input")![handlerIndex]!,
+					event,
+					ctx,
+					extension,
+					extensionHandlerTimeoutMs,
+				)) as InputEventResult | undefined,
+		});
 	}
 
 	async emitContext(messages: AgentMessage[]): Promise<AgentMessage[]> {
@@ -895,55 +898,24 @@ export class ExtensionRunner {
 	}
 
 	async emitBeforeAgentStart(
-		prompt: string,
-		images: ImageContent[] | undefined,
+		prompt: string | UserContent[],
+		attachments: MediaContent[] | undefined,
 		systemPrompt: string[],
 	): Promise<BeforeAgentStartCombinedResult | undefined> {
 		const ctx = this.createContext();
-		const messages: NonNullable<BeforeAgentStartEventResult["message"]>[] = [];
-		let currentSystemPrompt = systemPrompt;
-		let systemPromptModified = false;
-
-		for (const ext of this.extensions) {
-			const handlers = ext.handlers.get("before_agent_start");
-			if (!handlers || handlers.length === 0) continue;
-
-			for (const handler of handlers) {
-				const event: BeforeAgentStartEvent = {
-					type: "before_agent_start",
-					prompt,
-					images,
-					systemPrompt: currentSystemPrompt,
-				};
-				const handlerResult = await this.#runHandlerWithTimeout(
-					handler,
+		return runBeforeAgentStartAttachmentAdapters({
+			extensions: this.extensions,
+			prompt,
+			attachments,
+			systemPrompt,
+			runHandler: async (extension, handlerIndex, event) =>
+				(await this.#runHandlerWithTimeout(
+					extension.handlers.get("before_agent_start")![handlerIndex]!,
 					event,
 					ctx,
-					ext,
+					extension,
 					extensionHandlerTimeoutMs,
-				);
-
-				if (handlerResult) {
-					const result = handlerResult as BeforeAgentStartEventResult;
-					if (result.message) {
-						messages.push(result.message);
-					}
-					if (result.systemPrompt !== undefined) {
-						currentSystemPrompt =
-							typeof result.systemPrompt === "string" ? [result.systemPrompt] : result.systemPrompt;
-						systemPromptModified = true;
-					}
-				}
-			}
-		}
-
-		if (messages.length > 0 || systemPromptModified) {
-			return {
-				messages: messages.length > 0 ? messages : undefined,
-				systemPrompt: systemPromptModified ? currentSystemPrompt : undefined,
-			};
-		}
-
-		return undefined;
+				)) as BeforeAgentStartEventResult | undefined,
+		});
 	}
 }

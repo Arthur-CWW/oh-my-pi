@@ -3,11 +3,9 @@ import { type Api, Effort, type Model } from "@oh-my-pi/pi-ai";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import type { CanonicalModelVariant } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import {
-	expandRoleAlias,
 	filterAvailableModelsByEnabledPatterns,
 	parseModelPattern,
 	parseModelString,
-	resolveAgentModelPatterns,
 	resolveCliModel,
 	resolveModelFromString,
 	resolveModelOverride,
@@ -15,6 +13,10 @@ import {
 	resolveModelRoleValue,
 	resolveModelScope,
 } from "@oh-my-pi/pi-coding-agent/config/model-resolver";
+import {
+	expandRoleAlias,
+	resolveAgentModelPatterns,
+} from "@oh-my-pi/pi-coding-agent/config/role-resolution";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 
 // Mock models for testing
@@ -972,6 +974,61 @@ describe("resolveModelOverrideWithAuthFallback", () => {
 	});
 });
 describe("resolveCliModel", () => {
+	const fableVisionModel = buildModel({
+		id: "gemini-3.5-flash",
+		name: "Gemini 3.5 Flash",
+		api: "google-gemini-cli",
+		provider: "google-antigravity",
+		baseUrl: "https://daily-cloudcode-pa.googleapis.com",
+		reasoning: true,
+		thinking: { mode: "google-level", efforts: [Effort.Minimal, Effort.Low, Effort.Medium, Effort.High] },
+		input: ["text", "image", "video"],
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		contextWindow: 1_048_576,
+		maxTokens: 65_535,
+	});
+	const fableRegistry = {
+		getAll: () => [fableVisionModel],
+	} as unknown as Parameters<typeof resolveCliModel>[0]["modelRegistry"];
+	const fableSettings = Settings.isolated({
+		modelRoles: { vision: "google-antigravity/gemini-3.5-flash" },
+	});
+
+	test("resolves the Fable pi/vision CLI role to the provider-qualified Antigravity model", () => {
+		const result = resolveCliModel({
+			cliModel: "pi/vision",
+			modelRegistry: fableRegistry,
+			settings: fableSettings,
+		});
+
+		expect(result).toMatchObject({
+			error: undefined,
+			model: { provider: "google-antigravity", id: "gemini-3.5-flash" },
+			selector: "google-antigravity/gemini-3.5-flash",
+			thinkingLevel: undefined,
+		});
+
+		const highEffort = resolveCliModel({
+			cliModel: "pi/vision:high",
+			modelRegistry: fableRegistry,
+			settings: fableSettings,
+		});
+		expect(highEffort.selector).toBe("google-antigravity/gemini-3.5-flash:high");
+		expect(highEffort.thinkingLevel).toBe(Effort.High);
+	});
+
+	test("rejects unknown pi roles with valid roles and configuration sources", () => {
+		const result = resolveCliModel({
+			cliModel: "pi/not-configured",
+			modelRegistry: fableRegistry,
+			settings: fableSettings,
+		});
+
+		expect(result.model).toBeUndefined();
+		expect(result.error).toContain('Unknown model role "pi/not-configured"');
+		expect(result.error).toContain("pi/vision");
+		expect(result.error).toContain("modelRoles in --config, project, or global settings");
+	});
 	test("resolves exact canonical ids to the preferred concrete provider", () => {
 		const result = resolveCliModel({
 			cliModel: "claude-sonnet-4-5",

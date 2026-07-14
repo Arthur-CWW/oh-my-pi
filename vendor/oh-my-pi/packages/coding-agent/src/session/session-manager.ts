@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { ImageContent, Message, MessageAttribution, ServiceTier, TextContent, Usage } from "@oh-my-pi/pi-ai";
+import type { Message, MessageAttribution, ServiceTier, Usage, UserContent } from "@oh-my-pi/pi-ai";
 import { getBlobsDir, getProjectDir, getSessionsDir, isEnoent, logger, toError } from "@oh-my-pi/pi-utils";
 import { ArtifactManager } from "./artifacts";
 import { type BlobPutOptions, type BlobPutResult, BlobStore } from "./blob-store";
@@ -406,28 +406,26 @@ function jsonValuesEqual(left: JsonValue | undefined, right: JsonValue | undefin
 	return leftEntries.every(([key, value]) => Object.hasOwn(rightRecord, key) && jsonValuesEqual(value, rightRecord[key]));
 }
 
-function contentEquals(
-	left: string | (TextContent | ImageContent)[],
-	right: string | (TextContent | ImageContent)[],
-): boolean {
+function contentEquals(left: string | UserContent[], right: string | UserContent[]): boolean {
 	if (typeof left === "string" || typeof right === "string") return left === right;
 	if (left.length !== right.length) return false;
 	return left.every((block, index) => {
 		const other = right[index];
 		if (!other || block.type !== other.type) return false;
-		if (block.type === "text" && other.type === "text") return block.text === other.text;
-		return (
-			block.type === "image" &&
-			other.type === "image" &&
-			block.data === other.data &&
-			block.mimeType === other.mimeType
-		);
+		switch (block.type) {
+			case "text":
+				return other.type === "text" && block.text === other.text;
+			case "image":
+				return other.type === "image" && block.data === other.data && block.mimeType === other.mimeType;
+			case "video":
+				return other.type === "video" && block.data === other.data && block.mimeType === other.mimeType;
+		}
 	});
 }
 
 export interface DurableCustomMessageInput {
 	customType: string;
-	content: string | (TextContent | ImageContent)[];
+	content: string | UserContent[];
 	display: boolean;
 	details?: JsonValue;
 	attribution: MessageAttribution;
@@ -1864,14 +1862,14 @@ export class SessionManager {
 	/**
 	 * Append a custom message entry (for extensions) that participates in LLM context.
 	 * @param customType Hook identifier for filtering on reload
-	 * @param content Message content (string or TextContent/ImageContent array)
+	 * @param content Message content (string or UserContent array)
 	 * @param display Whether to show in TUI (true = styled display, false = hidden)
 	 * @param details Optional extension-specific metadata (not sent to LLM)
 	 * @param attribution Who initiated this message for billing/attribution semantics
 	 */
 	appendCustomMessageEntry<T = unknown>(
 		customType: string,
-		content: string | (TextContent | ImageContent)[],
+		content: string | UserContent[],
 		display: boolean,
 		details?: T,
 		attribution: MessageAttribution = "agent",

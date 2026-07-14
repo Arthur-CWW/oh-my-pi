@@ -47,6 +47,11 @@ export interface CredentialRefreshResponse {
 /** POST /v1/credential/:id/disable request body. */
 export interface CredentialDisableRequest {
 	cause: string;
+	/**
+	 * Serialized redacted credential data observed by the caller. When present,
+	 * disable is conditional on the broker still exposing the same snapshot.
+	 */
+	expectedData?: string;
 }
 
 /** POST /v1/credential/:id/disable response body. */

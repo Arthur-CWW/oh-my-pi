@@ -85,6 +85,12 @@ import {
 	getImplicitOllamaBaseUrl,
 	getOllamaContextLengthOverride,
 } from "./model-discovery";
+import {
+	getDisabledProviderIdsFromSettings,
+	ModelAvailability,
+	type ModelAvailabilitySnapshot,
+	type ProviderDiscoveryState,
+} from "./model-availability";
 import { ModelsConfigFile, type ProviderValidationModel, validateProviderConfiguration } from "./models-config";
 import type { ModelOverride, ModelsConfig, ProviderAuthMode } from "./models-config-schema";
 import { settings } from "./settings";
@@ -224,18 +230,6 @@ function mergeByModelKey<T extends { provider: string; id: string }>(
 interface BuiltInDiscoveryResult {
 	models: Model<Api>[];
 	authoritativeProviders: Set<string>;
-}
-
-export type ProviderDiscoveryStatus = "idle" | "ok" | "empty" | "cached" | "unavailable" | "unauthenticated";
-
-export interface ProviderDiscoveryState {
-	provider: string;
-	status: ProviderDiscoveryStatus;
-	optional: boolean;
-	stale: boolean;
-	fetchedAt?: number;
-	models: string[];
-	error?: string;
 }
 
 export interface CanonicalModelQueryOptions {
@@ -614,14 +608,6 @@ function resolveModelOverrideWithAliases(
 	return undefined;
 }
 
-function getDisabledProviderIdsFromSettings(): Set<string> {
-	try {
-		return new Set(settings.get("disabledProviders"));
-	} catch {
-		return new Set();
-	}
-}
-
 function getConfiguredProviderOrderFromSettings(): string[] {
 	try {
 		return settings.get("modelProviderOrder");
@@ -652,7 +638,6 @@ export class ModelRegistry {
 	#providerDiscoveryStates: Map<string, ProviderDiscoveryState> = new Map();
 	#cacheDbPath?: string;
 	#suppressedSelectors: Map<string, number> = new Map();
-	#backgroundRefresh?: Promise<void>;
 	#lastDiscoveryWarnings: Map<string, string> = new Map();
 	// Runtime extension model overlays — persist across refresh() cycles so that
 	// models registered by extensions survive the model selector's offline reload.
@@ -667,6 +652,8 @@ export class ModelRegistry {
 	#rebuildPending: boolean = false;
 	#rebuildSuspended: number = 0;
 	#fetch: FetchImpl;
+	#availability: ModelAvailability;
+
 
 	#resolveCommandBackedApiKey(provider: string): CommandApiKeyResolution {
 		const keyConfig = this.#customProviderApiKeys.get(provider);
@@ -719,6 +706,11 @@ export class ModelRegistry {
 		});
 		// Load models synchronously in constructor.
 		this.#loadModels();
+		this.#availability = new ModelAvailability({
+			authStorage,
+			getModels: () => this.#models,
+			getKeylessProviders: () => this.#keylessProviders,
+		});
 	}
 
 	/**
@@ -736,21 +728,7 @@ export class ModelRegistry {
 	}
 
 	refreshInBackground(strategy: ModelRefreshStrategy = "online-if-uncached"): void {
-		if (this.#backgroundRefresh) {
-			return;
-		}
-		const refreshPromise = this.refresh(strategy)
-			.catch(error => {
-				logger.warn("background model refresh failed", {
-					error: error instanceof Error ? error.message : String(error),
-				});
-			})
-			.finally(() => {
-				if (this.#backgroundRefresh === refreshPromise) {
-					this.#backgroundRefresh = undefined;
-				}
-			});
-		this.#backgroundRefresh = refreshPromise;
+		this.#availability.refreshInBackground(() => this.refresh(strategy));
 	}
 
 	async refreshProvider(providerId: string, strategy: ModelRefreshStrategy = "online"): Promise<void> {
@@ -1679,25 +1657,8 @@ export class ModelRegistry {
 		return this.#models;
 	}
 
-	/**
-	 * Availability predicate with per-provider memoization. Auth lookups
-	 * (`authStorage.hasAuth`) and the disabled-provider set are resolved once
-	 * per provider instead of once per model, which matters when filtering the
-	 * full bundled catalog (thousands of models, ~50 providers).
-	 */
 	#createAvailabilityCheck(): (model: Model<Api>) => boolean {
-		const disabledProviders = getDisabledProviderIdsFromSettings();
-		const byProvider = new Map<string, boolean>();
-		return model => {
-			let available = byProvider.get(model.provider);
-			if (available === undefined) {
-				available =
-					!disabledProviders.has(model.provider) &&
-					(this.#keylessProviders.has(model.provider) || this.authStorage.hasAuth(model.provider));
-				byProvider.set(model.provider, available);
-			}
-			return available;
-		};
+		return this.#availability.createCheck();
 	}
 
 	/**
@@ -1809,12 +1770,20 @@ export class ModelRegistry {
 		return this.#ensureCanonicalIndex().bySelector.get(formatCanonicalVariantSelector(model).toLowerCase());
 	}
 
+	getAvailabilitySnapshot(): ModelAvailabilitySnapshot {
+		return this.#availability.getSnapshot();
+	}
+
+	onAvailabilityChanged(listener: (snapshot: ModelAvailabilitySnapshot) => void): () => void {
+		return this.#availability.onChanged(listener);
+	}
+
 	/**
 	 * Get only models that have auth configured.
 	 * This is a fast check that doesn't refresh OAuth tokens.
 	 */
 	getAvailable(): Model<Api>[] {
-		return this.#models.filter(this.#createAvailabilityCheck());
+		return [...this.getAvailabilitySnapshot().models];
 	}
 
 	/**

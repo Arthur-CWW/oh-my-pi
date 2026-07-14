@@ -16,7 +16,7 @@ import {
 	type TUI,
 	visibleWidth,
 } from "@oh-my-pi/pi-tui";
-import { formatNumber } from "@oh-my-pi/pi-utils";
+import type { ModelAvailabilitySnapshot } from "../../config/model-availability";
 import type { ModelRegistry } from "../../config/model-registry";
 import { getModelMatchPreferences, resolveModelRoleValue } from "../../config/model-resolver";
 import { getKnownRoleIds, getRoleInfo, MODEL_ROLE_IDS, MODEL_ROLES } from "../../config/model-roles";
@@ -26,6 +26,16 @@ import { matchesSelectDown, matchesSelectUp } from "../../modes/utils/keybinding
 import { AUTO_THINKING, type ConfiguredThinkingLevel, getConfiguredThinkingLevelMetadata } from "../../thinking";
 import { getTabBarTheme } from "../shared";
 import { DynamicBorder } from "./dynamic-border";
+import {
+	classifyModelSelectorItem,
+	formatAuthStatusSuffix,
+	formatContextWarningSuffix,
+	formatDiscoveryAge,
+	formatProviderEmptyStateMessage,
+	formatProviderRefreshStatus,
+	formatProviderTabLabel,
+	type ModelSelectorItemClassification,
+} from "./model-selector-availability";
 
 function makeInvertedBadge(label: string, color: ThemeColor): string {
 	const fgAnsi = theme.getFgAnsi(color);
@@ -65,30 +75,6 @@ function compactSearchText(value: string): string {
 
 function getAlphaSearchTokens(query: string): string[] {
 	return [...normalizeSearchText(query).matchAll(/[a-z]+/g)].map(match => match[0]).filter(token => token.length > 0);
-}
-
-export interface ModelSelectorItemClassification {
-	disabled: boolean;
-	contextOverflow: boolean;
-	contextWarning: string | null;
-}
-
-export function classifyModelSelectorItem(options: {
-	currentContextTokens: number;
-	contextWindow?: number | null;
-	disabledReason?: string | null;
-}): ModelSelectorItemClassification {
-	const contextWindow = options.contextWindow ?? 0;
-	const contextOverflow =
-		options.currentContextTokens > 0 && contextWindow > 0 && options.currentContextTokens > contextWindow;
-	const disabledReason = options.disabledReason;
-	return {
-		disabled: disabledReason !== undefined && disabledReason !== null && disabledReason.length > 0,
-		contextOverflow,
-		contextWarning: contextOverflow
-			? `context ${formatNumber(options.currentContextTokens).toLowerCase()} > ${formatNumber(contextWindow).toLowerCase()} — will compact on switch`
-			: null,
-	};
 }
 
 function computeModelRank(model: Model, roles: Record<string, RoleAssignment | undefined>): number {
@@ -161,10 +147,6 @@ const STATIC_PROVIDER_TABS: ProviderTabState[] = [
 
 const MODEL_TAB_REFRESH_DEBOUNCE_MS = 120;
 
-function formatProviderTabLabel(providerId: string): string {
-	return providerId.replace(/[-_]+/g, " ").toUpperCase();
-}
-
 function createProviderTab(providerId: string): ProviderTabState {
 	return { id: providerId, label: formatProviderTabLabel(providerId), providerId };
 }
@@ -206,6 +188,10 @@ export class ModelSelectorComponent extends Container {
 	#scheduledProviderRefreshes: Map<string, ReturnType<typeof setTimeout>> = new Map();
 	#refreshSpinnerFrame: number = 0;
 	#refreshSpinnerInterval?: NodeJS.Timeout;
+	#authRefreshingProviders: Set<string> = new Set();
+	#staleProviders: Set<string> = new Set();
+	#unsubscribeAvailability?: () => void;
+	#disposed: boolean = false;
 
 	// Context menu state
 	#isMenuOpen: boolean = false;
@@ -294,6 +280,14 @@ export class ModelSelectorComponent extends Container {
 		// dropped while the offline refresh promise is still pending. This stays
 		// on the open path, so it must remain cheap — heavy lifting lives in the
 		// registry's one-pass getCanonicalModelSelections.
+		if (this.#scopedModels.length === 0) {
+			this.#unsubscribeAvailability = this.#modelRegistry.onAvailabilityChanged(snapshot => {
+				if (this.#disposed) return;
+				this.#syncFromRegistryState(snapshot);
+				this.#tui.requestComponentRender(this);
+			});
+		}
+
 		this.#syncFromRegistryState();
 
 		// Reconcile with cached discovery state in the background. A --models
@@ -302,12 +296,17 @@ export class ModelSelectorComponent extends Container {
 		if (this.#scopedModels.length === 0) {
 			this.#modelRegistry
 				.refresh("offline")
-				.then(() => this.#syncFromRegistryState())
+				.then(() => {
+					if (!this.#disposed) this.#syncFromRegistryState();
+				})
 				.catch(error => {
+					if (this.#disposed) return;
 					this.#errorMessage = error instanceof Error ? error.message : String(error);
 					this.#updateList();
 				})
-				.finally(() => this.#tui.requestComponentRender(this));
+				.finally(() => {
+					if (!this.#disposed) this.#tui.requestComponentRender(this);
+				});
 		}
 	}
 
@@ -469,7 +468,7 @@ export class ModelSelectorComponent extends Container {
 		});
 	}
 
-	#loadModelsFromCurrentRegistryState(): void {
+	#loadModelsFromCurrentRegistryState(snapshot?: ModelAvailabilitySnapshot): void {
 		let models: ModelItem[];
 		if (this.#scopedModels.length > 0) {
 			models = this.#scopedModels.map(scoped => ({
@@ -488,8 +487,10 @@ export class ModelSelectorComponent extends Container {
 			}
 
 			try {
-				const availableModels = this.#modelRegistry.getAvailable();
-				models = availableModels.map((model: Model) => ({
+				const availability = snapshot ?? this.#modelRegistry.getAvailabilitySnapshot();
+				this.#authRefreshingProviders = new Set(availability.refreshingProviders);
+				this.#staleProviders = new Set(availability.staleProviders);
+				models = availability.models.map((model: Model) => ({
 					kind: "provider",
 					provider: model.provider,
 					id: model.id,
@@ -509,7 +510,7 @@ export class ModelSelectorComponent extends Container {
 		const candidates = models.map(item => item.model);
 		this.#loadRoleModels(candidates);
 		const canonicalSelections = this.#modelRegistry.getCanonicalModelSelections({
-			availableOnly: this.#scopedModels.length === 0,
+			availableOnly: false,
 			candidates,
 		});
 		const canonicalModels = canonicalSelections.map(({ record, model: selectedModel }): CanonicalModelItem => {
@@ -554,9 +555,10 @@ export class ModelSelectorComponent extends Container {
 	 * the highlighted item by selector — a refresh that reorders or inserts
 	 * models must not yank the user's selection out from under a pending Enter.
 	 */
-	#syncFromRegistryState(): void {
+	#syncFromRegistryState(snapshot?: ModelAvailabilitySnapshot): void {
 		const selectedKey = this.#getSelectedItem()?.selector;
-		this.#loadModelsFromCurrentRegistryState();
+		this.#loadModelsFromCurrentRegistryState(snapshot);
+		this.#syncAuthRefreshSpinner();
 		this.#buildProviderTabs();
 		this.#updateTabBar();
 		this.#applyTabFilter();
@@ -588,18 +590,6 @@ export class ModelSelectorComponent extends Container {
 			activeIndex >= 0 ? activeIndex : Math.min(this.#activeTabIndex, this.#providers.length - 1);
 	}
 
-	#getActiveProviderRefreshStatusText(): string | undefined {
-		const providerId = this.#getActiveProviderId();
-		if (!providerId || !this.#refreshingProviders.has(providerId)) {
-			return undefined;
-		}
-		const spinnerFrames = theme.spinnerFrames;
-		const spinner =
-			spinnerFrames.length > 0
-				? spinnerFrames[this.#refreshSpinnerFrame % spinnerFrames.length]
-				: theme.status.pending;
-		return theme.fg("warning", `  ${spinner} Refreshing ${formatProviderTabLabel(providerId)} in background...`);
-	}
 
 	#startRefreshSpinner(): void {
 		if (this.#refreshSpinnerInterval) {
@@ -616,7 +606,7 @@ export class ModelSelectorComponent extends Container {
 	}
 
 	#stopRefreshSpinner(): void {
-		if (this.#refreshingProviders.size > 0) {
+		if (this.#refreshingProviders.size > 0 || this.#authRefreshingProviders.size > 0) {
 			return;
 		}
 		if (this.#refreshSpinnerInterval) {
@@ -632,6 +622,13 @@ export class ModelSelectorComponent extends Container {
 			this.#startRefreshSpinner();
 		} else {
 			this.#refreshingProviders.delete(providerId);
+			this.#stopRefreshSpinner();
+		}
+	}
+	#syncAuthRefreshSpinner(): void {
+		if (this.#authRefreshingProviders.size > 0) {
+			this.#startRefreshSpinner();
+		} else {
 			this.#stopRefreshSpinner();
 		}
 	}
@@ -670,14 +667,17 @@ export class ModelSelectorComponent extends Container {
 			// here must stay purely in-memory — do not call modelRegistry.refresh()
 			// again or tab switches will pay an extra whole-registry reload after the
 			// network round-trip completes.
-			this.#syncFromRegistryState();
+			if (!this.#disposed) this.#syncFromRegistryState();
 		} catch (error) {
+			if (this.#disposed) return;
 			this.#errorMessage = error instanceof Error ? error.message : String(error);
 			this.#updateList();
 		} finally {
 			this.#setProviderRefreshing(providerId, false);
-			this.#updateTabBar();
-			this.#tui.requestComponentRender(this);
+			if (!this.#disposed) {
+				this.#updateTabBar();
+				this.#tui.requestComponentRender(this);
+			}
 		}
 	}
 
@@ -700,7 +700,13 @@ export class ModelSelectorComponent extends Container {
 		};
 		this.#tabBar = tabBar;
 		this.#headerContainer.addChild(tabBar);
-		const refreshStatusText = this.#getActiveProviderRefreshStatusText();
+		const refreshStatusText = formatProviderRefreshStatus({
+			providerId: this.#getActiveProviderId(),
+			providerRefreshes: this.#refreshingProviders,
+			authRefreshes: this.#authRefreshingProviders,
+			staleProviders: this.#staleProviders,
+			spinnerFrame: this.#refreshSpinnerFrame,
+		});
 		if (refreshStatusText) {
 			this.#headerContainer.addChild(new Text(refreshStatusText, 0, 0));
 		}
@@ -737,13 +743,6 @@ export class ModelSelectorComponent extends Container {
 		return false;
 	}
 
-	#formatContextWarningSuffix(model: Model): string {
-		const warning = this.#classifyModel(model).contextWarning;
-		if (!warning) {
-			return "";
-		}
-		return ` ${theme.fg("dim", `⚠ ${warning}`)}`;
-	}
 
 	#getVisibleItems(): ReadonlyArray<ModelItem | CanonicalModelItem> {
 		return this.#isCanonicalTab() ? this.#filteredCanonicalModels : this.#filteredModels;
@@ -879,34 +878,6 @@ export class ModelSelectorComponent extends Container {
 		const query = this.#searchInput.getValue();
 		this.#filterModels(query);
 	}
-
-	#formatDiscoveryAge(fetchedAt: number | undefined): string | undefined {
-		if (!fetchedAt) {
-			return undefined;
-		}
-		const ageMs = Math.max(0, Date.now() - fetchedAt);
-		if (ageMs < 60_000) {
-			return "less than a minute ago";
-		}
-		const ageMinutes = Math.round(ageMs / 60_000);
-		return `${ageMinutes}m ago`;
-	}
-
-	#formatDiscoveryErrorHint(error: string | undefined): string | undefined {
-		if (!error) {
-			return undefined;
-		}
-		const httpMatch = error.match(/^HTTP (\d+) from (.+)$/);
-		if (!httpMatch) {
-			return undefined;
-		}
-		const [, statusCode, url] = httpMatch;
-		if (statusCode === "404") {
-			return `  Discovery endpoint ${url} returned 404. Point baseUrl at the host that serves /models (usually .../v1).`;
-		}
-		return `  Discovery failed: ${error}`;
-	}
-
 	#getProviderEmptyStateMessage(): string | undefined {
 		const activeProviderId = this.#getActiveProviderId();
 		if (!activeProviderId || this.#searchInput.getValue().trim()) {
@@ -916,26 +887,7 @@ export class ModelSelectorComponent extends Container {
 		if (!state) {
 			return undefined;
 		}
-		const age = this.#formatDiscoveryAge(state.fetchedAt);
-		switch (state.status) {
-			case "cached":
-				return age
-					? `  Using cached model list from ${age}. Live refresh is still pending.`
-					: "  Using cached model list. Live refresh is still pending.";
-			case "unavailable":
-				return (
-					this.#formatDiscoveryErrorHint(state.error) ??
-					(age ? `  Provider unavailable. Using cached model list from ${age}.` : "  Provider unavailable.")
-				);
-			case "unauthenticated":
-				return "  Provider requires authentication before models can be discovered.";
-			case "idle":
-				return "  Provider has not been refreshed yet.";
-			case "empty":
-				return "  Discovery succeeded but returned 0 models. Check that /models returns { data: [{ id }] }.";
-			case "ok":
-				return undefined;
-		}
+		return formatProviderEmptyStateMessage(state, formatDiscoveryAge(state.fetchedAt));
 	}
 
 	#updateList(): void {
@@ -962,7 +914,12 @@ export class ModelSelectorComponent extends Container {
 
 			const isSelected = i === this.#selectedIndex;
 			const isDisabled = this.#isItemDisabled(item);
-			const contextWarningSuffix = this.#formatContextWarningSuffix(item.model);
+			const contextWarningSuffix = formatContextWarningSuffix(item.model, this.#currentContextTokens);
+			const authStatusSuffix = formatAuthStatusSuffix(
+				item.model.provider,
+				this.#staleProviders,
+				this.#authRefreshingProviders,
+			);
 
 			// Build role badges. Solid badges are configured; outlined badges are auto-selected defaults.
 			const roleBadgeTokens: string[] = [];
@@ -989,24 +946,24 @@ export class ModelSelectorComponent extends Container {
 				if (isCanonicalTab) {
 					const variants = theme.fg("dim", ` [${canonicalItem?.variantCount ?? 0}]`);
 					const backing = theme.fg("dim", ` -> ${item.model.provider}/${item.model.id}`);
-					line = `${prefix}${theme.fg("accent", item.id)}${variants}${backing}${badgeText}${contextWarningSuffix}`;
+					line = `${prefix}${theme.fg("accent", item.id)}${variants}${backing}${badgeText}${contextWarningSuffix}${authStatusSuffix}`;
 				} else if (showProvider) {
 					const providerPrefix = theme.fg("dim", `${providerItem?.provider ?? ""}/`);
-					line = `${prefix}${providerPrefix}${theme.fg("accent", providerItem?.id ?? item.id)}${badgeText}${contextWarningSuffix}`;
+					line = `${prefix}${providerPrefix}${theme.fg("accent", providerItem?.id ?? item.id)}${badgeText}${contextWarningSuffix}${authStatusSuffix}`;
 				} else {
-					line = `${prefix}${theme.fg("accent", item.id)}${badgeText}${contextWarningSuffix}`;
+					line = `${prefix}${theme.fg("accent", item.id)}${badgeText}${contextWarningSuffix}${authStatusSuffix}`;
 				}
 			} else {
 				const prefix = "  ";
 				if (isCanonicalTab) {
 					const variants = theme.fg("dim", ` [${canonicalItem?.variantCount ?? 0}]`);
 					const backing = theme.fg("dim", ` -> ${item.model.provider}/${item.model.id}`);
-					line = `${prefix}${item.id}${variants}${backing}${badgeText}${contextWarningSuffix}`;
+					line = `${prefix}${item.id}${variants}${backing}${badgeText}${contextWarningSuffix}${authStatusSuffix}`;
 				} else if (showProvider) {
 					const providerPrefix = theme.fg("dim", `${providerItem?.provider ?? ""}/`);
-					line = `${prefix}${providerPrefix}${providerItem?.id ?? item.id}${badgeText}${contextWarningSuffix}`;
+					line = `${prefix}${providerPrefix}${providerItem?.id ?? item.id}${badgeText}${contextWarningSuffix}${authStatusSuffix}`;
 				} else {
-					line = `${prefix}${item.id}${badgeText}${contextWarningSuffix}`;
+					line = `${prefix}${item.id}${badgeText}${contextWarningSuffix}${authStatusSuffix}`;
 				}
 			}
 
@@ -1194,6 +1151,24 @@ export class ModelSelectorComponent extends Container {
 		return Math.max(MIN_VISIBLE_OPTIONS, Math.min(optionCount, terminalRows - MENU_CHROME_ROWS));
 	}
 
+	#cleanup(): void {
+		if (this.#disposed) return;
+		this.#disposed = true;
+		this.#unsubscribeAvailability?.();
+		this.#unsubscribeAvailability = undefined;
+		for (const timer of this.#scheduledProviderRefreshes.values()) {
+			clearTimeout(timer);
+		}
+		this.#scheduledProviderRefreshes.clear();
+		this.#refreshingProviders.clear();
+		this.#authRefreshingProviders.clear();
+		if (this.#refreshSpinnerInterval) {
+			clearInterval(this.#refreshSpinnerInterval);
+			this.#refreshSpinnerInterval = undefined;
+		}
+		this.#refreshSpinnerFrame = 0;
+	}
+
 	handleInput(keyData: string): void {
 		if (this.#isMenuOpen) {
 			this.#handleMenuInput(keyData);
@@ -1231,8 +1206,8 @@ export class ModelSelectorComponent extends Container {
 			return;
 		}
 
-		// Escape or Ctrl+C - close selector
 		if (getKeybindings().matches(keyData, "tui.select.cancel")) {
+			this.#cleanup();
 			this.#onCancelCallback();
 			return;
 		}
@@ -1305,6 +1280,7 @@ export class ModelSelectorComponent extends Container {
 		if (this.#isItemDisabled(item)) {
 			return;
 		}
+		this.#cleanup();
 		// For temporary role, don't save to settings - just notify caller
 		if (role === null) {
 			this.#onSelectCallback(item.model, null, undefined, item.selector);

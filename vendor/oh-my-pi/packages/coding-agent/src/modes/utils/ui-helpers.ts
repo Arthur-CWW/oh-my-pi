@@ -239,7 +239,7 @@ export class UiHelpers {
 							},
 							() => this.ctx.toolOutputExpanded,
 							theme,
-							() => this.ctx.transcriptWrap,
+							this.ctx,
 						);
 						this.ctx.chatContainer.addChild(card);
 						return [card];
@@ -292,8 +292,10 @@ export class UiHelpers {
 						const size = typeof file.byteSize === "number" ? formatBytes(file.byteSize) : "unknown size";
 						suffix = `(skipped: ${size})`;
 					} else {
-						suffix = file.image
-							? "(image)"
+						suffix = file.attachment
+							? file.attachment.type === "video"
+								? "(video)"
+								: "(image)"
 							: file.lineCount === undefined
 								? "(unknown lines)"
 								: `(${file.lineCount} lines)`;
@@ -492,6 +494,7 @@ export class UiHelpers {
 							editFuzzyThreshold: settings.get("edit.fuzzyThreshold"),
 							editAllowFuzzy: settings.get("edit.fuzzyMatch"),
 							liveRegion: this.ctx.chatContainer,
+							transcriptDisplay: this.ctx,
 						},
 						tool,
 						this.ctx.ui,
@@ -647,7 +650,7 @@ export class UiHelpers {
 		this.ctx.present([
 			new Spacer(1),
 			new Text(theme.fg("error", `Error: ${errorMessage}`), 1, 0),
-			new Text(theme.fg("dim", `(/errors for history)`), 1, 0),
+			new Text(theme.fg("dim", `(:errors for history)`), 1, 0),
 		]);
 	}
 
@@ -720,10 +723,18 @@ export class UiHelpers {
 			new TruncatedText(theme.fg("dim", `Pending inputs (${pendingCount}):`), 1, 0),
 		);
 		for (const input of durableInputs) {
-			const imageMarker = input.payload.kind === "user" && input.payload.images?.length ? " [image]" : "";
+			const attachments =
+				input.payload.kind === "custom"
+					? typeof input.payload.message.content === "string"
+						? []
+						: input.payload.message.content.filter(part => part.type !== "text")
+					: (input.payload.attachments ?? []);
+			const hasImages = attachments.some(attachment => attachment.type === "image");
+			const hasVideos = attachments.some(attachment => attachment.type === "video");
+			const attachmentMarker = hasImages ? (hasVideos ? " [image, video]" : " [image]") : hasVideos ? " [video]" : "";
 			const queuedText = theme.fg(
 				"dim",
-				`#${input.sequence} ${input.deliveryClass} · ${input.state} · ${input.inputId.slice(0, 8)}: ${durableSummary(input)}${imageMarker}`,
+				`#${input.sequence} ${input.deliveryClass} · ${input.state} · ${input.inputId.slice(0, 8)}: ${durableSummary(input)}${attachmentMarker}`,
 			);
 			this.ctx.pendingMessagesContainer.addChild(new TruncatedText(queuedText, 1, 0));
 		}
