@@ -51,16 +51,19 @@ async function fixture(
 		provider: "test-provider",
 		stopReason: "stop" as const,
 	};
-	const liveMessages =
-		options.liveEvidence === false
-			? [{ role: "user" as const, content: [{ type: "text" as const, text: "prompt" }], timestamp: now - 2_000 }]
-			: [assistantMessage];
+	const liveMessages = [
+		{ role: "user" as const, content: [{ type: "text" as const, text: "prompt" }], timestamp: now - 2_000 },
+	];
+	const state: {
+		messages: typeof liveMessages;
+		streamMessage: typeof assistantMessage | null;
+	} = {
+		messages: liveMessages,
+		streamMessage: options.liveEvidence === false ? null : assistantMessage,
+	};
 	let listener: SessionEventListener | undefined;
 	const session = {
-		state: {
-			messages: liveMessages,
-			streamMessage: options.liveEvidence === false ? null : assistantMessage,
-		},
+		state,
 		// A task child can remain registry-running while AgentSession's transient
 		// streaming getter is false from the Hub's observation point.
 		get isStreaming() {
@@ -107,6 +110,14 @@ async function fixture(
 		setLiveOutput(output: number) {
 			assistantMessage.usage.output = output;
 		},
+		setLiveText(text: string) {
+			assistantMessage.content[0]!.text = text;
+		},
+		async completeLive(text: string) {
+			assistantMessage.content[0]!.text = text;
+			await fs.appendFile(sessionFile, journalMessage(assistantMessage, "completed-live"));
+			state.streamMessage = null;
+		},
 		emit(event: object) {
 			Reflect.apply(listener!, session, [event]);
 		},
@@ -150,13 +161,84 @@ describe("Agent Hub live token rate preview", () => {
 				),
 			);
 			view.setLiveOutput(40);
-			view.emit({ type: "message_update", message: { role: "assistant" }, assistantMessageEvent: { type: "text_delta", delta: "x" } });
+			view.emit({
+				type: "message_update",
+				message: { role: "assistant" },
+				assistantMessageEvent: { type: "text_delta", delta: "x" },
+			});
 			await Bun.sleep(100);
 			const updated = renderText(view.hub);
 			expect(updated).toContain("40.0 tok/s");
 			expect(updated).toContain("journal update visible");
 		} finally {
 			await view.dispose();
+		}
+	});
+
+	it("renders bounded live deltas without rescanning finalized history", async () => {
+		const view = await fixture({ duration: 1_000 });
+		try {
+			view.setLiveText(`discarded prefix sentinel${"x".repeat(300_000)} visible bounded suffix`);
+			view.emit({
+				type: "message_update",
+				message: { role: "assistant" },
+				assistantMessageEvent: { type: "text_delta", delta: "suffix" },
+			});
+			await Bun.sleep(100);
+			const bounded = renderText(view.hub);
+			expect(bounded).toContain("visible bounded suffix");
+			expect(bounded).not.toContain("discarded prefix sentinel");
+			renderText(view.hub);
+			const baselineScans = view.hub.getRetentionMetrics().previewFinalizedPrefixScans;
+			for (let index = 1; index <= 4; index++) {
+				view.setLiveText(`production-shaped live delta ${index}`);
+				view.emit({
+					type: "message_update",
+					message: { role: "assistant" },
+					assistantMessageEvent: { type: "text_delta", delta: String(index) },
+				});
+				await Bun.sleep(100);
+				expect(renderText(view.hub)).toContain(`production-shaped live delta ${index}`);
+			}
+			expect(view.hub.getRetentionMetrics().previewFinalizedPrefixScans).toBe(baselineScans);
+		} finally {
+			await view.dispose();
+		}
+	});
+
+	it("hands a completed live message to the journal without duplication", async () => {
+		const view = await fixture({ duration: 1_000 });
+		try {
+			view.setLiveText("handoff sentinel");
+			view.emit({
+				type: "message_update",
+				message: { role: "assistant" },
+				assistantMessageEvent: { type: "text_delta", delta: "sentinel" },
+			});
+			await Bun.sleep(100);
+			expect(renderText(view.hub)).toContain("handoff sentinel");
+
+			await view.completeLive("handoff sentinel");
+			view.emit({ type: "message_end", message: { role: "assistant" } });
+			await Bun.sleep(100);
+			const completed = renderText(view.hub);
+			expect(completed.split("handoff sentinel")).toHaveLength(2);
+		} finally {
+			await view.dispose();
+		}
+	});
+
+	it("does not project transient state for idle or parked children", async () => {
+		const idle = await fixture({ status: "idle" });
+		const parked = await fixture({ status: "parked" });
+		try {
+			idle.setLiveText("idle transient sentinel");
+			parked.setLiveText("parked transient sentinel");
+			expect(renderText(idle.hub)).not.toContain("idle transient sentinel");
+			expect(renderText(parked.hub)).not.toContain("parked transient sentinel");
+		} finally {
+			await idle.dispose();
+			await parked.dispose();
 		}
 	});
 

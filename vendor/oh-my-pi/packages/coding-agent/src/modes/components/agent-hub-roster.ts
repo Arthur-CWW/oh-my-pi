@@ -1,5 +1,6 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import { getSessionsDir } from "@oh-my-pi/pi-utils";
 import type { AgentRef } from "../../registry/agent-registry";
 
@@ -362,4 +363,124 @@ export function cycleVisibleAgentSibling(
 	const siblingIndex = siblings.findIndex(ref => ref.id === currentId);
 	if (siblingIndex < 0) return undefined;
 	return siblings[(siblingIndex + direction + siblings.length) % siblings.length];
+}
+
+/** Copy only a byte-bounded visible suffix from an in-flight assistant message. */
+export function boundedStreamingAssistant(message: AssistantMessage, maxBytes: number): AssistantMessage {
+	let remaining = maxBytes;
+	const content: AssistantMessage["content"] = [];
+	for (let index = message.content.length - 1; index >= 0 && remaining > 0; index--) {
+		const block = message.content[index]!;
+		if (block.type !== "text" && block.type !== "thinking") continue;
+		const source = block.type === "text" ? block.text : block.thinking;
+		const suffix = source.slice(-remaining);
+		const bytes = Buffer.from(suffix);
+		const clipped =
+			bytes.length <= remaining
+				? suffix
+				: bytes
+						.subarray(bytes.length - remaining)
+						.toString("utf8")
+						.replace(/^\uFFFD/, "");
+		remaining -= Buffer.byteLength(clipped);
+		content.unshift(block.type === "text" ? { ...block, text: clipped } : { ...block, thinking: clipped });
+	}
+	return { ...message, content };
+}
+
+export interface ResolvedModelParts {
+	provider: string | undefined;
+	id: string;
+	thinking: string | undefined;
+	raw: string;
+}
+
+const MODEL_ABBREVIATIONS: Record<string, string> = {
+	"openai-codex/gpt-5.5": "GPT-5.5",
+	"kimi-code/kimi-for-coding": "KimiCode",
+	"deepseek/deepseek-v4-pro": "DS V4 Pro",
+	"google-antigravity/gemini-3.5-flash": "Gem3.5F",
+};
+const PROVIDER_SHORT_NAMES: Record<string, string> = {
+	anthropic: "AN",
+	openai: "OA",
+	"openai-codex": "OX",
+	google: "GO",
+	"google-antigravity": "GM",
+	deepseek: "DS",
+	"kimi-code": "KM",
+	openrouter: "OR",
+	mistral: "MI",
+};
+
+export function shortProviderName(provider: string): string {
+	return PROVIDER_SHORT_NAMES[provider] ?? provider.slice(0, 2).toUpperCase();
+}
+
+function splitThinkingSuffix(value: string): { id: string; thinking: string | undefined } {
+	const suffixStart = value.lastIndexOf(":");
+	if (suffixStart <= 0 || suffixStart === value.length - 1) return { id: value, thinking: undefined };
+	return { id: value.slice(0, suffixStart), thinking: value.slice(suffixStart + 1) };
+}
+
+export function parseResolvedModel(resolvedModel: string): ResolvedModelParts {
+	const raw = resolvedModel.trim().replaceAll("\t", "    ");
+	const providerEnd = raw.indexOf("/");
+	if (providerEnd <= 0 || providerEnd === raw.length - 1) {
+		const { id, thinking } = splitThinkingSuffix(raw);
+		return { provider: undefined, id, thinking, raw };
+	}
+	const provider = raw.slice(0, providerEnd);
+	const { id, thinking } = splitThinkingSuffix(raw.slice(providerEnd + 1));
+	return { provider, id, thinking, raw };
+}
+
+const VARIANT_ALIASES: Record<string, string> = {
+	terra: "Tr",
+	sonnet: "So",
+	luna: "Lu",
+	flash: "Fl",
+	pro: "Pr",
+	coding: "Cd",
+	opus: "Op",
+	haiku: "Hk",
+};
+
+export function abbreviateResolvedModel(parts: ResolvedModelParts): string {
+	const modelKey = parts.provider ? `${parts.provider}/${parts.id}` : parts.id;
+	const abbreviation = MODEL_ABBREVIATIONS[modelKey];
+	if (abbreviation) return abbreviation;
+	const id = parts.id
+		.replace(/^gpt-/, "")
+		.replace(/^claude-/, "")
+		.toLowerCase();
+	let family = "";
+	for (const candidate of Object.keys(VARIANT_ALIASES)) {
+		if (id.includes(candidate)) {
+			family = candidate;
+			break;
+		}
+	}
+	const versionMatch = id.match(/(\d+)[-.](\d+)/);
+	let version = "";
+	if (versionMatch) version = `${versionMatch[1]}.${versionMatch[2]}`;
+	else {
+		const singleMatch = id.match(/\d+/);
+		if (singleMatch) version = singleMatch[0];
+	}
+	if (family) {
+		const alias = VARIANT_ALIASES[family];
+		return version ? `${version}${alias}` : alias;
+	}
+	return version || parts.id;
+}
+
+export function getModelLaneWidth(width: number): number {
+	if (width <= 80) return 13;
+	if (width <= 120) return 14;
+	return 15;
+}
+
+export function getStateLaneWidth(width: number): number {
+	return width <= 80 ? 6 : 7;
 }

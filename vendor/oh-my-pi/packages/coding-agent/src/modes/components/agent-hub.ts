@@ -77,13 +77,19 @@ import {
 import { createAdvisorMessageCard } from "./advisor-message";
 import {
 	agentHistoryRank,
+	abbreviateResolvedModel,
+	boundedStreamingAssistant,
 	cycleVisibleAgentSibling,
 	DurableJournalModelCache,
 	durableModelSelector,
 	expandAgentAncestors,
+	getModelLaneWidth,
+	getStateLaneWidth,
 	isHistoricalAgent,
 	listAutomationJournalRows,
+	parseResolvedModel,
 	projectAgentRoster,
+	shortProviderName,
 } from "./agent-hub-roster";
 import { AssistantMessageComponent } from "./assistant-message";
 import { createBackgroundTanDispatchBlock } from "./background-tan-message";
@@ -222,120 +228,10 @@ function displayedExternalPeerState(peer: AgentHubExternalPeer): AgentHubExterna
 	return isIrcExternalPeerFresh(peer.lastSeen) ? normalizeExternalPeerState(peer.state) : "disconnected";
 }
 
-interface ResolvedModelParts {
-	provider: string | undefined;
-	id: string;
-	thinking: string | undefined;
-	raw: string;
-}
-
 const SUBSCRIPTION_MODEL_PROVIDERS = new Set(["kimi-code", "openai-codex", "google-antigravity"]);
-
-const MODEL_ABBREVIATIONS: Record<string, string> = {
-	"openai-codex/gpt-5.5": "GPT-5.5",
-	"kimi-code/kimi-for-coding": "KimiCode",
-	"deepseek/deepseek-v4-pro": "DS V4 Pro",
-	"google-antigravity/gemini-3.5-flash": "Gem3.5F",
-};
-
-/** Compact provider codes so the model id survives narrow lanes ("anthropic/claude-…" → "ant/claude-…"). */
-const PROVIDER_SHORT_NAMES: Record<string, string> = {
-	anthropic: "AN",
-	openai: "OA",
-	"openai-codex": "OX",
-	google: "GO",
-	"google-antigravity": "GM",
-	deepseek: "DS",
-	"kimi-code": "KM",
-	openrouter: "OR",
-	mistral: "MI",
-};
-
-function shortProviderName(provider: string): string {
-	return PROVIDER_SHORT_NAMES[provider] ?? provider.slice(0, 2).toUpperCase();
-}
-
-function splitThinkingSuffix(value: string): { id: string; thinking: string | undefined } {
-	const suffixStart = value.lastIndexOf(":");
-	if (suffixStart <= 0 || suffixStart === value.length - 1) return { id: value, thinking: undefined };
-	return { id: value.slice(0, suffixStart), thinking: value.slice(suffixStart + 1) };
-}
-
-function parseResolvedModel(resolvedModel: string): ResolvedModelParts {
-	const raw = replaceTabs(resolvedModel.trim());
-	const providerEnd = raw.indexOf("/");
-	if (providerEnd <= 0 || providerEnd === raw.length - 1) {
-		const { id, thinking } = splitThinkingSuffix(raw);
-		return { provider: undefined, id, thinking, raw };
-	}
-
-	const provider = raw.slice(0, providerEnd);
-	const { id, thinking } = splitThinkingSuffix(raw.slice(providerEnd + 1));
-	return { provider, id, thinking, raw };
-}
 
 function modelAuthBadge(provider: string | undefined): string {
 	return SUBSCRIPTION_MODEL_PROVIDERS.has(provider ?? "") ? theme.fg("success", "S") : theme.fg("warning", "A");
-}
-
-const VARIANT_ALIASES: Record<string, string> = {
-	terra: "Tr",
-	sonnet: "So",
-	luna: "Lu",
-	flash: "Fl",
-	pro: "Pr",
-	coding: "Cd",
-	opus: "Op",
-	haiku: "Hk",
-};
-
-function abbreviateResolvedModel(parts: ResolvedModelParts): string {
-	const modelKey = parts.provider ? `${parts.provider}/${parts.id}` : parts.id;
-	const abbreviation = MODEL_ABBREVIATIONS[modelKey];
-	if (abbreviation) return abbreviation;
-
-	const id = parts.id
-		.replace(/^gpt-/, "")
-		.replace(/^claude-/, "")
-		.toLowerCase();
-
-	let family = "";
-	for (const f of Object.keys(VARIANT_ALIASES)) {
-		if (id.includes(f)) {
-			family = f;
-			break;
-		}
-	}
-
-	const versionMatch = id.match(/(\d+)[-.](\d+)/);
-	let version = "";
-	if (versionMatch) {
-		version = `${versionMatch[1]}.${versionMatch[2]}`;
-	} else {
-		const singleMatch = id.match(/\d+/);
-		if (singleMatch) {
-			version = singleMatch[0];
-		}
-	}
-
-	if (family) {
-		const alias = VARIANT_ALIASES[family];
-		return version ? `${version}${alias}` : alias;
-	}
-
-	return version || parts.id;
-}
-
-function getModelLaneWidth(width: number): number {
-	if (width <= 60) return 13;
-	if (width <= 80) return 13;
-	if (width <= 120) return 14;
-	return 15;
-}
-
-function getStateLaneWidth(width: number): number {
-	if (width <= 80) return 6;
-	return 7;
 }
 
 const ARCHIVED_STATE_BADGES: Record<string, { shape: string; text: string; color: string }> = {
@@ -346,50 +242,38 @@ const ARCHIVED_STATE_BADGES: Record<string, { shape: string; text: string; color
 };
 
 function formatArchivedState(state: string): string {
-	const normalized = state.toLowerCase();
-	const config = ARCHIVED_STATE_BADGES[normalized] ?? { shape: "■", text: "LEGC", color: "muted" };
+	const config = ARCHIVED_STATE_BADGES[state.toLowerCase()] ?? { shape: "■", text: "LEGC", color: "muted" };
 	return theme.fg(config.color as any, `${config.shape} ${config.text}`);
 }
 
 function modelLane(resolvedModel: string, maxLabelWidth: number): string {
 	const parts = parseResolvedModel(resolvedModel);
 	const provider = parts.provider ? shortProviderName(parts.provider) : "";
-	const sOrA = modelAuthBadge(parts.provider);
+	const auth = modelAuthBadge(parts.provider);
 	let variant = abbreviateResolvedModel(parts).replace(/\s+/g, "");
-
 	let effort = "";
 	if (parts.thinking) {
-		const eff = parts.thinking.toLowerCase();
-		if (eff === "low" || eff === "l") effort = "l";
-		else if (eff === "medium" || eff === "m") effort = "m";
-		else if (eff === "high" || eff === "h") effort = "h";
+		const normalized = parts.thinking.toLowerCase();
+		if (normalized === "low" || normalized === "l") effort = "l";
+		else if (normalized === "medium" || normalized === "m") effort = "m";
+		else if (normalized === "high" || normalized === "h") effort = "h";
 	}
-
-	const hasProvider = provider.length > 0;
-	const hasEffort = effort.length > 0;
 	const textWidth = maxLabelWidth - 1;
-	const overhead = 2 + (hasProvider ? 3 : 0) + (hasEffort ? 2 : 0);
-	const available = Math.max(1, textWidth - overhead);
-	const truncatedVariant = truncateToWidth(variant, available);
-
-	let result = sOrA + " ";
-	if (hasProvider) {
-		result += theme.fg("dim", provider) + " ";
-	}
-	result += truncatedVariant;
-	if (hasEffort) {
-		result += " " + theme.fg("dim", effort);
-	}
-	const truncatedResult = truncateToWidth(result, textWidth);
-	return truncatedResult + padding(Math.max(0, textWidth - visibleWidth(truncatedResult))) + " ";
+	const overhead = 2 + (provider ? 3 : 0) + (effort ? 2 : 0);
+	variant = truncateToWidth(variant, Math.max(1, textWidth - overhead));
+	let result = `${auth} `;
+	if (provider) result += `${theme.fg("dim", provider)} `;
+	result += variant;
+	if (effort) result += ` ${theme.fg("dim", effort)}`;
+	result = truncateToWidth(result, textWidth);
+	return result + padding(Math.max(0, textWidth - visibleWidth(result))) + " ";
 }
 
 function modelHeaderLane(resolvedModel: string): string {
 	const parts = parseResolvedModel(resolvedModel);
 	const abbreviated = abbreviateResolvedModel(parts);
 	const lane = `${modelAuthBadge(parts.provider)} ${abbreviated}`;
-	if (parts.raw === abbreviated) return lane;
-	return `${lane} ${theme.fg("dim", `(${parts.raw})`)}`;
+	return parts.raw === abbreviated ? lane : `${lane} ${theme.fg("dim", `(${parts.raw})`)}`;
 }
 
 function fixedLane(value: string, width: number): string {
@@ -522,6 +406,8 @@ export interface AgentHubRetentionMetrics {
 	cachedTranscriptEntries: number;
 	/** Transcript components retained only while a chat transcript is open. */
 	materializedChatComponents: number;
+	/** Full finalized-prefix scans performed by the shared transcript projection. */
+	previewFinalizedPrefixScans: number;
 	/** The age interval plus an optional debounced chat refresh. */
 	liveTimers: number;
 }
@@ -641,6 +527,7 @@ export class AgentHubOverlayComponent extends Container {
 	#chatExpandables: Array<{ setExpanded(expanded: boolean): void }> = [];
 	#chatExpanded = false;
 	#plainPreview = false;
+	#liveAssistantComponent: AssistantMessageComponent | undefined;
 	#chatPlaceholder: string | undefined;
 	// Chat transcript search (/ key in chat view)
 	#chatSearchQuery = "";
@@ -755,6 +642,7 @@ export class AgentHubOverlayComponent extends Container {
 			externalOrderEntries: this.#externalOrder.size,
 			cachedTranscriptEntries: this.#transcriptCache?.entries.length ?? 0,
 			materializedChatComponents: this.#chatLog.children.length,
+			previewFinalizedPrefixScans: this.#chatLog.getRetentionMetrics().finalizedPrefixScans,
 			liveTimers:
 				Number(this.#ageTimer !== undefined) +
 				Number(this.#projectionTimer !== undefined) +
@@ -2353,6 +2241,10 @@ export class AgentHubOverlayComponent extends Container {
 		} else if (ref?.sessionFile) {
 			messageEntries = this.#loadTranscript(ref.sessionFile);
 		}
+		const transcriptChanged =
+			messageEntries !== null &&
+			(this.#chatEntriesRef !== messageEntries || this.#chatBuiltCount < messageEntries.length);
+		if (transcriptChanged) this.#detachStreamingAssistant(false);
 
 		this.#viewerHeaderLines = [];
 		this.#viewerHeaderLines.push(theme.fg("accent", `Agent Hub > ${id ?? "?"}`));
@@ -2421,6 +2313,7 @@ export class AgentHubOverlayComponent extends Container {
 			this.#chatPlaceholder = undefined;
 			this.#syncChatComponents(messageEntries);
 		}
+		this.#syncStreamingAssistant(ref);
 	}
 
 	#handleChatInput(keyData: string): void {
@@ -2903,10 +2796,42 @@ export class AgentHubOverlayComponent extends Container {
 		this.#pendingUsage = undefined;
 		this.#chatWaitingPoll = null;
 		this.#chatExpandables = [];
+		this.#liveAssistantComponent = undefined;
 		this.#chatLog.dispose();
 		this.#chatLog.clear();
 		this.#chatEntriesRef = undefined;
 		this.#chatBuiltCount = 0;
+		this.#chatPlaceholder = undefined;
+	}
+
+	#detachStreamingAssistant(dispose: boolean): void {
+		const component = this.#liveAssistantComponent;
+		if (!component) return;
+		this.#chatLog.removeChild(component);
+		if (dispose) {
+			component.dispose();
+			this.#liveAssistantComponent = undefined;
+		}
+	}
+
+	/** Project the live Agent state through the same assistant component as Main. */
+	#syncStreamingAssistant(ref: AgentRef | undefined): void {
+		const streamMessage = ref?.status === "running" ? ref.session?.state?.streamMessage : undefined;
+		if (!streamMessage || streamMessage.role !== "assistant") {
+			this.#detachStreamingAssistant(true);
+			return;
+		}
+		const message = boundedStreamingAssistant(streamMessage, PREVIEW_TAIL_BYTES);
+		if (!this.#liveAssistantComponent) {
+			this.#liveAssistantComponent = new AssistantMessageComponent(
+				undefined,
+				this.#hideThinkingBlock?.() ?? false,
+				() => this.#requestRender(),
+			);
+		}
+		this.#liveAssistantComponent.updateContent(message, { transient: true });
+		if (!this.#chatLog.children.includes(this.#liveAssistantComponent))
+			this.#chatLog.addChild(this.#liveAssistantComponent);
 		this.#chatPlaceholder = undefined;
 	}
 
