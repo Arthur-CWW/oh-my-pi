@@ -9,7 +9,7 @@ import {
 	resolveFeedSurfacePaths,
 } from "../feeds";
 import { commandConsumed, parseSubcommand, usage } from "./helpers/parse";
-import type { ParsedSlashCommand, SlashCommandResult, SlashCommandRuntime } from "./types";
+import type { ParsedSlashCommand, SlashCommandResult, SlashCommandRuntime, SlashCommandSpec } from "./types";
 
 const FEEDS_USAGE = "Usage: /feeds [list|add <handle-or-url> [--name n] [--cadence hourly|daily]|sync [name]]";
 
@@ -58,6 +58,19 @@ export async function handleFeedsCommand(
 	}
 	return usage(FEEDS_USAGE, runtime);
 }
+
+export const FEEDS_COMMAND_SPEC: SlashCommandSpec = {
+	name: "feeds",
+	description: "List, add, and sync availability feeds",
+	acpDescription: "Manage availability feeds",
+	subcommands: [
+		{ name: "list", description: "Show registered feeds and cached item counts" },
+		{ name: "add", description: "Append a feed to feeds.yml", usage: "<handle-or-url> [--name n] [--cadence hourly|daily]" },
+		{ name: "sync", description: "Synchronize registered feeds", usage: "[name]" },
+	],
+	allowArgs: true,
+	handle: handleFeedsCommand,
+};
 
 interface ParsedAddArgs {
 	readonly target: string;
