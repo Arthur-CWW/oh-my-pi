@@ -42,6 +42,10 @@ echo "omp-link: linked OMP files from ${repo_root}"
 description = "Readiness-gate and atomically promote committed OMP fork changes"
 run = "bun scripts/omp-promote.ts"
 
+[tasks.install-git-hooks]
+description = "Install repository git hooks"
+run = 'repo_root="${MISE_PROJECT_ROOT:-$(git rev-parse --show-toplevel)}"; hooks_dir="${repo_root}/.git/hooks"; mkdir -p "${hooks_dir}"; ln -sfn "${repo_root}/scripts/git-hooks/post-commit" "${hooks_dir}/post-commit"'
+
 [tasks.omp-build-fork]
 description = "Build OMP from the local oh-my-pi fork and install it to ~/.bun/bin/omp"
 run = '''
