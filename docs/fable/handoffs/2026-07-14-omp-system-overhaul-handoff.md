@@ -20,9 +20,9 @@ Read this first in the next orchestrator session. Then read:
 ## Current git / binary state
 
 - Current branch: `main`.
-- Handoff-writing HEAD: `492695a5` — `fix(release): honor fork nightly toolchain in isolated promotion builds`.
-- Installed binary before the final promotion run: `omp/16.0.1+fork.185d65765f13`, digest `b4199937…`.
-- A corrected explicit promotion is running as background job `bg_1` (`mise run omp-promote`). **Do not claim HEAD is installed until that job completes and `omp --version` confirms it.**
+- Repo HEAD after committing this handoff: `4eb8d0be` (docs-only); latest blessed fork-touching source commit: `492695a5`.
+- Installed binary: `omp/16.0.1+fork.492695a5acfc`, digest `0e4534c2e1be33c995e4b85296d2919092c1ca115bd2a04aabc469c81d685d62`.
+- Final promotion succeeded in 106.81s. Receipt: `vendor/oh-my-pi/local/readiness-receipt-0e4534c2e1be33c995e4b85296d2919092c1ca115bd2a04aabc469c81d685d62.json` (receipt SHA-256 `5648b36c…`). Rollout correctly skipped this working session and another working dotfiles session; one legacy dotfiles peer needs one manual restart.
 - Promotion bug fixed at `492695a5`: ambient `RUSTUP_TOOLCHAIN=1.97.0` overrode `vendor/oh-my-pi/rust-toolchain.toml` (nightly-2026-04-29), causing `#![feature(alloc_error_hook)]` failure. Promotion now removes the ambient override for native builds; 10 promotion tests and ratchets pass.
 - Prior blessed releases are retained additively under `~/.bun/bin/.omp-releases/`; rollback remains available.
 
@@ -99,16 +99,15 @@ Latest observed union before the handoff:
 
 ## Primary unresolved work (priority order)
 
-1. **Confirm final promotion result.** Background job `bg_1` must finish. Record new `omp --version`, digest, receipt. If it fails again, stable is preserved; diagnose from the exact log before claiming rollout.
-2. **Current session fleet bootstrap:** every session started before `50ec6048` needs one manual restart. Thereafter, post-bless rollout manages capable idle/waiting sessions; working sessions are skipped (no deferred safe-boundary command exists yet).
-3. **120-request child decapitation:** PrimitivesInspector, WrapRichCommands, VendorSync, AutomationsDefectFix, and RestartPathDebugger all hit the soft request budget after useful work, often yielding no final output. Fresh finisher pattern recovered disk work, but this is a systemic tax. Need checkpoint-before-budget / automatic partial-yield, or raise/request-budget based on packet class. Taxonomy class: child cancellation output loss.
-4. **Revived-agent wake-drop:** 2/2 parked agents read injected directives then silently parked without work/reply; fresh spawns succeeded. Likely injection-to-turn boundary / revive handling. High-severity friction row.
-5. **Wrap coverage:** extend `:wrap` from main IRC transcript cards to the remaining transcript/tool-result render surfaces; do not wrap roster single-line rows unless designed separately.
-6. **Peripheral field + browser component layer:** design is captured, not built. Recommended first browser component: side-by-side subagent run comparison (prompt/packet/route/timeline/outcome).
-7. **Worker-pool echo stub:** still incomplete and misleading under `vendor/oh-my-pi/packages/coding-agent/src/task/subagent-worker-*`; either delete (recommended) or extract the real TaskTool execution contract. Do not present it as implemented.
-8. **cmux nine-finding slice:** preserved but not independently reverified in this session.
-9. **Storage decisions requiring Arthur:** `local/voiceink-store-backup-20260713` (~8.3GB); personal screenshots → private store; root `fix.js`; worker-pool stub deletion.
-10. **Refund automation:** enable only after Arthur reviews `local/refund-case/automation-packet.md`; it is draft-gated and must never send without explicit approval.
+1. **Current session fleet bootstrap:** every session started before `50ec6048` needs one manual restart. Thereafter, post-bless rollout manages capable idle/waiting sessions; working sessions are skipped (no deferred safe-boundary command exists yet).
+2. **120-request child decapitation:** PrimitivesInspector, WrapRichCommands, VendorSync, AutomationsDefectFix, and RestartPathDebugger all hit the soft request budget after useful work, often yielding no final output. Fresh finisher pattern recovered disk work, but this is a systemic tax. Need checkpoint-before-budget / automatic partial-yield, or raise/request-budget based on packet class. Taxonomy class: child cancellation output loss.
+3. **Revived-agent wake-drop:** 2/2 parked agents read injected directives then silently parked without work/reply; fresh spawns succeeded. Likely injection-to-turn boundary / revive handling. High-severity friction row.
+4. **Wrap coverage:** extend `:wrap` from main IRC transcript cards to the remaining transcript/tool-result render surfaces; do not wrap roster single-line rows unless designed separately.
+5. **Peripheral field + browser component layer:** design is captured, not built. Recommended first browser component: side-by-side subagent run comparison (prompt/packet/route/timeline/outcome).
+6. **Worker-pool echo stub:** still incomplete and misleading under `vendor/oh-my-pi/packages/coding-agent/src/task/subagent-worker-*`; either delete (recommended) or extract the real TaskTool execution contract. Do not present it as implemented.
+7. **cmux nine-finding slice:** preserved but not independently reverified in this session.
+8. **Storage decisions requiring Arthur:** `local/voiceink-store-backup-20260713` (~8.3GB); personal screenshots → private store; root `fix.js`; worker-pool stub deletion.
+9. **Refund automation:** enable only after Arthur reviews `local/refund-case/automation-packet.md`; it is draft-gated and must never send without explicit approval.
 
 ## Systemic lessons from this session
 
