@@ -1,6 +1,6 @@
 import { INTENT_FIELD } from "@oh-my-pi/pi-agent-core";
 import { calculatePromptTokens } from "@oh-my-pi/pi-agent-core/compaction/compaction";
-import { type AssistantMessage, type ImageContent, isTransientNetworkError } from "@oh-my-pi/pi-ai";
+import { type AssistantMessage, type ImageContent } from "@oh-my-pi/pi-ai";
 import { type Component, Loader, TERMINAL } from "@oh-my-pi/pi-tui";
 import { extractTextContent } from "../../commit/utils";
 import { settings } from "../../config/settings";
@@ -22,13 +22,13 @@ import { isSilentAbort, readQueueChipText, resolveAbortLabel } from "../../sessi
 import type { ResolveToolDetails } from "../../tools/resolve";
 import { vocalizer } from "../../tts/vocalizer";
 import { canonicalizeMessage, normalizeThinkingDisplay } from "../../utils/thinking-display";
+import { RequestFailurePresenter } from "../utils/request-failure-presentation";
 import { interruptHint } from "../shared";
 import { addToolExecutionComponent } from "./tool-execution-construction";
 import { StreamingRevealController } from "./streaming-reveal";
 import { ToolArgsRevealController } from "./tool-args-reveal";
 
 type AgentSessionEventKind = AgentSessionEvent["type"];
-
 const IRC_MESSAGE_VISIBLE_TTL_MS = 10_000;
 /**
  * Concurrent IRC cards allowed in the transcript's live region. Cards land
@@ -60,11 +60,7 @@ export class EventController {
 	#readToolCallArgs = new Map<string, Record<string, unknown>>();
 	#readToolCallAssistantComponents = new Map<string, AssistantMessageComponent>();
 	#lastAssistantComponent: AssistantMessageComponent | undefined = undefined;
-	// Assistant component whose turn-ending error is currently mirrored in the
-	// pinned banner. Its inline `Error: …` line is suppressed while pinned and
-	// restored when the banner clears at the next `agent_start` (see
-	// #handleMessageEnd / #handleAgentStart).
-	#pinnedErrorComponent: AssistantMessageComponent | undefined = undefined;
+	#requestFailures: RequestFailurePresenter;
 	#idleCompactionTimer?: NodeJS.Timeout;
 	#ircExpiryTimers = new Map<string, NodeJS.Timeout>();
 	// Insertion-ordered IRC cards not yet retired; values are the transcript
@@ -83,6 +79,7 @@ export class EventController {
 	#handlers: AgentSessionEventHandlers;
 
 	constructor(private ctx: InteractiveModeContext) {
+		this.#requestFailures = new RequestFailurePresenter(ctx);
 		this.#streamingReveal = new StreamingRevealController({
 			getSmoothStreaming: () => this.ctx.settings.get("display.smoothStreaming"),
 			getHideThinkingBlock: () => this.ctx.hideThinkingBlock,
@@ -221,7 +218,7 @@ export class EventController {
 		this.#readToolCallArgs.clear();
 		this.#readToolCallAssistantComponents.clear();
 		this.#lastAssistantComponent = undefined;
-		this.#pinnedErrorComponent = undefined;
+		this.#requestFailures.reset();
 		this.#cancelIdleCompaction();
 		for (const timer of this.#ircExpiryTimers.values()) {
 			clearTimeout(timer);
@@ -239,7 +236,6 @@ export class EventController {
 			await this.ctx.init();
 		}
 
-
 		const run = this.#handlers[event.type] as (e: AgentSessionEvent) => Promise<void>;
 		await run(event);
 	}
@@ -250,11 +246,7 @@ export class EventController {
 		this.#readToolCallAssistantComponents.clear();
 		this.#resetReadGroup();
 		this.#lastAssistantComponent = undefined;
-		// Restore the previous turn's inline error in the transcript before dropping
-		// the banner, so the error stays in history once the banner is gone.
-		this.#pinnedErrorComponent?.setErrorPinned(false);
-		this.#pinnedErrorComponent = undefined;
-		this.ctx.clearPinnedError();
+		this.#requestFailures.handleAgentStart();
 		if (this.ctx.retryLoader) {
 			this.ctx.retryLoader.stop();
 			this.ctx.retryLoader = undefined;
@@ -553,13 +545,7 @@ export class EventController {
 				if (!this.ctx.pendingTools.has(content.id)) {
 					this.#resolveDisplaceablePoll(content.name);
 					this.#resetReadGroup();
-					const component = addToolExecutionComponent(
-						this.ctx,
-						content.name,
-						renderArgs,
-						content.id,
-						false,
-					);
+					const component = addToolExecutionComponent(this.ctx, content.name, renderArgs, content.id, false);
 					this.#toolArgsReveal.bind(content.id, component);
 				} else {
 					const component = this.ctx.pendingTools.get(content.id);
@@ -612,7 +598,7 @@ export class EventController {
 			this.ctx.streamingMessage = event.message;
 			this.#streamingReveal.stop();
 			this.#toolArgsReveal.flushAll();
-			let errorMessage: string | undefined;
+			const rawErrorDetail = this.ctx.streamingMessage.errorMessage;
 			const aborted = this.ctx.streamingMessage.stopReason === "aborted";
 			const silentlyAborted = aborted && isSilentAbort(this.ctx.streamingMessage.errorMessage);
 			const ttsrSilenced = aborted && this.ctx.viewSession.isTtsrAbortPending;
@@ -624,8 +610,10 @@ export class EventController {
 				// AgentSession.#handleAgentEvent already stamped SILENT_ABORT_MARKER for
 				// the plan-compact transition before this controller ran, so reaching
 				// this branch implies the abort was NOT a silent internal transition.
-				errorMessage = resolveAbortLabel(this.ctx.streamingMessage.errorMessage, this.ctx.viewSession.retryAttempt);
-				this.ctx.streamingMessage.errorMessage = errorMessage;
+				this.ctx.streamingMessage.errorMessage = resolveAbortLabel(
+					this.ctx.streamingMessage.errorMessage,
+					this.ctx.viewSession.retryAttempt,
+				);
 			}
 			if (silentlyAborted || ttsrSilenced) {
 				// Silence the streaming render by downgrading stopReason to "stop" for
@@ -662,29 +650,19 @@ export class EventController {
 			}
 			this.ctx.streamingComponent = undefined;
 			this.ctx.streamingMessage = undefined;
-			// Pin a turn-ending provider error (e.g. Anthropic content-filter block)
-			// above the editor so it survives transcript scroll. Cleared at the next
-			// turn's agent_start. Suppress the transcript's inline `Error: …` line for
-			// the same message while pinned so the error isn't rendered twice.
 			if (
-				event.message.stopReason === "error" &&
+				(event.message.stopReason === "error" || event.message.stopReason === "aborted") &&
 				event.message.errorMessage &&
-				!isSilentAbort(event.message.errorMessage)
+				!isSilentAbort(event.message.errorMessage) &&
+				this.#lastAssistantComponent
 			) {
-				this.#lastAssistantComponent?.setErrorPinned(true);
-				this.#pinnedErrorComponent = this.#lastAssistantComponent;
-				this.ctx.showPinnedError({
-					message: event.message.errorMessage,
-					source: "provider",
-					provider: event.message.provider,
-					model: event.message.model,
-					status: event.message.errorStatus,
-					session: this.ctx.sessionManager.getSessionId(),
-					category: event.message.stopDetails?.category ?? event.message.stopDetails?.type ?? "provider",
-					errorClass: isTransientNetworkError(event.message.errorMessage) ? "network" : undefined,
-					code: event.message.stopDetails?.type,
-					operation: "turn",
-				});
+				this.#requestFailures.handleMessage(
+					event.message,
+					this.#lastAssistantComponent,
+					settings.get("retry.enabled"),
+					this.ctx.viewSession.retryAttempt,
+					rawErrorDetail,
+				);
 			}
 			this.ctx.statusLine.invalidate();
 			this.ctx.updateEditorTopBorder();
@@ -711,13 +689,7 @@ export class EventController {
 			}
 
 			this.#resetReadGroup();
-			addToolExecutionComponent(
-				this.ctx,
-				event.toolName,
-				event.args,
-				event.toolCallId,
-				true,
-			);
+			addToolExecutionComponent(this.ctx, event.toolName, event.args, event.toolCallId, true);
 			this.ctx.ui.requestRender();
 		}
 	}
@@ -994,6 +966,7 @@ export class EventController {
 	async #handleAutoRetryStart(event: Extract<AgentSessionEvent, { type: "auto_retry_start" }>): Promise<void> {
 		this.#stopWorkingLoader();
 		this.ctx.statusContainer.clear();
+		this.#requestFailures.handleRetryStart(event);
 		const delaySeconds = Math.max(0, Math.round(event.delayMs / 1000));
 		const retryMessage =
 			event.cause === "network"
@@ -1017,7 +990,7 @@ export class EventController {
 			this.ctx.retryLoader = undefined;
 			this.ctx.statusContainer.clear();
 		}
-		if (!event.success) {
+		if (!this.#requestFailures.handleRetryEnd(event) && !event.success) {
 			this.ctx.showError(`Retry failed after ${event.attempt} attempts: ${event.finalError || "Unknown error"}`);
 		}
 		this.ctx.ui.requestRender();

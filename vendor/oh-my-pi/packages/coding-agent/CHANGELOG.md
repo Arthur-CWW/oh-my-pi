@@ -25,6 +25,7 @@
 - Task spawning now refuses revivable `NameResume`/exact-id duplicates, warns on running or archived matches with in-band IRC/history guidance, preserves live registry ids during allocation, and reports resume-in-place or transcript-salvage instructions after task failures and restarts.
 - `Ctrl-Q` is direct cancellation (including focused-child return); `Ctrl-Enter` remains the follow-up queue action in the attached full TUI. Typed command automation and vendor-sync v2 policy plumbing are available, and the typed daily vendor `--apply` path is active for the current 21-entry manifest (NCode removed); the latest apply updated codex, plugins, cua, chrome-devtools, and whisper, left cmux blocked by a dirty tree, and left pins untouched.
 ### Fixed
+- Provider request/stream failures now render structured cards with provider, model, agent/session owner, typed cause, retry disposition, timestamped ErrorInbox facets, and raw SDK detail; user interrupts remain card-free.
 - Fixed custom model validation to accept subscription-backed `auth: oauth` providers without requiring an API key.
 - Selecting a session already owned by a verified live cmux surface now activates that workspace and surface instead of failing with `Session is controlled by external owner`.
 - Agent resource/error aggregation now records failed non-cancelled child jobs as typed, redacted `ErrorInbox` records with transcript/final-output recovery links; `agent://` exposes final output with a `history://` pointer, while invalid `agents://` suggests the singular protocol.

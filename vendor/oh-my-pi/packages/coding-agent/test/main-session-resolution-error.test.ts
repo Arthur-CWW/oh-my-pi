@@ -46,7 +46,11 @@ const stubSettings = { get: () => undefined } as unknown as Settings;
 
 describe("createSessionManager — missing session (#2084)", () => {
 	it("rejects --resume with SessionResolutionError carrying a usage hint", async () => {
-		vi.spyOn(sessionListingModule, "resolveResumableSession").mockResolvedValue(undefined);
+		vi.spyOn(sessionListingModule, "resolveResumableSessionWithDiagnostics").mockResolvedValue({
+			match: undefined,
+			skippedFiles: [],
+			searchedLocations: ["/sessions/-current-project", "/sessions"],
+		});
 		try {
 			await expect(
 				createSessionManager(
@@ -56,7 +60,8 @@ describe("createSessionManager — missing session (#2084)", () => {
 				),
 			).rejects.toMatchObject({
 				name: "SessionResolutionError",
-				message: 'Session "019ea530-0000-7000-0000-000000000000" not found.',
+				message:
+					'Session "019ea530-0000-7000-0000-000000000000" not found. Looked in /sessions/-current-project and recursively under /sessions.',
 				hint: expect.stringContaining("omp --resume"),
 			});
 
@@ -73,7 +78,11 @@ describe("createSessionManager — missing session (#2084)", () => {
 	});
 
 	it("rejects --fork with SessionResolutionError carrying a usage hint", async () => {
-		vi.spyOn(sessionListingModule, "resolveResumableSession").mockResolvedValue(undefined);
+		vi.spyOn(sessionListingModule, "resolveResumableSessionWithDiagnostics").mockResolvedValue({
+			match: undefined,
+			skippedFiles: [],
+			searchedLocations: ["/sessions/-current-project", "/sessions"],
+		});
 		try {
 			await expect(
 				createSessionManager(
@@ -83,7 +92,8 @@ describe("createSessionManager — missing session (#2084)", () => {
 				),
 			).rejects.toMatchObject({
 				name: "SessionResolutionError",
-				message: 'Session "019ea530-0000-7000-0000-000000000000" not found.',
+				message:
+					'Session "019ea530-0000-7000-0000-000000000000" not found. Looked in /sessions/-current-project and recursively under /sessions.',
 				hint: expect.stringContaining("omp --resume"),
 			});
 		} finally {

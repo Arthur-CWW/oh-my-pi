@@ -7,7 +7,7 @@ import type { AgentSession } from "../../../session/agent-session";
 import * as git from "../../../utils/git";
 import { getSessionAccentAnsi, getSessionAccentHex } from "../../../utils/session-color";
 import { sanitizeStatusText } from "../../shared";
-import { theme } from "../../theme/theme";
+import { getThemeEpoch, theme } from "../../theme/theme";
 import { BorderMemo, GitBorderCache } from "./border-cache";
 import { canReuseCachedPr, createPrCacheContext, isSamePrCacheContext, type PrCacheContext } from "./git-utils";
 import { recordBorderRebuild } from "./performance-counters";
@@ -736,11 +736,20 @@ export class StatusLineComponent implements Component {
 		return leftGroup + gapFill + rightGroup;
 	}
 
+	#liveBorderBucket(): number {
+		const effectiveSettings = this.#resolveSettings();
+		const showsTokenRate =
+			effectiveSettings.leftSegments.includes("token_rate") || effectiveSettings.rightSegments.includes("token_rate");
+		return showsTokenRate && this.#mainSession.isStreaming ? Math.floor(Date.now() / 1000) : 0;
+	}
+
 	#getCachedStatusLine(width: number): string {
-		const cached = this.#borderMemo.get(width, this.#statusRevision);
+		const liveBucket = this.#liveBorderBucket();
+		const themeEpoch = getThemeEpoch();
+		const cached = this.#borderMemo.get(width, this.#statusRevision, liveBucket, themeEpoch);
 		if (cached !== undefined) return cached;
 		const content = this.#buildStatusLine(width);
-		this.#borderMemo.set(width, this.#statusRevision, content);
+		this.#borderMemo.set(width, this.#statusRevision, liveBucket, themeEpoch, content);
 		return content;
 	}
 

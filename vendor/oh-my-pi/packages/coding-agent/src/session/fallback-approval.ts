@@ -1,4 +1,6 @@
-export type RetryCause = "network" | "rate-limit" | "provider";
+import type { RetryCause } from "@oh-my-pi/pi-ai";
+
+export type { RetryCause } from "@oh-my-pi/pi-ai";
 
 export interface FallbackApprovalProposal {
 	readonly agentId: string;
@@ -62,7 +64,11 @@ export class FallbackApprovalGate {
 			.filter(proposal => proposal.parentAgentId === parentAgentId);
 	}
 
-	async act(parentAgentId: string, agentId: string, action: FallbackApprovalAction): Promise<FallbackApprovalResolution> {
+	async act(
+		parentAgentId: string,
+		agentId: string,
+		action: FallbackApprovalAction,
+	): Promise<FallbackApprovalResolution> {
 		const pending = this.#pending.get(agentId);
 		if (!pending) throw new Error(`No fallback approval is pending for agent ${agentId}.`);
 		if (pending.proposal.parentAgentId !== parentAgentId) {

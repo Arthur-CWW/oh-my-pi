@@ -10,7 +10,6 @@ export interface ErrorSelectorOptions {
 	readonly onUpdate?: () => void;
 }
 
-
 function isOpenFleetIncident(err: DiagnosticEvent): boolean {
 	return !err.resolved && err.source === "fleet" && err.category === "fleet-incident" && err.status === "open";
 }
@@ -30,7 +29,9 @@ export function formatDiagnosticDetail(err: DiagnosticEvent | null, actionMessag
 	if (!err) return "";
 	let out = isOpenFleetIncident(err) ? `${theme.bold("[incident open]")}\n` : "";
 	if (err.count > 1) {
-		out += theme.bold(`Occurrences: `) + `${err.count} (first: ${new Date(err.firstTimestamp).toISOString()}, last: ${new Date(err.lastTimestamp).toISOString()})\n`;
+		out +=
+			theme.bold(`Occurrences: `) +
+			`${err.count} (first: ${new Date(err.firstTimestamp).toISOString()}, last: ${new Date(err.lastTimestamp).toISOString()})\n`;
 	} else {
 		out += theme.bold(`Timestamp: `) + `${new Date(err.lastTimestamp).toISOString()}\n`;
 	}
@@ -39,6 +40,8 @@ export function formatDiagnosticDetail(err: DiagnosticEvent | null, actionMessag
 		["ID", err.id],
 		["Source", err.source],
 		["Category", err.category],
+		["Cause", err.cause],
+		["Disposition", err.disposition],
 		["Provider", err.provider],
 		["Model", err.model],
 		["Session", err.session],
@@ -62,7 +65,8 @@ export function formatDiagnosticDetail(err: DiagnosticEvent | null, actionMessag
 		}
 	}
 
-	out += "\n" + theme.bold("Message:\n") + err.message;
+	out += "\n" + theme.bold("Headline:\n") + err.message;
+	if (err.detail) out += "\n\n" + theme.bold("Raw detail:\n") + err.detail;
 
 	if (err.causeChain && err.causeChain.length > 0) {
 		out += "\n\n" + theme.bold("Cause chain:\n");
@@ -73,7 +77,6 @@ export function formatDiagnosticDetail(err: DiagnosticEvent | null, actionMessag
 	if (actionMessage) {
 		out += `\n\n${actionMessage}`;
 	}
-
 
 	if (err.action) {
 		out += "\n" + theme.fg("dim", "Focus active cmux session: Enter   Close: Esc");

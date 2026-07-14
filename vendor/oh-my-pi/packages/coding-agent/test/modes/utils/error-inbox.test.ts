@@ -1,9 +1,5 @@
 import { describe, expect, mock, test } from "bun:test";
-import {
-	diagnosticInputFromError,
-	ErrorInbox,
-	type DiagnosticEventInput,
-} from "../../../src/modes/utils/error-inbox";
+import { diagnosticInputFromError, ErrorInbox, type DiagnosticEventInput } from "../../../src/modes/utils/error-inbox";
 import type { SessionEntry } from "../../../src/session/session-entries";
 import { SessionOwnershipLostError } from "../../../src/session/durable-input-queue";
 
@@ -108,12 +104,81 @@ describe("ErrorInbox", () => {
 		const inbox = new ErrorInbox({ appendCustomEntry });
 
 		const entries = [
-			{ type: "custom", customType: "ui_error", data: { version: 1, id: "legacy1", timestamp: 1000, message: "v1", count: 1 } },
-			{ type: "custom", customType: "ui_error", data: { version: 2, id: "v2", firstTimestamp: 2000, lastTimestamp: 2000, message: "v2", count: 1, unread: true, resolved: false } },
-			{ type: "custom", customType: "ui_error", data: { version: 3, id: "v3", firstTimestamp: 3000, lastTimestamp: 3000, message: "v3", count: 1, unread: true, resolved: false } },
-			{ type: "custom", customType: "ui_error", data: { version: 2, id: "bad", firstTimestamp: 4000, message: "missing lastTimestamp", count: 1, unread: true, resolved: false } },
-			{ type: "custom", customType: "ui_error", data: { version: 2, id: "bad2", firstTimestamp: 5000, lastTimestamp: 5000, message: "bad count", count: 0, unread: true, resolved: false } },
-			{ type: "custom", customType: "ui_error", data: { version: 2, id: "bad3", firstTimestamp: 6000, lastTimestamp: 6000, message: "bad status", count: 1, status: {}, unread: true, resolved: false } },
+			{
+				type: "custom",
+				customType: "ui_error",
+				data: { version: 1, id: "legacy1", timestamp: 1000, message: "v1", count: 1 },
+			},
+			{
+				type: "custom",
+				customType: "ui_error",
+				data: {
+					version: 2,
+					id: "v2",
+					firstTimestamp: 2000,
+					lastTimestamp: 2000,
+					message: "v2",
+					count: 1,
+					unread: true,
+					resolved: false,
+				},
+			},
+			{
+				type: "custom",
+				customType: "ui_error",
+				data: {
+					version: 3,
+					id: "v3",
+					firstTimestamp: 3000,
+					lastTimestamp: 3000,
+					message: "v3",
+					count: 1,
+					unread: true,
+					resolved: false,
+				},
+			},
+			{
+				type: "custom",
+				customType: "ui_error",
+				data: {
+					version: 2,
+					id: "bad",
+					firstTimestamp: 4000,
+					message: "missing lastTimestamp",
+					count: 1,
+					unread: true,
+					resolved: false,
+				},
+			},
+			{
+				type: "custom",
+				customType: "ui_error",
+				data: {
+					version: 2,
+					id: "bad2",
+					firstTimestamp: 5000,
+					lastTimestamp: 5000,
+					message: "bad count",
+					count: 0,
+					unread: true,
+					resolved: false,
+				},
+			},
+			{
+				type: "custom",
+				customType: "ui_error",
+				data: {
+					version: 2,
+					id: "bad3",
+					firstTimestamp: 6000,
+					lastTimestamp: 6000,
+					message: "bad status",
+					count: 1,
+					status: {},
+					unread: true,
+					resolved: false,
+				},
+			},
 		] as unknown as SessionEntry[];
 
 		inbox.reconcile(entries);
@@ -132,8 +197,34 @@ describe("ErrorInbox", () => {
 		const inbox = new ErrorInbox({ appendCustomEntry });
 
 		const entries = [
-			{ type: "custom", customType: "ui_error", data: { version: 2, id: "same", firstTimestamp: 1000, lastTimestamp: 1000, message: "upd1", count: 1, unread: true, resolved: false } },
-			{ type: "custom", customType: "ui_error", data: { version: 2, id: "same", firstTimestamp: 1000, lastTimestamp: 2000, message: "upd2", count: 2, unread: false, resolved: true } },
+			{
+				type: "custom",
+				customType: "ui_error",
+				data: {
+					version: 2,
+					id: "same",
+					firstTimestamp: 1000,
+					lastTimestamp: 1000,
+					message: "upd1",
+					count: 1,
+					unread: true,
+					resolved: false,
+				},
+			},
+			{
+				type: "custom",
+				customType: "ui_error",
+				data: {
+					version: 2,
+					id: "same",
+					firstTimestamp: 1000,
+					lastTimestamp: 2000,
+					message: "upd2",
+					count: 2,
+					unread: false,
+					resolved: true,
+				},
+			},
 		] as unknown as SessionEntry[];
 
 		inbox.reconcile(entries);
@@ -150,9 +241,35 @@ describe("ErrorInbox", () => {
 		const inbox = new ErrorInbox({ appendCustomEntry });
 
 		const entries = [
-			{ type: "custom", customType: "ui_error", data: { version: 2, id: "before", firstTimestamp: 1000, lastTimestamp: 1000, message: "before", count: 1, unread: true, resolved: false } },
+			{
+				type: "custom",
+				customType: "ui_error",
+				data: {
+					version: 2,
+					id: "before",
+					firstTimestamp: 1000,
+					lastTimestamp: 1000,
+					message: "before",
+					count: 1,
+					unread: true,
+					resolved: false,
+				},
+			},
 			{ type: "custom", customType: "ui_error_clear", data: { version: 1, clearedAt: 1500 } },
-			{ type: "custom", customType: "ui_error", data: { version: 2, id: "after", firstTimestamp: 2000, lastTimestamp: 2000, message: "after", count: 1, unread: true, resolved: false } },
+			{
+				type: "custom",
+				customType: "ui_error",
+				data: {
+					version: 2,
+					id: "after",
+					firstTimestamp: 2000,
+					lastTimestamp: 2000,
+					message: "after",
+					count: 1,
+					unread: true,
+					resolved: false,
+				},
+			},
 		] as unknown as SessionEntry[];
 
 		inbox.reconcile(entries);
@@ -166,7 +283,20 @@ describe("ErrorInbox", () => {
 		const inbox = new ErrorInbox({ appendCustomEntry });
 
 		const entries = [
-			{ type: "custom", customType: "ui_error", data: { version: 2, id: "keep", firstTimestamp: 1000, lastTimestamp: 1000, message: "keep", count: 1, unread: true, resolved: false } },
+			{
+				type: "custom",
+				customType: "ui_error",
+				data: {
+					version: 2,
+					id: "keep",
+					firstTimestamp: 1000,
+					lastTimestamp: 1000,
+					message: "keep",
+					count: 1,
+					unread: true,
+					resolved: false,
+				},
+			},
 			{ type: "custom", customType: "ui_error_clear", data: { clearedAt: 1500 } }, // missing version
 			{ type: "custom", customType: "ui_error_clear", data: { version: 2, clearedAt: 1500 } }, // unsupported version
 		] as unknown as SessionEntry[];
@@ -249,6 +379,9 @@ describe("ErrorInbox", () => {
 			message: "boom",
 			source: "provider",
 			category: "quota",
+			cause: "rate-limit",
+			disposition: "retrying 1/2 in 8s",
+			detail: "429 Request was aborted",
 			provider: "anthropic",
 			model: "claude-3-5-sonnet",
 			session: "sess-1",
@@ -270,6 +403,9 @@ describe("ErrorInbox", () => {
 			message: "boom",
 			source: "provider",
 			category: "quota",
+			cause: "rate-limit",
+			disposition: "retrying 1/2 in 8s",
+			detail: "429 Request was aborted",
 			provider: "anthropic",
 			model: "claude-3-5-sonnet",
 			session: "sess-1",
@@ -290,7 +426,14 @@ describe("ErrorInbox", () => {
 		const entries: SessionEntry[] = [];
 		const inbox = new ErrorInbox({
 			appendCustomEntry(type, data) {
-				entries.push({ type: "custom", id: `entry-${entries.length}`, parentId: null, timestamp: new Date().toISOString(), customType: type, data });
+				entries.push({
+					type: "custom",
+					id: `entry-${entries.length}`,
+					parentId: null,
+					timestamp: new Date().toISOString(),
+					customType: type,
+					data,
+				});
 				return "";
 			},
 		});
@@ -342,5 +485,4 @@ describe("ErrorInbox", () => {
 		});
 		expect(diagnosticInputFromError(new Error("ordinary"), "/tmp/session.jsonl")).toBe("ordinary");
 	});
-
 });

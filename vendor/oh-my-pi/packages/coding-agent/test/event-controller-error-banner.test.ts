@@ -62,21 +62,23 @@ function createFixture(streamingMessage?: AssistantMessage) {
 	const showPinnedError = vi.fn();
 	const clearPinnedError = vi.fn();
 
-	const session = { isTtsrAbortPending: false, retryAttempt: 0 };
+	const session = { isTtsrAbortPending: false, retryAttempt: 0, getAgentId: () => "Main" };
 	const sessionManager = SessionManager.inMemory();
 	const ctx = {
 		isInitialized: true,
 		init: vi.fn(async () => {}),
-		ui: { requestRender: vi.fn() },
+		ui: { requestRender: vi.fn(), requestComponentRender: vi.fn() },
 		statusLine: { invalidate: vi.fn() },
 		updateEditorTopBorder: vi.fn(),
 		ensureLoadingAnimation: vi.fn(),
+		statusContainer: { clear: vi.fn(), addChild: vi.fn() },
 		editor: {},
 		streamingComponent: streamingMessage ? streamingComponent : undefined,
 		streamingMessage,
 		pendingTools: new Map(),
 		showPinnedError,
 		clearPinnedError,
+		errorInbox: { recordError: vi.fn() },
 		session,
 		sessionManager,
 		get viewSession() {
@@ -93,7 +95,7 @@ describe("EventController error banner", () => {
 	it("pins the provider error above the editor when an assistant turn ends on stopReason error", async () => {
 		const errorMessage = "Output blocked by content filtering policy";
 		const message = makeAssistantMessage({ stopReason: "error", errorMessage });
-		const { controller, sessionManager, showPinnedError, streamingComponent } = createFixture(message);
+		const { controller, showPinnedError, streamingComponent } = createFixture(message);
 
 		await controller.handleEvent({ type: "message_end", message } as Extract<
 			AgentSessionEvent,
@@ -101,16 +103,20 @@ describe("EventController error banner", () => {
 		>);
 
 		expect(showPinnedError).toHaveBeenCalledTimes(1);
-		expect(showPinnedError).toHaveBeenCalledWith({
-			message: errorMessage,
-			source: "provider",
-			provider: message.provider,
-			model: message.model,
-			status: message.errorStatus,
-			session: sessionManager.getSessionId(),
-			category: "provider",
-			operation: "turn",
-		});
+		expect(showPinnedError).toHaveBeenCalledWith(
+			expect.objectContaining({
+				message: expect.stringContaining("anthropic/claude-sonnet-4-5 provider request failed (provider-error)"),
+				detail: errorMessage,
+				cause: "provider-error",
+				disposition: "gave up after 1",
+				source: "provider",
+				provider: message.provider,
+				model: message.model,
+				agent: "Main",
+				category: "request-failure",
+				operation: "turn",
+			}),
+		);
 		// The same error is mirrored in the banner, so the transcript's inline
 		// `Error: …` line is suppressed to avoid a duplicate render.
 		expect(streamingComponent.setErrorPinned).toHaveBeenCalledWith(true);
@@ -145,8 +151,44 @@ describe("EventController error banner", () => {
 		expect(showPinnedError).not.toHaveBeenCalled();
 	});
 
-	it("does not pin a banner for an aborted assistant turn", async () => {
-		const message = makeAssistantMessage({ stopReason: "aborted", errorMessage: "Operation aborted" });
+	it("renders an Anthropic stream stall with typed retry disposition", async () => {
+		const rawDetail = "Anthropic stream stalled while waiting for the next event";
+		const message = makeAssistantMessage({ content: [], stopReason: "error", errorMessage: rawDetail });
+		const { controller, showPinnedError } = createFixture(message);
+
+		await controller.handleEvent({ type: "message_end", message } as Extract<
+			AgentSessionEvent,
+			{ type: "message_end" }
+		>);
+		expect(showPinnedError).not.toHaveBeenCalled();
+
+		await controller.handleEvent({
+			type: "auto_retry_start",
+			cause: "provider",
+			attempt: 1,
+			maxAttempts: 2,
+			delayMs: 8000,
+			errorMessage: rawDetail,
+		});
+
+		expect(showPinnedError).toHaveBeenCalledWith(
+			expect.objectContaining({
+				message: expect.stringMatching(
+					/anthropic\/claude-sonnet-4-5 stream stalled \(provider-stream-abort\).*retrying 1\/2 in 8s/,
+				),
+				detail: rawDetail,
+				cause: "provider-stream-abort",
+				disposition: "retrying 1/2 in 8s",
+				provider: "anthropic",
+				model: "claude-sonnet-4-5",
+				agent: "Main",
+				retry: true,
+			}),
+		);
+	});
+
+	it("renders a parent cancellation with structured context", async () => {
+		const message = makeAssistantMessage({ stopReason: "aborted", errorMessage: "Request was aborted" });
 		const { controller, showPinnedError } = createFixture(message);
 
 		await controller.handleEvent({ type: "message_end", message } as Extract<
@@ -154,7 +196,22 @@ describe("EventController error banner", () => {
 			{ type: "message_end" }
 		>);
 
+		expect(showPinnedError).toHaveBeenCalledWith(
+			expect.objectContaining({ cause: "parent-cancel", detail: "Request was aborted", agent: "Main" }),
+		);
+	});
+
+	it("does not render a redundant card for a user interrupt", async () => {
+		const message = makeAssistantMessage({ stopReason: "aborted", errorMessage: "Interrupted by user" });
+		const { controller, showPinnedError, ctx } = createFixture(message);
+
+		await controller.handleEvent({ type: "message_end", message } as Extract<
+			AgentSessionEvent,
+			{ type: "message_end" }
+		>);
+
 		expect(showPinnedError).not.toHaveBeenCalled();
+		expect(ctx.errorInbox.recordError).not.toHaveBeenCalled();
 	});
 
 	it("clears the pinned banner when the next turn starts", async () => {

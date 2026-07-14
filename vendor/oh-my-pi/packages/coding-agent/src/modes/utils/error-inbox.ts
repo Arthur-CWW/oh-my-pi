@@ -12,7 +12,10 @@ export type {
 	ResolveFallbackApprovalAction,
 } from "../../session/error-inbox-ledger";
 
-export function diagnosticInputFromError(error: unknown, sessionFile: string | null | undefined): string | DiagnosticEventInput {
+export function diagnosticInputFromError(
+	error: unknown,
+	sessionFile: string | null | undefined,
+): string | DiagnosticEventInput {
 	const message = error instanceof Error ? error.message : String(error);
 	if (!(error instanceof SessionOwnershipLostError) || !sessionFile) return message;
 	return {
@@ -89,7 +92,6 @@ function isSameAction(a: DiagnosticAction | undefined, b: DiagnosticAction | und
 	return false;
 }
 
-
 export const DEDUPE_WINDOW_MS = 60 * 1000; // 1 minute window for deduping
 
 function isObject(val: unknown): val is Record<string, unknown> {
@@ -126,11 +128,24 @@ function optionalString(data: Record<string, unknown>, key: string): string | un
 	if (typeof val !== "string") throw new DecoderError(`${key} must be a string or undefined`);
 	return val;
 }
+function optionalRequestFailureCause(data: Record<string, unknown>, key: string): DiagnosticEvent["cause"] {
+	const val = optionalString(data, key);
+	if (val === undefined) return undefined;
+	if (
+		val === "user-interrupt" ||
+		val === "parent-cancel" ||
+		val === "timeout" ||
+		val === "provider-stream-abort" ||
+		val === "network" ||
+		val === "rate-limit" ||
+		val === "provider-error"
+	) {
+		return val;
+	}
+	throw new DecoderError(`${key} must be a recognized request failure cause or undefined`);
+}
 
-function optionalSubagentFailureClass(
-	data: Record<string, unknown>,
-	key: string,
-): SubagentFailureClass | undefined {
+function optionalSubagentFailureClass(data: Record<string, unknown>, key: string): SubagentFailureClass | undefined {
 	const val = optionalString(data, key);
 	if (val === undefined) return undefined;
 	if (
@@ -200,6 +215,9 @@ function decodeUiErrorV2(data: Record<string, unknown>): DiagnosticEvent {
 		source: optionalString(data, "source"),
 		errorClass: optionalSubagentFailureClass(data, "errorClass"),
 		category: optionalString(data, "category"),
+		cause: optionalRequestFailureCause(data, "cause"),
+		disposition: optionalString(data, "disposition"),
+		detail: optionalString(data, "detail"),
 		provider: optionalString(data, "provider"),
 		model: optionalString(data, "model"),
 		session: optionalString(data, "session"),
@@ -240,6 +258,9 @@ function decodeUiErrorV1(data: Record<string, unknown>): DiagnosticEvent {
 		count,
 		source: optionalString(data, "source"),
 		category: optionalString(data, "category"),
+		cause: optionalRequestFailureCause(data, "cause"),
+		disposition: optionalString(data, "disposition"),
+		detail: optionalString(data, "detail"),
 		provider: optionalString(data, "provider"),
 		model: optionalString(data, "model"),
 		session: optionalString(data, "session"),
@@ -325,11 +346,7 @@ export class ErrorInbox {
 		return this.#errors;
 	}
 
-	recordError(
-		input: string | DiagnosticEventInput,
-		source?: string,
-		options?: { nowMs?: number; id?: string },
-	): void {
+	recordError(input: string | DiagnosticEventInput, source?: string, options?: { nowMs?: number; id?: string }): void {
 		const now = options?.nowMs ?? Date.now();
 		let message: string;
 		let details: Omit<DiagnosticEventInput, "message">;
@@ -346,31 +363,35 @@ export class ErrorInbox {
 			if (options?.id && !details.id) details.id = options.id;
 		}
 
-		const match = this.#errors.find(existing =>
-			existing.message === message &&
-			existing.source === details.source &&
-			existing.category === details.category &&
-			existing.errorClass === details.errorClass &&
-			existing.provider === details.provider &&
-			existing.model === details.model &&
-			existing.session === details.session &&
-			existing.agent === details.agent &&
-			existing.tool === details.tool &&
-			existing.job === details.job &&
-			existing.operation === details.operation &&
-			existing.status === details.status &&
-			existing.code === details.code &&
-			existing.retry === details.retry &&
-			existing.reset === details.reset &&
-			existing.requestFingerprint === details.requestFingerprint &&
-			existing.logPointer === details.logPointer &&
-			existing.historyUri === details.historyUri &&
-			existing.finalOutputUri === details.finalOutputUri &&
-			existing.finalOutputAvailable === details.finalOutputAvailable &&
-			isSameCauseChain(existing.causeChain, details.causeChain) &&
-			isSameAction(existing.action, details.action) &&
-			now >= existing.lastTimestamp &&
-			now - existing.lastTimestamp <= DEDUPE_WINDOW_MS,
+		const match = this.#errors.find(
+			existing =>
+				existing.message === message &&
+				existing.source === details.source &&
+				existing.category === details.category &&
+				existing.errorClass === details.errorClass &&
+				existing.cause === details.cause &&
+				existing.disposition === details.disposition &&
+				existing.detail === details.detail &&
+				existing.provider === details.provider &&
+				existing.model === details.model &&
+				existing.session === details.session &&
+				existing.agent === details.agent &&
+				existing.tool === details.tool &&
+				existing.job === details.job &&
+				existing.operation === details.operation &&
+				existing.status === details.status &&
+				existing.code === details.code &&
+				existing.retry === details.retry &&
+				existing.reset === details.reset &&
+				existing.requestFingerprint === details.requestFingerprint &&
+				existing.logPointer === details.logPointer &&
+				existing.historyUri === details.historyUri &&
+				existing.finalOutputUri === details.finalOutputUri &&
+				existing.finalOutputAvailable === details.finalOutputAvailable &&
+				isSameCauseChain(existing.causeChain, details.causeChain) &&
+				isSameAction(existing.action, details.action) &&
+				now >= existing.lastTimestamp &&
+				now - existing.lastTimestamp <= DEDUPE_WINDOW_MS,
 		);
 
 		let record: DiagnosticEvent;
@@ -394,6 +415,9 @@ export class ErrorInbox {
 				source: details.source,
 				category: details.category,
 				errorClass: details.errorClass,
+				cause: details.cause,
+				disposition: details.disposition,
+				detail: details.detail,
 				provider: details.provider,
 				model: details.model,
 				session: details.session,

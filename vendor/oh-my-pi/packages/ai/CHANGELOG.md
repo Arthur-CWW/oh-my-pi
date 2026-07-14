@@ -10,6 +10,7 @@
 ### Fixed
 
 - Classified transient DNS/socket failures through one shared typed error helper so auth retry and OAuth refresh paths preserve credentials instead of rotating or disabling them during infrastructure outages.
+- Added structured request-failure causes for provider aborts, timeouts, stream stalls, transient networks, rate limits, and provider errors; Anthropic watchdog and caller-abort errors now preserve a typed cause.
 
 ## [16.0.1] - 2026-06-15
 

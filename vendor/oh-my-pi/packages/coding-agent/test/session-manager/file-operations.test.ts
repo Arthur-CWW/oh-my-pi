@@ -241,6 +241,23 @@ describe("SessionManager temp cwd session dirs", () => {
 		expect(path.dirname(sessionFile)).toBe(expectedDir);
 		expect(fs.existsSync(path.join(expectedDir, "carried.jsonl"))).toBe(true);
 	});
+
+	it("resolves an exact id from a nested journal in another cwd group", async () => {
+		const currentCwd = path.join(testAgentDir, "current-project");
+		const otherGroup = path.join(getSessionsDir(), "-other-project", "parent-session");
+		const id = "019f56ec-20f0-7000-84f4-ecc85568063f";
+		const journal = path.join(otherGroup, "CardQualityAudit.jsonl");
+		fs.mkdirSync(otherGroup, { recursive: true });
+		fs.writeFileSync(
+			journal,
+			`${JSON.stringify({ type: "session", version: 3, id, timestamp: "2025-01-01T00:00:00Z", cwd: "/other/project" })}\n`,
+		);
+
+		const match = await resolveResumableSession(id, currentCwd);
+
+		expect(match?.scope).toBe("global");
+		expect(match?.session.path).toBe(journal);
+	});
 });
 
 describe("SessionManager legacy session migration persistence", () => {

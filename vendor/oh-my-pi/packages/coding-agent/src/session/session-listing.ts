@@ -69,6 +69,8 @@ export interface SessionListResult {
 export interface ResolvedSessionLookup {
 	match: ResolvedSessionMatch | undefined;
 	skippedFiles: SessionScanSkippedFile[];
+	/** Directories or roots inspected while resolving the argument, in lookup order. */
+	searchedLocations: string[];
 }
 
 /** Lightweight metadata for a recent session, used in welcome/picker UI. */
@@ -676,6 +678,27 @@ function sessionMatchesResumeArg(session: SessionInfo, sessionArg: string): bool
 	return fileSessionId.startsWith(normalizedArg);
 }
 
+async function findExactSessionAcrossGroups(
+	sessionArg: string,
+	sessionsRoot: string,
+	storage: SessionStorage,
+): Promise<SessionListResult> {
+	let files: string[];
+	try {
+		files = storage.listFilesSync(sessionsRoot, "**/*.jsonl");
+	} catch (err) {
+		return {
+			sessions: [],
+			skippedFiles: [{ path: sessionsRoot, reason: "scan_error", message: toError(err).message }],
+		};
+	}
+	const result = await collectSessionsFromFiles(files, storage, true);
+	const normalizedArg = sessionArg.toLowerCase();
+	result.sessions = result.sessions.filter(session => session.id.toLowerCase() === normalizedArg);
+	logSkippedSessionFiles(result.skippedFiles);
+	return result;
+}
+
 export async function resolveResumableSession(
 	sessionArg: string,
 	cwd: string,
@@ -695,19 +718,42 @@ export async function resolveResumableSessionWithDiagnostics(
 	const localResult = await listSessionsWithDiagnostics(localSessionDir, storage);
 	const localMatch = localResult.sessions.find(session => sessionMatchesResumeArg(session, sessionArg));
 	if (localMatch) {
-		return { match: { session: localMatch, scope: "local" }, skippedFiles: localResult.skippedFiles };
+		return {
+			match: { session: localMatch, scope: "local" },
+			skippedFiles: localResult.skippedFiles,
+			searchedLocations: [localSessionDir],
+		};
 	}
 
 	if (sessionDir) {
-		return { match: undefined, skippedFiles: localResult.skippedFiles };
+		return { match: undefined, skippedFiles: localResult.skippedFiles, searchedLocations: [localSessionDir] };
+	}
+
+	const sessionsRoot = path.dirname(localSessionDir);
+	const exactResult = await findExactSessionAcrossGroups(sessionArg, sessionsRoot, storage);
+	const exactMatch = exactResult.sessions[0];
+	if (exactMatch) {
+		return {
+			match: { session: exactMatch, scope: "global" },
+			skippedFiles: dedupeSkippedSessionFiles([...localResult.skippedFiles, ...exactResult.skippedFiles]),
+			searchedLocations: [localSessionDir, sessionsRoot],
+		};
 	}
 
 	const globalResult = await listAllSessionsWithDiagnostics(storage);
 	const globalMatch = globalResult.sessions.find(session => sessionMatchesResumeArg(session, sessionArg));
-	const skippedFiles = dedupeSkippedSessionFiles([...localResult.skippedFiles, ...globalResult.skippedFiles]);
+	const skippedFiles = dedupeSkippedSessionFiles([
+		...localResult.skippedFiles,
+		...exactResult.skippedFiles,
+		...globalResult.skippedFiles,
+	]);
 	if (!globalMatch) {
-		return { match: undefined, skippedFiles };
+		return { match: undefined, skippedFiles, searchedLocations: [localSessionDir, sessionsRoot] };
 	}
 
-	return { match: { session: globalMatch, scope: "global" }, skippedFiles };
+	return {
+		match: { session: globalMatch, scope: "global" },
+		skippedFiles,
+		searchedLocations: [localSessionDir, sessionsRoot],
+	};
 }

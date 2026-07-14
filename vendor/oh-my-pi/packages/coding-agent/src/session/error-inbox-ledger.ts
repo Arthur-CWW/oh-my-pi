@@ -1,3 +1,5 @@
+import type { RequestFailureCause } from "@oh-my-pi/pi-ai";
+
 import type { SessionManager } from "./session-manager";
 
 export interface FocusCmuxOwnerAction {
@@ -28,6 +30,12 @@ export interface DiagnosticEvent {
 
 	source?: string;
 	category?: string;
+	/** Stable request-failure taxonomy; greppable in the durable ledger. */
+	cause?: RequestFailureCause;
+	/** Terminal/retry outcome rendered in the operator headline. */
+	disposition?: string;
+	/** Raw provider/SDK message, never used as the operator headline. */
+	detail?: string;
 	errorClass?: string;
 	provider?: string;
 	model?: string;
@@ -71,4 +79,3 @@ export function appendErrorInboxEvent(sessionManager: ErrorInboxWriter, event: D
 		return false;
 	}
 }
-

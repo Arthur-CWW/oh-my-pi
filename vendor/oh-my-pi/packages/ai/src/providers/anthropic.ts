@@ -17,6 +17,7 @@ import {
 	logger,
 	readSseEvents,
 } from "@oh-my-pi/pi-utils";
+import { ProviderRequestError } from "../errors";
 import { isUsageLimitError } from "../rate-limit-utils";
 import { getEnvApiKey, OUTPUT_FALLBACK_BUFFER } from "../stream";
 import type {
@@ -51,6 +52,7 @@ import { AssistantMessageEventStream } from "../utils/event-stream";
 import { isFoundryEnabled } from "../utils/foundry";
 import { finalizeErrorMessage, type RawHttpRequestDump, rewriteCopilotError } from "../utils/http-inspector";
 import { getStreamFirstEventTimeoutMs, getStreamIdleTimeoutMs, iterateWithIdleTimeout } from "../utils/idle-iterator";
+import { classifyAbortReason } from "../utils/network-error";
 import { parseStreamingJsonThrottled } from "../utils/json-parse";
 import { notifyProviderResponse } from "../utils/provider-response";
 import { isCopilotTransientModelError } from "../utils/retry";
@@ -1722,8 +1724,14 @@ export const streamAnthropic: StreamFunction<"anthropic-messages"> = (
 			// Provider-level transport/rate-limit failures: only before any streamed content starts.
 			// Malformed envelopes/JSON: only before replay-unsafe text/tool events are visible on this stream.
 			let providerRetryAttempt = 0;
-			const firstEventTimeoutAbortError = new Error("Anthropic stream timed out while waiting for the first event");
-			const idleTimeoutAbortError = new Error("Anthropic stream stalled while waiting for the next event");
+			const firstEventTimeoutAbortError = new ProviderRequestError(
+				"Anthropic stream timed out while waiting for the first event",
+				{ failureCause: "provider-stream-abort" },
+			);
+			const idleTimeoutAbortError = new ProviderRequestError(
+				"Anthropic stream stalled while waiting for the next event",
+				{ failureCause: "provider-stream-abort" },
+			);
 			while (true) {
 				activeAbortTracker = createAbortSourceTracker(options?.signal);
 				const { requestSignal } = activeAbortTracker;
@@ -2089,7 +2097,10 @@ export const streamAnthropic: StreamFunction<"anthropic-messages"> = (
 						throw firstEventTimeoutError;
 					}
 					if (activeAbortTracker.wasCallerAbort()) {
-						throw new Error("Request was aborted");
+						throw new ProviderRequestError("Request was aborted", {
+							failureCause: classifyAbortReason(options?.signal?.reason),
+							cause: options?.signal?.reason,
+						});
 					}
 					if (!sawEvent || !sawMessageStart) {
 						throw createAnthropicStreamEnvelopeError("stream ended before message_start");

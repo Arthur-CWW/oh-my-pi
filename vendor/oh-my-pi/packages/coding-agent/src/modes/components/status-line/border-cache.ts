@@ -142,14 +142,21 @@ export class GitBorderCache {
 }
 
 export class BorderMemo {
-	#cached: { width: number; revision: number; content: string } | undefined;
+	#cached:
+		| { width: number; revision: number; liveBucket: number; themeEpoch: number; content: string }
+		| undefined;
 
-	get(width: number, revision: number): string | undefined {
+	get(width: number, revision: number, liveBucket: number, themeEpoch: number): string | undefined {
 		const cached = this.#cached;
-		return cached?.width === width && cached.revision === revision ? cached.content : undefined;
+		return cached?.width === width &&
+			cached.revision === revision &&
+			cached.liveBucket === liveBucket &&
+			cached.themeEpoch === themeEpoch
+			? cached.content
+			: undefined;
 	}
 
-	set(width: number, revision: number, content: string): void {
-		this.#cached = { width, revision, content };
+	set(width: number, revision: number, liveBucket: number, themeEpoch: number, content: string): void {
+		this.#cached = { width, revision, liveBucket, themeEpoch, content };
 	}
 }

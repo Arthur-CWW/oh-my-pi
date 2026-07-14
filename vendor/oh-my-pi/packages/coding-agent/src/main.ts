@@ -570,6 +570,12 @@ function skippedSessionFilesSuffix(skippedFiles: readonly SessionScanSkippedFile
 	return ` (${skippedFiles.length} unreadable files skipped — see debug log)`;
 }
 
+function searchedSessionLocationsSuffix(locations: readonly string[]): string {
+	if (locations.length === 0) return "";
+	if (locations.length === 1) return ` Looked in ${locations[0]}.`;
+	return ` Looked in ${locations[0]} and recursively under ${locations[1]}.`;
+}
+
 function continueStartupMessage(manager: SessionManager): string | undefined {
 	const sessionFile = manager.getSessionFile();
 	const provenance = manager.getContinueProvenance();
@@ -661,7 +667,7 @@ export async function createSessionManager(
 		const match = lookup.match;
 		if (!match) {
 			throw new SessionResolutionError(
-				`Session "${forkSource}" not found.${skippedSessionFilesSuffix(lookup.skippedFiles)}`,
+				`Session "${forkSource}" not found.${skippedSessionFilesSuffix(lookup.skippedFiles)}${searchedSessionLocationsSuffix(lookup.searchedLocations)}`,
 				"Run `omp --resume` without an argument to pick from recent sessions, or `omp` to start a new one.",
 			);
 		}
@@ -683,7 +689,7 @@ export async function createSessionManager(
 		const match = lookup.match;
 		if (!match) {
 			throw new SessionResolutionError(
-				`Session "${sessionArg}" not found.${skippedSessionFilesSuffix(lookup.skippedFiles)}`,
+				`Session "${sessionArg}" not found.${skippedSessionFilesSuffix(lookup.skippedFiles)}${searchedSessionLocationsSuffix(lookup.searchedLocations)}`,
 				"Run `omp --resume` without an argument to pick from recent sessions, or `omp` to start a new one.",
 			);
 		}

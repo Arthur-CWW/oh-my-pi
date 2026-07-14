@@ -1,3 +1,25 @@
+import type { RequestFailureCause } from "./utils/network-error";
+
+export interface ProviderRequestErrorOptions {
+	readonly failureCause: RequestFailureCause;
+	readonly cause?: unknown;
+}
+
+/**
+ * Provider transport/stream failure with a stable machine-readable cause.
+ * The message remains the raw SDK detail; callers should use `failureCause`
+ * for headlines and retry policy.
+ */
+export class ProviderRequestError extends Error {
+	readonly failureCause: RequestFailureCause;
+
+	constructor(message: string, options: ProviderRequestErrorOptions) {
+		super(message, options.cause === undefined ? undefined : { cause: options.cause });
+		this.name = "ProviderRequestError";
+		this.failureCause = options.failureCause;
+	}
+}
+
 /**
  * Structured HTTP errors thrown by provider clients.
  *
