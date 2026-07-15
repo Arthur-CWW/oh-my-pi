@@ -4,7 +4,11 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { isSubcommand } from "@oh-my-pi/pi-coding-agent/cli-commands";
 import { IrcExternalBus } from "@oh-my-pi/pi-coding-agent/irc/bus-external";
-import { createRolloutPlan, executeRolloutPlan } from "@oh-my-pi/pi-coding-agent/session/rollout";
+import {
+	createRolloutPlan,
+	executeRolloutPlan,
+	matchesFleetRecovery,
+} from "@oh-my-pi/pi-coding-agent/session/rollout";
 
 const cleanupRoots: string[] = [];
 
@@ -94,6 +98,45 @@ describe("staged session rollout", () => {
 			});
 			expect(calls).toEqual([]);
 			expect(result).toEqual({ restarted: [] });
+		} finally {
+			bus.close();
+		}
+	});
+
+	it("accepts only the exact durable same-session replacement identity", async () => {
+		const bus = await fixtureBus();
+		try {
+			register(bus, "saved-session", 107, "old", "idle");
+			const original = bus.listPeers().find(peer => peer.sessionId === "saved-session")!;
+			const heartbeatFreshAfter = Date.parse(original.lastSeen);
+			const sessionFile = "/tmp/saved-session/session.jsonl";
+			const replacement = {
+				...original,
+				sessionFile,
+				ownerEpoch: "owner-saved-session-v2",
+				buildDigest: "target",
+				lastSeen: new Date(heartbeatFreshAfter + 1).toISOString(),
+			};
+			const expectation = {
+				sessionId: original.sessionId,
+				sessionFile: "/tmp/saved-session/./session.jsonl",
+				previousOwnerEpoch: original.ownerEpoch!,
+				heartbeatFreshAfter,
+				targetDigest: "target",
+			};
+
+			expect(matchesFleetRecovery(replacement, expectation)).toBe(true);
+			expect(matchesFleetRecovery({ ...replacement, sessionId: "new-session" }, expectation)).toBe(false);
+			expect(matchesFleetRecovery({ ...replacement, sessionFile: "/tmp/new-session/session.jsonl" }, expectation)).toBe(false);
+			expect(matchesFleetRecovery({ ...replacement, ownerEpoch: original.ownerEpoch }, expectation)).toBe(false);
+			expect(matchesFleetRecovery({ ...replacement, buildDigest: "old" }, expectation)).toBe(false);
+			expect(
+				matchesFleetRecovery(
+					{ ...replacement, lastSeen: new Date(heartbeatFreshAfter).toISOString() },
+					expectation,
+				),
+			).toBe(false);
+			expect(matchesFleetRecovery(replacement, { ...expectation, sessionFile: undefined })).toBe(false);
 		} finally {
 			bus.close();
 		}

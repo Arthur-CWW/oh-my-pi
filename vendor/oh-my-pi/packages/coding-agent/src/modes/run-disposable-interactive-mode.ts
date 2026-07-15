@@ -1,7 +1,7 @@
 import * as path from "node:path";
 import { postmortem } from "@oh-my-pi/pi-utils";
 import { Effect } from "effect";
-import { buildRestartSpawnSpec, replaceRestartProcess } from "../cli/restart-session";
+import { replaceRestartProcess } from "../cli/restart-session";
 import { CollabHost, collabDisplayName } from "../collab/host";
 import { DEFAULT_RELAY_URL } from "../collab/protocol";
 import type { SessionRunner } from "../runner/session-runner";
@@ -129,12 +129,10 @@ export async function runDisposableInteractiveMode(
 						if (!receipt.restartSpawn) {
 							throw new Error("Restart transition did not produce a process spawn specification");
 						}
-						const restartSpawn = buildRestartSpawnSpec({
-							sessionId: ownership.sessionFile,
-							cwd: options.cwd ?? process.cwd(),
-							executable:
-								command.intent.kind === "restart" ? command.intent.executable : receipt.restartSpawn.executable,
-						});
+						const restartSpawn =
+							command.intent.kind === "restart"
+								? { ...receipt.restartSpawn, executable: command.intent.executable }
+								: receipt.restartSpawn;
 						commit();
 						replaceRestartProcess(restartSpawn, ownership.ownerEpoch);
 					},

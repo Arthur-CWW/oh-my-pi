@@ -218,6 +218,49 @@ describe("fleet inspection projections", () => {
 		expect(after).toEqual(before);
 	});
 
+	it("does not project recovered onto an old-digest peer row", async () => {
+		using tempDir = TempDir.createSync("@omp-fleet-cli-recovered-");
+		const sessionFile = `${tempDir.path()}/session.jsonl`;
+		await Bun.write(sessionFile, journalText({ id: "saved-session", workstream: "fleet-alpha", errors: [] }));
+		const ircDbPath = `${tempDir.path()}/irc.sqlite`;
+		const bus = new IrcExternalBus(ircDbPath);
+		bus.registerPeer({
+			sessionId: "saved-session",
+			name: "old-peer",
+			cwd: "/fixture",
+			sessionFile,
+			ownerEpoch: "old-epoch",
+			buildDigest: "old-digest",
+			version: "1.2.2",
+		});
+		bus.updatePeerState("saved-session", "idle");
+		bus.close();
+		const editDb = new Database(ircDbPath);
+		editDb.query("UPDATE peers SET last_seen = $lastSeen WHERE session_id = 'saved-session'").run({
+			$lastSeen: new Date(NOW - 20 * 60_000).toISOString(),
+		});
+		editDb.close();
+
+		const controlDbPath = `${tempDir.path()}/control.sqlite`;
+		const rollout = new RolloutJournal(controlDbPath);
+		rollout.beginRun({ rolloutId: "rollout-recovered", targetDigest: "new-digest", targetVersion: "1.2.3" });
+		for (const phase of ["planned", "requested", "applied", "recovered"] as const) {
+			rollout.updatePeer({
+				rolloutId: "rollout-recovered",
+				sessionId: "saved-session",
+				sessionFile,
+				name: "saved-session",
+				phase,
+			});
+		}
+		rollout.close();
+
+		const rows = await collectFleetStatus({ ircDbPath, controlDbPath, all: true, nowMs: NOW });
+		expect(rows).toHaveLength(1);
+		expect(rows[0]?.buildDigest).toBe("old-digest");
+		expect(rows[0]?.rollout).toBe("-");
+	});
+
 	it("dry-runs and applies only stale dead test/temp heartbeat rows without deleting journals", async () => {
 		using tempDir = TempDir.createSync("@omp-fleet-cli-prune-");
 		const ircDbPath = `${tempDir.path()}/irc.sqlite`;

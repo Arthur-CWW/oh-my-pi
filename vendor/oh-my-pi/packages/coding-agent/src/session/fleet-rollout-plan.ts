@@ -229,6 +229,7 @@ function classifyPeer(
 	if (options.initiatorSessionIds.has(peer.sessionId) || options.initiatorPids?.has(peer.pid)) {
 		return { state: "Classified", reason: "rollout initiator excluded" };
 	}
+	if (!peer.sessionFile) return { state: "BusyDeferred", reason: "durable session journal unavailable" };
 	if (!isIrcExternalPeerFresh(peer.lastSeen, options.nowMs))
 		return { state: "LegacyIncompatible", reason: "stale peer" };
 	const isProcessAlive = options.isProcessAlive ?? isFleetOwnerProcessAlive;

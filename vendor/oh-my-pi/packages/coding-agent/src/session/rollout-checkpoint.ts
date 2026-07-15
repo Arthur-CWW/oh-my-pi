@@ -172,6 +172,7 @@ export async function assembleRolloutCheckpoint(
 		createdAt: new Date(now()).toISOString(),
 	};
 	options.sessionManager.appendCustomEntry(ROLLOUT_CHECKPOINT_CUSTOM_TYPE, checkpoint);
+	await options.sessionManager.ensureOnDisk();
 	await options.sessionManager.flush();
 	return checkpoint;
 }

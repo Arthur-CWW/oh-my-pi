@@ -16,7 +16,6 @@ async function fixture() {
 	const root = await fs.mkdtemp(path.join(os.tmpdir(), "omp-rollout-checkpoint-"));
 	cleanupRoots.push(root);
 	const sessionManager = SessionManager.create(root, path.join(root, "sessions"));
-	await sessionManager.ensureOnDisk();
 	let restartCheckpointCalls = 0;
 	const session = {
 		asyncJobManager: undefined,
@@ -68,8 +67,11 @@ describe("rollout checkpoint", () => {
 		await sessionManager.close();
 	});
 
-	it("round-trips a safe checkpoint receipt through the session journal", async () => {
+	it("materializes and flushes a fresh journal before returning a safe checkpoint receipt", async () => {
 		const { root, sessionManager, session, restartCheckpointCalls } = await fixture();
+		const sessionFile = sessionManager.getSessionFile();
+		if (!sessionFile) throw new Error("expected allocated session file");
+		await expect(fs.stat(sessionFile)).rejects.toMatchObject({ code: "ENOENT" });
 		const checkpoint = await assembleRolloutCheckpoint({
 			sessionManager,
 			session,
@@ -81,8 +83,17 @@ describe("rollout checkpoint", () => {
 			drainTimeoutMs: 10,
 			inspectDrain: () => ({ safe: true, children: [] }),
 		});
-		const sessionFile = sessionManager.getSessionFile();
-		if (!sessionFile) throw new Error("expected durable session file");
+		const durableEntries = (await fs.readFile(sessionFile, "utf8"))
+			.trim()
+			.split("\n")
+			.map(line => JSON.parse(line));
+		expect(durableEntries).toContainEqual(
+			expect.objectContaining({
+				type: "custom",
+				customType: ROLLOUT_CHECKPOINT_CUSTOM_TYPE,
+				data: checkpoint,
+			}),
+		);
 		await sessionManager.close();
 
 		const reopened = await SessionManager.open(sessionFile, path.join(root, "sessions"));
@@ -100,5 +111,28 @@ describe("rollout checkpoint", () => {
 			checkpointId: decoded.checkpointId,
 		});
 		await reopened.close();
+	});
+
+	it("rejects checkpoint assembly when the manager has no durable journal path", async () => {
+		const sessionManager = SessionManager.inMemory("/workspace");
+		const session = {
+			asyncJobManager: undefined,
+			checkpointChildJobsForRestart: async () => undefined,
+		} as unknown as AgentSession;
+
+		await expect(
+			assembleRolloutCheckpoint({
+				sessionManager,
+				session,
+				commandId: "command-memory",
+				rolloutId: "rollout-memory",
+				ownerEpoch: "owner-memory",
+				expectedDigest: "digest-memory",
+				pauseProvenance: "rollout",
+				drainTimeoutMs: 0,
+				inspectDrain: () => ({ safe: false, busyReason: "not durable", children: [] }),
+			}),
+		).rejects.toThrow("Rollout checkpoint requires a durable session journal");
+		await sessionManager.close();
 	});
 });

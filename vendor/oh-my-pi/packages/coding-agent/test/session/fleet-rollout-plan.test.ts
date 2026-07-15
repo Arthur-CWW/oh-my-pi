@@ -154,6 +154,20 @@ describe("fleet rollout planning", () => {
 		});
 	});
 
+	it("defers a peer without a durable session journal before assigning rollout work", () => {
+		const plan = planFor([peer("memory", "idle", { sessionFile: undefined })]);
+
+		expect(plan.waves).toEqual([]);
+		expect(plan.orderedTargets).toEqual([]);
+		expect(plan.excluded).toContainEqual(
+			expect.objectContaining({
+				sessionId: "memory",
+				state: "BusyDeferred",
+				reason: "durable session journal unavailable",
+			}),
+		);
+	});
+
 	it("plans a fresh current capability while rejecting a legacy peer", () => {
 		const current = peer("current");
 		const legacy = peer("legacy", "idle", { fleetCapability: undefined });

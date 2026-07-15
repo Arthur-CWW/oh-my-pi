@@ -43,6 +43,7 @@ import {
 	resolveReleaseValidationPaths,
 } from "../session/release-registry-validation";
 import { SessionManager } from "../session/session-manager";
+import { matchesFleetRecovery } from "../session/rollout";
 import { acquireSessionOwnership, type SessionOwnershipHandle } from "../session/session-ownership";
 import { resolveVerifiedReleaseExecutable } from "./restart-session";
 import { collectFleetErrors } from "./fleet-cli";
@@ -414,16 +415,15 @@ async function waitForReplacement(options: {
 }): Promise<IrcExternalPeer> {
 	const deadline = Date.now() + options.timeoutMs;
 	for (;;) {
-		const replacement = options.listPeers().find(peer => {
-			const seen = Date.parse(peer.lastSeen);
-			return (
-				peer.sessionId === options.target.sessionId &&
-				!!peer.ownerEpoch &&
-				peer.ownerEpoch !== options.target.expectedOwnerEpoch &&
-				peer.buildDigest === options.targetDigest &&
-				seen >= options.startedAt
-			);
-		});
+		const replacement = options.listPeers().find(peer =>
+			matchesFleetRecovery(peer, {
+				sessionId: options.target.sessionId,
+				sessionFile: options.target.peer.sessionFile,
+				previousOwnerEpoch: options.target.expectedOwnerEpoch,
+				heartbeatFreshAfter: options.startedAt,
+				targetDigest: options.targetDigest,
+			}),
+		);
 		if (replacement) return replacement;
 		if (Date.now() >= deadline)
 			throw new Error(`Timed out waiting for replacement heartbeat for ${options.target.sessionId}`);

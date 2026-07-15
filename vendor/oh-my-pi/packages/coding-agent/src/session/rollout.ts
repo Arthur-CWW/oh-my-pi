@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import * as fs from "node:fs";
+import * as path from "node:path";
 import { Command, Flags } from "@oh-my-pi/pi-utils/cli";
 import { VERSION } from "@oh-my-pi/pi-utils/dirs";
 import { IrcExternalBus, type IrcExternalPeer } from "../irc/bus-external";
@@ -14,6 +15,29 @@ type RolloutPeer = IrcExternalPeer & { readonly controlSessionId?: string };
 export type RolloutPlanEntry =
 	| { readonly action: "restart"; readonly peer: RolloutPeer }
 	| { readonly action: "skip"; readonly peer: RolloutPeer; readonly reason: SkipReason };
+
+export interface FleetRecoveryExpectation {
+	readonly sessionId: string;
+	readonly sessionFile: string | undefined;
+	readonly previousOwnerEpoch: string;
+	readonly heartbeatFreshAfter: number;
+	readonly targetDigest: string;
+}
+
+export function matchesFleetRecovery(
+	peer: IrcExternalPeer,
+	expectation: FleetRecoveryExpectation,
+): boolean {
+	if (!peer.sessionFile || !expectation.sessionFile) return false;
+	return (
+		peer.sessionId === expectation.sessionId &&
+		path.resolve(peer.sessionFile) === path.resolve(expectation.sessionFile) &&
+		!!peer.ownerEpoch &&
+		peer.ownerEpoch !== expectation.previousOwnerEpoch &&
+		Date.parse(peer.lastSeen) > expectation.heartbeatFreshAfter &&
+		peer.buildDigest === expectation.targetDigest
+	);
+}
 
 const SKIP_REASON_REPORT: Record<SkipReason, string> = {
 	working: "working",
@@ -212,18 +236,16 @@ export async function runRollout(options: RunRolloutOptions = {}): Promise<Rollo
 				for (;;) {
 					const recovered = activeBus
 						.listPeers({ includeStale: true })
-						.find(
-							peer =>
-								peer.sessionId === (current.controlSessionId ?? current.sessionId) ||
-								peer.sessionFile === current.sessionFile,
+						.find(peer =>
+							matchesFleetRecovery(peer, {
+								sessionId: current.controlSessionId ?? current.sessionId,
+								sessionFile: current.sessionFile,
+								previousOwnerEpoch: current.ownerEpoch!,
+								heartbeatFreshAfter: baselineHeartbeat,
+								targetDigest,
+							}),
 						);
-					if (
-						recovered &&
-						Date.parse(recovered.lastSeen) > baselineHeartbeat &&
-						recovered.ownerEpoch !== current.ownerEpoch &&
-						recovered.buildDigest === targetDigest &&
-						(!recovered.version || recovered.version === targetVersion)
-					) {
+					if (recovered && (!recovered.version || recovered.version === targetVersion)) {
 						updatePeer({ ...current, sessionFile: recovered.sessionFile ?? current.sessionFile }, "recovered");
 						return;
 					}

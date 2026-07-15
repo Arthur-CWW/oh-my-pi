@@ -153,6 +153,17 @@ function openReadonlyRolloutJournal(dbPath: string | undefined): RolloutJournal 
 	}
 }
 
+function recoveredSnapshotMatchesPeer(peer: IrcExternalPeer, snapshot: RolloutPeerSnapshot): boolean {
+	if (snapshot.phase !== "recovered") return true;
+	if (!peer.sessionFile || !snapshot.sessionFile) return false;
+	const digest = peer.fleetCapability?.buildDigest ?? peer.buildDigest;
+	return (
+		snapshot.sessionId === peer.sessionId &&
+		path.resolve(snapshot.sessionFile) === path.resolve(peer.sessionFile) &&
+		snapshot.targetDigest === digest
+	);
+}
+
 export async function collectFleetStatus(options: FleetStatusOptions = {}): Promise<readonly FleetStatusRow[]> {
 	const nowMs = options.nowMs ?? Date.now();
 	let bus: IrcExternalBus | undefined;
@@ -176,6 +187,7 @@ export async function collectFleetStatus(options: FleetStatusOptions = {}): Prom
 			let rollout: RolloutPeerSnapshot | undefined;
 			try {
 				rollout = rolloutJournal?.latestForPeer({ sessionId: peer.sessionId, sessionFile: peer.sessionFile });
+				if (rollout && !recoveredSnapshotMatchesPeer(peer, rollout)) rollout = undefined;
 			} catch {
 				rollout = undefined;
 			}
