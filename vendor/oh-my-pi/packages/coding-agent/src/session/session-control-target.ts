@@ -1,15 +1,29 @@
+import * as path from "node:path";
+import { verifyExecutableDigest } from "../cli/restart-session";
 import {
 	SessionControlBus,
 	type SessionControlCommand,
+	type FleetPinControlCommand,
+	type PrepareRolloutCommand,
+	type PrepareRolloutIntent,
 	type SessionControlResult,
 	stopConfirmationToken,
 } from "./session-control";
+import { decodeRolloutCheckpoint, type RolloutCheckpoint, type RolloutPauseProvenance } from "./rollout-checkpoint";
 import type { SessionOwnershipHandle } from "./session-ownership";
 
 export interface SessionControlTargetActions {
 	readonly status: (command: SessionControlCommand) => SessionControlResult | Promise<SessionControlResult>;
 	readonly pause: (command: SessionControlCommand) => void | Promise<void>;
 	readonly resume: (command: SessionControlCommand) => void | Promise<void>;
+	readonly fleetPinControl?: (
+		command: FleetPinControlCommand,
+	) => SessionControlResult | Promise<SessionControlResult>;
+	readonly prepareRollout?: (
+		intent: PrepareRolloutIntent,
+		pauseProvenance: RolloutPauseProvenance,
+		command: PrepareRolloutCommand,
+	) => RolloutCheckpoint | Promise<RolloutCheckpoint>;
 	readonly restart: (command: SessionControlCommand, commit: () => void) => void | Promise<void>;
 	readonly setModel: (
 		selector: string,
@@ -98,6 +112,50 @@ export async function startSessionControlTarget(options: SessionControlTargetOpt
 					bus.setPaused(ownership.sessionId, ownership.ownerEpoch, false);
 					bus.complete(command.commandId, ownership.ownerEpoch, actionResult(command, { paused: false }));
 					return;
+				case "fleet-pin":
+				case "fleet-unpin": {
+					const result = await (actions.fleetPinControl ?? actions.status)(command as FleetPinControlCommand);
+					await assertCurrentOwner(ownership);
+					bus.complete(command.commandId, ownership.ownerEpoch, actionResult(command, result));
+					return;
+				}
+				case "prepare-rollout": {
+					if (!actions.prepareRollout) throw new Error("Target does not support prepare-rollout");
+					if (ownership.buildRevision.digest !== command.intent.expectedDigest) {
+						throw new Error(
+							`Expected runner digest ${command.intent.expectedDigest}, found ${ownership.buildRevision.digest}`,
+						);
+					}
+					const pauseProvenance: RolloutPauseProvenance = bus.getPaused(ownership.sessionId)
+						? "manual"
+						: "rollout";
+					let cordon = bus.cordon(
+						ownership.sessionId,
+						ownership.ownerEpoch,
+						command.intent.rolloutId,
+						command.intent.expectedDigest,
+						pauseProvenance,
+					);
+					if (pauseProvenance === "rollout") {
+						await actions.pause(command);
+						await assertCurrentOwner(ownership);
+						bus.setPaused(ownership.sessionId, ownership.ownerEpoch, true);
+					}
+					const checkpoint = await actions.prepareRollout(
+						command.intent,
+						pauseProvenance,
+						command as PrepareRolloutCommand,
+					);
+					await assertCurrentOwner(ownership);
+					cordon = bus.recordCordonCheckpoint({
+						sessionId: ownership.sessionId,
+						expectedOwnerEpoch: ownership.ownerEpoch,
+						fleetRolloutId: command.intent.rolloutId,
+						checkpointId: checkpoint.checkpointId,
+					});
+					bus.complete(command.commandId, ownership.ownerEpoch, actionResult(command, { cordon, checkpoint }));
+					return;
+				}
 				case "setModel": {
 					const result = await actions.setModel(command.intent.selector, command);
 					await assertCurrentOwner(ownership);
@@ -111,6 +169,30 @@ export async function startSessionControlTarget(options: SessionControlTargetOpt
 					return;
 				}
 				case "restart": {
+					if (command.schemaVersion === 2) {
+						const cordon = bus.getCordon(ownership.sessionId);
+						if (!cordon || cordon.ownerEpoch !== ownership.ownerEpoch || cordon.rolloutId !== command.intent.rolloutId) {
+							throw new Error("Rollout restart requires the matching active cordon");
+						}
+						const receipt = bus.getReceipt(command.intent.checkpointCommandId);
+						const result = receipt?.result as { checkpoint?: unknown } | undefined;
+						const checkpoint = decodeRolloutCheckpoint(result?.checkpoint);
+						if (
+							receipt?.state !== "applied" ||
+							checkpoint.outcome !== "Checkpointed" ||
+							checkpoint.commandId !== command.intent.checkpointCommandId ||
+							checkpoint.rolloutId !== command.intent.rolloutId ||
+							checkpoint.ownerEpoch !== ownership.ownerEpoch ||
+							checkpoint.expectedDigest !== ownership.buildRevision.digest ||
+							checkpoint.journalCheckpoint.sessionId !== ownership.sessionId ||
+							path.resolve(checkpoint.journalCheckpoint.sessionFile) !== path.resolve(ownership.sessionFile) ||
+							cordon.expectedDigest !== checkpoint.expectedDigest
+						) {
+							throw new Error("Rollout restart requires a matching successful checkpoint receipt");
+						}
+						await verifyExecutableDigest(command.intent.executable, command.intent.targetDigest);
+						await assertCurrentOwner(ownership);
+					}
 					terminalAction = true;
 					let committed = false;
 					await actions.restart(command, () => {

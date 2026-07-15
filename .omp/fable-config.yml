@@ -20,15 +20,15 @@ retry:
   fallbackRevertPolicy: cooldown-expiry
   # Temporary quota-exhaustion posture: subagents only. Delete or move this
   # timestamp into the past to restore approval round-trips.
-  subagentFallbackAutoApproveUntil: "2026-07-14T21:49:33Z"
+  subagentFallbackAutoApproveUntil: "2026-07-15T03:48:04Z"
   proposableFallbackChains:
     task:
       - kimi-code/kimi-for-coding
-      - anthropic/claude-opus-4-6
     smol:
       - openai-codex/gpt-5.6-sol:high
       - kimi-code/kimi-for-coding
     designer:
+      - kimi-code/kimi-for-coding
       - openai-codex/gpt-5.6-sol:high
 
 advisor:

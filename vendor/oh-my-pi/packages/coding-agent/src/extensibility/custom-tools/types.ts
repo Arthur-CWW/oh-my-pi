@@ -153,6 +153,8 @@ export interface RenderResultOptions {
 	spinnerFrame?: number;
 	/** Stable transcript presentation settings, shared by reference with the owning TUI. */
 	transcriptDisplay?: TranscriptDisplayContext;
+	/** Cached semantic one-line summary of the call and its current result state. */
+	headline?: string;
 }
 
 export type CustomToolResult<TDetails = any> = AgentToolResult<TDetails>;

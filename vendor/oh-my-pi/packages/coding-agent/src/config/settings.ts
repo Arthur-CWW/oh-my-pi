@@ -40,6 +40,7 @@ import {
 	SETTINGS_SCHEMA,
 	type SettingPath,
 	type SettingValue,
+	validateSettingValue,
 } from "./settings-schema";
 
 // Re-export types that callers need
@@ -326,8 +327,9 @@ export class Settings {
 		}
 
 		const value = getByPath(this.#merged, SETTING_PATH_SEGMENTS[path]);
+		const resolvedValue = value !== undefined ? (resolvePathScopedStringArray(path, value, this.#cwd) ?? value) : undefined;
 		const resolved =
-			value !== undefined ? (resolvePathScopedStringArray(path, value, this.#cwd) ?? value) : getDefault(path);
+			resolvedValue !== undefined && validateSettingValue(path, resolvedValue) ? resolvedValue : getDefault(path);
 		this.#resolvedCache.set(path, resolved);
 		return resolved as SettingValue<P>;
 	}
@@ -1394,6 +1396,3 @@ export const settings = new Proxy({} as Settings, {
 	},
 });
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Helpers
-// ═══════════════════════════════════════════════════════════════════════════

@@ -1,5 +1,6 @@
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { MessageAttribution, ServiceTier, UserContent } from "@oh-my-pi/pi-ai";
+import type { SpawnRecord } from "../task/spawn-record";
 
 export const CURRENT_SESSION_VERSION = 4;
 
@@ -449,6 +450,7 @@ export interface MCPToolSelectionEntry extends SessionEntryBase {
 	selectedToolNames: string[];
 }
 
+
 /** Durable task metadata needed to re-adopt a direct child after controller replacement. */
 export interface SubagentSessionMetadata {
 	agentId: string;
@@ -461,6 +463,8 @@ export interface SubagentSessionMetadata {
 	/** Child depth and task prefix preserve subagent-scoped advisor policy on revival. */
 	taskDepth: number;
 	parentTaskPrefix: string;
+	/** Full spawn-boundary prompt, definition, lineage, and model-route evidence. Absent in legacy journals. */
+	spawnRecord?: SpawnRecord;
 }
 
 /** Session init entry - captures initial context for subagent sessions (debugging/replay). */

@@ -246,6 +246,8 @@ export interface LaunchHeadlessOptions {
 	headless: boolean;
 	sessionId: string;
 	viewport?: { width: number; height: number; deviceScaleFactor?: number };
+	maxOwnedPerSession?: number;
+	maxOwnedGlobal?: number;
 }
 
 export interface HeadlessBrowserLaunch {
@@ -282,7 +284,10 @@ export async function launchHeadlessBrowser(opts: LaunchHeadlessOptions): Promis
 	if (ignoreCert === "true" || ignoreCert === "1" || ignoreCert === "yes" || ignoreCert === "on") {
 		launchArgs.push("--ignore-certificate-errors");
 	}
-	const ownership = await prepareOwnedBrowserProfile(opts.sessionId);
+	const ownership = await prepareOwnedBrowserProfile(opts.sessionId, {
+		maxOwnedPerSession: opts.maxOwnedPerSession,
+		maxOwnedGlobal: opts.maxOwnedGlobal,
+	});
 	try {
 		const browser = await puppeteer.launch({
 			headless: opts.headless,

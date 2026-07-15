@@ -102,3 +102,25 @@ export interface CodexResetsSettings {
 	minBlockedMinutes: number;
 	keepCredits: number;
 }
+
+export interface ContextPromotionSettings {
+	enabled: boolean;
+}
+
+export interface RetrySettings {
+	enabled: boolean;
+	maxRetries: number;
+	baseDelayMs: number;
+	networkHoldMs: number;
+	maxDelayMs: number;
+	fallbackApproval: boolean;
+	proposableFallbackChains: Record<string, string[]>;
+	subagentFallbackAutoApproveUntil: string;
+	fallbackRevertPolicy: "cooldown-expiry" | "never";
+}
+
+export interface IncidentsSettings {
+	enabled: boolean;
+	windowMs: number;
+	threshold: number;
+}

@@ -1,21 +1,38 @@
-import { beforeAll, describe, expect, it } from "bun:test";
+import { afterEach, beforeAll, describe, expect, it } from "bun:test";
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
-import { CURSOR_MARKER } from "@oh-my-pi/pi-tui";
 import {
-	type CommandModeContext,
 	applyCommandModeCompletion,
+	type CommandModeCommand,
+	type CommandModeContext,
 	commandModeCommandsForView,
 	dispatchCommandLine,
 	getCommandModeCompletions,
 	parseCommandLine,
 	TUI_COLON_COMMAND_NAMES,
 } from "@oh-my-pi/pi-coding-agent/modes/command-registry";
+import { toggleRichTranscript } from "@oh-my-pi/pi-coding-agent/modes/transcript-commands";
 import { AssistantMessageComponent } from "@oh-my-pi/pi-coding-agent/modes/components/assistant-message";
-import { canEnterCommandMode, CommandLineComponent } from "@oh-my-pi/pi-coding-agent/modes/components/command-line";
-import type { TranscriptDisplayContext } from "@oh-my-pi/pi-coding-agent/modes/transcript-display";
+import {
+	CommandLineComponent,
+	canEnterCommandMode,
+	installCommandLine,
+} from "@oh-my-pi/pi-coding-agent/modes/components/command-line";
 import { initTheme, theme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
+import type { TranscriptDisplayContext } from "@oh-my-pi/pi-coding-agent/modes/transcript-display";
+import { HistoryStorage } from "@oh-my-pi/pi-coding-agent/session/history-storage";
 import { BUILTIN_SLASH_COMMAND_DEFS } from "@oh-my-pi/pi-coding-agent/slash-commands/builtin-registry";
 import { createIrcMessageCard } from "@oh-my-pi/pi-coding-agent/tools/irc";
+import { Container, CURSOR_MARKER } from "@oh-my-pi/pi-tui";
+
+const commandHistoryTempDirs: string[] = [];
+
+afterEach(async () => {
+	HistoryStorage.resetInstance();
+	await Promise.all(commandHistoryTempDirs.splice(0).map(dir => fs.rm(dir, { recursive: true, force: true })));
+});
 
 beforeAll(async () => {
 	await initTheme(false);
@@ -123,7 +140,7 @@ describe("colon command registry", () => {
 		expect(await dispatchCommandLine(":commands", ctx)).toBe(true);
 		const feedback = ctx.feedback.at(-1) ?? "";
 		expect(feedback).toContain(":wrap — toggle wrapping");
-		expect(feedback).toContain(":commands — list TUI colon commands and shortcuts");
+		expect(feedback).toContain(":rich — toggle rich Markdown rendering");
 		expect(feedback).toContain("Viewer shortcuts");
 		expect(feedback).toContain("Agent Hub shortcuts");
 		expect(feedback).toContain("Command-line shortcuts");
@@ -173,6 +190,59 @@ describe("colon command registry", () => {
 		expect(ctx.copied.at(-1)).toBe("019f6141-df73-7000-b792-985f12d9db5d/CardQualityAudit");
 	});
 
+	it("opens from a transcript viewer and restores its focus and scroll state", () => {
+		let listener: ((data: string) => { consume?: boolean } | undefined) | undefined;
+		const editor = { getText: () => "", isShowingAutocomplete: () => false, render: () => [] };
+		const viewer = { scrollOffset: 37, render: () => [] };
+		let focused: unknown = viewer;
+		let overlayHidden = false;
+		const editorContainer = new Container();
+		editorContainer.addChild(editor);
+		const ui = {
+			addInputListener: (next: typeof listener) => {
+				listener = next;
+			},
+			getFocused: () => focused,
+			setFocus: (next: unknown) => {
+				focused = next;
+			},
+			showOverlay: () => ({
+				hide: () => {
+					overlayHidden = true;
+				},
+			}),
+			requestRender: () => {},
+		};
+		const interactive = {
+			editor,
+			editorContainer,
+			ui,
+			focusedAgentId: undefined,
+		};
+
+		installCommandLine(interactive as never);
+		expect(listener?.(":")).toEqual({ consume: true });
+		expect(focused).toBeInstanceOf(CommandLineComponent);
+		expect(editorContainer.children).toEqual([editor]);
+
+		(focused as CommandLineComponent).handleInput("\x1b");
+		(focused as CommandLineComponent).handleInput("\x1b");
+		expect(overlayHidden).toBe(true);
+		expect(focused).toBe(viewer);
+		expect(viewer.scrollOffset).toBe(37);
+	});
+
+	it("respects literal-colon text prompts while enabling normal composite views", () => {
+		const editor = { getText: () => "", isShowingAutocomplete: () => false };
+		const guardedSearch = { render: () => [], canEnterCommandMode: () => false };
+		const normalSelector = { render: () => [] };
+		let focused: unknown = guardedSearch;
+		const interactive = { editor, ui: { getFocused: () => focused } };
+		expect(canEnterCommandMode(interactive as never)).toBe(false);
+		focused = normalSelector;
+		expect(canEnterCommandMode(interactive as never)).toBe(true);
+	});
+
 	it("filters and selects :commands as a normal colon completion", () => {
 		const completions = getCommandModeCompletions(":comm");
 		expect(completions.map(completion => completion.value)).toEqual(["commands"]);
@@ -195,18 +265,98 @@ describe("colon command registry", () => {
 		expect(lines.slice(0, -1).some(line => Bun.stripANSI(line).includes("commands"))).toBe(true);
 		expect(Bun.stripANSI(inputLine).startsWith(":")).toBe(true);
 		expect(inputLine.indexOf(CURSOR_MARKER)).toBe(1);
+		prompt.handleInput("definitely-not-a-command");
+		expect(prompt.render(80)).toHaveLength(1);
 	});
 
-	it("Esc exits only the command prompt", () => {
+	it("dismisses completions before exiting the command prompt", () => {
 		const ctx = new CommandFixture();
 		let exits = 0;
 		const prompt = new CommandLineComponent(ctx, () => {
 			exits += 1;
 		});
-		prompt.handleInput("x");
+		prompt.handleInput("\x1b");
+		expect(exits).toBe(0);
+		expect(prompt.input.getValue()).toBe("");
 		prompt.handleInput("\x1b");
 		expect(exits).toBe(1);
-		expect(prompt.input.getValue()).toBe("x");
+	});
+
+	it("cycles completion without accepting it, then Enter accepts and submits", async () => {
+		const ctx = new CommandFixture();
+		const ran: string[] = [];
+		const commands: readonly CommandModeCommand[] = ["first", "second", "third"].map(name => ({
+			name,
+			description: name,
+			run: () => {
+				ran.push(name);
+			},
+		}));
+		const done: string[] = [];
+		const prompt = new CommandLineComponent(ctx, reason => done.push(reason), { commands });
+
+		prompt.handleInput("\x1b[Z");
+		prompt.handleInput("\t");
+		prompt.handleInput("\x1b[A");
+		prompt.handleInput("\x0e");
+		prompt.handleInput("\x10");
+		prompt.handleInput("\x1b[B");
+		expect(prompt.input.getValue()).toBe("");
+		prompt.handleInput("\r");
+		await Promise.resolve();
+
+		expect(prompt.input.getValue()).toBe("first");
+		expect(ran).toEqual(["first"]);
+		expect(done).toEqual(["submit"]);
+	});
+
+	it("uses arrows and Ctrl-N/P for menu navigation, then history when dismissed", async () => {
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-command-history-"));
+		commandHistoryTempDirs.push(dir);
+		HistoryStorage.resetInstance();
+		const storage = HistoryStorage.open(path.join(dir, "history.db"));
+		await storage.addToChannel("command", "older");
+		await storage.addToChannel("command", "newer");
+
+		const ctx = new CommandFixture();
+		const prompt = new CommandLineComponent(ctx, () => {}, {
+			commands: [
+				{ name: "first", description: "first", run: () => {} },
+				{ name: "second", description: "second", run: () => {} },
+			],
+			historyStorage: storage,
+		});
+		prompt.handleInput("\x1b[B");
+		prompt.handleInput("\x10");
+		prompt.handleInput("\x1b");
+		prompt.input.setValue("draft");
+
+		prompt.handleInput("\x10");
+		expect(prompt.input.getValue()).toBe("newer");
+		prompt.handleInput("\x1b[A");
+		expect(prompt.input.getValue()).toBe("older");
+		prompt.handleInput("\x0e");
+		expect(prompt.input.getValue()).toBe("newer");
+		prompt.handleInput("\x1b[B");
+		expect(prompt.input.getValue()).toBe("draft");
+	});
+
+	it("persists accepted :id commands only in colon history", async () => {
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-command-submit-"));
+		commandHistoryTempDirs.push(dir);
+		HistoryStorage.resetInstance();
+		const storage = HistoryStorage.open(path.join(dir, "history.db"));
+		const ctx = new CommandFixture();
+		const prompt = new CommandLineComponent(ctx, () => {}, { historyStorage: storage });
+
+		prompt.handleInput("\t");
+		expect(prompt.input.getValue()).toBe("");
+		prompt.handleInput("\r");
+		await Bun.sleep(120);
+
+		expect(ctx.copied.at(-1)).toBe("019f6141-df73-7000-b792-985f12d9db5d/Main");
+		expect(storage.getRecent(10)).toEqual([]);
+		expect(storage.getRecent(10, "command").map(entry => entry.prompt)).toEqual(["id"]);
 	});
 });
 
@@ -233,5 +383,32 @@ describe("transcript command rendering", () => {
 		expect(component.render(80).join("\n")).not.toContain("**bold words**");
 		component.setRichRendering(false);
 		expect(component.render(80).join("\n")).toContain("**bold words**");
+	});
+	it(":rich immediately changes a cached IRC body in the focused view", async () => {
+		const view = {
+			transcriptMode: "rich" as const,
+			transcriptWrap: false,
+			richTranscript: true,
+			chatContainer: { children: [] as unknown[], invalidate: () => {} },
+			streamingComponent: undefined,
+			toggleTranscriptMode: () => {},
+			ui: { resetDisplay: () => {} },
+		};
+		const card = createIrcMessageCard(
+			{ kind: "incoming", from: "YaziTreeImplementer", body: "**bold** words" },
+			() => false,
+			theme,
+			view,
+		);
+		view.chatContainer.children.push(card);
+		const command = new CommandFixture();
+		command.toggleRich = () => toggleRichTranscript(view as never);
+
+		const rich = card.render(80).join("\n");
+		expect(rich).not.toContain("**bold**");
+		expect(await dispatchCommandLine(":rich", command)).toBe(true);
+		const plain = card.render(80).join("\n");
+		expect(plain).toContain("**bold**");
+		expect(plain).not.toBe(rich);
 	});
 });

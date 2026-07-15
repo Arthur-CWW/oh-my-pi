@@ -30,6 +30,25 @@ export interface DiscoveryResult {
 	projectAgentsDir: string | null;
 }
 
+/** Stable data projection consumed by agent pickers and preview surfaces. */
+export interface AgentPickerEntry {
+	name: string;
+	description: string;
+	source: AgentSource;
+	definitionSourcePath: string;
+	fullPrompt: string;
+}
+
+export function getAgentPickerData(agents: readonly AgentDefinition[]): AgentPickerEntry[] {
+	return agents.map(agent => ({
+		name: agent.name,
+		description: agent.description,
+		source: agent.source,
+		definitionSourcePath: agent.filePath ?? `embedded:${agent.name}.md`,
+		fullPrompt: agent.systemPrompt,
+	}));
+}
+
 /**
  * Load agents from a directory.
  */

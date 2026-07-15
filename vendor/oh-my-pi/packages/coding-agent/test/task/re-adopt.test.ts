@@ -365,6 +365,37 @@ describe("restart child re-adoption", () => {
 		]);
 	});
 
+	it("persists a corrupt manifest child diagnostic and excludes it from auto-resume", async () => {
+		const { parent, children } = await makeParent();
+		const corrupt = await writeChild({ parent, children, id: "Corrupt", corrupt: true });
+		const journal = await SessionManager.open(parent);
+		try {
+			const result = await reAdoptDirectChildren({
+				parentSessionFile: parent,
+				parentSessionId: "parent",
+				idleTtlMs: 0,
+				ownership: ownership(parent),
+				predecessorOwnerEpoch: "old-epoch",
+				restartManifest: [{ agentId: "Corrupt", state: "running", journalPath: corrupt, queueCheckpoint: null }],
+				diagnosticJournal: journal,
+				deferInterruptedResume: true,
+				createReviver: async () => async () => ({ subscribe: () => () => {} }) as never,
+			});
+			expect(result.outcome).toBe("ReAdoptionDegraded");
+			expect(result.autoResumeCandidates).toEqual([]);
+			expect(
+				journal.getEntries().filter(
+					entry =>
+						entry.type === "custom" &&
+						entry.customType === "re-adoption-diagnostic" &&
+						(entry.data as { file?: string }).file === corrupt,
+				),
+			).toHaveLength(2);
+		} finally {
+			await journal.close();
+		}
+	});
+
 	it("rolls back all rows when ownership changes before a later registration", async () => {
 		const { parent, children } = await makeParent();
 		await writeChild({ parent, children, id: "First" });

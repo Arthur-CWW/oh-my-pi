@@ -12,12 +12,15 @@ export interface HistoryEntry {
 	sessionId?: string;
 }
 
+export type HistoryChannel = "prompt" | "command";
+
 type HistoryRow = {
 	id: number;
 	prompt: string;
 	created_at: number;
 	cwd: string | null;
 	session_id: string | null;
+	channel: HistoryChannel;
 };
 
 const SQLITE_NOW_EPOCH = "CAST(strftime('%s','now') AS INTEGER)";
@@ -65,7 +68,7 @@ class AsyncDrain<T> {
 export class HistoryStorage {
 	#db: Database;
 	static #instance?: HistoryStorage;
-	#drain = new AsyncDrain<Pick<HistoryEntry, "prompt" | "cwd" | "sessionId">>(100);
+	#drain = new AsyncDrain<Pick<HistoryEntry, "prompt" | "cwd" | "sessionId"> & { channel: HistoryChannel }>(100);
 	#sessionResolver?: () => string | undefined;
 
 	// Prepared statements
@@ -76,8 +79,8 @@ export class HistoryStorage {
 	// Cache substring-fallback prepared statements keyed by token count.
 	#substringStmts = new Map<number, Statement>();
 
-	// In-memory cache of last prompt to avoid sync DB reads on add
-	#lastPromptCache: string | null = null;
+	// In-memory cache of the last value in each channel to avoid sync DB reads on add.
+	#lastPromptCache = new Map<HistoryChannel, string>();
 
 	private constructor(dbPath: string) {
 		this.#ensureDir(dbPath);
@@ -97,7 +100,8 @@ CREATE TABLE IF NOT EXISTS history (
 	prompt TEXT NOT NULL,
 	created_at INTEGER NOT NULL DEFAULT (${SQLITE_NOW_EPOCH}),
 	cwd TEXT,
-	session_id TEXT
+	session_id TEXT,
+	channel TEXT NOT NULL DEFAULT 'prompt'
 );
 CREATE INDEX IF NOT EXISTS idx_history_created_at ON history(created_at DESC);
 
@@ -116,6 +120,10 @@ CREATE TRIGGER IF NOT EXISTS history_ai AFTER INSERT ON history BEGIN
 			this.#db.run("ALTER TABLE history ADD COLUMN session_id TEXT");
 		}
 
+		if (!this.#historySchemaHasColumn("channel")) {
+			this.#db.run("ALTER TABLE history ADD COLUMN channel TEXT NOT NULL DEFAULT 'prompt'");
+		}
+
 		if (!hasFts) {
 			try {
 				this.#db.run("INSERT INTO history_fts(history_fts) VALUES('rebuild')");
@@ -125,17 +133,21 @@ CREATE TRIGGER IF NOT EXISTS history_ai AFTER INSERT ON history BEGIN
 		}
 
 		this.#recentStmt = this.#db.prepare(
-			"SELECT id, prompt, created_at, cwd, session_id FROM history ORDER BY created_at DESC, id DESC LIMIT ?",
+			"SELECT id, prompt, created_at, cwd, session_id, channel FROM history WHERE channel = ? ORDER BY created_at DESC, id DESC LIMIT ?",
 		);
 		this.#searchStmt = this.#db.prepare(
-			"SELECT h.id, h.prompt, h.created_at, h.cwd, h.session_id FROM history_fts f JOIN history h ON h.id = f.rowid WHERE history_fts MATCH ? ORDER BY h.created_at DESC, h.id DESC LIMIT ?",
+			"SELECT h.id, h.prompt, h.created_at, h.cwd, h.session_id, h.channel FROM history_fts f JOIN history h ON h.id = f.rowid WHERE history_fts MATCH ? AND h.channel = ? ORDER BY h.created_at DESC, h.id DESC LIMIT ?",
 		);
-		this.#lastPromptStmt = this.#db.prepare("SELECT prompt FROM history ORDER BY id DESC LIMIT 1");
+		this.#lastPromptStmt = this.#db.prepare("SELECT prompt, channel FROM history ORDER BY id DESC");
 
-		this.#insertRowStmt = this.#db.prepare("INSERT INTO history (prompt, cwd, session_id) VALUES (?, ?, ?)");
+		this.#insertRowStmt = this.#db.prepare(
+			"INSERT INTO history (prompt, cwd, session_id, channel) VALUES (?, ?, ?, ?)",
+		);
 
-		const last = this.#lastPromptStmt.get() as { prompt?: string } | undefined;
-		this.#lastPromptCache = last?.prompt ?? null;
+		const rows = this.#lastPromptStmt.all() as Array<{ prompt: string; channel: HistoryChannel }>;
+		for (const row of rows) {
+			if (!this.#lastPromptCache.has(row.channel)) this.#lastPromptCache.set(row.channel, row.prompt);
+		}
 	}
 
 	static open(dbPath: string = getHistoryDbPath()): HistoryStorage {
@@ -150,12 +162,14 @@ CREATE TRIGGER IF NOT EXISTS history_ai AFTER INSERT ON history BEGIN
 		HistoryStorage.#instance = undefined;
 	}
 
-	#insertBatch(rows: Array<Pick<HistoryEntry, "prompt" | "cwd" | "sessionId">>): void {
-		this.#db.transaction((rows: Array<Pick<HistoryEntry, "prompt" | "cwd" | "sessionId">>) => {
-			for (const row of rows) {
-				this.#insertRowStmt.run(row.prompt, row.cwd ?? null, row.sessionId ?? null);
-			}
-		})(rows);
+	#insertBatch(rows: Array<Pick<HistoryEntry, "prompt" | "cwd" | "sessionId"> & { channel: HistoryChannel }>): void {
+		this.#db.transaction(
+			(rows: Array<Pick<HistoryEntry, "prompt" | "cwd" | "sessionId"> & { channel: HistoryChannel }>) => {
+				for (const row of rows) {
+					this.#insertRowStmt.run(row.prompt, row.cwd ?? null, row.sessionId ?? null, row.channel);
+				}
+			},
+		)(rows);
 	}
 
 	/**
@@ -168,22 +182,29 @@ CREATE TRIGGER IF NOT EXISTS history_ai AFTER INSERT ON history BEGIN
 	}
 
 	add(prompt: string, cwd?: string, sessionId?: string): Promise<void> {
-		const trimmed = prompt.trim();
-		if (!trimmed) return Promise.resolve();
-		if (this.#lastPromptCache === trimmed) return Promise.resolve();
-		this.#lastPromptCache = trimmed;
-		const session = sessionId ?? this.#sessionResolver?.();
-		return this.#drain.push({ prompt: trimmed, cwd: cwd ?? undefined, sessionId: session || undefined }, rows => {
-			this.#insertBatch(rows);
-		});
+		return this.addToChannel("prompt", prompt, cwd, sessionId);
 	}
 
-	getRecent(limit: number): HistoryEntry[] {
+	addToChannel(channel: HistoryChannel, prompt: string, cwd?: string, sessionId?: string): Promise<void> {
+		const trimmed = prompt.trim();
+		if (!trimmed) return Promise.resolve();
+		if (this.#lastPromptCache.get(channel) === trimmed) return Promise.resolve();
+		this.#lastPromptCache.set(channel, trimmed);
+		const session = sessionId ?? this.#sessionResolver?.();
+		return this.#drain.push(
+			{ prompt: trimmed, cwd: cwd ?? undefined, sessionId: session || undefined, channel },
+			rows => {
+				this.#insertBatch(rows);
+			},
+		);
+	}
+
+	getRecent(limit: number, channel: HistoryChannel = "prompt"): HistoryEntry[] {
 		const safeLimit = this.#normalizeLimit(limit);
 		if (safeLimit === 0) return [];
 
 		try {
-			const rows = this.#recentStmt.all(safeLimit) as HistoryRow[];
+			const rows = this.#recentStmt.all(channel, safeLimit) as HistoryRow[];
 			return rows.map(row => this.#toEntry(row));
 		} catch (error) {
 			logger.error("HistoryStorage getRecent failed", { error: String(error) });
@@ -204,7 +225,7 @@ CREATE TRIGGER IF NOT EXISTS history_ai AFTER INSERT ON history BEGIN
 		const ftsQuery = tokens.map(tok => `"${tok.replace(/"/g, '""')}"*`).join(" ");
 		let ftsRows: HistoryRow[] = [];
 		try {
-			ftsRows = this.#searchStmt.all(ftsQuery, safeLimit) as HistoryRow[];
+			ftsRows = this.#searchStmt.all(ftsQuery, "prompt", safeLimit) as HistoryRow[];
 		} catch (error) {
 			// Malformed FTS expression - fall through to substring path.
 			logger.debug("HistoryStorage FTS query failed, using substring only", { error: String(error) });
@@ -284,7 +305,8 @@ CREATE TABLE history (
 	prompt TEXT NOT NULL,
 	created_at INTEGER NOT NULL DEFAULT (${SQLITE_NOW_EPOCH}),
 	cwd TEXT,
-	session_id TEXT
+	session_id TEXT,
+	channel TEXT NOT NULL DEFAULT 'prompt'
 );
 CREATE INDEX IF NOT EXISTS idx_history_created_at ON history(created_at DESC);
 INSERT INTO history (id, prompt, created_at, cwd)
@@ -331,7 +353,7 @@ END;
 		if (stmt) return stmt;
 		const whereClause = Array(tokenCount).fill("prompt LIKE ? ESCAPE '\\' COLLATE NOCASE").join(" AND ");
 		stmt = this.#db.prepare(
-			`SELECT id, prompt, created_at, cwd, session_id FROM history WHERE ${whereClause} ORDER BY created_at DESC, id DESC LIMIT ?`,
+			`SELECT id, prompt, created_at, cwd, session_id, channel FROM history WHERE channel = 'prompt' AND ${whereClause} ORDER BY created_at DESC, id DESC LIMIT ?`,
 		);
 		this.#substringStmts.set(tokenCount, stmt);
 		return stmt;

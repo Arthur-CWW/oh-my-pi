@@ -4,6 +4,7 @@
 
 ### Added
 - Added a main-view `:` command prompt with `wrap`, `rich`, and `version` commands, including tab completion and immediate transcript reflow.
+- Added Neovim-style colon completion cycling with `Tab`/`Shift-Tab`, menu-aware `Ctrl-N`/`Ctrl-P`, one-level Escape unwinding, and isolated persistent command history shared through the TUI completion behavior.
 - Effect v4 beta.92 alignment probe covering service layers, typed failures, scoped cleanup/interruption, bounded queues, and deterministic test-clock scheduling.
 - Added workstream session classification via `--workstream`, `OMP_WORKSTREAM`, exact `streams/<slug>` launch-directory inference, and live `/session workstream`, `/session adhoc`, and `/session unclassify` commands while preserving resumed-session metadata.
 - Added opt-in ambient main-session labels (`irc.ambientRename.enabled`, 5-minute `irc.ambientRename.intervalMs` default), preserving explicit peer names while using the `smol` role for stale automatic labels.
@@ -11,6 +12,9 @@
 - Added default-on OpenAI Codex weekly-quota saved-reset redemption with per-window idempotency, a one-reset-per-24-hours safety cap, structured audit logs, and session notices for every outcome.
 - Added the local append-only Fable refusal corpus and `omp refusals` commands for redacted evidence, verdicts, aggregate stats, and no-tools replay of false positives.
 - Added default-on fleet incident detection for correlated transient network failures, with one IRC/ErrorInbox notice, shared session-control state, connectivity-probed clearing, and journaled automatic child salvage.
+- Added epoch-fenced `prepare-rollout` session control with durable cordons, safe bounded drain checkpoints, restart-child manifests, manual-pause provenance, and typed task-spawn refusal.
+- Added read-only `omp fleet status` and `omp fleet errors` projections for local peer compatibility, rollout state, journaled ErrorInbox evidence, and fleet incidents.
+- Added journal-authoritative fleet rollout planning with digest/N−1 preflight, compatibility and pin classification, idle-first canary waves, controller leases, stale-epoch reclassification, and failure freezing.
 
 - Added `task.maxLiveChildren` FIFO admission control to bound peak live in-process subagents without charging queued time against child runtime limits.
 - Per-spawn `model` override for `task` tool items: each spawn item accepts an optional `model` selector that takes priority over agent-level `task.agentModelOverrides`. Invalid overrides are rejected at schedule time with a formatted error listing available models, and spawn receipts now include a resolved model chain (e.g., `explore → "Rust specialist" → openai/gpt-5.2:high`).

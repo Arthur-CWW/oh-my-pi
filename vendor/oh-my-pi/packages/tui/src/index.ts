@@ -2,6 +2,7 @@
 
 // Autocomplete support
 export * from "./autocomplete";
+export * from "./completion-behavior";
 // Components
 export * from "./components/box";
 export * from "./components/cancellable-loader";

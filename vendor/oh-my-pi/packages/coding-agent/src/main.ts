@@ -326,9 +326,9 @@ export async function submitInteractiveInput(
 		// "Working…". Passing a behavior unconditionally is a no-op when the session
 		// is genuinely idle (a fresh turn runs and the option is ignored) and queues
 		// the message instead of erroring when a turn is already underway. Normal
-		// user Enter carries "steer" (interrupt, matching the streaming-branch Enter);
-		// background/continuation submits omit it and fall back to "followUp". The
-		// synthetic branch below opts out by design.
+		// user Enter carries "followUp" (turn-boundary delivery); explicit steer
+		// actions opt into mid-turn injection. The synthetic branch below opts out
+		// by design.
 		const streamingBehavior = input.streamingBehavior ?? ("followUp" as const);
 		// Continue shortcuts are the sole already-started inputs: they submit a
 		// synthetic developer prompt without an optimistic user message. Every editor
@@ -1435,6 +1435,7 @@ export async function runRootCommand(
 				parentSessionId: session.sessionManager.getSessionId(),
 				idleTtlMs: Math.trunc(Number(settingsInstance.get("task.agentIdleTtlMs") ?? 420_000) || 0),
 				ownership,
+				diagnosticJournal: session.sessionManager,
 				...(restartHandoff
 					? {
 							predecessorOwnerEpoch: restartHandoff.predecessorOwnerEpoch,

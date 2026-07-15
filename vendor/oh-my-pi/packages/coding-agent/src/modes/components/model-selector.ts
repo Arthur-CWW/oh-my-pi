@@ -1169,6 +1169,11 @@ export class ModelSelectorComponent extends Container {
 		this.#refreshSpinnerFrame = 0;
 	}
 
+	/** The model list's normal printable keys edit its search prompt. */
+	canEnterCommandMode(): boolean {
+		return this.#isMenuOpen;
+	}
+
 	handleInput(keyData: string): void {
 		if (this.#isMenuOpen) {
 			this.#handleMenuInput(keyData);

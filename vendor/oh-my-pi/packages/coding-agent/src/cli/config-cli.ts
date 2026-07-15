@@ -17,7 +17,7 @@ import {
 	type SettingValue,
 	settings,
 } from "../config/settings";
-import { SETTINGS_SCHEMA } from "../config/settings-schema";
+import { SETTINGS_SCHEMA, validateSettingValue } from "../config/settings-schema";
 import { theme } from "../modes/theme/theme";
 import { initXdg } from "./commands/init-xdg";
 
@@ -225,6 +225,9 @@ function parseAndSetValue(path: SettingPath, rawValue: string): void {
 			parsedValue = trimmed;
 	}
 
+	if (!validateSettingValue(path, parsedValue)) {
+		throw new Error(`Invalid value for ${path}: ${rawValue}`);
+	}
 	settings.set(path, parsedValue as SettingValue<typeof path>);
 }
 

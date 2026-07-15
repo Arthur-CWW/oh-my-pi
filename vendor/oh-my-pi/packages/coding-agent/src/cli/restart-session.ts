@@ -1,3 +1,8 @@
+import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
+import { decodeRolloutCheckpoint, type RolloutCheckpoint } from "../session/rollout-checkpoint";
 import {
 	acquireSessionOwnership,
 	ExternalSessionOwner,
@@ -25,6 +30,9 @@ const DROPPED_BOOLEAN_FLAGS: Record<string, true> = {
 };
 export const RESTART_API_KEY_ENV = "OMP_RESTART_API_KEY";
 export const RESTART_OWNER_EPOCH_ENV = "OMP_RESTART_OWNER_EPOCH";
+export const RESTART_ROLLOUT_ID_ENV = "OMP_RESTART_ROLLOUT_ID";
+export const RESTART_TARGET_DIGEST_ENV = "OMP_RESTART_TARGET_DIGEST";
+export const RESTART_CHECKPOINT_ID_ENV = "OMP_RESTART_CHECKPOINT_ID";
 
 function restartApiKey(args: readonly string[]): string | undefined {
 	for (let i = 0; i < args.length; i++) {
@@ -111,6 +119,71 @@ export interface RestartSpawnSpec {
 	args: string[];
 	cwd: string;
 	env?: Record<string, string | undefined>;
+}
+const SHA256_DIGEST = /^[0-9a-f]{64}$/;
+
+export async function verifyExecutableDigest(executable: string, targetDigest: string): Promise<void> {
+	if (!SHA256_DIGEST.test(targetDigest)) throw new Error("Rollout target digest must be a lowercase SHA-256 digest");
+	const metadata = await fs.lstat(executable);
+	if (!metadata.isFile() || metadata.isSymbolicLink() || (metadata.mode & 0o111) === 0) {
+		throw new Error(`Rollout release is not an executable regular file: ${targetDigest}`);
+	}
+	const hash = createHash("sha256");
+	for await (const chunk of createReadStream(executable)) hash.update(chunk);
+	const actualDigest = hash.digest("hex");
+	if (actualDigest !== targetDigest) {
+		throw new Error(`Rollout release digest mismatch: expected ${targetDigest}, found ${actualDigest}`);
+	}
+}
+
+export async function resolveVerifiedReleaseExecutable(releaseStoreDir: string, targetDigest: string): Promise<string> {
+	const executable = path.join(releaseStoreDir, `omp-${targetDigest}`);
+	await verifyExecutableDigest(executable, targetDigest);
+	return executable;
+}
+
+export interface RolloutRestartSpawnOptions {
+	readonly checkpoint: RolloutCheckpoint | unknown;
+	readonly rolloutId: string;
+	readonly targetDigest: string;
+	readonly releaseStoreDir: string;
+	readonly sessionId: string;
+	readonly sessionFile: string;
+	readonly ownerEpoch: string;
+	readonly cwd: string;
+	readonly processArgv?: readonly string[];
+	readonly launchArgs?: readonly string[];
+}
+
+/** Build an exact-artifact restart only from the current runner's durable checkpoint receipt. */
+export async function buildRolloutRestartSpawnSpec(options: RolloutRestartSpawnOptions): Promise<RestartSpawnSpec> {
+	const checkpoint = decodeRolloutCheckpoint(options.checkpoint);
+	if (
+		checkpoint.outcome !== "Checkpointed" ||
+		checkpoint.rolloutId !== options.rolloutId ||
+		checkpoint.ownerEpoch !== options.ownerEpoch ||
+		checkpoint.journalCheckpoint.sessionId !== options.sessionId ||
+		path.resolve(checkpoint.journalCheckpoint.sessionFile) !== path.resolve(options.sessionFile)
+	) {
+		throw new Error("Rollout restart requires a matching successful checkpoint receipt");
+	}
+	const executable = await resolveVerifiedReleaseExecutable(options.releaseStoreDir, options.targetDigest);
+	const spec = buildRestartSpawnSpec({
+		sessionId: options.sessionId,
+		cwd: options.cwd,
+		executable,
+		processArgv: options.processArgv,
+		launchArgs: options.launchArgs,
+	});
+	return {
+		...spec,
+		env: {
+			...(spec.env ?? Bun.env),
+			[RESTART_ROLLOUT_ID_ENV]: options.rolloutId,
+			[RESTART_TARGET_DIGEST_ENV]: options.targetDigest,
+			[RESTART_CHECKPOINT_ID_ENV]: checkpoint.checkpointId,
+		},
+	};
 }
 
 function isBunVirtualEntry(arg: string): boolean {

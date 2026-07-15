@@ -18,7 +18,7 @@ function makeContext() {
 }
 
 describe("InteractiveMode.handleErrorsCommand", () => {
-	test("/errors clear empties the ledger and reports status", () => {
+	test(":errors clear empties the ledger and reports status", () => {
 		const { inbox, ctx, statusMessages } = makeContext();
 		inbox.recordError("msg", "src", { nowMs: 1000 });
 
@@ -28,13 +28,13 @@ describe("InteractiveMode.handleErrorsCommand", () => {
 		expect(statusMessages).toContain("Error history cleared.");
 	});
 
-	test("/errors clear with extra args shows usage", () => {
+	test(":errors clear with extra args shows usage", () => {
 		const { ctx, statusMessages } = makeContext();
 		InteractiveMode.prototype.handleErrorsCommand.call(ctx, "clear extra");
-		expect(statusMessages[0]).toContain("Usage: /errors clear");
+		expect(statusMessages[0]).toContain("Usage: :errors clear");
 	});
 
-	test("/errors resolve \u003cid\u003e resolves the matching error", () => {
+	test(":errors resolve <id> resolves the matching error", () => {
 		const { inbox, ctx, statusMessages } = makeContext();
 		inbox.recordError("msg", "src", { nowMs: 1000, id: "ERR-1" });
 
@@ -46,7 +46,7 @@ describe("InteractiveMode.handleErrorsCommand", () => {
 		expect(statusMessages).toContain("Error ERR-1 resolved.");
 	});
 
-	test("/errors resolve preserves case-sensitive ids", () => {
+	test(":errors resolve preserves case-sensitive ids", () => {
 		const { inbox, ctx, statusMessages } = makeContext();
 		inbox.recordError("msg", "src", { nowMs: 1000, id: "MixedCase-ID" });
 
@@ -56,27 +56,27 @@ describe("InteractiveMode.handleErrorsCommand", () => {
 		expect(statusMessages).toContain("Error MixedCase-ID resolved.");
 	});
 
-	test("/errors resolve with extra tokens shows usage", () => {
+	test(":errors resolve with extra tokens shows usage", () => {
 		const { ctx, statusMessages } = makeContext();
 		InteractiveMode.prototype.handleErrorsCommand.call(ctx, "resolve id extra");
-		expect(statusMessages[0]).toContain("Usage: /errors resolve \u003cid\u003e");
+		expect(statusMessages[0]).toContain("Usage: :errors resolve <id>");
 	});
 
-	test("/errors resolve with unknown id reports not found", () => {
+	test(":errors resolve with unknown id reports not found", () => {
 		const { ctx, statusMessages } = makeContext();
 		InteractiveMode.prototype.handleErrorsCommand.call(ctx, "resolve missing");
 		expect(statusMessages[0]).toContain('No error with id "missing"');
 	});
 
-	test("bare /errors resolve shows usage", () => {
+	test("bare :errors resolve shows usage", () => {
 		const { ctx, statusMessages } = makeContext();
 		InteractiveMode.prototype.handleErrorsCommand.call(ctx, "resolve");
-		expect(statusMessages[0]).toContain("Usage: /errors resolve \u003cid\u003e");
+		expect(statusMessages[0]).toContain("Usage: :errors resolve <id>");
 	});
 
 	test("unknown verb shows usage", () => {
 		const { ctx, statusMessages } = makeContext();
 		InteractiveMode.prototype.handleErrorsCommand.call(ctx, "nope");
-		expect(statusMessages[0]).toContain("Usage: /errors [clear | resolve \u003cid\u003e]");
+		expect(statusMessages[0]).toContain("Usage: :errors [clear | resolve <id>]");
 	});
 });

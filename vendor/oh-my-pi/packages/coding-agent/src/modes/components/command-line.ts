@@ -1,17 +1,19 @@
-import { Container, Input, matchesKey, SelectList, type SelectItem } from "@oh-my-pi/pi-tui";
-import { VERSION } from "@oh-my-pi/pi-utils";
+import { CompletionBehavior, Container, Input, matchesKey, type SelectItem, SelectList } from "@oh-my-pi/pi-tui";
+import { logger, VERSION } from "@oh-my-pi/pi-utils";
+import type { HistoryStorage } from "../../session/history-storage";
 import { buildVersionViewModel, formatVersion } from "../../slash-commands/version";
 import { copyToClipboard } from "../../utils/clipboard";
 import {
-	COMMAND_MODE_COMMANDS,
 	applyCommandModeCompletion,
-	commandModeCommandsForView,
+	COMMAND_MODE_COMMANDS,
 	type CommandModeCommand,
 	type CommandModeCompletion,
 	type CommandModeContext,
+	commandModeCommandsForView,
 	dispatchCommandLine,
 	getCommandModeCompletions,
 } from "../command-registry";
+import { canEnterCommandModeFromCurrentFocus } from "../command-mode-activation";
 import { getSelectListTheme } from "../theme/theme";
 import { toggleRichTranscript, toggleTranscriptWrap } from "../transcript-commands";
 import type { InteractiveModeContext } from "../types";
@@ -29,112 +31,166 @@ function feedbackError(error: Error | string): string {
 	);
 }
 
+class CommandLineInput extends Input {
+	delegate?: (data: string) => void;
+
+	override handleInput(data: string): void {
+		if (this.delegate) {
+			this.delegate(data);
+			return;
+		}
+		super.handleInput(data);
+	}
+
+	handleEditingInput(data: string): void {
+		super.handleInput(data);
+	}
+}
+
 /** Single-line footer prompt with a completion popup above it for Vim-style colon commands. */
 export class CommandLineComponent extends Container {
-	readonly input = new Input();
+	readonly input: Input = new CommandLineInput();
 	#completionList: SelectList;
+	readonly #completion = new CompletionBehavior<CommandModeCompletion>();
 	#closed = false;
 	readonly #ctx: CommandModeContext;
 	readonly #onDone: (reason: "submit" | "cancel") => void;
 	readonly #commands: readonly CommandModeCommand[];
 	readonly #maxVisible: number;
+	readonly #historyStorage?: HistoryStorage;
 
 	constructor(
 		ctx: CommandModeContext,
 		onDone: (reason: "submit" | "cancel") => void,
-		options: { commands?: readonly CommandModeCommand[]; maxVisible?: number } = {},
+		options: {
+			commands?: readonly CommandModeCommand[];
+			maxVisible?: number;
+			historyStorage?: HistoryStorage;
+		} = {},
 	) {
 		super();
 		this.#ctx = ctx;
 		this.#onDone = onDone;
 		this.#commands = options.commands ?? COMMAND_MODE_COMMANDS;
 		this.#maxVisible = Math.max(1, options.maxVisible ?? DEFAULT_MAX_VISIBLE);
-		this.#completionList = this.#createCompletionList(getCommandModeCompletions("", this.#commands));
+		this.#historyStorage = options.historyStorage;
+		this.#completion.loadHistory(
+			(options.historyStorage?.getRecent(100, "command") ?? []).map(entry => entry.prompt).reverse(),
+		);
+		this.#completion.setItems(getCommandModeCompletions("", this.#commands));
+		this.#completionList = this.#createCompletionList();
 		this.input.prompt = ":";
-		this.input.onEscape = () => this.#cancel();
-		this.input.onSubmit = () => this.#submit();
-		this.addChild(this.#completionList);
-		this.addChild(this.input);
+		(this.input as CommandLineInput).delegate = data => this.handleInput(data);
+		this.#syncChildren();
 	}
 
 	handleInput(data: string): void {
 		if (this.#closed) return;
-		if (
-			matchesSelectCancel(data) ||
-			matchesKey(data, "escape") ||
-			matchesKey(data, "esc") ||
-			matchesKey(data, "ctrl+c")
-		) {
+		if (matchesKey(data, "escape") || matchesKey(data, "esc")) {
+			if (this.#completion.dismiss()) {
+				this.#syncChildren();
+			} else {
+				this.#cancel();
+			}
+			return;
+		}
+		if (matchesSelectCancel(data) || matchesKey(data, "ctrl+c")) {
 			this.#cancel();
 			return;
 		}
-		if (matchesKey(data, "tab")) {
-			this.#applySelectedCompletion();
+		if (matchesKey(data, "tab") || matchesKey(data, "shift+tab")) {
+			this.#completion.cycle(matchesKey(data, "shift+tab") ? -1 : 1);
+			this.#syncSelectedIndex();
 			return;
 		}
 		if (matchesKey(data, "enter") || matchesKey(data, "return") || data === "\n") {
+			const selected = this.#completion.accept();
+			if (selected) this.#applyCompletion(selected);
 			if (this.input.getValue().trim() === "") {
 				this.#cancel();
 				return;
 			}
-			this.#applySelectedCompletion();
 			this.#submit();
 			return;
 		}
-		if (
-			matchesKey(data, "up") ||
-			matchesKey(data, "down") ||
-			matchesKey(data, "pageUp") ||
-			matchesKey(data, "pageDown")
-		) {
-			this.#completionList.handleInput(data);
+		if (matchesKey(data, "up") || matchesKey(data, "ctrl+p")) {
+			this.#navigate(-1);
+			return;
+		}
+		if (matchesKey(data, "down") || matchesKey(data, "ctrl+n")) {
+			this.#navigate(1);
+			return;
+		}
+		if (matchesKey(data, "pageUp") || matchesKey(data, "pageDown")) {
+			this.#completion.page(matchesKey(data, "pageUp") ? -1 : 1, this.#maxVisible);
+			this.#syncSelectedIndex();
 			return;
 		}
 		if (matchesKey(data, "backspace") && this.input.getValue() === "") {
 			this.#cancel();
 			return;
 		}
-		this.input.handleInput(data);
+		(this.input as CommandLineInput).handleEditingInput(data);
+		this.#completion.loadHistory(this.#completion.history);
 		this.#refreshCompletions();
 	}
 
-	#createCompletionList(completions: readonly CommandModeCompletion[]): SelectList {
-		const items: readonly SelectItem[] = completions.map(completion => ({
+	#createCompletionList(): SelectList {
+		const items: readonly SelectItem[] = this.#completion.items.map(completion => ({
 			value: completion.value,
 			label: completion.label,
 			description: completion.description,
 			hint: completion.hint,
 		}));
 		const list = new SelectList(items, this.#maxVisible, getSelectListTheme());
-		list.onCancel = () => this.#cancel();
+		list.setSelectedIndex(this.#completion.selectedIndex);
+		list.onCancel = () => {
+			if (this.#completion.dismiss()) this.#syncChildren();
+		};
+		list.onSelectionChange = item => {
+			const index = items.indexOf(item);
+			if (index >= 0) this.#completion.select(index);
+		};
 		list.onSelect = item => {
-			this.#applyCompletion(item);
+			const index = items.indexOf(item);
+			if (index >= 0) this.#completion.select(index);
+			const selected = this.#completion.accept();
+			if (selected) this.#applyCompletion(selected);
 			this.#submit();
 		};
 		return list;
 	}
 
 	#refreshCompletions(): void {
-		const completions = getCommandModeCompletions(this.input.getValue(), this.#commands);
-		this.#completionList = this.#createCompletionList(completions);
-		this.children[0] = this.#completionList;
+		this.#completion.setItems(getCommandModeCompletions(this.input.getValue(), this.#commands));
+		this.#completionList = this.#createCompletionList();
+		this.#syncChildren();
+	}
+
+	#syncChildren(): void {
+		this.clear();
+		if (this.#completion.isOpen) this.addChild(this.#completionList);
+		this.addChild(this.input);
 		this.invalidate();
 	}
 
-	#applyCompletion(item: SelectItem): void {
-		const completion: CommandModeCompletion = {
-			value: item.value,
-			label: item.label,
-			description: item.description,
-			hint: item.hint,
-		};
-		this.input.setValue(applyCommandModeCompletion(this.input.getValue(), completion));
-		this.#refreshCompletions();
+	#syncSelectedIndex(): void {
+		this.#completionList.setSelectedIndex(this.#completion.selectedIndex);
+		this.invalidate();
 	}
 
-	#applySelectedCompletion(): void {
-		const item = this.#completionList.getSelectedItem();
-		if (item) this.#applyCompletion(item);
+	#navigate(direction: -1 | 1): void {
+		const result = this.#completion.navigate(direction, this.input.getValue());
+		if (result.kind === "selection") {
+			this.#completionList.setSelectedIndex(result.index);
+		} else if (result.kind === "history") {
+			this.input.setValue(result.value);
+		}
+		this.invalidate();
+	}
+
+	#applyCompletion(completion: CommandModeCompletion): void {
+		this.input.setValue(applyCommandModeCompletion(this.input.getValue(), completion));
 	}
 
 	#cancel(): void {
@@ -148,18 +204,25 @@ export class CommandLineComponent extends Container {
 		const value = this.input.getValue();
 		this.#closed = true;
 		this.#onDone("submit");
-		void dispatchCommandLine(value, this.#ctx, this.#commands).catch(error => {
-			this.#ctx.showFeedback(`Command failed: ${feedbackError(error instanceof Error ? error : String(error))}`);
-		});
+		void dispatchCommandLine(value, this.#ctx, this.#commands)
+			.then(handled => {
+				if (!handled) return;
+				const command = value.trim();
+				this.#completion.recordHistory(command);
+				void this.#historyStorage?.addToChannel("command", command).catch(error => {
+					logger.warn("Command history persistence failed", { error: String(error) });
+				});
+			})
+			.catch(error => {
+				this.#ctx.showFeedback(`Command failed: ${feedbackError(error instanceof Error ? error : String(error))}`);
+			});
 	}
 }
 
 const installedContexts = new WeakSet<InteractiveModeContext>();
 
 export function canEnterCommandMode(ctx: InteractiveModeContext): boolean {
-	return (
-		ctx.ui.getFocused() === ctx.editor && ctx.editor.getText().length === 0 && !ctx.editor.isShowingAutocomplete()
-	);
+	return canEnterCommandModeFromCurrentFocus(ctx);
 }
 
 export function commandModeContextForInteractive(
@@ -209,18 +272,41 @@ export function installCommandLine(ctx: InteractiveModeContext): void {
 	const show = (): void => {
 		if (!canEnter()) return;
 		const commands = commandModeCommandsForView(Boolean(ctx.focusedAgentId));
+		const priorFocus = ctx.ui.getFocused();
+		const useEditorSlot = priorFocus === ctx.editor;
+		const priorChildren = useEditorSlot ? [...ctx.editorContainer.children] : undefined;
+		let overlay: ReturnType<InteractiveModeContext["ui"]["showOverlay"]> | undefined;
+		let commandLine: CommandLineComponent;
 		const restore = (): void => {
-			ctx.editorContainer.clear();
-			ctx.editorContainer.addChild(ctx.editor);
-			ctx.ui.setFocus(ctx.editor);
+			if (overlay) {
+				overlay.hide();
+				overlay = undefined;
+			} else if (priorChildren) {
+				ctx.editorContainer.clear();
+				for (const child of priorChildren) ctx.editorContainer.addChild(child);
+			}
+			commandLine.input.focused = false;
+			ctx.ui.setFocus(priorFocus);
 			ctx.ui.requestRender();
 		};
-		const commandLine = new CommandLineComponent(commandModeContextForInteractive(ctx, commands), restore, {
+		commandLine = new CommandLineComponent(commandModeContextForInteractive(ctx, commands), restore, {
 			commands,
+			historyStorage: ctx.historyStorage,
 		});
-		ctx.editorContainer.clear();
-		ctx.editorContainer.addChild(commandLine);
-		ctx.ui.setFocus(commandLine.input);
+		if (useEditorSlot) {
+			ctx.editorContainer.clear();
+			ctx.editorContainer.addChild(commandLine);
+			ctx.ui.setFocus(commandLine.input);
+		} else {
+			overlay = ctx.ui.showOverlay(commandLine, {
+				anchor: "bottom-center",
+				width: "100%",
+				maxHeight: "50%",
+				margin: 0,
+			});
+			commandLine.input.focused = true;
+			ctx.ui.setFocus(commandLine);
+		}
 		ctx.ui.requestRender();
 	};
 	ctx.ui.addInputListener(data => {

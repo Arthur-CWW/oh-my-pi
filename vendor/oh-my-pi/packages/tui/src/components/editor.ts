@@ -1,6 +1,7 @@
 import { getProjectDir, logger } from "@oh-my-pi/pi-utils";
 import type { AutocompleteProvider, CombinedAutocompleteProvider } from "../autocomplete";
 import { BracketedPasteHandler } from "../bracketed-paste";
+import { CompletionBehavior } from "../completion-behavior";
 import { getKeybindings, type KeybindingsManager } from "../keybindings";
 import { extractPrintableText, matchesKey } from "../keys";
 import { KillRing } from "../kill-ring";
@@ -17,7 +18,7 @@ import {
 	truncateToWidth,
 	visibleWidth,
 } from "../utils";
-import { SelectList, type SelectListLayoutOptions, type SelectListTheme } from "./select-list";
+import { type SelectItem, SelectList, type SelectListLayoutOptions, type SelectListTheme } from "./select-list";
 
 const AUTOCOMPLETE_SELECT_LIST_LAYOUT: SelectListLayoutOptions = {
 	overflowSearch: false,
@@ -418,6 +419,7 @@ export class Editor implements Component, Focusable {
 	#autocompleteProvider?: AutocompleteProvider;
 	#autocompleteList?: SelectList;
 	#autocompleteState: "regular" | "force" | null = null;
+	#completion = new CompletionBehavior<SelectItem>();
 	#autocompletePrefix: string = "";
 	#autocompleteRequestId: number = 0;
 	#autocompleteMaxVisible: number = 5;
@@ -834,7 +836,7 @@ export class Editor implements Component, Focusable {
 
 		// Render each layout line
 		// Emit hardware cursor marker only when focused and not showing autocomplete
-		const emitCursorMarker = this.focused && !this.#autocompleteState;
+		const emitCursorMarker = this.focused && !this.#completion.isOpen;
 		const lineContentWidth = contentAreaWidth;
 
 		// Compute inline hint text (dim ghost text after cursor)
@@ -1012,7 +1014,7 @@ export class Editor implements Component, Focusable {
 		}
 
 		// Add autocomplete list if active
-		if (this.#autocompleteState && this.#autocompleteList) {
+		if (this.#completion.isOpen && this.#autocompleteList) {
 			const autocompleteResult = this.#autocompleteList.render(width);
 			result.push(...autocompleteResult);
 		}
@@ -1075,15 +1077,11 @@ export class Editor implements Component, Focusable {
 			return;
 		}
 
-		// Handle autocomplete special keys first (but don't block other input)
-		if (this.#autocompleteState && this.#autocompleteList) {
-			// Escape - cancel autocomplete
+		if (this.#completion.isOpen && this.#autocompleteList) {
 			if (kb.matches(data, "tui.select.cancel")) {
 				this.#cancelAutocomplete(true);
 				return;
-			}
-			// Let the autocomplete list handle navigation and selection
-			else if (
+			} else if (
 				kb.matches(data, "tui.select.up") ||
 				kb.matches(data, "tui.select.down") ||
 				kb.matches(data, "tui.select.pageUp") ||
@@ -1092,21 +1090,20 @@ export class Editor implements Component, Focusable {
 				data === "\n" ||
 				kb.matches(data, "tui.input.tab")
 			) {
-				// Only pass navigation keys to the list, not Enter/Tab (we handle those directly)
-				if (
-					kb.matches(data, "tui.select.up") ||
-					kb.matches(data, "tui.select.down") ||
-					kb.matches(data, "tui.select.pageUp") ||
-					kb.matches(data, "tui.select.pageDown")
-				) {
-					this.#autocompleteList.handleInput(data);
+				if (kb.matches(data, "tui.select.up") || kb.matches(data, "tui.select.down")) {
+					this.#completion.cycle(kb.matches(data, "tui.select.up") ? -1 : 1);
+					this.#autocompleteList.setSelectedIndex(this.#completion.selectedIndex);
 					this.onAutocompleteUpdate?.();
 					return;
 				}
-
-				// If Tab was pressed, always apply the selection
+				if (kb.matches(data, "tui.select.pageUp") || kb.matches(data, "tui.select.pageDown")) {
+					this.#completion.page(kb.matches(data, "tui.select.pageUp") ? -1 : 1, this.#autocompleteMaxVisible);
+					this.#autocompleteList.setSelectedIndex(this.#completion.selectedIndex);
+					this.onAutocompleteUpdate?.();
+					return;
+				}
 				if (kb.matches(data, "tui.input.tab")) {
-					const selected = this.#autocompleteList.getSelectedItem();
+					const selected = this.#completion.accept();
 					if (selected && this.#autocompleteProvider) {
 						const shouldChainSlashCommandAutocomplete = this.#isSlashCommandNameAutocompleteSelection();
 						const result = this.#autocompleteProvider.applyCompletion(
@@ -1146,7 +1143,7 @@ export class Editor implements Component, Focusable {
 						// Autocomplete is stale - cancel and fall through to normal submission
 						this.#cancelAutocomplete();
 					} else {
-						const selected = this.#autocompleteList.getSelectedItem();
+						const selected = this.#completion.accept();
 						if (selected && this.#autocompleteProvider) {
 							const result = this.#autocompleteProvider.applyCompletion(
 								this.#state.lines,
@@ -1167,7 +1164,7 @@ export class Editor implements Component, Focusable {
 				}
 				// If Enter was pressed on a file path, apply completion
 				else if (kb.matches(data, "tui.input.submit") || data === "\n") {
-					const selected = this.#autocompleteList.getSelectedItem();
+					const selected = this.#completion.accept();
 					if (selected && this.#autocompleteProvider) {
 						const result = this.#autocompleteProvider.applyCompletion(
 							this.#state.lines,
@@ -1198,7 +1195,7 @@ export class Editor implements Component, Focusable {
 		}
 
 		// Tab key - context-aware completion (but not when already autocompleting)
-		if (kb.matches(data, "tui.input.tab") && !this.#autocompleteState) {
+		if (kb.matches(data, "tui.input.tab") && !this.#completion.isOpen) {
 			this.#handleTabCompletion();
 			return;
 		}
@@ -1281,7 +1278,7 @@ export class Editor implements Component, Focusable {
 			// Synchronous slash command completion for the race condition where
 			// async autocomplete hasn't resolved yet (user types /q quickly + Enter).
 			// Match the existing selected-item behavior when autocomplete IS showing.
-			if (!this.#autocompleteState) {
+			if (!this.#completion.isOpen) {
 				const currentLine = this.#state.lines[this.#state.cursorLine] ?? "";
 				const textBeforeCursor = currentLine.slice(0, this.#state.cursorCol);
 				if (
@@ -1787,7 +1784,7 @@ export class Editor implements Component, Focusable {
 				if (this.onChange) {
 					this.onChange(this.getText());
 				}
-				if (this.#autocompleteState) {
+				if (this.#completion.isOpen) {
 					this.#cancelAutocomplete();
 					this.onAutocompleteUpdate?.();
 				}
@@ -1796,7 +1793,7 @@ export class Editor implements Component, Focusable {
 		}
 
 		// Check if we should trigger or update autocomplete
-		if (!this.#autocompleteState) {
+		if (!this.#completion.isOpen) {
 			// Auto-trigger for "/" at the start of a line (slash commands)
 			if (char === "/" && this.#isAtStartOfSubmittedMessage()) {
 				this.#tryTriggerAutocomplete();
@@ -1943,7 +1940,7 @@ export class Editor implements Component, Focusable {
 
 	/** Re-evaluate autocomplete triggers for the text ending at the cursor (used after bulk edits). */
 	#retriggerAutocompleteAtCursor(): void {
-		if (this.#autocompleteState) {
+		if (this.#completion.isOpen) {
 			this.#debouncedUpdateAutocomplete();
 			return;
 		}
@@ -2109,7 +2106,7 @@ export class Editor implements Component, Focusable {
 		}
 
 		// Update or re-trigger autocomplete after backspace
-		if (this.#autocompleteState) {
+		if (this.#completion.isOpen) {
 			this.#debouncedUpdateAutocomplete();
 		} else {
 			// If autocomplete was cancelled (no matches), re-trigger if we're in a completable context
@@ -2279,7 +2276,7 @@ export class Editor implements Component, Focusable {
 			this.onChange(this.getText());
 		}
 
-		if (this.#autocompleteState) {
+		if (this.#completion.isOpen) {
 			this.#debouncedUpdateAutocomplete();
 		} else {
 			const currentLine = this.#state.lines[this.#state.cursorLine] || "";
@@ -2611,7 +2608,7 @@ export class Editor implements Component, Focusable {
 		}
 
 		// Update or re-trigger autocomplete after forward delete
-		if (this.#autocompleteState) {
+		if (this.#completion.isOpen) {
 			this.#debouncedUpdateAutocomplete();
 		} else {
 			const currentLine = this.#state.lines[this.#state.cursorLine] || "";
@@ -2913,12 +2910,15 @@ export class Editor implements Component, Focusable {
 			this.onAutocompleteUpdate?.();
 		}
 	}
-	#createAutocompleteList(
-		prefix: string,
-		items: Array<{ value: string; label: string; description?: string }>,
-	): SelectList {
+	#createAutocompleteList(prefix: string, items: ReadonlyArray<SelectItem>): SelectList {
+		this.#completion.setItems(items);
 		const layout = prefix.startsWith("/") ? SLASH_COMMAND_SELECT_LIST_LAYOUT : AUTOCOMPLETE_SELECT_LIST_LAYOUT;
-		return new SelectList(items, this.#autocompleteMaxVisible, this.#theme.selectList, layout);
+		const list = new SelectList(items, this.#autocompleteMaxVisible, this.#theme.selectList, layout);
+		list.setSelectedIndex(this.#completion.selectedIndex);
+		list.onSelectionChange = item => {
+			this.#completion.select(items.indexOf(item));
+		};
+		return list;
 	}
 
 	#handleTabCompletion(): void {
@@ -2997,7 +2997,7 @@ https://github.com/EsotericSoftware/spine-runtimes/actions/runs/19536643416/job/
 	}
 
 	#cancelAutocomplete(notifyCancel: boolean = false): void {
-		const wasAutocompleting = this.#autocompleteState !== null;
+		const wasAutocompleting = this.#completion.dismiss();
 		this.#clearAutocompleteTimeout();
 		this.#autocompleteRequestId += 1;
 		this.#autocompleteState = null;
@@ -3009,11 +3009,11 @@ https://github.com/EsotericSoftware/spine-runtimes/actions/runs/19536643416/job/
 	}
 
 	isShowingAutocomplete(): boolean {
-		return this.#autocompleteState !== null;
+		return this.#completion.isOpen;
 	}
 
 	async #updateAutocomplete(): Promise<void> {
-		if (!this.#autocompleteState || !this.#autocompleteProvider) return;
+		if (!this.#completion.isOpen || !this.#autocompleteProvider) return;
 
 		// In force mode, use forceFileAutocomplete to get suggestions
 		if (this.#autocompleteState === "force") {
@@ -3064,9 +3064,8 @@ https://github.com/EsotericSoftware/spine-runtimes/actions/runs/19536643416/job/
 	 */
 	#getInlineHint(): string | null {
 		// Check selected autocomplete item for a hint
-		if (this.#autocompleteState && this.#autocompleteList) {
-			const selected = this.#autocompleteList.getSelectedItem();
-			return selected?.hint ?? null;
+		if (this.#completion.isOpen) {
+			return this.#completion.selectedItem?.hint ?? null;
 		}
 
 		// Fall back to provider's getInlineHint

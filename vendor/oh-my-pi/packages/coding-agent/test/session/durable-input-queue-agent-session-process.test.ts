@@ -185,6 +185,7 @@ function createControllerContext(session, sessionManager, settings, commandSink)
 		cancelPendingSubmission() { return false; },
 		onInputCallback: undefined,
 		updatePendingMessagesDisplay() {},
+		closeUnpinnedErrorsPanel() {},
 		flushPendingBashComponents() {},
 		queueCompactionMessage() {},
 		showError(message) { commandSink.statuses.push(String(message)); },

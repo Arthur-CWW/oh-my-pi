@@ -35,14 +35,23 @@ import {
 } from "../tts/models";
 import { EDIT_MODES } from "../utils/edit-mode";
 import { SEARCH_PROVIDER_OPTIONS, SEARCH_PROVIDER_PREFERENCES, type SearchProviderId } from "../web/search/types";
+import { BROWSER_SETTINGS_SCHEMA } from "./browser-settings";
 import {
 	AUTH_FALLBACK_SETTINGS_SCHEMA,
 	CODEX_RESET_SETTINGS_SCHEMA,
 	type CodexResetsSettings,
+	type ContextPromotionSettings,
+	type IncidentsSettings,
 	RETRY_FALLBACK_SETTINGS_SCHEMA,
+	type RetrySettings,
 } from "./fallback-settings-schema";
 
-export type { CodexAutoRedeemMode } from "./fallback-settings-schema";
+export type {
+	CodexAutoRedeemMode,
+	ContextPromotionSettings,
+	IncidentsSettings,
+	RetrySettings,
+} from "./fallback-settings-schema";
 
 /** Unified settings schema - single source of truth for all settings.
  *
@@ -231,6 +240,9 @@ interface StringDef {
 interface NumberDef {
 	type: "number";
 	default: number;
+	/** Optional schema constraints for settings that require bounded integers. */
+	min?: number;
+	integer?: boolean;
 	ui?: UiNumber;
 }
 
@@ -3231,50 +3243,7 @@ export const SETTINGS_SCHEMA = {
 		},
 	},
 
-	"browser.enabled": {
-		type: "boolean",
-		default: true,
-		ui: {
-			tab: "tools",
-			group: "Available Tools",
-			label: "Browser",
-			description: "Enable the browser tool for scripted Chromium automation (puppeteer)",
-		},
-	},
-
-	"browser.headless": {
-		type: "boolean",
-		default: true,
-		ui: {
-			tab: "tools",
-			group: "Search & Browser",
-			label: "Headless Browser",
-			description: "Launch browser in headless mode (disable to show browser UI)",
-		},
-	},
-
-	"browser.cmux": {
-		type: "boolean",
-		default: true,
-		ui: {
-			tab: "tools",
-			group: "Search & Browser",
-			label: "cmux Browser",
-			description:
-				"Use cmux WKWebView surfaces for browser automation when a cmux socket is available. Set PI_BROWSER_CMUX=0 or PI_BROWSER_CMUX=1 to override.",
-		},
-	},
-	"browser.screenshotDir": {
-		type: "string",
-		default: undefined,
-		ui: {
-			tab: "tools",
-			group: "Search & Browser",
-			label: "Screenshot Directory",
-			description:
-				"Directory to save screenshots. If unset, screenshots go to a temp file. Supports ~. Examples: ~/Downloads, ~/Desktop, /sdcard/Download (Android)",
-		},
-	},
+	...BROWSER_SETTINGS_SCHEMA,
 
 	// Tool execution
 	"tools.intentTracing": {
@@ -4544,6 +4513,15 @@ export function getDefault<P extends SettingPath>(path: P): SettingValue<P> {
 	return SETTINGS_SCHEMA[path].default as SettingValue<P>;
 }
 
+/** Validate a raw setting value against schema constraints when present. */
+export function validateSettingValue<P extends SettingPath>(path: P, value: unknown): value is SettingValue<P> {
+	const definition = SETTINGS_SCHEMA[path];
+	if (definition.type !== "number") return true;
+	if (typeof value !== "number" || !Number.isFinite(value)) return false;
+	if ("integer" in definition && definition.integer && !Number.isSafeInteger(value)) return false;
+	return !("min" in definition) || definition.min === undefined || value >= definition.min;
+}
+
 /** Check if a path has UI metadata (should appear in settings panel) */
 export function hasUi(path: SettingPath): boolean {
 	return "ui" in SETTINGS_SCHEMA[path];
@@ -4610,27 +4588,6 @@ export interface CompactionSettings {
 	idleTimeoutSeconds: number;
 	supersedeReads: boolean;
 	dropUseless: boolean;
-}
-
-export interface ContextPromotionSettings {
-	enabled: boolean;
-}
-export interface RetrySettings {
-	enabled: boolean;
-	maxRetries: number;
-	baseDelayMs: number;
-	networkHoldMs: number;
-	maxDelayMs: number;
-	fallbackApproval: boolean;
-	proposableFallbackChains: Record<string, string[]>;
-	subagentFallbackAutoApproveUntil: string;
-	fallbackRevertPolicy: "cooldown-expiry" | "never";
-}
-
-export interface IncidentsSettings {
-	enabled: boolean;
-	windowMs: number;
-	threshold: number;
 }
 
 export interface MemoriesSettings {

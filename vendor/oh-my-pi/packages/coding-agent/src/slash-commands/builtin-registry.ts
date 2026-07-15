@@ -213,7 +213,7 @@ async function restartHandlerTui(
 	runtime: TuiSlashCommandRuntime,
 ): Promise<SlashCommandResult> {
 	const ctx = runtime.ctx;
-	ctx.editor.setText("");
+	const draftText = ctx.editor.getText();
 	if (ctx.session.isStreaming) {
 		ctx.showWarning("Wait for the current response to finish or abort it before restarting.");
 		return commandConsumed();
@@ -231,7 +231,7 @@ async function restartHandlerTui(
 	try {
 		await ctx.sessionManager.ensureOnDisk();
 		await ctx.sessionManager.flush();
-		await ctx.sessionManager.saveDraft("");
+		await ctx.sessionManager.saveDraft(draftText);
 		ownership = await ensureRestartSessionOwnership(ctx.sessionManager);
 	} catch (err) {
 		ctx.showError(`Restart failed while acquiring session ownership: ${errorMessage(err)}`);

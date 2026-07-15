@@ -142,14 +142,22 @@ function decodeSnapshot(row: RolloutSnapshotRow): RolloutPeerSnapshot {
 	);
 }
 
+export interface RolloutJournalOptions {
+	readonly readonly?: boolean;
+}
+
 /** Latest-per-peer rollout state stored beside session-control commands and receipts. */
 export class RolloutJournal {
 	readonly #db: Database;
 
-	constructor(readonly dbPath: string = SESSION_CONTROL_DB_PATH) {
-		fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-		this.#db = new Database(dbPath);
+	constructor(
+		readonly dbPath: string = SESSION_CONTROL_DB_PATH,
+		options: RolloutJournalOptions = {},
+	) {
+		if (!options.readonly) fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+		this.#db = options.readonly ? new Database(dbPath, { readonly: true }) : new Database(dbPath);
 		this.#db.run("PRAGMA busy_timeout = 3000");
+		if (options.readonly) return;
 		this.#db.run("PRAGMA journal_mode = WAL");
 		this.#db.run("PRAGMA foreign_keys = ON");
 		this.#db.run(`
@@ -177,9 +185,7 @@ export class RolloutJournal {
 		this.#db.run(
 			"CREATE INDEX IF NOT EXISTS idx_rollout_peers_session ON rollout_peers(session_id, updated_at DESC)",
 		);
-		this.#db.run(
-			"CREATE INDEX IF NOT EXISTS idx_rollout_peers_file ON rollout_peers(session_file, updated_at DESC)",
-		);
+		this.#db.run("CREATE INDEX IF NOT EXISTS idx_rollout_peers_file ON rollout_peers(session_file, updated_at DESC)");
 	}
 
 	close(): void {
@@ -190,7 +196,8 @@ export class RolloutJournal {
 		const rolloutId = boundedIdentity(input.rolloutId);
 		const targetDigest = boundedIdentity(input.targetDigest);
 		const targetVersion = boundedText(input.targetVersion);
-		if (!rolloutId || !targetDigest || !targetVersion) throw new Error("Rollout id, digest, and version are required");
+		if (!rolloutId || !targetDigest || !targetVersion)
+			throw new Error("Rollout id, digest, and version are required");
 		const startedAt = input.startedAt ?? nowIso();
 		const existing = this.#db
 			.query<RolloutRunRow, { $rolloutId: string }>(
@@ -211,7 +218,12 @@ export class RolloutJournal {
 			.query(
 				"INSERT INTO rollout_runs (rollout_id,target_digest,target_version,started_at) VALUES ($rolloutId,$targetDigest,$targetVersion,$startedAt)",
 			)
-			.run({ $rolloutId: rolloutId, $targetDigest: targetDigest, $targetVersion: targetVersion, $startedAt: startedAt });
+			.run({
+				$rolloutId: rolloutId,
+				$targetDigest: targetDigest,
+				$targetVersion: targetVersion,
+				$startedAt: startedAt,
+			});
 	}
 
 	updatePeer(input: RolloutPeerTransition): void {
@@ -233,8 +245,7 @@ export class RolloutJournal {
 			if (!NEXT_PHASES[current][input.phase]) {
 				throw new Error(`Invalid rollout transition ${current} -> ${input.phase}`);
 			}
-		}
-		else if (input.phase !== "planned" && input.phase !== "skipped") {
+		} else if (input.phase !== "planned" && input.phase !== "skipped") {
 			throw new Error(`Initial rollout phase must be planned or skipped, received ${input.phase}`);
 		}
 		const reason = boundedText(input.reason);

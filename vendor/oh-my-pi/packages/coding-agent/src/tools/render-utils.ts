@@ -17,6 +17,7 @@ import { settings } from "../config/settings";
 import type { Theme } from "../modes/theme/theme";
 import { Hasher } from "../tui/utils";
 import { formatDimensionNote, type ResizedImage } from "../utils/image-resize";
+import { sanitizeDiagnosticDisplayText } from "./tool-detail-render";
 
 export { Ellipsis } from "@oh-my-pi/pi-natives";
 export { replaceTabs, truncateToWidth, wrapTextWithAnsi } from "@oh-my-pi/pi-tui";
@@ -300,10 +301,6 @@ interface ParsedDiagnostic {
 	source?: string;
 	message: string;
 	code?: string;
-}
-
-function sanitizeDiagnosticDisplayText(text: string): string {
-	return replaceTabs(text);
 }
 
 function getSeverityRank(severity: ParsedDiagnostic["severity"]): number {
@@ -750,18 +747,20 @@ export function capParseErrors(
 /**
  * Standard width+expand keyed render cache used by every search-style tool
  * renderer. `compute` re-runs only when the cache key changes; the returned
- * Component is the canonical `{ render, invalidate }` pair.
+ * Component is the canonical `{ render, invalidate }` pair. `cacheVersion`
+ * covers mutable view-local state that must invalidate a block on the next
+ * render without requiring an explicit tree walk.
  */
 export function createCachedComponent(
 	getExpanded: () => boolean,
 	compute: (width: number, expanded: boolean) => string[],
-	options: { paddingX?: number } = {},
+	options: { paddingX?: number; cacheVersion?: () => number } = {},
 ): Component {
 	let cached: { key: bigint; lines: string[] } | undefined;
 	return {
 		render(width: number): readonly string[] {
 			const expanded = getExpanded();
-			const key = new Hasher().bool(expanded).u32(width).digest();
+			const key = new Hasher().bool(expanded).u32(width).u32(options.cacheVersion?.() ?? 0).digest();
 			if (cached?.key === key) return cached.lines;
 			const paddingX = Math.max(0, options.paddingX ?? 0);
 			const innerWidth = Math.max(1, width - paddingX * 2);

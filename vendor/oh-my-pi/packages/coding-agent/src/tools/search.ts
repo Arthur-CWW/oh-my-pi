@@ -1453,7 +1453,7 @@ function searchStatusIcon(uiTheme: Theme): string {
 
 export const searchToolRenderer = {
 	inline: true,
-	renderCall(args: SearchRenderArgs, _options: RenderResultOptions, uiTheme: Theme): Component {
+	renderCall(args: SearchRenderArgs, options: RenderResultOptions, uiTheme: Theme): Component {
 		const paths = toPathList(args.paths);
 		const meta: string[] = [];
 		if (paths.length) meta.push(`in ${paths.join(", ")}`);
@@ -1462,7 +1462,7 @@ export const searchToolRenderer = {
 		if (args.skip !== undefined && args.skip > 0) meta.push(`skip:${args.skip}`);
 
 		const text = renderStatusLine(
-			{ icon: "pending", title: "Search", titleColor: "toolTitle", description: args.pattern || "?", meta },
+			{ icon: "pending", title: options.headline ?? "Search", titleColor: "toolTitle", description: options.headline ? undefined : args.pattern || "?", meta: options.headline ? undefined : meta },
 			uiTheme,
 		);
 		return new Text(text, 1, 0);
@@ -1492,11 +1492,11 @@ export const searchToolRenderer = {
 			const description = args?.pattern ?? undefined;
 			const header = renderStatusLine(
 				{
-					iconOverride: searchStatusIcon(uiTheme),
-					title: "Search",
+					icon: "success",
+					title: options.headline ?? "Search",
 					titleColor: "toolTitle",
-					description,
-					meta: [formatCount("item", lines.length)],
+					description: options.headline ? undefined : description,
+					meta: options.headline ? undefined : [formatCount("item", lines.length)],
 				},
 				uiTheme,
 			);
@@ -1537,7 +1537,7 @@ export const searchToolRenderer = {
 			const scopeMeta = searchScopeMeta(details);
 			if (scopeMeta) meta.push(scopeMeta);
 			const header = renderStatusLine(
-				{ icon: "warning", title: "Search", titleColor: "toolTitle", description: args?.pattern, meta },
+				{ icon: "warning", title: options.headline ?? "Search", titleColor: "toolTitle", description: options.headline ? undefined : args?.pattern, meta: options.headline ? undefined : meta },
 				uiTheme,
 			);
 			const lines = [header, formatEmptyMessage("No matches found", uiTheme)];
@@ -1553,11 +1553,11 @@ export const searchToolRenderer = {
 		const description = args?.pattern ?? undefined;
 		const header = renderStatusLine(
 			{
-				...(truncated ? { icon: "warning" as const } : { iconOverride: searchStatusIcon(uiTheme) }),
-				title: "Search",
+				icon: truncated ? "warning" : "success",
+				title: options.headline ?? "Search",
 				titleColor: "toolTitle",
-				description,
-				meta,
+				description: options.headline ? undefined : description,
+				meta: options.headline ? undefined : meta,
 			},
 			uiTheme,
 		);

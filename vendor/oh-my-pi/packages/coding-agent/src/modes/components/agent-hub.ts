@@ -657,6 +657,11 @@ export class AgentHubOverlayComponent extends Container {
 		this.#selectedAgentKey = undefined;
 	}
 
+	/** Literal `:` belongs to active filter prompts; normal Hub lanes open command mode. */
+	canEnterCommandMode(): boolean {
+		return !this.#tableFilterEditing && !this.#chatSearchEditing;
+	}
+
 	override render(width: number): readonly string[] {
 		return this.#view === "table" ? this.#renderTable(width) : this.#renderChat(width);
 	}
@@ -1255,13 +1260,26 @@ export class AgentHubOverlayComponent extends Container {
 	}
 
 	#inspectorLines(observed: ObservableSession | undefined, width: number): string[] {
+		const sessionFile = this.#chatAgentId ? this.#registryRefs.get(this.#chatAgentId)?.sessionFile : undefined;
+		const durableSpawn = this.#journalModels.peek(sessionFile)?.spawnRecord;
 		if (this.#inspectorSection === "prompt") {
 			const progress = observed?.progress;
-			const context = progress?.spawnContext?.slice(0, INSPECTOR_PROMPT_MAX_CHARS) ?? "";
+			const context = (progress?.spawnContext ?? durableSpawn?.context ?? "").slice(0, INSPECTOR_PROMPT_MAX_CHARS);
 			const remaining = Math.max(0, INSPECTOR_PROMPT_MAX_CHARS - context.length);
-			const assignment = (progress?.assignment ?? progress?.task ?? observed?.description ?? "").slice(0, remaining);
+			const assignment = (
+				progress?.assignment ??
+				durableSpawn?.assignment ??
+				progress?.task ??
+				observed?.description ??
+				""
+			).slice(0, remaining);
 			if (!context && !assignment) return ["No spawn prompt available."];
 			const lines: string[] = [];
+			const definitionSourcePath = progress?.definitionSourcePath ?? durableSpawn?.definitionSourcePath;
+			const spawnerId = progress?.spawnerId ?? durableSpawn?.spawnerId;
+			if (definitionSourcePath) lines.push(`Definition: ${definitionSourcePath}`);
+			if (spawnerId) lines.push(`Spawner: ${spawnerId}`);
+			if (lines.length) lines.push("");
 			if (context) {
 				lines.push(theme.fg("dim", "Context"));
 				lines.push(...this.#wrapInspectorText(context, width, ""));
@@ -1285,7 +1303,7 @@ export class AgentHubOverlayComponent extends Container {
 				return `${direction} ${record.state}${method} [${record.origin}]`;
 			});
 		}
-		const receipt = observed?.progress?.routeReceipt;
+		const receipt = observed?.progress?.routeReceipt ?? durableSpawn?.route;
 		if (!receipt) return ["No route provenance available."];
 		const lines = [
 			`Selected: ${receipt.route.selector}`,

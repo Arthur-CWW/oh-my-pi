@@ -3,6 +3,8 @@ import { IrcBus } from "../irc/bus";
 import { IrcExternalBus, resolveIrcExternalPeerName } from "../irc/bus-external";
 import { type AgentRef, AgentRegistry, MAIN_AGENT_ID } from "../registry/agent-registry";
 import { appendErrorInboxEvent } from "../session/error-inbox-ledger";
+import { createFleetCapability } from "../session/fleet-capability";
+import { CURRENT_SESSION_CONTROL_PROTOCOL } from "../session/session-control";
 import type { SessionEntry } from "../session/session-entries";
 import type { SessionManager } from "../session/session-manager";
 import {
@@ -129,6 +131,15 @@ async function broadcastIncident(incident: FleetIncident): Promise<void> {
 			ownerEpoch: ownership?.ownerEpoch,
 			buildDigest: ownership?.buildRevision.digest,
 			version: ownership?.buildRevision.version,
+			fleetCapability:
+				ownership === undefined
+					? undefined
+					: createFleetCapability({
+							buildDigest: ownership.buildRevision.digest,
+							productVersion: ownership.buildRevision.version,
+							controlProtocol: CURRENT_SESSION_CONTROL_PROTOCOL,
+							workstream: manager.getWorkstream(),
+						}),
 		});
 		for (const peer of bus.listPeers({ excludeSessionId: sessionId })) {
 			bus.sendMessage({ fromPeer: name, toPeer: peer.name, body, origin: "system" });

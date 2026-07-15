@@ -312,8 +312,11 @@ import {
 	FallbackApprovalGate,
 	type FallbackApprovalProposal,
 	formatFallbackApprovalNotice,
+	fallbackAutoApprove,
 	type RetryCause,
+	sendFallbackApprovalNotice,
 } from "./fallback-approval";
+import { createFleetCapability } from "./fleet-capability";
 import {
 	type BashExecutionMessage,
 	type CustomMessage,
@@ -335,6 +338,7 @@ import {
 	getRestorableSessionModels,
 	getRestorableSessionThinkingLevel,
 } from "./session-context";
+import { CURRENT_SESSION_CONTROL_PROTOCOL } from "./session-control";
 import { formatSessionDumpText } from "./session-dump-format";
 import type {
 	BranchSummaryEntry,
@@ -2310,15 +2314,7 @@ export class AgentSession {
 
 	async emitFallbackApprovalNotice(proposal: FallbackApprovalProposal): Promise<void> {
 		await this.#emitSessionEvent({ type: "retry_fallback_approval_requested", proposal });
-		await this.sendCustomMessage(
-			{
-				customType: "fallback:approval-required",
-				content: `<system-warning>${formatFallbackApprovalNotice(proposal)}</system-warning>`,
-				display: false,
-				attribution: "agent",
-			},
-			{ deliverAs: "nextTurn" },
-		);
+		await sendFallbackApprovalNotice(this, proposal);
 	}
 
 	beginExternalIrcWaitingInput(): () => void {
@@ -9829,7 +9825,8 @@ export class AgentSession {
 				autoContinue,
 				getMessages: () => this.agent.state.messages,
 				replaceMessages: messages => this.agent.replaceMessages(messages),
-				compact: async () => void (await this.#runAutoCompaction("overflow", true, false, allowDefer, { autoContinue: false })),
+				compact: async () =>
+					void (await this.#runAutoCompaction("overflow", true, false, allowDefer, { autoContinue: false })),
 				emit: event => this.#emitSessionEvent(event),
 				notice: message => this.emitNotice("error", message, "provider-error"),
 				scheduleRetry: () => this.#scheduleAgentContinue({ delayMs: 100, generation }),
@@ -11800,14 +11797,6 @@ export class AgentSession {
 		});
 	}
 
-	#isSubagentFallbackAutoApproveActive(): boolean {
-		if (this.#agentKind !== "sub") return false;
-		const configuredUntil = this.settings.get("retry.subagentFallbackAutoApproveUntil");
-		if (!configuredUntil) return false;
-		const expiresAt = Date.parse(configuredUntil);
-		return Number.isFinite(expiresAt) && expiresAt > Date.now();
-	}
-
 	async #requestRetryFallbackApproval(
 		currentSelector: string,
 		cause: RetryCause,
@@ -11834,7 +11823,7 @@ export class AgentSession {
 			taskContext,
 			requestedAt: Date.now(),
 		};
-		if (this.#isSubagentFallbackAutoApproveActive()) {
+		if (fallbackAutoApprove(this.settings, this.#agentKind)) {
 			await this.#applyRetryFallbackCandidate(selected.role, selected.selector, currentSelector);
 			await this.#emitSessionEvent({
 				type: "retry_fallback_approval_resolved",
@@ -12134,7 +12123,7 @@ export class AgentSession {
 			if (outcome.switched) {
 				switchedCredential = true;
 				delayMs = 0;
-			} else if (!this.#isSubagentFallbackAutoApproveActive() && (await this.#maybeAutoRedeemCodexReset())) {
+			} else if (!fallbackAutoApprove(this.settings, this.#agentKind) && (await this.#maybeAutoRedeemCodexReset())) {
 				// A live usage-limit 429 on the active Codex account, with a banked
 				// reset and the opt-in setting on: spend the reset and retry
 				// immediately instead of waiting out the window. Runs after the
@@ -12935,6 +12924,15 @@ export class AgentSession {
 			ownerEpoch: ownership?.ownerEpoch,
 			buildDigest: ownership?.buildRevision.digest,
 			version: ownership?.buildRevision.version,
+			fleetCapability:
+				ownership === undefined
+					? undefined
+					: createFleetCapability({
+							buildDigest: ownership.buildRevision.digest,
+							productVersion: ownership.buildRevision.version,
+							controlProtocol: CURRENT_SESSION_CONTROL_PROTOCOL,
+							workstream: this.sessionManager.getWorkstream(),
+						}),
 		});
 		return { bus, sessionId, name };
 	}

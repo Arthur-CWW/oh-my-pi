@@ -61,8 +61,8 @@ export type SubmittedUserInput = {
 	display?: boolean;
 	/** Queue intent if the session is (or becomes) busy when this submission is
 	 *  dispatched: "steer" (interrupt the active turn) or "followUp" (process after
-	 *  it). Normal user Enter carries "steer" to match the streaming-branch Enter;
-	 *  background/continuation submits omit it and default to "followUp". */
+	 *  it). Normal user Enter carries "followUp" for turn-boundary delivery;
+	 *  explicit steer actions opt into mid-turn injection. */
 	streamingBehavior?: "steer" | "followUp";
 	cancelled: boolean;
 	started: boolean;
@@ -124,6 +124,7 @@ export interface InteractiveModeContext {
 	/** Focus the focused agent's parent session, falling back to main (delegates to focusParent). */
 	focusParentSession(): Promise<void>;
 	handleErrorsCommand(args?: string): void;
+	closeUnpinnedErrorsPanel(): void;
 	/** Return the view to the main session (delegates to SessionFocusController.unfocus). */
 	unfocusSession(): Promise<void>;
 	/** Clear loader, status/pending containers, streaming state, and pending tools. */

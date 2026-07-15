@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { decodeFleetCapability, type FleetCapability } from "../session/fleet-capability";
 import type { IrcDeliveryRecord, IrcMessageOrigin } from "./bus";
 
 export type IrcExternalPeerState = "unknown" | "working" | "waiting_input" | "idle";
@@ -22,6 +23,7 @@ export interface IrcExternalPeer {
 	ownerEpoch?: string;
 	buildDigest?: string;
 	version?: string;
+	fleetCapability?: FleetCapability;
 }
 
 export interface IrcExternalMessage {
@@ -46,6 +48,7 @@ interface PeerRow {
 	owner_epoch: string | null;
 	build_digest: string | null;
 	version: string | null;
+	fleet_capability_json: string | null;
 }
 
 interface MessageRow {
@@ -72,8 +75,12 @@ export interface IrcExternalRegistration {
 	ownerEpoch?: string;
 	buildDigest?: string;
 	version?: string;
+	fleetCapability?: FleetCapability;
 }
 
+export interface IrcExternalBusOptions {
+	readonly readonly?: boolean;
+}
 export const IRC_EXTERNAL_STALE_MS = 10 * 60 * 1000;
 
 const DEFAULT_DB_PATH = path.join(os.homedir(), ".omp", "agent", "irc-bus.sqlite");
@@ -93,6 +100,15 @@ export function isIrcExternalPeerFresh(lastSeen: string, nowMs = Date.now(), sta
 
 function normalizePeerState(value: string): IrcExternalPeerState {
 	return value === "working" || value === "waiting_input" || value === "idle" ? value : "unknown";
+}
+
+function decodeFleetCapabilityJson(value: string | null): FleetCapability | undefined {
+	if (value === null) return undefined;
+	try {
+		return decodeFleetCapability(JSON.parse(value));
+	} catch {
+		return undefined;
+	}
 }
 
 export function getIrcExternalPeerDisplayState(
@@ -145,6 +161,7 @@ function toPeer(row: PeerRow): IrcExternalPeer {
 		ownerEpoch: row.owner_epoch ?? undefined,
 		buildDigest: row.build_digest ?? undefined,
 		version: row.version ?? undefined,
+		fleetCapability: decodeFleetCapabilityJson(row.fleet_capability_json),
 	};
 }
 
@@ -204,6 +221,9 @@ export class IrcExternalBus {
 		if (!columns.has("version")) {
 			this.#db.run("ALTER TABLE peers ADD COLUMN version TEXT");
 		}
+		if (!columns.has("fleet_capability_json")) {
+			this.#db.run("ALTER TABLE peers ADD COLUMN fleet_capability_json TEXT");
+		}
 	}
 	#ensureMessageOriginColumn(): void {
 		const columns = new Set(
@@ -220,16 +240,17 @@ export class IrcExternalBus {
 	#getPeerBySessionId(sessionId: string): IrcExternalPeer | undefined {
 		const row = this.#db
 			.query<PeerRow, { $sessionId: string }>(
-				"SELECT session_id, name, cwd, pid, last_seen, state, state_ts, explicit_name, session_file, owner_epoch, build_digest, version FROM peers WHERE session_id = $sessionId",
+				"SELECT session_id, name, cwd, pid, last_seen, state, state_ts, explicit_name, session_file, owner_epoch, build_digest, version, fleet_capability_json FROM peers WHERE session_id = $sessionId",
 			)
 			.get({ $sessionId: sessionId });
 		return row ? toPeer(row) : undefined;
 	}
 
-	constructor(readonly dbPath: string = DEFAULT_DB_PATH) {
-		fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-		this.#db = new Database(dbPath);
+	constructor(readonly dbPath: string = DEFAULT_DB_PATH, options: IrcExternalBusOptions = {}) {
+		if (!options.readonly) fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+		this.#db = options.readonly ? new Database(dbPath, { readonly: true, strict: true }) : new Database(dbPath);
 		this.#db.run("PRAGMA busy_timeout = 3000");
+		if (options.readonly) return;
 		this.#db.run("PRAGMA journal_mode = WAL");
 		this.#db.run(`
 			CREATE TABLE IF NOT EXISTS peers (
@@ -244,7 +265,8 @@ export class IrcExternalBus {
 				session_file TEXT,
 				owner_epoch TEXT,
 				build_digest TEXT,
-				version TEXT
+				version TEXT,
+				fleet_capability_json TEXT
 			)
 		`);
 		this.#ensurePeerStateColumns();
@@ -272,8 +294,8 @@ export class IrcExternalBus {
 		const lastSeen = nowIso();
 		this.#db
 			.query(
-				`INSERT INTO peers (session_id, name, cwd, pid, last_seen, explicit_name, session_file, owner_epoch, build_digest, version)
-				 VALUES ($sessionId, $name, $cwd, $pid, $lastSeen, $explicitName, $sessionFile, $ownerEpoch, $buildDigest, $version)
+				`INSERT INTO peers (session_id, name, cwd, pid, last_seen, explicit_name, session_file, owner_epoch, build_digest, version, fleet_capability_json)
+				 VALUES ($sessionId, $name, $cwd, $pid, $lastSeen, $explicitName, $sessionFile, $ownerEpoch, $buildDigest, $version, $fleetCapabilityJson)
 				 ON CONFLICT(session_id) DO UPDATE SET
 					name = CASE WHEN peers.explicit_name = 1 THEN peers.name ELSE excluded.name END,
 					cwd = excluded.cwd,
@@ -283,7 +305,8 @@ export class IrcExternalBus {
 					session_file = COALESCE(excluded.session_file, peers.session_file),
 					owner_epoch = excluded.owner_epoch,
 					build_digest = excluded.build_digest,
-					version = excluded.version`,
+					version = excluded.version,
+					fleet_capability_json = excluded.fleet_capability_json`,
 			)
 			.run({
 				$sessionId: peer.sessionId,
@@ -296,6 +319,7 @@ export class IrcExternalBus {
 				$ownerEpoch: peer.ownerEpoch ?? null,
 				$buildDigest: peer.buildDigest ?? null,
 				$version: peer.version ?? null,
+				$fleetCapabilityJson: peer.fleetCapability === undefined ? null : JSON.stringify(peer.fleetCapability),
 			});
 		return (
 			this.#getPeerBySessionId(peer.sessionId) ?? {
@@ -311,6 +335,7 @@ export class IrcExternalBus {
 				ownerEpoch: peer.ownerEpoch,
 				buildDigest: peer.buildDigest,
 				version: peer.version,
+				fleetCapability: peer.fleetCapability,
 			}
 		);
 	}
@@ -356,7 +381,7 @@ export class IrcExternalBus {
 		const staleMs = options.staleMs ?? IRC_EXTERNAL_STALE_MS;
 		return this.#db
 			.query<PeerRow, []>(
-				"SELECT session_id, name, cwd, pid, last_seen, state, state_ts, explicit_name, session_file, owner_epoch, build_digest, version FROM peers ORDER BY last_seen DESC",
+				"SELECT session_id, name, cwd, pid, last_seen, state, state_ts, explicit_name, session_file, owner_epoch, build_digest, version, fleet_capability_json FROM peers ORDER BY last_seen DESC",
 			)
 			.all()
 			.filter(
@@ -370,7 +395,7 @@ export class IrcExternalBus {
 	findPeerByName(name: string, options: { excludeSessionId?: string } = {}): IrcExternalPeer | undefined {
 		const rows = this.#db
 			.query<PeerRow, { $name: string }>(
-				"SELECT session_id, name, cwd, pid, last_seen, state, state_ts, explicit_name, session_file, owner_epoch, build_digest, version FROM peers WHERE name = $name ORDER BY last_seen DESC",
+				"SELECT session_id, name, cwd, pid, last_seen, state, state_ts, explicit_name, session_file, owner_epoch, build_digest, version, fleet_capability_json FROM peers WHERE name = $name ORDER BY last_seen DESC",
 			)
 			.all({ $name: name });
 		const row = rows.find(

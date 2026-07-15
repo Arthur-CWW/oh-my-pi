@@ -3,10 +3,12 @@ import * as path from "node:path";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import { getSessionsDir } from "@oh-my-pi/pi-utils";
 import type { AgentRef } from "../../registry/agent-registry";
+import { isSpawnRecord, type SpawnRecord } from "../../task/spawn-record";
 
 export interface DurableJournalModel {
 	modelId?: string;
 	thinkingLevel?: string | null;
+	spawnRecord?: SpawnRecord;
 }
 
 export function durableModelSelector(model: DurableJournalModel | undefined): string | undefined {
@@ -26,6 +28,7 @@ const journalMetadataIo: JournalMetadataIo = {
 function durableJournalModel(text: string): DurableJournalModel | undefined {
 	let modelId: string | undefined;
 	let thinkingLevel: string | null | undefined;
+	let spawnRecord: SpawnRecord | undefined;
 	for (const line of text.split("\n")) {
 		if (!line.trim()) continue;
 		let entry: Record<string, unknown>;
@@ -39,6 +42,7 @@ function durableJournalModel(text: string): DurableJournalModel | undefined {
 			if (typeof metadata.model === "string" && metadata.model) modelId = metadata.model;
 			if (metadata.thinkingLevel === null || typeof metadata.thinkingLevel === "string")
 				thinkingLevel = metadata.thinkingLevel;
+			if (isSpawnRecord(metadata.spawnRecord)) spawnRecord = metadata.spawnRecord;
 		} else if (entry.type === "model_change" && typeof entry.model === "string" && entry.model) {
 			modelId = entry.model;
 		} else if (
@@ -48,7 +52,9 @@ function durableJournalModel(text: string): DurableJournalModel | undefined {
 			thinkingLevel = entry.thinkingLevel;
 		}
 	}
-	return modelId === undefined && thinkingLevel === undefined ? undefined : { modelId, thinkingLevel };
+	return modelId === undefined && thinkingLevel === undefined && spawnRecord === undefined
+		? undefined
+		: { modelId, thinkingLevel, spawnRecord };
 }
 
 /** Durable model metadata, cached by journal path and mtime so renders remain filesystem-free. */

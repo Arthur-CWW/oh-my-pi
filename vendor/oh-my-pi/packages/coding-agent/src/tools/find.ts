@@ -484,17 +484,17 @@ function findStatusIcon(uiTheme: Theme): string {
 
 export const findToolRenderer = {
 	inline: true,
-	renderCall(args: FindRenderArgs, _options: RenderResultOptions, uiTheme: Theme): Component {
+	renderCall(args: FindRenderArgs, options: RenderResultOptions, uiTheme: Theme): Component {
 		const meta: string[] = [];
 		if (args.limit !== undefined) meta.push(`limit:${args.limit}`);
 
 		const text = renderStatusLine(
 			{
 				icon: "pending",
-				title: "Find",
+				title: options.headline ?? "Find",
 				titleColor: "toolTitle",
-				description: formatFindRenderPaths(args.paths) || "*",
-				meta,
+				description: options.headline ? undefined : formatFindRenderPaths(args.paths) || "*",
+				meta: options.headline ? undefined : meta,
 			},
 			uiTheme,
 		);
@@ -530,11 +530,11 @@ export const findToolRenderer = {
 			const lines = textContent.split("\n").filter(l => l.trim());
 			const header = renderStatusLine(
 				{
-					iconOverride: findStatusIcon(uiTheme),
-					title: "Find",
+					icon: "success",
+					title: options.headline ?? "Find",
 					titleColor: "toolTitle",
-					description: formatFindRenderPaths(args?.paths),
-					meta: [formatCount("file", lines.length)],
+					description: options.headline ? undefined : formatFindRenderPaths(args?.paths),
+					meta: options.headline ? undefined : [formatCount("file", lines.length)],
 				},
 				uiTheme,
 			);
@@ -571,10 +571,10 @@ export const findToolRenderer = {
 			const header = renderStatusLine(
 				{
 					icon: "warning",
-					title: "Find",
+					title: options.headline ?? "Find",
 					titleColor: "toolTitle",
-					description: formatFindRenderPaths(args?.paths),
-					meta: ["0 files"],
+					description: options.headline ? undefined : formatFindRenderPaths(args?.paths),
+					meta: options.headline ? undefined : ["0 files"],
 				},
 				uiTheme,
 			);
@@ -587,11 +587,11 @@ export const findToolRenderer = {
 		if (truncated) meta.push(uiTheme.fg("warning", "truncated"));
 		const header = renderStatusLine(
 			{
-				...(truncated ? { icon: "warning" as const } : { iconOverride: findStatusIcon(uiTheme) }),
-				title: "Find",
+				icon: truncated ? "warning" : "success",
+				title: options.headline ?? "Find",
 				titleColor: "toolTitle",
-				description: formatFindRenderPaths(args?.paths),
-				meta,
+				description: options.headline ? undefined : formatFindRenderPaths(args?.paths),
+				meta: options.headline ? undefined : meta,
 			},
 			uiTheme,
 		);

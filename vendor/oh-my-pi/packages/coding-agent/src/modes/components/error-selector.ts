@@ -166,7 +166,7 @@ export class ErrorSelectorComponent extends Container {
 
 		this.addChild(new Spacer(1));
 		this.addChild(new DynamicBorder(str => theme.fg("dim", str)));
-		this.addChild(new Text(theme.bold("Error History"), 1, 0));
+		this.addChild(new Text(theme.bold("Error History") + theme.fg("dim", "  p pin/unpin · Ctrl-W w focus · Esc close"), 1, 0));
 		this.addChild(this.#selectList);
 		this.addChild(new DynamicBorder(str => theme.fg("dim", str)));
 		this.addChild(detailText);

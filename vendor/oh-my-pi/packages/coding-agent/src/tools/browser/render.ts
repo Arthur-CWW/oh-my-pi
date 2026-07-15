@@ -96,7 +96,7 @@ function renderRunCell(
 	if (url) titleParts.push(shortenPath(url));
 	const browserDesc = describeBrowser(args, details);
 	if (browserDesc) titleParts.push(browserDesc);
-	const title = titleParts.join(" · ");
+	const title = options.headline ?? titleParts.join(" · ");
 
 	let cached: { key: bigint; width: number; lines: string[] } | undefined;
 	return markFramedBlockComponent({
@@ -143,15 +143,14 @@ function renderRunCell(
 function renderOpenOrCloseLine(
 	args: BrowserRenderArgs,
 	details: BrowserToolDetails | undefined,
-	isPartial: boolean,
+	options: RenderResultOptions,
 	isError: boolean,
 	output: string,
 	theme: Theme,
 ): Component {
 	const action = (details?.action ?? args.action ?? "open") as "open" | "close" | "run";
-	const status = cellStatus(isPartial, isError);
-	const icon =
-		status === "complete" ? "done" : status === "error" ? "error" : status === "running" ? "running" : "pending";
+	const status = cellStatus(options.isPartial, isError);
+	const icon = status === "complete" ? "success" : status === "error" ? "error" : status === "running" ? "running" : "pending";
 
 	let title: string;
 	if (action === "close") {
@@ -161,6 +160,7 @@ function renderOpenOrCloseLine(
 	} else {
 		title = `Open ${tabLabel(args, details)}`;
 	}
+	title = options.headline ?? title;
 
 	const meta: string[] = [];
 	const browserDesc = describeBrowser(args, details);
@@ -168,10 +168,7 @@ function renderOpenOrCloseLine(
 	const url = details?.url ?? args.url;
 	if (url) meta.push(shortenPath(url));
 
-	const header =
-		status === "complete"
-			? renderStatusLine({ iconOverride: theme.styledSymbol("tool.browser", "accent"), title, meta }, theme)
-			: renderStatusLine({ icon, title, meta }, theme);
+	const header = renderStatusLine({ icon, spinnerFrame: options.spinnerFrame, title, meta: options.headline ? undefined : meta }, theme);
 	if (!output) return new Text(header, 0, 0);
 	const outputLines = output.split("\n").map(line => theme.fg("toolOutput", replaceTabs(line)));
 	return new Text([header, ...outputLines].join("\n"), 0, 0);
@@ -192,7 +189,7 @@ export const browserToolRenderer = {
 		if (action === "run") {
 			return renderRunCell(args, undefined, options, "", false, theme);
 		}
-		return renderOpenOrCloseLine(args, undefined, options.isPartial, false, "", theme);
+		return renderOpenOrCloseLine(args, undefined, options, false, "", theme);
 	},
 	renderResult(
 		result: { content: Array<{ type: string; text?: string }>; details?: BrowserToolDetails; isError?: boolean },
@@ -214,7 +211,7 @@ export const browserToolRenderer = {
 			component = appendLine(component, truncationWarning);
 			return component;
 		}
-		return renderOpenOrCloseLine(argsObj, details, options.isPartial, isError, output, theme);
+		return renderOpenOrCloseLine(argsObj, details, options, isError, output, theme);
 	},
 	mergeCallAndResult: true,
 	inline: true,

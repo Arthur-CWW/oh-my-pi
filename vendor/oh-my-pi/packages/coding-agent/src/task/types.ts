@@ -3,6 +3,7 @@ import type { Usage } from "@oh-my-pi/pi-ai";
 import { $env } from "@oh-my-pi/pi-utils";
 import { z } from "zod/v4";
 import type { AgentSessionEvent } from "../session/agent-session";
+import type { SessionSpawnCordon } from "../session/session-control";
 import type { NestedRepoPatch } from "./worktree";
 import type { SpawnRouteReceipt } from "./route-resolution";
 
@@ -290,6 +291,10 @@ export interface AgentProgress {
 	assignment?: string;
 	/** Shared spawn context supplied alongside the per-agent assignment. */
 	spawnContext?: string;
+	/** Definition file used to specialize this agent type. */
+	definitionSourcePath?: string;
+	/** Immediate agent which issued this spawn. */
+	spawnerId?: string;
 	description?: string;
 	lastIntent?: string;
 	currentTool?: string;
@@ -425,6 +430,8 @@ export interface TaskToolDetails {
 	projectAgentsDir: string | null;
 	results: SingleResult[];
 	totalDurationMs: number;
+	/** Typed spawn-admission refusal while the parent session is rollout-cordoned. */
+	spawnRefusal?: SessionSpawnCordon;
 	/** Aggregated usage across all subagents. */
 	usage?: Usage;
 	outputPaths?: string[];

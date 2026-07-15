@@ -19,10 +19,12 @@ import type { RenderResultOptions } from "../extensibility/custom-tools/types";
 import { IrcBus, type IrcDeliveryReceipt, type IrcDeliveryRecord, type IrcMessage } from "../irc/bus";
 import { getIrcExternalPeerDisplayState, IrcExternalBus, resolveIrcExternalPeerName } from "../irc/bus-external";
 import { renderTranscriptBodyLines } from "../modes/components/transcript-body";
-import type { TranscriptDisplayContext } from "../modes/transcript-display";
+import { transcriptDisplayCacheVersion, type TranscriptDisplayContext } from "../modes/transcript-display";
 import type { Theme } from "../modes/theme/theme";
 import ircDescription from "../prompts/tools/irc.md" with { type: "text" };
 import type { AgentRegistry } from "../registry/agent-registry";
+import { createFleetCapability } from "../session/fleet-capability";
+import { CURRENT_SESSION_CONTROL_PROTOCOL } from "../session/session-control";
 import { canSpawnAtDepth } from "../task/types";
 import { Ellipsis, renderStatusLine, truncateToWidth } from "../tui";
 import type { ToolSession } from ".";
@@ -464,7 +466,8 @@ export class IrcTool implements AgentTool<typeof ircSchema, IrcDetails> {
 
 	#registerExternalPeer(): { bus: IrcExternalBus; sessionId: string; name: string } | null {
 		if (this.externalBus === null) return null;
-		const sessionId = `${this.session.cwd}:${process.pid}`;
+		const ownership = this.session.sessionManager?.getSessionOwnership();
+		const sessionId = ownership?.sessionId ?? this.session.getSessionId?.() ?? `${this.session.cwd}:${process.pid}`;
 		const bus = this.externalBus ?? IrcExternalBus.global();
 		const name = resolveIrcExternalPeerName({
 			configuredName: this.session.settings.get("irc.peerName"),
@@ -477,6 +480,19 @@ export class IrcTool implements AgentTool<typeof ircSchema, IrcDetails> {
 			cwd: this.session.cwd,
 			pid: process.pid,
 			explicitName: Boolean(this.session.settings.get("irc.peerName")?.trim()),
+			sessionFile: this.session.getSessionFile() ?? undefined,
+			ownerEpoch: ownership?.ownerEpoch,
+			buildDigest: ownership?.buildRevision.digest,
+			version: ownership?.buildRevision.version,
+			fleetCapability:
+				ownership === undefined
+					? undefined
+					: createFleetCapability({
+							buildDigest: ownership.buildRevision.digest,
+							productVersion: ownership.buildRevision.version,
+							controlProtocol: CURRENT_SESSION_CONTROL_PROTOCOL,
+							workstream: this.session.sessionManager?.getWorkstream(),
+						}),
 		});
 		return { bus, sessionId, name };
 	}
@@ -558,7 +574,10 @@ export function createIrcMessageCard(
 			}
 			return lines.map(line => truncateToWidth(line, width, Ellipsis.Unicode));
 		},
-		{ paddingX: 1 },
+		{
+			paddingX: 1,
+			cacheVersion: () => transcriptDisplayCacheVersion(transcriptDisplay),
+		},
 	);
 }
 
@@ -571,8 +590,12 @@ export const ircToolRenderer = {
 			() => options.expanded,
 			(width, expanded) => {
 				const lines = buildIrcCallLines(args, expanded, width, uiTheme, options.transcriptDisplay);
+				if (options.headline) {
+					lines[0] = renderStatusLine({ icon: "pending", title: options.headline }, uiTheme);
+				}
 				return lines.map(line => truncateToWidth(line, width, Ellipsis.Unicode));
 			},
+			{ cacheVersion: () => transcriptDisplayCacheVersion(options.transcriptDisplay) },
 		);
 	},
 
@@ -585,10 +608,17 @@ export const ircToolRenderer = {
 		const details: Partial<IrcDetails> = result.details ?? {};
 		return createCachedComponent(
 			() => options.expanded,
-			(width, expanded) =>
-				buildIrcResultLines(result, details, args, expanded, width, uiTheme, options.transcriptDisplay).map(line =>
-					truncateToWidth(line, width, Ellipsis.Unicode),
-				),
+			(width, expanded) => {
+				const lines = buildIrcResultLines(result, details, args, expanded, width, uiTheme, options.transcriptDisplay);
+				if (options.headline) {
+					lines[0] = renderStatusLine(
+						{ icon: result.isError ? "error" : options.isPartial ? "running" : "success", spinnerFrame: options.spinnerFrame, title: options.headline },
+						uiTheme,
+					);
+				}
+				return lines.map(line => truncateToWidth(line, width, Ellipsis.Unicode));
+			},
+			{ cacheVersion: () => transcriptDisplayCacheVersion(options.transcriptDisplay) },
 		);
 	},
 };

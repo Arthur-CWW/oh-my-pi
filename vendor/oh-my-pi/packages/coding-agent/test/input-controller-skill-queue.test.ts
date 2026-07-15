@@ -78,6 +78,7 @@ function createStubInputControllerContext(opts: { skillCommands: Map<string, str
 			return (this as typeof ctx).session;
 		},
 		showError,
+		closeUnpinnedErrorsPanel: vi.fn(),
 		handleGoalModeCommand,
 		goalModeEnabled: false,
 		updatePendingMessagesDisplay,

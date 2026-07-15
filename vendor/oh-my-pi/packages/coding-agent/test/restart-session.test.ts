@@ -1,5 +1,6 @@
-import { beforeEach, describe, expect, test } from "bun:test";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { beforeEach, describe, expect, test, vi } from "bun:test";
+import { createHash } from "node:crypto";
+import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -7,14 +8,19 @@ import {
 	acquireRestartSessionOwnership,
 	buildRestartLaunchArgs,
 	buildRestartSpawnSpec,
+	buildRolloutRestartSpawnSpec,
 	captureRestartLaunchArgs,
 	getRestartLaunchArgsForTest,
 	handoffRestartProcess,
 	RESTART_API_KEY_ENV,
+	RESTART_CHECKPOINT_ID_ENV,
+	RESTART_ROLLOUT_ID_ENV,
+	RESTART_TARGET_DIGEST_ENV,
+	resolveVerifiedReleaseExecutable,
 } from "../src/cli/restart-session";
 import { SessionManager } from "../src/session/session-manager";
 import { acquireSessionOwnership, inspectSessionOwnership, readRestartHandoff } from "../src/session/session-ownership";
-import { ensureRestartSessionOwnership } from "../src/slash-commands/builtin-registry";
+import { ensureRestartSessionOwnership, executeBuiltinSlashCommand } from "../src/slash-commands/builtin-registry";
 
 type HandoffReceipt = {
 	predecessorEpoch?: string;
@@ -417,6 +423,69 @@ describe("buildRestartSpawnSpec", () => {
 	});
 });
 
+describe("rollout restart release verification", () => {
+	test("refuses a digest-named executable whose bytes do not match", async () => {
+		const root = await mkdtemp(path.join(os.tmpdir(), "omp-release-mismatch-"));
+		const claimedDigest = "a".repeat(64);
+		const executable = path.join(root, `omp-${claimedDigest}`);
+		try {
+			await writeFile(executable, "corrupt release");
+			await chmod(executable, 0o555);
+			await expect(resolveVerifiedReleaseExecutable(root, claimedDigest)).rejects.toThrow("digest mismatch");
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	});
+
+	test("builds exact-digest same-session reexec only from its checkpoint", async () => {
+		const root = await mkdtemp(path.join(os.tmpdir(), "omp-release-valid-"));
+		const bytes = "#!/bin/sh\nexit 0\n";
+		const digest = createHash("sha256").update(bytes).digest("hex");
+		const executable = path.join(root, `omp-${digest}`);
+		try {
+			await writeFile(executable, bytes);
+			await chmod(executable, 0o555);
+			const spec = await buildRolloutRestartSpawnSpec({
+				checkpoint: {
+					type: "rollout-checkpoint",
+					checkpointId: "checkpoint-1",
+					rolloutId: "rollout-1",
+					commandId: "00000000-0000-4000-8000-000000000001",
+					ownerEpoch: "old-epoch",
+					expectedDigest: "b".repeat(64),
+					journalCheckpoint: {
+						sessionId: SESSION,
+						sessionFile: "/tmp/session.jsonl",
+						checkpointId: "checkpoint-1",
+					},
+					children: [],
+					unresumableReasons: [],
+					autoResumeAllowed: true,
+					pauseProvenance: "rollout",
+					outcome: "Checkpointed",
+					createdAt: "2026-01-01T00:00:00.000Z",
+				},
+				rolloutId: "rollout-1",
+				targetDigest: digest,
+				releaseStoreDir: root,
+				sessionId: SESSION,
+				sessionFile: "/tmp/session.jsonl",
+				ownerEpoch: "old-epoch",
+				cwd: "/work",
+				processArgv: ["omp"],
+				launchArgs: [],
+			});
+			expect(spec.executable).toBe(executable);
+			expect(spec.args).toEqual(["--resume", SESSION]);
+			expect(spec.env?.[RESTART_ROLLOUT_ID_ENV]).toBe("rollout-1");
+			expect(spec.env?.[RESTART_TARGET_DIGEST_ENV]).toBe(digest);
+			expect(spec.env?.[RESTART_CHECKPOINT_ID_ENV]).toBe("checkpoint-1");
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	});
+});
+
 describe("ensureRestartSessionOwnership", () => {
 	test("acquires and binds ownership when a fresh manager has none", async () => {
 		const tempDir = await mkdtemp(path.join(os.tmpdir(), "omp-restart-fresh-"));
@@ -429,6 +498,51 @@ describe("ensureRestartSessionOwnership", () => {
 			expect(await ownership.isCurrent()).toBe(true);
 			await ownership.release();
 		} finally {
+			await manager.close();
+			await rm(tempDir, { recursive: true, force: true });
+		}
+	});
+});
+
+describe("/restart draft persistence", () => {
+	test("saves the editor draft before attempting process replacement", async () => {
+		const tempDir = await mkdtemp(path.join(os.tmpdir(), "omp-restart-draft-"));
+		const manager = SessionManager.create(tempDir, path.join(tempDir, "sessions"));
+		const setText = vi.fn();
+		const showError = vi.fn();
+		const shutdown = vi.fn(async () => {});
+		const session = {
+			isStreaming: false,
+			asyncJobManager: undefined,
+			async checkpointChildJobsForRestart() {},
+		};
+		const editor = {
+			getText: () => "unsent editor draft",
+			setText,
+		};
+		const ctx = {
+			editor,
+			session,
+			sessionManager: manager,
+			showError,
+			showStatus: vi.fn(),
+			showWarning: vi.fn(),
+			shutdown,
+			focusedAgentId: undefined,
+			collabGuest: undefined,
+		} as unknown as Parameters<typeof executeBuiltinSlashCommand>[1]["ctx"];
+		const execve = vi.spyOn(process, "execve").mockImplementation(() => {
+			throw new Error("stop restart in test");
+		});
+
+		try {
+			await expect(executeBuiltinSlashCommand("/restart", { ctx })).resolves.toBe(true);
+			expect(await manager.consumeDraft()).toBe("unsent editor draft");
+			expect(setText).not.toHaveBeenCalled();
+			expect(shutdown).toHaveBeenCalledTimes(1);
+			expect(showError).toHaveBeenCalledWith(expect.stringContaining("stop restart in test"));
+		} finally {
+			execve.mockRestore();
 			await manager.close();
 			await rm(tempDir, { recursive: true, force: true });
 		}

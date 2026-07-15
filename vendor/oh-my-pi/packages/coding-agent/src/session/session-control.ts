@@ -4,13 +4,22 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { Schema } from "effect";
+import type { FleetProtocolRange } from "./fleet-capability";
 
 export const SESSION_CONTROL_SCHEMA_VERSION = 1 as const;
+
+export const CURRENT_SESSION_CONTROL_PROTOCOL: FleetProtocolRange = {
+	minMajor: SESSION_CONTROL_SCHEMA_VERSION,
+	maxMajor: 2,
+	maxMinor: 0,
+};
 
 const UUIDSchema = Schema.String.pipe(
 	Schema.check(Schema.isPattern(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i)),
 );
 const NonEmptyStringSchema = Schema.Trim.pipe(Schema.check(Schema.isMinLength(1)));
+const SHA256DigestSchema = Schema.String.pipe(Schema.check(Schema.isPattern(/^[a-f0-9]{64}$/)));
+const ReadinessReceiptJsonSchema = Schema.String.pipe(Schema.check(Schema.isMinLength(1)));
 const TimestampSchema = Schema.String.pipe(
 	Schema.refine((value): value is string => {
 		const parsed = Date.parse(value);
@@ -23,7 +32,7 @@ const LocalSourceSchema = Schema.Struct({
 	pid: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(1))),
 	uid: Schema.optional(Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0)))),
 });
-const IntentSchema = Schema.Union([
+const LegacyIntentSchema = Schema.Union([
 	Schema.Struct({ kind: Schema.Literal("status") }),
 	Schema.Struct({ kind: Schema.Literal("pause") }),
 	Schema.Struct({ kind: Schema.Literal("resume") }),
@@ -32,17 +41,150 @@ const IntentSchema = Schema.Union([
 	Schema.Struct({ kind: Schema.Literal("compact"), instructions: Schema.optional(NonEmptyStringSchema) }),
 	Schema.Struct({ kind: Schema.Literal("stop"), confirmationToken: NonEmptyStringSchema }),
 ]);
-export const SessionControlCommandSchema = Schema.Struct({
-	schemaVersion: Schema.Literal(SESSION_CONTROL_SCHEMA_VERSION),
+const PrepareRolloutIntentSchema = Schema.Struct({
+	kind: Schema.Literal("prepare-rollout"),
+	rolloutId: NonEmptyStringSchema,
+	expectedDigest: NonEmptyStringSchema,
+	drainTimeoutMs: Schema.Int.pipe(Schema.check(Schema.isGreaterThan(0))),
+});
+const RolloutRestartIntentSchema = Schema.Struct({
+	kind: Schema.Literal("restart"),
+	executable: NonEmptyStringSchema,
+	rolloutId: NonEmptyStringSchema,
+	targetDigest: NonEmptyStringSchema,
+	checkpointCommandId: UUIDSchema,
+});
+export const FleetPinChannelSchema = Schema.Literals(["digest", "blessed", "canary"]);
+export const FleetPinSelectionSchema = Schema.Struct({
+	requestedChannel: FleetPinChannelSchema,
+	resolvedDigest: SHA256DigestSchema,
+	readinessReceipt: Schema.Struct({
+		json: ReadinessReceiptJsonSchema,
+		digest: SHA256DigestSchema,
+	}),
+});
+const FleetPinIntentSchema = Schema.Struct({
+	kind: Schema.Literal("fleet-pin"),
+	selection: FleetPinSelectionSchema,
+});
+const FleetUnpinIntentSchema = Schema.Struct({
+	kind: Schema.Literal("fleet-unpin"),
+});
+const CommandEnvelopeFields = {
 	commandId: UUIDSchema,
 	source: LocalSourceSchema,
 	sessionId: NonEmptyStringSchema,
 	targetOwnerEpoch: NonEmptyStringSchema,
 	requestedAt: TimestampSchema,
-	intent: IntentSchema,
+};
+/** Immutable strict v1 compatibility lane. */
+export const SessionControlCommandV1Schema = Schema.Struct({
+	schemaVersion: Schema.Literal(SESSION_CONTROL_SCHEMA_VERSION),
+	...CommandEnvelopeFields,
+	intent: LegacyIntentSchema,
 });
-export type SessionControlIntent = typeof IntentSchema.Type;
+export const PrepareRolloutCommandSchema = Schema.Struct({
+	schemaVersion: Schema.Literal(2),
+	...CommandEnvelopeFields,
+	intent: PrepareRolloutIntentSchema,
+});
+export const RolloutRestartCommandSchema = Schema.Struct({
+	schemaVersion: Schema.Literal(2),
+	...CommandEnvelopeFields,
+	intent: RolloutRestartIntentSchema,
+});
+export const FleetPinCommandSchema = Schema.Struct({
+	schemaVersion: Schema.Literal(2),
+	...CommandEnvelopeFields,
+	intent: FleetPinIntentSchema,
+});
+export const FleetUnpinCommandSchema = Schema.Struct({
+	schemaVersion: Schema.Literal(2),
+	...CommandEnvelopeFields,
+	intent: FleetUnpinIntentSchema,
+});
+export const SessionControlCommandSchema = Schema.Union([
+	SessionControlCommandV1Schema,
+	PrepareRolloutCommandSchema,
+	RolloutRestartCommandSchema,
+	FleetPinCommandSchema,
+	FleetUnpinCommandSchema,
+]);
+export type LegacySessionControlIntent = typeof LegacyIntentSchema.Type;
+export type PrepareRolloutIntent = typeof PrepareRolloutIntentSchema.Type;
+export type RolloutRestartIntent = typeof RolloutRestartIntentSchema.Type;
+export type FleetPinChannel = typeof FleetPinChannelSchema.Type;
+export type FleetPinSelection = typeof FleetPinSelectionSchema.Type;
+export type FleetPinIntent = typeof FleetPinIntentSchema.Type;
+export type FleetUnpinIntent = typeof FleetUnpinIntentSchema.Type;
+export type SessionControlIntent =
+	| LegacySessionControlIntent
+	| PrepareRolloutIntent
+	| RolloutRestartIntent
+	| FleetPinIntent
+	| FleetUnpinIntent;
 export type SessionControlCommand = typeof SessionControlCommandSchema.Type;
+export type PrepareRolloutCommand = typeof PrepareRolloutCommandSchema.Type;
+export type RolloutRestartCommand = typeof RolloutRestartCommandSchema.Type;
+export type FleetPinCommand = typeof FleetPinCommandSchema.Type;
+export type FleetUnpinCommand = typeof FleetUnpinCommandSchema.Type;
+export type FleetPinControlCommand = FleetPinCommand | FleetUnpinCommand;
+export type FleetPinSource = "explicit-digest" | "registry-stable" | "registry-candidate" | "unpin";
+export type FleetPinJournalRecord =
+	| {
+			readonly version: 2;
+			readonly action: "pin";
+			readonly channel: FleetPinChannel;
+			readonly source: Exclude<FleetPinSource, "unpin">;
+			readonly digest: string;
+			readonly commandId: string;
+			readonly recordedAt: string;
+			readonly ownerEpoch: string;
+	  }
+	| {
+			readonly version: 2;
+			readonly action: "unpin";
+			readonly channel: "blessed";
+			readonly source: "unpin";
+			readonly commandId: string;
+			readonly recordedAt: string;
+			readonly ownerEpoch: string;
+	  };
+export interface FleetPinControlResult {
+	readonly channel: FleetPinChannel;
+	readonly digest: string;
+	readonly pinned: boolean;
+	readonly source: FleetPinSource;
+}
+
+const SESSION_CONTROL_INTENT_MAJOR: Record<SessionControlIntent["kind"], number> = {
+	status: 1,
+	pause: 1,
+	resume: 1,
+	restart: 1,
+	setModel: 1,
+	compact: 1,
+	stop: 1,
+	"prepare-rollout": 2,
+	"fleet-pin": 2,
+	"fleet-unpin": 2,
+};
+
+export function selectSessionControlCommandKind(
+	requested: string,
+	controller: FleetProtocolRange,
+	peer: FleetProtocolRange,
+): SessionControlIntent["kind"] | undefined {
+	if (!(requested in SESSION_CONTROL_INTENT_MAJOR)) return undefined;
+	const kind = requested as SessionControlIntent["kind"];
+	const requiredMajor = SESSION_CONTROL_INTENT_MAJOR[kind];
+	return requiredMajor >= controller.minMajor &&
+		requiredMajor <= controller.maxMajor &&
+		requiredMajor >= peer.minMajor &&
+		requiredMajor <= peer.maxMajor
+		? kind
+		: undefined;
+}
 
 const ReceiptStateSchema = Schema.Literals(["requested", "acknowledged", "applied", "failed"]);
 export const SessionControlReceiptSchema = Schema.Struct({
@@ -87,6 +229,50 @@ interface ReceiptRow {
 interface PausedRow {
 	paused: number;
 	owner_epoch: string;
+}
+
+export interface SessionSpawnCordon {
+	readonly kind: "SpawnCordoned";
+	readonly sessionId: string;
+	readonly ownerEpoch: string;
+	readonly rolloutId: string;
+	readonly expectedDigest: string;
+	readonly pauseProvenance: "manual" | "rollout";
+	readonly cordonedAt: string;
+	readonly checkpointId?: string;
+}
+
+interface CordonRow {
+	session_id: string;
+	owner_epoch: string;
+	rollout_id: string;
+	expected_digest: string;
+	pause_provenance: string;
+	cordoned_at: string;
+	checkpoint_id: string | null;
+}
+
+const activeSpawnCordons = new Map<string, SessionSpawnCordon>();
+
+function decodeCordonRow(row: CordonRow): SessionSpawnCordon {
+	if (row.pause_provenance !== "manual" && row.pause_provenance !== "rollout") {
+		throw new Error(`Invalid rollout pause provenance ${row.pause_provenance}`);
+	}
+	return {
+		kind: "SpawnCordoned",
+		sessionId: row.session_id,
+		ownerEpoch: row.owner_epoch,
+		rolloutId: row.rollout_id,
+		expectedDigest: row.expected_digest,
+		pauseProvenance: row.pause_provenance,
+		cordonedAt: row.cordoned_at,
+		...(row.checkpoint_id === null ? {} : { checkpointId: row.checkpoint_id }),
+	};
+}
+
+/** Process-local admission projection, hydrated from durable control state when a target binds. */
+export function getSessionSpawnCordon(sessionId: string): SessionSpawnCordon | undefined {
+	return activeSpawnCordons.get(sessionId);
 }
 
 export const SESSION_CONTROL_DB_PATH =
@@ -167,6 +353,23 @@ export class SessionControlBus {
 				updated_at TEXT NOT NULL
 			)
 		`);
+		this.#db.run(`
+			CREATE TABLE IF NOT EXISTS rollout_cordons (
+				session_id TEXT PRIMARY KEY,
+				owner_epoch TEXT NOT NULL,
+				rollout_id TEXT NOT NULL,
+				expected_digest TEXT NOT NULL,
+				pause_provenance TEXT NOT NULL CHECK(pause_provenance IN ('manual','rollout')),
+				cordoned_at TEXT NOT NULL,
+				checkpoint_id TEXT
+			)
+		`);
+		const cordonColumns = new Set(
+			this.#db.query<{ name: string }, []>("PRAGMA table_info(rollout_cordons)").all().map(column => column.name),
+		);
+		if (!cordonColumns.has("checkpoint_id")) {
+			this.#db.run("ALTER TABLE rollout_cordons ADD COLUMN checkpoint_id TEXT");
+		}
 		this.#db.run(
 			"CREATE INDEX IF NOT EXISTS idx_control_receipts_target ON control_receipts(session_id, target_owner_epoch, state, requested_at)",
 		);
@@ -193,6 +396,8 @@ export class SessionControlBus {
 				)
 				.run({ $sessionId: sessionId, $ownerEpoch: ownerEpoch, $at: at });
 		})();
+		const cordon = this.getCordon(sessionId);
+		if (cordon) activeSpawnCordons.set(sessionId, cordon);
 	}
 
 	releaseTarget(sessionId: string, ownerEpoch: string): void {
@@ -347,5 +552,108 @@ export class SessionControlBus {
 			)
 			.run({ $paused: paused ? 1 : 0, $at: nowIso(), $sessionId: sessionId, $ownerEpoch: ownerEpoch });
 		if (result.changes !== 1) throw new Error(`Owner ${ownerEpoch} is not the bound control target for ${sessionId}`);
+	}
+
+	getCordon(sessionId: string): SessionSpawnCordon | undefined {
+		const row = this.#db
+			.query<CordonRow, { $sessionId: string }>(
+				`SELECT session_id,owner_epoch,rollout_id,expected_digest,pause_provenance,cordoned_at,checkpoint_id
+				 FROM rollout_cordons WHERE session_id=$sessionId`,
+			)
+			.get({ $sessionId: sessionId });
+		return row ? decodeCordonRow(row) : undefined;
+	}
+
+	cordon(
+		sessionId: string,
+		ownerEpoch: string,
+		rolloutId: string,
+		expectedDigest: string,
+		pauseProvenance: "manual" | "rollout",
+	): SessionSpawnCordon {
+		const cordonedAt = nowIso();
+		const updated = this.#db
+			.query(
+				`INSERT INTO rollout_cordons
+				 (session_id,owner_epoch,rollout_id,expected_digest,pause_provenance,cordoned_at,checkpoint_id)
+				 SELECT $sessionId,$ownerEpoch,$rolloutId,$expectedDigest,$pauseProvenance,$cordonedAt,NULL
+				 WHERE EXISTS (
+				 	SELECT 1 FROM control_targets WHERE session_id=$sessionId AND owner_epoch=$ownerEpoch
+				 )
+				 ON CONFLICT(session_id) DO UPDATE SET
+				 	owner_epoch=excluded.owner_epoch,
+				 	rollout_id=excluded.rollout_id,
+				 	expected_digest=excluded.expected_digest,
+				 	pause_provenance=excluded.pause_provenance,
+				 	cordoned_at=excluded.cordoned_at,
+				 	checkpoint_id=NULL`,
+			)
+			.run({
+				$sessionId: sessionId,
+				$ownerEpoch: ownerEpoch,
+				$rolloutId: rolloutId,
+				$expectedDigest: expectedDigest,
+				$pauseProvenance: pauseProvenance,
+				$cordonedAt: cordonedAt,
+			});
+		if (updated.changes !== 1) throw new Error(`Owner ${ownerEpoch} is not the bound control target for ${sessionId}`);
+		const cordon = this.getCordon(sessionId);
+		if (!cordon) throw new Error(`Failed to cordon session ${sessionId}`);
+		activeSpawnCordons.set(sessionId, cordon);
+		return cordon;
+	}
+	recordCordonCheckpoint(input: {
+		readonly sessionId: string;
+		readonly expectedOwnerEpoch: string;
+		readonly fleetRolloutId: string;
+		readonly checkpointId: string;
+	}): SessionSpawnCordon {
+		const updated = this.#db
+			.query(
+				`UPDATE rollout_cordons SET checkpoint_id=$checkpointId
+				 WHERE session_id=$sessionId AND owner_epoch=$ownerEpoch AND rollout_id=$rolloutId`,
+			)
+			.run({
+				$sessionId: input.sessionId,
+				$ownerEpoch: input.expectedOwnerEpoch,
+				$rolloutId: input.fleetRolloutId,
+				$checkpointId: input.checkpointId,
+			});
+		if (updated.changes !== 1) {
+			throw new Error(`No matching rollout cordon ${input.fleetRolloutId} for owner ${input.expectedOwnerEpoch} of ${input.sessionId}`);
+		}
+		const cordon = this.getCordon(input.sessionId);
+		if (!cordon) throw new Error(`Failed to record checkpoint for cordon ${input.sessionId}`);
+		activeSpawnCordons.set(input.sessionId, cordon);
+		return cordon;
+	}
+
+	releaseCordon(input: {
+		readonly sessionId: string;
+		readonly expectedOwnerEpoch: string;
+		readonly fleetRolloutId: string;
+		readonly checkpointId: string;
+	}): void {
+		const removed = this.#db
+			.query(
+				`DELETE FROM rollout_cordons
+				 WHERE session_id=$sessionId
+				   AND owner_epoch=$ownerEpoch
+				   AND rollout_id=$rolloutId
+				   AND checkpoint_id=$checkpointId
+				   AND pause_provenance='rollout'`,
+			)
+			.run({
+				$sessionId: input.sessionId,
+				$ownerEpoch: input.expectedOwnerEpoch,
+				$rolloutId: input.fleetRolloutId,
+				$checkpointId: input.checkpointId,
+			});
+		if (removed.changes !== 1) {
+			throw new Error(
+				`No releasable rollout cordon ${input.fleetRolloutId}/${input.checkpointId} for owner ${input.expectedOwnerEpoch} of ${input.sessionId}`,
+			);
+		}
+		activeSpawnCordons.delete(input.sessionId);
 	}
 }

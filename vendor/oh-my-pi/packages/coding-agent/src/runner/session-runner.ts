@@ -5,6 +5,8 @@ import type { BashResult } from "../exec/bash-executor";
 import { IrcBus } from "../irc/bus";
 import type { InteractiveHostIntent } from "../modes/interactive-host-intent";
 import { captureRestartChildManifest } from "../session/restart-child-manifest";
+import type { ReleaseRegistryValidationOptions } from "../session/release-registry-validation";
+import { type RolloutCheckpoint, type RolloutPauseProvenance } from "../session/rollout-checkpoint";
 import { writeRestartHandoff } from "../session/session-ownership";
 import { type AgentSession, type AgentSessionEvent, PromptOperationConflictError } from "../session/agent-session";
 import {
@@ -30,7 +32,7 @@ import {
 	SessionRevisionConflictError,
 	SessionStateCommandInFlightError,
 } from "../session/session-manager";
-import type { SessionControlCommand, SessionControlResult } from "../session/session-control";
+import type { PrepareRolloutCommand, SessionControlCommand, SessionControlResult } from "../session/session-control";
 import type { SessionOwnershipHandle } from "../session/session-ownership";
 import {
 	InvalidRunnerCommandError,
@@ -145,6 +147,7 @@ import {
 	type TransitionGoalModeReceipt,
 	type TransitionPlanModeReceipt,
 } from "./protocol";
+import { makeSessionControlHandlers } from "./session-control-handler";
 import type {
 	TerminalSessionDelivery,
 	TerminalSessionSnapshot,
@@ -185,6 +188,7 @@ export interface SessionRunnerOptions {
 	readonly mailboxCapacity: number;
 	readonly eventCapacity: number;
 	readonly childStopPolicy?: "detach" | "stop";
+	readonly releaseValidation?: ReleaseRegistryValidationOptions;
 }
 
 export interface SessionRunnerLiveResources {
@@ -301,6 +305,10 @@ export interface SessionRunner {
 	readonly applySessionControl: (
 		command: SessionControlCommand,
 	) => Effect.Effect<SessionControlResult, RunnerFailure, Scope.Scope>;
+	readonly prepareRollout: (
+		command: PrepareRolloutCommand,
+		pauseProvenance: RolloutPauseProvenance,
+	) => Effect.Effect<RolloutCheckpoint, RunnerFailure, Scope.Scope>;
 	readonly stop: () => Effect.Effect<void, RunnerFailure, Scope.Scope>;
 }
 
@@ -4353,84 +4361,15 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 		} satisfies TerminalSessionView;
 	});
 
-	const applySessionControl = Effect.fn("Runner.applySessionControl")(function* (command: SessionControlCommand) {
-		switch (command.intent.kind) {
-			case "status": {
-				const current = yield* snapshot();
-				const model = resources.session.model;
-				return {
-					status: current.status,
-					revision: current.revision,
-					sessionRevision: current.sessionRevision,
-					pendingOperations: current.pendingOperations,
-					model: model ? `${model.provider}/${model.id}` : undefined,
-				};
-			}
-			case "pause":
-				yield* enqueue(
-					Effect.tryPromise({
-						try: () => resources.session.setSessionControlPaused(true),
-						catch: asRunnerFailure,
-					}),
-				);
-				return { paused: true };
-			case "resume":
-				yield* enqueue(
-					Effect.tryPromise({
-						try: () => resources.session.setSessionControlPaused(false),
-						catch: asRunnerFailure,
-					}),
-				);
-				return { paused: false };
-			case "setModel": {
-				const controller = activeController;
-				if (!controller) {
-					return yield* Effect.fail(new InvalidRunnerCommandError({ issue: "No active runner controller" }));
-				}
-				const separator = command.intent.selector.indexOf("/");
-				if (separator <= 0 || separator === command.intent.selector.length - 1) {
-					return yield* Effect.fail(
-						new InvalidRunnerCommandError({ issue: `Invalid model selector: ${command.intent.selector}` }),
-					);
-				}
-				const current = yield* snapshot();
-				return yield* setModel(controller.viewId, controller.epoch, {
-					schemaVersion: RUNNER_SCHEMA_VERSION,
-					kind: "setModel",
-					commandId: command.commandId,
-					correlationId: command.commandId,
-					expectedSessionRevision: current.sessionRevision,
-					viewId: controller.viewId,
-					controllerEpoch: controller.epoch,
-					payload: {
-						provider: command.intent.selector.slice(0, separator),
-						id: command.intent.selector.slice(separator + 1),
-					},
-				});
-			}
-			case "compact": {
-				const controller = activeController;
-				if (!controller) {
-					return yield* Effect.fail(new InvalidRunnerCommandError({ issue: "No active runner controller" }));
-				}
-				const current = yield* snapshot();
-				return yield* runCompaction(controller.viewId, controller.epoch, {
-					schemaVersion: RUNNER_SCHEMA_VERSION,
-					kind: "runCompaction",
-					commandId: command.commandId,
-					correlationId: command.commandId,
-					expectedSessionRevision: current.sessionRevision as RunCompactionCommand["expectedSessionRevision"],
-					viewId: controller.viewId,
-					controllerEpoch: controller.epoch as RunCompactionCommand["controllerEpoch"],
-					customInstructions: command.intent.instructions,
-				});
-			}
-			case "restart":
-			case "stop":
-				return yield* Effect.fail(
-					new InvalidRunnerCommandError({ issue: `${command.intent.kind} is a runner lifecycle action` }),
-				);
-		}
+	const { applySessionControl, prepareRollout } = makeSessionControlHandlers({
+		resources,
+		releaseValidation: options.releaseValidation,
+		snapshot,
+		enqueue,
+		activeController: () => activeController,
+		setModel,
+		runCompaction,
+		asRunnerFailure,
 	});
 
 	const stop = Effect.fn("Runner.stop")(function* () {
@@ -4547,5 +4486,5 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 	yield* Effect.addFinalizer(() =>
 		stop().pipe(Effect.matchCauseEffect({ onFailure: () => Effect.void, onSuccess: () => Effect.void })),
 	);
-	return { attachView, attachTerminalView, snapshot, applySessionControl, stop } satisfies SessionRunner;
+	return { attachView, attachTerminalView, snapshot, applySessionControl, prepareRollout, stop } satisfies SessionRunner;
 });

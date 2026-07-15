@@ -1,4 +1,5 @@
 import type { RetryCause } from "@oh-my-pi/pi-ai";
+import type { Settings } from "../config/settings";
 
 export type { RetryCause } from "@oh-my-pi/pi-ai";
 
@@ -98,6 +99,26 @@ export class FallbackApprovalGate {
 export const FALLBACK_APPROVAL_OPTIONS_TEXT =
 	"Options: (a) wait/retry source model with timeout, (b) approve proposed model, (c) choose another explicit model, (d) abort.";
 
+export interface FallbackApprovalNoticeSink {
+	sendCustomMessage(
+		message: {
+			customType: string;
+			content: string;
+			display: boolean;
+			attribution: "agent";
+		},
+		options: { deliverAs: "nextTurn" },
+	): Promise<boolean>;
+}
+
+export function fallbackAutoApprove(settings: Settings, agentKind: "main" | "sub", now = Date.now()): boolean {
+	if (agentKind !== "sub") return false;
+	const configuredUntil = settings.get("retry.subagentFallbackAutoApproveUntil");
+	if (!configuredUntil) return false;
+	const expiresAt = Date.parse(configuredUntil);
+	return Number.isFinite(expiresAt) && expiresAt > now;
+}
+
 export function formatFallbackApprovalNotice(proposal: FallbackApprovalProposal): string {
 	return [
 		`Fallback approval required for ${proposal.agentId}.`,
@@ -111,4 +132,19 @@ export function formatFallbackApprovalNotice(proposal: FallbackApprovalProposal)
 		`job({ fallbackApproval: { id: "${proposal.agentId}", action: "choose", model: "provider/model" } }), or`,
 		`job({ fallbackApproval: { id: "${proposal.agentId}", action: "abort" } }).`,
 	].join("\n");
+}
+
+export async function sendFallbackApprovalNotice(
+	sink: FallbackApprovalNoticeSink,
+	proposal: FallbackApprovalProposal,
+): Promise<void> {
+	await sink.sendCustomMessage(
+		{
+			customType: "fallback:approval-required",
+			content: `<system-warning>${formatFallbackApprovalNotice(proposal)}</system-warning>`,
+			display: false,
+			attribution: "agent",
+		},
+		{ deliverAs: "nextTurn" },
+	);
 }

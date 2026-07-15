@@ -8,6 +8,11 @@ import { enforceInlineByteCap } from "../session/streaming-output";
 import { truncateForPrompt } from "./approval";
 import { resolveCmuxKind } from "./browser/cmux/rpc";
 import { acquireBrowser, type BrowserHandle, type BrowserKind, type BrowserKindTag } from "./browser/registry";
+import {
+	DEFAULT_MAX_OWNED_GLOBAL,
+	DEFAULT_MAX_OWNED_PER_SESSION,
+	normalizeBrowserOwnershipCap,
+} from "./browser/process-ownership";
 import type { Observation, ScreenshotResult } from "./browser/tab-protocol";
 import { acquireTab, dropHeadlessTabs, getTab, releaseAllTabs, releaseTab, runInTab } from "./browser/tab-supervisor";
 import type { OutputMeta } from "./output-meta";
@@ -235,6 +240,14 @@ export class BrowserTool implements AgentTool<typeof browserSchema, BrowserToolD
 			);
 		}
 
+		const maxOwnedPerSession = normalizeBrowserOwnershipCap(
+			this.session.settings.get("browser.maxOwnedPerSession"),
+			DEFAULT_MAX_OWNED_PER_SESSION,
+		);
+		const maxOwnedGlobal = normalizeBrowserOwnershipCap(
+			this.session.settings.get("browser.maxOwnedGlobal"),
+			DEFAULT_MAX_OWNED_GLOBAL,
+		);
 		const browser = await untilAborted(signal, () =>
 			acquireBrowser(kind, {
 				cwd: this.session.cwd,
@@ -248,6 +261,8 @@ export class BrowserTool implements AgentTool<typeof browserSchema, BrowserToolD
 					: undefined,
 				appArgs: params.app?.args,
 				signal,
+				maxOwnedPerSession,
+				maxOwnedGlobal,
 			}),
 		);
 

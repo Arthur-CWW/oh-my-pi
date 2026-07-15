@@ -38,6 +38,14 @@ import { isFramedBlockComponent, renderStatusLine } from "../../tui";
 import { sanitizeWithOptionalSixelPassthrough } from "../../utils/sixel";
 import { renderDiff } from "./diff";
 import { createToolRenderState, deriveToolDisplayMemoKey, syncToolRenderState, ToolDisplayMemo, type ToolRenderState } from "./tool-execution-render-state";
+import { getArgsWithStreamedTextInput } from "../../tools/tool-detail-render";
+import {
+	composeToolHeadline,
+	formatToolArgsLines,
+	phaseStatus,
+	ToolHeadlineMemo,
+	type ToolCallPhase,
+} from "../../tools/tool-headline";
 import { DEFAULT_TRANSCRIPT_DISPLAY_CONTEXT, type TranscriptDisplayContext } from "../transcript-display";
 
 /**
@@ -91,27 +99,6 @@ function resolveEditModeForTool(toolName: string, tool: AgentTool | undefined): 
 	if (toolName === "apply_patch") return "apply_patch";
 	if (toolName !== "edit") return undefined;
 	return (tool as { mode?: EditMode } | undefined)?.mode;
-}
-
-function rawTextInputFromPartialJson(partialJson: unknown): string | undefined {
-	if (typeof partialJson !== "string") return undefined;
-	if (partialJson.length === 0) return undefined;
-	const trimmed = partialJson.trimStart();
-	if (trimmed.length === 0) return undefined;
-	const first = trimmed[0];
-	// Function-tool arguments stream as JSON. Custom/free-form tools stream raw
-	// text in the same transport field; only the raw form is a valid fallback for
-	// the conventional `input` parameter.
-	if (first === "{" || first === '"') return undefined;
-	return partialJson;
-}
-
-function getArgsWithStreamedTextInput(args: unknown): unknown {
-	if (args == null || typeof args !== "object") return args;
-	const record = args as Record<string, unknown>;
-	if (typeof record.input === "string") return args;
-	const input = rawTextInputFromPartialJson(record.__partialJson);
-	return input === undefined ? args : { ...record, input };
 }
 
 /**
@@ -190,6 +177,8 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 	#displayInputVersion = 0;
 	#renderedImageCount = 0;
 	#displayMemo = new ToolDisplayMemo();
+	#headlineMemo = new ToolHeadlineMemo();
+	#headlinePhase: ToolCallPhase = "pending";
 	#tool?: AgentTool;
 	#ui: TUI;
 	#cwd: string;
@@ -720,6 +709,22 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 	}
 
 	#rebuildDisplay(): void {
+		this.#headlinePhase = this.#sealed && !this.#result
+			? "interrupted"
+			: this.#isPartial
+				? this.#argsComplete
+					? "running"
+					: "pending"
+				: this.#result?.isError
+					? "error"
+					: "ok";
+		this.#renderState.headline = this.#headlineMemo.get(
+			this.#toolName,
+			this.#args,
+			this.#headlinePhase,
+			this.#resultVersion,
+			() => composeToolHeadline(this.#toolName, this.#args, this.#headlinePhase, this.#result),
+		);
 
 		// Non-self-framing tools (custom/extension renderers and the generic
 		// fallback) get a padded, state-tinted block — built-ins that draw their
@@ -919,6 +924,16 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 			this.#contentText.setCustomBgFn(stateBgFn);
 			this.#contentText.setText(this.#formatToolExecution());
 		}
+		if (
+			this.#expanded &&
+			this.#args !== undefined &&
+			((this.#tool && (this.#tool.renderCall || this.#tool.renderResult)) || this.#toolName in toolRenderers)
+		) {
+			const argLines = formatToolArgsLines(this.#args);
+			this.#contentBox.addChild(
+				new Text(["", theme.fg("dim", "Args"), ...argLines.map(line => `  ${theme.fg("dim", line)}`)].join("\n"), 0, 0),
+			);
+		}
 
 		// Handle images (same for both custom and built-in)
 		for (const img of this.#imageComponents) {
@@ -1070,31 +1085,24 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 	 * Format a generic tool execution (fallback for tools without custom renderers)
 	 */
 	#formatToolExecution(): string {
-		const lines: string[] = [];
-		const icon = this.#isPartial ? "pending" : this.#result?.isError ? "error" : "done";
-		lines.push(renderStatusLine({ icon, title: this.#toolLabel }, theme));
-
-		const argsObject = this.#args && typeof this.#args === "object" ? (this.#args as Record<string, unknown>) : null;
-		if (!this.#expanded && argsObject && Object.keys(argsObject).length > 0) {
-			const preview = formatArgsInline(argsObject, 70);
-			if (preview) {
-				lines.push(` ${theme.fg("dim", theme.tree.last)} ${theme.fg("dim", preview)}`);
-			}
-		}
+		const phase = this.#headlinePhase;
+		const headline = this.#renderState.headline ?? this.#toolLabel;
+		const lines: string[] = [
+			renderStatusLine(
+				{
+					icon: phaseStatus(phase),
+					spinnerFrame: this.#spinnerFrame,
+					title: headline,
+				},
+				theme,
+			),
+		];
 
 		if (this.#expanded && this.#args !== undefined) {
 			lines.push("");
 			lines.push(theme.fg("dim", "Args"));
-			const tree = renderJsonTreeLines(
-				this.#args,
-				theme,
-				JSON_TREE_MAX_DEPTH_EXPANDED,
-				JSON_TREE_MAX_LINES_EXPANDED,
-				JSON_TREE_SCALAR_LEN_EXPANDED,
-			);
-			lines.push(...tree.lines);
-			if (tree.truncated) {
-				lines.push(theme.fg("dim", "…"));
+			for (const line of formatToolArgsLines(this.#args)) {
+				lines.push(`  ${theme.fg("dim", line)}`);
 			}
 			lines.push("");
 		}

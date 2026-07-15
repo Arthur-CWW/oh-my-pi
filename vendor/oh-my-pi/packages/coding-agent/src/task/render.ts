@@ -579,7 +579,12 @@ export function renderCall(args: TaskParams, options: TaskRenderOptions, theme: 
 	// pending/hourglass icon would misread the call as something the turn
 	// waits on.
 	const header = renderStatusLine(
-		{ iconOverride: theme.styledSymbol("tool.task", "accent"), title: "Task", description: args.agent },
+		{
+			icon: options.isPartial ? "running" : "pending",
+			spinnerFrame: options.spinnerFrame,
+			title: options.headline ?? "Task",
+			description: options.headline ? undefined : args.agent,
+		},
 		theme,
 	);
 	const assignmentSection = createAssignmentSectionRenderer(args, theme);
@@ -1259,16 +1264,14 @@ export function renderResult(
 	if (!details) {
 		const text = result.content.find(c => c.type === "text")?.text || "";
 		const errored = result.isError === true;
-		const header = errored
-			? renderStatusLine({ icon: "error", title: "Task", description: agentLabel }, theme)
-			: renderStatusLine(
-					{
-						iconOverride: theme.styledSymbol("status.done", "accent"),
-						title: "Task",
-						description: agentLabel,
-					},
-					theme,
-				);
+		const header = renderStatusLine(
+			{
+				icon: errored ? "error" : "success",
+				title: options.headline ?? "Task",
+				description: options.headline ? undefined : agentLabel,
+			},
+			theme,
+		);
 		return framedBlock(theme, width => ({
 			header,
 			sections: [
@@ -1295,18 +1298,10 @@ export function renderResult(
 	const metaLabel = countLabel ? (agentLabel ? `${countLabel}: ${agentLabel}` : countLabel) : agentLabel;
 	const header = renderStatusLine(
 		{
-			icon: icon === "success" || icon === "running" ? undefined : icon,
-			// While agents are in flight the header shows the dispatch glyph, not a
-			// spinner: async spawns return immediately, so "running" means
-			// "delegated to peers", not "this call is blocking the turn".
-			iconOverride:
-				icon === "running"
-					? theme.styledSymbol("tool.task", "accent")
-					: icon === "success"
-						? theme.styledSymbol("status.done", "accent")
-						: undefined,
-			title: "Task",
-			meta: metaLabel ? [metaLabel] : undefined,
+			icon,
+			spinnerFrame: options.spinnerFrame,
+			title: options.headline ?? "Task",
+			meta: options.headline ? undefined : metaLabel ? [metaLabel] : undefined,
 		},
 		theme,
 	);

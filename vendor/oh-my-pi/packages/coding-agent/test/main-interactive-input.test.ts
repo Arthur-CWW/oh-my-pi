@@ -54,7 +54,7 @@ describe("submitInteractiveInput", () => {
 
 		expect(mode.markPendingSubmissionStarted).not.toHaveBeenCalled();
 		expect(session.prompt).toHaveBeenCalledWith("resume now", { synthetic: true, expandPromptTemplates: false });
-		expect(mode.finishPendingSubmission).toHaveBeenCalledWith(input);
+		expect(mode.finishPendingSubmission).toHaveBeenCalledWith(input, false);
 		expect(mode.showError).not.toHaveBeenCalled();
 	});
 
@@ -76,7 +76,7 @@ describe("submitInteractiveInput", () => {
 
 		expect(mode.markPendingSubmissionStarted).toHaveBeenCalledWith(input);
 		expect(session.prompt).not.toHaveBeenCalled();
-		expect(mode.finishPendingSubmission).toHaveBeenCalledWith(input);
+		expect(mode.finishPendingSubmission).toHaveBeenCalledWith(input, false);
 		expect(mode.showError).not.toHaveBeenCalled();
 	});
 
@@ -108,7 +108,7 @@ describe("submitInteractiveInput", () => {
 			},
 			{ streamingBehavior: "followUp" },
 		);
-		expect(mode.finishPendingSubmission).toHaveBeenCalledWith(input);
+		expect(mode.finishPendingSubmission).toHaveBeenCalledWith(input, false);
 		expect(mode.showError).not.toHaveBeenCalled();
 	});
 
@@ -132,7 +132,7 @@ describe("submitInteractiveInput", () => {
 		expect(mode.showError).not.toHaveBeenCalled();
 	});
 
-	it("honors a steer intent on the submission (normal Enter) instead of forcing followUp", async () => {
+	it("honors an explicit steer intent on the submission instead of forcing followUp", async () => {
 		const mode = {
 			markPendingSubmissionStarted: vi.fn(() => true),
 			finishPendingSubmission: vi.fn(),
@@ -181,7 +181,7 @@ describe("submitInteractiveInput", () => {
 			},
 			{ streamingBehavior: "followUp" },
 		);
-		expect(mode.finishPendingSubmission).toHaveBeenCalledWith(input);
+		expect(mode.finishPendingSubmission).toHaveBeenCalledWith(input, false);
 		expect(mode.showError).not.toHaveBeenCalled();
 	});
 
@@ -203,7 +203,7 @@ describe("submitInteractiveInput", () => {
 
 		expect(session.prompt).toHaveBeenCalledWith("loop prompt", { attachments: undefined, streamingBehavior: "followUp" });
 		expect(session.promptCustomMessage).not.toHaveBeenCalled();
-		expect(mode.finishPendingSubmission).toHaveBeenCalledWith(input);
+		expect(mode.finishPendingSubmission).toHaveBeenCalledWith(input, false);
 		expect(mode.showError).not.toHaveBeenCalled();
 	});
 

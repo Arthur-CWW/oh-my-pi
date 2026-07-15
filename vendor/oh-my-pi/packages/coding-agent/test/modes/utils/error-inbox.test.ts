@@ -349,6 +349,90 @@ describe("ErrorInbox", () => {
 		expect(appendCustomEntry).toHaveBeenCalledTimes(0);
 	});
 
+	test("delivers record notifications asynchronously", async () => {
+		const appendCustomEntry = mock<(type: string, data?: unknown) => string>(() => "");
+		const inbox = new ErrorInbox({ appendCustomEntry });
+		const subscriber = mock(() => {});
+		inbox.subscribe(subscriber);
+
+		inbox.recordError("msg", "src", { nowMs: 1000, id: "x" });
+
+		expect(subscriber).toHaveBeenCalledTimes(0);
+		await Promise.resolve();
+		expect(subscriber).toHaveBeenCalledTimes(1);
+	});
+
+	test("coalesces mutation bursts into one notification", async () => {
+		const appendCustomEntry = mock<(type: string, data?: unknown) => string>(() => "");
+		const inbox = new ErrorInbox({ appendCustomEntry });
+		const subscriber = mock(() => {});
+		inbox.subscribe(subscriber);
+
+		inbox.recordError("one", undefined, { nowMs: 1000 });
+		inbox.recordError("two", undefined, { nowMs: 2000 });
+		inbox.recordError("three", undefined, { nowMs: 3000 });
+
+		expect(subscriber).toHaveBeenCalledTimes(0);
+		await Promise.resolve();
+		expect(subscriber).toHaveBeenCalledTimes(1);
+	});
+
+	test("does not notify an unsubscribed subscriber", async () => {
+		const appendCustomEntry = mock<(type: string, data?: unknown) => string>(() => "");
+		const inbox = new ErrorInbox({ appendCustomEntry });
+		const subscriber = mock(() => {});
+		const unsubscribe = inbox.subscribe(subscriber);
+
+		inbox.recordError("queued", undefined, { nowMs: 1000 });
+		unsubscribe();
+		await Promise.resolve();
+		inbox.recordError("later", undefined, { nowMs: 2000 });
+		await Promise.resolve();
+
+		expect(subscriber).toHaveBeenCalledTimes(0);
+	});
+
+	test("notifies after clear, reconcile, and successful resolve", async () => {
+		const appendCustomEntry = mock<(type: string, data?: unknown) => string>(() => "");
+		const inbox = new ErrorInbox({ appendCustomEntry });
+		const subscriber = mock(() => {});
+		inbox.subscribe(subscriber);
+
+		inbox.clear(500);
+		await Promise.resolve();
+		expect(subscriber).toHaveBeenCalledTimes(1);
+		expect(appendCustomEntry).toHaveBeenCalledTimes(1);
+
+		inbox.reconcile([
+			{
+				type: "custom",
+				customType: "ui_error",
+				data: {
+					version: 2,
+					id: "recovered",
+					firstTimestamp: 1000,
+					lastTimestamp: 1000,
+					message: "recovered",
+					count: 1,
+					unread: true,
+					resolved: false,
+				},
+			},
+		] as unknown as SessionEntry[]);
+		await Promise.resolve();
+		expect(subscriber).toHaveBeenCalledTimes(2);
+		expect(appendCustomEntry).toHaveBeenCalledTimes(1);
+
+		expect(inbox.resolve("recovered")).toBe(true);
+		await Promise.resolve();
+		expect(subscriber).toHaveBeenCalledTimes(3);
+		expect(appendCustomEntry).toHaveBeenCalledTimes(2);
+
+		expect(inbox.resolve("missing")).toBe(false);
+		await Promise.resolve();
+		expect(subscriber).toHaveBeenCalledTimes(3);
+	});
+
 	test("silent persistence failure on record", () => {
 		const appendCustomEntry = mock<(type: string, data?: unknown) => string>(() => {
 			throw new Error("Disk full");

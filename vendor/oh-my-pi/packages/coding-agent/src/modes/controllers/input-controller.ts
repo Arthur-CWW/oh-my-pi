@@ -414,12 +414,13 @@ export class InputController {
 		this.ctx.editor.onSubmit = async (text: string) => {
 			text = text.trim();
 			if ((!isSettingsInitialized() || settings.get("emojiAutocomplete")) && text) text = expandEmoticons(text);
+			if (text) this.ctx.closeUnpinnedErrorsPanel();
 
 			// Focused subagent session: the editor is a plain chat box for it.
 			// Everything below (continue shortcuts, slash/bash/python, loop,
 			// compaction queueing) is main-session-only.
 			if (this.ctx.focusedAgentId) {
-				await this.#submitToFocusedSession(text, "steer");
+				await this.#submitToFocusedSession(text, "followUp");
 				return;
 			}
 
@@ -534,10 +535,9 @@ export class InputController {
 				return;
 			}
 
-			// Handle skill commands (/skill:name [args]). Enter ⇒ steer (matches the
-			// free-text Enter semantics applied a few lines below at the streaming
-			// branch). Ctrl+Enter routes through `handleFollowUp` and dispatches the
-			// same helper with `"followUp"`.
+			// Handle skill commands (/skill:name [args]). Enter intentionally keeps
+			// the explicit steer behavior. Ctrl+Enter routes through
+			// `handleFollowUp` and dispatches the same helper with `"followUp"`.
 			if (await this.#invokeSkillCommand(text, "steer")) {
 				return;
 			}
@@ -598,7 +598,7 @@ export class InputController {
 				try {
 					await this.ctx.withLocalSubmission(
 						text,
-						() => this.ctx.session.sendUserMessage(content, { deliverAs: "steer" }),
+						() => this.ctx.session.sendUserMessage(content, { deliverAs: "followUp" }),
 						{ imageCount },
 					);
 					this.ctx.editor.addToHistory(text);
@@ -624,7 +624,7 @@ export class InputController {
 				return;
 			}
 
-			// If streaming, use prompt() with steer behavior
+			// If streaming, use prompt() with follow-up behavior
 			// This handles extension commands (execute immediately), prompt template expansion, and queueing
 			if (this.ctx.session.isStreaming) {
 				this.ctx.editor.addToHistory(text);
@@ -642,7 +642,7 @@ export class InputController {
 				try {
 					await this.ctx.withLocalSubmission(
 						text,
-						() => this.ctx.session.prompt(text, { streamingBehavior: "steer", attachments }),
+						() => this.ctx.session.prompt(text, { streamingBehavior: "followUp", attachments }),
 						{ imageCount: imageAttachments.length },
 					);
 				} catch (error) {
@@ -714,16 +714,15 @@ export class InputController {
 				this.ctx.pendingImageLinks = [];
 
 				// Render user message immediately, then let session events catch up.
-				// Tag the submission as "steer": this is a normal Enter the controller
+				// Tag the submission as "followUp": this is a normal Enter the controller
 				// believed was idle, but a background turn can start in the gap before
-				// `submitInteractiveInput` dispatches it. Steering matches the
-				// streaming-branch Enter (above) and keeps the message from throwing
-				// AgentBusyError on that race.
+				// `submitInteractiveInput` dispatches it. Follow-up preserves turn-boundary
+				// delivery and keeps the message from throwing AgentBusyError on that race.
 				const submission = this.ctx.startPendingSubmission({
 					text,
 					attachments,
 					imageLinks: inputImageLinks,
-					streamingBehavior: "steer",
+					streamingBehavior: "followUp",
 				});
 
 				this.ctx.onInputCallback(submission);
@@ -732,15 +731,14 @@ export class InputController {
 				// epilogue, retry backoff, or a scheduled continue) with the agent
 				// momentarily idle. The editor already cleared itself on Enter, so
 				// falling through here would silently swallow the message. Queue it
-				// as a steer instead: the idle drain in #queueSteer delivers it
-				// immediately when the session is resumable, and a retry/continue
-				// run picks it up at loop start otherwise.
+				// as a follow-up instead of steering: terminal drain delivers it at
+				// the next turn boundary, and a retry/continue run picks it up there.
 				this.ctx.editor.imageLinks = undefined;
 				const attachments = inputAttachments?.length ? [...inputAttachments] : undefined;
 				this.ctx.pendingImages = [];
 				this.ctx.pendingImageLinks = [];
 				try {
-					await this.ctx.withLocalSubmission(text, () => this.ctx.session.steer(text, attachments), {
+					await this.ctx.withLocalSubmission(text, () => this.ctx.session.followUp(text, attachments), {
 						imageCount: countImageAttachments(attachments),
 					});
 				} catch (error) {

@@ -11,6 +11,7 @@ import type { FileDiagnosticsResult } from "../lsp";
 import { renderDiff as renderDiffColored } from "../modes/components/diff";
 import { getLanguageFromPath, type Theme } from "../modes/theme/theme";
 import type { OutputMeta } from "../tools/output-meta";
+import { truncateEditTitlePath } from "../tools/tool-detail-render";
 import {
 	cachedRenderedString,
 	createRenderedStringCache,
@@ -213,22 +214,6 @@ interface EditPathDisplayOptions {
 	maxPathWidth?: number;
 }
 
-function truncateEditTitlePath(displayPath: string, maxWidth: number | undefined): string {
-	if (maxWidth === undefined) return displayPath;
-	const width = visibleWidth(displayPath);
-	const safeMaxWidth = Math.max(0, Math.floor(maxWidth));
-	if (width <= safeMaxWidth) return displayPath;
-
-	const contentWidth = safeMaxWidth - 1;
-	if (contentWidth <= 0) return "…";
-
-	const headWidth = Math.floor(contentWidth / 2);
-	const tailWidth = contentWidth - headWidth;
-	const head = sliceWithWidth(displayPath, 0, headWidth, true).text;
-	const tail = sliceWithWidth(displayPath, Math.max(0, width - tailWidth), tailWidth, true).text;
-	return `${head}…${tail}`;
-}
-
 function formatEditTitlePath(pathValue: string, maxWidth?: number): string {
 	return truncateEditTitlePath(replaceTabs(shortenPath(pathValue), pathValue), maxWidth);
 }
@@ -284,6 +269,7 @@ function renderEditHeader(
 	uiTheme: Theme,
 	options: {
 		icon: "pending" | "success" | "error";
+		headline?: string;
 		iconOverride?: string;
 		op?: Operation;
 		rawPath: string;
@@ -294,6 +280,9 @@ function renderEditHeader(
 		extraSuffix?: string;
 	},
 ): string {
+	if (options.headline) {
+		return renderStatusLine({ icon: options.icon, title: options.headline }, uiTheme);
+	}
 	const title = getOperationTitle(options.op);
 	const descriptionOptions: EditPathDisplayOptions = {
 		rename: options.rename,
@@ -623,6 +612,7 @@ export const editToolRenderer = {
 			// "(streaming)" line instead.
 			const header = renderEditHeader(width, uiTheme, {
 				icon: "pending",
+				headline: options.headline,
 				op,
 				rawPath,
 				rename,
@@ -723,7 +713,8 @@ function renderSingleFileResult(
 		const statsSuffix = headerDiff ? formatDiffStatsSuffix(headerDiff, uiTheme) : "";
 		const header = renderEditHeader(width, uiTheme, {
 			icon: isError ? "error" : "success",
-			iconOverride: !isError && !options.isPartial ? uiTheme.styledSymbol("tool.edit", "accent") : undefined,
+			headline: options.headline,
+			iconOverride: undefined,
 			op,
 			rawPath,
 			rename,

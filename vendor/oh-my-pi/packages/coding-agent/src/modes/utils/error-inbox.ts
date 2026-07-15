@@ -1,9 +1,15 @@
 import { randomUUID } from "node:crypto";
 import { SessionOwnershipLostError } from "../../session/durable-input-queue";
+import type {
+	DiagnosticAction,
+	DiagnosticEvent,
+	DiagnosticEventInput,
+	ErrorInboxWriter,
+} from "../../session/error-inbox-ledger";
+import { appendErrorInboxEvent, enrichErrorInboxEvent } from "../../session/error-inbox-ledger";
 import type { SessionEntry } from "../../session/session-entries";
-import { appendErrorInboxEvent } from "../../session/error-inbox-ledger";
-import type { DiagnosticAction, DiagnosticEvent, DiagnosticEventInput } from "../../session/error-inbox-ledger";
 import type { SubagentFailureClass } from "../../task/subagent-failure";
+
 export type {
 	DiagnosticAction,
 	DiagnosticEvent,
@@ -235,6 +241,8 @@ function decodeUiErrorV2(data: Record<string, unknown>): DiagnosticEvent {
 		finalOutputUri: optionalString(data, "finalOutputUri"),
 		finalOutputAvailable: optionalBoolean(data, "finalOutputAvailable"),
 		causeChain: optionalStringArray(data, "causeChain"),
+		buildDigest: optionalString(data, "buildDigest"),
+		fleetRolloutId: optionalString(data, "fleetRolloutId"),
 		action: decodeDiagnosticAction(data.action),
 		unread,
 		resolved,
@@ -311,10 +319,19 @@ function isSameCauseChain(a: string[] | undefined, b: string[] | undefined): boo
 export class ErrorInbox {
 	#errors: DiagnosticEvent[] = [];
 	readonly #maxErrors = 100;
-	readonly #sessionManager: { appendCustomEntry(type: string, data?: unknown): string };
+	readonly #sessionManager: ErrorInboxWriter;
+	readonly #subscribers = new Set<() => void>();
+	#notificationScheduled = false;
 
-	constructor(sessionManager: { appendCustomEntry(type: string, data?: unknown): string }) {
+	constructor(sessionManager: ErrorInboxWriter) {
 		this.#sessionManager = sessionManager;
+	}
+
+	subscribe(subscriber: () => void): () => void {
+		this.#subscribers.add(subscriber);
+		return () => {
+			this.#subscribers.delete(subscriber);
+		};
 	}
 
 	/**
@@ -340,6 +357,7 @@ export class ErrorInbox {
 		this.#errors = Array.from(decoded.values())
 			.sort((a, b) => b.lastTimestamp - a.lastTimestamp)
 			.slice(0, this.#maxErrors);
+		this.#scheduleNotification();
 	}
 
 	getErrors(): ReadonlyArray<DiagnosticEvent> {
@@ -362,6 +380,7 @@ export class ErrorInbox {
 			if (source && !details.source) details.source = source;
 			if (options?.id && !details.id) details.id = options.id;
 		}
+		enrichErrorInboxEvent(this.#sessionManager, details);
 
 		const match = this.#errors.find(
 			existing =>
@@ -388,6 +407,8 @@ export class ErrorInbox {
 				existing.historyUri === details.historyUri &&
 				existing.finalOutputUri === details.finalOutputUri &&
 				existing.finalOutputAvailable === details.finalOutputAvailable &&
+				existing.buildDigest === details.buildDigest &&
+				existing.fleetRolloutId === details.fleetRolloutId &&
 				isSameCauseChain(existing.causeChain, details.causeChain) &&
 				isSameAction(existing.action, details.action) &&
 				now >= existing.lastTimestamp &&
@@ -435,6 +456,8 @@ export class ErrorInbox {
 				finalOutputUri: details.finalOutputUri,
 				finalOutputAvailable: details.finalOutputAvailable,
 				causeChain: details.causeChain,
+				buildDigest: details.buildDigest,
+				fleetRolloutId: details.fleetRolloutId,
 				action: details.action,
 			};
 			this.#errors.unshift(record);
@@ -444,6 +467,7 @@ export class ErrorInbox {
 		}
 
 		appendErrorInboxEvent(this.#sessionManager, record);
+		this.#scheduleNotification();
 	}
 
 	/**
@@ -457,6 +481,7 @@ export class ErrorInbox {
 		} catch {
 			// Persistence failure must never recursively surface as a new error.
 		}
+		this.#scheduleNotification();
 	}
 
 	/**
@@ -475,6 +500,22 @@ export class ErrorInbox {
 		this.#errors[idx] = resolvedEvent;
 
 		appendErrorInboxEvent(this.#sessionManager, resolvedEvent);
+		this.#scheduleNotification();
 		return true;
+	}
+
+	#scheduleNotification(): void {
+		if (this.#subscribers.size === 0 || this.#notificationScheduled) return;
+		this.#notificationScheduled = true;
+		queueMicrotask(() => {
+			this.#notificationScheduled = false;
+			for (const subscriber of this.#subscribers) {
+				try {
+					subscriber();
+				} catch {
+					// Subscribers must not be able to break inbox updates.
+				}
+			}
+		});
 	}
 }

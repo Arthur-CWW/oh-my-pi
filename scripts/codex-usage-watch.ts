@@ -20,7 +20,7 @@ const LOG = `${DIR}log.jsonl`;
 const ALERTS = `${DIR}alerts.log`;
 
 let lastAvailable: number | null = null;
-let lastWeeklyUsed: number | null = null;
+const lastWeeklyByAccount = new Map<string, number>();
 
 const alert = (message: string) => {
 	const line = `${new Date().toISOString()} ${message}\n`;
@@ -62,15 +62,14 @@ for (;;) {
 			}
 			lastAvailable = credits.availableCount;
 		}
-		const proUsed = weekly.find(w => typeof w.used === "number")?.used;
-		if (typeof proUsed === "number") {
-			if (lastWeeklyUsed !== null && lastWeeklyUsed >= 80 && proUsed <= 20) {
-				alert(`UPSTREAM RESET OBSERVED: weekly used ${lastWeeklyUsed}% -> ${proUsed}% (all-clear)`);
+		// Alert on the reset transition for ANY account (>=80% -> <=20%).
+		for (const w of weekly) {
+			const key = String(w.account ?? "?");
+			const used = typeof w.used === "number" ? w.used : null;
+			if (used === null) continue;
+			const prev = lastWeeklyByAccount.get(key);
+			if (prev !== undefined && prev >= 80 && used <= 20) {
+				alert(`UPSTREAM RESET OBSERVED on ${key}: weekly used ${prev}% -> ${used}% (all-clear)`);
 			}
-			lastWeeklyUsed = proUsed;
+			lastWeeklyByAccount.set(key, used);
 		}
-	} catch (error) {
-		appendFileSync(ALERTS, `${new Date().toISOString()} watcher error: ${String(error)}\n`);
-	}
-	await Bun.sleep(POLL_MINUTES * 60_000);
-}

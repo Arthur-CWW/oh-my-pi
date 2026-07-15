@@ -115,7 +115,8 @@ import { ChatBlock, type ChatBlockHost } from "./components/chat-block";
 import { CustomEditor } from "./components/custom-editor";
 import { DynamicBorder } from "./components/dynamic-border";
 import { ErrorBannerComponent } from "./components/error-banner";
-import { ErrorSelectorComponent } from "./components/error-selector";
+import type { DockablePanelController } from "./components/dockable-panel";
+import { createErrorsDock, type ErrorsPanelComponent } from "./components/errors-panel";
 import type { EvalExecutionComponent } from "./components/eval-execution";
 import type { HookEditorComponent } from "./components/hook-editor";
 import type { HookInputComponent } from "./components/hook-input";
@@ -183,7 +184,6 @@ import type {
 	TodoPhase,
 	TranscriptMode,
 } from "./types";
-import { focusCmuxOwner } from "./utils/cmux-owner-navigation";
 import { type DiagnosticEventInput, ErrorInbox } from "./utils/error-inbox";
 import { UiHelpers } from "./utils/ui-helpers";
 
@@ -506,6 +506,8 @@ export class InteractiveMode implements InteractiveModeContext, SubmittedInputRe
 	readonly #chatHost: ChatBlockHost = { requestRender: component => this.ui.requestComponentRender(component) };
 
 	readonly errorInbox: ErrorInbox;
+	readonly #errorsPanel: ErrorsPanelComponent;
+	readonly #errorsDock: DockablePanelController;
 	constructor(
 		session: AgentSession,
 		version: string,
@@ -600,6 +602,12 @@ export class InteractiveMode implements InteractiveModeContext, SubmittedInputRe
 		this.editorContainer.addChild(this.editor);
 		this.statusLine = new StatusLineComponent(session);
 		this.statusLine.setAutoCompactEnabled(session.autoCompactionEnabled);
+		({ panel: this.#errorsPanel, dock: this.#errorsDock } = createErrorsDock(
+			this.ui,
+			this.errorInbox,
+			this.editor,
+			pinned => this.showStatus(`Errors panel ${pinned ? "pinned" : "unpinned"}.`),
+		));
 
 		this.hideThinkingBlock = settings.get("hideThinkingBlock");
 
@@ -2834,25 +2842,14 @@ export class InteractiveMode implements InteractiveModeContext, SubmittedInputRe
 			return;
 		}
 
-		const errors = this.errorInbox.getErrors();
-		if (errors.length === 0) {
+		if (this.errorInbox.getErrors().length === 0 && !this.#errorsDock.isOpen) {
 			this.showStatus("No recent errors.");
 			return;
 		}
-		this.#selectorController.showSelector(done => {
-			const selector = new ErrorSelectorComponent(
-				errors,
-				() => {
-					done();
-					this.ui.requestRender();
-				},
-				{
-					onAction: focusCmuxOwner,
-					onUpdate: () => this.ui.requestRender(),
-				},
-			);
-			return { component: selector, focus: selector.getSelectList() };
-		});
+		this.#errorsDock.toggle();
+	}
+	closeUnpinnedErrorsPanel(): void {
+		if (this.#errorsDock.isOpen && !this.#errorsDock.isPinned) this.#errorsDock.close();
 	}
 
 	async handlePlanApproval(details: PlanApprovalDetails): Promise<void> {
@@ -3056,6 +3053,8 @@ export class InteractiveMode implements InteractiveModeContext, SubmittedInputRe
 		this.#observerRegistry.dispose();
 		this.#eventController.dispose();
 		this.statusLine.dispose();
+		this.#errorsDock.close();
+		this.#errorsPanel.dispose();
 		if (this.#resizeHandler) {
 			process.stdout.removeListener("resize", this.#resizeHandler);
 			this.#resizeHandler = undefined;

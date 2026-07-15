@@ -86,6 +86,7 @@ import {
 	splitInternalUrlSel,
 	splitPathAndSel,
 } from "./path-utils";
+import { readSourceFsPath } from "./tool-detail-render";
 import { formatBytes, replaceTabs, shortenPath, wrapBrackets } from "./render-utils";
 import {
 	executeReadQuery,
@@ -2685,15 +2686,6 @@ function firstReadSelectorLine(sel: string | undefined): number | undefined {
 	}
 }
 
-/** Absolute fs path the read result actually resolved to, used as the OSC 8 link
- * target when the structured `resolvedPath` isn't set (the common plain-file and
- * image reads only record the path in `meta.source`). URL/internal sources are
- * not fs paths, so only `type: "path"` qualifies. */
-function readSourceFsPath(details: ReadToolDetails | undefined): string | undefined {
-	const source = details?.meta?.source;
-	return source?.type === "path" ? source.value : undefined;
-}
-
 function formatReadPathLink(
 	rawPath: string,
 	options: {
@@ -2736,7 +2728,10 @@ export const readToolRenderer = {
 			pathDisplay += `:${startLine}${endLine ? `-${endLine}` : ""}`;
 		}
 
-		const text = renderStatusLine({ icon: "pending", title: "Read", description: pathDisplay }, uiTheme);
+		const text = renderStatusLine(
+			{ icon: "pending", title: _options.headline ?? "Read", description: _options.headline ? undefined : pathDisplay },
+			uiTheme,
+		);
 		return new Text(text, 0, 0);
 	},
 
@@ -2772,7 +2767,7 @@ export const readToolRenderer = {
 				const endLine = args.limit !== undefined ? startLine + args.limit - 1 : "";
 				title += `:${startLine}${endLine ? `-${endLine}` : ""}`;
 			}
-			const header = renderStatusLine({ icon: "error", title }, uiTheme);
+			const header = renderStatusLine({ icon: "error", title: options.headline ?? title }, uiTheme);
 			const errorLines = errorText.split("\n").map(line => uiTheme.fg("error", replaceTabs(line)));
 			const outputBlock = new CachedOutputBlock();
 			return markFramedBlockComponent({
@@ -2822,7 +2817,7 @@ export const readToolRenderer = {
 			});
 			const correction = suffix ? ` ${uiTheme.fg("dim", `(corrected from ${shortenPath(suffix.from)})`)}` : "";
 			const header = renderStatusLine(
-				{ icon: suffix ? "warning" : "success", title: "Read", description: `${displayPath}${correction}` },
+				{ icon: suffix ? "warning" : "success", title: options.headline ?? "Read", description: options.headline ? undefined : `${displayPath}${correction}` },
 				uiTheme,
 			);
 			const detailLines = contentText ? contentText.split("\n").map(line => uiTheme.fg("toolOutput", line)) : [];
@@ -2873,6 +2868,7 @@ export const readToolRenderer = {
 			const n = details.conflictCount;
 			title += ` ${uiTheme.fg("warning", `(⚠ ${n} conflict${n === 1 ? "" : "s"})`)}`;
 		}
+		title = options.headline ?? title;
 		const rawRequested = args?.raw === true || isRawSelector(parseSel(renderPath.sel));
 		const isMarkdown = details?.contentType === "text/markdown" && !rawRequested;
 		let cachedWidth: number | undefined;

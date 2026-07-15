@@ -116,6 +116,40 @@ describe("HistoryStorage session linkage", () => {
 	});
 });
 
+describe("HistoryStorage channels", () => {
+	it("persists command history without surfacing it as prompt history", async () => {
+		const { storage, dbPath } = await freshStorage();
+		await flush(
+			storage.add("normal prompt", "/repo", "session-prompt"),
+			storage.addToChannel("command", ":id", "/repo", "session-command"),
+		);
+
+		expect(storage.getRecent(10).map(entry => entry.prompt)).toEqual(["normal prompt"]);
+		expect(storage.getRecent(10, "command").map(entry => entry.prompt)).toEqual([":id"]);
+		expect(storage.search("id", 10)).toEqual([]);
+
+		HistoryStorage.resetInstance();
+		const reopened = HistoryStorage.open(dbPath);
+		expect(reopened.getRecent(10).map(entry => entry.prompt)).toEqual(["normal prompt"]);
+		expect(reopened.getRecent(10, "command").map(entry => [entry.prompt, entry.sessionId])).toEqual([
+			[":id", "session-command"],
+		]);
+	});
+
+	it("deduplicates adjacent values independently within each channel", async () => {
+		const { storage } = await freshStorage();
+		await flush(
+			storage.add("same"),
+			storage.addToChannel("command", "same"),
+			storage.add("same"),
+			storage.addToChannel("command", "same"),
+		);
+
+		expect(storage.getRecent(10).map(entry => entry.prompt)).toEqual(["same"]);
+		expect(storage.getRecent(10, "command").map(entry => entry.prompt)).toEqual(["same"]);
+	});
+});
+
 describe("HistoryStorage.matchingSessionIds", () => {
 	it("returns matching session ids ordered by recency, de-duplicated", async () => {
 		const { storage } = await freshStorage();

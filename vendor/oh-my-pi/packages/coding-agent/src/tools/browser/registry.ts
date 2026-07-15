@@ -7,7 +7,11 @@ import { findFreeCdpPort, findReusableCdp, gracefulKillTreeOnce, killExistingByP
 import type { CmuxKind } from "./cmux/rpc";
 import { CmuxSocketClient } from "./cmux/socket-client";
 import { BROWSER_PROTOCOL_TIMEOUT_MS, launchHeadlessBrowser, loadPuppeteer, type UserAgentOverride } from "./launch";
-import { removeOwnedBrowserProfile, type OwnedBrowserProfile } from "./process-ownership";
+import {
+	recordOwnedBrowserActiveTabs,
+	removeOwnedBrowserProfile,
+	type OwnedBrowserProfile,
+} from "./process-ownership";
 
 export type PuppeteerBrowserKind =
 	| { kind: "headless"; headless: boolean }
@@ -43,6 +47,7 @@ export interface CmuxBrowserHandle extends BrowserHandleCommon {
 export type BrowserHandle = PuppeteerBrowserHandle | CmuxBrowserHandle;
 
 const browsers = new Map<string, BrowserHandle>();
+const activeTabUpdates = new WeakMap<BrowserHandle, Promise<void>>();
 
 function browserKey(kind: BrowserKind): string {
 	switch (kind.kind) {
@@ -63,6 +68,8 @@ export interface AcquireBrowserOptions {
 	viewport?: { width: number; height: number; deviceScaleFactor?: number };
 	appArgs?: string[];
 	signal?: AbortSignal;
+	maxOwnedPerSession?: number;
+	maxOwnedGlobal?: number;
 }
 
 export async function acquireBrowser(kind: BrowserKind, opts: AcquireBrowserOptions): Promise<BrowserHandle> {
@@ -107,6 +114,8 @@ async function openBrowserHandle(kind: BrowserKind, opts: AcquireBrowserOptions)
 			headless: kind.headless,
 			sessionId: opts.sessionId,
 			viewport: opts.viewport,
+			maxOwnedPerSession: opts.maxOwnedPerSession,
+			maxOwnedGlobal: opts.maxOwnedGlobal,
 		});
 		return {
 			key: browserKey(kind),
@@ -201,10 +210,12 @@ async function openBrowserHandle(kind: BrowserKind, opts: AcquireBrowserOptions)
 
 export function holdBrowser(handle: BrowserHandle): void {
 	handle.refCount++;
+	updateOwnedBrowserActiveTabs(handle);
 }
 
 export async function releaseBrowser(handle: BrowserHandle, opts: { kill: boolean }): Promise<void> {
 	handle.refCount = Math.max(0, handle.refCount - 1);
+	updateOwnedBrowserActiveTabs(handle);
 	if (handle.refCount === 0) {
 		// Only evict if the registry still points at THIS handle. After a disconnect,
 		// `acquireBrowser` may have already replaced the entry with a fresh live handle
@@ -265,3 +276,17 @@ async function disposeBrowserHandle(handle: BrowserHandle, opts: { kill: boolean
 }
 
 postmortem.register("browser-processes", disposeAllBrowsers);
+
+function updateOwnedBrowserActiveTabs(handle: BrowserHandle): void {
+	if (!("browser" in handle) || handle.kind.kind !== "headless") return;
+	const ownership = handle.ownership;
+	if (!ownership) return;
+	const previous = activeTabUpdates.get(handle) ?? Promise.resolve();
+	const update = previous
+		.catch(() => undefined)
+		.then(() => recordOwnedBrowserActiveTabs(ownership, handle.refCount));
+	activeTabUpdates.set(handle, update);
+	void update.catch(error => {
+		logger.debug("Failed to update owned browser activity", { error: String(error) });
+	});
+}

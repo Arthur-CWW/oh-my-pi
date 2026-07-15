@@ -45,6 +45,7 @@ import type { AsyncJobManager } from "../async";
 import type { LocalProtocolOptions } from "../internal-urls";
 import { type ArchivedDirectChildDescriptor, listArchivedDirectChildren } from "../internal-urls/history-protocol";
 import { loadOverallPlanReference } from "../plan-mode/plan-handoff";
+import { getSessionSpawnCordon, type SessionSpawnCordon } from "../session/session-control";
 import { AgentLifecycleManager, type ReviveAdmissionAcquirer } from "../registry/agent-lifecycle";
 import type { AgentStatus } from "../registry/agent-registry";
 import { AgentRegistry, MAIN_AGENT_ID } from "../registry/agent-registry";
@@ -113,9 +114,11 @@ function renderSubagentUserPrompt(assignment: string): string {
 // Re-export types and utilities
 export { loadBundledAgents as BUNDLED_AGENTS } from "./agents";
 export { discoverCommands, expandCommand, getCommand } from "./commands";
-export { discoverAgents, getAgent } from "./discovery";
+export { discoverAgents, getAgent, getAgentPickerData } from "./discovery";
 export { AgentOutputManager } from "./output-manager";
 export { formatAvailableModels, formatInvalidModelOverrideError, formatModelChain } from "./spawn-route";
+export { composeSpawnPrompt, createSpawnRecord, isSpawnRecord, SPAWN_RECORD_VERSION } from "./spawn-record";
+export type { SpawnRecord } from "./spawn-record";
 export type {
 	AgentDefinition,
 	AgentProgress,
@@ -223,6 +226,18 @@ function createTaskModeError(text: string): AgentToolResult<TaskToolDetails> {
 	return {
 		content: [{ type: "text", text }],
 		details: { projectAgentsDir: null, results: [], totalDurationMs: 0 },
+	};
+}
+
+function createSpawnCordonRefusal(cordon: SessionSpawnCordon): AgentToolResult<TaskToolDetails> {
+	return {
+		content: [
+			{
+				type: "text",
+				text: `Spawn refused: session is cordoned for rollout ${cordon.rolloutId} (${cordon.expectedDigest}).`,
+			},
+		],
+		details: { projectAgentsDir: null, results: [], totalDurationMs: 0, spawnRefusal: cordon },
 	};
 }
 
@@ -784,6 +799,8 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 		if (validationError) {
 			return createTaskModeError(validationError);
 		}
+		const cordon = this.session.getSessionId ? getSessionSpawnCordon(this.session.getSessionId() ?? "") : undefined;
+		if (cordon) return createSpawnCordonRefusal(cordon);
 
 		const spawnItems = resolveSpawnItems(params);
 		const selectedAgent = this.#discoveredAgents.find(agent => agent.name === params.agent);
@@ -1342,6 +1359,8 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 		} catch (error) {
 			logger.warn("task: failed to reload settings before spawning subagent", { error: String(error) });
 		}
+		const cordon = this.session.getSessionId ? getSessionSpawnCordon(this.session.getSessionId() ?? "") : undefined;
+		if (cordon) return createSpawnCordonRefusal(cordon);
 		const { agents, projectAgentsDir } = await discoverAgents(this.session.cwd);
 		const agentName = params.agent ?? "";
 		const preResolved = preAllocatedId ? this.#preResolvedModels.get(preAllocatedId) : undefined;
@@ -1580,6 +1599,8 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 				task: renderSubagentUserPrompt(assignment),
 				assignment,
 				spawnContext: sharedContext,
+				definitionSourcePath: agent.filePath ?? `embedded:${agent.name}.md`,
+				spawnerId: this.session.getAgentId?.() ?? MAIN_AGENT_ID,
 				recentTools: [],
 				recentOutput: [],
 				toolCount: 0,

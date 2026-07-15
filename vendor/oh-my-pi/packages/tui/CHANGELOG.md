@@ -5,6 +5,7 @@
 ### Added
 
 - Added an undo-safe `Enter` action that expands a collapsed paste marker in place for inline editing without re-collapsing its raw text.
+- Added a reusable, terminal-independent completion behavior state machine for shared selection, acceptance, dismissal, and history navigation across editor surfaces.
 
 ## [16.0.1] - 2026-06-15
 

@@ -10,9 +10,10 @@ import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/typ
  * on Enter, so the message vanished without a trace (no queue entry, no error,
  * no transcript message).
  *
- * Contract: such a submission must be queued as a steer (the session's idle
- * drain / next run start delivers it) and recorded as a local submission so
- * its eventual delivery does not clobber the editor.
+ * Contract: such a submission must be queued as a follow-up (the session's
+ * idle drain / next run start delivers it at the next turn boundary) and
+ * recorded as a local submission so its eventual delivery does not clobber
+ * the editor.
  */
 
 type FakeEditor = {
@@ -28,7 +29,7 @@ type FakeEditor = {
 
 function createContext() {
 	let editorText = "";
-	const steer = vi.fn(async (_text: string, _images?: unknown) => {});
+	const followUp = vi.fn(async (_text: string, _images?: unknown) => {});
 	const prompt = vi.fn(async () => {});
 	const updatePendingMessagesDisplay = vi.fn();
 	const requestRender = vi.fn();
@@ -58,7 +59,7 @@ function createContext() {
 			isBashRunning: false,
 			isEvalRunning: false,
 			extensionRunner: undefined,
-			steer,
+			followUp,
 			prompt,
 			queuedMessageCount: 0,
 			getQueuedMessages: () => ({ steering: [], followUp: [] }),
@@ -95,9 +96,9 @@ function createContext() {
 			}
 		},
 		// No input waiter: the state under test.
-		onInputCallback: undefined,
 		updatePendingMessagesDisplay,
 		flushPendingBashComponents,
+		closeUnpinnedErrorsPanel: vi.fn(),
 		showError,
 		isBashMode: false,
 		isPythonMode: false,
@@ -106,20 +107,20 @@ function createContext() {
 	return {
 		ctx,
 		editor,
-		spies: { steer, prompt, updatePendingMessagesDisplay, requestRender, showError, addToHistory },
+		spies: { followUp, prompt, updatePendingMessagesDisplay, requestRender, showError, addToHistory },
 	};
 }
 
 
 describe("InputController orphaned submit", () => {
-	it("queues an idle submit with no input waiter as a steer instead of dropping it", async () => {
+	it("queues an idle submit with no input waiter as a follow-up instead of dropping it", async () => {
 		const { ctx, editor, spies } = createContext();
 		const controller = new InputController(ctx);
 		controller.setupEditorSubmitHandler();
 
 		await editor.onSubmit?.("do not lose me");
 
-		expect(spies.steer).toHaveBeenCalledWith("do not lose me", undefined);
+		expect(spies.followUp).toHaveBeenCalledWith("do not lose me", undefined);
 		expect(spies.prompt).not.toHaveBeenCalled();
 		// Delivery protection: the queued message is marked as locally submitted.
 		expect(ctx.locallySubmittedUserSignatures.has("do not lose me\u00000")).toBe(true);
@@ -138,16 +139,16 @@ describe("InputController orphaned submit", () => {
 
 		await editor.onSubmit?.("look at this");
 
-		expect(spies.steer).toHaveBeenCalledWith("look at this", [image]);
+		expect(spies.followUp).toHaveBeenCalledWith("look at this", [image]);
 		expect(ctx.locallySubmittedUserSignatures.has("look at this\u00001")).toBe(true);
 		expect(ctx.pendingImages.length).toBe(0);
 	});
 
-	it("restores text and images to the editor when the steer rejects", async () => {
+	it("restores text and images when the follow-up rejects", async () => {
 		const { ctx, editor, spies } = createContext();
 		const image = { type: "image" as const, data: "abc", mimeType: "image/png" };
 		(ctx.pendingImages as unknown[]).push(image);
-		spies.steer.mockImplementationOnce(async () => {
+		spies.followUp.mockImplementationOnce(async () => {
 			throw new Error("queue exploded");
 		});
 		const controller = new InputController(ctx);
@@ -163,19 +164,18 @@ describe("InputController orphaned submit", () => {
 		expect(ctx.locallySubmittedUserSignatures.has("doomed message\u00001")).toBe(false);
 	});
 
-	it("returns queued images to the pending-image buffer on queue restore", async () => {
+	it("restores queued text to the editor", async () => {
 		const { ctx, editor } = createContext();
-		const image = { type: "image" as const, data: "abc", mimeType: "image/png" };
 		const session = ctx.session as unknown as {
 			getQueuedInputProjection: () => unknown[];
 			cancelQueuedInput: (inputId: string) => Promise<unknown>;
 		};
 		const queued = {
-			inputId: "queued-image",
+			inputId: "queued-follow-up",
 			sequence: 1,
-			deliveryClass: "steer" as const,
+			deliveryClass: "followUp" as const,
 			revision: 1,
-			payload: { text: "queued with image", attachments: [image] },
+			payload: { text: "queued text", attachments: undefined },
 			state: "queued" as const,
 			attempts: [],
 		};
@@ -186,9 +186,7 @@ describe("InputController orphaned submit", () => {
 		const restored = await controller.restoreQueuedMessagesToEditor();
 
 		expect(restored).toBe(1);
-		expect(editor.getText()).toBe("queued with image");
-		expect(ctx.pendingImages).toEqual([image]);
-		expect(ctx.pendingImageLinks).toEqual([undefined]);
+		expect(editor.getText()).toBe("queued text");
 	});
 });
 

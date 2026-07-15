@@ -43,6 +43,7 @@ export interface FleetIncidentStoreOptions {
 	readonly threshold?: number;
 	readonly now?: () => number;
 	readonly createId?: () => string;
+	readonly readonly?: boolean;
 }
 
 interface IncidentRow {
@@ -96,9 +97,10 @@ export class FleetIncidentStore {
 		this.#threshold = Math.max(1, Math.trunc(options.threshold ?? DEFAULT_THRESHOLD));
 		this.#now = options.now ?? Date.now;
 		this.#createId = options.createId ?? randomUUID;
-		fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-		this.#db = new Database(dbPath);
+		if (!options.readonly) fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+		this.#db = options.readonly ? new Database(dbPath, { readonly: true }) : new Database(dbPath);
 		this.#db.run("PRAGMA busy_timeout = 3000");
+		if (options.readonly) return;
 		this.#db.run("PRAGMA journal_mode = WAL");
 		this.#db.run("PRAGMA foreign_keys = ON");
 		this.#db.run(`

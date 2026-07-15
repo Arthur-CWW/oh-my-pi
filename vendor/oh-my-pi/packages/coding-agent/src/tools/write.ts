@@ -1116,8 +1116,8 @@ export const writeToolRenderer = {
 		const header = renderStatusLine(
 			{
 				icon: "pending",
-				title: "Write",
-				description: `${langIcon} ${pathDisplay}`,
+				title: options.headline ?? "Write",
+				description: options.headline ? undefined : `${langIcon} ${pathDisplay}`,
 			},
 			uiTheme,
 		);
@@ -1166,7 +1166,7 @@ export const writeToolRenderer = {
 		if (result.isError) {
 			const errorText = result.content?.find(c => c.type === "text")?.text ?? "";
 			const header = renderStatusLine(
-				{ icon: "error", title: "Write", description: `${langIcon} ${pathDisplay}` },
+				{ icon: "error", title: options.headline ?? "Write", description: options.headline ? undefined : `${langIcon} ${pathDisplay}` },
 				uiTheme,
 			);
 			return framedBlock(uiTheme, width => ({
@@ -1185,9 +1185,9 @@ export const writeToolRenderer = {
 			: "";
 		const header = renderStatusLine(
 			{
-				iconOverride: uiTheme.styledSymbol("tool.write", "accent"),
-				title: "Write",
-				description: `${langIcon} ${pathDisplay}${lineSuffix}${execSuffix}`,
+				icon: "success",
+				title: options.headline ?? "Write",
+				description: options.headline ? undefined : `${langIcon} ${pathDisplay}${lineSuffix}${execSuffix}`,
 			},
 			uiTheme,
 		);

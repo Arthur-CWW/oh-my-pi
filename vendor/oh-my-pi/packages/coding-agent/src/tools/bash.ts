@@ -1174,7 +1174,7 @@ export function createShellRenderer<TArgs>(config: ShellRendererConfig<TArgs>) {
 			const header =
 				config.showHeader === false
 					? undefined
-					: renderStatusLine({ icon: "pending", title: config.resolveTitle(args, options) }, uiTheme);
+					: renderStatusLine({ icon: "pending", title: options.headline ?? config.resolveTitle(args, options) }, uiTheme);
 			const outputBlock = new CachedOutputBlock();
 			return markFramedBlockComponent({
 				render: (width: number): readonly string[] =>
@@ -1214,12 +1214,12 @@ export function createShellRenderer<TArgs>(config: ShellRendererConfig<TArgs>) {
 					: renderStatusLine(
 							success
 								? {
-										iconOverride: uiTheme.styledSymbol("tool.bash", "accent"),
-										title: config.resolveTitle(args, options),
+										icon: "success",
+										title: options.headline ?? config.resolveTitle(args, options),
 									}
 								: {
 										icon: isPartial ? "pending" : "error",
-										title: config.resolveTitle(args, options),
+										title: options.headline ?? config.resolveTitle(args, options),
 									},
 							uiTheme,
 						);

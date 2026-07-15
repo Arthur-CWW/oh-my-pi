@@ -59,6 +59,7 @@ import { appendChildLifecycleRecord, type ChildLifecycleState } from "./child-li
 import { type RestorableSessionModel, resolveRestorableSessionModel } from "./hotswap";
 import { getNumberField, getProgressUsageTokens } from "./progress-usage";
 import type { SpawnRouteReceipt } from "./route-resolution";
+import { createSpawnRecord } from "./spawn-record";
 import { subprocessToolRegistry } from "./subprocess-tool-registry";
 import {
 	type AgentDefinition,
@@ -905,6 +906,9 @@ interface RunMonitorArgs {
 	description?: string;
 	modelOverride?: string | string[];
 	routeReceipt?: SpawnRouteReceipt;
+	context?: string;
+	definitionSourcePath: string;
+	spawnerId: string;
 	signal?: AbortSignal;
 	isHardCancelled?: () => boolean;
 	onProgress?: (progress: AgentProgress) => void;
@@ -972,6 +976,9 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
 		task,
 		assignment,
 		description: args.description,
+		spawnContext: args.context,
+		definitionSourcePath: args.definitionSourcePath,
+		spawnerId: args.spawnerId,
 		lastIntent: undefined,
 		recentTools: [],
 		recentOutput: [],
@@ -2020,6 +2027,8 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 
 	const modelPatterns = normalizeModelPatterns(modelOverride ?? agent.model);
 	const sessionFile = subtaskSessionFile ?? null;
+	const spawnerId = options.parentAgentId ?? MAIN_AGENT_ID;
+	const definitionSourcePath = agent.filePath ?? `embedded:${agent.name}.md`;
 	const spawnsEnv = atMaxDepth
 		? ""
 		: agent.spawns === undefined
@@ -2047,6 +2056,9 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 		description: options.description,
 		modelOverride,
 		routeReceipt,
+		context: options.context,
+		definitionSourcePath,
+		spawnerId,
 		signal,
 		onProgress,
 		eventBus: options.eventBus,
@@ -2391,6 +2403,16 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 								parentTaskPrefix: id,
 								thinkingLevel: effectiveThinkingLevel ?? null,
 								isolated: worktree !== undefined,
+								spawnRecord: createSpawnRecord({
+									agentId: id,
+									spawnerId,
+									agentType: agent.name,
+									definitionSourcePath,
+									assignment: assignment ?? task,
+									context: options.context,
+									resolvedModel: routeReceipt?.route.selector ?? (model ? `${model.provider}/${model.id}` : undefined),
+									route: routeReceipt,
+								}),
 							},
 						}
 					: {}),
