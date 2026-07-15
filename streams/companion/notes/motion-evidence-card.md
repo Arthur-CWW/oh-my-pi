@@ -1,6 +1,6 @@
 # Motion evidence card — Apple Vision body/hands lanes
 
-Status: DRAFT — sico batch in flight; live calibrated clips pending Arthur. Numbers marked *(interim)* update when the batch completes; sections marked *(pending)* are honestly absent, not implied.
+Status: PUBLISHED 2026-07-15 with one declared gap — live calibrated close-hand clips (needs Arthur, ~2 min on camera). The batch and comparison sections below are final; the GPU corpus processor (RTX, RTMPose-wholebody) is being built and will add a third track set at `data/gpu-pose-tracks/`.
 
 ## Sources and versions
 
@@ -16,11 +16,13 @@ Status: DRAFT — sico batch in flight; live calibrated clips pending Arthur. Nu
 - Oracle retarget thresholds 0.45 arms/torso/head, 0.60 legs; stale release 420ms; PoseGuard 12 rad/s cap; HandGuard 9 rad/s, hold 100ms/decay 250ms/reset 350ms.
 - Synthetic replay now carries full 19-joint body + both Hand-21 hands: drive-motion provable end-to-end without a camera (test-asserted through parse → PoseGuard → retarget).
 
-## Sico corpus batch *(interim — 74/281 clips at draft time)*
+## Sico corpus batch (FINAL — 281 clips, completed 2026-07-15 10:39)
 
-- body2d: mean 0.62 / median 0.65 of sampled frames; hands: mean 0.54; body3d: mean 0.71 / median 0.78. Zero-detection clips: 2/74. ~57s wall per clip at every-2nd-frame sampling, single process.
-- Same-clip Vision-vs-MediaPipe comparison over the 73 body-track clips: *(fills in from `data/apple-vision-tracks/comparison-summary.json`)*.
-- Failure taxonomy + overlays: *(fills in from `streams/companion/notes/vision-sico-batch.md`)*.
+- 279/280 manifest entries ok, 1 honest empty (no detections), 0 errors; 52,519 sampled frames (every 2nd), 4.34h single-process wall on the M4 Max.
+- Detection rates over sampled frames: body2d mean 0.69 / median 0.75 (4 zero clips); hands mean 0.63 / median 0.69 (4 zero); body3d mean 0.74 / median 0.83 (1 zero). 3D outperforming 2D on availability is consistent — VNDetectHumanBodyPose3DRequest tolerates partial bodies the 2D full-core gate rejects.
+- Same-clip Vision-vs-MediaPipe (73 clips, 12,591 aligned frames within 50ms, 102,268 joint samples): overall mean normalized delta 0.080, p95 0.356. Head/face joints (nose/eyes/ears) agree at mean ~0.023–0.029 with p95 ≤ 0.060 — tight cross-provider consensus where both detect. The overall mean is dominated by limb divergence on low-confidence/occluded frames; per-joint table in `data/apple-vision-tracks/comparison-summary.json` (explicit Vision→MediaPipe index mapping + unmapped joints declared).
+- Vision availability vs MediaPipe: Vision reports ~0.56 availability on head joints where MediaPipe claims 1.0 — MediaPipe always hallucinates a full skeleton; Vision withholds. Calibration implication: Vision confidence is the more honest gate; MediaPipe availability must be confidence-weighted before arbitration parity.
+- Overlays (eyeball intuition): `data/apple-vision-tracks/overlays/{7640921695418617101,7593135012170534174,7630618588805745933}.jpg`. Batch note: `streams/companion/notes/vision-sico-batch.md`.
 
 ## Coverage evidence
 
@@ -36,11 +38,13 @@ Full retarget core incl. nose/ears, both hands close for distal fingers, occlusi
 
 - Env + weights cached on RTX 3090; detector-only GPU smoke passed (3 frames, 0.8s). Full 3D runner fail-closes on licensed `MANO_RIGHT.pkl` — blocked on Arthur's MPI registration (same session as SMPL/SMPLX/FLAME). Rerun note: desktop `~/projects/model-bench/models/wilor/README.md`.
 
-## Bounded recommendation *(finalize with batch numbers)*
+## Bounded recommendation (grounded in the 281-clip batch)
 
-- Apple Vision 2D is a credible live shadow/drive lane behind the arbiter; hands at dance-video distance are weak *(interim 0.54 frame rate, low confidence at distance)* — close-range hands remain MediaPipe's to lose until live calibration + WiLoR measurements exist.
-- 3D lane stays shadow-only until a 3D retargeter is designed against real depth quality data from the batch.
-- No product-taste decision is made from synthetic packets; taste follows this card once the two pending sections fill.
+- Apple Vision 2D is a credible arbitrated live lane: cross-provider consensus with MediaPipe is tight on confidently-detected joints (head mean delta ≤0.03), and its honest availability gating (withholds where MediaPipe hallucinates) makes it the better confidence authority. Keep it tier-1 behind the arbiter with its own confidence as the gate.
+- Hands: 0.63 mean sampled-frame availability at dance-video distance is usable for shadow/A-B but NOT yet for close-range drive claims — that verdict waits on the 2-minute live calibration pass and, for the SOTA ceiling, WiLoR (MANO-blocked).
+- 3D lane: 0.74 availability with meters-scale output justifies designing a 3D retargeter next; until then it stays shadow-only. Depth QUALITY (vs image-plane) is still unquantified — the 3D retarget design should start with a bone-length-stability analysis over the batch's body3d tracks.
+- Calibration weights for the arbiter's per-provider multiplier should come from the per-joint comparison table, not global means: face/head near 1.0 parity, limbs discounted by their per-joint p95 divergence.
+- No product-taste decision from synthetic packets; the one open evidence gap is declared above.
 
 ## Rerun commands
 
