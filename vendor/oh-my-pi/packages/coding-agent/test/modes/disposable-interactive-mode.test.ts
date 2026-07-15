@@ -2,7 +2,10 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { promises as fs } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { resolveDisposableTuiManifest } from "../../src/modes/run-disposable-interactive-mode";
+import {
+	overrideRestartExecutable,
+	resolveDisposableTuiManifest,
+} from "../../src/modes/run-disposable-interactive-mode";
 
 const tempDirectories: string[] = [];
 
@@ -20,6 +23,32 @@ async function writeManifest(directory: string, value: unknown): Promise<string>
 
 afterEach(async () => {
 	await Promise.all(tempDirectories.splice(0).map(directory => fs.rm(directory, { recursive: true, force: true })));
+});
+
+describe("overrideRestartExecutable", () => {
+	it("preserves the receipt's resume identity and cwd while replacing only the executable", () => {
+		const sessionId = "session-from-runner-receipt";
+		const args = ["--resume", sessionId];
+		const env = { OMP_TEST_RESTART: "receipt-env" };
+		const restartSpawn = {
+			executable: "/previous/omp",
+			args,
+			cwd: "/receipt/session/cwd",
+			env,
+		};
+
+		const selected = overrideRestartExecutable(restartSpawn, "/rollout/omp");
+
+		expect(selected).toEqual({
+			executable: "/rollout/omp",
+			args: ["--resume", sessionId],
+			cwd: "/receipt/session/cwd",
+			env,
+		});
+		expect(selected.args).toBe(args);
+		expect(selected.env).toBe(env);
+		expect(restartSpawn.executable).toBe("/previous/omp");
+	});
 });
 
 describe("resolveDisposableTuiManifest", () => {

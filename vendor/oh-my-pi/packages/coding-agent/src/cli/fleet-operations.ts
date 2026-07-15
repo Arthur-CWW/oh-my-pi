@@ -2,82 +2,70 @@ import { createHash, randomUUID } from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { getAgentDir } from "@oh-my-pi/pi-utils";
-import {
-	IrcExternalBus,
-	isIrcExternalPeerFresh,
-	type IrcExternalPeer,
-} from "../irc/bus-external";
+import { IrcExternalBus, type IrcExternalPeer } from "../irc/bus-external";
 import { decodeJournalEntries, projectJournalEntries } from "../journal/projection";
-import {
-	createFleetCompatibilityProfile,
-	type FleetCompatibilityProfile,
-} from "../session/fleet-capability";
+import type { DiagnosticEvent } from "../session/error-inbox-ledger";
+import { createFleetCompatibilityProfile, type FleetCompatibilityProfile } from "../session/fleet-capability";
+import { requireHealthyFleetTarget } from "../session/fleet-health";
 import {
 	createFleetRollbackPlan,
 	executeFleetRollback as executeFleetRollbackPlan,
 	type FleetRollbackPlan,
 	type FleetRollbackTerminalReceipt,
 } from "../session/fleet-rollback";
-import { requireHealthyFleetTarget } from "../session/fleet-health";
 import {
 	executeFleetRolloutPlan,
-	fleetRolloutRecords,
-	isFleetOwnerProcessAlive,
-	FleetControllerLease,
-	startFleetRollout,
 	type FleetControllerJournal,
+	FleetControllerLease,
 	type FleetRolloutPlan,
 	type FleetRolloutRecord,
 	type FleetRolloutTarget,
+	fleetRolloutRecords,
+	isFleetOwnerProcessAlive,
+	startFleetRollout,
 } from "../session/fleet-rollout-plan";
+import { resolveReleaseValidationPaths } from "../session/release-registry-validation";
+import { matchesFleetRecovery } from "../session/rollout";
 import {
 	CURRENT_SESSION_CONTROL_PROTOCOL,
-	SessionControlBus,
 	decodeSessionControlCommand,
-	selectSessionControlCommandKind,
 	type FleetPinChannel,
+	SessionControlBus,
 	type SessionControlCommand,
 	type SessionControlReceipt,
+	selectSessionControlCommandKind,
 } from "../session/session-control";
-import {
-	resolveReleaseValidationPaths,
-} from "../session/release-registry-validation";
 import { SessionManager } from "../session/session-manager";
-import { matchesFleetRecovery } from "../session/rollout";
 import { acquireSessionOwnership, type SessionOwnershipHandle } from "../session/session-ownership";
-import { resolveVerifiedReleaseExecutable } from "./restart-session";
 import { collectFleetErrors } from "./fleet-cli";
-import type { DiagnosticEvent } from "../session/error-inbox-ledger";
+import { formatFleetActionReceipts, formatFleetReceipt, formatFleetRolloutPlan } from "./fleet-operation-format";
 import {
-	readRegistry as readFleetRegistry,
-	readinessForDigest as readinessForFleetDigest,
-	resolveFleetRelease,
-	resolveFleetSelectors,
-	selectorMatches,
 	type FleetReleaseRegistry,
 	type FleetReleaseSelection,
 	type FleetResolvedPeer,
 	type FleetSelectorOptions,
 	type ReleaseRegistryOptions,
-} from "./fleet-target-resolution";
-import {
-	formatFleetActionReceipts,
-	formatFleetReceipt,
-	formatFleetRolloutPlan,
-} from "./fleet-operation-format";
-export {
-	formatFleetActionReceipts,
-	formatFleetReceipt,
-	formatFleetRolloutPlan,
+	readRegistry as readFleetRegistry,
+	readinessForDigest as readinessForFleetDigest,
 	resolveFleetRelease,
 	resolveFleetSelectors,
-};
+	selectorMatches,
+} from "./fleet-target-resolution";
+import { resolveVerifiedReleaseExecutable } from "./restart-session";
+
 export type {
 	FleetReleaseRegistry,
 	FleetReleaseSelection,
 	FleetResolvedPeer,
 	FleetSelectorOptions,
 	ReleaseRegistryOptions,
+};
+export {
+	formatFleetActionReceipts,
+	formatFleetReceipt,
+	formatFleetRolloutPlan,
+	resolveFleetRelease,
+	resolveFleetSelectors,
 };
 
 const SHA256 = /^[0-9a-f]{64}$/;
@@ -90,8 +78,6 @@ const LOCAL_COMPATIBILITY = createFleetCompatibilityProfile(CURRENT_SESSION_CONT
 	"prepare-rollout",
 	"rollout-checkpoint",
 ]);
-
-
 
 export interface FleetControlOptions {
 	readonly action: "pause" | "resume";
@@ -117,7 +103,6 @@ export interface FleetPinOperationResult {
 	readonly selection: FleetReleaseSelection;
 	readonly receipts: readonly SessionControlReceipt[];
 }
-
 
 export interface FleetRolloutOperationOptions {
 	readonly peers: readonly FleetResolvedPeer[];
@@ -162,7 +147,10 @@ export interface FleetRollbackOperationOptions {
 
 export interface FleetRollbackOperationResult {
 	readonly plan: FleetRollbackPlan;
-	readonly execution: { readonly state: "RolledBack" | "Failed"; readonly receipts: readonly FleetRollbackTerminalReceipt[] };
+	readonly execution: {
+		readonly state: "RolledBack" | "Failed";
+		readonly receipts: readonly FleetRollbackTerminalReceipt[];
+	};
 }
 
 export interface FleetControllerContext {
@@ -204,7 +192,9 @@ function localSource(instanceId?: string): {
 	};
 }
 
-function peerControlRange(peer: IrcExternalPeer): { readonly minMajor: number; readonly maxMajor: number; readonly maxMinor: number } | undefined {
+function peerControlRange(
+	peer: IrcExternalPeer,
+): { readonly minMajor: number; readonly maxMajor: number; readonly maxMinor: number } | undefined {
 	return peer.fleetCapability?.controlProtocol;
 }
 
@@ -216,7 +206,11 @@ export function buildFleetControlCommand(input: {
 	readonly now?: () => string;
 }): SessionControlCommand {
 	if (!input.peer.ownerEpoch) throw new Error(`Fleet target ${input.peer.sessionId} has no owner epoch`);
-	const kind = selectSessionControlCommandKind(input.intent.kind, CURRENT_SESSION_CONTROL_PROTOCOL, peerControlRange(input.peer) ?? { minMajor: 1, maxMajor: 1, maxMinor: 0 });
+	const kind = selectSessionControlCommandKind(
+		input.intent.kind,
+		CURRENT_SESSION_CONTROL_PROTOCOL,
+		peerControlRange(input.peer) ?? { minMajor: 1, maxMajor: 1, maxMinor: 0 },
+	);
 	if (!kind) throw new Error(`Fleet target ${input.peer.sessionId} is incompatible with ${input.intent.kind}`);
 	const commandId = input.commandId ?? randomUUID();
 	const envelope = {
@@ -237,7 +231,6 @@ export function buildFleetControlCommand(input: {
 	return decodeSessionControlCommand({ schemaVersion, ...envelope });
 }
 
-
 export async function issueFleetControl(input: FleetControlOptions): Promise<SessionControlReceipt> {
 	const bus = input.controlBus ?? new SessionControlBus();
 	const ownsBus = input.controlBus === undefined;
@@ -256,9 +249,12 @@ export async function issueFleetControl(input: FleetControlOptions): Promise<Ses
 	}
 }
 
-
 export async function executeFleetPinOperation(options: FleetPinOperationOptions): Promise<FleetPinOperationResult> {
-	const selection = await resolveFleetRelease({ requestedChannel: options.channel, explicitDigest: options.explicitDigest, validation: options.release });
+	const selection = await resolveFleetRelease({
+		requestedChannel: options.channel,
+		explicitDigest: options.explicitDigest,
+		validation: options.release,
+	});
 	const bus = options.controlBus ?? new SessionControlBus();
 	const ownsBus = options.controlBus === undefined;
 	try {
@@ -267,16 +263,22 @@ export async function executeFleetPinOperation(options: FleetPinOperationOptions
 			if (!target.peer.ownerEpoch) throw new Error(`Fleet target ${target.peer.sessionId} has no owner epoch`);
 			const command = buildFleetControlCommand({
 				peer: target.peer,
-				intent: { kind: "fleet-pin", selection: {
-					requestedChannel: selection.requestedChannel,
-					resolvedDigest: selection.resolvedDigest,
-					readinessReceipt: selection.readinessReceipt,
-				} },
+				intent: {
+					kind: "fleet-pin",
+					selection: {
+						requestedChannel: selection.requestedChannel,
+						resolvedDigest: selection.resolvedDigest,
+						readinessReceipt: selection.readinessReceipt,
+					},
+				},
 				now: options.now,
 				sourceInstanceId: options.sourceInstanceId,
 			});
 			const requested = bus.request(command);
-			const receipt = requested.state === "applied" || requested.state === "failed" ? requested : await bus.waitForTerminal(command.commandId, { timeoutMs: options.timeoutMs ?? CONTROL_TIMEOUT_MS });
+			const receipt =
+				requested.state === "applied" || requested.state === "failed"
+					? requested
+					: await bus.waitForTerminal(command.commandId, { timeoutMs: options.timeoutMs ?? CONTROL_TIMEOUT_MS });
 			receipts.push(receipt);
 		}
 		return { selection, receipts };
@@ -285,7 +287,9 @@ export async function executeFleetPinOperation(options: FleetPinOperationOptions
 	}
 }
 
-export async function executeFleetUnpinOperation(options: Omit<FleetPinOperationOptions, "channel" | "explicitDigest">): Promise<{ readonly receipts: readonly SessionControlReceipt[] }> {
+export async function executeFleetUnpinOperation(
+	options: Omit<FleetPinOperationOptions, "channel" | "explicitDigest">,
+): Promise<{ readonly receipts: readonly SessionControlReceipt[] }> {
 	const validation = options.release ?? {};
 	const paths = resolveReleaseValidationPaths(validation);
 	const registry = await readFleetRegistry(paths);
@@ -295,9 +299,18 @@ export async function executeFleetUnpinOperation(options: Omit<FleetPinOperation
 	try {
 		const receipts: SessionControlReceipt[] = [];
 		for (const target of options.peers) {
-			const command = buildFleetControlCommand({ peer: target.peer, intent: { kind: "fleet-unpin" }, now: options.now, sourceInstanceId: options.sourceInstanceId });
+			const command = buildFleetControlCommand({
+				peer: target.peer,
+				intent: { kind: "fleet-unpin" },
+				now: options.now,
+				sourceInstanceId: options.sourceInstanceId,
+			});
 			const requested = bus.request(command);
-			receipts.push(requested.state === "applied" || requested.state === "failed" ? requested : await bus.waitForTerminal(command.commandId, { timeoutMs: options.timeoutMs ?? CONTROL_TIMEOUT_MS }));
+			receipts.push(
+				requested.state === "applied" || requested.state === "failed"
+					? requested
+					: await bus.waitForTerminal(command.commandId, { timeoutMs: options.timeoutMs ?? CONTROL_TIMEOUT_MS }),
+			);
 		}
 		return { receipts };
 	} finally {
@@ -311,7 +324,9 @@ function defaultControllerFactory(): FleetControllerFactory {
 			const manager = SessionManager.create(process.cwd(), path.join(getAgentDir(), "fleet-controller"));
 			const sessionFile = manager.getSessionFile();
 			if (!sessionFile) throw new Error("Fleet controller journal was not persisted");
-			const digest = createHash("sha256").update(await fs.readFile(process.execPath)).digest("hex");
+			const digest = createHash("sha256")
+				.update(await fs.readFile(process.execPath))
+				.digest("hex");
 			const runnerInstanceIdentity = { runnerInstanceId: randomUUID(), startedAt: nowIso() };
 			const ownership = await acquireSessionOwnership(sessionFile, manager.getSessionId(), {
 				buildRevision: { digest, version: CONTROLLER_VERSION },
@@ -350,12 +365,6 @@ function targetDigest(peer: IrcExternalPeer): string {
 	return digest;
 }
 
-function targetVersion(peer: IrcExternalPeer): string {
-	const version = peer.version ?? peer.fleetCapability?.productVersion;
-	if (!version) throw new Error(`Fleet target ${peer.sessionId} has no current product version`);
-	return version;
-}
-
 function appendIntentLifecycle(
 	journal: FleetControllerJournal,
 	plan: FleetRolloutPlan,
@@ -378,7 +387,14 @@ function appendIntentLifecycle(
 	});
 }
 
-function appendTargetLifecycle(journal: FleetControllerJournal, plan: FleetRolloutPlan, target: FleetRolloutTarget, state: FleetRolloutTarget["state"], reason?: string, digest = plan.target.digest): void {
+function appendTargetLifecycle(
+	journal: FleetControllerJournal,
+	plan: FleetRolloutPlan,
+	target: FleetRolloutTarget,
+	state: FleetRolloutTarget["state"],
+	reason?: string,
+	digest = plan.target.digest,
+): void {
 	const ownership = journal.getSessionOwnership();
 	if (!ownership) throw new Error("Fleet controller journal is not bound to session ownership");
 	journal.appendCustomEntry("fleet_rollout", {
@@ -401,7 +417,8 @@ function appendTargetLifecycle(journal: FleetControllerJournal, plan: FleetRollo
 }
 
 function checkpointFromReceipt(receipt: SessionControlReceipt): unknown {
-	if (receipt.state !== "applied" || !isRecord(receipt.result) || !Object.hasOwn(receipt.result, "checkpoint")) throw new Error(receipt.error ?? "Rollout checkpoint command failed");
+	if (receipt.state !== "applied" || !isRecord(receipt.result) || !Object.hasOwn(receipt.result, "checkpoint"))
+		throw new Error(receipt.error ?? "Rollout checkpoint command failed");
 	return receipt.result.checkpoint;
 }
 
@@ -431,7 +448,17 @@ async function waitForReplacement(options: {
 	}
 }
 
-function toDiagnosticEvents(rows: readonly { readonly sessionId: string; readonly cause: string; readonly timestamp: number; readonly buildDigest: string; readonly rolloutId: string; readonly count: number; readonly message: string }[]): DiagnosticEvent[] {
+function toDiagnosticEvents(
+	rows: readonly {
+		readonly sessionId: string;
+		readonly cause: string;
+		readonly timestamp: number;
+		readonly buildDigest: string;
+		readonly rolloutId: string;
+		readonly count: number;
+		readonly message: string;
+	}[],
+): DiagnosticEvent[] {
 	return rows.map(row => ({
 		id: `${row.sessionId}:${row.cause}:${row.timestamp}`,
 		firstTimestamp: row.timestamp,
@@ -464,8 +491,10 @@ async function executeRolloutTarget(input: {
 }): Promise<void> {
 	const current = input.allPeers().find(peer => peer.sessionId === input.target.sessionId);
 	if (!current) throw new Error(`Fleet target ${input.target.sessionId} disappeared before rollout`);
-	if (!input.isProcessAlive(current.pid)) throw new Error(`Fleet target ${current.sessionId} owner process is not alive`);
-	if (current.pid !== input.target.peer.pid) throw new Error(`Fleet target ${current.sessionId} owner process changed before rollout`);
+	if (!input.isProcessAlive(current.pid))
+		throw new Error(`Fleet target ${current.sessionId} owner process is not alive`);
+	if (current.pid !== input.target.peer.pid)
+		throw new Error(`Fleet target ${current.sessionId} owner process changed before rollout`);
 	if (current.ownerEpoch !== input.target.expectedOwnerEpoch)
 		throw new Error(`Fleet target ${current.sessionId} owner epoch changed before rollout`);
 	const currentDigest = targetDigest(current);
@@ -474,10 +503,18 @@ async function executeRolloutTarget(input: {
 		peer: current,
 		commandId: input.target.commandId,
 		sourceInstanceId: input.sourceInstanceId,
-		intent: { kind: "prepare-rollout", rolloutId: input.plan.fleetRolloutId, expectedDigest: currentDigest, drainTimeoutMs: CONTROL_TIMEOUT_MS },
+		intent: {
+			kind: "prepare-rollout",
+			rolloutId: input.plan.fleetRolloutId,
+			expectedDigest: currentDigest,
+			drainTimeoutMs: CONTROL_TIMEOUT_MS,
+		},
 	});
 	let receipt = input.controlBus.request(prepare);
-	receipt = receipt.state === "applied" || receipt.state === "failed" ? receipt : await input.controlBus.waitForTerminal(prepare.commandId, { timeoutMs: input.controlTimeoutMs });
+	receipt =
+		receipt.state === "applied" || receipt.state === "failed"
+			? receipt
+			: await input.controlBus.waitForTerminal(prepare.commandId, { timeoutMs: input.controlTimeoutMs });
 	if (receipt.state !== "applied") throw new Error(receipt.error ?? `prepare-rollout failed for ${current.sessionId}`);
 	checkpointFromReceipt(receipt);
 	appendTargetLifecycle(input.journal, input.plan, input.target, "Checkpointed");
@@ -485,11 +522,20 @@ async function executeRolloutTarget(input: {
 	const restart = buildFleetControlCommand({
 		peer: current,
 		sourceInstanceId: input.sourceInstanceId,
-		intent: { kind: "restart", executable, rolloutId: input.plan.fleetRolloutId, targetDigest: input.plan.target.digest, checkpointCommandId: prepare.commandId },
+		intent: {
+			kind: "restart",
+			executable,
+			rolloutId: input.plan.fleetRolloutId,
+			targetDigest: input.plan.target.digest,
+			checkpointCommandId: prepare.commandId,
+		},
 	});
 	appendTargetLifecycle(input.journal, input.plan, input.target, "RestartRequested");
 	receipt = input.controlBus.request(restart);
-	receipt = receipt.state === "applied" || receipt.state === "failed" ? receipt : await input.controlBus.waitForTerminal(restart.commandId, { timeoutMs: input.controlTimeoutMs });
+	receipt =
+		receipt.state === "applied" || receipt.state === "failed"
+			? receipt
+			: await input.controlBus.waitForTerminal(restart.commandId, { timeoutMs: input.controlTimeoutMs });
 	if (receipt.state !== "applied") throw new Error(receipt.error ?? `restart failed for ${current.sessionId}`);
 	appendTargetLifecycle(input.journal, input.plan, input.target, "Acknowledged");
 	const replacement = await waitForReplacement({
@@ -502,9 +548,16 @@ async function executeRolloutTarget(input: {
 	});
 	appendTargetLifecycle(input.journal, input.plan, input.target, "Reacquired");
 	const statusRequestedAt = Date.now();
-	const status = buildFleetControlCommand({ peer: replacement, sourceInstanceId: input.sourceInstanceId, intent: { kind: "status" } });
+	const status = buildFleetControlCommand({
+		peer: replacement,
+		sourceInstanceId: input.sourceInstanceId,
+		intent: { kind: "status" },
+	});
 	let statusReceipt = input.controlBus.request(status);
-	statusReceipt = statusReceipt.state === "applied" || statusReceipt.state === "failed" ? statusReceipt : await input.controlBus.waitForTerminal(status.commandId, { timeoutMs: input.controlTimeoutMs });
+	statusReceipt =
+		statusReceipt.state === "applied" || statusReceipt.state === "failed"
+			? statusReceipt
+			: await input.controlBus.waitForTerminal(status.commandId, { timeoutMs: input.controlTimeoutMs });
 	const projection = await collectFleetErrors({ controlDbPath: input.controlDbPath, nowMs: Date.now() });
 	const health = requireHealthyFleetTarget({
 		sessionId: replacement.sessionId,
@@ -528,22 +581,46 @@ async function executeRolloutTarget(input: {
 	appendTargetLifecycle(input.journal, input.plan, input.target, "Healthy");
 }
 
-function buildPlanFromRecords(records: readonly FleetRolloutRecord[], peers: readonly FleetResolvedPeer[], rolloutId: string): FleetRolloutPlan {
-	const intent = records.find((record): record is Extract<FleetRolloutRecord, { readonly record: "intent" }> => record.record === "intent");
+function buildPlanFromRecords(
+	records: readonly FleetRolloutRecord[],
+	peers: readonly FleetResolvedPeer[],
+	rolloutId: string,
+): FleetRolloutPlan {
+	const intent = records.find(
+		(record): record is Extract<FleetRolloutRecord, { readonly record: "intent" }> => record.record === "intent",
+	);
 	if (!intent) throw new Error(`Rollout ${rolloutId} has no durable intent record`);
 	const bySession = new Map<string, Extract<FleetRolloutRecord, { readonly record: "target" }>>();
 	for (const record of records) {
-		if (record.record !== "target" || record.state === "Healthy" || record.state === "RestartFailed" || record.state === "Frozen") continue;
+		if (
+			record.record !== "target" ||
+			record.state === "Healthy" ||
+			record.state === "RestartFailed" ||
+			record.state === "Frozen"
+		)
+			continue;
 		if (!bySession.has(record.sessionId)) bySession.set(record.sessionId, record);
 	}
 	const targets: FleetRolloutTarget[] = [];
 	for (const record of bySession.values()) {
 		const resolved = peers.find(peer => peer.peer.sessionId === record.sessionId);
 		if (!resolved) continue;
-		targets.push({ targetId: record.targetId, sessionId: record.sessionId, peer: resolved.peer, expectedOwnerEpoch: resolved.peer.ownerEpoch ?? record.expectedOwnerEpoch, commandId: record.commandId, waveId: record.waveId, state: "Classified" });
+		targets.push({
+			targetId: record.targetId,
+			sessionId: record.sessionId,
+			peer: resolved.peer,
+			expectedOwnerEpoch: resolved.peer.ownerEpoch ?? record.expectedOwnerEpoch,
+			commandId: record.commandId,
+			waveId: record.waveId,
+			state: "Classified",
+		});
 	}
 	if (targets.length === 0) throw new Error(`Rollout ${rolloutId} has no durable target records`);
-	const waves = [...new Set(targets.map(target => target.waveId))].map(waveId => ({ waveId, kind: waveId === targets[0]?.waveId ? "canary" as const : "rolling" as const, targets: targets.filter(target => target.waveId === waveId) }));
+	const waves = [...new Set(targets.map(target => target.waveId))].map(waveId => ({
+		waveId,
+		kind: waveId === targets[0]?.waveId ? ("canary" as const) : ("rolling" as const),
+		targets: targets.filter(target => target.waveId === waveId),
+	}));
 	return {
 		fleetRolloutId: rolloutId,
 		target: { digest: intent.targetDigest, source: intent.targetSource },
@@ -555,20 +632,35 @@ function buildPlanFromRecords(records: readonly FleetRolloutRecord[], peers: rea
 	};
 }
 
-async function controllerFor(factory: FleetControllerFactory | undefined, rolloutId: string): Promise<FleetControllerContext> {
+async function controllerFor(
+	factory: FleetControllerFactory | undefined,
+	rolloutId: string,
+): Promise<FleetControllerContext> {
 	return (factory ?? defaultControllerFactory()).create(rolloutId);
 }
 
 export async function executeFleetRollout(options: FleetRolloutOperationOptions): Promise<FleetRolloutOperationResult> {
 	if (options.peers.length === 0) throw new Error("No eligible fleet targets matched the rollout selectors");
-	const release = await resolveFleetRelease({ requestedChannel: options.explicitDigest ? "digest" : (options.requestedChannel ?? "blessed"), explicitDigest: options.explicitDigest, validation: options.release });
+	const release = await resolveFleetRelease({
+		requestedChannel: options.explicitDigest ? "digest" : (options.requestedChannel ?? "blessed"),
+		explicitDigest: options.explicitDigest,
+		validation: options.release,
+	});
 	const liveBus = options.bus ?? new IrcExternalBus(options.ircDbPath, { readonly: true });
 	const ownsLiveBus = options.bus === undefined;
 	const selectedIds = new Set(options.peers.map(item => item.peer.sessionId));
-	const allPeers = (): readonly IrcExternalPeer[] => liveBus.listPeers({ includeStale: true }).filter(peer => selectedIds.has(peer.sessionId));
-	const canary = options.canarySelector ? options.peers.find(item => selectorMatches(options.canarySelector!, item)) : undefined;
-	if (options.canarySelector && !canary) throw new Error(`No rollout target matches --canary ${options.canarySelector}`);
-	if (options.canarySelector && options.peers.filter(item => selectorMatches(options.canarySelector!, item)).length !== 1) throw new Error(`--canary ${options.canarySelector} must identify exactly one target`);
+	const allPeers = (): readonly IrcExternalPeer[] =>
+		liveBus.listPeers({ includeStale: true }).filter(peer => selectedIds.has(peer.sessionId));
+	const canary = options.canarySelector
+		? options.peers.find(item => selectorMatches(options.canarySelector!, item))
+		: undefined;
+	if (options.canarySelector && !canary)
+		throw new Error(`No rollout target matches --canary ${options.canarySelector}`);
+	if (
+		options.canarySelector &&
+		options.peers.filter(item => selectorMatches(options.canarySelector!, item)).length !== 1
+	)
+		throw new Error(`--canary ${options.canarySelector} must identify exactly one target`);
 	const rolloutId = randomUUID();
 	const controller = await controllerFor(options.controller, rolloutId);
 	try {
@@ -594,7 +686,10 @@ export async function executeFleetRollout(options: FleetRolloutOperationOptions)
 		const started = await startFleetRollout({
 			journal: controller.journal,
 			lease: controller.lease,
-			resolveTarget: release.requestedChannel === "blessed" ? { requestedChannel: "blessed", blessedDigest: release.resolvedDigest } : { explicitDigest: release.resolvedDigest, blessedDigest: release.resolvedDigest },
+			resolveTarget:
+				release.requestedChannel === "blessed"
+					? { requestedChannel: "blessed", blessedDigest: release.resolvedDigest }
+					: { explicitDigest: release.resolvedDigest, blessedDigest: release.resolvedDigest },
 			inventory,
 			listPeers: allPeers,
 			targetVersion: release.version,
@@ -604,7 +699,20 @@ export async function executeFleetRollout(options: FleetRolloutOperationOptions)
 			fleetRolloutId: rolloutId,
 			isProcessAlive: options.isProcessAlive,
 		});
-		if (started.mode === "read-only") return { mode: "read-only", reason: started.reason, plan: { fleetRolloutId: "superseded", target: { digest: release.resolvedDigest, source: { kind: "explicit" } }, previousDigest: release.registry.previous ?? release.resolvedDigest, waves: [], excluded: [], orderedTargets: [], maxUnavailable: 1 } };
+		if (started.mode === "read-only")
+			return {
+				mode: "read-only",
+				reason: started.reason,
+				plan: {
+					fleetRolloutId: "superseded",
+					target: { digest: release.resolvedDigest, source: { kind: "explicit" } },
+					previousDigest: release.registry.previous ?? release.resolvedDigest,
+					waves: [],
+					excluded: [],
+					orderedTargets: [],
+					maxUnavailable: 1,
+				},
+			};
 		appendIntentLifecycle(controller.journal, started.plan, "Preflight");
 		if (options.dryRun) return { mode: "dry-run", plan: started.plan };
 		appendIntentLifecycle(controller.journal, started.plan, "CanaryWave");
@@ -639,8 +747,7 @@ export async function executeFleetRollout(options: FleetRolloutOperationOptions)
 						isProcessAlive: options.isProcessAlive ?? isFleetOwnerProcessAlive,
 						sourceInstanceId: randomUUID(),
 					});
-					if (wave?.kind === "canary")
-						appendIntentLifecycle(controller.journal, started.plan, "ObserveCanary");
+					if (wave?.kind === "canary") appendIntentLifecycle(controller.journal, started.plan, "ObserveCanary");
 				},
 			});
 			appendIntentLifecycle(
@@ -648,7 +755,8 @@ export async function executeFleetRollout(options: FleetRolloutOperationOptions)
 				started.plan,
 				execution.state === "Succeeded" ? "Succeeded" : "Frozen",
 			);
-			if (execution.state !== "Succeeded" || execution.completed.length !== started.plan.orderedTargets.length) throw new Error("Rollout did not reach a healthy terminal result");
+			if (execution.state !== "Succeeded" || execution.completed.length !== started.plan.orderedTargets.length)
+				throw new Error("Rollout did not reach a healthy terminal result");
 			return { mode: "active", plan: started.plan, execution };
 		} finally {
 			controlBus.close();
@@ -659,8 +767,22 @@ export async function executeFleetRollout(options: FleetRolloutOperationOptions)
 	}
 }
 
-function latestRolloutId(records: readonly FleetRolloutRecord[], peers: readonly FleetResolvedPeer[]): string | undefined {
-	const candidates = records.filter((record): record is Extract<FleetRolloutRecord, { readonly record: "intent" }> => record.record === "intent").filter(intent => records.some(record => record.record === "target" && peers.some(peer => peer.peer.sessionId === record.sessionId) && record.fleetRolloutId === intent.fleetRolloutId));
+function latestRolloutId(
+	records: readonly FleetRolloutRecord[],
+	peers: readonly FleetResolvedPeer[],
+): string | undefined {
+	const candidates = records
+		.filter(
+			(record): record is Extract<FleetRolloutRecord, { readonly record: "intent" }> => record.record === "intent",
+		)
+		.filter(intent =>
+			records.some(
+				record =>
+					record.record === "target" &&
+					peers.some(peer => peer.peer.sessionId === record.sessionId) &&
+					record.fleetRolloutId === intent.fleetRolloutId,
+			),
+		);
 	return candidates.sort((left, right) => left.recordedAt.localeCompare(right.recordedAt)).at(-1)?.fleetRolloutId;
 }
 
@@ -686,8 +808,7 @@ async function loadDurableFleetRolloutRecords(
 				const projection = projectJournalEntries(decodeJournalEntries(await fs.readFile(candidate, "utf8")));
 				if (!projection) continue;
 				for (const item of projection.entries) {
-					if (item.type !== "custom" || item.customType !== "fleet_rollout" || !isRecord(item.data))
-						continue;
+					if (item.type !== "custom" || item.customType !== "fleet_rollout" || !isRecord(item.data)) continue;
 					if (item.data.schemaVersion === 1 && typeof item.data.fleetRolloutId === "string")
 						records.push(item.data as unknown as FleetRolloutRecord);
 				}
@@ -700,13 +821,12 @@ async function loadDurableFleetRolloutRecords(
 	return records;
 }
 
-export async function executeFleetRollback(options: FleetRollbackOperationOptions): Promise<FleetRollbackOperationResult> {
+export async function executeFleetRollback(
+	options: FleetRollbackOperationOptions,
+): Promise<FleetRollbackOperationResult> {
 	const controller = await controllerFor(options.controller, options.rolloutId ?? "rollback");
 	try {
-		const records = [
-			...(await loadDurableFleetRolloutRecords()),
-			...fleetRolloutRecords(controller.journal),
-		];
+		const records = [...(await loadDurableFleetRolloutRecords()), ...fleetRolloutRecords(controller.journal)];
 		const rolloutId = options.rolloutId ?? latestRolloutId(records, options.peers);
 		if (!rolloutId)
 			throw new Error("Rollback requires a durable rollout ID or a selector matching a journaled rollout");
@@ -717,15 +837,29 @@ export async function executeFleetRollback(options: FleetRollbackOperationOption
 			const requested = new Set(options.peers.map(peer => peer.peer.sessionId));
 			for (const sessionId of [...affected]) if (!requested.has(sessionId)) affected.delete(sessionId);
 		}
-		const trigger = { kind: "FleetIncident" as const, reason: "operator requested rollback", automatic: false as const };
-		const planned = createFleetRollbackPlan({ rollout, trigger, affectedSessionIds: affected });
-		const rollbackPlan: FleetRollbackPlan = options.to === "previous" ? planned : {
-			...planned,
-			targets: planned.targets.map(target => ({ ...target, selection: { digest: options.to, source: "previous-release" as const } })),
+		const trigger = {
+			kind: "FleetIncident" as const,
+			reason: "operator requested rollback",
+			automatic: false as const,
 		};
+		const planned = createFleetRollbackPlan({ rollout, trigger, affectedSessionIds: affected });
+		const rollbackPlan: FleetRollbackPlan =
+			options.to === "previous"
+				? planned
+				: {
+						...planned,
+						targets: planned.targets.map(target => ({
+							...target,
+							selection: { digest: options.to, source: "previous-release" as const },
+						})),
+					};
 		for (const target of rollbackPlan.targets) assertDigest(target.selection.digest, "Rollback digest");
 		const releases = options.release ?? {};
-		for (const target of rollbackPlan.targets) await resolveVerifiedReleaseExecutable(resolveReleaseValidationPaths(releases).releasesDir, target.selection.digest);
+		for (const target of rollbackPlan.targets)
+			await resolveVerifiedReleaseExecutable(
+				resolveReleaseValidationPaths(releases).releasesDir,
+				target.selection.digest,
+			);
 		const controlBus = new SessionControlBus(options.controlDbPath);
 		try {
 			const execution = await executeFleetRollbackPlan({
@@ -734,14 +868,45 @@ export async function executeFleetRollback(options: FleetRollbackOperationOption
 				executeTargetLifecycle: async rollbackTarget => {
 					const peer = rollbackTarget.target.peer;
 					const currentDigest = targetDigest(peer);
-					const command = buildFleetControlCommand({ peer, commandId: rollbackTarget.target.commandId, intent: { kind: "prepare-rollout", rolloutId, expectedDigest: currentDigest, drainTimeoutMs: CONTROL_TIMEOUT_MS } });
+					const command = buildFleetControlCommand({
+						peer,
+						commandId: rollbackTarget.target.commandId,
+						intent: {
+							kind: "prepare-rollout",
+							rolloutId,
+							expectedDigest: currentDigest,
+							drainTimeoutMs: CONTROL_TIMEOUT_MS,
+						},
+					});
 					let receipt = controlBus.request(command);
-					receipt = receipt.state === "applied" || receipt.state === "failed" ? receipt : await controlBus.waitForTerminal(command.commandId, { timeoutMs: options.controlTimeoutMs ?? CONTROL_TIMEOUT_MS });
+					receipt =
+						receipt.state === "applied" || receipt.state === "failed"
+							? receipt
+							: await controlBus.waitForTerminal(command.commandId, {
+									timeoutMs: options.controlTimeoutMs ?? CONTROL_TIMEOUT_MS,
+								});
 					if (receipt.state !== "applied") throw new Error(receipt.error ?? "rollback checkpoint failed");
-					const executable = await resolveVerifiedReleaseExecutable(resolveReleaseValidationPaths(releases).releasesDir, rollbackTarget.selection.digest);
-					const restart = buildFleetControlCommand({ peer, intent: { kind: "restart", executable, rolloutId, targetDigest: rollbackTarget.selection.digest, checkpointCommandId: command.commandId } });
+					const executable = await resolveVerifiedReleaseExecutable(
+						resolveReleaseValidationPaths(releases).releasesDir,
+						rollbackTarget.selection.digest,
+					);
+					const restart = buildFleetControlCommand({
+						peer,
+						intent: {
+							kind: "restart",
+							executable,
+							rolloutId,
+							targetDigest: rollbackTarget.selection.digest,
+							checkpointCommandId: command.commandId,
+						},
+					});
 					receipt = controlBus.request(restart);
-					receipt = receipt.state === "applied" || receipt.state === "failed" ? receipt : await controlBus.waitForTerminal(restart.commandId, { timeoutMs: options.controlTimeoutMs ?? CONTROL_TIMEOUT_MS });
+					receipt =
+						receipt.state === "applied" || receipt.state === "failed"
+							? receipt
+							: await controlBus.waitForTerminal(restart.commandId, {
+									timeoutMs: options.controlTimeoutMs ?? CONTROL_TIMEOUT_MS,
+								});
 					if (receipt.state !== "applied") throw new Error(receipt.error ?? "rollback restart failed");
 					const replacement = await waitForReplacement({
 						listPeers: () => options.peers.map(item => item.peer),
@@ -753,8 +918,17 @@ export async function executeFleetRollback(options: FleetRollbackOperationOption
 					});
 					const status = buildFleetControlCommand({ peer: replacement, intent: { kind: "status" } });
 					let statusReceipt = controlBus.request(status);
-					statusReceipt = statusReceipt.state === "applied" || statusReceipt.state === "failed" ? statusReceipt : await controlBus.waitForTerminal(status.commandId, { timeoutMs: options.controlTimeoutMs ?? CONTROL_TIMEOUT_MS });
-					const release = await resolveFleetRelease({ requestedChannel: "digest", explicitDigest: rollbackTarget.selection.digest, validation: releases });
+					statusReceipt =
+						statusReceipt.state === "applied" || statusReceipt.state === "failed"
+							? statusReceipt
+							: await controlBus.waitForTerminal(status.commandId, {
+									timeoutMs: options.controlTimeoutMs ?? CONTROL_TIMEOUT_MS,
+								});
+					const release = await resolveFleetRelease({
+						requestedChannel: "digest",
+						explicitDigest: rollbackTarget.selection.digest,
+						validation: releases,
+					});
 					return requireHealthyFleetTarget({
 						sessionId: replacement.sessionId,
 						previousOwnerEpoch: rollbackTarget.target.expectedOwnerEpoch,
@@ -782,5 +956,3 @@ export async function executeFleetRollback(options: FleetRollbackOperationOption
 		await controller.release();
 	}
 }
-
-

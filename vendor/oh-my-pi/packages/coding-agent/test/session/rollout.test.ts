@@ -4,11 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { isSubcommand } from "@oh-my-pi/pi-coding-agent/cli-commands";
 import { IrcExternalBus } from "@oh-my-pi/pi-coding-agent/irc/bus-external";
-import {
-	createRolloutPlan,
-	executeRolloutPlan,
-	matchesFleetRecovery,
-} from "@oh-my-pi/pi-coding-agent/session/rollout";
+import { createRolloutPlan, executeRolloutPlan, matchesFleetRecovery } from "@oh-my-pi/pi-coding-agent/session/rollout";
 
 const cleanupRoots: string[] = [];
 
@@ -127,7 +123,9 @@ describe("staged session rollout", () => {
 
 			expect(matchesFleetRecovery(replacement, expectation)).toBe(true);
 			expect(matchesFleetRecovery({ ...replacement, sessionId: "new-session" }, expectation)).toBe(false);
-			expect(matchesFleetRecovery({ ...replacement, sessionFile: "/tmp/new-session/session.jsonl" }, expectation)).toBe(false);
+			expect(
+				matchesFleetRecovery({ ...replacement, sessionFile: "/tmp/new-session/session.jsonl" }, expectation),
+			).toBe(false);
 			expect(matchesFleetRecovery({ ...replacement, ownerEpoch: original.ownerEpoch }, expectation)).toBe(false);
 			expect(matchesFleetRecovery({ ...replacement, buildDigest: "old" }, expectation)).toBe(false);
 			expect(

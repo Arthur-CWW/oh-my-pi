@@ -100,7 +100,7 @@ describe("rollout checkpoint", () => {
 		const entry = reopened
 			.getEntries()
 			.find(candidate => candidate.type === "custom" && candidate.customType === ROLLOUT_CHECKPOINT_CUSTOM_TYPE);
-		if (!entry || entry.type !== "custom") throw new Error("expected rollout checkpoint journal entry");
+		if (entry?.type !== "custom") throw new Error("expected rollout checkpoint journal entry");
 		const decoded = decodeRolloutCheckpoint(entry.data);
 
 		expect(restartCheckpointCalls()).toBe(1);

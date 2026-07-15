@@ -225,7 +225,7 @@ async function createLiveFixture(holdProviderResponses = false, reloadSshTool?: 
 		},
 	});
 	const sessionManager = SessionManager.create(project, sessions);
-	await sessionManager.flush();
+	await sessionManager.ensureOnDisk();
 	const sessionFile = sessionManager.getSessionFile();
 	if (!sessionFile) throw new Error("persistent test session has no file");
 	const ownership = await acquireSessionOwnership(sessionFile, sessionManager.getSessionId(), {
@@ -346,6 +346,7 @@ describe("live SessionRunner", () => {
 						buildDigest: fixture.runnerIdentity.buildRevision.digest,
 						version: fixture.runnerIdentity.buildRevision.version,
 						fleetCapability: capability,
+						sessionFile: fixture.sessionFile,
 					};
 					const legacyPeer: IrcExternalPeer = { ...peer, sessionId: "legacy-runner", fleetCapability: undefined };
 					const plan = createFleetRolloutPlan({

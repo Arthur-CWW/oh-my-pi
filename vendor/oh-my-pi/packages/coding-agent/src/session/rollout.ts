@@ -24,10 +24,7 @@ export interface FleetRecoveryExpectation {
 	readonly targetDigest: string;
 }
 
-export function matchesFleetRecovery(
-	peer: IrcExternalPeer,
-	expectation: FleetRecoveryExpectation,
-): boolean {
+export function matchesFleetRecovery(peer: IrcExternalPeer, expectation: FleetRecoveryExpectation): boolean {
 	if (!peer.sessionFile || !expectation.sessionFile) return false;
 	return (
 		peer.sessionId === expectation.sessionId &&
@@ -234,17 +231,15 @@ export async function runRollout(options: RunRolloutOptions = {}): Promise<Rollo
 				if (receipt.state === "failed") throw new Error(receipt.error ?? "restart control command failed");
 				const deadline = Date.now() + timeoutMs;
 				for (;;) {
-					const recovered = activeBus
-						.listPeers({ includeStale: true })
-						.find(peer =>
-							matchesFleetRecovery(peer, {
-								sessionId: current.controlSessionId ?? current.sessionId,
-								sessionFile: current.sessionFile,
-								previousOwnerEpoch: current.ownerEpoch!,
-								heartbeatFreshAfter: baselineHeartbeat,
-								targetDigest,
-							}),
-						);
+					const recovered = activeBus.listPeers({ includeStale: true }).find(peer =>
+						matchesFleetRecovery(peer, {
+							sessionId: current.controlSessionId ?? current.sessionId,
+							sessionFile: current.sessionFile,
+							previousOwnerEpoch: current.ownerEpoch!,
+							heartbeatFreshAfter: baselineHeartbeat,
+							targetDigest,
+						}),
+					);
 					if (recovered && (!recovered.version || recovered.version === targetVersion)) {
 						updatePeer({ ...current, sessionFile: recovered.sessionFile ?? current.sessionFile }, "recovered");
 						return;

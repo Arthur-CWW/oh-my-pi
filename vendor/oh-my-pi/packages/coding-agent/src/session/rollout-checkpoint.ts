@@ -109,9 +109,7 @@ function collectUnresumableReasons(children: readonly RolloutChildSummary[], bus
  * provider request, tool call, or child. Restart-manifest capture runs only after
  * the drain probe declares the parent and children safe.
  */
-export async function assembleRolloutCheckpoint(
-	options: AssembleRolloutCheckpointOptions,
-): Promise<RolloutCheckpoint> {
+export async function assembleRolloutCheckpoint(options: AssembleRolloutCheckpointOptions): Promise<RolloutCheckpoint> {
 	const now = options.now ?? Date.now;
 	const sleep = options.sleep ?? Bun.sleep;
 	const pollIntervalMs = options.drainPollIntervalMs ?? 25;
@@ -191,7 +189,9 @@ export function decodeRolloutCheckpoint(input: unknown): RolloutCheckpoint {
 		!Array.isArray(value.unresumableReasons) ||
 		typeof value.autoResumeAllowed !== "boolean" ||
 		(value.pauseProvenance !== "manual" && value.pauseProvenance !== "rollout") ||
-		!(["Checkpointed", "DrainTimedOut", "BusyDeferred"] as const).includes(value.outcome as RolloutCheckpointOutcome) ||
+		!(["Checkpointed", "DrainTimedOut", "BusyDeferred"] as const).includes(
+			value.outcome as RolloutCheckpointOutcome,
+		) ||
 		typeof value.createdAt !== "string" ||
 		!value.journalCheckpoint
 	) {

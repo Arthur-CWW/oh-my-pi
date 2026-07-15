@@ -1,7 +1,7 @@
 import * as path from "node:path";
 import { postmortem } from "@oh-my-pi/pi-utils";
 import { Effect } from "effect";
-import { replaceRestartProcess } from "../cli/restart-session";
+import { type RestartSpawnSpec, replaceRestartProcess } from "../cli/restart-session";
 import { CollabHost, collabDisplayName } from "../collab/host";
 import { DEFAULT_RELAY_URL } from "../collab/protocol";
 import type { SessionRunner } from "../runner/session-runner";
@@ -76,6 +76,11 @@ function createBuiltinLoader(factory: DisposableTerminalViewFactory): Disposable
 	return { load: async () => factory };
 }
 
+/** Preserve the runner-authored restart identity while selecting a rollout executable. */
+export function overrideRestartExecutable(restartSpawn: RestartSpawnSpec, executable: string): RestartSpawnSpec {
+	return { ...restartSpawn, executable };
+}
+
 /** Own one disposable terminal host while the supplied runner remains the session authority. */
 export async function runDisposableInteractiveMode(
 	runner: SessionRunner,
@@ -131,7 +136,7 @@ export async function runDisposableInteractiveMode(
 						}
 						const restartSpawn =
 							command.intent.kind === "restart"
-								? { ...receipt.restartSpawn, executable: command.intent.executable }
+								? overrideRestartExecutable(receipt.restartSpawn, command.intent.executable)
 								: receipt.restartSpawn;
 						commit();
 						replaceRestartProcess(restartSpawn, ownership.ownerEpoch);

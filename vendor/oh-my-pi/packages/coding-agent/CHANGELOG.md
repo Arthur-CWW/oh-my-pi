@@ -39,6 +39,7 @@
 - Provider request/stream failures now render structured cards with provider, model, agent/session owner, typed cause, retry disposition, timestamped ErrorInbox facets, and raw SDK detail; user interrupts remain card-free.
 - Fixed fleet rollout eligibility to reject non-release build provenance and dead or replaced owners both during planning and immediately before control sends, and isolated session-runner capability tests from the shared peer registry.
 - Fixed fleet reexec recovery to durably checkpoint fresh sessions, preserve the exact session identity and restart arguments, reject replacement heartbeats with a different session or journal, and avoid projecting `recovered` onto stale peer rows.
+- Fixed backward-compatible fleet rollout preflight to defer legacy/older peers whose advertised journal path is not yet materialized as a non-empty regular file, revalidating immediately before send instead of reexecing into a new session identity or timing out recovery.
 - Fixed custom model validation to accept subscription-backed `auth: oauth` providers without requiring an API key.
 - Selecting a session already owned by a verified live cmux surface now activates that workspace and surface instead of failing with `Session is controlled by external owner`.
 - Agent resource/error aggregation now records failed non-cancelled child jobs as typed, redacted `ErrorInbox` records with transcript/final-output recovery links; `agent://` exposes final output with a `history://` pointer, while invalid `agents://` suggests the singular protocol.

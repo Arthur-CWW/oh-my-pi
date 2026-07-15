@@ -326,10 +326,12 @@ describe("fleet inspection projections", () => {
 		});
 		expect(applied.deleted).toBe(1);
 		const verify = new IrcExternalBus(ircDbPath, { readonly: true });
-		expect(verify.listPeers({ includeStale: true }).map(peer => peer.sessionId).sort()).toEqual([
-			"fresh-test",
-			"stale-legitimate",
-		]);
+		expect(
+			verify
+				.listPeers({ includeStale: true })
+				.map(peer => peer.sessionId)
+				.sort(),
+		).toEqual(["fresh-test", "stale-legitimate"]);
 		verify.close();
 		expect(await Bun.file(journalPath).text()).toBe('{"type":"session"}\n');
 	});
