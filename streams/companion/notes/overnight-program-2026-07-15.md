@@ -45,6 +45,13 @@ File ownership tonight: pose-transfer.ts+provider-tracks.ts=ReplayV3Cutover; tra
 - Test-coverage gaps from reviewer transcripts (arbiter production paths, lab-state seams) — qa agent.
 - /lab bundle audit (2.73MB): measure, split obvious islands if cheap; no restyle.
 
+### Wave 4 — model/rig GENERATION pipeline (DIRECTION-GATED, tail item, Arthur 2026-07-15 night)
+Arthur's ask: infra for generating our own 3D models + CUSTOM rig generation + validation ("SkyeSharkie" referenced in earlier companion chats — recon where; connects to the reference-avatar-pipeline challenger lane: multiview→highpoly→agent-lowpoly, currently documented fail-closed, not implemented). Explicitly: general direction should be checked by Arthur when he wakes.
+Tonight's scope is PREP ONLY, run after waves 1-3 and only with juice left: (a) recon SkyeSharkie references + prior chats/notes into a direction brief; (b) survey the generation-stack options against our constraints (VRoid-topology Perfect Sync transfer lane as production, generated-mesh challenger, licensing, GPU-queue fit); (c) draft the pipeline + validation-gate design as an extension of scripts/avatar-pipeline (tri-state gates, proof cards); (d) post a Xanadu QUESTION with the proposed direction + forks for his morning. NO heavy implementation before his direction check.
+
+### Orchestration conservatism (Arthur, tonight)
+Do not multiply unrelated substreams in parallel. One wave in flight at a time (current wave-1 concurrency is the ceiling); waves run in order; new substreams queue behind, not beside.
+
 ## Blocked on Arthur (documented, not tonight)
 - 2-min deliberate calibration pass (runbook docs/motion-capture-comparison.md).
 - MPI registration: SMPL+SMPLX+FLAME+MANO → unlocks GVHMR mesh-gen + WiLoR 3D via gpu-queue.
