@@ -36,7 +36,6 @@ const capability = createFleetCapability({
 	buildDigest: OTHER,
 	productVersion: "1.0.0",
 	controlProtocol: CURRENT_SESSION_CONTROL_PROTOCOL,
-	rolloutFeatures: ["status", "prepare-rollout", "rollout-checkpoint"],
 });
 
 async function tempRoot(): Promise<string> {
@@ -153,6 +152,21 @@ describe("fleet rollout planning", () => {
 			pinned: "PinnedElsewhere",
 			busy: "BusyDeferred",
 		});
+	});
+
+	it("plans a fresh current capability while rejecting a legacy peer", () => {
+		const current = peer("current");
+		const legacy = peer("legacy", "idle", { fleetCapability: undefined });
+		const plan = planFor([current, legacy]);
+
+		expect(plan.orderedTargets.map(item => item.sessionId)).toEqual(["current"]);
+		expect(plan.excluded).toContainEqual(
+			expect.objectContaining({
+				sessionId: "legacy",
+				state: "LegacyIncompatible",
+				reason: "peer did not advertise a recognized fleet capability",
+			}),
+		);
 	});
 });
 

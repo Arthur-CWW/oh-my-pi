@@ -59,7 +59,7 @@ const KNOWN_FEATURES: Record<FleetRolloutFeature, true> = {
 
 export function createFleetCompatibilityProfile(
 	controlProtocol: FleetProtocolRange,
-	rolloutFeatures: readonly FleetRolloutFeature[] = ["status"],
+	rolloutFeatures: readonly FleetRolloutFeature[] = FLEET_ROLLOUT_FEATURES,
 ): FleetCompatibilityProfile {
 	return {
 		journalSchema: CURRENT_JOURNAL_SCHEMA,

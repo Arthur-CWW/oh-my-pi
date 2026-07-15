@@ -1,3 +1,4 @@
+import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, it } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
@@ -48,6 +49,7 @@ describe("fleet capability advertisement and compatibility", () => {
 			});
 			const peer = bus.listPeers().find(candidate => candidate.sessionId === "session-fresh");
 			expect(peer?.fleetCapability).toEqual(capability);
+			expect(capability.rolloutFeatures).toEqual(["status", "prepare-rollout", "rollout-checkpoint"]);
 			expect(classifyFleetCompatibility(peer ?? {}, local)).toEqual({ kind: "compatible", reasons: [] });
 		} finally {
 			bus.close();
@@ -75,8 +77,64 @@ describe("fleet capability advertisement and compatibility", () => {
 	it("never selects unknown or unadvertised commands and rollout features", () => {
 		expect(selectSessionControlCommandKind("future-command", CURRENT_SESSION_CONTROL_PROTOCOL, capability.controlProtocol)).toBeUndefined();
 		expect(selectSessionControlCommandKind("status", CURRENT_SESSION_CONTROL_PROTOCOL, { minMajor: 2, maxMajor: 2, maxMinor: 0 })).toBeUndefined();
+		expect(selectSessionControlCommandKind("prepare-rollout", CURRENT_SESSION_CONTROL_PROTOCOL, { minMajor: 2, maxMajor: 2, maxMinor: 0 })).toBe(
+			"prepare-rollout",
+		);
 		expect(selectFleetRolloutFeature("future-rollout", local, { fleetCapability: capability })).toBeUndefined();
-		expect(selectFleetRolloutFeature("prepare-rollout", local, { fleetCapability: capability })).toBeUndefined();
+		expect(selectFleetRolloutFeature("prepare-rollout", local, { fleetCapability: capability })).toBe("prepare-rollout");
 		expect(selectFleetRolloutFeature("status", local, { fleetCapability: capability })).toBe("status");
+		expect(
+			selectFleetRolloutFeature("prepare-rollout", local, {
+				fleetCapability: { ...capability, rolloutFeatures: ["status"] },
+			}),
+		).toBeUndefined();
+	});
+
+	it("reads a legacy peer registry without migrating it", async () => {
+		const dbPath = await tempDbPath();
+		const db = new Database(dbPath);
+		db.run(`
+			CREATE TABLE peers (
+				session_id TEXT PRIMARY KEY,
+				name TEXT,
+				cwd TEXT,
+				pid INTEGER,
+				last_seen TEXT,
+				state TEXT,
+				state_ts TEXT,
+				explicit_name INTEGER,
+				session_file TEXT,
+				owner_epoch TEXT,
+				build_digest TEXT,
+				version TEXT
+			)
+		`);
+		db.query(
+			"INSERT INTO peers VALUES ($sessionId, $name, $cwd, $pid, $lastSeen, $state, NULL, 0, NULL, NULL, NULL, NULL)",
+		).run({
+			$sessionId: "legacy-session",
+			$name: "LegacyPeer",
+			$cwd: "/workspace",
+			$pid: 42,
+			$lastSeen: new Date().toISOString(),
+			$state: "idle",
+		});
+		db.close();
+
+		const bus = new IrcExternalBus(dbPath, { readonly: true });
+		try {
+			const peer = bus.listPeers()[0];
+			expect(peer?.fleetCapability).toBeUndefined();
+			expect(classifyFleetCompatibility(peer ?? {}, local).kind).toBe("LegacyIncompatible");
+		} finally {
+			bus.close();
+		}
+		const verify = new Database(dbPath, { readonly: true });
+		try {
+			const columns = verify.query<{ name: string }, []>("PRAGMA table_info(peers)").all();
+			expect(columns.some(column => column.name === "fleet_capability_json")).toBe(false);
+		} finally {
+			verify.close();
+		}
 	});
 });
