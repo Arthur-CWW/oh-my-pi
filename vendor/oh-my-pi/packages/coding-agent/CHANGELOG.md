@@ -53,6 +53,7 @@
 ### Fixed
 - Revived parked subagents keep their original tool inventory (an undefined full-capability selection no longer freezes into an empty allowlist), follow-up yield results and errors reach the parent as job/IRC reports, and `history://` renders parked transcripts whose message graph passes through lifecycle entries.
 - Rollout of cmux/disposable-view sessions no longer fails with `Target does not support prepare-rollout`: the disposable interactive host forwards prepare-rollout to the runner.
+- Session-control targets no longer feed the schema-v2 prepare-rollout command into the pause action (the runner rejected it and the tagged error collapsed to `Unknown control failure`); failed control receipts now carry the real bounded error text and journal a diagnostic in the target session.
 - `/context` completed its colon migration (`:context`); it no longer appears in slash autocomplete.
 - Provider request/stream failures now render structured cards with provider, model, agent/session owner, typed cause, retry disposition, timestamped ErrorInbox facets, and raw SDK detail; user interrupts remain card-free.
 - Fixed fleet rollout eligibility to reject non-release build provenance and dead or replaced owners both during planning and immediately before control sends, and isolated session-runner capability tests from the shared peer registry.
