@@ -35,6 +35,8 @@ AppleMotionOracle (public Vision) ─── UDP 49982 ──> src/motion-oracle.
 
 Face and motion are separate transports and separate capture lanes. Do not add face fields to `companion.motion-oracle/1`, do not make body or hands conditional on face availability, and do not let any oracle write the avatar outside L0. **FaceKit Mirror X remains on by default for browser preview geometry only.** Canonical face coefficients and head pose are never mirrored. Motion is canonicalized to normalized upper-left coordinates at the UDP receiver; anatomical left/right is never swapped for a mirrored preview.
 
+**Provider source identity (binding for new emitters, incl. any CUDA lane).** The 2D decoder hard-pins `source: "apple-vision-body2d-r2"`; any packet with another source string is rejected, and reusing the Apple identity from a non-Apple model (CUDA RTMPose etc.) is prohibited — it poisons calibration and the A/B. A new provider gets its OWN source id (e.g. `cuda-rtmpose-body2d-r1`) via an additive decode path beside the existing ones, exactly how `companion.motion-oracle-3d/1` was added without touching 2D semantics. Downstream (WS forwarding, browser adapter, `public/capture-arbiter.ts` lanes, the comparison recorder) is source-id-aware: a registered provider participates in arbitration with per-provider staleness/confidence/calibration and needs no adapter surgery.
+
 #### What is complete
 
 - Native source and operator scripts: `scripts/apple-motion-oracle/AppleMotionOracle.swift`, `Info.plist`, and `build.sh`; package commands are `oracle:motion:build`, `oracle:motion:metadata`, and `oracle:motion:run`. The signed app bundle is `/tmp/ai-companion-motion-oracle/AppleMotionOracle.app`.
