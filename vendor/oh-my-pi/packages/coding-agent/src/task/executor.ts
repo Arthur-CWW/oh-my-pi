@@ -61,6 +61,7 @@ import { type RestorableSessionModel, resolveRestorableSessionModel } from "./ho
 import { getNumberField, getProgressUsageTokens } from "./progress-usage";
 import type { SpawnRouteReceipt } from "./route-resolution";
 import { createSpawnRecord } from "./spawn-record";
+import type { SpawnWorkerRunRequest } from "./spawn-worker-protocol";
 import { subprocessToolRegistry } from "./subprocess-tool-registry";
 import {
 	type AgentDefinition,
@@ -768,14 +769,19 @@ export function createMCPProxyTools(mcpManager: MCPManager): CustomTool[] {
 	});
 }
 
-export function createSubagentSettings(
-	baseSettings: Settings,
-	overrides?: Partial<Record<SettingPath, unknown>>,
-): Settings {
+export function snapshotExecutorSettings(baseSettings: Settings): Partial<Record<SettingPath, unknown>> {
 	const snapshot: Partial<Record<SettingPath, unknown>> = {};
 	for (const key of Object.keys(SETTINGS_SCHEMA) as SettingPath[]) {
 		snapshot[key] = baseSettings.get(key);
 	}
+	return snapshot;
+}
+
+export function createSubagentSettings(
+	baseSettings: Settings,
+	overrides?: Partial<Record<SettingPath, unknown>>,
+): Settings {
+	const snapshot = snapshotExecutorSettings(baseSettings);
 	return Settings.isolated({
 		...snapshot,
 		"async.enabled": false,
@@ -2006,6 +2012,33 @@ export async function inheritParentWorkstream(
 ): Promise<boolean> {
 	if (!parentWorkstream) return false;
 	return sessionManager.setWorkstream(parentWorkstream, "inherited");
+}
+
+/**
+ * Rehydrate the serializable subprocess request inside the worker process.
+ * Live parent-owned objects are deliberately absent: the worker creates its
+ * own auth/model/MCP/session state and is the sole writer of the child journal.
+ */
+export function runSubprocessWorkerRequest(
+	request: SpawnWorkerRunRequest,
+	runtime: { signal?: AbortSignal; onProgress?: (progress: AgentProgress) => void; eventBus?: EventBus } = {},
+): Promise<SingleResult> {
+	const local = request.localProtocol;
+	return runSubprocess({
+		...request.options,
+		settings: Settings.isolated(request.settings),
+		signal: runtime.signal,
+		onProgress: runtime.onProgress,
+		eventBus: runtime.eventBus,
+		...(local
+			? {
+					localProtocolOptions: {
+						getArtifactsDir: () => local.artifactsDir,
+						getSessionId: () => local.sessionId,
+					},
+				}
+			: {}),
+	});
 }
 
 /**

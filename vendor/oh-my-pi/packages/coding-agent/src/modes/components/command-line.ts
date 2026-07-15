@@ -1,9 +1,11 @@
 import { CompletionBehavior, Container, Input, matchesKey, type SelectItem, SelectList } from "@oh-my-pi/pi-tui";
 import { logger, VERSION } from "@oh-my-pi/pi-utils";
 import type { HistoryStorage } from "../../session/history-storage";
+import { formatLoopStats } from "../../slash-commands/loopstats";
 import { buildVersionViewModel, formatVersion } from "../../slash-commands/version";
 import { routeCommandOutput } from "../../task/route-inspector";
 import { copyToClipboard } from "../../utils/clipboard";
+import { canEnterCommandModeFromCurrentFocus } from "../command-mode-activation";
 import {
 	applyCommandModeCompletion,
 	COMMAND_MODE_COMMANDS,
@@ -14,7 +16,6 @@ import {
 	dispatchCommandLine,
 	getCommandModeCompletions,
 } from "../command-registry";
-import { canEnterCommandModeFromCurrentFocus } from "../command-mode-activation";
 import { getSelectListTheme } from "../theme/theme";
 import { toggleRichTranscript, toggleTranscriptWrap } from "../transcript-commands";
 import type { InteractiveModeContext } from "../types";
@@ -260,6 +261,9 @@ export function commandModeContextForInteractive(
 				sessionStartedAt: ctx.viewSession.sessionManager.getHeader()?.timestamp,
 			});
 			ctx.showStatus(formatVersion(viewModel));
+		},
+		showLoopStats: () => {
+			ctx.showStatus(formatLoopStats(ctx.ui.loopWatchdogSnapshot));
 		},
 		getSessionIdentity: () => {
 			const viewSession = ctx.viewSession;

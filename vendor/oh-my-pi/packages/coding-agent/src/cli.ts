@@ -96,6 +96,7 @@ const TAB_WORKER_ARG = "__omp_worker_tab";
 const JS_EVAL_WORKER_ARG = "__omp_worker_js_eval";
 const STT_WORKER_ARG = "__omp_worker_stt";
 const TTS_WORKER_ARG = "__omp_worker_tts";
+const TASK_SPAWN_WORKER_ARG = "__omp_worker_task_spawn";
 
 async function runWorkerEntrypoint(arg: string | undefined): Promise<boolean> {
 	if (arg === TINY_WORKER_ARG) {
@@ -149,6 +150,11 @@ async function runWorkerEntrypoint(arg: string | undefined): Promise<boolean> {
 	if (arg === TTS_WORKER_ARG) {
 		const { startTtsWorker } = await import("./tts/tts-worker");
 		await runIpcSubprocessWorker(startTtsWorker);
+		return true;
+	}
+	if (arg === TASK_SPAWN_WORKER_ARG) {
+		const { startSpawnWorker } = await import("./task/spawn-worker-entry");
+		await startSpawnWorker();
 		return true;
 	}
 	return false;

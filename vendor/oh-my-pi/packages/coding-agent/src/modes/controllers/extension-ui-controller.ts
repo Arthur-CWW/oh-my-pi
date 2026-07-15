@@ -16,6 +16,7 @@ import type {
 	SendUserMessageHandler,
 	TerminalInputHandler,
 } from "../../extensibility/extensions";
+import { NEVER_ABORT_SIGNAL } from "../../extensibility/extensions";
 import { getSessionSlashCommands } from "../../extensibility/extensions/get-commands-handler";
 import { createExtensionModelQuery } from "../../extensibility/extensions/model-api";
 import { HookEditorComponent } from "../../modes/components/hook-editor";
@@ -488,6 +489,7 @@ export class ExtensionUiController {
 				try {
 					await registeredTool.definition.onSession(event, {
 						ui: uiContext,
+						signal: NEVER_ABORT_SIGNAL,
 						getContextUsage: () => this.ctx.session.getContextUsage(),
 						compact: instructionsOrOptions => this.#compactSession(instructionsOrOptions),
 						hasUI: true,

@@ -3669,6 +3669,22 @@ export const SETTINGS_SCHEMA = {
 		},
 	},
 
+	"task.spawnGuidePath": {
+		type: "string",
+		default: "docs/fable/spawn-guide.md",
+		ui: {
+			tab: "tasks",
+			group: "Subagents",
+			label: "Spawn Guide Path",
+			description: "Optional living doctrine prepended to the shared context of every task spawn",
+		},
+	},
+
+	"task.isolateSetup": {
+		type: "boolean",
+		default: undefined,
+	},
+
 	"quotaAdmission.enabled": {
 		type: "boolean",
 		default: true,

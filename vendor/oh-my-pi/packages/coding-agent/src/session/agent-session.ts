@@ -191,6 +191,7 @@ import type {
 	TurnEndEvent,
 	TurnStartEvent,
 } from "../extensibility/extensions";
+import { NEVER_ABORT_SIGNAL } from "../extensibility/extensions";
 import { createExtensionModelQuery } from "../extensibility/extensions/model-api";
 import type { CompactOptions, ContextUsage } from "../extensibility/extensions/types";
 import { ExtensionToolWrapper } from "../extensibility/extensions/wrapper";
@@ -6449,6 +6450,7 @@ export class AgentSession {
 
 		return {
 			ui: noOpUIContext,
+			signal: NEVER_ABORT_SIGNAL,
 			hasUI: false,
 			cwd: this.sessionManager.getCwd(),
 			sessionManager: this.sessionManager,

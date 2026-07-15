@@ -1,0 +1,431 @@
+import * as path from "node:path";
+import { isCompiledBinary, popLoopPhase, pushLoopPhase, workerHostEntry } from "@oh-my-pi/pi-utils";
+import type { Settings } from "../config/settings";
+import { AgentRegistry } from "../registry/agent-registry";
+import type { EventBus } from "../utils/event-bus";
+import { snapshotExecutorSettings, type ExecutorOptions } from "./executor";
+import {
+	decodeSpawnWorkerRecord,
+	SPAWN_WORKER_ARG,
+	SPAWN_WORKER_MAX_RECORD_BYTES,
+	SPAWN_WORKER_PROTOCOL_VERSION,
+	type SerializableExecutorOptions,
+	type SpawnWorkerErrorCode,
+	type SpawnWorkerRecord,
+	type SpawnWorkerRegistryRef,
+	type SpawnWorkerRequest,
+	type SpawnWorkerRunRequest,
+	type SpawnWorkerSyntheticRequest,
+} from "./spawn-worker-protocol";
+import type { SingleResult } from "./types";
+
+const DEFAULT_MAX_RSS_BYTES = 1536 * 1024 * 1024;
+const RSS_SAMPLE_INTERVAL_MS = 250;
+const STDERR_CAP_BYTES = 64 * 1024;
+const SETUP_TIMEOUT_GRACE_MS = 60_000;
+let spawnLaunchTail: Promise<void> = Promise.resolve();
+
+async function launchSpawnProcess(
+	requestId: string,
+	command: SpawnCommand,
+	signal?: AbortSignal,
+): Promise<Bun.Subprocess<"pipe", "pipe", "pipe">> {
+	const previous = spawnLaunchTail;
+	const { promise: turnComplete, resolve: releaseTurn } = Promise.withResolvers<void>();
+	spawnLaunchTail = turnComplete;
+	await previous;
+	await new Promise<void>(resolve => setTimeout(resolve, 10));
+	try {
+		if (signal?.aborted) throw new SpawnWorkerError("aborted", "Subagent subprocess aborted before spawn");
+		pushLoopPhase(`subagent:${requestId}:process-spawn`);
+		try {
+			return Bun.spawn({
+				cmd: command.cmd,
+				cwd: command.cwd,
+				env: Bun.env,
+				stdin: "pipe",
+				stdout: "pipe",
+				stderr: "pipe",
+				detached: true,
+				windowsHide: true,
+			});
+		} finally {
+			popLoopPhase();
+		}
+	} finally {
+		releaseTurn();
+	}
+}
+
+export class SpawnWorkerError extends Error {
+	constructor(
+		readonly code: SpawnWorkerErrorCode,
+		message: string,
+	) {
+		super(message);
+		this.name = "SpawnWorkerError";
+	}
+}
+
+export interface SpawnWorkerClientOptions {
+	signal?: AbortSignal;
+	maxRssBytes?: number;
+	timeoutMs?: number;
+	onProgress?: ExecutorOptions["onProgress"];
+	eventBus?: EventBus;
+	onPhase?: (phase: Extract<SpawnWorkerRecord, { type: "phase" }>["phase"]) => void;
+}
+
+export interface SyntheticSpawnWorkload {
+	spinMs: number;
+	allocateBytes: number;
+	hangMs?: number;
+}
+
+export interface SyntheticSpawnResult {
+	allocatedBytes: number;
+	rssBytes: number;
+}
+
+interface SpawnCommand {
+	cmd: string[];
+	cwd?: string;
+}
+
+function spawnCommand(): SpawnCommand {
+	if (isCompiledBinary()) return { cmd: [process.execPath, SPAWN_WORKER_ARG] };
+	const hostEntry = workerHostEntry();
+	if (hostEntry) {
+		return { cmd: [process.execPath, path.basename(hostEntry), SPAWN_WORKER_ARG], cwd: path.dirname(hostEntry) };
+	}
+	const packageRoot = path.resolve(import.meta.dir, "..", "..");
+	return { cmd: [process.execPath, "src/cli.ts", SPAWN_WORKER_ARG], cwd: packageRoot };
+}
+
+const SERIALIZABLE_OPTION_KEYS = [
+	"worktree",
+	"assignment",
+	"context",
+	"planReference",
+	"description",
+	"role",
+	"parentToolCallId",
+	"detached",
+	"modelOverride",
+	"routeReceipt",
+	"buildVersion",
+	"buildDigest",
+	"parentActiveModelPattern",
+	"thinkingLevel",
+	"outputSchema",
+	"taskDepth",
+	"maxRuntimeMs",
+	"quotaAdmission",
+	"enableLsp",
+	"sessionFile",
+	"parentWorkstream",
+	"parentSessionFile",
+	"parentSessionId",
+	"parentAgentId",
+	"persistArtifacts",
+	"artifactsDir",
+	"contextFiles",
+	"skills",
+	"promptTemplates",
+	"workspaceTree",
+	"rules",
+	"preloadedExtensionPaths",
+	"preloadedCustomToolPaths",
+	"parentEvalSessionId",
+	"autoloadSkills",
+] as const satisfies readonly (keyof SerializableExecutorOptions)[];
+
+function serializeOptions(options: ExecutorOptions): SerializableExecutorOptions {
+	const result: SerializableExecutorOptions = {
+		cwd: options.cwd,
+		agent: options.agent,
+		task: options.task,
+		index: options.index,
+		id: options.id,
+	};
+	const writable = result as Record<string, unknown>;
+	for (const key of SERIALIZABLE_OPTION_KEYS) {
+		const value = options[key];
+		if (value !== undefined) writable[key] = value;
+	}
+	return result;
+}
+
+function registrySnapshot(): SpawnWorkerRegistryRef[] {
+	return AgentRegistry.global()
+		.list()
+		.map(ref => ({
+			id: ref.id,
+			displayName: ref.displayName,
+			kind: ref.kind,
+			status: ref.status,
+			...(ref.parentId ? { parentId: ref.parentId } : {}),
+			sessionFile: ref.sessionFile,
+		}));
+}
+
+function projectRegistry(ref: SpawnWorkerRegistryRef): void {
+	const registry = AgentRegistry.global();
+	const existing = registry.get(ref.id);
+	if (!existing || existing.sessionFile !== (ref.sessionFile ?? null)) {
+		registry.register({ ...ref, session: null });
+		return;
+	}
+	registry.setStatus(ref.id, ref.status);
+}
+
+function killProcessTree(proc: Bun.Subprocess): void {
+	try {
+		process.kill(-proc.pid, "SIGKILL");
+		return;
+	} catch {
+		// The worker may have exited or may not yet own its process group.
+	}
+	try {
+		proc.kill("SIGKILL");
+	} catch {
+		// Exit processing reports the terminal state.
+	}
+}
+
+interface RssWatch {
+	maxBytes: number;
+	onExceeded(rssBytes: number): void;
+}
+
+const rssWatches = new Map<number, RssWatch>();
+let rssTimer: Timer | undefined;
+let rssSampling = false;
+
+async function sampleWorkerRss(): Promise<void> {
+	if (rssSampling || rssWatches.size === 0) return;
+	rssSampling = true;
+	try {
+		const pids = [...rssWatches.keys()];
+		const sample = Bun.spawn({
+			cmd: ["/bin/ps", "-o", "pid=,rss=", "-p", pids.join(",")],
+			stdout: "pipe",
+			stderr: "ignore",
+		});
+		const [text] = await Promise.all([new Response(sample.stdout).text(), sample.exited]);
+		for (const line of text.split("\n")) {
+			const [pidText, rssText] = line.trim().split(/\s+/, 2);
+			const pid = Number.parseInt(pidText, 10);
+			const rssBytes = Number.parseInt(rssText, 10) * 1024;
+			const watch = rssWatches.get(pid);
+			if (watch && Number.isFinite(rssBytes) && rssBytes > watch.maxBytes) watch.onExceeded(rssBytes);
+		}
+	} finally {
+		rssSampling = false;
+	}
+}
+
+function watchWorkerRss(pid: number, watch: RssWatch): () => void {
+	rssWatches.set(pid, watch);
+	if (rssTimer === undefined) {
+		rssTimer = setInterval(() => void sampleWorkerRss(), RSS_SAMPLE_INTERVAL_MS);
+		rssTimer.unref?.();
+	}
+	return () => {
+		rssWatches.delete(pid);
+		if (rssWatches.size === 0) {
+			clearInterval(rssTimer);
+			rssTimer = undefined;
+		}
+	};
+}
+
+async function readCappedStderr(stream: ReadableStream<Uint8Array>): Promise<string> {
+	const reader = stream.getReader();
+	const decoder = new TextDecoder();
+	let bytes = 0;
+	let text = "";
+	try {
+		while (true) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			const remaining = STDERR_CAP_BYTES - bytes;
+			if (remaining <= 0) continue;
+			const slice = value.byteLength > remaining ? value.subarray(0, remaining) : value;
+			bytes += slice.byteLength;
+			text += decoder.decode(slice, { stream: true });
+		}
+		return text + decoder.decode();
+	} finally {
+		reader.releaseLock();
+	}
+}
+
+
+async function runRequest(
+	request: SpawnWorkerRequest,
+	options: SpawnWorkerClientOptions,
+): Promise<SingleResult | SyntheticSpawnResult> {
+	if (options.signal?.aborted) throw new SpawnWorkerError("aborted", "Subagent subprocess aborted before spawn");
+	const command = spawnCommand();
+	let proc: Bun.Subprocess<"pipe", "pipe", "pipe">;
+	try {
+		proc = await launchSpawnProcess(request.requestId, command, options.signal);
+	} catch (error) {
+		if (error instanceof SpawnWorkerError) throw error;
+		throw new SpawnWorkerError("spawn", error instanceof Error ? error.message : String(error));
+	}
+
+	let terminalError: SpawnWorkerError | undefined;
+	let result: SingleResult | SyntheticSpawnResult | undefined;
+	let sawReady = false;
+	const maxRssBytes = Math.max(1, Math.trunc(options.maxRssBytes ?? DEFAULT_MAX_RSS_BYTES));
+	const failAndKill = (error: SpawnWorkerError): void => {
+		terminalError ??= error;
+		killProcessTree(proc);
+	};
+	const onAbort = (): void => failAndKill(new SpawnWorkerError("aborted", "Subagent subprocess aborted"));
+	options.signal?.addEventListener("abort", onAbort, { once: true });
+	const timeout = options.timeoutMs && options.timeoutMs > 0
+		? setTimeout(() => failAndKill(new SpawnWorkerError("timeout", `Subagent subprocess exceeded ${options.timeoutMs}ms`)), options.timeoutMs)
+		: undefined;
+	const stopRssWatch = watchWorkerRss(proc.pid, {
+		maxBytes: maxRssBytes,
+		onExceeded: rssBytes =>
+			failAndKill(new SpawnWorkerError("rss-limit", `Subagent subprocess RSS ${rssBytes} exceeded ${maxRssBytes}`)),
+	});
+
+	const stderrPromise = readCappedStderr(proc.stderr);
+	const stdoutPromise = (async (): Promise<void> => {
+		const reader = proc.stdout.getReader();
+		const decoder = new TextDecoder();
+		let buffer = "";
+		const handleLine = (line: string): void => {
+			if (new TextEncoder().encode(line).byteLength > SPAWN_WORKER_MAX_RECORD_BYTES) {
+				failAndKill(new SpawnWorkerError("protocol", "Subagent subprocess emitted an oversized record"));
+				return;
+			}
+			let record: SpawnWorkerRecord;
+			try {
+				record = decodeSpawnWorkerRecord(JSON.parse(line));
+			} catch (error) {
+				failAndKill(new SpawnWorkerError("protocol", error instanceof Error ? error.message : String(error)));
+				return;
+			}
+			if (record.requestId !== request.requestId) {
+				failAndKill(new SpawnWorkerError("protocol", "Subagent subprocess request id mismatch"));
+				return;
+			}
+			switch (record.type) {
+				case "ready":
+					if (sawReady || record.pid !== proc.pid) failAndKill(new SpawnWorkerError("protocol", "Invalid worker ready record"));
+					sawReady = true;
+					break;
+				case "phase":
+					options.onPhase?.(record.phase);
+					break;
+				case "registry":
+					projectRegistry(record.ref);
+					break;
+				case "progress":
+					options.onProgress?.(record.progress);
+					break;
+				case "event":
+					options.eventBus?.emit(record.channel, record.payload);
+					break;
+				case "result":
+					result = record.result;
+					break;
+				case "synthetic-result":
+					result = { allocatedBytes: record.allocatedBytes, rssBytes: record.rssBytes };
+					break;
+				case "error":
+					failAndKill(new SpawnWorkerError(record.code, record.message));
+					break;
+			}
+		};
+		try {
+			while (true) {
+				const { done, value } = await reader.read();
+				if (done) break;
+				buffer += decoder.decode(value, { stream: true });
+				let newline = buffer.indexOf("\n");
+				while (newline >= 0) {
+					const line = buffer.slice(0, newline);
+					buffer = buffer.slice(newline + 1);
+					if (line.length > 0) handleLine(line);
+					newline = buffer.indexOf("\n");
+				}
+				if (new TextEncoder().encode(buffer).byteLength > SPAWN_WORKER_MAX_RECORD_BYTES) {
+					failAndKill(new SpawnWorkerError("protocol", "Subagent subprocess unterminated record exceeded cap"));
+					break;
+				}
+			}
+			buffer += decoder.decode();
+			if (buffer.trim().length > 0) handleLine(buffer);
+		} finally {
+			reader.releaseLock();
+		}
+	})();
+
+	try {
+		proc.stdin.write(`${JSON.stringify(request)}\n`);
+		proc.stdin.end();
+		const [exitCode, stderr] = await Promise.all([proc.exited, stderrPromise, stdoutPromise]).then(values => [values[0], values[1]] as const);
+		if (terminalError) throw terminalError;
+		if (exitCode !== 0) throw new SpawnWorkerError("exit", `Subagent subprocess exited with code ${exitCode}${stderr.trim() ? `: ${stderr.trim()}` : ""}`);
+		if (!sawReady) throw new SpawnWorkerError("protocol", "Subagent subprocess exited before ready");
+		if (!result) throw new SpawnWorkerError("protocol", "Subagent subprocess exited without a result");
+		return result;
+	} finally {
+		clearTimeout(timeout);
+		stopRssWatch();
+		options.signal?.removeEventListener("abort", onAbort);
+	}
+}
+
+export function runSubagentSpawnProcess(options: ExecutorOptions, settings: Settings): Promise<SingleResult> {
+	pushLoopPhase(`subagent:${options.id}:request-snapshot`);
+	let request: SpawnWorkerRunRequest;
+	try {
+		request = {
+			version: SPAWN_WORKER_PROTOCOL_VERSION,
+			type: "run",
+			requestId: crypto.randomUUID(),
+			options: serializeOptions(options),
+			settings: snapshotExecutorSettings(settings),
+			registry: registrySnapshot(),
+			...(options.localProtocolOptions
+				? {
+						localProtocol: {
+							artifactsDir: options.localProtocolOptions.getArtifactsDir?.() ?? null,
+							sessionId: options.localProtocolOptions.getSessionId?.() ?? null,
+						},
+					}
+				: {}),
+		};
+	} finally {
+		popLoopPhase();
+	}
+	const runtimeLimitMs = options.maxRuntimeMs ?? settings.get("task.maxRuntimeMs");
+	const timeoutMs = runtimeLimitMs > 0 ? runtimeLimitMs + SETUP_TIMEOUT_GRACE_MS : undefined;
+	return runRequest(request, {
+		signal: options.signal,
+		timeoutMs,
+		onProgress: options.onProgress,
+		eventBus: options.eventBus,
+	}).then(result => result as SingleResult);
+}
+
+export function runSyntheticSpawnWorkerWorkload(
+	workload: SyntheticSpawnWorkload,
+	options: SpawnWorkerClientOptions = {},
+): Promise<SyntheticSpawnResult> {
+	const request: SpawnWorkerSyntheticRequest = {
+		version: SPAWN_WORKER_PROTOCOL_VERSION,
+		type: "synthetic",
+		requestId: crypto.randomUUID(),
+		workload,
+	};
+	return runRequest(request, options).then(result => result as SyntheticSpawnResult);
+}

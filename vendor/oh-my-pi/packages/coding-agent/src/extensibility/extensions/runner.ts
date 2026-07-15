@@ -1,6 +1,7 @@
 /**
  * Extension runner - executes extensions and manages their lifecycle.
  */
+import { AsyncLocalStorage } from "node:async_hooks";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type {
 	CredentialDisabledEvent,
@@ -16,6 +17,7 @@ import type { Settings } from "../../config/settings";
 import type { MemoryRuntimeContext } from "../../memory-backend";
 import { type Theme, theme } from "../../modes/theme/theme";
 import type { SessionManager } from "../../session/session-manager";
+import { runWithExecHandlerContext } from "../../exec/exec";
 import { createExtensionModelQuery } from "./model-api";
 import {
 	type BeforeAgentStartCombinedResult,
@@ -67,8 +69,70 @@ import type {
 	UserPythonEventResult,
 } from "./types";
 
-
 export type ExtensionErrorListener = (error: ExtensionError) => void;
+
+export type ExtensionViolationRecord =
+	| {
+			kind: "timeout";
+			extensionId: string;
+			sessionId: string;
+			event: string;
+			elapsedMs: number;
+			action: "abort_handler_and_process_tree";
+			timeoutMs: number;
+			timestamp: string;
+	  }
+	| {
+			kind: "reentrancy";
+			extensionId: string;
+			sessionId: string;
+			event: string;
+			elapsedMs: number;
+			action: "coalesce_with_in_flight";
+			timestamp: string;
+	  }
+	| {
+			kind: "output_overflow";
+			extensionId: string;
+			sessionId: string;
+			event: string;
+			elapsedMs: number;
+			action: "truncate_output";
+			stream: "stdout" | "stderr";
+			limitBytes: number;
+			timestamp: string;
+	  }
+	| {
+			kind: "message_overflow";
+			extensionId: string;
+			sessionId: string;
+			event: string;
+			elapsedMs: number;
+			action: "drop_message";
+			limit: number;
+			timestamp: string;
+	  };
+
+export type ExtensionViolationListener = (record: ExtensionViolationRecord) => void;
+
+interface HandlerMessageBudget {
+	count: number;
+	overflowRecorded: boolean;
+	startedAt: number;
+	extensionId?: string;
+}
+
+interface HandlerExecutionScope {
+	extensionId: string;
+	event: string;
+	startedAt: number;
+	messageBudget: HandlerMessageBudget;
+}
+
+const handlerExecutionContext = new AsyncLocalStorage<HandlerExecutionScope>();
+export const NEVER_ABORT_SIGNAL = new AbortController().signal;
+const MAX_PENDING_EXTENSION_MESSAGES = 32;
+const MAX_EXTENSION_VIOLATION_RECORDS = 128;
 
 export const EXTENSION_HANDLER_TIMEOUT_MS = 30_000;
 let extensionHandlerTimeoutMs = EXTENSION_HANDLER_TIMEOUT_MS;
@@ -204,6 +268,12 @@ const noOpUIContext: ExtensionUIContext = {
 export class ExtensionRunner {
 	#uiContext: ExtensionUIContext;
 	#errorListeners: Set<ExtensionErrorListener> = new Set();
+	#violationListeners: Set<ExtensionViolationListener> = new Set();
+	#violationRecords: ExtensionViolationRecord[] = [];
+	#inFlightEvents = new Map<
+		string,
+		{ promise: Promise<unknown>; startedAt: number; messageBudget: HandlerMessageBudget }
+	>();
 	#getModel: () => Model | undefined = () => undefined;
 	#isIdleFn: () => boolean = () => true;
 	#waitForIdleFn: () => Promise<void> = async () => {};
@@ -250,8 +320,14 @@ export class ExtensionRunner {
 		uiContext?: ExtensionUIContext,
 	): void {
 		// Copy actions into the shared runtime (all extension APIs reference this)
-		this.runtime.sendMessage = actions.sendMessage;
-		this.runtime.sendUserMessage = actions.sendUserMessage;
+		this.runtime.sendMessage = (message, options) => {
+			if (!this.#consumePendingMessageSlot()) return;
+			actions.sendMessage(message, options);
+		};
+		this.runtime.sendUserMessage = (content, options) => {
+			if (!this.#consumePendingMessageSlot()) return;
+			actions.sendUserMessage(content, options);
+		};
 		this.runtime.appendEntry = actions.appendEntry;
 		this.runtime.getActiveTools = actions.getActiveTools;
 		this.runtime.getAllTools = actions.getAllTools;
@@ -293,7 +369,7 @@ export class ExtensionRunner {
 		const pending = this.#pendingCredentialDisabled.splice(0);
 		queueMicrotask(() => {
 			for (const event of pending) {
-				this.emit({ type: "credential_disabled", ...event }).catch((error: unknown) => {
+				this.#emitHandlers({ type: "credential_disabled", ...event }).catch((error: unknown) => {
 					logger.warn("credential_disabled handler threw during initialize flush", {
 						provider: event.provider,
 						error: error instanceof Error ? error.message : String(error),
@@ -438,6 +514,47 @@ export class ExtensionRunner {
 		}
 	}
 
+	onViolation(listener: ExtensionViolationListener): () => void {
+		this.#violationListeners.add(listener);
+		return () => this.#violationListeners.delete(listener);
+	}
+
+	getViolationRecords(): readonly ExtensionViolationRecord[] {
+		return this.#violationRecords;
+	}
+
+	#recordViolation(record: ExtensionViolationRecord): void {
+		if (this.#violationRecords.length >= MAX_EXTENSION_VIOLATION_RECORDS) {
+			this.#violationRecords.shift();
+		}
+		this.#violationRecords.push(record);
+		for (const listener of this.#violationListeners) listener(record);
+	}
+
+	#consumePendingMessageSlot(): boolean {
+		const scope = handlerExecutionContext.getStore();
+		if (!scope) return true;
+		const budget = scope.messageBudget;
+		if (budget.count < MAX_PENDING_EXTENSION_MESSAGES) {
+			budget.count++;
+			return true;
+		}
+		if (!budget.overflowRecorded) {
+			budget.overflowRecorded = true;
+			this.#recordViolation({
+				kind: "message_overflow",
+				extensionId: scope.extensionId,
+				sessionId: this.sessionManager.getSessionId(),
+				event: scope.event,
+				elapsedMs: performance.now() - scope.startedAt,
+				action: "drop_message",
+				limit: MAX_PENDING_EXTENSION_MESSAGES,
+				timestamp: new Date().toISOString(),
+			});
+		}
+		return false;
+	}
+
 	hasHandlers(eventType: string): boolean {
 		for (const ext of this.extensions) {
 			const handlers = ext.handlers.get(eventType);
@@ -497,10 +614,11 @@ export class ExtensionRunner {
 		return undefined;
 	}
 
-	createContext(): ExtensionContext {
+	createContext(signal: AbortSignal = NEVER_ABORT_SIGNAL): ExtensionContext {
 		const getModel = this.#getModel;
 		return {
 			ui: this.#uiContext,
+			signal,
 			getContextUsage: () => this.#getContextUsageFn(),
 			compact: instructionsOrOptions => this.#compactFn(instructionsOrOptions),
 			hasUI: this.hasUI(),
@@ -556,18 +674,69 @@ export class ExtensionRunner {
 		ctx: ExtensionContext,
 		ext: Extension,
 		timeoutMs: number,
+		messageBudget: HandlerMessageBudget = {
+			count: 0,
+			overflowRecorded: false,
+			startedAt: performance.now(),
+		},
 	): Promise<TResult | undefined> {
+		const startedAt = performance.now();
+		const controller = new AbortController();
+		const handlerContext = { ...ctx, signal: controller.signal };
+		messageBudget.extensionId = ext.path;
+		const scope: HandlerExecutionScope = {
+			extensionId: ext.path,
+			event: event.type,
+			startedAt,
+			messageBudget,
+		};
+		let timer: ReturnType<typeof setTimeout> | undefined;
 		try {
-			const handlerResult = await Promise.race([
-				Promise.resolve(handler(event, ctx)),
-				Bun.sleep(timeoutMs).then(() => EXTENSION_HANDLER_TIMEOUT),
-			]);
+			const handlerPromise = Promise.resolve(
+				handlerExecutionContext.run(scope, () =>
+					runWithExecHandlerContext(
+						{
+							signal: controller.signal,
+							onOutputTruncated: (stream, limitBytes) => {
+								this.#recordViolation({
+									kind: "output_overflow",
+									extensionId: ext.path,
+									sessionId: this.sessionManager.getSessionId(),
+									event: event.type,
+									elapsedMs: performance.now() - startedAt,
+									action: "truncate_output",
+									stream,
+									limitBytes,
+									timestamp: new Date().toISOString(),
+								});
+							},
+						},
+						() => handler(event, handlerContext),
+					),
+				),
+			);
+			const timeoutResult = new Promise<typeof EXTENSION_HANDLER_TIMEOUT>(resolve => {
+				timer = setTimeout(() => resolve(EXTENSION_HANDLER_TIMEOUT), timeoutMs);
+			});
+			const handlerResult = await Promise.race([handlerPromise, timeoutResult]);
 			if (handlerResult === EXTENSION_HANDLER_TIMEOUT) {
+				const elapsedMs = performance.now() - startedAt;
+				controller.abort(new Error(`Extension handler timed out after ${timeoutMs}ms`));
 				const error = `handler timed out after ${timeoutMs}ms`;
 				logger.warn("Extension handler timed out", {
 					extensionPath: ext.path,
 					event: event.type,
 					timeoutMs,
+				});
+				this.#recordViolation({
+					kind: "timeout",
+					extensionId: ext.path,
+					sessionId: this.sessionManager.getSessionId(),
+					event: event.type,
+					elapsedMs,
+					action: "abort_handler_and_process_tree",
+					timeoutMs,
+					timestamp: new Date().toISOString(),
 				});
 				this.emitError({
 					extensionPath: ext.path,
@@ -587,10 +756,48 @@ export class ExtensionRunner {
 				stack,
 			});
 			return undefined;
+		} finally {
+			if (timer !== undefined) clearTimeout(timer);
 		}
 	}
 
 	async emit<TEvent extends RunnerEmitEvent>(event: TEvent): Promise<RunnerEmitResult<TEvent>> {
+		const active = this.#inFlightEvents.get(event.type);
+		if (active) {
+			this.#recordViolation({
+				kind: "reentrancy",
+				extensionId: active.messageBudget.extensionId ?? this.extensions[0]?.path ?? "<runner>",
+				sessionId: this.sessionManager.getSessionId(),
+				event: event.type,
+				elapsedMs: performance.now() - active.startedAt,
+				action: "coalesce_with_in_flight",
+				timestamp: new Date().toISOString(),
+			});
+			return active.promise as Promise<RunnerEmitResult<TEvent>>;
+		}
+
+		const startedAt = performance.now();
+		const messageBudget: HandlerMessageBudget = {
+			count: 0,
+			overflowRecorded: false,
+			startedAt,
+		};
+		const promise = Promise.resolve().then(() => this.#emitHandlers(event, messageBudget));
+		this.#inFlightEvents.set(event.type, { promise, startedAt, messageBudget });
+		void promise.finally(() => {
+			if (this.#inFlightEvents.get(event.type)?.promise === promise) this.#inFlightEvents.delete(event.type);
+		});
+		return promise;
+	}
+
+	async #emitHandlers<TEvent extends RunnerEmitEvent>(
+		event: TEvent,
+		messageBudget: HandlerMessageBudget = {
+			count: 0,
+			overflowRecorded: false,
+			startedAt: performance.now(),
+		},
+	): Promise<RunnerEmitResult<TEvent>> {
 		const ctx = this.createContext();
 		let result: SessionBeforeEventResult | SessionCompactingResult | undefined;
 
@@ -605,13 +812,12 @@ export class ExtensionRunner {
 					ctx,
 					ext,
 					handlerTimeoutForEvent(event.type),
+					messageBudget,
 				);
 
 				if (this.#isSessionBeforeEvent(event) && handlerResult) {
 					result = handlerResult as SessionBeforeEventResult;
-					if (result.cancel) {
-						return result as RunnerEmitResult<TEvent>;
-					}
+					if (result.cancel) return result as RunnerEmitResult<TEvent>;
 				}
 
 				if (event.type === "session.compacting" && handlerResult) {
@@ -675,25 +881,16 @@ export class ExtensionRunner {
 			if (!handlers || handlers.length === 0) continue;
 
 			for (const handler of handlers) {
-				try {
-					const handlerResult = await handler(event, ctx);
-
-					if (handlerResult) {
-						result = handlerResult as ToolCallEventResult;
-						if (result.block) {
-							return result;
-						}
-					}
-				} catch (err) {
-					const message = err instanceof Error ? err.message : String(err);
-					const stack = err instanceof Error ? err.stack : undefined;
-					this.emitError({
-						extensionPath: ext.path,
-						event: "tool_call",
-						error: message,
-						stack,
-					});
-					return { block: true, reason: `Extension ${ext.path} failed: ${message}` };
+				const handlerResult = await this.#runHandlerWithTimeout(
+					handler,
+					event,
+					ctx,
+					ext,
+					extensionHandlerTimeoutMs,
+				);
+				if (handlerResult) {
+					result = handlerResult as ToolCallEventResult;
+					if (result.block) return result;
 				}
 			}
 		}

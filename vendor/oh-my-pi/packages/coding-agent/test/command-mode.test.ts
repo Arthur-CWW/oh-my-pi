@@ -13,7 +13,6 @@ import {
 	parseCommandLine,
 	TUI_COLON_COMMAND_NAMES,
 } from "@oh-my-pi/pi-coding-agent/modes/command-registry";
-import { toggleRichTranscript } from "@oh-my-pi/pi-coding-agent/modes/transcript-commands";
 import { AssistantMessageComponent } from "@oh-my-pi/pi-coding-agent/modes/components/assistant-message";
 import {
 	CommandLineComponent,
@@ -21,9 +20,11 @@ import {
 	installCommandLine,
 } from "@oh-my-pi/pi-coding-agent/modes/components/command-line";
 import { initTheme, theme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
+import { toggleRichTranscript } from "@oh-my-pi/pi-coding-agent/modes/transcript-commands";
 import type { TranscriptDisplayContext } from "@oh-my-pi/pi-coding-agent/modes/transcript-display";
 import { HistoryStorage } from "@oh-my-pi/pi-coding-agent/session/history-storage";
 import { BUILTIN_SLASH_COMMAND_DEFS } from "@oh-my-pi/pi-coding-agent/slash-commands/builtin-registry";
+import { formatLoopStats } from "@oh-my-pi/pi-coding-agent/slash-commands/loopstats";
 import { createIrcMessageCard } from "@oh-my-pi/pi-coding-agent/tools/irc";
 import { Container, CURSOR_MARKER } from "@oh-my-pi/pi-tui";
 
@@ -41,6 +42,7 @@ class CommandFixture implements CommandModeContext {
 	wrap = false;
 	rich = true;
 	versionRuns = 0;
+	loopStatsRuns = 0;
 	feedback: string[] = [];
 	copied: string[] = [];
 	identity = {
@@ -82,6 +84,25 @@ class CommandFixture implements CommandModeContext {
 
 	showVersion(): void {
 		this.versionRuns += 1;
+	}
+
+	showLoopStats(): void {
+		this.loopStatsRuns += 1;
+		this.feedback.push(
+			formatLoopStats({
+				totalViolations: 2,
+				maxBlockedMs: 418,
+				violations: [
+					{
+						timestamp: 1720000000000,
+						blockedMs: 418,
+						phase: "ui.render",
+						pid: 123,
+						attribution: "session-1",
+					},
+				],
+			}),
+		);
 	}
 
 	showFeedback(message: string): void {
@@ -127,6 +148,13 @@ describe("colon command registry", () => {
 		expect(ctx.wrap).toBe(true);
 		expect(await dispatchCommandLine("version", ctx)).toBe(true);
 		expect(ctx.versionRuns).toBe(1);
+		expect(await dispatchCommandLine("loopstats", ctx)).toBe(true);
+		expect(ctx.loopStatsRuns).toBe(1);
+		const loopStats = ctx.feedback.at(-1) ?? "";
+		expect(loopStats).toContain("total violations: 2");
+		expect(loopStats).toContain("max blocked ms: 418");
+		expect(loopStats).toContain("phase=ui.render");
+		expect(loopStats).toContain("attribution=session-1");
 	});
 
 	it("names the known commands for an unknown command", async () => {
@@ -184,6 +212,7 @@ describe("colon command registry", () => {
 			"rich",
 			"errors",
 			"version",
+			"loopstats",
 			"changelog",
 			"hotkeys",
 		]);

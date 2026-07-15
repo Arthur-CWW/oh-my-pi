@@ -15,7 +15,15 @@ import { currentLoopPhase, logger, popLoopPhase, pushLoopPhase, takeRecentLoopPh
  * ticks by hand; firing re-arms via schedule, so the captured callback always
  * advances to the next pending tick.
  */
-function harness(options: Partial<{ intervalMs: number; thresholdMs: number }> = {}) {
+function harness(
+	options: Partial<{
+		intervalMs: number;
+		thresholdMs: number;
+		timestamp: () => number;
+		maxViolations: number;
+		attribution: string;
+	}> = {},
+) {
 	let nowValue = 0;
 	let scheduled: (() => void) | undefined;
 	const now = () => nowValue;
@@ -194,6 +202,54 @@ describe("LoopWatchdog", () => {
 		nowValue = 600;
 		cb?.(); // late tick logs and re-arms
 		expect(unref).toHaveBeenCalledTimes(2); // the re-armed handle is unref'd too
+	});
+
+	test("records bounded violations with counters and evicts the oldest record", () => {
+		vi.spyOn(logger, "warn").mockImplementation(() => {});
+		let timestamp = 1000;
+		const { wd, setNow, fireTick } = harness({
+			timestamp: () => timestamp,
+			maxViolations: 2,
+			attribution: "session/request",
+		});
+
+		wd.start(); // deadline 250
+		pushLoopPhase("ui.handle-input");
+		popLoopPhase();
+		setNow(600); // first rising edge: 350ms blocked
+		fireTick();
+		setNow(850); // recover
+		fireTick();
+
+		timestamp = 2000;
+		pushLoopPhase("ui.render");
+		popLoopPhase();
+		setNow(1450); // second rising edge
+		fireTick();
+		setNow(1700); // recover
+		fireTick();
+
+		timestamp = 3000;
+		pushLoopPhase("ui.render");
+		popLoopPhase();
+		setNow(2300); // third rising edge; evicts the first record
+		fireTick();
+
+		expect(wd.totalViolations).toBe(3);
+		expect(wd.maxBlockedMs).toBe(350);
+		expect(wd.violations).toHaveLength(2);
+		expect(wd.violations.map(record => record.timestamp)).toEqual([2000, 3000]);
+		expect(wd.violations[0]).toMatchObject({
+			blockedMs: 350,
+			phase: "ui.render",
+			pid: process.pid,
+			attribution: "session/request",
+		});
+		expect(wd.getSnapshot()).toEqual({
+			totalViolations: 3,
+			maxBlockedMs: 350,
+			violations: wd.violations,
+		});
 	});
 
 	test("stop() cancels the armed timer handle so no stale tick is left pending", () => {

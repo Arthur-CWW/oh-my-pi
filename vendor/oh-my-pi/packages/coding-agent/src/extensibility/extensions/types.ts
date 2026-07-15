@@ -329,6 +329,8 @@ export interface ExtensionModelQuery {
 export interface ExtensionContext {
 	/** UI methods for user interaction */
 	ui: ExtensionUIContext;
+	/** Aborted when this handler exceeds its execution budget. */
+	signal: AbortSignal;
 	/** Get current context usage for the active model. */
 	getContextUsage(): ContextUsage | undefined;
 	/** Compact the session context (interactive mode shows UI). */

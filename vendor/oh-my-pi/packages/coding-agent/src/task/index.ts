@@ -17,7 +17,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import path from "node:path";
 import type { AgentTool, AgentToolResult, AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
-import { $env, logger, prompt, Snowflake, VERSION } from "@oh-my-pi/pi-utils";
+import { $env, isEnoent, logger, prompt, Snowflake, VERSION } from "@oh-my-pi/pi-utils";
 import type { ToolSession } from "..";
 import { MCPManager } from "../mcp/manager";
 import type { Theme } from "../modes/theme/theme";
@@ -52,7 +52,8 @@ import { getSessionSpawnCordon, type SessionSpawnCordon } from "../session/sessi
 import { generateCommitMessage } from "../utils/commit-message-generator";
 import * as git from "../utils/git";
 import { type DiscoveryResult, discoverAgents, getAgent } from "./discovery";
-import { runSubprocess } from "./executor";
+import { type ExecutorOptions, runSubprocess } from "./executor";
+import { runSubagentSpawnProcess } from "./spawn-worker-client";
 import { generateTaskName } from "./name-generator";
 import { AgentOutputManager } from "./output-manager";
 import { mapWithConcurrencyLimit, REVIVE_ADMISSION_WAIT_MS, resolveSpawnConcurrency, Semaphore } from "./parallel";
@@ -90,6 +91,81 @@ import {
 	parseIsolationMode,
 	type WorktreeBaseline,
 } from "./worktree";
+
+export const DEFAULT_SPAWN_GUIDE_PATH = "docs/fable/spawn-guide.md";
+
+interface SpawnGuideCacheEntry {
+	mtimeMs: number;
+	content: string;
+}
+
+const spawnGuideCache = new Map<string, SpawnGuideCacheEntry>();
+const defaultSpawnGuidePathCache = new Map<string, Promise<string>>();
+
+async function resolveSpawnGuidePath(cwd: string, configuredPath?: string): Promise<string> {
+	const requestedPath = configuredPath?.trim() || DEFAULT_SPAWN_GUIDE_PATH;
+	if (path.isAbsolute(requestedPath)) return requestedPath;
+	if (requestedPath !== DEFAULT_SPAWN_GUIDE_PATH) return path.resolve(cwd, requestedPath);
+
+	const resolvedCwd = path.resolve(cwd);
+	let cached = defaultSpawnGuidePathCache.get(resolvedCwd);
+	if (!cached) {
+		cached = getRepoRoot(resolvedCwd)
+			.then(repoRoot => path.join(repoRoot, requestedPath))
+			.catch(() => path.resolve(resolvedCwd, requestedPath));
+		defaultSpawnGuidePathCache.set(resolvedCwd, cached);
+	}
+	return cached;
+}
+
+/**
+ * Load the optional living spawn doctrine. The file is cached by mtime so
+ * edits are visible to the next spawn without restarting the process.
+ */
+export async function loadSpawnGuide(cwd: string, configuredPath?: string): Promise<string | undefined> {
+	const guidePath = await resolveSpawnGuidePath(cwd, configuredPath);
+	let stat: Awaited<ReturnType<typeof fs.stat>>;
+	try {
+		stat = await fs.stat(guidePath);
+	} catch (error) {
+		spawnGuideCache.delete(guidePath);
+		if (!isEnoent(error)) logger.warn("task: failed to stat spawn guide", { path: guidePath, error: String(error) });
+		return undefined;
+	}
+
+	const cached = spawnGuideCache.get(guidePath);
+	if (cached?.mtimeMs === stat.mtimeMs) return cached.content;
+
+	let source: string;
+	try {
+		source = await fs.readFile(guidePath, "utf8");
+	} catch (error) {
+		spawnGuideCache.delete(guidePath);
+		if (!isEnoent(error)) logger.warn("task: failed to read spawn guide", { path: guidePath, error: String(error) });
+		return undefined;
+	}
+
+	const trimmedSource = source.trim();
+	const provenance = `Spawn guide: ${guidePath} (${stat.mtime.toISOString()})`;
+	const content = trimmedSource ? `${provenance}\n\n${trimmedSource}` : provenance;
+	spawnGuideCache.set(guidePath, { mtimeMs: stat.mtimeMs, content });
+	return content;
+}
+
+/**
+ * Prepare one shared task context before fan-out. Callers pass the resulting
+ * string to every item; the guide is never loaded or concatenated per item.
+ */
+export async function prepareSpawnContext(
+	cwd: string,
+	configuredPath: string | undefined,
+	context: string | undefined,
+): Promise<string | undefined> {
+	const guide = await loadSpawnGuide(cwd, configuredPath);
+	const trimmedContext = context?.trim() || undefined;
+	if (!guide) return trimmedContext;
+	return trimmedContext ? `${guide}\n\n${trimmedContext}` : guide;
+}
 
 function deriveSpawnGroup(ownerId: string | undefined): { groupId: string; coordinatorId?: string } {
 	const registry = AgentRegistry.global();
@@ -797,7 +873,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 		signal?: AbortSignal,
 		onUpdate?: AgentToolUpdateCallback<TaskToolDetails>,
 	): Promise<AgentToolResult<TaskToolDetails>> {
-		const params = repairTaskParams(rawParams as TaskParams);
+		let params = repairTaskParams(rawParams as TaskParams);
 		const batchEnabled = this.#isBatchEnabled();
 		const validationError = validateShapeParams(batchEnabled, params) ?? validateSpawnParams(params, batchEnabled);
 		if (validationError) {
@@ -805,6 +881,15 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 		}
 		const cordon = this.session.getSessionId ? getSessionSpawnCordon(this.session.getSessionId() ?? "") : undefined;
 		if (cordon) return createSpawnCordonRefusal(cordon);
+
+		if (batchEnabled) {
+			const context = await prepareSpawnContext(
+				this.session.cwd,
+				this.session.settings.get("task.spawnGuidePath"),
+				params.context,
+			);
+			params = { ...params, context };
+		}
 
 		const spawnItems = resolveSpawnItems(params);
 		const selectedAgent = this.#discoveredAgents.find(agent => agent.name === params.agent);
@@ -1646,6 +1731,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 
 			const maxRuntimeMsOverride =
 				params.timeoutSec !== undefined ? Math.trunc(params.timeoutSec * 1000) : undefined;
+			const isolateSetup = this.session.settings.get("task.isolateSetup") ?? this.session.hasUI;
 
 			const sharedRunOptions = {
 				cwd: this.session.cwd,
@@ -1710,9 +1796,14 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 				asyncJobId: preAllocatedId,
 			};
 
+			const executeChild = (options: ExecutorOptions): Promise<SingleResult> =>
+				isolateSetup
+					? runSubagentSpawnProcess(options, this.session.settings)
+					: runSubprocess(options);
+
 			const runTask = async (): Promise<SingleResult> => {
 				if (!isIsolated) {
-					return runSubprocess(sharedRunOptions);
+					return executeChild(sharedRunOptions);
 				}
 
 				const taskStart = Date.now();
@@ -1728,7 +1819,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 
 					// Isolated runs re-discover extensions/custom tools inside the
 					// worktree instead of reusing the parent's source paths.
-					const result = await runSubprocess({
+					const result = await executeChild({
 						...sharedRunOptions,
 						worktree: isolationDir,
 						preloadedExtensionPaths: undefined,

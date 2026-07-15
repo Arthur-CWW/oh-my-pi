@@ -15,6 +15,38 @@ type InMask = "pipe" | "ignore" | Buffer | Uint8Array | null;
 /** A Bun subprocess with stdout/stderr always piped (stdin may vary). */
 type PipedSubprocess<In extends InMask = InMask> = Subprocess<In, "pipe", "pipe">;
 
+const OUTPUT_TRUNCATION_MARKER = (omittedBytes: number): string =>
+	`\n[output truncated: ${omittedBytes} bytes omitted]`;
+
+async function captureTextBounded(
+	stream: ReadableStream<Uint8Array>,
+	maxBytes: number,
+): Promise<{ text: string; truncated: boolean; totalBytes: number }> {
+	if (!Number.isFinite(maxBytes)) {
+		const text = await new Response(stream).text();
+		return { text, truncated: false, totalBytes: Buffer.byteLength(text) };
+	}
+
+	const limit = Math.max(0, Math.floor(maxBytes));
+	const retained = new Uint8Array(limit);
+	let retainedBytes = 0;
+	let totalBytes = 0;
+	for await (const chunk of stream) {
+		totalBytes += chunk.byteLength;
+		if (retainedBytes >= limit) continue;
+		const take = Math.min(chunk.byteLength, limit - retainedBytes);
+		retained.set(chunk.subarray(0, take), retainedBytes);
+		retainedBytes += take;
+	}
+	const truncated = totalBytes > retainedBytes;
+	const text = new TextDecoder().decode(retained.subarray(0, retainedBytes));
+	return {
+		text: truncated ? `${text}${OUTPUT_TRUNCATION_MARKER(totalBytes - retainedBytes)}` : text,
+		truncated,
+		totalBytes,
+	};
+}
+
 // ── Exceptions ───────────────────────────────────────────────────────────────
 
 /**
@@ -73,6 +105,8 @@ export interface WaitOptions {
 	allowNonZero?: boolean;
 	allowAbort?: boolean;
 	stderr?: "full" | "buffer";
+	/** Maximum bytes retained independently for stdout and stderr. Streams are still drained. */
+	maxOutputBytes?: number;
 }
 
 /** Result from wait and exec. */
@@ -82,6 +116,8 @@ export interface ExecResult {
 	exitCode: number | null;
 	ok: boolean;
 	exitError?: Exception;
+	stdoutTruncated?: boolean;
+	stderrTruncated?: boolean;
 }
 
 // ── ChildProcess ─────────────────────────────────────────────────────────────
@@ -103,11 +139,17 @@ export class ChildProcess<In extends InMask = InMask> {
 	#stderrDone: Promise<void>;
 	#exited: Promise<number>;
 	#stderrStream?: ReadableStream<Uint8Array>;
+	#maxOutputBytes = Number.POSITIVE_INFINITY;
+	#stderrCapturedBytes = 0;
+	#stderrTotalBytes = 0;
+	#stderrTruncated = false;
 
 	constructor(
 		readonly proc: PipedSubprocess<In>,
 		readonly exposeStderr: boolean,
+		maxOutputBytes = Number.POSITIVE_INFINITY,
 	) {
+		this.#maxOutputBytes = maxOutputBytes;
 		// Eagerly drain stderr into a truncated tail string + raw chunks.
 		const dec = new TextDecoder();
 		const trim = () => {
@@ -123,7 +165,14 @@ export class ChildProcess<In extends InMask = InMask> {
 		this.#stderrDone = (async () => {
 			try {
 				for await (const chunk of stderrStream) {
-					this.#stderrChunks.push(chunk);
+					this.#stderrTotalBytes += chunk.byteLength;
+					const remaining = this.#maxOutputBytes - this.#stderrCapturedBytes;
+					if (remaining > 0) {
+						const take = Math.min(chunk.byteLength, remaining);
+						this.#stderrChunks.push(chunk.slice(0, take));
+						this.#stderrCapturedBytes += take;
+					}
+					if (this.#stderrTotalBytes > this.#stderrCapturedBytes) this.#stderrTruncated = true;
 					this.#stderrTail += dec.decode(chunk, { stream: true });
 					trim();
 				}
@@ -253,15 +302,25 @@ export class ChildProcess<In extends InMask = InMask> {
 	// ── Wait ─────────────────────────────────────────────────────────────
 
 	async wait(opts?: WaitOptions): Promise<ExecResult> {
-		const { allowNonZero = false, allowAbort = false, stderr: stderrMode = "buffer" } = opts ?? {};
+		const {
+			allowNonZero = false,
+			allowAbort = false,
+			stderr: stderrMode = "buffer",
+			maxOutputBytes = this.#maxOutputBytes,
+		} = opts ?? {};
 
-		const stdoutP = new Response(this.stdout).text();
+		const stdoutP = captureTextBounded(this.stdout, maxOutputBytes);
 		const stderrP =
 			stderrMode === "full"
-				? this.#stderrDone.then(() => new TextDecoder().decode(Buffer.concat(this.#stderrChunks)))
+				? this.#stderrDone.then(() => {
+						const retained = new TextDecoder().decode(Buffer.concat(this.#stderrChunks));
+						return this.#stderrTruncated
+							? `${retained}${OUTPUT_TRUNCATION_MARKER(this.#stderrTotalBytes - this.#stderrCapturedBytes)}`
+							: retained;
+					})
 				: this.#stderrDone.then(() => this.#stderrTail);
 
-		const [stdout, stderr] = await Promise.all([stdoutP, stderrP]);
+		const [stdoutCapture, stderr] = await Promise.all([stdoutP, stderrP]);
 
 		let exitError: Exception | undefined;
 		try {
@@ -283,7 +342,15 @@ export class ChildProcess<In extends InMask = InMask> {
 			if ((exitError.aborted && !allowAbort) || (!exitError.aborted && !allowNonZero)) throw exitError;
 		}
 
-		return { stdout, stderr, exitCode, ok, exitError };
+		return {
+			stdout: stdoutCapture.text,
+			stderr,
+			exitCode,
+			ok,
+			exitError,
+			stdoutTruncated: stdoutCapture.truncated,
+			stderrTruncated: stderrMode === "full" && this.#stderrTruncated,
+		};
 	}
 
 	// ── Signal / timeout ─────────────────────────────────────────────────
@@ -324,11 +391,12 @@ type ChildSpawnOptions<In extends InMask = InMask> = Omit<
 	signal?: AbortSignal;
 	detached?: boolean;
 	stderr?: "full" | null;
+	maxOutputBytes?: number;
 };
 
 /** Spawn a child process with piped stdout/stderr. */
 export function spawn<In extends InMask = InMask>(cmd: string[], opts?: ChildSpawnOptions<In>): ChildProcess<In> {
-	const { timeout = -1, signal, stderr, ...rest } = opts ?? {};
+	const { timeout = -1, signal, stderr, maxOutputBytes, ...rest } = opts ?? {};
 	const child = Bun.spawn(cmd, {
 		stdin: "ignore",
 		stdout: "pipe",
@@ -336,7 +404,7 @@ export function spawn<In extends InMask = InMask>(cmd: string[], opts?: ChildSpa
 		windowsHide: true,
 		...rest,
 	});
-	const cp = new ChildProcess(child, stderr === "full");
+	const cp = new ChildProcess(child, stderr === "full", maxOutputBytes);
 	if (signal) cp.attachSignal(signal);
 	if (timeout > 0) cp.attachTimeout(timeout);
 	return cp;
@@ -349,11 +417,12 @@ export interface ExecOptions extends Omit<ChildSpawnOptions, "stderr" | "stdin">
 
 /** Spawn, wait, and return captured output. */
 export async function exec(cmd: string[], opts?: ExecOptions): Promise<ExecResult> {
-	const { input, stderr, allowAbort, allowNonZero, ...spawnOpts } = opts ?? {};
+	const { input, stderr, allowAbort, allowNonZero, maxOutputBytes, ...spawnOpts } = opts ?? {};
 	const stdin = typeof input === "string" ? Buffer.from(input) : input;
-	const resolved: ChildSpawnOptions = stdin === undefined ? spawnOpts : { ...spawnOpts, stdin };
+	const resolved: ChildSpawnOptions =
+		stdin === undefined ? { ...spawnOpts, maxOutputBytes } : { ...spawnOpts, stdin, maxOutputBytes };
 	using child = spawn(cmd, resolved);
-	return await child.wait({ stderr, allowAbort, allowNonZero });
+	return await child.wait({ stderr, allowAbort, allowNonZero, maxOutputBytes });
 }
 
 // ── Signal combinators ───────────────────────────────────────────────────────

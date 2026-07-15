@@ -12,11 +12,11 @@
  */
 import * as fs from "node:fs";
 import { performance } from "node:perf_hooks";
-import { $flag, getDebugLogPath } from "@oh-my-pi/pi-utils";
+import { $flag, getDebugLogPath, popLoopPhase, pushLoopPhase } from "@oh-my-pi/pi-utils";
 import { DEFAULT_MAX_INLINE_IMAGES, ImageBudget } from "./components/image";
 import { planDeccaraFills } from "./deccara";
 import { isKeyRelease, matchesKey } from "./keys";
-import { LoopWatchdog } from "./loop-watchdog";
+import { LoopWatchdog, type LoopWatchdogSnapshot } from "./loop-watchdog";
 import { isConPTYHosted, setAltScreenActive, type Terminal } from "./terminal";
 import {
 	encodeKittyDeleteImage,
@@ -950,6 +950,16 @@ export class TUI extends Container {
 	/** Live scheduling counters; read-only to callers and allocation-free to sample. */
 	get renderMetrics(): Readonly<TUIRenderMetrics> {
 		return this.#renderMetrics;
+	}
+
+	/** Read-only event-loop watchdog counters and retained violation records. */
+	get loopWatchdogSnapshot(): LoopWatchdogSnapshot {
+		return this.#watchdog.getSnapshot();
+	}
+
+	/** Set the host label attached to subsequently recorded watchdog violations. */
+	setLoopWatchdogAttribution(attribution?: string): void {
+		this.#watchdog.setAttribution(attribution);
 	}
 
 	override render(width: number): readonly string[] {
@@ -1961,6 +1971,15 @@ export class TUI extends Container {
 	}
 
 	#handleInput(data: string): void {
+		pushLoopPhase("ui.handle-input");
+		try {
+			this.#handleInputInner(data);
+		} finally {
+			popLoopPhase();
+		}
+	}
+
+	#handleInputInner(data: string): void {
 		if (this.#inputListeners.size > 0) {
 			let current = data;
 			for (const listener of this.#inputListeners) {
@@ -2295,6 +2314,15 @@ export class TUI extends Container {
 	 * times — no viewport probes, no deferred reconciliation.
 	 */
 	#doRender(): void {
+		pushLoopPhase("ui.render");
+		try {
+			this.#doRenderInner();
+		} finally {
+			popLoopPhase();
+		}
+	}
+
+	#doRenderInner(): void {
 		if (this.#stopped) return;
 		this.#renderMetrics.renderPasses++;
 		const width = this.terminal.columns;

@@ -10,7 +10,7 @@ import { APP_NAME, setProjectDir, VERSION } from "@oh-my-pi/pi-utils";
 import { acquireRestartSessionOwnership, buildRestartSpawnSpec, handoffRestartProcess } from "../cli/restart-session";
 import { COLLAB_GUEST_ALLOWED_COMMANDS } from "../collab/guest";
 import type { CollabHost } from "../collab/host";
-import { settings, type SettingPath, type SettingValue } from "../config/settings";
+import { type SettingPath, type SettingValue, settings } from "../config/settings";
 import {
 	clearPluginRootsAndCaches,
 	resolveActiveProjectRegistryPath,
@@ -26,19 +26,18 @@ import {
 	MarketplaceManager,
 } from "../extensibility/plugins/marketplace";
 import { resolveMemoryBackend } from "../memory-backend";
-import { theme } from "../modes/theme/theme";
 import { TUI_COLON_COMMAND_NAMES } from "../modes/command-registry";
+import { theme } from "../modes/theme/theme";
 import type { InteractiveModeContext } from "../modes/types";
 import type { AgentSession, FreshSessionResult } from "../session/agent-session";
-import { decodeSessionWorkstream, type SessionWorkstream } from "../session/session-entries";
 import { captureRestartChildManifest } from "../session/restart-child-manifest";
-import { SessionManager } from "../session/session-manager";
+import { decodeSessionWorkstream, type SessionWorkstream } from "../session/session-entries";
+import type { SessionManager } from "../session/session-manager";
 import type { SessionOwnershipHandle } from "../session/session-ownership";
 import { formatShakeSummary, type ShakeMode } from "../session/shake-types";
 import { urlHyperlinkAlways } from "../tui";
 import { getChangelogPath, parseChangelog } from "../utils/changelog";
 import { FEEDS_COMMAND_SPEC } from "./feeds";
-import { VERSION_COMMAND_SPEC } from "./version";
 import { buildContextReportText } from "./helpers/context-report";
 import { formatDuration } from "./helpers/format";
 import { createMarketplaceManager } from "./helpers/marketplace-manager";
@@ -49,6 +48,7 @@ import { handleSshAcp } from "./helpers/ssh";
 import { launchStatsDashboard, parseStatsDashboardArgs } from "./helpers/stats-dashboard";
 import { handleTodoAcp } from "./helpers/todo";
 import { buildUsageReportText } from "./helpers/usage-report";
+import { LOOPSTATS_COMMAND_SPEC } from "./loopstats";
 import { parseMarketplaceInstallArgs, parsePluginScopeArgs } from "./marketplace-install-parser";
 import { handleReloadTuiCommand, RELOAD_TUI_COMMAND, RELOAD_TUI_DESCRIPTION } from "./reload-tui";
 import type {
@@ -60,6 +60,7 @@ import type {
 	SubcommandDef,
 	TuiSlashCommandRuntime,
 } from "./types";
+import { VERSION_COMMAND_SPEC } from "./version";
 
 export type { BuiltinSlashCommand, SubcommandDef } from "./types";
 /** TUI-specific runtime accepted by `executeBuiltinSlashCommand`. */
@@ -1080,6 +1081,7 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<SlashCommandSpec> = [
 	},
 	FEEDS_COMMAND_SPEC,
 	VERSION_COMMAND_SPEC,
+	LOOPSTATS_COMMAND_SPEC,
 	{
 		name: "usage",
 		description: "Show provider usage and limits",

@@ -1,8 +1,8 @@
 import type { CollabGuestLink } from "../collab/guest";
 import {
 	PRIMITIVE_CATEGORY_IDS,
-	resolvePrimitiveCategory,
 	type PrimitiveCategoryId,
+	resolvePrimitiveCategory,
 } from "./components/primitives-inspector-state";
 import { renderCommandShortcutSection } from "./interaction-registry";
 import { formatSessionIdentity, type SessionIdentity, sessionIdentityHandle } from "./session-identity";
@@ -22,6 +22,7 @@ export interface CommandModeContext {
 	handleToolsCommand(): void;
 	handleContextCommand(): void;
 	showVersion(): void | Promise<void>;
+	showLoopStats(): void | Promise<void>;
 	getSessionIdentity(): SessionIdentity;
 	copyIdentityHandle(handle: string): void | Promise<void>;
 	readonly commands?: readonly CommandModeCommand[];
@@ -216,6 +217,15 @@ export const COMMAND_MODE_COMMANDS: readonly CommandModeCommand[] = [
 		hostOnly: true,
 		run(ctx) {
 			return ctx.showVersion();
+		},
+	},
+	{
+		name: "loopstats",
+		description: "show event-loop watchdog violations and retained records",
+		viewLocal: true,
+		hostOnly: true,
+		run(ctx) {
+			return ctx.showLoopStats();
 		},
 	},
 	{
