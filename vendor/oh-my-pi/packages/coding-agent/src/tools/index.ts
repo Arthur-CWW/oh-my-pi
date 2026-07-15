@@ -204,6 +204,9 @@ export interface ToolSession {
 	getSessionFile: () => string | null;
 	/** Durable session journal for source-first control-plane facts. */
 	sessionManager?: SessionManager;
+	/** Installed binary provenance inherited by nested task spawns. */
+	buildVersion?: string;
+	buildDigest?: string;
 	/** Get eval kernel owner ID for session-scoped retained-kernel cleanup. */
 	getEvalKernelOwnerId?: () => string | null;
 	/** Reject new eval (python or js) work once session disposal has started. */

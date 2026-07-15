@@ -16,6 +16,10 @@ import {
 import {
 	executeFleetRolloutPlan,
 	type FleetControllerJournal,
+	type FleetRolloutExecutionResult,
+	type FleetRolloutFailureCondition,
+	FleetRolloutTargetError,
+	type FleetTargetState,
 	FleetControllerLease,
 	type FleetRolloutPlan,
 	type FleetRolloutRecord,
@@ -126,7 +130,7 @@ export interface FleetRolloutOperationOptions {
 export interface FleetRolloutOperationResult {
 	readonly mode: "active" | "read-only" | "dry-run";
 	readonly plan: FleetRolloutPlan;
-	readonly execution?: { readonly state: "Succeeded" | "Frozen"; readonly completed: readonly string[] };
+	readonly execution?: FleetRolloutExecutionResult;
 	readonly reason?: string;
 }
 
@@ -421,6 +425,68 @@ function checkpointFromReceipt(receipt: SessionControlReceipt): unknown {
 		throw new Error(receipt.error ?? "Rollout checkpoint command failed");
 	return receipt.result.checkpoint;
 }
+function targetExecutionError(input: {
+	readonly target: FleetRolloutTarget;
+	readonly phaseReached: FleetTargetState;
+	readonly awaitedCondition: FleetRolloutFailureCondition;
+	readonly terminalState: FleetTargetState;
+	readonly cause: string;
+	readonly timedOut?: boolean;
+	readonly commandId?: string;
+}): FleetRolloutTargetError {
+	return new FleetRolloutTargetError(
+		{
+			targetId: input.target.targetId,
+			sessionId: input.target.sessionId,
+			phaseReached: input.phaseReached,
+			awaitedCondition: input.awaitedCondition,
+			...(input.commandId === undefined ? {} : { commandId: input.commandId }),
+			timedOut: input.timedOut ?? false,
+			cause: input.cause,
+		},
+		input.terminalState,
+	);
+}
+
+async function awaitAppliedReceipt(input: {
+	readonly controlBus: SessionControlBus;
+	readonly initial: SessionControlReceipt;
+	readonly target: FleetRolloutTarget;
+	readonly phaseReached: FleetTargetState;
+	readonly awaitedCondition: FleetRolloutFailureCondition;
+	readonly terminalState: FleetTargetState;
+	readonly timeoutMs: number;
+}): Promise<SessionControlReceipt> {
+	let receipt = input.initial;
+	if (receipt.state !== "applied" && receipt.state !== "failed") {
+		try {
+			receipt = await input.controlBus.waitForTerminal(receipt.commandId, { timeoutMs: input.timeoutMs });
+		} catch (error) {
+			const lastReceipt = input.controlBus.getReceipt(receipt.commandId);
+			const cause = error instanceof Error ? error.message : String(error);
+			throw targetExecutionError({
+				target: input.target,
+				phaseReached: input.phaseReached,
+				awaitedCondition: input.awaitedCondition,
+				terminalState: input.terminalState,
+				commandId: receipt.commandId,
+				timedOut: cause.startsWith("Timed out waiting"),
+				cause: `${cause}; last receipt state=${lastReceipt?.state ?? "missing"}`,
+			});
+		}
+	}
+	if (receipt.state !== "applied") {
+		throw targetExecutionError({
+			target: input.target,
+			phaseReached: input.phaseReached,
+			awaitedCondition: input.awaitedCondition,
+			terminalState: input.terminalState,
+			commandId: receipt.commandId,
+			cause: receipt.error ?? `${input.awaitedCondition} failed with receipt state ${receipt.state}`,
+		});
+	}
+	return receipt;
+}
 
 async function waitForReplacement(options: {
 	readonly listPeers: () => readonly IrcExternalPeer[];
@@ -489,14 +555,23 @@ async function executeRolloutTarget(input: {
 	readonly sourceInstanceId: string;
 	readonly isProcessAlive: (pid: number) => boolean;
 }): Promise<void> {
+	const ownerVerificationError = (cause: string): FleetRolloutTargetError =>
+		targetExecutionError({
+			target: input.target,
+			phaseReached: "Classified",
+			awaitedCondition: "current owner verification",
+			terminalState: "RestartFailed",
+			commandId: input.target.commandId,
+			cause,
+		});
 	const current = input.allPeers().find(peer => peer.sessionId === input.target.sessionId);
-	if (!current) throw new Error(`Fleet target ${input.target.sessionId} disappeared before rollout`);
+	if (!current) throw ownerVerificationError(`Fleet target ${input.target.sessionId} disappeared before rollout`);
 	if (!input.isProcessAlive(current.pid))
-		throw new Error(`Fleet target ${current.sessionId} owner process is not alive`);
+		throw ownerVerificationError(`Fleet target ${current.sessionId} owner process is not alive`);
 	if (current.pid !== input.target.peer.pid)
-		throw new Error(`Fleet target ${current.sessionId} owner process changed before rollout`);
+		throw ownerVerificationError(`Fleet target ${current.sessionId} owner process changed before rollout`);
 	if (current.ownerEpoch !== input.target.expectedOwnerEpoch)
-		throw new Error(`Fleet target ${current.sessionId} owner epoch changed before rollout`);
+		throw ownerVerificationError(`Fleet target ${current.sessionId} owner epoch changed before rollout`);
 	const currentDigest = targetDigest(current);
 	const startedAt = Date.now();
 	const prepare = buildFleetControlCommand({
@@ -510,15 +585,40 @@ async function executeRolloutTarget(input: {
 			drainTimeoutMs: CONTROL_TIMEOUT_MS,
 		},
 	});
-	let receipt = input.controlBus.request(prepare);
-	receipt =
-		receipt.state === "applied" || receipt.state === "failed"
-			? receipt
-			: await input.controlBus.waitForTerminal(prepare.commandId, { timeoutMs: input.controlTimeoutMs });
-	if (receipt.state !== "applied") throw new Error(receipt.error ?? `prepare-rollout failed for ${current.sessionId}`);
-	checkpointFromReceipt(receipt);
+	let receipt = await awaitAppliedReceipt({
+		controlBus: input.controlBus,
+		initial: input.controlBus.request(prepare),
+		target: input.target,
+		phaseReached: "CordonRequested",
+		awaitedCondition: "prepare-rollout terminal receipt",
+		terminalState: "CheckpointFailed",
+		timeoutMs: input.controlTimeoutMs,
+	});
+	try {
+		checkpointFromReceipt(receipt);
+	} catch (error) {
+		throw targetExecutionError({
+			target: input.target,
+			phaseReached: "CordonRequested",
+			awaitedCondition: "prepare-rollout terminal receipt",
+			terminalState: "CheckpointFailed",
+			commandId: prepare.commandId,
+			cause: error instanceof Error ? error.message : String(error),
+		});
+	}
 	appendTargetLifecycle(input.journal, input.plan, input.target, "Checkpointed");
-	const executable = await resolveVerifiedReleaseExecutable(input.release.releaseStoreDir, input.plan.target.digest);
+	let executable: string;
+	try {
+		executable = await resolveVerifiedReleaseExecutable(input.release.releaseStoreDir, input.plan.target.digest);
+	} catch (error) {
+		throw targetExecutionError({
+			target: input.target,
+			phaseReached: "Checkpointed",
+			awaitedCondition: "verified release executable",
+			terminalState: "RestartFailed",
+			cause: error instanceof Error ? error.message : String(error),
+		});
+	}
 	const restart = buildFleetControlCommand({
 		peer: current,
 		sourceInstanceId: input.sourceInstanceId,
@@ -531,21 +631,37 @@ async function executeRolloutTarget(input: {
 		},
 	});
 	appendTargetLifecycle(input.journal, input.plan, input.target, "RestartRequested");
-	receipt = input.controlBus.request(restart);
-	receipt =
-		receipt.state === "applied" || receipt.state === "failed"
-			? receipt
-			: await input.controlBus.waitForTerminal(restart.commandId, { timeoutMs: input.controlTimeoutMs });
-	if (receipt.state !== "applied") throw new Error(receipt.error ?? `restart failed for ${current.sessionId}`);
-	appendTargetLifecycle(input.journal, input.plan, input.target, "Acknowledged");
-	const replacement = await waitForReplacement({
-		listPeers: input.allPeers,
+	receipt = await awaitAppliedReceipt({
+		controlBus: input.controlBus,
+		initial: input.controlBus.request(restart),
 		target: input.target,
-		targetDigest: input.plan.target.digest,
-		startedAt,
-		sleep: input.sleep,
-		timeoutMs: input.recoveryTimeoutMs,
+		phaseReached: "RestartRequested",
+		awaitedCondition: "restart terminal receipt",
+		terminalState: "RestartFailed",
+		timeoutMs: input.controlTimeoutMs,
 	});
+	appendTargetLifecycle(input.journal, input.plan, input.target, "Acknowledged");
+	let replacement: IrcExternalPeer;
+	try {
+		replacement = await waitForReplacement({
+			listPeers: input.allPeers,
+			target: input.target,
+			targetDigest: input.plan.target.digest,
+			startedAt,
+			sleep: input.sleep,
+			timeoutMs: input.recoveryTimeoutMs,
+		});
+	} catch (error) {
+		throw targetExecutionError({
+			target: input.target,
+			phaseReached: "Acknowledged",
+			awaitedCondition: "replacement heartbeat",
+			terminalState: "RecoveryTimedOut",
+			commandId: receipt.commandId,
+			timedOut: true,
+			cause: error instanceof Error ? error.message : String(error),
+		});
+	}
 	appendTargetLifecycle(input.journal, input.plan, input.target, "Reacquired");
 	const statusRequestedAt = Date.now();
 	const status = buildFleetControlCommand({
@@ -553,30 +669,44 @@ async function executeRolloutTarget(input: {
 		sourceInstanceId: input.sourceInstanceId,
 		intent: { kind: "status" },
 	});
-	let statusReceipt = input.controlBus.request(status);
-	statusReceipt =
-		statusReceipt.state === "applied" || statusReceipt.state === "failed"
-			? statusReceipt
-			: await input.controlBus.waitForTerminal(status.commandId, { timeoutMs: input.controlTimeoutMs });
-	const projection = await collectFleetErrors({ controlDbPath: input.controlDbPath, nowMs: Date.now() });
-	const health = requireHealthyFleetTarget({
-		sessionId: replacement.sessionId,
-		previousOwnerEpoch: input.target.expectedOwnerEpoch,
-		targetDigest: input.plan.target.digest,
-		targetVersion: input.release.version,
-		fleetRolloutId: input.plan.fleetRolloutId,
-		observedAt: Date.now(),
-		heartbeatFreshAfter: startedAt,
-		statusRequestedAt,
-		replacementHeartbeats: input.allPeers(),
-		statusReceipt,
-		errors: toDiagnosticEvents(projection.errors),
-		errorBaseline: { capturedAt: startedAt, countsById: new Map() },
-		errorPolicy: { correlatedEventThreshold: 1 },
-		incidents: projection.incidents,
-		compatibility: input.compatibility,
+	const statusReceipt = await awaitAppliedReceipt({
+		controlBus: input.controlBus,
+		initial: input.controlBus.request(status),
+		target: input.target,
+		phaseReached: "Reacquired",
+		awaitedCondition: "status terminal receipt",
+		terminalState: "HealthFailed",
+		timeoutMs: input.controlTimeoutMs,
 	});
-	if (health.state !== "Healthy") throw new Error("Fleet target health gate failed");
+	try {
+		const projection = await collectFleetErrors({ controlDbPath: input.controlDbPath, nowMs: Date.now() });
+		requireHealthyFleetTarget({
+			sessionId: replacement.sessionId,
+			previousOwnerEpoch: input.target.expectedOwnerEpoch,
+			targetDigest: input.plan.target.digest,
+			targetVersion: input.release.version,
+			fleetRolloutId: input.plan.fleetRolloutId,
+			observedAt: Date.now(),
+			heartbeatFreshAfter: startedAt,
+			statusRequestedAt,
+			replacementHeartbeats: input.allPeers(),
+			statusReceipt,
+			errors: toDiagnosticEvents(projection.errors),
+			errorBaseline: { capturedAt: startedAt, countsById: new Map() },
+			errorPolicy: { correlatedEventThreshold: 1 },
+			incidents: projection.incidents,
+			compatibility: input.compatibility,
+		});
+	} catch (error) {
+		throw targetExecutionError({
+			target: input.target,
+			phaseReached: "Reacquired",
+			awaitedCondition: "healthy target health gate",
+			terminalState: "HealthFailed",
+			commandId: status.commandId,
+			cause: error instanceof Error ? error.message : String(error),
+		});
+	}
 	appendTargetLifecycle(input.journal, input.plan, input.target, "ReAdopted");
 	appendTargetLifecycle(input.journal, input.plan, input.target, "Healthy");
 }
@@ -750,14 +880,43 @@ export async function executeFleetRollout(options: FleetRolloutOperationOptions)
 					if (wave?.kind === "canary") appendIntentLifecycle(controller.journal, started.plan, "ObserveCanary");
 				},
 			});
+			const terminalExecution: FleetRolloutExecutionResult =
+				execution.state === "Succeeded" && execution.completed.length !== started.plan.orderedTargets.length
+					? {
+							state: "Frozen",
+							completed: execution.completed,
+							failures: started.plan.orderedTargets
+								.filter(target => !execution.completed.includes(target.sessionId))
+								.map(target => {
+									const record = fleetRolloutRecords(controller.journal, started.plan.fleetRolloutId)
+										.filter(
+											item =>
+												item.record === "target" &&
+												item.sessionId === target.sessionId &&
+												item.state !== "CordonRequested",
+										)
+										.at(-1);
+									return {
+										targetId: target.targetId,
+										sessionId: target.sessionId,
+										phaseReached: "Classified" as const,
+										awaitedCondition: "current owner verification" as const,
+										commandId: target.commandId,
+										timedOut: false,
+										cause:
+											record?.record === "target"
+												? (record.reason ?? "target became ineligible before command dispatch")
+												: "target became ineligible before command dispatch",
+									};
+								}),
+						}
+					: execution;
 			appendIntentLifecycle(
 				controller.journal,
 				started.plan,
-				execution.state === "Succeeded" ? "Succeeded" : "Frozen",
+				terminalExecution.state === "Succeeded" ? "Succeeded" : "Frozen",
 			);
-			if (execution.state !== "Succeeded" || execution.completed.length !== started.plan.orderedTargets.length)
-				throw new Error("Rollout did not reach a healthy terminal result");
-			return { mode: "active", plan: started.plan, execution };
+			return { mode: "active", plan: started.plan, execution: terminalExecution };
 		} finally {
 			controlBus.close();
 		}

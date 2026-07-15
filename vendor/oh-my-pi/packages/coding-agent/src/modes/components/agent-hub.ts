@@ -172,6 +172,21 @@ interface ExternalPeerRow {
 /** A selectable local agent row; archived children never become registry refs. */
 type HubAgentRow = { kind: "active"; ref: AgentRef } | { kind: "archived"; descriptor: ArchivedDirectChildDescriptor };
 
+async function listArchivedDescendants(parentSessionFile: string): Promise<ArchivedDirectChildDescriptor[]> {
+	const pending = [parentSessionFile];
+	const visited = new Set<string>();
+	const rows: ArchivedDirectChildDescriptor[] = [];
+	while (pending.length > 0) {
+		const current = pending.pop()!;
+		if (visited.has(current)) continue;
+		visited.add(current);
+		const children = await listArchivedDirectChildren(current);
+		rows.push(...children);
+		for (const child of children) pending.push(child.childSessionFile);
+	}
+	return rows;
+}
+
 function externalIrcDbPath(): string {
 	return path.join(os.homedir(), ".omp", "agent", "irc-bus.sqlite");
 }
@@ -727,6 +742,7 @@ export class AgentHubOverlayComponent extends Container {
 		this.#scrollOffset = 0;
 		this.#wasAtBottom = true;
 		this.#lastLeftTap = 0;
+		void this.#journalModels.load(row.childSessionFile).then(() => this.#requestRender());
 		this.#rebuildChatContent();
 		this.#requestRender();
 	}
@@ -1267,7 +1283,9 @@ export class AgentHubOverlayComponent extends Container {
 	}
 
 	#inspectorLines(observed: ObservableSession | undefined, width: number): string[] {
-		const sessionFile = this.#chatAgentId ? this.#registryRefs.get(this.#chatAgentId)?.sessionFile : undefined;
+		const sessionFile = this.#chatAgentId
+			? (this.#registryRefs.get(this.#chatAgentId)?.sessionFile ?? this.#chatArchived?.childSessionFile)
+			: this.#chatArchived?.childSessionFile;
 		const durableSpawn = this.#journalModels.peek(sessionFile)?.spawnRecord;
 		if (this.#inspectorSection === "prompt") {
 			const progress = observed?.progress;
@@ -1280,13 +1298,23 @@ export class AgentHubOverlayComponent extends Container {
 				observed?.description ??
 				""
 			).slice(0, remaining);
-			if (!context && !assignment) return ["No spawn prompt available."];
+			const fullPrompt = durableSpawn?.fullPrompt?.slice(0, INSPECTOR_PROMPT_MAX_CHARS);
+			if (!context && !assignment && !fullPrompt) return ["No spawn prompt available."];
 			const lines: string[] = [];
 			const definitionSourcePath = progress?.definitionSourcePath ?? durableSpawn?.definitionSourcePath;
 			const spawnerId = progress?.spawnerId ?? durableSpawn?.spawnerId;
+			const buildVersion = progress?.buildVersion ?? durableSpawn?.buildVersion;
+			const buildDigest = progress?.buildDigest ?? durableSpawn?.buildDigest;
 			if (definitionSourcePath) lines.push(`Definition: ${definitionSourcePath}`);
 			if (spawnerId) lines.push(`Spawner: ${spawnerId}`);
+			if (buildVersion) lines.push(`Build: ${buildVersion}`);
+			if (buildDigest) lines.push(`Build digest: ${buildDigest}`);
 			if (lines.length) lines.push("");
+			if (fullPrompt) {
+				lines.push(theme.fg("dim", "Spawn prompt"));
+				lines.push(...this.#wrapInspectorText(fullPrompt, width, ""));
+				return lines;
+			}
 			if (context) {
 				lines.push(theme.fg("dim", "Context"));
 				lines.push(...this.#wrapInspectorText(context, width, ""));
@@ -1311,8 +1339,14 @@ export class AgentHubOverlayComponent extends Container {
 			});
 		}
 		const receipt = observed?.progress?.routeReceipt ?? durableSpawn?.route;
-		if (!receipt) return ["No route provenance available."];
+		if (!receipt) {
+			const model = observed?.progress?.resolvedModel ?? durableSpawn?.resolvedModel;
+			return model ? [`Model: ${model}`, "No route provenance available."] : ["No route provenance available."];
+		}
 		const lines = [
+			`Model: ${receipt.route.selector}`,
+			`Resolution source: ${receipt.resolutionSource}`,
+			`Lane: ${receipt.resolvedLane}`,
 			`Selected: ${receipt.route.selector}`,
 			`Source: ${receipt.source}`,
 			...(receipt.reason ? [`Reason: ${receipt.reason}`] : []),
@@ -1413,7 +1447,7 @@ export class AgentHubOverlayComponent extends Container {
 		this.#archiveSourceSessionFile = parentSessionFile;
 		const token = ++this.#archivedLoadToken;
 		void Promise.all([
-			parentSessionFile ? listArchivedDirectChildren(parentSessionFile) : Promise.resolve([]),
+			parentSessionFile ? listArchivedDescendants(parentSessionFile) : Promise.resolve([]),
 			listAutomationJournalRows(this.#sessionsDir, parentSessionFile),
 		])
 			.then(([children, automations]) => {

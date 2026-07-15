@@ -80,6 +80,8 @@ describe("durable spawn records", () => {
 			context: "# Goal\nCorrelate the child error ledger.",
 			assignment: "# Target\nInspect depth-two failures.",
 			resolvedModel: "openai/gpt-5.6",
+			buildVersion: "15.9.0",
+			buildDigest: "a".repeat(64),
 			route,
 		});
 		await fs.writeFile(
@@ -116,6 +118,8 @@ describe("durable spawn records", () => {
 		);
 		expect(durable?.spawnRecord?.route?.source).toBe("auth_fallback");
 		expect(durable?.spawnRecord?.route?.originalSource).toBe("agent_frontmatter");
+		expect(durable?.spawnRecord?.buildVersion).toBe("15.9.0");
+		expect(durable?.spawnRecord?.buildDigest).toBe("a".repeat(64));
 	});
 
 	it("projects definition source and full prompt for agent picker previews", () => {

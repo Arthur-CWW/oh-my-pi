@@ -17,7 +17,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import path from "node:path";
 import type { AgentTool, AgentToolResult, AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
-import { $env, logger, prompt, Snowflake } from "@oh-my-pi/pi-utils";
+import { $env, logger, prompt, Snowflake, VERSION } from "@oh-my-pi/pi-utils";
 import type { ToolSession } from "..";
 import { MCPManager } from "../mcp/manager";
 import type { Theme } from "../modes/theme/theme";
@@ -1650,6 +1650,8 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 			const sharedRunOptions = {
 				cwd: this.session.cwd,
 				routeReceipt,
+				buildVersion: this.session.buildVersion ?? VERSION,
+				buildDigest: this.session.buildDigest,
 				agent: effectiveAgent,
 				task: renderSubagentUserPrompt(assignment),
 				assignment,

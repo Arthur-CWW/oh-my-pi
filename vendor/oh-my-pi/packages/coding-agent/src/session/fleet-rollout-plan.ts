@@ -48,6 +48,46 @@ export const FLEET_TARGET_STATES = [
 export type FleetTargetState = (typeof FLEET_TARGET_STATES)[number];
 export type FleetRolloutTargetRecordState = FleetTargetState | "Frozen";
 
+export type FleetRolloutFailureCondition =
+	| "current owner verification"
+	| "prepare-rollout terminal receipt"
+	| "verified release executable"
+	| "restart terminal receipt"
+	| "replacement heartbeat"
+	| "status terminal receipt"
+	| "healthy target health gate"
+	| "target lifecycle completion";
+
+export interface FleetRolloutFailureReceipt {
+	readonly targetId: string;
+	readonly sessionId: string;
+	readonly phaseReached: FleetTargetState;
+	readonly awaitedCondition: FleetRolloutFailureCondition;
+	readonly commandId?: string;
+	readonly timedOut: boolean;
+	readonly cause: string;
+}
+
+export class FleetRolloutTargetError extends Error {
+	readonly receipt: FleetRolloutFailureReceipt;
+	readonly terminalState: FleetTargetState;
+
+	constructor(receipt: FleetRolloutFailureReceipt, terminalState: FleetTargetState) {
+		super(receipt.cause);
+		this.name = "FleetRolloutTargetError";
+		this.receipt = receipt;
+		this.terminalState = terminalState;
+	}
+}
+
+export type FleetRolloutExecutionResult =
+	| { readonly state: "Succeeded"; readonly completed: readonly string[] }
+	| {
+			readonly state: "Frozen";
+			readonly completed: readonly string[];
+			readonly failures: readonly FleetRolloutFailureReceipt[];
+	  };
+
 export type FleetTargetSource =
 	| { readonly kind: "explicit" }
 	| { readonly kind: "session-pin"; readonly sessionId: string }
@@ -91,6 +131,7 @@ export interface FleetRolloutTargetRecord extends FleetRolloutRecordBase {
 		readonly journalUri?: string;
 		readonly ownerEpoch?: string;
 	};
+	readonly failure?: FleetRolloutFailureReceipt;
 }
 
 export interface FleetRolloutSupersededRecord extends FleetRolloutRecordBase {
@@ -411,6 +452,7 @@ function targetRecord(
 	target: FleetRolloutTarget,
 	state: FleetRolloutTargetRecordState,
 	reason?: string,
+	failure?: FleetRolloutFailureReceipt,
 ): FleetRolloutTargetRecord {
 	return {
 		schemaVersion: 1,
@@ -427,12 +469,13 @@ function targetRecord(
 		...controllerFields(options.journal),
 		state,
 		...(reason === undefined ? {} : { reason }),
+		...(failure === undefined ? {} : { failure }),
 	};
 }
 
 export async function executeFleetRolloutPlan(
 	options: ExecuteFleetRolloutOptions,
-): Promise<{ readonly state: "Succeeded" | "Frozen"; readonly completed: readonly string[] }> {
+): Promise<FleetRolloutExecutionResult> {
 	const completed: string[] = [];
 	for (const excluded of options.plan.excluded)
 		appendFleetRecord(options.journal, targetRecord(options, excluded, excluded.state, excluded.reason));
@@ -492,15 +535,27 @@ export async function executeFleetRolloutPlan(
 			await options.executeTarget(planned);
 			completed.push(planned.sessionId);
 		} catch (error) {
-			const reason = error instanceof Error ? error.message : String(error);
-			appendFleetRecord(options.journal, targetRecord(options, planned, "RestartFailed", reason));
+			const failure =
+				error instanceof FleetRolloutTargetError
+					? error.receipt
+					: {
+							targetId: planned.targetId,
+							sessionId: planned.sessionId,
+							phaseReached: "CordonRequested" as const,
+							awaitedCondition: "target lifecycle completion" as const,
+							commandId: planned.commandId,
+							timedOut: false,
+							cause: error instanceof Error ? error.message : String(error),
+						};
+			const terminalState = error instanceof FleetRolloutTargetError ? error.terminalState : "RestartFailed";
+			appendFleetRecord(options.journal, targetRecord(options, planned, terminalState, failure.cause, failure));
 			options.rolloutIndex?.updatePeer({
 				rolloutId: options.plan.fleetRolloutId,
 				sessionId: planned.sessionId,
 				...(planned.peer.sessionFile ? { sessionFile: planned.peer.sessionFile } : {}),
 				name: planned.peer.name,
 				phase: "failed",
-				error: reason,
+				error: failure.cause,
 			});
 			for (const later of options.plan.orderedTargets.slice(index + 1)) {
 				appendFleetRecord(
@@ -508,7 +563,7 @@ export async function executeFleetRolloutPlan(
 					targetRecord(options, later, "Frozen", `frozen after ${planned.sessionId} failed`),
 				);
 			}
-			return { state: "Frozen", completed };
+			return { state: "Frozen", completed, failures: [failure] };
 		}
 	}
 	return { state: "Succeeded", completed };

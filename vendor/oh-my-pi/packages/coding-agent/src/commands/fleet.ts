@@ -48,7 +48,10 @@ export default class Fleet extends Command {
 		digest: Flags.string({ description: "Select an exact 64-character release digest" }),
 		canary: Flags.string({ description: "Explicit canary selector for rollout" }),
 		"wave-size": Flags.integer({ description: "Rolling wave size", default: 1 }),
-		"dry-run": Flags.boolean({ description: "Create and print a rollout plan without control sends", default: false }),
+		"dry-run": Flags.boolean({
+			description: "Create and print a rollout plan without control sends",
+			default: false,
+		}),
 		apply: Flags.boolean({ description: "Apply a fleet prune (prune defaults to dry-run)", default: false }),
 		to: Flags.string({ description: "Rollback target: previous or an exact digest" }),
 		workstream: Flags.string({ description: "Filter by durable workstream ID" }),
@@ -83,10 +86,25 @@ export default class Fleet extends Command {
 		if (flags.apply && flags["dry-run"]) fail("--apply and --dry-run are mutually exclusive");
 
 		if (action === "status") {
-			if (value || flags.digest || flags.blessed || flags.canary || flags.to || flags["wave-size"] !== 1 || flags["dry-run"])
+			if (
+				value ||
+				flags.digest ||
+				flags.blessed ||
+				flags.canary ||
+				flags.to ||
+				flags["wave-size"] !== 1 ||
+				flags["dry-run"]
+			)
 				fail("status accepts only a selector, --workstream, and --all");
 			let rows = await collectFleetStatus({ workstream: flags.workstream, all: flags.all });
-			if (selector) rows = rows.filter(row => row.sessionId === selector || row.name === selector || row.workstream === selector || row.workstream === `workstream:${selector}`);
+			if (selector)
+				rows = rows.filter(
+					row =>
+						row.sessionId === selector ||
+						row.name === selector ||
+						row.workstream === selector ||
+						row.workstream === `workstream:${selector}`,
+				);
 			process.stdout.write(formatFleetStatus(rows));
 			return;
 		}
@@ -113,7 +131,16 @@ export default class Fleet extends Command {
 		}
 
 		if (action === "errors") {
-			if (selector || flags.digest || flags.blessed || flags.canary || flags.to || flags["wave-size"] !== 1 || flags["dry-run"] || flags.all)
+			if (
+				selector ||
+				flags.digest ||
+				flags.blessed ||
+				flags.canary ||
+				flags.to ||
+				flags["wave-size"] !== 1 ||
+				flags["dry-run"] ||
+				flags.all
+			)
 				fail("errors accepts --since, --session, --workstream, and --rollout");
 			process.stdout.write(
 				formatFleetErrors(
@@ -129,7 +156,17 @@ export default class Fleet extends Command {
 		}
 
 		if (action === "pause" || action === "resume") {
-			if (!selector || value || flags.digest || flags.blessed || flags.canary || flags.to || flags["wave-size"] !== 1 || flags["dry-run"] || flags.all)
+			if (
+				!selector ||
+				value ||
+				flags.digest ||
+				flags.blessed ||
+				flags.canary ||
+				flags.to ||
+				flags["wave-size"] !== 1 ||
+				flags["dry-run"] ||
+				flags.all
+			)
 				fail(`${action} requires one selector and no value flags`);
 			const targets = await resolveFleetSelectors({ selectors, workstream: flags.workstream });
 			if (targets.length === 0) fail(`${action} selector matched no fresh target`);
@@ -152,8 +189,7 @@ export default class Fleet extends Command {
 				flags.all
 			)
 				fail("pin requires: omp fleet pin <selector> <digest|blessed|canary>");
-			const channel =
-				value === "blessed" ? "blessed" : value === "canary" ? "canary" : "digest";
+			const channel = value === "blessed" ? "blessed" : value === "canary" ? "canary" : "digest";
 			if (channel === "digest" && !/^[0-9a-f]{64}$/.test(value))
 				fail("pin digest must be a full 64-character lowercase SHA-256 digest");
 			const targets = await resolveFleetSelectors({ selectors, workstream: flags.workstream });
@@ -168,7 +204,17 @@ export default class Fleet extends Command {
 		}
 
 		if (action === "unpin") {
-			if (!selector || value || flags.digest || flags.blessed || flags.canary || flags.to || flags["wave-size"] !== 1 || flags["dry-run"] || flags.all)
+			if (
+				!selector ||
+				value ||
+				flags.digest ||
+				flags.blessed ||
+				flags.canary ||
+				flags.to ||
+				flags["wave-size"] !== 1 ||
+				flags["dry-run"] ||
+				flags.all
+			)
 				fail("unpin requires one selector and no channel flags");
 			const targets = await resolveFleetSelectors({ selectors, workstream: flags.workstream });
 			if (targets.length === 0) fail("unpin selector matched no fresh target");
@@ -187,7 +233,9 @@ export default class Fleet extends Command {
 				flags.all ||
 				Number(flags.blessed) + Number(flags.digest !== undefined) !== 1
 			)
-				fail("rollout requires exactly one of --blessed or --digest and accepts --workstream, --canary, --wave-size, --dry-run");
+				fail(
+					"rollout requires exactly one of --blessed or --digest and accepts --workstream, --canary, --wave-size, --dry-run",
+				);
 			if (flags.canary !== undefined && !flags.canary.trim()) fail("--canary requires a selector");
 			const targets = await resolveFleetSelectors({ workstream: flags.workstream });
 			if (targets.length === 0) fail("rollout matched no fresh targets");
@@ -200,6 +248,8 @@ export default class Fleet extends Command {
 				dryRun: flags["dry-run"],
 			});
 			process.stdout.write(formatFleetRolloutPlan(result));
+			if (result.execution?.state === "Frozen")
+				fail(`rollout ${result.plan.fleetRolloutId} froze; inspect TARGET_ERROR rows above`);
 			return;
 		}
 
@@ -234,7 +284,10 @@ export default class Fleet extends Command {
 			});
 			process.stdout.write(
 				`${result.execution.receipts
-					.map(receipt => `ROLLBACK\\tsessionId=${receipt.sessionId}\\ttargetId=${receipt.targetId}\\ttargetDigest=${receipt.targetDigest}\\tstate=${receipt.state}\\treason=${receipt.reason ?? "-"}\\n`)
+					.map(
+						receipt =>
+							`ROLLBACK\\tsessionId=${receipt.sessionId}\\ttargetId=${receipt.targetId}\\ttargetDigest=${receipt.targetDigest}\\tstate=${receipt.state}\\treason=${receipt.reason ?? "-"}\\n`,
+					)
 					.join("")}`,
 			);
 			return;

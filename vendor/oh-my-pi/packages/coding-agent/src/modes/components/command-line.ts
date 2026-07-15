@@ -2,6 +2,7 @@ import { CompletionBehavior, Container, Input, matchesKey, type SelectItem, Sele
 import { logger, VERSION } from "@oh-my-pi/pi-utils";
 import type { HistoryStorage } from "../../session/history-storage";
 import { buildVersionViewModel, formatVersion } from "../../slash-commands/version";
+import { routeCommandOutput } from "../../task/route-inspector";
 import { copyToClipboard } from "../../utils/clipboard";
 import {
 	applyCommandModeCompletion,
@@ -235,6 +236,17 @@ export function commandModeContextForInteractive(
 		toggleWrap: () => toggleTranscriptWrap(ctx),
 		toggleRich: () => toggleRichTranscript(ctx),
 		handleErrorsCommand: args => ctx.handleErrorsCommand(args),
+		handleRouteCommand: async args => {
+			ctx.showStatus(
+				await routeCommandOutput({
+					mainSession: ctx.session,
+					focusedSession: ctx.viewSession,
+					focusedAgentId: ctx.focusedAgentId,
+					args,
+					binaryVersion: VERSION,
+				}),
+			);
+		},
 		showPrimitivesInspector: category => ctx.showPrimitivesInspector(category),
 		showCopySelector: () => ctx.showCopySelector(),
 		handleDumpCommand: isRaw => ctx.handleDumpCommand(isRaw),

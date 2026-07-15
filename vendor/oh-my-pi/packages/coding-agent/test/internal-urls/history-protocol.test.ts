@@ -33,7 +33,7 @@ function fakeLiveSession(messages: unknown[]): AgentSession {
 }
 
 /** Minimal current-version session JSONL: header + a linear user/assistant chain. */
-function sessionFixtureJsonl(): string {
+function sessionFixtureJsonl(withLifecycle = false): string {
 	const timestamp = new Date().toISOString();
 	const header = {
 		type: "session",
@@ -45,7 +45,7 @@ function sessionFixtureJsonl(): string {
 	const userEntry = {
 		type: "message",
 		id: "m1",
-		parentId: null,
+		parentId: withLifecycle ? "lifecycle-1" : null,
 		timestamp,
 		message: { role: "user", content: "parked hello", timestamp: 1 },
 	};
@@ -65,7 +65,22 @@ function sessionFixtureJsonl(): string {
 			timestamp: 2,
 		},
 	};
-	return `${JSON.stringify(header)}\n${JSON.stringify(userEntry)}\n${JSON.stringify(assistantEntry)}\n`;
+	const lifecycleEntry = {
+		type: "custom",
+		customType: CHILD_LIFECYCLE_CUSTOM_TYPE,
+		data: {
+			version: 1,
+			agentId: "Sleeper",
+			childSessionFile: "/tmp/parked.jsonl",
+			parentSessionFile: "/tmp/parent.jsonl",
+			state: "running",
+			updatedAt: timestamp,
+		},
+		id: "lifecycle-1",
+		parentId: null,
+		timestamp,
+	};
+	return `${JSON.stringify(header)}\n${withLifecycle ? `${JSON.stringify(lifecycleEntry)}\n` : ""}${JSON.stringify(userEntry)}\n${JSON.stringify(assistantEntry)}\n`;
 }
 
 async function writeDirectChildJournal(options: {
@@ -188,7 +203,7 @@ describe("history:// protocol", () => {
 	it("history://<id> renders a parked ref read-only from its session file", async () => {
 		await withTempDir(async dir => {
 			const sessionFile = path.join(dir, "parked.jsonl");
-			await Bun.write(sessionFile, sessionFixtureJsonl());
+			await Bun.write(sessionFile, sessionFixtureJsonl(true));
 			AgentRegistry.global().register({
 				id: "Sleeper",
 				displayName: "task",

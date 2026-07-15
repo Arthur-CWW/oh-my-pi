@@ -194,7 +194,10 @@ function ownership(target: TargetFixture, buildDigest: string): SessionOwnership
 		ownerEpoch: target.oldEpoch,
 		ownerKind: "omp",
 		buildRevision: { digest: buildDigest, version: "15.9.0" },
-		runnerInstanceIdentity: { runnerInstanceId: `runner-${target.peer.name}`, startedAt: new Date(START).toISOString() },
+		runnerInstanceIdentity: {
+			runnerInstanceId: `runner-${target.peer.name}`,
+			startedAt: new Date(START).toISOString(),
+		},
 		isCurrent: async () => true,
 		isFenced: () => false,
 		release: async () => {},
@@ -385,10 +388,9 @@ describe("fleet rollout lifecycle proof", () => {
 		const controllerFile = controller.getSessionFile();
 		if (!controllerFile) throw new Error("controller fixture requires a journal");
 		const recoveredController = await SessionManager.open(controllerFile, path.join(root, "controller"));
-		expect(fleetRolloutRecords(controllerJournal(recoveredController), fleetRolloutId).map(record => record.state)).toEqual([
-			"Requested",
-			"Preflight",
-		]);
+		expect(
+			fleetRolloutRecords(controllerJournal(recoveredController), fleetRolloutId).map(record => record.state),
+		).toEqual(["Requested", "Preflight"]);
 
 		controllerIntent(journal, plan, "CanaryWave");
 		const bus = new SessionControlBus(path.join(root, "control.sqlite"));
@@ -458,7 +460,10 @@ describe("fleet rollout lifecycle proof", () => {
 					},
 				});
 				bus.request(prepare);
-				const prepareReceipt = await bus.waitForTerminal(prepare.commandId, { timeoutMs: 1_000, pollIntervalMs: 1 });
+				const prepareReceipt = await bus.waitForTerminal(prepare.commandId, {
+					timeoutMs: 1_000,
+					pollIntervalMs: 1,
+				});
 				const checkpoint = checkpoints.get(planned.sessionId)!;
 				expect(prepareReceipt.state).toBe("applied");
 				expect(bus.getCordon(planned.sessionId)).toMatchObject({
@@ -485,9 +490,15 @@ describe("fleet rollout lifecycle proof", () => {
 						getSessionSpawns: () => "*",
 					} as unknown as ToolSession;
 					const taskTool = await TaskTool.create(toolSession);
-					const refusal = await taskTool.execute("cordoned-spawn", { agent: "task", assignment: "must be refused" });
+					const refusal = await taskTool.execute("cordoned-spawn", {
+						agent: "task",
+						assignment: "must be refused",
+					});
 					expect(refusal.details?.spawnRefusal?.checkpointId).toBe(checkpoint.checkpointId);
-					expect(refusal.content[0]).toMatchObject({ type: "text", text: expect.stringContaining("Spawn refused") });
+					expect(refusal.content[0]).toMatchObject({
+						type: "text",
+						text: expect.stringContaining("Spawn refused"),
+					});
 				}
 				const restart = buildFleetControlCommand({
 					peer: peers.get(planned.sessionId)!,
@@ -506,7 +517,10 @@ describe("fleet rollout lifecycle proof", () => {
 					checkpointId: checkpoint.checkpointId,
 				});
 				bus.request(restart);
-				const restartReceipt = await bus.waitForTerminal(restart.commandId, { timeoutMs: 1_000, pollIntervalMs: 1 });
+				const restartReceipt = await bus.waitForTerminal(restart.commandId, {
+					timeoutMs: 1_000,
+					pollIntervalMs: 1,
+				});
 				await target.done;
 				expect(restartReceipt.state).toBe("applied");
 				expect(restartCommitted).toBe(true);
@@ -519,7 +533,8 @@ describe("fleet rollout lifecycle proof", () => {
 				}
 				expect(
 					fleetRolloutRecords(journal, fleetRolloutId).some(
-						record => record.record === "target" && record.sessionId === planned.sessionId && record.state === "Healthy",
+						record =>
+							record.record === "target" && record.sessionId === planned.sessionId && record.state === "Healthy",
 					),
 				).toBe(false);
 
@@ -552,11 +567,23 @@ describe("fleet rollout lifecycle proof", () => {
 					resultOwnerEpoch: fixture.newEpoch,
 				});
 
-				const replacementOwnership = { ...owner, ownerEpoch: fixture.newEpoch, buildRevision: { digest: release.targetDigest, version: VERSION } };
-				const statusTarget = await startSessionControlTarget({ ownership: replacementOwnership, actions, bus, pollIntervalMs: 1 });
+				const replacementOwnership = {
+					...owner,
+					ownerEpoch: fixture.newEpoch,
+					buildRevision: { digest: release.targetDigest, version: VERSION },
+				};
+				const statusTarget = await startSessionControlTarget({
+					ownership: replacementOwnership,
+					actions,
+					bus,
+					pollIntervalMs: 1,
+				});
 				const statusCommand = buildFleetControlCommand({ peer: replacement, intent: { kind: "status" } });
 				bus.request(statusCommand);
-				const statusReceipt = await bus.waitForTerminal(statusCommand.commandId, { timeoutMs: 1_000, pollIntervalMs: 1 });
+				const statusReceipt = await bus.waitForTerminal(statusCommand.commandId, {
+					timeoutMs: 1_000,
+					pollIntervalMs: 1,
+				});
 				const health = evaluateFleetTargetHealth({
 					sessionId: planned.sessionId,
 					previousOwnerEpoch: fixture.oldEpoch,
@@ -580,7 +607,11 @@ describe("fleet rollout lifecycle proof", () => {
 				let pausedAfterDecision = bus.getPaused(planned.sessionId);
 				for (const invalidFence of [
 					{ expectedOwnerEpoch: "stale-epoch", fleetRolloutId, checkpointId: checkpoint.checkpointId },
-					{ expectedOwnerEpoch: fixture.oldEpoch, fleetRolloutId: "wrong-rollout", checkpointId: checkpoint.checkpointId },
+					{
+						expectedOwnerEpoch: fixture.oldEpoch,
+						fleetRolloutId: "wrong-rollout",
+						checkpointId: checkpoint.checkpointId,
+					},
 					{ expectedOwnerEpoch: fixture.oldEpoch, fleetRolloutId, checkpointId: "wrong-checkpoint" },
 				]) {
 					expect(() =>
@@ -668,14 +699,19 @@ describe("fleet rollout lifecycle proof", () => {
 			const checkpoint = checkpoints.get(target.sessionId)!;
 			expect(targetRecords.some(record => record.state === "Healthy")).toBe(true);
 			expect(targetRecords.every(record => record.fleetRolloutId === fleetRolloutId)).toBe(true);
-			expect(targetRecords.every(record => record.waveId === target.waveId && record.targetId === target.targetId)).toBe(true);
+			expect(
+				targetRecords.every(record => record.waveId === target.waveId && record.targetId === target.targetId),
+			).toBe(true);
 			expect(targetRecords.every(record => record.commandId === target.commandId)).toBe(true);
 			expect(targetRecords.every(record => record.expectedOwnerEpoch === target.expectedOwnerEpoch)).toBe(true);
 			expect(targetRecords.every(record => record.targetDigest === release.targetDigest)).toBe(true);
 			expect(
 				targetRecords.some(record => {
 					const evidence = record.evidence as { checkpointId?: string; resultOwnerEpoch?: string } | undefined;
-					return evidence?.checkpointId === checkpoint.checkpointId && evidence.resultOwnerEpoch === targets.find(item => item.peer.sessionId === target.sessionId)!.newEpoch;
+					return (
+						evidence?.checkpointId === checkpoint.checkpointId &&
+						evidence.resultOwnerEpoch === targets.find(item => item.peer.sessionId === target.sessionId)!.newEpoch
+					);
 				}),
 			).toBe(true);
 			expect(restartCommandIds.get(target.sessionId)).toMatch(/^[0-9a-f-]{36}$/);
@@ -731,7 +767,9 @@ describe("fleet rollout lifecycle proof", () => {
 			trigger,
 			affectedSessionIds: new Set(plan.orderedTargets.map(target => target.sessionId)),
 		});
-		expect(rollbackPlan.targets.map(target => target.target.sessionId)).toEqual([...targets].reverse().map(target => target.peer.sessionId));
+		expect(rollbackPlan.targets.map(target => target.target.sessionId)).toEqual(
+			[...targets].reverse().map(target => target.peer.sessionId),
+		);
 		journal.appendCustomEntry("fleet_rollout", {
 			schemaVersion: 1,
 			record: "rollback-wave",
@@ -751,7 +789,8 @@ describe("fleet rollout lifecycle proof", () => {
 			executeTargetLifecycle: async target => healthyResult(peers.get(target.target.sessionId)!),
 			recordTerminal: receipt => {
 				terminalCount += 1;
-				globalRolledBack = terminalCount === rollbackPlan.targets.length && receipt.state === "RolledBack" && globalRolledBack;
+				globalRolledBack =
+					terminalCount === rollbackPlan.targets.length && receipt.state === "RolledBack" && globalRolledBack;
 				journal.appendCustomEntry("fleet_rollout", {
 					schemaVersion: 1,
 					record: "rollback-terminal",
@@ -762,7 +801,11 @@ describe("fleet rollout lifecycle proof", () => {
 		});
 		expect(terminalCount).toBe(rollbackPlan.targets.length);
 		expect(rollback.state).toBe("Failed");
-		expect(rollback.receipts.map(receipt => receipt.state)).toEqual(["RolledBack", "RollbackIncomplete", "RolledBack"]);
+		expect(rollback.receipts.map(receipt => receipt.state)).toEqual([
+			"RolledBack",
+			"RollbackIncomplete",
+			"RolledBack",
+		]);
 		expect(globalRolledBack).toBe(false);
 
 		const pinned = resolveFleetTarget({
@@ -775,9 +818,15 @@ describe("fleet rollout lifecycle proof", () => {
 			source: { kind: "session-pin", sessionId: targets[0]!.peer.sessionId },
 		});
 		const validation = { registryPath: release.registryPath, releasesDir: release.releasesDir };
-		const blessed = await resolveFleetRelease({ requestedChannel: "blessed", validation: { ...validation, readinessJson: release.blessedReadiness } });
+		const blessed = await resolveFleetRelease({
+			requestedChannel: "blessed",
+			validation: { ...validation, readinessJson: release.blessedReadiness },
+		});
 		expect(blessed.resolvedDigest).toBe(release.targetDigest);
-		const canary = await resolveFleetRelease({ requestedChannel: "canary", validation: { ...validation, readinessJson: release.canaryReadiness } });
+		const canary = await resolveFleetRelease({
+			requestedChannel: "canary",
+			validation: { ...validation, readinessJson: release.canaryReadiness },
+		});
 		expect(canary).toMatchObject({ requestedChannel: "canary", resolvedDigest: release.candidateDigest });
 		const unpinned = await validateFleetUnpinBlessed(validation);
 		expect(unpinned).toEqual({ channel: "blessed", digest: release.targetDigest, source: "registry-stable" });
@@ -811,12 +860,25 @@ describe("fleet rollout lifecycle proof", () => {
 		expect(dryResult.plan.orderedTargets).toHaveLength(1);
 		expect(await Bun.file(dryControlPath).exists()).toBe(false);
 		expect(
-			dryController.managers.flatMap(manager => fleetRolloutRecords(controllerJournal(manager))).some(record => record.state === "Requested"),
+			dryController.managers
+				.flatMap(manager => fleetRolloutRecords(controllerJournal(manager)))
+				.some(record => record.state === "Requested"),
 		).toBe(true);
 
-		const controllerStates = fleetRolloutRecords(journal, fleetRolloutId).filter(record => record.record === "intent").map(record => record.state);
-		expect(controllerStates).toEqual(["Requested", "Preflight", "CanaryWave", "ObserveCanary", "RollingWaves", "Succeeded", "Frozen"]);
-		const stateTransitionCount = controllerStates.length + 3 + targetStateCounts.length + 2 + rollback.receipts.length;
+		const controllerStates = fleetRolloutRecords(journal, fleetRolloutId)
+			.filter(record => record.record === "intent")
+			.map(record => record.state);
+		expect(controllerStates).toEqual([
+			"Requested",
+			"Preflight",
+			"CanaryWave",
+			"ObserveCanary",
+			"RollingWaves",
+			"Succeeded",
+			"Frozen",
+		]);
+		const stateTransitionCount =
+			controllerStates.length + 3 + targetStateCounts.length + 2 + rollback.receipts.length;
 		expect(stateTransitionCount).toBe(47);
 
 		bus.close();
@@ -829,5 +891,60 @@ describe("fleet rollout lifecycle proof", () => {
 			...targets.map(target => target.manager.close()),
 			...dryController.managers.map(manager => manager.close()),
 		]);
+	});
+
+	it("returns a typed terminal failure when a registered target never acknowledges", async () => {
+		const root = await tempRoot();
+		const release = await releaseFixture(root);
+		const fixture = await targetFixture(root, "unresponsive", "idle", release.previousDigest);
+		const irc = new IrcExternalBus(path.join(root, "irc.sqlite"));
+		irc.registerPeer({
+			sessionId: fixture.peer.sessionId,
+			name: fixture.peer.name,
+			cwd: root,
+			sessionFile: fixture.peer.sessionFile,
+			ownerEpoch: fixture.oldEpoch,
+			buildDigest: release.previousDigest,
+			version: fixture.peer.version,
+			fleetCapability: fixture.peer.fleetCapability,
+		});
+		irc.updatePeerState(fixture.peer.sessionId, "idle");
+		const controller = await controllerFactory(root);
+		const controlDbPath = path.join(root, "control.sqlite");
+		const startedAt = Date.now();
+		const result = await executeFleetRollout({
+			peers: [{ peer: irc.listPeers({ includeStale: true })[0]!, workstream: "adhoc" }],
+			requestedChannel: "blessed",
+			bus: irc,
+			controlDbPath,
+			release: {
+				registryPath: release.registryPath,
+				releasesDir: release.releasesDir,
+				readinessJson: release.blessedReadiness,
+			},
+			controller: controller.factory,
+			controlTimeoutMs: 20,
+			isProcessAlive: () => true,
+		});
+
+		expect(Date.now() - startedAt).toBeLessThan(1_000);
+		expect(result.execution?.state).toBe("Frozen");
+		const failure = result.execution?.state === "Frozen" ? result.execution.failures[0] : undefined;
+		expect(failure).toMatchObject({
+			targetId: fixture.peer.sessionId,
+			sessionId: fixture.peer.sessionId,
+			phaseReached: "CordonRequested",
+			awaitedCondition: "prepare-rollout terminal receipt",
+			timedOut: true,
+			cause: expect.stringContaining("last receipt state=requested"),
+		});
+		const receipts = new SessionControlBus(controlDbPath);
+		expect(failure?.commandId ? receipts.getReceipt(failure.commandId) : undefined).toMatchObject({
+			sessionId: fixture.peer.sessionId,
+			state: "requested",
+		});
+		receipts.close();
+		irc.close();
+		await Promise.all([fixture.manager.close(), ...controller.managers.map(manager => manager.close())]);
 	});
 });

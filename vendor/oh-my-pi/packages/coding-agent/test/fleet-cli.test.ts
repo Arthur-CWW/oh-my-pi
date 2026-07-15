@@ -9,6 +9,8 @@ import {
 	formatFleetStatus,
 	pruneFleetPeers,
 } from "../src/cli/fleet-cli";
+import { formatFleetRolloutPlan } from "../src/cli/fleet-operation-format";
+
 import { IrcExternalBus } from "../src/irc/bus-external";
 import { createFleetCapability } from "../src/session/fleet-capability";
 import { RolloutJournal } from "../src/session/rollout-journal";
@@ -334,5 +336,39 @@ describe("fleet inspection projections", () => {
 		).toEqual(["fresh-test", "stale-legitimate"]);
 		verify.close();
 		expect(await Bun.file(journalPath).text()).toBe('{"type":"session"}\n');
+	});
+
+	it("prints typed per-target rollout failures", () => {
+		const output = formatFleetRolloutPlan({
+			mode: "active",
+			plan: {
+				fleetRolloutId: "rollout-failed",
+				target: { digest: "a".repeat(64), source: { kind: "blessed" } },
+				previousDigest: "b".repeat(64),
+				waves: [],
+				excluded: [],
+				orderedTargets: [],
+				maxUnavailable: 1,
+			},
+			execution: {
+				state: "Frozen",
+				completed: [],
+				failures: [
+					{
+						targetId: "target-1",
+						sessionId: "session-1",
+						phaseReached: "CordonRequested",
+						awaitedCondition: "prepare-rollout terminal receipt",
+						commandId: "command-1",
+						timedOut: true,
+						cause: "Timed out\nlast receipt state=requested",
+					},
+				],
+			},
+		});
+		expect(output).toContain("EXECUTION\tFrozen\t-");
+		expect(output).toContain(
+			"TARGET_ERROR\ttargetId=target-1\tsessionId=session-1\tphase=CordonRequested\tawaited=prepare-rollout terminal receipt\tcommandId=command-1\ttimedOut=true\tcause=Timed out last receipt state=requested",
+		);
 	});
 });

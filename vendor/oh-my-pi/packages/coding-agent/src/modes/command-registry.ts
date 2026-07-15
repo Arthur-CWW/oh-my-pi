@@ -12,6 +12,7 @@ export interface CommandModeContext {
 	toggleWrap(): boolean;
 	toggleRich(): boolean;
 	handleErrorsCommand(args?: string): void;
+	handleRouteCommand(args: readonly string[]): void | Promise<void>;
 	showPrimitivesInspector(initialCategory?: PrimitiveCategoryId): Promise<void>;
 	showCopySelector(): void;
 	handleDumpCommand(isRaw?: boolean): void;
@@ -121,6 +122,17 @@ export const COMMAND_MODE_COMMANDS: readonly CommandModeCommand[] = [
 			const identity = ctx.getSessionIdentity();
 			await ctx.copyIdentityHandle(sessionIdentityHandle(identity));
 			ctx.showFeedback(formatSessionIdentity(identity));
+		},
+	},
+	{
+		name: "route",
+		description: "explain a current or previewed model route",
+		inlineHint: "[agentId | preview <selector-or-role>]",
+		subcommands: [{ name: "preview", description: "dry-run a spawn route", usage: "<selector-or-role>" }],
+		viewLocal: true,
+		hostOnly: true,
+		run(ctx, args) {
+			return ctx.handleRouteCommand(args);
 		},
 	},
 	{

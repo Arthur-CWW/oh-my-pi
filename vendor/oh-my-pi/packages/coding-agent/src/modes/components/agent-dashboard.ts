@@ -103,6 +103,7 @@ const SOURCE_LABEL: Record<AgentSource, string> = {
 	user: "User",
 	bundled: "Bundled",
 };
+const AGENT_PREVIEW_PROMPT_MAX_CHARS = 32 * 1024;
 
 const LIST_FOOTER =
 	" ↑/↓: navigate  Space: toggle  Enter: model override  N: new agent  ←/→: source  Ctrl+R: reload  Esc: close";
@@ -288,16 +289,23 @@ class AgentInspectorPane implements Component {
 			`${theme.fg("muted", "Effective:")} ${this.effectiveResolution ? this.#formatResolution(this.effectiveResolution) : theme.fg("dim", "(unresolved)")}`,
 		);
 
-		if (this.agent.filePath) {
-			lines.push("");
-			lines.push(theme.fg("muted", "Path:"));
-			lines.push(theme.fg("dim", `  ${replaceTabs(shortenPath(this.agent.filePath))}`));
-		}
+		const sourcePath = this.agent.filePath ?? `embedded:${this.agent.name}.md`;
+		lines.push("");
+		lines.push(theme.fg("muted", "Path:"));
+		lines.push(theme.fg("dim", `  ${replaceTabs(shortenPath(sourcePath))}`));
 
 		if (this.agent.description) {
 			lines.push("");
 			lines.push(theme.fg("muted", "Description:"));
 			for (const wrapped of wrapTextWithAnsi(replaceTabs(this.agent.description), Math.max(10, width - 2))) {
+				lines.push(truncateToWidth(wrapped, width));
+			}
+		}
+		if (this.agent.systemPrompt) {
+			lines.push("");
+			lines.push(theme.fg("muted", "Prompt:"));
+			const promptText = replaceTabs(this.agent.systemPrompt.slice(0, AGENT_PREVIEW_PROMPT_MAX_CHARS));
+			for (const wrapped of wrapTextWithAnsi(promptText, Math.max(10, width - 2))) {
 				lines.push(truncateToWidth(wrapped, width));
 			}
 		}

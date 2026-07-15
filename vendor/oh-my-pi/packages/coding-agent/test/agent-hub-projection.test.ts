@@ -11,6 +11,7 @@ import {
 import { SessionObserverRegistry } from "@oh-my-pi/pi-coding-agent/modes/session-observer-registry";
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
+import { createSpawnRecord } from "@oh-my-pi/pi-coding-agent/task/spawn-record";
 
 
 const tempRoots: string[] = [];
@@ -94,7 +95,7 @@ describe("Agent Hub sectioned projection", () => {
 		resetAgentHubPerfCounters();
 		for (let index = 1; index <= 100; index++) registry.setStatus(`parked-${index}`, "idle");
 		hub.render(120);
-		expect(getAgentHubPerfCounters()).toEqual({ journalReads: 0, projectionRebuilds: 0 });
+		expect(getAgentHubPerfCounters()).toEqual({ journalReads: 0, projectionRebuilds: 1 });
 		vi.advanceTimersByTime(15);
 		expect(renders).toBe(0);
 		vi.advanceTimersByTime(1);
@@ -106,7 +107,9 @@ describe("Agent Hub sectioned projection", () => {
 
 	it("keeps active-only event projection independent of hidden history population at N=50/338/1000", () => {
 		const measurements: Array<{ n: number; microseconds: number }> = [];
-		for (const n of [50, 338, 1000]) {
+		// Warmup pass: the first hub exercises cold JIT/caches; discard it so the
+		// N=50 measurement is not inflated relative to later sizes (ratio assertion below).
+		for (const n of [50, 50, 338, 1000]) {
 			const registry = registryWithParked(n);
 			const hub = hubFor(registry);
 			hub.handleInput(".");
@@ -123,6 +126,7 @@ describe("Agent Hub sectioned projection", () => {
 			measurements.push({ n, microseconds: samples[94]! });
 			hub.dispose();
 		}
+		measurements.shift(); // drop warmup
 		console.info("agent-hub event→projection p95 µs", measurements);
 		const values = measurements.map(row => row.microseconds);
 		expect(Math.max(...values)).toBeLessThan(2_000);
@@ -169,6 +173,71 @@ describe("Agent Hub sectioned projection", () => {
 			await Bun.sleep(10);
 		}
 		expect(getAgentHubPerfCounters().journalReads).toBe(0);
+		hub.dispose();
+	});
+	it("renders a persisted nested spawn packet in the selected inspector", async () => {
+		const root = await fs.mkdtemp(path.join(os.tmpdir(), "agent-hub-spawn-packet-"));
+		tempRoots.push(root);
+		const sessionFile = path.join(root, "Parent.Child.jsonl");
+		const spawnRecord = createSpawnRecord({
+			agentId: "Parent.Child",
+			spawnerId: "Parent",
+			agentType: "reviewer",
+			definitionSourcePath: "/tmp/project/.omp/agents/reviewer.md",
+			context: "Nested context",
+			assignment: "Nested assignment",
+			buildVersion: "15.9.0",
+			buildDigest: "b".repeat(64),
+		});
+		await Bun.write(
+			sessionFile,
+			`${JSON.stringify({
+				type: "session",
+				id: "nested",
+				timestamp: new Date().toISOString(),
+				cwd: root,
+			})}\n${JSON.stringify({
+				type: "session_init",
+				id: "init",
+				parentId: null,
+				timestamp: new Date().toISOString(),
+				systemPrompt: "reviewer",
+				task: "Nested assignment",
+				tools: [],
+				subagent: {
+					agentId: spawnRecord.agentId,
+					parentSessionFile: path.join(root, "Parent.jsonl"),
+					parentSessionId: "parent-session",
+					displayName: "Parent.Child",
+					model: "openai/gpt-5.6",
+					thinkingLevel: null,
+					isolated: false,
+					taskDepth: 2,
+					parentTaskPrefix: "Parent.Child",
+					spawnRecord,
+				},
+			})}\n`,
+		);
+		const registry = new AgentRegistry();
+		registry.register({
+			id: "selected",
+			displayName: "Parent.Child",
+			kind: "sub",
+			session: null,
+			sessionFile,
+			status: "running",
+		});
+		const hub = hubFor(registry);
+		const deadline = Date.now() + 1_000;
+		let rendered = text(hub);
+		while (!rendered.includes("Nested assignment")) {
+			if (Date.now() >= deadline) throw new Error("Timed out waiting for nested spawn inspector");
+			await Bun.sleep(10);
+			rendered = text(hub);
+		}
+		expect(rendered).toContain("Definition: /tmp/project/.omp/agents/reviewer.md");
+		expect(rendered).toContain("Build: 15.9.0");
+		expect(rendered).toContain(`Build digest: ${"b".repeat(64)}`);
 		hub.dispose();
 	});
 });

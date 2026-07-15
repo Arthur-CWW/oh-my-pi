@@ -137,9 +137,11 @@ export async function loadSessionMessagesReadOnly(filePath: string): Promise<Age
 	if (entries.length === 0) return [];
 	migrateToCurrentVersion(entries);
 	await resolveBlobRefsInEntries(entries, new BlobStore(getBlobsDir()));
-	const sessionEntries = entries.filter(
-		(e): e is SessionEntry => e.type !== "session" && !(e.type === "custom" && e.customType === "child_lifecycle"),
+	const sessionEntries = entries.filter((e): e is SessionEntry => e.type !== "session");
+	const transcriptEntries = sessionEntries.filter(
+		entry => !(entry.type === "custom" && entry.customType === "child_lifecycle"),
 	);
-	const leaf = resolveSessionLeaf(sessionEntries);
-	return buildSessionContext(sessionEntries, leaf.leafId, leaf.entriesById).messages;
+	const transcriptLeaf = resolveSessionLeaf(transcriptEntries);
+	const allEntries = resolveSessionLeaf(sessionEntries);
+	return buildSessionContext(sessionEntries, transcriptLeaf.leafId, allEntries.entriesById).messages;
 }

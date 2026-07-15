@@ -23,6 +23,7 @@ import { getSessionSlashCommands } from "../extensibility/extensions/get-command
 import { buildSkillPromptMessage, type Skill } from "../extensibility/skills";
 import type { HindsightSessionState } from "../hindsight/state";
 import type { LocalProtocolOptions } from "../internal-urls";
+import { IrcBus } from "../irc/bus";
 import { callTool } from "../mcp/client";
 import type { MCPManager } from "../mcp/manager";
 import type { MnemopiSessionState } from "../mnemopi/state";
@@ -147,6 +148,89 @@ export function extractLastAssistantText(session: Pick<AgentSession, "getLastAss
 	} catch {
 		return undefined;
 	}
+}
+
+export function snapshotRequestedToolNames(toolNames: readonly string[] | undefined): readonly string[] | undefined {
+	return toolNames === undefined ? undefined : Object.freeze([...toolNames]);
+}
+
+interface FollowUpResultRouter {
+	arm(): void;
+	subscribe(
+		session: AgentSession,
+		onLifecycleEvent: (event: AgentSessionEvent) => void,
+	): () => void;
+}
+
+function resultText(result: unknown): string | undefined {
+	if (!result || typeof result !== "object" || !("content" in result)) return undefined;
+	return extractAssistantTextFromContent((result as { content?: unknown }).content);
+}
+
+function formatFollowUpYield(id: string, event: Extract<AgentSessionEvent, { type: "tool_execution_end" }>): string {
+	if (event.isError) {
+		return `Follow-up yield from ${id} failed:\n${resultText(event.result) ?? "The yield tool threw without an error message."}`;
+	}
+	const extracted = subprocessToolRegistry.getHandler("yield")?.extractData?.({
+		toolName: event.toolName,
+		toolCallId: event.toolCallId,
+		args: (event as { args?: Record<string, unknown> }).args ?? {},
+		result: event.result,
+		isError: event.isError,
+	}) as { data?: unknown; status?: string; error?: string } | undefined;
+	if (extracted?.status === "aborted") {
+		return `Follow-up yield from ${id} aborted:\n${extracted.error ?? "Subagent aborted the follow-up turn."}`;
+	}
+	let payload: string;
+	try {
+		payload = JSON.stringify(extracted?.data, null, 2) ?? "null";
+	} catch (error) {
+		payload = `Failed to serialize yield data: ${error instanceof Error ? error.message : String(error)}`;
+	}
+	return `Follow-up yield from ${id}:\n${payload}`;
+}
+
+export function createFollowUpResultRouter(options: {
+	id: string;
+	parentAgentId?: string;
+	asyncJobManager?: AsyncJobManager;
+	asyncJobId?: string;
+}): FollowUpResultRouter {
+	let armed = false;
+	let turnHadYield = false;
+	const route = (text: string): void => {
+		const { asyncJobManager: manager, asyncJobId: jobId } = options;
+		if (manager && jobId) manager.refreshResultText(jobId, `${text}\n\n[refreshed after follow-up turn]`);
+		if (!options.parentAgentId || options.parentAgentId === options.id) return;
+		void IrcBus.global()
+			.send({ from: options.id, to: options.parentAgentId, body: text })
+			.then(receipt => {
+				if (receipt.outcome === "failed") {
+					logger.warn("Follow-up result delivery failed", { id: options.id, error: receipt.error });
+				}
+			})
+			.catch(error => logger.warn("Follow-up result delivery failed", { id: options.id, error: String(error) }));
+	};
+	return {
+		arm: () => {
+			armed = true;
+		},
+		subscribe: (session, onLifecycleEvent) =>
+			session.subscribe(event => {
+				onLifecycleEvent(event);
+				if (!armed) return;
+				if (event.type === "agent_start") {
+					turnHadYield = false;
+				} else if (event.type === "tool_execution_end" && event.toolName === "yield") {
+					turnHadYield = true;
+					route(formatFollowUpYield(options.id, event));
+					if (!event.isError) session.agent.abort();
+				} else if (event.type === "agent_end" && !turnHadYield) {
+					const text = extractLastAssistantText(session);
+					if (text) route(`Follow-up turn from ${options.id} completed without yield:\n${text}`);
+				}
+			}),
+	};
 }
 
 export function buildTimeoutPartialProgress(
@@ -282,6 +366,9 @@ export interface ExecutorOptions {
 	detached?: boolean;
 	modelOverride?: string | string[];
 	routeReceipt?: SpawnRouteReceipt;
+	/** Installed binary provenance inherited from the parent session. */
+	buildVersion?: string;
+	buildDigest?: string;
 	/**
 	 * Active model selector of the parent session, used as an auth-aware fallback
 	 * if the resolved subagent model has no working credentials. See #985.
@@ -807,9 +894,10 @@ interface ParkedChildSessionDescriptor {
 		| "settings"
 		| "toolNames"
 	>;
-	toolNames: readonly string[];
+	toolNames: readonly string[] | undefined;
 	subagentPrompt: string;
 	artifactManager?: ArtifactManager;
+	followUpResultRouter: FollowUpResultRouter;
 }
 
 function appendParkedChildLifecycleState(
@@ -865,7 +953,7 @@ function createParkedChildSessionReviver(
 				...descriptor.sessionOptions,
 				authStorage: descriptor.modelRegistry.authStorage,
 				modelRegistry: descriptor.modelRegistry,
-				toolNames: [...descriptor.toolNames],
+				toolNames: descriptor.toolNames === undefined ? undefined : [...descriptor.toolNames],
 				settings: sessionSettings,
 				model: model.model,
 				thinkingLevel: model.thinkingLevel ?? descriptor.initialThinkingLevel,
@@ -876,7 +964,7 @@ function createParkedChildSessionReviver(
 				sessionManager: reopened,
 			});
 			registerSubscription(
-				session.subscribe(event => {
+				descriptor.followUpResultRouter.subscribe(session, event => {
 					if (event.type === "agent_start") {
 						AgentRegistry.global().setStatus(descriptor.id, "running");
 						appendParkedChildLifecycleState(session, descriptor, "running");
@@ -905,6 +993,8 @@ interface RunMonitorArgs {
 	assignment?: string;
 	description?: string;
 	modelOverride?: string | string[];
+	buildVersion?: string;
+	buildDigest?: string;
 	routeReceipt?: SpawnRouteReceipt;
 	context?: string;
 	definitionSourcePath: string;
@@ -978,6 +1068,8 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
 		description: args.description,
 		spawnContext: args.context,
 		definitionSourcePath: args.definitionSourcePath,
+		buildVersion: args.buildVersion,
+		buildDigest: args.buildDigest,
 		spawnerId: args.spawnerId,
 		lastIntent: undefined,
 		recentTools: [],
@@ -2057,6 +2149,8 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 		modelOverride,
 		routeReceipt,
 		context: options.context,
+		buildVersion: options.buildVersion,
+		buildDigest: options.buildDigest,
 		definitionSourcePath,
 		spawnerId,
 		signal,
@@ -2075,24 +2169,20 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 	let reviveSession: ((registerSubscription: (unsubscribe: () => void) => void) => Promise<AgentSession>) | null =
 		null;
 	let appendLifecycleState: ((state: ChildLifecycleState) => void) | undefined;
-	const originalRunSettled = false;
+	const followUpResultRouter = createFollowUpResultRouter({
+		id,
+		parentAgentId: spawnerId,
+		asyncJobManager: options.asyncJobManager,
+		asyncJobId: options.asyncJobId,
+	});
 	const installRegistryStatusSync = (target: AgentSession): (() => void) =>
-		target.subscribe(event => {
+		followUpResultRouter.subscribe(target, event => {
 			if (event.type === "agent_start") {
 				AgentRegistry.global().setStatus(id, "running");
 				appendLifecycleState?.("running");
 			} else if (event.type === "agent_end") {
 				AgentRegistry.global().setStatus(id, "idle");
 				appendLifecycleState?.("idle");
-				if (!originalRunSettled || worktree !== undefined) return;
-				const manager = options.asyncJobManager;
-				const jobId = options.asyncJobId;
-				if (!manager || !jobId) return;
-				const job = manager.getJob(jobId);
-				if (!job || (job.status !== "completed" && job.status !== "failed")) return;
-				const latestText = extractLastAssistantText(target);
-				if (!latestText) return;
-				manager.refreshResultText(jobId, `${latestText}\n\n[refreshed after follow-up turn]`);
 			}
 		});
 
@@ -2266,6 +2356,8 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 				authStorage,
 				modelRegistry,
 				quotaAdmission: options.quotaAdmission,
+				buildVersion: options.buildVersion,
+				buildDigest: options.buildDigest,
 				settings: subagentSettings,
 				model,
 				thinkingLevel: effectiveThinkingLevel,
@@ -2347,9 +2439,10 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 					initialModel: model,
 					initialThinkingLevel: effectiveThinkingLevel,
 					sessionOptions: Object.freeze(sessionOptions),
-					toolNames: Object.freeze([...(initialToolNames ?? [])]),
+					toolNames: snapshotRequestedToolNames(initialToolNames),
 					subagentPrompt,
 					artifactManager: options.parentArtifactManager,
+					followUpResultRouter,
 				});
 				reviveSession = createParkedChildSessionReviver(descriptor);
 			}
@@ -2412,6 +2505,8 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 									context: options.context,
 									resolvedModel: routeReceipt?.route.selector ?? (model ? `${model.provider}/${model.id}` : undefined),
 									route: routeReceipt,
+									buildVersion: options.buildVersion,
+									buildDigest: options.buildDigest,
 								}),
 							},
 						}
@@ -2632,7 +2727,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 	};
 
 	const done = await runSubagent();
-	return finalizeRunResult({
+	const result = await finalizeRunResult({
 		monitor,
 		done,
 		index,
@@ -2652,4 +2747,6 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 		sessionFile: subtaskSessionFile,
 		startTime,
 	});
+	followUpResultRouter.arm();
+	return result;
 }

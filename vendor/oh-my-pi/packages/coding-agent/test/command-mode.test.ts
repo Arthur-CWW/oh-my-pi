@@ -62,6 +62,7 @@ class CommandFixture implements CommandModeContext {
 	}
 
 	handleErrorsCommand(): void {}
+	handleRouteCommand(): void {}
 	async showPrimitivesInspector(): Promise<void> {}
 	showCopySelector(): void {}
 	handleDumpCommand(): void {}
@@ -178,6 +179,7 @@ describe("colon command registry", () => {
 		expect(childCommands.map(command => command.name)).toEqual([
 			"commands",
 			"id",
+			"route",
 			"wrap",
 			"rich",
 			"errors",

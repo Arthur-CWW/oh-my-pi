@@ -125,6 +125,8 @@ export async function runDisposableInteractiveMode(
 						Effect.runPromise(Effect.scoped(runner.applySessionControl(command))).then(() => undefined),
 					resume: command =>
 						Effect.runPromise(Effect.scoped(runner.applySessionControl(command))).then(() => undefined),
+					prepareRollout: (_intent, pauseProvenance, command) =>
+						Effect.runPromise(Effect.scoped(runner.prepareRollout(command, pauseProvenance))),
 					setModel: (_selector, command) => Effect.runPromise(Effect.scoped(runner.applySessionControl(command))),
 					compact: (_instructions, command) =>
 						Effect.runPromise(Effect.scoped(runner.applySessionControl(command))),

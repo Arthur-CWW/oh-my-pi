@@ -16,6 +16,9 @@ export interface SpawnRecord {
 	readonly resolvedModel?: string;
 	/** Complete resolution receipt, including consulted/overridden layers and fallback attempts. */
 	readonly route?: SpawnRouteReceipt;
+	/** Installed binary provenance captured at the spawn boundary. */
+	readonly buildVersion?: string;
+	readonly buildDigest?: string;
 }
 
 export function composeSpawnPrompt(context: string | undefined, assignment: string): string {
@@ -35,6 +38,8 @@ export function createSpawnRecord(input: {
 	context?: string;
 	resolvedModel?: string;
 	route?: SpawnRouteReceipt;
+	buildVersion?: string;
+	buildDigest?: string;
 }): SpawnRecord {
 	const context = input.context?.trim() ?? "";
 	const assignment = input.assignment.trim();
@@ -49,6 +54,8 @@ export function createSpawnRecord(input: {
 		fullPrompt: composeSpawnPrompt(context, assignment),
 		...(input.resolvedModel ? { resolvedModel: input.resolvedModel } : {}),
 		...(input.route ? { route: input.route } : {}),
+		...(input.buildVersion ? { buildVersion: input.buildVersion } : {}),
+		...(input.buildDigest ? { buildDigest: input.buildDigest } : {}),
 	};
 }
 
@@ -64,6 +71,8 @@ export function isSpawnRecord(value: unknown): value is SpawnRecord {
 		typeof record.assignment === "string" &&
 		typeof record.context === "string" &&
 		typeof record.fullPrompt === "string" &&
-		(record.resolvedModel === undefined || typeof record.resolvedModel === "string")
+		(record.resolvedModel === undefined || typeof record.resolvedModel === "string") &&
+		(record.buildVersion === undefined || typeof record.buildVersion === "string") &&
+		(record.buildDigest === undefined || typeof record.buildDigest === "string")
 	);
 }

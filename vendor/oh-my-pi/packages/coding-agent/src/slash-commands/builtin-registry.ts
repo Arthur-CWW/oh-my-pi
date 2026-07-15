@@ -1185,7 +1185,7 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<SlashCommandSpec> = [
 	},
 	{
 		name: "context",
-		tuiNamespace: "slash",
+		tuiNamespace: "colon",
 		description: "Show estimated context usage breakdown",
 		acpDescription: "Show context usage",
 		handle: async (_command, runtime) => {

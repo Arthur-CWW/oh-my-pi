@@ -322,6 +322,9 @@ export interface AgentProgress {
 	modelOverride?: string | string[];
 	/** Resolved model display string in the form `<provider>/<id>`, optionally suffixed with `:<thinkingLevel>` when the level was set explicitly. Undefined when the model could not be resolved. */
 	resolvedModel?: string;
+	/** Installed binary provenance captured at the spawn boundary. */
+	buildVersion?: string;
+	buildDigest?: string;
 	routeReceipt?: SpawnRouteReceipt;
 	/** Data extracted by registered subprocess tool handlers (keyed by tool name) */
 	extractedToolData?: Record<string, unknown[]>;

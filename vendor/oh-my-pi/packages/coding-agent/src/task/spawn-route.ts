@@ -29,6 +29,8 @@ export interface SpawnPolicyRoutingOptions {
 	readonly directory?: string;
 }
 
+type SpawnPolicySession = Pick<ToolSession, "sessionManager">;
+
 let configuredPolicyDirectory: string | undefined;
 
 export function configureSpawnPolicyRouting(options: SpawnPolicyRoutingOptions = {}): void {
@@ -45,13 +47,13 @@ function policyReader(options: PolicyJournalOptions): PolicyJournal {
 	});
 }
 
-function sessionWorkstream(session: ToolSession): string | undefined {
+function sessionWorkstream(session: SpawnPolicySession): string | undefined {
 	const workstream = session.sessionManager?.getWorkstream();
 	return workstream?.kind === "workstream" ? workstream.id : undefined;
 }
 
 export async function snapshotTaskSpawnPolicy(
-	session: ToolSession,
+	session: SpawnPolicySession,
 	options: SpawnPolicyRoutingOptions = {},
 ): Promise<PolicySnapshot> {
 	const directory = options.directory ?? configuredPolicyDirectory;

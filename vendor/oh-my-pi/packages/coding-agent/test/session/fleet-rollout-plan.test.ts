@@ -351,7 +351,21 @@ describe("fleet rollout authority and execution", () => {
 			now: () => NOW,
 		});
 
-		expect(result).toEqual({ state: "Frozen", completed: [] });
+		expect(result).toEqual({
+			state: "Frozen",
+			completed: [],
+			failures: [
+				{
+					targetId: "a",
+					sessionId: "a",
+					phaseReached: "CordonRequested",
+					awaitedCondition: "target lifecycle completion",
+					commandId: "id-1",
+					timedOut: false,
+					cause: "restart failed",
+				},
+			],
+		});
 		expect(attempted).toEqual(["a"]);
 		expect(
 			fleetRolloutRecords(journal, plan.fleetRolloutId).map(record =>
@@ -363,6 +377,12 @@ describe("fleet rollout authority and execution", () => {
 			["b", "Frozen"],
 			["c", "Frozen"],
 		]);
+		const failed = fleetRolloutRecords(journal, plan.fleetRolloutId).find(
+			record => record.record === "target" && record.sessionId === "a" && record.state === "RestartFailed",
+		);
+		expect(failed?.record === "target" ? failed.failure : undefined).toEqual(
+			result.state === "Frozen" ? result.failures[0] : undefined,
+		);
 		await manager.close();
 	});
 
