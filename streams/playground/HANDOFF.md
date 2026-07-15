@@ -17,6 +17,8 @@ unfinished step. Do not touch other streams' owner paths.
 
 Read, in order: `docs/fable/charter.md`, `streams/playground/GOAL.md`, this doc's **State** and **Continuation** sections, then only the `docs/fable/atlas.md` sections you need. `docs/state/video-creative-direction.md` and `docs/plans/scene-lab.md` when you touch those lanes.
 
+**Literary/source index**: before any source mining, read `docs/research/power-posting-sources/SOURCE-INDEX.md` — it maps the durable feedstock shelves: **Calibre** (`~/Calibre Library/`), **Primer processed books** (`streams/primer/wrapped-commentary-reader/` — read-only, another stream's owner path), and **Borges Library downloads** (`~/.borges-library/downloads/`, incl. the Deleuze/Guattari shelf `deleuze-guattari/` — Anti-Oedipus + A Thousand Plateaus). Consult the index before mining sources. Never duplicate whole copyrighted books into Playground docs — archive only public sources or short attributed excerpts/analysis.
+
 ## State (as of 2026-07-08, session 3)
 
 Session 3 shipped seven waves across three substreams:
