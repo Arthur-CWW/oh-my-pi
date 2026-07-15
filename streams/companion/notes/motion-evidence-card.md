@@ -7,7 +7,7 @@ Status: DRAFT — sico batch in flight; live calibrated clips pending Arthur. Nu
 - Host: macOS 26.5.1, M4 Max. No public TypeScript ARKit/Vision SDK — Swift sidecars emit typed loopback UDP.
 - 2D live: `AppleMotionOracle` — VNDetectHumanBodyPoseRequest **revision 2** (19 joints), body-associated hands + standalone two-hand fallback **revision 1** (21 joints/side), 640×480 @ ~30fps, busy-gate frame dropping. Wire: `companion.motion-oracle/1` / `apple-vision-body2d-r2` / `body+hands`.
 - 3D live (shadow-only): `AppleMotionOracle3D` — VNDetectHumanBodyPose3DRequest **revision 1**, 17 joints, meters, model-space relative to root, bodyHeight + cameraOriginMatrix; per-joint confidence not provided by the API (honestly absent). Wire: `companion.motion-oracle-3d/1` / `apple-vision-body3d-r1` / `body3d`.
-- Offline batch: `AppleMotionOracleBatch` — AVAssetReader full-frame iteration, same joint vocabularies + association policy, JSONL per clip (no UDP).
+- Offline batch: `AppleMotionOracleBatch` — AVAssetReader iteration sampled at every 2nd frame (`--every-nth 2`, per the >90-minute wall-clock rule), same joint vocabularies + association policy, JSONL per clip (no UDP). Rates below are over sampled frames.
 - Baselines: MediaPipe pose/hands (browser, thresholds 0.40 detect / 0.45 retarget), 73 existing v2 body-tracks (`data/body-tracks/`). RTMPose remains a COCO-17 image-plane desktop baseline.
 
 ## Live-path rates (observed)
@@ -18,7 +18,7 @@ Status: DRAFT — sico batch in flight; live calibrated clips pending Arthur. Nu
 
 ## Sico corpus batch *(interim — 74/281 clips at draft time)*
 
-- body2d: mean 0.62 / median 0.65 of frames; hands: mean 0.54; body3d: mean 0.71 / median 0.78. Zero-detection clips: 2/74. ~57s wall per clip, full frames, single process.
+- body2d: mean 0.62 / median 0.65 of sampled frames; hands: mean 0.54; body3d: mean 0.71 / median 0.78. Zero-detection clips: 2/74. ~57s wall per clip at every-2nd-frame sampling, single process.
 - Same-clip Vision-vs-MediaPipe comparison over the 73 body-track clips: *(fills in from `data/apple-vision-tracks/comparison-summary.json`)*.
 - Failure taxonomy + overlays: *(fills in from `streams/companion/notes/vision-sico-batch.md`)*.
 
