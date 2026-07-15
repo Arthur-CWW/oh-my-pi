@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import * as fsSync from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import type { IrcExternalPeer } from "../irc/bus-external";
@@ -70,14 +71,7 @@ export interface FleetRolloutRecordBase {
 
 export interface FleetRolloutIntentRecord extends FleetRolloutRecordBase {
 	readonly record: "intent";
-	readonly state:
-		| "Requested"
-		| "Preflight"
-		| "CanaryWave"
-		| "ObserveCanary"
-		| "RollingWaves"
-		| "Frozen"
-		| "Succeeded";
+	readonly state: "Requested" | "Preflight" | "CanaryWave" | "ObserveCanary" | "RollingWaves" | "Frozen" | "Succeeded";
 	readonly previousDigest: string;
 	readonly maxUnavailable: 1;
 }
@@ -222,6 +216,16 @@ function comparePeers(left: IrcExternalPeer, right: IrcExternalPeer): number {
 	return stateRank(left) - stateRank(right) || left.sessionId.localeCompare(right.sessionId);
 }
 
+function isMaterializedSessionJournal(sessionFile: string | undefined): boolean {
+	if (!sessionFile) return false;
+	try {
+		const stats = fsSync.statSync(sessionFile);
+		return stats.isFile() && stats.size > 0;
+	} catch {
+		return false;
+	}
+}
+
 function classifyPeer(
 	peer: IrcExternalPeer,
 	options: CreateFleetRolloutPlanOptions,
@@ -229,7 +233,8 @@ function classifyPeer(
 	if (options.initiatorSessionIds.has(peer.sessionId) || options.initiatorPids?.has(peer.pid)) {
 		return { state: "Classified", reason: "rollout initiator excluded" };
 	}
-	if (!peer.sessionFile) return { state: "BusyDeferred", reason: "durable session journal unavailable" };
+	if (!isMaterializedSessionJournal(peer.sessionFile))
+		return { state: "BusyDeferred", reason: "durable session journal not materialized" };
 	if (!isIrcExternalPeerFresh(peer.lastSeen, options.nowMs))
 		return { state: "LegacyIncompatible", reason: "stale peer" };
 	const isProcessAlive = options.isProcessAlive ?? isFleetOwnerProcessAlive;

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test";
+import * as fsSync from "node:fs";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -27,6 +28,15 @@ const PREVIOUS = "b".repeat(64);
 const OTHER = "c".repeat(64);
 const NOW = "2026-07-15T00:00:00.000Z";
 const cleanupRoots: string[] = [];
+const fixtureFiles = new Set<string>();
+
+function materializedSessionFile(sessionId: string): string {
+	const file = path.join(os.tmpdir(), `omp-fleet-plan-${process.pid}-${sessionId}.jsonl`);
+	fsSync.writeFileSync(file, '{"type":"session","version":1}\n');
+	fixtureFiles.add(file);
+	return file;
+}
+
 const compatibility = createFleetCompatibilityProfile(CURRENT_SESSION_CONTROL_PROTOCOL, [
 	"status",
 	"prepare-rollout",
@@ -57,7 +67,7 @@ function peer(
 		lastSeen: NOW,
 		state,
 		stateTs: NOW,
-		sessionFile: `/sessions/${sessionId}.jsonl`,
+		sessionFile: materializedSessionFile(sessionId),
 		ownerEpoch: `epoch-${sessionId}`,
 		buildDigest: OTHER,
 		version: "1.0.0",
@@ -111,7 +121,10 @@ function planFor(peers: readonly IrcExternalPeer[], overrides = {}) {
 }
 
 afterEach(async () => {
-	await Promise.all(cleanupRoots.splice(0).map(root => fs.rm(root, { recursive: true, force: true })));
+	const roots = cleanupRoots.splice(0);
+	const fixtures = [...fixtureFiles];
+	fixtureFiles.clear();
+	await Promise.all([...roots, ...fixtures].map(file => fs.rm(file, { recursive: true, force: true })));
 });
 
 describe("fleet rollout planning", () => {
@@ -163,7 +176,81 @@ describe("fleet rollout planning", () => {
 			expect.objectContaining({
 				sessionId: "memory",
 				state: "BusyDeferred",
-				reason: "durable session journal unavailable",
+				reason: "durable session journal not materialized",
+			}),
+		);
+	});
+
+	it("defers an allocated-but-absent journal without assigning rollout work", async () => {
+		const root = await tempRoot();
+		const plan = planFor([peer("allocated", "idle", { sessionFile: path.join(root, "allocated.jsonl") })]);
+
+		expect(plan.orderedTargets).toEqual([]);
+		expect(plan.excluded).toContainEqual(
+			expect.objectContaining({
+				sessionId: "allocated",
+				state: "BusyDeferred",
+				reason: "durable session journal not materialized",
+			}),
+		);
+	});
+
+	it("defers empty and non-regular journal paths", async () => {
+		const root = await tempRoot();
+		const empty = path.join(root, "empty.jsonl");
+		const directory = path.join(root, "directory.jsonl");
+		await fs.writeFile(empty, "");
+		await fs.mkdir(directory);
+		const plan = planFor([
+			peer("empty", "idle", { sessionFile: empty }),
+			peer("directory", "idle", { sessionFile: directory }),
+		]);
+
+		expect(plan.orderedTargets).toEqual([]);
+		expect(plan.excluded).toHaveLength(2);
+		expect(plan.excluded.every(item => item.state === "BusyDeferred")).toBe(true);
+		expect(plan.excluded.every(item => item.reason === "durable session journal not materialized")).toBe(true);
+	});
+
+	it("plans an eligible peer with a materialized journal fixture", async () => {
+		const root = await tempRoot();
+		const sessionFile = path.join(root, "session.jsonl");
+		await fs.writeFile(sessionFile, '{"type":"session","version":1}\n');
+		const plan = planFor([peer("materialized", "idle", { sessionFile })]);
+
+		expect(plan.orderedTargets.map(item => item.sessionId)).toEqual(["materialized"]);
+	});
+
+	it("reclassifies a removed journal before command and does not send prepare", async () => {
+		const root = await tempRoot();
+		const sessionFile = path.join(root, "session.jsonl");
+		await fs.writeFile(sessionFile, '{"type":"session","version":1}\n');
+		const current = peer("removed", "idle", { sessionFile });
+		const plan = planFor([current]);
+		const { journal } = await controllerJournal();
+		await fs.rm(sessionFile);
+		let sent = false;
+
+		const result = await executeFleetRolloutPlan({
+			plan,
+			journal,
+			listPeers: () => [current],
+			compatibility,
+			initiatorSessionIds: new Set(),
+			executeTarget: async () => {
+				sent = true;
+			},
+			nowMs: Date.parse(NOW),
+			now: () => NOW,
+		});
+
+		expect(result).toEqual({ state: "Succeeded", completed: [] });
+		expect(sent).toBe(false);
+		expect(fleetRolloutRecords(journal, plan.fleetRolloutId)).toContainEqual(
+			expect.objectContaining({
+				sessionId: "removed",
+				state: "BusyDeferred",
+				reason: "durable session journal not materialized",
 			}),
 		);
 	});
