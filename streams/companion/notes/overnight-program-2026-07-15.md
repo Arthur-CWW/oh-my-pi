@@ -10,27 +10,27 @@ Orchestrator anchor: survives compactions. Update at every wave boundary (scribe
 - Routing: bounded → Luna xhigh; design/architecture/synthesis → Sol medium. Never Terra, never Fable spawns. Provider aborts are common tonight: on abort, revive in place via irc with disk-state summary; after 2 dead revivals respawn fresh with a state-grounded packet. Revived agents often park silently — verify DISK STATE, not reports.
 
 ## Validation pipeline (every checkpoint)
-1. `cd apps/ai-companion-rtc && bunx tsc --noEmit`
-2. `bun run build:lab && bun run build:vrm`
-3. `bun test` — full suite; baseline floor 466 pass / 0 fail (raise floor as waves land, never lower)
-4. Browser QA for user-visible changes (subagent, private instance, ports 4911+; NEVER restart 1355 from a worker)
-5. Nested commit `apps/ai-companion-rtc` (orchestrator only); outer repo: commit ONLY owned paths (scripts/avatar-pipeline, streams/companion/notes, scripts/gpu-queue.ts) — outer tree has other sessions' dirty files incl. a foreign package.json `pi`-block edit: never `git add -A` at root.
-- Script: `apps/ai-companion-rtc/scripts/validate.ts` (being built) — gates + summary JSON to `local/validation/`, `--checkpoint "msg"` mode commits nested on green.
+1. From `apps/ai-companion-rtc`, run `bun run validate`; this invokes `scripts/validate.ts` and runs the gates sequentially: `bunx tsc --noEmit`, `bun run build:lab`, `bun run build:vrm`, then `bun test`.
+2. The full-suite test gate must report 0 failures and at least the floor in `apps/ai-companion-rtc/scripts/validate-floor.json` (`minPass`, currently 466); the floor only ratchets upward.
+3. Every run writes `apps/ai-companion-rtc/local/validation/<timestamp>.json` plus complete per-gate logs under `apps/ai-companion-rtc/local/validation/logs/`.
+4. `bun run validate --fast` runs only typecheck and tests for mid-wave sanity; `--fast` cannot be combined with `--checkpoint`.
+5. `bun run validate --checkpoint "msg"` runs every gate, then commits the nested repo on green and prints the short SHA; red runs never commit.
+6. Browser QA for user-visible changes (subagent, private instance, ports 4911+; NEVER restart 1355 from a worker).
+7. Nested commit `apps/ai-companion-rtc` (orchestrator only); outer repo: commit ONLY owned paths (scripts/avatar-pipeline, streams/companion/notes, scripts/gpu-queue.ts) — outer tree has other sessions' dirty files incl. a foreign package.json `pi`-block edit: never `git add -A` at root.
 
 ## Checkpoint log
 - `ecd688b`→`ce96472`→`7fea892`→`b376e57` (arbiter/debug-stage/3D/recording) →`a03fbe4` (compare player) →`68f82b8` (gpu converter) →`a843fc9` (solo-swap+resizable) →`d0bca14` (center split + dejank). Outer: `bb5d63c09` (avatar gates), `7e6b99b78`/`0804b7db2` (handoff), `43385ea27`/`2fadbf6ef`/`c9e51cfb1` (evidence card), `543a1b91c` (gpu note), gpu-queue note commit.
 
 ## Wave status
-### Wave 1 — RUNNING (spawned ~15:2x)
-| Agent | Slice | State |
-|---|---|---|
-| Body3dStability | body3d bone-stability analysis → `data/apple-vision-tracks/body3d-stability.json` + note | running |
-| ReplayV3Cutover | default replay lane → provider tracks (gpu>vision>v2), hands, dejank filter; Xanadu question re v2 retirement | running |
-| CalibrationWeights | per-joint arbiter calibration from comparison-summary → `data/motion-calibration/weights.json` + `public/motion-calibration.ts` | running |
-| QATriageSweep | P2/P3 sweep + browser-error→errors.log wiring → `notes/qa-triage-2026-07-15.md` | running |
-| FilterParamTuning | One-Euro/damping grid on ~20 stratified clips → `notes/motion-filter-tuning.md`; owns track-motion-filter.ts | running |
-File ownership tonight: pose-transfer.ts+provider-tracks.ts=ReplayV3Cutover; track-motion-filter.ts=FilterParamTuning; capture-arbiter calibration seam=CalibrationWeights; controls/panels/CSS/docs=QATriageSweep.
-
+### Wave 1 — DONE (checkpoint nested `4901a8b`, outer `666361c4c`; suite floor now 473)
+| Slice | Outcome |
+|---|---|
+| Body3dStability | 281 clips analyzed; bone CVs ~1e-7 (Apple emits a fixed parametric skeleton — trivially stable), 0 depth flips, BUT 13.1% of frame transitions have >12m/s joint velocity (ankles/knees teleport). **Verdict: depth prior for 2D, NOT direct rotation driver.** `data/apple-vision-tracks/body3d-stability.json`, note body3d-stability.md |
+| ReplayV3Cutover | Default replay = provider tracks (gpu>vision>v2 fallback) through interp+One-Euro→PoseGuard→arbiter, hands via Hand-21→HandGuard; source telemetry + smoothing toggle propagate. Xanadu question f2114ebc (retire v2?). 473/0. GAP: browser E2E evidence deferred to wave-2 QA |
+| CalibrationWeights | weights.json (v1-p95-availability): apple arms .805/torso .854/head .908/legs .679; mediapipe .843/.899/.958/.660; hands neutral 1.0 (no hand stats — seam documented). Arbiter multiplies effective confidence + publishes in reason strings |
+| QATriageSweep | aria-labels, stale fallback text, browser window.onerror→errors.log wiring (proven), doc path cleanup. Note qa-triage-2026-07-15.md |
+| FilterParamTuning | Strict-feasible winner 0.45Hz/beta10/hipDamping1.5: median jerk −57.5% (prior −52.1%, +5.44pp), peak loss 9.1%, lag 0ms; constants updated w/ provenance. Note motion-filter-tuning.md |
+| ValidatePipeline | `bun scripts/validate.ts` 4 gates + ratchet floor (473) + `--checkpoint` commit mode; summaries in local/validation/ |
 ### Wave 2 — after wave 1 gates
 - 3D retargeter prototype (Sol) — scope from Body3dStability verdict (drive rotations / depth prior / not-ready).
 - Overnight soak: live-stack watcher (synthetic replay cycling via debug routes, lab-state sampling, errors.log diffing) in tmux, several hours; morning soak report.
