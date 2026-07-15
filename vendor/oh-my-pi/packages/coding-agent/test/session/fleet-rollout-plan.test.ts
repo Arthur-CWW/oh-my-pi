@@ -363,6 +363,8 @@ describe("fleet rollout authority and execution", () => {
 					commandId: "id-1",
 					timedOut: false,
 					cause: "restart failed",
+					buildVersion: "1.0.0",
+					buildDigest: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
 				},
 			],
 		});

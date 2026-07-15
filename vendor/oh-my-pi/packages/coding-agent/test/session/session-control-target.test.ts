@@ -1,8 +1,9 @@
-import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it } from "bun:test";
+import { createHash } from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { InvalidRunnerCommandError } from "../../src/runner/errors";
 import { SessionControlBus, type SessionControlCommand } from "../../src/session/session-control";
 import { type SessionControlTargetActions, startSessionControlTarget } from "../../src/session/session-control-target";
 import type { SessionOwnershipHandle } from "../../src/session/session-ownership";
@@ -173,7 +174,7 @@ describe("session control restart", () => {
 
 		expect(bus.getReceipt(command.commandId)).toMatchObject({
 			state: "failed",
-			error: "transition preparation failed",
+			error: "Error: transition preparation failed",
 		});
 		bus.close();
 	});
@@ -238,7 +239,12 @@ describe("session control prepare rollout", () => {
 			bus,
 			ownership,
 			pollIntervalMs: 1,
-			actions: { ...targetActions, pause: () => void (pauseCalls += 1) },
+			actions: {
+				...targetActions,
+				pause: () => {
+					pauseCalls += 1;
+				},
+			},
 		});
 		const command = requestPrepare(bus);
 		const receipt = await bus.waitForTerminal(command.commandId, { timeoutMs: 1_000, pollIntervalMs: 1 });
@@ -254,6 +260,55 @@ describe("session control prepare rollout", () => {
 		expect(bus.getPaused(ownership.sessionId)).toBe(true);
 		expect(bus.getCordon(ownership.sessionId)?.rolloutId).toBe("rollout-a");
 		expect(pauseCalls).toBe(1);
+		await target.stop();
+		bus.close();
+	});
+
+	it("preserves tagged handler errors in the receipt and target journal", async () => {
+		const { bus, ownership } = await fixture();
+		const journalEntries: Array<{ type: string; data: unknown }> = [];
+		let flushCalls = 0;
+		const targetActions = actions(() => {});
+		const target = await startSessionControlTarget({
+			bus,
+			ownership,
+			pollIntervalMs: 1,
+			diagnosticJournal: {
+				appendCustomEntry: (type, data) => {
+					journalEntries.push({ type, data });
+					return crypto.randomUUID();
+				},
+				flush: async () => {
+					flushCalls += 1;
+				},
+			},
+			actions: {
+				...targetActions,
+				prepareRollout: () => {
+					throw new InvalidRunnerCommandError({ issue: "checkpoint storage unavailable" });
+				},
+			},
+		});
+		const command = requestPrepare(bus);
+		const receipt = await bus.waitForTerminal(command.commandId, { timeoutMs: 1_000, pollIntervalMs: 1 });
+
+		expect(receipt).toMatchObject({
+			state: "failed",
+			error: "InvalidRunnerCommandError: checkpoint storage unavailable",
+		});
+		expect(journalEntries).toContainEqual({
+			type: "ui_error",
+			data: expect.objectContaining({
+				version: 2,
+				id: `session-control:${command.commandId}`,
+				message: "InvalidRunnerCommandError: checkpoint storage unavailable",
+				errorClass: "InvalidRunnerCommandError",
+				session: ownership.sessionId,
+				operation: "prepare-rollout",
+				fleetRolloutId: "rollout-a",
+			}),
+		});
+		expect(flushCalls).toBe(1);
 		await target.stop();
 		bus.close();
 	});

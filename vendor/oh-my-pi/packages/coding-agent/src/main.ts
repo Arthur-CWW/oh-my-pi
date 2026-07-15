@@ -76,7 +76,6 @@ import {
 } from "./sdk";
 import type { AgentSession } from "./session/agent-session";
 import type { AuthStorage } from "./session/auth-storage";
-import { startSessionControlTarget } from "./session/session-control-target";
 import {
 	resolveResumableSessionWithDiagnostics,
 	type SessionInfo,
@@ -1570,6 +1569,7 @@ export async function runRootCommand(
 				collabHost: parsedArgs.collabHost,
 				collabRelay: parsedArgs.collabRelay,
 				ownership,
+				diagnosticJournal: session.sessionManager,
 				cwd,
 			});
 		} else {

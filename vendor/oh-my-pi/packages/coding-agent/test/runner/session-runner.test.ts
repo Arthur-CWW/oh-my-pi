@@ -70,7 +70,12 @@ import {
 } from "../../src/session/fleet-capability";
 import { createFleetRolloutPlan } from "../../src/session/fleet-rollout-plan";
 import { convertToLlm } from "../../src/session/messages";
-import { CURRENT_SESSION_CONTROL_PROTOCOL, decodeSessionControlCommand } from "../../src/session/session-control";
+import {
+	CURRENT_SESSION_CONTROL_PROTOCOL,
+	decodeSessionControlCommand,
+	SessionControlBus,
+} from "../../src/session/session-control";
+import { startSessionControlTarget } from "../../src/session/session-control-target";
 import {
 	SessionManager,
 	SessionRevisionConflictError,
@@ -384,6 +389,84 @@ describe("live SessionRunner", () => {
 		);
 		expect(await snapshotDefaultPeerStore()).toEqual(defaultStoreBefore);
 	});
+	it("applies prepare-rollout through the live TUI session-control bridge", async () => {
+		const fixture = await createLiveFixture();
+		const bus = new SessionControlBus(path.join(fixture.root, "session-control.sqlite"));
+		try {
+			await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const runner = yield* makeSessionRunnerLive(fixture, { mailboxCapacity: 1, eventCapacity: 1 });
+						const target = yield* Effect.promise(() =>
+							startSessionControlTarget({
+								ownership: fixture.ownership,
+								bus,
+								diagnosticJournal: fixture.sessionManager,
+								pollIntervalMs: 1,
+								actions: {
+									status: command => Effect.runPromise(Effect.scoped(runner.applySessionControl(command))),
+									pause: command =>
+										Effect.runPromise(Effect.scoped(runner.applySessionControl(command))).then(
+											() => undefined,
+										),
+									resume: command =>
+										Effect.runPromise(Effect.scoped(runner.applySessionControl(command))).then(
+											() => undefined,
+										),
+									prepareRollout: (_intent, pauseProvenance, command) =>
+										Effect.runPromise(Effect.scoped(runner.prepareRollout(command, pauseProvenance))),
+									setModel: (_selector, command) =>
+										Effect.runPromise(Effect.scoped(runner.applySessionControl(command))),
+									compact: (_instructions, command) =>
+										Effect.runPromise(Effect.scoped(runner.applySessionControl(command))),
+									restart: () => {},
+									stop: () => {},
+								},
+							}),
+						);
+						const command = decodeSessionControlCommand({
+							schemaVersion: 2,
+							commandId: crypto.randomUUID(),
+							source: {
+								kind: "local-cli",
+								instanceId: crypto.randomUUID(),
+								pid: process.pid,
+								...(process.getuid ? { uid: process.getuid() } : {}),
+							},
+							sessionId: fixture.sessionManager.getSessionId(),
+							targetOwnerEpoch: fixture.ownership.ownerEpoch,
+							requestedAt: new Date().toISOString(),
+							intent: {
+								kind: "prepare-rollout",
+								rolloutId: "rollout-live-runner",
+								expectedDigest: fixture.runnerIdentity.buildRevision.digest,
+								drainTimeoutMs: 25,
+							},
+						});
+						bus.request(command);
+						const receipt = yield* Effect.promise(() =>
+							bus.waitForTerminal(command.commandId, { timeoutMs: 2_000, pollIntervalMs: 1 }),
+						);
+						yield* Effect.promise(() => target.stop());
+						expect(receipt).toMatchObject({
+							state: "applied",
+							result: {
+								kind: "prepare-rollout",
+								checkpoint: {
+									type: "rollout-checkpoint",
+									commandId: command.commandId,
+									rolloutId: "rollout-live-runner",
+									outcome: "Checkpointed",
+								},
+							},
+						});
+					}),
+				),
+			);
+		} finally {
+			bus.close();
+		}
+	});
 
 	it("uses queue and transcript authority across replay, fencing, resync, detach, and stop", async () => {
 		const fixture = await createLiveFixture();
@@ -655,11 +738,18 @@ describe("live SessionRunner", () => {
 					expect(mutationEvents).toEqual(["edit-command:inputEdited", "cancel-command:inputCancelled"]);
 					const snapshot = yield* runner.snapshot();
 					expect(snapshot.revision).toBe(4);
-					expect(snapshot.items.find(item => item.inputId === target.inputId)).toMatchObject({
-						revision: 2,
-						state: "cancelled",
-						payload: editCommand.payload,
-					});
+					const cancelledItem = snapshot.items.find(item => item.inputId === target.inputId);
+					expect(cancelledItem).toMatchObject({ revision: 2, state: "cancelled" });
+					// Snapshot returns the durable (externalized) payload: text verbatim,
+					// image attachments stored as content-addressed blob refs.
+					const cancelledPayload = cancelledItem?.payload;
+					if (!cancelledPayload || cancelledPayload.kind === "custom") {
+						throw new Error("expected a durable user payload on the cancelled item");
+					}
+					expect(cancelledPayload.text).toBe("after edit");
+					expect(cancelledPayload.attachments).toHaveLength(1);
+					expect(cancelledPayload.attachments?.[0]).toMatchObject({ type: "image", mimeType: "image/jpeg" });
+					expect(cancelledPayload.attachments?.[0]?.data).toMatch(/^blob:sha256:[0-9a-f]{64}$/);
 					fixture.releaseProviderResponses();
 					yield* Effect.promise(() => fixture.session.waitForIdle());
 					yield* runner.stop();

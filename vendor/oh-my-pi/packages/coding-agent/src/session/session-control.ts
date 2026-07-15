@@ -320,6 +320,29 @@ export function getSessionSpawnCordon(sessionId: string): SessionSpawnCordon | u
 export const SESSION_CONTROL_DB_PATH =
 	process.env.OMP_SESSION_CONTROL_DB ?? path.join(os.homedir(), ".omp", "agent", "session-control.sqlite");
 const nowIso = (): string => new Date().toISOString();
+const MAX_CONTROL_FAILURE_LENGTH = 1024;
+
+/** Render one bounded terminal-receipt failure without discarding Effect tagged-error details. */
+export function formatSessionControlFailure(error: unknown): string {
+	if (typeof error === "string") {
+		const message = error.trim();
+		return (message || "ThrownValue: empty string").slice(0, MAX_CONTROL_FAILURE_LENGTH);
+	}
+	const record = typeof error === "object" && error !== null ? (error as Record<PropertyKey, unknown>) : undefined;
+	const taggedName = typeof record?._tag === "string" ? record._tag.trim() : "";
+	const errorName = error instanceof Error ? error.name.trim() : "";
+	const name = taggedName || errorName || "ThrownValue";
+	const directMessage = error instanceof Error ? error.message.trim() : "";
+	const issue = typeof record?.issue === "string" ? record.issue.trim() : "";
+	const rendered = String(error).trim();
+	const fallback =
+		rendered && rendered !== name && rendered !== `[object ${name}]` && rendered !== "[object Object]"
+			? rendered
+			: "";
+	const message = directMessage || issue || fallback || "No error message was provided";
+	return `${name}: ${message}`.slice(0, MAX_CONTROL_FAILURE_LENGTH);
+}
+
 const currentUid = (): number | undefined => process.getuid?.();
 
 function assertLocalSource(command: SessionControlCommand): void {
@@ -536,14 +559,14 @@ export class SessionControlBus {
 
 	fail(commandId: string, ownerEpoch: string, error: unknown): SessionControlReceipt {
 		const completedAt = nowIso();
-		const message = error instanceof Error ? error.message : String(error);
+		const message = formatSessionControlFailure(error);
 		const updated = this.#db
 			.query(
 				"UPDATE control_receipts SET state='failed', completed_at=$at, result_json=NULL, error=$error WHERE command_id=$commandId AND target_owner_epoch=$ownerEpoch AND state='acknowledged'",
 			)
 			.run({
 				$at: completedAt,
-				$error: message || "Unknown control failure",
+				$error: message,
 				$commandId: commandId,
 				$ownerEpoch: ownerEpoch,
 			});

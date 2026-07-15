@@ -5,7 +5,11 @@ import { type RestartSpawnSpec, replaceRestartProcess } from "../cli/restart-ses
 import { CollabHost, collabDisplayName } from "../collab/host";
 import { DEFAULT_RELAY_URL } from "../collab/protocol";
 import type { SessionRunner } from "../runner/session-runner";
-import { type SessionControlTarget, startSessionControlTarget } from "../session/session-control-target";
+import {
+	type SessionControlDiagnosticJournal,
+	type SessionControlTarget,
+	startSessionControlTarget,
+} from "../session/session-control-target";
 import type { SessionOwnershipHandle } from "../session/session-ownership";
 import {
 	createUniqueRevisionLoader,
@@ -64,6 +68,8 @@ export interface RunDisposableInteractiveModeOptions {
 	readonly collabRelay?: string;
 	/** Live ownership enables the external session control target. */
 	readonly ownership?: SessionOwnershipHandle;
+	/** Durable journal for target-side control diagnostics. */
+	readonly diagnosticJournal?: SessionControlDiagnosticJournal;
 	readonly cwd?: string;
 }
 
@@ -119,6 +125,7 @@ export async function runDisposableInteractiveMode(
 			const ownership = options.ownership;
 			controlTarget = await startSessionControlTarget({
 				ownership,
+				diagnosticJournal: options.diagnosticJournal,
 				actions: {
 					status: command => Effect.runPromise(Effect.scoped(runner.applySessionControl(command))),
 					pause: command =>

@@ -1,8 +1,10 @@
 import * as path from "node:path";
 import { verifyExecutableDigest } from "../cli/restart-session";
+import { appendErrorInboxEvent, type ErrorInboxWriter } from "./error-inbox-ledger";
 import { decodeRolloutCheckpoint, type RolloutCheckpoint, type RolloutPauseProvenance } from "./rollout-checkpoint";
 import {
 	type FleetPinControlCommand,
+	formatSessionControlFailure,
 	isPolicyApplyControlCommand,
 	type PolicyApplyCommandV1,
 	type PolicyApplyControlCommand,
@@ -42,10 +44,15 @@ export interface SessionControlTargetActions {
 	readonly stop: (command: SessionControlCommand) => void | Promise<void>;
 }
 
+export interface SessionControlDiagnosticJournal extends ErrorInboxWriter {
+	readonly flush?: () => Promise<void>;
+}
+
 export interface SessionControlTargetOptions {
 	readonly ownership: SessionOwnershipHandle;
 	readonly actions: SessionControlTargetActions;
 	readonly bus?: SessionControlBus;
+	readonly diagnosticJournal?: SessionControlDiagnosticJournal;
 	readonly pollIntervalMs?: number;
 }
 
@@ -62,6 +69,42 @@ async function assertCurrentOwner(ownership: SessionOwnershipHandle): Promise<vo
 
 function actionResult(command: SessionControlCommand, detail: SessionControlResult = {}): SessionControlResult {
 	return { kind: command.intent.kind, ...((detail ?? {}) as object) };
+}
+
+function rolloutPauseCommand(command: PrepareRolloutCommand): SessionControlCommand {
+	return { ...command, schemaVersion: 1, intent: { kind: "pause" } };
+}
+
+async function recordControlFailure(
+	journal: SessionControlDiagnosticJournal | undefined,
+	ownership: SessionOwnershipHandle,
+	command: SessionControlCommand,
+	failure: string,
+): Promise<void> {
+	if (!journal) return;
+	const timestamp = Date.now();
+	const separator = failure.indexOf(":");
+	const persisted = appendErrorInboxEvent(journal, {
+		id: `session-control:${command.commandId}`,
+		firstTimestamp: timestamp,
+		lastTimestamp: timestamp,
+		message: failure,
+		count: 1,
+		source: "session-control-target",
+		category: "session-control",
+		errorClass: separator > 0 ? failure.slice(0, separator) : "ControlFailure",
+		session: ownership.sessionId,
+		operation: command.intent.kind,
+		...(command.intent.kind === "prepare-rollout" ? { fleetRolloutId: command.intent.rolloutId } : {}),
+		unread: true,
+		resolved: false,
+	});
+	if (!persisted) return;
+	try {
+		await journal.flush?.();
+	} catch {
+		// Receipt completion must not recurse through a diagnostic-journal failure.
+	}
 }
 
 /**
@@ -152,7 +195,7 @@ export async function startSessionControlTarget(options: SessionControlTargetOpt
 						pauseProvenance,
 					);
 					if (pauseProvenance === "rollout") {
-						await actions.pause(command);
+						await actions.pause(rolloutPauseCommand(command as PrepareRolloutCommand));
 						await assertCurrentOwner(ownership);
 						bus.setPaused(ownership.sessionId, ownership.ownerEpoch, true);
 					}
@@ -231,12 +274,14 @@ export async function startSessionControlTarget(options: SessionControlTargetOpt
 				}
 			}
 		} catch (error) {
+			const failure = formatSessionControlFailure(error);
+			await recordControlFailure(options.diagnosticJournal, ownership, command, failure);
 			if (terminalAction) {
 				const receipt = bus.getReceipt(command.commandId);
-				if (receipt?.state !== "applied") bus.fail(command.commandId, ownership.ownerEpoch, error);
+				if (receipt?.state !== "applied") bus.fail(command.commandId, ownership.ownerEpoch, failure);
 				throw error;
 			}
-			bus.fail(command.commandId, ownership.ownerEpoch, error);
+			bus.fail(command.commandId, ownership.ownerEpoch, failure);
 		}
 	};
 
