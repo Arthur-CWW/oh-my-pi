@@ -73,6 +73,7 @@ describe("reading store", () => {
       expect(afterFirstUndo).toHaveLength(1)
       expect(afterFirstUndo[0].lookupCount).toBe(1)
       expect(afterFirstUndo[0].provenance?.sentence).toBe("中国人很多。")
+      expect(afterFirstUndo[0].provenance?.markId).toBe(second.markId)
 
       expect(deleteReadingMark(db, second.markId)).toBe(true)
       expect(listQueueItems(db, "all", 10)).toEqual([])

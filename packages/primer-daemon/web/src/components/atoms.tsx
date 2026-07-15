@@ -8,6 +8,7 @@ export const SUBSTRATE_LABEL: Record<EvidenceSource, string> = {
   browser: "browser",
   twitter: "tweets",
   reader: "reading",
+  cards: "cards",
 }
 
 /** Restrained, functional per-substrate dot — a scanning aid, not decoration. */
@@ -15,6 +16,7 @@ export const SUBSTRATE_DOT: Record<EvidenceSource, string> = {
   browser: "bg-sky-400/80",
   twitter: "bg-primer",
   reader: "bg-emerald-400/80",
+  cards: "bg-violet-400/80",
 }
 
 /** Focus-ring treatment shared by every vim-navigable item. */

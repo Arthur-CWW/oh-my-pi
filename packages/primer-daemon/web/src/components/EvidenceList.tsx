@@ -7,7 +7,7 @@ import { readerRefUrl } from "@/lib/reader-link"
 import { RefChip, SUBSTRATE_DOT, SUBSTRATE_LABEL, SourceBadge, TimeAgo, focusRing } from "./atoms"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "./ui/collapsible"
 
-const ORDER: EvidenceSource[] = ["reader", "twitter", "browser"]
+const ORDER: EvidenceSource[] = ["reader", "twitter", "browser", "cards"]
 
 interface IndexedHit {
   hit: EvidenceHit
@@ -15,7 +15,7 @@ interface IndexedHit {
 }
 
 function group(hits: EvidenceHit[]): { source: EvidenceSource; items: IndexedHit[] }[] {
-  const buckets: Record<EvidenceSource, IndexedHit[]> = { reader: [], twitter: [], browser: [] }
+  const buckets: Record<EvidenceSource, IndexedHit[]> = { reader: [], twitter: [], browser: [], cards: [] }
   hits.forEach((hit, index) => {
     buckets[hit.source].push({ hit, index })
   })
@@ -53,8 +53,8 @@ function EvidenceRow({
   const panel = nav ? "ask" : undefined
   const vimIndex = nav ? index : undefined
   const hover = nav ? onFocus : undefined
-  // Reader refs deep-link into the Talmudic reader; every other source
-  // already carries its own url on the hit.
+  // Reader refs deep-link into the Talmudic reader; sources without a URL
+  // (including cards hits) render as non-link rows.
   const href = hit.url ?? readerRefUrl(hit.ref)
 
   return href ? (

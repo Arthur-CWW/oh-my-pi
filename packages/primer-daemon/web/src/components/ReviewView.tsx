@@ -1,7 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import type * as React from "react"
 
-import { type QueueItem, type QueueStatus, getQueue, setQueueStatus } from "@/api"
+import {
+  type QueueItem,
+  type QueueStatus,
+  type ReviewGrade,
+  type ReviewSessionItem,
+  getQueue,
+  getReviewSession,
+  gradeReview,
+  setQueueStatus,
+} from "@/api"
 import { navigate, readerUrl } from "@/hooks/useHashRoute"
 import { cn } from "@/lib/utils"
 import { focusRing } from "./atoms"
@@ -29,6 +38,22 @@ const FILTERS: Array<{ key: QueueStatus | "all"; label: string }> = [
   { key: "discarded", label: "Discarded" },
   { key: "all", label: "All" },
 ]
+const GRADE_OPTIONS: Array<{ grade: ReviewGrade; key: string; label: string; hint: string }> = [
+  { grade: "again", key: "1", label: "Again", hint: "forgetting" },
+  { grade: "hard", key: "2", label: "Hard", hint: "difficult" },
+  { grade: "good", key: "3", label: "Good", hint: "remembered" },
+  { grade: "easy", key: "4", label: "Easy", hint: "effortless" },
+]
+
+type ReviewMode = "triage" | "session"
+
+const EMPTY_GRADE_COUNTS: Record<ReviewGrade, number> = {
+  again: 0,
+  hard: 0,
+  good: 0,
+  easy: 0,
+}
+
 
 // ---------------------------------------------------------------------------
 // Queue row
@@ -120,6 +145,7 @@ function QueueRow({
 // ---------------------------------------------------------------------------
 
 export function ReviewView({ onShowHelp }: { onShowHelp: () => void }): React.JSX.Element {
+  const [mode, setMode] = useState<ReviewMode>("triage")
   const [items, setItems] = useState<QueueItem[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [filter, setFilter] = useState<QueueStatus | "all">("new")
@@ -127,10 +153,26 @@ export function ReviewView({ onShowHelp }: { onShowHelp: () => void }): React.JS
   const itemsRef = useRef(items)
   itemsRef.current = items
 
+  const [sessionItems, setSessionItems] = useState<ReviewSessionItem[] | null>(null)
+  const [sessionIndex, setSessionIndex] = useState(0)
+  const [sessionRevealed, setSessionRevealed] = useState(false)
+  const [sessionCounts, setSessionCounts] = useState<Record<ReviewGrade, number>>(EMPTY_GRADE_COUNTS)
+  const [sessionBusy, setSessionBusy] = useState(false)
+  const [sessionError, setSessionError] = useState<string | null>(null)
+  const sessionItemsRef = useRef(sessionItems)
+  sessionItemsRef.current = sessionItems
+  const sessionIndexRef = useRef(sessionIndex)
+  sessionIndexRef.current = sessionIndex
+  const sessionRevealedRef = useRef(sessionRevealed)
+  sessionRevealedRef.current = sessionRevealed
+  const sessionBusyRef = useRef(sessionBusy)
+  sessionBusyRef.current = sessionBusy
+
   // Fetch queue
   useEffect(() => {
     let alive = true
     setItems(null)
+    setError(null)
     setFocusIdx(-1)
     getQueue(filter === "all" ? "all" : filter, 200).then(
       (d) => { if (alive) setItems(d) },
@@ -138,6 +180,22 @@ export function ReviewView({ onShowHelp }: { onShowHelp: () => void }): React.JS
     )
     return () => { alive = false }
   }, [filter])
+
+  // Fetch a fresh review session when entering session mode.
+  useEffect(() => {
+    if (mode !== "session") return
+    let alive = true
+    setSessionItems(null)
+    setSessionError(null)
+    setSessionIndex(0)
+    setSessionRevealed(false)
+    setSessionCounts({ ...EMPTY_GRADE_COUNTS })
+    getReviewSession().then(
+      (d) => { if (alive) setSessionItems(d) },
+      (e: unknown) => { if (alive) setSessionError(e instanceof Error ? e.message : "Failed to load review session") },
+    )
+    return () => { alive = false }
+  }, [mode])
 
   // Optimistic status update (matching CardsPanel pattern)
   const handleStatus = useCallback(
@@ -167,14 +225,37 @@ export function ReviewView({ onShowHelp }: { onShowHelp: () => void }): React.JS
     (idx: number) => {
       const item = items?.[idx]
       if (!item?.provenance) return
-      const p = item.provenance
-      navigate(`/read/${p.docId}`)
+      navigate(readerUrl(item.provenance.docId, item.provenance.markId ?? undefined))
     },
     [items],
   )
 
-  // Keyboard
+  const handleSessionProvenance = useCallback(() => {
+    const item = sessionItemsRef.current?.[sessionIndexRef.current]
+    if (!item?.provenance) return
+    navigate(readerUrl(item.provenance.docId, item.provenance.markId ?? undefined))
+  }, [])
+
+  const handleGrade = useCallback((grade: ReviewGrade) => {
+    const item = sessionItemsRef.current?.[sessionIndexRef.current]
+    if (!item || !sessionRevealedRef.current || sessionBusyRef.current) return
+    setSessionBusy(true)
+    setSessionError(null)
+    gradeReview(item.queueItemId, grade).then(
+      () => {
+        setSessionCounts((prev) => ({ ...prev, [grade]: prev[grade] + 1 }))
+        setSessionIndex((prev) => prev + 1)
+        setSessionRevealed(false)
+      },
+      (e: unknown) => {
+        setSessionError(e instanceof Error ? e.message : "Failed to save grade")
+      },
+    ).finally(() => setSessionBusy(false))
+  }, [])
+
+  // Triage keyboard controls.
   useEffect(() => {
+    if (mode !== "triage") return
     function onKey(e: KeyboardEvent) {
       const el = document.activeElement as HTMLElement | null
       const typing = el?.tagName === "INPUT" || el?.tagName === "TEXTAREA" || el?.isContentEditable
@@ -229,9 +310,48 @@ export function ReviewView({ onShowHelp }: { onShowHelp: () => void }): React.JS
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [focusIdx, handleStatus, handleProvenance, onShowHelp])
+  }, [mode, focusIdx, handleStatus, handleProvenance, onShowHelp])
 
-  // Scroll focused into view
+  // Session keyboard controls: space reveals, 1–4 grade the revealed card.
+  useEffect(() => {
+    if (mode !== "session") return
+    function onKey(e: KeyboardEvent) {
+      const el = document.activeElement as HTMLElement | null
+      const typing = el?.tagName === "INPUT" || el?.tagName === "TEXTAREA" || el?.isContentEditable
+
+      if (e.key === "Escape") {
+        if (typing) {
+          el?.blur()
+        } else {
+          setSessionRevealed(false)
+        }
+        e.preventDefault()
+        return
+      }
+      if (typing || e.metaKey || e.ctrlKey || e.altKey) return
+      if (e.key === "?") {
+        onShowHelp()
+        e.preventDefault()
+        return
+      }
+      if (e.key === " " || e.key === "Spacebar") {
+        if (sessionItemsRef.current?.[sessionIndexRef.current] && !sessionBusyRef.current) {
+          setSessionRevealed((value) => !value)
+        }
+        e.preventDefault()
+        return
+      }
+      const option = GRADE_OPTIONS.find((candidate) => candidate.key === e.key)
+      if (option) {
+        handleGrade(option.grade)
+        e.preventDefault()
+      }
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [mode, handleGrade, onShowHelp])
+
+  // Scroll focused queue row into view.
   useEffect(() => {
     if (focusIdx < 0 || !items) return
     const item = items[focusIdx]
@@ -242,61 +362,173 @@ export function ReviewView({ onShowHelp }: { onShowHelp: () => void }): React.JS
     el?.scrollIntoView({ block: "nearest", behavior: "smooth" })
   }, [focusIdx, items])
 
+  const sessionItem = sessionItems?.[sessionIndex] ?? null
+  const sessionComplete = sessionItems !== null && sessionIndex >= sessionItems.length
+
   return (
     <div className="mx-auto w-full max-w-2xl px-4 py-6">
-      <h2 className="text-base font-semibold tracking-tight">Review Queue</h2>
-
-      {/* filter tabs */}
-      <div className="mt-3 flex flex-wrap gap-1">
-        {FILTERS.map((f) => (
-          <button
-            key={f.key}
-            type="button"
-            onClick={() => setFilter(f.key)}
-            className={cn(
-              "rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
-              filter === f.key
-                ? "bg-accent text-foreground"
-                : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
-            )}
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-base font-semibold tracking-tight">Review Queue</h2>
+        <div className="flex items-center gap-1">
+          <Button
+            variant="ghost"
+            size="xs"
+            className={cn(mode === "triage" && "bg-accent text-foreground")}
+            onClick={() => setMode("triage")}
           >
-            {f.label}
-          </button>
-        ))}
+            triage
+          </Button>
+          <Button
+            variant="ghost"
+            size="xs"
+            className={cn(mode === "session" && "bg-accent text-foreground")}
+            onClick={() => setMode("session")}
+          >
+            session
+          </Button>
+        </div>
       </div>
 
-      {error && <p className="mt-3 text-xs text-destructive/80">{error}</p>}
+      {mode === "triage" ? (
+        <>
+          {/* filter tabs */}
+          <div className="mt-3 flex flex-wrap gap-1">
+            {FILTERS.map((f) => (
+              <button
+                key={f.key}
+                type="button"
+                onClick={() => setFilter(f.key)}
+                className={cn(
+                  "rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
+                  filter === f.key
+                    ? "bg-accent text-foreground"
+                    : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+                )}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
 
-      <div className="mt-4 space-y-1.5">
-        {items === null && !error && (
-          <p className="py-8 text-center text-sm text-muted-foreground/60">loading…</p>
-        )}
-        {items !== null && items.length === 0 && (
-          <p className="py-8 text-center text-sm text-muted-foreground/60">
-            no items — look up words while reading to fill the queue
+          {error && <p className="mt-3 text-xs text-destructive/80">{error}</p>}
+
+          <div className="mt-4 space-y-1.5">
+            {items === null && !error && (
+              <p className="py-8 text-center text-sm text-muted-foreground/60">loading…</p>
+            )}
+            {items !== null && items.length === 0 && (
+              <p className="py-8 text-center text-sm text-muted-foreground/60">
+                no items — look up words while reading to fill the queue
+              </p>
+            )}
+            {items?.map((item, i) => (
+              <QueueRow
+                key={item.id}
+                item={item}
+                focused={focusIdx === i}
+                onFocus={() => setFocusIdx(i)}
+                onStatus={(status) => handleStatus(i, status)}
+                onProvenance={() => handleProvenance(i)}
+              />
+            ))}
+          </div>
+
+          <p className="mt-6 text-[11px] text-muted-foreground/35">
+            <kbd className="rounded bg-muted px-1 font-mono text-[10px]">j</kbd>/
+            <kbd className="rounded bg-muted px-1 font-mono text-[10px]">k</kbd> navigate ·{" "}
+            <kbd className="rounded bg-muted px-1 font-mono text-[10px]">s</kbd> keep ·{" "}
+            <kbd className="rounded bg-muted px-1 font-mono text-[10px]">m</kbd> known ·{" "}
+            <kbd className="rounded bg-muted px-1 font-mono text-[10px]">x</kbd> discard ·{" "}
+            <kbd className="rounded bg-muted px-1 font-mono text-[10px]">o</kbd> source ·{" "}
+            <kbd className="rounded bg-muted px-1 font-mono text-[10px]">?</kbd> help
           </p>
-        )}
-        {items?.map((item, i) => (
-          <QueueRow
-            key={item.id}
-            item={item}
-            focused={focusIdx === i}
-            onFocus={() => setFocusIdx(i)}
-            onStatus={(status) => handleStatus(i, status)}
-            onProvenance={() => handleProvenance(i)}
-          />
-        ))}
-      </div>
-
-      <p className="mt-6 text-[11px] text-muted-foreground/35">
-        <kbd className="rounded bg-muted px-1 font-mono text-[10px]">j</kbd>/
-        <kbd className="rounded bg-muted px-1 font-mono text-[10px]">k</kbd> navigate ·{" "}
-        <kbd className="rounded bg-muted px-1 font-mono text-[10px]">s</kbd> keep ·{" "}
-        <kbd className="rounded bg-muted px-1 font-mono text-[10px]">m</kbd> known ·{" "}
-        <kbd className="rounded bg-muted px-1 font-mono text-[10px]">x</kbd> discard ·{" "}
-        <kbd className="rounded bg-muted px-1 font-mono text-[10px]">o</kbd> source ·{" "}
-        <kbd className="rounded bg-muted px-1 font-mono text-[10px]">?</kbd> help
-      </p>
+        </>
+      ) : (
+        <div className="mt-4">
+          {sessionError && <p className="mb-3 text-xs text-destructive/80">{sessionError}</p>}
+          {sessionItems === null && !sessionError && (
+            <p className="py-8 text-center text-sm text-muted-foreground/60">loading…</p>
+          )}
+          {sessionComplete && (
+            <div className="rounded-xl border border-border/60 bg-muted/10 px-5 py-8 text-center">
+              <h3 className="text-lg font-semibold">Session complete</h3>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Reviewed {sessionItems.length} {sessionItems.length === 1 ? "item" : "items"}.
+              </p>
+              <div className="mt-5 grid grid-cols-4 gap-2">
+                {GRADE_OPTIONS.map((option) => (
+                  <div key={option.grade} className="rounded-lg bg-muted/40 px-2 py-2">
+                    <div className="text-lg font-semibold tabular-nums">{sessionCounts[option.grade]}</div>
+                    <div className="text-[10px] text-muted-foreground">{option.label}</div>
+                  </div>
+                ))}
+              </div>
+              <Button variant="secondary" size="sm" className="mt-6" onClick={() => setMode("triage")}>
+                back to triage
+              </Button>
+            </div>
+          )}
+          {sessionItem && !sessionComplete && (
+            <div
+              data-vim-panel="review-session"
+              data-vim-index={sessionItem.queueItemId}
+              className={cn(focusRing(true), "reading-surface")}
+            >
+              <div className="flex items-center justify-between gap-2 px-4 pt-4">
+                <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                  <span className="rounded-full bg-accent px-2 py-0.5 font-medium text-foreground">{sessionItem.phase}</span>
+                  <span className="tabular-nums">priority {sessionItem.priority}</span>
+                </div>
+                <span className="text-[11px] tabular-nums text-muted-foreground/60">
+                  {sessionIndex + 1} / {sessionItems?.length ?? 0}
+                </span>
+              </div>
+              <div className="px-4 pb-5 pt-8 text-center">
+                <div className="text-6xl font-medium leading-none tracking-tight" lang="zh">
+                  {sessionItem.word}
+                </div>
+                {!sessionRevealed ? (
+                  <p className="mt-6 text-sm text-muted-foreground">Press space to reveal</p>
+                ) : (
+                  <div className="mt-6 space-y-2">
+                    {sessionItem.pinyin && <p className="text-base text-muted-foreground">{sessionItem.pinyin}</p>}
+                    {sessionItem.gloss && <p className="text-sm text-muted-foreground">{sessionItem.gloss}</p>}
+                  </div>
+                )}
+              </div>
+              {sessionItem.provenance && (
+                <div className="border-t border-border/50 px-4 py-3">
+                  <Button variant="ghost" size="xs" onClick={handleSessionProvenance}>
+                    {sessionItem.provenance.docTitle}
+                  </Button>
+                </div>
+              )}
+              {sessionRevealed && (
+                <div className="grid grid-cols-4 gap-1 border-t border-border/50 p-3">
+                  {GRADE_OPTIONS.map((option) => (
+                    <Button
+                      key={option.grade}
+                      variant="secondary"
+                      size="sm"
+                      disabled={sessionBusy}
+                      onClick={() => handleGrade(option.grade)}
+                    >
+                      <span className="font-mono text-xs">{option.key}</span>
+                      <span className="ml-1">{option.label}</span>
+                    </Button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          <p className="mt-6 text-center text-[11px] text-muted-foreground/35">
+            <kbd className="rounded bg-muted px-1 font-mono text-[10px]">space</kbd> reveal ·{" "}
+            <kbd className="rounded bg-muted px-1 font-mono text-[10px]">1</kbd>–
+            <kbd className="rounded bg-muted px-1 font-mono text-[10px]">4</kbd> grade ·{" "}
+            <kbd className="rounded bg-muted px-1 font-mono text-[10px]">?</kbd> help
+          </p>
+        </div>
+      )}
     </div>
   )
 }

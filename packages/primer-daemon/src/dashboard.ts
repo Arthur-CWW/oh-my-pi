@@ -509,26 +509,29 @@ function jsonError(error: string, status: number): Response {
 
 function registerPortlessAlias(port: number, env: Record<string, string | undefined>): void {
   if (env.PORTLESS_URL === undefined) return
+  // Best-effort fallback claim: the wrapped-commentary-reader dev supervisor owns
+  // `meltdown` when running and takes the alias over; losing the race is expected.
+  if (env.PRIMER_MELTDOWN_ALIAS === "0") return
 
   try {
     const child = Bun.spawn(["bunx", "portless@latest", "alias", "meltdown", String(port)], {
       stdout: "ignore",
-      stderr: "inherit",
+      stderr: "ignore",
     })
     child.exited.then(
       (exitCode) => {
         if (exitCode === 0) {
           console.log(`Registered http://meltdown.localhost:1355 for port ${port}`)
         } else {
-          console.error(`Failed to register meltdown portless alias: exit ${exitCode}`)
+          console.log(`meltdown portless alias not claimed (exit ${exitCode}) — reader supervisor likely owns it; set PRIMER_MELTDOWN_ALIAS=0 to skip`)
         }
       },
-      (error: unknown) => {
-        console.error(`Failed to register meltdown portless alias: ${error instanceof Error ? error.message : String(error)}`)
+      () => {
+        console.log("meltdown portless alias registration unavailable — skipping (set PRIMER_MELTDOWN_ALIAS=0 to silence)")
       },
     )
-  } catch (error) {
-    console.error(`Failed to start meltdown portless alias registration: ${error instanceof Error ? error.message : String(error)}`)
+  } catch {
+    console.log("meltdown portless alias registration unavailable — skipping (set PRIMER_MELTDOWN_ALIAS=0 to silence)")
   }
 }
 

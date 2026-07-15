@@ -1,6 +1,6 @@
 import { createSseParser } from "@/lib/sse"
 
-export type EvidenceSource = "browser" | "twitter" | "reader"
+export type EvidenceSource = "browser" | "twitter" | "reader" | "cards"
 export type CardStatus = "candidate" | "approved" | "rejected"
 
 export interface EvidenceHit {
@@ -160,6 +160,7 @@ export interface DictResult {
 export interface QueueProvenance {
   docId: number
   docTitle: string
+  markId: number | null
   paragraphIdx: number
   start: number
   end: number
@@ -174,9 +175,30 @@ export interface QueueItem {
   pinyin: string | null
   gloss: string | null
   status: QueueStatus
+  priority: number
   lookupCount: number
   createdAt: string
   provenance: QueueProvenance | null
+}
+
+export type ReviewGrade = "again" | "hard" | "good" | "easy"
+
+export interface ReviewSessionItem {
+  queueItemId: number
+  word: string
+  pinyin: string | null
+  gloss: string | null
+  phase: "due" | "new"
+  due: string | null
+  priority: number
+  provenance: QueueProvenance | null
+}
+
+export interface GradeReviewResult {
+  queueItemId: number
+  due: string
+  state: string
+  reps: number
 }
 
 export interface CreateMarkResult {
@@ -342,6 +364,26 @@ export async function getKnownWords(): Promise<string[]> {
 export async function getQueue(status: QueueStatus | "all" = "new", limit = 100): Promise<QueueItem[]> {
   const params = new URLSearchParams({ status, limit: String(limit) })
   return fetchJson<QueueItem[]>(`/api/queue?${params}`)
+}
+export async function getReviewSession(limit?: number): Promise<ReviewSessionItem[]> {
+  const result = await fetchJson<{ items: ReviewSessionItem[] }>(withLimit("/api/review/session", limit))
+  return result.items
+}
+
+export async function gradeReview(queueItemId: number, grade: ReviewGrade): Promise<GradeReviewResult> {
+  return fetchJson<GradeReviewResult>("/api/review/grade", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ queueItemId, grade }),
+  })
+}
+
+export async function setQueuePriority(id: number, priority: number): Promise<QueueItem> {
+  return fetchJson<QueueItem>(`/api/queue/${id}/priority`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ priority }),
+  })
 }
 
 export async function setQueueStatus(id: number, status: QueueStatus): Promise<QueueItem> {

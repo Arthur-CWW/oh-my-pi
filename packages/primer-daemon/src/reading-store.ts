@@ -53,6 +53,7 @@ export interface CreateReadingMarkInput {
 export interface QueueProvenance {
   docId: number
   docTitle: string
+  markId: number | null
   paragraphIdx: number
   start: number
   end: number
@@ -65,6 +66,7 @@ export interface QueueItem {
   pinyin: string | null
   gloss: string | null
   status: QueueStatus
+  priority: number
   lookupCount: number
   createdAt: string
   updatedAt: string
@@ -126,6 +128,17 @@ const RawMarkRowSchema = Schema.Struct({
 })
 
 type RawMarkRow = Schema.Schema.Type<typeof RawMarkRowSchema>
+const TableInfoRowSchema = Schema.Struct({
+  cid: NonNegativeInteger,
+  name: Schema.String,
+  type: Schema.String,
+  notnull: NonNegativeInteger,
+  dflt_value: NullableString,
+  pk: NonNegativeInteger,
+})
+
+type TableInfoRow = Schema.Schema.Type<typeof TableInfoRowSchema>
+
 
 const RawQueueRowSchema = Schema.Struct({
   id: PositiveInteger,
@@ -133,9 +146,11 @@ const RawQueueRowSchema = Schema.Struct({
   pinyin: NullableString,
   gloss: NullableString,
   status: QueueStatusSchema,
+  priority: NonNegativeInteger,
   lookup_count: PositiveInteger,
   created_at: Schema.String,
   updated_at: Schema.String,
+  mark_id: Schema.NullOr(PositiveInteger),
   doc_id: Schema.NullOr(PositiveInteger),
   doc_title: NullableString,
   paragraph_idx: Schema.NullOr(NonNegativeInteger),
@@ -201,6 +216,7 @@ CREATE TABLE IF NOT EXISTS queue_items (
   pinyin TEXT,
   gloss TEXT,
   status TEXT NOT NULL DEFAULT 'new',
+  priority INTEGER NOT NULL DEFAULT 0,
   lookup_count INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
@@ -208,6 +224,45 @@ CREATE TABLE IF NOT EXISTS queue_items (
 CREATE INDEX IF NOT EXISTS reading_marks_doc_idx ON reading_marks(doc_id, paragraph_idx, start);
 CREATE INDEX IF NOT EXISTS reading_marks_surface_idx ON reading_marks(surface);
 CREATE INDEX IF NOT EXISTS queue_items_status_idx ON queue_items(status, updated_at);
+`)
+
+  const queueColumns = db.query<TableInfoRow, []>("PRAGMA table_info(queue_items)").all().map((row) =>
+    Schema.decodeUnknownSync(TableInfoRowSchema)(row),
+  )
+  if (!queueColumns.some((column) => column.name === "priority")) {
+    db.exec("ALTER TABLE queue_items ADD COLUMN priority INTEGER NOT NULL DEFAULT 0")
+  }
+  db.exec(`
+CREATE INDEX IF NOT EXISTS queue_items_new_intro_idx
+  ON queue_items(status, priority DESC, created_at ASC, id ASC);
+CREATE TABLE IF NOT EXISTS review_state (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  item_kind TEXT NOT NULL DEFAULT 'queue_item',
+  item_id INTEGER NOT NULL,
+  due TEXT NOT NULL,
+  stability REAL NOT NULL,
+  difficulty REAL NOT NULL,
+  reps INTEGER NOT NULL DEFAULT 0,
+  lapses INTEGER NOT NULL DEFAULT 0,
+  state TEXT NOT NULL,
+  last_review TEXT,
+  scheduled_days INTEGER NOT NULL DEFAULT 0,
+  learning_steps INTEGER NOT NULL DEFAULT 0,
+  state_version INTEGER NOT NULL DEFAULT 0,
+  UNIQUE(item_kind, item_id)
+);
+CREATE INDEX IF NOT EXISTS review_state_due_idx ON review_state(item_kind, due);
+CREATE TABLE IF NOT EXISTS review_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  item_kind TEXT NOT NULL DEFAULT 'queue_item',
+  item_id INTEGER NOT NULL,
+  event_time TEXT NOT NULL,
+  grade TEXT NOT NULL,
+  prior_state_version INTEGER NOT NULL,
+  derived_state_version INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS review_events_item_idx
+  ON review_events(item_kind, item_id, id);
 `)
 }
 
@@ -379,6 +434,18 @@ export function setQueueItemStatus(db: Database, id: number, status: QueueStatus
   return getQueueItemById(db, id)
 }
 
+export function setQueueItemPriority(db: Database, id: number, priority: number): QueueItem | null {
+  ensureReadingTables(db)
+  if (!Number.isFinite(priority) || !Number.isInteger(priority) || priority < 0) {
+    throw new Error("priority must be a non-negative integer")
+  }
+  const result = db
+    .query<NoRows, [number, string, number]>("UPDATE queue_items SET priority = ?, updated_at = ? WHERE id = ?")
+    .run(priority, nowIso(), id)
+  if (result.changes === 0) return null
+  return getQueueItemById(db, id)
+}
+
 export function getQueueItemById(db: Database, id: number): QueueItem | null {
   ensureReadingTables(db)
   const row = db.query<RawQueueRow, [number]>(`${queueItemSelectSql()} WHERE qi.id = ?`).get(id)
@@ -404,16 +471,17 @@ function countMarksForWord(db: Database, word: string): number {
   const row = db.query<CountRow, [string]>("SELECT COUNT(*) AS count FROM reading_marks WHERE surface = ?").get(word)
   return row === null ? 0 : Schema.decodeUnknownSync(CountRowSchema)(row).count
 }
-
 function queueItemSelectSql(): string {
   return `SELECT qi.id,
                  qi.word,
                  qi.pinyin,
                  qi.gloss,
                  qi.status,
+                 qi.priority,
                  qi.lookup_count,
                  qi.created_at,
                  qi.updated_at,
+                 qi.mark_id,
                  rd.id AS doc_id,
                  rd.title AS doc_title,
                  rm.paragraph_idx,
@@ -461,6 +529,7 @@ function decodeQueueRow(row: RawQueueRow): QueueItem {
     pinyin: item.pinyin,
     gloss: item.gloss,
     status: item.status,
+    priority: item.priority,
     lookupCount: item.lookup_count,
     createdAt: item.created_at,
     updatedAt: item.updated_at,
@@ -474,6 +543,7 @@ function decodeQueueRow(row: RawQueueRow): QueueItem {
         ? null
         : {
             docId: item.doc_id,
+            markId: item.mark_id,
             docTitle: item.doc_title,
             paragraphIdx: item.paragraph_idx,
             start: item.start,

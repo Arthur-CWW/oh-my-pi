@@ -1,5 +1,13 @@
+import { Schema } from "effect"
 import { askEvidence, recentEvidence, searchEvidence, SUBSTRATES, type EvidenceSet } from "./evidence"
 import { runCardCommand, runNoteCommand, runProgressCommand } from "./ledger-cli"
+import { openLedger, PositiveInteger } from "./ledger"
+import {
+  CardCandidateNotApprovedError,
+  CardCandidateNotFoundError,
+  enrollCardCandidate,
+  getReviewDueCounts,
+} from "./review-store"
 import { resolveDaemonPaths, type DaemonPaths } from "./paths"
 import type { EvidenceHit, EvidenceSource } from "./schema"
 
@@ -10,6 +18,7 @@ export const USAGE = `Usage:
   primer note <add|list> [options]
   primer card <add|list|status> [options]
   primer progress <add|list> [options]
+  primer review <enroll|due> [options]
 `
 
 const DEFAULT_SEARCH_LIMIT = 30
@@ -204,6 +213,7 @@ export async function runCli(argv: readonly string[], env: Record<string, string
   if (command === "note") return runNoteCommand(argv.slice(1), paths)
   if (command === "card") return runCardCommand(argv.slice(1), paths)
   if (command === "progress") return runProgressCommand(argv.slice(1), paths)
+  if (command === "review") return runReviewCommand(argv.slice(1), paths)
 
   process.stderr.write(USAGE)
   return 2
@@ -264,6 +274,71 @@ function runRecentCommand(argv: readonly string[], paths: DaemonPaths): number {
     writeHumanHits(evidence.hits)
   }
   return 0
+}
+
+const REVIEW_ENROLL_USAGE = "Usage: primer review enroll <cardId>"
+const REVIEW_DUE_USAGE = "Usage: primer review due"
+
+async function runReviewCommand(argv: readonly string[], paths: DaemonPaths): Promise<number> {
+  const parsed = parseArgs(argv, {})
+  if (parsed === null) {
+    process.stderr.write(`${USAGE}`)
+    return 2
+  }
+  const subcommand = parsed.positionals[0]
+  if (subcommand === "enroll") {
+    if (parsed.positionals.length !== 2 || parsed.flags.size !== 0) {
+      process.stderr.write(`${REVIEW_ENROLL_USAGE}\n`)
+      return 2
+    }
+    const idValue = parsed.positionals[1]!
+    if (!/^[1-9]\d*$/.test(idValue)) {
+      process.stderr.write(`${REVIEW_ENROLL_USAGE}\n`)
+      return 2
+    }
+    let cardId: number
+    try {
+      cardId = Schema.decodeUnknownSync(PositiveInteger)(Number(idValue))
+    } catch {
+      process.stderr.write(`${REVIEW_ENROLL_USAGE}\n`)
+      return 2
+    }
+
+    const db = openLedger(paths.ledgerDb)
+    try {
+      const state = enrollCardCandidate(db, cardId)
+      process.stdout.write(`card ${state.itemId} enrolled [${state.state}] due ${state.due}\n`)
+      return 0
+    } catch (error) {
+      if (error instanceof CardCandidateNotFoundError || error instanceof CardCandidateNotApprovedError) {
+        process.stderr.write(`${error.message}\n`)
+        return 1
+      }
+      throw error
+    } finally {
+      db.close()
+    }
+  }
+
+  if (subcommand === "due") {
+    if (parsed.positionals.length !== 1 || parsed.flags.size !== 0) {
+      process.stderr.write(`${REVIEW_DUE_USAGE}\n`)
+      return 2
+    }
+    const db = openLedger(paths.ledgerDb)
+    try {
+      const counts = getReviewDueCounts(db)
+      process.stdout.write(`due now: ${counts.dueNow}\n`)
+      process.stdout.write(`new available: ${counts.newAvailable}\n`)
+      process.stdout.write(`enrolled cards: ${counts.enrolledCards}\n`)
+      return 0
+    } finally {
+      db.close()
+    }
+  }
+
+  process.stderr.write(`${USAGE}`)
+  return 2
 }
 
 

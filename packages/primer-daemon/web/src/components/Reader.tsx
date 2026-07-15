@@ -5,13 +5,16 @@ import {
   type CreateMarkResult,
   type DictResult,
   type Mark,
+  type QueueItem,
   type ReaderDoc,
   createMark,
   deleteMark,
   dictBest,
   dictLookup,
   getKnownWords,
+  getQueue,
   getReaderDoc,
+  setQueuePriority,
 } from "@/api"
 import { navigate } from "@/hooks/useHashRoute"
 import { type Segment, classifyWord, extractSentence, isHan, parsePinyin, segmentText, toneColor } from "@/lib/segmentation"
@@ -30,6 +33,8 @@ interface PopupState {
   dict: DictResult | null
   loading: boolean
   markResult: CreateMarkResult | null
+  priority: number
+  prioritySaving: boolean
   undone: boolean
 }
 
@@ -39,6 +44,7 @@ interface PopupState {
 
 const UNKNOWN_STYLE = "underline decoration-amber-500/40 decoration-dotted decoration-1 underline-offset-4"
 const QUEUED_STYLE = "underline decoration-sky-400/30 decoration-dotted decoration-1 underline-offset-4"
+const PRIORITY_STYLE = "underline decoration-sky-300/70 decoration-solid decoration-2 underline-offset-4"
 const MARKED_STYLE = "bg-emerald-400/10 rounded-sm"
 
 // ---------------------------------------------------------------------------
@@ -68,10 +74,12 @@ function WordPopup({
   popup,
   onClose,
   onUndo,
+  onPriority,
 }: {
   popup: PopupState
   onClose: () => void
   onUndo: () => void
+  onPriority: () => void
 }): React.JSX.Element {
   const ref = useRef<HTMLDivElement>(null)
 
@@ -85,7 +93,7 @@ function WordPopup({
     if (left + 288 > window.innerWidth - 12) left = window.innerWidth - 300
     if (left < 8) left = 8
     // Clamp bottom — flip above if needed
-    if (top + 240 > window.innerHeight) top = anchorRect.top - 248
+    if (top + 280 > window.innerHeight) top = anchorRect.top - 288
     if (top < 8) top = 8
     setPos({ top, left })
   }, [popup])
@@ -134,8 +142,20 @@ function WordPopup({
             </span>
             <button
               type="button"
+              onClick={onPriority}
+              disabled={popup.prioritySaving}
+              className={cn(
+                "text-[11px] text-muted-foreground/70 transition-colors hover:text-foreground",
+                popup.prioritySaving && "cursor-wait opacity-50",
+              )}
+            >
+              {popup.priority > 0 ? `priority ↑${popup.priority}` : "push ↑ priority"}{" "}
+              <kbd className="ml-0.5 rounded bg-muted px-1 font-mono text-[10px]">p</kbd>
+            </button>
+            <button
+              type="button"
               onClick={onUndo}
-              className="text-[11px] text-muted-foreground/60 transition-colors hover:text-foreground"
+              className="ml-auto text-[11px] text-muted-foreground/60 transition-colors hover:text-foreground"
             >
               undo <kbd className="ml-0.5 rounded bg-muted px-1 font-mono text-[10px]">u</kbd>
             </button>
@@ -160,6 +180,7 @@ function ReaderParagraph({
   paragraphIdx,
   knownWords,
   queuedWords,
+  priorityWords,
   markedSurfaces,
   markMap,
   focused,
@@ -170,6 +191,7 @@ function ReaderParagraph({
   paragraphIdx: number
   knownWords: ReadonlySet<string>
   queuedWords: ReadonlySet<string>
+  priorityWords: ReadonlySet<string>
   markedSurfaces: ReadonlySet<string>
   markMap: ReadonlyMap<string, number> // "pIdx:start:end" → markId
   focused: boolean
@@ -196,9 +218,11 @@ function ReaderParagraph({
         const hasMark = markId !== undefined
         const han = isHan(seg.text)
         const cls = classifyWord(seg.text, knownWords, queuedWords, markedSurfaces)
+        const isPriority = priorityWords.has(seg.text)
 
         let wordStyle = ""
-        if (hasMark) wordStyle = MARKED_STYLE
+        if (hasMark) wordStyle = cn(MARKED_STYLE, isPriority && PRIORITY_STYLE)
+        else if (isPriority) wordStyle = PRIORITY_STYLE
         else if (cls === "unknown") wordStyle = UNKNOWN_STYLE
         else if (cls === "queued") wordStyle = QUEUED_STYLE
 
@@ -244,6 +268,7 @@ export function Reader({
   const [error, setError] = useState<string | null>(null)
   const [knownWords, setKnownWords] = useState<Set<string>>(new Set())
   const [queuedWords, setQueuedWords] = useState<Set<string>>(new Set())
+  const [priorityByWord, setPriorityByWord] = useState<Map<string, number>>(new Map())
   const [popup, setPopup] = useState<PopupState | null>(null)
   const [focusPara, setFocusPara] = useState(-1)
 
@@ -252,6 +277,8 @@ export function Reader({
     () => (doc ? new Set(doc.marks.map((m) => m.surface)) : new Set<string>()),
     [doc],
   )
+
+  const priorityWords = useMemo(() => new Set(priorityByWord.keys()), [priorityByWord])
 
   // Mark lookup map: "pIdx:start:end" → markId
   const markMap = useMemo(() => {
@@ -262,10 +289,10 @@ export function Reader({
     }
     return map
   }, [doc])
-
   // Load doc + known words (once)
   useEffect(() => {
     let alive = true
+    setPriorityByWord(new Map())
     Promise.all([getReaderDoc(docId), getKnownWords()]).then(
       ([d, words]) => {
         if (!alive) return
@@ -276,6 +303,17 @@ export function Reader({
       },
       (e: unknown) => {
         if (alive) setError(e instanceof Error ? e.message : "Failed to load document")
+      },
+    )
+    getQueue("all", 500).then(
+      (items: QueueItem[]) => {
+        if (!alive) return
+        setPriorityByWord(
+          new Map(items.filter((item) => item.priority > 0).map((item) => [item.word, item.priority])),
+        )
+      },
+      () => {
+        // Priority highlighting is best-effort; the document remains readable if unavailable.
       },
     )
     return () => {
@@ -319,6 +357,8 @@ export function Reader({
         dict: null,
         loading: true,
         markResult: null,
+        priority: priorityByWord.get(word) ?? 0,
+        prioritySaving: false,
         undone: false,
       }
       setPopup(state)
@@ -333,7 +373,17 @@ export function Reader({
       // Auto-record mark
       createMark({ docId: doc.id, paragraphIdx: pIdx, start, end, surface: word, sentence }).then(
         (result) => {
-          setPopup((prev) => (prev?.word === word ? { ...prev, markResult: result } : prev))
+          setPopup((prev) => (
+            prev?.word === word
+              ? { ...prev, markResult: result, priority: result.queueItem.priority }
+              : prev
+          ))
+          setPriorityByWord((prev) => {
+            if (result.queueItem.priority <= 0) return prev
+            const next = new Map(prev)
+            next.set(word, result.queueItem.priority)
+            return next
+          })
           setQueuedWords((prev) => new Set(prev).add(word))
           setDoc((prev) => {
             if (!prev) return prev
@@ -346,7 +396,7 @@ export function Reader({
         },
       )
     },
-    [doc],
+    [doc, priorityByWord],
   )
 
   // Undo mark
@@ -377,6 +427,35 @@ export function Reader({
       },
       () => {
         /* undo failed — popup already shows undone state */
+      },
+    )
+  }, [popup])
+
+  const onPriority = useCallback(() => {
+    const current = popup
+    const queueItem = current?.markResult?.queueItem
+    if (!queueItem || current.prioritySaving) return
+    const priority = current.priority > 0 ? current.priority + 1 : 1
+    setPopup((prev) => (prev ? { ...prev, prioritySaving: true } : prev))
+    setQueuePriority(queueItem.id, priority).then(
+      (updated) => {
+        setPriorityByWord((prev) => {
+          const next = new Map(prev)
+          next.set(updated.word, updated.priority)
+          return next
+        })
+        setPopup((prev) => {
+          if (!prev || prev.markResult?.queueItem.id !== updated.id) return prev
+          return {
+            ...prev,
+            priority: updated.priority,
+            prioritySaving: false,
+            markResult: { ...prev.markResult, queueItem: updated },
+          }
+        })
+      },
+      () => {
+        setPopup((prev) => (prev ? { ...prev, prioritySaving: false } : prev))
       },
     )
   }, [popup])
@@ -413,10 +492,13 @@ export function Reader({
         return
       }
 
-      // u = undo while popup open
+      // u = undo, p = push priority while popup open
       if (popup) {
         if (e.key === "u") {
           onUndo()
+          e.preventDefault()
+        } else if (e.key === "p") {
+          onPriority()
           e.preventDefault()
         }
         return
@@ -448,7 +530,7 @@ export function Reader({
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [doc, popup, closePopup, onUndo, onShowHelp])
+  }, [doc, popup, closePopup, onUndo, onPriority, onShowHelp])
 
   // Scroll focused paragraph
   useEffect(() => {
@@ -512,6 +594,7 @@ export function Reader({
             paragraphIdx={idx}
             knownWords={knownWords}
             queuedWords={queuedWords}
+            priorityWords={priorityWords}
             markedSurfaces={markedSurfaces}
             markMap={markMap}
             focused={focusPara === idx}
@@ -521,13 +604,14 @@ export function Reader({
         ))}
       </div>
 
-      {popup && <WordPopup popup={popup} onClose={closePopup} onUndo={onUndo} />}
+      {popup && <WordPopup popup={popup} onClose={closePopup} onUndo={onUndo} onPriority={onPriority} />}
 
       <p className="mt-8 text-[11px] text-muted-foreground/35">
         click any word to look up ·{" "}
         <kbd className="rounded bg-muted px-1 font-mono text-[10px]">j</kbd>/
         <kbd className="rounded bg-muted px-1 font-mono text-[10px]">k</kbd> paragraphs ·{" "}
         <kbd className="rounded bg-muted px-1 font-mono text-[10px]">u</kbd> undo ·{" "}
+        <kbd className="rounded bg-muted px-1 font-mono text-[10px]">p</kbd> priority (in popup) ·{" "}
         <kbd className="rounded bg-muted px-1 font-mono text-[10px]">Esc</kbd> close ·{" "}
         <kbd className="rounded bg-muted px-1 font-mono text-[10px]">?</kbd> help
       </p>

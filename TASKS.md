@@ -17,8 +17,9 @@ Status values: `active`, `next`, `blocked`, `done`, `parked`.
 | T-2026-06-10-071 | Continue Slotok V1 done-goal implementation loop | Codex | Active; follow the canonical plan or source named in the task history. |
 | T-2026-06-19-001 | Build OMP Discord agent-server bridge | Codex | Active; follow the canonical plan or source named in the task history. |
 | T-2026-06-09-005 | Split `packages/web-access` into focused agent-tool/skill packages | Codex | Active; follow the canonical plan or source named in the task history. |
-| T-2026-07-11-001 | Stabilize OMP runtime before further feature work | Arthur conversation / Harness | Active. BLESSED `9ad7` (`omp/16.0.1+fork.9ad7a32cf2d3`, digest prefix `632b7d0f`); rollout blocked on dead test-peer selection. Handoff: [2026-07-15-omp-fleet-control-continuation.md](docs/fable/handoffs/2026-07-15-omp-fleet-control-continuation.md). |
+| T-2026-07-11-001 | Stabilize OMP runtime before further feature work | Arthur conversation / Harness | Active. BLESSED `16.0.1+fork.9ad7a32cf2d3`, digest `632b7d0f…`; rollout is blocked/incomplete because dead test fixture peer `project-0auuza` (`session-runner-test`, zero digest, PID gone) was selected before the real canary. `FleetRegistryIsolationFix` is in flight. Current handoff: [2026-07-15 fleet-control continuation](docs/fable/handoffs/2026-07-15-omp-fleet-control-continuation.md). |
 | T-2026-07-03-001 | Bootstrap sharded Fable session: Companion | Fable | Active; follow the canonical plan or source named in the task history. |
+| T-2026-07-03-003 | Bootstrap sharded Fable session: Primer | Fable | Active 2026-07-15. Chinese loop scheduler (FSRS + priority + interleave), promotion bridge, enrichment prompt v0, dependency-gating brief, calibration sheet. Live handoff: `streams/primer/HANDOFF-LIVE-2026-07-15.md`. |
 
 ## Next
 
@@ -26,7 +27,6 @@ Status values: `active`, `next`, `blocked`, `done`, `parked`.
 |---|---|---|---|
 | T-2026-07-10-001 | Build domain-scoped trusted-source atlas | Arthur conversation / Primer | Queued; consult the named source and repository history before starting. |
 | T-2026-07-03-002 | Bootstrap sharded Fable session: Playground | Fable | Queued; consult the named source and repository history before starting. |
-| T-2026-07-03-003 | Bootstrap sharded Fable session: Primer | Fable | Queued; consult the named source and repository history before starting. |
 | T-2026-07-03-004 | Bootstrap sharded Fable session: Harness | Fable | Queued; consult the named source and repository history before starting. |
 | T-2026-07-08-001 | Add OMP event-driven pause/resume hooks | Arthur triage | Queued; consult the named source and repository history before starting. |
 | T-2026-07-03-005 | Build speech-to-speech streaming testbed | `docs/plans/speech-to-speech-testbed.md` (queued from playground session) | Queued; consult the named source and repository history before starting. |

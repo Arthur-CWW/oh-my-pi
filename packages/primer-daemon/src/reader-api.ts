@@ -5,12 +5,19 @@ import { CedictNotBuiltError, lookupCedictBest, lookupCedictExact, listKnownWord
 import { openLedger } from "./ledger"
 import type { DaemonPaths } from "./paths"
 import {
+  buildReviewSession,
+  gradeReviewItem,
+  type ReviewGrade,
+  type ReviewItemKind,
+} from "./review-store"
+import {
   createReadingDoc,
   createReadingMark,
   deleteReadingMark,
   getReadingDoc,
   listQueueItems,
   listReadingDocs,
+  setQueueItemPriority,
   setQueueItemStatus,
   type QueueStatus,
   type ReadingMarkKind,
@@ -47,6 +54,23 @@ const CreateMarkBodySchema = Schema.Struct({
 })
 
 const QueueStatusBodySchema = Schema.Struct({ status: QueueStatusSchema })
+const QueuePriorityBodySchema = Schema.Struct({ priority: NonNegativeInteger })
+const ReviewItemKindSchema = Schema.Union([Schema.Literal("queue_item"), Schema.Literal("card_candidate")])
+const ReviewGradeSchema = Schema.Union([
+  Schema.Literal("again"),
+  Schema.Literal("hard"),
+  Schema.Literal("good"),
+  Schema.Literal("easy"),
+])
+const ReviewGradeBodySchema = Schema.Struct({
+  queueItemId: PositiveInteger,
+  grade: ReviewGradeSchema,
+  itemKind: Schema.optionalKey(ReviewItemKindSchema),
+})
+const ReviewSessionQuerySchema = Schema.Struct({
+  limit: Schema.optionalKey(PositiveIntegerFromString),
+})
+
 const IdParamSchema = Schema.Struct({ id: PositiveIntegerFromString })
 const DictWordParamSchema = Schema.Struct({ word: Schema.String })
 const DictBestQuerySchema = Schema.Struct({ text: Schema.String })
@@ -57,6 +81,9 @@ const QueueQuerySchema = Schema.Struct({
 
 type CreateDocBody = Schema.Schema.Type<typeof CreateDocBodySchema>
 type CreateMarkBody = Schema.Schema.Type<typeof CreateMarkBodySchema>
+type QueuePriorityBody = Schema.Schema.Type<typeof QueuePriorityBodySchema>
+type ReviewGradeBody = Schema.Schema.Type<typeof ReviewGradeBodySchema>
+type ReviewSessionQuery = Schema.Schema.Type<typeof ReviewSessionQuerySchema>
 type QueueStatusBody = Schema.Schema.Type<typeof QueueStatusBodySchema>
 type IdParam = Schema.Schema.Type<typeof IdParamSchema>
 type DictWordParam = Schema.Schema.Type<typeof DictWordParamSchema>
@@ -79,6 +106,11 @@ export async function handleReaderApi(request: Request, paths: DaemonPaths): Pro
     if (request.method === "GET" && pathname === "/api/queue") return handleQueueList(url, paths)
     if (request.method === "POST" && pathname.startsWith("/api/queue/") && pathname.endsWith("/status")) {
       return handleQueueStatus(request, pathname, paths)
+    }
+    if (request.method === "GET" && pathname === "/api/review/session") return handleReviewSession(url, paths)
+    if (request.method === "POST" && pathname === "/api/review/grade") return await handleReviewGrade(request, paths)
+    if (request.method === "POST" && pathname.startsWith("/api/queue/") && pathname.endsWith("/priority")) {
+      return await handleQueuePriority(request, pathname, paths)
     }
   } catch (error) {
     if (error instanceof CedictNotBuiltError) return jsonError(error.message, 503)
@@ -163,6 +195,31 @@ async function handleQueueStatus(request: Request, pathname: string, paths: Daem
   })
 }
 
+function handleReviewSession(url: URL, paths: DaemonPaths): Response {
+  const query = decodeUnknown(ReviewSessionQuerySchema, Object.fromEntries(url.searchParams), "malformed review session query")
+  return withLedger(paths, (db) => jsonResponse({ items: buildReviewSession(db, query.limit ?? 20) }))
+}
+
+async function handleReviewGrade(request: Request, paths: DaemonPaths): Promise<Response> {
+  const body = await decodeJson(request, ReviewGradeBodySchema)
+  return withLedger(paths, (db) => {
+    const itemKind = body.itemKind ?? "queue_item"
+    const result = gradeReviewItem(db, body.queueItemId, body.grade as ReviewGrade, itemKind as ReviewItemKind)
+    if (result === null) throw new NotFoundError(itemKind === "card_candidate" ? "unknown card candidate" : "unknown queue item")
+    return jsonResponse(result)
+  })
+}
+
+async function handleQueuePriority(request: Request, pathname: string, paths: DaemonPaths): Promise<Response> {
+  const id = decodeQueuePriorityId(pathname)
+  const body = await decodeJson(request, QueuePriorityBodySchema)
+  return withLedger(paths, (db) => {
+    const item = setQueueItemPriority(db, id, body.priority)
+    if (item === null) throw new NotFoundError("unknown queue item")
+    return jsonResponse(item)
+  })
+}
+
 function normalizeDocBody(body: CreateDocBody): { title: string; text: string; lang?: string } {
   return body.lang === undefined ? { title: body.title, text: body.text } : { title: body.title, text: body.text, lang: body.lang }
 }
@@ -205,6 +262,12 @@ function decodeIdFromSuffix(pathname: string, prefix: string): number {
 
 function decodeQueueStatusId(pathname: string): number {
   const middle = pathname.slice("/api/queue/".length, -"/status".length)
+  if (middle.length === 0 || middle.includes("/")) throw new NotFoundError("unknown route")
+  return decodeUnknown(IdParamSchema, { id: middle }, "malformed id").id
+}
+
+function decodeQueuePriorityId(pathname: string): number {
+  const middle = pathname.slice("/api/queue/".length, -"/priority".length)
   if (middle.length === 0 || middle.includes("/")) throw new NotFoundError("unknown route")
   return decodeUnknown(IdParamSchema, { id: middle }, "malformed id").id
 }

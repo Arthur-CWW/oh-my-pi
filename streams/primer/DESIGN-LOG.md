@@ -223,3 +223,16 @@ The creation engine answers bounded reader questions through distinct projection
 Style Studies are evidence, not templates. Poet Engineer and Nous Research sources are archived with coverage gaps, then distilled into motion, typography, diagram, and interaction principles. Projects may consume the machine-readable registry and studies, but must not copy motifs without a product-specific reason.
 
 The first model portfolio selected GPT-5.6 Sol as the default UI/UX implementation lane for Primer: its restraint and editorial hierarchy survived blind review best. This supersedes the earlier provisional Terra preference while remaining a dated, evidence-specific routing decision.
+
+## 2026-07-15 — One review stream: FSRS borrowed, priority as admission order, gating designed fail-open
+
+**Status:** accepted-local decision (scheduler/priority/bridge shipped); design hypothesis (dependency gating)  
+**Scope:** review scheduling across queue words and ledger cards  
+**Relationships:** `implements_slice_of` → Arthur 2026-07-10 scheduler directive; `implements_slice_of` → [`CARD-PROMOTION.md`](CARD-PROMOTION.md) stage 8; `deferred_by` → knowledge-graph generation (gating brief only)  
+**Evidence:** `docs/qa/primer-scheduler.md`, isolated browser QA report, 131-test package gate
+
+Scheduling math is `ts-fsrs`, never hand-rolled. Priority is an admission-order concept: user-pushed words jump NEW-item introduction but never touch FSRS due timing. Review events are append-only with prior/derived state versions. Queue words and explicitly enrolled approved cards share one stream via `item_kind`/`item_id`; approval does not auto-enroll (explicit `primer review enroll`). Same-headword interleave guard separates sibling words in session order.
+
+Dependency gating (Skycak primitives) is designed as a **fail-open admission filter** over the NEW branch only — an unvalidated or absent graph edge has no gating effect, so a sparse graph degrades to today's shipped behavior (`experiments/scheduler-dependency-gating/design-brief-v0.md`). Alternative rejected: encoding prerequisites inside FSRS parameters or hiding overdue reviews behind gates.
+
+Companion experiment: enrichment prompt v0 (`experiments/queue-enrichment/`) treats enrichment output as CARD-PROMOTION stage 2–4 material — sense disambiguation against the quoted source sentence, constrained examples through the hsk-deck 85%-rule, targeting judgment without construction or approval. First 10 enrichments require Arthur per-field labels before any batch run.

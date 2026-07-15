@@ -19,6 +19,7 @@ const READER_KEYS: Array<{ keys: string[]; label: string }> = [
   { keys: ["j", "k"], label: "focus paragraph down / up" },
   { keys: ["g", "G"], label: "first / last paragraph" },
   { keys: ["u"], label: "undo mark (in popup)" },
+  { keys: ["p"], label: "push priority (in popup)" },
   { keys: ["Esc"], label: "close popup · back to library" },
   { keys: ["?"], label: "toggle this help" },
 ]
@@ -34,13 +35,15 @@ const LIBRARY_KEYS: Array<{ keys: string[]; label: string }> = [
 ]
 
 const REVIEW_KEYS: Array<{ keys: string[]; label: string }> = [
-  { keys: ["j", "k"], label: "focus item down / up" },
-  { keys: ["g", "G"], label: "first / last item" },
+  { keys: ["j", "k"], label: "focus item down / up (triage)" },
+  { keys: ["g", "G"], label: "first / last item (triage)" },
   { keys: ["s"], label: "keep (save for review)" },
   { keys: ["m"], label: "mark known" },
   { keys: ["x"], label: "discard" },
   { keys: ["Enter", "o"], label: "open provenance" },
-  { keys: ["Esc"], label: "clear focus" },
+  { keys: ["Space"], label: "reveal answer (session)" },
+  { keys: ["1", "2", "3", "4"], label: "grade again / hard / good / easy (session)" },
+  { keys: ["Esc"], label: "clear focus · hide answer" },
   { keys: ["?"], label: "toggle this help" },
 ]
 
