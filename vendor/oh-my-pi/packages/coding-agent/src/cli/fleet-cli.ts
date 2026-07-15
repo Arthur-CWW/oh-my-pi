@@ -1,6 +1,11 @@
 import * as path from "node:path";
 import { getAgentDir } from "@oh-my-pi/pi-utils";
-import { getIrcExternalPeerDisplayState, IrcExternalBus, type IrcExternalPeer } from "../irc/bus-external";
+import {
+	getIrcExternalPeerDisplayState,
+	IrcExternalBus,
+	type IrcExternalPeer,
+	type IrcPeerPruneResult,
+} from "../irc/bus-external";
 import { decodeJournalEntries, projectJournalEntries } from "../journal/projection";
 import {
 	classifyFleetCompatibility,
@@ -20,6 +25,14 @@ export interface FleetStatusOptions {
 	readonly nowMs?: number;
 	readonly ircDbPath?: string;
 	readonly controlDbPath?: string;
+}
+
+export interface FleetPruneOptions {
+	readonly apply?: boolean;
+	readonly retentionMs?: number;
+	readonly nowMs?: number;
+	readonly ircDbPath?: string;
+	readonly isProcessAlive?: (pid: number) => boolean;
 }
 
 export interface FleetStatusRow {
@@ -239,6 +252,34 @@ export function formatFleetStatus(rows: readonly FleetStatusRow[]): string {
 		.join("\n")}\n`;
 }
 
+export function pruneFleetPeers(options: FleetPruneOptions = {}): IrcPeerPruneResult {
+	let bus: IrcExternalBus;
+	try {
+		bus = new IrcExternalBus(options.ircDbPath, { readonly: !options.apply });
+	} catch {
+		return { candidates: [], deleted: 0 };
+	}
+	try {
+		return bus.prunePeers({
+			retentionMs: options.retentionMs ?? 7 * 24 * 60 * 60 * 1000,
+			nowMs: options.nowMs,
+			apply: options.apply,
+			isProcessAlive: options.isProcessAlive,
+		});
+	} finally {
+		bus.close();
+	}
+}
+
+export function formatFleetPrune(result: IrcPeerPruneResult, applied: boolean): string {
+	const lines = ["SESSION\tNAME\tPID\tLAST_SEEN\tREASON"];
+	for (const { peer, reason } of result.candidates) {
+		lines.push([peer.sessionId, peer.name, String(peer.pid), peer.lastSeen, reason].map(printable).join("\t"));
+	}
+	lines.push(`${applied ? "APPLIED" : "DRY_RUN"}\tcandidates=${result.candidates.length}\tdeleted=${result.deleted}`);
+	return `${lines.join("\n")}\n`;
+}
+
 export function parseSince(value: string | undefined, nowMs = Date.now()): number | undefined {
 	if (!value) return undefined;
 	const duration = /^(\d+)(s|m|h|d|w)$/.exec(value);
@@ -283,6 +324,19 @@ function decodeErrorRow(
 		sourceJournalUri,
 	};
 }
+function latestErrorEntries(entries: readonly CustomEntry[]): readonly CustomEntry[] {
+	const latestByEventId = new Map<string, CustomEntry>();
+	for (const entry of entries) {
+		if (entry.customType === "ui_error_clear" && isRecord(entry.data) && entry.data.version === 1) {
+			latestByEventId.clear();
+			continue;
+		}
+		if (entry.customType !== "ui_error" || !isRecord(entry.data) || entry.data.version !== 2) continue;
+		const eventId = stringField(entry.data, "id");
+		if (eventId) latestByEventId.set(eventId, entry);
+	}
+	return [...latestByEventId.values()];
+}
 
 async function collectJournalPaths(sessionsRoot: string): Promise<readonly string[]> {
 	try {
@@ -316,8 +370,8 @@ export async function collectFleetErrors(options: FleetErrorsOptions = {}): Prom
 			if (options.session && projection.header.id !== options.session) continue;
 			if (options.workstream && workstream !== options.workstream) continue;
 			const sourceJournalUri = Bun.pathToFileURL(journalPath).href;
-			for (const entry of projection.entries) {
-				if (entry.type !== "custom") continue;
+			const customEntries = projection.entries.filter((entry): entry is CustomEntry => entry.type === "custom");
+			for (const entry of latestErrorEntries(customEntries)) {
 				const row = decodeErrorRow(entry, projection.header, sourceJournalUri);
 				if (!row || (since !== undefined && row.timestamp < since)) continue;
 				if (options.rollout && row.rolloutId !== options.rollout) continue;

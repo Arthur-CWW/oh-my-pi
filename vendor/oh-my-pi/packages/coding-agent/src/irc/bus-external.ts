@@ -2,7 +2,11 @@ import { Database } from "bun:sqlite";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { decodeFleetCapability, type FleetCapability } from "../session/fleet-capability";
+import {
+	classifyFleetBuildProvenance,
+	decodeFleetCapability,
+	type FleetCapability,
+} from "../session/fleet-capability";
 import type { IrcDeliveryRecord, IrcMessageOrigin } from "./bus";
 
 export type IrcExternalPeerState = "unknown" | "working" | "waiting_input" | "idle";
@@ -82,6 +86,38 @@ export interface IrcExternalBusOptions {
 	readonly readonly?: boolean;
 }
 export const IRC_EXTERNAL_STALE_MS = 10 * 60 * 1000;
+
+export interface IrcPeerPruneCandidate {
+	readonly peer: IrcExternalPeer;
+	readonly reason: "stale-dead-test-or-temp";
+}
+
+export interface IrcPeerPruneResult {
+	readonly candidates: readonly IrcPeerPruneCandidate[];
+	readonly deleted: number;
+}
+
+function isProcessAlive(pid: number): boolean {
+	if (!Number.isSafeInteger(pid) || pid <= 0) return false;
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch (error) {
+		return (error as NodeJS.ErrnoException).code === "EPERM";
+	}
+}
+
+function isTempPeer(peer: IrcExternalPeer): boolean {
+	const resolved = path.resolve(peer.cwd);
+	const tempRoot = path.resolve(os.tmpdir());
+	return resolved === tempRoot || resolved.startsWith(`${tempRoot}${path.sep}`) || resolved.startsWith("/var/folders/");
+}
+
+function hasTestOrTempProvenance(peer: IrcExternalPeer): boolean {
+	if (isTempPeer(peer)) return true;
+	if (peer.buildDigest === undefined && peer.version === undefined && peer.fleetCapability === undefined) return false;
+	return !classifyFleetBuildProvenance(peer).valid;
+}
 
 const DEFAULT_DB_PATH = path.join(os.homedir(), ".omp", "agent", "irc-bus.sqlite");
 
@@ -192,6 +228,7 @@ export class IrcExternalBus {
 	}
 
 	readonly #db: Database;
+	#fleetCapabilitySelect = "fleet_capability_json";
 
 	#ensurePeerStateColumns(): void {
 		const columns = new Set(
@@ -240,7 +277,7 @@ export class IrcExternalBus {
 	#getPeerBySessionId(sessionId: string): IrcExternalPeer | undefined {
 		const row = this.#db
 			.query<PeerRow, { $sessionId: string }>(
-				"SELECT session_id, name, cwd, pid, last_seen, state, state_ts, explicit_name, session_file, owner_epoch, build_digest, version, fleet_capability_json FROM peers WHERE session_id = $sessionId",
+				`SELECT session_id, name, cwd, pid, last_seen, state, state_ts, explicit_name, session_file, owner_epoch, build_digest, version, ${this.#fleetCapabilitySelect} FROM peers WHERE session_id = $sessionId`,
 			)
 			.get({ $sessionId: sessionId });
 		return row ? toPeer(row) : undefined;
@@ -248,9 +285,15 @@ export class IrcExternalBus {
 
 	constructor(readonly dbPath: string = DEFAULT_DB_PATH, options: IrcExternalBusOptions = {}) {
 		if (!options.readonly) fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-		this.#db = options.readonly ? new Database(dbPath, { readonly: true, strict: true }) : new Database(dbPath);
+		this.#db = options.readonly ? new Database(dbPath, { readonly: true }) : new Database(dbPath);
 		this.#db.run("PRAGMA busy_timeout = 3000");
-		if (options.readonly) return;
+		if (options.readonly) {
+			const columns = this.#db.query<TableInfoRow, []>("PRAGMA table_info(peers)").all();
+			if (!columns.some(column => column.name === "fleet_capability_json")) {
+				this.#fleetCapabilitySelect = "NULL AS fleet_capability_json";
+			}
+			return;
+		}
 		this.#db.run("PRAGMA journal_mode = WAL");
 		this.#db.run(`
 			CREATE TABLE IF NOT EXISTS peers (
@@ -381,7 +424,7 @@ export class IrcExternalBus {
 		const staleMs = options.staleMs ?? IRC_EXTERNAL_STALE_MS;
 		return this.#db
 			.query<PeerRow, []>(
-				"SELECT session_id, name, cwd, pid, last_seen, state, state_ts, explicit_name, session_file, owner_epoch, build_digest, version, fleet_capability_json FROM peers ORDER BY last_seen DESC",
+				`SELECT session_id, name, cwd, pid, last_seen, state, state_ts, explicit_name, session_file, owner_epoch, build_digest, version, ${this.#fleetCapabilitySelect} FROM peers ORDER BY last_seen DESC`,
 			)
 			.all()
 			.filter(
@@ -392,10 +435,43 @@ export class IrcExternalBus {
 			.map(toPeer);
 	}
 
+	prunePeers(options: {
+		readonly retentionMs: number;
+		readonly nowMs?: number;
+		readonly apply?: boolean;
+		readonly isProcessAlive?: (pid: number) => boolean;
+	}): IrcPeerPruneResult {
+		if (!Number.isSafeInteger(options.retentionMs) || options.retentionMs < 1)
+			throw new Error("Peer prune retention must be a positive integer");
+		const nowMs = options.nowMs ?? Date.now();
+		const ownerAlive = options.isProcessAlive ?? isProcessAlive;
+		const candidates = this.listPeers({ includeStale: true })
+			.filter(peer => nowMs - parseTime(peer.lastSeen) > options.retentionMs)
+			.filter(peer => !ownerAlive(peer.pid))
+			.filter(hasTestOrTempProvenance)
+			.map(peer => ({ peer, reason: "stale-dead-test-or-temp" as const }));
+		if (!options.apply) return { candidates, deleted: 0 };
+		let deleted = 0;
+		for (const candidate of candidates) {
+			if (ownerAlive(candidate.peer.pid)) continue;
+			const result = this.#db
+				.query(
+					"DELETE FROM peers WHERE session_id = $sessionId AND pid = $pid AND last_seen = $lastSeen",
+				)
+				.run({
+					$sessionId: candidate.peer.sessionId,
+					$pid: candidate.peer.pid,
+					$lastSeen: candidate.peer.lastSeen,
+				});
+			deleted += result.changes;
+		}
+		return { candidates, deleted };
+	}
+
 	findPeerByName(name: string, options: { excludeSessionId?: string } = {}): IrcExternalPeer | undefined {
 		const rows = this.#db
 			.query<PeerRow, { $name: string }>(
-				"SELECT session_id, name, cwd, pid, last_seen, state, state_ts, explicit_name, session_file, owner_epoch, build_digest, version, fleet_capability_json FROM peers WHERE name = $name ORDER BY last_seen DESC",
+				`SELECT session_id, name, cwd, pid, last_seen, state, state_ts, explicit_name, session_file, owner_epoch, build_digest, version, ${this.#fleetCapabilitySelect} FROM peers WHERE name = $name ORDER BY last_seen DESC`,
 			)
 			.all({ $name: name });
 		const row = rows.find(

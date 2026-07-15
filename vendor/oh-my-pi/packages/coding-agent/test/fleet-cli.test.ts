@@ -1,7 +1,14 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, it } from "bun:test";
 import { TempDir } from "@oh-my-pi/pi-utils";
-import { collectFleetErrors, collectFleetStatus, formatFleetErrors, formatFleetStatus } from "../src/cli/fleet-cli";
+import {
+	collectFleetErrors,
+	collectFleetStatus,
+	formatFleetErrors,
+	formatFleetPrune,
+	formatFleetStatus,
+	pruneFleetPeers,
+} from "../src/cli/fleet-cli";
 import { IrcExternalBus } from "../src/irc/bus-external";
 import { createFleetCapability } from "../src/session/fleet-capability";
 import { RolloutJournal } from "../src/session/rollout-journal";
@@ -38,6 +45,7 @@ function journalText(args: {
 		customType: "ui_error",
 		data: {
 			version: 2,
+			id: error.id,
 			firstTimestamp: error.timestamp,
 			lastTimestamp: error.timestamp,
 			message: `failure ${error.cause}`,
@@ -68,6 +76,14 @@ describe("fleet inspection projections", () => {
 				id: "session-alpha",
 				workstream: "fleet-alpha",
 				errors: [
+					{
+						id: "e1",
+						cause: "network",
+						timestamp: NOW - 6_000,
+						buildDigest: "digest-a",
+						rolloutId: "rollout-a",
+						count: 1,
+					},
 					{
 						id: "e1",
 						cause: "network",
@@ -200,5 +216,78 @@ describe("fleet inspection projections", () => {
 		await collectFleetErrors({ sessionsRoot: root, controlDbPath });
 		const after = await Promise.all(sourcePaths.map(bytes));
 		expect(after).toEqual(before);
+	});
+
+	it("dry-runs and applies only stale dead test/temp heartbeat rows without deleting journals", async () => {
+		using tempDir = TempDir.createSync("@omp-fleet-cli-prune-");
+		const ircDbPath = `${tempDir.path()}/irc.sqlite`;
+		const journalPath = `${tempDir.path()}/session.jsonl`;
+		await Bun.write(journalPath, '{"type":"session"}\n');
+		const bus = new IrcExternalBus(ircDbPath);
+		const fakeCapability = createFleetCapability({
+			buildDigest: "0".repeat(64),
+			productVersion: "session-runner-test",
+			controlProtocol: CURRENT_SESSION_CONTROL_PROTOCOL,
+		});
+		bus.registerPeer({
+			sessionId: "stale-test",
+			name: "fixture",
+			cwd: tempDir.path(),
+			pid: 999_999,
+			sessionFile: journalPath,
+			buildDigest: "0".repeat(64),
+			version: "session-runner-test",
+			fleetCapability: fakeCapability,
+		});
+		bus.registerPeer({
+			sessionId: "stale-legitimate",
+			name: "legacy",
+			cwd: "/Users/operator/project",
+			pid: 999_998,
+			sessionFile: journalPath,
+		});
+		bus.registerPeer({
+			sessionId: "fresh-test",
+			name: "fresh-fixture",
+			cwd: tempDir.path(),
+			pid: 999_997,
+			buildDigest: "0".repeat(64),
+			version: "session-runner-test",
+			fleetCapability: fakeCapability,
+		});
+		bus.close();
+		const editDb = new Database(ircDbPath);
+		editDb.query("UPDATE peers SET last_seen = $lastSeen WHERE session_id <> 'fresh-test'").run({
+			$lastSeen: new Date(NOW - 8 * 24 * 60 * 60 * 1000).toISOString(),
+		});
+		editDb.close();
+
+		const before = await bytes(ircDbPath);
+		const preview = pruneFleetPeers({
+			ircDbPath,
+			nowMs: NOW,
+			retentionMs: 7 * 24 * 60 * 60 * 1000,
+			isProcessAlive: () => false,
+		});
+		expect(preview.candidates.map(item => item.peer.sessionId)).toEqual(["stale-test"]);
+		expect(preview.deleted).toBe(0);
+		expect(formatFleetPrune(preview, false)).toContain("DRY_RUN\tcandidates=1\tdeleted=0");
+		expect(await bytes(ircDbPath)).toEqual(before);
+
+		const applied = pruneFleetPeers({
+			ircDbPath,
+			nowMs: NOW,
+			retentionMs: 7 * 24 * 60 * 60 * 1000,
+			isProcessAlive: () => false,
+			apply: true,
+		});
+		expect(applied.deleted).toBe(1);
+		const verify = new IrcExternalBus(ircDbPath, { readonly: true });
+		expect(verify.listPeers({ includeStale: true }).map(peer => peer.sessionId).sort()).toEqual([
+			"fresh-test",
+			"stale-legitimate",
+		]);
+		verify.close();
+		expect(await Bun.file(journalPath).text()).toBe('{"type":"session"}\n');
 	});
 });

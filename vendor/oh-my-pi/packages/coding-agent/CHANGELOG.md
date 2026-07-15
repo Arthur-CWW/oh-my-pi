@@ -15,6 +15,7 @@
 - Added epoch-fenced `prepare-rollout` session control with durable cordons, safe bounded drain checkpoints, restart-child manifests, manual-pause provenance, and typed task-spawn refusal.
 - Added read-only `omp fleet status` and `omp fleet errors` projections for local peer compatibility, rollout state, journaled ErrorInbox evidence, and fleet incidents.
 - Added journal-authoritative fleet rollout planning with digest/N−1 preflight, compatibility and pin classification, idle-first canary waves, controller leases, stale-epoch reclassification, and failure freezing.
+- Added dry-run-by-default `omp fleet prune` for stale, dead test/temp heartbeat rows; `--apply` deletes only peer index records and preserves session journals.
 
 - Added `task.maxLiveChildren` FIFO admission control to bound peak live in-process subagents without charging queued time against child runtime limits.
 - Per-spawn `model` override for `task` tool items: each spawn item accepts an optional `model` selector that takes priority over agent-level `task.agentModelOverrides`. Invalid overrides are rejected at schedule time with a formatted error listing available models, and spawn receipts now include a resolved model chain (e.g., `explore → "Rust specialist" → openai/gpt-5.2:high`).
@@ -30,6 +31,7 @@
 - `Ctrl-Q` is direct cancellation (including focused-child return); `Ctrl-Enter` remains the follow-up queue action in the attached full TUI. Typed command automation and vendor-sync v2 policy plumbing are available, and the typed daily vendor `--apply` path is active for the current 21-entry manifest (NCode removed); the latest apply updated codex, plugins, cua, chrome-devtools, and whisper, left cmux blocked by a dirty tree, and left pins untouched.
 ### Fixed
 - Provider request/stream failures now render structured cards with provider, model, agent/session owner, typed cause, retry disposition, timestamped ErrorInbox facets, and raw SDK detail; user interrupts remain card-free.
+- Fixed fleet rollout eligibility to reject non-release build provenance and dead or replaced owners both during planning and immediately before control sends, and isolated session-runner capability tests from the shared peer registry.
 - Fixed custom model validation to accept subscription-backed `auth: oauth` providers without requiring an API key.
 - Selecting a session already owned by a verified live cmux surface now activates that workspace and surface instead of failing with `Session is controlled by external owner`.
 - Agent resource/error aggregation now records failed non-cancelled child jobs as typed, redacted `ErrorInbox` records with transcript/final-output recovery links; `agent://` exposes final output with a `history://` pointer, while invalid `agents://` suggests the singular protocol.

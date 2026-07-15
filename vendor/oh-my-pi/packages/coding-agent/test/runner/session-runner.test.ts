@@ -12,6 +12,7 @@ import { z } from "zod";
 import * as autoThinkingClassifier from "../../src/auto-thinking/classifier";
 import { ModelRegistry } from "../../src/config/model-registry";
 import { Settings } from "../../src/config/settings";
+import { IrcExternalBus, type IrcExternalPeer } from "../../src/irc/bus-external";
 import { createTerminalSessionController } from "../../src/modes/terminal-session-controller";
 import {
 	type AttachRunnerViewCommand,
@@ -62,7 +63,14 @@ import { AgentSession } from "../../src/session/agent-session";
 import { AuthStorage } from "../../src/session/auth-storage";
 import { isBlobRef } from "../../src/session/blob-store";
 import { DurableInputQueue } from "../../src/session/durable-input-queue";
+import {
+	createFleetCompatibilityProfile,
+	FLEET_ROLLOUT_FEATURES,
+	type FleetCapability,
+} from "../../src/session/fleet-capability";
+import { createFleetRolloutPlan } from "../../src/session/fleet-rollout-plan";
 import { convertToLlm } from "../../src/session/messages";
+import { CURRENT_SESSION_CONTROL_PROTOCOL, decodeSessionControlCommand } from "../../src/session/session-control";
 import {
 	SessionManager,
 	SessionRevisionConflictError,
@@ -81,8 +89,21 @@ const runnerIdentity = {
 } as const;
 
 const roots: string[] = [];
+const externalBuses: IrcExternalBus[] = [];
+
+async function snapshotDefaultPeerStore(): Promise<{ readonly bytes?: Uint8Array; readonly mtimeMs?: number }> {
+	const dbPath = path.join(os.homedir(), ".omp", "agent", "irc-bus.sqlite");
+	try {
+		const [bytes, stat] = await Promise.all([fs.readFile(dbPath), fs.stat(dbPath)]);
+		return { bytes, mtimeMs: stat.mtimeMs };
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
+		throw error;
+	}
+}
 
 afterEach(async () => {
+	for (const bus of externalBuses.splice(0)) bus.close();
 	vi.restoreAllMocks();
 	await Promise.all(roots.splice(0).map(root => fs.rm(root, { recursive: true, force: true })));
 });
@@ -129,6 +150,8 @@ async function createLiveFixture(holdProviderResponses = false, reloadSshTool?: 
 	const muxRoot = path.join(root, "mux");
 	await fs.mkdir(project, { recursive: true });
 	await fs.mkdir(sessions, { recursive: true });
+	const externalIrcBus = new IrcExternalBus(path.join(root, "irc-bus.sqlite"));
+	externalBuses.push(externalIrcBus);
 
 	const model = getBundledModel("anthropic", "claude-sonnet-4-5");
 	const alternateModel = getBundledModel("anthropic", "claude-haiku-4-5");
@@ -226,6 +249,7 @@ async function createLiveFixture(holdProviderResponses = false, reloadSshTool?: 
 		settings,
 		convertToLlm,
 		modelRegistry,
+		externalIrcBus,
 		toolRegistry: new Map([
 			[alphaTool.name, alphaTool],
 			[betaTool.name, betaTool],
@@ -251,6 +275,7 @@ async function createLiveFixture(holdProviderResponses = false, reloadSshTool?: 
 		root,
 		muxRoot,
 		sessionFile,
+		externalIrcBus,
 		ownership,
 		queue,
 		session,
@@ -282,6 +307,83 @@ async function createLiveFixture(holdProviderResponses = false, reloadSshTool?: 
 }
 
 describe("live SessionRunner", () => {
+	it("advertises rollout capability through the real runner and planner", async () => {
+		const defaultStoreBefore = await snapshotDefaultPeerStore();
+		const fixture = await createLiveFixture();
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const runner = yield* makeSessionRunnerLive(fixture, { mailboxCapacity: 1, eventCapacity: 1 });
+					const sessionId = fixture.sessionManager.getSessionId();
+					const status = decodeSessionControlCommand({
+						schemaVersion: 1,
+						commandId: "00000000-0000-4000-8000-000000000002",
+						source: {
+							kind: "local-cli",
+							instanceId: "00000000-0000-4000-8000-000000000003",
+							pid: process.pid,
+						},
+						sessionId,
+						targetOwnerEpoch: fixture.ownership.ownerEpoch,
+						requestedAt: new Date().toISOString(),
+						intent: { kind: "status" },
+					});
+					const result = yield* runner.applySessionControl(status);
+					expect(result).toHaveProperty("fleetCapability");
+					const capability = (result as { readonly fleetCapability: FleetCapability }).fleetCapability;
+					expect(capability.rolloutFeatures).toEqual(FLEET_ROLLOUT_FEATURES);
+
+					const now = new Date().toISOString();
+					const peer: IrcExternalPeer = {
+						sessionId,
+						name: "fresh-runner",
+						cwd: fixture.root,
+						pid: process.pid,
+						lastSeen: now,
+						state: "idle",
+						stateTs: now,
+						ownerEpoch: fixture.ownership.ownerEpoch,
+						buildDigest: fixture.runnerIdentity.buildRevision.digest,
+						version: fixture.runnerIdentity.buildRevision.version,
+						fleetCapability: capability,
+					};
+					const legacyPeer: IrcExternalPeer = { ...peer, sessionId: "legacy-runner", fleetCapability: undefined };
+					const plan = createFleetRolloutPlan({
+						peers: [peer, legacyPeer],
+						target: { digest: "1".repeat(64), source: { kind: "blessed" } },
+						previousDigest: "0".repeat(64),
+						compatibility: createFleetCompatibilityProfile(
+							CURRENT_SESSION_CONTROL_PROTOCOL,
+							FLEET_ROLLOUT_FEATURES,
+						),
+						initiatorSessionIds: new Set(),
+						nowMs: Date.parse(now),
+						id: (() => {
+							let sequence = 0;
+							return () => `test-id-${++sequence}`;
+						})(),
+					});
+					expect(plan.orderedTargets).toEqual([]);
+					expect(plan.excluded).toHaveLength(2);
+					expect(plan.excluded).toContainEqual(
+						expect.objectContaining({
+							sessionId,
+							state: "LegacyIncompatible",
+							reason: "peer build digest is not a nonzero release SHA-256",
+						}),
+					);
+					expect(plan.excluded).toContainEqual(
+						expect.objectContaining({
+							sessionId: "legacy-runner",
+							state: "LegacyIncompatible",
+						}),
+					);
+				}),
+			),
+		);
+		expect(await snapshotDefaultPeerStore()).toEqual(defaultStoreBefore);
+	});
+
 	it("uses queue and transcript authority across replay, fencing, resync, detach, and stop", async () => {
 		const fixture = await createLiveFixture();
 		await Effect.runPromise(
@@ -387,7 +489,8 @@ describe("live SessionRunner", () => {
 					const runner = yield* makeSessionRunnerLive(fixture, { mailboxCapacity: 1, eventCapacity: 4 });
 					const local = yield* runner.attachView(attach("local-controller", "controller", 0));
 					const remote = yield* runner.attachView(attach("remote-controller", "controller", 0));
-					if (local.capability !== "controller" || remote.capability !== "controller") throw new Error("expected controllers");
+					if (local.capability !== "controller" || remote.capability !== "controller")
+						throw new Error("expected controllers");
 					expect(remote.controllerEpoch).toBeGreaterThan(local.controllerEpoch);
 					const stale = yield* Effect.flip(
 						local.submitInput(submit(local.viewId, local.controllerEpoch, "displaced", 0)),

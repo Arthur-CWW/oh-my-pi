@@ -591,6 +591,8 @@ export interface AgentSessionConfig {
 		bus?: AmbientAgentRenamerOptions["bus"];
 		complete?: AmbientRenameCompletion;
 	};
+	/** Peer registry override. Tests that publish heartbeat/status MUST supply an isolated store. */
+	externalIrcBus?: IrcExternalBus;
 	/** Test seams for the opt-in announcement feed watcher. Production callers leave this unset. */
 	feedWatcher?: Omit<FeedWatcherOptions, "fetch" | "complete" | "notice" | "irc" | "sources"> & {
 		fetch?: FeedWatcherOptions["fetch"];
@@ -1375,6 +1377,7 @@ export class AgentSession {
 	#ircExternalSessionId: string | undefined;
 	#ircExternalPeerName: string | undefined;
 	#ircExternalPeerState: Exclude<IrcExternalPeerState, "unknown"> | undefined;
+	readonly #externalIrcBus: IrcExternalBus | undefined;
 	#ambientAgentRenamer: AmbientAgentRenamer | undefined;
 	#feedWatcher: FeedWatcher | undefined;
 	// Agent identity (registry id) used for IRC routing and job ownership.
@@ -1665,6 +1668,7 @@ export class AgentSession {
 	constructor(config: AgentSessionConfig) {
 		this.agent = config.agent;
 		this.sessionManager = config.sessionManager;
+		this.#externalIrcBus = config.externalIrcBus;
 		this.#ownershipLossUnsubscribe = this.sessionManager.subscribeOwnershipLost(error => {
 			if (!this.#handleDurableOwnershipLoss(error)) return;
 			this.emitNotice("error", error.message, "session-ownership");
@@ -12913,7 +12917,7 @@ export class AgentSession {
 				sessionId,
 			});
 		this.#ircExternalPeerName = name;
-		const bus = IrcExternalBus.global();
+		const bus = this.#externalIrcBus ?? IrcExternalBus.global();
 		bus.registerPeer({
 			sessionId,
 			name,

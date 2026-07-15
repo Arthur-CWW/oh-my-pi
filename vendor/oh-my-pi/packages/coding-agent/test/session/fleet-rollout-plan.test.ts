@@ -53,7 +53,7 @@ function peer(
 		sessionId,
 		name: sessionId,
 		cwd: "/workspace",
-		pid: sessionId.charCodeAt(0),
+		pid: process.pid,
 		lastSeen: NOW,
 		state,
 		stateTs: NOW,
@@ -168,6 +168,29 @@ describe("fleet rollout planning", () => {
 			}),
 		);
 	});
+
+	it("rejects test fixture build provenance before choosing a canary", () => {
+		const fakeCapability = createFleetCapability({
+			buildDigest: "0".repeat(64),
+			productVersion: "session-runner-test",
+			controlProtocol: CURRENT_SESSION_CONTROL_PROTOCOL,
+		});
+		const fake = peer("project-fixture", "idle", {
+			buildDigest: "0".repeat(64),
+			version: "session-runner-test",
+			fleetCapability: fakeCapability,
+		});
+		const plan = planFor([fake, peer("cmux-release")]);
+
+		expect(plan.orderedTargets.map(item => item.sessionId)).toEqual(["cmux-release"]);
+		expect(plan.excluded).toContainEqual(
+			expect.objectContaining({
+				sessionId: "project-fixture",
+				state: "LegacyIncompatible",
+				reason: "peer build digest is not a nonzero release SHA-256",
+			}),
+		);
+	});
 });
 
 describe("fleet rollout authority and execution", () => {
@@ -264,6 +287,38 @@ describe("fleet rollout authority and execution", () => {
 		expect(called).toBe(false);
 		expect(fleetRolloutRecords(journal, plan.fleetRolloutId)).toMatchObject([
 			{ record: "target", sessionId: "moving", state: "BusyDeferred", reason: "owner epoch changed before command" },
+		]);
+		await manager.close();
+	});
+
+	it("defers a target that dies between planning and command without sending", async () => {
+		const { manager, journal } = await controllerJournal();
+		const planned = peer("dead-before-command");
+		const plan = planFor([planned]);
+		let sent = false;
+		const result = await executeFleetRolloutPlan({
+			plan,
+			journal,
+			listPeers: () => [planned],
+			compatibility,
+			initiatorSessionIds: new Set(),
+			isProcessAlive: () => false,
+			executeTarget: async () => {
+				sent = true;
+			},
+			nowMs: Date.parse(NOW),
+			now: () => NOW,
+		});
+
+		expect(result).toEqual({ state: "Succeeded", completed: [] });
+		expect(sent).toBe(false);
+		expect(fleetRolloutRecords(journal, plan.fleetRolloutId)).toMatchObject([
+			{
+				record: "target",
+				sessionId: "dead-before-command",
+				state: "BusyDeferred",
+				reason: "owner process is not alive",
+			},
 		]);
 		await manager.close();
 	});

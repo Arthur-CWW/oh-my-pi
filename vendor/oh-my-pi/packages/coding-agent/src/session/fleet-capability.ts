@@ -1,4 +1,4 @@
-import { CURRENT_SESSION_VERSION, type SessionWorkstream, decodeSessionWorkstream } from "./session-entries";
+import { CURRENT_SESSION_VERSION, decodeSessionWorkstream, type SessionWorkstream } from "./session-entries";
 
 export const FLEET_CAPABILITY_ENVELOPE_MAJOR = 1 as const;
 export const IRC_FLEET_ENVELOPE_MAJOR = 1 as const;
@@ -41,6 +41,28 @@ export interface FleetCompatibilityProfile {
 export type FleetCompatibilityResult =
 	| { readonly kind: "compatible"; readonly reasons: readonly [] }
 	| { readonly kind: "LegacyIncompatible" | "newer-blocked"; readonly reasons: readonly string[] };
+
+const RELEASE_DIGEST = /^(?:sha256:)?[a-f0-9]{64}$/i;
+const RELEASE_VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
+
+export function classifyFleetBuildProvenance(peer: {
+	readonly buildDigest?: string;
+	readonly version?: string;
+	readonly fleetCapability?: unknown;
+}): { readonly valid: true } | { readonly valid: false; readonly reason: string } {
+	const capability = decodeFleetCapability(peer.fleetCapability);
+	if (!capability) return { valid: false, reason: "peer did not advertise a recognized fleet capability" };
+	if (!peer.buildDigest || !RELEASE_DIGEST.test(peer.buildDigest) || /^sha256:0{64}$/i.test(peer.buildDigest) || /^0{64}$/.test(peer.buildDigest)) {
+		return { valid: false, reason: "peer build digest is not a nonzero release SHA-256" };
+	}
+	if (!peer.version || !RELEASE_VERSION.test(peer.version)) {
+		return { valid: false, reason: "peer product version is not a release version" };
+	}
+	if (capability.buildDigest !== peer.buildDigest || capability.productVersion !== peer.version) {
+		return { valid: false, reason: "peer build provenance does not match its fleet capability" };
+	}
+	return { valid: true };
+}
 
 const CURRENT_JOURNAL_SCHEMA: FleetJournalSchemaRange = {
 	read: { minMajor: 1, maxMajor: CURRENT_SESSION_VERSION, maxMinor: 0 },
@@ -119,7 +141,11 @@ export function decodeFleetCapability(value: unknown): FleetCapability | undefin
 	const controlProtocol = decodeProtocolRange(value.controlProtocol);
 	const viewProtocol = decodeProtocolRange(value.viewProtocol);
 	if (!read || !write || !controlProtocol || !viewProtocol) return undefined;
-	if (!isRecord(value.ircEnvelope) || !Number.isSafeInteger(value.ircEnvelope.major) || (value.ircEnvelope.major as number) < 1) {
+	if (
+		!isRecord(value.ircEnvelope) ||
+		!Number.isSafeInteger(value.ircEnvelope.major) ||
+		(value.ircEnvelope.major as number) < 1
+	) {
 		return undefined;
 	}
 	if (!Array.isArray(value.rolloutFeatures) || value.rolloutFeatures.some(feature => typeof feature !== "string")) {
@@ -147,7 +173,10 @@ function rangesIntersect(left: FleetProtocolRange, right: FleetProtocolRange): b
 	return Math.max(left.minMajor, right.minMajor) <= Math.min(left.maxMajor, right.maxMajor);
 }
 
-function incompatibilityKind(peer: FleetProtocolRange, local: FleetProtocolRange): "LegacyIncompatible" | "newer-blocked" {
+function incompatibilityKind(
+	peer: FleetProtocolRange,
+	local: FleetProtocolRange,
+): "LegacyIncompatible" | "newer-blocked" {
 	return peer.minMajor > local.maxMajor ? "newer-blocked" : "LegacyIncompatible";
 }
 
@@ -170,7 +199,8 @@ export function classifyFleetCompatibility(
 		};
 	}
 	const capability = decodeFleetCapability(advertised);
-	if (!capability) return { kind: "LegacyIncompatible", reasons: ["peer did not advertise a recognized fleet capability"] };
+	if (!capability)
+		return { kind: "LegacyIncompatible", reasons: ["peer did not advertise a recognized fleet capability"] };
 	const legacyReasons: string[] = [];
 	const newerReasons: string[] = [];
 	const checkRange = (name: string, peerRange: FleetProtocolRange, localRange: FleetProtocolRange): void => {

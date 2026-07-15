@@ -22,6 +22,7 @@ import { requireHealthyFleetTarget } from "../session/fleet-health";
 import {
 	executeFleetRolloutPlan,
 	fleetRolloutRecords,
+	isFleetOwnerProcessAlive,
 	FleetControllerLease,
 	startFleetRollout,
 	type FleetControllerJournal,
@@ -133,6 +134,7 @@ export interface FleetRolloutOperationOptions {
 	readonly recoveryTimeoutMs?: number;
 	readonly controlTimeoutMs?: number;
 	readonly controller?: FleetControllerFactory;
+	readonly isProcessAlive?: (pid: number) => boolean;
 }
 
 export interface FleetRolloutOperationResult {
@@ -458,9 +460,14 @@ async function executeRolloutTarget(input: {
 	readonly controlDbPath?: string;
 	readonly compatibility: FleetCompatibilityProfile;
 	readonly sourceInstanceId: string;
+	readonly isProcessAlive: (pid: number) => boolean;
 }): Promise<void> {
 	const current = input.allPeers().find(peer => peer.sessionId === input.target.sessionId);
 	if (!current) throw new Error(`Fleet target ${input.target.sessionId} disappeared before rollout`);
+	if (!input.isProcessAlive(current.pid)) throw new Error(`Fleet target ${current.sessionId} owner process is not alive`);
+	if (current.pid !== input.target.peer.pid) throw new Error(`Fleet target ${current.sessionId} owner process changed before rollout`);
+	if (current.ownerEpoch !== input.target.expectedOwnerEpoch)
+		throw new Error(`Fleet target ${current.sessionId} owner epoch changed before rollout`);
 	const currentDigest = targetDigest(current);
 	const startedAt = Date.now();
 	const prepare = buildFleetControlCommand({
@@ -595,6 +602,7 @@ export async function executeFleetRollout(options: FleetRolloutOperationOptions)
 			initiatorSessionIds: new Set([controller.manager.getSessionId()]),
 			canarySessionId: canary?.peer.sessionId,
 			fleetRolloutId: rolloutId,
+			isProcessAlive: options.isProcessAlive,
 		});
 		if (started.mode === "read-only") return { mode: "read-only", reason: started.reason, plan: { fleetRolloutId: "superseded", target: { digest: release.resolvedDigest, source: { kind: "explicit" } }, previousDigest: release.registry.previous ?? release.resolvedDigest, waves: [], excluded: [], orderedTargets: [], maxUnavailable: 1 } };
 		appendIntentLifecycle(controller.journal, started.plan, "Preflight");
@@ -608,6 +616,7 @@ export async function executeFleetRollout(options: FleetRolloutOperationOptions)
 				journal: controller.journal,
 				listPeers: allPeers,
 				compatibility: LOCAL_COMPATIBILITY,
+				isProcessAlive: options.isProcessAlive,
 				initiatorSessionIds: new Set([controller.manager.getSessionId()]),
 				executeTarget: async target => {
 					const wave = started.plan.waves.find(item => item.waveId === target.waveId);
@@ -627,6 +636,7 @@ export async function executeFleetRollout(options: FleetRolloutOperationOptions)
 						sleep: options.sleep ?? Bun.sleep,
 						controlDbPath: options.controlDbPath,
 						compatibility: LOCAL_COMPATIBILITY,
+						isProcessAlive: options.isProcessAlive ?? isFleetOwnerProcessAlive,
 						sourceInstanceId: randomUUID(),
 					});
 					if (wave?.kind === "canary")

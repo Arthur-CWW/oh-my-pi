@@ -4,6 +4,7 @@ import * as path from "node:path";
 import type { IrcExternalPeer } from "../irc/bus-external";
 import { isIrcExternalPeerFresh } from "../irc/bus-external";
 import {
+	classifyFleetBuildProvenance,
 	classifyFleetCompatibility,
 	type FleetCompatibilityProfile,
 	selectFleetRolloutFeature,
@@ -200,6 +201,17 @@ export interface CreateFleetRolloutPlanOptions {
 	readonly waveSize?: number;
 	readonly nowMs?: number;
 	readonly id?: () => string;
+	readonly isProcessAlive?: (pid: number) => boolean;
+}
+
+export function isFleetOwnerProcessAlive(pid: number): boolean {
+	if (!Number.isSafeInteger(pid) || pid <= 0) return false;
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch (error) {
+		return (error as NodeJS.ErrnoException).code === "EPERM";
+	}
 }
 
 function stateRank(peer: IrcExternalPeer): number {
@@ -219,6 +231,10 @@ function classifyPeer(
 	}
 	if (!isIrcExternalPeerFresh(peer.lastSeen, options.nowMs))
 		return { state: "LegacyIncompatible", reason: "stale peer" };
+	const isProcessAlive = options.isProcessAlive ?? isFleetOwnerProcessAlive;
+	if (!isProcessAlive(peer.pid)) return { state: "BusyDeferred", reason: "owner process is not alive" };
+	const provenance = classifyFleetBuildProvenance(peer);
+	if (!provenance.valid) return { state: "LegacyIncompatible", reason: provenance.reason };
 	const compatibility = classifyFleetCompatibility(peer, options.compatibility);
 	if (compatibility.kind !== "compatible")
 		return { state: "LegacyIncompatible", reason: compatibility.reasons.join("; ") };
@@ -372,6 +388,7 @@ export interface ExecuteFleetRolloutOptions {
 	readonly reobserveTarget?: (target: FleetRolloutTarget) => Promise<void>;
 	readonly nowMs?: number;
 	readonly now?: () => string;
+	readonly isProcessAlive?: (pid: number) => boolean;
 }
 
 function controllerFields(journal: FleetControllerJournal): {
@@ -425,19 +442,19 @@ export async function executeFleetRolloutPlan(
 					initiatorSessionIds: options.initiatorSessionIds,
 					sessionPins: options.sessionPins,
 					nowMs: options.nowMs,
+					isProcessAlive: options.isProcessAlive,
 				})
-			: { state: "LegacyIncompatible" as const, reason: "peer disappeared before command" };
-		if (
-			!current ||
-			reclassified.state !== "Classified" ||
-			reclassified.reason !== undefined ||
-			current.ownerEpoch !== planned.expectedOwnerEpoch
-		) {
-			const state = current?.ownerEpoch !== planned.expectedOwnerEpoch ? "BusyDeferred" : reclassified.state;
-			const reason =
-				current?.ownerEpoch !== planned.expectedOwnerEpoch
+			: { state: "BusyDeferred" as const, reason: "peer disappeared before command" };
+		const ownershipChanged =
+			current !== undefined &&
+			(current.ownerEpoch !== planned.expectedOwnerEpoch || current.pid !== planned.peer.pid);
+		if (!current || reclassified.state !== "Classified" || reclassified.reason !== undefined || ownershipChanged) {
+			const state = ownershipChanged ? "BusyDeferred" : reclassified.state;
+			const reason = ownershipChanged
+				? current.ownerEpoch !== planned.expectedOwnerEpoch
 					? "owner epoch changed before command"
-					: reclassified.reason;
+					: "owner process changed before command"
+				: reclassified.reason;
 			appendFleetRecord(options.journal, targetRecord(options, planned, state, reason));
 			continue;
 		}

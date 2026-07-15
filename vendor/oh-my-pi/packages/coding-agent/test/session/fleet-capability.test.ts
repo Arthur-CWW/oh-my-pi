@@ -71,17 +71,37 @@ describe("fleet capability advertisement and compatibility", () => {
 		};
 		const result = classifyFleetCompatibility({ fleetCapability: newer }, local);
 		expect(result.kind).toBe("newer-blocked");
-		expect(result.reasons.some(reason => reason.includes(`control protocol major range ${newerMajor}-${newerMajor}`))).toBe(true);
+		expect(
+			result.reasons.some(reason => reason.includes(`control protocol major range ${newerMajor}-${newerMajor}`)),
+		).toBe(true);
 	});
 
 	it("never selects unknown or unadvertised commands and rollout features", () => {
-		expect(selectSessionControlCommandKind("future-command", CURRENT_SESSION_CONTROL_PROTOCOL, capability.controlProtocol)).toBeUndefined();
-		expect(selectSessionControlCommandKind("status", CURRENT_SESSION_CONTROL_PROTOCOL, { minMajor: 2, maxMajor: 2, maxMinor: 0 })).toBeUndefined();
-		expect(selectSessionControlCommandKind("prepare-rollout", CURRENT_SESSION_CONTROL_PROTOCOL, { minMajor: 2, maxMajor: 2, maxMinor: 0 })).toBe(
+		expect(
+			selectSessionControlCommandKind(
+				"future-command",
+				CURRENT_SESSION_CONTROL_PROTOCOL,
+				capability.controlProtocol,
+			),
+		).toBeUndefined();
+		expect(
+			selectSessionControlCommandKind("status", CURRENT_SESSION_CONTROL_PROTOCOL, {
+				minMajor: 2,
+				maxMajor: 2,
+				maxMinor: 0,
+			}),
+		).toBeUndefined();
+		expect(
+			selectSessionControlCommandKind("prepare-rollout", CURRENT_SESSION_CONTROL_PROTOCOL, {
+				minMajor: 2,
+				maxMajor: 2,
+				maxMinor: 0,
+			}),
+		).toBe("prepare-rollout");
+		expect(selectFleetRolloutFeature("future-rollout", local, { fleetCapability: capability })).toBeUndefined();
+		expect(selectFleetRolloutFeature("prepare-rollout", local, { fleetCapability: capability })).toBe(
 			"prepare-rollout",
 		);
-		expect(selectFleetRolloutFeature("future-rollout", local, { fleetCapability: capability })).toBeUndefined();
-		expect(selectFleetRolloutFeature("prepare-rollout", local, { fleetCapability: capability })).toBe("prepare-rollout");
 		expect(selectFleetRolloutFeature("status", local, { fleetCapability: capability })).toBe("status");
 		expect(
 			selectFleetRolloutFeature("prepare-rollout", local, {

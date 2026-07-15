@@ -144,10 +144,10 @@ async function releaseFixture(root: string): Promise<ReleaseFixture> {
 	};
 }
 
-function capability(digest: string) {
+function capability(digest: string, productVersion = VERSION) {
 	return createFleetCapability({
 		buildDigest: digest,
-		productVersion: VERSION,
+		productVersion,
 		controlProtocol: CURRENT_SESSION_CONTROL_PROTOCOL,
 		rolloutFeatures: ["status", "prepare-rollout", "rollout-checkpoint"],
 	});
@@ -174,7 +174,7 @@ async function targetFixture(
 			sessionId: manager.getSessionId(),
 			name,
 			cwd: root,
-			pid: 10_000 + name.charCodeAt(0),
+			pid: process.pid,
 			lastSeen: new Date(START).toISOString(),
 			state,
 			stateTs: new Date(START).toISOString(),
@@ -182,7 +182,7 @@ async function targetFixture(
 			ownerEpoch: oldEpoch,
 			buildDigest: oldDigest,
 			version: "15.9.0",
-			fleetCapability: capability(oldDigest),
+			fleetCapability: capability(oldDigest, "15.9.0"),
 		},
 	};
 }
@@ -793,7 +793,7 @@ describe("fleet rollout lifecycle proof", () => {
 			ownerEpoch: "dry-old-epoch",
 			buildDigest: release.previousDigest,
 			version: "15.9.0",
-			fleetCapability: capability(release.previousDigest),
+			fleetCapability: capability(release.previousDigest, "15.9.0"),
 		});
 		dryIrc.updatePeerState(dryPeer.sessionId, "idle");
 		const dryController = await controllerFactory(root);

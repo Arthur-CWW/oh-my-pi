@@ -9,9 +9,16 @@ import {
 	issueFleetControl,
 	resolveFleetSelectors,
 } from "../cli/fleet-operations";
-import { collectFleetErrors, collectFleetStatus, formatFleetErrors, formatFleetStatus } from "../cli/fleet-cli";
+import {
+	collectFleetErrors,
+	collectFleetStatus,
+	formatFleetErrors,
+	formatFleetPrune,
+	formatFleetStatus,
+	pruneFleetPeers,
+} from "../cli/fleet-cli";
 
-const ACTIONS = ["status", "errors", "pause", "resume", "rollout", "rollback", "pin", "unpin"] as const;
+const ACTIONS = ["status", "errors", "prune", "pause", "resume", "rollout", "rollback", "pin", "unpin"] as const;
 
 function fail(message: string): never {
 	throw new Error(`fleet: ${message}`);
@@ -42,6 +49,7 @@ export default class Fleet extends Command {
 		canary: Flags.string({ description: "Explicit canary selector for rollout" }),
 		"wave-size": Flags.integer({ description: "Rolling wave size", default: 1 }),
 		"dry-run": Flags.boolean({ description: "Create and print a rollout plan without control sends", default: false }),
+		apply: Flags.boolean({ description: "Apply a fleet prune (prune defaults to dry-run)", default: false }),
 		to: Flags.string({ description: "Rollback target: previous or an exact digest" }),
 		workstream: Flags.string({ description: "Filter by durable workstream ID" }),
 		all: Flags.boolean({ description: "Include stale peers or select all peers", default: false }),
@@ -53,6 +61,8 @@ export default class Fleet extends Command {
 	static examples = [
 		"# Show fresh fleet peers\n  omp fleet status",
 		"# Include stale peers for one workstream\n  omp fleet status --all --workstream fleet-rollout",
+		"# Preview stale dead test/temp peer index cleanup\n  omp fleet prune",
+		"# Apply stale dead test/temp peer index cleanup\n  omp fleet prune --apply",
 		"# Pause a peer by exact handle\n  omp fleet pause agent-handle",
 		"# Pin one peer to an immutable digest\n  omp fleet pin agent-handle <sha256>",
 		"# Journal a blessed rollout plan\n  omp fleet rollout --blessed --dry-run",
@@ -69,6 +79,8 @@ export default class Fleet extends Command {
 		if (flags.digest && flags.blessed) fail("--digest and --blessed are mutually exclusive");
 		if (flags["wave-size"] !== undefined && (!Number.isSafeInteger(flags["wave-size"]) || flags["wave-size"] < 1))
 			fail("--wave-size must be a positive integer");
+		if (flags.apply && action !== "prune") fail("--apply is accepted only by fleet prune");
+		if (flags.apply && flags["dry-run"]) fail("--apply and --dry-run are mutually exclusive");
 
 		if (action === "status") {
 			if (value || flags.digest || flags.blessed || flags.canary || flags.to || flags["wave-size"] !== 1 || flags["dry-run"])
@@ -76,6 +88,27 @@ export default class Fleet extends Command {
 			let rows = await collectFleetStatus({ workstream: flags.workstream, all: flags.all });
 			if (selector) rows = rows.filter(row => row.sessionId === selector || row.name === selector || row.workstream === selector || row.workstream === `workstream:${selector}`);
 			process.stdout.write(formatFleetStatus(rows));
+			return;
+		}
+
+		if (action === "prune") {
+			if (
+				selector ||
+				value ||
+				flags.digest ||
+				flags.blessed ||
+				flags.canary ||
+				flags.to ||
+				flags["wave-size"] !== 1 ||
+				flags.all ||
+				flags.since ||
+				flags.session ||
+				flags.rollout ||
+				flags.workstream
+			)
+				fail("prune accepts only --dry-run or --apply");
+			const result = pruneFleetPeers({ apply: flags.apply });
+			process.stdout.write(formatFleetPrune(result, flags.apply));
 			return;
 		}
 

@@ -286,6 +286,8 @@ async function spawnChild(mode: "accept" | "stop", root: string): Promise<Record
 		env: {
 			...process.env,
 			AGENT_MUX_DIR: path.join(root, "mux"),
+			HOME: root,
+			OMP_SESSION_CONTROL_DB: path.join(root, "session-control.sqlite"),
 			OMP_SESSION_RUNNER_CHILD_MODE: mode,
 			OMP_SESSION_RUNNER_ROOT: root,
 		},
@@ -355,6 +357,8 @@ const child = Bun.spawnSync([process.execPath, "test", ${JSON.stringify(testPath
 		OMP_SESSION_RUNNER_ROOT: fixtureRoot,
 		OMP_CANARY_OUTPUT: output,
 		OMP_CANARY_COMMAND_ID: commandId,
+		HOME: fixtureRoot,
+		OMP_SESSION_CONTROL_DB: \`\${fixtureRoot}/session-control.sqlite\`,
 		OMP_CANARY_BUILD_DIGEST: digest,
 		AGENT_MUX_DIR: process.env.AGENT_MUX_ROOT,
 	},

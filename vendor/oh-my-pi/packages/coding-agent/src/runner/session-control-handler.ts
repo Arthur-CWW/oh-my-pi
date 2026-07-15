@@ -1,8 +1,10 @@
 import { Effect, type Scope } from "effect";
+import type { AgentSession } from "../session/agent-session";
+import { createFleetCapability, FLEET_ROLLOUT_FEATURES } from "../session/fleet-capability";
 import {
+	type ReleaseRegistryValidationOptions,
 	validateFleetPinSelection,
 	validateFleetUnpinBlessed,
-	type ReleaseRegistryValidationOptions,
 } from "../session/release-registry-validation";
 import {
 	assembleRolloutCheckpoint,
@@ -10,10 +12,6 @@ import {
 	type RolloutCheckpoint,
 	type RolloutPauseProvenance,
 } from "../session/rollout-checkpoint";
-import { createFleetCapability } from "../session/fleet-capability";
-import type { AgentSession } from "../session/agent-session";
-import type { SessionOwnershipHandle } from "../session/session-ownership";
-import type { SessionManager } from "../session/session-manager";
 import {
 	CURRENT_SESSION_CONTROL_PROTOCOL,
 	type FleetPinControlCommand,
@@ -23,7 +21,8 @@ import {
 	type SessionControlCommand,
 	type SessionControlResult,
 } from "../session/session-control";
-import type { RunnerFailure } from "./session-runner";
+import type { SessionManager } from "../session/session-manager";
+import type { SessionOwnershipHandle } from "../session/session-ownership";
 import { InvalidRunnerCommandError } from "./errors";
 import {
 	RUNNER_SCHEMA_VERSION,
@@ -33,6 +32,7 @@ import {
 	type SessionRunnerSnapshot,
 	type SetModelReceipt,
 } from "./protocol";
+import type { RunnerFailure } from "./session-runner";
 
 interface SessionControlResources {
 	readonly ownership: SessionOwnershipHandle;
@@ -56,11 +56,7 @@ export interface SessionControlHandlerOptions {
 	readonly snapshot: () => RunnerEffect<SessionRunnerSnapshot>;
 	readonly enqueue: Enqueue;
 	readonly activeController: () => RunnerControllerRef | undefined;
-	readonly setModel: (
-		viewId: string,
-		controllerEpoch: number,
-		input: unknown,
-	) => RunnerEffect<SetModelReceipt>;
+	readonly setModel: (viewId: string, controllerEpoch: number, input: unknown) => RunnerEffect<SetModelReceipt>;
 	readonly runCompaction: (
 		viewId: string,
 		controllerEpoch: number,
@@ -119,6 +115,7 @@ export function makeSessionControlHandlers(options: SessionControlHandlerOptions
 						buildDigest: resources.runnerIdentity.buildRevision.digest,
 						productVersion: resources.runnerIdentity.buildRevision.version,
 						controlProtocol: CURRENT_SESSION_CONTROL_PROTOCOL,
+						rolloutFeatures: FLEET_ROLLOUT_FEATURES,
 						workstream: resources.sessionManager.getWorkstream(),
 					}),
 				};
@@ -143,7 +140,8 @@ export function makeSessionControlHandlers(options: SessionControlHandlerOptions
 			case "fleet-unpin":
 				return yield* options.enqueue(
 					Effect.tryPromise({
-						try: () => applyFleetPinControl(resources, command as FleetPinControlCommand, options.releaseValidation),
+						try: () =>
+							applyFleetPinControl(resources, command as FleetPinControlCommand, options.releaseValidation),
 						catch: options.asRunnerFailure,
 					}),
 				);
