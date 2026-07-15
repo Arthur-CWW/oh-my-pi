@@ -24,19 +24,23 @@ are hot-swappable bodies over one presence layer. Local-first; latency is a
 tracked number, not a vibe. Behavioral references only (Annie/Grok, Love
 and Deepspace, VTuber culture) — never copied assets.
 
-Before locking architecture, settle GOAL.md's open questions with Arthur:
-latency floor, hard-local inference vs local-data-only, audio-only v1
-acceptability, day-1 memory depth.
+GOAL.md's four architecture questions (latency floor, local inference
+vs local-data-only, audio-only v1, day-1 memory depth) were SETTLED in
+the 2026-07-03 Arthur interview — answers live in GOAL.md §Settled.
+Do not re-interview. HANDOFF-BEHAVIOR.md is the canonical continuation
+record; read it before planning any work — this boot doc is older than
+the work.
 
-Operate as orchestrator: dispatch GPT-5.5 workers via task (packet
-contract; workers skip gates), designer lane (Opus) for UX, verify per
-phase yourself, commit green phases. Log harness papercuts to
+Operate as orchestrator: dispatch workers via task (packet contract;
+workers skip gates; resolve lanes from .omp config + routing-doctrine,
+never restated here), designer lane for UX, verify per phase yourself,
+commit green phases. Log harness papercuts to
 docs/state/harness-friction.md — never fix the harness here.
 ```
 
 ## First moves
 
-1. Interview Arthur on the four open questions (they gate everything).
+1. Read `HANDOFF-BEHAVIOR.md` (canonical continuation — current state lives there, not here).
 2. Latency measurement harness in `apps/ai-companion-rtc` (voice round-trip as a number on every run).
 3. ASMR-presence spike: spatial audio + object-sound vignette using `packages/spatial-audio-renderer` + refs in `data/youtube-liked-asmr-refs/`.
 4. Reference recon (read-only scouts): `~/github/airi`, `~/github/Open-LLM-VTuber`, `~/github/aiavatarkit` — hot-swap avatar/presence-layer patterns worth stealing shapes from, not code.

@@ -1,6 +1,6 @@
 # Playground session — boot
 
-Launch from `~/agents` (playground overlay config — designer=Opus, workers=GPT-5.5):
+Launch from `~/agents` (role→model map lives in the overlay file — read it, it changes faster than this doc):
 
 ```bash
 omp --config ./.omp/playground-config.yml
@@ -48,7 +48,7 @@ Session 3 shipped seven waves across three substreams:
 - **Desktop**: SSH hardened (MagicDNS + multiplexing + fallbacks), sudo paste block for Arthur in feed report; uv installed.
 
 ### Routing
-**GPT-5.5 lanes DOWN** (OpenAI Pro degraded to free tier). `oracle` + `llm-frontend-browser` archived in `skills-attic/disabled-20260708/`. Charter routing override: Opus creates+reviews, Kimi mechanical, Antigravity via `omp token`/`omp -p` — never KIE/API keys.
+**[2026-07-08 snapshot — STALE: OpenAI access recovered 2026-07-10.]** GPT-5.5 lanes were down; `oracle` + `llm-frontend-browser` archived in `skills-attic/disabled-20260708/` (still archived until deliberately restored). Resolve current lanes from the overlay + `docs/fable/routing-doctrine.md`; subscription-over-API rule below remains live.
 
 ## Standing directives (session 3 — all promoted to charter/AGENTS.md)
 

@@ -45,9 +45,9 @@ http://meltdown.localhost:1355/#/graph. Proof artifacts live under
 Review contract with Arthur: he reviews PRODUCTS, not commits. Every
 finished task → docs/qa/primer-<task>.md proof + `bun packages/
 primer-daemon/src/cli.ts progress add` entry → visible in the dashboard.
-Escalate only taste/architecture forks. GPT-5.6 Sol is the current default
-UI/UX lane after the reader portfolio; use Terra for logic/retrieval and
-Kimi for bounded coding when available. Never route a subagent to Fable.
+Escalate only taste/architecture forks. Lane assignments are config, not
+prose: resolve from the session overlay + docs/fable/routing-doctrine.md.
+Never route a subagent to Fable.
 Workers skip gates — you gate in the parent shell. Product LLM calls stay
 on cheap subscription lanes, never the orchestrator model.
 Log papercuts to `docs/state/harness-friction.md`.

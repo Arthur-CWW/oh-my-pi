@@ -140,7 +140,7 @@ Everything below is in the NESTED working tree (81 changed files, uncommitted â€
 5. Gemini video-timeline lane quota-dead (429); local tracks don't need it.
 
 ### Session process rules (Arthur-set, keep)
-- Sol (`openai-codex/gpt-5.6-sol:medium`) default for all subagent work; luna implementation-trivia only, NEVER specs/design. No GPT-5.5/Fable spawns.
+- Sol (`openai-codex/gpt-5.6-sol:medium`) default for all subagent work; luna implementation-trivia only, NEVER specs/design. No Fable spawns. (Dated 2026-07-14; verify against the overlay if the lane world has rotated.)
 - Mac = realtime only; every batch/provision on desktop in named tmux with durable logs (policy enforced in `src/job-queue.ts`).
 - Xanadu posts: short summaries; `--summary-file` flag now exists in `apps/xanadu/src/post.ts` for anything longer.
 - Recordings save server-side (`data/ai-companion-rtc/recordings/`), never browser downloads â€” proof infra for agents, not a user feature.

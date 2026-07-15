@@ -1,3 +1,5 @@
+> **SUPERSEDED — history, not instruction.** The highest-dated `streams/primer/HANDOFF-LIVE-*.md` is the live handoff; never boot from this file. Routing/status claims below were true on 2026-07-10/11 only.
+
 # Primer live handoff — 2026-07-10 (Fable orchestrator session)
 
 Supersedes HANDOFF-LIVE-2026-07-09.md. Read GOAL.md + VISION.md after this.

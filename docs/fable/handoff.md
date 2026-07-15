@@ -6,7 +6,7 @@ Starting a Fable OMP session in `~/agents`:
 omp --config ./.omp/fable-config.yml
 ```
 
-(The overlay disables the advisor and autolearn. Sol at high effort handles orchestration, planning, and escalations; Terra at medium handles normal mutable task work. Mutable work uses `task` packets with a specialist role, owned/excluded files, a least-privilege tool allowlist, and an optional supported model/effort override when specifically required. Keep deliberate design/UI work with `designer`; use `explore` for read-only local scouting and `librarian` for external or API research. The fable-guard prevents Fable subagents.)
+(The overlay disables the advisor and autolearn. Role→model assignments are NOT restated here — read `.omp/fable-config.yml` itself; on any doc/config conflict the config wins (`docs/fable/epistemics.md`). Mutable work uses `task` packets with a specialist role, owned/excluded files, a least-privilege tool allowlist, and an optional supported model/effort override when specifically required. Keep deliberate design/UI work with `designer`; use `explore` for read-only local scouting and `librarian` for external or API research. The fable-guard prevents Fable subagents.)
 
 ## Read (in order, nothing else by default)
 
@@ -36,7 +36,7 @@ Rules for a sharded session:
 ## Retrieve on demand
 
 - Harness iteration: [`harness-brief.md`](harness-brief.md), then [`harness-slimming.md`](harness-slimming.md).
-- Previous sessions: [`session-index.md`](session-index.md) → `data/fable-prep/` (records now carry a `model` field — Fable vs GPT-5.5 vs Kimi attribution).
+- Previous sessions: [`session-index.md`](session-index.md) → `data/fable-prep/` (records carry a `model` attribution field).
 - External resources: [`external-inventory.md`](external-inventory.md).
 - Dictation ambiguity: [`transcription-notes.md`](transcription-notes.md).
 - Creative north star: `docs/state/creative-framing.md`, `docs/state/video-creative-direction.md`.

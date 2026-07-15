@@ -4,17 +4,26 @@
 
 `~/agents` — agent control plane monorepo: OMP harness, Pi extensions, skills, and four product streams (companion, playground, primer, harness). Each stream owns a slice of the repo; read your stream's `GOAL.md` before working.
 
+## Epistemics (read `docs/fable/epistemics.md` — the covenant)
+
+Docs here are testimony, not ground truth; most were written by agents and decay. The compressed rules:
+
+- **Config beats doc.** Model/lane/quota facts live in `.omp/*.yml`, `~/.omp/agent/config.yml`, `docs/state/model-availability.md`. Prose that restates them is stale by default — on conflict, the live file wins; flag the doc. Never write such snapshots into docs: link, never restate.
+- **Handoffs are messages, not law.** Highest-dated `HANDOFF-LIVE-*.md` is live; superseded or >7-day-old handoffs are history. Treat their routing/status claims as archaeology.
+- **Utterance ≠ preference.** When Arthur states a preference, record the generator (why + scope + date + provenance tier A/A~/I/M), not the bare sentence. Push back for real — name what would falsify the claim — and ask degree-of-truth before absolutizing a one-incident reaction into law.
+- **Band-aids die with the model.** Rules that exist because some model kept erring go down the guardrail ladder (lint/ratchet/runtime reminder), not into docs; if unavoidable, name the model and date it.
+- **Retire as you write.** Touching a ledger (TASKS.md, friction, INDEX) includes flagging rows you can see are dead. Append-only is rot.
+
 ## Build and verify
 
 ```bash
 bun run check                     # typecheck + tests + lint (the gate)
-bun run typecheck                 # packages/web-access
-bun run test                      # packages/web-access
-bun run lint                      # all guardrails
-bun run lint:unsafe-types         # no any/unknown ratchet
-bun run jimeng:test               # jimeng-client unit tests
-bun run dynamic-workflows:test    # workflow parser/runtime
+bun run typecheck                 # legacy root chain (~17 packages) — new packages self-gate in-package
+bun run test                      # legacy root chain (~17 packages)
+bun run lint                      # all guardrails (unsafe-types, ast-grep, ratchets)
 ```
+
+New/touched packages: `cd <pkg> && bun run check` (self-contained packages rule below).
 
 ## Code rules
 
@@ -50,7 +59,7 @@ Invariants. Most are also static lints — push every lesson down the guardrail 
 ## Hard rules
 
 - **No `sudo`** without Arthur's explicit approval via `ask` (exact command, cwd, why, reversibility).
-- **Model routing.** Never launch GPT-5.5 or Fable. **Never route to Terra** (Arthur, 2026-07-15: "Terra is not pareto-efficient at anything") — bounded workloads go Luna xhigh+, synthesis/taste/architecture/final integration go Sol medium+. Lane assignments are NOT cached here — resolve routes from `docs/fable/routing-doctrine.md` and the current posture in `docs/fable/agent-stack-consolidation.md`. Luna never owns synthesis, taste decisions, architecture, or final integration. The current global `smol` is Luna xhigh.
+- **Model routing.** Never spawn Fable subagents (orchestrator-only; hard-guarded in the model resolver). **Never route to Terra** (Arthur, 2026-07-15, about gpt-5.6-terra: "not pareto-efficient at anything") — bounded workloads go Luna xhigh+, synthesis/taste/architecture/final integration go Sol medium+. Luna never owns synthesis, taste decisions, architecture, or final integration. Lane assignments are NOT cached here — resolve live roles from the session's `.omp/*.yml` overlay and the doctrine in `docs/fable/routing-doctrine.md`; posture history in `docs/fable/agent-stack-consolidation.md`.
 - **No secrets in commits.** No `.env`, tokens, credentials, session files.
 - **Provider spend gates.** Jimeng/Dreamina: dry-run default, live spend only inside a named cap with approval; concurrency 1; stop on rate-limit errors.
 - **Respectful external access.** Low concurrency, jitter/backoff, disk cache, entity dedupe. No private/locked content.
@@ -61,6 +70,7 @@ Invariants. Most are also static lints — push every lesson down the guardrail 
 |---|---|
 | Stream goals and ownership | `streams/companion/GOAL.md`, `streams/playground/GOAL.md`, `streams/primer/GOAL.md`, `streams/harness/GOAL.md` |
 | Charter (priorities, routing, taste, contracts) | `docs/fable/charter.md` |
+| Epistemics covenant (doc classes, provenance, staleness) | `docs/fable/epistemics.md` |
 | Locator (code, artifacts, config, sessions) | `docs/fable/atlas.md` |
 | Creative direction | `docs/state/creative-framing.md` |
 | Harness design brief | `docs/fable/harness-brief.md` |

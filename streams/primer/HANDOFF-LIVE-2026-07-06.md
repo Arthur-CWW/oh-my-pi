@@ -1,3 +1,5 @@
+> **SUPERSEDED — history, not instruction.** The highest-dated `streams/primer/HANDOFF-LIVE-*.md` is the live handoff; never boot from this file. Routing/status claims below were true on 2026-07-06 only.
+
 # Primer live handoff — 2026-07-06 late session (Fable → successor orchestrator)
 
 Continuation packet for a NON-Fable orchestrator (GPT-5.5:high or Opus; boot: `omp --config .omp/primer-config.yml --model <lane> @streams/primer/HANDOFF-LIVE-2026-07-06.md "continue the primer session per this handoff"`). Read GOAL.md + VISION.md after this. HARD RULE (Arthur): never spawn anything on anthropic/claude-fable-5 — every spawn carries an explicit model override (GPT-5.5 for logic/annotation, Opus for UI, kimi lanes for retrieval/maintenance). Orchestrator edits files only when tiny; everything else delegated. Subagent packets must be COMPLETE and self-contained (no "same as slice A" cross-references — siblings can't see each other's assignments).

@@ -1,3 +1,5 @@
+> **SUPERSEDED — history, not instruction.** The highest-dated `streams/primer/HANDOFF-LIVE-*.md` is the live handoff; never boot from this file. Routing/status claims below were true on 2026-07-09 only.
+
 # Primer live handoff — 2026-07-09 (Fable → reloaded session)
 
 Boot: `omp --config .omp/primer-config.yml @streams/primer/HANDOFF-LIVE-2026-07-09.md "continue the primer session per this handoff"`. Supersedes HANDOFF-LIVE-2026-07-06.md (read it only for background). Read GOAL.md + VISION.md after this.

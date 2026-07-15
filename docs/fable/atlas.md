@@ -12,10 +12,12 @@ Pure locator: where things live. No policy (that's [`charter.md`](charter.md)). 
 
 | Stream | Code | Live docs |
 |---|---|---|
-| Companion | `apps/ai-companion-rtc/`, `packages/spatial-audio-renderer/` | `apps/ai-companion-rtc/docs/goal.md` |
-| Playground | `apps/slotok-workbench/`, `packages/{hyperframes-renderer,remotion-renderer,jimeng-client,ugc-cli}/`, `workflows/tiktok-recreate/` | `docs/state/video-creative-direction.md`, `docs/state/ugc-studio-style-direction.md`, `docs/state/creative-framing.md` |
-| Primer | `packages/{twitter-archive,borges-library}/`, `browser-extensions/extensions/twitter-archive-firefox/`; external: `~/apps/mochi-lite`, `~/apps/hsk-deck`, `~/apps/japanese-vocab`, `~/vault`, `~/github/hashcards` | `docs/twitter-archive-plan.md`, `docs/plans/twitter-archive-goal.md` |
-| Harness | `vendor/oh-my-pi/`, `packages/{web-access,dynamic-workflows}/`, `.omp/`, `skills/` | [`harness-brief.md`](harness-brief.md), [`harness-slimming.md`](harness-slimming.md) |
+| Companion | `apps/ai-companion-rtc/`, `apps/xanadu/` (feed/review surface), `packages/{spatial-audio-renderer,anichat-motion-lab}/`, `scripts/avatar-pipeline/` | `apps/ai-companion-rtc/docs/goal.md`, `streams/companion/HANDOFF-BEHAVIOR.md` (canonical continuation) |
+| Playground | `apps/slotok-workbench/`, `apps/scene-playground/`, `packages/{hyperframes-renderer,remotion-renderer,jimeng-client,ugc-cli}/`, `workflows/tiktok-recreate/` | `docs/state/video-creative-direction.md`, `docs/state/ugc-studio-style-direction.md`, `docs/state/creative-framing.md` |
+| Primer | `packages/{twitter-archive,borges-library,primer-daemon}/`, `browser-extensions/extensions/twitter-archive-firefox/`; external: `~/apps/mochi-lite`, `~/apps/hsk-deck`, `~/apps/japanese-vocab`, `~/vault`, `~/github/hashcards` | `docs/twitter-archive-plan.md`, `docs/plans/twitter-archive-goal.md`, newest `streams/primer/HANDOFF-LIVE-*.md` |
+| Harness | `vendor/oh-my-pi/`, `packages/{web-access,dynamic-workflows,omp-perf-explorer,control-plane,agent-mux}/`, `.omp/`, `skills/` | [`harness-brief.md`](harness-brief.md), [`harness-slimming.md`](harness-slimming.md) |
+
+This table rots by omission — when a new app/package graduates to active use, adding it here is part of that work, not a separate chore.
 
 Historical plans (banner-marked, reference only): `docs/plans/slotok-workbench.md` (retired Solid stack), `docs/plans/symphony-lite-rust-runner.md` (Elixir won), `docs/plans/asmr-companion-overnight-goals.md`.
 
@@ -62,10 +64,10 @@ Full inventory with sizes: [`external-inventory.md`](external-inventory.md). Not
 
 | Layer | File | Notes |
 |---|---|---|
-| Global OMP | `~/.omp/agent/config.yml` | modelRoles incl. `slow: claude-fable-5` (trap: built-in `reviewer` binds `pi/slow`; without the overlay the fable-guard routes it to a non-Fable lane), `advisor: deepseek` enabled — both overridden by the overlay |
-| Workspace | `.omp/config.yml` | Kagi search, apfs isolation, soft budget 40 |
-| Fable overlay | `.omp/fable-config.yml` | advisor off; Sol at high effort handles orchestration, plans, and escalations; Terra at medium handles normal task work. Keep `designer` for deliberate design/UI work; autolearn off. Launch: `omp --config ./.omp/fable-config.yml` |
-| Built-in agent roles | OMP task taxonomy | The eight bundled roles are `task`, `quick_task`, `explore`, `plan`, `reviewer`, `designer`, `librarian`, and `oracle`. Jimeng, prose, and authenticated-web work use `task` packets with a specialist role, owned/excluded files, least-privilege tool allowlist, and optional Terra model/effort override; read-only local scouting uses `explore`, while external or API research uses `librarian`. |
+| Global OMP | `~/.omp/agent/config.yml` | Machine-wide model roles + auth. Role values are NOT cached here — read the file. Known structural trap: built-in `reviewer` binds `pi/slow`, so whatever `slow` points at silently owns review work in un-overlaid sessions; verify `slow` before trusting reviewer output. |
+| Workspace | `.omp/config.yml` | Search provider, isolation mode, request budget — read the file for current values. |
+| Fable overlay | `.omp/fable-config.yml` | The Fable session's role→model map, fallback chains, guards. Read the file; on any doc/config conflict the config wins (`epistemics.md`). Launch: `omp --config ./.omp/fable-config.yml` |
+| Built-in agent roles | OMP task taxonomy | Bundled roles: `task`, `quick_task`, `explore`, `plan`, `reviewer`, `designer`, `librarian`, `oracle` (taxonomy under revision — HR-122 routes responsibilities away from catch-all `task`). Specialist work uses `task` packets with a role, owned/excluded files, least-privilege tool allowlist, and an optional supported model/effort override; read-only local scouting uses `explore`; external/API research uses `librarian`. |
 | Fable-subagent guard | `vendor/oh-my-pi/packages/coding-agent/src/config/model-resolver.ts` | Blocks subagent selectors containing `fable` |
 | Auth / quotas | `omp auth-broker`, `omp token <provider>`, `omp usage`, `OMP_PROFILE` | Reuse; never invent token storage |
 

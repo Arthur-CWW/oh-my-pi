@@ -9,7 +9,7 @@ Successor sessions should read these in order. Status matters: durable doctrine,
 3. [`GOAL.md`](GOAL.md) — stream charter, ownership, and settled constraints.
 4. [`VISION.md`](VISION.md) — living design space and dated decisions; broader than the current experiment.
 5. [`CARD-PROMOTION.md`](CARD-PROMOTION.md) — durable lifecycle contract separating source-local help, targeting, construction, global candidacy, approval, export, and scheduling.
-6. [`HANDOFF-LIVE-2026-07-10.md`](HANDOFF-LIVE-2026-07-10.md) — current shipped/staged state, including the 2026-07-11 continuation. Consult [`HANDOFF.md`](HANDOFF.md) for canonical boot/ownership context; older live handoffs are historical.
+6. The **highest-dated** `HANDOFF-LIVE-*.md` — current shipped/staged state. All lower-dated live handoffs are history (superseded, whether or not banner-marked); never boot from them. [`HANDOFF.md`](HANDOFF.md) is canonical boot/ownership context only, not status.
 7. [`research/learning-sources/system-synthesis.md`](research/learning-sources/system-synthesis.md) — source-grounded synthesis for the current one-chapter workbench, explicitly not universal pedagogy.
 8. [`DESIGN-LOG.md`](DESIGN-LOG.md) — append-oriented dated decisions, hypotheses, alternatives, and deferred debt.
 9. [`docs/plans/primer-intuitions.md`](../../docs/plans/primer-intuitions.md) — earlier direct-quote dossier and exact predecessor-session inventory; use as evidence, not a rigid specification.

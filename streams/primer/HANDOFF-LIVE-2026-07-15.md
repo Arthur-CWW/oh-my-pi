@@ -26,7 +26,7 @@ Boot either with `streams/primer/boot.sh` and state the sub-scope in the first m
 - Talmudic reader: `http://meltdown.localhost:1355` — supervisor restarted 2026-07-15 (`cd READER && nohup bun scripts/dev-supervisor.mjs &`; PID file `data/meltdown-reader/dev-up.pid`; survives shell exit, not reboot).
 - CEDICT built at `data/primer/cedict.sqlite` (30MB, with cjkvi IDS).
 - READER is a nested git repo; outer repo gitignores it; commit separately, scope outer `git add` to primer paths.
-- Model routing: resolve from `docs/fable/routing-doctrine.md`; never Fable/GPT-5.5 spawns, never Terra.
+- Model routing: resolve from the session overlay + `docs/fable/routing-doctrine.md`; never spawn Fable; never Terra (gpt-5.6-terra — Arthur, 2026-07-15).
 
 ## Next (priority order)
 
