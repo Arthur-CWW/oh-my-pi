@@ -2,8 +2,10 @@ import { CompletionBehavior, Container, Input, matchesKey, type SelectItem, Sele
 import { logger, VERSION } from "@oh-my-pi/pi-utils";
 import type { HistoryStorage } from "../../session/history-storage";
 import { formatLoopStats } from "../../slash-commands/loopstats";
+import { formatTabs } from "../../slash-commands/tabs";
 import { buildVersionViewModel, formatVersion } from "../../slash-commands/version";
 import { routeCommandOutput } from "../../task/route-inspector";
+import { listTabs } from "../../tools/browser/tab-supervisor";
 import { copyToClipboard } from "../../utils/clipboard";
 import { canEnterCommandModeFromCurrentFocus } from "../command-mode-activation";
 import {
@@ -264,6 +266,9 @@ export function commandModeContextForInteractive(
 		},
 		showLoopStats: () => {
 			ctx.showStatus(formatLoopStats(ctx.ui.loopWatchdogSnapshot));
+		},
+		showTabs: () => {
+			ctx.showStatus(formatTabs(listTabs()));
 		},
 		getSessionIdentity: () => {
 			const viewSession = ctx.viewSession;

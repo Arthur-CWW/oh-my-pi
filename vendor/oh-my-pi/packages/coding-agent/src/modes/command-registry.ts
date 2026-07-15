@@ -23,6 +23,7 @@ export interface CommandModeContext {
 	handleContextCommand(): void;
 	showVersion(): void | Promise<void>;
 	showLoopStats(): void | Promise<void>;
+	showTabs(): void | Promise<void>;
 	getSessionIdentity(): SessionIdentity;
 	copyIdentityHandle(handle: string): void | Promise<void>;
 	readonly commands?: readonly CommandModeCommand[];
@@ -226,6 +227,15 @@ export const COMMAND_MODE_COMMANDS: readonly CommandModeCommand[] = [
 		hostOnly: true,
 		run(ctx) {
 			return ctx.showLoopStats();
+		},
+	},
+	{
+		name: "tabs",
+		description: "show the browser tab pool and ownership labels",
+		viewLocal: true,
+		hostOnly: true,
+		run(ctx) {
+			return ctx.showTabs();
 		},
 	},
 	{

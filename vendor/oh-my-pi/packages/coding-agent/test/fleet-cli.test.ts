@@ -27,6 +27,7 @@ function journalText(args: {
 		cause: string;
 		timestamp: number;
 		buildDigest: string;
+		buildVersion?: string;
 		rolloutId?: string;
 		count?: number;
 	}>;
@@ -55,6 +56,7 @@ function journalText(args: {
 			count: error.count ?? 1,
 			unread: true,
 			resolved: false,
+			buildVersion: error.buildVersion,
 			buildDigest: error.buildDigest,
 			rolloutId: error.rolloutId,
 		},
@@ -82,6 +84,7 @@ describe("fleet inspection projections", () => {
 						id: "e1",
 						cause: "network",
 						timestamp: NOW - 6_000,
+						buildVersion: "16.0.1",
 						buildDigest: "digest-a",
 						rolloutId: "rollout-a",
 						count: 1,
@@ -90,6 +93,7 @@ describe("fleet inspection projections", () => {
 						id: "e1",
 						cause: "network",
 						timestamp: NOW - 5_000,
+						buildVersion: "16.0.1",
 						buildDigest: "digest-a",
 						rolloutId: "rollout-a",
 						count: 2,
@@ -131,9 +135,11 @@ describe("fleet inspection projections", () => {
 			["session-alpha", "provider", 1],
 			["session-beta", "network", 1],
 		]);
+		expect(projection.errors[0]?.buildVersion).toBe("16.0.1");
 		expect(projection.errors.every(row => row.sourceJournalUri.startsWith("file://"))).toBe(true);
 		expect(projection.incidents.map(incident => incident.id)).toEqual(["incident-network"]);
 		const rendered = formatFleetErrors(projection);
+		expect(rendered).toContain("BUILD_VERSION\tBUILD_DIGEST");
 		expect(rendered).toContain("ERRORS\nSESSION\tWORKSTREAM\tCAUSE");
 		expect(rendered).toContain("file://");
 		expect(rendered).toContain("INCIDENTS\nINCIDENT\tSTATUS\tCAUSE");
@@ -210,6 +216,12 @@ describe("fleet inspection projections", () => {
 			["session-fresh", "fresh", "compatible"],
 			["session-stale", "stale", "LegacyIncompatible"],
 		]);
+		expect(rows[0]?.rssMb).toBeGreaterThan(0);
+		expect(rows[0]?.cpuPercent).toBeGreaterThanOrEqual(0);
+		expect(rows[0]?.uptime).toMatch(/^(?:\d+-)?\d{1,3}:\d{2}(?::\d{2})?$/);
+		const statusOutput = formatFleetStatus(rows);
+		expect(statusOutput.split("\n")[0]).toContain("RSS_MB\tCPU%\tUPTIME");
+		expect(statusOutput.trimEnd().split("\n")).toHaveLength(3);
 		expect(rows[0]?.rollout).toBe("rollout-current:planned");
 		expect(rows[1]?.buildDigest).toBe("legacy-digest");
 		expect(formatFleetStatus(rows)).toContain("session-stale\tstale-peer\tfleet-alpha\tstale\tworking");
@@ -218,6 +230,28 @@ describe("fleet inspection projections", () => {
 		await collectFleetErrors({ sessionsRoot: root, controlDbPath });
 		const after = await Promise.all(sourcePaths.map(bytes));
 		expect(after).toEqual(before);
+	});
+
+	it("renders dashes for a dead peer process", async () => {
+		using tempDir = TempDir.createSync("@omp-fleet-cli-resources-");
+		const ircDbPath = `${tempDir.path()}/irc.sqlite`;
+		const controlDbPath = `${tempDir.path()}/control.sqlite`;
+		const bus = new IrcExternalBus(ircDbPath);
+		bus.registerPeer({
+			sessionId: "dead-session",
+			name: "dead-peer",
+			cwd: tempDir.path(),
+			pid: 999_999_999,
+		});
+		bus.updatePeerState("dead-session", "idle");
+		bus.close();
+
+		const rows = await collectFleetStatus({ ircDbPath, controlDbPath, all: true });
+		expect(rows).toHaveLength(1);
+		expect(rows[0]?.rssMb).toBeUndefined();
+		const output = formatFleetStatus(rows);
+		expect(output.trimEnd().split("\n")).toHaveLength(2);
+		expect(output.trimEnd().split("\n")[1]?.endsWith("\t-\t-\t-")).toBe(true);
 	});
 
 	it("does not project recovered onto an old-digest peer row", async () => {
@@ -361,6 +395,8 @@ describe("fleet inspection projections", () => {
 						awaitedCondition: "prepare-rollout terminal receipt",
 						commandId: "command-1",
 						timedOut: true,
+						buildVersion: "16.0.1",
+						buildDigest: "digest-target",
 						cause: "Timed out\nlast receipt state=requested",
 					},
 				],
@@ -368,7 +404,7 @@ describe("fleet inspection projections", () => {
 		});
 		expect(output).toContain("EXECUTION\tFrozen\t-");
 		expect(output).toContain(
-			"TARGET_ERROR\ttargetId=target-1\tsessionId=session-1\tphase=CordonRequested\tawaited=prepare-rollout terminal receipt\tcommandId=command-1\ttimedOut=true\tcause=Timed out last receipt state=requested",
+			"TARGET_ERROR\ttargetId=target-1\tsessionId=session-1\tphase=CordonRequested\tawaited=prepare-rollout terminal receipt\tcommandId=command-1\ttimedOut=true\tbuildVersion=16.0.1\tbuildDigest=digest-target\tcause=Timed out last receipt state=requested",
 		);
 	});
 });

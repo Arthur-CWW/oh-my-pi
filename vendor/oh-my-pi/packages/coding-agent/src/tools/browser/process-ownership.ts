@@ -3,11 +3,18 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { Process, ProcessStatus } from "@oh-my-pi/pi-natives";
 import { getActiveProfile, getProfileRootDir, logger } from "@oh-my-pi/pi-utils";
+import { z } from "zod/v4";
 import { gracefulKillTreeOnce } from "./attach";
+import {
+	BrowserTabBudgetError,
+	summarizeTabConsumers,
+	type BrowserTabBudgetRecord,
+} from "./tab-budget";
 import { ToolError } from "../tool-errors";
 
 const MARKER_NAME = "owner.json";
 const BUDGET_LOCK_NAME = ".budget-lock";
+const TAB_LEASES_NAME = "tab-leases.json";
 
 export const DEFAULT_MAX_OWNED_PER_SESSION = 2;
 export const DEFAULT_MAX_OWNED_GLOBAL = 6;
@@ -28,6 +35,33 @@ export interface OwnedBrowserMarker {
 	activeTabs?: number | null;
 }
 
+
+export interface OwnedBrowserTabLease {
+	version: 1;
+	leaseId: string;
+	sessionId: string;
+	ownerPid: number;
+	tabName: string;
+	createdAt: number;
+	lastUsedAt: number;
+	idle: boolean;
+}
+
+const tabLeaseSchema = z.object({
+	version: z.literal(1),
+	leaseId: z.string().min(1),
+	sessionId: z.string().min(1),
+	ownerPid: z.number().int().positive(),
+	tabName: z.string().min(1),
+	createdAt: z.number().finite(),
+	lastUsedAt: z.number().finite(),
+	idle: z.boolean(),
+});
+
+const tabLeaseFileSchema = z.object({
+	version: z.literal(1),
+	leases: z.array(tabLeaseSchema),
+});
 export interface OwnedBrowserRecord {
 	marker: OwnedBrowserMarker;
 	runDir: string;
@@ -266,6 +300,109 @@ async function withBudgetLock<T>(fn: () => Promise<T>): Promise<T> {
 		}
 	}
 	throw new ToolError("Timed out waiting for the browser ownership budget lock; retry the browser open.");
+}
+
+async function readTabLeasesUnlocked(): Promise<OwnedBrowserTabLease[]> {
+	try {
+		const raw = await fs.readFile(path.join(browserSessionsDirectory(), TAB_LEASES_NAME), "utf8");
+		const parsed = tabLeaseFileSchema.safeParse(JSON.parse(raw));
+		return parsed.success ? (parsed.data.leases as OwnedBrowserTabLease[]) : [];
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+		return [];
+	}
+}
+
+async function writeTabLeasesUnlocked(leases: readonly OwnedBrowserTabLease[]): Promise<void> {
+	await fs.writeFile(
+		path.join(browserSessionsDirectory(), TAB_LEASES_NAME),
+		`${JSON.stringify({ version: 1, leases })}\n`,
+		{ mode: 0o600 },
+	);
+}
+
+async function liveTabLeasesUnlocked(): Promise<OwnedBrowserTabLease[]> {
+	const leases = await readTabLeasesUnlocked();
+	const live = leases.filter(lease => inspectProcess(lease.ownerPid).alive);
+	if (live.length !== leases.length) await writeTabLeasesUnlocked(live);
+	return live;
+}
+
+export async function listOwnedBrowserTabLeases(): Promise<readonly OwnedBrowserTabLease[]> {
+	return await withBudgetLock(async () => await liveTabLeasesUnlocked());
+}
+
+export interface ReserveOwnedBrowserTabLeaseOptions {
+	sessionId: string;
+	tabName: string;
+	maxTabsPerSession: number;
+	maxGlobalTabs: number;
+}
+
+export async function reserveOwnedBrowserTabLease(
+	options: ReserveOwnedBrowserTabLeaseOptions,
+): Promise<OwnedBrowserTabLease> {
+	return await withBudgetLock(async () => {
+		const leases = await liveTabLeasesUnlocked();
+		const records: BrowserTabBudgetRecord[] = leases.map(lease => ({
+			name: lease.tabName,
+			sessionId: lease.sessionId,
+			createdAt: lease.createdAt,
+			lastUsedAt: lease.lastUsedAt,
+			idle: lease.idle,
+		}));
+		const sessionCount = leases.filter(lease => lease.sessionId === options.sessionId).length;
+		if (sessionCount >= options.maxTabsPerSession) {
+			throw new BrowserTabBudgetError(
+				"session",
+				options.maxTabsPerSession,
+				options.sessionId,
+				summarizeTabConsumers(records),
+			);
+		}
+		if (leases.length >= options.maxGlobalTabs) {
+			throw new BrowserTabBudgetError(
+				"global",
+				options.maxGlobalTabs,
+				options.sessionId,
+				summarizeTabConsumers(records),
+			);
+		}
+		const now = Date.now();
+		const lease: OwnedBrowserTabLease = {
+			version: 1,
+			leaseId: crypto.randomUUID(),
+			sessionId: options.sessionId,
+			ownerPid: process.pid,
+			tabName: options.tabName,
+			createdAt: now,
+			lastUsedAt: now,
+			idle: true,
+		};
+		await writeTabLeasesUnlocked([...leases, lease]);
+		return lease;
+	});
+}
+
+export async function releaseOwnedBrowserTabLease(leaseId: string): Promise<void> {
+	await withBudgetLock(async () => {
+		const leases = await liveTabLeasesUnlocked();
+		const next = leases.filter(lease => lease.leaseId !== leaseId);
+		if (next.length !== leases.length) await writeTabLeasesUnlocked(next);
+	});
+}
+
+export async function touchOwnedBrowserTabLease(leaseId: string, idle: boolean): Promise<void> {
+	await withBudgetLock(async () => {
+		const leases = await liveTabLeasesUnlocked();
+		let changed = false;
+		const next = leases.map(lease => {
+			if (lease.leaseId !== leaseId) return lease;
+			changed = true;
+			return { ...lease, lastUsedAt: Date.now(), idle };
+		});
+		if (changed) await writeTabLeasesUnlocked(next);
+	});
 }
 
 export async function enforceOwnedBrowserBudget(opts: OwnedBrowserBudgetOptions): Promise<void> {

@@ -16,6 +16,7 @@ import { RolloutJournal, type RolloutPeerSnapshot } from "../session/rollout-jou
 import { CURRENT_SESSION_CONTROL_PROTOCOL, SESSION_CONTROL_DB_PATH } from "../session/session-control";
 import { type CustomEntry, decodeSessionWorkstream, type SessionHeader } from "../session/session-entries";
 import { type FleetIncident, FleetIncidentStore } from "../task/fleet-incident";
+import { sampleFleetResources } from "./fleet-resource-sampler";
 
 const LOCAL_COMPATIBILITY = createFleetCompatibilityProfile(CURRENT_SESSION_CONTROL_PROTOCOL, ["status"]);
 
@@ -52,6 +53,9 @@ export interface FleetStatusRow {
 	readonly channel: string;
 	readonly pin: string;
 	readonly rollout: string;
+	readonly rssMb?: number;
+	readonly cpuPercent?: number;
+	readonly uptime?: string;
 }
 
 export interface FleetErrorsOptions {
@@ -70,6 +74,7 @@ export interface FleetErrorRow {
 	readonly cause: string;
 	readonly timestamp: number;
 	readonly buildDigest: string;
+	readonly buildVersion: string;
 	readonly rolloutId: string;
 	readonly count: number;
 	readonly message: string;
@@ -175,7 +180,7 @@ export async function collectFleetStatus(options: FleetStatusOptions = {}): Prom
 	const rolloutJournal = openReadonlyRolloutJournal(options.controlDbPath);
 	try {
 		const peers = bus.listPeers({ includeStale: true });
-		const rows: FleetStatusRow[] = [];
+		const entries: Array<{ readonly pid: number; readonly row: FleetStatusRow }> = [];
 		for (const peer of peers) {
 			const journal = await readPeerJournal(peer);
 			const workstream = formatWorkstream(peer.fleetCapability?.workstream ?? journal.header?.workstream);
@@ -191,28 +196,42 @@ export async function collectFleetStatus(options: FleetStatusOptions = {}): Prom
 			} catch {
 				rollout = undefined;
 			}
-			rows.push({
-				sessionId: peer.sessionId,
-				name: peer.name,
-				workstream,
-				freshness: displayState === "disconnected" ? "stale" : "fresh",
-				state: peer.state,
-				ownerEpoch: peer.ownerEpoch ?? "unknown",
-				buildDigest: capability?.buildDigest ?? peer.buildDigest ?? "unknown/legacy",
-				productVersion: capability?.productVersion ?? peer.version ?? "unknown/legacy",
-				compatibility: compatibility.kind,
-				journalRange: capability
-					? `r:${formatRange(capability.journalSchema.read)},w:${formatRange(capability.journalSchema.write)}`
-					: "unknown/legacy",
-				controlRange: formatRange(capability?.controlProtocol),
-				ircRange: capability ? String(capability.ircEnvelope.major) : "unknown/legacy",
-				viewRange: formatRange(capability?.viewProtocol),
-				channel: journal.pin.channel ?? "-",
-				pin: journal.pin.pin ?? "-",
-				rollout: rollout ? `${rollout.rolloutId}:${rollout.phase}` : "-",
+			entries.push({
+				pid: peer.pid,
+				row: {
+					sessionId: peer.sessionId,
+					name: peer.name,
+					workstream,
+					freshness: displayState === "disconnected" ? "stale" : "fresh",
+					state: peer.state,
+					ownerEpoch: peer.ownerEpoch ?? "unknown",
+					buildDigest: capability?.buildDigest ?? peer.buildDigest ?? "unknown/legacy",
+					productVersion: capability?.productVersion ?? peer.version ?? "unknown/legacy",
+					compatibility: compatibility.kind,
+					journalRange: capability
+						? `r:${formatRange(capability.journalSchema.read)},w:${formatRange(capability.journalSchema.write)}`
+						: "unknown/legacy",
+					controlRange: formatRange(capability?.controlProtocol),
+					ircRange: capability ? String(capability.ircEnvelope.major) : "unknown/legacy",
+					viewRange: formatRange(capability?.viewProtocol),
+					channel: journal.pin.channel ?? "-",
+					pin: journal.pin.pin ?? "-",
+					rollout: rollout ? `${rollout.rolloutId}:${rollout.phase}` : "-",
+				},
 			});
 		}
-		return rows;
+		const resources = await sampleFleetResources(entries.map(entry => entry.pid));
+		return entries.map(({ pid, row }) => {
+			const resource = resources.get(pid);
+			return resource === undefined
+				? row
+				: {
+						...row,
+						rssMb: resource.rssMb,
+						cpuPercent: resource.cpuPercent,
+						uptime: resource.uptime,
+					};
+		});
 	} finally {
 		rolloutJournal?.close();
 		bus.close();
@@ -237,6 +256,9 @@ export function formatFleetStatus(rows: readonly FleetStatusRow[]): string {
 		"CHANNEL",
 		"PIN",
 		"ROLLOUT",
+		"RSS_MB",
+		"CPU%",
+		"UPTIME",
 	].join("\t");
 	return `${header}\n${rows
 		.map(row =>
@@ -257,6 +279,9 @@ export function formatFleetStatus(rows: readonly FleetStatusRow[]): string {
 				row.channel,
 				row.pin,
 				row.rollout,
+				typeof row.rssMb === "number" && Number.isFinite(row.rssMb) ? row.rssMb.toFixed(1) : "-",
+				typeof row.cpuPercent === "number" && Number.isFinite(row.cpuPercent) ? row.cpuPercent.toFixed(1) : "-",
+				row.uptime,
 			]
 				.map(printable)
 				.join("\t"),
@@ -329,6 +354,7 @@ function decodeErrorRow(
 		workstream: formatWorkstream(header.workstream),
 		cause: stringField(entry.data, "cause", "category", "errorClass") ?? "unknown",
 		timestamp: lastTimestamp,
+		buildVersion: stringField(entry.data, "buildVersion", "version") ?? "unknown/legacy",
 		buildDigest: stringField(entry.data, "buildDigest", "runnerBuildDigest") ?? "unknown/legacy",
 		rolloutId: stringField(entry.data, "fleetRolloutId", "rolloutId") ?? "-",
 		count,
@@ -407,7 +433,7 @@ export async function collectFleetErrors(options: FleetErrorsOptions = {}): Prom
 }
 
 export function formatFleetErrors(projection: FleetErrorsProjection): string {
-	const lines = ["ERRORS", "SESSION\tWORKSTREAM\tCAUSE\tTIME\tBUILD\tROLLOUT\tCOUNT\tMESSAGE\tSOURCE_JOURNAL_URI"];
+	const lines = ["ERRORS", "SESSION\tWORKSTREAM\tCAUSE\tTIME\tBUILD_VERSION\tBUILD_DIGEST\tROLLOUT\tCOUNT\tMESSAGE\tSOURCE_JOURNAL_URI"];
 	for (const row of projection.errors) {
 		lines.push(
 			[
@@ -415,6 +441,7 @@ export function formatFleetErrors(projection: FleetErrorsProjection): string {
 				row.workstream,
 				row.cause,
 				new Date(row.timestamp).toISOString(),
+				row.buildVersion,
 				row.buildDigest,
 				row.rolloutId,
 				String(row.count),

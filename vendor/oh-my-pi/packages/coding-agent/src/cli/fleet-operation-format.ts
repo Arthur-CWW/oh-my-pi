@@ -33,6 +33,8 @@ function formatFleetRolloutFailure(failure: FleetRolloutFailureReceipt): string 
 		`awaited=${failure.awaitedCondition}`,
 		`commandId=${failure.commandId ?? "-"}`,
 		`timedOut=${failure.timedOut}`,
+		`buildVersion=${failure.buildVersion ?? "unknown/legacy"}`,
+		`buildDigest=${failure.buildDigest ?? "unknown/legacy"}`,
 		`cause=${inline(failure.cause)}`,
 	].join("\t");
 }

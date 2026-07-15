@@ -8,12 +8,7 @@ import type { AgentSession } from "../session/agent-session";
 import type { SessionEntry } from "../session/session-entries";
 import { replaceTabs, truncateToWidth } from "../tools/render-utils";
 import { discoverAgents } from "./discovery";
-import type {
-	ConsultedRouteInput,
-	SpawnRouteDecision,
-	SpawnRouteReceipt,
-	SpawnRouteSource,
-} from "./route-resolution";
+import type { ConsultedRouteInput, SpawnRouteDecision, SpawnRouteReceipt, SpawnRouteSource } from "./route-resolution";
 import { resolveSpawnRoute } from "./route-resolution";
 import { snapshotTaskSpawnPolicy } from "./spawn-route";
 import { type SpawnRecord, isSpawnRecord } from "./spawn-record";
@@ -98,7 +93,9 @@ function settingsLayerRecord(layer: ModelRoleWinningLayer): string {
 
 function appendSettingsLayers(lines: string[], candidate: ConsultedRouteInput, settings: Settings | undefined): void {
 	if (!settings) return;
-	const roles = [...new Set(candidate.selectors.map(roleFromSelector).filter((role): role is string => role !== undefined))];
+	const roles = [
+		...new Set(candidate.selectors.map(roleFromSelector).filter((role): role is string => role !== undefined)),
+	];
 	for (const role of roles) {
 		const resolution = settings.resolveModelRole(role);
 		if (!resolution.effectiveSelector || !resolution.winningLayer) {
@@ -124,7 +121,11 @@ function policyCandidateSource(candidate: PolicyCandidate): string {
 		: `policy ${candidate.sourceLayer} sequence=${candidate.sequence}`;
 }
 
-function appendPolicyLayers(lines: string[], snapshot: PolicySnapshot | undefined, key: CoreRoutingKey | undefined): void {
+function appendPolicyLayers(
+	lines: string[],
+	snapshot: PolicySnapshot | undefined,
+	key: CoreRoutingKey | undefined,
+): void {
 	if (!snapshot || !key) return;
 	const effective = snapshot.values[key];
 	if (!effective) return;
@@ -182,9 +183,15 @@ export function formatRouteInspection(input: RouteInspectionInput): string {
 		`explicit override: ${input.explicitOverride ?? "none"} [source: ${input.explicitOverride ? input.receiptSource : "route inputs"}]`,
 	);
 	if (isDecision(decision) && decision.block) {
-		lines.push(
-			`selected: blocked selector=${decision.block.selector}; reason=${decision.block.reason ?? "quota admission"} reset=${decision.block.resetAt ?? "unknown"} [source: quota admission decision]`,
-		);
+		if (decision.block.kind === "quota_admission_blocked") {
+			lines.push(
+				`selected: blocked selector=${decision.block.selector}; reason=${decision.block.reason ?? "quota admission"} reset=${decision.block.resetAt ?? "unknown"} [source: quota admission decision]`,
+			);
+		} else {
+			lines.push(
+				`selected: blocked selectors=${decision.block.requested.join(",")}; reason=provider policy denied [source: policy snapshot]`,
+			);
+		}
 	} else if (decision.route) {
 		lines.push(
 			`selected: ${decision.route.selector} effort=${decision.route.thinking ?? "none"} account=${decision.quotaAdmission?.reroutedProvider ?? decision.route.provider} [source: ${input.receiptSource} resolution=${decision.source ?? "unresolved"}]`,
@@ -215,10 +222,21 @@ export function formatRouteInspection(input: RouteInspectionInput): string {
 			`fallback ${index + 1}: rejected ${attempt.route.selector}; reason=${attempt.reason ?? attempt.quotaAdmission?.decisionReason ?? "ineligible"} [source: ${attempt.quotaAdmission ? "quota admission receipt" : `${input.receiptSource} priorAttempts`}]`,
 		);
 	}
-	if (isDecision(decision) && decision.block) {
+	for (const [index, exclusion] of (decision.excludedPolicyCandidates ?? []).entries()) {
 		lines.push(
-			`blocked: ${decision.block.selector}; reason=${decision.block.reason ?? "quota/ineligible"} [source: quota admission receipt]`,
+			`policy exclusion ${index + 1}: ${exclusion.selector}; reason=${exclusion.reason}; effective=${exclusion.effectiveFrom} expires=${exclusion.expiresAt ?? "none"} [source: policy key=${exclusion.key} transaction=${exclusion.transactionId} sequence=${exclusion.sequence} snapshot=${exclusion.snapshotAt}]`,
 		);
+	}
+	if (isDecision(decision) && decision.block) {
+		if (decision.block.kind === "quota_admission_blocked") {
+			lines.push(
+				`blocked: ${decision.block.selector}; reason=${decision.block.reason ?? "quota/ineligible"} [source: quota admission receipt]`,
+			);
+		} else {
+			lines.push(
+				`blocked: ${decision.block.requested.join(",")}; reason=provider policy denied [source: policy exclusion receipt]`,
+			);
+		}
 	}
 	if (decision.reason && !(decision.priorAttempts?.length ?? 0)) {
 		lines.push(`decision reason: ${decision.reason} [source: ${input.receiptSource}]`);
@@ -232,7 +250,11 @@ export function formatRouteInspection(input: RouteInspectionInput): string {
 	return visible.join("\n");
 }
 
-function previewPolicyKey(deprecatedTaskAlias: boolean, responsibility: string, selectors: readonly string[]): CoreRoutingKey {
+function previewPolicyKey(
+	deprecatedTaskAlias: boolean,
+	responsibility: string,
+	selectors: readonly string[],
+): CoreRoutingKey {
 	if (deprecatedTaskAlias) return "core.routing.implementer";
 	for (const selector of selectors) {
 		const role = roleFromSelector(selector);
@@ -273,7 +295,8 @@ export function previewSpawnRoute(input: RoutePreviewInput): RoutePreviewResult 
 
 function spawnRecordFromEntries(entries: readonly SessionEntry[]): SpawnRecord | undefined {
 	for (const entry of entries) {
-		if (entry.type === "session_init" && isSpawnRecord(entry.subagent?.spawnRecord)) return entry.subagent.spawnRecord;
+		if (entry.type === "session_init" && isSpawnRecord(entry.subagent?.spawnRecord))
+			return entry.subagent.spawnRecord;
 	}
 	return undefined;
 }
@@ -293,7 +316,8 @@ async function spawnRecordForAgent(agentId: string): Promise<SpawnRecord | undef
 		if (!line.trim()) continue;
 		try {
 			const entry = JSON.parse(line) as { type?: string; subagent?: { spawnRecord?: unknown } };
-			if (entry.type === "session_init" && isSpawnRecord(entry.subagent?.spawnRecord)) return entry.subagent.spawnRecord;
+			if (entry.type === "session_init" && isSpawnRecord(entry.subagent?.spawnRecord))
+				return entry.subagent.spawnRecord;
 		} catch {
 			continue;
 		}
@@ -394,4 +418,3 @@ export async function routeCommandOutput(options: {
 			record.route.source === "spawn_explicit" ? record.route.consulted[0]?.selectors.join(",") : undefined,
 	});
 }
-

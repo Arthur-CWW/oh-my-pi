@@ -33,6 +33,24 @@ export const BROWSER_SETTINGS_SCHEMA = {
 				"Use cmux WKWebView surfaces for browser automation when a cmux socket is available. Set PI_BROWSER_CMUX=0 or PI_BROWSER_CMUX=1 to override.",
 		},
 	},
+	/**
+	 * Tab budgets apply only to OMP-owned headless browser tabs. External backends
+	 * (cmux, spawned apps, and connected CDP) are never counted, refused, or
+	 * reclaimed. Per-session reclaim is process-local; a persisted lease held by
+	 * another process produces a typed refusal with top-consumer attribution.
+	 */
+	"browser.maxTabsPerSession": {
+		type: "number",
+		default: 4,
+		min: 1,
+		integer: true,
+	},
+	"browser.maxGlobalTabs": {
+		type: "number",
+		default: 12,
+		min: 1,
+		integer: true,
+	},
 	"browser.maxOwnedPerSession": {
 		type: "number",
 		default: 2,
@@ -44,6 +62,16 @@ export const BROWSER_SETTINGS_SCHEMA = {
 		default: 6,
 		min: 1,
 		integer: true,
+	},
+	"browser.tabIdleTtlMs": {
+		type: "number",
+		default: 600_000,
+		min: 0,
+		integer: true,
+	},
+	"browser.tabUrlQuerySensitive": {
+		type: "boolean",
+		default: false,
 	},
 	"browser.screenshotDir": {
 		type: "string",

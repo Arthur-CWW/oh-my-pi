@@ -54,6 +54,8 @@ export function formatDiagnosticDetail(err: DiagnosticEvent | null, actionMessag
 		["Retry", err.retry],
 		["Reset", err.reset !== undefined ? new Date(err.reset).toISOString() : undefined],
 		["Fingerprint", err.requestFingerprint],
+		["Build", err.buildVersion],
+		["Build digest", err.buildDigest],
 		["Log pointer", err.logPointer],
 		["Unread", err.unread],
 		["Resolved", err.resolved],

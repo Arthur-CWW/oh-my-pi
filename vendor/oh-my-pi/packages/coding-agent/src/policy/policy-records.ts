@@ -1,7 +1,9 @@
 import { Schema } from "effect";
 
 export const POLICY_SCHEMA_VERSION = 1 as const;
-export const POLICY_REGISTRY_VERSION = 1 as const;
+export const POLICY_REGISTRY_VERSION = 2 as const;
+export const CORE_ROUTING_FRAGMENT_VERSION = 1 as const;
+export const CORE_PROVIDER_FRAGMENT_VERSION = 1 as const;
 export const POLICY_GENESIS_HASH = "0".repeat(64);
 
 export const UUIDSchema = Schema.String.pipe(
@@ -57,6 +59,62 @@ export type CoreRoutingKey = typeof CoreRoutingKeySchema.Type;
 export const CoreRoutingValueSchema = NonEmptyStringSchema;
 export type CoreRoutingValue = typeof CoreRoutingValueSchema.Type;
 
+export const CORE_PROVIDER_KEYS = ["core.providers.deny.providers", "core.providers.deny.models"] as const;
+export const CoreProviderKeySchema = Schema.Literals(CORE_PROVIDER_KEYS);
+export type CoreProviderKey = typeof CoreProviderKeySchema.Type;
+export const ProviderIdSchema = NonEmptyStringSchema;
+export type ProviderId = typeof ProviderIdSchema.Type;
+export const ProviderModelSelectorSchema = Schema.Struct({
+	provider: ProviderIdSchema,
+	model: NonEmptyStringSchema,
+});
+export type ProviderModelSelector = typeof ProviderModelSelectorSchema.Type;
+
+function hasUniqueProviderIds(providerIds: readonly ProviderId[]): boolean {
+	for (let index = 0; index < providerIds.length; index += 1) {
+		for (let compared = index + 1; compared < providerIds.length; compared += 1) {
+			if (providerIds[index] === providerIds[compared]) return false;
+		}
+	}
+	return true;
+}
+
+function hasUniqueModelSelectors(models: readonly ProviderModelSelector[]): boolean {
+	for (let index = 0; index < models.length; index += 1) {
+		const model = models[index];
+		if (model === undefined) continue;
+		for (let compared = index + 1; compared < models.length; compared += 1) {
+			const other = models[compared];
+			if (other !== undefined && model.provider === other.provider && model.model === other.model) return false;
+		}
+	}
+	return true;
+}
+
+const ProviderIdsSchema = Schema.Array(ProviderIdSchema).pipe(
+	Schema.check(Schema.isMinLength(1)),
+	Schema.refine((providerIds): providerIds is readonly ProviderId[] => hasUniqueProviderIds(providerIds)),
+);
+const ProviderModelSelectorsSchema = Schema.Array(ProviderModelSelectorSchema).pipe(
+	Schema.check(Schema.isMinLength(1)),
+	Schema.refine((models): models is readonly ProviderModelSelector[] => hasUniqueModelSelectors(models)),
+);
+export const ProviderDenyValueSchema = Schema.Struct({ providerIds: ProviderIdsSchema });
+export type ProviderDenyValue = typeof ProviderDenyValueSchema.Type;
+export const ModelDenyValueSchema = Schema.Struct({ models: ProviderModelSelectorsSchema });
+export type ModelDenyValue = typeof ModelDenyValueSchema.Type;
+export type CoreProviderValue = ProviderDenyValue | ModelDenyValue;
+
+export const CORE_POLICY_KEYS = [...CORE_ROUTING_KEYS, ...CORE_PROVIDER_KEYS] as const;
+export const PolicyKeySchema = Schema.Literals(CORE_POLICY_KEYS);
+export type PolicyKey = typeof PolicyKeySchema.Type;
+export type PolicyValue = CoreRoutingValue | CoreProviderValue;
+export type PolicyValueForKey<Key extends PolicyKey> = Key extends "core.providers.deny.providers"
+	? ProviderDenyValue
+	: Key extends "core.providers.deny.models"
+		? ModelDenyValue
+		: CoreRoutingValue;
+
 export const GlobalPolicyScopeSchema = Schema.Struct({ kind: Schema.Literal("global") });
 export const WorkstreamPolicyScopeSchema = Schema.Struct({
 	kind: Schema.Literal("workstream"),
@@ -65,20 +123,51 @@ export const WorkstreamPolicyScopeSchema = Schema.Struct({
 export const PolicyScopeSchema = Schema.Union([GlobalPolicyScopeSchema, WorkstreamPolicyScopeSchema]);
 export type PolicyScope = typeof PolicyScopeSchema.Type;
 
-const MutationFields = {
-	key: CoreRoutingKeySchema,
+const MutationScopeFields = {
 	scope: PolicyScopeSchema,
-	fragmentVersion: Schema.Literal(POLICY_REGISTRY_VERSION),
 };
-export const SetPolicyMutationV1Schema = Schema.Struct({
+const SetCoreRoutingPolicyMutationV1Schema = Schema.Struct({
 	op: Schema.Literal("set"),
-	...MutationFields,
+	key: CoreRoutingKeySchema,
+	...MutationScopeFields,
+	fragmentVersion: Schema.Literals([1, POLICY_REGISTRY_VERSION]),
 	value: CoreRoutingValueSchema,
 });
-export const ClearPolicyMutationV1Schema = Schema.Struct({
-	op: Schema.Literal("clear"),
-	...MutationFields,
+const SetProviderDenyPolicyMutationV1Schema = Schema.Struct({
+	op: Schema.Literal("set"),
+	key: Schema.Literal("core.providers.deny.providers"),
+	...MutationScopeFields,
+	fragmentVersion: Schema.Literal(CORE_PROVIDER_FRAGMENT_VERSION),
+	value: ProviderDenyValueSchema,
 });
+const SetModelDenyPolicyMutationV1Schema = Schema.Struct({
+	op: Schema.Literal("set"),
+	key: Schema.Literal("core.providers.deny.models"),
+	...MutationScopeFields,
+	fragmentVersion: Schema.Literal(CORE_PROVIDER_FRAGMENT_VERSION),
+	value: ModelDenyValueSchema,
+});
+const ClearCoreRoutingPolicyMutationV1Schema = Schema.Struct({
+	op: Schema.Literal("clear"),
+	key: CoreRoutingKeySchema,
+	...MutationScopeFields,
+	fragmentVersion: Schema.Literals([1, POLICY_REGISTRY_VERSION]),
+});
+const ClearProviderPolicyMutationV1Schema = Schema.Struct({
+	op: Schema.Literal("clear"),
+	key: CoreProviderKeySchema,
+	...MutationScopeFields,
+	fragmentVersion: Schema.Literal(CORE_PROVIDER_FRAGMENT_VERSION),
+});
+export const SetPolicyMutationV1Schema = Schema.Union([
+	SetCoreRoutingPolicyMutationV1Schema,
+	SetProviderDenyPolicyMutationV1Schema,
+	SetModelDenyPolicyMutationV1Schema,
+]);
+export const ClearPolicyMutationV1Schema = Schema.Union([
+	ClearCoreRoutingPolicyMutationV1Schema,
+	ClearProviderPolicyMutationV1Schema,
+]);
 export const PolicyMutationV1Schema = Schema.Union([SetPolicyMutationV1Schema, ClearPolicyMutationV1Schema]);
 export type SetPolicyMutationV1 = typeof SetPolicyMutationV1Schema.Type;
 export type ClearPolicyMutationV1 = typeof ClearPolicyMutationV1Schema.Type;
@@ -100,7 +189,7 @@ export const PolicySourceV1Schema = Schema.Struct({
 export type PolicySourceV1 = typeof PolicySourceV1Schema.Type;
 
 export const PolicyRegistryV1Schema = Schema.Struct({
-	version: Schema.Literal(POLICY_REGISTRY_VERSION),
+	version: Schema.Literals([1, POLICY_REGISTRY_VERSION]),
 	digest: SHA256DigestSchema,
 });
 export type PolicyRegistryV1 = typeof PolicyRegistryV1Schema.Type;
@@ -218,7 +307,7 @@ export class PolicyLeaseConflictError extends Schema.TaggedErrorClass<PolicyLeas
 
 export class UnknownPolicyKeyError extends Schema.TaggedErrorClass<UnknownPolicyKeyError>()("UnknownPolicyKeyError", {
 	key: NonEmptyStringSchema,
-	suggestions: Schema.Array(CoreRoutingKeySchema),
+	suggestions: Schema.Array(PolicyKeySchema),
 }) {}
 
 export class PolicyJournalIoError extends Schema.TaggedErrorClass<PolicyJournalIoError>()("PolicyJournalIoError", {
@@ -247,4 +336,24 @@ export function decodeSessionPolicyRecordV1(input: unknown): SessionPolicyRecord
 
 export function isCoreRoutingKey(key: string): key is CoreRoutingKey {
 	return (CORE_ROUTING_KEYS as readonly string[]).includes(key);
+}
+
+export function isCoreProviderKey(key: string): key is CoreProviderKey {
+	return (CORE_PROVIDER_KEYS as readonly string[]).includes(key);
+}
+
+export function isPolicyKey(key: string): key is PolicyKey {
+	return (CORE_POLICY_KEYS as readonly string[]).includes(key);
+}
+
+export function decodePolicyValueForKey<Key extends PolicyKey>(key: Key, input: unknown): PolicyValueForKey<Key> {
+	const options = { onExcessProperty: "error" as const };
+	switch (key) {
+		case "core.providers.deny.providers":
+			return Schema.decodeUnknownSync(ProviderDenyValueSchema)(input, options) as PolicyValueForKey<Key>;
+		case "core.providers.deny.models":
+			return Schema.decodeUnknownSync(ModelDenyValueSchema)(input, options) as PolicyValueForKey<Key>;
+		default:
+			return Schema.decodeUnknownSync(CoreRoutingValueSchema)(input, options) as PolicyValueForKey<Key>;
+	}
 }

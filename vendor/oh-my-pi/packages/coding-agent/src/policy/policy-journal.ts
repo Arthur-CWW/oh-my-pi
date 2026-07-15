@@ -31,7 +31,7 @@ const POLICY_LOCK_FILENAME = "policy-v1.lock";
 
 export const POLICY_REGISTRY_DIGEST = createHash("sha256")
 	.update(
-		"core.routing:v1:default,smol,slow,vision,plan,designer,commit,title,implementer,qa,operator,synthesizer,task,advisor",
+		"registry:v2;core.routing:v1-2:default,smol,slow,vision,plan,designer,commit,title,implementer,qa,operator,synthesizer,task,advisor;core.providers:v1:deny.providers{providerIds[]},deny.models{models[{provider,model}]}",
 	)
 	.digest("hex");
 
@@ -126,6 +126,11 @@ function headOf(records: readonly PolicyTransactionV1[]): PolicyHead {
 	return last === undefined
 		? { sequence: 0, hash: POLICY_GENESIS_HASH }
 		: { sequence: last.sequence, hash: last.recordHash };
+}
+
+function samePolicyScope(left: PolicyMutationV1["scope"], right: PolicyMutationV1["scope"]): boolean {
+	if (left.kind !== right.kind) return false;
+	return left.kind === "global" || (right.kind === "workstream" && left.workstream === right.workstream);
 }
 
 function decodeLease(raw: string, leasePath: string): PolicyLeaseClaim {
@@ -376,18 +381,13 @@ export class PolicyJournal {
 			if (record === undefined || record.sequence >= beforeSequence) continue;
 			for (let mutationIndex = record.mutations.length - 1; mutationIndex >= 0; mutationIndex -= 1) {
 				const prior = record.mutations[mutationIndex];
-				if (
-					prior === undefined ||
-					prior.key !== mutation.key ||
-					JSON.stringify(prior.scope) !== JSON.stringify(mutation.scope)
-				)
+				if (prior === undefined || prior.key !== mutation.key || !samePolicyScope(prior.scope, mutation.scope))
 					continue;
-				return prior.op === "set"
-					? { ...prior, fragmentVersion: POLICY_REGISTRY_VERSION }
-					: { op: "clear", key: mutation.key, scope: mutation.scope, fragmentVersion: POLICY_REGISTRY_VERSION };
+				return prior;
 			}
 		}
-		return { op: "clear", key: mutation.key, scope: mutation.scope, fragmentVersion: POLICY_REGISTRY_VERSION };
+		const { key, scope, fragmentVersion } = mutation;
+		return { op: "clear", key, scope, fragmentVersion } as PolicyMutationV1;
 	}
 
 	#buildRecord(
@@ -414,11 +414,11 @@ export class PolicyJournal {
 				reason: "author uid and pid must own the foreground lease",
 			});
 		}
-		if (draft.registry.digest !== POLICY_REGISTRY_DIGEST) {
+		if (draft.registry.version !== POLICY_REGISTRY_VERSION || draft.registry.digest !== POLICY_REGISTRY_DIGEST) {
 			throw new PolicyJournalIoError({
 				operation: "append",
 				path: this.journalPath,
-				reason: "registry digest does not match the active closed policy registry",
+				reason: "registry version or digest does not match the active closed policy registry",
 			});
 		}
 		if (records.some(record => record.transactionId === draft.transactionId)) {

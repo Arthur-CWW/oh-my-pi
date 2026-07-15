@@ -38,6 +38,7 @@ import { buildHotkeysMarkdown } from "../../modes/utils/hotkeys-markdown";
 import { buildToolsMarkdown } from "../../modes/utils/tools-markdown";
 import type { AsyncJobSnapshotItem } from "../../session/agent-session";
 import type { AuthStorage, OAuthAccountIdentity } from "../../session/auth-storage";
+import { formatCompactionReceipt, getLatestCompactionReceipt } from "../../session/compaction-receipt";
 import type { NewSessionOptions } from "../../session/session-entries";
 import { formatShakeSummary, type ShakeMode, type ShakeResult } from "../../session/shake-types";
 import { limitMatchesActiveAccount } from "../../slash-commands/helpers/active-oauth-account";
@@ -1131,6 +1132,11 @@ export class CommandController {
 
 			this.ctx.statusLine.invalidate();
 			this.ctx.updateEditorTopBorder();
+			const receipt =
+				typeof this.ctx.sessionManager?.getEntries === "function"
+					? getLatestCompactionReceipt(this.ctx.sessionManager.getEntries())
+					: undefined;
+			if (receipt) this.ctx.showStatus(formatCompactionReceipt(receipt));
 		} catch (error) {
 			if (error instanceof CompactionCancelledError) {
 				outcome = "cancelled";

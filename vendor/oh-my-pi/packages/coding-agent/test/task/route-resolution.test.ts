@@ -6,12 +6,14 @@ import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import {
 	admitSpawnRoute,
 	reconcileSpawnRouteAuthFallback,
+	rerouteSpawnRoute,
 	resolveSpawnRoute,
 	type SpawnRouteInput,
 	type SpawnRouteSource,
 	toSpawnRouteReceipt,
 } from "@oh-my-pi/pi-coding-agent/task/route-resolution";
-import type { PolicySnapshot } from "../../src/policy/policy-projection";
+import { formatTaskRouteError } from "@oh-my-pi/pi-coding-agent/task/spawn-route";
+import type { PolicySnapshot, ProviderPostureEntry } from "../../src/policy/policy-projection";
 import type { CoreRoutingKey } from "../../src/policy/policy-records";
 
 const primary = buildModel({
@@ -70,6 +72,65 @@ const policySnapshot: PolicySnapshot = {
 	expiredTransactionIds: [],
 	futureTransactionIds: [],
 };
+
+const denyEffectiveFrom = "2026-07-14T23:00:00.000Z";
+const denyExpiresAt = "2026-07-15T01:00:00.000Z";
+const providerDenyTransactionId = "eb826c4a-34bf-4a39-8e74-343b4c83d8b7";
+const modelDenyTransactionId = "97995e36-d2e3-49d3-a598-15b29db3cb30";
+
+function denySnapshot(options: {
+	readonly providers?: readonly string[];
+	readonly models?: readonly { readonly provider: string; readonly model: string }[];
+	readonly state?: "active" | "expired";
+}): PolicySnapshot {
+	const providers = options.providers ?? [];
+	const models = options.models ?? [];
+	const state = options.state ?? "active";
+	const effective = state === "active";
+	const common = {
+		operation: "set" as const,
+		state,
+		effective,
+		effectiveFrom: denyEffectiveFrom,
+		expiresAt: denyExpiresAt,
+		remainingMs: effective ? 3_600_000 : 0,
+		sourceLayer: "temporary-posture" as const,
+		scope: { kind: "global" as const },
+		recordHash: "a".repeat(64),
+	};
+	const entries: ProviderPostureEntry[] = [];
+	if (providers.length > 0) {
+		entries.push({
+			...common,
+			key: "core.providers.deny.providers",
+			value: { providerIds: providers },
+			transactionId: providerDenyTransactionId,
+			sequence: 11,
+		});
+	}
+	if (models.length > 0) {
+		entries.push({
+			...common,
+			key: "core.providers.deny.models",
+			value: { models },
+			transactionId: modelDenyTransactionId,
+			sequence: 12,
+		});
+	}
+	return {
+		at: policySnapshotAt,
+		values: {},
+		providerPosture: {
+			values: {},
+			deniedProviderIds: effective ? providers : [],
+			deniedModels: effective ? models : [],
+			entries,
+		},
+		transactions: [],
+		expiredTransactionIds: effective ? [] : entries.map(entry => entry.transactionId),
+		futureTransactionIds: [],
+	};
+}
 
 function input(overrides: Omit<Partial<SpawnRouteInput>, "settings" | "modelRegistry"> = {}): SpawnRouteInput {
 	return { settings: Settings.isolated({}), modelRegistry: registry, ...overrides };
@@ -350,6 +411,146 @@ describe("resolveSpawnRoute", () => {
 
 		const thinking = resolveSpawnRoute(input({ spawnExplicit: "openai-codex/gpt-5.6-terra:xhigh" }));
 		expect(thinking.route?.thinking).toBe(ThinkingLevel.Medium);
+	});
+
+	it("skips a denied provider within a fallback chain and retains exact receipt provenance", () => {
+		const snapshot = denySnapshot({ providers: ["openai-codex"] });
+		const decision = resolveSpawnRoute(
+			input({
+				sessionTemporary: ["openai-codex/gpt-5.6-terra", "openai/smol-literal"],
+				policySnapshot: snapshot,
+			}),
+		);
+		const receipt = toSpawnRouteReceipt(decision);
+
+		expect(receipt.route.selector).toBe("openai/smol-literal");
+		expect(receipt.excludedPolicyCandidates).toEqual([
+			{
+				denyKind: "provider",
+				key: "core.providers.deny.providers",
+				provider: "openai-codex",
+				model: "gpt-5.6-terra",
+				selector: "openai-codex/gpt-5.6-terra",
+				source: "session_temporary",
+				reason: "provider openai-codex denied by core.providers.deny.providers",
+				transactionId: providerDenyTransactionId,
+				sequence: 11,
+				effectiveFrom: denyEffectiveFrom,
+				expiresAt: denyExpiresAt,
+				remainingMs: 3_600_000,
+				sourceLayer: "temporary-posture",
+				snapshotAt: policySnapshotAt,
+			},
+		]);
+		expect(Object.isFrozen(decision.providerDenyConstraints)).toBe(true);
+		expect(Object.isFrozen(receipt.excludedPolicyCandidates)).toBe(true);
+	});
+
+	it("skips an exact denied model while leaving other providers and models eligible", () => {
+		const decision = resolveSpawnRoute(
+			input({
+				agentModelOverride: ["openai-codex/gpt-5.6-terra", "openai/smol-literal"],
+				policySnapshot: denySnapshot({
+					models: [{ provider: "openai-codex", model: "gpt-5.6-terra" }],
+				}),
+			}),
+		);
+
+		expect(decision.route?.selector).toBe("openai/smol-literal");
+		expect(decision.excludedPolicyCandidates).toHaveLength(1);
+		expect(decision.excludedPolicyCandidates?.[0]).toMatchObject({
+			denyKind: "model",
+			key: "core.providers.deny.models",
+			provider: "openai-codex",
+			model: "gpt-5.6-terra",
+			transactionId: modelDenyTransactionId,
+			sequence: 12,
+		});
+	});
+
+	it("keeps a candidate eligible when its deny posture expired at the snapshot boundary", () => {
+		const decision = resolveSpawnRoute(
+			input({
+				sessionTemporary: "openai-codex/gpt-5.6-terra",
+				policySnapshot: denySnapshot({ providers: ["openai-codex"], state: "expired" }),
+			}),
+		);
+
+		expect(decision.route?.selector).toBe("openai-codex/gpt-5.6-terra");
+		expect(decision.providerDenyConstraints).toEqual([]);
+		expect(decision.excludedPolicyCandidates).toEqual([]);
+	});
+
+	it.each([
+		"spawnExplicit",
+		"sessionExplicit",
+	] as const)("returns a visible typed policy block when %s resolves only to a denied route", explicitInput => {
+		const decision = resolveSpawnRoute(
+			input({
+				[explicitInput]: "openai-codex/gpt-5.6-terra",
+				globalDefault: "openai/smol-literal",
+				policySnapshot: denySnapshot({ providers: ["openai-codex"] }),
+			}),
+		);
+
+		expect(decision.route).toBeUndefined();
+		expect(decision.invalid).toBeUndefined();
+		expect(decision.block).toMatchObject({
+			kind: "provider_policy_denied",
+			requested: ["openai-codex/gpt-5.6-terra"],
+			exclusions: [
+				{
+					denyKind: "provider",
+					key: "core.providers.deny.providers",
+					provider: "openai-codex",
+					model: "gpt-5.6-terra",
+				},
+			],
+		});
+		const message = formatTaskRouteError({} as Parameters<typeof formatTaskRouteError>[0], "implementer", decision);
+		expect(message).toContain('Provider policy denied explicit model pin for task agent "implementer"');
+		expect(message).toContain("openai-codex/gpt-5.6-terra");
+		expect(message).toContain(providerDenyTransactionId);
+	});
+
+	it("rejects denied quota reroutes and skips denied auth fallbacks from the captured snapshot", () => {
+		const decision = resolveSpawnRoute(
+			input({
+				agentFrontmatter: "openai/smol-literal",
+				parentActiveSelector: "openai-codex/gpt-5.6-terra",
+				policySnapshot: denySnapshot({ providers: ["openai-codex"] }),
+			}),
+		);
+		const authReconciled = reconcileSpawnRouteAuthFallback(decision, primary, ThinkingLevel.Low, true);
+		expect(authReconciled.source).toBe("agent_frontmatter");
+		expect(authReconciled.route?.selector).toBe("openai/smol-literal");
+		expect(authReconciled.excludedPolicyCandidates?.at(-1)).toMatchObject({
+			source: "auth_fallback",
+			provider: "openai-codex",
+			model: "gpt-5.6-terra",
+		});
+
+		const quotaReconciled = rerouteSpawnRoute(
+			decision,
+			{
+				providerId: "openai-codex",
+				modelId: "gpt-5.6-terra",
+				selector: "openai-codex/gpt-5.6-terra",
+			},
+			{
+				originalProvider: "openai",
+				originalModel: "openai/smol-literal",
+				decisionReason: "quota fallback",
+			},
+			"quota fallback",
+		);
+		expect(quotaReconciled.route?.selector).toBe("openai/smol-literal");
+		expect(quotaReconciled.block).toMatchObject({ kind: "provider_policy_denied" });
+		expect(quotaReconciled.excludedPolicyCandidates?.at(-1)).toMatchObject({
+			source: "automatic_reroute",
+			provider: "openai-codex",
+			model: "gpt-5.6-terra",
+		});
 	});
 
 	it("reconciles auth fallback into the sole receipt while preserving quota history", () => {

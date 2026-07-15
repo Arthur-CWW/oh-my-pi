@@ -54,6 +54,7 @@ export interface DiagnosticEvent {
 	finalOutputUri?: string;
 	finalOutputAvailable?: boolean;
 	causeChain?: string[];
+	buildVersion?: string;
 	buildDigest?: string;
 	fleetRolloutId?: string;
 
@@ -76,6 +77,14 @@ export interface ErrorInboxWriter {
 function inferBuildDigest(sessionManager: ErrorInboxWriter): string | undefined {
 	try {
 		return sessionManager.getSessionOwnership?.()?.buildRevision.digest;
+	} catch {
+		return undefined;
+	}
+}
+
+function inferBuildVersion(sessionManager: ErrorInboxWriter): string | undefined {
+	try {
+		return sessionManager.getSessionOwnership?.()?.buildRevision.version;
 	} catch {
 		return undefined;
 	}
@@ -107,8 +116,9 @@ function inferFleetRolloutId(sessionManager: ErrorInboxWriter): string | undefin
 }
 export function enrichErrorInboxEvent(
 	sessionManager: ErrorInboxWriter,
-	event: Pick<DiagnosticEvent, "buildDigest" | "fleetRolloutId">,
+	event: Pick<DiagnosticEvent, "buildVersion" | "buildDigest" | "fleetRolloutId">,
 ): void {
+	event.buildVersion ??= inferBuildVersion(sessionManager);
 	event.buildDigest ??= inferBuildDigest(sessionManager);
 	event.fleetRolloutId ??= inferFleetRolloutId(sessionManager);
 }

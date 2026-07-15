@@ -65,6 +65,8 @@ export interface FleetRolloutFailureReceipt {
 	readonly awaitedCondition: FleetRolloutFailureCondition;
 	readonly commandId?: string;
 	readonly timedOut: boolean;
+	readonly buildVersion?: string;
+	readonly buildDigest?: string;
 	readonly cause: string;
 }
 
@@ -545,6 +547,8 @@ export async function executeFleetRolloutPlan(
 							awaitedCondition: "target lifecycle completion" as const,
 							commandId: planned.commandId,
 							timedOut: false,
+							buildVersion: planned.peer.version ?? "unknown/legacy",
+							buildDigest: planned.peer.buildDigest ?? planned.peer.fleetCapability?.buildDigest ?? "unknown/legacy",
 							cause: error instanceof Error ? error.message : String(error),
 						};
 			const terminalState = error instanceof FleetRolloutTargetError ? error.terminalState : "RestartFailed";

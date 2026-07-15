@@ -441,6 +441,8 @@ function targetExecutionError(input: {
 			phaseReached: input.phaseReached,
 			awaitedCondition: input.awaitedCondition,
 			...(input.commandId === undefined ? {} : { commandId: input.commandId }),
+			buildVersion: input.target.peer.version ?? "unknown/legacy",
+			buildDigest: input.target.peer.buildDigest ?? input.target.peer.fleetCapability?.buildDigest ?? "unknown/legacy",
 			timedOut: input.timedOut ?? false,
 			cause: input.cause,
 		},
@@ -520,6 +522,7 @@ function toDiagnosticEvents(
 		readonly cause: string;
 		readonly timestamp: number;
 		readonly buildDigest: string;
+		readonly buildVersion: string;
 		readonly rolloutId: string;
 		readonly count: number;
 		readonly message: string;
@@ -532,6 +535,7 @@ function toDiagnosticEvents(
 		message: row.message,
 		count: row.count,
 		cause: row.cause as DiagnosticEvent["cause"],
+		buildVersion: row.buildVersion,
 		buildDigest: row.buildDigest,
 		fleetRolloutId: row.rolloutId,
 		unread: false,

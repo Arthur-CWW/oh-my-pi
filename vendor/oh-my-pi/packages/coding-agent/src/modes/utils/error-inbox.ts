@@ -241,6 +241,7 @@ function decodeUiErrorV2(data: Record<string, unknown>): DiagnosticEvent {
 		finalOutputUri: optionalString(data, "finalOutputUri"),
 		finalOutputAvailable: optionalBoolean(data, "finalOutputAvailable"),
 		causeChain: optionalStringArray(data, "causeChain"),
+		buildVersion: optionalString(data, "buildVersion"),
 		buildDigest: optionalString(data, "buildDigest"),
 		fleetRolloutId: optionalString(data, "fleetRolloutId"),
 		action: decodeDiagnosticAction(data.action),
@@ -407,6 +408,7 @@ export class ErrorInbox {
 				existing.historyUri === details.historyUri &&
 				existing.finalOutputUri === details.finalOutputUri &&
 				existing.finalOutputAvailable === details.finalOutputAvailable &&
+				existing.buildVersion === details.buildVersion &&
 				existing.buildDigest === details.buildDigest &&
 				existing.fleetRolloutId === details.fleetRolloutId &&
 				isSameCauseChain(existing.causeChain, details.causeChain) &&
@@ -456,6 +458,7 @@ export class ErrorInbox {
 				finalOutputUri: details.finalOutputUri,
 				finalOutputAvailable: details.finalOutputAvailable,
 				causeChain: details.causeChain,
+				buildVersion: details.buildVersion,
 				buildDigest: details.buildDigest,
 				fleetRolloutId: details.fleetRolloutId,
 				action: details.action,

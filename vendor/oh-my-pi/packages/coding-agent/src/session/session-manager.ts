@@ -2,8 +2,15 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { Message, MessageAttribution, ServiceTier, Usage, UserContent } from "@oh-my-pi/pi-ai";
 import { getBlobsDir, getProjectDir, getSessionsDir, isEnoent, logger, toError } from "@oh-my-pi/pi-utils";
+import {
+	PLAN_ARTIFACT_CUSTOM_TYPE,
+	PLAN_ARTIFACT_VERSION,
+	type PlanArtifactReference,
+} from "../plan-mode/plan-artifact";
 import { ArtifactManager } from "./artifacts";
 import { type BlobPutOptions, type BlobPutResult, BlobStore } from "./blob-store";
+import type { CompactionReceipt } from "./compaction-receipt";
+import { SessionOwnershipLostError } from "./durable-input-queue";
 import {
 	type BashExecutionMessage,
 	type CustomMessage,
@@ -25,10 +32,10 @@ import {
 	CURRENT_SESSION_VERSION,
 	type CustomEntry,
 	type CustomMessageEntry,
+	type DurableDeliveryIdentity,
 	decodeDurableDeliveryIdentity,
 	decodeSessionCommandEntry,
 	decodeSessionWorkstream,
-	type DurableDeliveryIdentity,
 	type FileEntry,
 	type JsonValue,
 	type LabelEntry,
@@ -58,7 +65,6 @@ import {
 	type WorkflowRestoreState,
 	type WorkstreamSource,
 } from "./session-entries";
-import { SessionOwnershipLostError } from "./durable-input-queue";
 import {
 	findMostRecentSession,
 	listAllSessions,
@@ -403,7 +409,9 @@ function jsonValuesEqual(left: JsonValue | undefined, right: JsonValue | undefin
 	const leftEntries = Object.entries(left);
 	const rightRecord = right as { readonly [key: string]: JsonValue };
 	if (leftEntries.length !== Object.keys(rightRecord).length) return false;
-	return leftEntries.every(([key, value]) => Object.hasOwn(rightRecord, key) && jsonValuesEqual(value, rightRecord[key]));
+	return leftEntries.every(
+		([key, value]) => Object.hasOwn(rightRecord, key) && jsonValuesEqual(value, rightRecord[key]),
+	);
 }
 
 function contentEquals(left: string | UserContent[], right: string | UserContent[]): boolean {
@@ -1793,6 +1801,7 @@ export class SessionManager {
 		fromExtension?: boolean,
 		preserveData?: Record<string, unknown>,
 		queueBoundarySequence?: number,
+		receipt?: CompactionReceipt,
 	): string {
 		const entry: CompactionEntry<T> = {
 			type: "compaction",
@@ -1805,6 +1814,7 @@ export class SessionManager {
 			fromExtension,
 			preserveData,
 			queueBoundarySequence,
+			receipt,
 		};
 		this.#recordEntry(entry);
 		return entry.id;
@@ -1814,6 +1824,40 @@ export class SessionManager {
 		const entry: CustomEntry = { type: "custom", customType, data, ...this.#freshEntryFields() };
 		this.#recordEntry(entry);
 		return entry.id;
+	}
+
+	/**
+	 * Persist one approved plan revision beside this session and append its journal
+	 * pointer. The local URL remains stable when the session is resumed or moved.
+	 */
+	async appendPlanArtifact(
+		title: string,
+		content: string,
+		sourcePath: string,
+	): Promise<{ entryId?: string; localPath: string; planUrl?: string }> {
+		const artifactsDir = this.getArtifactsDir();
+		if (!artifactsDir) return { localPath: sourcePath };
+
+		const fields = this.#freshEntryFields();
+		const relativePath = path.join("plans", `${fields.id}.md`);
+		const absolutePath = path.join(artifactsDir, "local", relativePath);
+		await fs.promises.mkdir(path.dirname(absolutePath), { recursive: true });
+		await Bun.write(absolutePath, content);
+
+		const localPath = `local://${relativePath.replaceAll(path.sep, "/")}`;
+		const data: PlanArtifactReference = {
+			version: PLAN_ARTIFACT_VERSION,
+			title,
+			localPath,
+		};
+		const entry: CustomEntry<PlanArtifactReference> = {
+			type: "custom",
+			...fields,
+			customType: PLAN_ARTIFACT_CUSTOM_TYPE,
+			data,
+		};
+		this.#recordEntry(entry);
+		return { entryId: fields.id, localPath, planUrl: `plan://${fields.id}` };
 	}
 
 	/**

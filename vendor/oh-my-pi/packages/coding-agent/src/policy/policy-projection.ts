@@ -1,10 +1,17 @@
 import {
+	CORE_PROVIDER_KEYS,
 	CORE_ROUTING_KEYS,
+	type CoreProviderKey,
+	type CoreProviderValue,
 	type CoreRoutingKey,
 	type CoreRoutingValue,
+	isCoreProviderKey,
+	type ModelDenyValue,
 	type PolicyMutationV1,
 	type PolicyScope,
 	type PolicyTransactionV1,
+	type ProviderDenyValue,
+	type ProviderModelSelector,
 } from "./policy-records";
 
 export type PolicySourceLayer =
@@ -50,10 +57,62 @@ export interface EffectivePolicyValue {
 	readonly shadowed: readonly PolicyCandidate[];
 }
 
+export interface ProviderPolicyCandidate {
+	readonly key: CoreProviderKey;
+	readonly operation: PolicyMutationV1["op"];
+	readonly value?: CoreProviderValue;
+	readonly sourceLayer: PolicySourceLayer;
+	readonly scope: PolicyScope;
+	readonly transactionId: string;
+	readonly sequence: number;
+	readonly recordHash: string;
+}
+
+export interface EffectiveProviderPolicyValue {
+	readonly key: CoreProviderKey;
+	readonly value: CoreProviderValue;
+	readonly sourceLayer: PolicySourceLayer;
+	readonly scope: PolicyScope;
+	readonly transactionId: string;
+	readonly sequence: number;
+	readonly recordHash: string;
+	readonly shadowed: readonly ProviderPolicyCandidate[];
+}
+
+export type ProviderPostureState = "active" | "future" | "expired";
+
+export interface ProviderPostureEntry {
+	readonly key: CoreProviderKey;
+	readonly operation: PolicyMutationV1["op"];
+	readonly value?: CoreProviderValue;
+	readonly state: ProviderPostureState;
+	readonly effective: boolean;
+	readonly transactionId: string;
+	readonly sequence: number;
+	readonly effectiveFrom: string;
+	readonly expiresAt?: string;
+	readonly remainingMs?: number;
+	readonly sourceLayer: PolicySourceLayer;
+	readonly scope: PolicyScope;
+	readonly recordHash: string;
+}
+
+export interface ProviderPostureProjection {
+	readonly values: Readonly<Partial<Record<CoreProviderKey, EffectiveProviderPolicyValue>>>;
+	readonly deniedProviderIds: readonly string[];
+	readonly deniedModels: readonly ProviderModelSelector[];
+	readonly entries: readonly ProviderPostureEntry[];
+}
+
 export interface PolicySnapshot {
 	readonly at: string;
 	readonly workstream?: string;
 	readonly values: Readonly<Partial<Record<CoreRoutingKey, EffectivePolicyValue>>>;
+	/**
+	 * Always present on snapshots produced by projectPolicy. Optional only so older
+	 * callers that construct routing-only snapshots remain source-compatible.
+	 */
+	readonly providerPosture?: ProviderPostureProjection;
 	readonly transactions: readonly PolicyTransactionV1[];
 	readonly expiredTransactionIds: readonly string[];
 	readonly futureTransactionIds: readonly string[];
@@ -75,11 +134,13 @@ function layerFor(record: PolicyTransactionV1, scope: PolicyScope): PolicySource
 	return scope.kind === "workstream" ? "workstream-durable" : "global-durable";
 }
 
-function candidateFromMutation(record: PolicyTransactionV1, mutation: PolicyMutationV1): PolicyCandidate {
+function routingCandidateFromMutation(record: PolicyTransactionV1, mutation: PolicyMutationV1): PolicyCandidate {
+	if (isCoreProviderKey(mutation.key))
+		throw new Error(`Provider mutation passed to routing projection: ${mutation.key}`);
 	return {
 		key: mutation.key,
 		operation: mutation.op,
-		...(mutation.op === "set" ? { value: mutation.value } : {}),
+		...(mutation.op === "set" ? { value: mutation.value as CoreRoutingValue } : {}),
 		sourceLayer: layerFor(record, mutation.scope),
 		scope: mutation.scope,
 		transactionId: record.transactionId,
@@ -88,7 +149,28 @@ function candidateFromMutation(record: PolicyTransactionV1, mutation: PolicyMuta
 	};
 }
 
-function compareCandidates(left: PolicyCandidate, right: PolicyCandidate): number {
+function providerCandidateFromMutation(
+	record: PolicyTransactionV1,
+	mutation: PolicyMutationV1,
+): ProviderPolicyCandidate {
+	if (!isCoreProviderKey(mutation.key))
+		throw new Error(`Routing mutation passed to provider projection: ${mutation.key}`);
+	return {
+		key: mutation.key,
+		operation: mutation.op,
+		...(mutation.op === "set" ? { value: mutation.value as CoreProviderValue } : {}),
+		sourceLayer: layerFor(record, mutation.scope),
+		scope: mutation.scope,
+		transactionId: record.transactionId,
+		sequence: record.sequence,
+		recordHash: record.recordHash,
+	};
+}
+
+function compareCandidates(
+	left: Pick<PolicyCandidate, "sourceLayer" | "sequence">,
+	right: Pick<PolicyCandidate, "sourceLayer" | "sequence">,
+): number {
 	const layerDifference =
 		POLICY_LAYER_PRECEDENCE.indexOf(left.sourceLayer) - POLICY_LAYER_PRECEDENCE.indexOf(right.sourceLayer);
 	return layerDifference === 0 ? right.sequence - left.sequence : layerDifference;
@@ -108,19 +190,53 @@ export function projectPolicy(
 	const expiredTransactionIds: string[] = [];
 	const futureTransactionIds: string[] = [];
 	const candidatesByKey: Partial<Record<CoreRoutingKey, PolicyCandidate[]>> = {};
+	const providerCandidatesByKey: Partial<Record<CoreProviderKey, ProviderPolicyCandidate[]>> = {};
+	const providerEntries: ProviderPostureEntry[] = [];
 
 	for (const record of records) {
-		if (Date.parse(record.effectiveFrom) > atMillis) {
-			futureTransactionIds.push(record.transactionId);
-			continue;
-		}
-		if (record.expiresAt !== undefined && Date.parse(record.expiresAt) <= atMillis) {
-			expiredTransactionIds.push(record.transactionId);
-			continue;
-		}
+		const effectiveMillis = Date.parse(record.effectiveFrom);
+		const expiresMillis = record.expiresAt === undefined ? undefined : Date.parse(record.expiresAt);
+		const state: ProviderPostureState =
+			effectiveMillis > atMillis
+				? "future"
+				: expiresMillis !== undefined && expiresMillis <= atMillis
+					? "expired"
+					: "active";
+		if (state === "future") futureTransactionIds.push(record.transactionId);
+		else if (state === "expired") expiredTransactionIds.push(record.transactionId);
+
 		for (const mutation of record.mutations) {
 			if (!scopeParticipates(mutation.scope, options.workstream)) continue;
-			(candidatesByKey[mutation.key] ??= []).push(candidateFromMutation(record, mutation));
+			if (isCoreProviderKey(mutation.key)) {
+				const candidate = providerCandidateFromMutation(record, mutation);
+				providerEntries.push({
+					key: candidate.key,
+					operation: candidate.operation,
+					...(candidate.value === undefined ? {} : { value: candidate.value }),
+					state,
+					effective: false,
+					transactionId: record.transactionId,
+					sequence: record.sequence,
+					effectiveFrom: record.effectiveFrom,
+					...(record.expiresAt === undefined ? {} : { expiresAt: record.expiresAt }),
+					...(state === "future"
+						? { remainingMs: effectiveMillis - atMillis }
+						: state === "expired"
+							? { remainingMs: 0 }
+							: expiresMillis === undefined
+								? {}
+								: { remainingMs: expiresMillis - atMillis }),
+					sourceLayer: candidate.sourceLayer,
+					scope: candidate.scope,
+					recordHash: record.recordHash,
+				});
+				if (state === "active") (providerCandidatesByKey[candidate.key] ??= []).push(candidate);
+				continue;
+			}
+			if (state === "active") {
+				const candidate = routingCandidateFromMutation(record, mutation);
+				(candidatesByKey[candidate.key] ??= []).push(candidate);
+			}
 		}
 	}
 
@@ -183,12 +299,112 @@ export function projectPolicy(
 		};
 	}
 
+	const providerValues: Partial<Record<CoreProviderKey, EffectiveProviderPolicyValue>> = {};
+	for (const key of CORE_PROVIDER_KEYS) {
+		const candidates = providerCandidatesByKey[key];
+		if (candidates === undefined) continue;
+		candidates.sort(compareCandidates);
+		const latestByLayer: Partial<Record<PolicySourceLayer, ProviderPolicyCandidate>> = {};
+		for (const candidate of candidates) latestByLayer[candidate.sourceLayer] ??= candidate;
+		const winner = POLICY_LAYER_PRECEDENCE.map(layer => latestByLayer[layer]).find(
+			(candidate): candidate is ProviderPolicyCandidate => candidate?.operation === "set",
+		);
+		if (winner === undefined || winner.value === undefined) continue;
+		providerValues[key] = {
+			key,
+			value: winner.value,
+			sourceLayer: winner.sourceLayer,
+			scope: winner.scope,
+			transactionId: winner.transactionId,
+			sequence: winner.sequence,
+			recordHash: winner.recordHash,
+			shadowed: candidates.filter(candidate => candidate !== winner),
+		};
+	}
+
+	const deniedProviderIds = [
+		...((providerValues["core.providers.deny.providers"]?.value as ProviderDenyValue | undefined)?.providerIds ?? []),
+	].sort();
+	const deniedModels = [
+		...((providerValues["core.providers.deny.models"]?.value as ModelDenyValue | undefined)?.models ?? []),
+	].sort((left, right) => left.provider.localeCompare(right.provider) || left.model.localeCompare(right.model));
+	const entries = providerEntries.map(entry => {
+		const winner = providerValues[entry.key];
+		return winner?.transactionId === entry.transactionId && winner.sequence === entry.sequence
+			? { ...entry, effective: true }
+			: entry;
+	});
+
 	return {
 		at,
 		...(options.workstream === undefined ? {} : { workstream: options.workstream }),
 		values,
+		providerPosture: { values: providerValues, deniedProviderIds, deniedModels, entries },
 		transactions: [...records],
 		expiredTransactionIds,
 		futureTransactionIds,
 	};
+}
+
+export type ProviderDenyMatch =
+	| {
+			readonly kind: "provider";
+			readonly key: "core.providers.deny.providers";
+			readonly provider: string;
+			readonly entry: ProviderPostureEntry;
+	  }
+	| {
+			readonly kind: "model";
+			readonly key: "core.providers.deny.models";
+			readonly provider: string;
+			readonly model: string;
+			readonly entry: ProviderPostureEntry;
+	  };
+
+function effectivePostureEntry(snapshot: PolicySnapshot, key: CoreProviderKey): ProviderPostureEntry | undefined {
+	return snapshot.providerPosture?.entries.find(
+		entry => entry.key === key && entry.state === "active" && entry.effective,
+	);
+}
+
+export function isProviderDenied(snapshot: PolicySnapshot, provider: string): boolean {
+	return snapshot.providerPosture?.deniedProviderIds.includes(provider) ?? false;
+}
+
+export function isModelDenied(snapshot: PolicySnapshot, provider: string, model: string): boolean {
+	return (
+		snapshot.providerPosture?.deniedModels.some(
+			selector => selector.provider === provider && selector.model === model,
+		) ?? false
+	);
+}
+
+export function providerDenyMatches(
+	snapshot: PolicySnapshot,
+	provider: string,
+	model: string,
+): readonly ProviderDenyMatch[] {
+	const matches: ProviderDenyMatch[] = [];
+	if (isProviderDenied(snapshot, provider)) {
+		const entry = effectivePostureEntry(snapshot, "core.providers.deny.providers");
+		if (entry !== undefined)
+			matches.push({
+				kind: "provider",
+				key: "core.providers.deny.providers",
+				provider,
+				entry,
+			});
+	}
+	if (isModelDenied(snapshot, provider, model)) {
+		const entry = effectivePostureEntry(snapshot, "core.providers.deny.models");
+		if (entry !== undefined)
+			matches.push({
+				kind: "model",
+				key: "core.providers.deny.models",
+				provider,
+				model,
+				entry,
+			});
+	}
+	return matches;
 }

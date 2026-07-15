@@ -6,14 +6,20 @@ import { Effect, Schema } from "effect";
 import { commitPolicyWithPreview } from "../policy/policy-apply";
 import { POLICY_REGISTRY_DIGEST, PolicyJournal } from "../policy/policy-journal";
 import {
+	CORE_PROVIDER_FRAGMENT_VERSION,
+	CORE_PROVIDER_KEYS,
 	CORE_ROUTING_KEYS,
 	type CoreRoutingValue,
 	CoreRoutingValueSchema,
+	decodePolicyValueForKey,
+	isCoreProviderKey,
+	isPolicyKey,
 	POLICY_REGISTRY_VERSION,
 	type PolicyMutationV1,
 	type PolicyScope,
 	type PolicyTransactionDraftV1,
 	type PolicyTransactionV1,
+	type PolicyValue,
 } from "../policy/policy-records";
 import { makePolicyService, type PolicyService } from "../policy/policy-service";
 
@@ -25,6 +31,9 @@ export interface PolicyCliRequest {
 	readonly value?: string;
 	readonly from?: string;
 	readonly to?: string;
+	readonly effectiveFrom?: string;
+	readonly expiresAt?: string;
+	readonly expiresIn?: string;
 	readonly transactionId?: string;
 	readonly sourcePaths?: readonly string[];
 	readonly frontmatterPaths?: readonly string[];
@@ -76,6 +85,83 @@ function decodeRoutingValue(value: string): CoreRoutingValue {
 	return Schema.decodeUnknownSync(CoreRoutingValueSchema)(value);
 }
 
+const DURATION_UNITS_MS = {
+	ms: 1,
+	s: 1_000,
+	m: 60_000,
+	h: 3_600_000,
+	d: 86_400_000,
+	w: 604_800_000,
+} as const;
+
+function decodeSetValue(key: string, value: string): PolicyValue {
+	if (!isPolicyKey(key)) throw new Error(`Unknown policy key: ${key}`);
+	if (!isCoreProviderKey(key)) return decodeRoutingValue(value);
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(value);
+	} catch (error) {
+		const reason = error instanceof Error ? error.message : String(error);
+		throw new Error(`policy set ${key} requires a valid JSON object: ${reason}`);
+	}
+	if (!isRecord(parsed)) throw new Error(`policy set ${key} requires a JSON object`);
+	return decodePolicyValueForKey(key, parsed);
+}
+
+function canonicalTimestamp(flag: string, value: string): string {
+	const timestamp = Date.parse(value);
+	if (!Number.isFinite(timestamp)) throw new Error(`${flag} requires a valid timestamp`);
+	return new Date(timestamp).toISOString();
+}
+
+function parsePositiveDuration(value: string): number {
+	const match = /^([1-9]\d*)(ms|s|m|h|d|w)$/.exec(value);
+	if (!match) throw new Error("--expires-in requires a positive integer duration with unit ms, s, m, h, d, or w");
+	const amount = Number(match[1]);
+	const unit = match[2] as keyof typeof DURATION_UNITS_MS;
+	const durationMs = amount * DURATION_UNITS_MS[unit];
+	if (!Number.isSafeInteger(durationMs) || durationMs <= 0) {
+		throw new Error("--expires-in duration is outside the supported range");
+	}
+	return durationMs;
+}
+
+function resolveSetInterval(
+	request: Pick<PolicyCliRequest, "effectiveFrom" | "expiresAt" | "expiresIn">,
+	now: Date,
+): { readonly effectiveFrom: string; readonly expiresAt?: string } {
+	if (request.expiresAt !== undefined && request.expiresIn !== undefined) {
+		throw new Error("--expires-at and --expires-in cannot be used together");
+	}
+	const effectiveFrom =
+		request.effectiveFrom === undefined
+			? now.toISOString()
+			: canonicalTimestamp("--effective-from", request.effectiveFrom);
+	const effectiveFromMs = Date.parse(effectiveFrom);
+	let expiresAt: string | undefined;
+	if (request.expiresIn !== undefined) {
+		const expiresAtMs = effectiveFromMs + parsePositiveDuration(request.expiresIn);
+		if (!Number.isSafeInteger(expiresAtMs) || Math.abs(expiresAtMs) > 8_640_000_000_000_000) {
+			throw new Error("--expires-in produces an unsupported expiry timestamp");
+		}
+		expiresAt = new Date(expiresAtMs).toISOString();
+	} else if (request.expiresAt !== undefined) {
+		expiresAt = canonicalTimestamp("--expires-at", request.expiresAt);
+	}
+	if (expiresAt !== undefined && Date.parse(expiresAt) <= effectiveFromMs) {
+		throw new Error("--expires-at must be later than --effective-from");
+	}
+	return { effectiveFrom, ...(expiresAt === undefined ? {} : { expiresAt }) };
+}
+
+function resolveNow(now: (() => Date) | undefined): Date {
+	const resolved = (now ?? (() => new Date()))();
+	if (!(resolved instanceof Date) || !Number.isFinite(resolved.getTime())) {
+		throw new Error("Policy clock returned an invalid date");
+	}
+	return resolved;
+}
+
 function isRecord(value: unknown): value is ParsedYaml {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -90,6 +176,28 @@ async function readYamlCandidate(filePath: string, role: string): Promise<Import
 	return typeof raw === "string" && raw.trim().length > 0
 		? [{ sourcePath: filePath, key: routingKey(role), value: decodeRoutingValue(raw) }]
 		: [];
+}
+
+async function readProviderDenyCandidate(filePath: string): Promise<ImportCandidate[]> {
+	const content = await Bun.file(filePath).text();
+	const parsed: unknown = YAML.parse(content);
+	if (!isRecord(parsed) || !Array.isArray(parsed.disabledProviders)) return [];
+	const providerIds = [
+		...new Set(
+			parsed.disabledProviders.flatMap(value =>
+				typeof value === "string" && value.trim().length > 0 ? [value.trim()] : [],
+			),
+		),
+	];
+	return providerIds.length === 0
+		? []
+		: [
+				{
+					sourcePath: filePath,
+					key: "core.providers.deny.providers",
+					value: JSON.stringify({ providerIds }),
+				},
+			];
 }
 
 async function readFrontmatterCandidate(filePath: string): Promise<ImportCandidate[]> {
@@ -120,7 +228,10 @@ function importMutations(candidates: readonly ImportCandidate[]): {
 	const grouped = new Map<string, ImportCandidate[]>();
 	const unsupported: string[] = [];
 	for (const candidate of candidates) {
-		if (!(CORE_ROUTING_KEYS as readonly string[]).includes(candidate.key)) {
+		if (
+			!(CORE_ROUTING_KEYS as readonly string[]).includes(candidate.key) &&
+			!(CORE_PROVIDER_KEYS as readonly string[]).includes(candidate.key)
+		) {
 			unsupported.push(`${candidate.sourcePath}:${candidate.key}`);
 			continue;
 		}
@@ -147,13 +258,31 @@ function importMutations(candidates: readonly ImportCandidate[]): {
 			classification: "policy",
 			requiredManualResolution: new Set(candidatesForKey).size > 1,
 		});
-		mutations.push({
-			op: "set",
-			key: key as PolicyMutationV1["key"],
-			scope: { kind: "global" },
-			fragmentVersion: POLICY_REGISTRY_VERSION,
-			value: winner.value as CoreRoutingValue,
-		});
+		if (key === "core.providers.deny.providers") {
+			mutations.push({
+				op: "set",
+				key,
+				scope: { kind: "global" },
+				fragmentVersion: CORE_PROVIDER_FRAGMENT_VERSION,
+				value: decodePolicyValueForKey(key, JSON.parse(winner.value)),
+			});
+		} else if (key === "core.providers.deny.models") {
+			mutations.push({
+				op: "set",
+				key,
+				scope: { kind: "global" },
+				fragmentVersion: CORE_PROVIDER_FRAGMENT_VERSION,
+				value: decodePolicyValueForKey(key, JSON.parse(winner.value)),
+			});
+		} else {
+			mutations.push({
+				op: "set",
+				key: key as (typeof CORE_ROUTING_KEYS)[number],
+				scope: { kind: "global" },
+				fragmentVersion: POLICY_REGISTRY_VERSION,
+				value: decodeRoutingValue(winner.value),
+			});
+		}
 	}
 	return { mutations, conflicts, unsupported };
 }
@@ -183,6 +312,7 @@ async function collectImport(
 		"advisor",
 	];
 	for (const role of roles) candidates.push(...(await readYamlCandidate(configPath, role)));
+	candidates.push(...(await readProviderDenyCandidate(configPath)));
 	for (const filePath of frontmatterPaths) candidates.push(...(await readFrontmatterCandidate(filePath)));
 	const sourcePaths = [configPath, ...frontmatterPaths];
 	const { mutations: _, ...details } = importMutations(candidates);
@@ -221,7 +351,7 @@ async function runImport(
 		registry: { version: POLICY_REGISTRY_VERSION, digest: POLICY_REGISTRY_DIGEST },
 		mutations: detail.mutations,
 	};
-	if (draft.mutations.length === 0) throw new Error("policy import found no supported routing candidates");
+	if (draft.mutations.length === 0) throw new Error("policy import found no supported policy candidates");
 	const preview = await journal.previewAppend(draft);
 	const transaction =
 		request.dryRun === true
@@ -250,6 +380,19 @@ function formatOutput(value: unknown, json: boolean): string {
 	return json ? `${JSON.stringify(value, null, 2)}\n` : `${JSON.stringify(value)}\n`;
 }
 
+function formatExplainOutput(value: unknown, json: boolean): string {
+	if (
+		!json &&
+		isRecord(value) &&
+		typeof value.status === "string" &&
+		typeof value.countdownTo === "string" &&
+		Array.isArray(value.entries)
+	) {
+		return `${JSON.stringify(value, null, 2)}\n`;
+	}
+	return formatOutput(value, json);
+}
+
 async function withPolicyService<T>(
 	options: PolicyCliOptions,
 	run: (journal: PolicyJournal, service: PolicyService) => Promise<T>,
@@ -268,28 +411,29 @@ async function withPolicyService<T>(
 
 export async function runPolicyCommand(request: PolicyCliRequest, options: PolicyCliOptions = {}): Promise<string> {
 	const json = request.json === true;
+	const now = resolveNow(options.now);
+	const nowIso = now.toISOString();
+	const resolvedOptions: PolicyCliOptions = { ...options, now: () => now };
 	if (request.action === "import") {
-		const report = await withPolicyService(options, journal =>
-			runImport(journal, request, options.now ?? (() => new Date())),
-		);
+		const report = await withPolicyService(resolvedOptions, journal => runImport(journal, request, () => now));
 		return formatOutput(report, json);
 	}
 	if (request.action === "export") {
-		const records = await withPolicyService(options, journal => journal.replay());
+		const records = await withPolicyService(resolvedOptions, journal => journal.replay());
 		return formatOutput({ schemaVersion: 1, transactions: records.map(redactedTransaction) }, json);
 	}
-	return withPolicyService(options, async (journal, service) => {
+	return withPolicyService(resolvedOptions, async (journal, service) => {
 		switch (request.action) {
 			case "get":
 				if (!request.key) throw new Error("policy get requires a key");
 				return formatOutput(
-					await Effect.runPromise(service.get(request.key, { workstream: request.workstream })),
+					await Effect.runPromise(service.get(request.key, { workstream: request.workstream, at: nowIso })),
 					json,
 				);
 			case "explain":
 				if (!request.key) throw new Error("policy explain requires a key");
-				return formatOutput(
-					await Effect.runPromise(service.explain(request.key, { workstream: request.workstream })),
+				return formatExplainOutput(
+					await Effect.runPromise(service.explain(request.key, { workstream: request.workstream, at: nowIso })),
 					json,
 				);
 			case "diff":
@@ -302,7 +446,8 @@ export async function runPolicyCommand(request: PolicyCliRequest, options: Polic
 				);
 			case "set": {
 				if (!request.key || request.value === undefined) throw new Error("policy set requires a key and value");
-				const value = decodeRoutingValue(request.value);
+				const value = decodeSetValue(request.key, request.value);
+				const interval = resolveSetInterval(request, now);
 				const previewAndCommit = await commitPolicyWithPreview({
 					service,
 					set: {
@@ -312,6 +457,7 @@ export async function runPolicyCommand(request: PolicyCliRequest, options: Polic
 						reason: request.reason ?? "policy set",
 						author: authorFor(journal, "cli"),
 						source: { kind: "cli", uri: journal.journalPath },
+						...interval,
 					},
 				});
 				return formatOutput(previewAndCommit, json);

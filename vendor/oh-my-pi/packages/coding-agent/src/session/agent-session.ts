@@ -223,6 +223,7 @@ import { parseTurnBudget } from "../modes/turn-budget";
 import { containsUltrathink, ULTRATHINK_NOTICE } from "../modes/ultrathink";
 import { computeNonMessageTokens } from "../modes/utils/context-usage";
 import { containsWorkflow, WORKFLOW_NOTICE } from "../modes/workflow";
+import { findLatestPlanArtifact } from "../plan-mode/plan-artifact";
 import { createPlanReadMatcher } from "../plan-mode/plan-protection";
 import type { PlanModeState } from "../plan-mode/state";
 import advisorSystemPrompt from "../prompts/advisor/system.md" with { type: "text" };
@@ -294,6 +295,7 @@ import {
 	redeemCodexResetCredit,
 	runCodexAutoRedeem,
 } from "./codex-auto-reset";
+import { createCompactionReceipt, estimateCompactedContextTokens } from "./compaction-receipt";
 import {
 	type CustomInputPayload,
 	type DurableInputAdmissionReceipt,
@@ -312,8 +314,8 @@ import {
 	type FallbackApprovalAction,
 	FallbackApprovalGate,
 	type FallbackApprovalProposal,
-	formatFallbackApprovalNotice,
 	fallbackAutoApprove,
+	formatFallbackApprovalNotice,
 	type RetryCause,
 	sendFallbackApprovalNotice,
 } from "./fallback-approval";
@@ -6923,6 +6925,8 @@ export class AgentSession {
 		const latest = this.#latestWorkflowChange();
 		if (!latest || latest.command.request.kind !== "transitionPlanMode") {
 			this.setPlanModeState(undefined);
+			const latestPlan = findLatestPlanArtifact(this.sessionManager.getBranch());
+			this.#planReferencePath = latestPlan?.data.localPath ?? "local://PLAN.md";
 			if (!latest) this.#lastAppliedWorkflowCommandEntryId = undefined;
 			return;
 		}
@@ -9274,6 +9278,7 @@ export class AgentSession {
 	 * @param options Optional callbacks for completion/error handling
 	 */
 	async compact(customInstructions?: string, options?: CompactOptions): Promise<CompactionResult> {
+		const compactionStartedAt = performance.now();
 		if (this.#compactionAbortController) {
 			throw new Error("Compaction already in progress");
 		}
@@ -9356,6 +9361,7 @@ export class AgentSession {
 			let firstKeptEntryId: string;
 			let tokensBefore: number;
 			let details: unknown;
+			let summaryModel: string | undefined;
 
 			// Snapcompact runs locally first; if its frame archive plus the kept
 			// history still overflows the model window, fall back to an LLM summary
@@ -9415,7 +9421,7 @@ export class AgentSession {
 				// block because every catch path throws — the post-try reads
 				// of the result-derived locals are reachable only on success.
 				try {
-					const result = await this.#compactWithFallbackModel(
+					const compacted = await this.#compactWithFallbackModel(
 						preparation,
 						customInstructions,
 						compactionAbortController.signal,
@@ -9426,6 +9432,8 @@ export class AgentSession {
 							convertToLlm: messages => this.#convertToLlmForSideRequest(messages),
 						},
 					);
+					const result = compacted.result;
+					summaryModel = compacted.summaryModel;
 					summary = result.summary;
 					shortSummary = result.shortSummary;
 					firstKeptEntryId = result.firstKeptEntryId;
@@ -9447,6 +9455,23 @@ export class AgentSession {
 				throw new CompactionCancelledError();
 			}
 
+			const tokensAfterEstimate = snapcompactResult
+				? this.#projectSnapcompactContextTokens(preparation, snapcompactResult)
+				: estimateCompactedContextTokens(
+						computeNonMessageTokens(this),
+						createCompactionSummaryMessage(summary, tokensBefore, new Date().toISOString(), shortSummary),
+						preparation.recentMessages,
+						estimateTokens,
+					);
+			const receipt = createCompactionReceipt({
+				trigger: "manual",
+				pathEntries,
+				firstKeptEntryId,
+				tokensBeforeEstimate: tokensBefore,
+				tokensAfterEstimate,
+				durationMs: performance.now() - compactionStartedAt,
+				summaryModel,
+			});
 			this.sessionManager.appendCompaction(
 				summary,
 				shortSummary,
@@ -9456,6 +9481,7 @@ export class AgentSession {
 				fromExtension,
 				preserveData,
 				queueBoundarySequence,
+				receipt,
 			);
 			await this.sessionManager.flush();
 			const newEntries = this.sessionManager.getEntries();
@@ -10826,7 +10852,7 @@ export class AgentSession {
 		customInstructions: string | undefined,
 		signal: AbortSignal,
 		options?: SummaryOptions,
-	): Promise<CompactionResult> {
+	): Promise<{ result: CompactionResult; summaryModel: string }> {
 		const candidates = this.#getCompactionModelCandidates(this.#modelRegistry.getAvailable(), preparation);
 		const telemetry = resolveTelemetry(this.agent.telemetry, this.sessionId);
 
@@ -10835,7 +10861,7 @@ export class AgentSession {
 			if (!apiKey) continue;
 
 			try {
-				return await compact(
+				const result = await compact(
 					this.#obfuscatePreparationForProvider(preparation),
 					candidate,
 					this.#modelRegistry.resolver(candidate, this.sessionId),
@@ -10853,6 +10879,7 @@ export class AgentSession {
 						thinkingLevel: this.thinkingLevel,
 					},
 				);
+				return { result, summaryModel: `${candidate.provider}/${candidate.id}` };
 			} catch (error) {
 				if (!this.#isCompactionAuthFailure(error)) {
 					throw error;
@@ -10967,6 +10994,7 @@ export class AgentSession {
 		allowDefer = true,
 		options: { autoContinue?: boolean; triggerContextTokens?: number } = {},
 	): Promise<boolean> {
+		const compactionStartedAt = performance.now();
 		const compactionSettings = this.settings.getGroup("compaction");
 		if (compactionSettings.strategy === "off") return false;
 		if (reason !== "idle" && !compactionSettings.enabled) return false;
@@ -11183,6 +11211,7 @@ export class AgentSession {
 			let firstKeptEntryId: string;
 			let tokensBefore: number;
 			let details: unknown;
+			let summaryModel: string | undefined;
 
 			// Snapcompact runs locally first; if its frame archive plus the kept
 			// history still overflows the model window (frames are capped by the
@@ -11266,6 +11295,7 @@ export class AgentSession {
 									thinkingLevel: this.thinkingLevel,
 								},
 							);
+							summaryModel = `${candidate.provider}/${candidate.id}`;
 							break;
 						} catch (error) {
 							if (autoCompactionSignal.aborted) {
@@ -11353,6 +11383,24 @@ export class AgentSession {
 				return false;
 			}
 
+			const tokensAfterEstimate = snapcompactResult
+				? this.#projectSnapcompactContextTokens(preparation, snapcompactResult)
+				: estimateCompactedContextTokens(
+						computeNonMessageTokens(this),
+						createCompactionSummaryMessage(summary, tokensBefore, new Date().toISOString(), shortSummary),
+						preparation.recentMessages,
+						estimateTokens,
+					);
+			const receipt = createCompactionReceipt({
+				trigger: reason === "threshold" ? "token_threshold" : "auto",
+				triggerReason: reason,
+				pathEntries,
+				firstKeptEntryId,
+				tokensBeforeEstimate: tokensBefore,
+				tokensAfterEstimate,
+				durationMs: performance.now() - compactionStartedAt,
+				summaryModel,
+			});
 			this.sessionManager.appendCompaction(
 				summary,
 				shortSummary,
@@ -11362,6 +11410,7 @@ export class AgentSession {
 				fromExtension,
 				preserveData,
 				queueBoundarySequence,
+				receipt,
 			);
 			await this.sessionManager.flush();
 			const newEntries = this.sessionManager.getEntries();
@@ -11657,12 +11706,7 @@ export class AgentSession {
 
 		const err = message.errorMessage;
 		const cause = classifyRequestFailure({ message: err, status: message.errorStatus });
-		if (
-			cause === "network" ||
-			cause === "rate-limit" ||
-			cause === "provider-stream-abort" ||
-			cause === "timeout"
-		) {
+		if (cause === "network" || cause === "rate-limit" || cause === "provider-stream-abort" || cause === "timeout") {
 			return true;
 		}
 		return this.#isTransientErrorMessage(err) || isUsageLimitError(err);

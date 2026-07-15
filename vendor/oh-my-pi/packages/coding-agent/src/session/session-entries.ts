@@ -360,11 +360,7 @@ function isWorkflowTransitionResult(
 			next.goalId === transition.goalId
 		);
 	}
-	if (
-		from.kind !== "goal" ||
-		from.phase !== "active" ||
-		from.goalId !== transition.goalId
-	) {
+	if (from.kind !== "goal" || from.phase !== "active" || from.goalId !== transition.goalId) {
 		return false;
 	}
 	return transition.disposition === "paused"
@@ -377,12 +373,16 @@ export interface ServiceTierChangeEntry extends SessionEntryBase {
 	serviceTier: ServiceTier | null;
 }
 
+export type { CompactionReceipt } from "./compaction-receipt";
+
 export interface CompactionEntry<T = unknown> extends SessionEntryBase {
 	type: "compaction";
 	summary: string;
 	shortSummary?: string;
 	firstKeptEntryId: string;
 	tokensBefore: number;
+	/** Content-free visibility receipt for this compaction run. */
+	receipt?: import("./compaction-receipt").CompactionReceipt;
 	/**
 	 * Highest durable input queue sequence observed when compaction began.
 	 * Audit metadata only; it neither owns the queue nor asserts payload inclusion.
@@ -449,7 +449,6 @@ export interface MCPToolSelectionEntry extends SessionEntryBase {
 	/** MCP tool names selected for visibility in discovery mode. */
 	selectedToolNames: string[];
 }
-
 
 /** Durable task metadata needed to re-adopt a direct child after controller replacement. */
 export interface SubagentSessionMetadata {

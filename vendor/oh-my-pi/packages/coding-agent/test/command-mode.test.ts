@@ -43,6 +43,7 @@ class CommandFixture implements CommandModeContext {
 	rich = true;
 	versionRuns = 0;
 	loopStatsRuns = 0;
+	tabsRuns = 0;
 	feedback: string[] = [];
 	copied: string[] = [];
 	identity = {
@@ -104,6 +105,10 @@ class CommandFixture implements CommandModeContext {
 			}),
 		);
 	}
+	showTabs(): void {
+		this.tabsRuns += 1;
+		this.feedback.push("Browser tab pool\n  tabs: 1\n  main owner=session/Main purpose=browser");
+	}
 
 	showFeedback(message: string): void {
 		this.feedback.push(message);
@@ -155,6 +160,9 @@ describe("colon command registry", () => {
 		expect(loopStats).toContain("max blocked ms: 418");
 		expect(loopStats).toContain("phase=ui.render");
 		expect(loopStats).toContain("attribution=session-1");
+		expect(await dispatchCommandLine("tabs", ctx)).toBe(true);
+		expect(ctx.tabsRuns).toBe(1);
+		expect(ctx.feedback.at(-1)).toContain("Browser tab pool");
 	});
 
 	it("names the known commands for an unknown command", async () => {
@@ -213,6 +221,7 @@ describe("colon command registry", () => {
 			"errors",
 			"version",
 			"loopstats",
+			"tabs",
 			"changelog",
 			"hotkeys",
 		]);

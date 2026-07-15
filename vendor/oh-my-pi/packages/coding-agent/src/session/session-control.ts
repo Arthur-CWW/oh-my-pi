@@ -560,6 +560,14 @@ export class SessionControlBus {
 			.get({ $commandId: commandId });
 		return row ? decodeReceiptRow(row) : undefined;
 	}
+	listReceipts(): SessionControlReceipt[] {
+		return this.#db
+			.query<ReceiptRow, []>(
+				"SELECT command_id,session_id,target_owner_epoch,state,requested_at,acknowledged_at,completed_at,result_json,error FROM control_receipts ORDER BY requested_at, rowid",
+			)
+			.all()
+			.map(decodeReceiptRow);
+	}
 
 	async waitForTerminal(commandId: string, options: SessionControlWaitOptions = {}): Promise<SessionControlReceipt> {
 		const timeoutMs = options.timeoutMs ?? 30_000;

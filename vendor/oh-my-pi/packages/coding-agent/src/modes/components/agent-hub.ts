@@ -113,6 +113,7 @@ import { calculateTokensPerSecond } from "./status-line/token-rate";
 import { ToolExecutionComponent } from "./tool-execution";
 import { TranscriptBlock, TranscriptContainer } from "./transcript-container";
 import { createUsageRowBlock } from "./usage-row";
+import { formatRouteInspection, type RouteInspectionInput } from "../../task/route-inspector";
 import { UserMessageComponent } from "./user-message";
 
 const AGE_TICK_MS = 5_000;
@@ -382,6 +383,51 @@ export interface AgentHubRetentionMetrics {
 	previewFinalizedPrefixScans: number;
 	liveTimers: number;
 }
+const ROUTE_INSPECTOR_PANE_LINES = 8;
+
+function boundedRouteInspectionLines(input: RouteInspectionInput, resolvedModel?: string): string[] {
+	const inspectionLines = formatRouteInspection(input).split("\n");
+	const selected = inspectionLines.find(line => line.startsWith("selected:"));
+	const consulted = inspectionLines.filter(line => /^\d+\. /.test(line));
+	const winner = consulted.find(
+		line => line.includes("result=winner") || line.includes("result=initial winner before fallback"),
+	);
+	const policy = inspectionLines.find(line => line.includes("policy key=") || line.startsWith("policy "));
+	const policyMetadata = input.decision.consulted.find(candidate => candidate.policy)?.policy;
+	const policyTransaction = policyMetadata?.transactionId ?? policy?.match(/transaction=[^ ;\]]+/)?.[0]?.slice(12);
+	const policyKey = policyMetadata?.key ?? policy?.match(/(?:policy key=|policy )([^ ]+)/)?.[1];
+	const policyLayer = policyMetadata?.sourceLayer ?? policy?.match(/layer=([^ ]+)/)?.[1];
+	const policySummary =
+		policyTransaction !== undefined
+			? `policy: transaction=${policyTransaction}${policyKey ? ` key=${policyKey}` : ""}${policyLayer ? ` layer=${policyLayer}` : ""}`
+			: policy
+				? `policy: ${policy}`
+				: undefined;
+	const reasons = [
+		...inspectionLines.filter(
+			line =>
+				line.startsWith("fallback ") ||
+				line.startsWith("policy exclusion ") ||
+				line.startsWith("blocked:") ||
+				line.startsWith("decision reason:"),
+		),
+		...(input.decision.reason &&
+		!inspectionLines.some(line => line.includes(`decision reason: ${input.decision.reason}`))
+			? [`decision reason: ${input.decision.reason}`]
+			: []),
+	];
+	const lines = [
+		"ROUTE",
+		...(resolvedModel ? [`model: ${resolvedModel}`] : []),
+		...(selected ? [selected] : []),
+		...(winner ? [`winner: ${winner}`] : []),
+		`consulted: ${input.decision.consulted.length} layers; shadowed candidates=${input.decision.overridden.length}`,
+		...(policySummary ? [policySummary] : []),
+		...reasons,
+	];
+	return lines.slice(0, ROUTE_INSPECTOR_PANE_LINES);
+}
+
 export class AgentHubOverlayComponent extends Container {
 	#registry: AgentRegistry;
 	#observers: SessionObserverRegistry;
@@ -1338,28 +1384,30 @@ export class AgentHubOverlayComponent extends Container {
 				return `${direction} ${record.state}${method} [${record.origin}]`;
 			});
 		}
-		const receipt = observed?.progress?.routeReceipt ?? durableSpawn?.route;
+		const progress = observed?.progress;
+		const receipt = progress?.routeReceipt ?? durableSpawn?.route;
 		if (!receipt) {
-			const model = observed?.progress?.resolvedModel ?? durableSpawn?.resolvedModel;
-			return model ? [`Model: ${model}`, "No route provenance available."] : ["No route provenance available."];
+			const model = progress?.resolvedModel ?? durableSpawn?.resolvedModel;
+			return model ? ["ROUTE", `Model: ${model}`, "No route provenance available."] : ["ROUTE", "No route provenance available."];
 		}
-		const lines = [
-			`Model: ${receipt.route.selector}`,
-			`Resolution source: ${receipt.resolutionSource}`,
-			`Lane: ${receipt.resolvedLane}`,
-			`Selected: ${receipt.route.selector}`,
-			`Source: ${receipt.source}`,
-			...(receipt.reason ? [`Reason: ${receipt.reason}`] : []),
-			...(receipt.resolvedPatterns.length ? [`Candidates: ${receipt.resolvedPatterns.join(", ")}`] : []),
-		];
-		if (receipt.quotaAdmission) lines.push(`Quota: ${JSON.stringify(receipt.quotaAdmission)}`);
-		for (const attempt of receipt.priorAttempts ?? []) {
-			lines.push(
-				`Prior: ${attempt.route.selector} [${attempt.source}]${attempt.reason ? ` — ${attempt.reason}` : ""}`,
-			);
-			if (attempt.quotaAdmission) lines.push(`  Quota: ${JSON.stringify(attempt.quotaAdmission)}`);
-		}
-		return lines.flatMap(line => this.#wrapInspectorText(line, width, ""));
+		const agentId = this.#chatAgentId ?? "selected agent";
+		const explicitOverride =
+			receipt.source === "spawn_explicit"
+				? receipt.consulted.find(candidate => candidate.explicit)?.selectors.join(",")
+				: undefined;
+		return boundedRouteInspectionLines(
+			{
+				agentId,
+				responsibility: receipt.responsibility ?? durableSpawn?.agentType ?? progress?.agent ?? "unknown",
+				definitionSourcePath:
+					progress?.definitionSourcePath ?? durableSpawn?.definitionSourcePath ?? "unknown definition",
+				decision: receipt,
+				binaryVersion: progress?.buildVersion ?? durableSpawn?.buildVersion ?? "unknown/legacy",
+				receiptSource: `spawn receipt ${agentId}`,
+				...(explicitOverride ? { explicitOverride } : {}),
+			},
+			progress?.resolvedModel ?? durableSpawn?.resolvedModel ?? `${receipt.route.provider}/${receipt.route.selector}`,
+		);
 	}
 
 	#wrapInspectorText(text: string, width: number, empty: string): string[] {

@@ -1,6 +1,7 @@
 import { describe, expect, mock, test } from "bun:test";
 import { diagnosticInputFromError, ErrorInbox, type DiagnosticEventInput } from "../../../src/modes/utils/error-inbox";
 import type { SessionEntry } from "../../../src/session/session-entries";
+import type { ErrorInboxWriter } from "../../../src/session/error-inbox-ledger";
 import { SessionOwnershipLostError } from "../../../src/session/durable-input-queue";
 
 describe("ErrorInbox", () => {
@@ -26,6 +27,23 @@ describe("ErrorInbox", () => {
 
 		expect(inbox.getErrors().length).toBe(1);
 		expect(inbox.getErrors()[0].id).toBe("test-id");
+	});
+
+	test("recordError stamps the owning binary version and digest at emission", () => {
+		const appendCustomEntry = mock<(type: string, data?: unknown) => string>(() => "");
+		const writer = {
+			appendCustomEntry,
+			getSessionOwnership: () => ({ buildRevision: { version: "16.0.1", digest: "build-a" } }),
+		} as unknown as ErrorInboxWriter;
+		const inbox = new ErrorInbox(writer);
+
+		inbox.recordError("versioned failure", "test-source", { nowMs: 1000, id: "versioned" });
+
+		expect(appendCustomEntry.mock.calls[0][1]).toMatchObject({
+			buildVersion: "16.0.1",
+			buildDigest: "build-a",
+		});
+		expect(inbox.getErrors()[0]).toMatchObject({ buildVersion: "16.0.1", buildDigest: "build-a" });
 	});
 
 	test("dedupes identical errors inside window", () => {

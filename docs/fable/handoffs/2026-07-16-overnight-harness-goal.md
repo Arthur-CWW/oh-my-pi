@@ -18,19 +18,26 @@ Finish all triaged P1/P2 OMP harness register rows: implemented+tested, verified
 | FleetCanaryClose | Canary re-heartbeat (READY turn) → session-control restart onto blessed → live rollout, max 2 attempts | RUNNING (revived with unblock: canary lost heartbeat row; surface ws:22/surface:415 alive on 668) |
 | HR130SetupWorker | DONE — typed JSONL subprocess protocol (spawn-worker-{protocol,entry,client}.ts), `task.isolateSetup` (undefined→hasUI), SIGKILL process-group bounds + RSS sampler, spawn-wave proof p50 0.36 / p95 11.1 / p99 21.0ms (<50), hung child non-blocking; 41 focused tests | DONE |
 | HR130ExtBounds | DONE — per-handler AbortSignal→exec process-tree kill, reentrancy coalesce, 256KiB output caps, 32-msg pending bound, 128-record violation ring; 35/35 + 12/12 stress; signal threading at ui-controller:492 + agent-session:6453 | DONE |
-| HR130Watchdog | tui/loop-watchdog.ts violation ring + counters + `:loopstats` + phase breadcrumbs | RUNNING |
+| HR130Watchdog | DONE — typed violation ring (64, configurable) + counters + `:loopstats` + ui.handle-input/ui.render breadcrumbs; tui 12 + command-mode 17 tests | DONE |
 | HR128SpawnGuide | DONE — docs/fable/spawn-guide.md (workspace root, 11 lines), `task.spawnGuidePath` + `task.isolateSetup` keys, prepareSpawnContext once at TaskTool.execute:884-891, tests 4/4 | DONE |
 | HR113Verify | DONE — register row flipped IMPLEMENTED with evidence (fleet.ts:133-155, fleet-cli.ts:316-406, tests 5/5) | DONE |
 
 Wave-3 gate command (union): park-revive/route-inspector/command-mode/spawn-wave/extensions-runner/loop-watchdog/spawn-guide tests + fleet-cli + check:types (coding-agent AND tui).
+## Wave 4 (RUNNING — spawned after Wave-3 checkpoint `a729a3368`, blessed `16.0.1+fork.a729a3368743`)
+| Agent | Slice |
+|---|---|
+| HR121BrowserBudgets | per-session/global tab caps + oldest-idle reclaim + typed refusal |
+| HR127TabPool | reuse-by-URL, idle TTL sweep, ownership labels, `:tabs` |
+| HR063CompactionVisibility | typed compaction receipts + /compact summary (Sol; agent-session edits require Main sign-off with line ranges) |
+| HR047DurablePlans | audit-then-implement durable plan artifacts |
+| HR035BuildProvenance | audit HR-035/040 clauses; implement small gaps only |
+| HR129Slice2 | core.providers deny/expiry posture fragment + enforcement at spawn admission |
 
-## Wave 4 (queued, spawn after Wave-3 gate+checkpoint+promote)
-- HR-121 browser resource budgets (browser tool acquisition caps + reclaim oldest idle)
-- HR-127 tab reuse-by-URL pool (browser guard extension)
-- HR-063 compaction visibility (compaction receipt: trigger reason + retained/dropped manifest; agent-session compaction path — unowned then)
-- HR-047 durable plans/prompts (persist plan-mode artifacts + spawn prompts durably; check overlap with HR-124 landed records first)
-- HR-035/040 build provenance audit (verify landed receipt/build fields satisfy rows; flip or implement gap)
-- HR-129 slice 2 (core.providers deny/expiry/budget fragment on the landed policy substrate)
+Wave-4 progress: HR-063 DONE (typed compaction receipts, emission agent-session.ts:9466/11394, 11 tests; protected regions untouched). HR-047 DONE-partial (plan-artifact schema + plan:// handler + approved-plan persistence + restore-after-replay; open: diagnostic link to plan revision; row IMPLEMENTED-PARTIAL). HR-035/040 DONE (buildVersion on DiagnosticEvent/error cards/fleet rows/TARGET_ERROR; rows flipped; 42 tests). HR-121/127 DONE via BrowserSeamCloser after two request-cap deaths (56/0 tests; externals exempt, process-local reclaim, maxOwnedGlobal kept; keys browser.maxTabsPerSession=4/maxGlobalTabs=12/tabIdleTtlMs=600000; :tabs command). HR-129 slice 2 DONE (core.providers deny fragment, projection-time expiry, receipt provenance, CLI timing flags, 54/0 + process proofs).
+
+Wave-5 progress: HR-134 DONE (one-ps-call sampler; RSS_MB/CPU%/UPTIME columns; 8 tests). HR-125 draft at docs/fable/drafts/2026-07-16-control-plane-grammar.md (84 lines, veto checklist). HR-133 probe at docs/fable/drafts/2026-07-16-rss-paging-probe.md (real measurements: idle runners 160-307MiB, WebKit Malloc dominant; row stays REQUESTED). HR-033 DONE (omp doctor + --apply safe subset: prune dead peers, clear dead-pid promote lock; 24 tests incl. fleet-cli). HR-132 pane in flight.
+
+Fleet canary state: OLD canary 019f660b re-heartbeated via cmux READY turn but /restart reexecs its pinned 668 image — bootstrap-legacy gap confirmed, documented, left as-is. NEW canary enrolled: session 019f6699-9308 (agents-7o8070, cmux workspace:24 fleet-canary-a729) on blessed digest 1ecb51b1 (a729a336, bridged) — the closeout promote provides the rollout target; live rollout against it proves the original freeze case E2E.
 
 ## Wave 5 (queued)
 - HR-132 Control Plane provenance pane (reuse :route assembly)

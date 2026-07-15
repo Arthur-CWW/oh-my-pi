@@ -18,15 +18,16 @@ import { getSymbolTheme, theme } from "../../modes/theme/theme";
 import type { InteractiveModeContext, TodoPhase } from "../../modes/types";
 import type { PlanApprovalDetails } from "../../plan-mode/approved-plan";
 import type { AgentSessionEvent } from "../../session/agent-session";
+import { formatCompactionReceipt, getLatestCompactionReceipt } from "../../session/compaction-receipt";
 import { isSilentAbort, readQueueChipText, resolveAbortLabel } from "../../session/messages";
 import type { ResolveToolDetails } from "../../tools/resolve";
 import { vocalizer } from "../../tts/vocalizer";
 import { canonicalizeMessage, normalizeThinkingDisplay } from "../../utils/thinking-display";
-import { RequestFailurePresenter } from "../utils/request-failure-presentation";
 import { interruptHint } from "../shared";
-import { addToolExecutionComponent } from "./tool-execution-construction";
+import { RequestFailurePresenter } from "../utils/request-failure-presentation";
 import { StreamingRevealController } from "./streaming-reveal";
 import { ToolArgsRevealController } from "./tool-args-reveal";
+import { addToolExecutionComponent } from "./tool-execution-construction";
 
 type AgentSessionEventKind = AgentSessionEvent["type"];
 const IRC_MESSAGE_VISIBLE_TTL_MS = 10_000;
@@ -945,6 +946,11 @@ export class EventController {
 			this.ctx.rebuildChatFromMessages();
 			this.ctx.statusLine.invalidate();
 			this.ctx.updateEditorTopBorder();
+			const receipt =
+				typeof this.ctx.sessionManager?.getEntries === "function"
+					? getLatestCompactionReceipt(this.ctx.sessionManager.getEntries())
+					: undefined;
+			if (receipt) this.ctx.showStatus(formatCompactionReceipt(receipt));
 		} else if (event.errorMessage) {
 			this.ctx.showWarning(event.errorMessage);
 		} else if (isHandoffAction) {

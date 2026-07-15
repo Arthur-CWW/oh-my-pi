@@ -3,7 +3,7 @@ Drives real Chromium tab; full puppeteer access via JS execution.
 <instruction>
 - Static content (articles, docs, issues/PRs, JSON, PDFs, feeds)? Use `read` with the URL. Reach for browser only for JS execution, authentication, or interactive actions.
 - Three actions:
-  - `open` — acquire or reuse named tab (`name` defaults `"main"`). Optional `url` (navigate once ready), `viewport`, `dialogs: "accept" | "dismiss"` (auto-handle `alert`/`confirm`/`beforeunload`; unhandled dialogs hang the page until you wire `page.on('dialog', …)`).
+  - `open` — acquire or reuse an idle tab by normalized URL (`name` defaults `"main"`). Optional `url` (navigate once ready), `reuse: false` (force a fresh tab), `purpose`, `viewport`, `dialogs: "accept" | "dismiss"` (auto-handle `alert`/`confirm`/`beforeunload`; unhandled dialogs hang the page until you wire `page.on('dialog', …)`).
   - `close` — release tab by `name`, or every tab with `all: true`. `kill: true` also terminates spawned-app process trees (default leaves them running).
   - `run` — execute JS in an existing tab. `code` is the body of an async function with `page`, `browser`, `tab`, `display`, `assert`, `wait` in scope. Return value is JSON-stringified into the result; `display(value)` calls accumulate text/images.
 - Tabs survive across `run` calls and in-process subagents — open once, reuse.

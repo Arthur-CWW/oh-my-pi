@@ -84,7 +84,7 @@ describe("ErrorInbox rollout provenance", () => {
 				return `entry-${writes.length}`;
 			},
 			getSessionOwnership() {
-				return { buildRevision: { digest: "build-owned" } };
+				return { buildRevision: { version: "16.0.1", digest: "build-owned" } };
 			},
 			getEntries() {
 				return entries;
@@ -97,11 +97,11 @@ describe("ErrorInbox rollout provenance", () => {
 
 		expect(writes[0]).toMatchObject({
 			type: "ui_error",
-			data: { version: 2, buildDigest: "build-owned", fleetRolloutId: "rollout-checkpoint" },
+			data: { version: 2, buildVersion: "16.0.1", buildDigest: "build-owned", fleetRolloutId: "rollout-checkpoint" },
 		});
 		expect(writes[1]).toMatchObject({
 			type: "ui_error",
-			data: { version: 2, buildDigest: "build-owned", fleetRolloutId: "rollout-auto-resume" },
+			data: { version: 2, buildVersion: "16.0.1", buildDigest: "build-owned", fleetRolloutId: "rollout-auto-resume" },
 		});
 	});
 
@@ -113,7 +113,7 @@ describe("ErrorInbox rollout provenance", () => {
 				return "entry-1";
 			},
 			getSessionOwnership() {
-				return { buildRevision: { digest: "build-inferred" } };
+				return { buildRevision: { version: "16.0.1", digest: "build-inferred" } };
 			},
 			getEntries() {
 				return [autoResume("rollout-inferred")];
@@ -122,11 +122,15 @@ describe("ErrorInbox rollout provenance", () => {
 
 		appendErrorInboxEvent(
 			writer,
-			diagnosticEvent({ buildDigest: "build-explicit", fleetRolloutId: "rollout-explicit" }),
+			diagnosticEvent({
+				buildVersion: "explicit-version",
+				buildDigest: "build-explicit",
+				fleetRolloutId: "rollout-explicit",
+			}),
 		);
 
 		expect(writes[0]).toMatchObject({
-			buildDigest: "build-explicit",
+			buildVersion: "explicit-version",
 			fleetRolloutId: "rollout-explicit",
 		});
 	});
@@ -142,7 +146,7 @@ describe("ErrorInbox rollout provenance", () => {
 
 		expect(appendErrorInboxEvent(writer, diagnosticEvent())).toBe(true);
 		expect(writes[0]).toMatchObject({ version: 2, id: "error-1" });
-		expect(writes[0]).toHaveProperty("buildDigest", undefined);
+		expect(writes[0]).toHaveProperty("buildVersion", undefined);
 		expect(writes[0]).toHaveProperty("fleetRolloutId", undefined);
 	});
 
@@ -157,19 +161,23 @@ describe("ErrorInbox rollout provenance", () => {
 		inbox.reconcile([
 			customEntry(
 				"ui_error",
-				{ ...diagnosticEvent({ buildDigest: "build-a", fleetRolloutId: "rollout-a" }), version: 2 },
+				{ ...diagnosticEvent({ buildVersion: "build-a-version", buildDigest: "build-a", fleetRolloutId: "rollout-a" }), version: 2 },
 				"persisted-error",
 			),
 		]);
 
-		inbox.recordError({ message: "boom", buildDigest: "build-a", fleetRolloutId: "rollout-a" }, undefined, {
-			nowMs: 2_000,
-		});
+		inbox.recordError(
+			{ message: "boom", buildVersion: "build-a-version", buildDigest: "build-a", fleetRolloutId: "rollout-a" },
+			undefined,
+			{
+				nowMs: 2_000,
+			},
+		);
 		expect(inbox.getErrors()).toHaveLength(1);
 		expect(inbox.getErrors()[0]).toMatchObject({
 			count: 2,
 			buildDigest: "build-a",
-			fleetRolloutId: "rollout-a",
+			buildVersion: "build-a-version",
 		});
 
 		inbox.recordError({ message: "boom", buildDigest: "build-b", fleetRolloutId: "rollout-a" }, undefined, {

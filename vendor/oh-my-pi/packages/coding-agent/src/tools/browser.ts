@@ -14,6 +14,11 @@ import {
 	normalizeBrowserOwnershipCap,
 } from "./browser/process-ownership";
 import type { Observation, ScreenshotResult } from "./browser/tab-protocol";
+import {
+	DEFAULT_MAX_GLOBAL_TABS,
+	DEFAULT_MAX_TABS_PER_SESSION,
+	normalizeTabBudgetCap,
+} from "./browser/tab-budget";
 import { acquireTab, dropHeadlessTabs, getTab, releaseAllTabs, releaseTab, runInTab } from "./browser/tab-supervisor";
 import type { OutputMeta } from "./output-meta";
 import { resolveToCwd } from "./path-utils";
@@ -39,6 +44,8 @@ const browserSchema = z.object({
 	action: z.enum(["open", "close", "run"] as const).describe("operation"),
 	name: z.string().describe("tab id (default 'main')").optional(),
 	url: z.string().describe("url to open").optional(),
+	reuse: z.boolean().describe("reuse an idle tab with the same URL (default true)").optional(),
+	purpose: z.string().describe("ownership purpose label for diagnostics").optional(),
 	app: appSchema.optional(),
 	viewport: z
 		.object({
@@ -244,10 +251,16 @@ export class BrowserTool implements AgentTool<typeof browserSchema, BrowserToolD
 			this.session.settings.get("browser.maxOwnedPerSession"),
 			DEFAULT_MAX_OWNED_PER_SESSION,
 		);
-		const maxOwnedGlobal = normalizeBrowserOwnershipCap(
-			this.session.settings.get("browser.maxOwnedGlobal"),
-			DEFAULT_MAX_OWNED_GLOBAL,
+		const maxTabsPerSession = normalizeTabBudgetCap(
+			this.session.settings.get("browser.maxTabsPerSession"),
+			DEFAULT_MAX_TABS_PER_SESSION,
 		);
+		const maxGlobalTabs = normalizeTabBudgetCap(
+			this.session.settings.get("browser.maxGlobalTabs"),
+			DEFAULT_MAX_GLOBAL_TABS,
+		);
+		const tabIdleTtlMs = this.session.settings.get("browser.tabIdleTtlMs") as number | undefined;
+		const urlQuerySensitive = this.session.settings.get("browser.tabUrlQuerySensitive") as boolean | undefined;
 		const browser = await untilAborted(signal, () =>
 			acquireBrowser(kind, {
 				cwd: this.session.cwd,
@@ -262,12 +275,24 @@ export class BrowserTool implements AgentTool<typeof browserSchema, BrowserToolD
 				appArgs: params.app?.args,
 				signal,
 				maxOwnedPerSession,
-				maxOwnedGlobal,
+				maxOwnedGlobal: normalizeBrowserOwnershipCap(
+					this.session.settings.get("browser.maxOwnedGlobal"),
+					DEFAULT_MAX_OWNED_GLOBAL,
+				),
 			}),
 		);
 
 		const result = await untilAborted(signal, () =>
 			acquireTab(name, browser, {
+				sessionId,
+				ownerSessionId: sessionId,
+				ownerAgentId: this.session.getAgentId?.() ?? "unknown",
+				purpose: params.purpose ?? "browser",
+				maxTabsPerSession,
+				maxGlobalTabs,
+				reuse: params.reuse,
+				tabIdleTtlMs,
+				urlQuerySensitive,
 				url: params.url,
 				waitUntil: params.wait_until,
 				viewport: params.viewport

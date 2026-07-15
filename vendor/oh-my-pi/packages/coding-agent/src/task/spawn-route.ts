@@ -16,12 +16,15 @@ import {
 	type QuotaModel,
 } from "./quota-admission";
 import {
+	appendSpawnRoutePolicyExclusions,
 	admitSpawnRoute,
 	blockSpawnRoute,
 	reconcileSpawnRouteAuthFallback,
 	rerouteSpawnRoute,
+	spawnRoutePolicyExclusions,
 	resolveSpawnRoute,
 	type SpawnRouteDecision,
+	type SpawnRoutePolicyExclusion,
 } from "./route-resolution";
 import type { AgentDefinition, TaskParams } from "./types";
 
@@ -167,11 +170,16 @@ function quotaModel(decision: SpawnRouteDecision): QuotaModel | undefined {
 	return route ? { providerId: route.provider, modelId: route.model, selector: route.selector } : undefined;
 }
 
-function quotaCandidates(session: ToolSession, decision: SpawnRouteDecision, primary: QuotaModel): QuotaModel[] {
+function quotaCandidates(
+	session: ToolSession,
+	decision: SpawnRouteDecision,
+	primary: QuotaModel,
+): { readonly candidates: QuotaModel[]; readonly exclusions: readonly SpawnRoutePolicyExclusion[] } {
 	const modelRegistry = session.modelRegistry;
-	if (!modelRegistry || decision.explicit) return [];
+	if (!modelRegistry || decision.explicit) return { candidates: [], exclusions: [] };
 	const available = modelRegistry.getAvailable();
 	const candidates: QuotaModel[] = [];
+	const exclusions: SpawnRoutePolicyExclusion[] = [];
 	for (const pattern of decision.resolvedPatterns) {
 		const resolved = resolveModelRoleValue(pattern, available, { settings: session.settings, modelRegistry });
 		if (!resolved.model) continue;
@@ -181,9 +189,18 @@ function quotaCandidates(session: ToolSession, decision: SpawnRouteDecision, pri
 			resolved.thinkingLevel,
 			resolved.explicitThinkingLevel,
 		);
+		const denied = spawnRoutePolicyExclusions(decision, "automatic_reroute", {
+			selector,
+			provider: resolved.model.provider,
+			model: resolved.model.id,
+		});
+		if (denied.length > 0) {
+			exclusions.push(...denied);
+			continue;
+		}
 		candidates.push({ providerId: resolved.model.provider, modelId: resolved.model.id, selector });
 	}
-	return candidates;
+	return { candidates, exclusions };
 }
 
 export async function applyQuotaAdmission(
@@ -213,7 +230,9 @@ export async function applyQuotaAdmission(
 			return null;
 		});
 	if (reports?.length) controller.observeReports(reports);
-	const quotaDecision = controller.admit(model, quotaCandidates(session, decision, model));
+	const constrained = quotaCandidates(session, decision, model);
+	const constrainedDecision = appendSpawnRoutePolicyExclusions(decision, constrained.exclusions);
+	const quotaDecision = controller.admit(model, constrained.candidates);
 	session.sessionManager?.appendCustomEntry(
 		QUOTA_ADMISSION_CUSTOM_TYPE,
 		createQuotaAdmissionStateRecord(controller.state, quotaDecision.atMs),
@@ -231,16 +250,16 @@ export async function applyQuotaAdmission(
 		quotaPoolId: quotaDecision.poolId,
 		limitWindowId: quotaDecision.windowId,
 	};
-	if (quotaDecision.outcome === "admit") return admitSpawnRoute(decision, admission);
+	if (quotaDecision.outcome === "admit") return admitSpawnRoute(constrainedDecision, admission);
 	if (quotaDecision.outcome === "block" || !quotaDecision.routedModel) {
-		return blockSpawnRoute(decision, {
+		return blockSpawnRoute(constrainedDecision, {
 			kind: "quota_admission_blocked",
 			selector: model.selector,
 			reason: quotaDecision.reason,
 			resetAt: quotaDecision.resetAt,
 		});
 	}
-	return rerouteSpawnRoute(decision, quotaDecision.routedModel, admission, quotaDecision.reason);
+	return rerouteSpawnRoute(constrainedDecision, quotaDecision.routedModel, admission, quotaDecision.reason);
 }
 
 export async function applyTaskAuthFallback(
@@ -283,7 +302,18 @@ export function formatTaskRouteError(
 			availableModels: session.modelRegistry?.getAvailable() ?? [],
 		});
 	}
-	if (decision.block) {
+	if (decision.block?.kind === "provider_policy_denied") {
+		const requested = decision.block.requested.join(", ");
+		const reasons = decision.block.exclusions
+			.map(
+				exclusion =>
+					`${exclusion.selector} (${exclusion.reason}; ${exclusion.sourceLayer} transaction ${exclusion.transactionId} sequence ${exclusion.sequence})`,
+			)
+			.join("; ");
+		const subject = decision.explicit ? "explicit model pin" : "model route";
+		return `Provider policy denied ${subject} for task agent "${agentName}": ${requested}. ${reasons}. Policy snapshot: ${decision.block.exclusions[0]?.snapshotAt ?? "unknown"}.`;
+	}
+	if (decision.block?.kind === "quota_admission_blocked") {
 		const reason = decision.block.reason ? ` (${decision.block.reason})` : "";
 		const reset = decision.block.resetAt ? ` Reset at ${new Date(decision.block.resetAt).toISOString()}.` : "";
 		return `Quota admission blocked ${decision.block.selector}${reason}.${reset}`;

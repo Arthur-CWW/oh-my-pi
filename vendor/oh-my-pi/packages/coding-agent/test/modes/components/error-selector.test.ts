@@ -26,6 +26,8 @@ describe("ErrorSelectorComponent", () => {
 		code: "insufficient_quota",
 		requestFingerprint: "fingerprint-123",
 		causeChain: ["Cause 1", "Cause 2"],
+		buildVersion: "16.0.1",
+		buildDigest: "build-a",
 		unread: true,
 		resolved: false,
 	};
@@ -44,6 +46,8 @@ describe("ErrorSelectorComponent", () => {
 		expect(content).toContain("400");
 		expect(content).toContain("insufficient_quota");
 		expect(content).toContain("fingerprint-123");
+		expect(content).toContain("Build: 16.0.1");
+		expect(content).toContain("Build digest: build-a");
 		expect(content).toContain("Some error msg");
 		expect(content).toContain("1. Cause 1");
 		expect(content).toContain("2. Cause 2");

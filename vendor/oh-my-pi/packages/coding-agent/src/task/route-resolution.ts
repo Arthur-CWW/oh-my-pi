@@ -4,7 +4,7 @@ import { type ModelLookupRegistry, resolveModelOverride } from "../config/model-
 import { MODEL_ROLE_IDS } from "../config/model-roles";
 import { resolveConfiguredModelPatterns } from "../config/role-resolution";
 import type { Settings } from "../config/settings";
-import type { PolicySnapshot, PolicySourceLayer } from "../policy/policy-projection";
+import type { PolicySnapshot, PolicySourceLayer, ProviderPostureEntry } from "../policy/policy-projection";
 import type { CoreRoutingKey } from "../policy/policy-records";
 import type { AgentQuotaAdmission } from "../registry/agent-registry";
 import type { QuotaModel } from "./quota-admission";
@@ -82,6 +82,37 @@ export interface SpawnRouteQuotaBlock {
 	readonly reason: string | undefined;
 	readonly resetAt: number | undefined;
 }
+
+export interface SpawnRouteProviderDenyConstraint {
+	readonly denyKind: "provider" | "model";
+	readonly key: "core.providers.deny.providers" | "core.providers.deny.models";
+	readonly provider: string;
+	readonly model?: string;
+	readonly transactionId: string;
+	readonly sequence: number;
+	readonly effectiveFrom: string;
+	readonly expiresAt?: string;
+	readonly remainingMs?: number;
+	readonly sourceLayer: PolicySourceLayer;
+	readonly snapshotAt: string;
+}
+
+export interface SpawnRoutePolicyExclusion extends Omit<SpawnRouteProviderDenyConstraint, "model"> {
+	readonly model: string;
+	readonly selector: string;
+	readonly source: SubsequentSpawnRouteSource;
+	readonly reason: string;
+}
+
+export interface SpawnRoutePolicyBlock {
+	readonly kind: "provider_policy_denied";
+	readonly requested: readonly string[];
+	readonly patterns: readonly string[];
+	readonly exclusions: readonly SpawnRoutePolicyExclusion[];
+}
+
+export type SpawnRouteBlock = SpawnRouteQuotaBlock | SpawnRoutePolicyBlock;
+
 export interface SpawnRouteAttempt {
 	readonly source: SubsequentSpawnRouteSource;
 	readonly route: ResolvedRoute;
@@ -103,10 +134,14 @@ export interface SpawnRouteDecision {
 	readonly reason?: string;
 	readonly invalid: SpawnRouteInvalidError | undefined;
 	readonly quotaAdmission?: AgentQuotaAdmission;
-	readonly block?: SpawnRouteQuotaBlock;
+	readonly block?: SpawnRouteBlock;
 	readonly priorAttempts?: readonly SpawnRouteAttempt[];
 	readonly responsibility?: string;
 	readonly alias?: SpawnRouteAlias;
+	/** Immutable deny rules derived from the policy snapshot used for this decision. */
+	readonly providerDenyConstraints?: readonly SpawnRouteProviderDenyConstraint[];
+	/** Denied concrete candidates skipped while resolving or reconciling this route. */
+	readonly excludedPolicyCandidates?: readonly SpawnRoutePolicyExclusion[];
 }
 
 export interface SpawnRouteReceipt {
@@ -120,6 +155,8 @@ export interface SpawnRouteReceipt {
 	readonly resolvedPatterns: readonly string[];
 	readonly quotaAdmission?: AgentQuotaAdmission;
 	readonly priorAttempts?: readonly SpawnRouteAttempt[];
+	/** Denied concrete candidates skipped before the selected route won. */
+	readonly excludedPolicyCandidates?: readonly SpawnRoutePolicyExclusion[];
 	/** Responsibility template which selected this lane. */
 	readonly responsibility?: string;
 	/** Compatibility status when the requested template was an alias. */
@@ -139,6 +176,104 @@ type RouteTier = {
 
 function immutable<T>(values: readonly T[]): readonly T[] {
 	return Object.freeze([...values]);
+}
+
+function activeProviderPostureEntry(
+	snapshot: PolicySnapshot,
+	key: SpawnRouteProviderDenyConstraint["key"],
+): ProviderPostureEntry | undefined {
+	return snapshot.providerPosture?.entries.find(
+		entry => entry.key === key && entry.state === "active" && entry.effective,
+	);
+}
+
+function constraintFromEntry(
+	entry: ProviderPostureEntry,
+	snapshotAt: string,
+	denyKind: SpawnRouteProviderDenyConstraint["denyKind"],
+	provider: string,
+	model?: string,
+): SpawnRouteProviderDenyConstraint {
+	return Object.freeze({
+		denyKind,
+		key: entry.key as SpawnRouteProviderDenyConstraint["key"],
+		provider,
+		...(model === undefined ? {} : { model }),
+		transactionId: entry.transactionId,
+		sequence: entry.sequence,
+		effectiveFrom: entry.effectiveFrom,
+		...(entry.expiresAt === undefined ? {} : { expiresAt: entry.expiresAt }),
+		...(entry.remainingMs === undefined ? {} : { remainingMs: entry.remainingMs }),
+		sourceLayer: entry.sourceLayer,
+		snapshotAt,
+	});
+}
+
+function providerDenyConstraints(snapshot: PolicySnapshot | undefined): readonly SpawnRouteProviderDenyConstraint[] {
+	const posture = snapshot?.providerPosture;
+	if (snapshot === undefined || posture === undefined) return immutable([]);
+	const providerEntry = activeProviderPostureEntry(snapshot, "core.providers.deny.providers");
+	const modelEntry = activeProviderPostureEntry(snapshot, "core.providers.deny.models");
+	return immutable([
+		...(providerEntry === undefined
+			? []
+			: posture.deniedProviderIds.map(provider =>
+					constraintFromEntry(providerEntry, snapshot.at, "provider", provider),
+				)),
+		...(modelEntry === undefined
+			? []
+			: posture.deniedModels.map(({ provider, model }) =>
+					constraintFromEntry(modelEntry, snapshot.at, "model", provider, model),
+				)),
+	]);
+}
+
+export function spawnRoutePolicyExclusions(
+	decision: Pick<SpawnRouteDecision, "providerDenyConstraints">,
+	source: SubsequentSpawnRouteSource,
+	route: Pick<ResolvedRoute, "selector" | "provider" | "model">,
+): readonly SpawnRoutePolicyExclusion[] {
+	const exclusions = (decision.providerDenyConstraints ?? [])
+		.filter(
+			constraint =>
+				constraint.provider === route.provider &&
+				(constraint.denyKind === "provider" || constraint.model === route.model),
+		)
+		.map(constraint =>
+			Object.freeze({
+				...constraint,
+				model: route.model,
+				selector: route.selector,
+				source,
+				reason:
+					constraint.denyKind === "provider"
+						? `provider ${route.provider} denied by ${constraint.key}`
+						: `model ${route.provider}/${route.model} denied by ${constraint.key}`,
+			}),
+		);
+	return immutable(exclusions);
+}
+
+export function appendSpawnRoutePolicyExclusions(
+	decision: SpawnRouteDecision,
+	exclusions: readonly SpawnRoutePolicyExclusion[],
+): SpawnRouteDecision {
+	if (exclusions.length === 0) return decision;
+	const merged = [...(decision.excludedPolicyCandidates ?? [])];
+	for (const exclusion of exclusions) {
+		if (
+			merged.some(
+				current =>
+					current.source === exclusion.source &&
+					current.selector === exclusion.selector &&
+					current.key === exclusion.key &&
+					current.transactionId === exclusion.transactionId,
+			)
+		)
+			continue;
+		merged.push(exclusion);
+	}
+	return { ...decision, excludedPolicyCandidates: immutable(merged) };
 }
 
 function compactSelectors(value: string | readonly string[] | undefined): readonly string[] {
@@ -187,6 +322,68 @@ function toRoute(
 	};
 }
 
+function registryWithAvailable(
+	modelRegistry: ModelLookupRegistry,
+	available: readonly Model<Api>[],
+): ModelLookupRegistry {
+	return {
+		getAvailable: () => [...available],
+		...(modelRegistry.resolveCanonicalModel === undefined
+			? {}
+			: { resolveCanonicalModel: modelRegistry.resolveCanonicalModel.bind(modelRegistry) }),
+		...(modelRegistry.getCanonicalVariants === undefined
+			? {}
+			: { getCanonicalVariants: modelRegistry.getCanonicalVariants.bind(modelRegistry) }),
+		...(modelRegistry.getCanonicalId === undefined
+			? {}
+			: { getCanonicalId: modelRegistry.getCanonicalId.bind(modelRegistry) }),
+	};
+}
+
+function resolveEligibleRoute(
+	patterns: readonly string[],
+	source: SubsequentSpawnRouteSource,
+	modelRegistry: ModelLookupRegistry,
+	settings: Settings,
+	parentActiveSelector: string | undefined,
+	constraints: readonly SpawnRouteProviderDenyConstraint[],
+): { readonly route?: ResolvedRoute; readonly exclusions: readonly SpawnRoutePolicyExclusion[] } {
+	const exclusions: SpawnRoutePolicyExclusion[] = [];
+	for (const pattern of patterns) {
+		let available = modelRegistry.getAvailable();
+		const seenDenied = new Set<string>();
+		while (available.length > 0) {
+			const resolved = resolveModelOverride([pattern], registryWithAvailable(modelRegistry, available), settings);
+			if (!resolved.model) break;
+			const route = toRoute(
+				resolved.model,
+				resolved.thinkingLevel,
+				resolved.explicitThinkingLevel,
+				parentActiveSelector,
+			);
+			const denied = spawnRoutePolicyExclusions({ providerDenyConstraints: constraints }, source, route);
+			if (denied.length === 0) return { route, exclusions: immutable(exclusions) };
+			if (seenDenied.has(route.selector)) break;
+			seenDenied.add(route.selector);
+			exclusions.push(...denied);
+			available = available.filter(model => model.provider !== route.provider || model.id !== route.model);
+		}
+	}
+	return { exclusions: immutable(exclusions) };
+}
+
+function providerPolicyBlock(
+	candidate: ConsultedRouteInput,
+	exclusions: readonly SpawnRoutePolicyExclusion[],
+): SpawnRoutePolicyBlock {
+	return {
+		kind: "provider_policy_denied",
+		requested: candidate.selectors,
+		patterns: candidate.patterns,
+		exclusions,
+	};
+}
+
 /**
  * Resolve the initial spawn route without performing I/O or mutating session state.
  * Explicit spawn and session selectors are terminal: an unresolved value is an error.
@@ -217,7 +414,9 @@ export function resolveSpawnRoute(inputs: SpawnRouteInput): SpawnRouteDecision {
 			selectors: inputs.globalDefault ?? inputs.settings.getModelRole("default"),
 		},
 	];
+	const constraints = providerDenyConstraints(inputs.policySnapshot);
 	const consulted: ConsultedRouteInput[] = [];
+	const exclusions: SpawnRoutePolicyExclusion[] = [];
 
 	for (let index = 0; index < tiers.length; index += 1) {
 		const tier = tiers[index];
@@ -239,34 +438,45 @@ export function resolveSpawnRoute(inputs: SpawnRouteInput): SpawnRouteDecision {
 				reason: inputs.reason,
 				responsibility: inputs.responsibility,
 				alias: inputs.alias,
+				providerDenyConstraints: constraints,
+				excludedPolicyCandidates: immutable(exclusions),
 				invalid: undefined,
 			};
 		}
-		const resolved = resolveModelOverride([...candidate.patterns], inputs.modelRegistry, inputs.settings);
-		if (resolved.model) {
+
+		const resolution = resolveEligibleRoute(
+			candidate.patterns,
+			tier.source,
+			inputs.modelRegistry,
+			inputs.settings,
+			inputs.parentActiveSelector,
+			constraints,
+		);
+		exclusions.push(...resolution.exclusions);
+		if (resolution.route) {
 			const overridden: ConsultedRouteInput[] = [];
 			for (let lower = index + 1; lower < tiers.length; lower += 1) {
-				const lowerCandidate = consultedInput(tiers[lower], inputs.settings);
+				const lowerTier = tiers[lower];
+				const lowerCandidate = consultedInput(lowerTier, inputs.settings);
 				if (!lowerCandidate) continue;
 				consulted.push(lowerCandidate);
-				const lowerResolved = resolveModelOverride(
-					[...lowerCandidate.patterns],
+				const lowerResolution = resolveEligibleRoute(
+					lowerCandidate.patterns,
+					lowerTier.source,
 					inputs.modelRegistry,
 					inputs.settings,
+					inputs.parentActiveSelector,
+					constraints,
 				);
-				if (lowerResolved.model) overridden.push(lowerCandidate);
+				exclusions.push(...lowerResolution.exclusions);
+				if (lowerResolution.route) overridden.push(lowerCandidate);
 			}
 			return {
 				source: tier.source,
 				explicit: tier.explicit,
 				selectedSelectors: candidate.selectors,
 				resolvedPatterns: candidate.patterns,
-				route: toRoute(
-					resolved.model,
-					resolved.thinkingLevel,
-					resolved.explicitThinkingLevel,
-					inputs.parentActiveSelector,
-				),
+				route: resolution.route,
 				parentActiveSelector: inputs.parentActiveSelector,
 				consulted: immutable(consulted),
 				overridden: immutable(overridden),
@@ -275,13 +485,18 @@ export function resolveSpawnRoute(inputs: SpawnRouteInput): SpawnRouteDecision {
 				reason: inputs.reason,
 				responsibility: inputs.responsibility,
 				alias: inputs.alias,
+				providerDenyConstraints: constraints,
+				excludedPolicyCandidates: immutable(exclusions),
 				invalid: undefined,
 			};
 		}
-		if (tier.source === "agent_frontmatter" && inputs.responsibility) {
+
+		const terminalResponsibility = tier.source === "agent_frontmatter" && inputs.responsibility;
+		if (terminalResponsibility || tier.explicit) {
+			const denied = resolution.exclusions.length > 0;
 			return {
 				source: tier.source,
-				explicit: false,
+				explicit: tier.explicit,
 				selectedSelectors: candidate.selectors,
 				resolvedPatterns: candidate.patterns,
 				route: undefined,
@@ -293,25 +508,12 @@ export function resolveSpawnRoute(inputs: SpawnRouteInput): SpawnRouteDecision {
 				reason: inputs.reason,
 				responsibility: inputs.responsibility,
 				alias: inputs.alias,
-				invalid: { kind: "invalid_spawn_route", requested: candidate.selectors, patterns: candidate.patterns },
-			};
-		}
-		if (tier.explicit) {
-			return {
-				source: tier.source,
-				explicit: true,
-				selectedSelectors: candidate.selectors,
-				resolvedPatterns: candidate.patterns,
-				route: undefined,
-				parentActiveSelector: inputs.parentActiveSelector,
-				consulted: immutable(consulted),
-				overridden: immutable([]),
-				originalRoute: inputs.originalRoute,
-				originalSource: inputs.originalSource,
-				reason: inputs.reason,
-				responsibility: inputs.responsibility,
-				alias: inputs.alias,
-				invalid: { kind: "invalid_spawn_route", requested: candidate.selectors, patterns: candidate.patterns },
+				providerDenyConstraints: constraints,
+				excludedPolicyCandidates: immutable(exclusions),
+				block: denied ? providerPolicyBlock(candidate, resolution.exclusions) : undefined,
+				invalid: denied
+					? undefined
+					: { kind: "invalid_spawn_route", requested: candidate.selectors, patterns: candidate.patterns },
 			};
 		}
 	}
@@ -330,6 +532,8 @@ export function resolveSpawnRoute(inputs: SpawnRouteInput): SpawnRouteDecision {
 		reason: inputs.reason,
 		responsibility: inputs.responsibility,
 		alias: inputs.alias,
+		providerDenyConstraints: constraints,
+		excludedPolicyCandidates: immutable(exclusions),
 		invalid: undefined,
 	};
 }
@@ -338,7 +542,7 @@ export function admitSpawnRoute(decision: SpawnRouteDecision, quotaAdmission: Ag
 	return { ...decision, quotaAdmission };
 }
 
-export function blockSpawnRoute(decision: SpawnRouteDecision, block: SpawnRouteQuotaBlock): SpawnRouteDecision {
+export function blockSpawnRoute(decision: SpawnRouteDecision, block: SpawnRouteBlock): SpawnRouteDecision {
 	return { ...decision, block };
 }
 
@@ -348,19 +552,33 @@ export function rerouteSpawnRoute(
 	quotaAdmission: AgentQuotaAdmission,
 	reason: string | undefined,
 ): SpawnRouteDecision {
+	const route: ResolvedRoute = {
+		selector: routedModel.selector,
+		provider: routedModel.providerId,
+		model: routedModel.modelId,
+		thinking: undefined,
+		parentActiveSelector: decision.parentActiveSelector,
+	};
+	const exclusions = spawnRoutePolicyExclusions(decision, "automatic_reroute", route);
+	if (exclusions.length > 0) {
+		return {
+			...appendSpawnRoutePolicyExclusions(decision, exclusions),
+			quotaAdmission,
+			block: {
+				kind: "provider_policy_denied",
+				requested: immutable([routedModel.selector]),
+				patterns: immutable([routedModel.selector]),
+				exclusions,
+			},
+		};
+	}
 	return {
 		...decision,
 		source: "automatic_reroute",
 		explicit: false,
 		selectedSelectors: immutable([routedModel.selector]),
 		resolvedPatterns: immutable([routedModel.selector]),
-		route: {
-			selector: routedModel.selector,
-			provider: routedModel.providerId,
-			model: routedModel.modelId,
-			thinking: undefined,
-			parentActiveSelector: decision.parentActiveSelector,
-		},
+		route,
 		originalSource: decision.source,
 		originalRoute: decision.route,
 		reason,
@@ -387,6 +605,8 @@ export function reconcileSpawnRouteAuthFallback(
 		throw new Error("Cannot apply auth fallback to an explicit, blocked, or unresolved spawn route");
 	}
 	const route = toRoute(model, thinking, explicitThinking, decision.parentActiveSelector);
+	const exclusions = spawnRoutePolicyExclusions(decision, "auth_fallback", route);
+	if (exclusions.length > 0) return appendSpawnRoutePolicyExclusions(decision, exclusions);
 	const authReason = `auth fallback from ${decision.route.selector} to ${route.selector}`;
 	const reason = authReason;
 	return {
@@ -421,6 +641,7 @@ export function toSpawnRouteReceipt(decision: SpawnRouteDecision): SpawnRouteRec
 		resolvedPatterns: decision.resolvedPatterns,
 		quotaAdmission: decision.quotaAdmission,
 		priorAttempts: decision.priorAttempts ?? immutable([]),
+		excludedPolicyCandidates: decision.excludedPolicyCandidates ?? immutable([]),
 		responsibility: decision.responsibility,
 		alias: decision.alias,
 		resolutionSource: decision.source,

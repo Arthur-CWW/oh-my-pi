@@ -2318,6 +2318,12 @@ export class InteractiveMode implements InteractiveModeContext, SubmittedInputRe
 		},
 	): Promise<void> {
 		const previousTools = this.#planModePreviousTools ?? this.session.getActiveToolNames();
+		let durablePlanPath = options.planFilePath;
+		if (options.preserveContext) {
+			durablePlanPath = (
+				await this.sessionManager.appendPlanArtifact(options.title, planContent, options.planFilePath)
+			).localPath;
+		}
 
 		// Mark the pending abort caused by the plan-mode → compaction transition as
 		// silent BEFORE #exitPlanMode raises it. The `finally` below clears the
@@ -2345,6 +2351,9 @@ export class InteractiveMode implements InteractiveModeContext, SubmittedInputRe
 					getSessionId: () => this.sessionManager.getSessionId(),
 				});
 				await Bun.write(newLocalPath, planContent);
+				durablePlanPath = (
+					await this.sessionManager.appendPlanArtifact(options.title, planContent, options.planFilePath)
+				).localPath;
 			} else if (options.compactBeforeExecute) {
 				// Distill the plan-mode transcript before the execution turn is queued so
 				// the plan-approved synthetic prompt lands as a fresh cache anchor.
@@ -2354,13 +2363,13 @@ export class InteractiveMode implements InteractiveModeContext, SubmittedInputRe
 				// Cancellation skips the synthetic-prompt dispatch (operator's explicit
 				// abort is honored); failure proceeds best-effort — approval intent stands.
 				const compactionPrompt = prompt.render(planModeCompactInstructionsPrompt, {
-					planFilePath: options.planFilePath,
+					planFilePath: durablePlanPath,
 				});
 				// Pin the plan reference path before compaction so user input captured
 				// while it runs retains the approved plan in
 				// `#buildPlanReferenceMessage`. Reassignment after the try/finally is
 				// idempotent and kept for the !compactBeforeExecute branch.
-				this.session.setPlanReferencePath(options.planFilePath);
+				this.session.setPlanReferencePath(durablePlanPath);
 				compactOutcome = await this.handleCompactCommand(compactionPrompt, outcome =>
 					this.#applyDeferredPlanModelTransition(outcome, options.executionModel),
 				);
@@ -2378,7 +2387,7 @@ export class InteractiveMode implements InteractiveModeContext, SubmittedInputRe
 		if (previousTools.length > 0) {
 			await this.session.setActiveToolsByName(previousTools);
 		}
-		this.session.setPlanReferencePath(options.planFilePath);
+		this.session.setPlanReferencePath(durablePlanPath);
 
 		// Resolve the deferred plan-approval model transition. The compaction
 		// callback may already have applied this; the re-run is idempotent and
@@ -2424,7 +2433,7 @@ export class InteractiveMode implements InteractiveModeContext, SubmittedInputRe
 		this.session.markPlanReferenceSent();
 		const planModePrompt = prompt.render(planModeApprovedPrompt, {
 			planContent,
-			planFilePath: options.planFilePath,
+			planFilePath: durablePlanPath,
 			contextPreserved: options.preserveContext === true,
 		});
 		// The executor's first turn must start on an idle session. The agent may still
