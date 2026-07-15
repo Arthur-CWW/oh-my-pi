@@ -47,6 +47,7 @@ A session lineage record should therefore say:
 | Artifact | Status and scope | Principal relationships |
 |---|---|---|
 | [`INTENT.md`](INTENT.md) | Current durable, revisable theory of Arthur’s aims | `derived_from` Primer intuitions, GOAL, VISION, handoffs, learning synthesis, and 2026-07-11 dossier; future corrections should `corrects` or `supersedes` scoped claims |
+| [`PREFERENCES.md`](PREFERENCES.md) | Current sourced, scoped preference doctrine and CEV-oriented steering frame as of 2026-07-14 | `derived_from` recent OMP/Codex/Pi workflow evidence, canonical browser-context doctrine, and privacy-preserving Firefox aggregates; observations remain `evidence_for` or `counterevidence_to` cards rather than silently becoming doctrine |
 | [`GOAL.md`](GOAL.md) | Stream charter and ownership boundary | `derived_from` early Primer episodes; `evidence_for` externalized tutor and structured-memory aims |
 | [`VISION.md`](VISION.md) | Living design-space/vibe record, with dated binding decisions | `derived_from` 2026-07-03/06 episodes; `evidence_for` the loop and reader-first medium; some sequencing is `supersedes`-sensitive |
 | [`DESIGN-LOG.md`](DESIGN-LOG.md) | Append-oriented dated hypotheses, decisions, alternatives, and debt | each entry names status and evidence; entries do not silently become doctrine |
@@ -129,6 +130,30 @@ The [learning-system synthesis](research/learning-sources/system-synthesis.md) k
 - Borretti / Hashcards: human-owned approved card artifacts separated from machine-owned review state; a scheduler and CLI reference, not Primer’s global architecture.
 
 Their agreement supports small, provenance-rich interventions. Their tensions are intentional. Hashcards is a downstream/reference influence, not the ancestor or global architecture of Primer.
+
+### Recent OMP / Codex / Pi / Firefox evidence wave — 2026-05-31 to 2026-07-14
+
+[`PREFERENCES.md`](PREFERENCES.md) is the durable interpretation produced from four distinct provenance classes. Their roles must remain separate:
+
+- **OMP episodes (primarily 2026-07-10–2026-07-14):** repeated task behavior and explicit corrections around parallel ownership, handoffs, behavioral proof, agent-interface state, guarded remote work, and deslop. Named session paths in `PREFERENCES.md` are `evidence_for` scoped workflow cards; duplicate routing blocks in `~/.omp/agent/history.db` mean prompt rows are signal, not task counts.
+- **Codex episodes (2026-06-29–2026-07-10):** task-local evidence about read-only inspection, concise synthesis, access boundaries, automation, interruption, and runtime/cwd failures. These are operational observations, not global Codex preferences and not evidence that generated Codex configuration expresses durable intent.
+- **Pi episodes (2026-05-31–2026-06-07):** older evidence for resumable data pipelines, session handoffs, non-focus-stealing browser access, and preserve-before-delete behavior. Model-specific routing and repeated Pi commands are stale implementation residue unless Arthur explicitly revives them.
+- **Firefox aggregate (2026-04-15–2026-07-14; recent comparison 2026-06-14–2026-07-14):** read-only visit/category counts and bounded burst transitions from the active profile’s `places.sqlite`. These are provisional attention observations only. They are `evidence_for` questions worth asking and can be `counterevidence_to` claims that browser volume measures importance; they cannot establish value, endorsement, intent, authorship, comprehension, or mastery.
+
+The CEV backward frame in `PREFERENCES.md` is a new, review-gated synthesis over this wave and the existing plural/corrigible-prior doctrine. It is **not** reported as present in the 2026-06-28 browser-context ontology, and it does not claim a working CEV model, preference aggregator, or automated extrapolation mechanism.
+
+#### Privacy and minimization boundary
+
+Firefox evidence was derived locally and reported only as date-bounded category/domain aggregates and coarse transitions. Sensitive/local/account paths, query strings, tokens, and exhaustive URL/title trails were excluded. The profile was locked with a WAL present, so the newest view may be incomplete; non-Firefox activity is absent. Successors may cite the aggregate and its limits, but must not reconstruct or publish raw browsing trails from this lineage. OMP/Codex/Pi evidence should likewise be cited by bounded episode path and interpreted claim, not copied as transcript dumps.
+
+#### Provenance distinctions for successors
+
+- **Doctrine** is a reviewed, revisable interpretation in `INTENT.md` or `PREFERENCES.md`.
+- **Observation** says what happened in a bounded episode or aggregate; it does not explain why.
+- **Explicit correction** is high-value evidence for its stated scope and may `corrects` or `supersedes` a prior claim.
+- **Attention aggregate** is a lead for inquiry, never a preference promotion.
+- **Implementation residue** records a mechanism that existed; absent current confirmation, it cannot establish the end it served.
+- **Extrapolation** is a labeled proposal about what a more reflective Arthur might endorse. It remains pending/review-gated and never outranks a current explicit correction.
 
 ## Recovery gaps and unavailable evidence
 

@@ -1,6 +1,6 @@
 # Primer intent
 
-**Status:** durable, revisable doctrine. This is a theory of Arthur’s aims, not a specification or a psychological profile. Claims marked **explicit** come from Arthur’s recorded words or corrections; **inferred** claims are working interpretations; **dated preference** records a preference in its episode and may be superseded. Correct this document by preserving the old claim as evidence and recording what changed in [`DESIGN-LOG.md`](DESIGN-LOG.md).
+**Status:** durable, revisable doctrine. This is a theory of Arthur’s aims, not a specification or a psychological profile. Claims marked **explicit** come from Arthur’s recorded words or corrections; **inferred** claims are working interpretations; **dated preference** records a preference in its episode and may be superseded. [`PREFERENCES.md`](PREFERENCES.md) holds the sourced, scoped preference layer. Correct this document by preserving the old claim as evidence and recording what changed in [`DESIGN-LOG.md`](DESIGN-LOG.md).
 
 ## What Primer is for
 
@@ -14,6 +14,12 @@ This interpretation combines two **explicit** aims:
 - Build a tutor/extended reading medium in which engagement accrues rather than remaining “just vibes.”
 
 The synthesis is **inferred and revisable**: Primer should predict useful help around Arthur’s current mental state while keeping the human-authored work and Arthur’s agency central.
+
+## CEV-oriented direction, not an implemented CEV system
+
+Primer may be steered by a **CEV backward frame**: ask what a better-informed, more reflective, more coherent future Arthur might endorse after reviewing the evidence and consequences, then use that perspective to question present interventions. This does not mean current behavior is coherent volition, that Primer can infer hidden values, or that a CEV system has been implemented.
+
+The frame remains a review-gated hypothesis. Current explicit corrections outrank extrapolation; conflicts remain visible; Arthur can revise or reject the frame. [`PREFERENCES.md`](PREFERENCES.md) defines the evidence ladder, current preference cards, attention caveats, and correction protocol.
 
 ## The durable loop
 
@@ -110,4 +116,4 @@ Predictive helpfulness is the ambition; restraint and provenance are the safety 
 
 ## Evidence base
 
-Start with [`docs/plans/primer-intuitions.md`](../../docs/plans/primer-intuitions.md), [`GOAL.md`](GOAL.md), [`VISION.md`](VISION.md), the [current live handoff](HANDOFF-LIVE-2026-07-10.md), and the [learning-system synthesis](research/learning-sources/system-synthesis.md). [`LINEAGE.md`](LINEAGE.md) records how these sources relate and where recovery is incomplete.
+Start with [`PREFERENCES.md`](PREFERENCES.md), [`docs/plans/primer-intuitions.md`](../../docs/plans/primer-intuitions.md), [`GOAL.md`](GOAL.md), [`VISION.md`](VISION.md), the [current live handoff](HANDOFF-LIVE-2026-07-10.md), and the [learning-system synthesis](research/learning-sources/system-synthesis.md). [`LINEAGE.md`](LINEAGE.md) records how these sources relate and where recovery is incomplete.
