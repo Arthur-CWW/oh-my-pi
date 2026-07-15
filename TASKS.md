@@ -8,18 +8,24 @@ Status values: `active`, `next`, `blocked`, `done`, `parked`.
 
 | ID | Task | Owner | Notes |
 |---|---|---|---|
+| T-2026-07-15-001 | Complete Stema behavioral proof and clean-cutover documentation/configuration | Codex / Stema | Active; docs and live references are being cut over from the retired package. |
 | T-2026-06-24-003 | Define vphone red/blue detectability workstream | Codex | Active; follow the canonical plan or source named in the task history. |
-| T-2026-06-27-004 | Build clean-room local-first AI companion realtime testbed | Codex | Active; follow the canonical plan or source named in the task history. |
+| T-2026-06-27-004 | Build clean-room local-first AI companion realtime testbed | Codex | Active; (unverified 2026-07-15: this ID collides with the completed OMP goal-tool task under the same ID in `docs/state/tasks/done-2026-06.md`; Companion task source/evidence not located.) |
 | T-2026-06-23-001 | Build OMP/SymphonyX control-plane and Dream promotion workstreams | Codex | Active; follow the canonical plan or source named in the task history. |
-| T-2026-06-15-001 | Research cheap/free residential proxy sourcing | Codex | Active; follow the canonical plan or source named in the task history. |
+| T-2026-06-15-001 | Research cheap/free residential proxy sourcing | Codex | Active; (unverified 2026-07-15: this ID collides with the completed OMP Kagi browser-session task under the same ID in `docs/state/tasks/done-2026-06.md`; proxy-task source/evidence not located.) |
 | T-2026-06-09-003 | Keep task tracking and durable preferences synchronized | Codex | Active; follow the canonical plan or source named in the task history. |
 | T-2026-06-09-024 | Reverse/catalog useful Jimeng GenAI frontend APIs | Codex | Active; follow the canonical plan or source named in the task history. |
 | T-2026-06-10-071 | Continue Slotok V1 done-goal implementation loop | Codex | Active; follow the canonical plan or source named in the task history. |
 | T-2026-06-19-001 | Build OMP Discord agent-server bridge | Codex | Active; follow the canonical plan or source named in the task history. |
 | T-2026-06-09-005 | Split `packages/web-access` into focused agent-tool/skill packages | Codex | Active; follow the canonical plan or source named in the task history. |
 | T-2026-07-11-001 | Stabilize OMP runtime before further feature work | Arthur conversation / Harness | Active. Fleet rollout continues in the concurrent fleet-owner session (recovery-identity fix committed `668288734`, promoted; canary cycles in flight). Parallel Main landed in working tree 2026-07-15 (all focused gates green, 360 tests + typecheck; checkpoint pending): Ctrl-Q/durable-followup wedge fix (abort-gated drains, depth-counted abort gate, exactly-once follow-up delivery, notice dedup — root cause of the 019f643a session loss), Enter-on-empty-prompt submits queued follow-up, HR-122 responsibility routing (catch-all `task` retired to deprecated alias), HR-129 Slice 1 policy journal/apply/CLI substrate, Agent Hub stale-projection fix. Wave 2 (2026-07-15, commits `dc0a754e2`+`80f525be2`, blessed `16.0.1+fork.dc0a754e24ad`): HR-136 revive tool retention + yield propagation + history:// fix; HR-132 `:route` inspector slice 1; HR-124 nested spawn provenance in Hub/picker; fleet rollout typed TARGET_ERROR receipts + disposable-view prepare-rollout bridge (root cause of the canary freeze — canary needs one manual restart onto a bridged build, then live rollout closes). Handoff: [2026-07-15 fleet-control continuation](docs/fable/handoffs/2026-07-15-omp-fleet-control-continuation.md). |
-| T-2026-07-03-001 | Bootstrap sharded Fable session: Companion | Fable | Active; follow the canonical plan or source named in the task history. |
 | T-2026-07-03-003 | Bootstrap sharded Fable session: Primer | Fable | Active 2026-07-15. Chinese loop scheduler (FSRS + priority + interleave), promotion bridge, enrichment prompt v0, dependency-gating brief, calibration sheet. Live handoff: `streams/primer/HANDOFF-LIVE-2026-07-15.md`. |
+
+## Retired
+
+| ID | Task | Date | Rationale |
+|---|---|---|---|
+| T-2026-07-03-001 | Bootstrap sharded Fable session: Companion | 2026-07-15 | Retired; this ID is already used by the completed Fable-advisor task in `docs/state/tasks/done-2026-07.md`; current Companion continuation is tracked by `streams/companion/HANDOFF-BEHAVIOR.md` and `streams/companion/notes/overnight-program-2026-07-15.md`. |
 
 ## Next
 
