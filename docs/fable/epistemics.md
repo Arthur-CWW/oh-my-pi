@@ -54,9 +54,17 @@ Queued questions/nitpicks/judgment calls carry a date and die honorably: an unan
 - **Repo deltas**: each repo's AGENTS.md holds only what differs there (stack, commands, local invariants). If a rule is true everywhere, it belongs in core, stated once.
 - **Runtime**: mechanical rules live in the harness (lints, ratchets, runtime reminders), not in prose. The harness is the layer that cannot be skimmed past.
 
+## Transactions and compaction (forensics-earned, 2026-07-15)
+
+- **Policy changes are transactions.** A fact that lives in N surfaces is not changed until all N are (the Terra ban updated 1 of 9 live-route files; the other 8 stayed authoritative to agents for days). Before committing a posture change, grep for every restatement — or better, there is only one home to change (Snapshot rule above).
+- **Compaction preserves evidence, not just labels.** Summarizing/sharding a ledger while keeping statuses but dropping their evidence notes manufactures zombies (the TASKS.md rewrite of 2026-07-13 reasserted seven dead "Active" rows this way). A compacted row keeps its last-evidence date and pointer, or gets retired in the same pass.
+- **A dated handoff is immutable.** Amending `HANDOFF-LIVE-<date>.md` after the fact makes the filename lie; new state gets a new date and a supersede banner on the old file, in the same commit.
+
 ## Enforcement backlog (harness-stream requests, not prose fixes)
 
 1. Staleness lint: flag operational claims with `review-by`/`dies-with` markers past due; flag model names in Doctrine-class docs.
 2. Supersede ratchet: creating `HANDOFF-LIVE-<date>.md` without banner-marking the predecessor fails lint.
 3. Unified triage queue (defer-judgment / fill-blanks / nitpicks / taste forks / preference-change proposals) with expiry — preference prose lands as queue proposals, not direct commits to Doctrine.
 4. Runtime mistake-reminder: first occurrence of a known lint-class mistake injects a one-line reminder into the offending agent's context for the rest of the run.
+5. Commit-attribution ratchet: agent-issued commits carry `Agent:`/`Model:` trailers (forensics 2026-07-15: 10/10 stale authority claims were agent-written under the shared `arthur` git identity — authorship was unrecoverable without session logs).
+6. Out-of-repo config provenance: `~/.omp/agent/config.yml` mutations get a journal (who/when/why) — it is an authority surface with zero history today.
