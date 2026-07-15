@@ -10,6 +10,7 @@ import { AsyncJobManager } from "@oh-my-pi/pi-coding-agent/async/job-manager";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { IrcBus } from "@oh-my-pi/pi-coding-agent/irc/bus";
+import { IrcExternalBus } from "@oh-my-pi/pi-coding-agent/irc/bus-external";
 import { AgentLifecycleManager } from "@oh-my-pi/pi-coding-agent/registry/agent-lifecycle";
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import { AgentSession, type AgentSessionEvent } from "@oh-my-pi/pi-coding-agent/session/agent-session";
@@ -208,6 +209,7 @@ describe("parked child revival", () => {
 				toolRegistry: new Map(tools.map(tool => [tool.name, tool])),
 				agentId: "RevivedReal",
 				agentKind: "sub",
+				externalIrcBus: new IrcExternalBus(path.join(root, "irc-bus.sqlite")),
 			});
 			activeSession = session;
 			return session;
