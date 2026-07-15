@@ -30,9 +30,10 @@ Status: PUBLISHED 2026-07-15 with one declared gap — live calibrated close-han
 - Motion Debug stage evidence: `local/motion-debug-qa/report.md`.
 - Arbitration: `test/capture-arbiter.test.ts` (8 tests incl. production-path swap latch + hysteresis deadline); reviewer transcript ArbiterReview (fix-first findings closed).
 
-## Live calibration *(pending — requires Arthur, ~2 min on camera)*
+## Live calibration — desk regime captured; deliberate protocol still Arthur's
 
-Full retarget core incl. nose/ears, both hands close for distal fingers, occlusion, motion blur, enter/leave frame, mirrored preview. Runbook: `apps/ai-companion-rtc/docs/motion-capture-comparison.md`. Until recorded: no close-hand live claim is made; the standalone-hand fallback is proven only synthetic + batch-offline.
+- **Desk-session live capture (2026-07-15, 3 min, recorded through the production pipeline):** 1,588 accepted events (~8.8/s); right hand present in 61% of events at desk distance, left 10% (off-keyboard/occluded); head joints 31% (screen-gaze down); hips/knees/ankles ≈0 (desk occlusion); mean joint confidence 0.52. Session: `data/ai-companion-rtc/recordings/motion/desk-session-2026-07-15/` (manifest stamped `a03fbe4`). This proves live camera → accepted UDP → recorder end-to-end and gives the seated-regime availability profile.
+- **Still pending (requires Arthur, ~2 min deliberate protocol):** distal-finger close-ups both hands, occlusion sweep, motion blur, enter/leave frame, mirrored preview, standing full retarget core, and simultaneous MediaPipe shadow (needs /lab open during the session). Runbook: `apps/ai-companion-rtc/docs/motion-capture-comparison.md`. Until then: no close-range distal-finger live claim; the standalone-hand fallback remains proven synthetic + batch-offline + desk-distance only.
 
 ## WiLoR challenger (desktop, provisioned)
 
