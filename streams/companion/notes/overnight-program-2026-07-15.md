@@ -37,6 +37,14 @@ Orchestrator anchor: survives compactions. Update at every wave boundary (scribe
 - OvernightSoak: watcher LIVE in tmux `soak-watch` (5-min cycles: both replays, lab-state, RSS, UDP lanes, errors.log diff → local/soak/soak-2026-07-15.jsonl); reporter `scripts/soak-report.ts`; first 2 cycles healthy, RSS flat, soak even caught QA's synthetic error line (wiring proven end-to-end).
 - Wave1BrowserQA: replay-v3 E2E gap closed (GPU body+fingers, source indicator, smoothing toggle all pass); calibration string live in browser arbiter (0.840048); PARTIAL: /api/debug/lab-state showed a stale no-eligible-offer reason during replay (browser-side live — likely snapshot cadence, triage in wave 3); resize-persistence/Space-pause partial due browser-tool limits (verified earlier waves).
 
+### Wave 3 — DONE (checkpoint nested `d593c76`, outer `53d9ffc73`; floor 489)
+- LibraryBadges: `data/clip-quality/quality.json` (281 rows; formula in scripts/derive-clip-quality.ts header; gpu rates saturate by design), `/api/lab/clip-quality` route, tier dot + hands glyph + tooltip in virtualized library (agent hit request cap post-completion; work validated green).
+- QueueMonitor: desktop gpu-queue surfaced read-only in the /lab pipeline monitor (60s ssh poller, unreachable degradation, SSE `gpu-queue` event); QA screenshots local/queue-monitor-qa/.
+- LicensedKinds: `wilor-3d` + `gvhmr-mesh` queue kinds fail-closed with exact missing-file paths (proven via real jobs, exit 3); drop location `desktop:~/projects/model-bench/licensed/` + `queue/preflight-licensed.sh` one-command checklist; FLAME confirmed NOT required by GVHMR demo config. Mac CLI submits both kinds.
+- LedgerRetirement: TASKS.md ID-collision annotations (2 unverified, 1 retired), notes INDEX.md covering all 42 notes, HANDOFF replay-default correction.
+- StaleReasonFix: heartbeat now re-samples live `__captureArbiterState` per cycle (root cause: cached accessor copy); seam test; endpoint reflects lane ownership within one heartbeat.
+- Bonus (RetargetDejank final act): compare-drive body had been BYPASSING PoseGuard — now unified through the production ProviderReplayPipeline in both paths; duplicate filter code deleted.
+
 ### Wave 3+ backlog (no-input, pre-approved shape)
 - Library quality badges: per-clip scores (availability/jerk/agreement from manifests+comparison) as badges in the 281-clip library; data JSON + small UI.
 - GPU-queue → /lab pipeline monitor: surface desktop queue status in the existing SSE pipeline pane (`src/job-queue.ts` seam); submit gpu-pose-batch from lab.
