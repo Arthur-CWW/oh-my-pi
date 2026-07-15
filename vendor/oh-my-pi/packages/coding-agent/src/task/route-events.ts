@@ -42,21 +42,52 @@ export type RouteResolutionSource = Linkage & {
 	payloadVersion: 1;
 	resolutionId: string;
 	occurredAt: number;
-	changeKind: "spawn_resolved" | "model_change" | "thinking_change" | "account_change" | "hotswap" | "fallback" | "revert" | "advisor_change";
+	changeKind:
+		| "spawn_resolved"
+		| "model_change"
+		| "thinking_change"
+		| "account_change"
+		| "hotswap"
+		| "fallback"
+		| "revert"
+		| "advisor_change";
 	reason: string | null;
+	responsibility: string | null;
+	alias: "deprecated-alias" | null;
 	route: {
 		lane: string;
 		provider: string;
 		upstreamProvider: string | null;
 		model: string;
-		account: { kind: "configured" | "ambient" | "none"; ref: string | null; provenance: { readonly [key: string]: JsonValue } };
+		account: {
+			kind: "configured" | "ambient" | "none";
+			ref: string | null;
+			provenance: { readonly [key: string]: JsonValue };
+		};
 		effort: string;
 	};
 	provenance: {
+		resolutionSource:
+			| "spawn_explicit"
+			| "session_explicit"
+			| "session_temporary"
+			| "agent_model_override"
+			| "policy"
+			| "agent_frontmatter"
+			| "session_inherited"
+			| "global_default"
+			| "automatic_reroute"
+			| "auth_fallback"
+			| "hard_constraint"
+			| "session_strategy"
+			| "workspace_policy"
+			| "global_policy";
+		resolvedLane: string;
 		winningLayer:
 			| "spawn_explicit"
 			| "session_explicit"
 			| "session_temporary"
+			| "policy"
 			| "agent_model_override"
 			| "agent_frontmatter"
 			| "session_inherited"
@@ -76,7 +107,11 @@ export type RouteResolutionSource = Linkage & {
 		lane: string;
 		provider: string;
 		model: string;
-		account: { kind: "configured" | "ambient" | "none"; ref: string | null; provenance: { readonly [key: string]: JsonValue } };
+		account: {
+			kind: "configured" | "ambient" | "none";
+			ref: string | null;
+			provenance: { readonly [key: string]: JsonValue };
+		};
 		effort: string;
 		disposition: "selected" | "rerouted";
 		fallbackOrdinal: number | null;
@@ -100,7 +135,11 @@ function isRouteSource(value: JsonValue | undefined): value is { readonly agentI
 function nextAgentSeq(entries: readonly SessionEntry[], agentId: string): number {
 	let next = 0;
 	for (const entry of entries) {
-		if (entry.type !== "custom" || (entry.customType !== ROUTE_TIMELINE_ENTRY && entry.customType !== ROUTE_RESOLUTION_ENTRY)) continue;
+		if (
+			entry.type !== "custom" ||
+			(entry.customType !== ROUTE_TIMELINE_ENTRY && entry.customType !== ROUTE_RESOLUTION_ENTRY)
+		)
+			continue;
 		const data = entry.data as JsonValue | undefined;
 		if (!isRouteSource(data) || data.agentId !== agentId) continue;
 		next = Math.max(next, data.agentSeq + 1);
@@ -141,9 +180,32 @@ export function createEffectiveHotswapRoute(
 		occurredAt: Date.now(),
 		changeKind: "hotswap",
 		reason: reason ?? null,
+		responsibility: null,
+		alias: null,
 		route,
-		provenance: { winningLayer: "session_strategy", constraints: [], consultedSources: [], overriddenValues: [] },
-		candidates: [{ ordinal: 0, lane: route.lane, provider, model: model.id, account: route.account, effort: route.effort, disposition: "selected", fallbackOrdinal: null, rejectionCode: null, rejectionReason: null, failedConstraintIds: [] }],
+		provenance: {
+			winningLayer: "session_strategy",
+			resolutionSource: "session_strategy",
+			resolvedLane: route.lane,
+			constraints: [],
+			consultedSources: [],
+			overriddenValues: [],
+		},
+		candidates: [
+			{
+				ordinal: 0,
+				lane: route.lane,
+				provider,
+				model: model.id,
+				account: route.account,
+				effort: route.effort,
+				disposition: "selected",
+				fallbackOrdinal: null,
+				rejectionCode: null,
+				rejectionReason: null,
+				failedConstraintIds: [],
+			},
+		],
 		fallbackFromResolutionId: null,
 		revertedFromResolutionId: null,
 		advisors: [],
@@ -229,9 +291,13 @@ export function createSpawnRouteResolution(
 		occurredAt: Date.now(),
 		changeKind: "spawn_resolved",
 		reason: receipt.reason ?? null,
+		responsibility: receipt.responsibility ?? null,
+		alias: receipt.alias ?? null,
 		route,
 		provenance: {
 			winningLayer: receipt.source,
+			resolutionSource: receipt.resolutionSource,
+			resolvedLane: receipt.resolvedLane,
 			constraints:
 				receipt.source === "automatic_reroute"
 					? [receipt.quotaAdmission?.quotaPoolId, receipt.quotaAdmission?.limitWindowId].filter(
@@ -260,8 +326,13 @@ export function appendSpawnRouteResolution(
 	return event;
 }
 
-
-export function appendLifecycleEvent(sessionManager: SessionManager, agentId: string, kind: LifecycleSource["kind"], fromState: LifecycleSource["fromState"], toState: LifecycleSource["toState"]): LifecycleSource {
+export function appendLifecycleEvent(
+	sessionManager: SessionManager,
+	agentId: string,
+	kind: LifecycleSource["kind"],
+	fromState: LifecycleSource["fromState"],
+	toState: LifecycleSource["toState"],
+): LifecycleSource {
 	const agentSeq = nextAgentSeq(sessionManager.getEntries(), agentId);
 	const event: LifecycleSource = {
 		agentId,
@@ -287,4 +358,3 @@ export function appendLifecycleEvent(sessionManager: SessionManager, agentId: st
 	sessionManager.appendCustomEntry(ROUTE_TIMELINE_ENTRY, event);
 	return event;
 }
-

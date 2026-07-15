@@ -472,10 +472,12 @@ describe("resolveModelRoleValue", () => {
 		expect(result.explicitThinkingLevel).toBe(true);
 	});
 
-	test("returns no model when pi/task role is unset", () => {
-		const result = resolveModelRoleValue("pi/task", allModels, { settings: Settings.isolated() });
+	test("resolves an unset pi/task alias identically to implementer", () => {
+		const settings = Settings.isolated();
+		const alias = resolveModelRoleValue("pi/task", allModels, { settings });
+		const implementer = resolveModelRoleValue("pi/implementer", allModels, { settings });
 
-		expect(result.model).toBeUndefined();
+		expect(alias.model).toEqual(implementer.model);
 	});
 
 	test("resolves pi/default through configured default role alias", () => {
@@ -590,7 +592,7 @@ describe("resolveAgentModelPatterns", () => {
 		expect(result).toEqual(["openai/gpt-4o"]);
 	});
 
-	test("falls back to the active session model when pi/task is unset", () => {
+	test("resolves the deprecated task alias through implementer instead of the active session model", () => {
 		const settings = Settings.isolated({
 			modelRoles: { default: "anthropic/claude-sonnet-4-5" },
 		});
@@ -601,13 +603,14 @@ describe("resolveAgentModelPatterns", () => {
 			streamModel: "openai/gpt-4o",
 		});
 
-		expect(result).toEqual(["openai/gpt-4o"]);
+		expect(result).toEqual(["anthropic/claude-sonnet-4-5"]);
 	});
 
-	test("uses the configured task role before falling back to the session model", () => {
+	test("keeps an explicitly configured task alias above the implementer lane", () => {
 		const settings = Settings.isolated({
 			modelRoles: {
 				default: "openai/gpt-4o",
+				implementer: "openai/gpt-4o",
 				task: "anthropic/claude-sonnet-4-5:high",
 			},
 		});
@@ -620,6 +623,22 @@ describe("resolveAgentModelPatterns", () => {
 
 		expect(result).toEqual(["anthropic/claude-sonnet-4-5:high"]);
 	});
+
+	test.each(["implementer", "qa", "operator", "synthesizer"] as const)(
+		"uses configured %s responsibility without inheriting the session stream",
+		responsibility => {
+			const settings = Settings.isolated({
+				modelRoles: { [responsibility]: "anthropic/claude-sonnet-4-5" },
+			});
+			expect(
+				resolveAgentModelPatterns({
+					taskOrRoleModel: `pi/${responsibility}`,
+					settings,
+					streamModel: "openai/gpt-4o",
+				}),
+			).toEqual(["anthropic/claude-sonnet-4-5"]);
+		},
+	);
 
 	test("uses default for unconfigured smol, slow, and designer agent roles before priority defaults", () => {
 		const settings = Settings.isolated({
@@ -779,7 +798,7 @@ describe("resolveModelOverrideWithAuthFallback", () => {
 		expect(result.authFallbackUsed).toBe(true);
 	});
 
-	test("empty patterns + fable parent + configured pi/task role resolves the task role", async () => {
+	test("empty patterns + fable parent + configured task role resolves the task-configured lane", async () => {
 		const fable = buildModel({
 			id: "claude-fable-1",
 			name: "Claude Fable",
@@ -804,8 +823,9 @@ describe("resolveModelOverrideWithAuthFallback", () => {
 			contextWindow: 128000,
 			maxTokens: 4096,
 		});
-		const settings = Settings.isolated();
-		settings.setModelRole("task", "openrouter/moonshotai/kimi-k2");
+		const settings = Settings.isolated({
+			modelRoles: { task: "openrouter/moonshotai/kimi-k2" },
+		});
 		const registry = {
 			getAvailable: () => [fable, worker],
 			getApiKey: async () => "test-key",
@@ -910,7 +930,7 @@ describe("resolveModelOverrideWithAuthFallback", () => {
 		});
 		const settings = Settings.isolated();
 		settings.set("task.orchestratorOnlyModels", ["*fable*", "openai/gpt-5.6-ultra"]);
-		settings.setModelRole("task", "openrouter/moonshotai/kimi-k2");
+		settings.setModelRole("implementer", "openrouter/moonshotai/kimi-k2");
 		const registry = {
 			getAvailable: () => [ultra, worker],
 			getApiKey: async () => "test-key",
@@ -955,7 +975,7 @@ describe("resolveModelOverrideWithAuthFallback", () => {
 		});
 		const settings = Settings.isolated();
 		settings.set("task.orchestratorOnlyModels", ["*fable*", "openai/gpt-5.6-ultra"]);
-		settings.setModelRole("task", "openrouter/moonshotai/kimi-k2");
+		settings.setModelRole("implementer", "openrouter/moonshotai/kimi-k2");
 		const registry = {
 			getAvailable: () => [ultra, worker],
 			getApiKey: async () => "test-key",

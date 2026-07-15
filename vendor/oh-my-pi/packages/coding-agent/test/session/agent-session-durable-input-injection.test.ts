@@ -14,6 +14,7 @@ import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
+import { IrcExternalBus } from "@oh-my-pi/pi-coding-agent/irc/bus-external";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { DurableInputQueue } from "@oh-my-pi/pi-coding-agent/session/durable-input-queue";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
@@ -25,7 +26,15 @@ const project = path.join(root, "project");
 const sessions = path.join(root, "sessions");
 const injectedMuxRoot = path.join(root, "injected-mux");
 const defaultMuxRoot = path.join(root, "default-mux");
+const externalIrcBus = new IrcExternalBus(path.join(root, "irc-bus.sqlite"));
 process.env.AGENT_MUX_DIR = defaultMuxRoot;
+const ownershipOptions = {
+  buildRevision: { digest: "0".repeat(64), version: "durable-input-injection-test" },
+  runnerInstanceIdentity: {
+    runnerInstanceId: "00000000-0000-4000-8000-000000000008",
+    startedAt: "2026-01-01T00:00:00.000Z",
+  },
+};
 await fs.mkdir(project, { recursive: true });
 await fs.mkdir(sessions, { recursive: true });
 
@@ -79,11 +88,11 @@ function makeAgent() {
 
 const manager = SessionManager.create(project, sessions);
 await manager.flush();
-const bootstrapOwnership = await acquireSessionOwnership(manager.getSessionFile(), manager.getSessionId(), { root: injectedMuxRoot });
+const bootstrapOwnership = await acquireSessionOwnership(manager.getSessionFile(), manager.getSessionId(), { root: injectedMuxRoot, ...ownershipOptions });
 const bootstrapQueue = await DurableInputQueue.open(bootstrapOwnership, injectedMuxRoot);
 await bootstrapQueue.adopt();
 await bootstrapOwnership.release();
-const ownership = await acquireSessionOwnership(manager.getSessionFile(), manager.getSessionId(), { root: injectedMuxRoot });
+const ownership = await acquireSessionOwnership(manager.getSessionFile(), manager.getSessionId(), { root: injectedMuxRoot, ...ownershipOptions });
 manager.bindSessionOwnership(ownership);
 const injectedQueue = await DurableInputQueue.open(ownership, injectedMuxRoot);
 await injectedQueue.adopt();
@@ -94,6 +103,7 @@ const injectedSession = new AgentSession({
   durableInputQueue: injectedQueue,
   settings: Settings.isolated({ "compaction.enabled": false }),
   modelRegistry,
+  externalIrcBus,
 });
 const input = { text: "runner command", deliveryClass: "followUp" };
 const command = {
@@ -202,7 +212,7 @@ await standaloneManager.flush();
 const standaloneOwnership = await acquireSessionOwnership(
   standaloneManager.getSessionFile(),
   standaloneManager.getSessionId(),
-  { root: defaultMuxRoot },
+  { root: defaultMuxRoot, ...ownershipOptions },
 );
 standaloneManager.bindSessionOwnership(standaloneOwnership);
 const standaloneSession = new AgentSession({
@@ -210,6 +220,7 @@ const standaloneSession = new AgentSession({
   sessionManager: standaloneManager,
   settings: Settings.isolated({ "compaction.enabled": false }),
   modelRegistry,
+  externalIrcBus,
 });
 const ownerDirectories = await fs.readdir(path.join(defaultMuxRoot, "owners-v1"));
 const standaloneQueueHead = path.join(defaultMuxRoot, "owners-v1", ownerDirectories[0], "queue-v3", "head.json");
@@ -225,6 +236,7 @@ for (let attempt = 0; attempt < 100 && !standaloneQueueHeadExists; attempt++) {
 await standaloneSession.dispose();
 await standaloneManager.close();
 await standaloneOwnership.release();
+externalIrcBus.close();
 authStorage.close();
 
 console.log(JSON.stringify({
@@ -264,7 +276,11 @@ describe("AgentSession durable input queue injection", () => {
 		const child = Bun.spawn({
 			cmd: [process.execPath, "-e", CHILD_SOURCE],
 			cwd: path.resolve(import.meta.dir, "../.."),
-			env: { ...process.env, ROOT: root },
+			env: {
+				...process.env,
+				ROOT: root,
+				OMP_SESSION_CONTROL_DB: path.join(root, "session-control.sqlite"),
+			},
 			stdout: "pipe",
 			stderr: "pipe",
 		});

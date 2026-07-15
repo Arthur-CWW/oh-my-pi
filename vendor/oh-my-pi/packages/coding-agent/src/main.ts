@@ -7,6 +7,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import * as fsSync from "node:fs";
 import * as os from "node:os";
+import * as path from "node:path";
 import { createInterface } from "node:readline/promises";
 import { EventLoopKeepalive } from "@oh-my-pi/pi-agent-core";
 import type { MediaContent } from "@oh-my-pi/pi-ai";
@@ -25,14 +26,14 @@ import { reset as resetCapabilities } from "./capability";
 import { type Args, reportUnrecognizedFlags } from "./cli/args";
 import { applyExtensionFlags, type ExtensionFlagSink } from "./cli/extension-flags";
 import { prepareInitialInput, submitInitialPrompts } from "./cli/initial-input";
-import { selectSession } from "./cli/session-picker";
-import { applyStartupCwd } from "./cli/startup-cwd";
 import {
 	acquireRestartSessionOwnership,
 	captureRestartLaunchArgs,
 	RESTART_API_KEY_ENV,
 	RESTART_OWNER_EPOCH_ENV,
 } from "./cli/restart-session";
+import { selectSession } from "./cli/session-picker";
+import { applyStartupCwd } from "./cli/startup-cwd";
 import { resolveStartupWorkstream, type StartupWorkstream, WorkstreamResolutionError } from "./cli/workstream";
 import { findConfigFile } from "./config";
 import { ModelRegistry } from "./config/model-registry";
@@ -57,14 +58,14 @@ import { ExtensionRunner } from "./extensibility/extensions/runner";
 import type { ExtensionUIContext } from "./extensibility/extensions/types";
 import { scheduleMarketplaceAutoUpdate } from "./extensibility/plugins/marketplace-auto-update";
 import type { MCPManager } from "./mcp";
-import { InteractiveMode } from "./modes/interactive-mode";
 import { createRichDisposableTerminalViewFactory } from "./modes/disposable-interactive-view";
-import { runDisposableInteractiveMode } from "./modes/run-disposable-interactive-mode";
-import { focusLiveCmuxOwner } from "./modes/utils/cmux-owner-navigation";
+import type { InteractiveMode } from "./modes/interactive-mode";
 import type { PrintModeOptions } from "./modes/print-mode";
+import { runDisposableInteractiveMode } from "./modes/run-disposable-interactive-mode";
 import { CURRENT_SETUP_VERSION } from "./modes/setup-version";
 import { initTheme, stopThemeWatcher } from "./modes/theme/theme";
 import type { SubmittedUserInput } from "./modes/types";
+import { focusLiveCmuxOwner } from "./modes/utils/cmux-owner-navigation";
 import {
 	type CreateAgentSessionOptions,
 	type CreateAgentSessionResult,
@@ -75,13 +76,13 @@ import {
 } from "./sdk";
 import type { AgentSession } from "./session/agent-session";
 import type { AuthStorage } from "./session/auth-storage";
+import { startSessionControlTarget } from "./session/session-control-target";
 import {
 	resolveResumableSessionWithDiagnostics,
 	type SessionInfo,
 	type SessionScanSkippedFile,
 } from "./session/session-listing";
 import { SessionManager } from "./session/session-manager";
-import { startSessionControlTarget } from "./session/session-control-target";
 import {
 	ExternalSessionOwner,
 	ExternalSessionOwnerUnverifiable,
@@ -91,6 +92,9 @@ import {
 } from "./session/session-ownership";
 import { executeBuiltinSlashCommand } from "./slash-commands/builtin-registry";
 import { discoverTitleSystemPromptFile, resolvePromptInput } from "./system-prompt";
+import { createReAdoptedSessionReviver } from "./task/executor";
+import { reAdoptDirectChildren } from "./task/re-adopt";
+import { configureSpawnPolicyRouting } from "./task/spawn-route";
 import { initTelemetryExport, isTelemetryExportEnabled } from "./telemetry-export";
 import { AUTO_THINKING } from "./thinking";
 import type { LspStartupServerInfo } from "./tools";
@@ -102,8 +106,6 @@ import {
 	writeLastChangelogVersion,
 } from "./utils/changelog";
 import { EventBus } from "./utils/event-bus";
-import { createReAdoptedSessionReviver } from "./task/executor";
-import { reAdoptDirectChildren } from "./task/re-adopt";
 
 const DISPOSABLE_TUI_MAILBOX_CAPACITY = 64;
 const DISPOSABLE_TUI_EVENT_CAPACITY = 256;
@@ -445,7 +447,6 @@ async function runInteractiveMode(
 	initialAttachments?: MediaContent[],
 	joinLink?: string,
 ): Promise<void> {
-
 	// Cold-launch gate: the full setup wizard (every scene + the overlay and
 	// their TUI/OAuth/search/theme deps) is heavy, yet the common case only needs
 	// to know whether the stored setup version is current. Lazy-load the wizard
@@ -676,7 +677,9 @@ export async function createSessionManager(
 
 	if (parsed.noSession) {
 		if (requirePersistent) {
-			throw new SessionResolutionError("Interactive mode requires session persistence; --no-session is not supported");
+			throw new SessionResolutionError(
+				"Interactive mode requires session persistence; --no-session is not supported",
+			);
 		}
 		return SessionManager.inMemory();
 	}
@@ -1295,6 +1298,9 @@ export async function runRootCommand(
 	sessionOptions.modelRegistry = modelRegistry;
 	sessionOptions.hasUI = isInteractive || mode === "rpc-ui";
 	sessionOptions.settings = settingsInstance;
+	configureSpawnPolicyRouting({
+		directory: path.join(sessionOptions.agentDir ?? settingsInstance.getAgentDir(), "policy"),
+	});
 
 	// OTEL: register the global OTLP trace exporter when an OTLP endpoint is
 	// configured via env, then switch on the agent loop's telemetry so its

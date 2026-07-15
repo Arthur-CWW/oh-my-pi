@@ -27,7 +27,7 @@ export const EVAL_AGENT_BRIDGE_NAME = "__agent__";
 /** Hard recursion limit for eval-driven subagents. */
 export const EVAL_AGENT_MAX_DEPTH = 3;
 
-const DEFAULT_AGENT_TYPE = "task";
+const DEFAULT_AGENT_TYPE = "implementer";
 const DEFAULT_AGENT_LABEL = "EvalAgent";
 
 const agentArgsSchema = z.object({

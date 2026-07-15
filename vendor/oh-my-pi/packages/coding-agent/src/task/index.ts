@@ -45,10 +45,10 @@ import type { AsyncJobManager } from "../async";
 import type { LocalProtocolOptions } from "../internal-urls";
 import { type ArchivedDirectChildDescriptor, listArchivedDirectChildren } from "../internal-urls/history-protocol";
 import { loadOverallPlanReference } from "../plan-mode/plan-handoff";
-import { getSessionSpawnCordon, type SessionSpawnCordon } from "../session/session-control";
 import { AgentLifecycleManager, type ReviveAdmissionAcquirer } from "../registry/agent-lifecycle";
 import type { AgentStatus } from "../registry/agent-registry";
 import { AgentRegistry, MAIN_AGENT_ID } from "../registry/agent-registry";
+import { getSessionSpawnCordon, type SessionSpawnCordon } from "../session/session-control";
 import { generateCommitMessage } from "../utils/commit-message-generator";
 import * as git from "../utils/git";
 import { type DiscoveryResult, discoverAgents, getAgent } from "./discovery";
@@ -68,6 +68,7 @@ import {
 	formatModelChain,
 	formatTaskRouteError,
 	resolveTaskSpawnRoute,
+	snapshotTaskSpawnPolicy,
 } from "./spawn-route";
 import {
 	recordFinalizedSubagentFailure,
@@ -116,9 +117,9 @@ export { loadBundledAgents as BUNDLED_AGENTS } from "./agents";
 export { discoverCommands, expandCommand, getCommand } from "./commands";
 export { discoverAgents, getAgent, getAgentPickerData } from "./discovery";
 export { AgentOutputManager } from "./output-manager";
-export { formatAvailableModels, formatInvalidModelOverrideError, formatModelChain } from "./spawn-route";
-export { composeSpawnPrompt, createSpawnRecord, isSpawnRecord, SPAWN_RECORD_VERSION } from "./spawn-record";
 export type { SpawnRecord } from "./spawn-record";
+export { composeSpawnPrompt, createSpawnRecord, isSpawnRecord, SPAWN_RECORD_VERSION } from "./spawn-record";
+export { formatAvailableModels, formatInvalidModelOverrideError, formatModelChain } from "./spawn-route";
 export type {
 	AgentDefinition,
 	AgentProgress,
@@ -362,20 +363,23 @@ function spawnParamsFor(params: TaskParams, item: TaskItem): TaskParams {
 }
 
 /** Generic worker agents whose output sharpens with a tailored `role` rather than the bare type. */
-const GENERIC_SPAWN_AGENTS: ReadonlySet<string> = new Set(["task", "quick_task"]);
+const GENERIC_SPAWN_AGENTS: ReadonlySet<string> = new Set(["quick_task"]);
 
 /**
- * Advisory — never a rejection — nudging the spawner toward tailored
- * specialists when it spawns generic role-less workers and still holds spawn
- * capacity (DepthCapacity: it currently has the `task` tool). Fires when a
- * generic `task`/`quick_task` spawn carries no `role`, or when one call clones
- * the same agent ≥2× all without roles. Returns undefined when no nudge applies.
+ * Advisory — never a rejection — marks the deprecated `task` alias and nudges
+ * generic workers toward tailored specialists while spawn capacity remains.
  */
 export function buildSpecializationAdvisory(
 	agentName: string | undefined,
 	items: TaskItem[],
 	depthCapacity: boolean,
 ): string | undefined {
+	if (agentName === "task") {
+		return (
+			'Deprecated alias: `agent: "task"` is marked `deprecated-alias` and resolves through the `implementer` ' +
+			'responsibility lane. Migrate this spawn to `agent: "implementer"`; the alias remains non-blocking during migration.'
+		);
+	}
 	if (!depthCapacity) return undefined;
 	const rolelessCount = items.filter(item => !item.role?.trim()).length;
 	if (rolelessCount === 0) return undefined;
@@ -870,8 +874,9 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 		const routeDecisions: Array<SpawnRouteDecision | undefined> = [];
 		for (const item of spawnItems) {
 			const spawnParams = spawnParamsFor(params, item);
+			const policySnapshot = selectedAgent ? await snapshotTaskSpawnPolicy(this.session) : undefined;
 			let routeDecision = selectedAgent
-				? resolveTaskSpawnRoute(this.session, agentLabel, selectedAgent, spawnParams)
+				? resolveTaskSpawnRoute(this.session, agentLabel, selectedAgent, spawnParams, policySnapshot)
 				: undefined;
 			if (routeDecision && !routeDecision.invalid) {
 				routeDecision = await applyQuotaAdmission(this.session, routeDecision, signal);
@@ -1425,7 +1430,9 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 				}
 			: agent;
 
-		let routeDecision = preResolved ?? resolveTaskSpawnRoute(this.session, agentName, effectiveAgent, params);
+		const policySnapshot = preResolved ? undefined : await snapshotTaskSpawnPolicy(this.session);
+		let routeDecision =
+			preResolved ?? resolveTaskSpawnRoute(this.session, agentName, effectiveAgent, params, policySnapshot);
 		if (!preResolved && !routeDecision.invalid) {
 			routeDecision = await applyQuotaAdmission(this.session, routeDecision, signal);
 		}

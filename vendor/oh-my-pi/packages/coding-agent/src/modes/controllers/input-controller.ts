@@ -1,7 +1,7 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import type { ImageContent, MediaContent } from "@oh-my-pi/pi-ai";
-import { type AutocompleteProvider, type SlashCommand } from "@oh-my-pi/pi-tui";
+import type { AutocompleteProvider, SlashCommand } from "@oh-my-pi/pi-tui";
 import { $env, isEnoent, logger, sanitizeText } from "@oh-my-pi/pi-utils";
 import { isSettingsInitialized, settings } from "../../config/settings";
 import { resolveLocalRoot } from "../../internal-urls";
@@ -424,15 +424,13 @@ export class InputController {
 				return;
 			}
 
-			// Empty submit while streaming with queued messages: abort the active
-			// turn and let the post-unwind drain deliver the agent-core queue.
+			// Empty submit while streaming interrupts the active turn. AgentSession's
+			// post-abort drain delivers any queued follow-up at the next boundary.
 			if (!text && this.ctx.session.isStreaming) {
-				if (this.ctx.session.queuedMessageCount > 0) {
-					const aborting = this.ctx.session.abort({ reason: USER_INTERRUPT_LABEL });
-					await aborting;
-					this.ctx.updatePendingMessagesDisplay();
-					this.ctx.ui.requestRender();
-				}
+				const aborting = this.ctx.session.abort({ reason: USER_INTERRUPT_LABEL });
+				await aborting;
+				this.ctx.updatePendingMessagesDisplay();
+				this.ctx.ui.requestRender();
 				return;
 			}
 
@@ -1028,7 +1026,7 @@ export class InputController {
 
 	/** Send editor text as a follow-up message (queued behind current stream). */
 	async handleFollowUp(): Promise<void> {
-		let text = this.ctx.editor.getText().trim();
+		let text = (this.ctx.editor.getExpandedText?.() ?? this.ctx.editor.getText()).trim();
 		if (!text) return;
 
 		// Focused subagent session: follow-ups go to it; non-chat input is gated.
@@ -1110,12 +1108,12 @@ export class InputController {
 		}
 
 		const parts: string[] = [];
-		let imageOffset = this.ctx.pendingImages.length;
+		const imageOffset = this.ctx.pendingImages.length;
 		for (const item of group) {
 			if (!("text" in item.payload)) continue;
 			parts.push(shiftImageMarkers(item.payload.text, imageOffset));
 		}
-		const currentText = options?.currentText ?? this.ctx.editor.getText();
+		const currentText = options?.currentText ?? this.ctx.editor.getExpandedText?.() ?? this.ctx.editor.getText();
 		this.ctx.editor.setText([parts.join("\n\n"), currentText].filter(text => text.trim()).join("\n\n"));
 		this.ctx.updatePendingMessagesDisplay();
 		if (options?.abort) void this.ctx.session.abort({ reason: USER_INTERRUPT_LABEL });
@@ -1448,7 +1446,7 @@ export class InputController {
 		}
 	}
 	handleCopyPrompt(): void {
-		const text = this.ctx.editor.getText();
+		const text = this.ctx.editor.getExpandedText?.() ?? this.ctx.editor.getText();
 		if (!text) {
 			this.ctx.showStatus("Nothing to copy");
 			return;

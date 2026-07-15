@@ -15,6 +15,10 @@ afterEach(async () => {
 
 const route: SpawnRouteReceipt = {
 	source: "auth_fallback",
+	responsibility: "implementer",
+	alias: "deprecated-alias",
+	resolutionSource: "auth_fallback",
+	resolvedLane: "openai/gpt-5.6",
 	route: {
 		selector: "openai/gpt-5.6",
 		provider: "openai",

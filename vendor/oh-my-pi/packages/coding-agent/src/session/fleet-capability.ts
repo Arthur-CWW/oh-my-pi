@@ -18,6 +18,8 @@ export interface FleetJournalSchemaRange {
 export const FLEET_ROLLOUT_FEATURES = ["status", "prepare-rollout", "rollout-checkpoint"] as const;
 export type FleetRolloutFeature = (typeof FLEET_ROLLOUT_FEATURES)[number];
 
+export const POLICY_APPLY_FEATURES = ["policy-apply-v1"] as const;
+export type FleetPolicyApplyFeature = (typeof POLICY_APPLY_FEATURES)[number];
 export interface FleetCapability {
 	readonly envelopeMajor: typeof FLEET_CAPABILITY_ENVELOPE_MAJOR;
 	readonly buildDigest: string;
@@ -27,6 +29,8 @@ export interface FleetCapability {
 	readonly ircEnvelope: { readonly major: number };
 	readonly viewProtocol: FleetProtocolRange;
 	readonly rolloutFeatures: readonly FleetRolloutFeature[];
+	readonly policyJournalSchema?: FleetJournalSchemaRange;
+	readonly policyApplyFeatures?: readonly FleetPolicyApplyFeature[];
 	readonly workstream?: SessionWorkstream;
 }
 
@@ -36,6 +40,8 @@ export interface FleetCompatibilityProfile {
 	readonly ircEnvelope: { readonly major: number };
 	readonly viewProtocol: FleetProtocolRange;
 	readonly rolloutFeatures: readonly FleetRolloutFeature[];
+	readonly policyJournalSchema: FleetJournalSchemaRange;
+	readonly policyApplyFeatures: readonly FleetPolicyApplyFeature[];
 }
 
 export type FleetCompatibilityResult =
@@ -52,7 +58,12 @@ export function classifyFleetBuildProvenance(peer: {
 }): { readonly valid: true } | { readonly valid: false; readonly reason: string } {
 	const capability = decodeFleetCapability(peer.fleetCapability);
 	if (!capability) return { valid: false, reason: "peer did not advertise a recognized fleet capability" };
-	if (!peer.buildDigest || !RELEASE_DIGEST.test(peer.buildDigest) || /^sha256:0{64}$/i.test(peer.buildDigest) || /^0{64}$/.test(peer.buildDigest)) {
+	if (
+		!peer.buildDigest ||
+		!RELEASE_DIGEST.test(peer.buildDigest) ||
+		/^sha256:0{64}$/i.test(peer.buildDigest) ||
+		/^0{64}$/.test(peer.buildDigest)
+	) {
 		return { valid: false, reason: "peer build digest is not a nonzero release SHA-256" };
 	}
 	if (!peer.version || !RELEASE_VERSION.test(peer.version)) {
@@ -68,6 +79,10 @@ const CURRENT_JOURNAL_SCHEMA: FleetJournalSchemaRange = {
 	read: { minMajor: 1, maxMajor: CURRENT_SESSION_VERSION, maxMinor: 0 },
 	write: { minMajor: CURRENT_SESSION_VERSION, maxMajor: CURRENT_SESSION_VERSION, maxMinor: 0 },
 };
+const CURRENT_POLICY_JOURNAL_SCHEMA: FleetJournalSchemaRange = {
+	read: { minMajor: 1, maxMajor: 1, maxMinor: 0 },
+	write: { minMajor: 1, maxMajor: 1, maxMinor: 0 },
+};
 const CURRENT_VIEW_PROTOCOL: FleetProtocolRange = {
 	minMajor: VIEW_PROTOCOL_MAJOR,
 	maxMajor: VIEW_PROTOCOL_MAJOR,
@@ -82,13 +97,16 @@ const KNOWN_FEATURES: Record<FleetRolloutFeature, true> = {
 export function createFleetCompatibilityProfile(
 	controlProtocol: FleetProtocolRange,
 	rolloutFeatures: readonly FleetRolloutFeature[] = FLEET_ROLLOUT_FEATURES,
+	policyApplyFeatures: readonly FleetPolicyApplyFeature[] = POLICY_APPLY_FEATURES,
 ): FleetCompatibilityProfile {
 	return {
 		journalSchema: CURRENT_JOURNAL_SCHEMA,
+		policyJournalSchema: CURRENT_POLICY_JOURNAL_SCHEMA,
 		controlProtocol,
 		ircEnvelope: { major: IRC_FLEET_ENVELOPE_MAJOR },
 		viewProtocol: CURRENT_VIEW_PROTOCOL,
 		rolloutFeatures,
+		policyApplyFeatures,
 	};
 }
 
@@ -97,13 +115,14 @@ export function createFleetCapability(args: {
 	readonly productVersion: string;
 	readonly controlProtocol: FleetProtocolRange;
 	readonly rolloutFeatures?: readonly FleetRolloutFeature[];
+	readonly policyApplyFeatures?: readonly FleetPolicyApplyFeature[];
 	readonly workstream?: SessionWorkstream;
 }): FleetCapability {
 	return {
 		envelopeMajor: FLEET_CAPABILITY_ENVELOPE_MAJOR,
 		buildDigest: args.buildDigest,
 		productVersion: args.productVersion,
-		...createFleetCompatibilityProfile(args.controlProtocol, args.rolloutFeatures),
+		...createFleetCompatibilityProfile(args.controlProtocol, args.rolloutFeatures, args.policyApplyFeatures),
 		...(args.workstream === undefined ? {} : { workstream: args.workstream }),
 	};
 }
@@ -151,6 +170,28 @@ export function decodeFleetCapability(value: unknown): FleetCapability | undefin
 	if (!Array.isArray(value.rolloutFeatures) || value.rolloutFeatures.some(feature => typeof feature !== "string")) {
 		return undefined;
 	}
+	const policyJournalSchema =
+		value.policyJournalSchema === undefined
+			? undefined
+			: isRecord(value.policyJournalSchema)
+				? (() => {
+						const policyRead = decodeProtocolRange(value.policyJournalSchema.read);
+						const policyWrite = decodeProtocolRange(value.policyJournalSchema.write);
+						return policyRead && policyWrite ? { read: policyRead, write: policyWrite } : undefined;
+					})()
+				: undefined;
+	if (value.policyJournalSchema !== undefined && !policyJournalSchema) return undefined;
+	const policyApplyFeatures =
+		value.policyApplyFeatures === undefined
+			? undefined
+			: Array.isArray(value.policyApplyFeatures) &&
+					value.policyApplyFeatures.every(feature => typeof feature === "string")
+				? value.policyApplyFeatures.filter(
+						(feature): feature is FleetPolicyApplyFeature =>
+							typeof feature === "string" && POLICY_APPLY_FEATURES.includes(feature as FleetPolicyApplyFeature),
+					)
+				: undefined;
+	if (value.policyApplyFeatures !== undefined && !policyApplyFeatures) return undefined;
 	const workstream = value.workstream === undefined ? undefined : decodeSessionWorkstream(value.workstream);
 	if (value.workstream !== undefined && workstream === undefined) return undefined;
 	const rolloutFeatures = value.rolloutFeatures.filter(
@@ -165,6 +206,8 @@ export function decodeFleetCapability(value: unknown): FleetCapability | undefin
 		ircEnvelope: { major: value.ircEnvelope.major as number },
 		viewProtocol,
 		rolloutFeatures,
+		...(policyJournalSchema === undefined ? {} : { policyJournalSchema }),
+		...(policyApplyFeatures === undefined ? {} : { policyApplyFeatures }),
 		...(workstream === undefined ? {} : { workstream }),
 	};
 }
@@ -212,6 +255,10 @@ export function classifyFleetCompatibility(
 	checkRange("journal read/write", capability.journalSchema.read, local.journalSchema.write);
 	checkRange("control protocol", capability.controlProtocol, local.controlProtocol);
 	checkRange("view protocol", capability.viewProtocol, local.viewProtocol);
+	if (capability.policyJournalSchema) {
+		checkRange("policy journal write/read", capability.policyJournalSchema.write, local.policyJournalSchema.read);
+		checkRange("policy journal read/write", capability.policyJournalSchema.read, local.policyJournalSchema.write);
+	}
 	if (capability.ircEnvelope.major !== local.ircEnvelope.major) {
 		const reason = `IRC envelope major ${capability.ircEnvelope.major} does not match local ${local.ircEnvelope.major}`;
 		(capability.ircEnvelope.major > local.ircEnvelope.major ? newerReasons : legacyReasons).push(reason);
@@ -238,4 +285,22 @@ export function selectFleetRolloutFeature(
 ): FleetRolloutFeature | undefined {
 	if (!(requested in KNOWN_FEATURES)) return undefined;
 	return intersectFleetRolloutFeatures(controller, peer).find(feature => feature === requested);
+}
+export function intersectPolicyApplyFeatures(
+	controller: Pick<FleetCompatibilityProfile, "policyApplyFeatures">,
+	peer: { readonly fleetCapability?: unknown },
+): readonly FleetPolicyApplyFeature[] {
+	const capability = decodeFleetCapability(peer.fleetCapability);
+	if (!capability?.policyApplyFeatures) return [];
+	const peerFeatures = new Set(capability.policyApplyFeatures);
+	return controller.policyApplyFeatures.filter(feature => peerFeatures.has(feature));
+}
+
+export function selectPolicyApplyFeature(
+	requested: string,
+	controller: Pick<FleetCompatibilityProfile, "policyApplyFeatures">,
+	peer: { readonly fleetCapability?: unknown },
+): FleetPolicyApplyFeature | undefined {
+	if (!POLICY_APPLY_FEATURES.includes(requested as FleetPolicyApplyFeature)) return undefined;
+	return intersectPolicyApplyFeatures(controller, peer).find(feature => feature === requested);
 }

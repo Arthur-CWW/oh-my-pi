@@ -7,6 +7,8 @@ import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { QUOTA_ADMISSION_CUSTOM_TYPE, createQuotaAdmissionStateRecord } from "@oh-my-pi/pi-coding-agent/task/quota-admission";
 import { formatModelChain, TaskTool } from "@oh-my-pi/pi-coding-agent/task";
+import { toSpawnRouteReceipt } from "@oh-my-pi/pi-coding-agent/task/route-resolution";
+import { resolveTaskSpawnRoute } from "@oh-my-pi/pi-coding-agent/task/spawn-route";
 import * as discoveryModule from "@oh-my-pi/pi-coding-agent/task/discovery";
 import * as executorModule from "@oh-my-pi/pi-coding-agent/task/executor";
 import type { AgentDefinition, SingleResult, TaskParams } from "@oh-my-pi/pi-coding-agent/task/types";
@@ -64,6 +66,7 @@ function createSession(
 		getSessionFile: () => null,
 		getSessionSpawns: () => "*",
 		getModelString: () => "anthropic/claude-sonnet-4-5",
+		getActiveModelString: () => "anthropic/claude-sonnet-4-5",
 		asyncJobManager: manager,
 		authStorage: options.authStorage,
 		modelRegistry,
@@ -122,6 +125,43 @@ describe("task model override receipts", () => {
 		);
 		expect(formatModelChain("task", "   ", "anthropic/claude-sonnet-4-5")).toBe("task → anthropic/claude-sonnet-4-5");
 		expect(formatModelChain("task", "Review specialist", undefined)).toBeUndefined();
+	});
+
+	it("routes task through implementer with deprecated-alias provenance and preserves explicit precedence", () => {
+		const manager = createManager();
+		const session = createSession(manager);
+		session.settings = Settings.isolated({
+			"task.isolation.mode": "none",
+			modelRoles: { implementer: "openai/gpt-5-mini" },
+		});
+
+		const aliased = toSpawnRouteReceipt(
+			resolveTaskSpawnRoute(session, "task", taskAgent, {
+				agent: "task",
+				assignment: "Do the thing.",
+			}),
+		);
+		expect(aliased).toMatchObject({
+			responsibility: "implementer",
+			alias: "deprecated-alias",
+			resolutionSource: "agent_frontmatter",
+			resolvedLane: "openai/gpt-5-mini",
+		});
+		expect(aliased.resolvedLane).not.toBe(aliased.route.parentActiveSelector);
+
+		const explicit = toSpawnRouteReceipt(
+			resolveTaskSpawnRoute(session, "task", taskAgent, {
+				agent: "task",
+				model: "anthropic/claude-sonnet-4-5",
+				assignment: "Do the thing.",
+			}),
+		);
+		expect(explicit).toMatchObject({
+			responsibility: "implementer",
+			alias: "deprecated-alias",
+			resolutionSource: "spawn_explicit",
+			resolvedLane: "anthropic/claude-sonnet-4-5",
+		});
 	});
 
 	it("includes the resolved model chain in the spawn receipt", async () => {

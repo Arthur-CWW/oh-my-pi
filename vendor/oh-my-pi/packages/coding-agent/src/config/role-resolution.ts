@@ -79,7 +79,7 @@ function normalizeModelPatternList(value: string | string[] | undefined): string
 }
 
 function isSessionInheritedAgentPattern(value: string): boolean {
-	return value === DEFAULT_MODEL_ROLE || value === `${PREFIX_MODEL_ROLE}${DEFAULT_MODEL_ROLE}` || value === "pi/task";
+	return value === DEFAULT_MODEL_ROLE || value === `${PREFIX_MODEL_ROLE}${DEFAULT_MODEL_ROLE}`;
 }
 
 function shouldInheritDefaultBeforePriority(role: string): boolean {
@@ -102,6 +102,14 @@ function getRolePriorityPatterns(role: string): string[] {
 	return normalizeModelPatternList(MODEL_PRIO[role as keyof typeof MODEL_PRIO]);
 }
 
+const RESPONSIBILITY_ROLE_FALLBACKS: Readonly<Record<string, readonly string[]>> = {
+	implementer: ["pi/slow"],
+	qa: ["pi/slow"],
+	operator: ["pi/smol"],
+	synthesizer: ["pi/slow"],
+	task: ["pi/implementer"],
+};
+
 function resolveRolePatterns(role: string, settings: Settings | undefined, visited: ReadonlySet<string>): string[] {
 	if (visited.has(role)) return getRolePriorityPatterns(role);
 
@@ -110,7 +118,10 @@ function resolveRolePatterns(role: string, settings: Settings | undefined, visit
 	const configured = normalizeModelPatternList(settings?.getModelRole(role));
 	if (configured.length > 0) return resolveConfiguredModelPatterns(configured, settings, nextVisited);
 
-	if (role === "task") return [];
+	const responsibilityFallback = RESPONSIBILITY_ROLE_FALLBACKS[role];
+	if (responsibilityFallback) {
+		return resolveConfiguredModelPatterns([...responsibilityFallback], settings, nextVisited);
+	}
 	if (shouldInheritDefaultBeforePriority(role)) {
 		const inherited = normalizeModelPatternList(settings?.getModelRole(DEFAULT_MODEL_ROLE));
 		if (inherited.length > 0) {
@@ -168,9 +179,7 @@ export function resolveAgentModelPatterns(options: AgentModelPatternResolutionOp
 	const taskOrRoleInheritsSessionModel = singleTaskOrRolePattern
 		? isSessionInheritedAgentPattern(singleTaskOrRolePattern)
 		: false;
-	if (taskOrRolePatterns.length > 0) {
-		if (!taskOrRoleInheritsSessionModel || singleTaskOrRolePattern === "pi/task") return taskOrRolePatterns;
-	}
+	if (taskOrRolePatterns.length > 0 && !taskOrRoleInheritsSessionModel) return taskOrRolePatterns;
 
 	for (const value of [streamModel, globalFallbackModel]) {
 		const patterns = resolveConfiguredModelPatterns(value, settings);

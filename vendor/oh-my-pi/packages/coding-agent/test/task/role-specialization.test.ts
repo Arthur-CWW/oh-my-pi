@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "bun:test";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { TaskTool, taskSchema } from "@oh-my-pi/pi-coding-agent/task";
+import { loadBundledAgents } from "@oh-my-pi/pi-coding-agent/task/agents";
 import * as discoveryModule from "@oh-my-pi/pi-coding-agent/task/discovery";
 import {
 	getTaskSchema,
@@ -81,6 +82,26 @@ describe("subagent system prompt role preamble", () => {
 
 	it("omits the preamble entirely when the role is blank", () => {
 		expect(render("")).not.toContain("specializing as");
+	});
+});
+
+describe("bundled responsibility agents", () => {
+	it.each(["implementer", "qa", "operator", "synthesizer"] as const)(
+		"exposes %s as a full-capability responsibility template",
+		responsibility => {
+			const agent = loadBundledAgents().find(candidate => candidate.name === responsibility);
+			expect(agent).toBeDefined();
+			expect(agent?.model).toEqual([`pi/${responsibility}`]);
+			expect(agent?.spawns).toBe("*");
+			expect(agent?.tools).toBeUndefined();
+			expect(agent?.description).not.toMatch(/general-purpose/i);
+		},
+	);
+
+	it("keeps task discoverable as the migration alias", () => {
+		const task = loadBundledAgents().find(candidate => candidate.name === "task");
+		expect(task?.model).toEqual(["pi/task"]);
+		expect(task?.spawns).toBe("*");
 	});
 });
 

@@ -3,6 +3,8 @@ import { InputController } from "@oh-my-pi/pi-coding-agent/modes/controllers/inp
 import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import type { DurableQueuedInput } from "@oh-my-pi/pi-coding-agent/session/durable-input-queue";
+import { Editor } from "@oh-my-pi/pi-tui";
+import { defaultEditorTheme } from "../../tui/test/test-themes";
 import manualContinuePrompt from "../src/prompts/system/manual-continue.md" with { type: "text" };
 
 type FakeEditor = {
@@ -91,6 +93,7 @@ async function createContext() {
 	const toggleTranscriptMode = vi.fn();
 	const showStatus = vi.fn();
 	const updatePendingMessagesDisplay = vi.fn();
+	const closeUnpinnedErrorsPanel = vi.fn();
 	const showError = vi.fn();
 	const editor: FakeEditor = {
 		setText(text: string) {
@@ -191,6 +194,7 @@ async function createContext() {
 		updateEditorBorderColor: vi.fn(),
 		hasActiveBtw: vi.fn(() => false),
 		showError,
+		closeUnpinnedErrorsPanel,
 	} as unknown as InteractiveModeContext;
 	Object.defineProperty(ctx, "viewSession", { get: () => ctx.session });
 
@@ -263,11 +267,40 @@ describe("InputController keybinding setup", () => {
 		expect(spies.toggleTranscriptMode).toHaveBeenCalledTimes(2);
 	});
 
-	it("empty Enter aborts the active stream when queued messages are pending", async () => {
+	it("empty Enter interrupts and submits one queued follow-up exactly once", async () => {
 		const { InputController, ctx, editor, spies } = await createContext();
 		const session = ctx.session as unknown as { isStreaming: boolean; queuedMessageCount: number };
 		session.isStreaming = true;
-		session.queuedMessageCount = 1;
+		const queuedFollowUps = ["queued follow-up"];
+		const submittedFollowUps: string[] = [];
+		const drainQueuedFollowUp = (): void => {
+			const next = queuedFollowUps.shift();
+			if (next) submittedFollowUps.push(next);
+		};
+		session.queuedMessageCount = queuedFollowUps.length;
+		spies.abort.mockImplementationOnce(async () => {
+			drainQueuedFollowUp();
+			session.queuedMessageCount = queuedFollowUps.length;
+		});
+		const controller = new InputController(ctx);
+
+		controller.setupEditorSubmitHandler();
+		await editor.onSubmit?.("");
+
+		expect(spies.abort).toHaveBeenCalledWith({ reason: "Interrupted by user" });
+		expect(submittedFollowUps).toEqual(["queued follow-up"]);
+		expect(session.queuedMessageCount).toBe(0);
+		drainQueuedFollowUp();
+		expect(submittedFollowUps).toEqual(["queued follow-up"]);
+		expect(spies.updatePendingMessagesDisplay).toHaveBeenCalledTimes(1);
+		expect(spies.requestRender).toHaveBeenCalledTimes(1);
+	});
+
+	it("empty Enter interrupts an active stream without queued follow-ups", async () => {
+		const { InputController, ctx, editor, spies } = await createContext();
+		const session = ctx.session as unknown as { isStreaming: boolean; queuedMessageCount: number };
+		session.isStreaming = true;
+		session.queuedMessageCount = 0;
 		const controller = new InputController(ctx);
 
 		controller.setupEditorSubmitHandler();
@@ -354,7 +387,7 @@ describe("InputController keybinding setup", () => {
 		expect(seam.cancelledIds()).toEqual(["follow-7", "follow-8"]);
 		expect(spies.prompt).toHaveBeenCalledTimes(1);
 		expect(spies.prompt).toHaveBeenCalledWith("edited combined payload", {
-			streamingBehavior: "steer",
+			streamingBehavior: "followUp",
 			attachments: undefined,
 		});
 		expect(editor.getText()).toBe("");
@@ -374,6 +407,51 @@ describe("InputController keybinding setup", () => {
 			deliverAs: "followUp",
 		});
 		expect(spies.updatePendingMessagesDisplay).toHaveBeenCalledTimes(1);
+	});
+
+	it("expands marker-sized paste before queueing a follow-up", async () => {
+		const { InputController, ctx, spies } = await createContext();
+		const editor = new Editor(defaultEditorTheme);
+		ctx.editor = editor as unknown as InteractiveModeContext["editor"];
+		const paste = Array.from({ length: 12 }, (_, index) => `pasted line ${index}`).join("\n");
+		editor.pasteText(paste);
+		expect(editor.getText()).toContain("[Paste #1");
+		expect(editor.getExpandedText()).toBe(paste);
+
+		(ctx.session as unknown as { isStreaming: boolean }).isStreaming = true;
+		const controller = new InputController(ctx);
+		await controller.handleFollowUp();
+
+		const submitted =
+			((spies.sendUserMessage.mock.calls[0] as unknown[] | undefined)?.[0] as string | undefined) ?? "";
+		expect(submitted).toContain(paste);
+		expect(submitted).not.toContain("[Paste #");
+		expect(spies.sendUserMessage).toHaveBeenCalledWith(paste, { deliverAs: "followUp" });
+	});
+
+	it("expands marker-sized paste on the ordinary submit path", async () => {
+		const { InputController, ctx, spies } = await createContext();
+		const editor = new Editor(defaultEditorTheme);
+		ctx.editor = editor as unknown as InteractiveModeContext["editor"];
+		const paste = Array.from({ length: 12 }, (_, index) => `submitted line ${index}`).join("\n");
+		editor.pasteText(paste);
+		expect(editor.getText()).toContain("[Paste #1");
+
+		(ctx.session as unknown as { isStreaming: boolean }).isStreaming = true;
+		const controller = new InputController(ctx);
+		controller.setupEditorSubmitHandler();
+		editor.handleInput("\r"); // expand the collapsed paste marker
+		editor.handleInput("\r"); // submit the expanded text
+		await Promise.resolve();
+		await Promise.resolve();
+
+		const submitted = ((spies.prompt.mock.calls[0] as unknown[] | undefined)?.[0] as string | undefined) ?? "";
+		expect(submitted).toContain(paste);
+		expect(submitted).not.toContain("[Paste #");
+		expect(spies.prompt).toHaveBeenCalledWith(paste, {
+			streamingBehavior: "followUp",
+			attachments: undefined,
+		});
 	});
 
 	it("marks idle follow-up submissions as local", async () => {

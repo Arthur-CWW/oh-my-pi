@@ -41,9 +41,26 @@ describe("request failure taxonomy", () => {
 			failureCause: "provider-stream-abort",
 		});
 		expect(classifyRequestFailure(stall)).toBe("provider-stream-abort");
-		expect(classifyRequestFailure("Request was aborted")).toBe("parent-cancel");
+		expect(classifyRequestFailure("Request was aborted")).toBe("network");
 		expect(classifyRequestFailure("HTTP 429 too many requests")).toBe("rate-limit");
 		expect(classifyRequestFailure("fetch failed")).toBe("network");
+	});
+
+	it("requires a fired caller signal to classify an abort-shaped SDK error as cancellation", () => {
+		const active = new AbortController();
+		expect(classifyRequestFailure("Request was aborted", active.signal)).toBe("network");
+
+		const parentCancelled = new AbortController();
+		parentCancelled.abort();
+		expect(classifyRequestFailure("Request was aborted", parentCancelled.signal)).toBe("parent-cancel");
+
+		const userInterrupted = new AbortController();
+		userInterrupted.abort("Interrupted by user");
+		expect(classifyRequestFailure("Operation aborted", userInterrupted.signal)).toBe("user-interrupt");
+
+		const timedOut = new AbortController();
+		timedOut.abort(new Error("Request timed out"));
+		expect(classifyRequestFailure("Request was aborted", timedOut.signal)).toBe("timeout");
 	});
 
 	it("distinguishes user interrupt, parent cancellation, and timeout abort reasons", () => {

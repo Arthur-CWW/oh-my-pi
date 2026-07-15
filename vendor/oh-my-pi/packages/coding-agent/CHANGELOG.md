@@ -3,6 +3,10 @@
 ## [Unreleased]
 
 ### Added
+- Added a typed, hash-chained runtime-policy journal with foreground leases, deterministic precedence/provenance projection, inverse rollback, expiry, and dry-run-safe service operations.
+- Added the `omp policy` command surface (get/explain/diff/set/rollback/import/export) with a validate→preview→commit→apply protocol, typed epoch-fenced session-control policy apply action, independent `policy-apply-v1` fleet capability range, and a YAML modelRoles/frontmatter import bridge (dry-run by default, one bootstrap transaction, redacted export).
+- Added responsibility spawn templates `implementer`, `qa`, `operator`, and `synthesizer` with per-role model-role lane resolution that never inherits the parent lane; `task` remains a deprecated alias resolving to the configured `task` role or `implementer`, and spawn receipts/route events now record responsibility, resolution source, resolved lane, and alias provenance.
+- Wired the runtime-policy journal into spawn routing: spawn admission snapshots the policy projection once; `core.routing.<role>` transactions resolve above settings/frontmatter/inherited routes (explicit spawn/session/temporary overrides stay higher) with transaction-level receipt provenance; absent/empty journals preserve legacy settings routing byte-for-byte.
 - Added a main-view `:` command prompt with `wrap`, `rich`, and `version` commands, including tab completion and immediate transcript reflow.
 - Added Neovim-style colon completion cycling with `Tab`/`Shift-Tab`, menu-aware `Ctrl-N`/`Ctrl-P`, one-level Escape unwinding, and isolated persistent command history shared through the TUI completion behavior.
 - Effect v4 beta.92 alignment probe covering service layers, typed failures, scoped cleanup/interruption, bounded queues, and deterministic test-clock scheduling.
@@ -29,12 +33,20 @@
 - IRC communication and tool-result bodies now honor `:wrap`/`:rich` while receipts, errors, metadata, and roster rows remain bounded single-line projections.
 - Task spawning now refuses revivable `NameResume`/exact-id duplicates, warns on running or archived matches with in-band IRC/history guidance, preserves live registry ids during allocation, and reports resume-in-place or transcript-salvage instructions after task failures and restarts.
 - `Ctrl-Q` is direct cancellation (including focused-child return); `Ctrl-Enter` remains the follow-up queue action in the attached full TUI. Typed command automation and vendor-sync v2 policy plumbing are available, and the typed daily vendor `--apply` path is active for the current 21-entry manifest (NCode removed); the latest apply updated codex, plugins, cua, chrome-devtools, and whisper, left cmux blocked by a dirty tree, and left pins untouched.
+- Eval `agent()`/`agentType` defaults, gallery fixtures, and the task tool prompt now use named responsibility templates; catch-all `task` is documented as a deprecated migration alias.
+- `Enter` on an empty prompt during streaming now aborts and delivers the next queued durable follow-up exactly once (removing it from the queue); with an empty queue it remains abort-only.
 ### Fixed
 - Provider request/stream failures now render structured cards with provider, model, agent/session owner, typed cause, retry disposition, timestamped ErrorInbox facets, and raw SDK detail; user interrupts remain card-free.
 - Fixed fleet rollout eligibility to reject non-release build provenance and dead or replaced owners both during planning and immediately before control sends, and isolated session-runner capability tests from the shared peer registry.
+- Fixed fleet reexec recovery to durably checkpoint fresh sessions, preserve the exact session identity and restart arguments, reject replacement heartbeats with a different session or journal, and avoid projecting `recovered` onto stale peer rows.
 - Fixed custom model validation to accept subscription-backed `auth: oauth` providers without requiring an API key.
 - Selecting a session already owned by a verified live cmux surface now activates that workspace and surface instead of failing with `Session is controlled by external owner`.
 - Agent resource/error aggregation now records failed non-cancelled child jobs as typed, redacted `ErrorInbox` records with transcript/final-output recovery links; `agent://` exposes final output with a `history://` pointer, while invalid `agents://` suggests the singular protocol.
+- Fixed a Ctrl-Q/abort race that could permanently wedge durable follow-up delivery: durable admissions/drains are now gated behind a depth-counted abort gate (overlapping aborts keep the gate closed until the outermost settles), queued-input cancellation is serialized with admission maintenance, attempt settlement clears and reschedules in `finally`, and durable follow-ups no longer duplicate orchestration notices on prompt re-entry.
+- Fixed stale Agent Hub chat/inspector/search/retention reads by flushing pending observer projections before every `#observerById` consumer renders.
+- Durable-input interrupt/injection tests now isolate their IRC bus and session-control databases under temp dirs instead of registering test peers on the real fleet store.
+- Follow-up queue capture, queued-draft restoration, and copy-prompt now expand collapsed `[Paste #N]` markers to their stored content; previously a large paste queued as a follow-up durably persisted the bare marker and lost the pasted text.
+- Bare `Request was aborted` provider failures without a fired local abort signal now classify as transient network errors and retry on the same lane within the jittered 180s window, instead of being mislabeled `parent-cancel` and giving up after one attempt; genuine user/parent cancellations remain non-retryable.
 - Transient DNS/socket failures now hold the current provider/model lane with jittered retries for a configurable 3-minute window, report network-specific retry status and ErrorInbox classes, and avoid killing task subagents on brief network outages.
 
 - Session-control restarts now prepare the same runner host transition as `/restart`, preserve disposable `--session-dir` journals by resuming their exact file, re-exec the rollout-selected binary in place, and surface pre-exec failures instead of silently exiting.

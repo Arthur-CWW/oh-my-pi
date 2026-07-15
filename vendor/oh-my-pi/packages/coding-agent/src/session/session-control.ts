@@ -4,6 +4,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { Schema } from "effect";
+import { type PolicyApplyClass, PolicyApplyClassSchema, type PolicyApplyCommandV1 } from "../policy/policy-records";
 import type { FleetProtocolRange } from "./fleet-capability";
 
 export const SESSION_CONTROL_SCHEMA_VERSION = 1 as const;
@@ -19,6 +20,7 @@ const UUIDSchema = Schema.String.pipe(
 );
 const NonEmptyStringSchema = Schema.Trim.pipe(Schema.check(Schema.isMinLength(1)));
 const SHA256DigestSchema = Schema.String.pipe(Schema.check(Schema.isPattern(/^[a-f0-9]{64}$/)));
+const PositiveIntSchema = Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(1)));
 const ReadinessReceiptJsonSchema = Schema.String.pipe(Schema.check(Schema.isMinLength(1)));
 const TimestampSchema = Schema.String.pipe(
 	Schema.refine((value): value is string => {
@@ -41,6 +43,14 @@ const LegacyIntentSchema = Schema.Union([
 	Schema.Struct({ kind: Schema.Literal("compact"), instructions: Schema.optional(NonEmptyStringSchema) }),
 	Schema.Struct({ kind: Schema.Literal("stop"), confirmationToken: NonEmptyStringSchema }),
 ]);
+const PolicyApplyIntentSchema = Schema.Struct({
+	kind: Schema.Literal("policy-apply"),
+	policyTransactionId: UUIDSchema,
+	policySequence: PositiveIntSchema,
+	policyHeadHash: SHA256DigestSchema,
+	expectedAppliedSequence: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0))),
+	impactedPolicyClasses: Schema.Array(PolicyApplyClassSchema).pipe(Schema.check(Schema.isMinLength(1))),
+});
 const PrepareRolloutIntentSchema = Schema.Struct({
 	kind: Schema.Literal("prepare-rollout"),
 	rolloutId: NonEmptyStringSchema,
@@ -103,12 +113,18 @@ export const FleetUnpinCommandSchema = Schema.Struct({
 	...CommandEnvelopeFields,
 	intent: FleetUnpinIntentSchema,
 });
+export const PolicyApplyCommandSchema = Schema.Struct({
+	schemaVersion: Schema.Literal(2),
+	...CommandEnvelopeFields,
+	intent: PolicyApplyIntentSchema,
+});
 export const SessionControlCommandSchema = Schema.Union([
 	SessionControlCommandV1Schema,
 	PrepareRolloutCommandSchema,
 	RolloutRestartCommandSchema,
 	FleetPinCommandSchema,
 	FleetUnpinCommandSchema,
+	PolicyApplyCommandSchema,
 ]);
 export type LegacySessionControlIntent = typeof LegacyIntentSchema.Type;
 export type PrepareRolloutIntent = typeof PrepareRolloutIntentSchema.Type;
@@ -122,12 +138,19 @@ export type SessionControlIntent =
 	| PrepareRolloutIntent
 	| RolloutRestartIntent
 	| FleetPinIntent
-	| FleetUnpinIntent;
+	| FleetUnpinIntent
+	| PolicyApplyIntent;
 export type SessionControlCommand = typeof SessionControlCommandSchema.Type;
 export type PrepareRolloutCommand = typeof PrepareRolloutCommandSchema.Type;
 export type RolloutRestartCommand = typeof RolloutRestartCommandSchema.Type;
 export type FleetPinCommand = typeof FleetPinCommandSchema.Type;
 export type FleetUnpinCommand = typeof FleetUnpinCommandSchema.Type;
+export type PolicyApplyIntent = typeof PolicyApplyIntentSchema.Type;
+export type PolicyApplyControlCommand = Extract<
+	SessionControlCommand,
+	{ readonly intent: { readonly kind: "policy-apply" } }
+>;
+export type { PolicyApplyClass, PolicyApplyCommandV1 };
 export type FleetPinControlCommand = FleetPinCommand | FleetUnpinCommand;
 export type FleetPinSource = "explicit-digest" | "registry-stable" | "registry-candidate" | "unpin";
 export type FleetPinJournalRecord =
@@ -168,6 +191,7 @@ const SESSION_CONTROL_INTENT_MAJOR: Record<SessionControlIntent["kind"], number>
 	"prepare-rollout": 2,
 	"fleet-pin": 2,
 	"fleet-unpin": 2,
+	"policy-apply": 2,
 };
 
 export function selectSessionControlCommandKind(
@@ -210,6 +234,24 @@ export const decodeSessionControlReceipt = (input: unknown): SessionControlRecei
 
 export function stopConfirmationToken(sessionId: string, ownerEpoch: string): string {
 	return `stop-${createHash("sha256").update(`${sessionId}\0${ownerEpoch}`, "utf8").digest("hex").slice(0, 24)}`;
+}
+
+export function toPolicyApplyCommandV1(command: PolicyApplyControlCommand): PolicyApplyCommandV1 {
+	return {
+		recordType: "policy-apply-command",
+		schemaVersion: 1,
+		commandId: command.commandId,
+		targetSessionId: command.sessionId,
+		targetOwnerEpoch: command.targetOwnerEpoch,
+		policyTransactionId: command.intent.policyTransactionId,
+		policySequence: command.intent.policySequence,
+		policyHeadHash: command.intent.policyHeadHash,
+		expectedAppliedSequence: command.intent.expectedAppliedSequence,
+		impactedPolicyClasses: command.intent.impactedPolicyClasses,
+	};
+}
+export function isPolicyApplyControlCommand(command: SessionControlCommand): command is PolicyApplyControlCommand {
+	return command.intent.kind === "policy-apply";
 }
 
 interface CommandRow {
@@ -365,7 +407,10 @@ export class SessionControlBus {
 			)
 		`);
 		const cordonColumns = new Set(
-			this.#db.query<{ name: string }, []>("PRAGMA table_info(rollout_cordons)").all().map(column => column.name),
+			this.#db
+				.query<{ name: string }, []>("PRAGMA table_info(rollout_cordons)")
+				.all()
+				.map(column => column.name),
 		);
 		if (!cordonColumns.has("checkpoint_id")) {
 			this.#db.run("ALTER TABLE rollout_cordons ADD COLUMN checkpoint_id TEXT");
@@ -596,7 +641,8 @@ export class SessionControlBus {
 				$pauseProvenance: pauseProvenance,
 				$cordonedAt: cordonedAt,
 			});
-		if (updated.changes !== 1) throw new Error(`Owner ${ownerEpoch} is not the bound control target for ${sessionId}`);
+		if (updated.changes !== 1)
+			throw new Error(`Owner ${ownerEpoch} is not the bound control target for ${sessionId}`);
 		const cordon = this.getCordon(sessionId);
 		if (!cordon) throw new Error(`Failed to cordon session ${sessionId}`);
 		activeSpawnCordons.set(sessionId, cordon);
@@ -620,7 +666,9 @@ export class SessionControlBus {
 				$checkpointId: input.checkpointId,
 			});
 		if (updated.changes !== 1) {
-			throw new Error(`No matching rollout cordon ${input.fleetRolloutId} for owner ${input.expectedOwnerEpoch} of ${input.sessionId}`);
+			throw new Error(
+				`No matching rollout cordon ${input.fleetRolloutId} for owner ${input.expectedOwnerEpoch} of ${input.sessionId}`,
+			);
 		}
 		const cordon = this.getCordon(input.sessionId);
 		if (!cordon) throw new Error(`Failed to record checkpoint for cordon ${input.sessionId}`);

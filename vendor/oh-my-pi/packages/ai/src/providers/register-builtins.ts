@@ -21,6 +21,7 @@ import type {
 } from "../types";
 import { type AbortSourceTracker, createAbortSourceTracker } from "../utils/abort";
 import { AssistantMessageEventStream as EventStreamImpl } from "../utils/event-stream";
+import { classifyRequestFailure } from "../utils/network-error";
 import {
 	getOpenAIStreamFirstEventTimeoutMs,
 	getOpenAIStreamIdleTimeoutMs,
@@ -262,7 +263,9 @@ function forwardStream<TApi extends Api>(
 				target.end();
 			}
 		} catch (error) {
-			const stopReason = abortTracker.wasCallerAbort() ? "aborted" : "error";
+			const failureCause = classifyRequestFailure(error instanceof Error ? error : String(error), options.signal);
+			const stopReason =
+				failureCause === "parent-cancel" || failureCause === "user-interrupt" ? "aborted" : "error";
 			const message = createLazyLoadErrorMessage(model, error, stopReason);
 			target.push({ type: "error", reason: stopReason, error: message });
 			target.end(message);

@@ -20,6 +20,7 @@ import {
 } from "../src/cli/restart-session";
 import { SessionManager } from "../src/session/session-manager";
 import { acquireSessionOwnership, inspectSessionOwnership, readRestartHandoff } from "../src/session/session-ownership";
+import { DurableInputQueue } from "../src/session/durable-input-queue";
 import { ensureRestartSessionOwnership, executeBuiltinSlashCommand } from "../src/slash-commands/builtin-registry";
 
 type HandoffReceipt = {
@@ -115,6 +116,107 @@ async function runRestartHandoffChild(): Promise<void> {
 		if (socketPath) await notifyHandoffParent(socketPath, receipt);
 		process.exitCode = 1;
 	}
+}
+
+type RestartCaptureSnapshot = {
+	draft: string | null;
+	queued: Array<{ sequence: number; text: string; deliveryClass: string; state: string }>;
+	error?: string;
+};
+
+async function runRestartCaptureChild(): Promise<void> {
+	const [mode, root, tempDir, reportPath, sessionFile, sessionId, predecessorEpoch] = process.argv.slice(2);
+	if (mode !== "--restart-capture-owner" && mode !== "--restart-capture-replacement") return;
+
+	try {
+		if (!root || !tempDir || !reportPath) throw new Error("Missing restart capture arguments");
+		if (mode === "--restart-capture-owner") {
+			const manager = SessionManager.create(tempDir, path.join(tempDir, "sessions"));
+			await manager.ensureOnDisk();
+			const ownerSessionFile = manager.getSessionFile();
+			const ownerSessionId = manager.getSessionId();
+			if (!ownerSessionFile) throw new Error("Restart capture session file unavailable");
+			const ownership = await acquireSessionOwnership(ownerSessionFile, ownerSessionId, {
+				root,
+				buildRevision: TEST_BUILD_REVISION,
+				runnerInstanceIdentity: OWNER_RUNNER_INSTANCE_IDENTITY,
+			});
+			manager.bindSessionOwnership(ownership);
+			const queue = await DurableInputQueue.open(ownership, root);
+			await queue.adopt();
+			await queue.enqueue({ text: "queued first", attachments: undefined, deliveryClass: "followUp" });
+			await queue.enqueue({ text: "queued second", attachments: undefined, deliveryClass: "followUp" });
+			await manager.saveDraft("draft survives restart verbatim\nwith two lines");
+
+			await handoffRestartProcess(
+				{
+					executable: process.execPath,
+					args: [
+						import.meta.path,
+						"--restart-capture-replacement",
+						root,
+						tempDir,
+						reportPath,
+						ownerSessionFile,
+						ownerSessionId,
+						ownership.ownerEpoch,
+					],
+					cwd: tempDir,
+				},
+				ownership,
+				async () => {
+					await manager.close();
+				},
+			);
+			return;
+		}
+
+		if (!sessionFile || !sessionId || !predecessorEpoch) throw new Error("Missing restart capture replacement arguments");
+		const ownership = await acquireRestartSessionOwnership(
+			sessionFile,
+			sessionId,
+			{
+				root,
+				buildRevision: TEST_BUILD_REVISION,
+				runnerInstanceIdentity: REPLACEMENT_RUNNER_INSTANCE_IDENTITY,
+			},
+			predecessorEpoch,
+		);
+		const queue = await DurableInputQueue.open(ownership, root);
+		await queue.adopt();
+		const manager = await SessionManager.open(sessionFile);
+		const items = await queue.list();
+		const queued = items
+			.filter(item => item.state === "queued" && item.payload.kind !== "custom" && "text" in item.payload)
+			.map(item => {
+				if (!("text" in item.payload)) throw new Error("Restart capture found a non-user input");
+				return {
+					sequence: item.sequence,
+					text: item.payload.text,
+					deliveryClass: item.deliveryClass,
+					state: item.state,
+				};
+			});
+		const snapshot: RestartCaptureSnapshot = {
+			draft: await manager.consumeDraft(),
+			queued,
+		};
+		await writeFile(reportPath, JSON.stringify(snapshot));
+		await manager.close();
+		await ownership.release();
+	} catch (error) {
+		await writeFile(
+			reportPath,
+			JSON.stringify({ draft: null, queued: [], error: error instanceof Error ? error.message : String(error) }),
+		);
+		process.exitCode = 1;
+	}
+}
+
+const restartCaptureChild = process.argv[2];
+if (restartCaptureChild === "--restart-capture-owner" || restartCaptureChild === "--restart-capture-replacement") {
+	await runRestartCaptureChild();
+	process.exit(process.exitCode ?? 0);
 }
 
 const restartHandoffChild = process.argv[2];
@@ -544,6 +646,31 @@ describe("/restart draft persistence", () => {
 		} finally {
 			execve.mockRestore();
 			await manager.close();
+			await rm(tempDir, { recursive: true, force: true });
+		}
+	});
+});
+
+describe("/restart durable capture", () => {
+	test("preserves queued follow-ups and the draft across same-PID replacement", async () => {
+		const tempDir = await mkdtemp(path.join(os.tmpdir(), "omp-restart-capture-"));
+		const root = path.join(tempDir, "ownership");
+		const reportPath = path.join(tempDir, "restart-capture.json");
+		const child = Bun.spawn(
+			[process.execPath, import.meta.path, "--restart-capture-owner", root, tempDir, reportPath],
+			{ cwd: tempDir, stdin: "ignore", stdout: "pipe", stderr: "pipe" },
+		);
+
+		try {
+			expect(await child.exited).toBe(0);
+			const snapshot = JSON.parse(await readFile(reportPath, "utf8")) as RestartCaptureSnapshot;
+			expect(snapshot.error).toBeUndefined();
+			expect(snapshot.draft).toBe("draft survives restart verbatim\nwith two lines");
+			expect(snapshot.queued).toEqual([
+				{ sequence: 1, text: "queued first", deliveryClass: "followUp", state: "queued" },
+				{ sequence: 2, text: "queued second", deliveryClass: "followUp", state: "queued" },
+			]);
+		} finally {
 			await rm(tempDir, { recursive: true, force: true });
 		}
 	});

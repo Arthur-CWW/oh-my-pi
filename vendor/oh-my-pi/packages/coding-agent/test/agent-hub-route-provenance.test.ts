@@ -32,6 +32,10 @@ function routeReceipt(source: SpawnRouteReceipt["source"], model: string): Spawn
 	const [modelId, thinking] = selector.split(":");
 	return {
 		source,
+		responsibility: "implementer",
+		alias: "deprecated-alias",
+		resolutionSource: source,
+		resolvedLane: selector,
 		route: {
 			selector,
 			provider,

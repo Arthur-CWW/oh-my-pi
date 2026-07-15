@@ -16,13 +16,13 @@ import { disposeAllVmContexts } from "../../src/eval/js/context-manager";
 import { executeJs } from "../../src/eval/js/executor";
 import { disposeAllKernelSessions, executePython } from "../../src/eval/py/executor";
 
-const taskAgent = {
-	name: "task",
-	description: "Task agent",
-	systemPrompt: "Run the task.",
+const implementerAgent = {
+	name: "implementer",
+	description: "Implementer agent",
+	systemPrompt: "Implement the task.",
 	source: "bundled",
 	spawns: "*",
-	model: ["pi/task"],
+	model: ["pi/implementer"],
 } satisfies AgentDefinition;
 
 const reviewerAgent = {
@@ -80,7 +80,7 @@ function makeSession(options: SessionOptions = {}): ToolSession {
 	};
 }
 
-function mockAgents(agents: AgentDefinition[] = [taskAgent, reviewerAgent]): void {
+function mockAgents(agents: AgentDefinition[] = [implementerAgent, reviewerAgent]): void {
 	vi.spyOn(taskDiscovery, "discoverAgents").mockResolvedValue({ agents, projectAgentsDir: null });
 }
 
@@ -154,7 +154,7 @@ describe("runEvalAgent", () => {
 		vi.restoreAllMocks();
 	});
 
-	it("resolves the default task agent and agentType overrides", async () => {
+	it("resolves the default implementer and agentType overrides", async () => {
 		mockAgents();
 		const runSpy = vi.spyOn(taskExecutor, "runSubprocess").mockImplementation(async options =>
 			singleResult(options, {
@@ -166,14 +166,14 @@ describe("runEvalAgent", () => {
 		const defaultResult = await runEvalAgent({ prompt: "hello" }, { session });
 		const overrideResult = await runEvalAgent({ prompt: "hello", agentType: "reviewer" }, { session });
 
-		expect(defaultResult.text).toBe("task");
+		expect(defaultResult.text).toBe("implementer");
 		expect(overrideResult.text).toBe("reviewer");
-		expect(runSpy.mock.calls[0]?.[0].agent.name).toBe("task");
+		expect(runSpy.mock.calls[0]?.[0].agent.name).toBe("implementer");
 		expect(runSpy.mock.calls[1]?.[0].agent.name).toBe("reviewer");
 	});
 
 	it("throws for an unknown agent", async () => {
-		mockAgents([taskAgent]);
+		mockAgents([implementerAgent]);
 		vi.spyOn(taskExecutor, "runSubprocess").mockImplementation(async options => singleResult(options));
 
 		await expect(runEvalAgent({ prompt: "hello", agentType: "missing" }, { session: makeSession() })).rejects.toThrow(
@@ -268,7 +268,7 @@ describe("runEvalAgent", () => {
 		const result = await runEvalAgent({ prompt: "hello" }, { session: makeSession() });
 		expect(result).toEqual({
 			text: "done",
-			details: { agent: "task", id: "0-EvalAgent", model: "p/model", structured: false },
+			details: { agent: "implementer", id: "0-EvalAgent", model: "p/model", structured: false },
 		});
 		await expect(runEvalAgent({ prompt: "fail" }, { session: makeSession() })).rejects.toThrow("boom");
 	});
@@ -339,7 +339,7 @@ describe("runEvalAgent", () => {
 		// Last resort: still produce a non-empty message even when nothing useful is set,
 		// so Python never falls back to `bridge call '__agent__' failed`.
 		await expect(runEvalAgent({ prompt: "blank" }, { session: makeSession() })).rejects.toThrow(
-			"agent() subagent 'task' failed.",
+			"agent() subagent 'implementer' failed.",
 		);
 	});
 });

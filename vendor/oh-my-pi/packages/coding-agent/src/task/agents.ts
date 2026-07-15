@@ -49,6 +49,46 @@ const EMBEDDED_AGENT_DEFS: EmbeddedAgentDef[] = [
 	{ fileName: "librarian.md", template: librarianMd },
 	{ fileName: "oracle.md", template: oracleMd },
 	{
+		fileName: "implementer.md",
+		frontmatter: {
+			name: "implementer",
+			description: "Builds production changes end-to-end with full capabilities",
+			spawns: "*",
+			model: "pi/implementer",
+		},
+		template: taskMd,
+	},
+	{
+		fileName: "qa.md",
+		frontmatter: {
+			name: "qa",
+			description: "Proves behavior with focused tests, diagnostics, and end-to-end validation",
+			spawns: "*",
+			model: "pi/qa",
+		},
+		template: taskMd,
+	},
+	{
+		fileName: "operator.md",
+		frontmatter: {
+			name: "operator",
+			description: "Executes operational workflows and environment changes with full capabilities",
+			spawns: "*",
+			model: "pi/operator",
+		},
+		template: taskMd,
+	},
+	{
+		fileName: "synthesizer.md",
+		frontmatter: {
+			name: "synthesizer",
+			description: "Integrates parallel findings and changes into one coherent deliverable",
+			spawns: "*",
+			model: "pi/synthesizer",
+		},
+		template: taskMd,
+	},
+	{
 		fileName: "task.md",
 		frontmatter: {
 			name: "task",

@@ -24,6 +24,7 @@ const STREAM_ABORT_MESSAGE_REGEX =
 	/stream (?:stalled|timed out|ended|closed|terminated)|waiting for (?:the first|the next) event/i;
 const TIMEOUT_MESSAGE_REGEX = /\btimed? ?out\b|\btimeout\b/i;
 const USER_INTERRUPT_MESSAGE_REGEX = /\binterrupted by user\b/i;
+const PROVIDER_ABORT_MESSAGE_REGEX = /\brequest was aborted\b|\boperation aborted\b/i;
 
 /** Map a retry-policy bucket onto the public operator-facing cause taxonomy. */
 export function requestFailureCauseFromRetryCause(cause: RetryCause): RequestFailureCause {
@@ -47,10 +48,17 @@ export function classifyAbortReason(
 
 /**
  * Classify one provider/request failure without relying on SDK-specific
- * `instanceof` checks. Structured provider errors win; legacy/raw messages
- * remain supported while providers migrate.
+ * `instanceof` checks. A fired caller-owned signal is authoritative; otherwise
+ * structured provider errors win and legacy/raw messages remain supported
+ * while providers migrate. An abort-shaped SDK message without that local
+ * cancellation evidence is a transient transport failure.
  */
-export function classifyRequestFailure(error: Error | string | StructuredRequestFailure): RequestFailureCause {
+export function classifyRequestFailure(
+	error: Error | string | StructuredRequestFailure,
+	signal?: AbortSignal,
+): RequestFailureCause {
+	if (signal?.aborted) return classifyAbortReason(signal.reason);
+
 	const structured = typeof error === "string" ? undefined : (error as StructuredRequestFailure);
 	const structuredCause = structured?.failureCause;
 	if (typeof structuredCause === "string") {
@@ -74,7 +82,7 @@ export function classifyRequestFailure(error: Error | string | StructuredRequest
 	if (structured?.status === 429) return "rate-limit";
 	if (RATE_LIMIT_MESSAGE_REGEX.test(message)) return "rate-limit";
 	if (isTransientNetworkError(error instanceof Error || typeof error === "string" ? error : message)) return "network";
-	if (/\brequest was aborted\b|\boperation aborted\b/i.test(message)) return "parent-cancel";
+	if (PROVIDER_ABORT_MESSAGE_REGEX.test(message)) return "network";
 	return "provider-error";
 }
 

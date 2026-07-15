@@ -64,6 +64,10 @@ function fixture(assignment: string) {
 			resolvedModel: "openai-codex/gpt-5.6-sol:medium",
 			routeReceipt: {
 				source: "automatic_reroute",
+				responsibility: "implementer",
+				alias: "deprecated-alias",
+				resolutionSource: "automatic_reroute",
+				resolvedLane: "openai-codex/gpt-5.6-sol:medium",
 				route: {
 					selector: "openai-codex/gpt-5.6-sol:medium",
 					provider: "openai-codex",

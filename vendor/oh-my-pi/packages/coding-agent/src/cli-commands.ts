@@ -32,6 +32,7 @@ export const commands: CommandEntry[] = [
 	{ name: "irc", load: () => import("./commands/irc").then(m => m.default) },
 	{ name: "join", load: () => import("./commands/join").then(m => m.default) },
 	{ name: "models", load: () => import("./commands/models").then(m => m.default) },
+	{ name: "policy", load: () => import("./commands/policy").then(m => m.default) },
 	{ name: "plugin", load: () => import("./commands/plugin").then(m => m.default) },
 	{ name: "say", load: () => import("./commands/say").then(m => m.default) },
 	{ name: "rollout", load: () => import("./session/rollout").then(m => m.default) },

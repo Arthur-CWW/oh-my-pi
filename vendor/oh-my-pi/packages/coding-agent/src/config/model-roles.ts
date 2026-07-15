@@ -14,6 +14,10 @@ export type ModelRole =
 	| "designer"
 	| "commit"
 	| "title"
+	| "implementer"
+	| "qa"
+	| "operator"
+	| "synthesizer"
 	| "task"
 	| "advisor";
 
@@ -35,6 +39,10 @@ export const MODEL_ROLES: Record<ModelRole, ModelRoleInfo> = {
 	designer: { tag: "DESIGNER", name: "Designer", color: "muted" },
 	commit: { tag: "COMMIT", name: "Commit", color: "dim" },
 	title: { tag: "TITLE", name: "Title", color: "dim", hidden: true },
+	implementer: { tag: "IMPLEMENTER", name: "Implementer", color: "muted" },
+	qa: { tag: "QA", name: "QA", color: "warning" },
+	operator: { tag: "OPERATOR", name: "Operator", color: "muted" },
+	synthesizer: { tag: "SYNTHESIZER", name: "Synthesizer", color: "accent" },
 	task: { tag: "TASK", name: "Subtask", color: "muted" },
 	advisor: { tag: "ADVISOR", name: "Advisor", color: "accent" },
 };
@@ -48,6 +56,10 @@ export const MODEL_ROLE_IDS: ModelRole[] = [
 	"designer",
 	"commit",
 	"title",
+	"implementer",
+	"qa",
+	"operator",
+	"synthesizer",
 	"task",
 	"advisor",
 ];

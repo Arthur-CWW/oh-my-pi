@@ -22,21 +22,21 @@
 </lifecycle>
 
 <parameters>
-- `agent`: agent type to spawn
+- `agent`: responsibility template to spawn. Choose one of the named templates below; responsibility naming is required for every spawn.
 {{#if batchEnabled}}
 - `context`: shared background prepended to every assignment — goal, constraints, shared contract (see context-fmt); REQUIRED, session-specific only
 - `tasks`: tasks to spawn — one subagent per item, all in parallel:
   - `assignment`: complete self-contained instructions; one-liners and missing acceptance criteria are PROHIBITED
   - `id`: stable agent id, CamelCase, ≤32 chars; generated when omitted
   - `description`: UI label only — subagent never sees it
-  - `role`: specialist identity this subagent embodies (e.g. "Auth-flow security reviewer") — sets its system-prompt persona and roster display name; tailor every spawn rather than cloning a generic worker
+  - `role`: specialist identity this responsibility embodies (e.g. "Auth-flow security reviewer") — sets its system-prompt persona and roster display name; tailor every spawn rather than cloning a generic agent
 {{#if isolationEnabled}}
   - `isolated`: run this spawn in an isolated env; returns patches. Isolated agents are torn down at completion — not addressable afterwards
 {{/if}}
 {{else}}
 - `id`: stable agent id, CamelCase, ≤32 chars; generated when omitted
 - `description`: UI label only — subagent never sees it
-- `role`: specialist identity this subagent embodies (e.g. "Auth-flow security reviewer") — sets its system-prompt persona and roster display name; tailor every spawn rather than cloning a generic worker
+- `role`: specialist identity this responsibility embodies (e.g. "Auth-flow security reviewer") — sets its system-prompt persona and roster display name; tailor every spawn rather than cloning a generic agent
 - `assignment`: complete self-contained instructions; one-liners and missing acceptance criteria are PROHIBITED
 {{#if isolationEnabled}}
 - `isolated`: run in isolated env; returns patches. Isolated agents are torn down at completion — not addressable afterwards
@@ -44,11 +44,27 @@
 {{/if}}
 </parameters>
 
+<responsibilities>
+- `implementer`: implementation and code changes
+- `qa`: test execution and proof collection
+- `operator`: operational or environment work
+- `synthesizer`: integrate findings and produce the final synthesis
+- `explore`: scouting and research
+- `reviewer`: code and design review
+- `designer`: UI/UX design and implementation
+- `plan`: architecture and implementation planning
+- `librarian`: source-verified library research
+- `oracle`: senior engineering judgment and implementation
+- `quick_task`: strictly mechanical updates or data collection
+</responsibilities>
+
+`task` is a deprecated alias for `implementer` during migration; use `implementer`.
+
 <rules>
 - **Maximize fan-out.** Issue the widest {{#if batchEnabled}}`tasks[]` batch{{else}}set of parallel `task` calls{{/if}} the work decomposes into. NEVER serialize work that could run concurrently.
 - **Subagents do not verify, lint, or format.** Every assignment MUST instruct the subagent to skip all gates, formatters, and project-wide build/test/lint. You run them once at the end across the union of changed files.
 - No globs, no "update all", no package-wide scope. Fan out.
-- **Tailor every spawn with a `role`.** A role naming the specialist (e.g. "Parser edge-case tester", "SSE backpressure specialist") makes a sharper agent than a bare generic `task`/`quick_task` worker; decompose into named specialists, never clones of one generic worker. A role-less generic spawn is the exception.
+- **Tailor every spawn with a `role`.** A role naming the specialist (e.g. "Parser edge-case tester", "SSE backpressure specialist") makes a sharper agent than a generic responsibility; decompose into named specialists, never clones of one generic worker. A role-less spawn is the exception; the `agent` responsibility must still be named.
 - NEVER slow down or serialize because tasks might overlap on some files. Agents resolve collisions among themselves in real time.
 - Subagents have no conversation history. Every fact, file path, and direction they need MUST be explicit in {{#if batchEnabled}}`context` or the item's `assignment`{{else}}the `assignment`{{/if}}.
 {{#if batchEnabled}}
@@ -57,8 +73,8 @@
 - **Shared background**: write it ONCE to a `local://` file (e.g. `local://ctx.md`) and reference that path in each assignment. Pass large payloads via `local://<path>` URIs, not inline.
 {{/if}}
 - Prefer agents that investigate **and** edit in one pass; only spin a read-only discovery step when affected files are genuinely unknown.
-- **Read-only agents**: Agents tagged READ-ONLY (e.g. `explore`) have no edit/write/command tools. NEVER hand them an assignment that requires changing files or running commands. Use them to investigate and report back; do the edits yourself or delegate to a writing agent (`task`, `oracle`, `designer`).
-- **No reasoning offload**: NEVER offload reasoning, analysis, design, or decision-making to `quick_task` or `explore` — they run minimal-effort / small models for mechanical lookups and data collection only. Keep judgment and synthesis in your own context; delegate hard thinking to `task`, `plan`, or `oracle`.
+- **Read-only agents**: Agents tagged READ-ONLY (e.g. `explore`) have no edit/write/command tools. NEVER hand them an assignment that requires changing files or running commands. Use them to investigate and report back; do the edits yourself or delegate to a writing responsibility (`implementer`, `oracle`, `designer`).
+- **No reasoning offload**: NEVER offload reasoning, analysis, design, or decision-making to `quick_task` or `explore` — they run minimal-effort / small models for mechanical lookups and data collection only. Keep judgment and synthesis in your own context; delegate hard thinking to `implementer`, `plan`, or `oracle`.
 </rules>
 
 <parallelization>

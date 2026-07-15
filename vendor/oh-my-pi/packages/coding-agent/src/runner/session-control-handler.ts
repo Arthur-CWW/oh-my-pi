@@ -197,6 +197,10 @@ export function makeSessionControlHandlers(options: SessionControlHandlerOptions
 				return yield* Effect.fail(
 					new InvalidRunnerCommandError({ issue: "prepare-rollout requires the rollout checkpoint action" }),
 				);
+			case "policy-apply":
+				return yield* Effect.fail(
+					new InvalidRunnerCommandError({ issue: "policy-apply requires a policy runtime adapter" }),
+				);
 		}
 	});
 

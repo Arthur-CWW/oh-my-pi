@@ -385,6 +385,7 @@ describe("Settings", () => {
 			await writeSettings({
 				modelRoles: {
 					default: "kimi-code/kimi-for-coding",
+					implementer: "kimi-code/kimi-for-coding",
 					task: "kimi-code/kimi-for-coding",
 				},
 			});
@@ -397,6 +398,7 @@ describe("Settings", () => {
 			await writeSettings({
 				modelRoles: {
 					default: "anthropic/claude-fable-5:medium",
+					implementer: "anthropic/claude-fable-5:medium",
 					task: "openai-codex/gpt-5.5:medium",
 				},
 			});
@@ -405,6 +407,10 @@ describe("Settings", () => {
 
 			expect(settings.getModelRole("default")).toBe("kimi-code/kimi-for-coding");
 			expect(settings.getModelRole("task")).toBe("openai-codex/gpt-5.5:medium");
+			expect(settings.getModelRole("implementer")).toBe("anthropic/claude-fable-5:medium");
+			expect(resolveAgentModelPatterns({ taskOrRoleModel: "pi/implementer", settings })).toEqual([
+				"anthropic/claude-fable-5:medium",
+			]);
 			expect(resolveAgentModelPatterns({ taskOrRoleModel: "pi/task", settings })).toEqual([
 				"openai-codex/gpt-5.5:medium",
 			]);

@@ -1,6 +1,12 @@
+import { randomUUID } from "node:crypto";
 import { logger } from "@oh-my-pi/pi-utils";
+import { Effect } from "effect";
 import type { ToolSession } from "..";
 import { resolveModelOverrideWithAuthFallback, resolveModelRoleValue } from "../config/model-resolver";
+import { PolicyJournal, type PolicyJournalOptions } from "../policy/policy-journal";
+import type { PolicySnapshot } from "../policy/policy-projection";
+import { type CoreRoutingKey, isCoreRoutingKey } from "../policy/policy-records";
+import { makePolicyService } from "../policy/policy-service";
 import type { AgentQuotaAdmission } from "../registry/agent-registry";
 import {
 	createQuotaAdmissionStateRecord,
@@ -18,6 +24,69 @@ import {
 	type SpawnRouteDecision,
 } from "./route-resolution";
 import type { AgentDefinition, TaskParams } from "./types";
+
+export interface SpawnPolicyRoutingOptions {
+	readonly directory?: string;
+}
+
+let configuredPolicyDirectory: string | undefined;
+
+export function configureSpawnPolicyRouting(options: SpawnPolicyRoutingOptions = {}): void {
+	configuredPolicyDirectory = options.directory;
+}
+
+function policyReader(options: PolicyJournalOptions): PolicyJournal {
+	const acquiredAt = new Date().toISOString();
+	return new PolicyJournal(options, {
+		uid: process.getuid?.() ?? 0,
+		pid: process.pid,
+		epoch: randomUUID(),
+		acquiredAt,
+	});
+}
+
+function sessionWorkstream(session: ToolSession): string | undefined {
+	const workstream = session.sessionManager?.getWorkstream();
+	return workstream?.kind === "workstream" ? workstream.id : undefined;
+}
+
+export async function snapshotTaskSpawnPolicy(
+	session: ToolSession,
+	options: SpawnPolicyRoutingOptions = {},
+): Promise<PolicySnapshot> {
+	const directory = options.directory ?? configuredPolicyDirectory;
+	if (directory === undefined) {
+		return {
+			at: new Date().toISOString(),
+			values: {},
+			transactions: [],
+			expiredTransactionIds: [],
+			futureTransactionIds: [],
+		};
+	}
+	const journal = policyReader({ directory });
+	const workstream = sessionWorkstream(session);
+	return Effect.runPromise(
+		makePolicyService(journal).snapshot({
+			...(workstream === undefined ? {} : { workstream }),
+		}),
+	);
+}
+
+function policyKeyForSpawn(
+	deprecatedTaskAlias: boolean,
+	responsibility: string,
+	modelSelectors: readonly string[] | undefined,
+): CoreRoutingKey {
+	if (deprecatedTaskAlias) return "core.routing.implementer";
+	for (const selector of modelSelectors ?? []) {
+		const role = selector.startsWith("pi/") ? selector.slice(3).split(":", 1)[0] : undefined;
+		const key = role === undefined ? undefined : `core.routing.${role}`;
+		if (key !== undefined && isCoreRoutingKey(key)) return key;
+	}
+	const responsibilityKey = `core.routing.${responsibility}`;
+	return isCoreRoutingKey(responsibilityKey) ? responsibilityKey : "core.routing.default";
+}
 
 function formatResolvedModelSelector(
 	model: { provider: string; id: string },
@@ -66,20 +135,28 @@ export function resolveTaskSpawnRoute(
 	agentName: string,
 	effectiveAgent: AgentDefinition,
 	params: TaskParams,
+	policySnapshot?: PolicySnapshot,
 ): SpawnRouteDecision {
+	const deprecatedTaskAlias = agentName === "task";
+	const responsibility = deprecatedTaskAlias ? "implementer" : agentName;
 	const agentModelOverrides = session.settings.get("task.agentModelOverrides");
 	const parentActiveSelector = session.getActiveModelString?.();
+	const policyKey = policyKeyForSpawn(deprecatedTaskAlias, responsibility, effectiveAgent.model);
 	return resolveSpawnRoute({
 		spawnExplicit: params.model,
 		sessionExplicit: session.getExplicitModelString?.(),
 		sessionTemporary: session.getTemporaryModelString?.(),
 		agentModelOverride: agentModelOverrides[agentName],
-		agentFrontmatter: effectiveAgent.model,
+		agentFrontmatter: deprecatedTaskAlias ? "pi/task" : effectiveAgent.model,
 		sessionInherited: parentActiveSelector,
 		globalDefault: session.settings.getModelRole("default"),
+		policyKey,
+		policySnapshot,
 		settings: session.settings,
 		modelRegistry: session.modelRegistry,
 		parentActiveSelector,
+		responsibility,
+		alias: deprecatedTaskAlias ? "deprecated-alias" : undefined,
 	});
 }
 

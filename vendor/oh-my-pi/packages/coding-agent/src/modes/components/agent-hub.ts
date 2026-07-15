@@ -586,6 +586,7 @@ export class AgentHubOverlayComponent extends Container {
 	}
 
 	getRetentionMetrics(): AgentHubRetentionMetrics {
+		this.#flushProjection();
 		return {
 			activeIdentities: this.#rows.length,
 			activeSearchFieldEntries: this.#activeSearchFields.size,
@@ -663,6 +664,12 @@ export class AgentHubOverlayComponent extends Container {
 	}
 
 	override render(width: number): readonly string[] {
+		this.#flushProjection();
+		if (this.#chatRefreshTimer) {
+			clearTimeout(this.#chatRefreshTimer);
+			this.#chatRefreshTimer = undefined;
+			if (this.#view === "chat" || this.#cockpitPreview) this.#rebuildChatContent();
+		}
 		return this.#view === "table" ? this.#renderTable(width) : this.#renderChat(width);
 	}
 
@@ -804,7 +811,7 @@ export class AgentHubOverlayComponent extends Container {
 	#rebuildActiveSearchFields(): void {
 		this.#activeSearchFields.clear();
 		for (const ref of this.#registryRefs.values()) {
-			const observed = this.#observerById.get(ref.id);
+			const observed = this.#observableFor(ref.id);
 			const task = observed?.description ?? observed?.progress?.task ?? "";
 			const model = observed?.progress?.resolvedModel ?? "";
 			const source = observed?.progress?.routeReceipt?.source ?? "";
@@ -1237,7 +1244,7 @@ export class AgentHubOverlayComponent extends Container {
 		const innerWidth = Math.max(20, width - 2);
 		const details = this.#inspectorLines(
 			!this.#chatExternal && !this.#chatArchived && this.#chatAgentId
-				? this.#observerById.get(this.#chatAgentId)
+				? this.#observableFor(this.#chatAgentId)
 				: undefined,
 			innerWidth,
 		);
@@ -1529,6 +1536,7 @@ export class AgentHubOverlayComponent extends Container {
 	}
 
 	#observableFor(id: string): ObservableSession | undefined {
+		this.#flushProjection();
 		return this.#observerById.get(id);
 	}
 
@@ -2216,6 +2224,7 @@ export class AgentHubOverlayComponent extends Container {
 
 	/** Rebuild the chat header and sync transcript components from new entries */
 	#rebuildChatContent(): void {
+		this.#flushProjection();
 		const id = this.#chatAgentId;
 		const ref = id && !this.#chatExternal && !this.#chatArchived ? this.#registry.get(id) : undefined;
 

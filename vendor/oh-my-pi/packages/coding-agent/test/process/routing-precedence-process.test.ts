@@ -98,12 +98,21 @@ function createProvider(provider, api, id) {
 
 let unhandledRejections = 0;
 process.on("unhandledRejection", () => { unhandledRejections += 1; });
+const TEST_BUILD_REVISION = { digest: "0".repeat(64), version: "routing-precedence-process-test" };
+const TEST_RUNNER_INSTANCE_IDENTITY = {
+	runnerInstanceId: "00000000-0000-4000-8000-000000000129",
+	startedAt: "2026-07-15T00:00:00.000Z",
+};
 
 clearCustomApis();
 const authStorage = await AuthStorage.create(path.join(home, "auth.db"));
 const registry = new ModelRegistry(authStorage);
 const manager = SessionManager.create(cwd, sessionsDir);
-const ownership = await acquireSessionOwnership(manager.getSessionFile(), manager.getSessionId(), { root: path.join(home, "ownership") });
+const ownership = await acquireSessionOwnership(manager.getSessionFile(), manager.getSessionId(), {
+	root: path.join(home, "ownership"),
+	buildRevision: TEST_BUILD_REVISION,
+	runnerInstanceIdentity: TEST_RUNNER_INSTANCE_IDENTITY,
+});
 manager.bindSessionOwnership(ownership);
 
 try {
@@ -170,6 +179,228 @@ try {
 	authStorage.close();
 	await ownership.release();
 	clearCustomApis();
+}
+process.exit(0);
+`;
+
+interface PolicyWriterResult {
+	transactionId: string;
+	sequence: number;
+	rollbackTransactionId: string;
+	rollbackSequence: number;
+	journalPath: string;
+	pid: number;
+}
+
+interface PolicyAdmission {
+	lane: string;
+	source: string;
+	pid: number;
+	policy?: {
+		key: string;
+		sourceLayer: string;
+		transactionId?: string;
+		sequence: number;
+		snapshotAt: string;
+	};
+	decision: Record<string, unknown>;
+}
+
+interface PolicyReaderResult {
+	pid: number;
+	writerLeasePid: number;
+	firstAtAdmission: PolicyAdmission;
+	firstAfterRollback: PolicyAdmission;
+	secondAfterRollback: PolicyAdmission;
+	settingsYamlBefore: string;
+	settingsYamlAfter: string;
+}
+
+const POLICY_WRITER_SOURCE = String.raw`
+import * as fs from "node:fs/promises";
+import { Effect } from "effect";
+import { PolicyJournal } from "@oh-my-pi/pi-coding-agent/policy/policy-journal";
+import { makePolicyService } from "@oh-my-pi/pi-coding-agent/policy/policy-service";
+
+const policyDirectory = process.env.POLICY_DIRECTORY;
+const committedFile = process.env.COMMITTED_FILE;
+const firstAdmissionFile = process.env.FIRST_ADMISSION_FILE;
+const rollbackFile = process.env.ROLLBACK_FILE;
+if (!policyDirectory || !committedFile || !firstAdmissionFile || !rollbackFile) {
+	throw new Error("missing policy writer environment");
+}
+
+async function waitForFile(file, label) {
+	const deadline = Date.now() + 10_000;
+	while (Date.now() < deadline) {
+		try {
+			return await fs.readFile(file, "utf8");
+		} catch (error) {
+			if (!(error instanceof Error) || !("code" in error) || error.code !== "ENOENT") throw error;
+		}
+		await Bun.sleep(10);
+	}
+	throw new Error("timed out waiting for " + label);
+}
+
+const journal = await PolicyJournal.acquire({ directory: policyDirectory });
+try {
+	const service = makePolicyService(journal);
+	const setResult = await Effect.runPromise(service.set({
+		key: "core.routing.implementer",
+		value: "routing-policy-b/model-b",
+		scope: { kind: "global" },
+		reason: "prove next-admission policy routing",
+	}));
+	await fs.writeFile(committedFile, JSON.stringify({
+		transactionId: setResult.transaction.transactionId,
+		sequence: setResult.transaction.sequence,
+	}) + "\n", { flag: "wx" });
+	await waitForFile(firstAdmissionFile, "the first policy admission");
+	const rollbackResult = await Effect.runPromise(service.rollback({
+		transactionId: setResult.transaction.transactionId,
+		reason: "restore the settings-backed implementer lane",
+	}));
+	await fs.writeFile(rollbackFile, JSON.stringify({
+		transactionId: rollbackResult.transaction.transactionId,
+		sequence: rollbackResult.transaction.sequence,
+		rollbackOf: rollbackResult.transaction.rollbackOf,
+	}) + "\n", { flag: "wx" });
+	console.log(JSON.stringify({
+		transactionId: setResult.transaction.transactionId,
+		sequence: setResult.transaction.sequence,
+		rollbackTransactionId: rollbackResult.transaction.transactionId,
+		rollbackSequence: rollbackResult.transaction.sequence,
+		journalPath: journal.journalPath,
+		pid: process.pid,
+	}));
+} finally {
+	await journal.release();
+}
+process.exit(0);
+`;
+
+const POLICY_READER_SOURCE = String.raw`
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
+import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
+import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
+import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import {
+	configureSpawnPolicyRouting,
+	resolveTaskSpawnRoute,
+	snapshotTaskSpawnPolicy,
+} from "@oh-my-pi/pi-coding-agent/task/spawn-route";
+
+const home = process.env.HOME;
+const cwd = process.env.CWD;
+const agentDir = process.env.AGENT_DIR;
+const settingsFile = process.env.SETTINGS_FILE;
+const policyDirectory = process.env.POLICY_DIRECTORY;
+const committedFile = process.env.COMMITTED_FILE;
+const firstAdmissionFile = process.env.FIRST_ADMISSION_FILE;
+const rollbackFile = process.env.ROLLBACK_FILE;
+if (!home || !cwd || !agentDir || !settingsFile || !policyDirectory || !committedFile || !firstAdmissionFile || !rollbackFile) {
+	throw new Error("missing policy reader environment");
+}
+
+async function waitForFile(file, label) {
+	const deadline = Date.now() + 10_000;
+	while (Date.now() < deadline) {
+		try {
+			return await fs.readFile(file, "utf8");
+		} catch (error) {
+			if (!(error instanceof Error) || !("code" in error) || error.code !== "ENOENT") throw error;
+		}
+		await Bun.sleep(10);
+	}
+	throw new Error("timed out waiting for " + label);
+}
+
+function providerConfig(provider, id) {
+	return {
+		baseUrl: "http://routing-policy.invalid/v1",
+		api: "openai-responses",
+		apiKey: "deterministic-key",
+		models: [{
+			id,
+			name: provider + " " + id,
+			reasoning: false,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 4096,
+			maxTokens: 1024,
+		}],
+	};
+}
+
+function summarize(decision) {
+	const policyInput = decision.consulted.find(input => input.source === "policy");
+	if (!decision.route || !decision.source) {
+		throw new Error("spawn admission did not resolve: " + JSON.stringify(decision));
+	}
+	return {
+		lane: decision.route.selector,
+		source: decision.source,
+		pid: process.pid,
+		...(policyInput?.policy ? { policy: policyInput.policy } : {}),
+		decision: JSON.parse(JSON.stringify(decision)),
+	};
+}
+
+await waitForFile(committedFile, "the committed policy transaction");
+await fs.mkdir(cwd, { recursive: true });
+await fs.mkdir(agentDir, { recursive: true });
+const authStorage = await AuthStorage.create(path.join(home, "auth.db"));
+try {
+	const registry = new ModelRegistry(authStorage);
+	const providerA = providerConfig("routing-policy-a", "model-a");
+	const providerB = providerConfig("routing-policy-b", "model-b");
+	registry.registerProvider("routing-policy-a", providerA, "routing-policy-process");
+	registry.registerProvider("routing-policy-b", providerB, "routing-policy-process");
+	authStorage.setRuntimeApiKey("routing-policy-a", "deterministic-key");
+	authStorage.setRuntimeApiKey("routing-policy-b", "deterministic-key");
+	const settings = await Settings.init({ cwd, agentDir, configFiles: [settingsFile] });
+	const session = {
+		cwd,
+		hasUI: false,
+		settings,
+		modelRegistry: registry,
+		getSessionFile: () => null,
+		getSessionSpawns: () => "*",
+		getActiveModelString: () => "routing-policy-a/model-a",
+	};
+	const implementer = {
+		name: "implementer",
+		description: "Implementation responsibility",
+		systemPrompt: "Implement the assignment.",
+		model: "routing-policy-a/model-a",
+		source: "bundled",
+	};
+	const params = { agent: "implementer", assignment: "Prove policy routing." };
+	configureSpawnPolicyRouting({ directory: policyDirectory });
+	const settingsYamlBefore = await fs.readFile(settingsFile, "utf8");
+	const firstSnapshot = await snapshotTaskSpawnPolicy(session);
+	const firstDecision = resolveTaskSpawnRoute(session, "implementer", implementer, params, firstSnapshot);
+	const firstAtAdmission = summarize(firstDecision);
+	const writerLease = JSON.parse(await fs.readFile(path.join(policyDirectory, "policy-v1.lease"), "utf8"));
+	await fs.writeFile(firstAdmissionFile, JSON.stringify({ admitted: true }) + "\n", { flag: "wx" });
+	await waitForFile(rollbackFile, "the policy rollback");
+	const firstAfterRollback = summarize(firstDecision);
+	const secondSnapshot = await snapshotTaskSpawnPolicy(session);
+	const secondDecision = resolveTaskSpawnRoute(session, "implementer", implementer, params, secondSnapshot);
+	const settingsYamlAfter = await fs.readFile(settingsFile, "utf8");
+	console.log(JSON.stringify({
+		pid: process.pid,
+		writerLeasePid: writerLease.pid,
+		firstAtAdmission,
+		firstAfterRollback,
+		secondAfterRollback: summarize(secondDecision),
+		settingsYamlBefore,
+		settingsYamlAfter,
+	}));
+} finally {
+	authStorage.close();
 }
 process.exit(0);
 `;
@@ -277,6 +508,69 @@ async function readReceipts(receiptsFile: string, diagnostics: readonly string[]
 		.map(line => decodeReceipt(parseJsonLine(line, "receipt")));
 }
 
+async function runPolicyCutoverChildren(environment: Record<string, string>): Promise<{
+	writer: PolicyWriterResult;
+	reader: PolicyReaderResult;
+	writerStderr: string;
+	readerStderr: string;
+}> {
+	const cwd = path.resolve(import.meta.dir, "../..");
+	const env = { ...process.env, ...environment };
+	const writerProcess = Bun.spawn({
+		cmd: [process.execPath, "-e", POLICY_WRITER_SOURCE],
+		cwd,
+		env,
+		stdout: "pipe",
+		stderr: "pipe",
+	});
+	const readerProcess = Bun.spawn({
+		cmd: [process.execPath, "-e", POLICY_READER_SOURCE],
+		cwd,
+		env,
+		stdout: "pipe",
+		stderr: "pipe",
+	});
+
+	const collect = async (label: string, child: typeof writerProcess): Promise<{ stdout: string; stderr: string }> => {
+		const stdoutPromise = new Response(child.stdout).text();
+		const stderrPromise = new Response(child.stderr).text();
+		const exitCode = await Promise.race([
+			child.exited,
+			Bun.sleep(12_000).then(() => {
+				throw new Error(`${label} timed out`);
+			}),
+		]);
+		const [stdout, stderr] = await Promise.all([stdoutPromise, stderrPromise]);
+		if (exitCode !== 0) throw new Error(`${label} failed (${exitCode}): ${stderr}`);
+		return { stdout, stderr };
+	};
+
+	try {
+		const [writerOutput, readerOutput] = await Promise.all([
+			collect("policy writer process", writerProcess),
+			collect("policy reader process", readerProcess),
+		]);
+		const writerLine = writerOutput.stdout.trim().split("\n").at(-1);
+		const readerLine = readerOutput.stdout.trim().split("\n").at(-1);
+		if (!writerLine) throw new Error("policy writer process emitted no result");
+		if (!readerLine) throw new Error("policy reader process emitted no result");
+		return {
+			writer: parseJsonLine(writerLine, "policy writer result") as PolicyWriterResult,
+			reader: parseJsonLine(readerLine, "policy reader result") as PolicyReaderResult,
+			writerStderr: writerOutput.stderr,
+			readerStderr: readerOutput.stderr,
+		};
+	} finally {
+		for (const child of [writerProcess, readerProcess]) {
+			if (child.exitCode !== null) continue;
+			try {
+				child.kill("SIGKILL");
+			} catch {}
+		}
+		await Promise.all([writerProcess.exited, readerProcess.exited]);
+	}
+}
+
 afterEach(async () => {
 	await Promise.all(roots.splice(0).map(root => fs.rm(root, { recursive: true, force: true })));
 });
@@ -313,6 +607,102 @@ describe("routing precedence process proof", () => {
 				model: "model-b",
 				lastUserText: "provider receipt proof",
 			},
+		]);
+	}, 20_000);
+
+	it("applies and rolls back durable policy at fresh spawn admission boundaries across processes", async () => {
+		const root = await fs.mkdtemp(path.join(os.tmpdir(), "omp-routing-policy-process-"));
+		roots.push(root);
+		const home = path.join(root, "home");
+		const cwd = path.join(root, "project");
+		const agentDir = path.join(root, "agent");
+		const policyDirectory = path.join(root, "policy");
+		const settingsFile = path.join(root, "routing.yml");
+		const committedFile = path.join(root, "committed.json");
+		const firstAdmissionFile = path.join(root, "first-admission.json");
+		const rollbackFile = path.join(root, "rolled-back.json");
+		const settingsYaml = "task:\n  agentModelOverrides:\n    implementer: routing-policy-a/model-a\n";
+		await Promise.all([
+			fs.mkdir(home, { recursive: true }),
+			fs.mkdir(cwd, { recursive: true }),
+			fs.mkdir(agentDir, { recursive: true }),
+			fs.writeFile(settingsFile, settingsYaml),
+		]);
+
+		const result = await runPolicyCutoverChildren({
+			HOME: home,
+			CWD: cwd,
+			AGENT_DIR: agentDir,
+			SETTINGS_FILE: settingsFile,
+			POLICY_DIRECTORY: policyDirectory,
+			COMMITTED_FILE: committedFile,
+			FIRST_ADMISSION_FILE: firstAdmissionFile,
+			ROLLBACK_FILE: rollbackFile,
+			XDG_CONFIG_HOME: path.join(root, "xdg-config"),
+			XDG_DATA_HOME: path.join(root, "xdg-data"),
+			XDG_STATE_HOME: path.join(root, "xdg-state"),
+		});
+
+		expect(result.writerStderr).not.toContain("unhandledRejection");
+		expect(result.readerStderr).not.toContain("unhandledRejection");
+		expect(result.writer.journalPath).toBe(path.join(policyDirectory, "policy-v1.jsonl"));
+		expect(result.writer.pid).not.toBe(result.reader.pid);
+		expect(result.reader.writerLeasePid).toBe(result.writer.pid);
+		expect(result.writer.sequence).toBe(1);
+		expect(result.writer.rollbackSequence).toBe(2);
+		expect(typeof result.reader.firstAtAdmission.policy?.snapshotAt).toBe("string");
+		expect(Number.isNaN(Date.parse(result.reader.firstAtAdmission.policy?.snapshotAt ?? ""))).toBe(false);
+		expect(result.reader.firstAtAdmission).toMatchObject({
+			lane: "routing-policy-b/model-b",
+			source: "policy",
+			pid: result.reader.pid,
+			policy: {
+				key: "core.routing.implementer",
+				sourceLayer: "global-durable",
+				transactionId: result.writer.transactionId,
+				sequence: 1,
+				snapshotAt: expect.any(String),
+			},
+		});
+		expect(result.reader.firstAfterRollback).toEqual(result.reader.firstAtAdmission);
+		expect(result.reader.secondAfterRollback).toMatchObject({
+			lane: "routing-policy-a/model-a",
+			source: "agent_model_override",
+			pid: result.reader.pid,
+		});
+		expect(result.reader.settingsYamlBefore).toBe(settingsYaml);
+		expect(result.reader.settingsYamlAfter).toBe(settingsYaml);
+		expect(await fs.readFile(settingsFile, "utf8")).toBe(settingsYaml);
+
+		const journalRecords = (await fs.readFile(result.writer.journalPath, "utf8"))
+			.trim()
+			.split("\n")
+			.map(line => parseJsonLine(line, "policy journal record"));
+		expect(journalRecords).toEqual([
+			expect.objectContaining({
+				transactionId: result.writer.transactionId,
+				sequence: 1,
+				author: expect.objectContaining({ pid: result.writer.pid }),
+				mutations: [
+					expect.objectContaining({
+						op: "set",
+						key: "core.routing.implementer",
+						value: "routing-policy-b/model-b",
+					}),
+				],
+			}),
+			expect.objectContaining({
+				transactionId: result.writer.rollbackTransactionId,
+				sequence: 2,
+				rollbackOf: result.writer.transactionId,
+				author: expect.objectContaining({ pid: result.writer.pid }),
+				mutations: [
+					expect.objectContaining({
+						op: "clear",
+						key: "core.routing.implementer",
+					}),
+				],
+			}),
 		]);
 	}, 20_000);
 });

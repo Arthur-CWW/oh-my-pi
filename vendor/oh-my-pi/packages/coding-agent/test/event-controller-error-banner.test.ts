@@ -187,6 +187,38 @@ describe("EventController error banner", () => {
 		);
 	});
 
+	it("renders an unfired provider abort as a transient network retry", async () => {
+		const rawDetail = "Request was aborted";
+		const message = makeAssistantMessage({ content: [], stopReason: "error", errorMessage: rawDetail });
+		const { controller, showPinnedError } = createFixture(message);
+
+		await controller.handleEvent({ type: "message_end", message } as Extract<
+			AgentSessionEvent,
+			{ type: "message_end" }
+		>);
+		expect(showPinnedError).not.toHaveBeenCalled();
+
+		await controller.handleEvent({
+			type: "auto_retry_start",
+			cause: "network",
+			attempt: 1,
+			maxAttempts: 1,
+			delayMs: 2000,
+			errorMessage: rawDetail,
+		});
+
+		expect(showPinnedError).toHaveBeenCalledWith(
+			expect.objectContaining({
+				message: expect.stringMatching(/network request failed \(network\).*retrying 1\/1 in 2s/),
+				detail: rawDetail,
+				cause: "network",
+				disposition: "retrying 1/1 in 2s",
+				retry: true,
+			}),
+		);
+		expect(showPinnedError.mock.calls[0]?.[0]).not.toMatchObject({ cause: "parent-cancel" });
+	});
+
 	it("renders a parent cancellation with structured context", async () => {
 		const message = makeAssistantMessage({ stopReason: "aborted", errorMessage: "Request was aborted" });
 		const { controller, showPinnedError } = createFixture(message);

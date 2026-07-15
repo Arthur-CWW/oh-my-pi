@@ -1,4 +1,5 @@
 import {
+	classifyAbortReason,
 	classifyRequestFailure,
 	type RequestFailureCause,
 	type RetryCause,
@@ -59,6 +60,17 @@ export function formatRequestFailureHeadline(
 	return `${message.provider}/${message.model} ${failureAction(cause)} (${cause}) — ${formatDisposition(disposition)}`;
 }
 
+function classifyAssistantRequestFailure(
+	message: AssistantMessage,
+	detail = message.errorMessage ?? "Provider returned no error detail",
+): RequestFailureCause {
+	return classifyRequestFailure({
+		failureCause: message.stopReason === "aborted" ? classifyAbortReason(detail) : undefined,
+		message: detail,
+		status: message.errorStatus,
+	});
+}
+
 export function buildRequestFailureDiagnostic(
 	message: AssistantMessage,
 	owner: RequestFailureOwner,
@@ -66,7 +78,7 @@ export function buildRequestFailureDiagnostic(
 	retryCause?: RetryCause,
 ): DiagnosticEventInput {
 	const detail = message.errorMessage ?? "Provider returned no error detail";
-	const classifiedCause = classifyRequestFailure({ message: detail, status: message.errorStatus });
+	const classifiedCause = classifyAssistantRequestFailure(message, detail);
 	const cause =
 		retryCause && classifiedCause === "provider-error"
 			? requestFailureCauseFromRetryCause(retryCause)
@@ -101,7 +113,7 @@ export function shouldAwaitRetryDisposition(message: AssistantMessage): boolean 
 		)
 	)
 		return false;
-	const cause = classifyRequestFailure({ message: message.errorMessage, status: message.errorStatus });
+	const cause = classifyAssistantRequestFailure(message);
 	return cause === "provider-stream-abort" || cause === "timeout" || cause === "network" || cause === "rate-limit";
 }
 
@@ -139,7 +151,7 @@ export class RequestFailurePresenter {
 		rawDetail = message.errorMessage,
 	): void {
 		if ((message.stopReason !== "error" && message.stopReason !== "aborted") || !rawDetail) return;
-		const cause = classifyRequestFailure(rawDetail);
+		const cause = classifyAssistantRequestFailure(message, rawDetail);
 		if (cause === "user-interrupt") return;
 		const pending = { message, component, rawDetail };
 		if (retryEnabled && shouldAwaitRetryDisposition(message)) {

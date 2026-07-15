@@ -806,9 +806,9 @@ export function resolveModelOverride(
  * If the resolved subagent model has no working credentials (provider has no
  * usable auth), and the parent's active model resolves with working auth,
  * use the parent's model instead. This prevents subagent dispatch from
- * silently routing to a provider the user can't actually call (e.g.
- * `modelRoles.task` pointing at an unqualified id whose only available
- * provider variant has no configured credentials — see #985).
+ * silently routing to a provider the user can't actually call (for example, a
+ * configured responsibility lane pointing at an unqualified id whose only
+ * available provider variant has no configured credentials — see #985).
  *
  * Keyless-by-design providers (llama.cpp, ollama, lm-studio) advertise the
  * `kNoAuth` sentinel from `getApiKey` to signal that they do not require
@@ -845,7 +845,7 @@ export async function resolveModelOverrideWithAuthFallback(
 			return { ...parentResolved, authFallbackUsed: false, blocked: false };
 		}
 		if (parentResolved.model && isBlockedSubagentModel(parentResolved.model, settings)) {
-			const fallbackPatterns = ["pi/task", "pi/smol", "pi/slow"];
+			const fallbackPatterns = ["pi/task", "pi/implementer", "pi/smol", "pi/slow"];
 			for (const fallbackPattern of fallbackPatterns) {
 				const fallback = resolveModelOverride([fallbackPattern], modelRegistry, settings);
 				if (!fallback.model || isBlockedSubagentModel(fallback.model, settings)) continue;
@@ -872,6 +872,7 @@ export async function resolveModelOverrideWithAuthFallback(
 		const fallbackPatterns = [
 			...(parentActiveModelPattern ? [parentActiveModelPattern] : []),
 			"pi/task",
+			"pi/implementer",
 			"pi/smol",
 			"pi/slow",
 		];

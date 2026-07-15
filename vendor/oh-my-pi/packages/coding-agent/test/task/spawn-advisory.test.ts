@@ -16,18 +16,20 @@ import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 const item = (role?: string): TaskItem => ({ assignment: "do the thing", role });
 
 describe("buildSpecializationAdvisory", () => {
-	it("nudges a generic role-less spawn when depth capacity remains", () => {
+	it("marks task as a deprecated alias while keeping the spawn non-blocking", () => {
 		const advice = buildSpecializationAdvisory("task", [item()], true);
-		expect(advice).toBeDefined();
-		expect(advice).toContain("`role`");
+		expect(advice).toContain("deprecated-alias");
+		expect(advice).toContain("implementer");
 	});
 
-	it("stays silent at max depth even for a generic role-less spawn", () => {
-		expect(buildSpecializationAdvisory("task", [item()], false)).toBeUndefined();
+	it("marks the alias even at max depth", () => {
+		expect(buildSpecializationAdvisory("task", [item()], false)).toContain("deprecated-alias");
 	});
 
-	it("stays silent when the spawn already carries a role", () => {
-		expect(buildSpecializationAdvisory("task", [item("Rust async-runtime specialist")], true)).toBeUndefined();
+	it("marks the alias even when the spawn carries a specialist role", () => {
+		expect(buildSpecializationAdvisory("task", [item("Rust async-runtime specialist")], true)).toContain(
+			"deprecated-alias",
+		);
 	});
 
 	it("treats a whitespace-only role as absent and nudges", () => {
@@ -101,11 +103,11 @@ describe("task tool advisory gating via suppressSpawnAdvisory", () => {
 		return result.content.find(part => part.type === "text")?.text ?? "";
 	}
 
-	it("appends the specialization advisory for a generic role-less spawn", async () => {
-		expect(await spawnText(false)).toContain("`role`");
+	it("appends the deprecated-alias advisory while allowing the spawn", async () => {
+		expect(await spawnText(false)).toContain("deprecated-alias");
 	});
 
 	it("omits the advisory entirely when the session suppresses it", async () => {
-		expect(await spawnText(true)).not.toContain("`role`");
+		expect(await spawnText(true)).not.toContain("deprecated-alias");
 	});
 });

@@ -26,25 +26,28 @@ type AgentHelper = (prompt: string, opts?: Record<string, unknown>) => Promise<u
 describe("eval js agent() returnHandle", () => {
 	it("returns a DAG node carrying the agent:// handle when returnHandle is set", async () => {
 		let seenName: string | undefined;
-		const sandbox = loadPrelude(async name => {
+		let seenArgs: unknown;
+		const sandbox = loadPrelude(async (name, args) => {
 			seenName = name;
-			return { text: "hello world", details: { agent: "task", id: "abc123", model: "m", structured: false } };
+			seenArgs = args;
+			return { text: "hello world", details: { agent: "implementer", id: "abc123", model: "m", structured: false } };
 		});
 		const node = await (sandbox.agent as AgentHelper)("say hi", { returnHandle: true });
 		expect(seenName).toBe("__agent__");
+		expect(seenArgs).toMatchObject({ prompt: "say hi", agentType: "implementer" });
 		expect(node).toEqual({
 			text: "hello world",
 			output: "hello world",
 			handle: "agent://abc123",
 			id: "abc123",
-			agent: "task",
+			agent: "implementer",
 		});
 	});
 
 	it("returns bare text by default (backward compatible)", async () => {
 		const sandbox = loadPrelude(async () => ({
 			text: "hello world",
-			details: { agent: "task", id: "abc123", structured: false },
+			details: { agent: "implementer", id: "abc123", structured: false },
 		}));
 		const out = await (sandbox.agent as AgentHelper)("say hi");
 		expect(out).toBe("hello world");
@@ -54,7 +57,7 @@ describe("eval js agent() returnHandle", () => {
 		const payload = JSON.stringify({ k: 1 });
 		const sandbox = loadPrelude(async () => ({
 			text: payload,
-			details: { agent: "task", id: "id-9", structured: true },
+			details: { agent: "implementer", id: "id-9", structured: true },
 		}));
 		const node = (await (sandbox.agent as AgentHelper)("emit", {
 			schema: { type: "object" },

@@ -1,24 +1,30 @@
 import * as path from "node:path";
 import { verifyExecutableDigest } from "../cli/restart-session";
+import { decodeRolloutCheckpoint, type RolloutCheckpoint, type RolloutPauseProvenance } from "./rollout-checkpoint";
 import {
-	SessionControlBus,
-	type SessionControlCommand,
 	type FleetPinControlCommand,
+	isPolicyApplyControlCommand,
+	type PolicyApplyCommandV1,
+	type PolicyApplyControlCommand,
 	type PrepareRolloutCommand,
 	type PrepareRolloutIntent,
+	SessionControlBus,
+	type SessionControlCommand,
 	type SessionControlResult,
 	stopConfirmationToken,
+	toPolicyApplyCommandV1,
 } from "./session-control";
-import { decodeRolloutCheckpoint, type RolloutCheckpoint, type RolloutPauseProvenance } from "./rollout-checkpoint";
 import type { SessionOwnershipHandle } from "./session-ownership";
 
 export interface SessionControlTargetActions {
+	readonly policyApply?: (
+		command: PolicyApplyCommandV1,
+		controlCommand: PolicyApplyControlCommand,
+	) => SessionControlResult | Promise<SessionControlResult>;
 	readonly status: (command: SessionControlCommand) => SessionControlResult | Promise<SessionControlResult>;
 	readonly pause: (command: SessionControlCommand) => void | Promise<void>;
 	readonly resume: (command: SessionControlCommand) => void | Promise<void>;
-	readonly fleetPinControl?: (
-		command: FleetPinControlCommand,
-	) => SessionControlResult | Promise<SessionControlResult>;
+	readonly fleetPinControl?: (command: FleetPinControlCommand) => SessionControlResult | Promise<SessionControlResult>;
 	readonly prepareRollout?: (
 		intent: PrepareRolloutIntent,
 		pauseProvenance: RolloutPauseProvenance,
@@ -100,6 +106,15 @@ export async function startSessionControlTarget(options: SessionControlTargetOpt
 					});
 					return;
 				}
+				case "policy-apply": {
+					if (!actions.policyApply || !isPolicyApplyControlCommand(command))
+						throw new Error("Target does not support policy-apply");
+					const policyCommand = toPolicyApplyCommandV1(command);
+					const result = await actions.policyApply(policyCommand, command);
+					await assertCurrentOwner(ownership);
+					bus.complete(command.commandId, ownership.ownerEpoch, actionResult(command, result));
+					return;
+				}
 				case "pause":
 					await actions.pause(command);
 					await assertCurrentOwner(ownership);
@@ -171,7 +186,11 @@ export async function startSessionControlTarget(options: SessionControlTargetOpt
 				case "restart": {
 					if (command.schemaVersion === 2) {
 						const cordon = bus.getCordon(ownership.sessionId);
-						if (!cordon || cordon.ownerEpoch !== ownership.ownerEpoch || cordon.rolloutId !== command.intent.rolloutId) {
+						if (
+							!cordon ||
+							cordon.ownerEpoch !== ownership.ownerEpoch ||
+							cordon.rolloutId !== command.intent.rolloutId
+						) {
 							throw new Error("Rollout restart requires the matching active cordon");
 						}
 						const receipt = bus.getReceipt(command.intent.checkpointCommandId);

@@ -1,9 +1,11 @@
 import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { Api, Model } from "@oh-my-pi/pi-ai";
-import { resolveModelOverride, type ModelLookupRegistry } from "../config/model-resolver";
-import { resolveConfiguredModelPatterns } from "../config/role-resolution";
+import { type ModelLookupRegistry, resolveModelOverride } from "../config/model-resolver";
 import { MODEL_ROLE_IDS } from "../config/model-roles";
+import { resolveConfiguredModelPatterns } from "../config/role-resolution";
 import type { Settings } from "../config/settings";
+import type { PolicySnapshot, PolicySourceLayer } from "../policy/policy-projection";
+import type { CoreRoutingKey } from "../policy/policy-records";
 import type { AgentQuotaAdmission } from "../registry/agent-registry";
 import type { QuotaModel } from "./quota-admission";
 
@@ -12,6 +14,7 @@ export type SpawnRouteSource =
 	| "spawn_explicit"
 	| "session_explicit"
 	| "session_temporary"
+	| "policy"
 	| "agent_model_override"
 	| "agent_frontmatter"
 	| "session_inherited"
@@ -19,6 +22,9 @@ export type SpawnRouteSource =
 
 /** Sources which can appear after the initial spawn decision has been made. */
 export type SubsequentSpawnRouteSource = SpawnRouteSource | "automatic_reroute" | "auth_fallback";
+
+/** Compatibility status attached to a responsibility route. */
+export type SpawnRouteAlias = "deprecated-alias";
 
 export interface SpawnRouteInput {
 	readonly spawnExplicit?: string | readonly string[];
@@ -28,12 +34,24 @@ export interface SpawnRouteInput {
 	readonly agentFrontmatter?: string | readonly string[];
 	readonly sessionInherited?: string | readonly string[];
 	readonly globalDefault?: string | readonly string[];
+	readonly policyKey?: CoreRoutingKey;
+	readonly policySnapshot?: PolicySnapshot;
 	readonly modelRegistry?: ModelLookupRegistry;
 	readonly settings: Settings;
 	readonly parentActiveSelector?: string;
 	readonly originalRoute?: ResolvedRoute;
 	readonly originalSource?: SubsequentSpawnRouteSource;
 	readonly reason?: string;
+	readonly responsibility?: string;
+	readonly alias?: SpawnRouteAlias;
+}
+
+export interface ConsultedPolicyRoute {
+	readonly key: CoreRoutingKey;
+	readonly sourceLayer: PolicySourceLayer;
+	readonly transactionId?: string;
+	readonly sequence: number;
+	readonly snapshotAt: string;
 }
 
 export interface ConsultedRouteInput {
@@ -41,6 +59,7 @@ export interface ConsultedRouteInput {
 	readonly explicit: boolean;
 	readonly selectors: readonly string[];
 	readonly patterns: readonly string[];
+	readonly policy?: ConsultedPolicyRoute;
 }
 
 export interface ResolvedRoute {
@@ -70,7 +89,6 @@ export interface SpawnRouteAttempt {
 	readonly quotaAdmission?: AgentQuotaAdmission;
 }
 
-
 export interface SpawnRouteDecision {
 	readonly source: SubsequentSpawnRouteSource | undefined;
 	readonly explicit: boolean;
@@ -87,6 +105,8 @@ export interface SpawnRouteDecision {
 	readonly quotaAdmission?: AgentQuotaAdmission;
 	readonly block?: SpawnRouteQuotaBlock;
 	readonly priorAttempts?: readonly SpawnRouteAttempt[];
+	readonly responsibility?: string;
+	readonly alias?: SpawnRouteAlias;
 }
 
 export interface SpawnRouteReceipt {
@@ -100,12 +120,21 @@ export interface SpawnRouteReceipt {
 	readonly resolvedPatterns: readonly string[];
 	readonly quotaAdmission?: AgentQuotaAdmission;
 	readonly priorAttempts?: readonly SpawnRouteAttempt[];
+	/** Responsibility template which selected this lane. */
+	readonly responsibility?: string;
+	/** Compatibility status when the requested template was an alias. */
+	readonly alias?: SpawnRouteAlias;
+	/** Provenance source which won the lane decision. */
+	readonly resolutionSource: SubsequentSpawnRouteSource;
+	/** Final concrete lane after quota/auth reconciliation. */
+	readonly resolvedLane: string;
 }
 
 type RouteTier = {
 	readonly source: SpawnRouteSource;
 	readonly explicit: boolean;
 	readonly selectors: string | readonly string[] | undefined;
+	readonly policy?: ConsultedPolicyRoute;
 };
 
 function immutable<T>(values: readonly T[]): readonly T[] {
@@ -123,7 +152,9 @@ function patternsFor(tier: RouteTier, settings: Settings): readonly string[] {
 	if (selectors.length === 0) return immutable([]);
 	const normalized: string[] =
 		tier.source === "spawn_explicit"
-			? selectors.map(selector => (MODEL_ROLE_IDS.includes(selector as (typeof MODEL_ROLE_IDS)[number]) ? `pi/${selector}` : selector))
+			? selectors.map(selector =>
+					MODEL_ROLE_IDS.includes(selector as (typeof MODEL_ROLE_IDS)[number]) ? `pi/${selector}` : selector,
+				)
 			: Array.from(selectors);
 	return immutable(resolveConfiguredModelPatterns(normalized, settings));
 }
@@ -131,7 +162,13 @@ function patternsFor(tier: RouteTier, settings: Settings): readonly string[] {
 function consultedInput(tier: RouteTier, settings: Settings): ConsultedRouteInput | undefined {
 	const selectors = compactSelectors(tier.selectors);
 	if (selectors.length === 0) return undefined;
-	return { source: tier.source, explicit: tier.explicit, selectors, patterns: patternsFor(tier, settings) };
+	return {
+		source: tier.source,
+		explicit: tier.explicit,
+		selectors,
+		patterns: patternsFor(tier, settings),
+		...(tier.policy === undefined ? {} : { policy: tier.policy }),
+	};
 }
 
 function toRoute(
@@ -155,14 +192,30 @@ function toRoute(
  * Explicit spawn and session selectors are terminal: an unresolved value is an error.
  */
 export function resolveSpawnRoute(inputs: SpawnRouteInput): SpawnRouteDecision {
+	const effectivePolicy = inputs.policyKey === undefined ? undefined : inputs.policySnapshot?.values[inputs.policyKey];
+	const policy: ConsultedPolicyRoute | undefined =
+		inputs.policyKey === undefined || inputs.policySnapshot === undefined || effectivePolicy === undefined
+			? undefined
+			: {
+					key: inputs.policyKey,
+					sourceLayer: effectivePolicy.sourceLayer,
+					...(effectivePolicy.transactionId === undefined ? {} : { transactionId: effectivePolicy.transactionId }),
+					sequence: effectivePolicy.sequence,
+					snapshotAt: inputs.policySnapshot.at,
+				};
 	const tiers: readonly RouteTier[] = [
 		{ source: "spawn_explicit", explicit: true, selectors: inputs.spawnExplicit },
 		{ source: "session_explicit", explicit: true, selectors: inputs.sessionExplicit },
 		{ source: "session_temporary", explicit: false, selectors: inputs.sessionTemporary },
+		{ source: "policy", explicit: false, selectors: effectivePolicy?.value, policy },
 		{ source: "agent_model_override", explicit: false, selectors: inputs.agentModelOverride },
 		{ source: "agent_frontmatter", explicit: false, selectors: inputs.agentFrontmatter },
 		{ source: "session_inherited", explicit: false, selectors: inputs.sessionInherited },
-		{ source: "global_default", explicit: false, selectors: inputs.globalDefault ?? inputs.settings.getModelRole("default") },
+		{
+			source: "global_default",
+			explicit: false,
+			selectors: inputs.globalDefault ?? inputs.settings.getModelRole("default"),
+		},
 	];
 	const consulted: ConsultedRouteInput[] = [];
 
@@ -184,6 +237,8 @@ export function resolveSpawnRoute(inputs: SpawnRouteInput): SpawnRouteDecision {
 				originalRoute: inputs.originalRoute,
 				originalSource: inputs.originalSource,
 				reason: inputs.reason,
+				responsibility: inputs.responsibility,
+				alias: inputs.alias,
 				invalid: undefined,
 			};
 		}
@@ -194,7 +249,11 @@ export function resolveSpawnRoute(inputs: SpawnRouteInput): SpawnRouteDecision {
 				const lowerCandidate = consultedInput(tiers[lower], inputs.settings);
 				if (!lowerCandidate) continue;
 				consulted.push(lowerCandidate);
-				const lowerResolved = resolveModelOverride([...lowerCandidate.patterns], inputs.modelRegistry, inputs.settings);
+				const lowerResolved = resolveModelOverride(
+					[...lowerCandidate.patterns],
+					inputs.modelRegistry,
+					inputs.settings,
+				);
 				if (lowerResolved.model) overridden.push(lowerCandidate);
 			}
 			return {
@@ -202,14 +261,39 @@ export function resolveSpawnRoute(inputs: SpawnRouteInput): SpawnRouteDecision {
 				explicit: tier.explicit,
 				selectedSelectors: candidate.selectors,
 				resolvedPatterns: candidate.patterns,
-				route: toRoute(resolved.model, resolved.thinkingLevel, resolved.explicitThinkingLevel, inputs.parentActiveSelector),
+				route: toRoute(
+					resolved.model,
+					resolved.thinkingLevel,
+					resolved.explicitThinkingLevel,
+					inputs.parentActiveSelector,
+				),
 				parentActiveSelector: inputs.parentActiveSelector,
 				consulted: immutable(consulted),
 				overridden: immutable(overridden),
 				originalRoute: inputs.originalRoute,
 				originalSource: inputs.originalSource,
 				reason: inputs.reason,
+				responsibility: inputs.responsibility,
+				alias: inputs.alias,
 				invalid: undefined,
+			};
+		}
+		if (tier.source === "agent_frontmatter" && inputs.responsibility) {
+			return {
+				source: tier.source,
+				explicit: false,
+				selectedSelectors: candidate.selectors,
+				resolvedPatterns: candidate.patterns,
+				route: undefined,
+				parentActiveSelector: inputs.parentActiveSelector,
+				consulted: immutable(consulted),
+				overridden: immutable([]),
+				originalRoute: inputs.originalRoute,
+				originalSource: inputs.originalSource,
+				reason: inputs.reason,
+				responsibility: inputs.responsibility,
+				alias: inputs.alias,
+				invalid: { kind: "invalid_spawn_route", requested: candidate.selectors, patterns: candidate.patterns },
 			};
 		}
 		if (tier.explicit) {
@@ -225,6 +309,8 @@ export function resolveSpawnRoute(inputs: SpawnRouteInput): SpawnRouteDecision {
 				originalRoute: inputs.originalRoute,
 				originalSource: inputs.originalSource,
 				reason: inputs.reason,
+				responsibility: inputs.responsibility,
+				alias: inputs.alias,
 				invalid: { kind: "invalid_spawn_route", requested: candidate.selectors, patterns: candidate.patterns },
 			};
 		}
@@ -242,21 +328,17 @@ export function resolveSpawnRoute(inputs: SpawnRouteInput): SpawnRouteDecision {
 		originalRoute: inputs.originalRoute,
 		originalSource: inputs.originalSource,
 		reason: inputs.reason,
+		responsibility: inputs.responsibility,
+		alias: inputs.alias,
 		invalid: undefined,
 	};
 }
 
-export function admitSpawnRoute(
-	decision: SpawnRouteDecision,
-	quotaAdmission: AgentQuotaAdmission,
-): SpawnRouteDecision {
+export function admitSpawnRoute(decision: SpawnRouteDecision, quotaAdmission: AgentQuotaAdmission): SpawnRouteDecision {
 	return { ...decision, quotaAdmission };
 }
 
-export function blockSpawnRoute(
-	decision: SpawnRouteDecision,
-	block: SpawnRouteQuotaBlock,
-): SpawnRouteDecision {
+export function blockSpawnRoute(decision: SpawnRouteDecision, block: SpawnRouteQuotaBlock): SpawnRouteDecision {
 	return { ...decision, block };
 }
 
@@ -339,5 +421,9 @@ export function toSpawnRouteReceipt(decision: SpawnRouteDecision): SpawnRouteRec
 		resolvedPatterns: decision.resolvedPatterns,
 		quotaAdmission: decision.quotaAdmission,
 		priorAttempts: decision.priorAttempts ?? immutable([]),
+		responsibility: decision.responsibility,
+		alias: decision.alias,
+		resolutionSource: decision.source,
+		resolvedLane: decision.route.selector,
 	};
 }

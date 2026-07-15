@@ -96,11 +96,11 @@ import type {
 } from "@oh-my-pi/pi-ai";
 import {
 	calculateRateLimitBackoffMs,
+	classifyRequestFailure,
 	clearAnthropicFastModeFallback,
 	deriveClaudeDeviceId,
 	Effort,
 	isContextOverflow,
-	isTransientNetworkError,
 	isUsageLimitError,
 	parseRateLimitReason,
 	resolveServiceTier,
@@ -1490,7 +1490,7 @@ export class AgentSession {
 			);
 		});
 	}
-	#abortInProgress = false;
+	#abortInProgress = 0;
 	// Wire-level agent_end emission deferred until #promptInFlightCount drops to 0.
 	// Internal extension hooks and post-emit work (auto-retry, auto-compaction, todo
 	// checks in #handleAgentEvent) still fire on the original schedule — only the
@@ -2692,34 +2692,37 @@ export class AgentSession {
 			const inputId = this.#activeDurableInputId;
 			const attemptId = this.#activeDurableAttemptId;
 			const requestStarted = this.#activeDurableRequestStarted;
-			const queue = await this.#durableInputQueue;
-			if (queue) {
-				try {
-					const revision = this.#activeDurableInputRevision;
-					if (revision === undefined) throw new Error(`Durable input ${inputId} has no active revision`);
-					const message = event.message as AssistantMessage;
-					if (!requestStarted) {
-						await queue.requeueUnstarted(inputId, attemptId);
-						await this.#refreshDurableQueuedInputProjection(queue);
-						await this.#appendDurableAttemptEntry(inputId, attemptId, revision, "not-executed");
-					} else if (message.errorMessage && isUsageLimitError(message.errorMessage)) {
-						const delay =
-							this.#parseRetryAfterMsFromError(message.errorMessage) ??
-							calculateRateLimitBackoffMs(parseRateLimitReason(message.errorMessage));
-						const retryAt = Date.now() + delay;
-						await queue.failRateLimit(inputId, attemptId, retryAt);
-						await this.#refreshDurableQueuedInputProjection(queue);
-						await this.#appendDurableAttemptEntry(inputId, attemptId, revision, "failed-rate-limit", retryAt);
-						this.#durableRateLimitHandledForAgentEnd = true;
-						await this.#scheduleDurableRetry(queue);
-					} else {
-						await queue.completeAttempt(inputId, attemptId);
-						await this.#refreshDurableQueuedInputProjection(queue);
-						await this.#appendDurableAttemptEntry(inputId, attemptId, revision, "completed");
-					}
+			const revision = this.#activeDurableInputRevision;
+			try {
+				const queue = await this.#durableInputQueue;
+				if (!queue) throw this.#durableInputQueueError ?? new Error("Durable input queue is unavailable");
+				if (revision === undefined) throw new Error(`Durable input ${inputId} has no active revision`);
+				const message = event.message as AssistantMessage;
+				if (!requestStarted) {
+					await queue.requeueUnstarted(inputId, attemptId);
+					await this.#refreshDurableQueuedInputProjection(queue);
+					await this.#appendDurableAttemptEntry(inputId, attemptId, revision, "not-executed");
+				} else if (message.errorMessage && isUsageLimitError(message.errorMessage)) {
+					const delay =
+						this.#parseRetryAfterMsFromError(message.errorMessage) ??
+						calculateRateLimitBackoffMs(parseRateLimitReason(message.errorMessage));
+					const retryAt = Date.now() + delay;
+					await queue.failRateLimit(inputId, attemptId, retryAt);
+					await this.#refreshDurableQueuedInputProjection(queue);
+					await this.#appendDurableAttemptEntry(inputId, attemptId, revision, "failed-rate-limit", retryAt);
+					this.#durableRateLimitHandledForAgentEnd = true;
+					await this.#scheduleDurableRetry(queue);
+				} else {
+					await queue.completeAttempt(inputId, attemptId);
+					await this.#refreshDurableQueuedInputProjection(queue);
+					await this.#appendDurableAttemptEntry(inputId, attemptId, revision, "completed");
+				}
+			} catch (error) {
+				if (!this.#handleDurableOwnershipLoss(error as Error)) throw error;
+			} finally {
+				if (this.#activeDurableInputId === inputId && this.#activeDurableAttemptId === attemptId) {
 					this.#clearActiveDurableAttempt();
-				} catch (error) {
-					if (!this.#handleDurableOwnershipLoss(error as Error)) throw error;
+					this.#scheduleDurableQueueDrainAfterIdle();
 				}
 			}
 		}
@@ -6090,9 +6093,13 @@ export class AgentSession {
 			} else {
 				await this.#queueUserMessage(expandedText, options?.attachments, "steer");
 			}
-			// Steer/follow-up the keyword notices alongside the queued user message.
-			for (const notice of keywordNotices) {
-				await this.sendCustomMessage(notice, { deliverAs: options.streamingBehavior });
+			// Follow-ups are re-entered through prompt(), which regenerates their
+			// keyword notices in the same provider turn. Enqueuing a second durable
+			// custom input here would admit the notice as a duplicate turn.
+			if (!this.#durableInputQueueRequired || options.streamingBehavior === "steer") {
+				for (const notice of keywordNotices) {
+					await this.sendCustomMessage(notice, { deliverAs: options.streamingBehavior });
+				}
 			}
 			return true;
 		}
@@ -7045,6 +7052,10 @@ export class AgentSession {
 
 	async #admitDurableQueuedInputAtToolBoundary(): Promise<AgentMessage | undefined> {
 		await this.#pendingTurnEndProcessing;
+		if (this.#abortInProgress) {
+			this.#durableQueueDrainPending = true;
+			return undefined;
+		}
 		if (this.#durableOwnershipLostError) throw this.#durableOwnershipLostError;
 		if (
 			this.#activeDurableInputId !== undefined ||
@@ -7054,6 +7065,11 @@ export class AgentSession {
 			return undefined;
 		}
 		const release = await this.#acquireDurableAdmissionMaintenance();
+		if (this.#abortInProgress) {
+			this.#durableQueueDrainPending = true;
+			release();
+			return undefined;
+		}
 		const queue = await this.#durableInputQueue;
 		if (!queue) {
 			release();
@@ -7131,10 +7147,13 @@ export class AgentSession {
 				await this.#refreshDurableQueuedInputProjection(queue);
 				await this.#appendDurableAttemptEntry(inputId, attemptId, revision, "not-executed");
 			}
-			this.#clearActiveDurableAttempt();
 		} catch (error) {
-			if (this.#handleDurableOwnershipLoss(error as Error)) return;
-			throw error;
+			if (!this.#handleDurableOwnershipLoss(error as Error)) throw error;
+		} finally {
+			if (this.#activeDurableInputId === inputId && this.#activeDurableAttemptId === attemptId) {
+				this.#clearActiveDurableAttempt();
+				this.#scheduleDurableQueueDrainAfterIdle();
+			}
 		}
 	}
 
@@ -7143,7 +7162,7 @@ export class AgentSession {
 			if (suppressOwnershipLoss) return;
 			throw this.#durableOwnershipLostError;
 		}
-		if (this.#sessionControlPaused) {
+		if (this.#sessionControlPaused || this.#abortInProgress) {
 			this.#durableQueueDrainPending = true;
 			return;
 		}
@@ -7157,7 +7176,8 @@ export class AgentSession {
 			if (suppressOwnershipLoss) return;
 			throw this.#durableOwnershipLostError;
 		}
-		if (this.#sessionControlPaused || this.isStreaming || this.#activeDurableInputId) {
+		if (this.#sessionControlPaused || this.#abortInProgress || this.isStreaming || this.#activeDurableInputId) {
+			if (this.#sessionControlPaused || this.#abortInProgress) this.#durableQueueDrainPending = true;
 			this.#releaseDurableAdmissionMaintenance();
 			return;
 		}
@@ -7292,10 +7312,16 @@ export class AgentSession {
 					} as InternalPromptOptions);
 				}
 				if (this.#activeDurableInputId === item.inputId && !this.#activeDurableRequestStarted) {
-					await queue.requeueUnstarted(item.inputId, attempt.id);
-					await this.#refreshDurableQueuedInputProjection(queue);
-					await this.#appendDurableAttemptEntry(item.inputId, attempt.id, item.revision, "not-executed");
-					this.#clearActiveDurableAttempt();
+					try {
+						await queue.requeueUnstarted(item.inputId, attempt.id);
+						await this.#refreshDurableQueuedInputProjection(queue);
+						await this.#appendDurableAttemptEntry(item.inputId, attempt.id, item.revision, "not-executed");
+					} finally {
+						if (this.#activeDurableInputId === item.inputId && this.#activeDurableAttemptId === attempt.id) {
+							this.#clearActiveDurableAttempt();
+							this.#scheduleDurableQueueDrainAfterIdle();
+						}
+					}
 				}
 			} catch (error) {
 				if (this.#handleDurableOwnershipLoss(error as Error)) {
@@ -7303,16 +7329,22 @@ export class AgentSession {
 					throw this.#durableOwnershipLostError ?? error;
 				}
 				if (this.#activeDurableInputId === item.inputId) {
-					if (!this.#activeDurableRequestStarted) {
-						await queue.requeueUnstarted(item.inputId, attempt.id);
-						await this.#refreshDurableQueuedInputProjection(queue);
-						await this.#appendDurableAttemptEntry(item.inputId, attempt.id, item.revision, "not-executed");
-					} else {
-						await queue.markUncertain(item.inputId, attempt.id);
-						await this.#refreshDurableQueuedInputProjection(queue);
-						await this.#appendDurableAttemptEntry(item.inputId, attempt.id, item.revision, "uncertain");
+					try {
+						if (!this.#activeDurableRequestStarted) {
+							await queue.requeueUnstarted(item.inputId, attempt.id);
+							await this.#refreshDurableQueuedInputProjection(queue);
+							await this.#appendDurableAttemptEntry(item.inputId, attempt.id, item.revision, "not-executed");
+						} else {
+							await queue.markUncertain(item.inputId, attempt.id);
+							await this.#refreshDurableQueuedInputProjection(queue);
+							await this.#appendDurableAttemptEntry(item.inputId, attempt.id, item.revision, "uncertain");
+						}
+					} finally {
+						if (this.#activeDurableInputId === item.inputId && this.#activeDurableAttemptId === attempt.id) {
+							this.#clearActiveDurableAttempt();
+							this.#scheduleDurableQueueDrainAfterIdle();
+						}
 					}
-					this.#clearActiveDurableAttempt();
 				}
 				throw error;
 			}
@@ -7521,9 +7553,9 @@ export class AgentSession {
 	}
 
 	#scheduleDurableQueueDrainAfterIdle(): void {
-		if (this.#isDisposed || this.#durableOwnershipLostError || this.#sessionControlPaused) return;
+		if (this.#isDisposed || this.#durableOwnershipLostError) return;
 		this.#durableQueueDrainPending = true;
-		if (this.#durableQueueDrainScheduled) return;
+		if (this.#sessionControlPaused || this.#abortInProgress || this.#durableQueueDrainScheduled) return;
 		this.#startDurableQueueDrainAfterIdle();
 	}
 
@@ -7532,6 +7564,7 @@ export class AgentSession {
 			this.#isDisposed ||
 			this.#durableOwnershipLostError ||
 			this.#sessionControlPaused ||
+			this.#abortInProgress ||
 			this.#durableQueueDrainScheduled ||
 			!this.#durableQueueDrainPending
 		) {
@@ -7542,7 +7575,13 @@ export class AgentSession {
 		drainTask = this.agent
 			.waitForIdle()
 			.then(async () => {
-				if (this.#isDisposed || this.#durableOwnershipLostError || this.#sessionControlPaused) return;
+				if (
+					this.#isDisposed ||
+					this.#durableOwnershipLostError ||
+					this.#sessionControlPaused ||
+					this.#abortInProgress
+				)
+					return;
 				// AgentCore may be idle before the outer prompt's recovery/finally
 				// releases its in-flight count. Leave the intent for #endInFlight
 				// instead of recursively prompting during that recovery.
@@ -7564,6 +7603,7 @@ export class AgentSession {
 					!this.#isDisposed &&
 					!this.#durableOwnershipLostError &&
 					!this.#sessionControlPaused &&
+					!this.#abortInProgress &&
 					!this.isStreaming &&
 					!this.#activeDurableInputId
 				) {
@@ -8026,14 +8066,17 @@ export class AgentSession {
 	}
 
 	async cancelQueuedInput(inputId: string): Promise<DurableQueuedInput> {
-		const queue = await this.#getDurableInputQueueForMutation();
+		const release = await this.#acquireDurableAdmissionMaintenance();
 		try {
+			const queue = await this.#getDurableInputQueueForMutation();
 			const item = await queue.cancel(inputId);
 			await this.#refreshDurableQueuedInputProjection(queue);
 			return this.#freezeDurableQueuedInput(item);
 		} catch (error) {
 			if (this.#handleDurableOwnershipLoss(error as Error)) throw this.#durableOwnershipLostError ?? error;
 			throw error;
+		} finally {
+			release();
 		}
 	}
 
@@ -8203,7 +8246,7 @@ export class AgentSession {
 		// Session switch/compact paths disconnect first; explicit aborts should
 		// leave any queued steer/follow-up visible for the user rather than
 		// auto-starting a fresh turn during cleanup.
-		this.#abortInProgress = true;
+		this.#abortInProgress++;
 		try {
 			this.abortRetry();
 			this.#promptGeneration++;
@@ -8242,8 +8285,10 @@ export class AgentSession {
 				this.#preserveAdvisorCard(card);
 			}
 		} finally {
-			this.#abortInProgress = false;
-			this.#drainStrandedQueuedMessages();
+			if (--this.#abortInProgress === 0) {
+				this.#scheduleDurableQueueDrainAfterIdle();
+				this.#drainStrandedQueuedMessages();
+			}
 		}
 	}
 
@@ -11609,6 +11654,15 @@ export class AgentSession {
 		if (this.#isStaleOpenAIResponsesReplayError(message)) return true;
 
 		const err = message.errorMessage;
+		const cause = classifyRequestFailure({ message: err, status: message.errorStatus });
+		if (
+			cause === "network" ||
+			cause === "rate-limit" ||
+			cause === "provider-stream-abort" ||
+			cause === "timeout"
+		) {
+			return true;
+		}
 		return this.#isTransientErrorMessage(err) || isUsageLimitError(err);
 	}
 	#refusalHasUnsafeReplayContent(message: AssistantMessage): boolean {
@@ -11660,7 +11714,7 @@ export class AgentSession {
 
 	#isTransientErrorMessage(errorMessage: string): boolean {
 		return (
-			isTransientNetworkError(errorMessage) ||
+			classifyRequestFailure(errorMessage) === "network" ||
 			this.#isTransientEnvelopeErrorMessage(errorMessage) ||
 			this.#isTransientTransportErrorMessage(errorMessage)
 		);
@@ -12033,7 +12087,8 @@ export class AgentSession {
 		const classifierRefusal = this.#refusalRerouteDecision(message).reroute;
 		const generation = this.#promptGeneration;
 		const errorMessage = message.errorMessage || "Unknown error";
-		const transientNetwork = isTransientNetworkError(errorMessage);
+		const requestFailureCause = classifyRequestFailure({ message: errorMessage, status: message.errorStatus });
+		const transientNetwork = requestFailureCause === "network";
 		const networkHoldMs = Math.max(0, retrySettings.networkHoldMs);
 		let networkElapsedMs = 0;
 		if (transientNetwork) {
@@ -12047,6 +12102,7 @@ export class AgentSession {
 		this.#retryAttempt++;
 		const retryCause =
 			transientNetwork ||
+			requestFailureCause === "rate-limit" ||
 			isUsageLimitError(errorMessage) ||
 			/\brate.?limit\b|too many requests|\b429\b/i.test(errorMessage)
 				? transientNetwork
