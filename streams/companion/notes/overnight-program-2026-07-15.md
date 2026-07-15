@@ -1,5 +1,16 @@
 # Overnight program — 2026-07-15 (living doc)
 
+## Morning summary
+Four overnight waves landed: replay now runs the production guarded path with fingers, corpus-tuned smoothing, and a fail-open 3D depth prior; provider comparison, clip-quality badges, queue visibility, and fail-closed licensed lanes are live; the direction-gated model/rig generation brief is ready for Arthur; and the latest full validation is **489 tests / 0 failures**. The guarded corpus result is **−26.8% jerk** with roughly **−95% hip jitter**, while all **281 clips** now carry quality badges.
+
+**Play right now at [companion.localhost:1355/lab](http://companion.localhost:1355/lab):**
+- Browse the badged 281-clip library.
+- Replay clips with fingers and flip smoothing and depth-prior toggles.
+- Open provider compare and solo-swap among Apple Vision, MediaPipe, and GPU tracks.
+- Watch the desktop GPU queue in Pipeline Monitor.
+
+**Arthur inputs pending:** run the 2-minute calibration pass; drop the registered MPI files into `desktop:~/projects/model-bench/licensed/`, then run `queue/preflight-licensed.sh`; answer Xanadu questions `f2114ebc` (v2 retirement) and `0357400a-c046-4da1-a432-cc1be7edb3cd` (model/rig generation direction).
+
 Orchestrator anchor: survives compactions. Update at every wave boundary (scribe-delegated). Boot context for any resumer: `streams/companion/HANDOFF-BEHAVIOR.md` → this doc.
 
 ## Operating rules (Arthur-set tonight)
@@ -54,17 +65,19 @@ Orchestrator anchor: survives compactions. Update at every wave boundary (scribe
 - Test-coverage gaps from reviewer transcripts (arbiter production paths, lab-state seams) — qa agent.
 - /lab bundle audit (2.73MB): measure, split obvious islands if cheap; no restyle.
 
-### Wave 4 — model/rig GENERATION pipeline (DIRECTION-GATED, tail item, Arthur 2026-07-15 night)
-Arthur's ask: infra for generating our own 3D models + CUSTOM rig generation + validation ("SkyeSharkie" referenced in earlier companion chats — recon where; connects to the reference-avatar-pipeline challenger lane: multiview→highpoly→agent-lowpoly, currently documented fail-closed, not implemented). Explicitly: general direction should be checked by Arthur when he wakes.
-Tonight's scope is PREP ONLY, run after waves 1-3 and only with juice left: (a) recon SkyeSharkie references + prior chats/notes into a direction brief; (b) survey the generation-stack options against our constraints (VRoid-topology Perfect Sync transfer lane as production, generated-mesh challenger, licensing, GPU-queue fit); (c) draft the pipeline + validation-gate design as an extension of scripts/avatar-pipeline (tri-state gates, proof cards); (d) post a Xanadu QUESTION with the proposed direction + forks for his morning. NO heavy implementation before his direction check.
+### Wave 4 — DONE (direction brief written; implementation remains direction-gated)
+The recon, generation-stack survey, two-lane model/rig pipeline, and fail-closed validation-gate design are complete in `streams/companion/notes/model-gen-direction.md`. Production stays on VRoid-topology Perfect Sync transfer; generated meshes remain reference-only, with template-fit production and custom-rig challenger lanes proposed. Xanadu question `0357400a-c046-4da1-a432-cc1be7edb3cd` is pending Arthur's direction check; no heavy implementation was started.
+
+## Soak (as of wrap)
+`bun scripts/soak-report.ts`: **50m04s observed uptime, 100.0% healthy (11/11 cycles), RSS slope +0.592 MB/cycle, 1 new error line, replay success 22/22 (100.0%)**. The watcher keeps running in tmux `soak-watch`; rerun the reporter anytime for soak-so-far.
 
 ### Orchestration conservatism (Arthur, tonight)
 Do not multiply unrelated substreams in parallel. One wave in flight at a time (current wave-1 concurrency is the ceiling); waves run in order; new substreams queue behind, not beside.
 
 ## Blocked on Arthur (documented, not tonight)
-- 2-min deliberate calibration pass (runbook docs/motion-capture-comparison.md).
-- MPI registration: SMPL+SMPLX+FLAME+MANO → unlocks GVHMR mesh-gen + WiLoR 3D via gpu-queue.
-- Xanadu question pending: v2 replay retirement.
+- 2-minute deliberate calibration pass (runbook `docs/motion-capture-comparison.md`).
+- MPI file drop: registered SMPL + SMPL-X + FLAME + MANO into `desktop:~/projects/model-bench/licensed/`, then run `queue/preflight-licensed.sh` to unlock the fail-closed GVHMR mesh and WiLoR 3D lanes.
+- Xanadu questions pending: `f2114ebc` (v2 replay retirement) and `0357400a-c046-4da1-a432-cc1be7edb3cd` (model/rig generation direction).
 
 ## Key seams (for resumers)
 - Tracks: `data/gpu-pose-tracks/*.json` (281, full-frame, hands), `data/apple-vision-tracks/*.jsonl` (281, 2D+3D), `data/body-tracks/*.json` (73, legacy v2), comparison at `data/apple-vision-tracks/comparison-summary.json`.
