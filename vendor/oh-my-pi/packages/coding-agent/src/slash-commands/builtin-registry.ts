@@ -1185,7 +1185,7 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<SlashCommandSpec> = [
 	},
 	{
 		name: "context",
-		tuiNamespace: "colon",
+		tuiNamespace: "slash",
 		description: "Show estimated context usage breakdown",
 		acpDescription: "Show context usage",
 		handle: async (_command, runtime) => {
@@ -2427,7 +2427,7 @@ export async function executeBuiltinSlashCommand(
 	if (!parsed) return false;
 
 	const command = BUILTIN_SLASH_COMMAND_LOOKUP.get(parsed.name);
-	if (TUI_COLON_COMMAND_NAMES.has(parsed.name) || command?.tuiNamespace === "colon") {
+	if ((TUI_COLON_COMMAND_NAMES.has(parsed.name) && !command) || command?.tuiNamespace === "colon") {
 		runtime.ctx.showStatus(`Use :${parsed.name} in the TUI`);
 		runtime.ctx.editor.setText("");
 		return true;

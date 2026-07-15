@@ -1144,7 +1144,9 @@ export class Editor implements Component, Focusable {
 						this.#cancelAutocomplete();
 					} else {
 						const selected = this.#completion.accept();
-						if (selected && this.#autocompleteProvider) {
+						const selectedMatchesTypedPrefix =
+							selected && selected.value.toLowerCase().startsWith(currentTextBeforeCursor.slice(1).toLowerCase());
+						if (selectedMatchesTypedPrefix && this.#autocompleteProvider) {
 							const result = this.#autocompleteProvider.applyCompletion(
 								this.#state.lines,
 								this.#state.cursorLine,
@@ -1289,20 +1291,22 @@ export class Editor implements Component, Focusable {
 					const syncResult = this.#autocompleteProvider.trySyncSlashCompletion(textBeforeCursor);
 					if (syncResult && syncResult.items.length > 0) {
 						// Invalidate any pending async autocomplete so its stale results are discarded
-						this.#autocompleteRequestId += 1;
-						// Apply the best match and submit the completed command
 						const selected = syncResult.items[0]!;
-						const result = this.#autocompleteProvider.applyCompletion(
-							this.#state.lines,
-							this.#state.cursorLine,
-							this.#state.cursorCol,
-							selected,
-							syncResult.prefix,
-						);
-						this.#state.lines = result.lines;
-						this.#state.cursorLine = result.cursorLine;
-						this.#setCursorCol(result.cursorCol);
-						result.onApplied?.();
+						if (selected.value.toLowerCase().startsWith(textBeforeCursor.slice(1).toLowerCase())) {
+							this.#autocompleteRequestId += 1;
+							// Apply the best match and submit the completed command
+							const result = this.#autocompleteProvider.applyCompletion(
+								this.#state.lines,
+								this.#state.cursorLine,
+								this.#state.cursorCol,
+								selected,
+								syncResult.prefix,
+							);
+							this.#state.lines = result.lines;
+							this.#state.cursorLine = result.cursorLine;
+							this.#setCursorCol(result.cursorCol);
+							result.onApplied?.();
+						}
 					}
 				}
 			}

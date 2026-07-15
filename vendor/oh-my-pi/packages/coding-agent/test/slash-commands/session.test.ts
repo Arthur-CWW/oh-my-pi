@@ -132,3 +132,47 @@ describe("/session slash command", () => {
 		expect(await executeBuiltinSlashCommand("/session delete", { ctx })).toBe(false);
 	});
 });
+describe("/context and /compact slash commands", () => {
+	it("dispatches exact /context as a read-only report without invoking compaction", async () => {
+		const statuses: string[] = [];
+		const setText = vi.fn();
+		const compact = vi.fn(async () => "ok");
+		const session = {
+			model: { provider: "test", id: "test", contextWindow: 200_000 },
+			agent: { state: { tools: [] } },
+			skills: [],
+			systemPrompt: ["You are a helpful assistant."],
+			messages: [{ role: "user", content: "hello" }],
+			getContextUsage: () => ({ contextWindow: 200_000, tokens: 12 }),
+		};
+		const ctx = {
+			session,
+			sessionManager: { getCwd: () => "/tmp" },
+			settings: {},
+			editor: { setText },
+			showStatus: (text: string) => statuses.push(text),
+			handleCompactCommand: compact,
+			refreshSlashCommandState: () => {},
+		} as unknown as InteractiveModeContext;
+
+		expect(await executeBuiltinSlashCommand("/context", { ctx })).toBe(true);
+		expect(statuses.at(-1)).toContain("Context");
+		expect(compact).not.toHaveBeenCalled();
+		expect(setText).toHaveBeenCalledWith("");
+	});
+
+	it("keeps explicit /compact dispatch on the compaction handler", async () => {
+		const setText = vi.fn();
+		const compact = vi.fn(async () => "ok");
+		const ctx = {
+			session: {},
+			sessionManager: { getCwd: () => "/tmp" },
+			settings: {},
+			editor: { setText },
+			handleCompactCommand: compact,
+		} as unknown as InteractiveModeContext;
+
+		expect(await executeBuiltinSlashCommand("/compact", { ctx })).toBe(true);
+		expect(compact).toHaveBeenCalledWith(undefined);
+	});
+});

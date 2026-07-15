@@ -78,6 +78,64 @@ describe("Editor slash autocomplete acceptance", () => {
 
 		expect(editor.getText()).toBe("/skills:fix-bug ");
 	});
+	it("keeps an unknown fuzzy slash token unchanged on Enter", async () => {
+		const editor = new Editor(defaultEditorTheme);
+		editor.setAutocompleteProvider(new CombinedAutocompleteProvider([{ name: "compact", description: "Compact" }], "/tmp"));
+		let submitted = "";
+		editor.onSubmit = text => {
+			submitted = text;
+		};
+
+		editor.handleInput("/");
+		await Bun.sleep(0);
+		editor.handleInput("c");
+		editor.handleInput("o");
+		editor.handleInput("m");
+		editor.handleInput("p");
+		editor.handleInput("t");
+		await Bun.sleep(0);
+		expect(editor.isShowingAutocomplete()).toBe(true);
+		editor.handleInput("\r");
+
+		expect(submitted).toBe("/compt");
+	});
+
+	it("accepts a slash command prefix explicitly with Tab", async () => {
+		const editor = new Editor(defaultEditorTheme);
+		editor.setAutocompleteProvider(new CombinedAutocompleteProvider([{ name: "compact", description: "Compact" }], "/tmp"));
+
+		editor.handleInput("/");
+		await Bun.sleep(0);
+		editor.handleInput("c");
+		editor.handleInput("o");
+		await Bun.sleep(0);
+		editor.handleInput("\t");
+
+		expect(editor.getText()).toBe("/compact ");
+	});
+
+	it("keeps exact /compact Enter submission unchanged", async () => {
+		const editor = new Editor(defaultEditorTheme);
+		editor.setAutocompleteProvider(new CombinedAutocompleteProvider([{ name: "compact", description: "Compact" }], "/tmp"));
+		let submitted = "";
+		editor.onSubmit = text => {
+			submitted = text;
+		};
+
+		editor.handleInput("/");
+		await Bun.sleep(0);
+		editor.handleInput("c");
+		editor.handleInput("o");
+		editor.handleInput("m");
+		editor.handleInput("p");
+		editor.handleInput("a");
+		editor.handleInput("c");
+		editor.handleInput("t");
+		await Bun.sleep(0);
+		editor.handleInput("\r");
+
+		expect(submitted).toBe("/compact");
+	});
 });
 class SyncSlashProvider implements AutocompleteProvider {
 	async getSuggestions(
