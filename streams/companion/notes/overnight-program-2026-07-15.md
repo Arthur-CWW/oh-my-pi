@@ -31,10 +31,11 @@ Orchestrator anchor: survives compactions. Update at every wave boundary (scribe
 | QATriageSweep | aria-labels, stale fallback text, browser window.onerror→errors.log wiring (proven), doc path cleanup. Note qa-triage-2026-07-15.md |
 | FilterParamTuning | Strict-feasible winner 0.45Hz/beta10/hipDamping1.5: median jerk −57.5% (prior −52.1%, +5.44pp), peak loss 9.1%, lag 0ms; constants updated w/ provenance. Note motion-filter-tuning.md |
 | ValidatePipeline | `bun scripts/validate.ts` 4 gates + ratchet floor (473) + `--checkpoint` commit mode; summaries in local/validation/ |
-### Wave 2 — after wave 1 gates
-- 3D retargeter prototype (Sol) — scope from Body3dStability verdict (drive rotations / depth prior / not-ready).
-- Overnight soak: live-stack watcher (synthetic replay cycling via debug routes, lab-state sampling, errors.log diffing) in tmux, several hours; morning soak report.
-- Full browser QA pass over wave-1 ships.
+### Wave 2 — DONE (checkpoint nested `3970e39`; floor 479)
+- DepthPrior3D: `public/depth-prior.ts` sign-only bend/fore-aft hints from body3d, gated (12m/s velocity, symmetry, availability, 150ms alignment); fail-open to 2D; toggle default-ON; 10/10 stable clips no-regression; 479/0.
+- Filter constants FINAL: 0.45Hz / beta **1** / hip 1.5 — RetargetDejank's post-guard basis superseded FilterParamTuning's pre-guard beta 10 (orchestrator ruling; provenance in file + tuning-note addendum). Guarded jerk 105.9→77.5 (−26.8%).
+- OvernightSoak: watcher LIVE in tmux `soak-watch` (5-min cycles: both replays, lab-state, RSS, UDP lanes, errors.log diff → local/soak/soak-2026-07-15.jsonl); reporter `scripts/soak-report.ts`; first 2 cycles healthy, RSS flat, soak even caught QA's synthetic error line (wiring proven end-to-end).
+- Wave1BrowserQA: replay-v3 E2E gap closed (GPU body+fingers, source indicator, smoothing toggle all pass); calibration string live in browser arbiter (0.840048); PARTIAL: /api/debug/lab-state showed a stale no-eligible-offer reason during replay (browser-side live — likely snapshot cadence, triage in wave 3); resize-persistence/Space-pause partial due browser-tool limits (verified earlier waves).
 
 ### Wave 3+ backlog (no-input, pre-approved shape)
 - Library quality badges: per-clip scores (availability/jerk/agreement from manifests+comparison) as badges in the 281-clip library; data JSON + small UI.
