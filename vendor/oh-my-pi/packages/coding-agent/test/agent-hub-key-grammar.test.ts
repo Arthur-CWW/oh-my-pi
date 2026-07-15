@@ -58,9 +58,7 @@ describe("Agent Hub Vim key grammar", () => {
 		expect(wrappedLine).toHaveLength(3);
 
 		const sequence = new AgentHubViewerSequence();
-		const options = (
-			overrides: Partial<AgentHubViewerSequenceOptions>,
-		): AgentHubViewerSequenceOptions => ({
+		const options = (overrides: Partial<AgentHubViewerSequenceOptions>): AgentHubViewerSequenceOptions => ({
 			prefix: false,
 			down: false,
 			up: false,
@@ -68,17 +66,9 @@ describe("Agent Hub Vim key grammar", () => {
 			interrupt: false,
 			...overrides,
 		});
-		const motion = (
-			offset: number,
-			key: "j" | "k",
-			nowMs: number,
-		): number => {
+		const motion = (offset: number, key: "j" | "k", nowMs: number): number => {
 			expect(sequence.handle("g", options({ prefix: true }), nowMs)).toEqual({ kind: "pending" });
-			const action = sequence.handle(
-				key,
-				options(key === "j" ? { down: true } : { up: true }),
-				nowMs + 1,
-			);
+			const action = sequence.handle(key, options(key === "j" ? { down: true } : { up: true }), nowMs + 1);
 			return applyAgentHubViewerSequenceAction(offset, displayRows.length - 1, action);
 		};
 
@@ -122,5 +112,12 @@ describe("Agent Hub Vim key grammar", () => {
 			const filter = getInteractions({ surfaces: [surface], modes: ["filter"] });
 			expect(filter.some(entry => entry.semantics === "literal-input" && entry.keys?.includes("text"))).toBe(true);
 		}
+	});
+	it("reserves y for selected-child identity yank in Hub table mode", () => {
+		const yank = getInteractions({ surfaces: ["hub.table"], modes: ["normal"] }).find(
+			entry => entry.id === "hub.table.yank-identity",
+		);
+		expect(yank?.keys).toEqual(["y"]);
+		expect(yank?.description).toContain("identity");
 	});
 });

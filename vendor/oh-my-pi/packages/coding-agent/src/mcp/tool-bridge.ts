@@ -4,7 +4,7 @@
  * Converts MCP tool definitions to CustomTool format for the agent.
  */
 import type { AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
-import type { TSchema } from "@oh-my-pi/pi-ai";
+import type { ImageContent, TextContent, TSchema } from "@oh-my-pi/pi-ai";
 import { normalizeSchemaForMCP } from "@oh-my-pi/pi-ai/utils/schema";
 import { untilAborted } from "@oh-my-pi/pi-utils";
 import type { SourceMeta } from "../capability/types";
@@ -72,6 +72,46 @@ export interface MCPToolDetails {
 	/** Provider display name (e.g., "Claude Code", "MCP Config") */
 	providerName?: string;
 }
+
+function parseSerializedImage(text: string): ImageContent | undefined {
+	if (text[0] !== "{" || text.at(-1) !== "}") {
+		return undefined;
+	}
+
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(text);
+	} catch {
+		return undefined;
+	}
+
+	if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+		return undefined;
+	}
+
+	const envelope = parsed as Record<string, unknown>;
+	if (
+		envelope.type !== "image" ||
+		typeof envelope.data !== "string" ||
+		envelope.data.length === 0 ||
+		typeof envelope.mimeType !== "string" ||
+		!/^image\/\S+$/.test(envelope.mimeType)
+	) {
+		return undefined;
+	}
+
+	return { type: "image", data: envelope.data, mimeType: envelope.mimeType };
+}
+
+function appendText(content: (TextContent | ImageContent)[], text: string): void {
+	const previous = content.at(-1);
+	if (previous?.type === "text") {
+		previous.text += `\n\n${text}`;
+		return;
+	}
+	content.push({ type: "text", text });
+}
+
 /**
  * Format MCP content for LLM consumption.
  */
@@ -80,9 +120,11 @@ function formatMCPContent(content: MCPContent[]): string {
 
 	for (const item of content) {
 		switch (item.type) {
-			case "text":
-				parts.push(item.text);
+			case "text": {
+				const image = parseSerializedImage(item.text);
+				parts.push(image ? `[Image: ${image.mimeType}]` : item.text);
 				break;
+			}
 			case "image":
 				parts.push(`[Image: ${item.mimeType}]`);
 				break;
@@ -107,7 +149,6 @@ function buildResult(
 	provider?: string,
 	providerName?: string,
 ): CustomToolResult<MCPToolDetails> {
-	const text = formatMCPContent(result.content);
 	const details: MCPToolDetails = {
 		serverName,
 		mcpToolName,
@@ -116,12 +157,45 @@ function buildResult(
 		provider,
 		providerName,
 	};
-	const contentText = result.isError ? `Error: ${text}` : text;
-	const toolResult: CustomToolResult<MCPToolDetails> = { content: [{ type: "text", text: contentText }], details };
 	if (result.isError) {
-		toolResult.isError = true;
+		const toolResult: CustomToolResult<MCPToolDetails> = {
+			content: [{ type: "text", text: `Error: ${formatMCPContent(result.content)}` }],
+			details,
+			isError: true,
+		};
+		return toolResult;
 	}
-	return toolResult;
+
+	const content: (TextContent | ImageContent)[] = [];
+	for (const item of result.content) {
+		switch (item.type) {
+			case "text": {
+				const image = parseSerializedImage(item.text);
+				if (image) {
+					content.push(image);
+				} else {
+					appendText(content, item.text);
+				}
+				break;
+			}
+			case "image":
+				content.push({ type: "image", data: item.data, mimeType: item.mimeType });
+				break;
+			case "resource":
+				appendText(
+					content,
+					item.resource.text
+						? `[Resource: ${item.resource.uri}]\n${item.resource.text}`
+						: `[Resource: ${item.resource.uri}]`,
+				);
+				break;
+		}
+	}
+	if (content.length === 0) {
+		content.push({ type: "text", text: "" });
+	}
+
+	return { content, details };
 }
 
 /** Build an error CustomToolResult from a caught exception. */

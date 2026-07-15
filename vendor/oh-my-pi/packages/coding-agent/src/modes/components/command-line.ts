@@ -1,8 +1,11 @@
 import { Container, Input, matchesKey, SelectList, type SelectItem } from "@oh-my-pi/pi-tui";
+import { VERSION } from "@oh-my-pi/pi-utils";
 import { buildVersionViewModel, formatVersion } from "../../slash-commands/version";
+import { copyToClipboard } from "../../utils/clipboard";
 import {
 	COMMAND_MODE_COMMANDS,
 	applyCommandModeCompletion,
+	commandModeCommandsForView,
 	type CommandModeCommand,
 	type CommandModeCompletion,
 	type CommandModeContext,
@@ -18,7 +21,12 @@ const DEFAULT_MAX_VISIBLE = 12;
 
 function feedbackError(error: Error | string): string {
 	const message = typeof error === "string" ? error : error.message;
-	return message.replace(/[\r\n\t]+/g, " ").replace(/\s+/g, " ").trim() || "Command failed";
+	return (
+		message
+			.replace(/[\r\n\t]+/g, " ")
+			.replace(/\s+/g, " ")
+			.trim() || "Command failed"
+	);
 }
 
 /** Single-line footer prompt with a completion popup above it for Vim-style colon commands. */
@@ -148,54 +156,75 @@ export class CommandLineComponent extends Container {
 
 const installedContexts = new WeakSet<InteractiveModeContext>();
 
-/** Install the normal-context `:` route once for a main-view input controller. */
+export function canEnterCommandMode(ctx: InteractiveModeContext): boolean {
+	return (
+		ctx.ui.getFocused() === ctx.editor && ctx.editor.getText().length === 0 && !ctx.editor.isShowingAutocomplete()
+	);
+}
+
+export function commandModeContextForInteractive(
+	ctx: InteractiveModeContext,
+	commands: readonly CommandModeCommand[],
+): CommandModeContext {
+	return {
+		collabGuest: ctx.collabGuest,
+		commands,
+		toggleWrap: () => toggleTranscriptWrap(ctx),
+		toggleRich: () => toggleRichTranscript(ctx),
+		handleErrorsCommand: args => ctx.handleErrorsCommand(args),
+		showPrimitivesInspector: category => ctx.showPrimitivesInspector(category),
+		showCopySelector: () => ctx.showCopySelector(),
+		handleDumpCommand: isRaw => ctx.handleDumpCommand(isRaw),
+		handleJobsCommand: () => ctx.handleJobsCommand(),
+		handleChangelogCommand: showFull => ctx.handleChangelogCommand(showFull),
+		handleHotkeysCommand: () => ctx.handleHotkeysCommand(),
+		handleToolsCommand: () => ctx.handleToolsCommand(),
+		handleContextCommand: () => ctx.handleContextCommand(),
+		showVersion: async () => {
+			const viewModel = await buildVersionViewModel({
+				sessionStartedAt: ctx.viewSession.sessionManager.getHeader()?.timestamp,
+			});
+			ctx.showStatus(formatVersion(viewModel));
+		},
+		getSessionIdentity: () => {
+			const viewSession = ctx.viewSession;
+			return {
+				sessionId: ctx.sessionManager.getSessionId(),
+				sessionName: ctx.sessionManager.getSessionName(),
+				agentId: ctx.focusedAgentId ?? viewSession.getAgentId() ?? "Main",
+				journalPath: viewSession.sessionManager.getSessionFile(),
+				binaryVersion: VERSION,
+			};
+		},
+		copyIdentityHandle: handle => copyToClipboard(handle),
+		showFeedback: message => ctx.showStatus(message),
+	};
+}
+
+/** Install the normal-context `:` route for the main or focused child view. */
 export function installCommandLine(ctx: InteractiveModeContext): void {
 	if (installedContexts.has(ctx)) return;
 	installedContexts.add(ctx);
-	const canEnterCommandMode = (): boolean =>
-		ctx.ui.getFocused() === ctx.editor &&
-		ctx.editor.getText().length === 0 &&
-		!ctx.editor.isShowingAutocomplete() &&
-		!ctx.focusedAgentId;
+	const canEnter = (): boolean => canEnterCommandMode(ctx);
 	const show = (): void => {
-		if (!canEnterCommandMode()) return;
+		if (!canEnter()) return;
+		const commands = commandModeCommandsForView(Boolean(ctx.focusedAgentId));
 		const restore = (): void => {
 			ctx.editorContainer.clear();
 			ctx.editorContainer.addChild(ctx.editor);
 			ctx.ui.setFocus(ctx.editor);
 			ctx.ui.requestRender();
 		};
-		const commandLine = new CommandLineComponent(
-			{
-				collabGuest: ctx.collabGuest,
-				toggleWrap: () => toggleTranscriptWrap(ctx),
-				toggleRich: () => toggleRichTranscript(ctx),
-				handleErrorsCommand: args => ctx.handleErrorsCommand(args),
-				showPrimitivesInspector: category => ctx.showPrimitivesInspector(category),
-				showCopySelector: () => ctx.showCopySelector(),
-				handleDumpCommand: isRaw => ctx.handleDumpCommand(isRaw),
-				handleJobsCommand: () => ctx.handleJobsCommand(),
-				handleChangelogCommand: showFull => ctx.handleChangelogCommand(showFull),
-				handleHotkeysCommand: () => ctx.handleHotkeysCommand(),
-				handleToolsCommand: () => ctx.handleToolsCommand(),
-				handleContextCommand: () => ctx.handleContextCommand(),
-				showVersion: async () => {
-					const viewModel = await buildVersionViewModel({
-						sessionStartedAt: ctx.sessionManager.getHeader()?.timestamp,
-					});
-					ctx.showStatus(formatVersion(viewModel));
-				},
-				showFeedback: message => ctx.showStatus(message),
-			},
-			restore,
-		);
+		const commandLine = new CommandLineComponent(commandModeContextForInteractive(ctx, commands), restore, {
+			commands,
+		});
 		ctx.editorContainer.clear();
 		ctx.editorContainer.addChild(commandLine);
 		ctx.ui.setFocus(commandLine.input);
 		ctx.ui.requestRender();
 	};
 	ctx.ui.addInputListener(data => {
-		if (data !== ":" || !canEnterCommandMode()) return undefined;
+		if (data !== ":" || !canEnter()) return undefined;
 		show();
 		return { consume: true };
 	});

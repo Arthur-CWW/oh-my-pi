@@ -87,6 +87,8 @@ export interface TuiSlashCommandRuntime {
 export interface SlashCommandSpec extends BuiltinSlashCommand {
 	/** When false, the dispatcher refuses to handle invocations that include arguments. */
 	allowArgs?: boolean;
+	/** Allow a read-only invocation while the TUI is focused on a child session. */
+	focusedViewSafe?: boolean | ((args: string) => boolean);
 	/**
 	 * ACP-specific override for `description`. Used by `ACP_BUILTIN_SLASH_COMMANDS`
 	 * when building `available_commands_update` payloads so the client receives

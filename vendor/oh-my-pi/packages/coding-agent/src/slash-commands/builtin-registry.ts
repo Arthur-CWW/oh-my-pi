@@ -175,10 +175,7 @@ const shutdownHandlerTui = (_command: ParsedSlashCommand, runtime: TuiSlashComma
 	return commandConsumed();
 };
 
-async function captureRestartChildrenAfterShutdown(
-	ctx: InteractiveModeContext,
-	predecessorOwnerEpoch: string,
-) {
+async function captureRestartChildrenAfterShutdown(ctx: InteractiveModeContext, predecessorOwnerEpoch: string) {
 	const manifest = await captureRestartChildManifest(ctx.session, predecessorOwnerEpoch);
 	await ctx.shutdown({ childPolicy: "restart", persistSession: false, exitProcess: false });
 	return manifest;
@@ -741,7 +738,7 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<SlashCommandSpec> = [
 	},
 	{
 		name: "dump",
-	tuiNamespace: "colon",
+		tuiNamespace: "colon",
 		description: "Copy session transcript to clipboard",
 		acpDescription: "Return full transcript as plain text",
 		inlineHint: "[raw]",
@@ -988,6 +985,7 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<SlashCommandSpec> = [
 			{ name: "delete", description: "Delete current session and return to selector" },
 		],
 		allowArgs: true,
+		focusedViewSafe: args => args.trim() === "" || args.trim() === "info",
 		handle: async (command, runtime) => {
 			if (await executeSessionClassificationCommand(command.args, runtime.sessionManager, runtime.output)) {
 				return commandConsumed();
@@ -1049,7 +1047,7 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<SlashCommandSpec> = [
 	},
 	{
 		name: "jobs",
-	tuiNamespace: "colon",
+		tuiNamespace: "colon",
 		description: "Show async background jobs status",
 		acpDescription: "Show background jobs",
 		handle: async (_command, runtime) => {
@@ -1145,7 +1143,7 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<SlashCommandSpec> = [
 	},
 	{
 		name: "changelog",
-	tuiNamespace: "colon",
+		tuiNamespace: "colon",
 		description: "Show changelog entries",
 		acpDescription: "Show changelog",
 		acpInputHint: "[full]",
@@ -1171,7 +1169,7 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<SlashCommandSpec> = [
 	},
 	{
 		name: "tools",
-	tuiNamespace: "colon",
+		tuiNamespace: "colon",
 		description: "Show tools currently visible to the agent",
 		acpDescription: "Show available tools",
 		handle: async (_command, runtime) => {
@@ -1187,7 +1185,7 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<SlashCommandSpec> = [
 	},
 	{
 		name: "context",
-	tuiNamespace: "colon",
+		tuiNamespace: "colon",
 		description: "Show estimated context usage breakdown",
 		acpDescription: "Show context usage",
 		handle: async (_command, runtime) => {
@@ -2371,15 +2369,15 @@ function buildStaticInlineHint(hint: string): (argumentText: string) => string |
 }
 
 /** Builtin command metadata used for slash-command autocomplete and help text. */
-export const BUILTIN_SLASH_COMMAND_DEFS: ReadonlyArray<BuiltinSlashCommand> = BUILTIN_SLASH_COMMAND_REGISTRY
-	.filter(command => command.tuiNamespace !== "colon")
-	.map(command => ({
-		name: command.name,
-		aliases: command.aliases,
-		description: command.description,
-		subcommands: command.subcommands,
-		inlineHint: command.inlineHint,
-	}));
+export const BUILTIN_SLASH_COMMAND_DEFS: ReadonlyArray<BuiltinSlashCommand> = BUILTIN_SLASH_COMMAND_REGISTRY.filter(
+	command => command.tuiNamespace !== "colon",
+).map(command => ({
+	name: command.name,
+	aliases: command.aliases,
+	description: command.description,
+	subcommands: command.subcommands,
+	inlineHint: command.inlineHint,
+}));
 
 /**
  * Materialized builtin slash commands with completion functions derived from
@@ -2438,6 +2436,12 @@ export async function executeBuiltinSlashCommand(
 	if (parsed.args.length > 0 && !command.allowArgs) {
 		return false;
 	}
+	const focusedView = Boolean(runtime.ctx.focusedAgentId);
+	const focusedViewSafe =
+		typeof command.focusedViewSafe === "function"
+			? command.focusedViewSafe(parsed.args)
+			: command.focusedViewSafe === true;
+	if (focusedView && !focusedViewSafe) return false;
 	// Collab guests run a read-mostly replica: session-mutating builtins are
 	// host-only; the allowlist covers purely local/read-only commands.
 	if (runtime.ctx.collabGuest && !COLLAB_GUEST_ALLOWED_COMMANDS[command.name]) {
@@ -2445,7 +2449,7 @@ export async function executeBuiltinSlashCommand(
 		runtime.ctx.editor.setText("");
 		return true;
 	}
-	if (command.handleTui) {
+	if (command.handleTui && !focusedView) {
 		const result = await command.handleTui(parsed, runtime);
 		if (result && typeof result === "object" && "prompt" in result) return result.prompt;
 		return true;
@@ -2459,10 +2463,10 @@ export async function executeBuiltinSlashCommand(
 		// `SlashCommandRuntime` shape.
 		const ctx = runtime.ctx;
 		const adapted: SlashCommandRuntime = {
-			session: ctx.session,
-			sessionManager: ctx.sessionManager,
+			session: focusedView ? ctx.viewSession : ctx.session,
+			sessionManager: focusedView ? ctx.viewSession.sessionManager : ctx.sessionManager,
 			settings: ctx.settings,
-			cwd: ctx.sessionManager.getCwd(),
+			cwd: (focusedView ? ctx.viewSession.sessionManager : ctx.sessionManager).getCwd(),
 			output: (text: string) => {
 				ctx.showStatus(text);
 			},

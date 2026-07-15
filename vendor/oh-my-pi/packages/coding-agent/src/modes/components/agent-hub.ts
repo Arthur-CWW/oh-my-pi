@@ -46,14 +46,12 @@ import {
 import type { SessionMessageEntry } from "../../session/session-entries";
 import { createIrcMessageCard } from "../../tools/irc";
 import { replaceTabs, shortenPath, TRUNCATE_LENGTHS, truncateToWidth } from "../../tools/render-utils";
+import { copyToClipboard } from "../../utils/clipboard";
 import { canonicalizeMessage, normalizeThinkingDisplay } from "../../utils/thinking-display";
 import type { CollabPromptDetails } from "../collab-presentation-types";
 import { resolveViewerScrollDelta } from "../interaction-registry";
 import type { ObservableSession, SessionObserverRegistry } from "../session-observer-registry";
-import {
-	DEFAULT_TRANSCRIPT_DISPLAY_CONTEXT,
-	type TranscriptDisplayContext,
-} from "../transcript-display";
+import { DEFAULT_TRANSCRIPT_DISPLAY_CONTEXT, type TranscriptDisplayContext } from "../transcript-display";
 import { theme } from "../theme/theme";
 import {
 	matchesAppInterrupt,
@@ -65,16 +63,11 @@ import {
 	matchesSelectUp,
 } from "../utils/keybinding-matchers";
 import { createAdvisorMessageCard } from "./advisor-message";
-import {
-	AgentHubViewerSequence,
-	applyAgentHubViewerSequenceAction,
-} from "./agent-hub-viewer-sequence";
+import { agentHubYankPayload } from "./agent-hub-identity";
+import { AgentHubViewerSequence, applyAgentHubViewerSequenceAction } from "./agent-hub-viewer-sequence";
 import { AgentHubFoldSequence } from "./agent-hub-fold-sequence";
 import { renderAgentHubChatFooter, renderAgentHubFooter, renderAgentHubHelp } from "./agent-hub-interaction-help";
-import {
-	AgentHubJournalTailCache,
-	recordAgentHubProjectionRebuild,
-} from "./agent-hub-performance";
+import { AgentHubJournalTailCache, recordAgentHubProjectionRebuild } from "./agent-hub-performance";
 import type { AgentHubRolloutDataSource, AgentHubRolloutPeerIdentity } from "./agent-hub-rollout-state";
 import {
 	EMPTY_AGENT_HUB_SELECTED_LIVE_STATE,
@@ -323,7 +316,6 @@ export interface AgentHubRemote {
 	readTranscript(id: string, fromByte: number): Promise<{ text: string; newSize: number } | null>;
 }
 
-
 export interface AgentHubDeps {
 	observers: SessionObserverRegistry;
 	hubKeys: KeyId[];
@@ -340,6 +332,10 @@ export interface AgentHubDeps {
 	expandKeys?: KeyId[];
 	/** Focus the main view on this agent's live session (ctx.focusAgentSession). When absent (collab guest, tests), Enter opens the in-hub chat view instead. */
 	focusAgent?: (id: string) => Promise<void>;
+	/** Clipboard sink for selected-agent identity yanks; defaults to OSC52-capable copyToClipboard. */
+	copyIdentity?: (payload: string) => void | Promise<void>;
+	/** Root session id shared by Main and all child handles. */
+	sessionId?: string;
 	initialAgentId?: string;
 	/** Collab guest: route actions/transcripts to the host instead of local sessions. */
 	remote?: AgentHubRemote;
@@ -473,6 +469,8 @@ export class AgentHubOverlayComponent extends Container {
 	#hideThinkingBlock: (() => boolean) | undefined;
 	#expandKeys: KeyId[];
 	#focusAgent: ((id: string) => Promise<void>) | undefined;
+	#copyIdentity: (payload: string) => void | Promise<void>;
+	#sessionId: string | undefined;
 	#chatLog = new TranscriptContainer();
 	#chatEntriesRef: SessionMessageEntry[] | undefined;
 	#chatBuiltCount = 0;
@@ -539,8 +537,9 @@ export class AgentHubOverlayComponent extends Container {
 		this.#hideThinkingBlock = deps.hideThinkingBlock;
 		this.#expandKeys = deps.expandKeys ?? ["ctrl+o"];
 		this.#focusAgent = deps.focusAgent;
+		this.#copyIdentity = deps.copyIdentity ?? copyToClipboard;
+		this.#sessionId = deps.sessionId ?? this.#registry.get(MAIN_AGENT_ID)?.session?.sessionManager.getSessionId();
 		this.#sessionsDir = deps.sessionsDir;
-
 
 		this.#unsubscribers.push(
 			this.#registry.onChange(event => {
@@ -1201,7 +1200,8 @@ export class AgentHubOverlayComponent extends Container {
 
 	#renderTranscriptPreview(width: number, targetHeight: number, trackHeight = true): string[] {
 		const innerWidth = Math.max(20, width - 2);
-		for (const component of this.#chatRichRenderables) component.setRichRendering(this.#transcriptDisplay.richTranscript);
+		for (const component of this.#chatRichRenderables)
+			component.setRichRendering(this.#transcriptDisplay.richTranscript);
 		this.#liveAssistantComponent?.setRichRendering(this.#transcriptDisplay.richTranscript);
 		const richRendered = this.#chatPlaceholder
 			? [theme.fg("dim", this.#chatPlaceholder)]
@@ -1244,7 +1244,10 @@ export class AgentHubOverlayComponent extends Container {
 		const focus = this.#inspectorFocused ? theme.fg("accent", "●") : "";
 		const label = this.#inspectorSection[0].toUpperCase() + this.#inspectorSection.slice(1);
 		const lines = [` ${focus}${theme.fg("accent", label)} ${theme.fg("dim", "[ / ] section")}`];
-		for (const row of content.slice(this.#inspectorScrollOffset, this.#inspectorScrollOffset + this.#inspectorViewportHeight))
+		for (const row of content.slice(
+			this.#inspectorScrollOffset,
+			this.#inspectorScrollOffset + this.#inspectorViewportHeight,
+		))
 			lines.push(` ${sanitizeLine(row, innerWidth)}`);
 		while (lines.length < targetHeight - 1) lines.push("");
 		lines.push(...new DynamicBorder().render(width));
@@ -1701,7 +1704,6 @@ export class AgentHubOverlayComponent extends Container {
 	}
 
 	#handleTableInput(keyData: string): void {
-
 		// Filter editing mode: capture keystrokes for the filter query
 		if (this.#tableFilterEditing) {
 			if (matchesKey(keyData, "enter") || keyData === "\r" || keyData === "\n") {
@@ -1741,11 +1743,7 @@ export class AgentHubOverlayComponent extends Container {
 		if (this.#dualLaneActive && this.#inspectorFocused) {
 			if (this.#handleInspectorNavigation(keyData)) return;
 		} else if (this.#handleViewerNavigation(keyData)) return;
-		const fold = this.#foldSequence.handle(
-			keyData,
-			this.#selectedInternalRef()?.id,
-			matchesAppInterrupt(keyData),
-		);
+		const fold = this.#foldSequence.handle(keyData, this.#selectedInternalRef()?.id, matchesAppInterrupt(keyData));
 		if (fold.kind !== "unhandled") {
 			if (fold.kind === "toggle") {
 				this.#toggleFold(fold.agentId);
@@ -1775,10 +1773,7 @@ export class AgentHubOverlayComponent extends Container {
 			return;
 		}
 		if (keyData === "h" || matchesKey(keyData, "left")) {
-			if (
-				!this.#toggleFold(this.#selectedInternalRef()?.id ?? "", false) &&
-				this.#dualLaneActive
-			)
+			if (!this.#toggleFold(this.#selectedInternalRef()?.id ?? "", false) && this.#dualLaneActive)
 				this.#inspectorFocused = true;
 			this.#requestRender();
 			return;
@@ -1795,6 +1790,10 @@ export class AgentHubOverlayComponent extends Container {
 			return;
 		}
 
+		if (keyData === "y") {
+			this.#yankSelectedIdentity();
+			return;
+		}
 		if (matchesAppInterrupt(keyData)) {
 			// Esc clears an active filter first, then closes the hub
 			if (this.#tableFilterQuery) {
@@ -1872,6 +1871,33 @@ export class AgentHubOverlayComponent extends Container {
 			return;
 		}
 	}
+	#yankSelectedIdentity(): void {
+		const row = this.#selectedAgentRow();
+		const agentId = row?.kind === "active" ? row.ref.id : row?.descriptor.agentId;
+		if (!agentId || agentId === MAIN_AGENT_ID) {
+			this.#notice = "Select a child agent to yank its identity.";
+			this.#requestRender();
+			return;
+		}
+		const sessionId = this.#sessionId;
+		if (!sessionId) {
+			this.#notice = "Session identity is unavailable.";
+			this.#requestRender();
+			return;
+		}
+		const payload = agentHubYankPayload({ sessionId, agentId });
+		void Promise.resolve(this.#copyIdentity(payload)).then(
+			() => {
+				this.#notice = `Yanked ${sessionId}/${agentId} + history://${agentId}`;
+				this.#requestRender();
+			},
+			error => {
+				this.#notice = `Could not yank identity: ${error instanceof Error ? error.message : String(error)}`;
+				this.#requestRender();
+			},
+		);
+	}
+
 	async #reconcileSelected(): Promise<void> {
 		const ref = this.#selectedInternalRef();
 		if (!ref) return;
@@ -2033,12 +2059,15 @@ export class AgentHubOverlayComponent extends Container {
 		const footerChrome = editorLines.length + footerLines.length + (noticeLine ? 1 : 0) + 1;
 		this.#viewportHeight = Math.max(5, termHeight - headerChrome - footerChrome);
 
-		for (const component of this.#chatRichRenderables) component.setRichRendering(this.#transcriptDisplay.richTranscript);
+		for (const component of this.#chatRichRenderables)
+			component.setRichRendering(this.#transcriptDisplay.richTranscript);
 		this.#liveAssistantComponent?.setRichRendering(this.#transcriptDisplay.richTranscript);
 		const renderedContent = this.#chatPlaceholder ? [] : this.#chatLog.render(innerWidth);
 		const richContentLines: readonly string[] = this.#chatPlaceholder
 			? [theme.fg("dim", this.#chatPlaceholder)]
-			: renderedContent.length > 0 ? renderedContent : [theme.fg("dim", "No messages yet.")];
+			: renderedContent.length > 0
+				? renderedContent
+				: [theme.fg("dim", "No messages yet.")];
 		const contentLines = this.#plainPreview ? richContentLines.map(line => Bun.stripANSI(line)) : richContentLines;
 
 		// Cache rendered lines for transcript search
@@ -2113,7 +2142,6 @@ export class AgentHubOverlayComponent extends Container {
 			],
 		});
 	}
-
 
 	#tokenRateBadge(): string | undefined {
 		const ref =
@@ -2559,7 +2587,6 @@ export class AgentHubOverlayComponent extends Container {
 		this.#requestRender();
 	}
 
-
 	/** Viewport scrolling for the chat transcript. Returns true when handled. */
 	#handleViewerNavigation(keyData: string): boolean {
 		const sequence = this.#viewerSequence.handle(keyData, {
@@ -2571,11 +2598,7 @@ export class AgentHubOverlayComponent extends Container {
 		});
 		if (sequence.kind !== "unhandled") {
 			if (sequence.kind !== "pending" && sequence.kind !== "cancelled") {
-				this.#scrollOffset = applyAgentHubViewerSequenceAction(
-					this.#scrollOffset,
-					this.#lastMaxScroll,
-					sequence,
-				);
+				this.#scrollOffset = applyAgentHubViewerSequenceAction(this.#scrollOffset, this.#lastMaxScroll, sequence);
 				this.#wasAtBottom = this.#scrollOffset >= this.#lastMaxScroll;
 				this.#requestRender();
 			}
@@ -2780,7 +2803,12 @@ export class AgentHubOverlayComponent extends Container {
 					const isSynthetic = message.role === "developer" ? true : (message.synthetic ?? false);
 					this.#chatLog.addChild(
 						this.#trackRich(
-							new UserMessageComponent(textContent, isSynthetic, undefined, this.#transcriptDisplay.richTranscript),
+							new UserMessageComponent(
+								textContent,
+								isSynthetic,
+								undefined,
+								this.#transcriptDisplay.richTranscript,
+							),
 						),
 					);
 				}

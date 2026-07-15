@@ -32,6 +32,7 @@ export type InteractionSemantics =
 	| "toggle-history"
 	| "toggle-rich"
 	| "attach"
+	| "yank-identity"
 	| "close"
 	| "literal-input"
 	| "previous-completion"
@@ -56,54 +57,420 @@ export type InteractionEntry = {
 } & InteractionBinding;
 
 export const INTERACTIONS: readonly InteractionEntry[] = [
-	{ id: "viewer.line-down", surface: "viewer", mode: "normal", action: "app.navigation.down", keys: ["j"], description: "scroll one line down", semantics: "line-down", group: "move" },
-	{ id: "viewer.line-up", surface: "viewer", mode: "normal", action: "app.navigation.up", keys: ["k"], description: "scroll one line up", semantics: "line-up", group: "move" },
-	{ id: "viewer.display-row-down", surface: "viewer", mode: "normal", keys: ["gj"], description: "scroll one display row down", semantics: "display-row-down", group: "move" },
-	{ id: "viewer.display-row-up", surface: "viewer", mode: "normal", keys: ["gk"], description: "scroll one display row up", semantics: "display-row-up", group: "move" },
-	{ id: "viewer.five-lines-down", surface: "viewer", mode: "normal", keys: ["J"], description: "scroll five lines down", semantics: "five-lines-down", group: "move" },
-	{ id: "viewer.five-lines-up", surface: "viewer", mode: "normal", keys: ["K"], description: "scroll five lines up", semantics: "five-lines-up", group: "move" },
-	{ id: "viewer.half-page-down", surface: "viewer", mode: "normal", action: "app.navigation.pageDown", keys: ["d"], description: "scroll half-page down", semantics: "half-page-down", group: "move" },
-	{ id: "viewer.half-page-up", surface: "viewer", mode: "normal", action: "app.navigation.pageUp", keys: ["u"], description: "scroll half-page up", semantics: "half-page-up", group: "move" },
-	{ id: "viewer.full-page-down", surface: "viewer", mode: "normal", keys: ["PgDn"], description: "scroll full page down", semantics: "full-page-down", group: "move" },
-	{ id: "viewer.full-page-up", surface: "viewer", mode: "normal", keys: ["PgUp"], description: "scroll full page up", semantics: "full-page-up", group: "move" },
-	{ id: "viewer.first-line", surface: "viewer", mode: "normal", action: "app.navigation.top", repeat: 2, description: "jump to the first line", semantics: "first-line", group: "navigate" },
-	{ id: "viewer.last-line", surface: "viewer", mode: "normal", action: "app.navigation.bottom", description: "jump to the last line", semantics: "last-line", group: "navigate" },
-	{ id: "viewer.unwind", surface: "viewer", mode: "normal", keys: ["Esc"], description: "unwind one level", semantics: "unwind", group: "finish" },
-	{ id: "viewer.filter", surface: "viewer", mode: "normal", keys: ["/"], description: "filter or search", semantics: "enter-filter", group: "mode" },
-	{ id: "viewer.help", surface: "viewer", mode: "normal", keys: ["?"], description: "show contextual help", semantics: "show-help", group: "mode" },
-	{ id: "viewer.command", surface: "viewer", mode: "normal", keys: [":"], description: "open command line", semantics: "enter-command", group: "mode" },
-	{ id: "viewer.fold", surface: "viewer", mode: "normal", keys: ["za"], description: "toggle fold", semantics: "toggle-fold", group: "view" },
-	{ id: "viewer.previous-sibling", surface: "viewer", mode: "normal", keys: ["["], description: "previous sibling", semantics: "previous-sibling", group: "navigate" },
-	{ id: "viewer.next-sibling", surface: "viewer", mode: "normal", keys: ["]"], description: "next sibling", semantics: "next-sibling", group: "navigate" },
+	{
+		id: "viewer.line-down",
+		surface: "viewer",
+		mode: "normal",
+		action: "app.navigation.down",
+		keys: ["j"],
+		description: "scroll one line down",
+		semantics: "line-down",
+		group: "move",
+	},
+	{
+		id: "viewer.line-up",
+		surface: "viewer",
+		mode: "normal",
+		action: "app.navigation.up",
+		keys: ["k"],
+		description: "scroll one line up",
+		semantics: "line-up",
+		group: "move",
+	},
+	{
+		id: "viewer.display-row-down",
+		surface: "viewer",
+		mode: "normal",
+		keys: ["gj"],
+		description: "scroll one display row down",
+		semantics: "display-row-down",
+		group: "move",
+	},
+	{
+		id: "viewer.display-row-up",
+		surface: "viewer",
+		mode: "normal",
+		keys: ["gk"],
+		description: "scroll one display row up",
+		semantics: "display-row-up",
+		group: "move",
+	},
+	{
+		id: "viewer.five-lines-down",
+		surface: "viewer",
+		mode: "normal",
+		keys: ["J"],
+		description: "scroll five lines down",
+		semantics: "five-lines-down",
+		group: "move",
+	},
+	{
+		id: "viewer.five-lines-up",
+		surface: "viewer",
+		mode: "normal",
+		keys: ["K"],
+		description: "scroll five lines up",
+		semantics: "five-lines-up",
+		group: "move",
+	},
+	{
+		id: "viewer.half-page-down",
+		surface: "viewer",
+		mode: "normal",
+		action: "app.navigation.pageDown",
+		keys: ["d"],
+		description: "scroll half-page down",
+		semantics: "half-page-down",
+		group: "move",
+	},
+	{
+		id: "viewer.half-page-up",
+		surface: "viewer",
+		mode: "normal",
+		action: "app.navigation.pageUp",
+		keys: ["u"],
+		description: "scroll half-page up",
+		semantics: "half-page-up",
+		group: "move",
+	},
+	{
+		id: "viewer.full-page-down",
+		surface: "viewer",
+		mode: "normal",
+		keys: ["PgDn"],
+		description: "scroll full page down",
+		semantics: "full-page-down",
+		group: "move",
+	},
+	{
+		id: "viewer.full-page-up",
+		surface: "viewer",
+		mode: "normal",
+		keys: ["PgUp"],
+		description: "scroll full page up",
+		semantics: "full-page-up",
+		group: "move",
+	},
+	{
+		id: "viewer.first-line",
+		surface: "viewer",
+		mode: "normal",
+		action: "app.navigation.top",
+		repeat: 2,
+		description: "jump to the first line",
+		semantics: "first-line",
+		group: "navigate",
+	},
+	{
+		id: "viewer.last-line",
+		surface: "viewer",
+		mode: "normal",
+		action: "app.navigation.bottom",
+		description: "jump to the last line",
+		semantics: "last-line",
+		group: "navigate",
+	},
+	{
+		id: "viewer.unwind",
+		surface: "viewer",
+		mode: "normal",
+		keys: ["Esc"],
+		description: "unwind one level",
+		semantics: "unwind",
+		group: "finish",
+	},
+	{
+		id: "viewer.filter",
+		surface: "viewer",
+		mode: "normal",
+		keys: ["/"],
+		description: "filter or search",
+		semantics: "enter-filter",
+		group: "mode",
+	},
+	{
+		id: "viewer.help",
+		surface: "viewer",
+		mode: "normal",
+		keys: ["?"],
+		description: "show contextual help",
+		semantics: "show-help",
+		group: "mode",
+	},
+	{
+		id: "viewer.command",
+		surface: "viewer",
+		mode: "normal",
+		keys: [":"],
+		description: "open command line",
+		semantics: "enter-command",
+		group: "mode",
+	},
+	{
+		id: "viewer.fold",
+		surface: "viewer",
+		mode: "normal",
+		keys: ["za"],
+		description: "toggle fold",
+		semantics: "toggle-fold",
+		group: "view",
+	},
+	{
+		id: "viewer.previous-sibling",
+		surface: "viewer",
+		mode: "normal",
+		keys: ["["],
+		description: "previous sibling",
+		semantics: "previous-sibling",
+		group: "navigate",
+	},
+	{
+		id: "viewer.next-sibling",
+		surface: "viewer",
+		mode: "normal",
+		keys: ["]"],
+		description: "next sibling",
+		semantics: "next-sibling",
+		group: "navigate",
+	},
 
-	{ id: "hub.table.search", surface: "hub.table", mode: "normal", keys: ["/"], description: "search", semantics: "enter-filter", group: "mode" },
-	{ id: "hub.table.cycle-siblings", surface: "hub.table", mode: "normal", keys: ["[ / ]"], description: "cycle siblings", semantics: "cycle-siblings", group: "navigate" },
-	{ id: "hub.table.next-agent", surface: "hub.table", mode: "normal", keys: ["n"], description: "select next agent", semantics: "next-item", group: "navigate" },
-	{ id: "hub.table.previous-agent", surface: "hub.table", mode: "normal", keys: ["p"], description: "select previous agent", semantics: "previous-item", group: "navigate" },
-	{ id: "hub.table.previous-group", surface: "hub.table", mode: "normal", keys: ["H"], description: "previous root group", semantics: "previous-group", group: "navigate" },
-	{ id: "hub.table.next-group", surface: "hub.table", mode: "normal", keys: ["L"], description: "next root group", semantics: "next-group", group: "navigate" },
-	{ id: "hub.table.history", surface: "hub.table", mode: "normal", keys: ["."], description: "toggle agent history", semantics: "toggle-history", group: "view" },
-	{ id: "hub.table.rich", surface: "hub.table", mode: "normal", keys: ["v"], description: "rich/plain preview", semantics: "toggle-rich", group: "view" },
-	{ id: "hub.table.attach", surface: "hub.table", mode: "normal", keys: ["Enter"], description: "attach to selected agent", semantics: "attach", group: "finish" },
-	{ id: "hub.table.close", surface: "hub.table", mode: "normal", keys: ["q"], description: "close Hub", semantics: "close", group: "finish" },
-	{ id: "hub.table.filter-literals", surface: "hub.table", mode: "filter", keys: ["text"], description: "enter filter text", semantics: "literal-input", group: "mode" },
-	{ id: "hub.table.filter-unwind", surface: "hub.table", mode: "filter", keys: ["Esc"], description: "clear filter and return", semantics: "unwind", group: "finish" },
+	{
+		id: "hub.table.search",
+		surface: "hub.table",
+		mode: "normal",
+		keys: ["/"],
+		description: "search",
+		semantics: "enter-filter",
+		group: "mode",
+	},
+	{
+		id: "hub.table.cycle-siblings",
+		surface: "hub.table",
+		mode: "normal",
+		keys: ["[ / ]"],
+		description: "cycle siblings",
+		semantics: "cycle-siblings",
+		group: "navigate",
+	},
+	{
+		id: "hub.table.next-agent",
+		surface: "hub.table",
+		mode: "normal",
+		keys: ["n"],
+		description: "select next agent",
+		semantics: "next-item",
+		group: "navigate",
+	},
+	{
+		id: "hub.table.previous-agent",
+		surface: "hub.table",
+		mode: "normal",
+		keys: ["p"],
+		description: "select previous agent",
+		semantics: "previous-item",
+		group: "navigate",
+	},
+	{
+		id: "hub.table.previous-group",
+		surface: "hub.table",
+		mode: "normal",
+		keys: ["H"],
+		description: "previous root group",
+		semantics: "previous-group",
+		group: "navigate",
+	},
+	{
+		id: "hub.table.next-group",
+		surface: "hub.table",
+		mode: "normal",
+		keys: ["L"],
+		description: "next root group",
+		semantics: "next-group",
+		group: "navigate",
+	},
+	{
+		id: "hub.table.history",
+		surface: "hub.table",
+		mode: "normal",
+		keys: ["."],
+		description: "toggle agent history",
+		semantics: "toggle-history",
+		group: "view",
+	},
+	{
+		id: "hub.table.rich",
+		surface: "hub.table",
+		mode: "normal",
+		keys: ["v"],
+		description: "rich/plain preview",
+		semantics: "toggle-rich",
+		group: "view",
+	},
+	{
+		id: "hub.table.yank-identity",
+		surface: "hub.table",
+		mode: "normal",
+		keys: ["y"],
+		description: "yank selected child identity",
+		semantics: "yank-identity",
+		group: "finish",
+	},
+	{
+		id: "hub.table.attach",
+		surface: "hub.table",
+		mode: "normal",
+		keys: ["Enter"],
+		description: "attach to selected agent",
+		semantics: "attach",
+		group: "finish",
+	},
+	{
+		id: "hub.table.close",
+		surface: "hub.table",
+		mode: "normal",
+		keys: ["q"],
+		description: "close Hub",
+		semantics: "close",
+		group: "finish",
+	},
+	{
+		id: "hub.table.filter-literals",
+		surface: "hub.table",
+		mode: "filter",
+		keys: ["text"],
+		description: "enter filter text",
+		semantics: "literal-input",
+		group: "mode",
+	},
+	{
+		id: "hub.table.filter-unwind",
+		surface: "hub.table",
+		mode: "filter",
+		keys: ["Esc"],
+		description: "clear filter and return",
+		semantics: "unwind",
+		group: "finish",
+	},
 
-	{ id: "hub.chat.search", surface: "hub.chat", mode: "normal", keys: ["/"], description: "search", semantics: "enter-filter", group: "mode" },
-	{ id: "hub.chat.cycle-siblings", surface: "hub.chat", mode: "normal", keys: ["[ / ]"], description: "cycle siblings", semantics: "cycle-siblings", group: "navigate" },
-	{ id: "hub.chat.rich", surface: "hub.chat", mode: "normal", keys: ["v"], description: "rich/plain preview", semantics: "toggle-rich", group: "view" },
-	{ id: "hub.chat.close", surface: "hub.chat", mode: "normal", keys: ["q"], description: "close Hub", semantics: "close", group: "finish" },
-	{ id: "hub.chat.filter-literals", surface: "hub.chat", mode: "filter", keys: ["text"], description: "enter search text", semantics: "literal-input", group: "mode" },
-	{ id: "hub.chat.filter-unwind", surface: "hub.chat", mode: "filter", keys: ["Esc"], description: "clear search and return", semantics: "unwind", group: "finish" },
+	{
+		id: "hub.chat.search",
+		surface: "hub.chat",
+		mode: "normal",
+		keys: ["/"],
+		description: "search",
+		semantics: "enter-filter",
+		group: "mode",
+	},
+	{
+		id: "hub.chat.cycle-siblings",
+		surface: "hub.chat",
+		mode: "normal",
+		keys: ["[ / ]"],
+		description: "cycle siblings",
+		semantics: "cycle-siblings",
+		group: "navigate",
+	},
+	{
+		id: "hub.chat.rich",
+		surface: "hub.chat",
+		mode: "normal",
+		keys: ["v"],
+		description: "rich/plain preview",
+		semantics: "toggle-rich",
+		group: "view",
+	},
+	{
+		id: "hub.chat.close",
+		surface: "hub.chat",
+		mode: "normal",
+		keys: ["q"],
+		description: "close Hub",
+		semantics: "close",
+		group: "finish",
+	},
+	{
+		id: "hub.chat.filter-literals",
+		surface: "hub.chat",
+		mode: "filter",
+		keys: ["text"],
+		description: "enter search text",
+		semantics: "literal-input",
+		group: "mode",
+	},
+	{
+		id: "hub.chat.filter-unwind",
+		surface: "hub.chat",
+		mode: "filter",
+		keys: ["Esc"],
+		description: "clear search and return",
+		semantics: "unwind",
+		group: "finish",
+	},
 
-
-	{ id: "command-line.previous", surface: "command-line", mode: "completion", keys: ["Up"], description: "previous completion", semantics: "previous-completion", group: "navigate" },
-	{ id: "command-line.next", surface: "command-line", mode: "completion", keys: ["Down"], description: "next completion", semantics: "next-completion", group: "navigate" },
-	{ id: "command-line.previous-page", surface: "command-line", mode: "completion", keys: ["PgUp"], description: "previous completion page", semantics: "previous-completion-page", group: "navigate" },
-	{ id: "command-line.next-page", surface: "command-line", mode: "completion", keys: ["PgDn"], description: "next completion page", semantics: "next-completion-page", group: "navigate" },
-	{ id: "command-line.accept", surface: "command-line", mode: "completion", keys: ["Tab"], description: "accept completion", semantics: "accept-completion", group: "finish" },
-	{ id: "command-line.submit", surface: "command-line", mode: "input", keys: ["Enter"], description: "run command", semantics: "submit-command", group: "finish" },
-	{ id: "command-line.cancel", surface: "command-line", mode: "input", action: "tui.select.cancel", keys: ["Esc", "Ctrl+C"], description: "close command line locally", semantics: "cancel-command", group: "finish" },
+	{
+		id: "command-line.previous",
+		surface: "command-line",
+		mode: "completion",
+		keys: ["Up"],
+		description: "previous completion",
+		semantics: "previous-completion",
+		group: "navigate",
+	},
+	{
+		id: "command-line.next",
+		surface: "command-line",
+		mode: "completion",
+		keys: ["Down"],
+		description: "next completion",
+		semantics: "next-completion",
+		group: "navigate",
+	},
+	{
+		id: "command-line.previous-page",
+		surface: "command-line",
+		mode: "completion",
+		keys: ["PgUp"],
+		description: "previous completion page",
+		semantics: "previous-completion-page",
+		group: "navigate",
+	},
+	{
+		id: "command-line.next-page",
+		surface: "command-line",
+		mode: "completion",
+		keys: ["PgDn"],
+		description: "next completion page",
+		semantics: "next-completion-page",
+		group: "navigate",
+	},
+	{
+		id: "command-line.accept",
+		surface: "command-line",
+		mode: "completion",
+		keys: ["Tab"],
+		description: "accept completion",
+		semantics: "accept-completion",
+		group: "finish",
+	},
+	{
+		id: "command-line.submit",
+		surface: "command-line",
+		mode: "input",
+		keys: ["Enter"],
+		description: "run command",
+		semantics: "submit-command",
+		group: "finish",
+	},
+	{
+		id: "command-line.cancel",
+		surface: "command-line",
+		mode: "input",
+		action: "tui.select.cancel",
+		keys: ["Esc", "Ctrl+C"],
+		description: "close command line locally",
+		semantics: "cancel-command",
+		group: "finish",
+	},
 ];
 
 const VIEWER_SCROLL_INTERACTION_IDS: readonly string[] = [
@@ -139,6 +506,7 @@ export const AGENT_HUB_SHORTCUT_INTERACTION_IDS: readonly string[] = [
 	"hub.table.next-group",
 	"hub.table.history",
 	"hub.table.rich",
+	"hub.table.yank-identity",
 	"hub.table.attach",
 	"hub.table.close",
 	"hub.chat.search",
@@ -191,8 +559,6 @@ export function resolveViewerScrollDelta(keyData: string, viewportHeight: number
 	return undefined;
 }
 
-
-
 export type InteractionKeyResolver = (action: Keybinding) => string;
 
 export interface InteractionQuery {
@@ -208,7 +574,6 @@ interface RenderedInteraction {
 	readonly semantics: InteractionSemantics;
 	readonly group: InteractionGroup;
 }
-
 
 function entryKeyLabel(entry: InteractionEntry, resolveAction: InteractionKeyResolver): string {
 	const actionKeys =
@@ -249,12 +614,18 @@ function renderedInteractions(query: InteractionQuery): readonly RenderedInterac
 	for (const entry of getInteractions(query)) {
 		const keys = entryKeyLabel(entry, resolveAction);
 		const existing = rendered.find(
-			item => item.semantics === entry.semantics && item.description === entry.description && item.group === entry.group,
+			item =>
+				item.semantics === entry.semantics && item.description === entry.description && item.group === entry.group,
 		);
 		if (existing) {
-			(rendered as Array<{ keys: string; description: string; semantics: InteractionSemantics; group: InteractionGroup }>)[
-				rendered.indexOf(existing)
-			] = { ...existing, keys: `${existing.keys}/${keys}` };
+			(
+				rendered as Array<{
+					keys: string;
+					description: string;
+					semantics: InteractionSemantics;
+					group: InteractionGroup;
+				}>
+			)[rendered.indexOf(existing)] = { ...existing, keys: `${existing.keys}/${keys}` };
 		} else {
 			rendered.push({ keys, description: entry.description, semantics: entry.semantics, group: entry.group });
 		}
@@ -293,7 +664,11 @@ export function renderInteractionHelp(query: InteractionQuery): readonly string[
 }
 
 export function renderInteractionMarkdown(
-	sections: readonly { readonly title: string; readonly surfaces: readonly InteractionSurface[]; readonly modes?: readonly InteractionMode[] }[],
+	sections: readonly {
+		readonly title: string;
+		readonly surfaces: readonly InteractionSurface[];
+		readonly modes?: readonly InteractionMode[];
+	}[],
 	resolveAction: InteractionKeyResolver,
 ): string {
 	return sections
@@ -313,5 +688,15 @@ export function renderCommandShortcutSection(): string {
 		ids: AGENT_HUB_SHORTCUT_INTERACTION_IDS,
 	});
 	const commandLine = renderInteractionHelp({ surfaces: ["command-line"], modes: ["input", "completion"] });
-	return ["", "Viewer shortcuts", ...viewer, "", "Agent Hub shortcuts", ...hub, "", "Command-line shortcuts", ...commandLine].join("\n");
+	return [
+		"",
+		"Viewer shortcuts",
+		...viewer,
+		"",
+		"Agent Hub shortcuts",
+		...hub,
+		"",
+		"Command-line shortcuts",
+		...commandLine,
+	].join("\n");
 }

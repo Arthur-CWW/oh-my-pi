@@ -323,6 +323,7 @@ import {
 	SKILL_PROMPT_MESSAGE_TYPE,
 	USER_INTERRUPT_LABEL,
 } from "./messages";
+import { OversizedPromptRecoveryGuard, recoverOversizedPrompt } from "./oversized-prompt-recovery";
 import {
 	decideRefusalReroute,
 	REFUSAL_REROUTE_ANNOTATION,
@@ -1308,6 +1309,7 @@ export class AgentSession {
 	// Compaction state
 	#compactionAbortController: AbortController | undefined = undefined;
 	#autoCompactionAbortController: AbortController | undefined = undefined;
+	#oversizedPromptRecovery = new OversizedPromptRecoveryGuard();
 
 	// Branch summarization state
 	#branchSummaryAbortController: AbortController | undefined = undefined;
@@ -9816,11 +9818,22 @@ export class AgentSession {
 				return false;
 			}
 
-			// No promotion target available fall through to compaction
 			const compactionSettings = this.settings.getGroup("compaction");
-			if (compactionSettings.enabled && compactionSettings.strategy !== "off") {
-				await this.#runAutoCompaction("overflow", true, false, allowDefer, { autoContinue });
-			}
+			if (!compactionSettings.enabled || compactionSettings.strategy === "off") return false;
+			await recoverOversizedPrompt({
+				guard: this.#oversizedPromptRecovery,
+				generation,
+				errorMessage: assistantMessage.errorMessage ?? "Provider rejected an oversized prompt",
+				contextWindow,
+				threshold: resolveThresholdTokens(contextWindow, compactionSettings),
+				autoContinue,
+				getMessages: () => this.agent.state.messages,
+				replaceMessages: messages => this.agent.replaceMessages(messages),
+				compact: async () => void (await this.#runAutoCompaction("overflow", true, false, allowDefer, { autoContinue: false })),
+				emit: event => this.#emitSessionEvent(event),
+				notice: message => this.emitNotice("error", message, "provider-error"),
+				scheduleRetry: () => this.#scheduleAgentContinue({ delayMs: 100, generation }),
+			});
 			return false;
 		}
 
@@ -11354,7 +11367,7 @@ export class AgentSession {
 					}
 				}
 
-				this.#scheduleAgentContinue({ delayMs: 100, generation });
+				if (shouldAutoContinue) this.#scheduleAgentContinue({ delayMs: 100, generation });
 			} else if (this.agent.hasQueuedMessages()) {
 				// Auto-compaction can complete while follow-up/steering/custom messages are waiting.
 				// Kick the loop so queued messages are actually delivered.
@@ -11508,7 +11521,7 @@ export class AgentSession {
 						(reason === "incomplete" && lastAssistant.stopReason === "length");
 					if (shouldDrop) this.agent.replaceMessages(messages.slice(0, -1));
 				}
-				this.#scheduleAgentContinue({ delayMs: 100, generation });
+				if (autoContinue) this.#scheduleAgentContinue({ delayMs: 100, generation });
 			} else if (this.agent.hasQueuedMessages()) {
 				this.#scheduleAgentContinue({
 					delayMs: 100,

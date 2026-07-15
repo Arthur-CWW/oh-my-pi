@@ -75,6 +75,7 @@ describe("handoff helpers", () => {
 			customInstructions: "preserve failing test name",
 			initiatorOverride: "agent",
 			metadata: { session: "handoff-test" },
+			thinkingLevel: Effort.High,
 		});
 
 		expect(document).toBe("## Goal\nContinue\n## Next Steps\n1. Run the focused test");

@@ -1,6 +1,11 @@
 import type { CollabGuestLink } from "../collab/guest";
-import { PRIMITIVE_CATEGORY_IDS, resolvePrimitiveCategory, type PrimitiveCategoryId } from "./components/primitives-inspector-state";
+import {
+	PRIMITIVE_CATEGORY_IDS,
+	resolvePrimitiveCategory,
+	type PrimitiveCategoryId,
+} from "./components/primitives-inspector-state";
 import { renderCommandShortcutSection } from "./interaction-registry";
+import { formatSessionIdentity, type SessionIdentity, sessionIdentityHandle } from "./session-identity";
 
 export interface CommandModeContext {
 	readonly collabGuest?: CollabGuestLink;
@@ -16,6 +21,9 @@ export interface CommandModeContext {
 	handleToolsCommand(): void;
 	handleContextCommand(): void;
 	showVersion(): void | Promise<void>;
+	getSessionIdentity(): SessionIdentity;
+	copyIdentityHandle(handle: string): void | Promise<void>;
+	readonly commands?: readonly CommandModeCommand[];
 	showFeedback(message: string): void;
 }
 
@@ -29,6 +37,9 @@ export interface CommandModeCommand {
 	readonly name: string;
 	readonly description: string;
 	readonly subcommands?: readonly CommandModeSubcommand[];
+	readonly aliases?: readonly string[];
+	/** Safe to expose while the transcript/editor is attached to a child agent. */
+	readonly viewLocal?: boolean;
 	readonly inlineHint?: string;
 	readonly hostOnly?: boolean;
 	run(ctx: CommandModeContext, args: readonly string[]): void | Promise<void>;
@@ -65,6 +76,14 @@ function commandCompletion(command: CommandModeCommand): CommandModeCompletion {
 	};
 }
 
+function commandNames(command: CommandModeCommand): readonly string[] {
+	return [command.name, ...(command.aliases ?? [])];
+}
+
+export function commandModeCommandsForView(childFocused: boolean): readonly CommandModeCommand[] {
+	return childFocused ? COMMAND_MODE_COMMANDS.filter(command => command.viewLocal) : COMMAND_MODE_COMMANDS;
+}
+
 function subcommandCompletion(subcommand: CommandModeSubcommand): CommandModeCompletion {
 	return {
 		value: subcommand.name,
@@ -78,22 +97,44 @@ export const COMMAND_MODE_COMMANDS: readonly CommandModeCommand[] = [
 	{
 		name: "commands",
 		description: "list TUI colon commands and shortcuts",
+		viewLocal: true,
 		run(ctx) {
+			const commands = ctx.commands ?? COMMAND_MODE_COMMANDS;
 			ctx.showFeedback(
-				`${COMMAND_MODE_COMMANDS.map(command => `:${command.name} — ${command.description}`).join("\n")}${renderCommandShortcutSection()}`,
+				`${commands
+					.map(command => {
+						const aliases = command.aliases?.length
+							? ` (alias ${command.aliases.map(alias => `:${alias}`).join(", ")})`
+							: "";
+						return `:${command.name}${aliases} — ${command.description}`;
+					})
+					.join("\n")}${renderCommandShortcutSection()}`,
 			);
+		},
+	},
+	{
+		name: "id",
+		aliases: ["whoami"],
+		description: "show and copy the focused session/agent identity",
+		viewLocal: true,
+		async run(ctx) {
+			const identity = ctx.getSessionIdentity();
+			await ctx.copyIdentityHandle(sessionIdentityHandle(identity));
+			ctx.showFeedback(formatSessionIdentity(identity));
 		},
 	},
 	{
 		name: "wrap",
 		description: "toggle wrapping for transcript body rows",
+		viewLocal: true,
 		run(ctx) {
 			ctx.showFeedback(`Transcript wrapping: ${ctx.toggleWrap() ? "on" : "off"}`);
 		},
 	},
 	{
 		name: "rich",
-		description: "toggle rich Markdown rendering for the main transcript",
+		description: "toggle rich Markdown rendering for the focused transcript",
+		viewLocal: true,
 		run(ctx) {
 			ctx.showFeedback(`Rich transcript: ${ctx.toggleRich() ? "on" : "off"}`);
 		},
@@ -101,6 +142,7 @@ export const COMMAND_MODE_COMMANDS: readonly CommandModeCommand[] = [
 	{
 		name: "errors",
 		description: "view recent errors or clear history",
+		viewLocal: true,
 		subcommands: [
 			{ name: "clear", description: "clear error history" },
 			{ name: "resolve", description: "resolve an error by id", usage: "<id>" },
@@ -158,6 +200,7 @@ export const COMMAND_MODE_COMMANDS: readonly CommandModeCommand[] = [
 	{
 		name: "version",
 		description: "show OMP version information",
+		viewLocal: true,
 		hostOnly: true,
 		run(ctx) {
 			return ctx.showVersion();
@@ -166,6 +209,7 @@ export const COMMAND_MODE_COMMANDS: readonly CommandModeCommand[] = [
 	{
 		name: "changelog",
 		description: "show changelog entries",
+		viewLocal: true,
 		subcommands: [{ name: "full", description: "show complete changelog" }],
 		inlineHint: "[full]",
 		hostOnly: true,
@@ -180,6 +224,7 @@ export const COMMAND_MODE_COMMANDS: readonly CommandModeCommand[] = [
 	{
 		name: "hotkeys",
 		description: "show all keyboard shortcuts",
+		viewLocal: true,
 		run(ctx) {
 			ctx.handleHotkeysCommand();
 		},
@@ -203,7 +248,7 @@ export const COMMAND_MODE_COMMANDS: readonly CommandModeCommand[] = [
 ];
 
 export const TUI_COLON_COMMAND_NAMES: ReadonlySet<string> = new Set(
-	COMMAND_MODE_COMMANDS.map(command => command.name),
+	COMMAND_MODE_COMMANDS.flatMap(command => commandNames(command)),
 );
 
 function splitCommandValue(value: string): { prefix: string; body: string; tokens: string[] } {
@@ -218,13 +263,18 @@ export function getCommandModeCompletions(
 ): readonly CommandModeCompletion[] {
 	const { body, tokens } = splitCommandValue(value);
 	const commandToken = tokens[0]?.toLowerCase() ?? "";
-	const command = commands.find(candidate => candidate.name.toLowerCase() === commandToken);
 	const hasWhitespace = /\s/.test(body);
+	const resolved = commands
+		.flatMap(command => commandNames(command).map(name => ({ command, name })))
+		.find(candidate => candidate.name.toLowerCase() === commandToken);
+	const command = resolved?.command;
 	if (!command || !hasWhitespace) {
 		const prefix = commandToken;
-		return commands
-			.filter(candidate => candidate.name.toLowerCase().startsWith(prefix))
-			.map(commandCompletion);
+		return commands.flatMap(command =>
+			commandNames(command)
+				.filter(name => name.toLowerCase().startsWith(prefix))
+				.map(name => commandCompletion({ ...command, name })),
+		);
 	}
 
 	if (!command.subcommands || tokens.length > 2) return [];
@@ -253,7 +303,7 @@ export async function dispatchCommandLine(
 	commands: readonly CommandModeCommand[] = COMMAND_MODE_COMMANDS,
 ): Promise<boolean> {
 	const parsed = parseCommandLine(value);
-	const command = commands.find(candidate => candidate.name.toLowerCase() === parsed.name);
+	const command = commands.find(candidate => commandNames(candidate).some(name => name.toLowerCase() === parsed.name));
 	if (!command) {
 		const entered = parsed.name ? ` "${parsed.name}"` : "";
 		ctx.showFeedback(

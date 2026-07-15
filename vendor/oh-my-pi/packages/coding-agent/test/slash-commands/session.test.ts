@@ -94,7 +94,6 @@ describe("/session slash command", () => {
 		expect(settled).toBe(true);
 	});
 
-
 	it("propagates session deletion failures through executeBuiltinSlashCommand", async () => {
 		const deleteError = new Error("delete failed");
 		const handleSessionDeleteCommand = vi.fn(async () => {
@@ -105,5 +104,31 @@ describe("/session slash command", () => {
 		await expect(executeBuiltinSlashCommand("/session delete", harness.runtime)).rejects.toBe(deleteError);
 		expect(handleSessionDeleteCommand).toHaveBeenCalledTimes(1);
 		expect(harness.setText).toHaveBeenCalledWith("");
+	});
+	it("runs read-only session info against the focused child and keeps mutations main-scoped", async () => {
+		const statuses: string[] = [];
+		const setText = vi.fn();
+		const childManager = { getCwd: () => "/child" };
+		const child = {
+			sessionId: "child-session-id",
+			sessionName: "Child session",
+			sessionManager: childManager,
+		};
+		const ctx = {
+			focusedAgentId: "Worker",
+			viewSession: child,
+			session: { sessionId: "main-session-id", sessionName: "Main session" },
+			sessionManager: { getCwd: () => "/main" },
+			settings: {},
+			editor: { setText },
+			showStatus: (text: string) => statuses.push(text),
+			refreshSlashCommandState: () => {},
+		} as unknown as InteractiveModeContext;
+
+		expect(await executeBuiltinSlashCommand("/session info", { ctx })).toBe(true);
+		expect(statuses.at(-1)).toContain("Session: child-session-id");
+		expect(statuses.at(-1)).toContain("CWD: /child");
+		expect(setText).toHaveBeenCalledWith("");
+		expect(await executeBuiltinSlashCommand("/session delete", { ctx })).toBe(false);
 	});
 });

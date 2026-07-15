@@ -291,6 +291,54 @@ function normalizeAnthropicImageMediaType(mimeType: string): AnthropicImageMedia
 	return undefined;
 }
 
+const LEGACY_NODE_REPL_IMAGE_BASE64 =
+	/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+const LEGACY_NODE_REPL_IMAGE_MIME_TYPE = /^image\/[^\s/]+$/i;
+
+function parseLegacyNodeReplImageEnvelope(text: string): ImageContent | undefined {
+	let start = 0;
+	let end = text.length - 1;
+	while (
+		start <= end &&
+		(text.charCodeAt(start) === 0x20 ||
+			text.charCodeAt(start) === 0x09 ||
+			text.charCodeAt(start) === 0x0a ||
+			text.charCodeAt(start) === 0x0d)
+	) {
+		start++;
+	}
+	while (
+		end >= start &&
+		(text.charCodeAt(end) === 0x20 ||
+			text.charCodeAt(end) === 0x09 ||
+			text.charCodeAt(end) === 0x0a ||
+			text.charCodeAt(end) === 0x0d)
+	) {
+		end--;
+	}
+	if (text.charCodeAt(start) !== 0x7b || text.charCodeAt(end) !== 0x7d) return undefined;
+
+	let envelope: unknown;
+	try {
+		envelope = JSON.parse(text);
+	} catch {
+		return undefined;
+	}
+	if (
+		!isRecord(envelope) ||
+		envelope.type !== "image" ||
+		typeof envelope.data !== "string" ||
+		envelope.data.length === 0 ||
+		envelope.data.length % 4 !== 0 ||
+		!LEGACY_NODE_REPL_IMAGE_BASE64.test(envelope.data) ||
+		typeof envelope.mimeType !== "string" ||
+		!LEGACY_NODE_REPL_IMAGE_MIME_TYPE.test(envelope.mimeType)
+	) {
+		return undefined;
+	}
+	return { type: "image", data: envelope.data, mimeType: envelope.mimeType };
+}
+
 function cloneAnthropicCacheControl(cacheControl: AnthropicCacheControl): AnthropicCacheControl {
 	return { ...cacheControl };
 }
@@ -919,18 +967,24 @@ function convertContentBlocks(content: UserContent[], supportsImages = true): An
 	let sawImage = false;
 
 	for (const block of content) {
+		let image: ImageContent;
 		if (block.type === "text") {
-			const text = block.text.toWellFormed();
-			if (text.trim().length === 0) continue;
-			sawText = true;
-			blocks.push({ type: "text", text });
-			continue;
-		}
-
-		if (block.type === "video") {
-			throw new Error(
-				"Video input reached Anthropic without native video support. Select the video-capable pi/vision model.",
-			);
+			const legacyImage = parseLegacyNodeReplImageEnvelope(block.text);
+			if (!legacyImage) {
+				const text = block.text.toWellFormed();
+				if (text.trim().length === 0) continue;
+				sawText = true;
+				blocks.push({ type: "text", text });
+				continue;
+			}
+			image = legacyImage;
+		} else {
+			if (block.type === "video") {
+				throw new Error(
+					"Video input reached Anthropic without native video support. Select the video-capable pi/vision model.",
+				);
+			}
+			image = block;
 		}
 
 		if (!supportsImages) {
@@ -938,9 +992,9 @@ function convertContentBlocks(content: UserContent[], supportsImages = true): An
 			continue;
 		}
 
-		const mediaType = normalizeAnthropicImageMediaType(block.mimeType);
+		const mediaType = normalizeAnthropicImageMediaType(image.mimeType);
 		if (!mediaType) {
-			blocks.push({ type: "text", text: `[unsupported image: ${block.mimeType}]` });
+			blocks.push({ type: "text", text: `[unsupported image: ${image.mimeType}]` });
 			continue;
 		}
 
@@ -950,7 +1004,7 @@ function convertContentBlocks(content: UserContent[], supportsImages = true): An
 			source: {
 				type: "base64",
 				media_type: mediaType,
-				data: block.data,
+				data: image.data,
 			},
 		});
 	}

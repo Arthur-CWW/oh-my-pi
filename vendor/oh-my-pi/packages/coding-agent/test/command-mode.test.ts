@@ -4,13 +4,14 @@ import { CURSOR_MARKER } from "@oh-my-pi/pi-tui";
 import {
 	type CommandModeContext,
 	applyCommandModeCompletion,
+	commandModeCommandsForView,
 	dispatchCommandLine,
 	getCommandModeCompletions,
 	parseCommandLine,
 	TUI_COLON_COMMAND_NAMES,
 } from "@oh-my-pi/pi-coding-agent/modes/command-registry";
 import { AssistantMessageComponent } from "@oh-my-pi/pi-coding-agent/modes/components/assistant-message";
-import { CommandLineComponent } from "@oh-my-pi/pi-coding-agent/modes/components/command-line";
+import { canEnterCommandMode, CommandLineComponent } from "@oh-my-pi/pi-coding-agent/modes/components/command-line";
 import type { TranscriptDisplayContext } from "@oh-my-pi/pi-coding-agent/modes/transcript-display";
 import { initTheme, theme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import { BUILTIN_SLASH_COMMAND_DEFS } from "@oh-my-pi/pi-coding-agent/slash-commands/builtin-registry";
@@ -24,6 +25,14 @@ class CommandFixture implements CommandModeContext {
 	rich = true;
 	versionRuns = 0;
 	feedback: string[] = [];
+	copied: string[] = [];
+	identity = {
+		sessionId: "019f6141-df73-7000-b792-985f12d9db5d",
+		sessionName: "Identity repro",
+		agentId: "Main",
+		journalPath: "/tmp/session.jsonl",
+		binaryVersion: "16.0.1+fork.test",
+	};
 
 	toggleWrap(): boolean {
 		this.wrap = !this.wrap;
@@ -44,6 +53,14 @@ class CommandFixture implements CommandModeContext {
 	handleHotkeysCommand(): void {}
 	handleToolsCommand(): void {}
 	handleContextCommand(): void {}
+
+	getSessionIdentity() {
+		return this.identity;
+	}
+
+	copyIdentityHandle(handle: string): void {
+		this.copied.push(handle);
+	}
 
 	showVersion(): void {
 		this.versionRuns += 1;
@@ -115,10 +132,54 @@ describe("colon command registry", () => {
 		expect(feedback).not.toContain("enter input mode");
 	});
 
+	it(":id and :whoami emit a structured identity and copy the paste-ready handle", async () => {
+		const ctx = new CommandFixture();
+		for (const command of [":id", ":whoami"]) expect(await dispatchCommandLine(command, ctx)).toBe(true);
+		const output = ctx.feedback.at(-1) ?? "";
+		expect(output).toContain("session id: 019f6141-df73-7000-b792-985f12d9db5d");
+		expect(output).toContain("session name: Identity repro");
+		expect(output).toContain("agent id: Main");
+		expect(output).toContain("journal: /tmp/session.jsonl");
+		expect(output).toContain("status segment: session (renders 019f6141)");
+		expect(ctx.copied).toEqual([
+			"019f6141-df73-7000-b792-985f12d9db5d/Main",
+			"019f6141-df73-7000-b792-985f12d9db5d/Main",
+		]);
+	});
+
+	it("keeps colon mode and view-local commands available while a child is focused", async () => {
+		const ctx = new CommandFixture();
+		ctx.identity = { ...ctx.identity, agentId: "CardQualityAudit", journalPath: "/tmp/CardQualityAudit.jsonl" };
+		const childCommands = commandModeCommandsForView(true);
+		const editor = { getText: () => "", isShowingAutocomplete: () => false };
+		const interactive = {
+			focusedAgentId: "CardQualityAudit",
+			editor,
+			ui: { getFocused: () => editor },
+		};
+		expect(canEnterCommandMode(interactive as never)).toBe(true);
+		expect(childCommands.map(command => command.name)).toEqual([
+			"commands",
+			"id",
+			"wrap",
+			"rich",
+			"errors",
+			"version",
+			"changelog",
+			"hotkeys",
+		]);
+		expect(await dispatchCommandLine(":id", ctx, childCommands)).toBe(true);
+		expect(ctx.feedback.at(-1)).toContain("agent id: CardQualityAudit");
+		expect(ctx.copied.at(-1)).toBe("019f6141-df73-7000-b792-985f12d9db5d/CardQualityAudit");
+	});
+
 	it("filters and selects :commands as a normal colon completion", () => {
 		const completions = getCommandModeCompletions(":comm");
 		expect(completions.map(completion => completion.value)).toEqual(["commands"]);
 		expect(applyCommandModeCompletion(":comm", completions[0]!)).toBe(":commands");
+		expect(completions[0]?.description).toContain("list TUI colon commands");
+		expect(getCommandModeCompletions(":id").map(completion => completion.value)).toEqual(["id"]);
+		expect(getCommandModeCompletions(":who").map(completion => completion.value)).toEqual(["whoami"]);
 	});
 
 	it("keeps migrated colon commands out of slash autocomplete", () => {

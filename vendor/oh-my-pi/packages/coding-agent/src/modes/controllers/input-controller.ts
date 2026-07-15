@@ -378,7 +378,6 @@ export class InputController {
 		};
 	}
 
-
 	#setupEnhancedPaste(): void {
 		if (this.#enhancedPaste) return;
 
@@ -778,7 +777,13 @@ export class InputController {
 			}
 			return;
 		}
-		if (text.startsWith("/") || text.startsWith("!") || text.startsWith("$")) {
+		if (text.startsWith("/")) {
+			const slashResult = await executeBuiltinSlashCommand(text, { ctx: this.ctx });
+			if (slashResult === true) return;
+			this.ctx.showStatus("This command runs in the main session — press ←← to return first");
+			return; // editor text not cleared: Editor does not auto-clear on submit
+		}
+		if (text.startsWith("!") || text.startsWith("$")) {
 			this.ctx.showStatus("Commands run in the main session — press ←← to return first");
 			return; // editor text not cleared: Editor does not auto-clear on submit
 		}

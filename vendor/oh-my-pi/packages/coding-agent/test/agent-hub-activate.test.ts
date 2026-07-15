@@ -37,7 +37,7 @@ type AgentHubControllerHarness = Pick<InteractiveModeContext, "hideThinkingBlock
 	collabGuest: { agentRegistry: AgentRegistry; hubRemote: undefined };
 	focusAgentSession(id: string): Promise<void>;
 	session: { getToolByName(name: string): undefined; extensionRunner: undefined };
-	sessionManager: { getCwd(): string; getSessionFile(): null };
+	sessionManager: { getCwd(): string; getSessionFile(): null; getSessionId(): string };
 };
 
 function showAgentHubForHarness(
@@ -51,7 +51,13 @@ function showAgentHubForHarness(
 
 function makeHub(
 	focusAgent: (id: string) => Promise<void>,
-	options: { status?: AgentStatus; sessionFile?: string | null; lifecycle?: AgentLifecycleManager } = {},
+	options: {
+		status?: AgentStatus;
+		sessionFile?: string | null;
+		lifecycle?: AgentLifecycleManager;
+		sessionId?: string;
+		copyIdentity?: (payload: string) => void;
+	} = {},
 ) {
 	const agents = new AgentRegistry();
 	const status = options.status ?? "running";
@@ -80,10 +86,24 @@ function makeHub(
 		lifecycle: options.lifecycle,
 		focusAgent,
 		externalIrc: null,
+		sessionId: options.sessionId,
+		copyIdentity: options.copyIdentity,
 	});
 	return { hub, agents, doneCalls: () => doneCalls, done: done.promise, renderRequested: renderRequested.promise };
 }
 
+it("y yanks the selected child's session handle and history URL", async () => {
+	const copied: string[] = [];
+	const { hub } = makeHub(async () => {}, {
+		sessionId: "019f6141-df73-7000-b792-985f12d9db5d",
+		copyIdentity: payload => copied.push(payload),
+	});
+	hub.handleInput("y");
+	await Bun.sleep(0);
+	expect(copied).toEqual(["019f6141-df73-7000-b792-985f12d9db5d/Worker\nhistory://Worker"]);
+	expect(renderedText(hub)).toContain("Yanked 019f6141-df73-7000-b792-985f12d9db5d/Worker + history://Worker");
+	hub.dispose();
+});
 function renderedText(hub: AgentHubOverlayComponent): string {
 	return hub
 		.render(120)
@@ -530,7 +550,7 @@ describe("Agent hub Enter activation", () => {
 				focusResolved.resolve();
 			},
 			session: { getToolByName: () => undefined, extensionRunner: undefined },
-			sessionManager: { getCwd: () => "/tmp", getSessionFile: () => null },
+			sessionManager: { getCwd: () => "/tmp", getSessionFile: () => null, getSessionId: () => "session-test" },
 			hideThinkingBlock: false,
 		};
 		showAgentHubForHarness(ctx, new SessionObserverRegistry());
@@ -581,7 +601,7 @@ describe("Agent hub double-← gating", () => {
 			collabGuest: { agentRegistry: agents, hubRemote: undefined },
 			focusAgentSession: async () => {},
 			session: { getToolByName: () => undefined, extensionRunner: undefined },
-			sessionManager: { getCwd: () => "/tmp", getSessionFile: () => null },
+			sessionManager: { getCwd: () => "/tmp", getSessionFile: () => null, getSessionId: () => "session-test" },
 			hideThinkingBlock: false,
 		};
 		const controller = {

@@ -22,7 +22,7 @@ import {
 import { preferredDialect } from "@oh-my-pi/pi-catalog/identity";
 import type { ReasoningEffort } from "@oh-my-pi/pi-catalog/effort";
 import { countTokens } from "@oh-my-pi/pi-natives";
-import { logger, prompt } from "@oh-my-pi/pi-utils";
+import { logger, parseImageMetadata, prompt } from "@oh-my-pi/pi-utils";
 import * as snapcompact from "@oh-my-pi/snapcompact";
 import { type AgentTelemetry, instrumentedCompleteSimple } from "../telemetry";
 import { isProviderThinkingEffort, ThinkingLevel } from "../thinking";
@@ -251,11 +251,110 @@ export function resolveThresholdTokens(contextWindow: number, settings: Compacti
 // Cut point detection
 // ============================================================================
 
+/** Anthropic downsizes images above 1.15 MP or 1568 px on either edge. */
+const IMAGE_MAX_PIXELS = 1_200_000;
+const IMAGE_MAX_DIMENSION = 1568;
+const IMAGE_MAX_TOKENS = 1600;
+const IMAGE_FALLBACK_TOKENS = 1200;
+
+interface InlineImagePayload {
+	data: string;
+	mimeType: string;
+}
+
+function legacySerializedImagePayload(text: string): InlineImagePayload | undefined {
+	const prefix = '{"type":"image","data":"';
+	const mimeMarker = '","mimeType":"';
+	if (!text.startsWith(prefix) || !text.endsWith('"}')) return undefined;
+	const mimeStart = text.lastIndexOf(mimeMarker);
+	if (mimeStart <= prefix.length) return undefined;
+	const mimeType = text.slice(mimeStart + mimeMarker.length, -2);
+	if (!mimeType.startsWith("image/")) return undefined;
+	return { data: text.slice(prefix.length, mimeStart), mimeType };
+}
+
+function imageDimensions(data: string): { width: number; height: number } | undefined {
+	try {
+		// Image dimensions live near the header. Avoid decoding the full payload:
+		// tool-result PNGs can be hundreds of kilobytes each.
+		const metadata = parseImageMetadata(Buffer.from(data.slice(0, 8192), "base64"));
+		if (metadata?.width && metadata.height) return { width: metadata.width, height: metadata.height };
+	} catch {
+		// Corrupt/unknown images use the conservative fallback below.
+	}
+	return undefined;
+}
+
+export function estimateImageTokens(data: string): number {
+	const dimensions = imageDimensions(data);
+	if (!dimensions) return IMAGE_FALLBACK_TOKENS;
+	const { width, height } = dimensions;
+	const scale = Math.min(
+		1,
+		IMAGE_MAX_DIMENSION / width,
+		IMAGE_MAX_DIMENSION / height,
+		Math.sqrt(IMAGE_MAX_PIXELS / (width * height)),
+	);
+	return Math.min(IMAGE_MAX_TOKENS, Math.ceil((width * scale * height * scale) / 750));
+}
+
+function imageElisionPlaceholder(data: string): string {
+	const dimensions = imageDimensions(data);
+	return dimensions ? `[image ${dimensions.width}x${dimensions.height} elided]` : "[image elided]";
+}
+
+type ContentArrayMessage = AgentMessage & { content: Array<Record<string, unknown>> };
+
+
+export interface ImageElisionResult {
+	messages: AgentMessage[];
+	elidedCount: number;
+	tokensBefore: number;
+	tokensAfter: number;
+}
+
 /**
- * Image content has no tokenizer representation; charge a fixed estimate
- * matching what providers typically bill for inline images.
+ * Replace image payloads with compact text markers, oldest first, until the
+ * message sequence fits `targetTokens`. Messages not requiring changes retain
+ * their identity; journal-owned inputs are never mutated.
  */
-const IMAGE_TOKEN_ESTIMATE = 1200;
+export function elideOldestImagePayloads(messages: AgentMessage[], targetTokens: number): ImageElisionResult {
+	const tokensBefore = messages.reduce((sum, message) => sum + estimateTokens(message), 0);
+	let tokensToRemove = Math.max(0, tokensBefore - Math.max(0, targetTokens));
+	if (tokensToRemove === 0) return { messages, elidedCount: 0, tokensBefore, tokensAfter: tokensBefore };
+
+	let elidedCount = 0;
+	const rewritten = messages.map(message => {
+		if (tokensToRemove <= 0) return message;
+		const content = (message as { content?: unknown }).content;
+		if (!Array.isArray(content)) return message;
+		let changed = false;
+		const rewrittenContent = content.map(block => {
+			if (tokensToRemove <= 0 || !block || typeof block !== "object") return block;
+			const candidate = block as { type?: unknown; data?: unknown; mimeType?: unknown; text?: unknown };
+			let payload: InlineImagePayload | undefined;
+			if (
+				candidate.type === "image" &&
+				typeof candidate.data === "string" &&
+				typeof candidate.mimeType === "string"
+			) {
+				payload = { data: candidate.data, mimeType: candidate.mimeType };
+			} else if (candidate.type === "text" && typeof candidate.text === "string") {
+				payload = legacySerializedImagePayload(candidate.text);
+			}
+			if (!payload) return block;
+			const imageTokens = estimateImageTokens(payload.data);
+			const placeholder = imageElisionPlaceholder(payload.data);
+			tokensToRemove -= Math.max(0, imageTokens - countTokens([placeholder]));
+			elidedCount++;
+			changed = true;
+			return { type: "text", text: placeholder };
+		});
+		return changed ? ({ ...message, content: rewrittenContent } as ContentArrayMessage) : message;
+	});
+	const tokensAfter = rewritten.reduce((sum, message) => sum + estimateTokens(message), 0);
+	return { messages: rewritten, elidedCount, tokensBefore, tokensAfter };
+}
 
 /**
  * Video duration is unavailable here, so this is only a nonzero control-flow
@@ -271,6 +370,14 @@ export const VIDEO_TOKEN_CONTROL_FLOW_FLOOR = 1;
 export function estimateTokens(message: AgentMessage): number {
 	const fragments: string[] = [];
 	let extra = 0;
+	const accountText = (text: string): void => {
+		const legacyImage = legacySerializedImagePayload(text);
+		if (legacyImage) {
+			extra += estimateImageTokens(legacyImage.data);
+		} else {
+			fragments.push(text);
+		}
+	};
 	if ((message as { role?: string }).role === "bashExecution") {
 		const bash = message as { command?: unknown; output?: unknown };
 		if (typeof bash.command === "string") fragments.push(bash.command);
@@ -283,11 +390,13 @@ export function estimateTokens(message: AgentMessage): number {
 		case "developer": {
 			const content = message.content;
 			if (typeof content === "string") {
-				fragments.push(content);
+				accountText(content);
 			} else {
 				for (const block of content) {
 					if (block.type === "text" && block.text) {
-						fragments.push(block.text);
+						accountText(block.text);
+					} else if (block.type === "image") {
+						extra += estimateImageTokens(block.data);
 					} else if (block.type === "video") {
 						extra += VIDEO_TOKEN_CONTROL_FLOW_FLOOR;
 					}
@@ -323,13 +432,13 @@ export function estimateTokens(message: AgentMessage): number {
 		case "hookMessage":
 		case "toolResult": {
 			if (typeof message.content === "string") {
-				fragments.push(message.content);
+				accountText(message.content);
 			} else {
 				for (const block of message.content) {
 					if (block.type === "text" && block.text) {
-						fragments.push(block.text);
+						accountText(block.text);
 					} else if (block.type === "image") {
-						extra += IMAGE_TOKEN_ESTIMATE;
+						extra += estimateImageTokens(block.data);
 					} else if (block.type === "video") {
 						extra += VIDEO_TOKEN_CONTROL_FLOW_FLOOR;
 					}
@@ -908,11 +1017,15 @@ export function prepareCompaction(
 	}
 
 	// Messages kept after compaction (recent history)
-	const recentMessages: AgentMessage[] = [];
+	const rawRecentMessages: AgentMessage[] = [];
 	for (let i = cutPoint.firstKeptEntryIndex; i < boundaryEnd; i++) {
 		const msg = getMessageFromEntry(pathEntries[i]);
-		if (msg) recentMessages.push(msg);
+		if (msg) rawRecentMessages.push(msg);
 	}
+	// A single tool-heavy turn can be larger than the whole recent-history
+	// budget because tool-call/result adjacency makes it indivisible. In that
+	// case retain its text but stub image payloads oldest-first.
+	const recentMessages = elideOldestImagePayloads(rawRecentMessages, keepRecentTokens).messages;
 	// Nothing to summarize means compaction would be a no-op.
 	if (messagesToSummarize.length === 0 && turnPrefixMessages.length === 0) {
 		return undefined;

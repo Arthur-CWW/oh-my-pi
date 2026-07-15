@@ -24,6 +24,7 @@ const NORMAL_FOOTER_IDS: Record<AgentHubInteractionSurface, readonly string[]> =
 		"viewer.help",
 		"hub.table.history",
 		"hub.table.rich",
+		"hub.table.yank-identity",
 		"hub.table.attach",
 		"hub.table.close",
 	],
@@ -59,21 +60,20 @@ const NORMAL_FOOTER_REMAINDER_IDS: Record<AgentHubInteractionSurface, readonly s
 
 const NORMAL_HELP_IDS: Record<AgentHubInteractionSurface, readonly string[]> = {
 	"hub.table": [
-		...NORMAL_FOOTER_IDS["hub.table"].filter(
-			id => id !== "viewer.previous-sibling" && id !== "viewer.next-sibling",
-		),
+		...NORMAL_FOOTER_IDS["hub.table"].filter(id => id !== "viewer.previous-sibling" && id !== "viewer.next-sibling"),
 		"hub.table.cycle-siblings",
 	],
 	"hub.chat": [
-		...NORMAL_FOOTER_IDS["hub.chat"].filter(
-			id => id !== "viewer.previous-sibling" && id !== "viewer.next-sibling",
-		),
+		...NORMAL_FOOTER_IDS["hub.chat"].filter(id => id !== "viewer.previous-sibling" && id !== "viewer.next-sibling"),
 		"hub.chat.cycle-siblings",
 	],
 	"hub.inspector": NORMAL_FOOTER_IDS["hub.inspector"],
 };
 
-function interactionSurfaces(surface: AgentHubInteractionSurface, mode: InteractionMode): readonly InteractionSurface[] {
+function interactionSurfaces(
+	surface: AgentHubInteractionSurface,
+	mode: InteractionMode,
+): readonly InteractionSurface[] {
 	if (mode !== "normal") return [surface];
 	return surface === "hub.inspector" ? ["viewer", "hub.table", surface] : ["viewer", surface];
 }
@@ -98,8 +98,7 @@ export function renderAgentHubFooter(options: {
 	readonly extra?: readonly string[];
 }): string {
 	const ids = options.mode === "normal" ? NORMAL_FOOTER_REMAINDER_IDS[options.surface] : undefined;
-	const priorityIds =
-		options.mode === "normal" ? NORMAL_FOOTER_PRIORITY_IDS[options.surface] : EMPTY_INTERACTION_IDS;
+	const priorityIds = options.mode === "normal" ? NORMAL_FOOTER_PRIORITY_IDS[options.surface] : EMPTY_INTERACTION_IDS;
 	const surfaces = interactionSurfaces(options.surface, options.mode);
 	const priorityLegend = renderInteractionLegend({
 		surfaces,
