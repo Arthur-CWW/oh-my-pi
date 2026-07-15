@@ -1,0 +1,19 @@
+
+portless
+
+-- Proxy is running
+-- primer-qa3.localhost (auto-resolves to 127.0.0.1)
+-- Using port 4733
+
+  -> http://primer-qa3.localhost:1355
+
+Running: PORT=4733 HOST=127.0.0.1 PORTLESS_URL=http://primer-qa3.localhost:1355 bun src/dashboard.ts
+
+Primer dashboard listening on http://localhost:4733
+meltdown portless alias not claimed (exit 1) — reader supervisor likely owns it; set PRIMER_MELTDOWN_ALIAS=0 to skip
+
+portless
+
+-- Proxy is running
+-- primer-qa3.localhost (auto-resolves to 127.0.0.1)
+-- Using port 4419

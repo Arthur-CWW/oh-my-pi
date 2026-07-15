@@ -1,5 +1,6 @@
 import { Schema } from "effect"
 import { askEvidence, recentEvidence, searchEvidence, SUBSTRATES, type EvidenceSet } from "./evidence"
+import { listFeedback, listUiEvents, type FeedbackEvent, type UiEvent } from "./feedback-store"
 import { runCardCommand, runNoteCommand, runProgressCommand } from "./ledger-cli"
 import { openLedger, PositiveInteger } from "./ledger"
 import {
@@ -10,7 +11,6 @@ import {
 } from "./review-store"
 import { resolveDaemonPaths, type DaemonPaths } from "./paths"
 import type { EvidenceHit, EvidenceSource } from "./schema"
-
 export const USAGE = `Usage:
   primer search <terms...> [--limit N] [--source browser|twitter|reader|cards] [--json]
   primer ask "<question>" [--limit N] [--json]
@@ -19,6 +19,8 @@ export const USAGE = `Usage:
   primer card <add|list|status> [options]
   primer progress <add|list> [options]
   primer review <enroll|due> [options]
+  primer feedback list [--limit N] [--json]
+  primer events tail [--kind K] [--limit N] [--json]
 `
 
 const DEFAULT_SEARCH_LIMIT = 30
@@ -214,6 +216,8 @@ export async function runCli(argv: readonly string[], env: Record<string, string
   if (command === "card") return runCardCommand(argv.slice(1), paths)
   if (command === "progress") return runProgressCommand(argv.slice(1), paths)
   if (command === "review") return runReviewCommand(argv.slice(1), paths)
+  if (command === "feedback") return runFeedbackCommand(argv.slice(1), paths)
+  if (command === "events") return runEventsCommand(argv.slice(1), paths)
 
   process.stderr.write(USAGE)
   return 2
@@ -274,6 +278,63 @@ function runRecentCommand(argv: readonly string[], paths: DaemonPaths): number {
     writeHumanHits(evidence.hits)
   }
   return 0
+}
+
+function runFeedbackCommand(argv: readonly string[], paths: DaemonPaths): number {
+  const parsed = parseArgs(argv, { limit: "value", json: "boolean" })
+  if (parsed === null || parsed.positionals.length !== 1 || parsed.positionals[0] !== "list") return usageError()
+
+  const limit = parsePositiveInteger(parsed.flags.get("limit"), 50)
+  if (limit === null) return usageError()
+
+  const db = openLedger(paths.ledgerDb)
+  try {
+    const rows = listFeedback(db, limit)
+    if (parsed.flags.has("json")) writeJson(rows)
+    else writeHumanFeedback(rows)
+    return 0
+  } finally {
+    db.close()
+  }
+}
+
+function runEventsCommand(argv: readonly string[], paths: DaemonPaths): number {
+  const parsed = parseArgs(argv, { kind: "value", limit: "value", json: "boolean" })
+  if (parsed === null || parsed.positionals.length !== 1 || parsed.positionals[0] !== "tail") return usageError()
+
+  const limit = parsePositiveInteger(parsed.flags.get("limit"), 100)
+  const kindValue = parsed.flags.get("kind")
+  if (limit === null || kindValue === true) return usageError()
+
+  const db = openLedger(paths.ledgerDb)
+  try {
+    const rows = listUiEvents(db, kindValue, limit)
+    if (parsed.flags.has("json")) writeJson(rows)
+    else writeHumanUiEvents(rows)
+    return 0
+  } finally {
+    db.close()
+  }
+}
+
+function writeHumanFeedback(rows: readonly FeedbackEvent[]): void {
+  if (rows.length === 0) {
+    process.stdout.write("No feedback.\n")
+    return
+  }
+  for (const row of rows) {
+    process.stdout.write(`[${row.createdAt}] ${row.surface} — ${row.verdict}`)
+    if (row.note !== null && row.note.length > 0) process.stdout.write(` — ${row.note}`)
+    process.stdout.write("\n")
+  }
+}
+
+function writeHumanUiEvents(rows: readonly UiEvent[]): void {
+  if (rows.length === 0) {
+    process.stdout.write("No UI events.\n")
+    return
+  }
+  for (const row of rows) process.stdout.write(`[${row.createdAt}] ${row.kind}\n`)
 }
 
 const REVIEW_ENROLL_USAGE = "Usage: primer review enroll <cardId>"
@@ -471,8 +532,8 @@ function writeSkipped(skipped: readonly string[]): void {
   for (const entry of skipped) process.stderr.write(`Skipped: ${entry}\n`)
 }
 
-function writeJson(hits: readonly EvidenceHit[]): void {
-  process.stdout.write(`${JSON.stringify(hits, null, 2)}\n`)
+function writeJson<T>(rows: readonly T[]): void {
+  process.stdout.write(`${JSON.stringify(rows, null, 2)}\n`)
 }
 
 function usageError(): number {

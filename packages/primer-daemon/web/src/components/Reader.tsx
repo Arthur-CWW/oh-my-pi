@@ -17,6 +17,7 @@ import {
   setQueuePriority,
 } from "@/api"
 import { navigate } from "@/hooks/useHashRoute"
+import { logEvent } from "@/hooks/useTelemetry"
 import { type Segment, classifyWord, extractSentence, isHan, parsePinyin, segmentText, toneColor } from "@/lib/segmentation"
 import { cn } from "@/lib/utils"
 
@@ -367,6 +368,7 @@ export function Reader({
       dictLookup(word)
         .catch(() => dictBest(word).catch(() => ({ word, entries: [] }) as DictResult))
         .then((result) => {
+          logEvent("word_lookup", { word })
           setPopup((prev) => (prev?.word === word ? { ...prev, dict: result, loading: false } : prev))
         })
 
@@ -439,6 +441,7 @@ export function Reader({
     setPopup((prev) => (prev ? { ...prev, prioritySaving: true } : prev))
     setQueuePriority(queueItem.id, priority).then(
       (updated) => {
+        logEvent("priority_push", { queueItemId: updated.id, priority: updated.priority })
         setPriorityByWord((prev) => {
           const next = new Map(prev)
           next.set(updated.word, updated.priority)

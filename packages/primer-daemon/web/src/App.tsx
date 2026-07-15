@@ -1,15 +1,19 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import type * as React from "react"
 
 import { DashboardView } from "./components/DashboardView"
+import { EnrichView } from "./components/EnrichView"
+import { FeedbackWidget } from "./components/FeedbackWidget"
 import { Header } from "./components/Header"
 import { KeymapOverlay } from "./components/KeymapOverlay"
+import { PipelineMap } from "./components/PipelineMap"
 import { ReadLibrary } from "./components/ReadLibrary"
 import { Reader } from "./components/Reader"
 import { ReviewView } from "./components/ReviewView"
+import { SchedulerXray } from "./components/SchedulerXray"
 import { ShadowView } from "./components/ShadowView"
 import { useHashRoute } from "./hooks/useHashRoute"
-
+import { logEvent, useTelemetry } from "./hooks/useTelemetry"
 // ---------------------------------------------------------------------------
 // Context-sensitive keymap definitions
 // ---------------------------------------------------------------------------
@@ -59,23 +63,55 @@ const SHADOW_KEYS: Array<{ keys: string[]; label: string }> = [
   { keys: ["?"], label: "toggle this help" },
 ]
 
+const ENRICH_KEYS: Array<{ keys: string[]; label: string }> = [
+  { keys: ["r"], label: "run enrichment for focused item" },
+  { keys: ["j", "k"], label: "focus enrichment record down / up" },
+  { keys: ["Enter"], label: "open focused record" },
+  { keys: ["e"], label: "open enrichment surface" },
+  { keys: ["?"], label: "toggle this help" },
+]
+
+const SCHEDULER_KEYS: Array<{ keys: string[]; label: string }> = [
+  { keys: ["r"], label: "refresh session and telemetry" },
+  { keys: ["1", "2", "3", "4"], label: "add again / hard / good / easy simulation grade" },
+  { keys: ["Backspace"], label: "remove last simulation grade" },
+  { keys: ["p"], label: "preset all good ×8" },
+  { keys: ["g"], label: "preset good / good / again / good…" },
+  { keys: ["?"], label: "toggle this help" },
+]
+
+const PIPELINE_KEYS: Array<{ keys: string[]; label: string }> = [
+  { keys: ["j", "k"], label: "move between pipeline stages" },
+  { keys: ["Enter"], label: "open focused stage" },
+  { keys: ["r"], label: "refresh pipeline counts" },
+  { keys: ["!"], label: "leave a vibe check" },
+  { keys: ["?"], label: "toggle this help" },
+]
+
 // ---------------------------------------------------------------------------
 // App — thin router shell
 // ---------------------------------------------------------------------------
 
 export default function App(): React.JSX.Element {
   const route = useHashRoute()
+  useTelemetry()
   const [helpOpen, setHelpOpen] = useState(false)
   const toggleHelp = () => setHelpOpen((v) => !v)
+  const routeKey = route.view === "reader" ? `${route.view}:${route.docId}:${route.markId ?? ""}` : route.view
 
-  // Map route view to nav segment for Header highlighting
+  useEffect(() => {
+    logEvent("nav", { route: typeof window === "undefined" ? "#/" : window.location.hash || "#/" })
+  }, [routeKey])
+
   const routeSegment =
     route.view === "reader" || route.view === "library" ? "read"
     : route.view === "review" ? "review"
     : route.view === "shadow" ? "shadow"
+    : route.view === "enrich" ? "enrich"
+    : route.view === "scheduler" ? "scheduler"
+    : route.view === "pipeline" ? "pipeline"
     : ""
 
-  // Pick keymap for current route
   const keymapKeys =
     route.view === "reader"
       ? READER_KEYS
@@ -85,9 +121,14 @@ export default function App(): React.JSX.Element {
           ? REVIEW_KEYS
           : route.view === "shadow"
             ? SHADOW_KEYS
-            : undefined
+            : route.view === "enrich"
+              ? ENRICH_KEYS
+              : route.view === "scheduler"
+                ? SCHEDULER_KEYS
+                : route.view === "pipeline"
+                  ? PIPELINE_KEYS
+                  : undefined
 
-  // Route content
   let content: React.JSX.Element
   switch (route.view) {
     case "reader":
@@ -102,12 +143,21 @@ export default function App(): React.JSX.Element {
     case "shadow":
       content = <ShadowView onShowHelp={toggleHelp} />
       break
+    case "enrich":
+      content = <EnrichView />
+      break
+    case "scheduler":
+      content = <SchedulerXray />
+      break
+    case "pipeline":
+      content = <PipelineMap />
+      break
     default:
-      // Dashboard manages its own KeymapOverlay via useVimNav
       return (
         <div className="min-h-svh bg-background text-foreground">
           <Header routeSegment={routeSegment} />
           <DashboardView />
+          <FeedbackWidget />
         </div>
       )
   }
@@ -116,6 +166,7 @@ export default function App(): React.JSX.Element {
     <div className="min-h-svh bg-background text-foreground">
       <Header routeSegment={routeSegment} />
       {content}
+      <FeedbackWidget />
       {helpOpen && keymapKeys ? (
         <KeymapOverlay keys={keymapKeys} onClose={() => setHelpOpen(false)} />
       ) : null}

@@ -10,7 +10,7 @@ import {
   setQueueItemPriority,
   type CreatedReadingMark,
 } from "../src/reading-store"
-import { buildReviewSession, gradeReviewItem } from "../src/review-store"
+import { buildReviewSession, gradeReviewItem, simulateReview } from "../src/review-store"
 
 let nextFixtureId = 0
 
@@ -72,6 +72,34 @@ CREATE TABLE queue_items (
       setQueueItemPriority(db, separated.queueItem.id, 1)
       expect(buildReviewSession(db, 10).map((item) => item.word)).toEqual(["中国", "学习", "国人"])
     })
+  })
+
+  test("explains priority jumps and interleave shifts", () => {
+    withReadingDb((db) => {
+      const first = markWord(db, "中国")
+      const conflicting = markWord(db, "国人")
+      const separated = markWord(db, "学习")
+      setQueueItemPriority(db, first.queueItem.id, 3)
+      setQueueItemPriority(db, conflicting.queueItem.id, 2)
+      setQueueItemPriority(db, separated.queueItem.id, 1)
+
+      const session = buildReviewSession(db, 10, { explain: true })
+      expect(session.map((item) => item.word)).toEqual(["中国", "学习", "国人"])
+      expect(session[0]?.explain).toEqual({
+        slot: 1,
+        reasons: ["new · priority 3 — jumped 0 items"],
+      })
+      expect(session[1]?.explain?.slot).toBe(2)
+      expect(session[1]?.explain?.reasons).toContain("new · priority 1 — jumped 1 item")
+      expect(session[1]?.explain?.reasons).toContain("shifted +1 · shares 国 with prev")
+    })
+  })
+
+  test("simulates repeated good grades with growing intervals", () => {
+    const steps = simulateReview(["good", "good", "good", "good"])
+    expect(steps).toHaveLength(4)
+    expect(steps.every((step) => step.due.length > 0 && step.stability > 0 && step.difficulty > 0)).toBe(true)
+    expect(steps.slice(1).every((step, index) => step.intervalDays >= (steps[index]?.intervalDays ?? 0))).toBe(true)
   })
 
   test("grades with FSRS, appends versioned events, and preserves event history", () => {

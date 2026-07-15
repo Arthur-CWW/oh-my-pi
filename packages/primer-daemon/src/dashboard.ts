@@ -16,6 +16,16 @@ import {
   setCardStatus,
   type CardStatus,
 } from "./ledger"
+import { handleEnrichApi } from "./enrich-api"
+import {
+  addFeedback,
+  addUiEvents,
+  FeedbackInputSchema,
+  listFeedback,
+  listUiEvents,
+  pipelineStats,
+  UiEventsRequestSchema,
+} from "./feedback-store"
 import { handleGenerationApi } from "./generation-api"
 import { handleReaderApi } from "./reader-api"
 import { handleShadowingApi } from "./shadowing-api"
@@ -54,6 +64,8 @@ const DEFAULT_ASK_LIMIT = 30
 const DEFAULT_NOTE_LIMIT = 50
 const DEFAULT_CARD_LIMIT = 100
 const DEFAULT_PROGRESS_LIMIT = 100
+const DEFAULT_FEEDBACK_LIMIT = 50
+const DEFAULT_UI_EVENT_LIMIT = 100
 const PACKAGE_DIR = fileURLToPath(new URL("../", import.meta.url))
 const DEFAULT_PROOF_DIR = resolve(PACKAGE_DIR, "../../docs/qa")
 const DEFAULT_WEB_DIST = resolve(PACKAGE_DIR, "web/dist")
@@ -113,6 +125,11 @@ async function handleRequest(request: Request, paths: DaemonPaths, env: Record<s
 
   const generationApiResponse = await handleGenerationApi(request, paths)
   if (generationApiResponse !== null) return generationApiResponse
+  const enrichApiResponse = await handleEnrichApi(request, paths)
+  if (enrichApiResponse !== null) return enrichApiResponse
+
+  const feedbackApiResponse = await handleFeedbackApi(request, paths)
+  if (feedbackApiResponse !== null) return feedbackApiResponse
   if (isReaderHost(request)) return handleReaderSite(request, pathname, paths)
 
   if (request.method === "GET" && pathname === "/") return handleWebIndex(env)
@@ -340,6 +357,39 @@ async function handleAskStream(request: Request, paths: DaemonPaths, env: Record
 function handleAskConfig(env: Record<string, string | undefined>): Response {
   const config = resolveAskSynthesisConfig(env)
   return jsonResponse({ model: config.model, synthesisEnabled: config.enabled })
+}
+
+async function handleFeedbackApi(request: Request, paths: DaemonPaths): Promise<Response | null> {
+  const url = new URL(request.url)
+  const pathname = url.pathname
+  if (request.method === "POST" && pathname === "/api/feedback") return handleFeedbackCreate(request, paths)
+  if (request.method === "GET" && pathname === "/api/feedback") {
+    const limit = parseLimit(url, DEFAULT_FEEDBACK_LIMIT)
+    if (limit === null) return jsonError("invalid limit", 400)
+    return withLedger(paths, (db) => jsonResponse(listFeedback(db, limit)))
+  }
+  if (request.method === "POST" && pathname === "/api/events") return handleUiEventsCreate(request, paths)
+  if (request.method === "GET" && pathname === "/api/events") {
+    const limit = parseLimit(url, DEFAULT_UI_EVENT_LIMIT)
+    if (limit === null) return jsonError("invalid limit", 400)
+    return withLedger(paths, (db) => jsonResponse(listUiEvents(db, url.searchParams.get("kind") ?? undefined, limit)))
+  }
+  if (request.method === "GET" && pathname === "/api/pipeline/stats") {
+    return withLedger(paths, (db) => jsonResponse(pipelineStats(db)))
+  }
+  return null
+}
+
+async function handleFeedbackCreate(request: Request, paths: DaemonPaths): Promise<Response> {
+  const body = await decodeJson(request, FeedbackInputSchema)
+  if (body instanceof Response) return body
+  return withLedger(paths, (db) => jsonResponse(addFeedback(db, body)))
+}
+
+async function handleUiEventsCreate(request: Request, paths: DaemonPaths): Promise<Response> {
+  const body = await decodeJson(request, UiEventsRequestSchema)
+  if (body instanceof Response) return body
+  return withLedger(paths, (db) => jsonResponse({ count: addUiEvents(db, body.events) }))
 }
 
 function handleNotes(url: URL, paths: DaemonPaths): Response {

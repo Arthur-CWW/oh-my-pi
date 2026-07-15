@@ -9,6 +9,11 @@ export type ReviewGrade = "again" | "hard" | "good" | "easy"
 export type ReviewPhase = "due" | "new"
 export type ReviewItemKind = "queue_item" | "card_candidate"
 
+export interface ReviewSessionExplain {
+  slot: number
+  reasons: string[]
+}
+
 export interface ReviewSessionItem {
   // Card candidates reuse queueItemId as the stable item-id field for compatibility.
   queueItemId: number
@@ -22,7 +27,30 @@ export interface ReviewSessionItem {
   due: string | null
   priority: number
   provenance: QueueProvenance | null
+  explain?: ReviewSessionExplain
 }
+
+export interface ReviewSessionOptions {
+  explain?: boolean
+}
+
+export interface ReviewSimulationStep {
+  grade: ReviewGrade
+  due: string
+  intervalDays: number
+  stability: number
+  difficulty: number
+}
+export interface ReviewEvent {
+  id: number
+  itemKind: ReviewItemKind
+  itemId: number
+  label: string
+  grade: ReviewGrade
+  eventTime: string
+}
+
+type ReviewSessionCandidate = ReviewSessionItem & { createdAt: string }
 
 export interface GradeReviewResult {
   // Card candidates reuse queueItemId as the stable item-id field for compatibility.
@@ -158,6 +186,15 @@ const RawReviewCardRowSchema = Schema.Struct({
   due: Schema.String,
 })
 type RawReviewCardRow = Schema.Schema.Type<typeof RawReviewCardRowSchema>
+const RawReviewEventRowSchema = Schema.Struct({
+  id: PositiveInteger,
+  item_kind: ReviewItemKindSchema,
+  item_id: PositiveInteger,
+  label: Schema.String,
+  grade: ReviewGradeSchema,
+  event_time: Schema.String,
+})
+type RawReviewEventRow = Schema.Schema.Type<typeof RawReviewEventRowSchema>
 
 const CountRowSchema = Schema.Struct({ count: NonNegativeInteger })
 type CountRow = Schema.Schema.Type<typeof CountRowSchema>
@@ -241,10 +278,14 @@ export function enrollCardCandidate(
   })(cardId)
 }
 
-export function buildReviewSession(db: Database, limit = DEFAULT_REVIEW_LIMIT): ReviewSessionItem[] {
+export function buildReviewSession(
+  db: Database,
+  limit = DEFAULT_REVIEW_LIMIT,
+  options: ReviewSessionOptions = {},
+): ReviewSessionItem[] {
   ensureReadingTables(db)
   const normalizedLimit = normalizeReviewLimit(limit)
-  const now = nowIso()
+  const now = new Date(nowIso())
   const queueDueItems = db
     .query<RawReviewQueueRow, [string]>(
       `${reviewQueueSelectSql()}
@@ -253,7 +294,7 @@ export function buildReviewSession(db: Database, limit = DEFAULT_REVIEW_LIMIT): 
          AND datetime(rs.due) <= datetime(?)
        ORDER BY datetime(rs.due) ASC, qi.id ASC`,
     )
-    .all(now)
+    .all(now.toISOString())
     .map((row) => decodeReviewQueueRow(row, "due"))
   const cardDueItems = hasTable(db, "card_candidates")
     ? db
@@ -263,7 +304,7 @@ export function buildReviewSession(db: Database, limit = DEFAULT_REVIEW_LIMIT): 
              AND datetime(rs.due) <= datetime(?)
            ORDER BY datetime(rs.due) ASC, cc.id ASC`,
         )
-        .all(now)
+        .all(now.toISOString())
         .map((row) => decodeReviewCardRow(row, "due"))
     : []
   const dueItems = [...queueDueItems, ...cardDueItems].sort(compareReviewDueItems)
@@ -277,7 +318,30 @@ export function buildReviewSession(db: Database, limit = DEFAULT_REVIEW_LIMIT): 
     .all()
     .map((row) => decodeReviewQueueRow(row, "new"))
 
-  return interleaveReviewItems(dueItems, newItems, normalizedLimit)
+  return interleaveReviewItems(dueItems, newItems, normalizedLimit, options.explain === true, now).map(
+    ({ createdAt: _createdAt, ...item }) => item,
+  )
+}
+
+export function simulateReview(grades: readonly ReviewGrade[]): ReviewSimulationStep[] {
+  const initialReviewAt = new Date(nowIso())
+  let reviewAt = initialReviewAt
+  let card = createEmptyCard(initialReviewAt)
+  const steps: ReviewSimulationStep[] = []
+  for (const grade of grades) {
+    const normalizedGrade = normalizeReviewGrade(grade)
+    const nextCard = reviewScheduler.next(card, reviewAt, normalizedGrade).card
+    steps.push({
+      grade: reviewGradeName(normalizedGrade),
+      due: nextCard.due.toISOString(),
+      intervalDays: Math.max(0, (nextCard.due.getTime() - reviewAt.getTime()) / DAY_MS),
+      stability: nextCard.stability,
+      difficulty: nextCard.difficulty,
+    })
+    card = nextCard
+    reviewAt = nextCard.due
+  }
+  return steps
 }
 
 export interface ReviewItemReference {
@@ -410,6 +474,42 @@ export function gradeReviewItem(
       reps: nextCard.reps,
     }
   })( { itemKind, itemId }, grade)
+}
+export function listReviewEvents(db: Database, limit = 20): ReviewEvent[] {
+  ensureReadingTables(db)
+  const normalizedLimit = normalizeReviewLimit(limit)
+  const cardJoin = hasTable(db, "card_candidates")
+    ? "LEFT JOIN card_candidates cc ON cc.id = re.item_id AND re.item_kind = 'card_candidate'"
+    : ""
+  const labelExpression = hasTable(db, "card_candidates")
+    ? "COALESCE(qi.word, cc.front, re.item_kind || ' #' || re.item_id)"
+    : "COALESCE(qi.word, re.item_kind || ' #' || re.item_id)"
+  const rows = db
+    .query<RawReviewEventRow, [number]>(
+      `SELECT re.id,
+              re.item_kind,
+              re.item_id,
+              ${labelExpression} AS label,
+              re.grade,
+              re.event_time
+       FROM review_events re
+       LEFT JOIN queue_items qi ON qi.id = re.item_id AND re.item_kind = 'queue_item'
+       ${cardJoin}
+       ORDER BY re.id DESC
+       LIMIT ?`,
+    )
+    .all(normalizedLimit)
+  return rows.map((row) => {
+    const event = Schema.decodeUnknownSync(RawReviewEventRowSchema)(row)
+    return {
+      id: event.id,
+      itemKind: event.item_kind,
+      itemId: event.item_id,
+      label: event.label,
+      grade: event.grade,
+      eventTime: event.event_time,
+    }
+  })
 }
 
 export function getReviewDueCounts(db: Database): ReviewDueCounts {
@@ -572,7 +672,7 @@ function hasTable(db: Database, tableName: string): boolean {
   return row !== null && Schema.decodeUnknownSync(RawTableNameRowSchema)(row).name === tableName
 }
 
-function decodeReviewQueueRow(row: RawReviewQueueRow, phase: ReviewPhase): ReviewSessionItem {
+function decodeReviewQueueRow(row: RawReviewQueueRow, phase: ReviewPhase): ReviewSessionCandidate {
   const item = Schema.decodeUnknownSync(RawReviewQueueRowSchema)(row)
   return {
     queueItemId: item.queue_item_id,
@@ -584,10 +684,11 @@ function decodeReviewQueueRow(row: RawReviewQueueRow, phase: ReviewPhase): Revie
     due: item.due,
     priority: item.priority,
     provenance: decodeProvenance(item),
+    createdAt: item.created_at,
   }
 }
 
-function decodeReviewCardRow(row: RawReviewCardRow, phase: ReviewPhase): ReviewSessionItem {
+function decodeReviewCardRow(row: RawReviewCardRow, phase: ReviewPhase): ReviewSessionCandidate {
   const item = Schema.decodeUnknownSync(RawReviewCardRowSchema)(row)
   return {
     queueItemId: item.card_id,
@@ -601,9 +702,9 @@ function decodeReviewCardRow(row: RawReviewCardRow, phase: ReviewPhase): ReviewS
     due: item.due,
     priority: 0,
     provenance: null,
+    createdAt: item.created_at,
   }
 }
-
 function decodeProvenance(item: RawReviewQueueRow): QueueProvenance | null {
   if (
     item.doc_id === null ||
@@ -627,12 +728,14 @@ function decodeProvenance(item: RawReviewQueueRow): QueueProvenance | null {
 }
 
 function interleaveReviewItems(
-  dueItems: readonly ReviewSessionItem[],
-  newItems: readonly ReviewSessionItem[],
+  dueItems: readonly ReviewSessionCandidate[],
+  newItems: readonly ReviewSessionCandidate[],
   limit: number,
-): ReviewSessionItem[] {
-  const result: ReviewSessionItem[] = []
-  let previous: ReviewSessionItem | null = null
+  explain: boolean,
+  now: Date,
+): ReviewSessionCandidate[] {
+  const result: ReviewSessionCandidate[] = []
+  let previous: ReviewSessionCandidate | null = null
   for (const phaseItems of [dueItems, newItems]) {
     const remaining = [...phaseItems]
     while (remaining.length > 0 && result.length < limit) {
@@ -640,6 +743,12 @@ function interleaveReviewItems(
       if (selectedIndex < 0) selectedIndex = 0
       const selected = remaining.splice(selectedIndex, 1)[0]
       if (selected === undefined) break
+      if (explain) {
+        selected.explain = {
+          slot: result.length + 1,
+          reasons: explainReasons(selected, previous, remaining, selectedIndex, now),
+        }
+      }
       result.push(selected)
       previous = selected
     }
@@ -647,6 +756,56 @@ function interleaveReviewItems(
   }
   return result
 }
+
+function explainReasons(
+  item: ReviewSessionCandidate,
+  previous: ReviewSessionCandidate | null,
+  remaining: readonly ReviewSessionCandidate[],
+  selectedIndex: number,
+  now: Date,
+): string[] {
+  const reasons: string[] = []
+  if (item.phase === "due") {
+    reasons.push(`due · ${formatDueDelta(item.due, now)}`)
+  } else {
+    const jumped = remaining
+      .slice(0, selectedIndex)
+      .filter(
+        (candidate) =>
+          candidate.createdAt < item.createdAt ||
+          (candidate.createdAt === item.createdAt && candidate.queueItemId < item.queueItemId),
+      )
+      .length
+    reasons.push(`new · priority ${item.priority} — jumped ${jumped} item${jumped === 1 ? "" : "s"}`)
+  }
+  if (selectedIndex > 0 && previous !== null) {
+    const displaced = remaining[0]
+    const shared = displaced === undefined ? null : sharedHanCharacter(previous.word, displaced.word)
+    if (shared !== null) {
+      reasons.push(`shifted +${selectedIndex} · shares ${shared} with prev`)
+    } else {
+      reasons.push(`shifted +${selectedIndex} · separated from ${previous.word}`)
+    }
+  }
+  return reasons
+}
+
+function formatDueDelta(due: string | null, now: Date): string {
+  if (due === null) return "now"
+  const deltaMs = now.getTime() - new Date(due).getTime()
+  if (deltaMs < 0) return `in ${formatDuration(-deltaMs)}`
+  if (deltaMs < 60_000) return "now"
+  return `${formatDuration(deltaMs)} overdue`
+}
+
+function formatDuration(durationMs: number): string {
+  const minutes = Math.floor(durationMs / 60_000)
+  if (minutes < 60) return `${Math.max(1, minutes)}m`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h`
+  return `${Math.floor(hours / 24)}d`
+}
+
 
 function sharesGuardFamily(left: ReviewSessionItem, right: ReviewSessionItem): boolean {
   if (left.itemKind !== REVIEW_ITEM_KIND || right.itemKind !== REVIEW_ITEM_KIND) return false
@@ -659,6 +818,17 @@ function sharesGuardFamily(left: ReviewSessionItem, right: ReviewSessionItem): b
     if (leftCharacters.has(character)) return true
   }
   return false
+}
+function sharedHanCharacter(left: string, right: string): string | null {
+  if (left === right) return left.slice(0, 1) || null
+  const leftCharacters = new Set<string>()
+  for (const character of left) {
+    if (isHan(character)) leftCharacters.add(character)
+  }
+  for (const character of right) {
+    if (leftCharacters.has(character)) return character
+  }
+  return null
 }
 
 function isHan(character: string): boolean {

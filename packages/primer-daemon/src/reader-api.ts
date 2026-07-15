@@ -6,6 +6,8 @@ import { openLedger } from "./ledger"
 import type { DaemonPaths } from "./paths"
 import {
   buildReviewSession,
+  listReviewEvents,
+  simulateReview,
   gradeReviewItem,
   type ReviewGrade,
   type ReviewItemKind,
@@ -67,10 +69,14 @@ const ReviewGradeBodySchema = Schema.Struct({
   grade: ReviewGradeSchema,
   itemKind: Schema.optionalKey(ReviewItemKindSchema),
 })
+const ReviewSimulationBodySchema = Schema.Struct({
+  grades: Schema.Array(ReviewGradeSchema),
+})
+const ReviewSessionExplainSchema = Schema.Union([Schema.Literal("0"), Schema.Literal("1")])
 const ReviewSessionQuerySchema = Schema.Struct({
   limit: Schema.optionalKey(PositiveIntegerFromString),
+  explain: Schema.optionalKey(ReviewSessionExplainSchema),
 })
-
 const IdParamSchema = Schema.Struct({ id: PositiveIntegerFromString })
 const DictWordParamSchema = Schema.Struct({ word: Schema.String })
 const DictBestQuerySchema = Schema.Struct({ text: Schema.String })
@@ -81,6 +87,7 @@ const QueueQuerySchema = Schema.Struct({
 
 type CreateDocBody = Schema.Schema.Type<typeof CreateDocBodySchema>
 type CreateMarkBody = Schema.Schema.Type<typeof CreateMarkBodySchema>
+type ReviewSimulationBody = Schema.Schema.Type<typeof ReviewSimulationBodySchema>
 type QueuePriorityBody = Schema.Schema.Type<typeof QueuePriorityBodySchema>
 type ReviewGradeBody = Schema.Schema.Type<typeof ReviewGradeBodySchema>
 type ReviewSessionQuery = Schema.Schema.Type<typeof ReviewSessionQuerySchema>
@@ -109,6 +116,8 @@ export async function handleReaderApi(request: Request, paths: DaemonPaths): Pro
     }
     if (request.method === "GET" && pathname === "/api/review/session") return handleReviewSession(url, paths)
     if (request.method === "POST" && pathname === "/api/review/grade") return await handleReviewGrade(request, paths)
+    if (request.method === "POST" && pathname === "/api/review/simulate") return await handleReviewSimulate(request)
+    if (request.method === "GET" && pathname === "/api/review/events") return handleReviewEvents(url, paths)
     if (request.method === "POST" && pathname.startsWith("/api/queue/") && pathname.endsWith("/priority")) {
       return await handleQueuePriority(request, pathname, paths)
     }
@@ -197,7 +206,23 @@ async function handleQueueStatus(request: Request, pathname: string, paths: Daem
 
 function handleReviewSession(url: URL, paths: DaemonPaths): Response {
   const query = decodeUnknown(ReviewSessionQuerySchema, Object.fromEntries(url.searchParams), "malformed review session query")
-  return withLedger(paths, (db) => jsonResponse({ items: buildReviewSession(db, query.limit ?? 20) }))
+  return withLedger(paths, (db) =>
+    jsonResponse({ items: buildReviewSession(db, query.limit ?? 20, { explain: query.explain === "1" }) }),
+  )
+}
+
+async function handleReviewSimulate(request: Request): Promise<Response> {
+  const body = await decodeJson(request, ReviewSimulationBodySchema)
+  return jsonResponse({ steps: simulateReview(body.grades) })
+}
+
+function handleReviewEvents(url: URL, paths: DaemonPaths): Response {
+  const query = decodeUnknown(
+    Schema.Struct({ limit: Schema.optionalKey(PositiveIntegerFromString) }),
+    Object.fromEntries(url.searchParams),
+    "malformed review events query",
+  )
+  return withLedger(paths, (db) => jsonResponse(listReviewEvents(db, query.limit ?? 20)))
 }
 
 async function handleReviewGrade(request: Request, paths: DaemonPaths): Promise<Response> {

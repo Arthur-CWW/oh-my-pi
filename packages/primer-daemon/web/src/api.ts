@@ -185,6 +185,7 @@ export type ReviewGrade = "again" | "hard" | "good" | "easy"
 
 export interface ReviewSessionItem {
   queueItemId: number
+  itemKind: "queue_item" | "card_candidate"
   word: string
   pinyin: string | null
   gloss: string | null
@@ -192,6 +193,19 @@ export interface ReviewSessionItem {
   due: string | null
   priority: number
   provenance: QueueProvenance | null
+  explain?: {
+    slot: number
+    reasons: string[]
+  }
+}
+
+export interface ReviewEvent {
+  id: number
+  itemKind: "queue_item" | "card_candidate"
+  itemId: number
+  label: string
+  grade: ReviewGrade
+  eventTime: string
 }
 
 export interface GradeReviewResult {
@@ -365,8 +379,12 @@ export async function getQueue(status: QueueStatus | "all" = "new", limit = 100)
   const params = new URLSearchParams({ status, limit: String(limit) })
   return fetchJson<QueueItem[]>(`/api/queue?${params}`)
 }
-export async function getReviewSession(limit?: number): Promise<ReviewSessionItem[]> {
-  const result = await fetchJson<{ items: ReviewSessionItem[] }>(withLimit("/api/review/session", limit))
+export async function getReviewSession(limit?: number, explain = false): Promise<ReviewSessionItem[]> {
+  const params = new URLSearchParams()
+  if (limit !== undefined) params.set("limit", String(limit))
+  if (explain) params.set("explain", "1")
+  const suffix = params.toString()
+  const result = await fetchJson<{ items: ReviewSessionItem[] }>(suffix ? `/api/review/session?${suffix}` : "/api/review/session")
   return result.items
 }
 
@@ -391,6 +409,221 @@ export async function setQueueStatus(id: number, status: QueueStatus): Promise<Q
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ status }),
+  })
+}
+
+export type JsonValue = string | number | boolean | null | { [key: string]: JsonValue } | JsonValue[]
+export type JsonObject = { [key: string]: JsonValue }
+
+export type FeedbackVerdict = "good" | "wrong" | "confusing" | "idea"
+
+export interface FeedbackEvent {
+  id: number
+  surface: string
+  verdict: FeedbackVerdict
+  context: JsonObject | null
+  note: string | null
+  createdAt: string
+}
+
+export interface SubmitFeedbackInput {
+  surface: string
+  verdict: FeedbackVerdict
+  note?: string
+  context?: JsonObject
+}
+
+export interface UiEvent {
+  id: number
+  kind: string
+  payload: JsonObject | null
+  createdAt: string
+}
+
+export interface UiEventInput {
+  kind: string
+  payload?: JsonObject
+}
+
+export interface PipelineStats {
+  docs: number
+  marks: number
+  queue: {
+    new: number
+    keep: number
+    known: number
+    discarded: number
+  }
+  priorityPushed: number
+  enrolledQueue: number
+  enrolledCards: number
+  dueNow: number
+  newAvailable: number
+  reviewEvents: number
+  feedbackCount: number
+  enrichmentCount: number
+}
+
+export interface ReviewSimulationStep {
+  grade: ReviewGrade
+  due: string
+  intervalDays: number
+  stability: number
+  difficulty: number
+}
+
+export interface ReviewSimulationResult {
+  steps: ReviewSimulationStep[]
+}
+
+export interface EnrichmentLabel {
+  id: number
+  enrichmentId: number
+  field: string
+  verdict: "keep" | "cut" | "edit"
+  edited: string | null
+  note: string | null
+  createdAt: string
+}
+
+export interface EnrichmentOutput {
+  enrichment_version: "v0"
+  item: {
+    queue_item_id: number
+    word: string
+    pinyin: string
+  }
+  provenance: {
+    source_sentence: string
+    doc_id: number
+    doc_title: string
+    paragraph_idx: number
+    mark_id: number | null
+    quote_verified: boolean
+  }
+  sense_disambiguation: {
+    cedict_definitions: string[]
+    selected_sense_index: number
+    selected_sense: string
+    evidence_quote: string
+    gloss_in_context: string
+    source: "cedict" | "cedict-extended" | "inferred"
+    confidence: "high" | "medium" | "low"
+    note: string | null
+  }
+  examples: Array<{
+    sentence: string
+    pinyin: string
+    translation: string
+    uses_sense_index: number
+    unknown_tokens: string[]
+    known_token_ratio: number
+  }>
+  morpheme_note: {
+    components: Array<{ char: string; ids?: string; gloss: string }>
+    note: string
+    predicted_confusion: string
+    source: string
+  } | null
+  contrast: {
+    confusable_with: string
+    trigger: string
+    distinction: string
+    source: string
+  } | null
+  review_target: {
+    durable_candidate: boolean
+    retrieval_target: string | null
+    why: string
+    note: string
+  }
+  self_audit: {
+    no_empty_filler_fields: boolean
+    sense_selected_not_dumped: boolean
+    answer_not_leaked_into_target: boolean
+    examples_within_unknown_budget: boolean
+    omissions: string[]
+  }
+}
+
+export interface EnrichmentRecord {
+  id: number
+  queueItemId: number
+  model: string | null
+  promptVersion: string
+  output: EnrichmentOutput | null
+  status: "ok" | "error"
+  error: string | null
+  elapsedMs: number | null
+  createdAt: string
+  labels: EnrichmentLabel[]
+}
+
+export interface EnrichmentLabelInput {
+  field: string
+  verdict: "keep" | "cut" | "edit"
+  edited?: string
+  note?: string
+}
+
+export async function submitFeedback(input: SubmitFeedbackInput): Promise<{ id: number }> {
+  return fetchJson<{ id: number }>("/api/feedback", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  })
+}
+
+export async function getFeedback(limit?: number): Promise<FeedbackEvent[]> {
+  return fetchJson<FeedbackEvent[]>(withLimit("/api/feedback", limit))
+}
+
+export async function postUiEvents(events: UiEventInput[]): Promise<{ count: number }> {
+  return fetchJson<{ count: number }>("/api/events", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ events }),
+  })
+}
+
+export async function getUiEvents(limit?: number, kind?: string): Promise<UiEvent[]> {
+  const params = new URLSearchParams()
+  if (limit !== undefined) params.set("limit", String(limit))
+  if (kind) params.set("kind", kind)
+  const suffix = params.toString()
+  return fetchJson<UiEvent[]>(suffix ? `/api/events?${suffix}` : "/api/events")
+}
+
+export async function getPipelineStats(): Promise<PipelineStats> {
+  return fetchJson<PipelineStats>("/api/pipeline/stats")
+}
+
+export async function simulateReview(grades: ReviewGrade[]): Promise<ReviewSimulationResult> {
+  return fetchJson<ReviewSimulationResult>("/api/review/simulate", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ grades }),
+  })
+}
+
+export async function getReviewEvents(limit?: number): Promise<ReviewEvent[]> {
+  return fetchJson<ReviewEvent[]>(withLimit("/api/review/events", limit))
+}
+
+export async function runEnrichment(queueItemId: number): Promise<{ enrichment: EnrichmentRecord }> {
+  return fetchJson<{ enrichment: EnrichmentRecord }>(`/api/enrich/${queueItemId}`, { method: "POST" })
+}
+
+export async function getEnrichments(queueItemId?: number): Promise<EnrichmentRecord[]> {
+  const path = queueItemId === undefined ? "/api/enrichments" : `/api/enrichments?queueItemId=${queueItemId}`
+  return fetchJson<EnrichmentRecord[]>(path)
+}
+
+export async function addEnrichmentLabel(id: number, input: EnrichmentLabelInput): Promise<{ id: number }> {
+  return fetchJson<{ id: number }>(`/api/enrichments/${id}/labels`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
   })
 }
 

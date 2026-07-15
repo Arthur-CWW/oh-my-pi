@@ -12,6 +12,7 @@ import {
   setQueueStatus,
 } from "@/api"
 import { navigate, readerUrl } from "@/hooks/useHashRoute"
+import { logEvent } from "@/hooks/useTelemetry"
 import { cn } from "@/lib/utils"
 import { focusRing } from "./atoms"
 import { Button } from "./ui/button"
@@ -210,6 +211,7 @@ export function ReviewView({ onShowHelp }: { onShowHelp: () => void }): React.JS
 
       setQueueStatus(item.id, status).then(
         (updated) => {
+          logEvent("triage_status", { queueItemId: updated.id, status: updated.status })
           setItems((prev) => (prev ? prev.map((it) => (it.id === updated.id ? updated : it)) : prev))
         },
         () => {
@@ -243,6 +245,8 @@ export function ReviewView({ onShowHelp }: { onShowHelp: () => void }): React.JS
     setSessionError(null)
     gradeReview(item.queueItemId, grade).then(
       () => {
+        logEvent("session_grade", { queueItemId: item.queueItemId, grade })
+        if (sessionIndexRef.current + 1 >= (sessionItemsRef.current?.length ?? 0)) logEvent("session_complete", { count: sessionItemsRef.current?.length ?? 0 })
         setSessionCounts((prev) => ({ ...prev, [grade]: prev[grade] + 1 }))
         setSessionIndex((prev) => prev + 1)
         setSessionRevealed(false)
