@@ -1,0 +1,87 @@
+site	construct	purpose	current_policy	target_schedule	testclock_plan	notes
+task/executor.ts:294	withAbortTimeout	MCP tool-call wall-clock timeout	setTimeout(timeoutMs) + clearTimeout on abort/resolve	Effect.timeout(toolCallEffect, timeoutMs)	TestClock.advance(timeoutMs); expect timeout failure	also clears on abort signal
+task/executor.ts:301	setTimeout	MCP tool call timeout timer	timeoutMs fixed	Clock.sleep(timeoutMs) raced with tool-call effect	TestClock.advance(timeoutMs); expect timeout failure	
+task/executor.ts:310	clearTimeout	cancel tool-call timeout on abort	clears timeoutId	Effect.timeout cancellation via interruption	TestClock.advance before timeout; interrupt; no timeout fired	
+task/executor.ts:320	clearTimeout	cancel tool-call timeout on settle	clears timeoutId in finally	Effect.timeout cleanup with Scope	TestClock.advance after completion; no timeout fired	
+task/executor.ts:920	new Date().toISOString	child lifecycle record timestamp	wall-clock ISO timestamp	Clock.currentTimeMillis formatted to ISO	TestClock.set(t); updatedAt reflects t	journal timestamp
+task/executor.ts:1064	Date.now	subagent run duration baseline	wall-clock start	Clock.currentTimeMillis at run start	TestClock.set(startMs); run effect	
+task/executor.ts:1162	setTimeout	subagent wall-clock runtime limit (I3 hazard)	maxRuntimeMs fixed; currently fires across post-yield teardown	timeout scoped to active turn, disarmed at yieldWritten/before park	TestClock.advance(maxRuntimeMs) during active turn; after yieldWritten advance must not abort	I3: monitor.finish is absent and finalizeRunResult lets runtimeLimitExceeded override yieldCalled; current timer is not disarmed before yielded/parked state
+task/executor.ts:1204	Date.now	progress duration snapshot	wall-clock elapsed	Clock.currentTimeMillis difference	TestClock.advance(t); read durationMs	
+task/executor.ts:1222	Date.now	progress coalesce baseline	wall-clock last emit	Clock.currentTimeMillis after emit	TestClock.advance(t); lastProgressEmitMs updated	
+task/executor.ts:1234	Date.now	progress coalesce elapsed check	wall-clock now	Clock.currentTimeMillis	TestClock.advance(t); elapsed = now - lastProgressEmitMs	
+task/executor.ts:1245	setTimeout	progress emission debounce	PROGRESS_COALESCE_MS(150) - elapsed	Clock.sleep(PROGRESS_COALESCE_MS - elapsed) raced with abort	TestClock.advance(PROGRESS_COALESCE_MS); emit fires	
+task/executor.ts:1309	Date.now	event-processing tool timestamp	wall-clock now	Clock.currentTimeMillis	TestClock.advance(t); tool endMs recorded	
+task/executor.ts:1346	Date.now	recent tool end timestamp	wall-clock endMs	Clock.currentTimeMillis	TestClock.advance(t); endMs recorded	
+task/executor.ts:1555	Date.now	auto-retry started timestamp	wall-clock startedAtMs	Clock.currentTimeMillis	TestClock.advance(t); retryState.startedAtMs updated	
+task/executor.ts:1637	clearTimeout	cancel runtime limit on finish	clears runtimeTimeoutId only if finish is called	Scope finalizer / interruption (currently unreachable: no monitor.finish call)	TestClock.advance after terminal result; timer must not fire	monitor.finish is defined at executor.ts:1633 but never invoked
+task/executor.ts:1641	clearTimeout	cancel progress debounce on finish	clears progressTimeoutId only if finish is called	Scope finalizer / interruption (currently unreachable: no monitor.finish call)	TestClock.advance after terminal result; no deferred emit	monitor.finish is defined at executor.ts:1633 but never invoked
+task/executor.ts:1985	Date.now	final result duration	Date.now() - args.startTime	Clock.currentTimeMillis difference	TestClock.advance(t); durationMs = t - start	
+task/executor.ts:2064	Date.now	in-process subagent run duration baseline	wall-clock startTime	Clock.currentTimeMillis	TestClock.set(start); run effect	
+task/executor.ts:2115	agentIdleTtlMs setting	park TTL before idle child is parked	task.agentIdleTtlMs default 420000 or 0 disabled	Schedule.fromDuration or passed to lifecycle manager	TestClock.advance(idleTtlMs); expect park	delegates to AgentLifecycleManager (out of scope)
+task/executor.ts:2507	new Date().toISOString	lifecycle appender record timestamp	wall-clock ISO timestamp	Clock.currentTimeMillis formatted to ISO	TestClock.set(t); updatedAt reflects t	journal timestamp
+task/executor.ts:2714	AbortSignal.timeout	bounded cleanup wait for aborted child	5000ms fixed	Effect.timeout(cleanupEffect, 5000)	TestClock.advance(5000); cleanup abandoned	
+task/executor.ts:2728	AbortSignal.timeout	bounded cleanup wait for parked worktree child	5000ms fixed	Effect.timeout(cleanupEffect, 5000)	TestClock.advance(5000); cleanup abandoned	
+task/executor.ts:2759	Date.now	in-process subagent run duration result	Date.now() - startTime	Clock.currentTimeMillis difference	TestClock.advance(t); durationMs = t - start	
+task/index.ts:149	stat.mtime.toISOString	spawn guide cache timestamp	file mtime ISO string	not a scheduler; keep wall-clock file mtime	must stay wall-clock; filesystem metadata	not a timer; journal/metadata only
+task/index.ts:408	timeoutSec field	per-spawn timeout parameter	timeoutSec from task params	Effect.timeout(..., timeoutSec * 1000)	TestClock.advance(timeoutSec*1000); expect timeout	drives executor maxRuntimeMs; I3 source value
+task/index.ts:431	timeoutSec assignment	propagate per-spawn timeout to spawn object	timeoutSec from item	same as above	same as above	
+task/index.ts:683	AbortSignal.timeout	bounded wait for revive admission slot	waitMs default REVIVE_ADMISSION_WAIT_MS (5000)	Effect.timeout(acquireEffect, waitMs)	TestClock.advance(waitMs); expect timeout bypass	
+task/index.ts:1211	Date.now	background spawn duration baseline	wall-clock startedAt	Clock.currentTimeMillis	TestClock.set(start); run effect	
+task/index.ts:1279	Date.now	background spawn failure duration	Date.now() - startedAt	Clock.currentTimeMillis difference	TestClock.advance(t); durationMs updated	
+task/index.ts:1337	Date.now	sync fanout duration baseline	wall-clock startTime	Clock.currentTimeMillis	TestClock.set(start); run fanout	
+task/index.ts:1344	Date.now	sync fanout progress duration	Date.now() - startTime	Clock.currentTimeMillis difference	TestClock.advance(t); totalDurationMs updated	
+task/index.ts:1411	Date.now	sync fanout result duration	Date.now() - startTime	Clock.currentTimeMillis difference	TestClock.advance(t); totalDurationMs = t - start	
+task/index.ts:1446	Date.now	runSpawn duration baseline	wall-clock startTime	Clock.currentTimeMillis	TestClock.set(start); run spawn	
+task/index.ts:1537	Date.now	route error result duration	Date.now() - startTime	Clock.currentTimeMillis difference	TestClock.advance(t); durationMs recorded	
+task/index.ts:1545	Date.now	route error total duration	Date.now() - startTime	Clock.currentTimeMillis difference	TestClock.advance(t); totalDurationMs recorded	
+task/index.ts:1573	Date.now	isolation git error total duration	Date.now() - startTime	Clock.currentTimeMillis difference	TestClock.advance(t); totalDurationMs recorded	
+task/index.ts:1616	Date.now	recursion/spawn block total duration	Date.now() - startTime	Clock.currentTimeMillis difference	TestClock.advance(t); totalDurationMs recorded	
+task/index.ts:1633	Date.now	agent not allowed total duration	Date.now() - startTime	Clock.currentTimeMillis difference	TestClock.advance(t); totalDurationMs recorded	
+task/index.ts:1713	Date.now	spawn progress update duration	Date.now() - startTime	Clock.currentTimeMillis difference	TestClock.advance(t); totalDurationMs updated	
+task/index.ts:1733	timeoutSec conversion	convert per-spawn timeout to ms	Math.trunc(timeoutSec * 1000)	Duration.seconds(timeoutSec)	TestClock.advance(timeoutSec*1000); expect timeout	I3 source value passed to executor
+task/index.ts:1809	Date.now	isolated task duration baseline	wall-clock taskStart	Clock.currentTimeMillis	TestClock.set(start); run isolated task	
+task/index.ts:1880	Date.now	isolated task error duration	Date.now() - taskStart	Clock.currentTimeMillis difference	TestClock.advance(t); durationMs recorded	
+task/index.ts:2003	Date.now	buildResultPayload duration	Date.now() - startTime	Clock.currentTimeMillis difference	TestClock.advance(t); totalDurationMs passed to payload	
+task/index.ts:2007	Date.now	runSpawn catch total duration	Date.now() - startTime	Clock.currentTimeMillis difference	TestClock.advance(t); totalDurationMs recorded	
+task/spawn-worker-client.ts:24	RSS_SAMPLE_INTERVAL_MS constant	RSS polling interval	250ms fixed	Schedule.spaced(250)	TestClock.advance(250); assert sample taken	
+task/spawn-worker-client.ts:26	SETUP_TIMEOUT_GRACE_MS constant	subprocess setup grace period	60000ms added to runtime limit	Effect.timeout with duration runtimeLimitMs + 60000	TestClock.advance(runtimeLimitMs + 60000); expect timeout	
+task/spawn-worker-client.ts:38	setTimeout	serialize spawn launches with yield gap	10ms fixed	Clock.sleep(10)	TestClock.advance(10); next spawn proceeds	
+task/spawn-worker-client.ts:232	setInterval	poll child RSS while alive	RSS_SAMPLE_INTERVAL_MS(250) recurring	Effect.repeat(Schedule.spaced(250)) or Stream.fromSchedule	TestClock.advance multiples of 250); samples fire	fires while child is alive including post-yield linger
+task/spawn-worker-client.ts:238	clearInterval	stop RSS polling when no watches remain	clears rssTimer	Scope finalizer on subscription	TestClock.advance after last watch removed; no samples	
+task/spawn-worker-client.ts:363	setTimeout	subprocess wall-clock timeout (I3 hazard)	options.timeoutMs fixed; cleared only in finally after proc.exited	timeout scoped to active turn, disarmed at yieldWritten/before park	TestClock.advance(timeoutMs) during active turn; after result/yield advance must not abort	I3: timeout spans child result delivery and process exit wait; it can fire after yield before proc.exited
+task/spawn-worker-client.ts:466	clearTimeout	cancel subprocess timeout on completion	clears timeout in finally	Scope finalizer / interruption	TestClock.advance after success; no timeout fired	
+task/spawn-worker-client.ts:496	timeoutMs composition	subprocess total timeout including setup grace	runtimeLimitMs + SETUP_TIMEOUT_GRACE_MS	Effect.timeout with combined duration	TestClock.advance(runtimeLimitMs + 60000); expect timeout	
+task/spawn-worker-entry.ts:118	performance.now	synthetic CPU spin workload	busy loop until spinMs elapsed	Clock.currentTimeMillis if virtual spin needed; otherwise stay wall-clock	TestClock.advance(spinMs) does not execute CPU spin; must stay wall-clock for real load	synthetic test only; not domain scheduling
+task/spawn-worker-entry.ts:122	Bun.sleep	synthetic hang workload	hangMs fixed sleep	Clock.sleep(hangMs)	TestClock.advance(hangMs); worker resumes	synthetic test only
+task/spawn-worker-entry.ts:150	Date.now	phase timestamp decode	wall-clock at	Clock.currentTimeMillis	TestClock.set(t); phase record emitted	journal timestamp
+task/spawn-worker-entry.ts:152	Date.now	phase timestamp run	wall-clock at	Clock.currentTimeMillis	TestClock.set(t); phase record emitted	journal timestamp
+task/spawn-worker-entry.ts:171	Date.now	phase timestamp setup	wall-clock at	Clock.currentTimeMillis	TestClock.set(t); phase record emitted	journal timestamp
+task/spawn-worker-entry.ts:172	Date.now	phase timestamp run	wall-clock at	Clock.currentTimeMillis	TestClock.set(t); phase record emitted	journal timestamp
+task/spawn-worker-entry.ts:178	Date.now	phase timestamp finalize	wall-clock at	Clock.currentTimeMillis	TestClock.set(t); phase record emitted	journal timestamp
+task/quota-admission.ts:78	QUOTA_SAMPLE_MAX_AGE_MS constant	TTL for retained quota samples	15 * 60000 = 900000ms	Schedule retention or Clock.currentTimeMillis filter	TestClock.advance(900001); sample treated stale	
+task/quota-admission.ts:84	Date.now	compaction timestamp default	wall-clock nowMs	Clock.currentTimeMillis	TestClock.set(t); freshness checked	
+task/quota-admission.ts:213	Date.now	latest state timestamp default	wall-clock nowMs fallback	Clock.currentTimeMillis	TestClock.set(t); maxAge check	
+task/quota-admission.ts:218	Date.now	state record updatedAt default	wall-clock nowMs	Clock.currentTimeMillis	TestClock.set(t); record.updatedAtMs reflects t	persistence boundary timestamp when caller omits updatedAtMs
+task/quota-admission.ts:291	Date.now	usage report observedAt fallback	wall-clock when fetchedAt missing	Clock.currentTimeMillis	TestClock.set(t); sample.observedAtMs = t	
+task/quota-admission.ts:343	Date.now	admission decision timestamp default	wall-clock nowMs	Clock.currentTimeMillis	TestClock.set(t); decision.atMs = t	
+task/auto-resume.ts:36	Date.now	rollout recovery deadline clock	wall-clock now fallback	Clock.currentTimeMillis	TestClock.set(t0); deadline = t0 + timeoutMs	
+task/auto-resume.ts:37	Bun.sleep	rollout recovery poll sleep	pollIntervalMs default 25	Clock.sleep(min(pollIntervalMs, remaining))	TestClock.advance(pollIntervalMs); next poll runs	
+task/auto-resume.ts:38	deadline arithmetic	wall-clock recovery deadline	now() + timeoutMs	Effect.timeout(recoveryLoop, timeoutMs)	TestClock.advance(timeoutMs); RecoveryTimedOut	
+task/auto-resume.ts:44	Date.parse	compare peer heartbeat timestamps	Date.parse(peer.lastSeen) > Date.parse(previousHeartbeat)	Clock.currentTimeMillis comparisons	TestClock.set peer.lastSeen virtual time; comparison succeeds	
+task/auto-resume.ts:53	deadline arithmetic	remaining recovery time	deadline - now()	Clock.currentTimeMillis difference	TestClock.advance(t); remaining updated	
+task/auto-resume.ts:60	sleep	recovery poll interval	min(pollIntervalMs ?? 25, remaining)	Clock.sleep(min(pollIntervalMs, remaining))	TestClock.advance(pollIntervalMs); loop polls	
+task/auto-resume.ts:123	new Date().toISOString	auto-resume decision timestamp	wall-clock ISO timestamp	Clock.currentTimeMillis formatted to ISO	TestClock.set(t); committedAt reflects virtual time	journal timestamp
+task/subagent-worker-entry.ts:40	Bun.sleep	synthetic per-turn delay	request.payload.delayMs	Clock.sleep(delayMs)	TestClock.advance(delayMs); turn resumes	
+task/subagent-worker-protocol.ts:5	delayMs field	synthetic per-turn delay parameter	optional delayMs in payload	Clock.sleep(delayMs)	TestClock.advance(delayMs); turn resumes	schema only; timer in subagent-worker-entry
+task/subagent-worker-protocol.ts:96	delayMs decode	decode synthetic delay parameter	integerField(input.delayMs)	Clock.sleep(delayMs)	same as above	schema only
+task/parallel.ts:97	REVIVE_ADMISSION_WAIT_MS constant	maximum bounded wait for revive admission	5000ms	Effect.timeout(acquireEffect, 5000)	TestClock.advance(5000); expect admission bypass	used by index.ts acquireReviveAdmissionSlot
+task/child-lifecycle.ts:74	Date.parse	validate lifecycle record timestamp	Date.parse(updatedAt)	Clock.currentTimeMillis formatted/parsed	TestClock.set(t); formatted string parses	timestamp validation only
+task/child-lifecycle.ts:113	Date.parse	validate restart record timestamp	Date.parse(updatedAt)	Clock.currentTimeMillis formatted/parsed	TestClock.set(t); formatted string parses	timestamp validation only
+task/child-lifecycle.ts:155	new Date().toISOString	append lifecycle record timestamp	wall-clock ISO timestamp	Clock.currentTimeMillis formatted to ISO	TestClock.set(t); updatedAt reflects t	journal timestamp
+task/child-lifecycle.ts:164	Date.parse	latest lifecycle timestamp comparison	Date.parse(decoded.record.updatedAt) >= Date.parse(latest.updatedAt)	Clock.currentTimeMillis comparisons	TestClock.set(t1, t2); comparison matches	timestamp ordering only
+task/re-adopt.ts:65	idleTtlMs option	park TTL for re-adopted children	idleTtlMs from options	passed to lifecycle manager	TestClock.advance(idleTtlMs); expect park	delegates to AgentLifecycleManager (out of scope)
+task/re-adopt.ts:158	new Date().toISOString	degraded re-adoption timestamp	wall-clock ISO timestamp	Clock.currentTimeMillis formatted to ISO	TestClock.set(t); createdAt reflects t	journal timestamp
+task/re-adopt.ts:305	new Date().toISOString	resume candidate timestamp	wall-clock ISO timestamp	Clock.currentTimeMillis formatted to ISO	TestClock.set(t); updatedAt reflects t	journal timestamp
+task/re-adopt.ts:388	lifecycle.adopt idleTtlMs	adopt recovered child with park TTL	idleTtlMs passed to lifecycle.adopt	Schedule.fromDuration or passed to lifecycle manager	TestClock.advance(idleTtlMs); expect park	delegates to AgentLifecycleManager (out of scope)
+task/re-adopt.ts:419	new Date().toISOString	resume attempt start timestamp	wall-clock ISO timestamp	Clock.currentTimeMillis formatted to ISO	TestClock.set(t); updatedAt reflects t	journal timestamp
+task/re-adopt.ts:427	new Date().toISOString	resume attempt end timestamp	wall-clock ISO timestamp	Clock.currentTimeMillis formatted to ISO	TestClock.set(t); updatedAt reflects t	journal timestamp
