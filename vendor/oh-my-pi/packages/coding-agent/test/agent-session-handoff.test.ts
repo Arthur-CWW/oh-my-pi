@@ -10,6 +10,7 @@ import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { ExtensionRunner, loadExtensions } from "@oh-my-pi/pi-coding-agent/extensibility/extensions";
 import { SecretObfuscator } from "@oh-my-pi/pi-coding-agent/secrets";
 import { AgentSession, type AgentSessionEvent } from "@oh-my-pi/pi-coding-agent/session/agent-session";
+import { IrcExternalBus } from "@oh-my-pi/pi-coding-agent/irc/bus-external";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import {
 	findLatestHandoffProvenanceEntry,
@@ -37,6 +38,10 @@ describe("AgentSession handoff", () => {
 	let sessionManager: SessionManager;
 	let events: AgentSessionEvent[];
 	let obfuscator: SecretObfuscator;
+	// Isolated per-test external bus: without injection AgentSession falls back to
+	// IrcExternalBus.global() (~/.omp/agent/irc-bus.sqlite) and every test run leaks
+	// dead pi-handoff-* peer rows into the machine-wide roster.
+	let ircBus: IrcExternalBus;
 
 	/** Poll `predicate` until it holds (returns as soon as the state is reached) or the
 	 *  deadline elapses. Replaces blind settle sleeps for tests with a positive signal. */
@@ -83,6 +88,7 @@ describe("AgentSession handoff", () => {
 	beforeEach(async () => {
 		tempDir = TempDir.createSync("@pi-handoff-");
 		sessionManager = SessionManager.create(tempDir.path(), tempDir.path());
+		ircBus = new IrcExternalBus(path.join(tempDir.path(), "irc-bus.sqlite"));
 		events = [];
 		obfuscator = new SecretObfuscator([{ type: "plain", content: HANDOFF_SECRET }]);
 
@@ -98,6 +104,7 @@ describe("AgentSession handoff", () => {
 		session = new AgentSession({
 			agent,
 			sessionManager,
+			externalIrcBus: ircBus,
 			settings: Settings.isolated({
 				"compaction.enabled": true,
 				"compaction.autoContinue": false,
@@ -138,6 +145,7 @@ describe("AgentSession handoff", () => {
 		if (session) {
 			await session.dispose();
 		}
+		ircBus.close();
 		try {
 			await tempDir.remove();
 		} catch {}
@@ -322,6 +330,7 @@ describe("AgentSession handoff", () => {
 		session = new AgentSession({
 			agent,
 			sessionManager,
+			externalIrcBus: ircBus,
 			settings: Settings.isolated({
 				"compaction.enabled": true,
 				"compaction.autoContinue": false,
@@ -406,6 +415,7 @@ describe("AgentSession handoff", () => {
 		session = new AgentSession({
 			agent,
 			sessionManager,
+			externalIrcBus: ircBus,
 			settings: Settings.isolated({
 				"compaction.enabled": true,
 				"compaction.autoContinue": false,
@@ -492,6 +502,7 @@ describe("AgentSession handoff", () => {
 		session = new AgentSession({
 			agent,
 			sessionManager,
+			externalIrcBus: ircBus,
 			settings: Settings.isolated({
 				"compaction.enabled": false,
 				"compaction.autoContinue": false,
@@ -920,6 +931,7 @@ describe("AgentSession handoff", () => {
 		session = new AgentSession({
 			agent,
 			sessionManager,
+			externalIrcBus: ircBus,
 			settings: Settings.isolated({
 				"compaction.enabled": true,
 				"compaction.autoContinue": false,
@@ -1147,6 +1159,7 @@ describe("AgentSession handoff", () => {
 		session = new AgentSession({
 			agent,
 			sessionManager,
+			externalIrcBus: ircBus,
 			settings: Settings.isolated({ "compaction.enabled": false }),
 			modelRegistry,
 			extensionRunner,
