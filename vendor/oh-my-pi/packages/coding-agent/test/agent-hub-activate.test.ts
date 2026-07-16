@@ -477,7 +477,7 @@ describe("Agent hub Enter activation", () => {
 		hub.dispose();
 	});
 
-	it("cycles archived transcripts with brackets, then restores the drilled cursor on back", async () => {
+	it("does not use brackets for duplicate archived transcript navigation", async () => {
 		using tempDir = TempDir.createSync("@omp-agent-hub-archived-cycle-");
 		const parentFile = `${tempDir.path()}/Main.jsonl`;
 		const childrenDir = `${tempDir.path()}/Main`;
@@ -527,7 +527,7 @@ describe("Agent hub Enter activation", () => {
 		hub.handleInput("\r");
 		expect(renderedText(hub)).toContain("Agent Hub > Newest");
 		hub.handleInput("]");
-		expect(renderedText(hub)).toContain("Agent Hub > Older");
+		expect(renderedText(hub)).toContain("Agent Hub > Newest");
 		hub.handleInput("[");
 		expect(renderedText(hub)).toContain("Agent Hub > Newest");
 
@@ -633,8 +633,8 @@ describe("Agent hub external transcript preview", () => {
 					id: "external-init",
 					parentId: null,
 					timestamp,
-					systemPrompt: "external",
-					task: "external preview",
+					systemPrompt: "External peer system prompt from the journal head.",
+					task: "First external user message from session init.",
 					tools: [],
 					subagent: {
 						agentId: "Main",
@@ -655,6 +655,15 @@ describe("Agent hub external transcript preview", () => {
 					message: { role: "user", content: "external transcript content", timestamp: Date.parse(timestamp) },
 				},
 			];
+			for (let index = 0; index < 40; index++) {
+				entries.push({
+					type: "message",
+					id: `external-message-${index}`,
+					parentId: null,
+					timestamp,
+					message: { role: "user", content: `peer journal line ${index}`, timestamp: Date.parse(timestamp) },
+				});
+			}
 			await Bun.write(sessionFile, `${entries.map(entry => JSON.stringify(entry)).join("\n")}\n`);
 			const rawHandle = "019f6699-32f0-7000-9000-000000000000/Main";
 			bus.registerPeer({
@@ -679,13 +688,26 @@ describe("Agent hub external transcript preview", () => {
 				externalSessionId: "current-test-session",
 			});
 
-			hub.handleInput("\r");
-			await waitForRenderedText(hub, "external transcript content");
+			await waitForRenderedText(hub, "OX5.6gpt");
 			let rendered = renderedText(hub);
+			expect(rendered).toContain("System prompt");
+			expect(rendered).toContain("External peer system prompt from the journal head.");
+			expect(rendered).toContain("First user message");
+			expect(rendered).toContain("First external user message from session init.");
+
+			hub.handleInput("\r");
+			await waitForRenderedText(hub, "peer journal line 39");
+			rendered = renderedText(hub);
 			expect(rendered).toContain("Agent Hub > Main · alpha ·");
 			expect(rendered).toContain("read-only — external session");
-			expect(rendered).toContain("external transcript content");
 			expect(rendered).not.toContain(rawHandle);
+			hub.handleInput("u");
+			const scrolledUp = renderedText(hub);
+			expect(scrolledUp).not.toBe(rendered);
+			hub.handleInput("j");
+			expect(renderedText(hub)).not.toBe(scrolledUp);
+			hub.handleInput("d");
+			expect(renderedText(hub)).toContain("peer journal line 39");
 
 			hub.handleInput("i");
 			rendered = renderedText(hub);

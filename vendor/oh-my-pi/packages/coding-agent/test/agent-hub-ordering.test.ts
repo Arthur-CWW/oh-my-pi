@@ -459,12 +459,11 @@ describe("Agent hub row ordering", () => {
 		});
 		const hub = makeHub(agents);
 
-		await waitForRenderedText(hub, "5.6Tr");
+		await waitForRenderedText(hub, "5.6terra");
 		const row = renderedText(hub)
 			.split("\n")
-			.find(line => line.includes("Worker"));
-		expect(row?.slice(3, 17)).toContain("S OX");
-		expect(row?.slice(3, 17)).toContain("h");
+			.find(line => line.includes("Worker") && line.includes("5.6terra"));
+		expect(row).toContain("OX5.6terra h");
 		hub.dispose();
 	});
 
@@ -492,12 +491,11 @@ describe("Agent hub row ordering", () => {
 		});
 		const hub = makeHub(agents);
 
-		await waitForRenderedText(hub, "4.5Op");
+		await waitForRenderedText(hub, "4.5opus");
 		const row = renderedText(hub)
 			.split("\n")
-			.find(line => line.includes("Parent.Child"));
-		expect(row?.slice(3, 17)).toContain("A AN");
-		expect(row?.slice(3, 17)).toContain("m");
+			.find(line => line.includes("Parent.Child") && line.includes("4.5opus"));
+		expect(row).toContain("AN4.5opus m");
 		hub.dispose();
 	});
 
@@ -591,7 +589,7 @@ describe("Agent hub row ordering", () => {
 
 		for (const w of [60, 80, 120, 160] as const) {
 			const rendered = hub.render(w);
-			const line = Bun.stripANSI(rendered.find(candidate => Bun.stripANSI(candidate).includes("Worker")) || "");
+			const line = Bun.stripANSI(rendered.find(candidate => Bun.stripANSI(candidate).includes("OX5.6terra")) || "");
 
 			const modelWidth = w <= 80 ? 13 : w <= 120 ? 14 : 15;
 			const stateWidth = w <= 80 ? 6 : 7;
@@ -605,27 +603,27 @@ describe("Agent hub row ordering", () => {
 			expect(namePart.startsWith("Worker")).toBe(true);
 
 			const modelCol = line.slice(3, 3 + modelWidth);
-			expect(modelCol.startsWith("S OX")).toBe(true);
-			expect(modelCol.includes("5.6Tr")).toBe(true);
+			expect(modelCol.startsWith("OX")).toBe(true);
+			expect(modelCol.includes("5.6terra")).toBe(true);
 			expect(modelCol.includes("h")).toBe(true);
 		}
 
 		// Test adjacent variant distinction (claude-sonnet-4-5 vs claude-opus-4-5)
 		sessionsList[0].progress.resolvedModel = "anthropic/claude-sonnet-4-5";
 		const sonnetLine = Bun.stripANSI(
-			hub.render(120).find(candidate => Bun.stripANSI(candidate).includes("Worker")) || "",
+			hub.render(120).find(candidate => Bun.stripANSI(candidate).includes("AN4.5sonnet")) || "",
 		);
 		const sonnetModelCol = sonnetLine.slice(3, 3 + 14);
-		expect(sonnetModelCol.startsWith("A AN")).toBe(true);
-		expect(sonnetModelCol.includes("4.5So")).toBe(true);
+		expect(sonnetModelCol.startsWith("AN")).toBe(true);
+		expect(sonnetModelCol.includes("4.5sonnet")).toBe(true);
 
 		sessionsList[0].progress.resolvedModel = "anthropic/claude-opus-4-5";
 		const opusLine = Bun.stripANSI(
-			hub.render(120).find(candidate => Bun.stripANSI(candidate).includes("Worker")) || "",
+			hub.render(120).find(candidate => Bun.stripANSI(candidate).includes("AN4.5opus")) || "",
 		);
 		const opusModelCol = opusLine.slice(3, 3 + 14);
-		expect(opusModelCol.startsWith("A AN")).toBe(true);
-		expect(opusModelCol.includes("4.5Op")).toBe(true);
+		expect(opusModelCol.startsWith("AN")).toBe(true);
+		expect(opusModelCol.includes("4.5opus")).toBe(true);
 
 		hub.dispose();
 	});

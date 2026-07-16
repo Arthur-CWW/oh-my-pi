@@ -9,6 +9,8 @@ export interface DurableJournalModel {
 	modelId?: string;
 	thinkingLevel?: string | null;
 	spawnRecord?: SpawnRecord;
+	systemPrompt?: string;
+	firstUserMessage?: string;
 }
 
 export function durableModelSelector(model: DurableJournalModel | undefined): string | undefined {
@@ -29,6 +31,8 @@ function durableJournalModel(text: string): DurableJournalModel | undefined {
 	let modelId: string | undefined;
 	let thinkingLevel: string | null | undefined;
 	let spawnRecord: SpawnRecord | undefined;
+	let systemPrompt: string | undefined;
+	let firstUserMessage: string | undefined;
 	for (const line of text.split("\n")) {
 		if (!line.trim()) continue;
 		let entry: Record<string, unknown>;
@@ -37,12 +41,17 @@ function durableJournalModel(text: string): DurableJournalModel | undefined {
 		} catch {
 			continue;
 		}
-		if (entry.type === "session_init" && typeof entry.subagent === "object" && entry.subagent !== null) {
-			const metadata = entry.subagent as Record<string, unknown>;
-			if (typeof metadata.model === "string" && metadata.model) modelId = metadata.model;
-			if (metadata.thinkingLevel === null || typeof metadata.thinkingLevel === "string")
+		if (entry.type === "session_init") {
+			if (typeof entry.systemPrompt === "string" && entry.systemPrompt) systemPrompt = entry.systemPrompt;
+			if (typeof entry.task === "string" && entry.task) firstUserMessage = entry.task;
+			const metadata =
+				typeof entry.subagent === "object" && entry.subagent !== null
+					? (entry.subagent as Record<string, unknown>)
+					: undefined;
+			if (typeof metadata?.model === "string" && metadata.model) modelId = metadata.model;
+			if (metadata?.thinkingLevel === null || typeof metadata?.thinkingLevel === "string")
 				thinkingLevel = metadata.thinkingLevel;
-			if (isSpawnRecord(metadata.spawnRecord)) spawnRecord = metadata.spawnRecord;
+			if (isSpawnRecord(metadata?.spawnRecord)) spawnRecord = metadata.spawnRecord;
 		} else if (entry.type === "model_change" && typeof entry.model === "string" && entry.model) {
 			modelId = entry.model;
 		} else if (
@@ -52,9 +61,13 @@ function durableJournalModel(text: string): DurableJournalModel | undefined {
 			thinkingLevel = entry.thinkingLevel;
 		}
 	}
-	return modelId === undefined && thinkingLevel === undefined && spawnRecord === undefined
+	return modelId === undefined &&
+		thinkingLevel === undefined &&
+		spawnRecord === undefined &&
+		systemPrompt === undefined &&
+		firstUserMessage === undefined
 		? undefined
-		: { modelId, thinkingLevel, spawnRecord };
+		: { modelId, thinkingLevel, spawnRecord, systemPrompt, firstUserMessage };
 }
 
 /** Durable model metadata, cached by journal path and mtime so renders remain filesystem-free. */
@@ -301,7 +314,7 @@ export function projectAgentRoster(
 		const siblingIndex = siblings.indexOf(ref);
 		let guide = "";
 		for (let index = 0; index + 1 < continuations.length; index++) guide += continuations[index] ? "│ " : "  ";
-		if (depth > 0) guide += siblingIndex + 1 < siblings.length ? "├ • " : "└ • ";
+		if (depth > 0) guide += siblingIndex + 1 < siblings.length ? "├ " : "└ ";
 		const children = visibleChildrenByParent.get(ref.id) ?? [];
 		const row: AgentRosterRow = {
 			ref,

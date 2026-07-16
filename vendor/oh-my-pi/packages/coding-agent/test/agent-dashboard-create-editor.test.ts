@@ -1,11 +1,13 @@
-import { afterEach, describe, expect, test, vi } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { KeybindingsManager } from "@oh-my-pi/pi-coding-agent/config/keybindings";
 import type { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AgentDashboard } from "@oh-my-pi/pi-coding-agent/modes/components/agent-dashboard";
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import * as discovery from "@oh-my-pi/pi-coding-agent/task/discovery";
+import { setKeybindings } from "@oh-my-pi/pi-tui";
 
 const ANSI_PATTERN = /\x1b\[[0-?]*[ -/]*[@-~]/g;
 const tempDirs: string[] = [];
@@ -53,8 +55,13 @@ function stubStdoutGeometry(cols: number): { setRows(n: number): void; restore()
 	};
 }
 
+beforeEach(() => {
+	setKeybindings(KeybindingsManager.inMemory());
+});
+
 afterEach(async () => {
 	vi.restoreAllMocks();
+	setKeybindings(KeybindingsManager.inMemory());
 	await Promise.all(tempDirs.splice(0).map(dir => fs.rm(dir, { recursive: true, force: true })));
 });
 
@@ -126,7 +133,7 @@ describe("AgentDashboard layout", () => {
 			// past it (which is what pushed the controls into scrollback).
 			expect(lines.length).toBe(30);
 			expect(plain).toContain("Agent Control Center");
-			expect(plain).toContain("Esc: close");
+			expect(plain).toContain("escape close");
 		} finally {
 			geo.restore();
 		}
@@ -144,7 +151,7 @@ describe("AgentDashboard layout", () => {
 			const shrunk = dashboard.render(100);
 			expect(shrunk.length).toBe(18);
 			// Footer survives the shrink instead of being clipped off the bottom.
-			expect(shrunk.map(line => line.replace(ANSI_PATTERN, "")).join("\n")).toContain("Esc: close");
+			expect(shrunk.map(line => line.replace(ANSI_PATTERN, "")).join("\n")).toContain("escape close");
 		} finally {
 			geo.restore();
 		}

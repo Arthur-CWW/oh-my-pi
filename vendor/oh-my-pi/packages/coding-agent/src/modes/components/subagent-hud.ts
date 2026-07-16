@@ -139,7 +139,7 @@ export class SubagentHudRenderer {
 
 	#buildRow(input: HudRow, rate: string, state: string, tokenColumnWidth: number, columns: number): string {
 		const abbreviation = input.modelSelector
-			? renderModelSelectorAbbreviation(input.modelSelector)
+			? renderModelSelectorAbbreviation(input.modelSelector, "compact")
 			: theme.fg("dim", "?");
 		let left = `${theme.fg("dim", input.prefix)}[${abbreviation}] ${theme.fg("accent", theme.bold(input.displayId))}`;
 		if (input.description) {
@@ -150,8 +150,11 @@ export class SubagentHudRenderer {
 
 		const tokenLane = tokenColumnWidth > 0 ? rate.padStart(tokenColumnWidth) : "";
 		const stateLane = state.padStart(5);
+		// Leave the terminal's final cell unused. Exact-width rows arm the terminal's
+		// pending-wrap state, so the next cursor move can appear on a second display line.
+		const rowWidth = Math.max(1, columns - 1);
 		const tailWidth = tokenColumnWidth + (tokenColumnWidth > 0 ? 1 : 0) + stateLane.length;
-		const leftWidth = Math.max(1, columns - tailWidth - 1);
+		const leftWidth = Math.max(1, rowWidth - tailWidth - 1);
 		left = truncateToWidth(left, Math.max(TRUNCATE_LENGTHS.SHORT, leftWidth));
 		left = truncateToWidth(left, leftWidth);
 		left += padding(Math.max(0, leftWidth - visibleWidth(left)));

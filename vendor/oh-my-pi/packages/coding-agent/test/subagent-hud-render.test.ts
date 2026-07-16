@@ -337,14 +337,33 @@ describe("subagent HUD lines", () => {
 			.split("\n")
 			.filter(line => line.includes("["));
 		expect(rendered).toHaveLength(3);
-		expect(rendered[0]).toContain("[SOX5.6xh] HR147ColonMode: Colon-mode UX implementer");
-		expect(rendered[1]).toContain("[SAN4.6h] HR151DismissAction: Modal input-action migration specialist");
-		expect(rendered[2]).toContain("[KKMm] DismissSelectors: Selector dismissal migration specialist");
+		expect(rendered[0]).toContain("[OX5.6sol xh] HR147ColonMode: Colon-mode UX implementer");
+		expect(rendered[1]).toContain("[AN4.6sonnet h] HR151DismissAction: Modal input-action migration specialist");
+		expect(rendered[2]).toContain("[KMkimi m] DismissSelectors: Selector dismissal migration specialist");
 		expect(rendered.join("\n")).not.toContain("HR147ColonMode.HR151DismissAction");
-		expect(rendered.map(line => Bun.stringWidth(line))).toEqual([100, 100, 100]);
+		expect(rendered.map(line => Bun.stringWidth(line))).toEqual([99, 99, 99]);
 		expect(rendered[0]).toMatch(/\s10\s+RUN$/);
 		expect(rendered[1]).toMatch(/\s123\s+RUN$/);
 		expect(rendered[2]).toMatch(/\s1\s+RUN\+0$/);
 		expect(rendered.join("\n")).not.toMatch(/\d+\.\d+t\/s/);
+	});
+
+	it("keeps long-role rows on one display line at narrow, normal, and wide widths", () => {
+		const row = makeSession({
+			id: "LongRoleWorker",
+			description: `HUD and Hub polish implementer ${"with a deliberately long role ".repeat(20)}`,
+			tokenRate: 123.4,
+			progress: makeProgress({
+				id: "LongRoleWorker",
+				resolvedModel: "openai-codex/gpt-5.6-sol:xhigh",
+			}),
+		});
+		for (const width of [60, 100, 160]) {
+			const rendered = renderSubagentHudLines([row], width).at(-1)!;
+			const plain = Bun.stripANSI(rendered);
+			expect(Bun.stringWidth(plain)).toBe(width - 1);
+			expect(plain).toMatch(/…\s+123\s+RUN$/);
+			expect(plain.split("\n")).toHaveLength(1);
+		}
 	});
 });

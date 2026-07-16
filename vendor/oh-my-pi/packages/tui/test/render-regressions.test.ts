@@ -3236,10 +3236,10 @@ describe("TUI terminal-state regressions", () => {
 				// is per-screen, so without this Esc reverts to legacy bare \x1b
 				// inside fullscreen overlays (settings Esc bug).
 				expect(modalWrites).toContain("\x1b[?1049h\x1b[>1u");
-				// … enabled mouse tracking for click/scroll/hover support …
-				expect(modalWrites).toContain("\x1b[?1000h");
-				expect(modalWrites).toContain("\x1b[?1003h"); // any-motion tracking drives hover
-				expect(modalWrites).toContain("\x1b[?1006h");
+				// Mouse tracking is opt-in so fullscreen startup preserves native selection/copy.
+				expect(modalWrites).not.toContain("\x1b[?1000h");
+				expect(modalWrites).not.toContain("\x1b[?1003h");
+				expect(modalWrites).not.toContain("\x1b[?1006h");
 				// … and never erased scrollback (ED3) or otherwise touched the transcript.
 				expect(modalWrites).not.toContain("\x1b[3J");
 				expect(visible(term).some(line => line.includes("MODAL-0"))).toBeTrue();
@@ -3252,10 +3252,8 @@ describe("TUI terminal-state regressions", () => {
 				expect(hideWrites).toContain("\x1b[?1049l");
 				// The alt screen's kitty frame is popped before leaving it.
 				expect(hideWrites).toContain("\x1b[<u\x1b[?1049l");
-				// Mouse tracking is disabled again so the rest of the app keeps native
-				// terminal selection.
-				expect(hideWrites).toContain("\x1b[?1003l"); // motion tracking torn down too
-				expect(hideWrites).toContain("\x1b[?1000l");
+				expect(hideWrites).not.toContain("\x1b[?1003l");
+				expect(hideWrites).not.toContain("\x1b[?1000l");
 				// Transcript is back on the normal screen after leaving the alt buffer.
 				expect(visible(term).some(line => line.includes("base-"))).toBeTrue();
 				expect(visible(term).some(line => line.includes("MODAL-0"))).toBeFalse();
@@ -3264,34 +3262,62 @@ describe("TUI terminal-state regressions", () => {
 			}
 		});
 
-		it("leaves native scrollback untouched across the modal lifetime", async () => {
-			const term = new VirtualTerminal(40, 6, 200);
-			const tui = new TUI(term);
-			// Base transcript overflows the viewport, so rows land in scrollback.
-			tui.addChild(new MutableLinesComponent(rows("base-", 24)));
-
+		it("emits mouse reporting only when explicitly enabled", async () => {
+			const term = new VirtualTerminal(40, 8, 200);
+			const writes = captureWrites(term);
+			const tui = new TUI(term, undefined, { mouseTracking: true });
 			try {
 				tui.start();
 				await settle(term);
-				const scrollbackBefore = term.getScrollBuffer().map(line => line.trimEnd());
-
-				const handle = tui.showOverlay(new MutableLinesComponent(["MODAL"]), {
-					anchor: "bottom-center",
-					width: "100%",
-					maxHeight: "100%",
-					margin: 0,
-					fullscreen: true,
-				});
+				const showFrom = writes.length;
+				const handle = tui.showOverlay(new MutableLinesComponent(["MODAL"]), { fullscreen: true });
 				await settle(term);
+				const modalWrites = writes.slice(showFrom).join("");
+				expect(modalWrites).toContain("\x1b[?1000h");
+				expect(modalWrites).toContain("\x1b[?1003h");
+				expect(modalWrites).toContain("\x1b[?1006h");
 				handle.hide();
 				await settle(term);
-
-				// The modal borrowed/returned the alt buffer without rewriting the
-				// normal screen's scrollback — the transcript a reader scrolled up to
-				// see is identical before and after.
-				expect(term.getScrollBuffer().map(line => line.trimEnd())).toEqual(scrollbackBefore);
 			} finally {
 				tui.stop();
+			}
+		});
+
+		it("preserves both a followed tail and a scrolled-up reader across the modal lifetime", async () => {
+			for (const readerState of ["at-bottom", "scrolled-up"] as const) {
+				const term = new VirtualTerminal(40, 6, 200);
+				const tui = new TUI(term);
+				// Base transcript overflows the viewport, so rows land in scrollback.
+				tui.addChild(new MutableLinesComponent(rows("base-", 24)));
+
+				try {
+					tui.start();
+					await settle(term);
+					if (readerState === "scrolled-up") {
+						term.scrollLines(-3);
+						await term.flush();
+					}
+					const viewportBefore = term.getBufferPosition().viewportY;
+					const scrollbackBefore = term.getScrollBuffer().map(line => line.trimEnd());
+					expect(term.isNativeViewportAtBottom()).toBe(readerState === "at-bottom");
+
+					const handle = tui.showOverlay(new MutableLinesComponent(["MODAL"]), {
+						anchor: "bottom-center",
+						width: "100%",
+						maxHeight: "100%",
+						margin: 0,
+						fullscreen: true,
+					});
+					await settle(term);
+					handle.hide();
+					await settle(term);
+
+					expect(term.getBufferPosition().viewportY).toBe(viewportBefore);
+					expect(term.isNativeViewportAtBottom()).toBe(readerState === "at-bottom");
+					expect(term.getScrollBuffer().map(line => line.trimEnd())).toEqual(scrollbackBefore);
+				} finally {
+					tui.stop();
+				}
 			}
 		});
 	});

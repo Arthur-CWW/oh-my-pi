@@ -24,8 +24,6 @@ const NORMAL_FOOTER_IDS: Record<AgentHubInteractionSurface, readonly string[]> =
 		"hub.table.previous-orchestrator",
 		"hub.table.search",
 		"viewer.fold",
-		"viewer.previous-sibling",
-		"viewer.next-sibling",
 		"viewer.help",
 		"hub.table.history",
 		"hub.table.rich",
@@ -36,16 +34,13 @@ const NORMAL_FOOTER_IDS: Record<AgentHubInteractionSurface, readonly string[]> =
 	"hub.chat": [
 		...VIEWER_NAVIGATION_INTERACTION_IDS,
 		"hub.chat.search",
-		"viewer.previous-sibling",
-		"viewer.next-sibling",
 		"viewer.help",
 		"hub.chat.rich",
 		"hub.chat.close",
 	],
 	"hub.inspector": [
 		...VIEWER_NAVIGATION_INTERACTION_IDS,
-		"viewer.previous-sibling",
-		"viewer.next-sibling",
+		"hub.inspector.cycle-sections",
 		"viewer.help",
 	],
 };
@@ -63,17 +58,7 @@ const NORMAL_FOOTER_REMAINDER_IDS: Record<AgentHubInteractionSurface, readonly s
 	"hub.inspector": NORMAL_FOOTER_IDS["hub.inspector"],
 };
 
-const NORMAL_HELP_IDS: Record<AgentHubInteractionSurface, readonly string[]> = {
-	"hub.table": [
-		...NORMAL_FOOTER_IDS["hub.table"].filter(id => id !== "viewer.previous-sibling" && id !== "viewer.next-sibling"),
-		"hub.table.cycle-siblings",
-	],
-	"hub.chat": [
-		...NORMAL_FOOTER_IDS["hub.chat"].filter(id => id !== "viewer.previous-sibling" && id !== "viewer.next-sibling"),
-		"hub.chat.cycle-siblings",
-	],
-	"hub.inspector": NORMAL_FOOTER_IDS["hub.inspector"],
-};
+const NORMAL_HELP_IDS: Record<AgentHubInteractionSurface, readonly string[]> = NORMAL_FOOTER_IDS;
 
 function interactionSurfaces(
 	surface: AgentHubInteractionSurface,

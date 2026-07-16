@@ -126,6 +126,8 @@ export interface TUIRenderMetrics {
 
 export interface TUIOptions {
 	renderScheduler?: RenderScheduler;
+	/** Enable terminal mouse reporting for fullscreen overlays. Off preserves native selection/copy. */
+	mouseTracking?: boolean;
 }
 
 export interface TUIStartOptions {
@@ -887,6 +889,7 @@ export class TUI extends Container {
 	// untouched, so exiting reconciles cleanly against the terminal-restored
 	// normal screen. #altPreviousLines is the last alt frame, for repaint-skip.
 	#altActive = false;
+	#mouseTrackingEnabled = false;
 	#altPreviousLines: string[] = [];
 	#altEnterWidth = 0;
 	#altEnterHeight = 0;
@@ -943,6 +946,7 @@ export class TUI extends Container {
 		super();
 		this.terminal = terminal;
 		this.#renderScheduler = options?.renderScheduler ?? DEFAULT_RENDER_SCHEDULER;
+		this.#mouseTrackingEnabled = options?.mouseTracking ?? false;
 		this.#showHardwareCursor = showHardwareCursor === undefined ? this.#showHardwareCursor : showHardwareCursor;
 		this.#watchdog = new LoopWatchdog();
 	}
@@ -1558,7 +1562,7 @@ export class TUI extends Container {
 		}
 		if (this.#altActive) {
 			const kittyPop = this.terminal.kittyEnableSequence ? "\x1b[<u" : "";
-			this.terminal.write(`${MOUSE_TRACKING_OFF}${kittyPop}\x1b[?1049l`);
+			this.terminal.write(`${this.#mouseTrackingEnabled ? MOUSE_TRACKING_OFF : ""}${kittyPop}\x1b[?1049l`);
 			setAltScreenActive(false);
 			this.#altActive = false;
 			this.#altPreviousLines = [];
@@ -2343,7 +2347,9 @@ export class TUI extends Container {
 			// entered alternate screen, or Esc/modified keys revert to legacy
 			// encoding inside fullscreen overlays (Ghostty/kitty). See kitty
 			// keyboard-protocol docs: the mode stack is separate per screen.
-			this.terminal.write(`\x1b[?1049h${this.terminal.kittyEnableSequence ?? ""}${MOUSE_TRACKING_ON}`);
+			this.terminal.write(
+				`\x1b[?1049h${this.terminal.kittyEnableSequence ?? ""}${this.#mouseTrackingEnabled ? MOUSE_TRACKING_ON : ""}`,
+			);
 			setAltScreenActive(true);
 			this.terminal.hideCursor();
 			this.#forgetHardwareCursorState();
@@ -2354,7 +2360,7 @@ export class TUI extends Container {
 			this.#altEnterHeight = height;
 		} else if (!wantAlt && this.#altActive) {
 			const kittyPop = this.terminal.kittyEnableSequence ? "\x1b[<u" : "";
-			this.terminal.write(`${MOUSE_TRACKING_OFF}${kittyPop}\x1b[?1049l`);
+			this.terminal.write(`${this.#mouseTrackingEnabled ? MOUSE_TRACKING_OFF : ""}${kittyPop}\x1b[?1049l`);
 			setAltScreenActive(false);
 			this.#forgetHardwareCursorState();
 			this.#altActive = false;

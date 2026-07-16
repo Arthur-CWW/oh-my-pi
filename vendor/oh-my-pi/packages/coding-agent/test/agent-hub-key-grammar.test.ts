@@ -164,6 +164,11 @@ describe("Agent Hub Vim key grammar", () => {
 		expect(keys.get("hub.table.previous-orchestrator")).toEqual(["p"]);
 		expect(table.some(entry => entry.keys?.includes("H") || entry.keys?.includes("L"))).toBe(false);
 		expect(table.some(entry => entry.keys?.some(key => key.includes("Ctrl+S")))).toBe(false);
+		expect(table.some(entry => entry.keys?.some(key => key.includes("[")))).toBe(false);
+		const chat = getInteractions({ surfaces: ["hub.chat"], modes: ["normal"] });
+		expect(chat.some(entry => entry.keys?.some(key => key.includes("[")))).toBe(false);
+		const inspector = getInteractions({ surfaces: ["hub.inspector"], modes: ["normal"] });
+		expect(inspector.find(entry => entry.id === "hub.inspector.cycle-sections")?.keys).toEqual(["[ / ]"]);
 	});
 
 	it("has no Hub input mode and keeps filter text literal", () => {

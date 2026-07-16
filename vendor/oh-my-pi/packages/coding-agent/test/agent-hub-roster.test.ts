@@ -26,7 +26,7 @@ describe("Agent Hub roster projection", () => {
 	it("preserves root and sibling order while flattening two nested levels", () => {
 		const rows = projectAgentRoster(nestedRefs(), new Set());
 		expect(rows.map(row => row.ref.id)).toEqual(["Alpha", "Alpha.One", "Alpha.One.Leaf", "Alpha.Two", "Beta"]);
-		expect(rows.map(row => row.guide)).toEqual(["", "├ • ", "│ └ • ", "└ • ", ""]);
+		expect(rows.map(row => row.guide)).toEqual(["", "├ ", "│ └ ", "└ ", ""]);
 	});
 
 	it("hides a collapsed subtree and rolls up hidden and running descendants", () => {

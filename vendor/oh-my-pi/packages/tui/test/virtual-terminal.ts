@@ -3,6 +3,9 @@ import * as os from "node:os";
 import type { Terminal, TerminalAppearance } from "@oh-my-pi/pi-tui/terminal";
 import { CellFlags, Ghostty, type GhosttyCell, type GhosttyTerminal } from "ghostty-web";
 
+const ALT_SCREEN_ENTER = "\x1b[?1049h";
+const ALT_SCREEN_EXIT = "\x1b[?1049l";
+
 // ---------------------------------------------------------------------------
 // Shared Ghostty VT engine
 // ---------------------------------------------------------------------------
@@ -136,6 +139,11 @@ export class VirtualTerminal implements Terminal {
 	#rows: number;
 	#scrollbackCap: number;
 	#viewportY = 0;
+	// Normal and alternate screens own independent viewport positions. The
+	// Ghostty VT core models their grids but not the user's scroll viewport, so
+	// retain the normal-buffer position while an alternate-screen modal is open.
+	#normalViewportYBeforeAlt: number | undefined;
+	#normalViewportWasAtBottomBeforeAlt = true;
 	#inputHandler?: (data: string) => void;
 	#resizeHandler?: () => void;
 	#pendingEngineResize = false;
@@ -420,6 +428,10 @@ export class VirtualTerminal implements Terminal {
 
 	#engineWrite(data: string): void {
 		const wasBottom = this.#atBottom();
+		if (data.includes(ALT_SCREEN_ENTER) && this.#normalViewportYBeforeAlt === undefined) {
+			this.#normalViewportYBeforeAlt = this.#viewportY;
+			this.#normalViewportWasAtBottomBeforeAlt = wasBottom;
+		}
 		const clearScrollbackAfterFullClear = "\x1b[2J\x1b[H\x1b[3J";
 		const clearIndex = data.indexOf(clearScrollbackAfterFullClear);
 		if (clearIndex >= 0 && this.#canRecreateForFullClear(data, clearIndex)) {
@@ -441,6 +453,13 @@ export class VirtualTerminal implements Terminal {
 		data = stripCombiningMarksForGhostty(data);
 		this.#writeToGhostty(data);
 		this.#refollowBottom(wasBottom);
+		if (data.includes(ALT_SCREEN_EXIT) && this.#normalViewportYBeforeAlt !== undefined) {
+			this.#viewportY = this.#normalViewportWasAtBottomBeforeAlt
+				? this.#cappedBaseY()
+				: Math.min(this.#normalViewportYBeforeAlt, this.#cappedBaseY());
+			this.#normalViewportYBeforeAlt = undefined;
+			this.#normalViewportWasAtBottomBeforeAlt = true;
+		}
 	}
 
 	#stripSynchronizedOutput(data: string): string {
@@ -612,6 +631,8 @@ export class VirtualTerminal implements Terminal {
 		this.#term = createGhosttyTerminal(this.#ghostty, this.#columns, this.#rows, this.#scrollbackCap);
 		this.#pendingEngineResize = false;
 		this.#viewportY = 0;
+		this.#normalViewportYBeforeAlt = undefined;
+		this.#normalViewportWasAtBottomBeforeAlt = true;
 		this.#historyTextCache.length = 0; // fresh engine: prior scrollback is gone
 		this.#eventLog.length = 0;
 		this.#eventLogBytes = 0;

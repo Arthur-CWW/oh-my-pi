@@ -92,7 +92,7 @@ const modelSegment: StatusLineSegment = {
 			else if (state.thinkingLevel && state.thinkingLevel !== ThinkingLevel.Off) effort = state.thinkingLevel;
 		}
 		const selector = withModelSelectorEffort(baseSelector, effort) ?? baseSelector;
-		const label = renderModelSelectorAbbreviation(selector);
+		const label = renderModelSelectorAbbreviation(selector, "standalone");
 		let content = theme.icon.model ? `${theme.fg("statusLineModel", `${theme.icon.model} `)}${label}` : label;
 		if (ctx.session.isAdvisorActive()) content += theme.fg("success", "++");
 		if (ctx.session.isFastModeActive() && theme.icon.fast) {
@@ -506,7 +506,7 @@ const usageSegment: StatusLineSegment = {
 					: "";
 			parts.push(`7d ${pctText}${reset}`);
 		}
-		const content = withIcon(theme.icon.time, parts.join(theme.sep.dot));
+		const content = withIcon(theme.icon.time, parts.join(" "));
 		return { content, visible: true };
 	},
 };

@@ -89,7 +89,6 @@ import {
 import {
 	agentHistoryRank,
 	boundedStreamingAssistant,
-	cycleVisibleAgentSibling,
 	DurableJournalModelCache,
 	durableModelSelector,
 	expandAgentAncestors,
@@ -265,12 +264,14 @@ function formatArchivedState(state: string): string {
 
 function modelLane(resolvedModel: string, maxLabelWidth: number): string {
 	const textWidth = maxLabelWidth - 1;
-	const result = truncateToWidth(renderModelSelectorAbbreviation(resolvedModel), textWidth);
+	const rendered =
+		resolvedModel === "-" ? theme.fg("dim", "-") : renderModelSelectorAbbreviation(resolvedModel, "compact");
+	const result = truncateToWidth(rendered, textWidth);
 	return result + padding(Math.max(0, textWidth - visibleWidth(result))) + " ";
 }
 
 function modelHeaderLane(resolvedModel: string): string {
-	return renderModelSelectorAbbreviation(resolvedModel);
+	return renderModelSelectorAbbreviation(resolvedModel, "standalone");
 }
 
 function fixedLane(value: string, width: number): string {
@@ -990,6 +991,11 @@ export class AgentHubOverlayComponent extends Container {
 		if (selectedExternal) this.#chatExternal = selectedExternal.peer;
 		this.#externalRows = externalRows;
 		this.#filterDirty = true;
+		const sessionFiles = externalRows.flatMap(row => (row.peer.sessionFile ? [row.peer.sessionFile] : []));
+		if (sessionFiles.length > 0)
+			void Promise.all(sessionFiles.map(sessionFile => this.#journalModels.load(sessionFile))).then(() =>
+				this.#requestRender(),
+			);
 		return true;
 	}
 
@@ -1056,17 +1062,6 @@ export class AgentHubOverlayComponent extends Container {
 		else this.#foldedAgentIds.add(agentId);
 		this.#filterDirty = true;
 		this.#applyFilter();
-		return true;
-	}
-
-	#cycleSibling(direction: -1 | 1): boolean {
-		const selected = this.#selectedInternalRef();
-		if (!selected) return false;
-		const sibling = cycleVisibleAgentSibling(this.#visibleActiveRows, selected.id, direction);
-		if (!sibling || sibling.id === selected.id) return false;
-		this.#selectedAgentKey = `agent:${sibling.id}`;
-		this.#resolveSelection();
-		this.#syncSelectedPreview();
 		return true;
 	}
 
@@ -1412,7 +1407,7 @@ export class AgentHubOverlayComponent extends Container {
 				`Session: ${peer.sessionId}`,
 				`State: ${displayedExternalPeerState(peer).replace("_", " ")}`,
 				`Source: ${peer.sessionFile ?? "remote transcript"}`,
-				`Model: unavailable`,
+				`Model: ${durableModelSelector(this.#journalModels.peek(peer.sessionFile)) ?? "unknown"}`,
 				`Version/fork: ${peer.version ?? "unknown"}${peer.buildDigest ? ` · ${peer.buildDigest.slice(0, 12)}` : ""}`,
 				...states,
 			];
@@ -1547,11 +1542,30 @@ export class AgentHubOverlayComponent extends Container {
 	}
 
 	#inspectorLines(observed: ObservableSession | undefined, width: number): string[] {
-		const sessionFile = this.#chatAgentId
-			? (this.#registryRefs.get(this.#chatAgentId)?.sessionFile ?? this.#chatArchived?.childSessionFile)
-			: this.#chatArchived?.childSessionFile;
-		const durableSpawn = this.#journalModels.peek(sessionFile)?.spawnRecord;
+		const sessionFile = this.#chatExternal?.sessionFile ??
+			(this.#chatAgentId
+				? (this.#registryRefs.get(this.#chatAgentId)?.sessionFile ?? this.#chatArchived?.childSessionFile)
+				: this.#chatArchived?.childSessionFile);
+		const durableJournal = this.#journalModels.peek(sessionFile);
+		const durableSpawn = durableJournal?.spawnRecord;
 		if (this.#inspectorSection === "prompt") {
+			if (this.#chatExternal) {
+				const systemPrompt = durableJournal?.systemPrompt?.slice(0, INSPECTOR_PROMPT_MAX_CHARS) ?? "";
+				const remaining = Math.max(0, INSPECTOR_PROMPT_MAX_CHARS - systemPrompt.length);
+				const firstUserMessage = durableJournal?.firstUserMessage?.slice(0, remaining) ?? "";
+				if (!systemPrompt && !firstUserMessage) return ["No journal head prompt available."];
+				const lines: string[] = [];
+				if (systemPrompt) {
+					lines.push(theme.fg("dim", "System prompt"));
+					lines.push(...this.#wrapInspectorText(systemPrompt, width, ""));
+				}
+				if (firstUserMessage) {
+					if (systemPrompt) lines.push("");
+					lines.push(theme.fg("dim", "First user message"));
+					lines.push(...this.#wrapInspectorText(firstUserMessage, width, ""));
+				}
+				return lines;
+			}
 			const progress = observed?.progress;
 			const context = (progress?.spawnContext ?? durableSpawn?.context ?? "").slice(0, INSPECTOR_PROMPT_MAX_CHARS);
 			const remaining = Math.max(0, INSPECTOR_PROMPT_MAX_CHARS - context.length);
@@ -2060,6 +2074,7 @@ export class AgentHubOverlayComponent extends Container {
 			width: Math.max(10, width - 1),
 			state: animation ? this.#spinnerStateLabel(animation) : externalStateBadge(row.state),
 			name: `${theme.bold(replaceTabs(peer.name || peer.sessionId))} ${theme.fg("dim", "external")}`,
+			model: durableModelSelector(this.#journalModels.peek(peer.sessionFile)) ?? "-",
 			context: shortenPath(peer.cwd),
 			age: formatLastSeenAge(peer.lastSeen),
 		});
@@ -2237,14 +2252,12 @@ export class AgentHubOverlayComponent extends Container {
 			this.#requestRender();
 			return;
 		}
-		if (keyData === "[" || keyData === "]") {
-			if (!this.#cycleSibling(keyData === "]" ? 1 : -1) && this.#dualLaneActive) {
-				const sections = ["prompt", "route", "comms"] as const;
-				const current = sections.indexOf(this.#inspectorSection);
-				this.#inspectorSection =
-					sections[(current + (keyData === "]" ? 1 : sections.length - 1)) % sections.length];
-				this.#inspectorScrollOffset = 0;
-			}
+		if ((keyData === "[" || keyData === "]") && this.#dualLaneActive) {
+			const sections = ["prompt", "route", "comms"] as const;
+			const current = sections.indexOf(this.#inspectorSection);
+			this.#inspectorSection =
+				sections[(current + (keyData === "]" ? 1 : sections.length - 1)) % sections.length];
+			this.#inspectorScrollOffset = 0;
 			this.#requestRender();
 			return;
 		}
@@ -2719,15 +2732,17 @@ export class AgentHubOverlayComponent extends Container {
 		if (this.#chatExternal) {
 			const peer = this.#chatExternal;
 			const state = displayedExternalPeerState(peer);
+			const model = durableModelSelector(this.#journalModels.peek(peer.sessionFile));
+			const modelLabel = model ? ` ${modelHeaderLane(model)}` : ` ${theme.fg("dim", "-")}`;
 			this.#viewerHeaderLines.push(
-				`${externalStateBadge(state)} ${theme.fg("dim", `pid ${peer.pid} · ${shortenPath(peer.cwd)} · ${accessLabel}`)}`,
+				`${externalStateBadge(state)} ${theme.fg("dim", `pid ${peer.pid} · ${shortenPath(peer.cwd)} · ${accessLabel}`)}${modelLabel}`,
 			);
 		} else if (this.#chatArchived) {
 			const archived = this.#chatArchived;
 			const model = archived.modelId
 				? `${archived.modelId}${archived.thinkingLevel ? `:${archived.thinkingLevel}` : ""}`
 				: withModelSelectorEffort(this.#transcriptCache?.model, this.#transcriptCache?.thinking);
-			const modelLabel = model ? `${theme.sep.dot}${modelHeaderLane(model)}` : "";
+			const modelLabel = model ? ` ${modelHeaderLane(model)}` : "";
 			this.#viewerHeaderLines.push(
 				`${theme.bold(archived.agentId)} ${theme.fg("dim", `${archived.state} · archived · ${accessLabel}`)}${modelLabel}`,
 			);
@@ -2740,7 +2755,7 @@ export class AgentHubOverlayComponent extends Container {
 					observed?.progress?.routeReceipt?.route.thinking,
 				) ?? cachedRoute;
 			const kindTag = theme.fg("dim", ` ${ref.parentId ? `${ref.kind} · of ${ref.parentId}` : ref.kind}`);
-			const modelLabel = model ? `${theme.sep.dot}${modelHeaderLane(model)}` : "";
+			const modelLabel = model ? ` ${modelHeaderLane(model)}` : "";
 			const source = observed?.progress?.routeReceipt?.source;
 			const sourceLabel = source ? theme.fg("dim", ` [${source}]`) : "";
 			this.#viewerHeaderLines.push(
@@ -2861,14 +2876,6 @@ export class AgentHubOverlayComponent extends Container {
 			this.#closeChat();
 			return;
 		}
-		if (keyData === "]") {
-			this.#openAdjacentChat(1);
-			return;
-		}
-		if (keyData === "[") {
-			this.#openAdjacentChat(-1);
-			return;
-		}
 		for (const key of this.#expandKeys) {
 			if (matchesKey(keyData, key)) {
 				this.#chatExpanded = !this.#chatExpanded;
@@ -2937,14 +2944,6 @@ export class AgentHubOverlayComponent extends Container {
 			this.#closeChat();
 			return;
 		}
-		if (keyData === "]") {
-			this.#openAdjacentChat(1);
-			return;
-		}
-		if (keyData === "[") {
-			this.#openAdjacentChat(-1);
-			return;
-		}
 		if (keyData === "/") {
 			this.#chatSearchEditing = true;
 			this.#chatSearchQuery = "";
@@ -3006,26 +3005,6 @@ export class AgentHubOverlayComponent extends Container {
 		const target = Math.max(0, Math.min(matchLine - Math.floor(this.#viewportHeight / 2), maxScroll));
 		this.#scrollOffset = target;
 		this.#wasAtBottom = this.#scrollOffset >= maxScroll;
-	}
-
-	/** Move through the visible active or archived agent rows without losing the detail view. */
-	#openAdjacentChat(delta: number): void {
-		const currentKey = this.#chatArchived
-			? `archived:${this.#chatArchived.childSessionFile}`
-			: this.#chatAgentId
-				? `agent:${this.#chatAgentId}`
-				: undefined;
-		const currentIndex = currentKey ? this.#findTableIndex(currentKey) : -1;
-		const navigableRows = this.#visibleAgentRowCount();
-		if (currentIndex < 0 || navigableRows === 0) return;
-		const nextIndex = Math.max(0, Math.min(currentIndex + delta, navigableRows - 1));
-		if (nextIndex === currentIndex) return;
-		const next = this.#tableAgentRowAt(nextIndex);
-		if (!next) return;
-		this.#selectedRow = nextIndex;
-		this.#syncSelectedKey();
-		if (next.kind === "active") this.openChat(next.ref.id);
-		else this.#openArchivedChat(next.descriptor);
 	}
 
 	/** Open the chat for the agent's parent, or close the hub when the parent is the main session. */

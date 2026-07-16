@@ -787,6 +787,17 @@ export const SETTINGS_SCHEMA = {
 			"Maximum number of inline images kept as live terminal graphics (default 8). Older images fall back to a text placeholder via a full redraw once the limit is exceeded. Set to 0 to keep every image (no limit).",
 	},
 
+	"tui.mouse": {
+		type: "boolean",
+		default: false,
+		ui: {
+			tab: "appearance",
+			group: "Display",
+			label: "Mouse Support",
+			description: "Enable mouse reporting in fullscreen views. Off preserves terminal-native selection and copy/paste.",
+		},
+	},
+
 	"tui.textSizing": {
 		type: "boolean",
 		default: false,

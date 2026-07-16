@@ -3,6 +3,10 @@
 ## [Unreleased]
 
 ### Added
+- Shared Scope-managed `TablePreviewComponent` (table + live preview + key routing + guaranteed finalizers on unmount); `/agents` dashboard is the first consumer — selection, filtering, scrolling, and preview assembly are no longer reimplemented per surface.
+- Model labels are tier-aware: dense comparative rows (HUD, Hub roster) use compact form (`OX5.6sol xh`) while standalone surfaces use fuller names; variant names always spell out (5.6sol/5.6terra/opus/haiku — one-letter lane codes removed), and decorative `•` spacers are gone.
+- HUD rows never wrap: role text truncates while tok/s and state badges stay on one line at any width; Hub roster shows model abbreviations for peer orchestrators; peer/sibling detail panes render their system prompt and first user message with scrollable transcript previews.
+- Terminal mouse reporting is off by default (`tui.mouse`) so native selection/copy works; fullscreen overlays enable it only when opted in.
 - Agent Hub Enter now opens every local, archived, and cross-session row as a transcript preview; attachable agents expose `i` to focus their composer and Esc returns through preview to roster, while running/external/non-revivable rows remain inert with friendly read-only titles.
 - Full Control Plane key grammar: j/k with arrow parity, n/p orchestrator jump with wraparound, u/d half-page, the `g` chord namespace (gx errors, gm messages, gb bookmarks, gr refresh, gs send) with a no-timeout pending cue and Esc cancel, a fixed selected-agent rail with live spinners and rollout/error placement, `?` contextual metadata and `:help`; H/L and Ctrl-S n/p are retired.
 - Colon-command output renders in a bottom-anchored overlay above the input line (dismiss on keypress) instead of force-scrolling the transcript; all colon commands inherit it.

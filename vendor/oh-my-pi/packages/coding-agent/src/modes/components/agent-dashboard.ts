@@ -18,24 +18,20 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import {
-	type Component,
 	Container,
 	Editor,
-	extractPrintableText,
 	fuzzyMatch,
 	Input,
 	matchesKey,
-	padding,
 	replaceTabs,
-	ScrollView,
 	Spacer,
 	Text,
 	truncateToWidth,
-	visibleWidth,
 	wrapTextWithAnsi,
 } from "@oh-my-pi/pi-tui";
 import { isEnoent, prompt } from "@oh-my-pi/pi-utils";
 import { YAML } from "bun";
+import { Effect, Exit, Scope } from "effect";
 import { getConfigDirs } from "../../config";
 import type { ModelRegistry } from "../../config/model-registry";
 import { formatModelString, resolveModelOverride } from "../../config/model-resolver";
@@ -48,15 +44,10 @@ import { discoverAgents } from "../../task/discovery";
 import type { AgentDefinition, AgentSource } from "../../task/types";
 import { shortenPath } from "../../tools/render-utils";
 import { getEditorTheme, theme } from "../theme/theme";
-import {
-	matchesUiDismiss,
-	matchesNavigationDown,
-	matchesNavigationUp,
-	matchesSelectDown,
-	matchesSelectUp,
-} from "../utils/keybinding-matchers";
+import { matchesUiDismiss } from "../utils/keybinding-matchers";
 import { keyHint } from "./keybinding-hints";
 import { DynamicBorder } from "./dynamic-border";
+import { TablePreviewComponent, type TablePreviewSession } from "./table-preview";
 
 type SourceTabId = "all" | AgentSource;
 type AgentScope = "project" | "user";
@@ -103,8 +94,7 @@ const SOURCE_LABEL: Record<AgentSource, string> = {
 };
 const AGENT_PREVIEW_PROMPT_MAX_CHARS = 32 * 1024;
 
-const LIST_FOOTER_PREFIX =
-	" ↑/↓: navigate  Space: toggle  Enter: model override  N: new agent  ←/→: source  Ctrl+R: reload  ";
+const LIST_FOOTER_PREFIX = " ↑/↓: navigate  Space: toggle  Enter: model  N: new  ←/→: source  Ctrl+R: reload  ";
 
 const IDENTIFIER_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+){1,5}$/;
 function joinPatterns(patterns: string[]): string {
@@ -189,68 +179,7 @@ function parseGeneratedAgentSpec(raw: string): GeneratedAgentSpec {
 	return { identifier, whenToUse, systemPrompt };
 }
 
-class AgentListPane implements Component {
-	constructor(
-		private readonly agents: DashboardAgent[],
-		private readonly selectedIndex: number,
-		private readonly scrollOffset: number,
-		private readonly searchQuery: string,
-		private readonly maxVisible: number,
-	) {}
-
-	render(width: number): readonly string[] {
-		const lines: string[] = [];
-		const searchPrefix = theme.fg("muted", "Search: ");
-		const searchText = this.searchQuery || theme.fg("dim", "type to filter");
-		lines.push(`${searchPrefix}${searchText}`);
-		lines.push("");
-
-		if (this.agents.length === 0) {
-			lines.push(theme.fg("muted", "  No agents found."));
-			return lines;
-		}
-
-		const overflow = this.agents.length > this.maxVisible;
-		const rowWidth = Math.max(0, width - (overflow ? 1 : 0));
-		const start = this.scrollOffset;
-		const end = Math.min(start + this.maxVisible, this.agents.length);
-
-		const rows: string[] = [];
-		for (let i = start; i < end; i++) {
-			const agent = this.agents[i];
-			const selected = i === this.selectedIndex;
-			const status = agent.disabled
-				? theme.fg("dim", theme.status.disabled)
-				: theme.fg("success", theme.status.enabled);
-			const source = theme.fg("dim", `[${SOURCE_LABEL[agent.source]}]`);
-			const override = agent.overrideModel ? ` ${theme.fg("warning", "(override)")}` : "";
-			let line = ` ${status} ${replaceTabs(agent.name)} ${source}${override}`;
-
-			if (selected) {
-				line = theme.bg("selectedBg", theme.bold(theme.fg("accent", line)));
-			} else if (agent.disabled) {
-				line = theme.fg("dim", line);
-			}
-
-			rows.push(truncateToWidth(line, rowWidth));
-		}
-
-		const sv = new ScrollView(rows, {
-			height: rows.length,
-			scrollbar: "auto",
-			totalRows: this.agents.length,
-			theme: { track: t => theme.fg("muted", t), thumb: t => theme.fg("accent", t) },
-		});
-		sv.setScrollOffset(this.scrollOffset);
-		lines.push(...sv.render(width));
-
-		return lines;
-	}
-
-	invalidate(): void {}
-}
-
-class AgentInspectorPane implements Component {
+class AgentInspectorPane implements TablePreviewSession {
 	constructor(
 		private readonly agent: DashboardAgent | null,
 		private readonly defaultPatterns: string[],
@@ -314,40 +243,6 @@ class AgentInspectorPane implements Component {
 	#formatResolution(resolution: ModelResolution): string {
 		return formatResolution(resolution);
 	}
-
-	invalidate(): void {}
-}
-
-class TwoColumnBody implements Component {
-	constructor(
-		private readonly leftPane: AgentListPane,
-		private readonly rightPane: AgentInspectorPane,
-		private readonly maxHeight: number,
-	) {}
-
-	render(width: number): readonly string[] {
-		const leftWidth = Math.floor(width * 0.5);
-		const rightWidth = width - leftWidth - 3;
-		const leftLines = this.leftPane.render(leftWidth);
-		const rightLines = this.rightPane.render(rightWidth);
-		const lineCount = this.maxHeight;
-		const out: string[] = [];
-		const separator = theme.fg("dim", ` ${theme.boxSharp.vertical} `);
-
-		for (let i = 0; i < lineCount; i++) {
-			const left = truncateToWidth(leftLines[i] ?? "", leftWidth);
-			const leftPadded = left + padding(Math.max(0, leftWidth - visibleWidth(left)));
-			const right = truncateToWidth(rightLines[i] ?? "", rightWidth);
-			out.push(leftPadded + separator + right);
-		}
-
-		return out;
-	}
-
-	invalidate(): void {
-		this.leftPane.invalidate?.();
-		this.rightPane.invalidate?.();
-	}
 }
 
 export class AgentDashboard extends Container {
@@ -356,9 +251,9 @@ export class AgentDashboard extends Container {
 	#filteredAgents: DashboardAgent[] = [];
 	#tabs: SourceTab[] = [{ id: "all", label: "All", count: 0 }];
 	#activeTabIndex = 0;
-	#selectedIndex = 0;
-	#scrollOffset = 0;
-	#searchQuery = "";
+	#tablePreview!: TablePreviewComponent<DashboardAgent, string>;
+	readonly #viewScope = Scope.makeUnsafe("sequential");
+	#disposed = false;
 	#loading = true;
 	#loadError: string | null = null;
 	#notice: string | null = null;
@@ -395,12 +290,56 @@ export class AgentDashboard extends Container {
 		modelContext: AgentDashboardModelContext = {},
 	): Promise<AgentDashboard> {
 		const dashboard = new AgentDashboard(cwd, settings, terminalHeight ?? process.stdout.rows ?? 24, modelContext);
-		await dashboard.#init();
-		return dashboard;
+		try {
+			await dashboard.#init();
+			return dashboard;
+		} catch (error) {
+			await dashboard.dispose();
+			throw error;
+		}
 	}
 
 	async #init(): Promise<void> {
 		this.#settingsManager = this.settings ?? (await Settings.init());
+		this.#tablePreview = await Effect.runPromise(
+			Scope.provide(this.#viewScope)(
+				TablePreviewComponent.mount<DashboardAgent, string>({
+					rows: () => this.#filteredAgents,
+					keyOf: agent => agent.name,
+					matchesRow: matchAgent,
+					renderRow: agent => {
+						const status = agent.disabled
+							? theme.fg("dim", theme.status.disabled)
+							: theme.fg("success", theme.status.enabled);
+						const source = theme.fg("dim", `[${SOURCE_LABEL[agent.source]}]`);
+						const override = agent.overrideModel ? ` ${theme.fg("warning", "(override)")}` : "";
+						const row = ` ${status} ${replaceTabs(agent.name)} ${source}${override}`;
+						return agent.disabled ? theme.fg("dim", row) : row;
+					},
+					preview: {
+						open: agent => {
+							const defaultPatterns = this.#defaultPatternsFor(agent);
+							const effectivePatterns = this.#effectivePatternsFor(agent, agent.overrideModel);
+							return new AgentInspectorPane(
+								agent,
+								defaultPatterns,
+								this.#resolvePatterns(defaultPatterns),
+								effectivePatterns,
+								this.#resolvePatterns(effectivePatterns),
+							);
+						},
+					},
+					height: () => this.#computeBodyHeight(),
+					requestRender: () => this.onRequestRender?.(),
+					onClose: () => this.#close(),
+					handleKey: data => this.#handleTableKey(data),
+					layout: "columns",
+					tableRatio: 0.5,
+					emptyMessage: "No agents found.",
+					previewEmptyMessage: "Select an agent to inspect settings",
+				}),
+			),
+		);
 		await this.#reloadData();
 		this.#buildLayout();
 	}
@@ -411,7 +350,6 @@ export class AgentDashboard extends Container {
 		this.#buildLayout();
 
 		try {
-			const selectedName = this.#selectedAgent()?.name;
 			const activeTabId = this.#tabs[this.#activeTabIndex]?.id ?? "all";
 			const { agents } = await discoverAgents(this.cwd);
 			const disabled = new Set((this.#settingsManager?.get("task.disabledAgents") as string[] | undefined) ?? []);
@@ -434,21 +372,12 @@ export class AgentDashboard extends Container {
 			const nextTabIndex = this.#tabs.findIndex(tab => tab.id === activeTabId);
 			this.#activeTabIndex = nextTabIndex >= 0 ? nextTabIndex : 0;
 			this.#applyFilters();
-
-			if (selectedName) {
-				const idx = this.#filteredAgents.findIndex(agent => agent.name === selectedName);
-				if (idx >= 0) {
-					this.#selectedIndex = idx;
-				}
-			}
-			this.#clampSelection();
 		} catch (error) {
 			this.#allAgents = [];
 			this.#filteredAgents = [];
 			this.#tabs = [{ id: "all", label: "All", count: 0 }];
 			this.#activeTabIndex = 0;
-			this.#selectedIndex = 0;
-			this.#scrollOffset = 0;
+			this.#tablePreview.refresh();
 			this.#loadError = error instanceof Error ? error.message : String(error);
 		} finally {
 			this.#loading = false;
@@ -474,21 +403,14 @@ export class AgentDashboard extends Container {
 	}
 
 	#selectedAgent(): DashboardAgent | null {
-		return this.#filteredAgents[this.#selectedIndex] ?? null;
+		return this.#tablePreview.selected ?? null;
 	}
 
-	#applyFilters(): void {
+	#applyFilters(resetSelection = false, refreshPreview = false): void {
 		const activeTab = this.#tabs[this.#activeTabIndex] ?? this.#tabs[0];
-		const tabFiltered =
+		this.#filteredAgents =
 			activeTab.id === "all" ? this.#allAgents : this.#allAgents.filter(agent => agent.source === activeTab.id);
-
-		if (!this.#searchQuery) {
-			this.#filteredAgents = tabFiltered;
-		} else {
-			this.#filteredAgents = tabFiltered.filter(agent => matchAgent(agent, this.#searchQuery));
-		}
-
-		this.#clampSelection();
+		this.#tablePreview.refresh({ resetSelection, refreshPreview });
 	}
 
 	/** Live terminal height so the dashboard tracks resize while open. */
@@ -517,11 +439,6 @@ export class AgentDashboard extends Container {
 		return Math.max(5, this.#terminalRows() - chrome);
 	}
 
-	#getMaxVisibleItems(): number {
-		// List pane chrome inside the body: search line, blank line, count line.
-		return Math.max(3, this.#computeBodyHeight() - 3);
-	}
-
 	override render(width: number): readonly string[] {
 		// Rebuild when terminal geometry changes so the full-screen overlay
 		// re-fits on resize.
@@ -538,24 +455,6 @@ export class AgentDashboard extends Container {
 		const padded = lines.slice();
 		while (padded.length < rows) padded.push("");
 		return padded;
-	}
-
-	#clampSelection(): void {
-		if (this.#filteredAgents.length === 0) {
-			this.#selectedIndex = 0;
-			this.#scrollOffset = 0;
-			return;
-		}
-
-		this.#selectedIndex = Math.min(this.#selectedIndex, this.#filteredAgents.length - 1);
-		this.#selectedIndex = Math.max(0, this.#selectedIndex);
-
-		const maxVisible = this.#getMaxVisibleItems();
-		if (this.#selectedIndex < this.#scrollOffset) {
-			this.#scrollOffset = this.#selectedIndex;
-		} else if (this.#selectedIndex >= this.#scrollOffset + maxVisible) {
-			this.#scrollOffset = this.#selectedIndex - maxVisible + 1;
-		}
 	}
 
 	#persistDisabledAgents(): void {
@@ -584,6 +483,7 @@ export class AgentDashboard extends Container {
 		if (!selected) return;
 		selected.disabled = !selected.disabled;
 		this.#persistDisabledAgents();
+		this.#tablePreview.refresh({ refreshPreview: true });
 		this.#buildLayout();
 	}
 
@@ -611,7 +511,7 @@ export class AgentDashboard extends Container {
 		this.#persistModelOverrides();
 		this.#editingAgentName = null;
 		this.#editInput = null;
-		this.#applyFilters();
+		this.#applyFilters(false, true);
 		this.#notice = `Updated model override for ${selected.name}`;
 		this.#buildLayout();
 	}
@@ -826,16 +726,7 @@ export class AgentDashboard extends Container {
 	#switchTab(direction: 1 | -1): void {
 		if (this.#tabs.length === 0) return;
 		this.#activeTabIndex = (this.#activeTabIndex + direction + this.#tabs.length) % this.#tabs.length;
-		this.#selectedIndex = 0;
-		this.#scrollOffset = 0;
-		this.#applyFilters();
-		this.#buildLayout();
-	}
-
-	#moveSelection(delta: -1 | 1): void {
-		if (this.#filteredAgents.length === 0) return;
-		this.#selectedIndex = Math.max(0, Math.min(this.#filteredAgents.length - 1, this.#selectedIndex + delta));
-		this.#clampSelection();
+		this.#applyFilters(true);
 		this.#buildLayout();
 	}
 
@@ -1055,28 +946,7 @@ export class AgentDashboard extends Container {
 			this.addChild(new Spacer(1));
 			this.addChild(new Text(theme.fg("dim", " Enter: save  ") + keyHint("ui.dismiss", "cancel"), 0, 0));
 		} else {
-			const selected = this.#selectedAgent();
-			const defaultPatterns = selected ? this.#defaultPatternsFor(selected) : [];
-			const defaultResolution = selected ? this.#resolvePatterns(defaultPatterns) : undefined;
-			const effectivePatterns = selected ? this.#effectivePatternsFor(selected, selected.overrideModel) : [];
-			const effectiveResolution = selected ? this.#resolvePatterns(effectivePatterns) : undefined;
-
-			const listPane = new AgentListPane(
-				this.#filteredAgents,
-				this.#selectedIndex,
-				this.#scrollOffset,
-				this.#searchQuery,
-				this.#getMaxVisibleItems(),
-			);
-			const inspector = new AgentInspectorPane(
-				selected,
-				defaultPatterns,
-				defaultResolution,
-				effectivePatterns,
-				effectiveResolution,
-			);
-			const bodyHeight = this.#computeBodyHeight();
-			this.addChild(new TwoColumnBody(listPane, inspector, bodyHeight));
+			this.addChild(this.#tablePreview);
 			this.addChild(new Spacer(1));
 			this.addChild(new Text(this.#listFooter(), 0, 0));
 		}
@@ -1086,9 +956,48 @@ export class AgentDashboard extends Container {
 		this.#builtCols = this.#uiWidth();
 	}
 
+	#handleTableKey(data: string): boolean {
+		if (matchesKey(data, "ctrl+r")) {
+			void this.#reloadData();
+			return true;
+		}
+		if (matchesKey(data, "tab") || matchesKey(data, "right")) {
+			this.#switchTab(1);
+			return true;
+		}
+		if (matchesKey(data, "shift+tab") || matchesKey(data, "left")) {
+			this.#switchTab(-1);
+			return true;
+		}
+		if (data === " ") {
+			this.#toggleSelectedAgent();
+			return true;
+		}
+		if (matchesKey(data, "enter") || matchesKey(data, "return") || data === "\n") {
+			this.#beginModelEdit();
+			return true;
+		}
+		if (data.toLowerCase() === "n") {
+			this.#beginCreateFlow();
+			return true;
+		}
+		return false;
+	}
+
+	#close(): void {
+		void this.dispose();
+		this.onClose?.();
+	}
+
+	async dispose(): Promise<void> {
+		if (this.#disposed) return;
+		this.#disposed = true;
+		await Effect.runPromise(Scope.close(this.#viewScope, Exit.void));
+	}
+
 	handleInput(data: string): void {
 		if (matchesKey(data, "ctrl+c")) {
-			this.onClose?.();
+			this.#close();
 			return;
 		}
 
@@ -1156,73 +1065,6 @@ export class AgentDashboard extends Container {
 			return;
 		}
 
-		if (matchesUiDismiss(data)) {
-			if (this.#searchQuery.length > 0) {
-				this.#searchQuery = "";
-				this.#applyFilters();
-				this.#buildLayout();
-				return;
-			}
-			this.onClose?.();
-			return;
-		}
-
-		if (matchesKey(data, "ctrl+r")) {
-			void this.#reloadData();
-			return;
-		}
-
-		if (matchesKey(data, "tab") || matchesKey(data, "right")) {
-			this.#switchTab(1);
-			return;
-		}
-		if (matchesKey(data, "shift+tab") || matchesKey(data, "left")) {
-			this.#switchTab(-1);
-			return;
-		}
-
-		if (matchesSelectUp(data) || matchesNavigationUp(data)) {
-			this.#moveSelection(-1);
-			return;
-		}
-		if (matchesSelectDown(data) || matchesNavigationDown(data)) {
-			this.#moveSelection(1);
-			return;
-		}
-
-		if (data === " ") {
-			this.#toggleSelectedAgent();
-			return;
-		}
-		if (matchesKey(data, "enter") || matchesKey(data, "return") || data === "\n") {
-			this.#beginModelEdit();
-			return;
-		}
-		if (data.toLowerCase() === "n") {
-			this.#beginCreateFlow();
-			return;
-		}
-
-		if (matchesKey(data, "backspace")) {
-			if (this.#searchQuery.length > 0) {
-				this.#searchQuery = this.#searchQuery.slice(0, -1);
-				this.#applyFilters();
-				this.#buildLayout();
-			}
-			return;
-		}
-
-		const printableText = extractPrintableText(data);
-		if (printableText && printableText.length === 1) {
-			const printableCharCode = printableText.charCodeAt(0);
-			if (printableCharCode > 32 && printableCharCode < 127) {
-				if (printableText === "j" || printableText === "k") {
-					return;
-				}
-				this.#searchQuery += printableText;
-				this.#applyFilters();
-				this.#buildLayout();
-			}
-		}
+		this.#tablePreview.handleInput(data);
 	}
 }

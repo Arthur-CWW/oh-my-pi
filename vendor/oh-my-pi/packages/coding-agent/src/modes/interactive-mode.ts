@@ -578,7 +578,9 @@ export class InteractiveMode implements InteractiveModeContext, SubmittedInputRe
 			);
 		}
 
-		this.ui = new TUI(new ProcessTerminal(), settings.get("showHardwareCursor"));
+		this.ui = new TUI(new ProcessTerminal(), settings.get("showHardwareCursor"), {
+			mouseTracking: settings.get("tui.mouse"),
+		});
 		this.ui.setMaxInlineImages(settings.get("tui.maxInlineImages"));
 		// OSC 66 text-sizing is Kitty-only; resolve the setting against the terminal's
 		// capability (`TERMINAL.textSizing` defaults on for Kitty) so it stays off

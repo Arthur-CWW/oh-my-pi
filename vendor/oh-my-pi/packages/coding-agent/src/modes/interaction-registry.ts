@@ -25,6 +25,7 @@ export type InteractionSemantics =
 	| "previous-sibling"
 	| "next-sibling"
 	| "cycle-siblings"
+	| "cycle-sections"
 	| "previous-item"
 	| "next-item"
 	| "previous-group"
@@ -244,15 +245,6 @@ export const INTERACTIONS: readonly InteractionEntry[] = [
 		group: "mode",
 	},
 	{
-		id: "hub.table.cycle-siblings",
-		surface: "hub.table",
-		mode: "normal",
-		keys: ["[ / ]"],
-		description: "cycle siblings",
-		semantics: "cycle-siblings",
-		group: "navigate",
-	},
-	{
 		id: "hub.table.next-row",
 		surface: "hub.table",
 		mode: "normal",
@@ -353,6 +345,15 @@ export const INTERACTIONS: readonly InteractionEntry[] = [
 	},
 
 	{
+		id: "hub.inspector.cycle-sections",
+		surface: "hub.inspector",
+		mode: "normal",
+		keys: ["[ / ]"],
+		description: "cycle inspector sections",
+		semantics: "cycle-sections",
+		group: "navigate",
+	},
+	{
 		id: "hub.chat.search",
 		surface: "hub.chat",
 		mode: "normal",
@@ -360,15 +361,6 @@ export const INTERACTIONS: readonly InteractionEntry[] = [
 		description: "search",
 		semantics: "enter-filter",
 		group: "mode",
-	},
-	{
-		id: "hub.chat.cycle-siblings",
-		surface: "hub.chat",
-		mode: "normal",
-		keys: ["[ / ]"],
-		description: "cycle siblings",
-		semantics: "cycle-siblings",
-		group: "navigate",
 	},
 	{
 		id: "hub.chat.rich",
@@ -499,7 +491,6 @@ export const AGENT_HUB_SHORTCUT_INTERACTION_IDS: readonly string[] = [
 	"viewer.next-sibling",
 	"viewer.help",
 	"hub.table.search",
-	"hub.table.cycle-siblings",
 	"hub.table.next-row",
 	"hub.table.previous-row",
 	"hub.table.next-orchestrator",
@@ -510,7 +501,6 @@ export const AGENT_HUB_SHORTCUT_INTERACTION_IDS: readonly string[] = [
 	"hub.table.attach",
 	"hub.table.close",
 	"hub.chat.search",
-	"hub.chat.cycle-siblings",
 	"hub.chat.rich",
 	"hub.chat.close",
 ];
