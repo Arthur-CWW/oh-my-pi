@@ -26,10 +26,12 @@ Status is epistemic, not a freshness timestamp: `live` is current guidance or an
 - `motion-evidence-card.md` — Published Apple Vision body/hand evidence card and declared calibration gap; **evidence-of-record** (its “GPU processor being built” sentence is superseded by `gpu-pose-batch.md`).
 - `motion-filter-tuning.md` — Deterministic filter sweep and guarded production tuning evidence; **evidence-of-record** (pre-guard beta10 selection is superseded by the guarded beta1 addendum).
 - `overnight-program-2026-07-15.md` — Living wave ledger, defaults, blockers, and wave-3 backlog; **live** (its Wave-1 beta10 row is superseded by the Wave-2 beta1 ruling in the same doc).
+- `overnight-program-2026-07-16.md` — Living overnight-2 wave ledger for the 2026-07-16 program; **live**.
 - `perfect-sync-models.md` — Licensed Perfect Sync donor-model survey and local verification; **evidence-of-record**.
 - `presence-recon.md` — Early airi/Open-LLM-VTuber/aiavatarkit presence-layer recon; **historical**.
 - `qa-triage-2026-07-15.md` — Companion QA findings, dispositions, and focused gate results; **evidence-of-record**.
 - `reference-avatar-pipeline.md` — Blessed resumable VRoid-topology/Perfect Sync production pipeline and gates; **live**.
+- `retarget-3d-evaluation.md` — Offline ten-clip direct-3D vs shipped 2D+depth-prior retarget evaluation; **evidence-of-record** (verdict: direct 3D stays shadow-only).
 - `rotejin-effect.md` — PuruPuru PNGTuber body reference and future hot-swap direction; **live**.
 - `sota-pose-transfer.md` — GVHMR-first SOTA pose-transfer decision and desktop dispatch constraints; **live** (still blocked on licensed inputs).
 - `tts-stt-survey.md` — Early local TTS/streaming-STT voice-lane survey; **historical**.
