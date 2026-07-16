@@ -4,14 +4,28 @@ import { getKeybindings, type KeyId, matchesKey } from "@oh-my-pi/pi-tui";
  * Match the coding-agent interrupt key.
  *
  * Interactive mode installs a keybinding manager that exposes `app.interrupt`
- * globally, but some isolated component tests still run with only TUI
- * keybindings registered. In that case, fall back to raw Escape matching.
+ * globally. Isolated components may install a TUI-only registry without that
+ * action, so fall back to the coding-agent's mandatory Ctrl+Q interrupt.
  */
 export function matchesAppInterrupt(data: string): boolean {
 	const keybindings = getKeybindings();
-	const interruptKeys = keybindings.getKeys("app.interrupt");
-	if (interruptKeys.length > 0) {
+	if (keybindings.getDefinition("app.interrupt") !== undefined) {
 		return keybindings.matches(data, "app.interrupt");
+	}
+	return matchesKey(data, "ctrl+q");
+}
+
+/**
+ * Match the coding-agent UI dismissal key.
+ *
+ * Isolated components may install a TUI-only keybinding registry without
+ * `ui.dismiss`. Fall back to raw Escape only when the action is absent so an
+ * explicitly empty binding remains disabled.
+ */
+export function matchesUiDismiss(data: string): boolean {
+	const keybindings = getKeybindings();
+	if (keybindings.getDefinition("ui.dismiss") !== undefined) {
+		return keybindings.matches(data, "ui.dismiss");
 	}
 	return matchesKey(data, "escape") || matchesKey(data, "esc");
 }

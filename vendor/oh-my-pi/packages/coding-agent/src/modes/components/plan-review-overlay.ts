@@ -31,10 +31,11 @@ import {
 import { getMarkdownTheme, theme } from "../theme/theme";
 import {
 	matchesAppExternalEditor,
-	matchesSelectCancel,
+	matchesUiDismiss,
 	matchesSelectDown,
 	matchesSelectUp,
 } from "../utils/keybinding-matchers";
+import { editorKey } from "./keybinding-hints";
 import type { HookSelectorSlider } from "./hook-selector";
 import {
 	bottomBorder,
@@ -80,7 +81,7 @@ interface UndoEntry {
 export interface PlanReviewOverlayCallbacks {
 	/** Invoked with the chosen option label (never a disabled one). */
 	onPick: (label: string) => void;
-	/** Invoked on Esc / cancel. */
+	/** Invoked on UI dismiss / cancel. */
 	onCancel: () => void;
 	/** Invoked when the external-editor key is pressed (overlay stays open). */
 	onExternalEditor?: () => void;
@@ -108,9 +109,6 @@ export interface PlanReviewOverlayOptions {
 	externalEditorLabel?: string;
 }
 
-/** Default trailing footer hint when the caller supplies none. */
-const DEFAULT_HELP_SUFFIX = "esc cancel";
-
 export class PlanReviewOverlay implements Component {
 	#mdTheme: MarkdownTheme;
 	#scrollView: ScrollView;
@@ -125,7 +123,7 @@ export class PlanReviewOverlay implements Component {
 
 	#options: string[];
 	#disabled: Set<number>;
-	#helpSuffix: string;
+	#helpSuffix: string | undefined;
 	#externalEditorLabel: string | undefined;
 	#promptTitle: string | undefined;
 	#selectedIndex: number;
@@ -167,7 +165,7 @@ export class PlanReviewOverlay implements Component {
 		this.#disabled = new Set(
 			(options.disabledIndices ?? []).filter(i => Number.isInteger(i) && i >= 0 && i < this.#options.length),
 		);
-		this.#helpSuffix = options.helpText ?? DEFAULT_HELP_SUFFIX;
+		this.#helpSuffix = options.helpText;
 		this.#externalEditorLabel = options.externalEditorLabel;
 		this.#promptTitle = options.promptTitle;
 		this.#selectedIndex = this.#coerceIndex(options.initialIndex ?? 0);
@@ -180,7 +178,6 @@ export class PlanReviewOverlay implements Component {
 		this.#input = new Input();
 		this.#input.setUseTerminalCursor(false);
 		this.#input.onSubmit = value => this.#submitAnnotation(value);
-		this.#input.onEscape = () => this.#exitAnnotate();
 		this.#setSections(planContent);
 	}
 
@@ -285,6 +282,10 @@ export class PlanReviewOverlay implements Component {
 	handleInput(keyData: string): void {
 		if (keyData.startsWith("\x1b[<") && this.#handleMouse(keyData)) return;
 		if (this.#annotating) {
+			if (matchesUiDismiss(keyData)) {
+				this.#exitAnnotate();
+				return;
+			}
 			if (this.callbacks.onAnnotationExternalEditor && matchesAppExternalEditor(keyData)) {
 				this.callbacks.onAnnotationExternalEditor(this.#input.getValue(), text => {
 					if (text !== null) this.#submitAnnotation(text);
@@ -294,7 +295,7 @@ export class PlanReviewOverlay implements Component {
 			this.#input.handleInput(keyData);
 			return;
 		}
-		if (matchesSelectCancel(keyData)) {
+		if (matchesUiDismiss(keyData)) {
 			this.callbacks.onCancel();
 			return;
 		}
@@ -679,7 +680,7 @@ export class PlanReviewOverlay implements Component {
 		}
 		parts.push("tab regions");
 		if (this.#externalEditorLabel && this.#focus !== "toc") parts.push(`${this.#externalEditorLabel} editor`);
-		parts.push(this.#helpSuffix);
+		parts.push(this.#helpSuffix ?? `${editorKey("ui.dismiss")} cancel`);
 		return parts.join(sep);
 	}
 
@@ -774,7 +775,7 @@ export class PlanReviewOverlay implements Component {
 			const section = this.#sections[this.#toc[this.#tocCursor]!];
 			const title = section?.title ?? "";
 			const caption = `${theme.fg("dim", "Annotate")} ${theme.fg("accent", `‹${title}›`)}`;
-			const hintParts = ["enter save", "esc cancel"];
+			const hintParts = ["enter save", `${editorKey("ui.dismiss")} cancel`];
 			if (this.#externalEditorLabel) hintParts.push(`${this.#externalEditorLabel} editor`);
 			return [caption, this.#input.render(innerWidth)[0] ?? "", theme.fg("dim", hintParts.join(" · "))];
 		}

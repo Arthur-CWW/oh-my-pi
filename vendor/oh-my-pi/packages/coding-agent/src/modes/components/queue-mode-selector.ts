@@ -1,5 +1,6 @@
 import { Container, type SelectItem, SelectList } from "@oh-my-pi/pi-tui";
 import { getSelectListTheme } from "../../modes/theme/theme";
+import { matchesUiDismiss } from "../utils/keybinding-matchers";
 import { DynamicBorder } from "./dynamic-border";
 
 /**
@@ -7,6 +8,7 @@ import { DynamicBorder } from "./dynamic-border";
  */
 export class QueueModeSelectorComponent extends Container {
 	#selectList: SelectList;
+	readonly #onCancel: () => void;
 
 	constructor(
 		currentMode: "all" | "one-at-a-time",
@@ -14,6 +16,7 @@ export class QueueModeSelectorComponent extends Container {
 		onCancel: () => void,
 	) {
 		super();
+		this.#onCancel = onCancel;
 
 		const queueModes: SelectItem[] = [
 			{
@@ -40,14 +43,18 @@ export class QueueModeSelectorComponent extends Container {
 			onSelect(item.value as "all" | "one-at-a-time");
 		};
 
-		this.#selectList.onCancel = () => {
-			onCancel();
-		};
-
 		this.addChild(this.#selectList);
 
 		// Add bottom border
 		this.addChild(new DynamicBorder());
+	}
+
+	handleInput(data: string): void {
+		if (matchesUiDismiss(data)) {
+			this.#onCancel();
+			return;
+		}
+		this.#selectList.handleInput(data);
 	}
 
 	getSelectList(): SelectList {

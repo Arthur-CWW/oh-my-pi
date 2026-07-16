@@ -6,6 +6,7 @@ import {
 	truncateToWidth,
 	visibleWidth,
 } from "@oh-my-pi/pi-tui";
+import { keyHint } from "../../components/keybinding-hints";
 import {
 	enableAutoTheme,
 	getAvailableThemes,
@@ -18,6 +19,7 @@ import {
 	setSymbolPreset,
 	theme,
 } from "../../theme/theme";
+import { matchesUiDismiss } from "../../utils/keybinding-matchers";
 import type { SetupScene, SetupSceneController, SetupSceneHost } from "./types";
 
 type ThemeMode = "curated" | "all";
@@ -117,6 +119,10 @@ class ThemeSceneController implements SetupSceneController {
 	}
 
 	handleInput(data: string): void {
+		if (matchesUiDismiss(data)) {
+			this.#dismiss();
+			return;
+		}
 		const quickIndex = data >= "1" && data <= "9" ? Number(data) - 1 : -1;
 		if (quickIndex >= 0) {
 			this.#selectList.setSelectedIndex(quickIndex);
@@ -146,8 +152,8 @@ class ThemeSceneController implements SetupSceneController {
 		const lines = [
 			theme.fg("muted", "Theme changes preview live. Nothing is saved until you press Enter."),
 			this.#mode === "all"
-				? theme.fg("dim", "Browsing all themes · Esc returns to curated choices")
-				: theme.fg("dim", "Esc skips this step"),
+				? theme.fg("dim", "Browsing all themes · ") + keyHint("ui.dismiss", "returns to curated choices")
+				: keyHint("ui.dismiss", "skips this step"),
 			"",
 			...renderThemePreview(width),
 			"",
@@ -165,6 +171,17 @@ class ThemeSceneController implements SetupSceneController {
 		return lines;
 	}
 
+	#dismiss(): void {
+		if (this.#mode === "all") {
+			this.#mode = "curated";
+			this.#selectList = this.#createSelectList(CURATED_ITEMS, this.#currentCuratedIndex());
+			this.host.requestRender();
+			return;
+		}
+		this.#restorePreview();
+		this.host.finish("skipped");
+	}
+
 	#createSelectList(items: readonly SelectItem[], selectedIndex: number): SelectList {
 		const list = new SelectList(items, Math.min(10, Math.max(1, items.length)), getSelectListTheme());
 		list.setSelectedIndex(selectedIndex);
@@ -173,16 +190,6 @@ class ThemeSceneController implements SetupSceneController {
 		};
 		list.onSelect = item => {
 			void this.#select(item.value);
-		};
-		list.onCancel = () => {
-			if (this.#mode === "all") {
-				this.#mode = "curated";
-				this.#selectList = this.#createSelectList(CURATED_ITEMS, this.#currentCuratedIndex());
-				this.host.requestRender();
-				return;
-			}
-			this.#restorePreview();
-			this.host.finish("skipped");
 		};
 		return list;
 	}

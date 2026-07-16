@@ -35,8 +35,10 @@ import { SETTING_TABS, TAB_METADATA } from "../../config/settings-schema";
 import { getCurrentThemeName, getSelectListTheme, getSettingsListTheme, theme } from "../../modes/theme/theme";
 import { AUTO_THINKING, type ConfiguredThinkingLevel } from "../../thinking";
 import { getTabBarTheme } from "../shared";
+import { matchesSelectCancel, matchesUiDismiss } from "../utils/keybinding-matchers";
 import { bottomBorder, divider, row, topBorder } from "./overlay-box";
-import { handleInputOrEscape, PluginSettingsComponent } from "./plugin-settings";
+import { handleInputOrDismiss, PluginSettingsComponent } from "./plugin-settings";
+import { keyHint } from "./keybinding-hints";
 import { getSettingDef, getSettingsForTab, type SettingDef } from "./settings-defs";
 import { SnapcompactShapePreview } from "./snapcompact-shape-preview";
 import { getPreset } from "./status-line/presets";
@@ -76,11 +78,11 @@ class TextInputSubmenu extends Container {
 		};
 		this.addChild(this.#input);
 		this.addChild(new Spacer(1));
-		this.addChild(new Text(theme.fg("dim", "  Enter to save · Esc to cancel · Clear field to unset"), 0, 0));
+		this.addChild(new Text(`  ${keyHint("ui.dismiss", "cancel")} · Clear field to unset · Enter to save`, 0, 0));
 	}
 
 	handleInput(data: string): void {
-		handleInputOrEscape(data, this.#input, this.onCancel);
+		handleInputOrDismiss(data, this.#input, this.onCancel);
 	}
 }
 
@@ -97,7 +99,7 @@ class SelectSubmenu extends Container {
 		options: ReadonlyArray<SelectItem>,
 		currentValue: string,
 		onSelect: (value: string) => void,
-		onCancel: () => void,
+		private readonly onCancel: () => void,
 		onSelectionChange?: (value: string) => void | Promise<void>,
 		private readonly getPreview?: () => string,
 		footer?: Component,
@@ -137,8 +139,6 @@ class SelectSubmenu extends Container {
 			onSelect(item.value);
 		};
 
-		this.#selectList.onCancel = onCancel;
-
 		if (onSelectionChange) {
 			this.#selectList.onSelectionChange = item => {
 				const requestId = ++this.#previewUpdateRequestId;
@@ -161,7 +161,7 @@ class SelectSubmenu extends Container {
 
 		// Hint
 		this.addChild(new Spacer(1));
-		this.addChild(new Text(theme.fg("dim", "  Enter to select · Esc to go back"), 0, 0));
+		this.addChild(new Text(`  Enter to select · ${keyHint("ui.dismiss", "go back")}`, 0, 0));
 
 		// Footer (e.g. the snapcompact shape preview) below the interactive rows,
 		// so the list never shifts while browsing.
@@ -213,6 +213,11 @@ class SelectSubmenu extends Container {
 	}
 
 	handleInput(data: string): void {
+		if (matchesUiDismiss(data)) {
+			this.onCancel();
+			return;
+		}
+		if (matchesSelectCancel(data)) return;
 		this.#selectList.handleInput(data);
 	}
 }
@@ -370,16 +375,16 @@ export class SettingsSelectorComponent implements Component {
 
 	#footerHintText(): string {
 		if (this.#searchList) {
-			return "Enter to change · Tab to jump tabs · Esc to exit search";
+			return `Enter to change · Tab to jump tabs · ${keyHint("ui.dismiss", "exit search")}`;
 		}
 		if (this.#currentTabId === "plugins") {
-			return "Tab to switch tabs · Esc to close";
+			return `Tab to switch tabs · ${keyHint("ui.dismiss", "close")}`;
 		}
 		if (this.#currentList?.sectionFocused) {
-			return "↑/↓ to jump sections · Tab/Enter to settings · ←/→ to switch tabs · Esc to close";
+			return `↑/↓ to jump sections · Tab/Enter to settings · ←/→ to switch tabs · ${keyHint("ui.dismiss", "close")}`;
 		}
 		const nav = this.#hasSectionJump ? "Tab to jump sections · ←/→ to switch tabs" : "Tab to switch tabs";
-		return `Enter/Space to change · ${nav} · Type to search · Esc to close`;
+		return `Enter/Space to change · ${nav} · Type to search · ${keyHint("ui.dismiss", "close")}`;
 	}
 
 	/** Single-line search banner: accent icon, editable query with live cursor, right-aligned match count. */
@@ -1010,14 +1015,30 @@ export class SettingsSelectorComponent implements Component {
 			return;
 		}
 
+		const activeList = this.#searchList ?? this.#currentList;
+		if (matchesUiDismiss(data)) {
+			if (activeList?.hasOpenSubmenu()) {
+				activeList.handleInput(data);
+			} else if (this.#searchList) {
+				this.#endSearch(true);
+			} else if (this.#currentList?.sectionFocused) {
+				this.#currentList.toggleSectionFocus();
+			} else if (this.#pluginComponent) {
+				this.#pluginComponent.handleInput(data);
+			} else {
+				this.callbacks.onCancel();
+			}
+			return;
+		}
+		// Generic selector cancellation must not bypass a disabled/remapped ui.dismiss.
+		if (matchesSelectCancel(data)) return;
+
 		// Text-input submenus take every byte: arrow keys must reach the
 		// cursor and Tab must not switch tabs.
 		if (this.#textInputActive) {
 			(this.#searchList ?? this.#currentList)?.handleInput(data);
 			return;
 		}
-
-		const activeList = this.#searchList ?? this.#currentList;
 
 		// An open submenu owns input entirely — Tab/arrows/typing belong to it.
 		if (activeList?.hasOpenSubmenu()) {
@@ -1064,11 +1085,6 @@ export class SettingsSelectorComponent implements Component {
 
 	#handleSearchModeInput(data: string, list: SettingsList): void {
 		const kb = getKeybindings();
-		if (kb.matches(data, "tui.select.cancel")) {
-			// Exit search, landing on the tab of the selected result.
-			this.#endSearch(true);
-			return;
-		}
 		if (matchesKey(data, "tab") || matchesKey(data, "shift+tab")) {
 			// Jump between tabs that have matches (muted tabs are skipped).
 			this.#tabBar.handleInput(data);

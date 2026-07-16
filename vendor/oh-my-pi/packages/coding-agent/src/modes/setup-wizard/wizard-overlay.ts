@@ -1,9 +1,10 @@
 import { type Component, matchesKey, padding, parseSgrMouse, truncateToWidth, visibleWidth } from "@oh-my-pi/pi-tui";
 import { APP_NAME } from "@oh-my-pi/pi-utils";
 import { gradientLogo, PI_LOGO } from "../components/welcome";
+import { keyHint } from "../components/keybinding-hints";
 import { theme } from "../theme/theme";
 import type { InteractiveModeContext } from "../types";
-import { matchesAppInterrupt } from "../utils/keybinding-matchers";
+import { matchesUiDismiss } from "../utils/keybinding-matchers";
 import { renderSetupOutro, SETUP_OUTRO_MS } from "./scenes/outro";
 import { renderSetupSplash, SETUP_SPLASH_MS, SETUP_TICK_MS } from "./scenes/splash";
 import type { SetupScene, SetupSceneController, SetupSceneHost, SetupSceneResult } from "./scenes/types";
@@ -103,7 +104,7 @@ export class SetupWizardComponent implements Component {
 				matchesKey(data, "enter") ||
 				matchesKey(data, "return") ||
 				matchesKey(data, "space") ||
-				matchesAppInterrupt(data)
+				matchesUiDismiss(data)
 			) {
 				this.#beginScene();
 			}
@@ -114,7 +115,7 @@ export class SetupWizardComponent implements Component {
 				matchesKey(data, "enter") ||
 				matchesKey(data, "return") ||
 				matchesKey(data, "space") ||
-				matchesAppInterrupt(data)
+				matchesUiDismiss(data)
 			) {
 				this.#complete();
 			}
@@ -204,7 +205,10 @@ export class SetupWizardComponent implements Component {
 
 		const footer = [
 			"",
-			centerLine(theme.fg("dim", "↑/↓ select · enter confirm · esc skip · ctrl+c exit setup"), width),
+			centerLine(
+				`${theme.fg("dim", "↑/↓ select · enter confirm · ")}${keyHint("ui.dismiss", "skip")}${theme.fg("dim", " · ctrl+c exit setup")}`,
+				width,
+			),
 		];
 		const maxBodyLines = Math.max(0, height - header.length - footer.length);
 		const body = this.#activeScene?.render(contentWidth).slice(0, maxBodyLines) ?? [];

@@ -1,4 +1,5 @@
 import { type SgrMouseEvent, TabBar } from "@oh-my-pi/pi-tui";
+import { editorKey } from "../../components/keybinding-hints";
 import { getTabBarTheme } from "../../shared";
 import { SignInTab } from "./sign-in";
 import type { SetupScene, SetupSceneController, SetupSceneHost, SetupTab } from "./types";
@@ -12,7 +13,7 @@ import { WebSearchTab } from "./web-search";
  */
 class ProvidersSceneController implements SetupSceneController {
 	title = "Set up your providers";
-	subtitle = "Sign in and pick a web search provider. Press Esc when you're done.";
+	subtitle = `Sign in and pick a web search provider. Press ${editorKey("ui.dismiss")} when you're done.`;
 
 	#tabs: SetupTab[];
 	#tabBar: TabBar;

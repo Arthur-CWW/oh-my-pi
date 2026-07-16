@@ -13,15 +13,15 @@ import {
 } from "@oh-my-pi/pi-tui";
 import { theme } from "../../modes/theme/theme";
 import {
-	matchesAppInterrupt,
 	matchesSelectDown,
 	matchesSelectPageDown,
 	matchesSelectPageUp,
 	matchesSelectUp,
+	matchesUiDismiss,
 } from "../../modes/utils/keybinding-matchers";
 import type { HistoryEntry, HistoryStorage } from "../../session/history-storage";
 import { DynamicBorder } from "./dynamic-border";
-import { rawKeyHint } from "./keybinding-hints";
+import { keyHint, rawKeyHint } from "./keybinding-hints";
 
 /** Visible result rows; also the jump distance for PageUp/PageDown. */
 const MAX_VISIBLE = 10;
@@ -183,15 +183,14 @@ export class HistorySearchComponent extends Container {
 				this.#onSelect(selected.prompt);
 			}
 		};
-		this.#searchInput.onEscape = () => {
-			this.#onCancel();
-		};
 
 		this.#resultsList = new HistoryResultsList();
 
 		const title = theme.bold(theme.fg("accent", `${theme.icon.rewind} Search History`));
 		const dot = theme.fg("dim", theme.sep.dot);
-		const hint = [rawKeyHint("↑↓", "navigate"), rawKeyHint("enter", "select"), rawKeyHint("esc", "cancel")].join(dot);
+		const hint = [rawKeyHint("↑↓", "navigate"), rawKeyHint("enter", "select"), keyHint("ui.dismiss", "cancel")].join(
+			dot,
+		);
 
 		this.addChild(new Spacer(1));
 		this.addChild(new Text(title, 1, 0));
@@ -260,7 +259,7 @@ export class HistorySearchComponent extends Container {
 			return;
 		}
 
-		if (matchesAppInterrupt(keyData)) {
+		if (matchesUiDismiss(keyData)) {
 			this.#onCancel();
 			return;
 		}

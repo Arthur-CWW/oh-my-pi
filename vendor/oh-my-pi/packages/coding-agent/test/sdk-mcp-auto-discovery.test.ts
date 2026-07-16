@@ -7,6 +7,7 @@ import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { createAgentSession } from "@oh-my-pi/pi-coding-agent/sdk";
+import { IrcExternalBus } from "@oh-my-pi/pi-coding-agent/irc/bus-external";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { Snowflake } from "@oh-my-pi/pi-utils";
 import { MANY_TOOL_COUNT } from "./fixtures/many-tools-mcp";
@@ -34,6 +35,9 @@ describe("createAgentSession deferred MCP auto discovery", () => {
 	// to an empty dir so the test connects ONLY to the fixture server and never
 	// spawns the developer's real MCP servers.
 	let isolatedHome: string;
+	let externalIrcBus: IrcExternalBus | undefined;
+	let previousHome: string | undefined;
+	let previousControlDb: string | undefined;
 
 	beforeAll(async () => {
 		registryDir = path.join(os.tmpdir(), `pi-sdk-mcp-auto-registry-${Snowflake.next()}`);
@@ -56,15 +60,35 @@ describe("createAgentSession deferred MCP auto discovery", () => {
 	beforeEach(() => {
 		tempDir = path.join(os.tmpdir(), `pi-sdk-mcp-auto-${Snowflake.next()}`);
 		fs.mkdirSync(tempDir, { recursive: true });
+		previousHome = process.env.HOME;
+		previousControlDb = process.env.OMP_SESSION_CONTROL_DB;
+		process.env.HOME = isolatedHome;
+		process.env.OMP_SESSION_CONTROL_DB = path.join(tempDir, "session-control.sqlite");
+		externalIrcBus = new IrcExternalBus(path.join(tempDir, "irc-bus.sqlite"));
 		spyOn(os, "homedir").mockReturnValue(isolatedHome);
 	});
 
 	afterEach(() => {
+		externalIrcBus?.close();
+		externalIrcBus = undefined;
+		if (previousHome === undefined) delete process.env.HOME;
+		else process.env.HOME = previousHome;
+		if (previousControlDb === undefined) delete process.env.OMP_SESSION_CONTROL_DB;
+		else process.env.OMP_SESSION_CONTROL_DB = previousControlDb;
 		if (tempDir && fs.existsSync(tempDir)) {
 			fs.rmSync(tempDir, { recursive: true, force: true });
 		}
 		mock.restore();
 	});
+
+	const writeCodexConfig = () => {
+		const codexDir = path.join(isolatedHome, ".codex");
+		fs.mkdirSync(codexDir, { recursive: true });
+		fs.writeFileSync(
+			path.join(codexDir, "config.toml"),
+			`[mcp_servers.node_repl]\ncommand = ${JSON.stringify(process.execPath)}\nargs = [${JSON.stringify(FIXTURE_PATH)}]\n`,
+		);
+	};
 
 	const writeMcpConfig = (extraArgs: string[] = []) => {
 		fs.writeFileSync(
@@ -76,12 +100,25 @@ describe("createAgentSession deferred MCP auto discovery", () => {
 			}),
 		);
 	};
+	const writeExplicitMcpConfig = () => {
+		const configDir = path.join(tempDir, ".mcp");
+		fs.mkdirSync(configDir, { recursive: true });
+		fs.writeFileSync(
+			path.join(configDir, "mcp.json"),
+			JSON.stringify({
+				mcpServers: {
+					explicit: { type: "stdio", command: process.execPath, args: [FIXTURE_PATH] },
+				},
+			}),
+		);
+	};
 
 	const baseOptions = () => ({
 		cwd: tempDir,
 		agentDir: tempDir,
 		modelRegistry,
 		sessionManager: SessionManager.inMemory(),
+		externalIrcBus: externalIrcBus!,
 		settings: Settings.isolated({}),
 		model: getBundledModel("openai", "gpt-4o-mini"),
 		disableExtensionDiscovery: true,
@@ -151,6 +188,40 @@ describe("createAgentSession deferred MCP auto discovery", () => {
 		expect(session.getActiveToolNames()).not.toContain("search_tool_bm25");
 		expect(session.isMCPDiscoveryEnabled()).toBe(false);
 	}, 40_000);
+	it("keeps Codex-compatible MCP opt-in while always loading explicit project config", async () => {
+		writeCodexConfig();
+		writeExplicitMcpConfig();
+
+		const defaultResult = await createAgentSession({ ...baseOptions(), hasUI: false });
+		try {
+			const connected = defaultResult.mcpManager?.getConnectedServers() ?? [];
+			expect(connected).toContain("explicit");
+			expect(connected).not.toContain("node_repl");
+			expect(defaultResult.session.getActiveToolNames().some(name => name.includes("node_repl"))).toBe(false);
+			expect(
+				defaultResult.session.getDiscoverableTools({ source: "mcp" }).some(tool => tool.serverName === "node_repl"),
+			).toBe(false);
+			expect(Settings.isolated({}).get("mcp.codexCompat")).toBe(false);
+		} finally {
+			await defaultResult.session.dispose();
+		}
+
+		const optInResult = await createAgentSession({
+			...baseOptions(),
+			settings: Settings.isolated({ "mcp.codexCompat": true }),
+			hasUI: false,
+		});
+		try {
+			const connected = optInResult.mcpManager?.getConnectedServers() ?? [];
+			expect(connected).toContain("explicit");
+			expect(connected).toContain("node_repl");
+			expect(
+				optInResult.session.getDiscoverableTools({ source: "mcp" }).some(tool => tool.serverName === "node_repl"),
+			).toBe(true);
+		} finally {
+			await optInResult.session.dispose();
+		}
+	});
 	it("does not discover the retired fetch MCP server in a fresh isolated session", async () => {
 		const { session } = await createAgentSession({ ...baseOptions(), hasUI: false });
 		try {

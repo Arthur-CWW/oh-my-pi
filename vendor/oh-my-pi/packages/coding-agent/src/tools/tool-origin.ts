@@ -1,6 +1,6 @@
 import * as path from "node:path";
 
-export type ToolOriginKind = "builtin" | "mcp" | "extension" | "skill";
+export type ToolOriginKind = "builtin" | "mcp" | "extension" | "dynamic" | "skill";
 
 /** Queryable provenance attached directly to each registered tool. */
 export interface ToolOrigin {
@@ -49,6 +49,8 @@ export function compactToolOriginTag(origin: ToolOrigin | undefined, shorten: (v
 		}
 		case "extension":
 			return `extension:${path.basename(origin.source)}`;
+		case "dynamic":
+			return `dynamic:${path.basename(origin.source)}`;
 		case "skill":
 			return `skill:${path.basename(origin.source)}`;
 	}

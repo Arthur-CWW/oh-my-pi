@@ -1294,11 +1294,24 @@ export type GetThinkingLevelHandler = () => ThinkingLevel | undefined;
 
 export type SetThinkingLevelHandler = (level: ThinkingLevel, persist?: boolean) => void;
 
+export type ExtensionRuntimePhase = "loading" | "active" | "disposing" | "disposed";
+
+export type RefreshToolsHandler = (tools: RegisteredTool[]) => Promise<void>;
+
 /** Shared state created by loader, used during registration and runtime. */
 export interface ExtensionRuntimeState {
 	flagValues: Map<string, boolean | string>;
 	/** Provider registrations queued during extension loading, processed during session initialization */
 	pendingProviderRegistrations: Array<{ name: string; config: ProviderConfig; sourceId: string }>;
+	/** Lifecycle of this session-owned extension runtime. */
+	extensionPhase: ExtensionRuntimePhase;
+	/** Runtime registrations grouped by their owning extension and tool name. */
+	dynamicTools: Map<Extension, Extension["tools"]>;
+	/** Serialized completion tail for dynamic registry refreshes. */
+	dynamicToolRefreshTail: Promise<void>;
+	activateDynamicTools(refreshTools?: RefreshToolsHandler): void;
+	requestDynamicToolRefresh(): void;
+	flushDynamicToolRefresh(): Promise<void>;
 }
 
 /** Action implementations for ExtensionAPI methods. */
@@ -1316,6 +1329,8 @@ export interface ExtensionActions {
 	setThinkingLevel: SetThinkingLevelHandler;
 	getSessionName: () => string | undefined;
 	setSessionName: (name: string) => Promise<void>;
+	/** Replace the session-owned dynamic extension tool set. */
+	refreshTools?: RefreshToolsHandler;
 }
 
 /** Actions for ExtensionContext (ctx.* in event handlers). */

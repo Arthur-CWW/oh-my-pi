@@ -1,8 +1,11 @@
-import { beforeAll, describe, expect, it } from "bun:test";
+import { afterEach, beforeAll, describe, expect, it } from "bun:test";
+import { KeybindingsManager } from "@oh-my-pi/pi-coding-agent/config/keybindings";
+import { setKeybindings } from "@oh-my-pi/pi-tui";
 import { wrapTextWithAnsi } from "@oh-my-pi/pi-tui/utils";
 import { AgentHubFoldSequence } from "@oh-my-pi/pi-coding-agent/modes/components/agent-hub-fold-sequence";
 import { renderAgentHubFooter } from "@oh-my-pi/pi-coding-agent/modes/components/agent-hub-interaction-help";
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
+import { matchesUiDismiss } from "@oh-my-pi/pi-coding-agent/modes/utils/keybinding-matchers";
 import {
 	AgentHubViewerSequence,
 	applyAgentHubViewerSequenceAction,
@@ -15,7 +18,12 @@ import {
 } from "@oh-my-pi/pi-coding-agent/modes/interaction-registry";
 
 beforeAll(async () => {
+	setKeybindings(KeybindingsManager.inMemory());
 	await initTheme(false);
+});
+
+afterEach(() => {
+	setKeybindings(KeybindingsManager.inMemory());
 });
 
 describe("Agent Hub Vim key grammar", () => {
@@ -69,7 +77,7 @@ describe("Agent Hub Vim key grammar", () => {
 			down: false,
 			up: false,
 			displayRows: true,
-			interrupt: false,
+			dismiss: false,
 			...overrides,
 		});
 		const motion = (offset: number, key: "j" | "k"): number => {
@@ -95,31 +103,41 @@ describe("Agent Hub Vim key grammar", () => {
 		expect(sequence.handle("G", options({}))).toEqual({ kind: "unhandled" });
 	});
 
-	it("waits indefinitely on g, dispatches the namespace, and cancels explicitly", () => {
+	it("waits indefinitely on g, dispatches the namespace, and cancels only on live ui.dismiss", () => {
 		const sequence = new AgentHubViewerSequence();
-		const base: AgentHubViewerSequenceOptions = {
+		const options = (keyData: string): AgentHubViewerSequenceOptions => ({
 			prefix: false,
 			down: false,
 			up: false,
 			displayRows: true,
-			interrupt: false,
-		};
-		expect(sequence.handle("g", { ...base, prefix: true })).toEqual({ kind: "pending" });
+			dismiss: matchesUiDismiss(keyData),
+		});
+		expect(sequence.handle("g", { ...options("g"), prefix: true })).toEqual({ kind: "pending" });
 		expect(sequence.isPending).toBe(true);
-		expect(sequence.handle("x", base)).toEqual({ kind: "open-errors" });
+		expect(sequence.handle("x", options("x"))).toEqual({ kind: "open-errors" });
 		for (const [key, kind] of [
 			["m", "open-messages"],
 			["b", "open-bookmarks"],
 			["r", "refresh"],
 			["s", "send"],
 		] as const) {
-			expect(sequence.handle("g", { ...base, prefix: true })).toEqual({ kind: "pending" });
-			expect(sequence.handle(key, base)).toEqual({ kind });
+			expect(sequence.handle("g", { ...options("g"), prefix: true })).toEqual({ kind: "pending" });
+			expect(sequence.handle(key, options(key))).toEqual({ kind });
 		}
-		expect(sequence.handle("g", { ...base, prefix: true })).toEqual({ kind: "pending" });
-		expect(sequence.handle("t", base)).toEqual({ kind: "unknown", chord: "gt" });
-		expect(sequence.handle("g", { ...base, prefix: true })).toEqual({ kind: "pending" });
-		expect(sequence.handle("\x1b", { ...base, interrupt: true })).toEqual({ kind: "cancelled" });
+		expect(sequence.handle("g", { ...options("g"), prefix: true })).toEqual({ kind: "pending" });
+		expect(sequence.handle("t", options("t"))).toEqual({ kind: "unknown", chord: "gt" });
+
+		setKeybindings(KeybindingsManager.inMemory({ "app.interrupt": "ctrl+q" }));
+		expect(sequence.handle("g", { ...options("g"), prefix: true })).toEqual({ kind: "pending" });
+		expect(sequence.handle("\x11", options("\x11"))).toEqual({ kind: "unknown", chord: "g\x11" });
+		expect(sequence.handle("g", { ...options("g"), prefix: true })).toEqual({ kind: "pending" });
+		expect(sequence.handle("\x1b", options("\x1b"))).toEqual({ kind: "cancelled" });
+
+		setKeybindings(KeybindingsManager.inMemory({ "ui.dismiss": "ctrl+g" }));
+		expect(sequence.handle("g", { ...options("g"), prefix: true })).toEqual({ kind: "pending" });
+		expect(sequence.handle("\x1b", options("\x1b"))).toEqual({ kind: "unknown", chord: "g\x1b" });
+		expect(sequence.handle("g", { ...options("g"), prefix: true })).toEqual({ kind: "pending" });
+		expect(sequence.handle("\x07", options("\x07"))).toEqual({ kind: "cancelled" });
 		expect(sequence.isPending).toBe(false);
 	});
 

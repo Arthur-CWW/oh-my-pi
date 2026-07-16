@@ -57,6 +57,7 @@ import { BookmarksSelectorComponent } from "../components/bookmarks-selector";
 import { AssistantMessageComponent } from "../components/assistant-message";
 import { CopySelectorComponent } from "../components/copy-selector";
 import { ExtensionDashboard } from "../components/extensions";
+import { keyHint } from "../components/keybinding-hints";
 import { HistorySearchComponent } from "../components/history-search";
 import { LogoutAccountSelectorComponent } from "../components/logout-account-selector";
 import { ModelSelectorComponent } from "../components/model-selector";
@@ -558,7 +559,7 @@ export class SelectorController {
 						this.ctx.ui.requestRender();
 					},
 				});
-				return { component: selector, focus: selector.getSelectList() };
+				return { component: selector, focus: selector };
 			});
 			return;
 		}
@@ -595,7 +596,7 @@ export class SelectorController {
 					this.ctx.ui.requestRender();
 				},
 			});
-			return { component: selector, focus: selector.getSelectList() };
+			return { component: selector, focus: selector };
 		});
 	}
 
@@ -724,12 +725,12 @@ export class SelectorController {
 						break;
 					}
 
-					// Set up escape handler and loader if summarizing
+					// Set up interrupt handler and loader if summarizing.
 					let summaryLoader: Loader | undefined;
-					const originalOnEscape = this.ctx.editor.onEscape;
+					const originalOnInterrupt = this.ctx.editor.onInterrupt;
 
 					if (wantsSummary) {
-						this.ctx.editor.onEscape = () => {
+						this.ctx.editor.onInterrupt = () => {
 							this.ctx.session.abortBranchSummary();
 						};
 						this.ctx.chatContainer.addChild(new Spacer(1));
@@ -737,7 +738,7 @@ export class SelectorController {
 							this.ctx.ui,
 							spinner => theme.fg("accent", spinner),
 							text => theme.fg("muted", text),
-							"Summarizing branch... (esc to cancel)",
+							`Summarizing branch... (${keyHint("app.interrupt", "to cancel")})`,
 							getSymbolTheme().spinnerFrames,
 						);
 						this.ctx.statusContainer.addChild(summaryLoader);
@@ -777,7 +778,7 @@ export class SelectorController {
 							summaryLoader.stop();
 							this.ctx.statusContainer.clear();
 						}
-						this.ctx.editor.onEscape = originalOnEscape;
+						this.ctx.editor.onInterrupt = originalOnInterrupt;
 					}
 				},
 				() => {
@@ -1215,7 +1216,11 @@ export class SelectorController {
 		for (let index = 0; index < args.length; index++) {
 			const arg = args[index]!;
 			if (arg === "--note") {
-				note = args.slice(index + 1).join(" ").trim() || undefined;
+				note =
+					args
+						.slice(index + 1)
+						.join(" ")
+						.trim() || undefined;
 				break;
 			}
 			if (arg.startsWith("--note=")) {
@@ -1287,7 +1292,8 @@ export class SelectorController {
 				this.ctx.ui.setFocus(selector);
 				this.ctx.ui.requestRender();
 			},
-			error => this.ctx.showError(`Could not read bookmarks: ${error instanceof Error ? error.message : String(error)}`),
+			error =>
+				this.ctx.showError(`Could not read bookmarks: ${error instanceof Error ? error.message : String(error)}`),
 		);
 	}
 
@@ -1364,6 +1370,7 @@ export class SelectorController {
 			width: "100%",
 			maxHeight: "100%",
 			margin: 0,
+			fullscreen: true,
 		});
 		this.#activeHubOverlay = overlayHandle;
 		this.ctx.ui.setFocus(hub);

@@ -1,12 +1,4 @@
-import {
-	CompletionBehavior,
-	Container,
-	Input,
-	matchesKey,
-	type SelectItem,
-	SelectList,
-	Text,
-} from "@oh-my-pi/pi-tui";
+import { CompletionBehavior, Container, Input, matchesKey, type SelectItem, SelectList, Text } from "@oh-my-pi/pi-tui";
 import { logger, VERSION } from "@oh-my-pi/pi-utils";
 import type { HistoryStorage } from "../../session/history-storage";
 import { formatLoopStats } from "../../slash-commands/loopstats";
@@ -30,7 +22,7 @@ import {
 import { getSelectListTheme } from "../theme/theme";
 import { toggleRichTranscript, toggleTranscriptWrap } from "../transcript-commands";
 import type { InteractiveModeContext } from "../types";
-import { matchesSelectCancel } from "../utils/keybinding-matchers";
+import { matchesUiDismiss } from "../utils/keybinding-matchers";
 
 const DEFAULT_MAX_VISIBLE = 12;
 const MAX_COMMAND_OUTPUT_LINES = 12;
@@ -100,7 +92,7 @@ export class CommandLineComponent extends Container {
 
 	handleInput(data: string): void {
 		if (this.#closed) return;
-		if (matchesKey(data, "escape") || matchesKey(data, "esc")) {
+		if (matchesUiDismiss(data)) {
 			if (this.#completion.dismiss()) {
 				this.#syncChildren();
 			} else {
@@ -108,12 +100,13 @@ export class CommandLineComponent extends Container {
 			}
 			return;
 		}
-		if (matchesSelectCancel(data) || matchesKey(data, "ctrl+c")) {
+		if (matchesKey(data, "ctrl+c")) {
 			this.#cancel();
 			return;
 		}
 		if (matchesKey(data, "tab") || matchesKey(data, "shift+tab")) {
-			this.#completion.cycle(matchesKey(data, "shift+tab") ? -1 : 1);
+			const selected = this.#completion.cycle(matchesKey(data, "shift+tab") ? -1 : 1);
+			if (selected) this.#applyCompletion(selected);
 			this.#syncSelectedIndex();
 			return;
 		}
@@ -250,7 +243,8 @@ export class CommandOutputOverlayComponent extends Container {
 		const border = new DynamicBorder().render(width);
 		const body = new Text(this.message, 1, 0).render(Math.max(10, width));
 		const clipped = body.slice(0, MAX_COMMAND_OUTPUT_LINES);
-		if (body.length > clipped.length) clipped[clipped.length - 1] = ` … ${body.length - clipped.length + 1} more lines`;
+		if (body.length > clipped.length)
+			clipped[clipped.length - 1] = ` … ${body.length - clipped.length + 1} more lines`;
 		return [...border, ...clipped, ...border];
 	}
 }

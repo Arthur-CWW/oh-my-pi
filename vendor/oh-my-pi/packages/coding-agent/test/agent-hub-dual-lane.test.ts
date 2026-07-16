@@ -223,4 +223,15 @@ describe("Agent Hub dual-lane inspector", () => {
 		hub.dispose();
 		observers.dispose();
 	});
+	it("shows compressed effort in both roster and preview header", () => {
+		const { hub, observers } = fixture("Effort-visible preview");
+		try {
+			expect(text(hub, 160)).toContain("SOX5.6m");
+			hub.handleInput("\r");
+			expect(text(hub, 160)).toContain("SOX5.6m");
+		} finally {
+			hub.dispose();
+			observers.dispose();
+		}
+	});
 });

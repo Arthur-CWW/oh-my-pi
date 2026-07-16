@@ -8,8 +8,9 @@ import {
 	visibleWidth,
 } from "@oh-my-pi/pi-tui";
 import { sanitizeText } from "@oh-my-pi/pi-utils";
+import { keyHint } from "../modes/components/keybinding-hints";
 import { theme } from "../modes/theme/theme";
-import { matchesAppInterrupt } from "../modes/utils/keybinding-matchers";
+import { matchesUiDismiss } from "../modes/utils/keybinding-matchers";
 import { copyToClipboard } from "../utils/clipboard";
 import {
 	formatDebugLogExpandedLines,
@@ -502,7 +503,7 @@ export class DebugLogViewerComponent implements Component {
 	}
 
 	handleInput(keyData: string): void {
-		if (matchesAppInterrupt(keyData)) {
+		if (matchesUiDismiss(keyData)) {
 			this.#onExit();
 			return;
 		}
@@ -630,7 +631,7 @@ export class DebugLogViewerComponent implements Component {
 	}
 
 	#controlsText(): string {
-		return "Esc: back  Ctrl+C: copy  Up/Down: move  Shift+Up/Down: select range  Left/Right: collapse/expand  Ctrl+A: select all  Ctrl+O: load older  Ctrl+P: pid filter";
+		return `${keyHint("ui.dismiss", "back")}  Ctrl+C: copy  Up/Down: move  Shift+Up/Down: select range  Left/Right: collapse/expand  Ctrl+A: select all  Ctrl+O: load older  Ctrl+P: pid filter`;
 	}
 
 	#filterText(): string {

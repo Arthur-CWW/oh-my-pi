@@ -2592,6 +2592,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 						getAllTools: () => session.getAllToolNames(),
 						setActiveTools: (toolNames: string[]) =>
 							session.setActiveToolsByName(toolNames.filter(name => !parentOwnedToolNames.has(name))),
+						refreshTools: tools => session.refreshDynamicTools(tools, extensionRunner),
 						getCommands: () => getSessionSlashCommands(session),
 						setModel: model => runExtensionSetModel(session, model),
 						getThinkingLevel: () => session.thinkingLevel,

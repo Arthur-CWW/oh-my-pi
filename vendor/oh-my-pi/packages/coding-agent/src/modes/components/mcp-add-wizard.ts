@@ -19,8 +19,9 @@ import { analyzeAuthError, discoverOAuthEndpoints } from "../../mcp/oauth-discov
 import type { MCPHttpServerConfig, MCPServerConfig, MCPSseServerConfig, MCPStdioServerConfig } from "../../mcp/types";
 import { shortenPath } from "../../tools/render-utils";
 import { theme } from "../theme/theme";
-import { matchesAppInterrupt, matchesSelectDown, matchesSelectUp } from "../utils/keybinding-matchers";
+import { matchesSelectDown, matchesSelectUp, matchesUiDismiss } from "../utils/keybinding-matchers";
 import { DynamicBorder } from "./dynamic-border";
+import { keyHint } from "./keybinding-hints";
 
 type TransportType = "stdio" | "http" | "sse";
 type AuthMethod = "none" | "oauth" | "manual";
@@ -92,6 +93,12 @@ const MAX_DISPLAY_WIDTH = 120;
 /** Sanitize a string for TUI display: replace tabs and truncate */
 function sanitize(text: string): string {
 	return truncateToWidth(replaceTabs(text), MAX_DISPLAY_WIDTH);
+}
+
+/** Render wizard chrome with the live, independently remappable dismissal binding. */
+function wizardHint(prefix: string, dismissDescription: string): string {
+	const lead = prefix ? `[${prefix}, ` : "[";
+	return theme.fg("muted", lead) + keyHint("ui.dismiss", dismissDescription) + theme.fg("muted", "]");
 }
 
 export class MCPAddWizard extends Container {
@@ -269,7 +276,7 @@ export class MCPAddWizard extends Container {
 		this.#contentContainer.addChild(
 			new Text(theme.fg("muted", "[Only letters, numbers, dash, underscore, dot, colon]"), 0, 0),
 		);
-		this.#contentContainer.addChild(new Text(theme.fg("muted", "[Enter to continue, Esc to cancel]"), 0, 0));
+		this.#contentContainer.addChild(new Text(wizardHint("Enter to continue", "cancel"), 0, 0));
 	}
 
 	#renderTransportStep(): void {
@@ -293,9 +300,7 @@ export class MCPAddWizard extends Container {
 		}
 
 		this.#contentContainer.addChild(new Spacer(1));
-		this.#contentContainer.addChild(
-			new Text(theme.fg("muted", "[↑↓ to navigate, Enter to select, Esc to cancel]"), 0, 0),
-		);
+		this.#contentContainer.addChild(new Text(wizardHint("↑↓ to navigate, Enter to select", "cancel"), 0, 0));
 	}
 
 	#renderCommandStep(): void {
@@ -308,7 +313,7 @@ export class MCPAddWizard extends Container {
 		this.#inputField.setValue(this.#state.command);
 		this.#contentContainer.addChild(this.#inputField);
 		this.#contentContainer.addChild(new Spacer(1));
-		this.#contentContainer.addChild(new Text(theme.fg("muted", "[Enter to continue, Esc to go back]"), 0, 0));
+		this.#contentContainer.addChild(new Text(wizardHint("Enter to continue", "go back"), 0, 0));
 	}
 
 	#renderArgsStep(): void {
@@ -342,7 +347,7 @@ export class MCPAddWizard extends Container {
 		}
 
 		this.#contentContainer.addChild(new Text(theme.fg("muted", "[Must start with http:// or https://]"), 0, 0));
-		this.#contentContainer.addChild(new Text(theme.fg("muted", "[Enter to continue, Esc to go back]"), 0, 0));
+		this.#contentContainer.addChild(new Text(wizardHint("Enter to continue", "go back"), 0, 0));
 	}
 
 	#renderAuthLocationStep(): void {
@@ -363,9 +368,7 @@ export class MCPAddWizard extends Container {
 		}
 
 		this.#contentContainer.addChild(new Spacer(1));
-		this.#contentContainer.addChild(
-			new Text(theme.fg("muted", "[↑↓ to navigate, Enter to select, Esc to go back]"), 0, 0),
-		);
+		this.#contentContainer.addChild(new Text(wizardHint("↑↓ to navigate, Enter to select", "go back"), 0, 0));
 	}
 
 	#renderEnvVarNameStep(): void {
@@ -378,7 +381,7 @@ export class MCPAddWizard extends Container {
 		this.#inputField.setValue(this.#state.envVarName);
 		this.#contentContainer.addChild(this.#inputField);
 		this.#contentContainer.addChild(new Spacer(1));
-		this.#contentContainer.addChild(new Text(theme.fg("muted", "[Enter to continue, Esc to go back]"), 0, 0));
+		this.#contentContainer.addChild(new Text(wizardHint("Enter to continue", "go back"), 0, 0));
 	}
 
 	#renderHeaderNameStep(): void {
@@ -391,7 +394,7 @@ export class MCPAddWizard extends Container {
 		this.#inputField.setValue(this.#state.headerName);
 		this.#contentContainer.addChild(this.#inputField);
 		this.#contentContainer.addChild(new Spacer(1));
-		this.#contentContainer.addChild(new Text(theme.fg("muted", "[Enter to continue, Esc to go back]"), 0, 0));
+		this.#contentContainer.addChild(new Text(wizardHint("Enter to continue", "go back"), 0, 0));
 	}
 
 	#renderScopeStep(): void {
@@ -416,9 +419,7 @@ export class MCPAddWizard extends Container {
 		}
 
 		this.#contentContainer.addChild(new Spacer(1));
-		this.#contentContainer.addChild(
-			new Text(theme.fg("muted", "[↑↓ to navigate, Enter to select, Esc to go back]"), 0, 0),
-		);
+		this.#contentContainer.addChild(new Text(wizardHint("↑↓ to navigate, Enter to select", "go back"), 0, 0));
 	}
 
 	#renderConfirmStep(): void {
@@ -467,9 +468,7 @@ export class MCPAddWizard extends Container {
 		}
 
 		this.#contentContainer.addChild(new Spacer(1));
-		this.#contentContainer.addChild(
-			new Text(theme.fg("muted", "[↑↓ to navigate, Enter to select, Esc to go back]"), 0, 0),
-		);
+		this.#contentContainer.addChild(new Text(wizardHint("↑↓ to navigate, Enter to select", "go back"), 0, 0));
 	}
 
 	handleInput(keyData: string): void {
@@ -480,8 +479,8 @@ export class MCPAddWizard extends Container {
 			return;
 		}
 
-		// Handle Escape (always handled by wizard)
-		if (matchesAppInterrupt(keyData)) {
+		// The wizard owns modal dismissal independently of active-work interruption.
+		if (matchesUiDismiss(keyData)) {
 			if (this.#currentStep === "name") {
 				// Cancel wizard
 				this.#onCancelCallback();
@@ -829,9 +828,7 @@ export class MCPAddWizard extends Container {
 		}
 
 		this.#contentContainer.addChild(new Spacer(1));
-		this.#contentContainer.addChild(
-			new Text(theme.fg("muted", "[↑↓ to navigate, Enter to select, Esc to go back]"), 0, 0),
-		);
+		this.#contentContainer.addChild(new Text(wizardHint("↑↓ to navigate, Enter to select", "go back"), 0, 0));
 	}
 
 	#renderOAuthAuthUrlStep(): void {
@@ -848,7 +845,7 @@ export class MCPAddWizard extends Container {
 			new Text(theme.fg("muted", "e.g., https://auth.example.com/oauth/authorize"), 0, 0),
 		);
 		this.#contentContainer.addChild(new Spacer(1));
-		this.#contentContainer.addChild(new Text(theme.fg("muted", "[Enter to continue, Esc to go back]"), 0, 0));
+		this.#contentContainer.addChild(new Text(wizardHint("Enter to continue", "go back"), 0, 0));
 	}
 
 	#renderOAuthTokenUrlStep(): void {
@@ -863,7 +860,7 @@ export class MCPAddWizard extends Container {
 		this.#contentContainer.addChild(new Spacer(1));
 		this.#contentContainer.addChild(new Text(theme.fg("muted", "e.g., https://auth.example.com/oauth/token"), 0, 0));
 		this.#contentContainer.addChild(new Spacer(1));
-		this.#contentContainer.addChild(new Text(theme.fg("muted", "[Enter to continue, Esc to go back]"), 0, 0));
+		this.#contentContainer.addChild(new Text(wizardHint("Enter to continue", "go back"), 0, 0));
 	}
 
 	#renderOAuthClientIdStep(): void {
@@ -876,7 +873,7 @@ export class MCPAddWizard extends Container {
 		this.#inputField.setValue(this.#state.oauthClientId);
 		this.#contentContainer.addChild(this.#inputField);
 		this.#contentContainer.addChild(new Spacer(1));
-		this.#contentContainer.addChild(new Text(theme.fg("muted", "[Enter to continue, Esc to go back]"), 0, 0));
+		this.#contentContainer.addChild(new Text(wizardHint("Enter to continue", "go back"), 0, 0));
 	}
 
 	#renderOAuthClientSecretStep(): void {
@@ -890,7 +887,7 @@ export class MCPAddWizard extends Container {
 		this.#inputField.setValue(this.#state.oauthClientSecret);
 		this.#contentContainer.addChild(this.#inputField);
 		this.#contentContainer.addChild(new Spacer(1));
-		this.#contentContainer.addChild(new Text(theme.fg("muted", "[Enter to continue, Esc to go back]"), 0, 0));
+		this.#contentContainer.addChild(new Text(wizardHint("Enter to continue", "go back"), 0, 0));
 	}
 
 	#renderOAuthScopesStep(): void {
@@ -905,7 +902,7 @@ export class MCPAddWizard extends Container {
 		this.#contentContainer.addChild(new Spacer(1));
 		this.#contentContainer.addChild(new Text(theme.fg("muted", "e.g., read write"), 0, 0));
 		this.#contentContainer.addChild(new Spacer(1));
-		this.#contentContainer.addChild(new Text(theme.fg("muted", "[Enter to continue, Esc to go back]"), 0, 0));
+		this.#contentContainer.addChild(new Text(wizardHint("Enter to continue", "go back"), 0, 0));
 	}
 
 	#renderOAuthErrorStep(): void {
@@ -923,9 +920,7 @@ export class MCPAddWizard extends Container {
 		}
 
 		this.#contentContainer.addChild(new Spacer(1));
-		this.#contentContainer.addChild(
-			new Text(theme.fg("muted", "[↑↓ to navigate, Enter to select, Esc to go back]"), 0, 0),
-		);
+		this.#contentContainer.addChild(new Text(wizardHint("↑↓ to navigate, Enter to select", "go back"), 0, 0));
 	}
 
 	#renderApiKeyStep(): void {
@@ -939,7 +934,7 @@ export class MCPAddWizard extends Container {
 		this.#inputField.setValue(this.#state.apiKey);
 		this.#contentContainer.addChild(this.#inputField);
 		this.#contentContainer.addChild(new Spacer(1));
-		this.#contentContainer.addChild(new Text(theme.fg("muted", "[Enter to continue, Esc to go back]"), 0, 0));
+		this.#contentContainer.addChild(new Text(wizardHint("Enter to continue", "go back"), 0, 0));
 	}
 
 	/**
@@ -1134,7 +1129,7 @@ export class MCPAddWizard extends Container {
 			this.#contentContainer.addChild(new Spacer(1));
 			this.#contentContainer.addChild(new Text("Authorization and Token URLs are required.", 0, 0));
 			this.#contentContainer.addChild(new Spacer(1));
-			this.#contentContainer.addChild(new Text(theme.fg("muted", "[Press Esc to go back]"), 0, 0));
+			this.#contentContainer.addChild(new Text(wizardHint("", "go back"), 0, 0));
 			this.#requestRender();
 			return;
 		}
@@ -1150,7 +1145,7 @@ export class MCPAddWizard extends Container {
 			new Text(theme.fg("warning", "If browser doesn't open, copy the URL from chat."), 0, 0),
 		);
 		this.#contentContainer.addChild(new Spacer(1));
-		this.#contentContainer.addChild(new Text(theme.fg("muted", "(Press Esc to cancel)"), 0, 0));
+		this.#contentContainer.addChild(new Text(wizardHint("", "cancel"), 0, 0));
 		this.#requestRender();
 
 		try {
@@ -1264,9 +1259,7 @@ export class MCPAddWizard extends Container {
 			this.#contentContainer.addChild(new Text(`${theme.fg("accent", "→ ")}Retry`, 0, 0));
 			this.#contentContainer.addChild(new Text("  Edit OAuth settings", 0, 0));
 			this.#contentContainer.addChild(new Spacer(1));
-			this.#contentContainer.addChild(
-				new Text(theme.fg("muted", "[↑↓ to navigate, Enter to select, Esc to go back]"), 0, 0),
-			);
+			this.#contentContainer.addChild(new Text(wizardHint("↑↓ to navigate, Enter to select", "go back"), 0, 0));
 			this.#requestRender();
 
 			// Set up as a selector step

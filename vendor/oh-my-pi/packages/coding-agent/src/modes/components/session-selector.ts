@@ -14,10 +14,11 @@ import {
 } from "@oh-my-pi/pi-tui";
 import { formatBytes } from "@oh-my-pi/pi-utils";
 import { theme } from "../../modes/theme/theme";
-import { matchesAppInterrupt, matchesSelectDown, matchesSelectUp } from "../../modes/utils/keybinding-matchers";
+import { matchesSelectDown, matchesSelectUp, matchesUiDismiss } from "../../modes/utils/keybinding-matchers";
 import type { SessionInfo, SessionStatus } from "../../session/session-listing";
 import { shortenPath } from "../../tools/render-utils";
 import { DynamicBorder } from "./dynamic-border";
+import { editorKey } from "./keybinding-hints";
 import { HookSelectorComponent } from "./hook-selector";
 
 /**
@@ -406,7 +407,7 @@ class SessionList implements Component {
 		lines.push(
 			theme.fg(
 				"muted",
-				`  [Del delete · Enter select · Tab ${this.#showCwd ? "current folder" : "all projects"} · Esc cancel]`,
+				`  [Del delete · Enter select · Tab ${this.#showCwd ? "current folder" : "all projects"} · ${editorKey("ui.dismiss")} cancel]`,
 			),
 		);
 
@@ -451,16 +452,16 @@ class SessionList implements Component {
 			}
 			return;
 		}
-		// Escape - cancel
-		if (matchesAppInterrupt(keyData)) {
-			if (this.onCancel) {
-				this.onCancel();
-			}
-			return;
-		}
 		// Ctrl+C - exit
 		if (matchesKey(keyData, "ctrl+c")) {
 			this.onExit();
+			return;
+		}
+		// UI dismiss - cancel
+		if (matchesUiDismiss(keyData)) {
+			if (this.onCancel) {
+				this.onCancel();
+			}
 			return;
 		}
 		// Tab - toggle folder / all-projects scope

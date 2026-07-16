@@ -31,19 +31,20 @@ import {
 } from "../../extensibility/plugins/marketplace";
 import type { InstalledPlugin, PluginSettingSchema } from "../../extensibility/plugins/types";
 import { getSelectListTheme, getSettingsListTheme, theme } from "../../modes/theme/theme";
-import { matchesAppInterrupt } from "../../modes/utils/keybinding-matchers";
+import { matchesSelectCancel, matchesUiDismiss } from "../../modes/utils/keybinding-matchers";
 import { shortenPath } from "../../tools/render-utils";
 import { DynamicBorder } from "./dynamic-border";
+import { keyHint, rawKeyHint } from "./keybinding-hints";
 
 /**
- * Forwards a keystroke to `input`, but cancels via the configured app interrupt key.
+ * Forwards a keystroke to `input`, but cancels via the configured modal dismissal key.
  */
-export function handleInputOrEscape(
+export function handleInputOrDismiss(
 	data: string,
 	input: { handleInput(data: string): void },
 	onCancel: () => void,
 ): void {
-	if (matchesAppInterrupt(data)) {
+	if (matchesUiDismiss(data)) {
 		onCancel();
 		return;
 	}
@@ -101,7 +102,7 @@ export class PluginListComponent extends Container {
 
 	constructor(
 		private readonly entries: ReadonlyArray<PluginListEntry>,
-		callbacks: PluginListCallbacks,
+		private readonly callbacks: PluginListCallbacks,
 	) {
 		super();
 
@@ -120,9 +121,8 @@ export class PluginListComponent extends Container {
 			this.addChild(new Spacer(1));
 			this.addChild(new DynamicBorder());
 
-			// Empty list still handles Escape so the user can leave the panel.
+			// Empty list still accepts the modal dismissal action so the user can leave the panel.
 			this.#selectList = new SelectList([], 1, getSelectListTheme());
-			this.#selectList.onCancel = callbacks.onCancel;
 			return;
 		}
 
@@ -143,11 +143,10 @@ export class PluginListComponent extends Container {
 			else callbacks.onMarketplaceSelect(found.plugin);
 		};
 
-		this.#selectList.onCancel = callbacks.onCancel;
-
 		this.addChild(this.#selectList);
 		this.addChild(new Spacer(1));
-		this.addChild(new Text(theme.fg("dim", "  Enter to configure · Esc to go back"), 0, 0));
+		const hint = [rawKeyHint("enter", "configure"), keyHint("ui.dismiss", "go back")].join(theme.fg("dim", " · "));
+		this.addChild(new Text(`  ${hint}`, 0, 0));
 		this.addChild(new DynamicBorder());
 	}
 
@@ -194,6 +193,12 @@ export class PluginListComponent extends Container {
 	}
 
 	handleInput(data: string): void {
+		if (matchesUiDismiss(data)) {
+			this.callbacks.onCancel();
+			return;
+		}
+		// SelectList's generic cancel binding must not bypass a disabled/remapped ui.dismiss.
+		if (matchesSelectCancel(data)) return;
 		this.#selectList.handleInput(data);
 	}
 }
@@ -366,12 +371,19 @@ export class PluginDetailComponent extends Container {
 
 		this.addChild(this.#settingsList);
 		this.addChild(new Spacer(1));
-		this.addChild(new Text(theme.fg("dim", "  Enter to edit · Esc to go back"), 0, 0));
+		const hint = [rawKeyHint("enter", "edit"), keyHint("ui.dismiss", "go back")].join(theme.fg("dim", " · "));
+		this.addChild(new Text(`  ${hint}`, 0, 0));
 		this.addChild(new DynamicBorder());
 	}
 
 	handleInput(data: string): void {
 		if (!this.#settingsList) return;
+		if (matchesUiDismiss(data)) {
+			if (this.#settingsList.hasOpenSubmenu()) this.#settingsList.handleInput(data);
+			else this.callbacks.onBack();
+			return;
+		}
+		if (matchesSelectCancel(data)) return;
 		this.#settingsList.handleInput(data);
 	}
 }
@@ -459,11 +471,18 @@ export class MarketplacePluginDetailComponent extends Container {
 		}
 
 		this.addChild(new Spacer(1));
-		this.addChild(new Text(theme.fg("dim", "  Enter to toggle · Esc to go back"), 0, 0));
+		const hint = [rawKeyHint("enter", "toggle"), keyHint("ui.dismiss", "go back")].join(theme.fg("dim", " · "));
+		this.addChild(new Text(`  ${hint}`, 0, 0));
 		this.addChild(new DynamicBorder());
 	}
 
 	handleInput(data: string): void {
+		if (matchesUiDismiss(data)) {
+			if (this.#settingsList.hasOpenSubmenu()) this.#settingsList.handleInput(data);
+			else this.callbacks.onBack();
+			return;
+		}
+		if (matchesSelectCancel(data)) return;
 		this.#settingsList.handleInput(data);
 	}
 }
@@ -484,7 +503,7 @@ class ConfigEnumSubmenu extends Container {
 		values: string[],
 		currentValue: string,
 		onSelect: (value: string) => void,
-		onCancel: () => void,
+		private readonly onCancel: () => void,
 	) {
 		super();
 
@@ -504,14 +523,19 @@ class ConfigEnumSubmenu extends Container {
 		}
 
 		this.#selectList.onSelect = item => onSelect(item.value);
-		this.#selectList.onCancel = onCancel;
 
 		this.addChild(this.#selectList);
 		this.addChild(new Spacer(1));
-		this.addChild(new Text(theme.fg("dim", "  Enter to select · Esc to cancel"), 0, 0));
+		const hint = [rawKeyHint("enter", "select"), keyHint("ui.dismiss", "cancel")].join(theme.fg("dim", " · "));
+		this.addChild(new Text(`  ${hint}`, 0, 0));
 	}
 
 	handleInput(data: string): void {
+		if (matchesUiDismiss(data)) {
+			this.onCancel();
+			return;
+		}
+		if (matchesSelectCancel(data)) return;
 		this.#selectList.handleInput(data);
 	}
 }
@@ -538,15 +562,15 @@ class ConfigInputSubmenu extends Container {
 		}
 
 		// Type hint
-		let hint = `Type: ${schema.type}`;
+		let typeHint = `Type: ${schema.type}`;
 		if (schema.type === "number") {
 			const numSchema = schema as { min?: number; max?: number };
 			if (numSchema.min !== undefined || numSchema.max !== undefined) {
-				hint += ` (${numSchema.min ?? ""}..${numSchema.max ?? ""})`;
+				typeHint += ` (${numSchema.min ?? ""}..${numSchema.max ?? ""})`;
 			}
 		}
 		this.addChild(new Spacer(1));
-		this.addChild(new Text(theme.fg("dim", hint), 0, 0));
+		this.addChild(new Text(theme.fg("dim", typeHint), 0, 0));
 
 		this.addChild(new Spacer(1));
 
@@ -566,11 +590,12 @@ class ConfigInputSubmenu extends Container {
 
 		this.addChild(this.#input);
 		this.addChild(new Spacer(1));
-		this.addChild(new Text(theme.fg("dim", "  Enter to save · Esc to cancel"), 0, 0));
+		const hint = [rawKeyHint("enter", "save"), keyHint("ui.dismiss", "cancel")].join(theme.fg("dim", " · "));
+		this.addChild(new Text(`  ${hint}`, 0, 0));
 	}
 
 	handleInput(data: string): void {
-		handleInputOrEscape(data, this.#input, this.onCancel);
+		handleInputOrDismiss(data, this.#input, this.onCancel);
 	}
 }
 
@@ -726,10 +751,8 @@ export class PluginSettingsComponent extends Container {
 
 	handleInput(data: string): void {
 		if (!this.#viewComponent) {
-			// Until it does — or if listing rejected and no view ever mounted —
-			// the configured interrupt key must still close the panel instead of
-			// leaving /settings non-dismissible.
-			if (matchesAppInterrupt(data)) {
+			// Until the async list mounts, the modal must remain dismissible.
+			if (matchesUiDismiss(data)) {
 				this.callbacks.onClose();
 			}
 			return;

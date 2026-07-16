@@ -10,7 +10,7 @@ import {
 	truncateToWidth,
 } from "@oh-my-pi/pi-tui";
 import { theme } from "../../modes/theme/theme";
-import { matchesSelectCancel, matchesSelectDown, matchesSelectUp } from "../../modes/utils/keybinding-matchers";
+import { matchesSelectDown, matchesSelectUp, matchesUiDismiss } from "../../modes/utils/keybinding-matchers";
 import { DynamicBorder } from "./dynamic-border";
 
 interface UserMessageItem {
@@ -151,8 +151,8 @@ class UserMessageList implements Component {
 	}
 
 	handleInput(keyData: string): void {
-		// Escape / cancel
-		if (matchesSelectCancel(keyData)) {
+		// UI dismiss
+		if (matchesUiDismiss(keyData)) {
 			if (this.onCancel) {
 				this.onCancel();
 			}

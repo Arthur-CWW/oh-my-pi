@@ -5,6 +5,7 @@ import { type Component, Loader, TERMINAL } from "@oh-my-pi/pi-tui";
 import { extractTextContent } from "../../commit/utils";
 import { settings } from "../../config/settings";
 import { AssistantMessageComponent } from "../../modes/components/assistant-message";
+import { keyHint } from "../../modes/components/keybinding-hints";
 import {
 	ReadToolGroupComponent,
 	readArgsHaveTarget,
@@ -900,7 +901,7 @@ export class EventController {
 			this.ctx.ui,
 			spinner => theme.fg("accent", spinner),
 			text => theme.fg("muted", text),
-			`${reasonText}${actionLabel}… (esc to cancel)`,
+			`${reasonText}${actionLabel}… (${keyHint("app.interrupt", "to cancel")})`,
 			getSymbolTheme().spinnerFrames,
 		);
 		this.ctx.statusContainer.addChild(this.ctx.autoCompactionLoader);
@@ -974,12 +975,13 @@ export class EventController {
 		this.ctx.statusContainer.clear();
 		this.#requestFailures.handleRetryStart(event);
 		const delaySeconds = Math.max(0, Math.round(event.delayMs / 1000));
+		const retryHint = `(${keyHint("app.interrupt", "to cancel")})`;
 		const retryMessage =
 			event.cause === "network"
-				? `Provider unreachable (network/DNS), retrying ${delaySeconds}s… (esc to cancel)`
+				? `Provider unreachable (network/DNS), retrying ${delaySeconds}s… ${retryHint}`
 				: event.cause === "rate-limit"
-					? `Rate limited, retrying (${event.attempt}/${event.maxAttempts}) in ${delaySeconds}s… (esc to cancel)`
-					: `Provider error, retrying (${event.attempt}/${event.maxAttempts}) in ${delaySeconds}s… (esc to cancel)`;
+					? `Rate limited, retrying (${event.attempt}/${event.maxAttempts}) in ${delaySeconds}s… ${retryHint}`
+					: `Provider error, retrying (${event.attempt}/${event.maxAttempts}) in ${delaySeconds}s… ${retryHint}`;
 		this.ctx.retryLoader = new Loader(
 			this.ctx.ui,
 			spinner => theme.fg("warning", spinner),

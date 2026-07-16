@@ -16,6 +16,8 @@ import type { MCPServerConfig } from "./types";
 export interface LoadMCPConfigsOptions {
 	/** Whether to load project-level config (default: true) */
 	enableProjectConfig?: boolean;
+	/** Whether to load Codex-compatible MCP config.toml files (default: false) */
+	codexCompat?: boolean;
 	/** Whether to filter out Exa MCP servers (default: true) */
 	filterExa?: boolean;
 	/** Whether to filter out browser MCP servers when builtin browser tool is enabled (default: false) */
@@ -94,12 +96,17 @@ function convertToLegacyConfig(server: MCPServer): MCPServerConfig {
  */
 export async function loadAllMCPConfigs(cwd: string, options?: LoadMCPConfigsOptions): Promise<LoadMCPConfigsResult> {
 	const enableProjectConfig = options?.enableProjectConfig ?? true;
+	const codexCompat = options?.codexCompat ?? false;
 	const filterExa = options?.filterExa ?? true;
 	const filterBrowser = options?.filterBrowser ?? false;
 
-	// Load MCP servers via capability system
-	const result = await loadCapability<MCPServer>(mcpCapability.id, { cwd });
-
+	// Load MCP servers via capability system. Codex's config.toml is an
+	// compatibility surface and must be explicitly enabled; project/user mcp.json
+	// providers remain enabled regardless of this setting.
+	const result = await loadCapability<MCPServer>(mcpCapability.id, {
+		cwd,
+		...(codexCompat ? {} : { excludeProviders: ["codex"] }),
+	});
 	// Filter out project-level configs if disabled
 	const servers = enableProjectConfig
 		? result.items

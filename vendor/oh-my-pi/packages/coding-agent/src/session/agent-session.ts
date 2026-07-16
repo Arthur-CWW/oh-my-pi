@@ -193,8 +193,8 @@ import type {
 } from "../extensibility/extensions";
 import { NEVER_ABORT_SIGNAL } from "../extensibility/extensions";
 import { createExtensionModelQuery } from "../extensibility/extensions/model-api";
-import type { CompactOptions, ContextUsage } from "../extensibility/extensions/types";
-import { ExtensionToolWrapper } from "../extensibility/extensions/wrapper";
+import type { CompactOptions, ContextUsage, RegisteredTool } from "../extensibility/extensions/types";
+import { ExtensionToolWrapper, RegisteredToolAdapter } from "../extensibility/extensions/wrapper";
 import type { HookCommandContext } from "../extensibility/hooks/types";
 import type { Skill, SkillWarning } from "../extensibility/skills";
 import { expandSlashCommand, type FileSlashCommand } from "../extensibility/slash-commands";
@@ -1411,6 +1411,7 @@ export class AgentSession {
 	#toolRegistry: Map<string, AgentTool>;
 	#toolConfigurationGeneration = 0;
 	#activeToolMutationTail: Promise<void> = Promise.resolve();
+	#dynamicExtensionToolNames = new Set<string>();
 	#transformContext: (messages: AgentMessage[], signal?: AbortSignal) => AgentMessage[] | Promise<AgentMessage[]>;
 	#onPayload: SimpleStreamOptions["onPayload"] | undefined;
 	#onResponse: SimpleStreamOptions["onResponse"] | undefined;
@@ -4307,6 +4308,11 @@ export class AgentSession {
 		} catch (error) {
 			logger.warn("Failed to emit session_shutdown event", { error: String(error) });
 		}
+		try {
+			await this.#extensionRunner?.disposeDynamicTools();
+		} catch (error) {
+			logger.warn("Failed to dispose dynamic extension tools", { error: String(error) });
+		}
 		// Abort post-prompt work so the drain below can complete. Without this, a
 		// deferred-handoff task that has already advanced into
 		// `await this.handoff(...) → generateHandoff(...)` keeps awaiting a live LLM stream
@@ -5315,6 +5321,41 @@ export class AgentSession {
 		}
 		const date = new Date().toISOString().slice(0, 10);
 		return `${nameSegment}\u0003${descriptionSegment}\u0005${registrySegment}\u0007${instructionsSegment}|${date}`;
+	}
+
+	/**
+	 * Replace this session's runtime-registered extension tools and make the
+	 * resulting active set visible before the registering event resolves.
+	 */
+	async refreshDynamicTools(registeredTools: RegisteredTool[], runner: ExtensionRunner): Promise<void> {
+		await this.#withActiveToolMutation(async () => {
+			const previousDynamicNames = this.#dynamicExtensionToolNames;
+			const nextActiveToolNames = new Set(this.getActiveToolNames());
+
+			for (const name of previousDynamicNames) {
+				const current = this.#toolRegistry.get(name) as (AgentTool & { origin?: { kind?: string } }) | undefined;
+				if (current?.origin?.kind === "dynamic") {
+					this.#toolRegistry.delete(name);
+					nextActiveToolNames.delete(name);
+				}
+			}
+
+			const nextDynamicNames = new Set<string>();
+			for (const registeredTool of registeredTools) {
+				const adapted = new RegisteredToolAdapter(registeredTool, runner) as AgentTool;
+				const wrapped = new ExtensionToolWrapper(adapted, runner) as AgentTool;
+				this.#toolRegistry.set(wrapped.name, wrapped);
+				nextDynamicNames.add(wrapped.name);
+				if (!registeredTool.definition.defaultInactive) {
+					nextActiveToolNames.add(wrapped.name);
+				}
+			}
+			this.#dynamicExtensionToolNames = nextDynamicNames;
+
+			await this.#applyActiveToolsByNameUnlocked([...nextActiveToolNames], {
+				persistMCPSelection: false,
+			});
+		});
 	}
 
 	/**

@@ -1,4 +1,5 @@
 Run code in a persistent kernel using a list of cells.
+Persistent JavaScript and Python kernels cover REPL workflows.
 
 <instruction>
 Cells run in array order. State persists per language — across cells, tool calls, and `task` subagents: variables either side defines are visible to the other. Stage helpers, datasets, or live clients once; subagents use them directly — no re-importing or serializing across the boundary.

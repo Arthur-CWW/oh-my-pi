@@ -11,6 +11,7 @@ import {
 } from "@oh-my-pi/pi-tui";
 import type { WorkflowModeSnapshot } from "../session/session-entries";
 import { handleReloadTuiCommand, RELOAD_TUI_COMMAND, RELOAD_TUI_DESCRIPTION } from "../slash-commands/reload-tui";
+import { editorKey } from "./components/keybinding-hints";
 import type { DisposableTerminalHostCallbacks, DisposableTerminalView } from "./disposable-terminal-host";
 import type { TerminalSessionController } from "./terminal-session-controller";
 
@@ -265,7 +266,7 @@ export function createDisposableTerminalView(
 			statusText = new Text("", 1, 0);
 			feedbackText = new Text("", 1, 0);
 			const helpText = new Text(
-				`Disposable TUI · /${RELOAD_TUI_COMMAND} (${RELOAD_TUI_DESCRIPTION}) · Esc interrupt · Ctrl-D exit · Ctrl-L redraw\n` +
+				`Disposable TUI · /${RELOAD_TUI_COMMAND} (${RELOAD_TUI_DESCRIPTION}) · ${editorKey("app.interrupt")} interrupt · Ctrl-D exit · Ctrl-L redraw\n` +
 					"Pending input management unavailable in disposable TUI · Agent Hub unavailable in disposable TUI",
 				1,
 				0,

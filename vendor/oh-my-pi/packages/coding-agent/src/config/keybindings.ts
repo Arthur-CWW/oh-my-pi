@@ -18,6 +18,7 @@ import { YAML } from "bun";
  */
 interface AppKeybindings {
 	"app.interrupt": true;
+	"ui.dismiss": true;
 	"app.clear": true;
 	"app.exit": true;
 	"app.suspend": true;
@@ -82,8 +83,12 @@ export function getDefaultPasteImageKeys(platform: NodeJS.Platform = process.pla
 export const KEYBINDINGS = {
 	...TUI_KEYBINDINGS,
 	"app.interrupt": {
-		defaultKeys: ["escape", "ctrl+q"],
+		defaultKeys: "ctrl+q",
 		description: "Interrupt current operation",
+	},
+	"ui.dismiss": {
+		defaultKeys: "escape",
+		description: "Dismiss active UI",
 	},
 	"app.clear": {
 		defaultKeys: "ctrl+c",
@@ -543,10 +548,7 @@ export class KeybindingsManager extends TuiKeybindingsManager {
 		if (keybinding === "app.message.followUp") {
 			return keys.filter(key => key.toLowerCase() !== DIRECT_INTERRUPT_KEY);
 		}
-		if (
-			keybinding !== "app.interrupt" ||
-			keys.some(key => key.toLowerCase() === DIRECT_INTERRUPT_KEY)
-		) {
+		if (keybinding !== "app.interrupt" || keys.some(key => key.toLowerCase() === DIRECT_INTERRUPT_KEY)) {
 			return keys;
 		}
 		return [...keys, DIRECT_INTERRUPT_KEY];

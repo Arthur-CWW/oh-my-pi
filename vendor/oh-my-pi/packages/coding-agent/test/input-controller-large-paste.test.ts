@@ -23,6 +23,9 @@ function createContext(options?: { threshold?: number; choice?: string; artifact
 		editor: { insertPaste, insertText } as unknown as InteractiveModeContext["editor"],
 		ui: { requestRender } as unknown as InteractiveModeContext["ui"],
 		settings: { get: () => options?.threshold ?? 100 } as unknown as InteractiveModeContext["settings"],
+		keybindings: {
+			getDisplayString: (action: string) => (action === "ui.dismiss" ? "escape" : ""),
+		} as unknown as InteractiveModeContext["keybindings"],
 		sessionManager: {
 			getArtifactsDir: () => options?.artifactsDir ?? null,
 			getSessionId: () => "test-session",
@@ -77,6 +80,7 @@ describe("InputController.presentLargePasteMenu actions", () => {
 			"Attach as local file",
 			"Paste inline",
 		]);
+		expect(spies.showHookSelector.mock.calls[0][2]).toEqual({ helpText: "escape to paste inline" });
 	});
 
 	it("wraps the paste in attachment XML collapsed to a marker", async () => {

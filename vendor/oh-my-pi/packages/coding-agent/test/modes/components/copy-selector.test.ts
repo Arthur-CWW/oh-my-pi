@@ -9,7 +9,9 @@ import { setKeybindings } from "@oh-my-pi/pi-tui";
 const UP = "\x1b[A";
 const DOWN = "\x1b[B";
 const ENTER = "\n";
-const CANCEL = "\x07"; // ctrl+g, remapped to tui.select.cancel below
+const ESCAPE = "\x1b";
+const INTERRUPT = "\x11"; // ctrl+q
+const DISMISS_CTRL_G = "\x07";
 
 let darkTheme = await getThemeByName("dark");
 
@@ -67,7 +69,7 @@ describe("CopySelectorComponent", () => {
 
 	beforeEach(() => {
 		setThemeInstance(darkTheme!);
-		setKeybindings(KeybindingsManager.inMemory({ "tui.select.cancel": "ctrl+g" }));
+		setKeybindings(KeybindingsManager.inMemory());
 	});
 
 	afterEach(() => {
@@ -124,12 +126,31 @@ describe("CopySelectorComponent", () => {
 		expect(render(component)).toContain("beta()");
 	});
 
-	it("quits on the cancel key", () => {
+	it("keeps the preview open on Ctrl+Q and dismisses on Escape when only app.interrupt is remapped", () => {
+		setKeybindings(KeybindingsManager.inMemory({ "app.interrupt": "ctrl+q" }));
 		const onCancel = vi.fn();
 		const component = new CopySelectorComponent(makeRoots(), { onPick: vi.fn(), onCancel });
 
-		component.handleInput(CANCEL);
+		expect(render(component)).toContain("newest-preview-text");
+		component.handleInput(INTERRUPT);
+		expect(onCancel).not.toHaveBeenCalled();
+		expect(render(component)).toContain("newest-preview-text");
 
+		component.handleInput(ESCAPE);
+		expect(onCancel).toHaveBeenCalledTimes(1);
+	});
+
+	it("dismisses on remapped ui.dismiss and renders its live hint", () => {
+		setKeybindings(KeybindingsManager.inMemory({ "ui.dismiss": "ctrl+g" }));
+		const onCancel = vi.fn();
+		const component = new CopySelectorComponent(makeRoots(), { onPick: vi.fn(), onCancel });
+
+		expect(render(component)).toContain("ctrl+g quit");
+
+		component.handleInput(ESCAPE);
+		expect(onCancel).not.toHaveBeenCalled();
+
+		component.handleInput(DISMISS_CTRL_G);
 		expect(onCancel).toHaveBeenCalledTimes(1);
 	});
 });

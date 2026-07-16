@@ -1,5 +1,6 @@
 import { Container, type SelectItem, SelectList } from "@oh-my-pi/pi-tui";
 import { getSelectListTheme } from "../../modes/theme/theme";
+import { matchesUiDismiss } from "../utils/keybinding-matchers";
 import { DynamicBorder } from "./dynamic-border";
 
 /**
@@ -9,6 +10,7 @@ import { DynamicBorder } from "./dynamic-border";
 export class ThemeSelectorComponent extends Container {
 	#selectList: SelectList;
 	#onPreview: (themeName: string) => void;
+	readonly #onCancel: () => void;
 
 	constructor(
 		currentTheme: string,
@@ -18,6 +20,7 @@ export class ThemeSelectorComponent extends Container {
 		onPreview: (themeName: string) => void,
 	) {
 		super();
+		this.#onCancel = onCancel;
 		this.#onPreview = onPreview;
 
 		// Create select items from provided themes
@@ -43,10 +46,6 @@ export class ThemeSelectorComponent extends Container {
 			onSelect(item.value);
 		};
 
-		this.#selectList.onCancel = () => {
-			onCancel();
-		};
-
 		this.#selectList.onSelectionChange = item => {
 			this.#onPreview(item.value);
 		};
@@ -55,6 +54,14 @@ export class ThemeSelectorComponent extends Container {
 
 		// Add bottom border
 		this.addChild(new DynamicBorder());
+	}
+
+	handleInput(data: string): void {
+		if (matchesUiDismiss(data)) {
+			this.#onCancel();
+			return;
+		}
+		this.#selectList.handleInput(data);
 	}
 
 	getSelectList(): SelectList {

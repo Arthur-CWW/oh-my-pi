@@ -5,7 +5,6 @@ import { modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
 import {
 	Container,
 	fuzzyFilter,
-	getKeybindings,
 	Input,
 	matchesKey,
 	ScrollView,
@@ -22,10 +21,11 @@ import { getModelMatchPreferences, resolveModelRoleValue } from "../../config/mo
 import { getKnownRoleIds, getRoleInfo, MODEL_ROLE_IDS, MODEL_ROLES } from "../../config/model-roles";
 import type { Settings } from "../../config/settings";
 import { type ThemeColor, theme } from "../../modes/theme/theme";
-import { matchesSelectDown, matchesSelectUp } from "../../modes/utils/keybinding-matchers";
+import { matchesSelectDown, matchesSelectUp, matchesUiDismiss } from "../../modes/utils/keybinding-matchers";
 import { AUTO_THINKING, type ConfiguredThinkingLevel, getConfiguredThinkingLevelMetadata } from "../../thinking";
 import { getTabBarTheme } from "../shared";
 import { DynamicBorder } from "./dynamic-border";
+import { editorKey } from "./keybinding-hints";
 import {
 	classifyModelSelectorItem,
 	formatAuthStatusSuffix,
@@ -155,7 +155,7 @@ function createProviderTab(providerId: string): ProviderTabState {
  * - Tab/Arrow Left/Right: Switch between provider tabs
  * - Arrow Up/Down: Navigate model list
  * - Enter: Open context menu to select action
- * - Escape: Close menu or selector
+ * - UI dismiss: Close menu or selector
  */
 export class ModelSelectorComponent extends Container {
 	#searchInput: Input;
@@ -590,7 +590,6 @@ export class ModelSelectorComponent extends Container {
 			activeIndex >= 0 ? activeIndex : Math.min(this.#activeTabIndex, this.#providers.length - 1);
 	}
 
-
 	#startRefreshSpinner(): void {
 		if (this.#refreshSpinnerInterval) {
 			return;
@@ -742,7 +741,6 @@ export class ModelSelectorComponent extends Container {
 	#isItemDisabled(_item: ModelItem | CanonicalModelItem): boolean {
 		return false;
 	}
-
 
 	#getVisibleItems(): ReadonlyArray<ModelItem | CanonicalModelItem> {
 		return this.#isCanonicalTab() ? this.#filteredCanonicalModels : this.#filteredModels;
@@ -1079,7 +1077,10 @@ export class ModelSelectorComponent extends Container {
 			showingThinking && this.#menuSelectedRole
 				? `  Thinking for: ${selectedRoleName} (${selectedItem.id})`
 				: `  Action for: ${selectedItem.id}`;
-		const hintText = showingThinking ? "  Enter: confirm  Esc: back" : "  Enter: continue  Esc: cancel";
+		const dismissKey = editorKey("ui.dismiss");
+		const hintText = showingThinking
+			? `  Enter: confirm  ${dismissKey}: back`
+			: `  Enter: continue  ${dismissKey}: cancel`;
 		// Window the option list so a long action/thinking menu scrolls inside the
 		// viewport instead of running off the bottom of the screen.
 		const maxVisible = this.#getMenuVisibleCount(optionLines.length);
@@ -1169,11 +1170,6 @@ export class ModelSelectorComponent extends Container {
 		this.#refreshSpinnerFrame = 0;
 	}
 
-	/** The model list's normal printable keys edit its search prompt. */
-	canEnterCommandMode(): boolean {
-		return this.#isMenuOpen;
-	}
-
 	handleInput(keyData: string): void {
 		if (this.#isMenuOpen) {
 			this.#handleMenuInput(keyData);
@@ -1211,7 +1207,7 @@ export class ModelSelectorComponent extends Container {
 			return;
 		}
 
-		if (getKeybindings().matches(keyData, "tui.select.cancel")) {
+		if (matchesUiDismiss(keyData)) {
 			this.#cleanup();
 			this.#onCancelCallback();
 			return;
@@ -1263,7 +1259,7 @@ export class ModelSelectorComponent extends Container {
 			return;
 		}
 
-		if (getKeybindings().matches(keyData, "tui.select.cancel")) {
+		if (matchesUiDismiss(keyData)) {
 			if (this.#menuStep === "thinking" && this.#menuSelectedRole !== null) {
 				this.#menuStep = "role";
 				const roleIndex = this.#menuRoleActions.findIndex(action => action.role === this.#menuSelectedRole);

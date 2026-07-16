@@ -11,7 +11,7 @@
  * - Space: enable/disable selected agent
  * - Enter: edit model override for selected agent
  * - N: start agent creation flow
- * - Esc: clear search (if any) or close dashboard
+ * - UI dismiss: clear search (if any) or close dashboard
  * - Ctrl+R: reload discovered agents
  */
 import * as fs from "node:fs/promises";
@@ -38,10 +38,7 @@ import { isEnoent, prompt } from "@oh-my-pi/pi-utils";
 import { YAML } from "bun";
 import { getConfigDirs } from "../../config";
 import type { ModelRegistry } from "../../config/model-registry";
-import {
-	formatModelString,
-	resolveModelOverride,
-} from "../../config/model-resolver";
+import { formatModelString, resolveModelOverride } from "../../config/model-resolver";
 import { resolveAgentModelPatterns, resolveConfiguredModelPatterns } from "../../config/role-resolution";
 import { Settings } from "../../config/settings";
 import agentCreationArchitectPrompt from "../../prompts/system/agent-creation-architect.md" with { type: "text" };
@@ -52,12 +49,13 @@ import type { AgentDefinition, AgentSource } from "../../task/types";
 import { shortenPath } from "../../tools/render-utils";
 import { getEditorTheme, theme } from "../theme/theme";
 import {
-	matchesAppInterrupt,
+	matchesUiDismiss,
 	matchesNavigationDown,
 	matchesNavigationUp,
 	matchesSelectDown,
 	matchesSelectUp,
 } from "../utils/keybinding-matchers";
+import { keyHint } from "./keybinding-hints";
 import { DynamicBorder } from "./dynamic-border";
 
 type SourceTabId = "all" | AgentSource;
@@ -105,8 +103,8 @@ const SOURCE_LABEL: Record<AgentSource, string> = {
 };
 const AGENT_PREVIEW_PROMPT_MAX_CHARS = 32 * 1024;
 
-const LIST_FOOTER =
-	" ↑/↓: navigate  Space: toggle  Enter: model override  N: new agent  ←/→: source  Ctrl+R: reload  Esc: close";
+const LIST_FOOTER_PREFIX =
+	" ↑/↓: navigate  Space: toggle  Enter: model override  N: new agent  ←/→: source  Ctrl+R: reload  ";
 
 const IDENTIFIER_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+){1,5}$/;
 function joinPatterns(patterns: string[]): string {
@@ -503,8 +501,12 @@ export class AgentDashboard extends Container {
 		return wrapTextWithAnsi(theme.fg("success", replaceTabs(this.#notice)), this.#uiWidth()).length + 1;
 	}
 
+	#listFooter(): string {
+		return theme.fg("dim", LIST_FOOTER_PREFIX) + keyHint("ui.dismiss", "close");
+	}
+
 	#footerLines(): number {
-		return Math.max(1, wrapTextWithAnsi(theme.fg("dim", LIST_FOOTER), this.#uiWidth()).length);
+		return Math.max(1, wrapTextWithAnsi(this.#listFooter(), this.#uiWidth()).length);
 	}
 
 	/** Height budget for the two-column body, sized to the live terminal. */
@@ -923,9 +925,10 @@ export class AgentDashboard extends Container {
 		}
 		this.addChild(new Spacer(1));
 		const hints = this.#createGenerating
-			? " Generating..."
-			: " Ctrl+Enter: generate  Enter: newline  Tab: toggle scope  Esc: cancel";
-		this.addChild(new Text(theme.fg("dim", hints), 0, 0));
+			? theme.fg("dim", " Generating...")
+			: theme.fg("dim", " Ctrl+Enter: generate  Enter: newline  Tab: toggle scope  ") +
+				keyHint("ui.dismiss", "cancel");
+		this.addChild(new Text(hints, 0, 0));
 	}
 
 	#renderCreateReview(): void {
@@ -964,7 +967,13 @@ export class AgentDashboard extends Container {
 			this.addChild(new Text(theme.fg("error", replaceTabs(this.#createError)), 0, 0));
 		}
 		this.addChild(new Spacer(1));
-		this.addChild(new Text(theme.fg("dim", " Enter: save  Tab: toggle scope  R: regenerate  Esc: cancel"), 0, 0));
+		this.addChild(
+			new Text(
+				theme.fg("dim", " Enter: save  Tab: toggle scope  R: regenerate  ") + keyHint("ui.dismiss", "cancel"),
+				0,
+				0,
+			),
+		);
 	}
 
 	#uiWidth(): number {
@@ -1044,7 +1053,7 @@ export class AgentDashboard extends Container {
 			}
 
 			this.addChild(new Spacer(1));
-			this.addChild(new Text(theme.fg("dim", " Enter: save  Esc: cancel"), 0, 0));
+			this.addChild(new Text(theme.fg("dim", " Enter: save  ") + keyHint("ui.dismiss", "cancel"), 0, 0));
 		} else {
 			const selected = this.#selectedAgent();
 			const defaultPatterns = selected ? this.#defaultPatternsFor(selected) : [];
@@ -1069,7 +1078,7 @@ export class AgentDashboard extends Container {
 			const bodyHeight = this.#computeBodyHeight();
 			this.addChild(new TwoColumnBody(listPane, inspector, bodyHeight));
 			this.addChild(new Spacer(1));
-			this.addChild(new Text(theme.fg("dim", LIST_FOOTER), 0, 0));
+			this.addChild(new Text(this.#listFooter(), 0, 0));
 		}
 
 		this.addChild(new DynamicBorder());
@@ -1084,7 +1093,7 @@ export class AgentDashboard extends Container {
 		}
 
 		if (this.#createSpec) {
-			if (matchesAppInterrupt(data)) {
+			if (matchesUiDismiss(data)) {
 				this.#clearCreateFlow();
 				this.#buildLayout();
 				return;
@@ -1108,7 +1117,7 @@ export class AgentDashboard extends Container {
 		}
 
 		if (this.#createInput || this.#createGenerating) {
-			if (matchesAppInterrupt(data)) {
+			if (matchesUiDismiss(data)) {
 				if (!this.#createGenerating) {
 					this.#clearCreateFlow();
 					this.#buildLayout();
@@ -1136,7 +1145,7 @@ export class AgentDashboard extends Container {
 		}
 
 		if (this.#editInput) {
-			if (matchesAppInterrupt(data)) {
+			if (matchesUiDismiss(data)) {
 				this.#cancelModelEdit();
 				return;
 			}
@@ -1147,7 +1156,7 @@ export class AgentDashboard extends Container {
 			return;
 		}
 
-		if (matchesAppInterrupt(data)) {
+		if (matchesUiDismiss(data)) {
 			if (this.#searchQuery.length > 0) {
 				this.#searchQuery = "";
 				this.#applyFilters();

@@ -45,6 +45,7 @@ import { shortenPath } from "../../tools/render-utils";
 import { urlHyperlinkAlways } from "../../tui";
 import { openPath } from "../../utils/open";
 import { ChatBlock } from "../components/chat-block";
+import { editorKey, keyHint } from "../components/keybinding-hints";
 import { MCPAddWizard } from "../components/mcp-add-wizard";
 import { TranscriptBlock } from "../components/transcript-container";
 import { parseCommandArgs } from "../shared";
@@ -1060,13 +1061,9 @@ export class MCPCommandController {
 
 	#handleWizardCancel(): void {
 		this.#showMessage(
-			[
-				"",
-				theme.fg("muted", "Server creation cancelled."),
-				"",
-				theme.fg("dim", "Tip: Press Ctrl+C or Esc anytime to cancel"),
-				"",
-			].join("\n"),
+			["", theme.fg("muted", "Server creation cancelled."), "", keyHint("ui.dismiss", "anytime to cancel"), ""].join(
+				"\n",
+			),
 		);
 	}
 
@@ -1260,9 +1257,9 @@ export class MCPCommandController {
 			return;
 		}
 
-		const originalOnEscape = this.ctx.editor.onEscape;
+		const originalOnInterrupt = this.ctx.editor.onInterrupt;
 		const abortController = new AbortController();
-		this.ctx.editor.onEscape = () => {
+		this.ctx.editor.onInterrupt = () => {
 			abortController.abort();
 		};
 
@@ -1284,7 +1281,11 @@ export class MCPCommandController {
 			}
 
 			this.#showMessage(
-				["", theme.fg("muted", `Testing connection to "${name}"... (esc to cancel)`), ""].join("\n"),
+				[
+					"",
+					theme.fg("muted", `Testing connection to "${name}"... (${editorKey("app.interrupt")} to cancel)`),
+					"",
+				].join("\n"),
 			);
 
 			// Resolve auth config if needed
@@ -1347,7 +1348,7 @@ export class MCPCommandController {
 
 			this.ctx.showError(`Failed to connect to "${name}": ${errorMsg}${helpText}`);
 		} finally {
-			this.ctx.editor.onEscape = originalOnEscape;
+			this.ctx.editor.onInterrupt = originalOnInterrupt;
 			if (connection) {
 				// Best-effort: don't block UI on cleanup.
 				void disconnectServer(connection);
@@ -1873,7 +1874,7 @@ export class MCPCommandController {
 	}
 
 	async #handleSmitheryLoginWithApiKey(): Promise<boolean> {
-		const apiKey = await this.#promptSmitheryApiKey("Smithery API key (Esc to cancel)");
+		const apiKey = await this.#promptSmitheryApiKey(`Smithery API key (${editorKey("ui.dismiss")} to cancel)`);
 		if (!apiKey) return false;
 		await saveSmitheryApiKey(apiKey);
 		this.ctx.showStatus("Smithery API key saved.");

@@ -9,6 +9,7 @@ import manualContinuePrompt from "../src/prompts/system/manual-continue.md" with
 
 type FakeEditor = {
 	onEscape?: (key?: string) => void;
+	onInterrupt?: (key?: string) => void;
 	onClear?: () => void;
 	onExit?: () => void;
 	onDisplayReset?: () => void;
@@ -63,6 +64,8 @@ function installDurableInputSeam(
 async function createContext() {
 	let editorText = "";
 	const keyMap: Record<string, string[]> = {
+		"app.interrupt": ["ctrl+q"],
+		"ui.dismiss": ["escape"],
 		"app.display.reset": ["ctrl+l"],
 		"app.transcript.rawToggle": ["alt+v"],
 		"app.model.selectTemporary": ["ctrl+y"],
@@ -229,6 +232,10 @@ describe("InputController keybinding setup", () => {
 
 		controller.setupKeyHandlers();
 
+		expect(spies.setActionKeys).toHaveBeenCalledWith("app.interrupt", ["ctrl+q"]);
+		expect(spies.setActionKeys).toHaveBeenCalledWith("ui.dismiss", ["escape"]);
+		expect(editor.onInterrupt).toBeDefined();
+		expect(editor.onEscape).toBeDefined();
 		expect(spies.setActionKeys).toHaveBeenCalledWith("app.display.reset", ["ctrl+l"]);
 		expect(spies.setActionKeys).toHaveBeenCalledWith("app.model.selectTemporary", ["ctrl+y"]);
 		expect(spies.setActionKeys).toHaveBeenCalledWith("app.model.select", ["alt+m"]);
@@ -526,7 +533,7 @@ describe("InputController keybinding setup", () => {
 		const controller = new InputController(ctx);
 		controller.setupKeyHandlers();
 
-		editor.onEscape?.("ctrl+q");
+		editor.onInterrupt?.("ctrl+q");
 
 		expect(spies.abort).toHaveBeenCalledWith({ reason: "Interrupted by user" });
 		expect(spies.hardCancel).not.toHaveBeenCalled();
@@ -555,7 +562,7 @@ describe("InputController keybinding setup", () => {
 		const controller = new InputController(ctx);
 		controller.setupKeyHandlers();
 
-		editor.onEscape?.("ctrl+q");
+		editor.onInterrupt?.("ctrl+q");
 		await Promise.resolve();
 		await Promise.resolve();
 

@@ -10,7 +10,10 @@ beforeAll(async () => {
 function createModelContext(advisorActive: boolean): SegmentContext {
 	return {
 		session: {
-			state: { model: { id: "test-model", name: "Test Model" } },
+			state: {
+				model: { id: "gpt-5.6-sol", name: "GPT-5.6 Sol", provider: "openai-codex", thinking: true },
+				thinkingLevel: "xhigh",
+			},
 			isFastModeActive: () => false,
 			isAutoThinking: false,
 			autoResolvedThinkingLevel: () => undefined,
@@ -43,7 +46,7 @@ function createModelContext(advisorActive: boolean): SegmentContext {
 describe("status line model segment advisor badge", () => {
 	it("appends a success-colored ++ badge when the advisor is active", () => {
 		const rendered = renderSegment("model", createModelContext(true));
-		expect(rendered.content).toContain("Test Model");
+		expect(Bun.stripANSI(rendered.content)).toContain("SOX5.6xh");
 		// The badge carries the success color, kept distinct from the statusLineModel
 		// name color (which several themes alias to `accent`).
 		expect(rendered.content).toContain(theme.fg("success", "++"));
@@ -51,7 +54,7 @@ describe("status line model segment advisor badge", () => {
 
 	it("omits the badge when the advisor is inactive", () => {
 		const rendered = renderSegment("model", createModelContext(false));
-		expect(rendered.content).toContain("Test Model");
+		expect(Bun.stripANSI(rendered.content)).toContain("SOX5.6xh");
 		expect(rendered.content).not.toContain("++");
 	});
 });

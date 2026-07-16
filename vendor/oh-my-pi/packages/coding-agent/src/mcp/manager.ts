@@ -144,6 +144,8 @@ export interface MCPLoadResult {
 export interface MCPDiscoverOptions {
 	/** Whether to load project-level config (default: true) */
 	enableProjectConfig?: boolean;
+	/** Whether to load Codex-compatible MCP config.toml files (default: false) */
+	codexCompat?: boolean;
 	/** Whether to filter out Exa MCP servers (default: true) */
 	filterExa?: boolean;
 	/** Whether to filter out browser MCP servers when builtin browser tool is enabled (default: false) */
@@ -311,6 +313,7 @@ export class MCPManager {
 	async discoverAndConnect(options?: MCPDiscoverOptions): Promise<MCPLoadResult> {
 		const { configs, exaApiKeys, sources } = await loadAllMCPConfigs(this.cwd, {
 			enableProjectConfig: options?.enableProjectConfig,
+			codexCompat: options?.codexCompat,
 			filterExa: options?.filterExa,
 			filterBrowser: options?.filterBrowser,
 		});

@@ -8,6 +8,7 @@ import {
 	type SizeValue,
 	type TUI,
 } from "@oh-my-pi/pi-tui";
+import { matchesUiDismiss } from "../utils/keybinding-matchers";
 
 export type DockPosition = "bottom" | "right" | "left";
 
@@ -241,7 +242,7 @@ export class DockablePanelController {
 			this.#waitingForFocusChord = true;
 			return true;
 		}
-		if (matchesKey(data, "escape") || matchesKey(data, "esc")) {
+		if (matchesUiDismiss(data)) {
 			if (!this.isOpen) return false;
 			this.close();
 			return true;

@@ -3,7 +3,7 @@ import { replaceTabs } from "../../tools/render-utils";
 import { highlightCode, theme } from "../theme/theme";
 import type { CopyTarget } from "../utils/copy-targets";
 import {
-	matchesSelectCancel,
+	matchesUiDismiss,
 	matchesSelectDown,
 	matchesSelectPageDown,
 	matchesSelectPageUp,
@@ -81,7 +81,7 @@ export class CopySelectorComponent implements Component {
 	}
 
 	handleInput(keyData: string): void {
-		if (matchesSelectCancel(keyData)) {
+		if (matchesUiDismiss(keyData)) {
 			this.callbacks.onCancel();
 			return;
 		}
@@ -190,7 +190,7 @@ export class CopySelectorComponent implements Component {
 		const footer = [
 			rawKeyHint("↑↓", "move"),
 			keyHint("tui.select.confirm", "copy"),
-			keyHint("tui.select.cancel", "quit"),
+			keyHint("ui.dismiss", "quit"),
 		].join(theme.fg("dim", " · "));
 
 		return [

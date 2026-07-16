@@ -14,7 +14,7 @@ export class AgentHubFoldSequence {
 	#agentId: string | undefined;
 	#pending = false;
 
-	handle(keyData: string, selectedAgentId: string | undefined, interrupt: boolean): AgentHubFoldSequenceAction {
+	handle(keyData: string, selectedAgentId: string | undefined, dismiss: boolean): AgentHubFoldSequenceAction {
 		if (!this.#pending) {
 			if (keyData !== "z") return { kind: "unhandled" };
 			this.#pending = true;
@@ -24,7 +24,7 @@ export class AgentHubFoldSequence {
 
 		const agentId = this.#agentId;
 		this.reset();
-		if (interrupt || keyData !== "a" || !agentId) return { kind: "cancelled" };
+		if (dismiss || keyData !== "a" || !agentId) return { kind: "cancelled" };
 		return { kind: "toggle", agentId };
 	}
 

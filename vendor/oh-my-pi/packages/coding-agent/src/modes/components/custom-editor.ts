@@ -8,6 +8,7 @@ import { fgOrPlain } from "../theme/theme";
 type ConfigurableEditorAction = Extract<
 	AppKeybinding,
 	| "app.interrupt"
+	| "ui.dismiss"
 	| "app.clear"
 	| "app.exit"
 	| "app.suspend"
@@ -28,7 +29,8 @@ type ConfigurableEditorAction = Extract<
 >;
 
 const DEFAULT_ACTION_KEYS: Record<ConfigurableEditorAction, KeyId[]> = {
-	"app.interrupt": ["escape", "ctrl+q"],
+	"app.interrupt": ["ctrl+q"],
+	"ui.dismiss": ["escape"],
 	"app.clear": ["ctrl+c"],
 	"app.exit": ["ctrl+d"],
 	"app.suspend": ["ctrl+z"],
@@ -229,6 +231,7 @@ export class CustomEditor extends Editor {
 		}, CustomEditor.SHIMMER_FRAME_MS);
 		this.#shimmerTimer.unref?.();
 	}
+	onInterrupt?: (key: KeyId) => void;
 	onEscape?: (key: KeyId) => void;
 	onClear?: () => void;
 	onExit?: () => void;
@@ -430,8 +433,8 @@ export class CustomEditor extends Editor {
 
 		// Ctrl+Q always reaches the direct-interrupt lifecycle before any
 		// configurable action or local editor overlay can claim the key.
-		if (canonical === "ctrl+q" && this.onEscape) {
-			this.onEscape(canonical);
+		if (canonical === "ctrl+q" && this.onInterrupt) {
+			this.onInterrupt(canonical);
 			return;
 		}
 
@@ -525,13 +528,14 @@ export class CustomEditor extends Editor {
 				return;
 			}
 
-			// Escape remains context-sensitive: autocomplete dismisses first,
-			// then the controller unwinds or interrupts the active context.
-			if (
-				this.#matchesAction(canonical, "app.interrupt") &&
-				this.onEscape &&
-				!this.isShowingAutocomplete()
-			) {
+			if (this.#matchesAction(canonical, "app.interrupt") && this.onInterrupt) {
+				this.onInterrupt(canonical);
+				return;
+			}
+
+			// Dismissal remains context-sensitive: autocomplete dismisses first,
+			// then the controller unwinds the active UI without cancelling a turn.
+			if (this.#matchesAction(canonical, "ui.dismiss") && this.onEscape && !this.isShowingAutocomplete()) {
 				this.onEscape(canonical);
 				return;
 			}

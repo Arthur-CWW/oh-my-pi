@@ -19,14 +19,15 @@ export interface AgentHubViewerSequenceOptions {
 	readonly down: boolean;
 	readonly up: boolean;
 	readonly displayRows: boolean;
-	readonly interrupt: boolean;
+	readonly dismiss: boolean;
 }
 
 /** Vim-style `g` prefix shared by every Hub lane.
  *
  * There is deliberately no timeout: `g` has no standalone action, so waiting
  * preserves intent without introducing a latency race. The owner renders the
- * pending continuations until a bound second key, Escape, or an unknown key.
+ * pending continuations until a bound second key, the configured UI dismissal
+ * key, or an unknown key.
  */
 export class AgentHubViewerSequence {
 	#pending = false;
@@ -43,7 +44,7 @@ export class AgentHubViewerSequence {
 		}
 
 		this.reset();
-		if (options.interrupt) return { kind: "cancelled" };
+		if (options.dismiss) return { kind: "cancelled" };
 		if (options.prefix) return { kind: "first-line" };
 		if (options.down) return { kind: options.displayRows ? "display-row-down" : "logical-down" };
 		if (options.up) return { kind: options.displayRows ? "display-row-up" : "logical-up" };

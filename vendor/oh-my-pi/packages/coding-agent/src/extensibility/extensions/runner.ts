@@ -299,6 +299,7 @@ export class ExtensionRunner {
 	 * {@link MAX_PENDING_CREDENTIAL_DISABLED}; oldest entries are dropped under pressure.
 	 */
 	#pendingCredentialDisabled: CredentialDisabledEvent[] = [];
+	#dynamicToolsDispose: Promise<void> | undefined;
 
 	constructor(
 		private readonly extensions: Extension[],
@@ -338,6 +339,7 @@ export class ExtensionRunner {
 		this.runtime.setThinkingLevel = actions.setThinkingLevel;
 		this.runtime.getSessionName = actions.getSessionName;
 		this.runtime.setSessionName = actions.setSessionName;
+		this.runtime.activateDynamicTools(actions.refreshTools);
 
 		// Context actions (required)
 		this.#getModel = contextActions.getModel;
@@ -425,6 +427,69 @@ export class ExtensionRunner {
 			}
 		}
 		return tools;
+	}
+
+	/**
+	 * Shut down and remove every tool registered after this runner initialized.
+	 * The operation is session-owned and idempotent.
+	 */
+	disposeDynamicTools(): Promise<void> {
+		if (this.#dynamicToolsDispose) return this.#dynamicToolsDispose;
+		if (this.runtime.extensionPhase === "disposed") return Promise.resolve();
+		this.runtime.extensionPhase = "disposing";
+		this.#dynamicToolsDispose = this.#disposeDynamicTools();
+		return this.#dynamicToolsDispose;
+	}
+
+	async #disposeDynamicTools(): Promise<void> {
+		try {
+			try {
+				await this.runtime.flushDynamicToolRefresh();
+			} catch (error) {
+				this.emitError({
+					extensionPath: "<dynamic-tools>",
+					event: "tool_refresh",
+					error: error instanceof Error ? error.message : String(error),
+					stack: error instanceof Error ? error.stack : undefined,
+				});
+			}
+
+			const context = this.createContext();
+			for (const [extension, ownedTools] of this.runtime.dynamicTools) {
+				for (const [name, registeredTool] of ownedTools) {
+					const onSession = registeredTool.definition.onSession;
+					if (onSession) {
+						try {
+							await onSession({ reason: "shutdown", previousSessionFile: undefined }, context);
+						} catch (error) {
+							this.emitError({
+								extensionPath: extension.path,
+								event: "tool_session_shutdown",
+								error: error instanceof Error ? error.message : String(error),
+								stack: error instanceof Error ? error.stack : undefined,
+							});
+						}
+					}
+					if (extension.tools.get(name) === registeredTool) {
+						extension.tools.delete(name);
+					}
+				}
+			}
+			this.runtime.dynamicTools.clear();
+			this.runtime.requestDynamicToolRefresh();
+			try {
+				await this.runtime.flushDynamicToolRefresh();
+			} catch (error) {
+				this.emitError({
+					extensionPath: "<dynamic-tools>",
+					event: "tool_refresh",
+					error: error instanceof Error ? error.message : String(error),
+					stack: error instanceof Error ? error.stack : undefined,
+				});
+			}
+		} finally {
+			this.runtime.extensionPhase = "disposed";
+		}
 	}
 
 	/**
@@ -782,7 +847,11 @@ export class ExtensionRunner {
 			overflowRecorded: false,
 			startedAt,
 		};
-		const promise = Promise.resolve().then(() => this.#emitHandlers(event, messageBudget));
+		const promise = Promise.resolve().then(async () => {
+			const result = await this.#emitHandlers(event, messageBudget);
+			await this.runtime.flushDynamicToolRefresh();
+			return result;
+		});
 		this.#inFlightEvents.set(event.type, { promise, startedAt, messageBudget });
 		void promise.finally(() => {
 			if (this.#inFlightEvents.get(event.type)?.promise === promise) this.#inFlightEvents.delete(event.type);

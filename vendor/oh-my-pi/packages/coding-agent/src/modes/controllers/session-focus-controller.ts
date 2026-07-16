@@ -92,7 +92,8 @@ export class SessionFocusController {
 			this.#focusedAgentId = id;
 			this.#attachedSession = session;
 			this.#registryUnsubscribe ??= this.registry.onChange(event => this.#onRegistryEvent(event));
-			this.ctx.showStatus(`Viewing agent ${id} — Esc returns to main, Alt+Shift+← returns to parent`);
+			const dismissKey = this.ctx.keybindings.getDisplayString("ui.dismiss");
+			this.ctx.showStatus(`Viewing agent ${id} — ${dismissKey} returns to main, Alt+Shift+← returns to parent`);
 		} catch (error) {
 			const failure = this.#asError(error as object);
 			this.#focusedAgentId = previousId;
@@ -141,7 +142,9 @@ export class SessionFocusController {
 		if (!gone && !dead) return;
 		void this.unfocus()
 			.then(() => {
-				this.ctx.showStatus(`Agent ${event.ref.id} is ${gone ? "gone" : event.ref.status}; returned to main session`);
+				this.ctx.showStatus(
+					`Agent ${event.ref.id} is ${gone ? "gone" : event.ref.status}; returned to main session`,
+				);
 			})
 			.catch(error => {
 				const failure = this.#asError(error as object);
@@ -183,7 +186,11 @@ export class SessionFocusController {
 			replacementUnsubscribe = target.subscribe(async event => {
 				if (event.type === "message_start" && event.message.role === "assistant") {
 					assistantStreamSynced = true;
-				} else if (event.type === "message_update" && event.message.role === "assistant" && !assistantStreamSynced) {
+				} else if (
+					event.type === "message_update" &&
+					event.message.role === "assistant" &&
+					!assistantStreamSynced
+				) {
 					assistantStreamSynced = true;
 					await this.ctx.eventController.handleEvent({ type: "message_start", message: event.message });
 				}

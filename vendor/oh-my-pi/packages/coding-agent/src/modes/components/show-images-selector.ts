@@ -1,5 +1,6 @@
 import { Container, type SelectItem, SelectList } from "@oh-my-pi/pi-tui";
 import { getSelectListTheme } from "../../modes/theme/theme";
+import { matchesUiDismiss } from "../utils/keybinding-matchers";
 import { DynamicBorder } from "./dynamic-border";
 
 /**
@@ -7,9 +8,11 @@ import { DynamicBorder } from "./dynamic-border";
  */
 export class ShowImagesSelectorComponent extends Container {
 	#selectList: SelectList;
+	readonly #onCancel: () => void;
 
 	constructor(currentValue: boolean, onSelect: (show: boolean) => void, onCancel: () => void) {
 		super();
+		this.#onCancel = onCancel;
 
 		const items: SelectItem[] = [
 			{ value: "yes", label: "Yes", description: "Show images inline in terminal" },
@@ -29,14 +32,18 @@ export class ShowImagesSelectorComponent extends Container {
 			onSelect(item.value === "yes");
 		};
 
-		this.#selectList.onCancel = () => {
-			onCancel();
-		};
-
 		this.addChild(this.#selectList);
 
 		// Add bottom border
 		this.addChild(new DynamicBorder());
+	}
+
+	handleInput(data: string): void {
+		if (matchesUiDismiss(data)) {
+			this.#onCancel();
+			return;
+		}
+		this.#selectList.handleInput(data);
 	}
 
 	getSelectList(): SelectList {

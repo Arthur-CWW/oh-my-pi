@@ -8,6 +8,7 @@ import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { Model, TSchema, UserContent } from "@oh-my-pi/pi-ai";
 import type { KeyId } from "@oh-my-pi/pi-tui";
 import { hasFsCode, isEacces, isEnoent, logger } from "@oh-my-pi/pi-utils";
+import * as Schema from "effect/Schema";
 import { z } from "zod/v4";
 import { type ExtensionModule, extensionModuleCapability } from "../../capability/extension-module";
 import { loadCapability } from "../../discovery";
@@ -34,6 +35,8 @@ import type {
 	MessageRenderer,
 	ProviderConfig,
 	RegisteredCommand,
+	RefreshToolsHandler,
+	RegisteredTool,
 	ToolDefinition,
 } from "./types";
 
@@ -45,6 +48,43 @@ type LoadedExtensionModule = ExtensionFactory | { default?: ExtensionFactory };
 function getExtensionFactory(module: LoadedExtensionModule): ExtensionFactory | null {
 	const candidate = typeof module === "function" ? module : module.default;
 	return typeof candidate === "function" ? candidate : null;
+}
+
+const NonEmptyTrimmedStringSchema = Schema.String.pipe(
+	Schema.check(Schema.isMinLength(1), Schema.isTrimmed()),
+);
+const DynamicToolNameSchema = Schema.String.pipe(
+	Schema.check(Schema.isPattern(/^[a-z0-9_-]{1,64}$/)),
+);
+const DynamicToolRegistrationSchema = Schema.Struct({
+	source: NonEmptyTrimmedStringSchema,
+	definition: Schema.Struct({
+		name: DynamicToolNameSchema,
+		label: NonEmptyTrimmedStringSchema,
+		description: NonEmptyTrimmedStringSchema,
+		origin: Schema.optional(Schema.Unknown),
+		parameters: Schema.Unknown,
+		hidden: Schema.optional(Schema.Boolean),
+		defaultInactive: Schema.optional(Schema.Boolean),
+		deferrable: Schema.optional(Schema.Boolean),
+		approval: Schema.optional(Schema.Unknown),
+		mcpServerName: Schema.optional(NonEmptyTrimmedStringSchema),
+		mcpToolName: Schema.optional(NonEmptyTrimmedStringSchema),
+		execute: Schema.Unknown,
+		onSession: Schema.optional(Schema.Unknown),
+		renderCall: Schema.optional(Schema.Unknown),
+		renderResult: Schema.optional(Schema.Unknown),
+	}),
+});
+
+function validateDynamicToolRegistration<TParams extends TSchema, TDetails>(
+	tool: ToolDefinition<TParams, TDetails>,
+	source: string,
+): void {
+	Schema.decodeUnknownSync(DynamicToolRegistrationSchema)(
+		{ source, definition: tool },
+		{ onExcessProperty: "error" },
+	);
 }
 
 export class ExtensionRuntimeNotInitializedError extends Error {
@@ -60,7 +100,35 @@ export class ExtensionRuntimeNotInitializedError extends Error {
 export class ExtensionRuntime implements IExtensionRuntime {
 	flagValues = new Map<string, boolean | string>();
 	pendingProviderRegistrations: Array<{ name: string; config: ProviderConfig; sourceId: string }> = [];
+	extensionPhase: IExtensionRuntime["extensionPhase"] = "loading";
+	dynamicTools = new Map<Extension, Extension["tools"]>();
+	dynamicToolRefreshTail: Promise<void> = Promise.resolve();
+	#dynamicToolRefreshHandler: RefreshToolsHandler | undefined;
 
+	activateDynamicTools(refreshTools?: RefreshToolsHandler): void {
+		if (this.extensionPhase !== "loading") {
+			throw new Error(`Extension runtime cannot initialize from phase "${this.extensionPhase}"`);
+		}
+		this.#dynamicToolRefreshHandler = refreshTools;
+		this.extensionPhase = "active";
+	}
+
+	requestDynamicToolRefresh(): void {
+		const refreshTools = this.#dynamicToolRefreshHandler;
+		if (!refreshTools) return;
+		const previous = this.dynamicToolRefreshTail.catch(() => {});
+		this.dynamicToolRefreshTail = previous.then(() => {
+			const tools: RegisteredTool[] = [];
+			for (const ownedTools of this.dynamicTools.values()) {
+				tools.push(...ownedTools.values());
+			}
+			return refreshTools(tools);
+		});
+	}
+
+	flushDynamicToolRefresh(): Promise<void> {
+		return this.dynamicToolRefreshTail;
+	}
 	sendMessage(): void {
 		throw new ExtensionRuntimeNotInitializedError();
 	}
@@ -119,7 +187,7 @@ export class ExtensionRuntime implements IExtensionRuntime {
  * Registration methods write to the extension object.
  * Action methods delegate to the shared runtime.
  */
-class ConcreteExtensionAPI implements ExtensionAPI, IExtensionRuntime {
+class ConcreteExtensionAPI implements ExtensionAPI {
 	readonly logger = logger;
 	readonly typebox = TypeBox;
 	readonly zod = z;
@@ -145,10 +213,33 @@ class ConcreteExtensionAPI implements ExtensionAPI, IExtensionRuntime {
 	}
 
 	registerTool<TParams extends TSchema = TSchema, TDetails = unknown>(tool: ToolDefinition<TParams, TDetails>): void {
-		this.extension.tools.set(tool.name, {
-			definition: tool,
+		if (this.runtime.extensionPhase === "loading") {
+			this.extension.tools.set(tool.name, {
+				definition: tool,
+				extensionPath: this.extension.path,
+			});
+			return;
+		}
+		if (this.runtime.extensionPhase !== "active") {
+			throw new Error("Cannot register a dynamic extension tool after its session runtime has been disposed.");
+		}
+
+		validateDynamicToolRegistration(tool, this.extension.path);
+		const registeredTool: RegisteredTool<TParams, TDetails> = {
+			definition: {
+				...tool,
+				origin: { kind: "dynamic", source: this.extension.path },
+			},
 			extensionPath: this.extension.path,
-		});
+		};
+		this.extension.tools.set(tool.name, registeredTool);
+		let ownedTools = this.runtime.dynamicTools.get(this.extension);
+		if (!ownedTools) {
+			ownedTools = new Map();
+			this.runtime.dynamicTools.set(this.extension, ownedTools);
+		}
+		ownedTools.set(tool.name, registeredTool);
+		this.runtime.requestDynamicToolRefresh();
 	}
 
 	registerCommand(

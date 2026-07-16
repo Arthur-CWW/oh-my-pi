@@ -9,6 +9,7 @@ type Spy = Mock<(...args: unknown[]) => unknown>;
 type StartPendingSubmissionSpy = Mock<InteractiveModeContext["startPendingSubmission"]>;
 type FakeEditor = {
 	onEscape?: (key?: string) => void;
+	onInterrupt?: (key?: string) => void;
 	onSubmit?: (text: string) => Promise<void>;
 	onClear?: () => void;
 	onExit?: () => void;
@@ -81,7 +82,7 @@ function createContext(): {
 	inputListeners: Array<(data: string) => { consume?: boolean; data?: string } | undefined>;
 } {
 	let editorText = "";
-	const abort = vi.fn();
+	const abort = vi.fn(async () => {});
 	const abortBash = vi.fn();
 	const abortEval = vi.fn();
 	const abortHandoff = vi.fn();
@@ -196,12 +197,14 @@ function createContext(): {
 		startPendingSubmission,
 		updatePendingMessagesDisplay,
 		updateEditorBorderColor: vi.fn(),
+		closeUnpinnedErrorsPanel: vi.fn(),
 		showDebugSelector: vi.fn(),
 		toggleTodoExpansion: vi.fn(),
 		showAgentHub: vi.fn(),
 		unfocusSession: vi.fn(async () => {}),
 		focusParentSession: vi.fn(async () => {}),
 		handleSTTToggle: vi.fn(),
+		returnToAgentHubPreview: vi.fn(() => false),
 		handleBtwEscape,
 		handleBtwCommand,
 		hasActiveBtw,
@@ -259,7 +262,7 @@ afterEach(() => {
 });
 
 describe("InputController escape behavior", () => {
-	it("prefers canceling a pending optimistic submission before aborting the session", async () => {
+	it("prefers canceling a pending optimistic submission before aborting on interrupt", async () => {
 		const { ctx, editor, spies } = createContext();
 		const submission = createSubmission({ text: "hello" });
 		spies.startPendingSubmission.mockReturnValue(submission);
@@ -275,11 +278,11 @@ describe("InputController escape behavior", () => {
 			text: "hello",
 			attachments: undefined,
 			imageLinks: undefined,
-			streamingBehavior: "steer",
+			streamingBehavior: "followUp",
 		});
 		expect(spies.onInputCallback).toHaveBeenCalledWith(submission);
 
-		editor.onEscape?.();
+		editor.onInterrupt?.();
 		expect(spies.cancelPendingSubmission).toHaveBeenCalledTimes(1);
 		expect(spies.clearQueue).not.toHaveBeenCalled();
 		expect(spies.abort).not.toHaveBeenCalled();
@@ -327,7 +330,7 @@ describe("InputController escape behavior", () => {
 		const controller = new InputController(ctx);
 
 		controller.setupKeyHandlers();
-		editor.onEscape?.();
+		editor.onInterrupt?.();
 		await Promise.resolve();
 		await Promise.resolve();
 
@@ -337,13 +340,13 @@ describe("InputController escape behavior", () => {
 		expect(spies.abort).toHaveBeenCalledWith({ reason: USER_INTERRUPT_LABEL });
 	});
 
-	it("aborts active handoff generation before default Esc handling", () => {
+	it("interrupts active handoff generation before the default turn cancel", () => {
 		const { ctx, editor, spies } = createContext();
 		(ctx.viewSession as { isGeneratingHandoff: boolean }).isGeneratingHandoff = true;
 		const controller = new InputController(ctx);
 
 		controller.setupKeyHandlers();
-		editor.onEscape?.();
+		editor.onInterrupt?.();
 
 		expect(spies.abortHandoff).toHaveBeenCalledTimes(1);
 		expect(ctx.showTreeSelector).not.toHaveBeenCalled();
@@ -357,7 +360,7 @@ describe("InputController escape behavior", () => {
 		const controller = new InputController(ctx);
 
 		controller.setupKeyHandlers();
-		editor.onEscape?.();
+		editor.onInterrupt?.();
 
 		expect(spies.abortBash).toHaveBeenCalledTimes(1);
 		expect(spies.abort).not.toHaveBeenCalled();
@@ -370,7 +373,7 @@ describe("InputController escape behavior", () => {
 		const controller = new InputController(ctx);
 
 		controller.setupKeyHandlers();
-		editor.onEscape?.();
+		editor.onInterrupt?.();
 
 		expect(spies.abortEval).toHaveBeenCalledTimes(1);
 		expect(spies.abort).not.toHaveBeenCalled();
@@ -418,7 +421,20 @@ describe("InputController escape behavior", () => {
 		expect(spies.abort).not.toHaveBeenCalled();
 	});
 
-	it("aborts streaming even when the working loader is no longer present", () => {
+	it("interrupts streaming even when the working loader is no longer present", () => {
+		const { ctx, editor, spies } = createContext();
+		(ctx.session as { isStreaming: boolean }).isStreaming = true;
+		const controller = new InputController(ctx);
+
+		controller.setupKeyHandlers();
+		editor.onInterrupt?.();
+
+		expect(spies.cancelPendingSubmission).toHaveBeenCalledTimes(1);
+		expect(spies.clearQueue).not.toHaveBeenCalled();
+		expect(spies.abort).toHaveBeenCalledTimes(1);
+	});
+
+	it("dismisses editor UI without interrupting a streaming turn", () => {
 		const { ctx, editor, spies } = createContext();
 		(ctx.session as { isStreaming: boolean }).isStreaming = true;
 		const controller = new InputController(ctx);
@@ -426,9 +442,8 @@ describe("InputController escape behavior", () => {
 		controller.setupKeyHandlers();
 		editor.onEscape?.();
 
+		expect(spies.abort).not.toHaveBeenCalled();
 		expect(spies.cancelPendingSubmission).not.toHaveBeenCalled();
-		expect(spies.clearQueue).not.toHaveBeenCalled();
-		expect(spies.abort).toHaveBeenCalledTimes(1);
 	});
 
 	it("returns focused subagent view to main on Esc instead of aborting", () => {
@@ -551,7 +566,6 @@ describe("InputController interactive quit behavior", () => {
 		expect(spies.showHookSelector).not.toHaveBeenCalled();
 		expect(spies.shutdown).toHaveBeenCalledWith({ childPolicy: "detach" });
 	});
-
 
 	it("offers detach, destructive stop, and cancel for running child work", async () => {
 		const { ctx, editor, spies } = createContext();

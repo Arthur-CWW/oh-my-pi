@@ -196,7 +196,12 @@ describe("subagent HUD lines", () => {
 			.list()
 			.filter(ref => ref.kind === "sub")
 			.map(ref => ref.id);
-		expect(first.getSessions().filter(session => session.kind === "subagent").map(session => session.id)).toEqual(expected);
+		expect(
+			first
+				.getSessions()
+				.filter(session => session.kind === "subagent")
+				.map(session => session.id),
+		).toEqual(expected);
 		expect(first.getSessions().find(session => session.id === "QuietRoot.ParkedLeaf")).toMatchObject({
 			registryStatus: "parked",
 			parentAgentId: "QuietRoot",
@@ -205,14 +210,20 @@ describe("subagent HUD lines", () => {
 
 		const rebuilt = new SessionObserverRegistry();
 		rebuilt.subscribeToAgentRegistry(agents);
-		expect(rebuilt.getSessions().filter(session => session.kind === "subagent").map(session => session.id)).toEqual(expected);
+		expect(
+			rebuilt
+				.getSessions()
+				.filter(session => session.kind === "subagent")
+				.map(session => session.id),
+		).toEqual(expected);
 		expect(render(rebuilt.getSessions())).toContain("QuietRoot: Quiet root");
 		rebuilt.dispose();
 	});
 
 	it("renders nested ids as a breadcrumb and truncates long descriptions to the viewport", () => {
 		const out = render([makeSession({ id: "Anna.Bob", description: `start ${"x".repeat(300)} end` })], 60);
-		expect(out).toContain("Anna>Bob:");
+		expect(out).toContain("Bob:");
+		expect(out).not.toContain("Anna>Bob");
 		expect(out).not.toContain("end");
 		for (const line of out.split("\n")) {
 			expect(Bun.stringWidth(line)).toBeLessThanOrEqual(60);
@@ -275,7 +286,8 @@ describe("subagent HUD lines", () => {
 			const live = registry.getSessions().find(session => session.id === "RateWorker");
 			expect(live?.tokenRate).toBeCloseTo(10, 5);
 			expect(live?.tokenRateStuck).toBe(false);
-			expect(render(registry.getSessions())).toContain("10.0t/s");
+			expect(render(registry.getSessions())).toMatch(/\s10\s+RUN$/m);
+			expect(render(registry.getSessions())).not.toContain("t/s");
 
 			setSystemTime(new Date(start.getTime() + 61_000));
 			const decayed = registry.getSessions().find(session => session.id === "RateWorker");
@@ -291,4 +303,48 @@ describe("subagent HUD lines", () => {
 		}
 	});
 
+	it("renders a three-deep short-name tree with aligned integer rate and state columns", () => {
+		const rows = [
+			makeSession({
+				id: "HR147ColonMode",
+				description: "Colon-mode UX implementer",
+				tokenRate: 9.6,
+				progress: makeProgress({ id: "HR147ColonMode", resolvedModel: "openai-codex/gpt-5.6-sol:xhigh" }),
+			}),
+			makeSession({
+				id: "HR147ColonMode.HR151DismissAction",
+				parentAgentId: "HR147ColonMode",
+				description: "Modal input-action migration specialist",
+				tokenRate: 123.4,
+				progress: makeProgress({
+					id: "HR147ColonMode.HR151DismissAction",
+					resolvedModel: "anthropic/claude-sonnet-4-6:high",
+				}),
+			}),
+			makeSession({
+				id: "HR147ColonMode.HR151DismissAction.DismissSelectors",
+				parentAgentId: "HR147ColonMode.HR151DismissAction",
+				description: "Selector dismissal migration specialist",
+				tokenRate: 1.2,
+				tokenRateStuck: true,
+				progress: makeProgress({
+					id: "HR147ColonMode.HR151DismissAction.DismissSelectors",
+					resolvedModel: "kimi-code/kimi-for-coding:medium",
+				}),
+			}),
+		];
+		const rendered = render(rows, 100)
+			.split("\n")
+			.filter(line => line.includes("["));
+		expect(rendered).toHaveLength(3);
+		expect(rendered[0]).toContain("[SOX5.6xh] HR147ColonMode: Colon-mode UX implementer");
+		expect(rendered[1]).toContain("[SAN4.6h] HR151DismissAction: Modal input-action migration specialist");
+		expect(rendered[2]).toContain("[KKMm] DismissSelectors: Selector dismissal migration specialist");
+		expect(rendered.join("\n")).not.toContain("HR147ColonMode.HR151DismissAction");
+		expect(rendered.map(line => Bun.stringWidth(line))).toEqual([100, 100, 100]);
+		expect(rendered[0]).toMatch(/\s10\s+RUN$/);
+		expect(rendered[1]).toMatch(/\s123\s+RUN$/);
+		expect(rendered[2]).toMatch(/\s1\s+RUN\+0$/);
+		expect(rendered.join("\n")).not.toMatch(/\d+\.\d+t\/s/);
+	});
 });

@@ -110,6 +110,7 @@ export class ExtensionUiController {
 			getActiveTools: () => this.ctx.session.getActiveToolNames(),
 			getAllTools: () => this.ctx.session.getAllToolNames(),
 			setActiveTools: toolNames => this.ctx.session.setActiveToolsByName(toolNames),
+			refreshTools: tools => this.ctx.session.refreshDynamicTools(tools, extensionRunner),
 			setModel: async model => {
 				const key = await this.ctx.session.modelRegistry.getApiKey(model);
 				if (!key) return false;
@@ -349,6 +350,7 @@ export class ExtensionUiController {
 			getActiveTools: () => this.ctx.session.getActiveToolNames(),
 			getAllTools: () => this.ctx.session.getAllToolNames(),
 			setActiveTools: toolNames => this.ctx.session.setActiveToolsByName(toolNames),
+			refreshTools: tools => this.ctx.session.refreshDynamicTools(tools, extensionRunner),
 			setModel: async model => {
 				const key = await this.ctx.session.modelRegistry.getApiKey(model);
 				if (!key) return false;
@@ -485,6 +487,7 @@ export class ExtensionUiController {
 			return;
 		}
 		for (const registeredTool of this.ctx.session.extensionRunner?.getAllRegisteredTools() ?? []) {
+			if (reason === "shutdown" && registeredTool.definition.origin?.kind === "dynamic") continue;
 			if (registeredTool.definition.onSession) {
 				try {
 					await registeredTool.definition.onSession(event, {

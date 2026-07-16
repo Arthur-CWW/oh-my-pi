@@ -4,6 +4,7 @@
  */
 import { afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
 import * as fs from "node:fs/promises";
+import { KeybindingsManager } from "@oh-my-pi/pi-coding-agent/config/keybindings";
 import { IrcBus } from "@oh-my-pi/pi-coding-agent/irc/bus";
 import { AgentHubOverlayComponent } from "@oh-my-pi/pi-coding-agent/modes/components/agent-hub";
 import type { AgentHubTurnStatus } from "@oh-my-pi/pi-coding-agent/modes/components/agent-hub-selected-state";
@@ -13,7 +14,21 @@ import { AgentRegistry, type AgentStatus } from "@oh-my-pi/pi-coding-agent/regis
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { CURRENT_SESSION_VERSION } from "@oh-my-pi/pi-coding-agent/session/session-entries";
 import { CHILD_LIFECYCLE_CUSTOM_TYPE, type ChildLifecycleState } from "@oh-my-pi/pi-coding-agent/task/child-lifecycle";
+import { setKeybindings } from "@oh-my-pi/pi-tui";
 import { TempDir } from "@oh-my-pi/pi-utils";
+
+const CTRL_G = "\x07";
+const CTRL_Q = "\x11";
+const ESCAPE = "\x1b";
+
+beforeAll(async () => {
+	setKeybindings(KeybindingsManager.inMemory());
+	await initTheme();
+});
+
+afterEach(() => {
+	setKeybindings(KeybindingsManager.inMemory());
+});
 
 interface GeometryStub {
 	setRows(n: number): void;
@@ -158,44 +173,34 @@ function revealParked(hub: AgentHubOverlayComponent, id: string): void {
 	hub.handleInput("\r");
 }
 
+function renderedRowAgentId(line: string): string | undefined {
+	const plain = Bun.stripANSI(line);
+	const prefix = plain.slice(0, 3);
+	if (prefix !== " ❯ " && prefix !== "   ") return undefined;
+	// Model/state lanes are deliberately width-adaptive. Anchor on the semantic
+	// state badge instead of fixed columns so density changes do not erase the
+	// fixture's roster projection.
+	return plain.match(/[●○■×◌·✓~◐◑◒◓]\s+\S+\s+(?:[▸▾]\s*)?(\S+)/)?.[1];
+}
+
 function renderedAgentIds(hub: AgentHubOverlayComponent): string[] {
 	return hub
 		.render(120)
-		.map(line => Bun.stripANSI(line))
-		.filter(line => {
-			if (line.length <= 25) return false;
-			const prefix = line.slice(0, 3);
-			if (prefix !== " ❯ " && prefix !== "   ") return false;
-			const stateCol = line.slice(17, 23).trim();
-			return /[●○■×◌·✓~]/.test(stateCol);
-		})
-		.map(line => {
-			const namePart = line.slice(23).trim();
-			const cleanName = namePart.replace(/^[▸▾]\s*/, "");
-			return cleanName.split(/\s+/)[0];
-		})
-		.filter(Boolean) as string[];
+		.map(renderedRowAgentId)
+		.filter((id): id is string => id !== undefined);
 }
 
 /** Return the id from the table row carrying the rendered navigation cursor. */
 function selectedAgentId(hub: AgentHubOverlayComponent): string | undefined {
 	for (const line of hub.render(120)) {
 		const plain = Bun.stripANSI(line);
-		if (plain.startsWith(" ❯ ")) {
-			const namePart = plain.slice(23).trim();
-			const cleanName = namePart.replace(/^[▸▾]\s*/, "");
-			return cleanName.split(/\s+/)[0];
-		}
+		if (plain.startsWith(" ❯ ")) return renderedRowAgentId(plain);
 	}
 	return undefined;
 }
 
 describe("Agent Hub selection and filter", () => {
 	let geometry: GeometryStub | undefined;
-
-	beforeAll(async () => {
-		await initTheme();
-	});
 
 	afterEach(() => {
 		vi.restoreAllMocks();
@@ -332,47 +337,26 @@ describe("Agent Hub selection and filter", () => {
 		expect(renderedAgentIds(hub)).toEqual(["Alpha", "Beta", "Gamma", "Delta"]);
 		expect(selectedAgentId(hub)).toBe("Beta");
 
-		let focusedId: string | undefined;
-		const agents2 = new AgentRegistry();
-		registerAgent(agents2, "Alpha");
-		registerAgent(agents2, "Beta");
-		const { hub: hub2 } = makeHub(agents2, {
-			focusAgent: async id => {
-				focusedId = id;
-			},
-		});
-		registerAgent(agents2, "Gamma");
-		hub2.handleInput("\r");
-		expect(focusedId).toBe("Alpha");
-
 		hub.dispose();
-		hub2.dispose();
 	});
 
-	it("n/p move through the roster", () => {
+	it("j/k move through the roster without attaching", () => {
 		geometry = stubStdoutGeometry(120);
 		const agents = new AgentRegistry();
 		registerAgent(agents, "Alpha");
 		registerAgent(agents, "Beta");
 		registerAgent(agents, "Gamma");
 
-		const focus: { id: string | undefined } = { id: undefined };
-		const focusedId = (): string | undefined => focus.id;
-		const { hub } = makeHub(agents, {
-			focusAgent: async id => {
-				focus.id = id;
-			},
-		});
-		// Oldest registrations are at the top.
-		hub.handleInput("\r");
-		expect(focusedId()).toBe("Alpha");
+		const focusAgent = vi.fn(async () => {});
+		const { hub } = makeHub(agents, { focusAgent });
+		expect(selectedAgentId(hub)).toBe("Alpha");
 
-		// Move to the newest registration.
-		hub.handleInput("n");
-		hub.handleInput("n");
-		focus.id = undefined;
-		hub.handleInput("\r");
-		expect(focusedId()).toBe("Gamma");
+		hub.handleInput("j");
+		hub.handleInput("j");
+		expect(selectedAgentId(hub)).toBe("Gamma");
+		hub.handleInput("k");
+		expect(selectedAgentId(hub)).toBe("Beta");
+		expect(focusAgent).not.toHaveBeenCalled();
 
 		hub.dispose();
 	});
@@ -393,7 +377,7 @@ describe("Agent Hub selection and filter", () => {
 			activeSearchFieldEntries: 0,
 			materializedRows: 3,
 		});
-		for (let i = 0; i < 10_000; i++) hub.handleInput("n");
+		for (let i = 0; i < 10_000; i++) hub.handleInput("j");
 		expect(renderedAgentIds(hub)).toEqual(["Agent9997", "Agent9998", "Agent9999"]);
 
 		hub.handleInput("/");
@@ -452,30 +436,59 @@ describe("Agent Hub selection and filter", () => {
 		hub.dispose();
 	});
 
-	it("Esc clears filter before closing hub", () => {
+	it("keeps app.interrupt separate from default Hub dismissal", () => {
+		setKeybindings(KeybindingsManager.inMemory({ "app.interrupt": "ctrl+q" }));
 		geometry = stubStdoutGeometry(120);
 		const agents = new AgentRegistry();
 		registerAgent(agents, "AuthLoader");
 		registerAgent(agents, "DataParser");
 
 		const { hub, doneCalls } = makeHub(agents);
-
-		// Enter filter, type something
 		hub.handleInput("/");
-		hub.handleInput("a");
-		hub.handleInput("u");
-		// Exit filter editing with Enter
+		for (const key of "auth") hub.handleInput(key);
 		hub.handleInput("\r");
-
 		expect(renderedAgentIds(hub)).toEqual(["AuthLoader"]);
 
-		// First Esc clears the filter
-		hub.handleInput("\x1b");
+		hub.handleInput(CTRL_Q);
+		expect(renderedAgentIds(hub)).toEqual(["AuthLoader"]);
+		expect(doneCalls()).toBe(0);
+
+		hub.handleInput(ESCAPE);
 		expect(renderedAgentIds(hub)).toEqual(["AuthLoader", "DataParser"]);
 		expect(doneCalls()).toBe(0);
 
-		// Second Esc closes the hub
-		hub.handleInput("\x1b");
+		hub.handleInput(CTRL_Q);
+		expect(doneCalls()).toBe(0);
+		hub.handleInput(ESCAPE);
+		expect(doneCalls()).toBe(1);
+
+		hub.dispose();
+	});
+
+	it("uses remapped ui.dismiss to clear the table filter and close the Hub", () => {
+		setKeybindings(KeybindingsManager.inMemory({ "ui.dismiss": "ctrl+g" }));
+		geometry = stubStdoutGeometry(120);
+		const agents = new AgentRegistry();
+		registerAgent(agents, "AuthLoader");
+		registerAgent(agents, "DataParser");
+
+		const { hub, doneCalls } = makeHub(agents);
+		hub.handleInput("/");
+		for (const key of "auth") hub.handleInput(key);
+		hub.handleInput("\r");
+		expect(renderedAgentIds(hub)).toEqual(["AuthLoader"]);
+
+		hub.handleInput(ESCAPE);
+		expect(renderedAgentIds(hub)).toEqual(["AuthLoader"]);
+		expect(doneCalls()).toBe(0);
+
+		hub.handleInput(CTRL_G);
+		expect(renderedAgentIds(hub)).toEqual(["AuthLoader", "DataParser"]);
+		expect(doneCalls()).toBe(0);
+
+		hub.handleInput(ESCAPE);
+		expect(doneCalls()).toBe(0);
+		hub.handleInput(CTRL_G);
 		expect(doneCalls()).toBe(1);
 
 		hub.dispose();
@@ -488,12 +501,7 @@ describe("Agent Hub selection and filter", () => {
 		registerAgent(agents, "Beta");
 		registerAgent(agents, "AlphaChild");
 
-		let focusedId: string | undefined;
-		const { hub } = makeHub(agents, {
-			focusAgent: async id => {
-				focusedId = id;
-			},
-		});
+		const { hub } = makeHub(agents);
 
 		// Default selects Alpha (oldest). Keep Alpha selected while filtering.
 
@@ -508,8 +516,7 @@ describe("Agent Hub selection and filter", () => {
 
 		// Alpha and AlphaChild visible; Alpha should still be selected.
 		expect(renderedAgentIds(hub)).toEqual(["Alpha", "AlphaChild"]);
-		hub.handleInput("\r");
-		expect(focusedId).toBe("Alpha");
+		expect(selectedAgentId(hub)).toBe("Alpha");
 
 		hub.dispose();
 	});
@@ -619,23 +626,12 @@ describe("Agent Hub selection and filter", () => {
 		registerAgent(agents, "Beta", "parked");
 		registerAgent(agents, "Gamma");
 
-		const focus: { id: string | undefined } = { id: undefined };
-		const focusedId = (): string | undefined => focus.id;
-		const { hub } = makeHub(agents, {
-			focusAgent: async id => {
-				focus.id = id;
-			},
-		});
+		const { hub } = makeHub(agents);
 
 		revealParked(hub, "Beta");
 		hub.handleInput("\r");
 		hub.handleInput("\x1b");
 		expect(selectedAgentId(hub)).toBe("Beta");
-
-		hub.handleInput("\x1b");
-		hub.handleInput("p");
-		hub.handleInput("\r");
-		expect(focusedId()).toBe("Gamma");
 
 		hub.dispose();
 	});
@@ -644,10 +640,6 @@ describe("Agent Hub selection and filter", () => {
 describe("Agent Hub transcript search", () => {
 	let geometry: GeometryStub | undefined;
 
-	beforeAll(async () => {
-		await initTheme();
-	});
-
 	afterEach(() => {
 		vi.restoreAllMocks();
 		geometry?.restore();
@@ -655,50 +647,69 @@ describe("Agent Hub transcript search", () => {
 		AgentRegistry.resetGlobalForTests();
 	});
 
-	it("/ in chat view enters search mode and Esc clears before closing", () => {
+	it("keeps app.interrupt separate from default chat-preview dismissal", () => {
+		setKeybindings(KeybindingsManager.inMemory({ "app.interrupt": "ctrl+q" }));
 		geometry = stubStdoutGeometry(120);
 		const agents = new AgentRegistry();
 		registerAgent(agents, "Worker", "parked");
 
 		const { hub, doneCalls } = makeHub(agents);
 		revealParked(hub, "Worker");
-		hub.handleInput("\r"); // open chat for parked Worker
-
-		// Verify we're in chat view
-		let text = renderedText(hub);
-		expect(text).toContain("Agent Hub > Worker");
-
-		// Enter search mode
-		hub.handleInput("/");
-		text = renderedText(hub);
-		// Should show the search input prompt
-		expect(text).toContain("/");
-
-		// Type a query
-		hub.handleInput("t");
-		hub.handleInput("e");
-		hub.handleInput("s");
-		hub.handleInput("t");
-
-		text = renderedText(hub);
-		expect(text).toContain("/test");
-
-		// Confirm search with Enter
 		hub.handleInput("\r");
+		expect(renderedText(hub)).toContain("Agent Hub > Worker");
 
-		// Esc should clear search first (not close chat)
-		hub.handleInput("\x1b");
-		text = renderedText(hub);
-		// Should still be in chat view (search was cleared, not closed)
-		expect(text).toContain("Agent Hub > Worker");
-		// Search indicator should be gone
-		expect(text).not.toContain("/test");
+		hub.handleInput("/");
+		for (const key of "test") hub.handleInput(key);
+		hub.handleInput("\r");
+		expect(renderedText(hub)).toContain("/test");
 
-		// Second Esc closes chat back to table
-		hub.handleInput("\x1b");
-		text = renderedText(hub);
-		expect(text).toContain("Agent Hub");
-		expect(text).not.toContain("Agent Hub > Worker");
+		hub.handleInput(CTRL_Q);
+		expect(renderedText(hub)).toContain("/test");
+		expect(doneCalls()).toBe(0);
+
+		hub.handleInput(ESCAPE);
+		expect(renderedText(hub)).toContain("Agent Hub > Worker");
+		expect(renderedText(hub)).not.toContain("/test");
+
+		hub.handleInput(CTRL_Q);
+		expect(renderedText(hub)).toContain("Agent Hub > Worker");
+		expect(doneCalls()).toBe(0);
+
+		hub.handleInput(ESCAPE);
+		expect(renderedText(hub)).toContain("Agent Hub");
+		expect(renderedText(hub)).not.toContain("Agent Hub > Worker");
+		expect(doneCalls()).toBe(0);
+
+		hub.dispose();
+	});
+
+	it("uses remapped ui.dismiss to clear search and close the chat preview", () => {
+		setKeybindings(KeybindingsManager.inMemory({ "ui.dismiss": "ctrl+g" }));
+		geometry = stubStdoutGeometry(120);
+		const agents = new AgentRegistry();
+		registerAgent(agents, "Worker", "parked");
+
+		const { hub } = makeHub(agents);
+		revealParked(hub, "Worker");
+		hub.handleInput("\r");
+		hub.handleInput("/");
+		for (const key of "test") hub.handleInput(key);
+		hub.handleInput("\r");
+		expect(renderedText(hub)).toContain("/test");
+
+		hub.handleInput(ESCAPE);
+		expect(renderedText(hub)).toContain("/test");
+
+		hub.handleInput(CTRL_G);
+		expect(renderedText(hub)).toContain("Agent Hub > Worker");
+		expect(renderedText(hub)).not.toContain("/test");
+
+		hub.handleInput(ESCAPE);
+		expect(renderedText(hub)).toContain("Agent Hub > Worker");
+
+		hub.handleInput(CTRL_G);
+		expect(renderedText(hub)).toContain("Agent Hub");
+		expect(renderedText(hub)).not.toContain("Agent Hub > Worker");
 
 		hub.dispose();
 	});

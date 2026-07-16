@@ -3,9 +3,10 @@ import { PASTE_CODE_LOGIN_PROVIDERS } from "@oh-my-pi/pi-ai";
 import type { OAuthProvider } from "@oh-my-pi/pi-ai/oauth/types";
 import { Input, matchesKey, type SgrMouseEvent, wrapTextWithAnsi } from "@oh-my-pi/pi-tui";
 import { getAgentDbPath } from "@oh-my-pi/pi-utils";
+import { keyHint } from "../../components/keybinding-hints";
 import { OAuthSelectorComponent } from "../../components/oauth-selector";
 import { theme } from "../../theme/theme";
-import { matchesAppInterrupt } from "../../utils/keybinding-matchers";
+import { matchesUiDismiss } from "../../utils/keybinding-matchers";
 import type { SetupSceneHost, SetupTab } from "./types";
 
 function loginUrlLink(url: string): string {
@@ -21,7 +22,7 @@ interface PromptState {
 /**
  * "Sign in" panel: lets the user authenticate one or more model providers via
  * OAuth. Unlike a standalone scene it never auto-advances the wizard — the user
- * may sign in to several providers and then continue with Esc.
+ * may sign in to several providers and then continue with the configured dismissal binding.
  */
 export class SignInTab implements SetupTab {
 	readonly id = "sign-in";
@@ -63,9 +64,12 @@ export class SignInTab implements SetupTab {
 
 	handleInput(data: string): void {
 		if (this.#loggingInProvider) {
-			if (matchesAppInterrupt(data) || matchesKey(data, "ctrl+c")) {
+			if (matchesUiDismiss(data) || matchesKey(data, "ctrl+c")) {
 				this.#loginAbort?.abort();
+				this.#resolvePrompt("");
+				return;
 			}
+			this.#prompt?.input.handleInput(data);
 			return;
 		}
 		this.#selector.handleInput(data);
@@ -174,7 +178,7 @@ export class SignInTab implements SetupTab {
 				const message = error instanceof Error ? error.message : String(error);
 				this.#statusLines = [
 					theme.fg("error", `Login failed: ${message}`),
-					theme.fg("dim", "Choose another provider or press Esc to continue."),
+					theme.fg("dim", "Choose another provider or ") + keyHint("ui.dismiss", "to continue."),
 				];
 				this.#authUrl = undefined;
 			}
@@ -194,11 +198,8 @@ export class SignInTab implements SetupTab {
 		input.onSubmit = value => {
 			this.#resolvePrompt(value);
 		};
-		input.onEscape = () => {
-			this.#loginAbort?.abort();
-			this.#resolvePrompt("");
-		};
-		this.host.setFocus(input);
+		// Keep the scene focused so ui.dismiss is intercepted before the Input widget.
+		this.host.restoreFocus();
 		this.host.requestRender();
 		return pending.promise;
 	}

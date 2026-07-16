@@ -9,7 +9,7 @@
  * - TAB/Shift+TAB: Cycle through provider tabs
  * - Up/Down/j/k: Navigate list
  * - Space: Toggle selected item (or master switch)
- * - Esc: Close dashboard (clears search first if active)
+ * - UI dismiss: Close dashboard (clears search first if active)
  */
 import {
 	type Component,
@@ -24,8 +24,9 @@ import {
 } from "@oh-my-pi/pi-tui";
 import { Settings } from "../../../config/settings";
 import { DynamicBorder } from "../../../modes/components/dynamic-border";
+import { keyHint } from "../../../modes/components/keybinding-hints";
 import { theme } from "../../../modes/theme/theme";
-import { matchesAppInterrupt } from "../../../modes/utils/keybinding-matchers";
+import { matchesUiDismiss } from "../../../modes/utils/keybinding-matchers";
 import { ExtensionList } from "./extension-list";
 import { InspectorPanel } from "./inspector-panel";
 import {
@@ -38,7 +39,7 @@ import {
 } from "./state-manager";
 import type { DashboardState } from "./types";
 
-const EXT_FOOTER = " ↑/↓: navigate  Space: toggle  ←/→: provider  Esc: close";
+const EXT_FOOTER_PREFIX = " ↑/↓: navigate  Space: toggle  ←/→: provider  ";
 
 export class ExtensionDashboard extends Container {
 	#state!: DashboardState;
@@ -121,8 +122,12 @@ export class ExtensionDashboard extends Container {
 		return Math.max(20, process.stdout.columns || 80);
 	}
 
+	#footer(): string {
+		return theme.fg("dim", EXT_FOOTER_PREFIX) + keyHint("ui.dismiss", "close");
+	}
+
 	#footerLines(): number {
-		return Math.max(1, wrapTextWithAnsi(theme.fg("dim", EXT_FOOTER), this.#uiWidth()).length);
+		return Math.max(1, wrapTextWithAnsi(this.#footer(), this.#uiWidth()).length);
 	}
 
 	/** Height budget for the two-column body, sized to the live terminal. */
@@ -173,7 +178,7 @@ export class ExtensionDashboard extends Container {
 		this.addChild(new TwoColumnBody(this.#mainList, this.#inspector, bodyMaxHeight));
 
 		this.addChild(new Spacer(1));
-		this.addChild(new Text(theme.fg("dim", EXT_FOOTER), 0, 0));
+		this.addChild(new Text(this.#footer(), 0, 0));
 
 		// Bottom border
 		this.addChild(new DynamicBorder());
@@ -324,8 +329,8 @@ export class ExtensionDashboard extends Container {
 			return;
 		}
 
-		// Escape - clear search first, then close
-		if (matchesAppInterrupt(data)) {
+		// Dismiss clears search first, then closes
+		if (matchesUiDismiss(data)) {
 			if (this.#state.searchQuery.length > 0) {
 				this.#state.searchQuery = "";
 				this.#state.searchFiltered = this.#state.tabFiltered;

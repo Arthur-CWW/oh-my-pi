@@ -1,8 +1,10 @@
 import { getOAuthProviders } from "@oh-my-pi/pi-ai/oauth";
-import { Container, getKeybindings, Input, Spacer, Text, type TUI } from "@oh-my-pi/pi-tui";
+import { Container, Input, Spacer, Text, type TUI } from "@oh-my-pi/pi-tui";
 import { theme } from "../../modes/theme/theme";
+import { matchesUiDismiss } from "../../modes/utils/keybinding-matchers";
 import { openPath } from "../../utils/open";
 import { DynamicBorder } from "./dynamic-border";
+import { keyHint, rawKeyHint } from "./keybinding-hints";
 
 /**
  * Login dialog component - replaces editor during OAuth login flow
@@ -44,9 +46,6 @@ export class LoginDialogComponent extends Container {
 				this.#inputResolver = undefined;
 				this.#inputRejecter = undefined;
 			}
-		};
-		this.#input.onEscape = () => {
-			this.#cancel();
 		};
 
 		// Bottom border
@@ -99,7 +98,7 @@ export class LoginDialogComponent extends Container {
 		if (!this.#contentContainer.children.includes(this.#input)) {
 			this.#contentContainer.addChild(this.#input);
 		}
-		this.#contentContainer.addChild(new Text(theme.fg("dim", "(Escape to cancel)"), 1, 0));
+		this.#contentContainer.addChild(new Text(`(${keyHint("ui.dismiss", "to cancel")})`, 1, 0));
 		this.#tui.requestRender();
 
 		const { promise, resolve, reject } = Promise.withResolvers<string>();
@@ -121,7 +120,8 @@ export class LoginDialogComponent extends Container {
 		if (!this.#contentContainer.children.includes(this.#input)) {
 			this.#contentContainer.addChild(this.#input);
 		}
-		this.#contentContainer.addChild(new Text(theme.fg("dim", "(Escape to cancel, Enter to submit)"), 1, 0));
+		const promptHint = [keyHint("ui.dismiss", "to cancel"), rawKeyHint("enter", "to submit")].join(", ");
+		this.#contentContainer.addChild(new Text(`(${promptHint})`, 1, 0));
 
 		this.#input.setValue("");
 		this.#tui.requestRender();
@@ -138,7 +138,7 @@ export class LoginDialogComponent extends Container {
 	showWaiting(message: string): void {
 		this.#contentContainer.addChild(new Spacer(1));
 		this.#contentContainer.addChild(new Text(theme.fg("dim", message), 1, 0));
-		this.#contentContainer.addChild(new Text(theme.fg("dim", "(Escape to cancel)"), 1, 0));
+		this.#contentContainer.addChild(new Text(`(${keyHint("ui.dismiss", "to cancel")})`, 1, 0));
 		this.#tui.requestRender();
 	}
 
@@ -151,9 +151,7 @@ export class LoginDialogComponent extends Container {
 	}
 
 	handleInput(data: string): void {
-		const kb = getKeybindings();
-
-		if (kb.matches(data, "tui.select.cancel")) {
+		if (matchesUiDismiss(data)) {
 			this.#cancel();
 			return;
 		}

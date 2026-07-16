@@ -27,7 +27,7 @@ import { HistoryStorage } from "@oh-my-pi/pi-coding-agent/session/history-storag
 import { BUILTIN_SLASH_COMMAND_DEFS } from "@oh-my-pi/pi-coding-agent/slash-commands/builtin-registry";
 import { formatLoopStats } from "@oh-my-pi/pi-coding-agent/slash-commands/loopstats";
 import { createIrcMessageCard } from "@oh-my-pi/pi-coding-agent/tools/irc";
-import { Container, CURSOR_MARKER } from "@oh-my-pi/pi-tui";
+import { Container, CURSOR_MARKER, Input } from "@oh-my-pi/pi-tui";
 
 const commandHistoryTempDirs: string[] = [];
 
@@ -303,15 +303,35 @@ describe("colon command registry", () => {
 		(output?.component as CommandOutputOverlayComponent).handleInput("x");
 	});
 
-	it("respects literal-colon text prompts while enabling normal composite views", () => {
-		const editor = { getText: () => "", isShowingAutocomplete: () => false };
-		const guardedSearch = { render: () => [], canEnterCommandMode: () => false };
-		const normalSelector = { render: () => [] };
-		let focused: unknown = guardedSearch;
+	it("opens colon mode uniformly from non-insert surfaces and keeps insert-mode colon literal", () => {
+		let editorText = "";
+		const editor = {
+			getText: () => editorText,
+			setText: (text: string) => {
+				editorText = text;
+			},
+			isShowingAutocomplete: () => false,
+		};
+		let focused: unknown = editor;
 		const interactive = { editor, ui: { getFocused: () => focused } };
-		expect(canEnterCommandMode(interactive as never)).toBe(false);
-		focused = normalSelector;
+
 		expect(canEnterCommandMode(interactive as never)).toBe(true);
+		editor.setText("draft");
+		expect(canEnterCommandMode(interactive as never)).toBe(false);
+		editor.setText("");
+
+		for (const surface of [
+			{ name: "Hub", canEnterCommandMode: () => false },
+			{ name: "viewer sequence" },
+			{ name: "transcript scroll" },
+			{ name: "roster" },
+		]) {
+			focused = surface;
+			expect(canEnterCommandMode(interactive as never), surface.name).toBe(true);
+		}
+
+		focused = new Input();
+		expect(canEnterCommandMode(interactive as never)).toBe(false);
 	});
 
 	it("filters and selects :commands as a normal colon completion", () => {
@@ -353,7 +373,7 @@ describe("colon command registry", () => {
 		expect(exits).toBe(1);
 	});
 
-	it("cycles completion without accepting it, then Enter accepts and submits", async () => {
+	it("makes Tab apply every cycled completion before Enter submits it", async () => {
 		const ctx = new CommandFixture();
 		const ran: string[] = [];
 		const commands: readonly CommandModeCommand[] = ["first", "second", "third"].map(name => ({
@@ -366,18 +386,16 @@ describe("colon command registry", () => {
 		const done: string[] = [];
 		const prompt = new CommandLineComponent(ctx, reason => done.push(reason), { commands });
 
-		prompt.handleInput("\x1b[Z");
 		prompt.handleInput("\t");
-		prompt.handleInput("\x1b[A");
-		prompt.handleInput("\x0e");
-		prompt.handleInput("\x10");
-		prompt.handleInput("\x1b[B");
-		expect(prompt.input.getValue()).toBe("");
+		expect(prompt.input.getValue()).toBe("second");
+		prompt.handleInput("\t");
+		expect(prompt.input.getValue()).toBe("third");
+		prompt.handleInput("\x1b[Z");
+		expect(prompt.input.getValue()).toBe("second");
 		prompt.handleInput("\r");
 		await Promise.resolve();
 
-		expect(prompt.input.getValue()).toBe("first");
-		expect(ran).toEqual(["first"]);
+		expect(ran).toEqual(["second"]);
 		expect(done).toEqual(["submit"]);
 	});
 
@@ -421,7 +439,7 @@ describe("colon command registry", () => {
 		const prompt = new CommandLineComponent(ctx, () => {}, { historyStorage: storage });
 
 		prompt.handleInput("\t");
-		expect(prompt.input.getValue()).toBe("");
+		expect(prompt.input.getValue()).toBe("id");
 		prompt.handleInput("\r");
 		await Bun.sleep(120);
 

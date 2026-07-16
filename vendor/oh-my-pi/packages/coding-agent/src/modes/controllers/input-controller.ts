@@ -139,17 +139,13 @@ export class InputController {
 
 	setupKeyHandlers(): void {
 		this.ctx.editor.setActionKeys("app.interrupt", this.ctx.keybindings.getKeys("app.interrupt"));
+		this.ctx.editor.setActionKeys("ui.dismiss", this.ctx.keybindings.getKeys("ui.dismiss"));
 		this.#interruptController.installFocusedLeftTapListener();
 		installCommandLine(this.ctx);
-		this.ctx.editor.onEscape = key => {
-			if (key === "ctrl+q") {
-				this.#interruptController.interrupt();
-				return;
-			}
-
-			// Active context maintenance owns Escape. Dispatch on live session
-			// state instead of swapping handlers: interleaved start/end events
-			// otherwise clobber the single saved-handler slot.
+		this.ctx.editor.onInterrupt = () => {
+			// Active operations are interruptible independently of UI dismissal.
+			// Dispatch on live session state instead of swapping handlers:
+			// interleaved start/end events otherwise clobber the saved callback.
 			const viewSession = this.ctx.viewSession;
 			let aborted = false;
 			if (viewSession.isCompacting) {
@@ -181,12 +177,26 @@ export class InputController {
 				}
 				return;
 			}
-			if (this.ctx.hasActiveBtw() && this.ctx.handleBtwEscape()) {
+			if (this.ctx.loadingAnimation) {
+				if (this.ctx.cancelPendingSubmission()) return;
+				void this.restoreQueuedMessagesToEditor({ abort: true }).catch(error => {
+					this.ctx.showError(diagnosticInputFromError(error, this.ctx.sessionManager.getSessionFile()));
+				});
 				return;
 			}
-			if (this.ctx.hasActiveOmfg() && this.ctx.handleOmfgEscape()) {
+			if (this.ctx.session.isBashRunning) {
+				this.ctx.session.abortBash();
 				return;
 			}
+			if (this.ctx.session.isEvalRunning) {
+				this.ctx.session.abortEval();
+				return;
+			}
+			this.#interruptController.interrupt();
+		};
+		this.ctx.editor.onEscape = () => {
+			if (this.ctx.hasActiveBtw() && this.ctx.handleBtwEscape()) return;
+			if (this.ctx.hasActiveOmfg() && this.ctx.handleOmfgEscape()) return;
 			if (this.ctx.focusedAgentId) {
 				// A composer entered from Agent Hub returns to that read-only
 				// preview first. Other focused views keep the established
@@ -198,41 +208,26 @@ export class InputController {
 				} else {
 					this.#interruptController.unfocus();
 				}
-				return; // double-escape backtrack (/tree, /branch) stays main-only
+				return; // double-dismiss backtrack (/tree, /branch) stays main-only
 			}
 			if (this.ctx.collabGuest) {
 				// The protocol-v2 guest is a pure read model until terminal rendering
 				// and controller command construction are cut over.
 				return;
 			}
-			if (this.ctx.loadingAnimation) {
-				if (this.ctx.cancelPendingSubmission()) {
-					return;
-				}
-				void this.restoreQueuedMessagesToEditor({ abort: true }).catch(error => {
-					this.ctx.showError(diagnosticInputFromError(error, this.ctx.sessionManager.getSessionFile()));
-				});
-			} else if (this.ctx.session.isBashRunning) {
-				this.ctx.session.abortBash();
-			} else if (this.ctx.isBashMode) {
+			if (this.ctx.isBashMode) {
 				this.ctx.editor.setText("");
 				this.ctx.isBashMode = false;
 				this.ctx.updateEditorBorderColor();
-			} else if (this.ctx.session.isEvalRunning) {
-				this.ctx.session.abortEval();
 			} else if (this.ctx.isPythonMode) {
 				this.ctx.editor.setText("");
 				this.ctx.isPythonMode = false;
 				this.ctx.updateEditorBorderColor();
-			} else if (this.ctx.session.isStreaming) {
-				void this.ctx.session.abort({ reason: USER_INTERRUPT_LABEL });
 			} else if (this.ctx.editor.getText().trim()) {
-				// Esc with typed text clears the draft instead of (or before) any double-Esc action
 				this.ctx.editor.setText("");
 				this.ctx.ui.requestRender();
 				this.ctx.lastEscapeTime = 0;
 			} else {
-				// Double-interrupt with empty editor triggers /tree, /branch, or nothing based on setting
 				const action = settings.get("doubleEscapeAction");
 				if (action !== "none") {
 					const now = Date.now();
@@ -1341,8 +1336,8 @@ export class InputController {
 	/**
 	 * Present the large-paste menu and apply the chosen action: wrap in `<attachment>` tags (collapsed
 	 * to a `[Paste]` marker that expands on submit), save the text to a file and reference its path so
-	 * the agent can `read` it on demand, or paste inline. Cancelling (Esc) falls back to the default
-	 * inline paste marker, so the pasted content is never lost.
+	 * the agent can `read` it on demand, or paste inline. Dismissing falls back to the default inline
+	 * paste marker, so the pasted content is never lost.
 	 */
 	async presentLargePasteMenu(text: string, lineCount: number): Promise<void> {
 		const WRAPPED_BLOCK = "Attach as a wrapped block";
@@ -1358,7 +1353,7 @@ export class InputController {
 					{ label: LOCAL_FILE, description: "Save the text to a local://attachment file" },
 					{ label: INLINE, description: "Collapse the text to an inline paste marker" },
 				],
-				{ helpText: "Esc to paste inline" },
+				{ helpText: `${this.ctx.keybindings.getDisplayString("ui.dismiss")} to paste inline` },
 			);
 		} catch (error) {
 			logger.warn("large-paste menu failed", { error: error instanceof Error ? error.message : String(error) });

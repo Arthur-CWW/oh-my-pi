@@ -8,6 +8,7 @@ import { type ThemeColor, theme } from "../../../modes/theme/theme";
 import { shortenPath } from "../../../tools/render-utils";
 import { getSessionAccentAnsi, getSessionAccentHex } from "../../../utils/session-color";
 import { sanitizeStatusText } from "../../shared";
+import { renderModelSelectorAbbreviation, withModelSelectorEffort } from "../model-selector-abbreviation";
 import { formatContextUsage, getContextUsageLevel, getContextUsageThemeColor } from "./context-thresholds";
 import { processMemoryFootprintSampler } from "./memory-footprint";
 import { mainTokenRateSegment } from "./main-token-rate";
@@ -83,93 +84,34 @@ const modelSegment: StatusLineSegment = {
 	render(ctx) {
 		const state = ctx.session.state;
 		const opts = ctx.options.model ?? {};
-
-		let modelName = state.model?.name || state.model?.id || "no-model";
-		if (modelName.startsWith("Claude ")) {
-			modelName = modelName.slice(7);
+		const model = state.model;
+		const baseSelector = model ? `${model.provider ? `${model.provider}/` : ""}${model.id}` : "no-model";
+		let effort: string | undefined;
+		if (opts.showThinkingLevel !== false && model?.thinking) {
+			if (ctx.session.isAutoThinking) effort = ctx.session.autoResolvedThinkingLevel() ?? "auto";
+			else if (state.thinkingLevel && state.thinkingLevel !== ThinkingLevel.Off) effort = state.thinkingLevel;
 		}
-
-		// Fast-mode icon and thinking-level suffix trail the model name and are
-		// colored together with it as `statusLineModel`. The advisor "++" badge
-		// sits between the name and that tail in `accent`, so it reads as a
-		// distinct marker. theme.fg resets only the fg, so the spans are
-		// concatenated (not nested) to keep each color intact.
-		let tail = "";
+		const selector = withModelSelectorEffort(baseSelector, effort) ?? baseSelector;
+		const label = renderModelSelectorAbbreviation(selector);
+		let content = theme.icon.model ? `${theme.fg("statusLineModel", `${theme.icon.model} `)}${label}` : label;
+		if (ctx.session.isAdvisorActive()) content += theme.fg("success", "++");
 		if (ctx.session.isFastModeActive() && theme.icon.fast) {
-			tail += ` ${theme.icon.fast}`;
+			content += theme.fg("statusLineModel", ` ${theme.icon.fast}`);
 		}
-
-		if (opts.showThinkingLevel !== false && state.model?.thinking) {
-			if (ctx.session.isAutoThinking) {
-				// Pending (no turn classified yet / classifying) shows a symbol-theme
-				// question-box marker; once resolved it shows `<level>`.
-				const resolved = ctx.session.autoResolvedThinkingLevel();
-				const resolvedText = resolved ? (theme.thinking[resolved as keyof typeof theme.thinking] ?? resolved) : "";
-				tail += `${theme.sep.dot}${resolved ? resolvedText : `${theme.thinking.autoPending} auto`}`;
-			} else {
-				const level = state.thinkingLevel ?? ThinkingLevel.Off;
-				if (level !== ThinkingLevel.Off) {
-					const thinkingText = theme.thinking[level as keyof typeof theme.thinking];
-					if (thinkingText) {
-						tail += `${theme.sep.dot}${thinkingText}`;
-					}
-				}
-			}
-		}
-
-		// `statusLineModel` is aliased to `accent` in many themes, so the badge
-		// uses `success` to stay visibly distinct from the model name color.
-		let content = theme.fg("statusLineModel", withIcon(theme.icon.model, modelName));
-		if (ctx.session.isAdvisorActive()) {
-			content += theme.fg("success", "++");
-		}
-		if (tail) {
-			content += theme.fg("statusLineModel", tail);
-		}
-
 		return { content, visible: true };
 	},
 };
 
 function formatGoalBudget(current: number, budget?: number): string {
-	const used = formatNumber(current);
-	if (budget === undefined) return used;
-	return `${used}/${formatNumber(budget)}`;
+	return budget === undefined ? formatNumber(current) : `${formatNumber(current)}/${formatNumber(budget)}`;
 }
 
 function renderGoalMode(ctx: SegmentContext, mode: { enabled: boolean; paused: boolean }): RenderedSegment {
 	const goal = ctx.session.getGoalModeState()?.goal;
-	const status = goal?.status ?? (mode.paused ? "paused" : "active");
-
-	let icon: string = theme.icon.goal;
-	let color: ThemeColor = "accent";
-	switch (status) {
-		case "paused":
-			icon = theme.icon.pause || theme.symbol("status.pending");
-			color = "warning";
-			break;
-		case "complete":
-			icon = theme.symbol("status.success");
-			color = "success";
-			break;
-		case "budget-limited":
-			icon = theme.symbol("status.warning");
-			color = "warning";
-			break;
-		case "dropped":
-			icon = theme.symbol("status.aborted");
-			color = "dim";
-			break;
-		default:
-			break;
-	}
-
-	const parts: string[] = [withIcon(icon, "Goal")];
-	const showBudget = ctx.session.settings.get("goal.statusInFooter") === true;
-	if (showBudget && goal) {
-		parts.push(formatGoalBudget(goal.tokensUsed, goal.tokenBudget));
-	}
-	return { content: theme.fg(color, parts.join(" ")), visible: true };
+	const budget = goal ? ` ${formatGoalBudget(goal.tokensUsed, goal.tokenBudget)}` : "";
+	const pause = mode.paused ? (theme.icon.pause ? ` ${theme.icon.pause}` : " (paused)") : "";
+	const content = withIcon(theme.icon.goal, `Goal${budget}${pause}`);
+	return { content: theme.fg(mode.paused ? "warning" : "accent", content), visible: true };
 }
 
 const modeSegment: StatusLineSegment = {
@@ -341,7 +283,6 @@ const tokenTotalSegment: StatusLineSegment = {
 		return { content: theme.fg("statusLineSpend", content), visible: true };
 	},
 };
-
 
 const costSegment: StatusLineSegment = {
 	id: "cost",

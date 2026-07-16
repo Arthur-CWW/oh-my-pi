@@ -151,6 +151,7 @@ async function loadContextFiles(ctx: LoadContext): Promise<LoadResult<ContextFil
 // MCP Servers (config.toml)
 // =============================================================================
 
+// MCP config.toml is a compatibility source; mcp/config.ts excludes this provider unless opted in.
 async function loadMCPServers(ctx: LoadContext): Promise<LoadResult<MCPServer>> {
 	const warnings: string[] = [];
 

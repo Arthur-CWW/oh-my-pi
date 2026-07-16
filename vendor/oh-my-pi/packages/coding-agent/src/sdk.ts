@@ -1693,6 +1693,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		const mcpDiscoverOptions = {
 			onConnecting: onMCPConnecting,
 			enableProjectConfig: settings.get("mcp.enableProjectConfig") ?? true,
+			codexCompat: settings.get("mcp.codexCompat") ?? false,
 			// Always filter Exa - we have native integration
 			filterExa: true,
 			// Filter browser MCP servers when builtin browser tool is active

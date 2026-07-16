@@ -14,6 +14,7 @@ import type * as XtermModule from "@xterm/headless";
 import type { Terminal as XtermTerminalType } from "@xterm/headless";
 import { Settings } from "../config/settings";
 import type { Theme } from "../modes/theme/theme";
+import { editorKey } from "../modes/components/keybinding-hints";
 import { matchesAppInterrupt } from "../modes/utils/keybinding-matchers";
 import { OutputSink, type OutputSummary } from "../session/streaming-output";
 import { sanitizeWithOptionalSixelPassthrough } from "../utils/sixel";
@@ -268,7 +269,7 @@ class BashInteractiveOverlayComponent implements Component {
 		const footer =
 			this.#state === "running"
 				? truncateToWidth(
-						`${this.uiTheme.fg("warning", "esc")} ${this.uiTheme.fg("dim", "force-kill")} ${this.uiTheme.fg("dim", "· input forwarded to PTY")}`,
+						`${this.uiTheme.fg("warning", editorKey("app.interrupt"))} ${this.uiTheme.fg("dim", "force-kill")} ${this.uiTheme.fg("dim", "· input forwarded to PTY")}`,
 						innerWidth,
 					)
 				: truncateToWidth(this.uiTheme.fg("dim", "session finished"), innerWidth);

@@ -23,12 +23,13 @@ import {
 import { getMarkdownTheme, type ThemeColor, theme } from "../../modes/theme/theme";
 import {
 	matchesAppExternalEditor,
-	matchesSelectCancel,
+	matchesUiDismiss,
 	matchesSelectDown,
 	matchesSelectUp,
 } from "../../modes/utils/keybinding-matchers";
 import { CountdownTimer } from "./countdown-timer";
 import { DynamicBorder } from "./dynamic-border";
+import { editorKey } from "./keybinding-hints";
 import { renderSegmentTrack } from "./segment-track";
 
 /** One segment of a {@link HookSelectorSlider} — a label and an optional
@@ -170,6 +171,8 @@ export class HookSelectorComponent extends Container {
 	#sliderIndex: number = 0;
 	#sliderComponent: Text | undefined;
 	#lastRenderWidth: number | undefined;
+	#controlsHint: Text;
+	#customHelpText: string | undefined;
 	constructor(
 		title: string,
 		options: HookSelectorOptionInput[],
@@ -201,6 +204,7 @@ export class HookSelectorComponent extends Container {
 		this.#onLeftCallback = opts?.onLeft;
 		this.#onRightCallback = opts?.onRight;
 		this.#onExternalEditorCallback = opts?.onExternalEditor;
+		this.#customHelpText = opts?.helpText;
 		if (opts?.slider && opts.slider.segments.length > 0) {
 			this.#slider = opts.slider;
 			this.#sliderIndex = Math.max(0, Math.min(opts.slider.index, opts.slider.segments.length - 1));
@@ -246,8 +250,8 @@ export class HookSelectorComponent extends Container {
 			this.addChild(this.#listContainer);
 		}
 		this.addChild(new Spacer(1));
-		const controlsHint = opts?.helpText ?? "up/down navigate  enter select  esc cancel";
-		this.addChild(new Text(theme.fg("dim", controlsHint), 1, 0));
+		this.#controlsHint = new Text("", 1, 0);
+		this.addChild(this.#controlsHint);
 		this.addChild(new Spacer(1));
 		this.addChild(new DynamicBorder());
 
@@ -618,7 +622,7 @@ export class HookSelectorComponent extends Container {
 		// Reset countdown on any interaction
 		this.#countdown?.reset();
 
-		if (matchesSelectCancel(keyData)) {
+		if (matchesUiDismiss(keyData)) {
 			this.#onCancelCallback();
 			return;
 		}
@@ -645,7 +649,13 @@ export class HookSelectorComponent extends Container {
 		}
 	}
 
+	#updateControlsHint(): void {
+		const controlsHint = this.#customHelpText ?? `up/down navigate  enter select  ${editorKey("ui.dismiss")} cancel`;
+		this.#controlsHint.setText(theme.fg("dim", controlsHint));
+	}
+
 	override render(width: number): readonly string[] {
+		this.#updateControlsHint();
 		const renderWidth = Math.max(1, width);
 		if (this.#lastRenderWidth !== renderWidth) {
 			this.#lastRenderWidth = renderWidth;

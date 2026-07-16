@@ -3452,6 +3452,17 @@ export const SETTINGS_SCHEMA = {
 			description: "Load .mcp.json/mcp.json from project root",
 		},
 	},
+	"mcp.codexCompat": {
+		type: "boolean",
+		default: false,
+		ui: {
+			tab: "tools",
+			group: "Discovery & MCP",
+			label: "Codex-compatible MCP",
+			description:
+				"Load MCP servers from ~/.codex/config.toml and .codex/config.toml (default: off); .mcp/mcp.json is always loaded",
+		},
+	},
 
 	"mcp.discoveryMode": {
 		type: "boolean",

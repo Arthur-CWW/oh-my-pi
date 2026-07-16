@@ -13,8 +13,9 @@ import { replaceTabs, truncateToWidth } from "../../tools/render-utils";
 import { theme } from "../theme/theme";
 import type { InteractiveModeContext } from "../types";
 import { computeContextBreakdown } from "../utils/context-usage";
-import { matchesAppInterrupt } from "../utils/keybinding-matchers";
+import { matchesUiDismiss } from "../utils/keybinding-matchers";
 import { DynamicBorder } from "./dynamic-border";
+import { keyHint } from "./keybinding-hints";
 import {
 	beginPrimitiveFilter,
 	createPrimitiveInspectorState,
@@ -394,7 +395,7 @@ export class PrimitivesInspectorOverlayComponent extends Container {
 		if (this.#state.filterEditing) {
 			if (matchesKey(keyData, "enter") || keyData === "\r" || keyData === "\n") {
 				this.#state = { ...this.#state, filterEditing: false };
-			} else if (matchesAppInterrupt(keyData)) {
+			} else if (matchesUiDismiss(keyData)) {
 				this.#state = { ...this.#state, filterEditing: false, filterQuery: "" };
 			} else if (matchesKey(keyData, "backspace")) {
 				this.#state = updatePrimitiveFilter(this.#state, this.#state.filterQuery.slice(0, -1));
@@ -404,7 +405,7 @@ export class PrimitivesInspectorOverlayComponent extends Container {
 			this.#requestRender();
 			return;
 		}
-		if (matchesKey(keyData, "escape") || matchesKey(keyData, "esc") || matchesAppInterrupt(keyData)) {
+		if (matchesUiDismiss(keyData)) {
 			const next = unwindPrimitiveInspector(this.#state);
 			if (!next) this.#onDone();
 			else {
@@ -448,7 +449,7 @@ export class PrimitivesInspectorOverlayComponent extends Container {
 				"l/Enter/→    drill in",
 				"h/←          back",
 				"/            filter current level",
-				"Esc          clear filter, unwind one level, then close",
+				keyHint("ui.dismiss", "clear filter, unwind one level, then close"),
 				"alt+i        toggle inspector (also :inspect)",
 				"?            close this help",
 				"",
@@ -511,7 +512,7 @@ export class PrimitivesInspectorOverlayComponent extends Container {
 			lines.push(` ${leftCell} ${theme.fg("dim", "│")} ${rightCell}`);
 		}
 		lines.push(
-			` ${theme.fg("dim", "j/k navigate · l/Enter drill · h back · / filter · Esc unwind · ? help · :inspect or alt+i toggle")}`,
+			` ${theme.fg("dim", "j/k navigate · l/Enter drill · h back · / filter · ")}${keyHint("ui.dismiss", "unwind")}${theme.fg("dim", " · ? help · :inspect or alt+i toggle")}`,
 		);
 		lines.push(...new DynamicBorder().render(safeWidth));
 		return lines;

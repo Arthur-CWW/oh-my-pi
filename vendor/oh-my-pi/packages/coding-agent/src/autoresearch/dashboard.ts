@@ -1,6 +1,7 @@
 import { matchesKey, replaceTabs, ScrollView, Text, truncateToWidth, visibleWidth } from "@oh-my-pi/pi-tui";
 import type { Theme } from "../modes/theme/theme";
-import { matchesAppInterrupt } from "../modes/utils/keybinding-matchers";
+import { keyHint } from "../modes/components/keybinding-hints";
+import { matchesUiDismiss } from "../modes/utils/keybinding-matchers";
 import { formatElapsed, formatNum, isBetter } from "./helpers";
 import { currentResults, findBaselineMetric, findBaselineRunNumber, findBaselineSecondary } from "./state";
 import type { AutoresearchRuntime, DashboardController, ExperimentResult, ExperimentState } from "./types";
@@ -92,7 +93,7 @@ export function createDashboardController(): DashboardController {
 								(runtime.runningExperiment ? 1 : 0);
 							const viewportRows = Math.max(4, (process.stdout.rows ?? 40) - 4);
 							const maxScroll = Math.max(0, totalRows - viewportRows);
-							if (matchesAppInterrupt(data) || data === "q") {
+							if (matchesUiDismiss(data) || data === "q") {
 								done(undefined);
 								return;
 							}
@@ -408,7 +409,7 @@ function renderOverlayRunningLine(
 }
 
 function renderOverlayFooter(width: number, theme: Theme): string {
-	const hint = theme.fg("dim", " up/down j/k pageup pagedown g G esc ");
+	const hint = `${theme.fg("dim", " up/down j/k pageup pagedown g G ")}${keyHint("ui.dismiss", "close")} `;
 	const fill = Math.max(0, width - visibleWidth(hint));
 	return theme.fg("borderMuted", "-".repeat(fill)) + hint;
 }

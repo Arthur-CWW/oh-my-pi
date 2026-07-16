@@ -332,7 +332,6 @@ class StatusContainer extends Container implements NativeScrollbackLiveRegion {
  *  before it auto-clears, mirroring the todo HUD's auto-clear timer. */
 const MODEL_CYCLE_TRACK_CLEAR_MS = 4000;
 
-
 export class InteractiveMode implements InteractiveModeContext, SubmittedInputRestoreHost {
 	session: AgentSession;
 	sessionManager: SessionManager;
@@ -1024,7 +1023,7 @@ export class InteractiveMode implements InteractiveModeContext, SubmittedInputRe
 	}
 
 	#deferLoopAutoSubmit(callback: () => void): void {
-		// Brief delay so the user has a chance to press Esc between iterations.
+		// Brief delay so the user has a chance to interrupt between iterations.
 		this.#loopAutoSubmitTimer = setTimeout(() => {
 			this.#loopAutoSubmitTimer = undefined;
 			if (!this.loopModeEnabled || !this.onInputCallback) return;
@@ -1170,8 +1169,9 @@ export class InteractiveMode implements InteractiveModeContext, SubmittedInputRe
 		this.ui.requestRender();
 		const limitSuffix = parsedLimit ? ` Limited to ${describeLoopLimit(parsedLimit)}.` : "";
 		const remainingSuffix = this.loopLimit ? ` ${describeLoopLimitRuntime(this.loopLimit)}.` : "";
+		const interruptKey = this.keybindings.getDisplayString("app.interrupt");
 		this.showStatus(
-			`Loop mode enabled.${limitSuffix}${remainingSuffix} Your next prompt will repeat after each turn. Esc cancels the current iteration; /loop again to disable.`,
+			`Loop mode enabled.${limitSuffix}${remainingSuffix} Your next prompt will repeat after each turn. ${interruptKey} cancels the current iteration; /loop again to disable.`,
 		);
 	}
 
@@ -2939,7 +2939,7 @@ export class InteractiveMode implements InteractiveModeContext, SubmittedInputRe
 				: undefined;
 		// The overlay now owns the dynamic, focus-aware help line; the caller only
 		// supplies the trailing cancel hint.
-		const helpText = "esc cancel";
+		const helpText = `${this.keybindings.getDisplayString("ui.dismiss")} cancel`;
 		// In-overlay edits (section deletes/undo) and section annotations. Deletes
 		// update `editedContent` (and mirror to disk); annotations build `feedback`
 		// that the Refine branch re-prompts the model with.

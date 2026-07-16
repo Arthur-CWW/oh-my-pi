@@ -310,7 +310,7 @@ describe("HookEditorComponent prompt-style mode", () => {
 		expect(lines[0]).toMatch(/^─+$/);
 		expect(lines.at(-1)).toMatch(/^─+$/);
 		expect(lines[4]?.startsWith("> ")).toBe(true);
-		expect(rendered).toContain(" enter submit  esc cancel");
+		expect(rendered).toContain(" enter submit  escape cancel");
 		expect(rendered).not.toContain("shift+enter newline");
 		expect(rendered).toContain("ctrl+g external editor");
 	});
@@ -353,10 +353,10 @@ describe("HookEditorComponent prompt-style mode", () => {
 		expect(onSubmit).not.toHaveBeenCalled();
 	});
 
-	it("cancels on app.interrupt in prompt-style mode even when remapped", () => {
+	it("cancels on ui.dismiss in prompt-style mode when remapped", () => {
 		setKeybindings(
 			KeybindingsManager.inMemory({
-				"app.interrupt": "ctrl+c",
+				"ui.dismiss": "ctrl+c",
 			}),
 		);
 		const onSubmit = vi.fn();
@@ -364,6 +364,12 @@ describe("HookEditorComponent prompt-style mode", () => {
 		const component = new HookEditorComponent(createTui(), "Prompt", "draft", onSubmit, onCancel, {
 			promptStyle: true,
 		});
+
+		expect(renderText(component)).toContain("ctrl+c cancel");
+		expect(renderText(component)).toContain("ctrl+g external editor");
+
+		component.handleInput("\x1b");
+		expect(onCancel).not.toHaveBeenCalled();
 
 		component.handleInput("\x03");
 

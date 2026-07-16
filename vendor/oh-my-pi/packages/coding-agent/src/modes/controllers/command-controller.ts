@@ -29,6 +29,7 @@ import { resolveMemoryBackend } from "../../memory-backend";
 import { BashExecutionComponent } from "../../modes/components/bash-execution";
 import { BorderedLoader } from "../../modes/components/bordered-loader";
 import { DynamicBorder } from "../../modes/components/dynamic-border";
+import { keyHint } from "../../modes/components/keybinding-hints";
 import { EvalExecutionComponent } from "../../modes/components/eval-execution";
 import { TranscriptBlock } from "../../modes/components/transcript-container";
 import { getMarkdownTheme, getSymbolTheme, theme } from "../../modes/theme/theme";
@@ -1105,7 +1106,7 @@ export class CommandController {
 		}
 		this.ctx.statusContainer.clear();
 
-		const label = isAuto ? "Auto-compacting context... (esc to cancel)" : "Compacting context... (esc to cancel)";
+		const label = `${isAuto ? "Auto-compacting context..." : "Compacting context..."} (${keyHint("app.interrupt", "to cancel")})`;
 		const compactingLoader = new Loader(
 			this.ctx.ui,
 			spinner => theme.fg("accent", spinner),
@@ -1180,7 +1181,7 @@ export class CommandController {
 			this.ctx.ui,
 			spinner => theme.fg("accent", spinner),
 			text => theme.fg("muted", text),
-			"Generating handoff… (esc to cancel)",
+			`Generating handoff… (${keyHint("app.interrupt", "to cancel")})`,
 			getSymbolTheme().spinnerFrames,
 		);
 		this.ctx.statusContainer.addChild(handoffLoader);

@@ -2,7 +2,9 @@ import { Container, type SelectItem, SelectList, Spacer, Text } from "@oh-my-pi/
 import { getSelectListTheme, theme } from "../theme/theme";
 import type { DiagnosticEvent, FocusCmuxOwnerAction } from "../utils/error-inbox";
 import { CMUX_OWNER_UNAVAILABLE_MESSAGE, type FocusCmuxOwnerResult } from "../utils/cmux-owner-navigation";
+import { matchesUiDismiss } from "../utils/keybinding-matchers";
 import { DynamicBorder } from "./dynamic-border";
+import { keyHint } from "./keybinding-hints";
 export type DiagnosticActionHandler = (action: FocusCmuxOwnerAction) => Promise<FocusCmuxOwnerResult>;
 
 export interface ErrorSelectorOptions {
@@ -81,9 +83,12 @@ export function formatDiagnosticDetail(err: DiagnosticEvent | null, actionMessag
 	}
 
 	if (err.action) {
-		out += "\n" + theme.fg("dim", "Focus active cmux session: Enter   Close: Esc");
+		out += "\n" + theme.fg("dim", "Focus active cmux session: Enter   ") + keyHint("ui.dismiss", "close");
 	} else if (!err.resolved) {
-		out += "\n" + theme.fg("dim", `Resolve: :errors resolve ${err.id}   Close: Esc/Enter`);
+		out +=
+			"\n" +
+			theme.fg("dim", `Resolve: :errors resolve ${err.id}   `) +
+			keyHint("ui.dismiss", "close or press Enter");
 	}
 
 	return out.trimEnd();
@@ -91,9 +96,11 @@ export function formatDiagnosticDetail(err: DiagnosticEvent | null, actionMessag
 
 export class ErrorSelectorComponent extends Container {
 	#selectList: SelectList;
+	readonly #onDismiss: () => void;
 
 	constructor(errors: ReadonlyArray<DiagnosticEvent>, onDismiss: () => void, options: ErrorSelectorOptions = {}) {
 		super();
+		this.#onDismiss = onDismiss;
 
 		const byId = new Map<string, DiagnosticEvent>(errors.map(e => [e.id, e]));
 
@@ -156,7 +163,6 @@ export class ErrorSelectorComponent extends Container {
 				},
 			);
 		};
-		this.#selectList.onCancel = () => onDismiss();
 		this.#selectList.onSelectionChange = item => {
 			if (item.value === "none") return;
 			selectedId = item.value;
@@ -168,11 +174,27 @@ export class ErrorSelectorComponent extends Container {
 
 		this.addChild(new Spacer(1));
 		this.addChild(new DynamicBorder(str => theme.fg("dim", str)));
-		this.addChild(new Text(theme.bold("Error History") + theme.fg("dim", "  p pin/unpin · Ctrl-W w focus · Esc close"), 1, 0));
+		this.addChild(
+			new Text(
+				theme.bold("Error History") +
+					theme.fg("dim", "  p pin/unpin · Ctrl-W w focus · ") +
+					keyHint("ui.dismiss", "close"),
+				1,
+				0,
+			),
+		);
 		this.addChild(this.#selectList);
 		this.addChild(new DynamicBorder(str => theme.fg("dim", str)));
 		this.addChild(detailText);
 		this.addChild(new Spacer(1));
+	}
+
+	handleInput(data: string): void {
+		if (matchesUiDismiss(data)) {
+			this.#onDismiss();
+			return;
+		}
+		this.#selectList.handleInput(data);
 	}
 
 	getSelectList(): SelectList {

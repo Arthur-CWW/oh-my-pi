@@ -14,12 +14,13 @@ import {
 } from "@oh-my-pi/pi-tui";
 import type { TreeFilterMode } from "../../config/settings-schema";
 import { theme } from "../../modes/theme/theme";
-import { matchesAppInterrupt, matchesSelectDown, matchesSelectUp } from "../../modes/utils/keybinding-matchers";
+import { matchesSelectDown, matchesSelectUp, matchesUiDismiss } from "../../modes/utils/keybinding-matchers";
 import type { SessionTreeNode } from "../../session/session-entries";
 import { shortenPath } from "../../tools/render-utils";
 import { toPathList } from "../../tools/search";
 import { canonicalizeMessage } from "../../utils/thinking-display";
 import { DynamicBorder } from "./dynamic-border";
+import { editorKey } from "./keybinding-hints";
 
 /** Gutter info: position (displayIndent where connector was) and whether to show │ */
 interface GutterInfo {
@@ -789,7 +790,7 @@ class TreeList implements Component {
 			if (selected && this.onSelect) {
 				this.onSelect(selected.node.entry.id);
 			}
-		} else if (matchesAppInterrupt(keyData)) {
+		} else if (matchesUiDismiss(keyData)) {
 			if (this.#searchQuery) {
 				this.#searchQuery = "";
 				this.#applyFilter();
@@ -886,7 +887,9 @@ class LabelInput implements Component {
 		const availableWidth = width - indent.length;
 		lines.push(truncateToWidth(`${indent}${theme.fg("muted", "Label (empty to remove):")}`, width));
 		lines.push(...this.#input.render(availableWidth).map(line => truncateToWidth(`${indent}${line}`, width)));
-		lines.push(truncateToWidth(`${indent}${theme.fg("dim", "enter: save  esc: cancel")}`, width));
+		lines.push(
+			truncateToWidth(`${indent}${theme.fg("dim", `enter: save  ${editorKey("ui.dismiss")}: cancel`)}`, width),
+		);
 		return lines;
 	}
 
@@ -894,7 +897,7 @@ class LabelInput implements Component {
 		if (matchesKey(keyData, "enter") || matchesKey(keyData, "return") || keyData === "\n") {
 			const value = this.#input.getValue().trim();
 			this.onSubmit?.(this.entryId, value || undefined);
-		} else if (matchesAppInterrupt(keyData)) {
+		} else if (matchesUiDismiss(keyData)) {
 			this.onCancel?.();
 		} else {
 			this.#input.handleInput(keyData);

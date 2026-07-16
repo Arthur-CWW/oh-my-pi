@@ -8,8 +8,9 @@ import {
 	visibleWidth,
 } from "@oh-my-pi/pi-tui";
 import { sanitizeText } from "@oh-my-pi/pi-utils";
+import { keyHint } from "../modes/components/keybinding-hints";
 import { theme } from "../modes/theme/theme";
-import { matchesAppInterrupt } from "../modes/utils/keybinding-matchers";
+import { matchesUiDismiss } from "../modes/utils/keybinding-matchers";
 import { copyToClipboard } from "../utils/clipboard";
 import {
 	formatRawSseIsoTime,
@@ -100,7 +101,7 @@ export class RawSseViewerComponent implements Component {
 	}
 
 	handleInput(keyData: string): void {
-		if (matchesAppInterrupt(keyData)) {
+		if (matchesUiDismiss(keyData)) {
 			this.#unsubscribe();
 			this.#onExit();
 			return;
@@ -227,7 +228,7 @@ export class RawSseViewerComponent implements Component {
 		const snapshot = this.#buffer.snapshot();
 		const last = snapshot.lastUpdatedAt ? ` last=${formatRawSseIsoTime(snapshot.lastUpdatedAt)}` : "";
 		const follow = this.#followTail ? "follow:on" : "follow:off";
-		return ` # raw provider stream (SSE + WS) | events=${snapshot.totalEvents} records=${snapshot.records.length}${last} | ${follow} | Esc back Ctrl+C copy End follow`;
+		return ` # raw provider stream (SSE + WS) | events=${snapshot.totalEvents} records=${snapshot.records.length}${last} | ${follow} | ${keyHint("ui.dismiss", "back")} Ctrl+C copy End follow`;
 	}
 
 	#statusText(): string {

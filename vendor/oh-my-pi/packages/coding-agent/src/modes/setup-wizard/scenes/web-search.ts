@@ -3,6 +3,7 @@ import { SETTINGS_SCHEMA } from "../../../config/settings-schema";
 import { getSearchProvider, setPreferredSearchProvider } from "../../../web/search/provider";
 import { isSearchProviderPreference, type SearchProviderId } from "../../../web/search/types";
 import { getSelectListTheme, theme } from "../../theme/theme";
+import { matchesUiDismiss } from "../../utils/keybinding-matchers";
 import type { SetupSceneHost, SetupTab } from "./types";
 
 const MAX_VISIBLE = 8;
@@ -41,7 +42,6 @@ export class WebSearchTab implements SetupTab {
 		if (index >= 0) this.#list.setSelectedIndex(index);
 		this.#list.onSelectionChange = item => this.#onHighlight(item.value);
 		this.#list.onSelect = item => this.#apply(item.value);
-		this.#list.onCancel = () => host.finish("skipped");
 	}
 
 	onActivate(): void {
@@ -54,6 +54,11 @@ export class WebSearchTab implements SetupTab {
 	}
 
 	handleInput(data: string): void {
+		if (matchesUiDismiss(data)) {
+			this.host.finish("skipped");
+			return;
+		}
+
 		this.#list.handleInput(data);
 	}
 

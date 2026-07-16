@@ -11,7 +11,7 @@ import {
 	TruncatedText,
 } from "@oh-my-pi/pi-tui";
 import { theme } from "../../modes/theme/theme";
-import { matchesSelectCancel, matchesSelectDown, matchesSelectUp } from "../../modes/utils/keybinding-matchers";
+import { matchesSelectDown, matchesSelectUp, matchesUiDismiss } from "../../modes/utils/keybinding-matchers";
 import type { AuthStorage, CredentialOriginKind } from "../../session/auth-storage";
 import { DynamicBorder } from "./dynamic-border";
 
@@ -320,8 +320,8 @@ export class OAuthSelectorComponent extends Container {
 		}
 	}
 	handleInput(keyData: string): void {
-		// Escape or Ctrl+C
-		if (matchesSelectCancel(keyData)) {
+		// UI dismiss or Ctrl+C
+		if (matchesUiDismiss(keyData) || matchesKey(keyData, "ctrl+c")) {
 			this.stopValidation();
 			this.#onCancelCallback();
 			return;

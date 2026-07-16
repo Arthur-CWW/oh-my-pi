@@ -1,7 +1,9 @@
 import { Container, type SelectItem, SelectList, Spacer, Text } from "@oh-my-pi/pi-tui";
 import type { BookmarkRecord } from "../../session/bookmarks";
 import { getSelectListTheme, theme } from "../theme/theme";
+import { matchesUiDismiss } from "../utils/keybinding-matchers";
 import { DynamicBorder } from "./dynamic-border";
+import { keyHint } from "./keybinding-hints";
 
 export interface BookmarksSelectorOptions {
 	readonly now?: () => number;
@@ -27,6 +29,7 @@ export function formatBookmarkDescription(record: BookmarkRecord): string {
 
 export class BookmarksSelectorComponent extends Container {
 	readonly #selectList: SelectList;
+	readonly #onDismiss: () => void;
 
 	constructor(
 		entries: ReadonlyArray<BookmarkRecord>,
@@ -35,6 +38,7 @@ export class BookmarksSelectorComponent extends Container {
 		options: BookmarksSelectorOptions = {},
 	) {
 		super();
+		this.#onDismiss = onDismiss;
 		const byId = new Map(entries.map(record => [record.id, record]));
 		const now = options.now?.() ?? Date.now();
 		const items: SelectItem[] = entries.map(record => ({
@@ -49,14 +53,23 @@ export class BookmarksSelectorComponent extends Container {
 			const record = byId.get(item.value);
 			if (record) onJump(record);
 		};
-		this.#selectList.onCancel = onDismiss;
 
 		this.addChild(new Spacer(1));
 		this.addChild(new DynamicBorder(str => theme.fg("dim", str)));
-		this.addChild(new Text(theme.bold("Bookmarks") + theme.fg("dim", "  Enter jump · Esc close"), 1, 0));
+		this.addChild(
+			new Text(theme.bold("Bookmarks") + theme.fg("dim", "  Enter jump · ") + keyHint("ui.dismiss", "close"), 1, 0),
+		);
 		this.addChild(this.#selectList);
 		this.addChild(new DynamicBorder(str => theme.fg("dim", str)));
 		this.addChild(new Spacer(1));
+	}
+
+	handleInput(data: string): void {
+		if (matchesUiDismiss(data)) {
+			this.#onDismiss();
+			return;
+		}
+		this.#selectList.handleInput(data);
 	}
 
 	getSelectList(): SelectList {

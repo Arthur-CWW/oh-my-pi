@@ -41,7 +41,7 @@ export class ErrorsPanelComponent implements Component {
 	}
 
 	handleInput(data: string): void {
-		this.#selector.getSelectList().handleInput(data);
+		this.#selector.handleInput(data);
 	}
 
 	invalidate(): void {
@@ -70,7 +70,11 @@ export function createErrorsDock(
 	onPinChange: (pinned: boolean) => void,
 ): { panel: ErrorsPanelComponent; dock: DockablePanelController } {
 	let dock: DockablePanelController;
-	const panel = new ErrorsPanelComponent(inbox, () => dock.close(), () => ui.requestComponentRender(panel));
+	const panel = new ErrorsPanelComponent(
+		inbox,
+		() => dock.close(),
+		() => ui.requestComponentRender(panel),
+	);
 	dock = new DockablePanelController(ui, panel, { preferredDock: "right", interruptOwner, onPinChange });
 	ui.addInputListener(data => {
 		if (!dock.isOpen || dock.isFocused) return undefined;

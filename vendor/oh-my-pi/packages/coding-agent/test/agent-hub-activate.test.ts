@@ -29,7 +29,7 @@ function liveSession(): AgentSession {
 type AgentHubControllerHarness = Pick<InteractiveModeContext, "hideThinkingBlock"> & {
 	keybindings: { getKeys(key: string): string[] };
 	ui: {
-		showOverlay(component: AgentHubOverlayComponent): { hide(): void };
+		showOverlay(component: AgentHubOverlayComponent, options?: Record<string, unknown>): { hide(): void };
 		setFocus(target: object): void;
 		requestRender(): void;
 	};
@@ -92,7 +92,14 @@ function makeHub(
 		sessionId: options.sessionId,
 		copyIdentity: options.copyIdentity,
 	});
-	return { hub, agents, lifecycle, doneCalls: () => doneCalls, done: done.promise, renderRequested: renderRequested.promise };
+	return {
+		hub,
+		agents,
+		lifecycle,
+		doneCalls: () => doneCalls,
+		done: done.promise,
+		renderRequested: renderRequested.promise,
+	};
 }
 
 it("y yanks the selected child's session handle and history URL", async () => {
@@ -545,6 +552,7 @@ describe("Agent hub Enter activation", () => {
 
 		const editor = {};
 		let capturedHub: AgentHubOverlayComponent | undefined;
+		let overlayOptions: Record<string, unknown> | undefined;
 		let hideCalls = 0;
 		const focusedIds: string[] = [];
 		const focusResolved = Promise.withResolvers<void>();
@@ -553,8 +561,9 @@ describe("Agent hub Enter activation", () => {
 		const ctx: AgentHubControllerHarness = {
 			keybindings: { getKeys: () => [] },
 			ui: {
-				showOverlay: component => {
+				showOverlay: (component, options) => {
 					capturedHub = component;
+					overlayOptions = options;
 					return {
 						hide: () => {
 							hideCalls++;
@@ -582,6 +591,7 @@ describe("Agent hub Enter activation", () => {
 		if (!capturedHub) throw new Error("Expected Agent Hub overlay");
 		const shownHub = capturedHub;
 		expect(focusTargets[0]).toBe(shownHub);
+		expect(overlayOptions).toMatchObject({ fullscreen: true });
 
 		shownHub.handleInput("\r");
 		expect(focusedIds).toEqual([]);

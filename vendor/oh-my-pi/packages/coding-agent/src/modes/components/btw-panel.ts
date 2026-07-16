@@ -2,6 +2,7 @@ import { type Component, Container, Markdown, Spacer, Text, type TUI } from "@oh
 import { replaceTabs } from "../../tools/render-utils";
 import { getMarkdownTheme, theme } from "../theme/theme";
 import { DynamicBorder } from "./dynamic-border";
+import { keyHint } from "./keybinding-hints";
 
 type BtwPanelState = "running" | "complete" | "aborted" | "error";
 
@@ -83,13 +84,13 @@ export class BtwPanelComponent extends Container {
 	#footerLine(): string {
 		switch (this.#state) {
 			case "running":
-				return theme.fg("muted", "Esc cancel /btw");
+				return keyHint("app.interrupt", "cancel /btw");
 			case "complete":
-				return theme.fg("muted", "Esc dismiss");
+				return keyHint("ui.dismiss", "dismiss");
 			case "aborted":
-				return theme.fg("warning", `${theme.status.warning} Cancelled · Esc dismiss`);
+				return `${theme.fg("warning", `${theme.status.warning} Cancelled · `)}${keyHint("ui.dismiss", "dismiss")}`;
 			case "error":
-				return theme.fg("error", `${theme.status.error} Error · Esc dismiss`);
+				return `${theme.fg("error", `${theme.status.error} Error · `)}${keyHint("ui.dismiss", "dismiss")}`;
 		}
 	}
 

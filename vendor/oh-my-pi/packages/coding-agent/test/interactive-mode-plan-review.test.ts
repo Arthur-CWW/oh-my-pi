@@ -267,7 +267,7 @@ describe("InteractiveMode plan review rendering", () => {
 		const previousVisual = Bun.env.VISUAL;
 		const keybindings = KeybindingsManager.inMemory({
 			"app.editor.external": "ctrl+e",
-			"tui.select.cancel": "ctrl+g",
+			"ui.dismiss": "ctrl+g",
 		});
 		mode.keybindings = keybindings;
 		setKeybindings(keybindings);
