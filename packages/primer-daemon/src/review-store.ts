@@ -44,26 +44,33 @@ export interface ReviewSimulationStep {
   stability: number
   difficulty: number
 }
+export type ReviewFailReason = "decode" | "slow" | "forgot"
+
 export interface ReviewEvent {
   id: number
   itemKind: ReviewItemKind
   itemId: number
   label: string
   grade: ReviewGrade
+  failReason: ReviewFailReason | null
   eventTime: string
 }
 
-type ReviewSessionCandidate = ReviewSessionItem & { createdAt: string }
+export type ReviewEventReasonUpdate = "updated" | "not_found" | "stale" | "already_tagged" | "not_again"
 
 export interface GradeReviewResult {
   // Card candidates reuse queueItemId as the stable item-id field for compatibility.
   queueItemId: number
   itemKind: ReviewItemKind
   itemId: number
+  eventId: number
   due: string
   state: string
   reps: number
 }
+
+type ReviewSessionCandidate = ReviewSessionItem & { createdAt: string }
+
 
 export interface ReviewState {
   id: number
@@ -116,6 +123,11 @@ const ReviewGradeSchema = Schema.Union([
   Schema.Literal("hard"),
   Schema.Literal("good"),
   Schema.Literal("easy"),
+])
+const ReviewFailReasonSchema = Schema.Union([
+  Schema.Literal("decode"),
+  Schema.Literal("slow"),
+  Schema.Literal("forgot"),
 ])
 const ReviewStateNameSchema = Schema.Union([
   Schema.Literal("New"),
@@ -212,9 +224,16 @@ const RawReviewEventRowSchema = Schema.Struct({
   item_id: PositiveInteger,
   label: Schema.String,
   grade: ReviewGradeSchema,
+  fail_reason: Schema.NullOr(ReviewFailReasonSchema),
   event_time: Schema.String,
 })
 type RawReviewEventRow = Schema.Schema.Type<typeof RawReviewEventRowSchema>
+const RawReviewEventReasonRowSchema = Schema.Struct({
+  grade: ReviewGradeSchema,
+  fail_reason: Schema.NullOr(ReviewFailReasonSchema),
+  event_time: Schema.String,
+})
+type RawReviewEventReasonRow = Schema.Schema.Type<typeof RawReviewEventReasonRowSchema>
 
 const CountRowSchema = Schema.Struct({ count: NonNegativeInteger })
 type CountRow = Schema.Schema.Type<typeof CountRowSchema>
@@ -380,27 +399,43 @@ export function gradeReviewItem(
   itemId: number,
   rating: Rating | ReviewGrade,
   itemKind?: ReviewItemKind,
+  failReason?: ReviewFailReason,
+): GradeReviewResult | null
+export function gradeReviewItem(
+  db: Database,
+  itemId: number,
+  rating: Rating | ReviewGrade,
+  failReason: ReviewFailReason,
 ): GradeReviewResult | null
 export function gradeReviewItem(
   db: Database,
   item: ReviewItemReference,
   rating: Rating | ReviewGrade,
+  failReason?: ReviewFailReason,
 ): GradeReviewResult | null
 export function gradeReviewItem(
   db: Database,
   itemOrId: number | ReviewItemReference,
   rating: Rating | ReviewGrade,
-  itemKindArg?: ReviewItemKind,
+  itemKindOrFailReason?: ReviewItemKind | ReviewFailReason,
+  failReasonArg?: ReviewFailReason,
 ): GradeReviewResult | null {
   ensureReadingTables(db)
   const item: ReviewItemReference =
     typeof itemOrId === "number"
-      ? { itemKind: itemKindArg ?? REVIEW_ITEM_KIND, itemId: itemOrId }
+      ? { itemKind: itemKindOrFailReason && isReviewItemKind(itemKindOrFailReason) ? itemKindOrFailReason : REVIEW_ITEM_KIND, itemId: itemOrId }
       : itemOrId
+  const requestedFailReason =
+    typeof itemOrId === "number"
+      ? failReasonArg
+      : itemKindOrFailReason && isReviewFailReason(itemKindOrFailReason)
+        ? itemKindOrFailReason
+        : undefined
   const itemId = Schema.decodeUnknownSync(PositiveInteger)(item.itemId)
   const itemKind = Schema.decodeUnknownSync(ReviewItemKindSchema)(item.itemKind)
   const grade = normalizeReviewGrade(rating)
-  return db.transaction((reference: ReviewItemReference, selectedGrade: Grade) => {
+  const failReason = requestedFailReason === undefined ? null : Schema.decodeUnknownSync(ReviewFailReasonSchema)(requestedFailReason)
+  return db.transaction((reference: ReviewItemReference, selectedGrade: Grade, selectedFailReason: ReviewFailReason | null) => {
     let queueItem: RawQueueStatusRow | null = null
     if (reference.itemKind === REVIEW_ITEM_KIND) {
       const queueRow = db.query<RawQueueStatusRow, [number]>("SELECT id, status FROM queue_items WHERE id = ?").get(reference.itemId)
@@ -480,11 +515,21 @@ export function gradeReviewItem(
       derivedStateVersion,
     )
     const eventTime = now.toISOString()
-    db.query<NoRows, [string, number, string, string, number, number]>(
+    const eventFailReason = reviewGradeName(selectedGrade) === "again" ? selectedFailReason : null
+    const eventInsert = db.query<NoRows, [string, number, string, string, number, number, ReviewFailReason | null]>(
       `INSERT INTO review_events
-         (item_kind, item_id, event_time, grade, prior_state_version, derived_state_version)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-    ).run(reference.itemKind, reference.itemId, eventTime, reviewGradeName(selectedGrade), priorStateVersion, derivedStateVersion)
+         (item_kind, item_id, event_time, grade, prior_state_version, derived_state_version, fail_reason)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      reference.itemKind,
+      reference.itemId,
+      eventTime,
+      reviewGradeName(selectedGrade),
+      priorStateVersion,
+      derivedStateVersion,
+      eventFailReason,
+    )
+    const eventId = Number(eventInsert.lastInsertRowid)
     if (queueItem?.status === "new") {
       db.query<NoRows, [string, number]>("UPDATE queue_items SET status = 'keep', updated_at = ? WHERE id = ?").run(
         eventTime,
@@ -495,11 +540,12 @@ export function gradeReviewItem(
       queueItemId: reference.itemId,
       itemKind: reference.itemKind,
       itemId: reference.itemId,
+      eventId,
       due,
       state: nextState,
       reps: nextCard.reps,
     }
-  })( { itemKind, itemId }, grade)
+  })( { itemKind, itemId }, grade, failReason)
 }
 export function listReviewEvents(db: Database, limit = 20): ReviewEvent[] {
   ensureReadingTables(db)
@@ -517,6 +563,7 @@ export function listReviewEvents(db: Database, limit = 20): ReviewEvent[] {
               re.item_id,
               ${labelExpression} AS label,
               re.grade,
+              re.fail_reason,
               re.event_time
        FROM review_events re
        LEFT JOIN queue_items qi ON qi.id = re.item_id AND re.item_kind = 'queue_item'
@@ -533,10 +580,39 @@ export function listReviewEvents(db: Database, limit = 20): ReviewEvent[] {
       itemId: event.item_id,
       label: event.label,
       grade: event.grade,
+      failReason: event.fail_reason,
       eventTime: event.event_time,
     }
   })
 }
+export function setReviewEventFailReason(
+  db: Database,
+  eventId: number,
+  failReason: ReviewFailReason,
+): ReviewEventReasonUpdate {
+  ensureReadingTables(db)
+  const id = Schema.decodeUnknownSync(PositiveInteger)(eventId)
+  const reason = Schema.decodeUnknownSync(ReviewFailReasonSchema)(failReason)
+  const row = db
+    .query<RawReviewEventReasonRow, [number]>(
+      "SELECT grade, fail_reason, event_time FROM review_events WHERE id = ?",
+    )
+    .get(id)
+  if (row === null) return "not_found"
+  const event = Schema.decodeUnknownSync(RawReviewEventReasonRowSchema)(row)
+  if (event.grade !== "again") return "not_again"
+  const eventMs = Date.parse(event.event_time)
+  const ageMs = Date.now() - eventMs
+  if (!Number.isFinite(eventMs) || ageMs < 0 || ageMs >= 60_000) return "stale"
+  if (event.fail_reason !== null) return "already_tagged"
+  const result = db
+    .query<NoRows, [ReviewFailReason, number]>(
+      "UPDATE review_events SET fail_reason = ? WHERE id = ? AND fail_reason IS NULL",
+    )
+    .run(reason, id)
+  return result.changes === 1 ? "updated" : "already_tagged"
+}
+
 
 export function getReviewDueCounts(db: Database): ReviewDueCounts {
   ensureReadingTables(db)
@@ -597,6 +673,14 @@ export function getReviewDueCounts(db: Database): ReviewDueCounts {
       )
     : 0
   return { dueNow: dueQueue + dueCards, newAvailable: newQueue + newCards, enrolledCards }
+}
+
+function isReviewItemKind(value: string): value is ReviewItemKind {
+  return value === REVIEW_ITEM_KIND || value === CARD_ITEM_KIND
+}
+
+function isReviewFailReason(value: string): value is ReviewFailReason {
+  return value === "decode" || value === "slow" || value === "forgot"
 }
 
 function normalizeReviewGrade(rating: Rating | ReviewGrade): Grade {

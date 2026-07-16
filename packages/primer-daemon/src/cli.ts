@@ -13,6 +13,9 @@ import { attachReaderMedia, importReaderMedia, listReaderMedia } from "./reader-
 import { resolveDaemonPaths, type DaemonPaths } from "./paths"
 import { indexZhDict } from "./zhdict-store"
 import type { EvidenceHit, EvidenceSource } from "./schema"
+import { CedictNotBuiltError, segmentCedict } from "./dict"
+import { listHanlyZh, runHanlyZh } from "./hanly-zh"
+
 export const USAGE = `Usage:
   primer search <terms...> [--limit N] [--source browser|twitter|reader|cards] [--json]
   primer ask "<question>" [--limit N] [--json]
@@ -27,6 +30,8 @@ export const USAGE = `Usage:
   primer media attach <docId> <dir>
   primer media list [--json]
   primer zhdict index [--json]
+  primer hanly-zh generate [--limit N] [--json]
+  primer hanly-zh list [--limit N] [--json]
 `
 
 const DEFAULT_SEARCH_LIMIT = 30
@@ -177,8 +182,45 @@ const STOPWORDS: Partial<Record<string, true>> = {
   your: true,
   yours: true,
   yourself: true,
+
   yourselves: true,
 }
+
+const ZH_STOPWORDS: Partial<Record<string, true>> = {
+  的: true,
+  了: true,
+  吗: true,
+  呢: true,
+  我: true,
+  你: true,
+  他: true,
+  她: true,
+  它: true,
+  他们: true,
+  她们: true,
+  它们: true,
+  们: true,
+  是: true,
+  在: true,
+  有: true,
+  和: true,
+  也: true,
+  都: true,
+  这: true,
+  那: true,
+  什么: true,
+  怎么: true,
+  为什么: true,
+  如何: true,
+  哪里: true,
+  哪儿: true,
+  哪个: true,
+  哪些: true,
+  谁: true,
+  请: true,
+}
+
+const ZH_STOPWORD_LIST = Object.keys(ZH_STOPWORDS).sort((left, right) => right.length - left.length)
 
 type FlagKind = "boolean" | "value"
 type FlagValue = string | true
@@ -189,7 +231,7 @@ interface ParsedArgs {
 }
 
 
-export function extractTerms(question: string): string[] {
+export function extractTerms(question: string, cedictDbPath = resolveDaemonPaths().cedictDb): string[] {
   const terms: string[] = []
   let cursor = 0
   let unquoted = ""
@@ -204,11 +246,76 @@ export function extractTerms(question: string): string[] {
   }
 
   unquoted += question.slice(cursor)
-  for (const token of normalizeUnquoted(unquoted)) {
+  appendUnquotedTerms(terms, unquoted, cedictDbPath)
+  return terms
+}
+
+function appendUnquotedTerms(terms: string[], value: string, cedictDbPath: string): void {
+  const hanPattern = /\p{Script=Han}+/gu
+  let cursor = 0
+  for (const match of value.matchAll(hanPattern)) {
+    const index = match.index ?? cursor
+    appendLatinTerms(terms, value.slice(cursor, index))
+    for (const segment of segmentHanRun(match[0], cedictDbPath)) {
+      if (ZH_STOPWORDS[segment] !== true) pushUnique(terms, segment)
+    }
+    cursor = index + match[0].length
+  }
+  appendLatinTerms(terms, value.slice(cursor))
+}
+
+function appendLatinTerms(terms: string[], value: string): void {
+  for (const token of normalizeUnquoted(value)) {
     if (token.length >= 3 && STOPWORDS[token] !== true) pushUnique(terms, token)
   }
+}
 
-  return terms
+function segmentHanRun(run: string, cedictDbPath: string): string[] {
+  const segments: string[] = []
+  for (const span of splitHanStopwordBoundaries(run)) {
+    if (ZH_STOPWORDS[span] === true) {
+      segments.push(span)
+      continue
+    }
+    segments.push(...segmentNonStopwordSpan(span, cedictDbPath))
+  }
+  return segments
+}
+
+function splitHanStopwordBoundaries(run: string): string[] {
+  const chars = Array.from(run)
+  const spans: string[] = []
+  let cursor = 0
+  let nonStopwordStart = 0
+
+  while (cursor < chars.length) {
+    const stopword = ZH_STOPWORD_LIST.find((candidate) => chars.slice(cursor, cursor + candidate.length).join("") === candidate)
+    if (stopword === undefined) {
+      cursor += 1
+      continue
+    }
+    if (nonStopwordStart < cursor) spans.push(chars.slice(nonStopwordStart, cursor).join(""))
+    spans.push(stopword)
+    cursor += stopword.length
+    nonStopwordStart = cursor
+  }
+
+  if (nonStopwordStart < chars.length) spans.push(chars.slice(nonStopwordStart).join(""))
+  return spans
+}
+
+function segmentNonStopwordSpan(span: string, cedictDbPath: string): string[] {
+  try {
+    return segmentCedict(cedictDbPath, span)
+  } catch (error) {
+    if (!(error instanceof CedictNotBuiltError)) throw error
+    const chars = Array.from(span)
+    const segments: string[] = []
+    for (let cursor = 0; cursor < chars.length; cursor += 2) {
+      segments.push(chars.slice(cursor, cursor + 2).join(""))
+    }
+    return segments
+  }
 }
 
 export async function runCli(argv: readonly string[], env: Record<string, string | undefined> = process.env): Promise<number> {
@@ -224,6 +331,7 @@ export async function runCli(argv: readonly string[], env: Record<string, string
   if (command === "media") return runMediaCommand(argv.slice(1), paths)
   if (command === "review") return runReviewCommand(argv.slice(1), paths)
   if (command === "zhdict") return runZhDictCommand(argv.slice(1), paths)
+  if (command === "hanly-zh") return runHanlyZhCommand(argv.slice(1), paths)
   if (command === "feedback") return runFeedbackCommand(argv.slice(1), paths)
   if (command === "events") return runEventsCommand(argv.slice(1), paths)
 
@@ -257,7 +365,8 @@ function runAskCommand(argv: readonly string[], paths: DaemonPaths): number {
   if (limit === null) return usageError()
 
   const question = parsed.positionals.join(" ")
-  const terms = extractTerms(question)
+  const terms = extractTerms(question, paths.cedictDb)
+
   if (terms.length === 0) return usageError()
 
   const evidence = askEvidence(paths, terms, limit)
@@ -298,6 +407,48 @@ function runZhDictCommand(argv: readonly string[], paths: DaemonPaths): number {
     process.stdout.write(`Indexed ${result.sentenceCount} sentences from ${result.sourceCount} sources (${result.insertedCount} new).\n`)
   }
   return 0
+}
+
+async function runHanlyZhCommand(argv: readonly string[], paths: DaemonPaths): Promise<number> {
+  const parsed = parseArgs(argv, { limit: "value", json: "boolean" })
+  if (parsed === null || parsed.positionals.length !== 1) return usageError()
+  const subcommand = parsed.positionals[0]
+  const limit = parsePositiveInteger(parsed.flags.get("limit"), 50)
+  if (limit === null || limit > 50) return usageError()
+  if (paths.hanlyDb === undefined) return storageError(new Error("Hanly database path is not configured"))
+
+  const db = openLedger(paths.ledgerDb)
+  try {
+    if (subcommand === "generate") {
+      const summary = await runHanlyZh(db, paths.hanlyDb, limit)
+      if (parsed.flags.has("json")) {
+        process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`)
+      } else {
+        process.stdout.write(`hanly-zh: total=${summary.total} ok=${summary.ok} error=${summary.error}\n`)
+        for (const sample of summary.samples.slice(0, 3)) {
+          process.stdout.write(`${sample.source.char}: ${JSON.stringify(sample.output, null, 0)}\n`)
+        }
+      }
+      return 0
+    }
+    if (subcommand === "list") {
+      const rows = listHanlyZh(db, limit)
+      if (parsed.flags.has("json")) {
+        process.stdout.write(`${JSON.stringify(rows, null, 2)}\n`)
+      } else if (rows.length === 0) {
+        process.stdout.write("No Hanly zh rows.\n")
+      } else {
+        process.stdout.write("char\tstatus\texplanation\tmodel\tcreated_at\n")
+        for (const row of rows) process.stdout.write(`${row.char}\t${row.status}\t${row.zhExplanation ?? ""}\t${row.model}\t${row.createdAt}\n`)
+      }
+      return 0
+    }
+    return usageError()
+  } catch (error) {
+    return storageError(error)
+  } finally {
+    db.close()
+  }
 }
 
 function runFeedbackCommand(argv: readonly string[], paths: DaemonPaths): number {

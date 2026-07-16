@@ -4,12 +4,14 @@ import type * as React from "react"
 import {
   type QueueItem,
   type QueueStatus,
+  type ReviewFailReason,
   type ReviewGrade,
   type ReviewSessionItem,
   type ReviewSessionMode,
   getQueue,
   getReviewSession,
   gradeReview,
+  setReviewEventReason,
   setQueueStatus,
 } from "@/api"
 import { navigate, readerUrl } from "@/hooks/useHashRoute"
@@ -46,6 +48,13 @@ const GRADE_OPTIONS: Array<{ grade: ReviewGrade; key: string; label: string; hin
   { grade: "good", key: "3", label: "Good", hint: "remembered" },
   { grade: "easy", key: "4", label: "Easy", hint: "effortless" },
 ]
+type FailureCapture = {
+  queueItemId: number
+  eventId: number | null
+  pendingReason?: ReviewFailReason
+}
+const FAILURE_CAPTURE_MS = 2_500
+
 
 type ReviewMode = "triage" | "session"
 
@@ -170,6 +179,15 @@ export function ReviewView({ onShowHelp }: { onShowHelp: () => void }): React.JS
   sessionRevealedRef.current = sessionRevealed
   const sessionBusyRef = useRef(sessionBusy)
   sessionBusyRef.current = sessionBusy
+  const [failureCapture, setFailureCapture] = useState<FailureCapture | null>(null)
+  const failureCaptureRef = useRef(failureCapture)
+  failureCaptureRef.current = failureCapture
+  const failureTimerRef = useRef<number | null>(null)
+
+  useEffect(() => () => {
+    if (failureTimerRef.current !== null) window.clearTimeout(failureTimerRef.current)
+  }, [])
+
 
   // Fetch queue
   useEffect(() => {
@@ -240,23 +258,69 @@ export function ReviewView({ onShowHelp }: { onShowHelp: () => void }): React.JS
     navigate(readerUrl(item.provenance.docId, item.provenance.markId ?? undefined))
   }, [])
 
+  const handleFailureReason = useCallback((reason: ReviewFailReason): boolean => {
+    const capture = failureCaptureRef.current
+    if (!capture) return false
+    if (failureTimerRef.current !== null) window.clearTimeout(failureTimerRef.current)
+    if (capture.eventId === null) {
+      failureCaptureRef.current = { ...capture, pendingReason: reason }
+    } else {
+      void setReviewEventReason(capture.eventId, reason).catch((error: unknown) => {
+        setSessionError(error instanceof Error ? error.message : "Failed to save failure reason")
+      })
+      failureCaptureRef.current = null
+    }
+    setFailureCapture(null)
+    return true
+  }, [])
+
   const handleGrade = useCallback((grade: ReviewGrade) => {
     const item = sessionItemsRef.current?.[sessionIndexRef.current]
     if (!item || !sessionRevealedRef.current || sessionBusyRef.current) return
     setSessionBusy(true)
     setSessionError(null)
-    gradeReview(item.queueItemId, grade).then(
-      () => {
+    const gradeRequest = gradeReview(item.queueItemId, grade)
+    if (grade === "again") {
+      const capture: FailureCapture = { queueItemId: item.queueItemId, eventId: null }
+      failureCaptureRef.current = capture
+      setFailureCapture(capture)
+      failureTimerRef.current = window.setTimeout(() => {
+        if (failureCaptureRef.current?.queueItemId === item.queueItemId) {
+          failureCaptureRef.current = null
+          setFailureCapture(null)
+        }
+      }, FAILURE_CAPTURE_MS)
+    }
+    const isLast = sessionIndexRef.current + 1 >= (sessionItemsRef.current?.length ?? 0)
+    setSessionCounts((prev) => ({ ...prev, [grade]: prev[grade] + 1 }))
+    setSessionIndex((prev) => prev + 1)
+    setSessionRevealed(false)
+    setSessionBusy(false)
+    void gradeRequest.then(
+      (result) => {
         logEvent("session_grade", { queueItemId: item.queueItemId, grade })
-        if (sessionIndexRef.current + 1 >= (sessionItemsRef.current?.length ?? 0)) logEvent("session_complete", { count: sessionItemsRef.current?.length ?? 0 })
-        setSessionCounts((prev) => ({ ...prev, [grade]: prev[grade] + 1 }))
-        setSessionIndex((prev) => prev + 1)
-        setSessionRevealed(false)
+        if (isLast) logEvent("session_complete", { count: sessionItemsRef.current?.length ?? 0 })
+        if (grade !== "again") return
+        const capture = failureCaptureRef.current
+        if (!capture || capture.queueItemId !== item.queueItemId || capture.eventId !== null) return
+        failureCaptureRef.current = { ...capture, eventId: result.eventId }
+        if (capture.pendingReason !== undefined) {
+          failureCaptureRef.current = null
+          void setReviewEventReason(result.eventId, capture.pendingReason).catch((error: unknown) => {
+            setSessionError(error instanceof Error ? error.message : "Failed to save failure reason")
+          })
+        } else {
+          setFailureCapture((current) => current && current.queueItemId === item.queueItemId ? { ...current, eventId: result.eventId } : current)
+        }
       },
-      (e: unknown) => {
-        setSessionError(e instanceof Error ? e.message : "Failed to save grade")
+      (error: unknown) => {
+        setSessionError(error instanceof Error ? error.message : "Failed to save grade")
+        if (grade === "again" && failureCaptureRef.current?.queueItemId === item.queueItemId) {
+          failureCaptureRef.current = null
+          setFailureCapture(null)
+        }
       },
-    ).finally(() => setSessionBusy(false))
+    )
   }, [])
 
   // Triage keyboard controls.
@@ -324,6 +388,13 @@ export function ReviewView({ onShowHelp }: { onShowHelp: () => void }): React.JS
     function onKey(e: KeyboardEvent) {
       const el = document.activeElement as HTMLElement | null
       const typing = el?.tagName === "INPUT" || el?.tagName === "TEXTAREA" || el?.isContentEditable
+      const capturedReason =
+        e.key === "d" ? "decode" : e.key === "s" ? "slow" : e.key === " " || e.key === "Spacebar" ? "forgot" : null
+      if (!typing && capturedReason !== null && failureCaptureRef.current) {
+        handleFailureReason(capturedReason)
+        e.preventDefault()
+        return
+      }
 
       if (e.key === "Escape") {
         if (typing) {
@@ -360,7 +431,7 @@ export function ReviewView({ onShowHelp }: { onShowHelp: () => void }): React.JS
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [mode, handleGrade, onShowHelp])
+  }, [mode, handleGrade, handleFailureReason, onShowHelp])
 
   // Scroll focused queue row into view.
   useEffect(() => {
@@ -478,6 +549,16 @@ export function ReviewView({ onShowHelp }: { onShowHelp: () => void }): React.JS
             </div>
           </div>
           {sessionError && <p className="mb-3 text-xs text-destructive/80">{sessionError}</p>}
+          {failureCapture && (
+            <div className="mb-3 flex items-center justify-center gap-2 rounded-md border border-border/40 bg-muted/20 px-2 py-1.5 text-[11px] text-muted-foreground">
+              <span>为什么？</span>
+              <button type="button" className="hover:text-foreground" onClick={() => handleFailureReason("decode")}>d 读不懂</button>
+              <span className="text-muted-foreground/40">·</span>
+              <button type="button" className="hover:text-foreground" onClick={() => handleFailureReason("slow")}>s 太慢</button>
+              <span className="text-muted-foreground/40">·</span>
+              <button type="button" className="hover:text-foreground" onClick={() => handleFailureReason("forgot")}>space 忘了</button>
+            </div>
+          )}
           {sessionItems === null && !sessionError && (
             <p className="py-8 text-center text-sm text-muted-foreground/60">loading…</p>
           )}

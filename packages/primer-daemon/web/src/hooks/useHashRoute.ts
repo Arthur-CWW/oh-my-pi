@@ -13,6 +13,7 @@ export type Route =
   | { view: "enrich" }
   | { view: "scheduler" }
   | { view: "pipeline" }
+  | { view: "cards" }
 
 // ---------------------------------------------------------------------------
 // Parse / navigate
@@ -36,6 +37,7 @@ function parseHash(hash: string): Route {
   if (h === "/enrich" || h === "/enrich/") return { view: "enrich" }
   if (h === "/scheduler" || h === "/scheduler/") return { view: "scheduler" }
   if (h === "/pipeline" || h === "/pipeline/") return { view: "pipeline" }
+  if (h === "/cards" || h === "/cards/") return { view: "cards" }
 
   return { view: "dashboard" }
 }

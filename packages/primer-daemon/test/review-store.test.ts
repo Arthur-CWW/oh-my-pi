@@ -13,8 +13,11 @@ import {
 import {
   buildReviewSession,
   gradeReviewItem,
+  listReviewEvents,
   QUICK_RETRIEVABILITY_THRESHOLD,
+  setReviewEventFailReason,
   simulateReview,
+  type ReviewFailReason,
 } from "../src/review-store"
 
 let nextFixtureId = 0
@@ -37,6 +40,8 @@ CREATE TABLE queue_items (
       const columns = db.query<{ name: string }, []>("PRAGMA table_info(queue_items)").all()
       expect(columns.filter((column) => column.name === "priority")).toHaveLength(1)
       expect(db.query<{ name: string }, []>("PRAGMA index_list(queue_items)").all().some((index) => index.name === "queue_items_new_intro_idx")).toBe(true)
+      const eventColumns = db.query<{ name: string }, []>("PRAGMA table_info(review_events)").all()
+      expect(eventColumns.filter((column) => column.name === "fail_reason")).toHaveLength(1)
     } finally {
       db.close()
     }
@@ -212,6 +217,15 @@ CREATE TABLE queue_items (
       )
       expect(badGrade?.status).toBe(400)
       expect(badPriority?.status).toBe(400)
+      const badReason = await handleReaderApi(
+        new Request("http://review.test/api/review/grade", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ queueItemId: 1, grade: "again", failReason: "unknown" }),
+        }),
+        paths,
+      )
+      expect(badReason?.status).toBe(400)
       const created = createReadingDoc(ledger, { title: "端点", text: "端点" })
       const mark = createReadingMark(ledger, {
         docId: created.id,
@@ -259,6 +273,30 @@ CREATE TABLE queue_items (
       ledger.close()
     }
   })
+  test("stores failure reasons on again events and guards reason annotations", () => {
+    withReadingDb((db) => {
+      const mark = markWord(db, "失败")
+      const graded = gradeReviewItem(db, mark.queueItem.id, "again", "queue_item", "decode")
+      expect(graded?.eventId).toBeGreaterThan(0)
+      expect(db.query("SELECT grade, fail_reason FROM review_events WHERE id = ?").get(graded!.eventId)).toEqual({
+        grade: "again",
+        fail_reason: "decode",
+      })
+      expect(listReviewEvents(db, 1)[0]?.failReason).toBe("decode")
+      expect(() => gradeReviewItem(db, mark.queueItem.id, "again", "queue_item", "invalid" as ReviewFailReason)).toThrow()
+
+      const untagged = markWord(db, "慢")
+      const untaggedGrade = gradeReviewItem(db, untagged.queueItem.id, "again")
+      expect(setReviewEventFailReason(db, untaggedGrade!.eventId, "slow")).toBe("updated")
+      expect(setReviewEventFailReason(db, untaggedGrade!.eventId, "forgot")).toBe("already_tagged")
+
+      const stale = markWord(db, "旧")
+      const staleGrade = gradeReviewItem(db, stale.queueItem.id, "again")
+      db.query("UPDATE review_events SET event_time = ? WHERE id = ?").run("2000-01-01T00:00:00.000Z", staleGrade!.eventId)
+      expect(setReviewEventFailReason(db, staleGrade!.eventId, "decode")).toBe("stale")
+    })
+  })
+
 })
 
 function withReadingDb(run: (db: Database) => void): void {

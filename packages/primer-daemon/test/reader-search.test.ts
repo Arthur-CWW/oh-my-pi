@@ -71,6 +71,7 @@ CREATE TABLE concepts (
       insertSourceBlock(db, 10, 1, "sb-10", "A source passage says metacognition shapes the reader's next question.")
       insertSourceBlock(db, 11, 2, "sb-11", "A paragraph about scheduling and review cadence.")
       insertSourceBlock(db, 12, 3, "sb-12", "Archive practice makes provenance visible.")
+      insertSourceBlock(db, 13, 1, "sb-13", "我最近在读什么。")
       insertAnnotation(db, 20, 1, "Feedback Note", "This note uses palimpsest as a metaphor for layered marginalia.")
       insertAnnotation(db, 21, 2, "Review Note", "Spacing changes the felt cost of returning to a claim.")
       insertAnnotation(db, 22, 3, "Archive Note", "References should remain close to the statement they support.")
@@ -121,6 +122,14 @@ describe("searchReader", () => {
       expect(sourceBlock?.snippet).toContain("metacognition")
       expect(concept?.ref).toBe("reader:concepts:30")
       expect(concept?.snippet).toContain("consolidation")
+    })
+  })
+
+  test("matches multi-character Han terms with LIKE evidence queries", () => {
+    withReaderDb((dbPath) => {
+      const result = searchReader(dbPath, ["最近"], 10)
+
+      expect(result.hits.map((hit) => hit.ref)).toContain("reader:source_blocks:13")
     })
   })
 })

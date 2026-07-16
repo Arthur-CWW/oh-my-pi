@@ -22,7 +22,7 @@ All three are 300–1,500 Han characters and fall inside the 85–95% comprehens
 
 ## Seeded documents
 
-Created via `POST http://primer.localhost:1355/api/reader/docs` with `{title, text, lang: "zh"}`:
+Created via `POST https://primer.localhost/api/reader/docs` with `{title, text, lang: "zh"}`:
 
 | ID | Title | Paragraphs | Verified |
 | ---: | --- | ---: | --- |

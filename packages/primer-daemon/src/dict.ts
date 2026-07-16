@@ -71,6 +71,40 @@ export function lookupCedictBest(dbPath: string, text: string): DictLookup {
     return { word: trimmedText, entries: [], decomposition: queryDecomposition(db, trimmedText) }
   })
 }
+export function segmentCedict(dbPath: string, text: string): string[] {
+  const trimmedText = text.trim()
+  if (trimmedText.length === 0) return []
+  return withCedict(dbPath, (db) => {
+    const exactWord = db.query<{ found: number }, [string, string]>(
+      "SELECT 1 AS found FROM cedict WHERE simplified = ? OR traditional = ? LIMIT 1",
+    )
+    const chars = Array.from(trimmedText)
+    const segments: string[] = []
+    let cursor = 0
+
+    while (cursor < chars.length) {
+      let matchedEnd = cursor
+      for (let end = chars.length; end > cursor; end -= 1) {
+        const candidate = chars.slice(cursor, end).join("")
+        if (exactWord.get(candidate, candidate) !== null) {
+          matchedEnd = end
+          segments.push(candidate)
+          break
+        }
+      }
+      if (matchedEnd > cursor) {
+        cursor = matchedEnd
+        continue
+      }
+
+      const fallbackEnd = Math.min(cursor + 2, chars.length)
+      segments.push(chars.slice(cursor, fallbackEnd).join(""))
+      cursor = fallbackEnd
+    }
+
+    return segments
+  })
+}
 
 export function listKnownWords(dbPath: string): KnownWordsResult {
   return withCedict(dbPath, (db) => {

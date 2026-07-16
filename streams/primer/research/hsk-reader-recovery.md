@@ -6,8 +6,8 @@ Date: 2026-07-16
 
 Both services are currently running behind portless and returned HTTP 200:
 
-- HSK reader: http://hsk-reader.localhost:1355/
-- Mochi-lite: http://mochi-lite.localhost:1355/
+- HSK reader: https://hsk-reader.localhost/
+- Mochi-lite: https://mochi-lite.localhost/
 
 No application source files were modified. The HSK app already had `node_modules`, `public/cards.json`, and the `public/audio` symlink, so no install or card generation was needed. The exact running commands (from each app directory) are:
 

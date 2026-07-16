@@ -6,7 +6,7 @@ Continuation packet for a NON-Fable orchestrator (GPT-5.5:high or Opus; boot: `o
 
 ## What shipped today (all gated green unless noted)
 
-1. **Chinese reading loop skeleton** — reader/review/queue + CEDICT (202,906 entries; 4,240 known words) + 4th substrate (learning-card-system). Proof: docs/qa/primer-chinese-loop.md. Live at primer.localhost:1355 (detached nohup process; log /tmp/primer-dev.log).
+1. **Chinese reading loop skeleton** — reader/review/queue + CEDICT (202,906 entries; 4,240 known words) + 4th substrate (learning-card-system). Proof: docs/qa/primer-chinese-loop.md. Live at https://primer.localhost (detached nohup process; log /tmp/primer-dev.log).
 2. **Shadowing v1** — packages/shadowing-pipeline (faster-whisper large-v3; FireRedASR2S is CUDA-pinned upstream = v1.5 with MFA phonemes) + #/shadow surface + batch mode: **40 aligned assets** at data/primer/shadowing/. Asset API routes (list/alignment/media+Range) in src/shadowing-api.ts, tested. Proof: docs/qa/primer-shadowing-v1.md (pre-batch; update worthwhile).
 3. **Generation store (SQLite, Arthur directive: sqlite not markdown)** — data/primer/generation-store.sqlite via `cd packages/primer-daemon && bun run ingest:generation` (idempotent; `stats` subcommand). Current: 531 annotation rows / 54 rubric verdicts / 375 HSK cards. Read-only API: /api/generation/* (src/generation-api.ts, tested).
 4. **Meltdown quality pass** — 54 cards audited by 2 judges (canonical tiers: T0=2/T1=31/T2=21) + 4 rewriters; merged per-unit batches at READER/artifacts/generation/quality-pass-2026-07-06/merged/ (READER = streams/primer/wrapped-commentary-reader). `bun scripts/merge-quality-pass.ts` = dry-run against a COPY, accounting verified (moved_in/out columns). **LIVE IMPORT NOT DONE** — decision gate: run import per merged unit only after AbJudge verdict + Arthur nod; site/ files still untouched.
@@ -38,5 +38,5 @@ Continuation packet for a NON-Fable orchestrator (GPT-5.5:high or Opus; boot: `o
 
 - Workers' sandboxes often EPERM on subprocess/fs writes → audit-then-fire: they IRC exact commands, orchestrator fires in parent shell, they verify. Budget for this.
 - GPT workers yield then get harness-retried — a final "nothing more needed, park" IRC message stops the loop.
-- Never touch primer.localhost:1355 for QA (Arthur's surface); workers boot own ports.
-- Live server currently runs from a detached nohup (dies on reboot); Arthur's tmux should run `cd packages/primer-daemon && bun run dev`.
+- Never touch https://primer.localhost for QA (Arthur's surface); workers boot own ports.
+- Live server is supervised by the primer stream service registry (`mise run up primer`).

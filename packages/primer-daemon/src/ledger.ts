@@ -2,6 +2,7 @@ import { existsSync, mkdirSync } from "node:fs"
 import { dirname } from "node:path"
 import { Database } from "bun:sqlite"
 import { Schema } from "effect"
+import { ensureReadingTables } from "./reading-store"
 
 export interface NoteInput {
   question: string
@@ -17,6 +18,7 @@ export interface CardInput {
 }
 
 export type CardStatus = "candidate" | "approved" | "rejected"
+export type CardListStatus = CardStatus | "enrolled" | "all"
 
 export interface ProgressInput {
   kind: string
@@ -94,6 +96,19 @@ const RawCardRowSchema = Schema.Struct({
 })
 
 type RawCardRow = Schema.Schema.Type<typeof RawCardRowSchema>
+
+const RawCardEnrollmentRowSchema = Schema.Struct({
+  id: PositiveInteger,
+  front: Schema.String,
+  back: Schema.String,
+  source_ref: NullableString,
+  url: NullableString,
+  status: CardStatusSchema,
+  created_at: Schema.String,
+  enrolled: Schema.Number,
+})
+
+type RawCardEnrollmentRow = Schema.Schema.Type<typeof RawCardEnrollmentRowSchema>
 
 const RawProgressRowSchema = Schema.Struct({
   id: PositiveInteger,
@@ -235,6 +250,42 @@ export function listCards(db: Database, limit = DEFAULT_LIMIT): CardRow[] {
     .map((row) => decodeCardRow(row))
 }
 
+export interface CardListRow extends CardRow {
+  enrolled: boolean
+}
+
+export function listCardsWithEnrollment(db: Database, limit = DEFAULT_LIMIT, status: CardListStatus = "all"): CardListRow[] {
+  ensureReadingTables(db)
+  const normalizedLimit = Number.isFinite(limit) && limit > 0 ? Math.trunc(limit) : DEFAULT_LIMIT
+  const rows = db
+    .query<RawCardEnrollmentRow, [CardListStatus, CardListStatus, CardListStatus, CardListStatus, number]>(
+      `SELECT cc.id, cc.front, cc.back, cc.source_ref, cc.url, cc.status, cc.created_at,
+              CASE WHEN EXISTS (
+                SELECT 1 FROM review_state rs
+                WHERE rs.item_kind = 'card_candidate' AND rs.item_id = cc.id
+              ) THEN 1 ELSE 0 END AS enrolled
+       FROM card_candidates cc
+       WHERE (
+         ? = 'all'
+         OR (? = 'enrolled' AND EXISTS (
+           SELECT 1 FROM review_state rs
+           WHERE rs.item_kind = 'card_candidate' AND rs.item_id = cc.id
+         ))
+         OR (? IN ('candidate', 'approved', 'rejected') AND cc.status = ? AND NOT EXISTS (
+           SELECT 1 FROM review_state rs
+           WHERE rs.item_kind = 'card_candidate' AND rs.item_id = cc.id
+         ))
+       )
+       ORDER BY datetime(cc.created_at) DESC, cc.id DESC
+       LIMIT ?`,
+    )
+    .all(status, status, status, status, normalizedLimit)
+  return rows.map((row) => {
+    const card = decodeCardEnrollmentRow(row)
+    return { ...card, enrolled: row.enrolled !== 0 }
+  })
+}
+
 export function setCardStatus(db: Database, id: number, status: CardStatus): CardRow | null {
   const result = db
     .query<NoRows, [CardStatus, number]>(
@@ -284,6 +335,19 @@ export function listProgress(db: Database, limit = DEFAULT_PROGRESS_LIMIT): Prog
 
 function decodeCardRow(row: RawCardRow): CardRow {
   const card = Schema.decodeUnknownSync(RawCardRowSchema)(row)
+  return {
+    id: card.id,
+    front: card.front,
+    back: card.back,
+    sourceRef: card.source_ref,
+    url: card.url,
+    status: card.status,
+    createdAt: card.created_at,
+  }
+}
+
+function decodeCardEnrollmentRow(row: RawCardEnrollmentRow): CardRow {
+  const card = Schema.decodeUnknownSync(RawCardEnrollmentRowSchema)(row)
   return {
     id: card.id,
     front: card.front,

@@ -47,6 +47,7 @@ const NAV_LINKS: Array<{ href: string; label: string; segment: string }> = [
   { href: "#/enrich", label: "Enrich", segment: "enrich" },
   { href: "#/scheduler", label: "Scheduler", segment: "scheduler" },
   { href: "#/pipeline", label: "Pipeline", segment: "pipeline" },
+  { href: "#/cards", label: "Cards", segment: "cards" },
 ]
 
 function Nav({ segment }: { segment: string }): React.JSX.Element {

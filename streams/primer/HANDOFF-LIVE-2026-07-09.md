@@ -49,5 +49,5 @@ Packet invariants (all annotation workers): output `<prompt-basename>.batch.json
 ## Operational notes (carried forward)
 
 - Workers may EPERM on subprocess/fs in sandboxes → audit-then-fire via IRC; task-tool in-process workers usually fine.
-- Never QA against primer.localhost:1355 (Arthur's surface); live server is a detached nohup, Arthur's tmux should run `cd packages/primer-daemon && bun run dev`.
+- Never QA against https://primer.localhost (Arthur's surface); live server is supervised by the primer stream service registry (`mise run up primer`).
 - Prompt-craft doctrine is binding for every generation/judge packet: `READER/references/prompt-craft-tacit-knowledge.md`.

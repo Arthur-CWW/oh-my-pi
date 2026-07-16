@@ -71,3 +71,39 @@ bun packages/primer-daemon/src/cli.ts media import data/primer/reader-media-inbo
 ```
 
 The asset directory is complete and imported into the Primer reader.
+## Overnight batch
+
+Date: 2026-07-16
+
+### 《庆余年》S1E1
+
+- Source: official/public YouTube playlist `https://www.youtube.com/playlist?list=PLMQ0lvZ3plNORNw9xWKYN5cS64VbqoipH`, episode URL `https://www.youtube.com/watch?v=_Lg6BJ1gBDo`.
+- Provenance: uploader `优优独播剧场 YoYo Television Series Exclusive` (`UCteBLoijWzlVFSR5BBtS_2Q`); fetched 2026-07-16.
+- `yt-dlp --list-subs` found no native Chinese track. The only `zh-*` entries were translated tracks such as `zh-Hans-en` (Chinese from English), not source Chinese captions.
+- Downloaded sequentially at 720p maximum (`398+251`, merged to `episode.mp4`); runtime 2,685,774 ms. Work dir: `data/primer/reader-media-inbox/qy-s1e01/`.
+- FireRedASR2S was infeasible: checkpoint is 4,731,558,506 bytes (4.41 GiB) with only 2.9 GiB free, and the published CUDA torch pins have no arm64 wheels. Fallback used the cached `faster-whisper-large-v3` Mandarin transcription; `alignment.media.asr` is honestly `faster-whisper-large-v3`.
+- Imported with `bun packages/primer-daemon/src/cli.ts media import data/primer/reader-media-inbox/qy-s1e01 --title '庆余年 S1E1 · 第一集' --kind video`; docId `53`, slug `庆余年-s1e1-第一集-a96a0755fd`.
+- API verification (`GET /api/reader/docs/53/media`): `file=episode.mp4`, `kind=video`, `durationMs=2685774`, `asr=faster-whisper-large-v3`, `sentenceCount=525`. Every generated sentence has explicit `charTiming: "interpolated"`.
+
+Spot checks against independent `faster-whisper-small` audio snippets:
+
+1. Sentence 0, `7020–12520 ms`, `你可曾听说过雪山悬崖`; snippet transcription: `你可曾聽說過雪山炫耀` (traditional/character error, sentence content recovered).
+2. Sentence 260, `1332920–1335060 ms`, `你父亲在京都啊`; snippet transcription includes `你父亲在京东啊`.
+3. Sentence 520, `2506880–2508280 ms`, `命会长些`; snippet transcription includes `命会长些`.
+
+### 习近平·2025新年贺词
+
+- Source: official CCTV YouTube channel, `https://www.youtube.com/watch?v=iOm7nPRx-io`; uploader `CCTV中国中央电视台`; fetched 2026-07-16. The 720p DASH request returned HTTP 403, so the public progressive 360p format 18 was used (within the ≤720p rule); runtime 657,636 ms.
+- Work dir: `data/primer/reader-media-inbox/xi-2025-new-year/`. Known transcript is `streams/primer/feedstock/zh-corpus/xi-2025-new-year.md`; its text matches doc 19 exactly. Sentence-split into 45 cues and aligned to extracted 16 kHz mono audio with Qwen forced alignment; `alignment.media.asr` is honestly `known-transcript-qwen-forced-alignment`.
+- `media attach 19 ...` was attempted and returned the exact contract error `alignment sentences do not exactly match reading document paragraphs` because doc 19 has 14 paragraph rows while the required sentence split has 45 cues. Fresh sentence-granular import succeeded with `bun packages/primer-daemon/src/cli.ts media import data/primer/reader-media-inbox/xi-2025-new-year --title '习近平·2025新年贺词 · 官方视频' --kind video`; docId `54`, slug `习近平-2025新年贺词-官方视频-cf2097175e`.
+- API verification (`GET /api/reader/docs/54/media`): `file=episode.mp4`, `kind=video`, `durationMs=657636`, `asr=known-transcript-qwen-forced-alignment`, `sentenceCount=45`. All 45 sentences have explicit `charTiming` (`native` or `interpolated`).
+
+Spot checks against independent `faster-whisper-small` audio snippets:
+
+1. Sentence 0, `48240–49020 ms`, `大家好。`; snippet recovered `大家好` and continued into the next known sentence.
+2. Sentence 22, `377390–387510 ms`, `我们隆重庆祝新中国成立75周年，深情回望共和国的沧桑巨变。`; snippet recovered both clauses (`我们隆重...七十五周年` and `深情回望...共和国的...`).
+3. Sentence 44, `638310–645310 ms`, `祝大家所愿皆所成，多喜乐、长安宁。`; snippet recovered `祝大家所愿皆所成 / 多喜乐 / 长安宁`.
+- Uploader check: `yt-dlp --playlist-end 1000 --match-filter 'title~="图图"'` against source uploader `697215493` found only the existing S2E15 (one public Tutu entry); nearest public consecutive S2E13/E14/E16 uploads were therefore taken from series uploader 赤石动漫 (`531115965`), with the mismatch preserved in each asset's provenance.
+- 大耳朵图图 S2E13 · 小怪的超能力 — source https://www.bilibili.com/video/BV1uqktY6EPb/; uploader 赤石动漫 (531115965); fetched 2026-07-16; work dir `data/primer/reader-media-inbox/tutu-s2e13-supercat/`; download 345.93s, alignment 71.08s; 224 sentences / 1,821 Han chars / 100% coverage, identity and bounded-monotonic timing checks pass, explicit `charTiming` native/interpolated; imported docId 55; `GET /api/reader/docs/55/media` verified `episode.mp4`, 810864ms, 224 sentences.
+- 大耳朵图图 S2E14 · 神奇的隐身衣 — source https://www.bilibili.com/video/BV1xEkiYRELw/; uploader 赤石动漫 (531115965); fetched 2026-07-16; work dir `data/primer/reader-media-inbox/tutu-s2e14-invisible-coat/`; download 364.09s plus clean alternate audio 39.97s after a 60s pause, final alignment 114.34s; 209 sentences / 1,720 Han chars / 100% coverage, identity and bounded-monotonic timing checks pass, explicit `charTiming` native/interpolated; imported docId 56; `GET /api/reader/docs/56/media` verified `episode.mp4`, 806058ms, 209 sentences.
+- 大耳朵图图 S2E16 · 图图家的非常时期 — source https://www.bilibili.com/video/BV1FGC3Y2Eor/; uploader 赤石动漫 (531115965); fetched 2026-07-16; work dir `data/primer/reader-media-inbox/tutu-s2e16-family-crisis/`; download 286.79s plus clean alternate audio 47.02s after a 60s pause, alignment 65.26s; 195 sentences / 1,483 Han chars / 100% coverage, identity and bounded-monotonic timing checks pass, explicit `charTiming` native/interpolated; imported docId 57; `GET /api/reader/docs/57/media` verified `episode.mp4`, 811192ms, 195 sentences.

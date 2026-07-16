@@ -8,8 +8,10 @@ import {
   buildReviewSession,
   QUICK_RETRIEVABILITY_THRESHOLD,
   listReviewEvents,
+  setReviewEventFailReason,
   simulateReview,
   gradeReviewItem,
+  type ReviewFailReason,
   type ReviewGrade,
   type ReviewItemKind,
   type ReviewSessionMode,
@@ -66,11 +68,18 @@ const ReviewGradeSchema = Schema.Union([
   Schema.Literal("good"),
   Schema.Literal("easy"),
 ])
+const ReviewFailReasonSchema = Schema.Union([
+  Schema.Literal("decode"),
+  Schema.Literal("slow"),
+  Schema.Literal("forgot"),
+])
 const ReviewGradeBodySchema = Schema.Struct({
   queueItemId: PositiveInteger,
   grade: ReviewGradeSchema,
   itemKind: Schema.optionalKey(ReviewItemKindSchema),
+  failReason: Schema.optionalKey(ReviewFailReasonSchema),
 })
+const ReviewEventReasonBodySchema = Schema.Struct({ failReason: ReviewFailReasonSchema })
 const ReviewSimulationBodySchema = Schema.Struct({
   grades: Schema.Array(ReviewGradeSchema),
 })
@@ -94,6 +103,7 @@ type CreateMarkBody = Schema.Schema.Type<typeof CreateMarkBodySchema>
 type ReviewSimulationBody = Schema.Schema.Type<typeof ReviewSimulationBodySchema>
 type QueuePriorityBody = Schema.Schema.Type<typeof QueuePriorityBodySchema>
 type ReviewGradeBody = Schema.Schema.Type<typeof ReviewGradeBodySchema>
+type ReviewEventReasonBody = Schema.Schema.Type<typeof ReviewEventReasonBodySchema>
 type ReviewSessionQuery = Schema.Schema.Type<typeof ReviewSessionQuerySchema>
 type QueueStatusBody = Schema.Schema.Type<typeof QueueStatusBodySchema>
 type IdParam = Schema.Schema.Type<typeof IdParamSchema>
@@ -122,12 +132,16 @@ export async function handleReaderApi(request: Request, paths: DaemonPaths): Pro
     if (request.method === "POST" && pathname === "/api/review/grade") return await handleReviewGrade(request, paths)
     if (request.method === "POST" && pathname === "/api/review/simulate") return await handleReviewSimulate(request)
     if (request.method === "GET" && pathname === "/api/review/events") return handleReviewEvents(url, paths)
+    if (request.method === "POST" && pathname.startsWith("/api/review/events/") && pathname.endsWith("/reason")) {
+      return await handleReviewEventReason(request, pathname, paths)
+    }
     if (request.method === "POST" && pathname.startsWith("/api/queue/") && pathname.endsWith("/priority")) {
       return await handleQueuePriority(request, pathname, paths)
     }
   } catch (error) {
     if (error instanceof CedictNotBuiltError) return jsonError(error.message, 503)
     if (error instanceof BadRequestError) return jsonError(error.message, 400)
+    if (error instanceof ConflictError) return jsonError(error.message, 409)
     if (error instanceof NotFoundError) return jsonError(error.message, 404)
     throw error
   }
@@ -238,9 +252,28 @@ async function handleReviewGrade(request: Request, paths: DaemonPaths): Promise<
   const body = await decodeJson(request, ReviewGradeBodySchema)
   return withLedger(paths, (db) => {
     const itemKind = body.itemKind ?? "queue_item"
-    const result = gradeReviewItem(db, body.queueItemId, body.grade as ReviewGrade, itemKind as ReviewItemKind)
+    const result = gradeReviewItem(
+      db,
+      body.queueItemId,
+      body.grade as ReviewGrade,
+      itemKind as ReviewItemKind,
+      body.failReason as ReviewFailReason | undefined,
+    )
     if (result === null) throw new NotFoundError(itemKind === "card_candidate" ? "unknown card candidate" : "unknown queue item")
     return jsonResponse(result)
+  })
+}
+
+async function handleReviewEventReason(request: Request, pathname: string, paths: DaemonPaths): Promise<Response> {
+  const eventId = decodeReviewEventReasonId(pathname)
+  const body = await decodeJson(request, ReviewEventReasonBodySchema)
+  return withLedger(paths, (db) => {
+    const result = setReviewEventFailReason(db, eventId, body.failReason as ReviewFailReason)
+    if (result === "not_found") throw new NotFoundError("unknown review event")
+    if (result === "stale") throw new ConflictError("review event reason window expired")
+    if (result === "already_tagged") throw new ConflictError("review event already has a failure reason")
+    if (result === "not_again") throw new BadRequestError("failure reasons require an again grade")
+    return jsonResponse({ eventId, failReason: body.failReason })
   })
 }
 
@@ -300,6 +333,12 @@ function decodeQueueStatusId(pathname: string): number {
   return decodeUnknown(IdParamSchema, { id: middle }, "malformed id").id
 }
 
+function decodeReviewEventReasonId(pathname: string): number {
+  const middle = pathname.slice("/api/review/events/".length, -"/reason".length)
+  if (middle.length === 0 || middle.includes("/")) throw new NotFoundError("unknown route")
+  return decodeUnknown(IdParamSchema, { id: middle }, "malformed id").id
+}
+
 function decodeQueuePriorityId(pathname: string): number {
   const middle = pathname.slice("/api/queue/".length, -"/priority".length)
   if (middle.length === 0 || middle.includes("/")) throw new NotFoundError("unknown route")
@@ -336,3 +375,4 @@ function jsonError(error: string, status: number): Response {
 
 class BadRequestError extends Error {}
 class NotFoundError extends Error {}
+class ConflictError extends Error {}

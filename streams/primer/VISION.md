@@ -65,8 +65,8 @@ Grounded corpus already exists — use it, don't re-derive:
 
 | Surface | State |
 |---|---|
-| `packages/primer-daemon` | Query path + streaming synthesis + ledger (notes/cards/progress) + dashboard (React/shadcn, vim nav) at `primer.localhost:1355` |
-| Wrapped-commentary reader | Talmudic 3-column canvas, marks/selections/graph, served at `meltdown.localhost:1355`; annotation pipeline scripts; **to be tracked in-repo** (integration decision) |
+| `packages/primer-daemon` | Query path + streaming synthesis + ledger (notes/cards/progress) + dashboard (React/shadcn, vim nav) at `https://primer.localhost` |
+| Wrapped-commentary reader | Talmudic 3-column canvas, marks/selections/graph, served at `https://meltdown.localhost`; annotation pipeline scripts; **to be tracked in-repo** (integration decision) |
 | Ledger | `data/primer/daemon-ledger.sqlite` — becomes the learning-queue/inbox substrate |
 | Learning-card-system.sqlite | HSK budget + concept graph — wire as 4th daemon substrate |
 | `decks/hsk-deck` → `~/apps/hsk-deck` | Deck generator with **constrained sentence generation** (progressive difficulty = the 85%-rule machinery), cleaned HSK1–4 decks, Canto/Mando grammar drills, `hsk_meta.db`, vendored CC-CEDICT, Yomitan enrichment + Firefox setup scripts |

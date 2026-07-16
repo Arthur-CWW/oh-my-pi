@@ -35,11 +35,11 @@ learning queue in the daemon ledger). Metric: time-to-comprehension of
 the next chapter, trending down. Arthur's state: HSK1-5 vocab done,
 reading volume is the bottleneck.
 
-Live estate: primer-daemon (dashboard http://primer.localhost:1355 —
-`cd packages/primer-daemon && bun run dev`; streaming ask on subscription
+Live estate: primer-daemon (dashboard https://primer.localhost —
+`mise run up primer` starts `primer-daemon`; streaming ask on subscription
 lanes; ledger notes/cards/progress), Talmudic reader at
-http://meltdown.localhost:1355, and its evidence-backed creation engine at
-http://meltdown.localhost:1355/#/graph. Proof artifacts live under
+https://meltdown.localhost, and its evidence-backed creation engine at
+https://meltdown.localhost/#/graph. Proof artifacts live under
 `local/primer-creation-engine-proof/` and docs/qa/primer-*.md.
 
 Review contract with Arthur: he reviews PRODUCTS, not commits. Every

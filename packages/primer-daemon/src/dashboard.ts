@@ -10,12 +10,20 @@ import { askEvidence } from "./evidence"
 import {
   addProgress,
   listCards,
+  listCardsWithEnrollment,
   listNotes,
   listProgress,
   openLedger,
   setCardStatus,
+  type CardListStatus,
   type CardStatus,
 } from "./ledger"
+import {
+  addExposureEvents,
+  ExposureRequestSchema,
+  exposureStats,
+  MAX_EXPOSURE_BATCH,
+} from "./exposure-store"
 import { handleEnrichApi } from "./enrich-api"
 import {
   addFeedback,
@@ -31,6 +39,7 @@ import { handleReaderMediaApi } from "./reader-media"
 import { handleReaderApi } from "./reader-api"
 import { handleZhDictApi } from "./zhdict-api"
 import { handleShadowingApi } from "./shadowing-api"
+import { CardCandidateNotApprovedError, CardCandidateNotFoundError, enrollCardCandidate } from "./review-store"
 import { resolveDaemonPaths, type DaemonPaths } from "./paths"
 
 export interface DashboardOptions {
@@ -91,6 +100,8 @@ const CardStatusRequestSchema = Schema.Struct({
   status: CardStatusSchema,
 })
 
+const ReviewEnrollRequestSchema = Schema.Struct({ cardId: PositiveInteger })
+
 const ProgressRequestSchema = Schema.Struct({
   kind: Schema.String,
   title: Schema.String,
@@ -134,6 +145,8 @@ async function handleRequest(request: Request, paths: DaemonPaths, env: Record<s
   const enrichApiResponse = await handleEnrichApi(request, paths)
   if (enrichApiResponse !== null) return enrichApiResponse
 
+  const exposureApiResponse = await handleExposureApi(request, paths)
+  if (exposureApiResponse !== null) return exposureApiResponse
   const feedbackApiResponse = await handleFeedbackApi(request, paths)
   if (feedbackApiResponse !== null) return feedbackApiResponse
   if (isReaderHost(request)) return handleReaderSite(request, pathname, paths)
@@ -147,6 +160,7 @@ async function handleRequest(request: Request, paths: DaemonPaths, env: Record<s
   if (request.method === "GET" && pathname === "/api/notes") return handleNotes(url, paths)
   if (request.method === "GET" && pathname === "/api/cards") return handleCards(url, paths)
   if (request.method === "POST" && pathname === "/api/cards/status") return handleCardStatus(request, paths)
+  if (request.method === "POST" && pathname === "/api/review/enroll") return handleCardEnroll(request, paths)
   if (request.method === "GET" && pathname === "/api/progress") return handleProgressList(url, paths)
   if (request.method === "POST" && pathname === "/api/progress") return handleProgressCreate(request, paths)
   if (request.method === "GET" && pathname === "/api/proofs") {
@@ -258,7 +272,7 @@ async function handleAsk(request: Request, paths: DaemonPaths, env: Record<strin
   const body = await decodeJson(request, AskRequestSchema)
   if (body instanceof Response) return body
 
-  const terms = extractTerms(body.question)
+  const terms = extractTerms(body.question, paths.cedictDb)
   const evidence = askEvidence(paths, terms, body.limit ?? DEFAULT_ASK_LIMIT)
   const config = resolveAskSynthesisConfig(env)
   let answer: { text: string; model: string; elapsedMs: number } | null = null
@@ -290,7 +304,7 @@ async function handleAskStream(request: Request, paths: DaemonPaths, env: Record
   const body = await decodeJson(request, AskRequestSchema)
   if (body instanceof Response) return body
 
-  const terms = extractTerms(body.question)
+  const terms = extractTerms(body.question, paths.cedictDb)
   const evidence = askEvidence(paths, terms, body.limit ?? DEFAULT_ASK_LIMIT)
   const config = resolveAskSynthesisConfig(env)
   const meta = {
@@ -386,6 +400,22 @@ async function handleFeedbackApi(request: Request, paths: DaemonPaths): Promise<
   return null
 }
 
+async function handleExposureApi(request: Request, paths: DaemonPaths): Promise<Response | null> {
+  const url = new URL(request.url)
+  const pathname = url.pathname
+  if (request.method === "POST" && pathname === "/api/exposure") {
+    const body = await decodeJson(request, ExposureRequestSchema)
+    if (body instanceof Response) return body
+    if (body.events.length > MAX_EXPOSURE_BATCH) return jsonError(`exposure batch exceeds ${MAX_EXPOSURE_BATCH} events`, 400)
+    if (body.events.some((event) => event.word.length === 0)) return jsonError("exposure word must not be empty", 400)
+    return withLedger(paths, (db) => jsonResponse(addExposureEvents(db, body.events)))
+  }
+  if (request.method === "GET" && pathname === "/api/exposure/stats") {
+    return withLedger(paths, (db) => jsonResponse(exposureStats(db)))
+  }
+  return null
+}
+
 async function handleFeedbackCreate(request: Request, paths: DaemonPaths): Promise<Response> {
   const body = await decodeJson(request, FeedbackInputSchema)
   if (body instanceof Response) return body
@@ -407,7 +437,12 @@ function handleNotes(url: URL, paths: DaemonPaths): Response {
 function handleCards(url: URL, paths: DaemonPaths): Response {
   const limit = parseLimit(url, DEFAULT_CARD_LIMIT)
   if (limit === null) return jsonError("invalid limit", 400)
-  return withLedger(paths, (db) => jsonResponse(listCards(db, limit)))
+  const status = url.searchParams.get("status")
+  if (status === null) return withLedger(paths, (db) => jsonResponse(listCards(db, limit)))
+  if (status !== "candidate" && status !== "approved" && status !== "rejected" && status !== "enrolled" && status !== "all") {
+    return jsonError("invalid status", 400)
+  }
+  return withLedger(paths, (db) => jsonResponse(listCardsWithEnrollment(db, limit, status as CardListStatus)))
 }
 
 async function handleCardStatus(request: Request, paths: DaemonPaths): Promise<Response> {
@@ -418,6 +453,20 @@ async function handleCardStatus(request: Request, paths: DaemonPaths): Promise<R
     const updated = setCardStatus(db, body.id, body.status as CardStatus)
     if (updated === null) return jsonError("unknown card id", 404)
     return jsonResponse(updated)
+  })
+}
+
+async function handleCardEnroll(request: Request, paths: DaemonPaths): Promise<Response> {
+  const body = await decodeJson(request, ReviewEnrollRequestSchema)
+  if (body instanceof Response) return body
+  return withLedger(paths, (db) => {
+    try {
+      return jsonResponse(enrollCardCandidate(db, body.cardId))
+    } catch (error) {
+      if (error instanceof CardCandidateNotFoundError) return jsonError(error.message, 404)
+      if (error instanceof CardCandidateNotApprovedError) return jsonError(error.message, 409)
+      throw error
+    }
   })
 }
 
@@ -577,7 +626,7 @@ function registerPortlessAlias(port: number, env: Record<string, string | undefi
     child.exited.then(
       (exitCode) => {
         if (exitCode === 0) {
-          console.log(`Registered http://meltdown.localhost:1355 for port ${port}`)
+          console.log(`Registered https://meltdown.localhost for port ${port}`)
         } else {
           console.log(`meltdown portless alias not claimed (exit ${exitCode}) — reader supervisor likely owns it; set PRIMER_MELTDOWN_ALIAS=0 to skip`)
         }

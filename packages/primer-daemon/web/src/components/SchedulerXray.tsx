@@ -9,6 +9,7 @@ import {
   type ReviewSessionItem,
   type ReviewSessionMode,
   type ReviewSimulationStep,
+  getExposureStats,
   getPipelineStats,
   getQueue,
   getReviewEvents,
@@ -44,6 +45,7 @@ export function SchedulerXray(): React.JSX.Element {
   const [queue, setQueue] = useState<QueueItem[]>([])
   const [events, setEvents] = useState<ReviewEvent[]>([])
   const [stats, setStats] = useState<PipelineStats | null>(null)
+  const [exposureCount, setExposureCount] = useState(0)
   const gradesRef = useRef<ReviewGrade[]>([])
   const [grades, setGrades] = useState<ReviewGrade[]>([])
   const [trajectory, setTrajectory] = useState<ReviewSimulationStep[]>([])
@@ -54,12 +56,19 @@ export function SchedulerXray(): React.JSX.Element {
   const refresh = useCallback(() => {
     setLoading(true)
     setError(null)
-    Promise.all([getReviewSession(20, true, previewMode), getQueue("all", 300), getPipelineStats(), getReviewEvents(20)]).then(
-      ([nextSession, nextQueue, nextStats, nextEvents]) => {
+    Promise.all([
+      getReviewSession(20, true, previewMode),
+      getQueue("all", 300),
+      getPipelineStats(),
+      getReviewEvents(20),
+      getExposureStats(),
+    ]).then(
+      ([nextSession, nextQueue, nextStats, nextEvents, nextExposureStats]) => {
         setSession(nextSession.items)
         setQueue(nextQueue)
         setStats(nextStats)
         setEvents(nextEvents)
+        setExposureCount(nextExposureStats.count)
       },
       (cause: unknown) => setError(cause instanceof Error ? cause.message : "Couldn't load scheduler evidence"),
     ).finally(() => setLoading(false))
@@ -158,6 +167,7 @@ export function SchedulerXray(): React.JSX.Element {
             </div>
           </div>
           <CardDescription>{previewMode === "quick" ? "Quick sweep · due cards at or above R 85%, easiest first." : "Due first by lowest retrievability, then priority-weighted new items, with shared-character shifts made visible."}</CardDescription>
+          <p className="text-xs text-muted-foreground/50">exposures logged: {exposureCount} (observe-only)</p>
         </CardHeader>
         <CardContent className="overflow-x-auto px-4 py-4">
           {session?.length ? (
@@ -258,7 +268,14 @@ function Trajectory({ steps }: { steps: ReviewSimulationStep[] }): React.JSX.Ele
 }
 
 function ReviewEventRow({ event }: { event: ReviewEvent }): React.JSX.Element {
-  return <div className="flex items-center gap-2 py-2 text-xs"><span className="min-w-0 flex-1 truncate font-medium">{event.label}</span><Badge variant="outline" className="text-[10px] capitalize">{event.grade}</Badge><span className="shrink-0 font-mono text-[10px] text-muted-foreground">{formatWhen(event.eventTime)}</span></div>
+  return (
+    <div className="flex items-center gap-2 py-2 text-xs">
+      <span className="min-w-0 flex-1 truncate font-medium">{event.label}</span>
+      <Badge variant="outline" className="text-[10px] capitalize">{event.grade}</Badge>
+      {event.failReason && <span className="shrink-0 text-[10px] text-muted-foreground/60">· {event.failReason}</span>}
+      <span className="shrink-0 font-mono text-[10px] text-muted-foreground">{formatWhen(event.eventTime)}</span>
+    </div>
+  )
 }
 
 function formatInterval(days: number): string {

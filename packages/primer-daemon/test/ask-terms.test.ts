@@ -29,3 +29,23 @@ describe("extractTerms", () => {
     expect(terms).not.toContain("in")
   })
 })
+
+test("segments Han runs with CEDICT words and drops Chinese stopwords", () => {
+  const terms = extractTerms("我最近在读什么？")
+
+  expect(terms).toEqual(["最近", "读"])
+})
+
+test("keeps Latin terms alongside segmented Han terms", () => {
+  const terms = extractTerms("compare React with 最近在读")
+
+  expect(terms).toContain("react")
+  expect(terms).toContain("最近")
+  expect(terms).toContain("读")
+})
+
+test("falls back to Han bigrams when CEDICT is unavailable", () => {
+  const terms = extractTerms("我甲乙丙", "/tmp/primer-missing-cedict.sqlite")
+
+  expect(terms).toEqual(["甲乙", "丙"])
+})

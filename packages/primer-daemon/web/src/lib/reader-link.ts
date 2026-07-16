@@ -1,4 +1,4 @@
-const READER_ORIGIN = "http://meltdown.localhost:1355"
+const READER_ORIGIN = "https://meltdown.localhost"
 
 /**
  * Deep-link for a reader-substrate evidence ref. `reader:annotations:<id>`

@@ -1,7 +1,8 @@
 # Stream service registry for scripts/streams.ts.
-# Skipped live routes: hsk-reader and mochi-lite are launched from repositories
-# outside ~/agents; hsk-component is an ad-hoc /tmp static server with no owning
-# package; meltdown and primer-qa* are aliases/test instances owned by
+# External live routes hsk-reader and mochi-lite are intentionally not registered:
+# their repositories live outside ~/agents, while this registry requires a
+# repo-relative cwd and a command owned by this tree. hsk-component is an ad-hoc
+# /tmp static server; primer-qa* are aliases/test instances owned by
 # primer-daemon without independent single dev commands.
 streams:
   companion:
@@ -64,12 +65,19 @@ streams:
         health:
           command: bunx portless list
           timeoutSec: 20
-      primer:
+      primer-daemon:
         cwd: packages/primer-daemon
         cmd: bun run dev
         dependsOn: [portless-proxy]
         health:
           url: https://primer.localhost/
+          timeoutSec: 120
+      meltdown:
+        cwd: streams/primer/wrapped-commentary-reader
+        cmd: bun run dev:up
+        dependsOn: [portless-proxy]
+        health:
+          url: https://meltdown.localhost/api/health
           timeoutSec: 120
   playground:
     services:

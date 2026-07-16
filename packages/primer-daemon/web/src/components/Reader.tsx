@@ -4,6 +4,7 @@ import type * as React from "react"
 import {
   type CreateMarkResult,
   type DictResult,
+  type ExposureEventInput,
   type Mark,
   type QueueItem,
   type ReaderAlignment,
@@ -20,6 +21,7 @@ import {
   getReaderDoc,
   getReaderMedia,
   getReaderMediaAlignment,
+  postExposureEvents,
   setQueuePriority,
 } from "@/api"
 import { navigate } from "@/hooks/useHashRoute"
@@ -54,6 +56,10 @@ const UNKNOWN_STYLE = "underline decoration-amber-500/40 decoration-dotted decor
 const QUEUED_STYLE = "underline decoration-sky-400/30 decoration-dotted decoration-1 underline-offset-4"
 const PRIORITY_STYLE = "underline decoration-sky-300/70 decoration-solid decoration-2 underline-offset-4"
 const MARKED_STYLE = "bg-emerald-400/10 rounded-sm"
+
+const EXPOSURE_FLUSH_INTERVAL_MS = 10_000
+const EXPOSURE_BATCH_LIMIT = 200
+const EXPOSURE_ENDPOINT = "/api/exposure"
 
 // ---------------------------------------------------------------------------
 // Pinyin display
@@ -355,6 +361,9 @@ export function Reader({
   const [focusPara, setFocusPara] = useState(-1)
   const [media, setMedia] = useState<ReaderMedia | null>(null)
   const [alignment, setAlignment] = useState<ReaderAlignment | null>(null)
+  const pendingExposuresRef = useRef<ExposureEventInput[]>([])
+  const exposureFlushInFlightRef = useRef<Promise<void> | null>(null)
+  const activeMediaSentenceRef = useRef<number | null>(null)
   const [mediaNotice, setMediaNotice] = useState<string | null>(null)
   const [showPinyin, setShowPinyin] = useState(true)
   const [playbackRate, setPlaybackRate] = useState(1)
@@ -381,6 +390,68 @@ export function Reader({
     }
     return map
   }, [doc])
+
+  const queueExposure = useCallback(
+    (paragraphIdx: number, source: ExposureEventInput["source"]) => {
+      const text = alignment?.sentences[paragraphIdx]?.text ?? doc?.paragraphs[paragraphIdx]
+      if (!text) return
+      const seen = new Set<string>()
+      for (const segment of segmentText(text)) {
+        if (!segment.isWordLike || !isHan(segment.text) || !queuedWords.has(segment.text) || seen.has(segment.text)) continue
+        seen.add(segment.text)
+        pendingExposuresRef.current.push({ docId, paragraphIdx, word: segment.text, source })
+      }
+    },
+    [alignment, doc, docId, queuedWords],
+  )
+
+  const flushExposures = useCallback(async (): Promise<void> => {
+    if (pendingExposuresRef.current.length === 0) return
+    if (exposureFlushInFlightRef.current) return exposureFlushInFlightRef.current
+    const batch = pendingExposuresRef.current.splice(0, EXPOSURE_BATCH_LIMIT)
+    let succeeded = false
+    const request = postExposureEvents(batch).then(
+      () => {
+        succeeded = true
+      },
+      () => {
+        pendingExposuresRef.current.unshift(...batch)
+      },
+    )
+    const tracked = request.finally(() => {
+      exposureFlushInFlightRef.current = null
+    })
+    exposureFlushInFlightRef.current = tracked
+    await tracked
+    if (succeeded && pendingExposuresRef.current.length > 0) await flushExposures()
+  }, [])
+
+  const flushExposuresOnExit = useCallback(() => {
+    while (pendingExposuresRef.current.length > 0) {
+      const batch = pendingExposuresRef.current.splice(0, EXPOSURE_BATCH_LIMIT)
+      const body = new Blob([JSON.stringify({ events: batch })], { type: "application/json" })
+      if (typeof navigator.sendBeacon === "function" && navigator.sendBeacon(EXPOSURE_ENDPOINT, body)) continue
+      pendingExposuresRef.current.unshift(...batch)
+      void flushExposures()
+      return
+    }
+  }, [flushExposures])
+
+  useEffect(() => {
+    const interval = window.setInterval(() => void flushExposures(), EXPOSURE_FLUSH_INTERVAL_MS)
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") flushExposuresOnExit()
+    }
+    document.addEventListener("visibilitychange", onVisibilityChange)
+    window.addEventListener("pagehide", flushExposuresOnExit)
+    return () => {
+      window.clearInterval(interval)
+      document.removeEventListener("visibilitychange", onVisibilityChange)
+      window.removeEventListener("pagehide", flushExposuresOnExit)
+      void flushExposures()
+    }
+  }, [flushExposures, flushExposuresOnExit])
+
   // Load doc, word state, and optional attached media.
   useEffect(() => {
     let alive = true
@@ -391,6 +462,7 @@ export function Reader({
     setMediaNotice(null)
     setPlaying(false)
     setActiveMediaChar(null)
+    activeMediaSentenceRef.current = null
     setPlaybackRate(1)
     userScrollOverrideRef.current = false
     setPriorityByWord(new Map())
@@ -440,6 +512,14 @@ export function Reader({
       if (frameRef.current !== null) cancelAnimationFrame(frameRef.current)
     }
   }, [docId])
+
+  // A stable text-reading focus is an observe-only exposure signal.
+  useEffect(() => {
+    if (focusPara < 0 || doc === null || alignment !== null) return
+    const timeout = window.setTimeout(() => queueExposure(focusPara, "read"), 3_000)
+    return () => window.clearTimeout(timeout)
+  }, [alignment, doc, focusPara, queueExposure])
+
 
   // Scroll to mark=<id> anchor
   useEffect(() => {
@@ -686,6 +766,25 @@ export function Reader({
   }, [alignment, mediaCharRanges.length, playing, updateActiveMediaChar])
 
   useEffect(() => {
+    const sentenceIdx = activeMediaChar?.sentenceIdx ?? null
+    const previousSentenceIdx = activeMediaSentenceRef.current
+    activeMediaSentenceRef.current = sentenceIdx
+    if (!playing || alignment === null || sentenceIdx === null || previousSentenceIdx === null || sentenceIdx === previousSentenceIdx) return
+    const previousSentence = alignment.sentences[previousSentenceIdx]
+    const currentTimeMs = (mediaRef.current?.currentTime ?? 0) * 1000
+    if (previousSentence && currentTimeMs + 120 >= previousSentence.endMs) {
+      queueExposure(previousSentenceIdx, "media")
+    }
+  }, [activeMediaChar?.sentenceIdx, alignment, playing, queueExposure])
+
+  const handleMediaEnded = useCallback(() => {
+    const sentenceIdx = activeMediaSentenceRef.current
+    if (sentenceIdx !== null) queueExposure(sentenceIdx, "media")
+    setPlaying(false)
+  }, [queueExposure])
+
+
+  useEffect(() => {
     const sentenceIdx = activeMediaChar?.sentenceIdx
     if (sentenceIdx == null || userScrollOverrideRef.current) return
     const element = document.querySelector(`[data-media-sentence="${sentenceIdx}"]`) as HTMLElement | null
@@ -835,7 +934,7 @@ export function Reader({
             preload="metadata"
             onPlay={handleMediaPlay}
             onPause={handleMediaPause}
-            onEnded={() => setPlaying(false)}
+            onEnded={handleMediaEnded}
             aria-label="Reader video"
           />
         ) : (
@@ -847,7 +946,7 @@ export function Reader({
             preload="metadata"
             onPlay={handleMediaPlay}
             onPause={handleMediaPause}
-            onEnded={() => setPlaying(false)}
+            onEnded={handleMediaEnded}
             className="sr-only"
             aria-hidden="true"
           />

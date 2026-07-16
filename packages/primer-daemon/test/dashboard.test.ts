@@ -55,6 +55,16 @@ interface CardResponse {
   status: string
 }
 
+interface CardListResponse extends CardResponse {
+  enrolled: boolean
+}
+
+interface EnrollResponse {
+  itemId: number
+  state: string
+  due: string
+}
+
 interface ProgressResponse {
   id: number
   kind: string
@@ -456,6 +466,49 @@ describe("dashboard", () => {
       expect(updated.body).toMatchObject({ id: cardId, status: "approved" })
       expect(missing.response.status).toBe(404)
       expect(typeof missing.body.error).toBe("string")
+    })
+  })
+
+  test("filters cards by enrollment and enrolls approved candidates", async () => {
+    await withDashboard(async ({ baseUrl, paths }) => {
+      const db = openLedger(paths.ledgerDb)
+      let candidateId = 0
+      let approvedId = 0
+      try {
+        candidateId = addCard(db, { front: "候选", back: "candidate" }).id
+        approvedId = addCard(db, { front: "批准", back: "approved" }).id
+      } finally {
+        db.close()
+      }
+
+      const approved = await requestJson<CardResponse>(baseUrl, "/api/cards/status", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id: approvedId, status: "approved" }),
+      })
+      const all = await requestJson<CardListResponse[]>(baseUrl, "/api/cards?status=all&limit=10")
+      const enrolled = await requestJson<EnrollResponse>(baseUrl, "/api/review/enroll", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ cardId: approvedId }),
+      })
+      const enrolledList = await requestJson<CardListResponse[]>(baseUrl, "/api/cards?status=enrolled&limit=10")
+      const candidateEnroll = await requestJson<ErrorResponse>(baseUrl, "/api/review/enroll", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ cardId: candidateId }),
+      })
+
+      expect(approved.response.status).toBe(200)
+      expect(all.response.status).toBe(200)
+      expect(all.body).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: candidateId, status: "candidate", enrolled: false }),
+        expect.objectContaining({ id: approvedId, status: "approved", enrolled: false }),
+      ]))
+      expect(enrolled.response.status).toBe(200)
+      expect(enrolled.body.itemId).toBe(approvedId)
+      expect(enrolledList.body).toEqual([expect.objectContaining({ id: approvedId, enrolled: true })])
+      expect(candidateEnroll.response.status).toBe(409)
     })
   })
 

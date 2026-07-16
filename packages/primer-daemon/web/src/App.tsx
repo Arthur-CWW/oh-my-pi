@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 import type * as React from "react"
 
 import { DashboardView } from "./components/DashboardView"
+import { CardTable } from "./components/CardTable"
 import { EnrichView } from "./components/EnrichView"
 import { FeedbackWidget } from "./components/FeedbackWidget"
 import { Header } from "./components/Header"
@@ -91,6 +92,13 @@ const PIPELINE_KEYS: Array<{ keys: string[]; label: string }> = [
   { keys: ["?"], label: "toggle this help" },
 ]
 
+const CARDS_KEYS: Array<{ keys: string[]; label: string }> = [
+  { keys: ["j", "k", "↑", "↓", "←", "→"], label: "focus card down / up" },
+  { keys: ["Enter"], label: "open card detail" },
+  { keys: ["Esc"], label: "close card detail" },
+  { keys: ["?"], label: "toggle this help" },
+]
+
 // ---------------------------------------------------------------------------
 // App — thin router shell
 // ---------------------------------------------------------------------------
@@ -113,6 +121,7 @@ export default function App(): React.JSX.Element {
     : route.view === "enrich" ? "enrich"
     : route.view === "scheduler" ? "scheduler"
     : route.view === "pipeline" ? "pipeline"
+    : route.view === "cards" ? "cards"
     : ""
 
   const keymapKeys =
@@ -130,7 +139,9 @@ export default function App(): React.JSX.Element {
                 ? SCHEDULER_KEYS
                 : route.view === "pipeline"
                   ? PIPELINE_KEYS
-                  : undefined
+                  : route.view === "cards"
+                    ? CARDS_KEYS
+                    : undefined
 
   let content: React.JSX.Element
   switch (route.view) {
@@ -142,6 +153,9 @@ export default function App(): React.JSX.Element {
       break
     case "review":
       content = <ReviewView onShowHelp={toggleHelp} />
+      break
+    case "cards":
+      content = <CardTable />
       break
     case "shadow":
       content = <ShadowView onShowHelp={toggleHelp} />

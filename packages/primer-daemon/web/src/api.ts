@@ -2,6 +2,7 @@ import { createSseParser } from "@/lib/sse"
 
 export type EvidenceSource = "browser" | "twitter" | "reader" | "cards"
 export type CardStatus = "candidate" | "approved" | "rejected"
+export type CardListStatus = CardStatus | "enrolled" | "all"
 
 export interface EvidenceHit {
   source: EvidenceSource
@@ -86,6 +87,7 @@ export interface Card {
   sourceRef: string | null
   url: string | null
   status: CardStatus
+  enrolled?: boolean
   createdAt: string
 }
 
@@ -268,6 +270,7 @@ export interface QueueItem {
 }
 
 export type ReviewGrade = "again" | "hard" | "good" | "easy"
+export type ReviewFailReason = "decode" | "slow" | "forgot"
 export type ReviewSessionMode = "full" | "quick"
 
 export interface ReviewSessionItem {
@@ -299,20 +302,39 @@ export interface ReviewEvent {
   itemId: number
   label: string
   grade: ReviewGrade
+  failReason: ReviewFailReason | null
   eventTime: string
 }
 
 export interface GradeReviewResult {
   queueItemId: number
+  itemKind: "queue_item" | "card_candidate"
+  itemId: number
+  eventId: number
   due: string
   state: string
   reps: number
 }
 
+
 export interface CreateMarkResult {
   markId: number
   queueItem: QueueItem
 }
+
+export type ExposureSource = "read" | "media"
+
+export interface ExposureEventInput {
+  docId: number
+  paragraphIdx: number
+  word: string
+  source: ExposureSource
+}
+
+export interface ExposureStats {
+  count: number
+}
+
 
 export async function getStatus(): Promise<DashboardStatus> {
   return fetchJson<DashboardStatus>("/api/status")
@@ -382,6 +404,19 @@ export async function getNotes(limit?: number): Promise<Note[]> {
 
 export async function getCards(limit?: number): Promise<Card[]> {
   return fetchJson<Card[]>(withLimit("/api/cards", limit))
+}
+
+export async function getCardCandidates(status: CardListStatus = "all", limit = 500): Promise<Card[]> {
+  const params = new URLSearchParams({ status, limit: String(limit) })
+  return fetchJson<Card[]>(`/api/cards?${params}`)
+}
+
+export async function enrollCardCandidate(cardId: number): Promise<{ itemId: number; state: string; due: string }> {
+  return fetchJson<{ itemId: number; state: string; due: string }>("/api/review/enroll", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ cardId }),
+  })
 }
 
 export async function setCardStatus(id: number, status: CardStatus): Promise<Card> {
@@ -505,11 +540,23 @@ export async function getReviewSession(
   return fetchJson<ReviewSessionResponse>(suffix ? `/api/review/session?${suffix}` : "/api/review/session")
 }
 
-export async function gradeReview(queueItemId: number, grade: ReviewGrade): Promise<GradeReviewResult> {
+export async function gradeReview(
+  queueItemId: number,
+  grade: ReviewGrade,
+  failReason?: ReviewFailReason,
+): Promise<GradeReviewResult> {
   return fetchJson<GradeReviewResult>("/api/review/grade", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ queueItemId, grade }),
+    body: JSON.stringify(failReason === undefined ? { queueItemId, grade } : { queueItemId, grade, failReason }),
+  })
+}
+
+export async function setReviewEventReason(eventId: number, failReason: ReviewFailReason): Promise<void> {
+  await fetchJson<{ eventId: number; failReason: ReviewFailReason }>(`/api/review/events/${eventId}/reason`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ failReason }),
   })
 }
 
@@ -695,6 +742,18 @@ export async function getFeedback(limit?: number): Promise<FeedbackEvent[]> {
   return fetchJson<FeedbackEvent[]>(withLimit("/api/feedback", limit))
 }
 
+
+export async function postExposureEvents(events: ExposureEventInput[]): Promise<{ count: number }> {
+  return fetchJson<{ count: number }>("/api/exposure", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ events }),
+  })
+}
+
+export async function getExposureStats(): Promise<ExposureStats> {
+  return fetchJson<ExposureStats>("/api/exposure/stats")
+}
 export async function postUiEvents(events: UiEventInput[]): Promise<{ count: number }> {
   return fetchJson<{ count: number }>("/api/events", {
     method: "POST",

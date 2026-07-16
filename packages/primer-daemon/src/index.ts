@@ -10,3 +10,6 @@ export * from "./substrate/cards"
 export { extractTerms, runCli } from "./cli"
 export * from "./zhdict-store"
 export * from "./zhdict-api"
+
+export * from "./hanly-zh"
+export * from "./exposure-store"

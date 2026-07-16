@@ -14,6 +14,7 @@ export interface DaemonPaths {
   ledgerDb: string
   cedictDb: string
   zhdictDb?: string
+  hanlyDb?: string
   generationStore: string
   shadowingDir: string
   readerMediaDir: string
@@ -37,5 +38,6 @@ export function resolveDaemonPaths(env: Record<string, string | undefined> = {})
     generationStore: env.PRIMER_GENERATION_STORE ?? resolve(REPO_ROOT, "data/primer/generation-store.sqlite"),
     shadowingDir: env.PRIMER_SHADOWING_DIR ?? resolve(REPO_ROOT, "data/primer/shadowing"),
     readerMediaDir: env.PRIMER_READER_MEDIA_DIR ?? resolve(REPO_ROOT, "data/primer/reader-media"),
+    hanlyDb: env.PRIMER_HANLY_DB ?? resolve(homedir(), "apps/hsk-deck/hanly-re/output/hanly-content.sqlite"),
   }
 }

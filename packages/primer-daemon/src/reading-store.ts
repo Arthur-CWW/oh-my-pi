@@ -259,11 +259,20 @@ CREATE TABLE IF NOT EXISTS review_events (
   event_time TEXT NOT NULL,
   grade TEXT NOT NULL,
   prior_state_version INTEGER NOT NULL,
-  derived_state_version INTEGER NOT NULL
+  derived_state_version INTEGER NOT NULL,
+  fail_reason TEXT CHECK (fail_reason IN ('decode', 'slow', 'forgot')) DEFAULT NULL
 );
 CREATE INDEX IF NOT EXISTS review_events_item_idx
   ON review_events(item_kind, item_id, id);
 `)
+
+  const reviewEventColumns = db
+    .query<TableInfoRow, []>("PRAGMA table_info(review_events)")
+    .all()
+    .map((row) => Schema.decodeUnknownSync(TableInfoRowSchema)(row))
+  if (!reviewEventColumns.some((column) => column.name === "fail_reason")) {
+    db.exec("ALTER TABLE review_events ADD COLUMN fail_reason TEXT CHECK (fail_reason IN ('decode', 'slow', 'forgot')) DEFAULT NULL")
+  }
 }
 
 export function splitReadingParagraphs(text: string): string[] {
