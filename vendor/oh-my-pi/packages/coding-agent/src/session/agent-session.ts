@@ -215,7 +215,12 @@ import {
 	type AmbientRenameCompletion,
 } from "../irc/ambient-agent-renamer";
 import { IrcBus, type IrcMessage } from "../irc/bus";
-import { IrcExternalBus, type IrcExternalPeerState, resolveIrcExternalPeerName } from "../irc/bus-external";
+import {
+	IRC_EXTERNAL_IDLE_HEARTBEAT_MS,
+	IrcExternalBus,
+	type IrcExternalPeerState,
+	resolveIrcExternalPeerName,
+} from "../irc/bus-external";
 import { resolveMemoryBackend } from "../memory-backend";
 import { getMnemopiSessionState, type MnemopiSessionState, setMnemopiSessionState } from "../mnemopi/state";
 import { containsOrchestrate, ORCHESTRATE_NOTICE } from "../modes/orchestrate";
@@ -605,6 +610,8 @@ export interface AgentSessionConfig {
 	};
 	/** Peer registry override. Tests that publish heartbeat/status MUST supply an isolated store. */
 	externalIrcBus?: IrcExternalBus;
+	/** Test seam for shortening the idle heartbeat interval; production uses four minutes. */
+	externalIrcHeartbeatIntervalMs?: number;
 	/** Test seams for the opt-in announcement feed watcher. Production callers leave this unset. */
 	feedWatcher?: Omit<FeedWatcherOptions, "fetch" | "complete" | "notice" | "irc" | "sources"> & {
 		fetch?: FeedWatcherOptions["fetch"];
@@ -1390,6 +1397,8 @@ export class AgentSession {
 	#ircExternalPeerName: string | undefined;
 	#ircExternalPeerState: Exclude<IrcExternalPeerState, "unknown"> | undefined;
 	readonly #externalIrcBus: IrcExternalBus | undefined;
+	#externalIrcHeartbeatTimer: ReturnType<typeof setInterval> | undefined;
+	readonly #externalIrcHeartbeatIntervalMs: number;
 	#ambientAgentRenamer: AmbientAgentRenamer | undefined;
 	#feedWatcher: FeedWatcher | undefined;
 	// Agent identity (registry id) used for IRC routing and job ownership.
@@ -1682,6 +1691,13 @@ export class AgentSession {
 		this.agent = config.agent;
 		this.sessionManager = config.sessionManager;
 		this.#externalIrcBus = config.externalIrcBus;
+		const configuredExternalIrcHeartbeatIntervalMs = config.externalIrcHeartbeatIntervalMs;
+		this.#externalIrcHeartbeatIntervalMs =
+			typeof configuredExternalIrcHeartbeatIntervalMs === "number" &&
+			Number.isFinite(configuredExternalIrcHeartbeatIntervalMs) &&
+			configuredExternalIrcHeartbeatIntervalMs > 0
+				? configuredExternalIrcHeartbeatIntervalMs
+				: IRC_EXTERNAL_IDLE_HEARTBEAT_MS;
 		this.#ownershipLossUnsubscribe = this.sessionManager.subscribeOwnershipLost(error => {
 			if (!this.#handleDurableOwnershipLoss(error)) return;
 			this.emitNotice("error", error.message, "session-ownership");
@@ -4265,6 +4281,7 @@ export class AgentSession {
 	 */
 	beginDispose(): void {
 		this.#isDisposed = true;
+		this.#stopExternalIrcHeartbeat();
 		this.#ownershipLossUnsubscribe?.();
 		this.#ownershipLossUnsubscribe = undefined;
 		this.#ambientAgentRenamer?.stop();
@@ -13129,6 +13146,37 @@ export class AgentSession {
 		if (state) this.#updateExternalIrcPeerState(state);
 	}
 
+	#startExternalIrcHeartbeat(): void {
+		if (
+			this.#agentKind !== "main" ||
+			this.#isDisposed ||
+			this.#ircExternalPeerState === undefined ||
+			this.#externalIrcHeartbeatTimer !== undefined
+		)
+			return;
+		const timer = setInterval(() => this.#touchExternalIrcPeer(), this.#externalIrcHeartbeatIntervalMs);
+		timer.unref?.();
+		this.#externalIrcHeartbeatTimer = timer;
+	}
+
+	#stopExternalIrcHeartbeat(): void {
+		const timer = this.#externalIrcHeartbeatTimer;
+		this.#externalIrcHeartbeatTimer = undefined;
+		if (timer !== undefined) clearInterval(timer);
+	}
+
+	#touchExternalIrcPeer(): void {
+		if (this.#isDisposed || this.#agentKind !== "main") return;
+		const sessionId = this.#ircExternalSessionId;
+		if (!sessionId) return;
+		try {
+			const bus = this.#externalIrcBus ?? IrcExternalBus.global();
+			bus.heartbeat(sessionId);
+		} catch (error) {
+			logger.warn("Failed to refresh external IRC peer heartbeat", { error: String(error) });
+		}
+	}
+
 	#registerExternalIrcPeer(predecessorSessionId?: string): { bus: IrcExternalBus; sessionId: string; name: string } {
 		const cwd = this.sessionManager.getCwd();
 		const ownership = this.sessionManager.getSessionOwnership();
@@ -13174,6 +13222,7 @@ export class AgentSession {
 			const { bus, sessionId } = this.#registerExternalIrcPeer();
 			bus.updatePeerState(sessionId, state);
 			this.#ircExternalPeerState = state;
+			this.#startExternalIrcHeartbeat();
 		} catch (error) {
 			logger.warn("Failed to update external IRC peer state", { error: String(error) });
 		}

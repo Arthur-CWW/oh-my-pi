@@ -86,6 +86,8 @@ export interface IrcExternalBusOptions {
 	readonly readonly?: boolean;
 }
 export const IRC_EXTERNAL_STALE_MS = 10 * 60 * 1000;
+/** Idle sessions touch their durable heartbeat before the ten-minute stale window. */
+export const IRC_EXTERNAL_IDLE_HEARTBEAT_MS = 4 * 60 * 1000;
 
 export interface IrcPeerPruneCandidate {
 	readonly peer: IrcExternalPeer;
@@ -97,7 +99,7 @@ export interface IrcPeerPruneResult {
 	readonly deleted: number;
 }
 
-function isProcessAlive(pid: number): boolean {
+export function isIrcExternalPeerProcessAlive(pid: number): boolean {
 	if (!Number.isSafeInteger(pid) || pid <= 0) return false;
 	try {
 		process.kill(pid, 0);
@@ -453,7 +455,7 @@ export class IrcExternalBus {
 		if (!Number.isSafeInteger(options.retentionMs) || options.retentionMs < 1)
 			throw new Error("Peer prune retention must be a positive integer");
 		const nowMs = options.nowMs ?? Date.now();
-		const ownerAlive = options.isProcessAlive ?? isProcessAlive;
+		const ownerAlive = options.isProcessAlive ?? isIrcExternalPeerProcessAlive;
 		const candidates = this.listPeers({ includeStale: true })
 			.filter(peer => nowMs - parseTime(peer.lastSeen) > options.retentionMs)
 			.filter(peer => !ownerAlive(peer.pid))

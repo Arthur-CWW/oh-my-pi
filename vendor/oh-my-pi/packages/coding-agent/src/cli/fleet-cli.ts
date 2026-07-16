@@ -3,6 +3,7 @@ import { getAgentDir } from "@oh-my-pi/pi-utils";
 import {
 	getIrcExternalPeerDisplayState,
 	IrcExternalBus,
+	isIrcExternalPeerProcessAlive,
 	type IrcExternalPeer,
 	type IrcPeerPruneResult,
 } from "../irc/bus-external";
@@ -25,6 +26,7 @@ export interface FleetStatusOptions {
 	readonly all?: boolean;
 	readonly nowMs?: number;
 	readonly ircDbPath?: string;
+	readonly isProcessAlive?: (pid: number) => boolean;
 	readonly controlDbPath?: string;
 }
 
@@ -171,6 +173,7 @@ function recoveredSnapshotMatchesPeer(peer: IrcExternalPeer, snapshot: RolloutPe
 
 export async function collectFleetStatus(options: FleetStatusOptions = {}): Promise<readonly FleetStatusRow[]> {
 	const nowMs = options.nowMs ?? Date.now();
+	const isProcessAlive = options.isProcessAlive ?? isIrcExternalPeerProcessAlive;
 	let bus: IrcExternalBus | undefined;
 	try {
 		bus = new IrcExternalBus(options.ircDbPath, { readonly: true });
@@ -184,9 +187,12 @@ export async function collectFleetStatus(options: FleetStatusOptions = {}): Prom
 		for (const peer of peers) {
 			const journal = await readPeerJournal(peer);
 			const workstream = formatWorkstream(peer.fleetCapability?.workstream ?? journal.header?.workstream);
-			if (options.workstream && workstream !== options.workstream) continue;
 			const displayState = getIrcExternalPeerDisplayState(peer, nowMs);
-			if (!options.all && displayState === "disconnected") continue;
+			const staleLiveIdle =
+				displayState === "disconnected" &&
+				(peer.state === "idle" || peer.state === "waiting_input") &&
+				isProcessAlive(peer.pid);
+			if (!options.all && displayState === "disconnected" && !staleLiveIdle) continue;
 			const capability = peer.fleetCapability;
 			const compatibility = classifyFleetCompatibility(peer, LOCAL_COMPATIBILITY);
 			let rollout: RolloutPeerSnapshot | undefined;

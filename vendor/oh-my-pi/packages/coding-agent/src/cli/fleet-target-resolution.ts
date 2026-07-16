@@ -4,6 +4,7 @@ import * as path from "node:path";
 import {
 	IrcExternalBus,
 	isIrcExternalPeerFresh,
+	isIrcExternalPeerProcessAlive,
 	type IrcExternalPeer,
 } from "../irc/bus-external";
 import { decodeJournalEntries, projectJournalEntries } from "../journal/projection";
@@ -53,6 +54,7 @@ export interface FleetSelectorOptions {
 	readonly all?: boolean;
 	readonly nowMs?: number;
 	readonly ircDbPath?: string;
+	readonly isProcessAlive?: (pid: number) => boolean;
 	readonly bus?: IrcExternalBus;
 }
 
@@ -69,7 +71,12 @@ export async function resolveFleetSelectors(options: FleetSelectorOptions = {}):
 		const allPeers = bus.listPeers({ includeStale: true });
 		const targets: FleetResolvedPeer[] = [];
 		for (const peer of allPeers) {
-			if (!options.all && !isIrcExternalPeerFresh(peer.lastSeen, options.nowMs)) continue;
+			const fresh = isIrcExternalPeerFresh(peer.lastSeen, options.nowMs);
+			if (!fresh) {
+				const isAlive = (options.isProcessAlive ?? isIrcExternalPeerProcessAlive)(peer.pid);
+				const isIdle = peer.state === "idle" || peer.state === "waiting_input";
+				if (!isAlive || (!options.all && !isIdle)) continue;
+			}
 			const workstream = await peerWorkstream(peer);
 			if (options.workstream && workstream !== options.workstream && workstream !== `workstream:${options.workstream}`) continue;
 			targets.push({ peer, workstream });
