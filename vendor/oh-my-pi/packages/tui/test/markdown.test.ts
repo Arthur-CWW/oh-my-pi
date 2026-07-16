@@ -600,6 +600,11 @@ describe("Markdown component", () => {
 			const component = new MarkdownWithInput(markdown);
 			tui.addChild(component);
 			tui.start();
+			const deadline = Date.now() + 1000;
+			while (component.markdownLineCount === 0) {
+				if (Date.now() >= deadline) throw new Error("markdown did not render");
+				await new Promise<void>(resolve => setImmediate(resolve));
+			}
 			await terminal.flush();
 
 			expect(component.markdownLineCount > 0).toBeTruthy();

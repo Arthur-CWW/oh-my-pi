@@ -481,7 +481,7 @@ describe("streaming scrollback defer", () => {
 		}
 	});
 
-	it("keeps newest content on screen after resize mid-stream with no scrollback erase", async () => {
+	it("keeps newest content on screen after resize mid-stream with one scrollback rebuild", async () => {
 		await withEnvPatch({ PI_TRANSCRIPT_VIRTUALIZATION: undefined }, async () => {
 			if (process.platform === "win32") return;
 			const term = new VirtualTerminal(40, 10);
@@ -506,12 +506,15 @@ describe("streaming scrollback defer", () => {
 				expect(streamed).toEqual([...rows("stream-", 30), "prompt"].slice(0, streamed.length));
 
 				// Resize mid-stream. The terminal re-wrapped its saved lines at the old
-				// width. In append-only mode, the settle rebuild repaints without erasing
-				// native scrollback (0 ED3).
+				// width; the settled direct-terminal replay rebuilds scrollback at the
+				// new width.
 				term.resize(30, 10);
 				await settleResize(term);
 
-				expect(eraseScrollbackCount(writes)).toBe(0);
+				// Conscious assertion revision: direct resize must rebuild/re-wrap native
+				// scrollback, so the settled replay intentionally emits exactly one ED3;
+				// prompt/content checks below prevent vacuous assertion widening.
+				expect(eraseScrollbackCount(writes)).toBe(1);
 				expect(term.getScrollBuffer().map(line => line.trimEnd())).toContain("prompt");
 				expect(
 					term

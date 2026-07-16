@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { type Component, CURSOR_MARKER, TUI } from "@oh-my-pi/pi-tui";
+import { type Component, CURSOR_MARKER, type RenderScheduler, type RenderTimer, TUI } from "@oh-my-pi/pi-tui";
 import { VirtualTerminal } from "./virtual-terminal";
 
 class LineComponent implements Component {
@@ -90,6 +90,54 @@ function longestBlankRun(lines: string[]): number {
 	}
 	return longest;
 }
+// Deterministic scheduler for resize bursts. The resize callback paints the
+// viewport synchronously; immediate callbacks are the positive/control signal
+// for any follow-up paints, while the active delayed callback is the settle.
+class OverlayResizeScheduler implements RenderScheduler {
+	#time = 0;
+	#immediates: (() => void)[] = [];
+	#renders = new Map<number, { callback: () => void; delayMs: number }>();
+	#nextId = 0;
+
+	now(): number {
+		this.#time += 20;
+		return this.#time;
+	}
+
+	scheduleImmediate(callback: () => void): void {
+		this.#immediates.push(callback);
+	}
+
+	scheduleRender(callback: () => void, delayMs: number): RenderTimer {
+		const id = this.#nextId++;
+		this.#renders.set(id, { callback, delayMs });
+		return {
+			cancel: () => {
+				this.#renders.delete(id);
+			},
+		};
+	}
+
+	async flushImmediates(term: VirtualTerminal): Promise<void> {
+		let rounds = 0;
+		while (this.#immediates.length > 0) {
+			if (++rounds > 100) throw new Error("immediates did not settle");
+			const batch = this.#immediates;
+			this.#immediates = [];
+			for (const callback of batch) callback();
+		}
+		await term.flush();
+	}
+
+	async flushDeferredSettle(term: VirtualTerminal): Promise<void> {
+		const settle = [...this.#renders.entries()].find(([, entry]) => entry.delayMs >= 100);
+		if (!settle) throw new Error("resize settle did not remain pending");
+		this.#renders.delete(settle[0]);
+		settle[1].callback();
+		await this.flushImmediates(term);
+	}
+}
+
 async function withEnv(name: string, value: string, run: () => Promise<void>): Promise<void> {
 	const previous = Bun.env[name];
 	Bun.env[name] = value;
@@ -529,23 +577,25 @@ describe("TUI overlays", () => {
 
 	it("limits scrollback growth during resize oscillation with overflowing content", async () => {
 		const term = new VirtualTerminal(60, 10);
-		const tui = new TUI(term);
+		const scheduler = new OverlayResizeScheduler();
+		const tui = new TUI(term, undefined, { renderScheduler: scheduler });
 		const component = new MutableContentComponent(buildRows(160));
 		tui.addChild(component);
 		try {
 			tui.start();
-			await flushRender(term);
+			await scheduler.flushImmediates(term);
 			const before = term.getScrollBuffer().length;
 
 			for (let i = 0; i < 18; i++) {
 				component.setLines(buildRows(140 + (i % 6) * 8));
 				term.resize(i % 2 === 0 ? 59 : 60, i % 3 === 0 ? 11 : 10);
 				tui.requestRender();
-				await flushRender(term);
+				await term.flush();
 				const viewportRows = viewportRowNumbers(term);
 				expect(viewportRows.length).toBeGreaterThan(0);
 			}
 
+			await scheduler.flushDeferredSettle(term);
 			const scrollback = term.getScrollBuffer();
 			expect(scrollback.length - before).toBeLessThan(220);
 			expect(longestBlankRun(scrollback)).toBeLessThan(30);
@@ -633,22 +683,24 @@ describe("TUI overlays", () => {
 	});
 	it("stays stable with direct row-delta movement", async () => {
 		const term = new VirtualTerminal(50, 10);
-		const tui = new TUI(term);
+		const scheduler = new OverlayResizeScheduler();
+		const tui = new TUI(term, undefined, { renderScheduler: scheduler });
 		const component = new MutableContentComponent(buildRows(150));
 		tui.addChild(component);
 		try {
 			tui.start();
-			await flushRender(term);
+			await scheduler.flushImmediates(term);
 			const before = term.getScrollBuffer().length;
 
 			for (let i = 0; i < 18; i++) {
 				component.setLines(buildRows(120 + (i % 8) * 6));
 				term.resize(i % 2 === 0 ? 50 : 49, i % 3 === 0 ? 11 : 10);
 				tui.requestRender();
-				await flushRender(term);
+				await term.flush();
 				expect(viewportRowNumbers(term).length).toBeGreaterThan(0);
 			}
 
+			await scheduler.flushDeferredSettle(term);
 			const scrollback = term.getScrollBuffer();
 			expect(scrollback.length - before).toBeLessThan(260);
 			expect(longestBlankRun(scrollback)).toBeLessThan(40);

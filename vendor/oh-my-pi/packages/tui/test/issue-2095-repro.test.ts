@@ -219,16 +219,21 @@ describe("issue #2095: ConPTY post-full-paint settle prevents viewport drift", (
 		setPlatform("win32");
 		const term = new VirtualTerminal(80, 24, 4096);
 
-		type Scheduled = { delayMs: number };
+		type Scheduled = { delayMs: number; canceled: boolean };
 		const scheduled: Scheduled[] = [];
 		const recordingScheduler: RenderScheduler = {
 			now: () => performance.now(),
 			scheduleImmediate: cb => process.nextTick(cb),
 			scheduleRender: (cb, delayMs): RenderTimer => {
-				const entry: Scheduled = { delayMs };
+				const entry: Scheduled = { delayMs, canceled: false };
 				scheduled.push(entry);
 				const handle = setTimeout(cb, delayMs);
-				return { cancel: () => clearTimeout(handle) };
+				return {
+					cancel: () => {
+						entry.canceled = true;
+						clearTimeout(handle);
+					},
+				};
 			},
 		};
 
@@ -269,9 +274,11 @@ describe("issue #2095: ConPTY post-full-paint settle prevents viewport drift", (
 			// never the 33 ms throttle that would defeat the settle. The
 			// `settle()` helper above already waited 40 ms — long enough for
 			// the would-be throttled timer to have been scheduled if it leaked.
-			const shortDelayTimers = scheduled.filter(s => s.delayMs > 0 && s.delayMs < 100);
+			// A canceled short timer is expected during the handoff; only active
+			// short timers would indicate a leaked pre-settle render.
+			const shortDelayTimers = scheduled.filter(s => !s.canceled && s.delayMs > 0 && s.delayMs < 100);
 			expect(shortDelayTimers).toEqual([]);
-			const settleTimers = scheduled.filter(s => s.delayMs >= 100);
+			const settleTimers = scheduled.filter(s => !s.canceled && s.delayMs >= 100);
 			expect(settleTimers.length).toBeGreaterThanOrEqual(1);
 
 			// Let the settle expire so the trailing render fires and any
