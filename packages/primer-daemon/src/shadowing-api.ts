@@ -1,53 +1,8 @@
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs"
+import { existsSync, readdirSync, statSync } from "node:fs"
 import { basename, extname, join, resolve, sep } from "node:path"
-import { Schema } from "effect"
 
+import { AlignmentReadError, readAlignment, type Alignment } from "./alignment"
 import type { DaemonPaths } from "./paths"
-
-const NonNegativeInteger = Schema.Number.check(Schema.isFinite(), Schema.isInt(), Schema.isGreaterThanOrEqualTo(0))
-const PositiveInteger = Schema.Number.check(Schema.isFinite(), Schema.isInt(), Schema.isGreaterThan(0))
-const NonEmptyString = Schema.String.check(Schema.isMinLength(1))
-const CJK_RE =
-  /[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff\u{20000}-\u{2a6df}\u{2f800}-\u{2fa1f}]/u
-
-const PhoneBlockSchema = Schema.Struct({
-  p: NonEmptyString,
-  startMs: NonNegativeInteger,
-  endMs: NonNegativeInteger,
-})
-
-const CharBlockSchema = Schema.Struct({
-  ch: NonEmptyString,
-  pinyin: NonEmptyString,
-  startMs: NonNegativeInteger,
-  endMs: NonNegativeInteger,
-  phones: Schema.optionalKey(Schema.NullOr(Schema.Array(PhoneBlockSchema))),
-})
-
-const SentenceBlockSchema = Schema.Struct({
-  idx: NonNegativeInteger,
-  text: NonEmptyString,
-  pinyin: NonEmptyString,
-  startMs: NonNegativeInteger,
-  endMs: NonNegativeInteger,
-  chars: Schema.Array(CharBlockSchema),
-  charTiming: Schema.optionalKey(Schema.NullOr(Schema.Union([Schema.Literal("native"), Schema.Literal("interpolated")]))),
-})
-
-const MediaBlockSchema = Schema.Struct({
-  file: NonEmptyString,
-  durationMs: PositiveInteger,
-  lang: Schema.Literal("zh"),
-  asr: NonEmptyString,
-})
-
-const AlignmentSchema = Schema.Struct({
-  version: Schema.Literal(1),
-  media: MediaBlockSchema,
-  sentences: Schema.Array(SentenceBlockSchema),
-})
-
-type Alignment = Schema.Schema.Type<typeof AlignmentSchema>
 
 interface ShadowingAssetOk {
   slug: string
@@ -84,6 +39,7 @@ export async function handleShadowingApi(request: Request, paths: DaemonPaths): 
       return handleAssetDetail(request, pathname, paths)
     }
   } catch (error) {
+    if (error instanceof AlignmentReadError) return jsonError(error.message, 400)
     if (error instanceof BadRequestError) return jsonError(error.message, 400)
     if (error instanceof NotFoundError) return jsonError(error.message, 404)
     throw error
@@ -154,61 +110,6 @@ function readAsset(slug: string, paths: DaemonPaths): { alignment: Alignment; me
   const alignmentPath = join(assetDir, "alignment.json")
   const alignment = readAlignment(alignmentPath)
   return { alignment, mediaPath: resolveMediaPath(assetDir, alignment) }
-}
-
-function readAlignment(path: string): Alignment {
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(readFileSync(path, "utf8"))
-  } catch {
-    throw new BadRequestError("malformed alignment JSON")
-  }
-
-  try {
-    const alignment = Schema.decodeUnknownSync(AlignmentSchema)(parsed)
-    validateAlignmentContract(alignment)
-    return alignment
-  } catch {
-    throw new BadRequestError("alignment JSON does not match shadowing contract")
-  }
-}
-
-function validateAlignmentContract(alignment: Alignment): void {
-  for (const [expectedIdx, sentence] of alignment.sentences.entries()) {
-    if (sentence.idx !== expectedIdx) throw new BadRequestError("alignment JSON does not match shadowing contract")
-    if (sentence.endMs < sentence.startMs) throw new BadRequestError("alignment JSON does not match shadowing contract")
-
-    const expectedChars = cjkChars(sentence.text)
-    if (sentence.chars.length !== expectedChars.length) {
-      throw new BadRequestError("alignment JSON does not match shadowing contract")
-    }
-
-    let previousStart = sentence.startMs
-    let previousEnd = sentence.startMs
-    for (const [charIdx, char] of sentence.chars.entries()) {
-      if (char.ch !== expectedChars[charIdx]) throw new BadRequestError("alignment JSON does not match shadowing contract")
-      if (char.endMs < char.startMs) throw new BadRequestError("alignment JSON does not match shadowing contract")
-      if (char.startMs < sentence.startMs || char.endMs > sentence.endMs) {
-        throw new BadRequestError("alignment JSON does not match shadowing contract")
-      }
-      if (char.startMs < previousStart || char.endMs < previousEnd) {
-        throw new BadRequestError("alignment JSON does not match shadowing contract")
-      }
-      previousStart = char.startMs
-      previousEnd = char.endMs
-      for (const phone of char.phones ?? []) {
-        if (phone.endMs < phone.startMs) throw new BadRequestError("alignment JSON does not match shadowing contract")
-      }
-    }
-  }
-}
-
-function cjkChars(text: string): string[] {
-  const chars: string[] = []
-  for (const char of text) {
-    if (CJK_RE.test(char)) chars.push(char)
-  }
-  return chars
 }
 
 function resolveMediaPath(assetDir: string, alignment: Alignment): string {

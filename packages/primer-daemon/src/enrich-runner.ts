@@ -95,7 +95,11 @@ export async function runEnrichment(db: Database, paths: DaemonPaths, queueItemI
   }
 }
 
-export function buildEnrichmentPromptInput(db: Database, paths: DaemonPaths, queueItemId: number): EnrichmentPromptInput {
+export function buildEnrichmentPromptInput(
+  db: Database,
+  paths: Pick<DaemonPaths, "cedictDb"> & Partial<DaemonPaths>,
+  queueItemId: number,
+): EnrichmentPromptInput {
   const queueItem = getQueueItemById(db, queueItemId)
   if (queueItem === null) throw new Error("unknown queue item")
   const provenance = queueItem.provenance

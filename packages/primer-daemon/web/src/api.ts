@@ -144,6 +144,54 @@ export interface ReaderDoc {
   paragraphs: string[]
   marks: Mark[]
 }
+export type ReaderMediaKind = "audio" | "video"
+
+export interface ReaderMedia {
+  slug: string
+  kind: ReaderMediaKind
+  file: string
+  durationMs: number
+  asr: string
+  sentenceCount: number
+}
+
+export interface ReaderAlignmentPhone {
+  p: string
+  startMs: number
+  endMs: number
+}
+
+export interface ReaderAlignmentChar {
+  ch: string
+  pinyin: string
+  startMs: number
+  endMs: number
+  phones?: ReaderAlignmentPhone[] | null
+}
+
+export interface ReaderAlignmentSentence {
+  idx: number
+  text: string
+  pinyin: string
+  startMs: number
+  endMs: number
+  chars: ReaderAlignmentChar[]
+  charTiming?: "native" | "interpolated" | null
+}
+
+export interface ReaderAlignmentMedia {
+  file: string
+  durationMs: number
+  lang: "zh"
+  asr: string
+  kind?: ReaderMediaKind
+}
+
+export interface ReaderAlignment {
+  version: 1
+  media: ReaderAlignmentMedia
+  sentences: ReaderAlignmentSentence[]
+}
 
 export interface DictEntry {
   simplified: string
@@ -155,6 +203,44 @@ export interface DictEntry {
 export interface DictResult {
   word: string
   entries: DictEntry[]
+}
+
+export type ZhSynonymRelation = "近义词" | "反义词"
+
+export interface ZhDictSynonym {
+  word: string
+  note: string
+  relation: ZhSynonymRelation
+}
+
+export interface ZhDictGloss {
+  word: string
+  simpleDef: string
+  synonyms: ZhDictSynonym[]
+  registerNote: string | null
+  model: string
+  createdAt: string
+}
+
+export interface ZhDictSentence {
+  text: string
+  source: string
+  easeRank: number
+}
+
+export interface ZhDictDecomposition {
+  char: string
+  ids: string
+  components: string[]
+}
+
+export interface ZhDictResult {
+  word: string
+  pinyin: string | null
+  sentences: ZhDictSentence[]
+  gloss: ZhDictGloss | null
+  decomposition: ZhDictDecomposition[]
+  en: DictEntry[]
 }
 
 export interface QueueProvenance {
@@ -341,6 +427,13 @@ export async function getReaderDocs(): Promise<ReaderDocSummary[]> {
 export async function getReaderDoc(id: number): Promise<ReaderDoc> {
   return fetchJson<ReaderDoc>(`/api/reader/docs/${id}`)
 }
+export async function getReaderMedia(docId: number): Promise<ReaderMedia> {
+  return fetchJson<ReaderMedia>(`/api/reader/docs/${docId}/media`)
+}
+
+export async function getReaderMediaAlignment(docId: number): Promise<ReaderAlignment> {
+  return fetchJson<ReaderAlignment>(`/api/reader/docs/${docId}/media/alignment`)
+}
 
 export async function createReaderDoc(title: string, text: string, lang?: string): Promise<{ id: number; paragraphCount: number }> {
   return fetchJson("/api/reader/docs", {
@@ -373,6 +466,18 @@ export async function deleteMark(id: number): Promise<void> {
 export async function dictLookup(word: string): Promise<DictResult> {
   return fetchJson<DictResult>(`/api/dict/${encodeURIComponent(word)}`)
 }
+export async function getZhDict(word: string): Promise<ZhDictResult> {
+  return fetchJson<ZhDictResult>(`/api/zhdict/${encodeURIComponent(word)}`)
+}
+
+export async function generateZhDictGloss(word: string): Promise<ZhDictGloss> {
+  return fetchJson<ZhDictGloss>(`/api/zhdict/${encodeURIComponent(word)}/generate`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: "{}",
+  })
+}
+
 
 export async function dictBest(text: string): Promise<DictResult> {
   return fetchJson<DictResult>(`/api/dict/best?text=${encodeURIComponent(text)}`)

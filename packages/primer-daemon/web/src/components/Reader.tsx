@@ -6,7 +6,11 @@ import {
   type DictResult,
   type Mark,
   type QueueItem,
+  type ReaderAlignment,
+  type ReaderAlignmentChar,
+  type ReaderAlignmentSentence,
   type ReaderDoc,
+  type ReaderMedia,
   createMark,
   deleteMark,
   dictBest,
@@ -14,10 +18,13 @@ import {
   getKnownWords,
   getQueue,
   getReaderDoc,
+  getReaderMedia,
+  getReaderMediaAlignment,
   setQueuePriority,
 } from "@/api"
 import { navigate } from "@/hooks/useHashRoute"
 import { logEvent } from "@/hooks/useTelemetry"
+import { ZhDictCard } from "@/components/ZhDictCard"
 import { type Segment, classifyWord, extractSentence, isHan, parsePinyin, segmentText, toneColor } from "@/lib/segmentation"
 import { cn } from "@/lib/utils"
 
@@ -90,11 +97,11 @@ function WordPopup({
     const { anchorRect } = popup
     let top = anchorRect.bottom + 8
     let left = anchorRect.left
-    // Clamp right edge
-    if (left + 288 > window.innerWidth - 12) left = window.innerWidth - 300
+    // Clamp right edge (card is w-80 = 320px)
+    if (left + 320 > window.innerWidth - 12) left = window.innerWidth - 332
     if (left < 8) left = 8
     // Clamp bottom — flip above if needed
-    if (top + 280 > window.innerHeight) top = anchorRect.top - 288
+    if (top + 360 > window.innerHeight) top = anchorRect.top - 368
     if (top < 8) top = 8
     setPos({ top, left })
   }, [popup])
@@ -102,42 +109,11 @@ function WordPopup({
   return (
     <>
       <div className="fixed inset-0 z-40" onClick={onClose} onKeyDown={undefined} />
-      <div
-        ref={ref}
-        style={{ position: "fixed", top: pos.top, left: pos.left, zIndex: 50 }}
-        className="w-72 rounded-lg border border-border/70 bg-popover p-3 shadow-xl"
-      >
-        {/* word + traditional */}
-        <div className="flex items-baseline gap-2">
-          <span className="text-xl font-medium">{popup.word}</span>
-          {popup.dict?.entries[0]?.traditional && popup.dict.entries[0].traditional !== popup.word && (
-            <span className="text-sm text-muted-foreground">{popup.dict.entries[0].traditional}</span>
-          )}
-        </div>
-
-        {popup.loading && <p className="mt-2 text-xs text-muted-foreground/60">looking up…</p>}
-
-        {popup.dict && popup.dict.entries.length > 0 && (
-          <div className="mt-2 space-y-2">
-            {popup.dict.entries.slice(0, 3).map((entry, i) => (
-              <div key={i}>
-                <PinyinDisplay pinyin={entry.pinyin} />
-                <ul className="mt-0.5">
-                  {entry.definitions.slice(0, 4).map((def, j) => (
-                    <li key={j} className="text-xs leading-relaxed text-muted-foreground">{def}</li>
-                  ))}
-                </ul>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {popup.dict && popup.dict.entries.length === 0 && !popup.loading && (
-          <p className="mt-2 text-xs text-muted-foreground/60">no dictionary entry</p>
-        )}
+      <div ref={ref} style={{ position: "fixed", top: pos.top, left: pos.left, zIndex: 50 }} className="w-80">
+        <ZhDictCard word={popup.word} />
 
         {popup.markResult && !popup.undone && (
-          <div className="mt-2.5 flex items-center gap-2 border-t border-border/40 pt-2">
+          <div className="mt-1 flex items-center gap-2 rounded-lg border border-border/70 bg-popover px-3 py-2 shadow-xl">
             <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] font-medium text-emerald-400">
               queued
             </span>
@@ -163,7 +139,7 @@ function WordPopup({
           </div>
         )}
         {popup.undone && (
-          <div className="mt-2.5 border-t border-border/40 pt-2">
+          <div className="mt-1 rounded-lg border border-border/70 bg-popover px-3 py-2 shadow-xl">
             <span className="text-[11px] text-muted-foreground/50">removed from queue</span>
           </div>
         )}
@@ -251,6 +227,111 @@ function ReaderParagraph({
     </p>
   )
 }
+function MediaParagraph({
+  sentence,
+  paragraphIdx,
+  knownWords,
+  queuedWords,
+  priorityWords,
+  markedSurfaces,
+  markMap,
+  focused,
+  activeCharIdx,
+  showPinyin,
+  onWordClick,
+  onCharClick,
+  onFocus,
+}: {
+  sentence: ReaderAlignmentSentence
+  paragraphIdx: number
+  knownWords: ReadonlySet<string>
+  queuedWords: ReadonlySet<string>
+  priorityWords: ReadonlySet<string>
+  markedSurfaces: ReadonlySet<string>
+  markMap: ReadonlyMap<string, number>
+  focused: boolean
+  activeCharIdx: number | null
+  showPinyin: boolean
+  onWordClick: (word: string, pIdx: number, seg: Segment, rect: DOMRect) => void
+  onCharClick: (pIdx: number, charIdx: number, char: ReaderAlignmentChar) => void
+  onFocus: () => void
+}): React.JSX.Element {
+  const segments = useMemo(() => segmentText(sentence.text), [sentence.text])
+  const units = useMemo(() => {
+    const result: Array<{ text: string; offset: number; charIdx: number | null; char: ReaderAlignmentChar | null }> = []
+    let offset = 0
+    let charIdx = 0
+    for (const text of Array.from(sentence.text)) {
+      const block = sentence.chars[charIdx]
+      const unit = { text, offset, charIdx: block?.ch === text ? charIdx : null, char: block?.ch === text ? block : null }
+      result.push(unit)
+      offset += text.length
+      if (unit.char !== null) charIdx += 1
+    }
+    return result
+  }, [sentence])
+
+  return (
+    <p
+      data-vim-panel="paragraphs"
+      data-vim-index={paragraphIdx}
+      data-media-sentence={paragraphIdx}
+      onMouseEnter={onFocus}
+      className={cn(
+        "scroll-mt-24 rounded-md px-2 py-2 transition-colors",
+        focused && "bg-accent/25 ring-1 ring-ring/15",
+      )}
+      style={{ maxWidth: "68ch" }}
+    >
+      {units.map((unit, unitIdx) => {
+        const { text, offset, charIdx, char } = unit
+        if (!char || charIdx === null) {
+          return <span key={`${unitIdx}:${text}`}>{text}</span>
+        }
+        const seg =
+          segments.find((candidate) => offset >= candidate.offset && offset < candidate.offset + candidate.text.length) ??
+          ({ text, offset, isWordLike: isHan(text) } satisfies Segment)
+        const segEnd = seg.offset + seg.text.length
+        const markId = markMap.get(`${paragraphIdx}:${seg.offset}:${segEnd}`)
+        const cls = classifyWord(seg.text, knownWords, queuedWords, markedSurfaces)
+        const isPriority = priorityWords.has(seg.text)
+        const han = isHan(text)
+        let wordStyle = ""
+        if (markId !== undefined) wordStyle = cn(MARKED_STYLE, isPriority && PRIORITY_STYLE)
+        else if (isPriority) wordStyle = PRIORITY_STYLE
+        else if (cls === "unknown") wordStyle = UNKNOWN_STYLE
+        else if (cls === "queued") wordStyle = QUEUED_STYLE
+
+        return (
+          <ruby
+            key={`${unitIdx}:${text}`}
+            data-media-char={`${paragraphIdx}:${charIdx}`}
+            data-mark-id={markId}
+            onClick={(ev) => {
+              const rect = (ev.currentTarget as HTMLElement).getBoundingClientRect()
+              if ((ev.ctrlKey || ev.altKey) && han) {
+                // Long-press fallback on touch should eventually call this same lookup path.
+                onWordClick(seg.text, paragraphIdx, seg, rect)
+                return
+              }
+              onCharClick(paragraphIdx, charIdx, char)
+            }}
+            className={cn(
+              "inline-block rounded-sm",
+              han && "cursor-pointer transition-colors hover:bg-accent/40",
+              activeCharIdx === charIdx && "bg-amber-300/35 text-amber-100",
+              wordStyle,
+            )}
+          >
+            {text}
+            {showPinyin && char.pinyin && <rt className="px-0.5 text-[10px] font-normal text-muted-foreground/65">{char.pinyin}</rt>}
+          </ruby>
+        )
+      })}
+    </p>
+  )
+}
+
 
 // ---------------------------------------------------------------------------
 // Reader
@@ -272,6 +353,16 @@ export function Reader({
   const [priorityByWord, setPriorityByWord] = useState<Map<string, number>>(new Map())
   const [popup, setPopup] = useState<PopupState | null>(null)
   const [focusPara, setFocusPara] = useState(-1)
+  const [media, setMedia] = useState<ReaderMedia | null>(null)
+  const [alignment, setAlignment] = useState<ReaderAlignment | null>(null)
+  const [mediaNotice, setMediaNotice] = useState<string | null>(null)
+  const [showPinyin, setShowPinyin] = useState(true)
+  const [playbackRate, setPlaybackRate] = useState(1)
+  const [playing, setPlaying] = useState(false)
+  const [activeMediaChar, setActiveMediaChar] = useState<{ sentenceIdx: number; charIdx: number } | null>(null)
+  const mediaRef = useRef<HTMLMediaElement | null>(null)
+  const frameRef = useRef<number | null>(null)
+  const userScrollOverrideRef = useRef(false)
 
   // Derived sets
   const markedSurfaces = useMemo(
@@ -290,20 +381,47 @@ export function Reader({
     }
     return map
   }, [doc])
-  // Load doc + known words (once)
+  // Load doc, word state, and optional attached media.
   useEffect(() => {
     let alive = true
+    setError(null)
+    setDoc(null)
+    setMedia(null)
+    setAlignment(null)
+    setMediaNotice(null)
+    setPlaying(false)
+    setActiveMediaChar(null)
+    setPlaybackRate(1)
+    userScrollOverrideRef.current = false
     setPriorityByWord(new Map())
     Promise.all([getReaderDoc(docId), getKnownWords()]).then(
       ([d, words]) => {
         if (!alive) return
         setDoc(d)
         setKnownWords(new Set(words))
-        // Seed queued words from existing marks
         setQueuedWords(new Set(d.marks.map((m) => m.surface)))
       },
       (e: unknown) => {
         if (alive) setError(e instanceof Error ? e.message : "Failed to load document")
+      },
+    )
+    void getReaderMedia(docId).then(
+      (meta) =>
+        getReaderMediaAlignment(docId).then(
+          (a) => {
+            if (!alive) return
+            setMedia(meta)
+            setAlignment(a)
+          },
+          () => {
+            if (alive) setMediaNotice("Media alignment unavailable; showing the document text.")
+          },
+        ),
+      (e: unknown) => {
+        // A 404 is the normal no-media case; other failures are still non-fatal.
+        if (alive && !(e instanceof Error && e.message.includes("404"))) {
+          setMediaNotice("Media unavailable; showing the document text.")
+        }
       },
     )
     getQueue("all", 500).then(
@@ -319,6 +437,7 @@ export function Reader({
     )
     return () => {
       alive = false
+      if (frameRef.current !== null) cancelAnimationFrame(frameRef.current)
     }
   }, [docId])
 
@@ -336,13 +455,13 @@ export function Reader({
         el.style.backgroundColor = ""
       }, 1500)
     })
-  }, [markId, doc])
+  }, [markId, doc, alignment])
 
   // Word click → dict lookup + auto-mark
   const onWordClick = useCallback(
     (word: string, pIdx: number, seg: Segment, rect: DOMRect) => {
       if (!doc) return
-      const paragraphText = doc.paragraphs[pIdx]
+      const paragraphText = alignment?.sentences[pIdx]?.text ?? doc.paragraphs[pIdx]
       if (!paragraphText) return
 
       const start = seg.offset
@@ -398,7 +517,7 @@ export function Reader({
         },
       )
     },
-    [doc, priorityByWord],
+    [doc, alignment, priorityByWord],
   )
 
   // Undo mark
@@ -463,6 +582,116 @@ export function Reader({
     )
   }, [popup])
 
+  const mediaCharRanges = useMemo(() => {
+    const ranges: Array<{ sentenceIdx: number; charIdx: number; startMs: number }> = []
+    alignment?.sentences.forEach((sentence, sentenceIdx) => {
+      sentence.chars.forEach((char, charIdx) => {
+        ranges.push({ sentenceIdx, charIdx, startMs: char.startMs })
+      })
+    })
+    return ranges
+  }, [alignment])
+
+  const updateActiveMediaChar = useCallback(() => {
+    const element = mediaRef.current
+    if (!element || mediaCharRanges.length === 0) return
+    const nowMs = element.currentTime * 1000
+    let low = 0
+    let high = mediaCharRanges.length - 1
+    let best = -1
+    while (low <= high) {
+      const mid = (low + high) >> 1
+      if (mediaCharRanges[mid].startMs <= nowMs) {
+        best = mid
+        low = mid + 1
+      } else {
+        high = mid - 1
+      }
+    }
+    if (best < 0) {
+      setActiveMediaChar(null)
+      return
+    }
+    const next = mediaCharRanges[best]
+    setActiveMediaChar((previous) =>
+      previous?.sentenceIdx === next.sentenceIdx && previous.charIdx === next.charIdx
+        ? previous
+        : { sentenceIdx: next.sentenceIdx, charIdx: next.charIdx },
+    )
+    setFocusPara((previous) => (previous === next.sentenceIdx ? previous : next.sentenceIdx))
+  }, [mediaCharRanges])
+
+  const seekToMediaChar = useCallback(
+    (sentenceIdx: number, charIdx: number, char: ReaderAlignmentChar) => {
+      const element = mediaRef.current
+      if (!element) return
+      element.currentTime = Math.max(0, char.startMs / 1000)
+      setActiveMediaChar({ sentenceIdx, charIdx })
+      setFocusPara(sentenceIdx)
+      userScrollOverrideRef.current = false
+      logEvent("media_seek", { docId, ms: char.startMs })
+      void element.play().catch(() => {
+        // Browser autoplay policy can reject only when no user gesture was available.
+      })
+    },
+    [docId],
+  )
+
+  const handleMediaPlay = useCallback(() => {
+    const element = mediaRef.current
+    setPlaying(true)
+    logEvent("media_play", { docId, ms: Math.round((element?.currentTime ?? 0) * 1000) })
+  }, [docId])
+
+  const handleMediaPause = useCallback(() => {
+    const element = mediaRef.current
+    setPlaying(false)
+    logEvent("media_pause", { docId, ms: Math.round((element?.currentTime ?? 0) * 1000) })
+  }, [docId])
+
+  const toggleMediaPlayback = useCallback(() => {
+    const element = mediaRef.current
+    if (!element) return
+    if (element.paused) void element.play().catch(() => undefined)
+    else element.pause()
+  }, [])
+
+  const cyclePlaybackRate = useCallback((direction: 1 | -1) => {
+    const rates = [0.75, 1, 1.25]
+    setPlaybackRate((current) => {
+      const index = rates.indexOf(current)
+      const currentIndex = index < 0 ? 1 : index
+      const next = rates[(currentIndex + direction + rates.length) % rates.length]
+      if (mediaRef.current) mediaRef.current.playbackRate = next
+      return next
+    })
+  }, [])
+
+  // A requestAnimationFrame loop keeps alignment smooth between sparse timeupdate events.
+  useEffect(() => {
+    if (!playing || !alignment || mediaCharRanges.length === 0) {
+      if (frameRef.current !== null) cancelAnimationFrame(frameRef.current)
+      frameRef.current = null
+      return
+    }
+    const tick = () => {
+      updateActiveMediaChar()
+      frameRef.current = requestAnimationFrame(tick)
+    }
+    tick()
+    return () => {
+      if (frameRef.current !== null) cancelAnimationFrame(frameRef.current)
+      frameRef.current = null
+    }
+  }, [alignment, mediaCharRanges.length, playing, updateActiveMediaChar])
+
+  useEffect(() => {
+    const sentenceIdx = activeMediaChar?.sentenceIdx
+    if (sentenceIdx == null || userScrollOverrideRef.current) return
+    const element = document.querySelector(`[data-media-sentence="${sentenceIdx}"]`) as HTMLElement | null
+    element?.scrollIntoView({ block: "center", behavior: "smooth" })
+  }, [activeMediaChar?.sentenceIdx])
+
   const closePopup = useCallback(() => setPopup(null), [])
 
   // Keyboard
@@ -507,7 +736,30 @@ export function Reader({
         return
       }
 
-      const paraCount = doc?.paragraphs.length ?? 0
+      if (alignment) {
+        if (e.code === "Space" || e.key === " ") {
+          toggleMediaPlayback()
+          e.preventDefault()
+          return
+        }
+        if (e.key === "p" || e.key === "P") {
+          setShowPinyin((visible) => !visible)
+          e.preventDefault()
+          return
+        }
+        if (e.key === "[") {
+          cyclePlaybackRate(-1)
+          e.preventDefault()
+          return
+        }
+        if (e.key === "]") {
+          cyclePlaybackRate(1)
+          e.preventDefault()
+          return
+        }
+      }
+
+      const paraCount = alignment?.sentences.length ?? doc?.paragraphs.length ?? 0
       switch (e.key) {
         case "j":
           if (paraCount > 0) {
@@ -533,7 +785,7 @@ export function Reader({
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [doc, popup, closePopup, onUndo, onPriority, onShowHelp])
+  }, [alignment, cyclePlaybackRate, doc, onPriority, onShowHelp, onUndo, popup, toggleMediaPlayback])
 
   // Scroll focused paragraph
   useEffect(() => {
@@ -571,6 +823,37 @@ export function Reader({
 
   return (
     <div className="mx-auto w-full max-w-2xl px-4 py-6">
+      {media && alignment && (
+        media.kind === "video" ? (
+          <video
+            ref={(node) => {
+              mediaRef.current = node
+            }}
+            src={`/api/reader/docs/${docId}/media/file`}
+            className="sticky top-16 z-30 ml-auto mb-4 block w-56 rounded-lg border border-border/60 bg-black/90 shadow-lg"
+            playsInline
+            preload="metadata"
+            onPlay={handleMediaPlay}
+            onPause={handleMediaPause}
+            onEnded={() => setPlaying(false)}
+            aria-label="Reader video"
+          />
+        ) : (
+          <audio
+            ref={(node) => {
+              mediaRef.current = node
+            }}
+            src={`/api/reader/docs/${docId}/media/file`}
+            preload="metadata"
+            onPlay={handleMediaPlay}
+            onPause={handleMediaPause}
+            onEnded={() => setPlaying(false)}
+            className="sr-only"
+            aria-hidden="true"
+          />
+        )
+      )}
+
       {/* breadcrumb */}
       <div className="mb-6 flex items-baseline gap-3">
         <button
@@ -588,35 +871,75 @@ export function Reader({
         )}
       </div>
 
+      {mediaNotice && <p className="mb-4 text-xs text-muted-foreground/55">{mediaNotice}</p>}
+
       {/* reading surface */}
-      <div className="reading-surface space-y-5">
-        {doc.paragraphs.map((para, idx) => (
-          <ReaderParagraph
-            key={idx}
-            text={para}
-            paragraphIdx={idx}
-            knownWords={knownWords}
-            queuedWords={queuedWords}
-            priorityWords={priorityWords}
-            markedSurfaces={markedSurfaces}
-            markMap={markMap}
-            focused={focusPara === idx}
-            onWordClick={onWordClick}
-            onFocus={() => setFocusPara(idx)}
-          />
-        ))}
+      <div
+        className="reading-surface space-y-5"
+        onWheelCapture={() => {
+          userScrollOverrideRef.current = true
+        }}
+      >
+        {alignment && media
+          ? alignment.sentences.map((sentence, idx) => (
+              <MediaParagraph
+                key={sentence.idx}
+                sentence={sentence}
+                paragraphIdx={idx}
+                knownWords={knownWords}
+                queuedWords={queuedWords}
+                priorityWords={priorityWords}
+                markedSurfaces={markedSurfaces}
+                markMap={markMap}
+                focused={focusPara === idx}
+                activeCharIdx={
+                  sentence.charTiming === "native" && activeMediaChar?.sentenceIdx === idx ? activeMediaChar.charIdx : null
+                }
+                showPinyin={showPinyin}
+                onWordClick={onWordClick}
+                onCharClick={seekToMediaChar}
+                onFocus={() => setFocusPara(idx)}
+              />
+            ))
+          : doc.paragraphs.map((para, idx) => (
+              <ReaderParagraph
+                key={idx}
+                text={para}
+                paragraphIdx={idx}
+                knownWords={knownWords}
+                queuedWords={queuedWords}
+                priorityWords={priorityWords}
+                markedSurfaces={markedSurfaces}
+                markMap={markMap}
+                focused={focusPara === idx}
+                onWordClick={onWordClick}
+                onFocus={() => setFocusPara(idx)}
+              />
+            ))}
       </div>
 
       {popup && <WordPopup popup={popup} onClose={closePopup} onUndo={onUndo} onPriority={onPriority} />}
 
       <p className="mt-8 text-[11px] text-muted-foreground/35">
-        click any word to look up ·{" "}
-        <kbd className="rounded bg-muted px-1 font-mono text-[10px]">j</kbd>/
-        <kbd className="rounded bg-muted px-1 font-mono text-[10px]">k</kbd> paragraphs ·{" "}
-        <kbd className="rounded bg-muted px-1 font-mono text-[10px]">u</kbd> undo ·{" "}
-        <kbd className="rounded bg-muted px-1 font-mono text-[10px]">p</kbd> priority (in popup) ·{" "}
-        <kbd className="rounded bg-muted px-1 font-mono text-[10px]">Esc</kbd> close ·{" "}
-        <kbd className="rounded bg-muted px-1 font-mono text-[10px]">?</kbd> help
+        {alignment ? (
+          <>
+            click a character to play from there ·{" "}
+            <kbd className="rounded bg-muted px-1 font-mono text-[10px]">Space</kbd> play / pause ·{" "}
+            <kbd className="rounded bg-muted px-1 font-mono text-[10px]">P</kbd> pinyin ·{" "}
+            <kbd className="rounded bg-muted px-1 font-mono text-[10px]">[</kbd>/<kbd className="rounded bg-muted px-1 font-mono text-[10px]">]</kbd>{" "}
+            rate ({playbackRate}×) · ctrl/alt-click look up
+          </>
+        ) : (
+          <>
+            click any word to look up ·{" "}
+            <kbd className="rounded bg-muted px-1 font-mono text-[10px]">j</kbd>/
+            <kbd className="rounded bg-muted px-1 font-mono text-[10px]">k</kbd> paragraphs ·{" "}
+            <kbd className="rounded bg-muted px-1 font-mono text-[10px]">u</kbd> undo ·{" "}
+            <kbd className="rounded bg-muted px-1 font-mono text-[10px]">p</kbd> priority (in popup) ·{" "}
+            <kbd className="rounded bg-muted px-1 font-mono text-[10px]">Esc</kbd> close ·{" "}
+            <kbd className="rounded bg-muted px-1 font-mono text-[10px]">?</kbd> help
+          </>
+        )}
       </p>
     </div>
   )

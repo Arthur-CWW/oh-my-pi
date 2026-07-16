@@ -27,7 +27,9 @@ import {
   UiEventsRequestSchema,
 } from "./feedback-store"
 import { handleGenerationApi } from "./generation-api"
+import { handleReaderMediaApi } from "./reader-media"
 import { handleReaderApi } from "./reader-api"
+import { handleZhDictApi } from "./zhdict-api"
 import { handleShadowingApi } from "./shadowing-api"
 import { resolveDaemonPaths, type DaemonPaths } from "./paths"
 
@@ -117,8 +119,12 @@ export function startDashboard(options: DashboardOptions): DashboardServer {
 async function handleRequest(request: Request, paths: DaemonPaths, env: Record<string, string | undefined>): Promise<Response> {
   const url = new URL(request.url)
   const pathname = url.pathname
+  const readerMediaApiResponse = await handleReaderMediaApi(request, paths)
+  if (readerMediaApiResponse !== null) return readerMediaApiResponse
   const readerApiResponse = await handleReaderApi(request, paths)
   if (readerApiResponse !== null) return readerApiResponse
+  const zhDictApiResponse = await handleZhDictApi(request, paths, { env })
+  if (zhDictApiResponse !== null) return zhDictApiResponse
 
   const shadowingApiResponse = await handleShadowingApi(request, paths)
   if (shadowingApiResponse !== null) return shadowingApiResponse

@@ -9,7 +9,9 @@ import {
   enrollCardCandidate,
   getReviewDueCounts,
 } from "./review-store"
+import { attachReaderMedia, importReaderMedia, listReaderMedia } from "./reader-media"
 import { resolveDaemonPaths, type DaemonPaths } from "./paths"
+import { indexZhDict } from "./zhdict-store"
 import type { EvidenceHit, EvidenceSource } from "./schema"
 export const USAGE = `Usage:
   primer search <terms...> [--limit N] [--source browser|twitter|reader|cards] [--json]
@@ -21,6 +23,10 @@ export const USAGE = `Usage:
   primer review <enroll|due> [options]
   primer feedback list [--limit N] [--json]
   primer events tail [--kind K] [--limit N] [--json]
+  primer media import <dir> --title T [--kind audio|video]
+  primer media attach <docId> <dir>
+  primer media list [--json]
+  primer zhdict index [--json]
 `
 
 const DEFAULT_SEARCH_LIMIT = 30
@@ -215,7 +221,9 @@ export async function runCli(argv: readonly string[], env: Record<string, string
   if (command === "note") return runNoteCommand(argv.slice(1), paths)
   if (command === "card") return runCardCommand(argv.slice(1), paths)
   if (command === "progress") return runProgressCommand(argv.slice(1), paths)
+  if (command === "media") return runMediaCommand(argv.slice(1), paths)
   if (command === "review") return runReviewCommand(argv.slice(1), paths)
+  if (command === "zhdict") return runZhDictCommand(argv.slice(1), paths)
   if (command === "feedback") return runFeedbackCommand(argv.slice(1), paths)
   if (command === "events") return runEventsCommand(argv.slice(1), paths)
 
@@ -280,6 +288,18 @@ function runRecentCommand(argv: readonly string[], paths: DaemonPaths): number {
   return 0
 }
 
+function runZhDictCommand(argv: readonly string[], paths: DaemonPaths): number {
+  const parsed = parseArgs(argv, { json: "boolean" })
+  if (parsed === null || parsed.positionals.length !== 1 || parsed.positionals[0] !== "index") return usageError()
+  const result = indexZhDict(paths)
+  if (parsed.flags.has("json")) {
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`)
+  } else {
+    process.stdout.write(`Indexed ${result.sentenceCount} sentences from ${result.sourceCount} sources (${result.insertedCount} new).\n`)
+  }
+  return 0
+}
+
 function runFeedbackCommand(argv: readonly string[], paths: DaemonPaths): number {
   const parsed = parseArgs(argv, { limit: "value", json: "boolean" })
   if (parsed === null || parsed.positionals.length !== 1 || parsed.positionals[0] !== "list") return usageError()
@@ -315,6 +335,98 @@ function runEventsCommand(argv: readonly string[], paths: DaemonPaths): number {
   } finally {
     db.close()
   }
+}
+
+async function runMediaCommand(argv: readonly string[], paths: DaemonPaths): Promise<number> {
+  const parsed = parseArgs(argv, { title: "value", kind: "value", json: "boolean" })
+  if (parsed === null || parsed.positionals.length === 0) return usageError()
+
+  const subcommand = parsed.positionals[0]
+  if (subcommand === "import") {
+    const title = parsed.flags.get("title")
+    const kind = parseMediaKind(parsed.flags.get("kind"))
+    if (
+      parsed.positionals.length !== 2 ||
+      title === undefined ||
+      title === true ||
+      title.trim().length === 0 ||
+      kind === null ||
+      parsed.flags.has("json")
+    ) {
+      return usageError()
+    }
+
+    try {
+      const result = importReaderMedia(paths, {
+        sourceDir: parsed.positionals[1]!,
+        title,
+        ...(kind === undefined ? {} : { kind }),
+      })
+      process.stdout.write(`docId=${result.docId} slug=${result.slug}\n`)
+      return 0
+    } catch (error) {
+      return storageError(error)
+    }
+  }
+
+  if (subcommand === "attach") {
+    const docId = parseRequiredPositiveInteger(parsed.positionals[1])
+    if (parsed.positionals.length !== 3 || docId === null || parsed.flags.size !== 0) return usageError()
+
+    try {
+      const result = attachReaderMedia(paths, {
+        docId,
+        sourceDir: parsed.positionals[2]!,
+      })
+      process.stdout.write(`docId=${result.docId} slug=${result.slug}\n`)
+      return 0
+    } catch (error) {
+      return storageError(error)
+    }
+  }
+
+  if (subcommand === "list") {
+    if (parsed.positionals.length !== 1 || parsed.flags.size > 1 || (parsed.flags.size === 1 && !parsed.flags.has("json"))) {
+      return usageError()
+    }
+
+    try {
+      const rows = listReaderMedia(paths)
+      if (parsed.flags.has("json")) writeJson(rows)
+      else writeHumanReaderMedia(rows)
+      return 0
+    } catch (error) {
+      return storageError(error)
+    }
+  }
+
+  return usageError()
+}
+
+function parseMediaKind(value: FlagValue | undefined): "audio" | "video" | undefined | null {
+  if (value === undefined) return undefined
+  if (value === true) return null
+  if (value === "audio" || value === "video") return value
+  return null
+}
+
+function parseRequiredPositiveInteger(value: string | undefined): number | null {
+  if (value === undefined || !/^[1-9]\d*$/.test(value)) return null
+  const parsed = Number(value)
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null
+}
+
+function writeHumanReaderMedia(rows: readonly { docId: number; slug: string; kind: string; createdAt: string }[]): void {
+  if (rows.length === 0) {
+    process.stdout.write("No reader media.\n")
+    return
+  }
+  for (const row of rows) process.stdout.write(`docId=${row.docId} slug=${row.slug} kind=${row.kind} createdAt=${row.createdAt}\n`)
+}
+
+function storageError(error: unknown): number {
+  process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`)
+  return 1
 }
 
 function writeHumanFeedback(rows: readonly FeedbackEvent[]): void {

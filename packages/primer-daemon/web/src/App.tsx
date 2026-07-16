@@ -20,6 +20,9 @@ import { logEvent, useTelemetry } from "./hooks/useTelemetry"
 
 const READER_KEYS: Array<{ keys: string[]; label: string }> = [
   { keys: ["click"], label: "look up word · auto-queue" },
+  { keys: ["Space"], label: "play / pause" },
+  { keys: ["P"], label: "toggle pinyin" },
+  { keys: ["[", "]"], label: "decrease / increase playback rate" },
   { keys: ["j", "k"], label: "focus paragraph down / up" },
   { keys: ["g", "G"], label: "first / last paragraph" },
   { keys: ["u"], label: "undo mark (in popup)" },
