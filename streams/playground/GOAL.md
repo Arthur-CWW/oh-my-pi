@@ -30,6 +30,10 @@ A **creative engine**, closer to a game engine than a video pipeline: programmat
 
 Code-driven video is now a first-class lane: `scene.v1` JSON specs → live playground preview (`apps/scene-playground`, port 4600, review-feed default view) → deterministic Three.js render (`packages/scene-renderer`). Pleometric-style grammar: clone fields, beat-synced tracks, retro shader passes. Manual + cookbook: `docs/plans/scene-lab.md`. Working dirs: `workflows/scene-lab/{specs,renders,reports}/`. Convention: agents drop proof reports into `workflows/scene-lab/reports/` — the playground feed is the review contract. Lane is self-contained (no root package.json coupling); Remotion remains recreate-lane only.
 
+## The engine-recreation frame (Arthur, 2026-07-15)
+
+Sharpened statement of the goal: **recreate pleometric's engine locally, as composable layers we can mutate, extend, and recombine** — not clone his outputs, own his machinery. Two composable layers (see `docs/research/power-posting-sources/ontology.md` § two-layer model): the **presentation/stylization layer is the product**; semantic registers (theoryposting, AGI economics, brainrot) are plug-ins. Components land as layers: scene.v1 render grammar, reference catalog → style recipes, narration (local TTS → cloned recurring character voices), lip-sync (Sonic), latwalk latent remixes. The companion project's pose-transfer/VR and Live2D layers are future components of the same workflow — coordinate via `packages/`, never by editing companion paths. Pleometric's tacit knowledge is indexed verbatim (`pleometric-meta-index.md`), never summarized — "his tweets are not that compressible." Cluster handles beyond pleometric: abelian_soup, voooooogel, norvid_studies, medjedowo, SkyeSharkie, poetengineer__.
+
 ## Owns
 
 `apps/slotok-workbench/`, `apps/scene-playground/`, `packages/hyperframes-renderer/`, `packages/remotion-renderer/`, `packages/scene-renderer/`, `packages/jimeng-client/`, `packages/ugc-cli/`, `workflows/tiktok-recreate/`, `workflows/scene-lab/`, `data/{ugc-studio,assets,tiktok-catalogue,jimeng-lab,video-recreation,workflow-runs,dreamina}/`, this directory.
