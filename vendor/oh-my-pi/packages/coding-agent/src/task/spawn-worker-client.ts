@@ -1,9 +1,10 @@
 import * as path from "node:path";
 import { isCompiledBinary, popLoopPhase, pushLoopPhase, workerHostEntry } from "@oh-my-pi/pi-utils";
 import type { Settings } from "../config/settings";
+import { SessionManager } from "../session/session-manager";
 import { AgentRegistry } from "../registry/agent-registry";
 import type { EventBus } from "../utils/event-bus";
-import { snapshotExecutorSettings, type ExecutorOptions } from "./executor";
+import { finalizeSubprocessOutput, snapshotExecutorSettings, type ExecutorOptions } from "./executor";
 import {
 	decodeSpawnWorkerRecord,
 	SPAWN_WORKER_ARG,
@@ -262,6 +263,78 @@ async function readCappedStderr(stream: ReadableStream<Uint8Array>): Promise<str
 }
 
 
+type RecoveredYield = { data?: unknown; status?: "success" | "aborted"; error?: string; schemaOverridden?: boolean };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Recover a terminal yield from the child journal when the worker's final JSONL
+ * record races process teardown. The journal is the durable source of truth;
+ * this path deliberately returns a typed failure when it cannot be read.
+ */
+export async function recoverSpawnWorkerResultFromJournal(
+	request: SpawnWorkerRunRequest,
+): Promise<SingleResult | undefined> {
+	const sessionFile = request.options.sessionFile;
+	if (!sessionFile) return undefined;
+	try {
+		const session = await SessionManager.open(sessionFile, undefined, undefined, { suppressBreadcrumb: true });
+		const yields: RecoveredYield[] = [];
+		for (const entry of session.getEntries()) {
+			if (entry.type !== "message" || !isRecord(entry.message) || entry.message.role !== "toolResult") continue;
+			const details = entry.message.details;
+			if (!isRecord(details) || (details.status !== "success" && details.status !== "aborted")) continue;
+			yields.push({
+				data: details.data,
+				status: details.status,
+				error: typeof details.error === "string" ? details.error : undefined,
+				schemaOverridden: details.schemaOverridden === true ? true : undefined,
+			});
+		}
+		const lastYield = yields[yields.length - 1];
+		if (!lastYield) return undefined;
+		const finalized = finalizeSubprocessOutput({
+			rawOutput: "",
+			exitCode: lastYield.status === "success" ? 0 : 1,
+			stderr: "",
+			doneAborted: false,
+			signalAborted: false,
+			completed: true,
+			yieldItems: yields,
+			outputSchema: request.options.outputSchema,
+		});
+		const output = finalized.rawOutput;
+		return {
+			index: request.options.index,
+			id: request.options.id,
+			agent: request.options.agent.name,
+			agentSource: request.options.agent.source,
+			task: request.options.task,
+			assignment: request.options.assignment,
+			description: request.options.description,
+			exitCode: finalized.exitCode,
+			output,
+			stderr: finalized.stderr,
+			truncated: false,
+			durationMs: 0,
+			tokens: 0,
+			requests: 0,
+			modelOverride: request.options.modelOverride,
+			routeReceipt: request.options.routeReceipt,
+			error: finalized.exitCode !== 0 && finalized.stderr ? finalized.stderr : undefined,
+			aborted: lastYield.status === "aborted",
+			abortReason: lastYield.status === "aborted" ? lastYield.error : undefined,
+			outputPath: request.options.artifactsDir ? path.join(request.options.artifactsDir, `${request.options.id}.md`) : undefined,
+			extractedToolData: { yield: yields },
+			outputMeta: { lineCount: output.split("\n").length, charCount: output.length },
+		};
+	} catch {
+		return undefined;
+	}
+}
+
 async function runRequest(
 	request: SpawnWorkerRequest,
 	options: SpawnWorkerClientOptions,
@@ -335,6 +408,11 @@ async function runRequest(
 					break;
 				case "result":
 					result = record.result;
+					try {
+						proc.kill();
+					} catch {
+						// The worker may already be exiting; proc.exited remains authoritative.
+					}
 					break;
 				case "synthetic-result":
 					result = { allocatedBytes: record.allocatedBytes, rssBytes: record.rssBytes };
@@ -373,9 +451,16 @@ async function runRequest(
 		proc.stdin.end();
 		const [exitCode, stderr] = await Promise.all([proc.exited, stderrPromise, stdoutPromise]).then(values => [values[0], values[1]] as const);
 		if (terminalError) throw terminalError;
-		if (exitCode !== 0) throw new SpawnWorkerError("exit", `Subagent subprocess exited with code ${exitCode}${stderr.trim() ? `: ${stderr.trim()}` : ""}`);
 		if (!sawReady) throw new SpawnWorkerError("protocol", "Subagent subprocess exited before ready");
-		if (!result) throw new SpawnWorkerError("protocol", "Subagent subprocess exited without a result");
+		if (!result && request.type === "run") {
+			result = await recoverSpawnWorkerResultFromJournal(request);
+		}
+		if (!result) {
+			if (exitCode !== 0) {
+				throw new SpawnWorkerError("exit", `Subagent subprocess exited with code ${exitCode}${stderr.trim() ? `: ${stderr.trim()}` : ""}`);
+			}
+			throw new SpawnWorkerError("protocol", "Subagent subprocess exited without a result");
+		}
 		return result;
 	} finally {
 		clearTimeout(timeout);

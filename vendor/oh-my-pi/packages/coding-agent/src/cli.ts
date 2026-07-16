@@ -293,6 +293,7 @@ export async function runCli(argv: string[]): Promise<void> {
 	// top-level evaluation finishes.
 	if (resolvedArgv[0]?.startsWith("__omp_worker_")) {
 		await runWorkerEntrypoint(resolvedArgv[0]);
+		if (resolvedArgv[0] === TASK_SPAWN_WORKER_ARG) process.exit(0);
 		return;
 	}
 

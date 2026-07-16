@@ -1,4 +1,5 @@
 import { AgentRegistry, type AgentRef } from "../registry/agent-registry";
+import { Settings } from "../config/settings";
 import { EventBus } from "../utils/event-bus";
 import {
 	decodeSpawnWorkerRequest,
@@ -127,12 +128,24 @@ async function runSynthetic(request: Extract<SpawnWorkerRequest, { type: "synthe
 	};
 }
 
+export async function initializeSpawnWorkerSettings(
+	request: Extract<SpawnWorkerRequest, { type: "run" }>,
+): Promise<void> {
+	await Settings.init({ inMemory: true, cwd: request.options.cwd, overrides: request.settings });
+}
+
 export async function startSpawnWorker(): Promise<void> {
 	const writer = new BoundedJsonlWriter();
 	let requestId = "unparsed";
 	try {
 		const request = await readRequest();
 		requestId = request.requestId;
+		if (request.type === "run") process.env.OMP_SUBPROCESS_WORKER = "1";
+		// Install the serialized settings snapshot before loading the executor/tool graph.
+		// Edit's auto-generated-file guard reads the process-global proxy.
+		if (request.type === "run") {
+			await initializeSpawnWorkerSettings(request);
+		}
 		writer.enqueue({ ...recordBase(requestId), type: "ready", pid: process.pid });
 		writer.enqueue({ ...recordBase(requestId), type: "phase", phase: "decode", at: Date.now() });
 		if (request.type === "synthetic") {

@@ -291,6 +291,13 @@ export class IrcTool implements AgentTool<typeof ircSchema, IrcDetails> {
 			return errorResult("Cannot send an IRC message to yourself.", { op: "send", from: senderId, to });
 		}
 		const localTarget = !isBroadcast ? registry.get(to) : undefined;
+		if (process.env.OMP_SUBPROCESS_WORKER === "1" && (!localTarget || localTarget.session === null)) {
+			const error = "subprocess-worker-peer-unavailable";
+			return errorResult(
+				`IRC unavailable in subprocess worker: ${to} is not a live in-process peer; coordinator IPC is required. External IRC fallback is disabled.`,
+				{ op: "send", from: senderId, to, receipts: [{ to, outcome: "failed", error }] },
+			);
+		}
 		const externalTarget =
 			!isBroadcast && !localTarget && external
 				? external.bus.findPeerByName(to, { excludeSessionId: external.sessionId })
@@ -465,7 +472,7 @@ export class IrcTool implements AgentTool<typeof ircSchema, IrcDetails> {
 	}
 
 	#registerExternalPeer(): { bus: IrcExternalBus; sessionId: string; name: string } | null {
-		if (this.externalBus === null) return null;
+		if (this.externalBus === null || process.env.OMP_SUBPROCESS_WORKER === "1") return null;
 		const ownership = this.session.sessionManager?.getSessionOwnership();
 		const sessionId = ownership?.sessionId ?? this.session.getSessionId?.() ?? `${this.session.cwd}:${process.pid}`;
 		const bus = this.externalBus ?? IrcExternalBus.global();
