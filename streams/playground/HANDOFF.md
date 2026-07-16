@@ -53,12 +53,12 @@ Read, in order: `docs/fable/charter.md`, `streams/playground/GOAL.md` (esp. § e
 
 0. **Read `docs/research/power-posting-sources/pleorama-synthesis.md` first** — the 2026-07-16 dialogue synthesis (two-optimization-surfaces model, liquidity order book, operator/無心 problem) reframes priorities 2–7 below; its § sync-requirements is a handoff packet owned by the corpus/stema orchestrator (relay it if not yet delivered — no stema peer was on the IRC bus when written). Catalog driver FINISHED (307/307, 0 failures, committed).
 1. ~~Check the catalog driver finished~~ — done, committed `a1b1ecb95`.
-2. **Voice cloning on the 3090** — Fish Speech or Qwen3-TTS in `~/tts-lab` (uv+tmux): clone 2–3 recurring-character voices, render one vibe-brief script per voice, compare against Kokoro baseline. This unlocks Arthur's recurring-character direction.
-3. **First recipe-driven piece**: pick 1–2 recipes from `style-recipes.md` expressible in scene.v1 today, author a short (25–50s) piece with Kokoro narration muxed, render chunked, ship to the feed. This closes the full local loop: corpus → recipe → scene → local TTS → video, $0.
-4. **Lip-sync decision**: one cheap Sonic test with a photoreal/humanlike portrait (not a figurine). If still bad, survey alternatives briefly and park the lane with evidence.
-5. **Refresh style recipes against the full catalog** (~280 entries vs the 56-entry snapshot) — cheap delegated pass.
-6. **Bookmark enrichment + meta-index rerun**: drain the 135 pending status jobs, extend media sync for medjedowo/norvid_studies, rerun the meta-index scan (43 absent IDs + new bookmark content).
-7. **Renderer gaps**: top-ranked gaps in `2026-07-15-style-recipes/report.md` (incl. known: sprite rotation.z ignored, halftone mix/opacity) — schedule fixes when a recipe-driven piece needs them.
+2. ~~Voice cloning~~ — DONE overnight 2026-07-16 (`2026-07-16-voice-clone/`): Qwen3-TTS 1.7B zero-shot in `~/tts-lab/fish/.venv`. Verdict: **Kokoro stays default**; Qwen only for characters Kokoro can't cover, with mandatory generation-token cap + duration QA (one runaway documented). Kokoro venv repaired (torch cu128) + regression pass. Next: character-reference sourcing pass (licensing rules in report).
+3. ~~First recipe-driven piece~~ — DONE: **"What Lab?"** (`2026-07-16-first-recipe-piece/what-lab.mp4`, spec in `specs/`). Full local loop closed: corpus → recipe → scene.v1 → Kokoro → video, $0. Next pieces: use the new halftone mix + audio-cue snap; re-render candidate noted in its report.
+4. ~~Lip-sync decision~~ — RESOLVED: **lane PARKED** (`2026-07-16-sonic-photoreal/`): Sonic fails photoreal too (identity warp doubles by 8s, plosives never close, 13 jump cuts). Evidence bar for any future alternative is in the report.
+5. ~~Recipe refresh~~ — DONE: 12 recipes vs full 307-entry catalog, kinesis primitive threaded in.
+6. **Bookmark enrichment + meta-index rerun** — now owned by the corpus/stema orchestrator (pleorama-synthesis packet); playground reruns `pleometric-meta-index.md` + `pleo-reader/` refresh AFTER their sync lands.
+7. ~~Renderer gaps (first slice)~~ — DONE: halftone `mix`, sprite `rotation.z`, audio-cue pipeline (`analyze-audio.ts`, `scene.cues.v1`, snap mode). Remaining from gap #1: dense-cluster, accelerate-to-hit, downbeat classification; gaps #2–#4 (typography/compositing/sequencing) untouched — schedule when a piece needs them.
 8. **Arthur labels the corpus** (his gate; ping once with the dev-server URL when he's around).
 
 ## Review etiquette
