@@ -51,7 +51,8 @@ Read, in order: `docs/fable/charter.md`, `streams/playground/GOAL.md` (esp. § e
 
 ## Continuation (in order)
 
-1. **Check the catalog driver finished** (`progress.json` ~280/280, `stopped_on_rate_limit` false; resume: `python3 workflows/scene-lab/reference_catalog_full.py`). Commit final catalog + report.
+0. **Read `docs/research/power-posting-sources/pleorama-synthesis.md` first** — the 2026-07-16 dialogue synthesis (two-optimization-surfaces model, liquidity order book, operator/無心 problem) reframes priorities 2–7 below; its § sync-requirements is a handoff packet owned by the corpus/stema orchestrator (relay it if not yet delivered — no stema peer was on the IRC bus when written). Catalog driver FINISHED (307/307, 0 failures, committed).
+1. ~~Check the catalog driver finished~~ — done, committed `a1b1ecb95`.
 2. **Voice cloning on the 3090** — Fish Speech or Qwen3-TTS in `~/tts-lab` (uv+tmux): clone 2–3 recurring-character voices, render one vibe-brief script per voice, compare against Kokoro baseline. This unlocks Arthur's recurring-character direction.
 3. **First recipe-driven piece**: pick 1–2 recipes from `style-recipes.md` expressible in scene.v1 today, author a short (25–50s) piece with Kokoro narration muxed, render chunked, ship to the feed. This closes the full local loop: corpus → recipe → scene → local TTS → video, $0.
 4. **Lip-sync decision**: one cheap Sonic test with a photoreal/humanlike portrait (not a figurine). If still bad, survey alternatives briefly and park the lane with evidence.
