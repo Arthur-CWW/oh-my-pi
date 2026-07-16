@@ -344,8 +344,24 @@ export class PolicyJournal {
 		}
 	}
 
+	async previewRollback(input: PolicyRollbackInput): Promise<PolicyTransactionV1> {
+		const records = await this.replay();
+		return this.previewAppend(this.#rollbackDraft(input, records), {
+			expectedHead: input.expectedHead ?? headOf(records),
+		});
+	}
+
 	async rollback(input: PolicyRollbackInput): Promise<PolicyTransactionV1> {
 		const records = await this.replay();
+		return this.append(this.#rollbackDraft(input, records), {
+			expectedHead: input.expectedHead ?? headOf(records),
+		});
+	}
+
+	#rollbackDraft(
+		input: PolicyRollbackInput,
+		records: readonly PolicyTransactionV1[],
+	): PolicyTransactionDraftV1 {
 		const target = records.find(record => record.transactionId === input.transactionId);
 		if (target === undefined) {
 			throw new PolicyJournalIoError({
@@ -354,21 +370,17 @@ export class PolicyJournal {
 				reason: `transaction not found: ${input.transactionId}`,
 			});
 		}
-		const inverse = target.mutations.map(mutation => this.#inverseMutation(records, target.sequence, mutation));
-		return this.append(
-			{
-				transactionId: randomUUID(),
-				createdAt: this.#now().toISOString(),
-				effectiveFrom: input.effectiveFrom ?? this.#now().toISOString(),
-				author: input.author,
-				source: input.source,
-				reason: input.reason,
-				rollbackOf: target.transactionId,
-				registry: { version: POLICY_REGISTRY_VERSION, digest: POLICY_REGISTRY_DIGEST },
-				mutations: inverse,
-			},
-			{ expectedHead: input.expectedHead ?? headOf(records) },
-		);
+		return {
+			transactionId: randomUUID(),
+			createdAt: this.#now().toISOString(),
+			effectiveFrom: input.effectiveFrom ?? this.#now().toISOString(),
+			author: input.author,
+			source: input.source,
+			reason: input.reason,
+			rollbackOf: target.transactionId,
+			registry: { version: POLICY_REGISTRY_VERSION, digest: POLICY_REGISTRY_DIGEST },
+			mutations: target.mutations.map(mutation => this.#inverseMutation(records, target.sequence, mutation)),
+		};
 	}
 
 	#inverseMutation(

@@ -1,8 +1,11 @@
 import { afterEach, describe, expect, it } from "bun:test";
+import { randomUUID } from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { collectImport, importMutations, runPolicyCommand } from "../../src/cli/policy-cli";
+import { IrcExternalBus } from "../../src/irc/bus-external";
+import { SessionControlBus } from "../../src/session/session-control";
 
 const temporaryDirectories: string[] = [];
 
@@ -204,5 +207,167 @@ describe("provider policy CLI", () => {
 				}),
 			]),
 		);
+	});
+
+	it("surfaces history, sequence diff, drift, impact, rebuild, and dry-run rollback without journal writes", async () => {
+		const directory = await temporaryDirectory();
+		const options = {
+			directory,
+			now: fixedClock("2026-01-01T10:00:00.000Z"),
+			liveSessions: () => [
+				{ sessionId: "session-behind", name: "Behind", workstream: "alpha", appliedSequence: 1 },
+			],
+		};
+		await runPolicyCommand(
+			{ action: "set", key: "core.routing.default", value: "openai/gpt-5.6", reason: "baseline" },
+			options,
+		);
+		const replacement = JSON.parse(
+			await runPolicyCommand(
+				{
+					action: "set",
+					key: "core.routing.default",
+					value: "anthropic/claude-fable-5",
+					reason: "replacement",
+					json: true,
+				},
+				options,
+			),
+		);
+		const journalPath = path.join(directory, "policy-v1.jsonl");
+		const journalBytes = await fs.readFile(journalPath);
+		const assertJournalUnchanged = async (): Promise<void> => {
+			expect(await fs.readFile(journalPath)).toEqual(journalBytes);
+		};
+
+		const explanation = JSON.parse(
+			await runPolicyCommand({ action: "explain", key: "core.routing.default", json: true }, options),
+		);
+		expect(explanation.stack.map((entry: { reason: string }) => entry.reason)).toEqual(["replacement", "baseline"]);
+		await assertJournalUnchanged();
+
+		const history = JSON.parse(
+			await runPolicyCommand({ action: "history", key: "core.routing.default", json: true }, options),
+		);
+		expect(history.map((row: { sequence: number }) => row.sequence)).toEqual([1, 2]);
+		await assertJournalUnchanged();
+
+		const diff = JSON.parse(
+			await runPolicyCommand({ action: "diff", from: "1", to: "2", json: true }, options),
+		);
+		expect(diff.changes.map((change: { key: string }) => change.key)).toEqual(["core.routing.default"]);
+		await assertJournalUnchanged();
+
+		const drift = JSON.parse(await runPolicyCommand({ action: "drift", json: true }, options));
+		expect(drift).toEqual([
+			expect.objectContaining({
+				sessionId: "session-behind",
+				rows: [expect.objectContaining({ key: "core.routing.default" })],
+			}),
+		]);
+		await assertJournalUnchanged();
+
+		const impact = JSON.parse(
+			await runPolicyCommand(
+				{ action: "impact", key: "core.routing.qa", value: "openai/gpt-5.6", json: true },
+				options,
+			),
+		);
+		expect(impact).toMatchObject({
+			committed: false,
+			sessions: [{ sessionId: "session-behind", keys: ["core.routing.qa"] }],
+		});
+		await assertJournalUnchanged();
+
+		const rollbackPreview = JSON.parse(
+			await runPolicyCommand(
+				{
+					action: "rollback",
+					transactionId: replacement.committed.transaction.transactionId,
+					dryRun: true,
+					json: true,
+				},
+				options,
+			),
+		);
+		expect(rollbackPreview.committed).toBe(false);
+		await assertJournalUnchanged();
+
+		const rebuilt = JSON.parse(await runPolicyCommand({ action: "rebuild", json: true }, options));
+		expect(rebuilt.transactions).toHaveLength(2);
+		await assertJournalUnchanged();
+	});
+
+	it("derives applied sequence from real fleet and policy-apply receipts", async () => {
+		const directory = await temporaryDirectory();
+		const ircDbPath = path.join(directory, "irc.sqlite");
+		const controlDbPath = path.join(directory, "session-control.sqlite");
+		const options = {
+			directory,
+			ircDbPath,
+			controlDbPath,
+			now: fixedClock("2026-01-01T10:00:00.000Z"),
+		};
+		const baseline = JSON.parse(
+			await runPolicyCommand(
+				{ action: "set", key: "core.routing.default", value: "openai/gpt-5.6", json: true },
+				options,
+			),
+		).committed.transaction;
+		await runPolicyCommand(
+			{ action: "set", key: "core.routing.default", value: "anthropic/claude-fable-5" },
+			options,
+		);
+
+		const ownerEpoch = randomUUID();
+		const ircBus = new IrcExternalBus(ircDbPath);
+		ircBus.registerPeer({
+			sessionId: "session-receipt",
+			name: "ReceiptPeer",
+			cwd: directory,
+			pid: process.pid,
+			ownerEpoch,
+		});
+		ircBus.close();
+
+		const controlBus = new SessionControlBus(controlDbPath);
+		controlBus.bindTarget("session-receipt", ownerEpoch);
+		const commandId = randomUUID();
+		controlBus.request({
+			schemaVersion: 2,
+			commandId,
+			source: { kind: "local-cli", instanceId: randomUUID(), pid: process.pid, uid: process.getuid?.() ?? 0 },
+			sessionId: "session-receipt",
+			targetOwnerEpoch: ownerEpoch,
+			requestedAt: "2026-01-01T10:00:00.000Z",
+			intent: {
+				kind: "policy-apply",
+				policyTransactionId: baseline.transactionId,
+				policySequence: baseline.sequence,
+				policyHeadHash: baseline.recordHash,
+				expectedAppliedSequence: 0,
+				impactedPolicyClasses: ["next-operation"],
+			},
+		});
+		expect(controlBus.claimNext("session-receipt", ownerEpoch)?.commandId).toBe(commandId);
+		controlBus.complete(commandId, ownerEpoch, { result: "applied", appliedSequence: baseline.sequence });
+		controlBus.close();
+
+		const drift = JSON.parse(await runPolicyCommand({ action: "drift", json: true }, options));
+		expect(drift).toEqual([
+			expect.objectContaining({
+				sessionId: "session-receipt",
+				name: "ReceiptPeer",
+				appliedSequence: 1,
+				headSequence: 2,
+				rows: [
+					expect.objectContaining({
+						key: "core.routing.default",
+						applied: expect.objectContaining({ sequence: 1 }),
+						head: expect.objectContaining({ sequence: 2 }),
+					}),
+				],
+			}),
+		]);
 	});
 });

@@ -6,6 +6,7 @@ import { Effect } from "effect";
 import { PolicyJournal } from "../../src/policy/policy-journal";
 import { isModelDenied, isProviderDenied } from "../../src/policy/policy-projection";
 import { makePolicyService } from "../../src/policy/policy-service";
+import { PolicyProjectionStore } from "../../src/policy/policy-projection-store";
 import { decodePolicyTransactionV1, POLICY_GENESIS_HASH } from "../../src/policy/policy-records";
 
 const temporaryDirectories: string[] = [];
@@ -213,5 +214,128 @@ describe("core.providers policy projection", () => {
 		);
 		expect(excessExit._tag).toBe("Failure");
 		expect(await journal.replay()).toEqual([]);
+	});
+	it("rebuilds the SQLite projection identically and exposes immutable inspection surfaces", async () => {
+		const journal = await createJournal();
+		const projectionStore = new PolicyProjectionStore(journal.journalPath);
+		const service = makePolicyService(journal, {}, projectionStore);
+		const baseline = await Effect.runPromise(
+			service.set({
+				key: "core.routing.default",
+				value: "openai/gpt-5.6",
+				scope: { kind: "global" },
+				reason: "global baseline",
+				effectiveFrom: "2026-01-01T00:00:00.000Z",
+			}),
+		);
+		await Effect.runPromise(
+			service.set({
+				key: "core.routing.default",
+				value: "anthropic/claude-fable-5",
+				scope: { kind: "workstream", workstream: "alpha" },
+				reason: "alpha override",
+				effectiveFrom: "2026-01-01T00:01:00.000Z",
+			}),
+		);
+		const posture = await Effect.runPromise(
+			service.set({
+				key: "core.routing.default",
+				value: "google/gemini-3-pro",
+				scope: { kind: "global" },
+				reason: "temporary incident route",
+				effectiveFrom: "2026-01-01T00:02:00.000Z",
+				expiresAt: "2099-01-01T00:00:00.000Z",
+			}),
+		);
+		const at = "2027-01-01T00:00:00.000Z";
+		const before = await Effect.runPromise(service.snapshot({ workstream: "alpha", at }));
+		const journalBytes = await fs.readFile(journal.journalPath);
+		const assertJournalUnchanged = async (): Promise<void> => {
+			expect(await fs.readFile(journal.journalPath)).toEqual(journalBytes);
+		};
+
+		await Effect.runPromise(service.get("core.routing.default", { workstream: "alpha", at }));
+		await assertJournalUnchanged();
+		const explanation = await Effect.runPromise(
+			service.explain("core.routing.default", { workstream: "alpha", at }),
+		);
+		expect(explanation.stack.map(entry => [entry.layer, entry.reason])).toEqual([
+			["temporary-posture", "temporary incident route"],
+			["workstream-durable", "alpha override"],
+			["global-durable", "global baseline"],
+		]);
+		expect(explanation.stack).toEqual(
+			explanation.stack.map(entry =>
+				expect.objectContaining({
+					author: expect.objectContaining({ kind: "cli" }),
+					source: expect.objectContaining({ kind: "cli" }),
+					effectiveFrom: expect.any(String),
+					state: "active",
+				}),
+			),
+		);
+		await assertJournalUnchanged();
+
+		const history = await Effect.runPromise(service.history({ key: "core.routing.default" }));
+		expect(history.map(row => row.sequence)).toEqual([1, 2, 3]);
+		expect(history.map(row => row.reason)).toEqual(["global baseline", "alpha override", "temporary incident route"]);
+		await assertJournalUnchanged();
+
+		const diff = await Effect.runPromise(service.diff({ from: "1", to: "3", workstream: "alpha" }));
+		expect(diff.changes.map(change => change.key)).toEqual(["core.routing.default"]);
+		await assertJournalUnchanged();
+
+		const drift = await Effect.runPromise(
+			service.drift(
+				[{ sessionId: "session-behind", name: "Behind", workstream: "alpha", appliedSequence: 1 }],
+				{ at },
+			),
+		);
+		expect(drift).toEqual([
+			expect.objectContaining({
+				sessionId: "session-behind",
+				appliedSequence: 1,
+				headSequence: 3,
+				rows: [
+					expect.objectContaining({
+						key: "core.routing.default",
+						applied: { value: "openai/gpt-5.6", sequence: baseline.transaction.sequence },
+						head: { value: "google/gemini-3-pro", sequence: posture.transaction.sequence },
+					}),
+				],
+			}),
+		]);
+		await assertJournalUnchanged();
+
+		const impact = await Effect.runPromise(
+			service.impactSet(
+				{
+					key: "core.routing.qa",
+					value: "openai/gpt-5.6",
+					scope: { kind: "global" },
+					reason: "preview QA route",
+					effectiveFrom: at,
+				},
+				[
+					{ sessionId: "session-behind", workstream: "alpha", appliedSequence: 1 },
+					{ sessionId: "session-head", appliedSequence: 3 },
+				],
+			),
+		);
+		expect(impact.committed).toBe(false);
+		expect(impact.sessions).toEqual([
+			expect.objectContaining({ sessionId: "session-behind", keys: ["core.routing.qa"] }),
+			expect.objectContaining({ sessionId: "session-head", keys: ["core.routing.qa"] }),
+		]);
+		expect((await journal.replay()).length).toBe(3);
+		await assertJournalUnchanged();
+
+		projectionStore.close();
+		await fs.rm(projectionStore.dbPath, { force: true });
+		const rebuilt = await Effect.runPromise(service.rebuildProjection({ workstream: "alpha", at }));
+		expect(rebuilt).toEqual(before);
+		await assertJournalUnchanged();
+		expect(await Effect.runPromise(service.snapshot({ workstream: "alpha", at }))).toEqual(before);
+		await assertJournalUnchanged();
 	});
 });

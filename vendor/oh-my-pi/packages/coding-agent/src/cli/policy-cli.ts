@@ -5,6 +5,7 @@ import { YAML } from "bun";
 import { Effect, Schema } from "effect";
 import { commitPolicyWithPreview } from "../policy/policy-apply";
 import { POLICY_REGISTRY_DIGEST, PolicyJournal } from "../policy/policy-journal";
+import { listLivePolicySessions, type PolicyLiveSession } from "../policy/policy-inspection";
 import {
 	CORE_PROVIDER_FRAGMENT_VERSION,
 	CORE_PROVIDER_KEYS,
@@ -23,7 +24,18 @@ import {
 } from "../policy/policy-records";
 import { makePolicyService, type PolicyService } from "../policy/policy-service";
 
-export type PolicyCliAction = "get" | "explain" | "diff" | "set" | "rollback" | "import" | "export";
+export type PolicyCliAction =
+	| "get"
+	| "explain"
+	| "diff"
+	| "history"
+	| "drift"
+	| "impact"
+	| "rebuild"
+	| "set"
+	| "rollback"
+	| "import"
+	| "export";
 
 export interface PolicyCliRequest {
 	readonly action: PolicyCliAction;
@@ -41,6 +53,8 @@ export interface PolicyCliRequest {
 	readonly json?: boolean;
 	readonly reason?: string;
 	readonly workstream?: string;
+	readonly author?: string;
+	readonly since?: string;
 	readonly configPath?: string;
 }
 
@@ -48,6 +62,9 @@ export interface PolicyCliOptions {
 	readonly directory?: string;
 	readonly journalPath?: string;
 	readonly now?: () => Date;
+	readonly ircDbPath?: string;
+	readonly controlDbPath?: string;
+	readonly liveSessions?: () => readonly PolicyLiveSession[];
 }
 
 export interface PolicyImportConflict {
@@ -444,23 +461,93 @@ export async function runPolicyCommand(request: PolicyCliRequest, options: Polic
 					),
 					json,
 				);
+			case "history":
+				return formatOutput(
+					await Effect.runPromise(
+						service.history({ key: request.key, author: request.author, since: request.since }),
+					),
+					json,
+				);
+			case "drift": {
+				const sessions =
+					resolvedOptions.liveSessions?.() ??
+					listLivePolicySessions({
+						ircDbPath: resolvedOptions.ircDbPath,
+						controlDbPath: resolvedOptions.controlDbPath,
+						nowMs: now.getTime(),
+					});
+				return formatOutput(
+					await Effect.runPromise(service.drift(sessions, { at: nowIso })),
+					json,
+				);
+			}
+			case "impact": {
+				if (!request.key) throw new Error("policy impact requires a policy key or transaction ID");
+				const sessions =
+					resolvedOptions.liveSessions?.() ??
+					listLivePolicySessions({
+						ircDbPath: resolvedOptions.ircDbPath,
+						controlDbPath: resolvedOptions.controlDbPath,
+						nowMs: now.getTime(),
+					});
+				if (request.value === undefined) {
+					return formatOutput(
+						await Effect.runPromise(
+							service.impactRollback(
+								{
+									transactionId: request.transactionId ?? request.key,
+									reason: request.reason ?? "policy rollback impact preview",
+									author: authorFor(journal, "cli"),
+									source: { kind: "cli", uri: journal.journalPath },
+								},
+								sessions,
+							),
+						),
+						json,
+					);
+				}
+				const value = decodeSetValue(request.key, request.value);
+				const interval = resolveSetInterval(request, now);
+				return formatOutput(
+					await Effect.runPromise(
+						service.impactSet(
+							{
+								key: request.key,
+								value,
+								scope: { kind: "global" },
+								reason: request.reason ?? "policy set impact preview",
+								author: authorFor(journal, "cli"),
+								source: { kind: "cli", uri: journal.journalPath },
+								...interval,
+							},
+							sessions,
+						),
+					),
+					json,
+				);
+			}
+			case "rebuild":
+				return formatOutput(
+					await Effect.runPromise(service.rebuildProjection({ workstream: request.workstream, at: nowIso })),
+					json,
+				);
 			case "set": {
 				if (!request.key || request.value === undefined) throw new Error("policy set requires a key and value");
 				const value = decodeSetValue(request.key, request.value);
 				const interval = resolveSetInterval(request, now);
-				const previewAndCommit = await commitPolicyWithPreview({
-					service,
-					set: {
-						key: request.key,
-						value,
-						scope: { kind: "global" } satisfies PolicyScope,
-						reason: request.reason ?? "policy set",
-						author: authorFor(journal, "cli"),
-						source: { kind: "cli", uri: journal.journalPath },
-						...interval,
-					},
-				});
-				return formatOutput(previewAndCommit, json);
+				const set = {
+					key: request.key,
+					value,
+					scope: { kind: "global" } satisfies PolicyScope,
+					reason: request.reason ?? "policy set",
+					author: authorFor(journal, "cli"),
+					source: { kind: "cli" as const, uri: journal.journalPath },
+					...interval,
+				};
+				if (request.dryRun === true) {
+					return formatOutput(await Effect.runPromise(service.set({ ...set, dryRun: true })), json);
+				}
+				return formatOutput(await commitPolicyWithPreview({ service, set }), json);
 			}
 			case "rollback":
 				if (!request.transactionId) throw new Error("policy rollback requires a transaction ID");
@@ -471,6 +558,7 @@ export async function runPolicyCommand(request: PolicyCliRequest, options: Polic
 							reason: request.reason ?? "policy rollback",
 							author: authorFor(journal, "cli"),
 							source: { kind: "cli", uri: journal.journalPath },
+							dryRun: request.dryRun,
 						}),
 					),
 					json,
