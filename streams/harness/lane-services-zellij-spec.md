@@ -16,7 +16,7 @@ Everything that should be running is just… running. Arthur never babysits a se
 
 ## The shape (three thin layers, each replaceable)
 
-- **Supervisor** (owns processes, restarts, health): `process-compose` is the installed candidate that actually has compose-style semantics — probes, dependencies, restart policies, detached mode, API. It's Go; `mprocs` is the Rust option but it's a runner, not a supervisor (no health/backoff, children die with it). Taste call below.
+- **Supervisor** (owns processes, restarts, health): `process-compose` — compose-style semantics that fit the ask: probes, dependencies, restart policies, detached mode, API. It's Go; that's the accepted cost.
 - **Boot glue** (starts the supervisor at login): one launchd agent on the Mac, one systemd-user unit on the desktop. That's all launchd does — everything else lives in the registry.
 - **Workspace** (the human surface): zellij, with the ported-tmux config; the fleet tab is just `process-compose attach` (or the supervisor's TUI) living in the layout.
 
@@ -24,11 +24,11 @@ Everything that should be running is just… running. Arthur never babysits a se
 
 - Dotfiles zellij migration: tmuxish + tmuxish-bar WASM plugins, compact layout, fish wrappers, Ctrl-a navigation — built but not daily-driven; the port-my-shortcuts pass is the unfinished part.
 - Tonight's interim: launchd `com.companion.stack` keeps the companion stack alive (works, but bespoke — fold into the registry then delete); `motion-oracle` + `soak-watch` in Mac tmux; five desktop tmux sessions incl. the gpu-queue daemon.
-- Installed: zellij 0.44.3, process-compose 1.94, mprocs 0.8.3.
+- Installed: zellij 0.44.3, process-compose 1.94. (mprocs rejected and uninstalled — Arthur, 2026-07-16.)
 
 ## Taste calls (Arthur)
 
-- **Supervisor:** process-compose (right semantics, Go) vs mprocs (Rust, weaker semantics) vs "zellij panes + tiny watchdog" (most native, most DIY). Default if unpicked: process-compose.
+- **Supervisor:** process-compose (right semantics, Go) vs "zellij panes + tiny watchdog" (most native, most DIY). Default if unpicked: process-compose.
 - **How much zellij customization** before diminishing returns — port shortcuts only, or go full custom bar/layout land?
 - **Desktop now or later** — Mac first is the default; desktop keeps tmux until the Mac shape feels right.
 
