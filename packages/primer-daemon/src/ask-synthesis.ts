@@ -112,7 +112,8 @@ export async function streamSynthesis(
 function buildOmpArgv(model: string, prompt: string): string[] {
   return [
     "omp",
-    "-p",
+    "--mode",
+    "json",
     "--no-session",
     "--no-tools",
     "--no-extensions",
@@ -126,14 +127,42 @@ function buildOmpArgv(model: string, prompt: string): string[] {
   ]
 }
 
+/** Consume omp `--mode json` NDJSON events, forwarding assistant text deltas.
+ * `text_delta` events carry incremental tokens; everything else (session
+ * header, turn/message lifecycle, thinking) is ignored so the SSE stream
+ * only ever contains answer text. */
 async function streamStdout(stdout: ReadableStream<Uint8Array>, onDelta: (text: string) => void): Promise<void> {
   const decoder = new TextDecoder()
-  for await (const chunk of stdout as ReadableStream<Uint8Array> & AsyncIterable<Uint8Array>) {
-    const text = decoder.decode(chunk, { stream: true })
-    if (text.length > 0) onDelta(text)
+  let buffer = ""
+  const consumeLine = (line: string): void => {
+    const trimmed = line.trim()
+    if (trimmed.length === 0) return
+    let event: unknown
+    try {
+      event = JSON.parse(trimmed)
+    } catch {
+      return // non-JSON noise on stdout; never forward it as answer text
+    }
+    if (typeof event !== "object" || event === null) return
+    const record = event as Record<string, unknown>
+    if (record.type !== "message_update") return
+    const inner = record.assistantMessageEvent
+    if (typeof inner !== "object" || inner === null) return
+    const innerRecord = inner as Record<string, unknown>
+    if (innerRecord.type !== "text_delta") return
+    if (typeof innerRecord.delta === "string" && innerRecord.delta.length > 0) onDelta(innerRecord.delta)
   }
-  const text = decoder.decode()
-  if (text.length > 0) onDelta(text)
+  for await (const chunk of stdout as ReadableStream<Uint8Array> & AsyncIterable<Uint8Array>) {
+    buffer += decoder.decode(chunk, { stream: true })
+    let newlineIdx = buffer.indexOf("\n")
+    while (newlineIdx >= 0) {
+      consumeLine(buffer.slice(0, newlineIdx))
+      buffer = buffer.slice(newlineIdx + 1)
+      newlineIdx = buffer.indexOf("\n")
+    }
+  }
+  buffer += decoder.decode()
+  consumeLine(buffer)
 }
 
 function containsNonWhitespace(text: string): boolean {

@@ -10,7 +10,12 @@ import {
   setQueueItemPriority,
   type CreatedReadingMark,
 } from "../src/reading-store"
-import { buildReviewSession, gradeReviewItem, simulateReview } from "../src/review-store"
+import {
+  buildReviewSession,
+  gradeReviewItem,
+  QUICK_RETRIEVABILITY_THRESHOLD,
+  simulateReview,
+} from "../src/review-store"
 
 let nextFixtureId = 0
 
@@ -59,6 +64,67 @@ CREATE TABLE queue_items (
       const session = buildReviewSession(db, 10)
       expect(session.map((item) => item.phase)).toEqual(["due", "new"])
       expect(session[0]?.word).toBe("甲")
+    })
+  })
+  test("orders due items by ascending retrievability rather than due date", () => {
+    withReadingDb((db) => {
+      const risky = markWord(db, "风险")
+      const stable = markWord(db, "稳定")
+      gradeReviewItem(db, risky.queueItem.id, "good")
+      gradeReviewItem(db, risky.queueItem.id, "good")
+      gradeReviewItem(db, stable.queueItem.id, "easy")
+      gradeReviewItem(db, stable.queueItem.id, "easy")
+      const lastReview = new Date(Date.now() - 2 * 86_400_000).toISOString()
+      db.query("UPDATE review_state SET due = ?, last_review = ? WHERE item_id = ?").run(
+        "2000-01-01T00:00:00.000Z",
+        lastReview,
+        risky.queueItem.id,
+      )
+      db.query("UPDATE review_state SET due = ?, last_review = ? WHERE item_id = ?").run(
+        "2000-01-01T00:00:01.000Z",
+        lastReview,
+        stable.queueItem.id,
+      )
+
+      const session = buildReviewSession(db, 10, { explain: true })
+      expect(session.map((item) => item.word)).toEqual(["风险", "稳定"])
+      expect(session[0]?.retrievability).not.toBeNull()
+      expect(session[1]?.retrievability).not.toBeNull()
+      expect(session[0]!.retrievability!).toBeLessThan(session[1]!.retrievability!)
+      expect(session[0]?.explain?.reasons[0]).toMatch(/due · R \d+% · most at risk/)
+    })
+  })
+
+  test("quick mode filters NEW and low-retrievability due items, then sweeps easiest first", () => {
+    withReadingDb((db) => {
+      const easiest = markWord(db, "容易")
+      const harder = markWord(db, "困难")
+      const fresh = markWord(db, "新词")
+      gradeReviewItem(db, easiest.queueItem.id, "easy")
+      gradeReviewItem(db, easiest.queueItem.id, "easy")
+      gradeReviewItem(db, harder.queueItem.id, "good")
+      gradeReviewItem(db, harder.queueItem.id, "good")
+      const lastReview = new Date(Date.now() - 2 * 86_400_000).toISOString()
+      db.query("UPDATE review_state SET due = ?, last_review = ?, stability = ? WHERE item_id = ?").run(
+        "2000-01-01T00:00:00.000Z",
+        lastReview,
+        10,
+        easiest.queueItem.id,
+      )
+      db.query("UPDATE review_state SET due = ?, last_review = ?, stability = ? WHERE item_id = ?").run(
+        "2000-01-01T00:00:00.000Z",
+        lastReview,
+        2,
+        harder.queueItem.id,
+      )
+
+      const session = buildReviewSession(db, 10, { mode: "quick", explain: true })
+      expect(session.every((item) => item.phase === "due")).toBe(true)
+      expect(session.every((item) => item.word !== fresh.queueItem.word)).toBe(true)
+      expect(session.every((item) => item.retrievability! >= QUICK_RETRIEVABILITY_THRESHOLD)).toBe(true)
+      expect(session.map((item) => item.word)).toEqual(["容易", "困难"])
+      expect(session[0]!.retrievability!).toBeGreaterThan(session[1]!.retrievability!)
+      expect(session[0]?.explain?.reasons[0]).toContain("easiest sweep")
     })
   })
 
@@ -164,6 +230,12 @@ CREATE TABLE queue_items (
         paths,
       )
       const session = await handleReaderApi(new Request("http://review.test/api/review/session?limit=1"), paths)
+      const sessionBody = await session!.json() as { items: Array<{ word: string }>; mode: string; threshold: number }
+      const quickSession = await handleReaderApi(
+        new Request("http://review.test/api/review/session?limit=1&mode=quick"),
+        paths,
+      )
+      const quickBody = await quickSession!.json() as { items: unknown[]; mode: string; threshold: number }
       const grade = await handleReaderApi(
         new Request("http://review.test/api/review/grade", {
           method: "POST",
@@ -175,7 +247,12 @@ CREATE TABLE queue_items (
       expect(priority?.status).toBe(200)
       expect((await priority?.json()).priority).toBe(7)
       expect(session?.status).toBe(200)
-      expect((await session?.json()).items[0].word).toBe("端点")
+      expect(sessionBody.items[0]?.word).toBe("端点")
+      expect(sessionBody.mode).toBe("full")
+      expect(sessionBody.threshold).toBe(QUICK_RETRIEVABILITY_THRESHOLD)
+      expect(quickSession?.status).toBe(200)
+      expect(quickBody).toMatchObject({ mode: "quick", threshold: QUICK_RETRIEVABILITY_THRESHOLD })
+      expect(quickBody.items).toHaveLength(0)
       expect(grade?.status).toBe(200)
       expect((await grade?.json()).state).toBe("Learning")
     } finally {

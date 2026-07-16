@@ -8,6 +8,7 @@ import { CardStatusSchema } from "./ledger"
 export type ReviewGrade = "again" | "hard" | "good" | "easy"
 export type ReviewPhase = "due" | "new"
 export type ReviewItemKind = "queue_item" | "card_candidate"
+export type ReviewSessionMode = "full" | "quick"
 
 export interface ReviewSessionExplain {
   slot: number
@@ -25,6 +26,7 @@ export interface ReviewSessionItem {
   back?: string
   phase: ReviewPhase
   due: string | null
+  retrievability: number | null
   priority: number
   provenance: QueueProvenance | null
   explain?: ReviewSessionExplain
@@ -32,6 +34,7 @@ export interface ReviewSessionItem {
 
 export interface ReviewSessionOptions {
   explain?: boolean
+  mode?: ReviewSessionMode
 }
 
 export interface ReviewSimulationStep {
@@ -101,6 +104,7 @@ export class CardCandidateNotApprovedError extends Error {
 const REVIEW_ITEM_KIND = "queue_item" as const
 const CARD_ITEM_KIND = "card_candidate" as const
 const DEFAULT_REVIEW_LIMIT = 20
+export const QUICK_RETRIEVABILITY_THRESHOLD = 0.85
 const DAY_MS = 86_400_000
 const FiniteNumber = Schema.Number.check(Schema.isFinite())
 const PositiveInteger = Schema.Number.check(Schema.isFinite(), Schema.isInt(), Schema.isGreaterThanOrEqualTo(1))
@@ -167,6 +171,14 @@ const RawReviewQueueRowSchema = Schema.Struct({
   priority: NonNegativeInteger,
   created_at: Schema.String,
   due: NullableString,
+  stability: Schema.NullOr(FiniteNumber),
+  difficulty: Schema.NullOr(FiniteNumber),
+  reps: Schema.NullOr(NonNegativeInteger),
+  lapses: Schema.NullOr(NonNegativeInteger),
+  state: Schema.NullOr(ReviewStateNameSchema),
+  last_review: NullableString,
+  scheduled_days: Schema.NullOr(NonNegativeInteger),
+  learning_steps: Schema.NullOr(NonNegativeInteger),
   doc_id: Schema.NullOr(PositiveInteger),
   doc_title: NullableString,
   mark_id: Schema.NullOr(PositiveInteger),
@@ -184,6 +196,14 @@ const RawReviewCardRowSchema = Schema.Struct({
   status: CardStatusSchema,
   created_at: Schema.String,
   due: Schema.String,
+  stability: FiniteNumber,
+  difficulty: FiniteNumber,
+  reps: NonNegativeInteger,
+  lapses: NonNegativeInteger,
+  state: ReviewStateNameSchema,
+  last_review: NullableString,
+  scheduled_days: NonNegativeInteger,
+  learning_steps: NonNegativeInteger,
 })
 type RawReviewCardRow = Schema.Schema.Type<typeof RawReviewCardRowSchema>
 const RawReviewEventRowSchema = Schema.Struct({
@@ -285,6 +305,7 @@ export function buildReviewSession(
 ): ReviewSessionItem[] {
   ensureReadingTables(db)
   const normalizedLimit = normalizeReviewLimit(limit)
+  const mode = options.mode ?? "full"
   const now = new Date(nowIso())
   const queueDueItems = db
     .query<RawReviewQueueRow, [string]>(
@@ -295,7 +316,7 @@ export function buildReviewSession(
        ORDER BY datetime(rs.due) ASC, qi.id ASC`,
     )
     .all(now.toISOString())
-    .map((row) => decodeReviewQueueRow(row, "due"))
+    .map((row) => decodeReviewQueueRow(row, "due", now))
   const cardDueItems = hasTable(db, "card_candidates")
     ? db
         .query<RawReviewCardRow, [string]>(
@@ -305,20 +326,25 @@ export function buildReviewSession(
            ORDER BY datetime(rs.due) ASC, cc.id ASC`,
         )
         .all(now.toISOString())
-        .map((row) => decodeReviewCardRow(row, "due"))
+        .map((row) => decodeReviewCardRow(row, "due", now))
     : []
-  const dueItems = [...queueDueItems, ...cardDueItems].sort(compareReviewDueItems)
-  const newItems = db
-    .query<RawReviewQueueRow, []>(
-      `${reviewQueueSelectSql()}
-       WHERE qi.status NOT IN ('known', 'discarded')
-         AND rs.item_id IS NULL
-       ORDER BY qi.priority DESC, datetime(qi.created_at) ASC, qi.id ASC`,
-    )
-    .all()
-    .map((row) => decodeReviewQueueRow(row, "new"))
+  const dueItems = [...queueDueItems, ...cardDueItems]
+    .filter((item) => mode !== "quick" || (item.retrievability !== null && item.retrievability >= QUICK_RETRIEVABILITY_THRESHOLD))
+    .sort((left, right) => compareReviewDueItems(left, right, mode))
+  const newItems =
+    mode === "quick"
+      ? []
+      : db
+          .query<RawReviewQueueRow, []>(
+            `${reviewQueueSelectSql()}
+             WHERE qi.status NOT IN ('known', 'discarded')
+               AND rs.item_id IS NULL
+             ORDER BY qi.priority DESC, datetime(qi.created_at) ASC, qi.id ASC`,
+          )
+          .all()
+          .map((row) => decodeReviewQueueRow(row, "new", now))
 
-  return interleaveReviewItems(dueItems, newItems, normalizedLimit, options.explain === true, now).map(
+  return interleaveReviewItems(dueItems, newItems, normalizedLimit, options.explain === true, now, mode).map(
     ({ createdAt: _createdAt, ...item }) => item,
   )
 }
@@ -672,7 +698,7 @@ function hasTable(db: Database, tableName: string): boolean {
   return row !== null && Schema.decodeUnknownSync(RawTableNameRowSchema)(row).name === tableName
 }
 
-function decodeReviewQueueRow(row: RawReviewQueueRow, phase: ReviewPhase): ReviewSessionCandidate {
+function decodeReviewQueueRow(row: RawReviewQueueRow, phase: ReviewPhase, now: Date): ReviewSessionCandidate {
   const item = Schema.decodeUnknownSync(RawReviewQueueRowSchema)(row)
   return {
     queueItemId: item.queue_item_id,
@@ -682,13 +708,14 @@ function decodeReviewQueueRow(row: RawReviewQueueRow, phase: ReviewPhase): Revie
     gloss: item.gloss,
     phase,
     due: item.due,
+    retrievability: getRetrievability(item, now),
     priority: item.priority,
     provenance: decodeProvenance(item),
     createdAt: item.created_at,
   }
 }
 
-function decodeReviewCardRow(row: RawReviewCardRow, phase: ReviewPhase): ReviewSessionCandidate {
+function decodeReviewCardRow(row: RawReviewCardRow, phase: ReviewPhase, now: Date): ReviewSessionCandidate {
   const item = Schema.decodeUnknownSync(RawReviewCardRowSchema)(row)
   return {
     queueItemId: item.card_id,
@@ -700,10 +727,63 @@ function decodeReviewCardRow(row: RawReviewCardRow, phase: ReviewPhase): ReviewS
     back: item.back,
     phase,
     due: item.due,
+    retrievability: reviewScheduler.get_retrievability(
+      {
+        due: new Date(item.due),
+        stability: item.stability,
+        difficulty: item.difficulty,
+        elapsed_days: elapsedDays(item.last_review, now),
+        scheduled_days: item.scheduled_days,
+        learning_steps: item.learning_steps,
+        reps: item.reps,
+        lapses: item.lapses,
+        state: item.state,
+        last_review: item.last_review,
+      },
+      now,
+      false,
+    ),
     priority: 0,
     provenance: null,
     createdAt: item.created_at,
   }
+}
+
+function getRetrievability(
+  item: Pick<
+    RawReviewQueueRow,
+    "due" | "stability" | "difficulty" | "reps" | "lapses" | "state" | "last_review" | "scheduled_days" | "learning_steps"
+  >,
+  now: Date,
+): number | null {
+  if (
+    item.due === null ||
+    item.stability === null ||
+    item.difficulty === null ||
+    item.reps === null ||
+    item.lapses === null ||
+    item.state === null ||
+    item.scheduled_days === null ||
+    item.learning_steps === null
+  ) {
+    return null
+  }
+  return reviewScheduler.get_retrievability(
+    {
+      due: new Date(item.due),
+      stability: item.stability,
+      difficulty: item.difficulty,
+      elapsed_days: elapsedDays(item.last_review, now),
+      scheduled_days: item.scheduled_days,
+      learning_steps: item.learning_steps,
+      reps: item.reps,
+      lapses: item.lapses,
+      state: item.state,
+      last_review: item.last_review,
+    },
+    now,
+    false,
+  )
 }
 function decodeProvenance(item: RawReviewQueueRow): QueueProvenance | null {
   if (
@@ -733,6 +813,7 @@ function interleaveReviewItems(
   limit: number,
   explain: boolean,
   now: Date,
+  mode: ReviewSessionMode,
 ): ReviewSessionCandidate[] {
   const result: ReviewSessionCandidate[] = []
   let previous: ReviewSessionCandidate | null = null
@@ -746,7 +827,7 @@ function interleaveReviewItems(
       if (explain) {
         selected.explain = {
           slot: result.length + 1,
-          reasons: explainReasons(selected, previous, remaining, selectedIndex, now),
+          reasons: explainReasons(selected, previous, remaining, selectedIndex, now, mode),
         }
       }
       result.push(selected)
@@ -763,10 +844,13 @@ function explainReasons(
   remaining: readonly ReviewSessionCandidate[],
   selectedIndex: number,
   now: Date,
+  mode: ReviewSessionMode,
 ): string[] {
   const reasons: string[] = []
   if (item.phase === "due") {
-    reasons.push(`due · ${formatDueDelta(item.due, now)}`)
+    const retrievability = item.retrievability === null ? "—" : `${Math.round(item.retrievability * 100)}%`
+    const risk = mode === "quick" ? "easiest sweep" : selectedIndex === 0 ? "most at risk" : "at risk"
+    reasons.push(`due · R ${retrievability} · ${risk}`)
   } else {
     const jumped = remaining
       .slice(0, selectedIndex)
@@ -835,7 +919,12 @@ function isHan(character: string): boolean {
   const codePoint = character.codePointAt(0)
   return codePoint !== undefined && ((codePoint >= 0x3400 && codePoint <= 0x4dbf) || (codePoint >= 0x4e00 && codePoint <= 0x9fff))
 }
-function compareReviewDueItems(left: ReviewSessionItem, right: ReviewSessionItem): number {
+function compareReviewDueItems(left: ReviewSessionItem, right: ReviewSessionItem, mode: ReviewSessionMode): number {
+  const leftRetrievability = left.retrievability ?? 1
+  const rightRetrievability = right.retrievability ?? 1
+  const retrievabilityOrder =
+    mode === "quick" ? rightRetrievability - leftRetrievability : leftRetrievability - rightRetrievability
+  if (retrievabilityOrder !== 0) return retrievabilityOrder
   const leftDue = left.due ?? ""
   const rightDue = right.due ?? ""
   const dueOrder = leftDue.localeCompare(rightDue)
@@ -851,7 +940,15 @@ function reviewCardSelectSql(): string {
                  cc.back,
                  cc.status,
                  cc.created_at,
-                 rs.due
+                 rs.due,
+                 rs.stability,
+                 rs.difficulty,
+                 rs.reps,
+                 rs.lapses,
+                 rs.state,
+                 rs.last_review,
+                 rs.scheduled_days,
+                 rs.learning_steps
           FROM card_candidates cc
           JOIN review_state rs
             ON rs.item_kind = 'card_candidate' AND rs.item_id = cc.id`
@@ -867,6 +964,14 @@ function reviewQueueSelectSql(): string {
                  qi.created_at,
                  qi.mark_id,
                  rs.due,
+                 rs.stability,
+                 rs.difficulty,
+                 rs.reps,
+                 rs.lapses,
+                 rs.state,
+                 rs.last_review,
+                 rs.scheduled_days,
+                 rs.learning_steps,
                  rd.id AS doc_id,
                  rd.title AS doc_title,
                  rm.paragraph_idx,

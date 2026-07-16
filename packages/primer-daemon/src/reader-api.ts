@@ -6,11 +6,13 @@ import { openLedger } from "./ledger"
 import type { DaemonPaths } from "./paths"
 import {
   buildReviewSession,
+  QUICK_RETRIEVABILITY_THRESHOLD,
   listReviewEvents,
   simulateReview,
   gradeReviewItem,
   type ReviewGrade,
   type ReviewItemKind,
+  type ReviewSessionMode,
 } from "./review-store"
 import {
   createReadingDoc,
@@ -73,9 +75,11 @@ const ReviewSimulationBodySchema = Schema.Struct({
   grades: Schema.Array(ReviewGradeSchema),
 })
 const ReviewSessionExplainSchema = Schema.Union([Schema.Literal("0"), Schema.Literal("1")])
+const ReviewSessionModeSchema = Schema.Union([Schema.Literal("full"), Schema.Literal("quick")])
 const ReviewSessionQuerySchema = Schema.Struct({
   limit: Schema.optionalKey(PositiveIntegerFromString),
   explain: Schema.optionalKey(ReviewSessionExplainSchema),
+  mode: Schema.optionalKey(ReviewSessionModeSchema),
 })
 const IdParamSchema = Schema.Struct({ id: PositiveIntegerFromString })
 const DictWordParamSchema = Schema.Struct({ word: Schema.String })
@@ -206,8 +210,13 @@ async function handleQueueStatus(request: Request, pathname: string, paths: Daem
 
 function handleReviewSession(url: URL, paths: DaemonPaths): Response {
   const query = decodeUnknown(ReviewSessionQuerySchema, Object.fromEntries(url.searchParams), "malformed review session query")
+  const mode: ReviewSessionMode = query.mode ?? "full"
   return withLedger(paths, (db) =>
-    jsonResponse({ items: buildReviewSession(db, query.limit ?? 20, { explain: query.explain === "1" }) }),
+    jsonResponse({
+      items: buildReviewSession(db, query.limit ?? 20, { explain: query.explain === "1", mode }),
+      mode,
+      threshold: QUICK_RETRIEVABILITY_THRESHOLD,
+    }),
   )
 }
 

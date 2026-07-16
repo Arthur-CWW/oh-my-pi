@@ -182,6 +182,7 @@ export interface QueueItem {
 }
 
 export type ReviewGrade = "again" | "hard" | "good" | "easy"
+export type ReviewSessionMode = "full" | "quick"
 
 export interface ReviewSessionItem {
   queueItemId: number
@@ -191,12 +192,19 @@ export interface ReviewSessionItem {
   gloss: string | null
   phase: "due" | "new"
   due: string | null
+  retrievability: number | null
   priority: number
   provenance: QueueProvenance | null
   explain?: {
     slot: number
     reasons: string[]
   }
+}
+
+export interface ReviewSessionResponse {
+  items: ReviewSessionItem[]
+  mode: ReviewSessionMode
+  threshold: number
 }
 
 export interface ReviewEvent {
@@ -379,13 +387,17 @@ export async function getQueue(status: QueueStatus | "all" = "new", limit = 100)
   const params = new URLSearchParams({ status, limit: String(limit) })
   return fetchJson<QueueItem[]>(`/api/queue?${params}`)
 }
-export async function getReviewSession(limit?: number, explain = false): Promise<ReviewSessionItem[]> {
+export async function getReviewSession(
+  limit?: number,
+  explain = false,
+  mode: ReviewSessionMode = "full",
+): Promise<ReviewSessionResponse> {
   const params = new URLSearchParams()
   if (limit !== undefined) params.set("limit", String(limit))
   if (explain) params.set("explain", "1")
+  if (mode !== "full") params.set("mode", mode)
   const suffix = params.toString()
-  const result = await fetchJson<{ items: ReviewSessionItem[] }>(suffix ? `/api/review/session?${suffix}` : "/api/review/session")
-  return result.items
+  return fetchJson<ReviewSessionResponse>(suffix ? `/api/review/session?${suffix}` : "/api/review/session")
 }
 
 export async function gradeReview(queueItemId: number, grade: ReviewGrade): Promise<GradeReviewResult> {

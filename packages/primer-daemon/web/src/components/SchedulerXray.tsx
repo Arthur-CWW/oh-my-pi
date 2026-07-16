@@ -7,6 +7,7 @@ import {
   type ReviewEvent,
   type ReviewGrade,
   type ReviewSessionItem,
+  type ReviewSessionMode,
   type ReviewSimulationStep,
   getPipelineStats,
   getQueue,
@@ -39,6 +40,7 @@ const STRATA: Array<{ status: QueueItem["status"]; label: string; color: string 
 
 export function SchedulerXray(): React.JSX.Element {
   const [session, setSession] = useState<ReviewSessionItem[] | null>(null)
+  const [previewMode, setPreviewMode] = useState<ReviewSessionMode>("full")
   const [queue, setQueue] = useState<QueueItem[]>([])
   const [events, setEvents] = useState<ReviewEvent[]>([])
   const [stats, setStats] = useState<PipelineStats | null>(null)
@@ -52,16 +54,16 @@ export function SchedulerXray(): React.JSX.Element {
   const refresh = useCallback(() => {
     setLoading(true)
     setError(null)
-    Promise.all([getReviewSession(20, true), getQueue("all", 300), getPipelineStats(), getReviewEvents(20)]).then(
+    Promise.all([getReviewSession(20, true, previewMode), getQueue("all", 300), getPipelineStats(), getReviewEvents(20)]).then(
       ([nextSession, nextQueue, nextStats, nextEvents]) => {
-        setSession(nextSession)
+        setSession(nextSession.items)
         setQueue(nextQueue)
         setStats(nextStats)
         setEvents(nextEvents)
       },
       (cause: unknown) => setError(cause instanceof Error ? cause.message : "Couldn't load scheduler evidence"),
     ).finally(() => setLoading(false))
-  }, [])
+  }, [previewMode])
 
   useEffect(() => {
     refresh()
@@ -144,8 +146,18 @@ export function SchedulerXray(): React.JSX.Element {
 
       <Card>
         <CardHeader className="gap-1 border-b pb-4">
-          <CardTitle className="text-base">Next session</CardTitle>
-          <CardDescription>Due first, then priority-weighted new items, with shared-character shifts made visible.</CardDescription>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <CardTitle className="text-base">Next session</CardTitle>
+            <div className="flex items-center gap-1">
+              <Button variant="ghost" size="xs" className={previewMode === "full" ? "bg-accent text-foreground" : ""} onClick={() => setPreviewMode("full")}>
+                full <kbd className="ml-1 text-[10px]">f</kbd>
+              </Button>
+              <Button variant="ghost" size="xs" className={previewMode === "quick" ? "bg-accent text-foreground" : ""} onClick={() => setPreviewMode("quick")}>
+                quick sweep (tired) <kbd className="ml-1 text-[10px]">q</kbd>
+              </Button>
+            </div>
+          </div>
+          <CardDescription>{previewMode === "quick" ? "Quick sweep · due cards at or above R 85%, easiest first." : "Due first by lowest retrievability, then priority-weighted new items, with shared-character shifts made visible."}</CardDescription>
         </CardHeader>
         <CardContent className="overflow-x-auto px-4 py-4">
           {session?.length ? (
@@ -158,6 +170,9 @@ export function SchedulerXray(): React.JSX.Element {
                       <p className="mt-1 text-[10px] uppercase tracking-[0.16em] text-muted-foreground/60">slot {item.explain?.slot ?? index + 1}</p>
                     </div>
                     <Badge variant="outline" className="text-[10px]">{item.phase}</Badge>
+                    {item.phase === "due" && item.retrievability !== null ? (
+                      <Badge variant="secondary" className="text-[10px]">R {Math.round(item.retrievability * 100)}%</Badge>
+                    ) : null}
                   </div>
                   <p className="mt-2 text-[11px] text-muted-foreground">priority <span className="font-mono tabular-nums text-foreground">{item.priority}</span></p>
                   <div className="mt-2 flex flex-wrap gap-1">

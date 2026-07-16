@@ -1,0 +1,4 @@
+Resolving dependencies
+Resolved, downloaded and extracted [2]
+Saved lockfile
+Error: "primer-qa4.localhost" is already registered by a running process (PID 78940). Use --force to override.

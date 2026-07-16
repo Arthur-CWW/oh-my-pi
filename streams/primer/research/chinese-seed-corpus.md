@@ -31,3 +31,24 @@ Created via `POST http://primer.localhost:1355/api/reader/docs` with `{title, te
 | 3 | `Rust By Example · 文件 I/O` | 21 | `GET /api/reader/docs/3` → 200 |
 
 A final `GET /api/reader/docs` returned exactly these three documents (IDs 3, 2, 1 in newest-first order), each with `lang: "zh"` and `markCount: 0`.
+
+## 2026-07-15 authentic corpus (Arthur's request: Mao/Xi, folk tales, classical targets)
+
+Arthur's verdict on the Rust docs: "kind of boring, and not in a good way" — replaced as primary material (Rust docs retained for triage). 12 docs seeded from archived originals in `streams/primer/feedstock/zh-corpus/` (provenance headers: url, fetch date, license). Curator agent hit its request budget after archiving; doc 19 was seeded from its archive by the orchestrator.
+
+| ID | Title | Tier | Source |
+| ---: | --- | --- | --- |
+| 4 | 民间故事 · 白蛇传 | T1 folk | wikisource/folk retelling |
+| 5 | 民间故事 · 孟姜女 | T1 folk | wikisource/folk retelling |
+| 6 | 民间故事 · 牛郎织女 | T1 folk | wikisource/folk retelling |
+| 7 | 韩非子 · 说难 (target) | T3 classical | zh.wikisource.org |
+| 8 | 论语 · 为政第二 (target) | T3 classical | zh.wikisource.org |
+| 9 | 论语 · 学而第一 (target) | T3 classical | zh.wikisource.org |
+| 10 | 毛主席语录 · 一 共产党 | T2 political | marxists.org zh |
+| 11 | 毛主席语录 · 二 阶级和阶级斗争 | T2 political | marxists.org zh |
+| 12 | 毛主席语录 · 八 人民战争 | T2 political | marxists.org zh |
+| 13 | 毛主席语录 · 三 为人民服务 | T2 political | marxists.org zh |
+| 14 | 习近平 · 2024新年贺词 | T2 political | gov.cn/新华 transcript |
+| 19 | 习近平 · 2025新年贺词 | T2 political | gov.cn/新华 transcript |
+
+HSK coverage estimates are only meaningful for T1/T2 (modern register); classical texts (T3) are a different register entirely and marked "(target)" — the north-star texts Arthur wants to eventually read in the original, not comprehensible-input material today.

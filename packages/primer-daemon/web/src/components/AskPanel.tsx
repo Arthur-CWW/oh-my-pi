@@ -1,17 +1,21 @@
-import { Search, SearchX } from "lucide-react"
+import { CircleStop, Search, SearchX } from "lucide-react"
 import { type FormEvent, useEffect, useMemo, useRef, useState } from "react"
 import type * as React from "react"
 
 import { type AskStreamMeta, type EvidenceHit, askStream, getAskConfig } from "@/api"
 import { usePolled } from "@/hooks/usePolled"
+import { logEvent } from "@/hooks/useTelemetry"
 import { readerRefUrl } from "@/lib/reader-link"
 import { relativeShort } from "@/lib/relative-time"
 import { cn } from "@/lib/utils"
 import { SUBSTRATE_LABEL, Section } from "./atoms"
 import { EvidenceList } from "./EvidenceList"
+import { Card, CardContent } from "./ui/card"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "./ui/empty"
 import { Field, FieldDescription } from "./ui/field"
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from "./ui/input-group"
+import { Kbd, KbdGroup } from "./ui/kbd"
+import { ScrollArea } from "./ui/scroll-area"
 import { Spinner } from "./ui/spinner"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./ui/tooltip"
 
@@ -21,8 +25,8 @@ const EXAMPLES = [
   "what have I been reading about HSK and Chinese learning?",
 ]
 
-/** submitting → (meta) streaming → done | stopped (user abort) | error. */
-type Phase = "submitting" | "streaming" | "done" | "stopped" | "error"
+/** searching → thinking → streaming → done | stopped (user abort) | error. */
+type Phase = "searching" | "thinking" | "streaming" | "done" | "stopped" | "error"
 
 interface Turn {
   id: number
@@ -37,10 +41,6 @@ interface Turn {
 
 const CITATION = /\[([^\]\n]{1,80})\]/g
 const prefersReducedMotion = (): boolean => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false
-const isTypingTarget = (): boolean => {
-  const el = document.activeElement as HTMLElement | null
-  return !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)
-}
 
 /** A resolved `[ref]` becomes a provenance tooltip and, when the source has a
  * url (or a reader deep-link), a link; unresolved refs render as plain chips. */
@@ -99,7 +99,7 @@ function FinalAnswer({ text, hits, model, elapsedMs }: { text: string; hits: Evi
       </div>
       <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
         {model ? <span className="inline-flex items-center rounded-md border border-primer/25 bg-primer/5 px-1.5 py-0.5 font-medium text-primer/90">{model}</span> : null}
-        {elapsedMs !== null ? <span className="tabular-nums">{(elapsedMs / 1000).toFixed(1)}s</span> : <span className="italic opacity-70">stopped</span>}
+        {elapsedMs !== null ? <span className="tabular-nums">{elapsedMs.toLocaleString()}ms</span> : <span className="italic opacity-70">stopped</span>}
       </div>
     </div>
   )
@@ -140,11 +140,28 @@ function NoEvidence(): React.JSX.Element {
 
 function Working({ label }: { label: string }): React.JSX.Element {
   return (
-    <div className="flex items-center gap-2 pt-1 text-xs text-muted-foreground/80">
+    <div aria-live="polite" className="flex items-center gap-2 pt-1 text-xs text-muted-foreground/80">
       <Spinner className="size-3.5 text-primer/70" />
       {label}
     </div>
   )
+}
+
+function PhaseStatus({ phase, hits, synthesisEnabled, hasText }: { phase: Phase; hits: number; synthesisEnabled: boolean; hasText: boolean }): React.JSX.Element | null {
+  if (phase === "searching") return <Working label="searching evidence across your reading, tweets, and cards…" />
+  if (phase === "thinking") {
+    const noun = hits === 1 ? "evidence hit" : "evidence hits"
+    return <Working label={`found ${hits} ${noun} · model thinking…`} />
+  }
+  if (phase === "streaming" && (hasText || synthesisEnabled)) {
+    return (
+      <div className="flex items-center gap-2 pt-1 text-xs text-muted-foreground/80">
+        <span aria-hidden className="size-1.5 animate-pulse rounded-full bg-primer/80" />
+        streaming answer…
+      </div>
+    )
+  }
+  return null
 }
 
 export function AskPanel({
@@ -163,19 +180,22 @@ export function AskPanel({
   const [draft, setDraft] = useState("")
   const nextId = useRef(0)
   const abortRef = useRef<AbortController | null>(null)
+  const firstTokenIdRef = useRef<number | null>(null)
   const latestRef = useRef<HTMLDivElement | null>(null)
 
   const latestId = turns.length > 0 ? turns[turns.length - 1].id : -1
-  const submitting = turns.some((t) => t.phase === "submitting")
+  const latestTurn = turns.length > 0 ? turns[turns.length - 1] : null
+  const latestTextLength = latestTurn?.text.length ?? 0
+  const inFlight = turns.some((t) => t.phase === "searching" || t.phase === "thinking" || t.phase === "streaming")
 
-  // Escape aborts an in-flight stream, taking precedence over vim-nav. Capture
-  // phase + stopPropagation keeps the same keystroke from also clearing focus;
-  // when no stream runs (or the field is focused) Escape falls through.
+  // Escape always cancels an in-flight request, including while the input has focus.
+  // Capture + stopPropagation keeps the same keystroke from reaching vim-nav.
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key !== "Escape" || !abortRef.current || isTypingTarget()) return
-      abortRef.current.abort()
+      if (e.key !== "Escape" || !abortRef.current) return
+      e.preventDefault()
       e.stopPropagation()
+      abortRef.current.abort()
     }
     window.addEventListener("keydown", onKey, true)
     return () => {
@@ -183,6 +203,16 @@ export function AskPanel({
       abortRef.current?.abort()
     }
   }, [])
+
+  useEffect(() => {
+    if (latestId < 0) return
+    requestAnimationFrame(() =>
+      latestRef.current?.scrollIntoView({
+        block: "end",
+        behavior: latestTextLength === 0 && !prefersReducedMotion() ? "smooth" : "auto",
+      }),
+    )
+  }, [latestId, latestTextLength, latestTurn?.phase])
 
   const setEvidenceOpen = (id: number, open: boolean): void => {
     setTurns((prev) => prev.map((t) => (t.id === id ? { ...t, evidenceOpen: open } : t)))
@@ -193,30 +223,42 @@ export function AskPanel({
     if (!text) return
     abortRef.current?.abort() // abort any prior stream before starting a new one
     const controller = new AbortController()
-    abortRef.current = controller
+    const startedAt = performance.now()
     const id = nextId.current++
-    setTurns((prev) => [...prev, { id, question: text, phase: "submitting", meta: null, text: "", elapsedMs: null, error: null, evidenceOpen: false }])
+    abortRef.current = controller
+    firstTokenIdRef.current = null
+    setTurns((prev) => [...prev, { id, question: text, phase: "searching", meta: null, text: "", elapsedMs: null, error: null, evidenceOpen: false }])
     setDraft("")
     onEvidence([])
-    requestAnimationFrame(() => latestRef.current?.scrollIntoView({ block: "start", behavior: prefersReducedMotion() ? "auto" : "smooth" }))
+    logEvent("ask_submit", { elapsedMs: 0 })
 
     void askStream(
       text,
       undefined,
       {
         onMeta: (meta) => {
-          setTurns((prev) => prev.map((t) => (t.id === id ? { ...t, phase: "streaming", meta } : t)))
+          if (abortRef.current !== controller) return
+          setTurns((prev) =>
+            prev.map((t) => (t.id === id ? { ...t, phase: meta.synthesisEnabled && meta.hits.length > 0 ? "thinking" : "searching", meta } : t)),
+          )
           onEvidence(meta.hits)
         },
         onDelta: (chunk) => {
-          setTurns((prev) => prev.map((t) => (t.id === id ? { ...t, text: t.text + chunk } : t)))
+          if (abortRef.current !== controller) return
+          if (firstTokenIdRef.current !== id && chunk.trim().length > 0) {
+            firstTokenIdRef.current = id
+            logEvent("ask_first_token", { elapsedMs: Math.round(performance.now() - startedAt) })
+          }
+          setTurns((prev) => prev.map((t) => (t.id === id ? { ...t, phase: "streaming", text: t.text + chunk } : t)))
         },
         onDone: ({ elapsedMs }) => {
-          if (abortRef.current === controller) abortRef.current = null
+          if (abortRef.current !== controller) return
+          abortRef.current = null
           setTurns((prev) => prev.map((t) => (t.id === id ? { ...t, phase: "done", elapsedMs, evidenceOpen: t.text.trim() === "" && (t.meta?.hits.length ?? 0) > 0 } : t)))
         },
         onError: (message) => {
-          if (abortRef.current === controller) abortRef.current = null
+          if (abortRef.current !== controller) return
+          abortRef.current = null
           setTurns((prev) => prev.map((t) => (t.id === id ? { ...t, phase: "error", error: message, evidenceOpen: true } : t)))
         },
       },
@@ -244,38 +286,46 @@ export function AskPanel({
     const hasText = turn.text.trim() !== ""
     const willSynthesize = turn.meta?.synthesisEnabled === true && hits.length > 0
     return (
-      <>
+      <div className="space-y-2.5">
         <div className="flex justify-end">
           <p className="max-w-[85%] rounded-2xl rounded-br-sm bg-secondary px-3.5 py-2 text-sm leading-snug text-secondary-foreground">{turn.question}</p>
         </div>
 
-        {turn.phase === "submitting" ? <Working label="searching your substrates…" /> : null}
-        {turn.meta && turn.meta.terms.length > 0 ? (
-          <div className="flex flex-wrap items-center gap-1.5">
-            {turn.meta.terms.map((term) => (
-              <span key={term} className="inline-flex items-center rounded-md border border-border/60 bg-muted/40 px-1.5 py-0.5 text-[11px] text-muted-foreground">
-                {term}
-              </span>
-            ))}
-          </div>
-        ) : null}
+        <Card className="gap-0 border-border/60 bg-background/50 py-0 shadow-none">
+          <CardContent className="space-y-3 p-3.5">
+            <PhaseStatus phase={turn.phase} hits={hits.length} synthesisEnabled={willSynthesize} hasText={hasText} />
 
-        {turn.phase === "streaming" ? hasText ? <StreamingAnswer text={turn.text} /> : willSynthesize ? <Working label="composing an answer…" /> : null : null}
-        {(turn.phase === "done" || turn.phase === "stopped") && hasText ? <FinalAnswer text={turn.text} hits={hits} model={turn.meta?.model ?? ""} elapsedMs={turn.elapsedMs} /> : null}
-        {turn.phase === "done" && !hasText && hits.length > 0 ? (
-          <CalmNotice>{turn.meta?.synthesisEnabled ? "Retrieval only — no answer was synthesized." : "Retrieval only — synthesis is disabled."}</CalmNotice>
-        ) : null}
-        {turn.phase === "stopped" && !hasText ? <CalmNotice>Stopped before an answer arrived.</CalmNotice> : null}
-        {turn.phase === "error" ? (
-          <CalmNotice detail={turn.error}>{turn.meta ? (hits.length > 0 ? "Synthesis failed — the retrieved sources are shown below." : "Synthesis failed before any sources were retrieved.") : "The request couldn’t be completed."}</CalmNotice>
-        ) : null}
+            {turn.meta && turn.meta.terms.length > 0 ? (
+              <div className="flex flex-wrap items-center gap-1.5">
+                {turn.meta.terms.map((term) => (
+                  <span key={term} className="inline-flex items-center rounded-md border border-border/60 bg-muted/40 px-1.5 py-0.5 text-[11px] text-muted-foreground">
+                    {term}
+                  </span>
+                ))}
+              </div>
+            ) : null}
 
-        {hits.length > 0 ? (
-          <EvidenceList hits={hits} open={turn.evidenceOpen} onOpenChange={(open) => setEvidenceOpen(turn.id, open)} nav={isLatest} isFocused={isFocused} onFocus={onFocus} />
-        ) : turn.phase === "done" && turn.meta ? (
-          <NoEvidence />
-        ) : null}
-      </>
+            {turn.phase === "streaming" && hasText ? <StreamingAnswer text={turn.text} /> : null}
+            {(turn.phase === "done" || turn.phase === "stopped") && hasText ? <FinalAnswer text={turn.text} hits={hits} model={turn.meta?.model ?? ""} elapsedMs={turn.elapsedMs} /> : null}
+            {turn.phase === "done" && !hasText && hits.length > 0 ? (
+              <CalmNotice detail={turn.elapsedMs !== null ? `${turn.elapsedMs.toLocaleString()}ms` : null}>{turn.meta?.synthesisEnabled ? "Retrieval only — no answer was synthesized." : "Retrieval only — synthesis is disabled."}</CalmNotice>
+            ) : null}
+            {turn.phase === "stopped" && !hasText ? <CalmNotice>Stopped before an answer arrived.</CalmNotice> : null}
+            {turn.phase === "error" ? (
+              <CalmNotice detail={turn.error}>{turn.meta ? (hits.length > 0 ? "Synthesis failed — the retrieved sources are shown below." : "Synthesis failed before any sources were retrieved.") : "The request couldn’t be completed."}</CalmNotice>
+            ) : null}
+
+            {hits.length > 0 ? (
+              <EvidenceList hits={hits} open={turn.evidenceOpen} onOpenChange={(open) => setEvidenceOpen(turn.id, open)} nav={isLatest} isFocused={isFocused} onFocus={onFocus} />
+            ) : turn.phase === "done" && turn.meta ? (
+              <div className="space-y-2">
+                <NoEvidence />
+                {turn.elapsedMs !== null ? <p className="text-right text-[11px] tabular-nums text-muted-foreground/60">{turn.elapsedMs.toLocaleString()}ms</p> : null}
+              </div>
+            ) : null}
+          </CardContent>
+        </Card>
+      </div>
     )
   }
 
@@ -285,58 +335,82 @@ export function AskPanel({
         <form onSubmit={onSubmit}>
           <Field className="gap-1.5">
             <InputGroup>
-              <InputGroupInput value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Ask your reading dæmon…" disabled={submitting} aria-label="Ask a question" />
+              <InputGroupInput
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                placeholder="Ask across your reading, tweets, cards…"
+                disabled={inFlight}
+                aria-label="Ask a question"
+              />
               <InputGroupAddon align="inline-end">
-                <InputGroupButton type="submit" variant="default" size="sm" disabled={submitting || draft.trim() === ""}>
-                  {submitting ? <Spinner className="size-3.5" /> : <Search className="size-3.5" />}
-                  Ask
-                </InputGroupButton>
+                {inFlight ? (
+                  <InputGroupButton type="button" variant="ghost" size="sm" onClick={() => abortRef.current?.abort()}>
+                    <CircleStop className="size-3.5" />
+                    Stop
+                  </InputGroupButton>
+                ) : (
+                  <InputGroupButton type="submit" variant="default" size="sm" disabled={draft.trim() === ""}>
+                    <Search className="size-3.5" />
+                    Ask
+                  </InputGroupButton>
+                )}
               </InputGroupAddon>
             </InputGroup>
-            <FieldDescription className="px-1 text-[11px] text-muted-foreground/70">
-              {config.data ? (
-                config.data.synthesisEnabled ? (
-                  <>
-                    answers via <span className="font-medium text-foreground/70">{config.data.model}</span>
-                  </>
+            <FieldDescription className="flex items-center justify-between gap-3 px-1 text-[11px] text-muted-foreground/70">
+              <span>
+                {config.data ? (
+                  config.data.synthesisEnabled ? (
+                    <>
+                      answers via <span className="font-medium text-foreground/70">{config.data.model}</span>
+                    </>
+                  ) : (
+                    "retrieval only — synthesis disabled"
+                  )
                 ) : (
-                  "retrieval only — synthesis disabled"
-                )
-              ) : (
-                "\u2026"
-              )}
+                  "\u2026"
+                )}
+              </span>
+              <KbdGroup className="shrink-0 gap-1">
+                <Kbd>Enter</Kbd>
+                <span>ask</span>
+                <Kbd>Esc</Kbd>
+                <span>stop</span>
+              </KbdGroup>
             </FieldDescription>
           </Field>
         </form>
 
         {turns.length === 0 ? (
           <div className="mt-4 space-y-2">
-            <p className="text-xs text-muted-foreground/70">Try asking…</p>
-            <div className="flex flex-col gap-1.5">
+            <p className="text-xs text-muted-foreground/70">Try a question</p>
+            <div className="flex flex-wrap gap-1.5">
               {EXAMPLES.map((ex) => (
                 <button
                   key={ex}
                   type="button"
-                  onClick={() => submit(ex)}
-                  className="group flex items-center gap-2 rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-left text-sm text-muted-foreground transition-colors hover:border-primer/30 hover:bg-accent/40 hover:text-foreground"
+                  disabled={inFlight}
+                  onClick={() => setDraft(ex)}
+                  className="group inline-flex items-center gap-1.5 rounded-full border border-border/60 bg-muted/20 px-3 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:border-primer/30 hover:bg-accent/40 hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
                 >
-                  <Search className="size-3.5 shrink-0 text-primer/70" />
+                  <Search className="size-3 shrink-0 text-primer/70" />
                   <span className="leading-snug">{ex}</span>
                 </button>
               ))}
             </div>
           </div>
         ) : (
-          <div className="mt-4 space-y-6">
-            {[...turns].reverse().map((turn) => {
-              const isLatest = turn.id === latestId
-              return (
-                <div key={turn.id} ref={isLatest ? latestRef : undefined} className={cn("scroll-mt-20 space-y-3", !isLatest && "opacity-80")}>
-                  {renderTurn(turn, isLatest)}
-                </div>
-              )
-            })}
-          </div>
+          <ScrollArea className="mt-4 max-h-[38rem] pr-2">
+            <div className="space-y-6 py-1">
+              {turns.map((turn) => {
+                const isLatest = turn.id === latestId
+                return (
+                  <div key={turn.id} ref={isLatest ? latestRef : undefined} className={cn("scroll-mt-20 space-y-3", !isLatest && "opacity-80")}>
+                    {renderTurn(turn, isLatest)}
+                  </div>
+                )
+              })}
+            </div>
+          </ScrollArea>
         )}
       </Section>
     </TooltipProvider>

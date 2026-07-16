@@ -6,6 +6,7 @@ import {
   type QueueStatus,
   type ReviewGrade,
   type ReviewSessionItem,
+  type ReviewSessionMode,
   getQueue,
   getReviewSession,
   gradeReview,
@@ -155,6 +156,7 @@ export function ReviewView({ onShowHelp }: { onShowHelp: () => void }): React.JS
   itemsRef.current = items
 
   const [sessionItems, setSessionItems] = useState<ReviewSessionItem[] | null>(null)
+  const [sessionMode, setSessionMode] = useState<ReviewSessionMode>("full")
   const [sessionIndex, setSessionIndex] = useState(0)
   const [sessionRevealed, setSessionRevealed] = useState(false)
   const [sessionCounts, setSessionCounts] = useState<Record<ReviewGrade, number>>(EMPTY_GRADE_COUNTS)
@@ -182,7 +184,7 @@ export function ReviewView({ onShowHelp }: { onShowHelp: () => void }): React.JS
     return () => { alive = false }
   }, [filter])
 
-  // Fetch a fresh review session when entering session mode.
+  // Fetch a fresh review session when entering session mode or switching its mode.
   useEffect(() => {
     if (mode !== "session") return
     let alive = true
@@ -191,12 +193,12 @@ export function ReviewView({ onShowHelp }: { onShowHelp: () => void }): React.JS
     setSessionIndex(0)
     setSessionRevealed(false)
     setSessionCounts({ ...EMPTY_GRADE_COUNTS })
-    getReviewSession().then(
-      (d) => { if (alive) setSessionItems(d) },
+    getReviewSession(undefined, false, sessionMode).then(
+      (d) => { if (alive) setSessionItems(d.items) },
       (e: unknown) => { if (alive) setSessionError(e instanceof Error ? e.message : "Failed to load review session") },
     )
     return () => { alive = false }
-  }, [mode])
+  }, [mode, sessionMode])
 
   // Optimistic status update (matching CardsPanel pattern)
   const handleStatus = useCallback(
@@ -338,6 +340,11 @@ export function ReviewView({ onShowHelp }: { onShowHelp: () => void }): React.JS
         e.preventDefault()
         return
       }
+      if ((e.key === "f" || e.key === "q") && sessionIndexRef.current === 0 && !sessionRevealedRef.current) {
+        setSessionMode(e.key === "q" ? "quick" : "full")
+        e.preventDefault()
+        return
+      }
       if (e.key === " " || e.key === "Spacebar") {
         if (sessionItemsRef.current?.[sessionIndexRef.current] && !sessionBusyRef.current) {
           setSessionRevealed((value) => !value)
@@ -449,6 +456,27 @@ export function ReviewView({ onShowHelp }: { onShowHelp: () => void }): React.JS
         </>
       ) : (
         <div className="mt-4">
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border/50 bg-muted/10 px-3 py-2">
+            <span className="text-[11px] text-muted-foreground">session mode</span>
+            <div className="flex items-center gap-1">
+              <Button
+                variant="ghost"
+                size="xs"
+                className={cn(sessionMode === "full" && "bg-accent text-foreground")}
+                onClick={() => setSessionMode("full")}
+              >
+                full <kbd className="ml-1 text-[10px] text-muted-foreground">f</kbd>
+              </Button>
+              <Button
+                variant="ghost"
+                size="xs"
+                className={cn(sessionMode === "quick" && "bg-accent text-foreground")}
+                onClick={() => setSessionMode("quick")}
+              >
+                quick sweep (tired) <kbd className="ml-1 text-[10px] text-muted-foreground">q</kbd>
+              </Button>
+            </div>
+          </div>
           {sessionError && <p className="mb-3 text-xs text-destructive/80">{sessionError}</p>}
           {sessionItems === null && !sessionError && (
             <p className="py-8 text-center text-sm text-muted-foreground/60">loading…</p>
@@ -483,6 +511,9 @@ export function ReviewView({ onShowHelp }: { onShowHelp: () => void }): React.JS
                   <span className="rounded-full bg-accent px-2 py-0.5 font-medium text-foreground">{sessionItem.phase}</span>
                   <span className="tabular-nums">priority {sessionItem.priority}</span>
                 </div>
+                <span className="rounded-full border border-border/60 px-2 py-0.5 text-[10px]">
+                  {sessionMode === "quick" ? "quick sweep (tired)" : "full"}
+                </span>
                 <span className="text-[11px] tabular-nums text-muted-foreground/60">
                   {sessionIndex + 1} / {sessionItems?.length ?? 0}
                 </span>
