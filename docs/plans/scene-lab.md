@@ -806,3 +806,22 @@ Use these as named recipes when asking another agent for a scene. They map taste
 - Use `beats` only when you need exact sync. Otherwise `bpm` is easier for agents.
 - Never rely on runtime network access except staged asset fetches through `assetBaseUrl`.
 - For VideoGen output, freeze it into assets first; Scene Lab owns timing after that.
+
+## Style vocabulary v1
+
+These names index the evidence-backed presentation recipes in `docs/research/style-recipes.md`. They describe composable styling machinery, never subject matter.
+
+| Recipe | Presentation effect | Native `scene.v1` anchors | Fidelity gap to name when relevant |
+|---|---|---|---|
+| **Terminal Reliquary** | Machine-liturgy authority through telemetry, diagrams, depth, and CRT damage | text/plate layers, grid/line/spiral clones, camera push, VHS + displacement + feedback | diagram paths, per-glyph type, regional post masks, onset envelopes |
+| **Chrome Halo Procession** | Iconic aura through shine, symmetry, orbit, and slow ceremonial motion | center sprite/plane, orbit clones, phased scale/opacity, bloom + feedback | mesh/material/lighting, extruded type, sprite `rotation.z` |
+| **Reference-Pile Retention Stack** | Referential density through one stable anchor and colliding inserts | layered planes/sprites, scatter, hard opacity cuts, beat scale, glitch | split-screen/crop/masks, keying, asset-switch tracks, staggered clip playback |
+| **Typographic Incantation** | Language as image and percussion, revealed by breath and syntax | text objects, line/grid clones, keyframes, beat scale/post spikes | wrapping/spans/strokes, transcript cues, 3D type |
+| **Mascot Clone Chorus** | A reusable persona becomes crowd, ritual, or refrain | all clone layouts, clone stagger, `phasePerClone`, camera push | rigs/morphs, clone overrides/formation morphs, staggered video playback |
+| **Institutional Signal Hijack** | A competent HR/news/finance/product surface performs an alien register without winking | layered text/planes/sprites, fixed bugs, clean keyframes, mild post | component parenting, charts/tickers, lower-third layout, scene templates |
+| **Found-Clip Evidence Wall** | Found footage reframed as evidence, reaction, or deadpan authority | `videoFrames`, grid clones, mild VHS, opacity cuts, audio offset/gain | clip in/out/rate/freeze, captions, crop/fit/pillarbox, multi-track mix |
+| **Retro-Web Urgency Shrine** | Banner-era coercion as cursed nostalgia: stickers, WordArt, flashes, fake urgency | saturated ground, scatter, scale/opacity cuts, glitch/chromatic, halftone | sprite sheets, rich type effects, halftone mix/opacity, sprite rotation |
+| **Feedback Corridor Pilgrimage** | Hypnotic travel through phased depth and accumulating reference trails | spiral/orbit/grid, z tracks, feedback + displacement + bloom, explicit beats | onset/downbeat analysis, accelerate-hold envelope, post-param tracks, invert pass |
+| **Hard-Button Loop** | One setup and one timed detonation, cut for replay | keyframed reveal/reset, explicit beat, staged VFX, post spike | event/loop schema, particle VFX, one-shot clip control, audio events |
+
+Composition rule: choose one lane-level carrier (machine/CRT, chrome/aura, referential collage, or typographic incantation), add at most two supporting recipes, and keep one stable visual or sonic anchor.

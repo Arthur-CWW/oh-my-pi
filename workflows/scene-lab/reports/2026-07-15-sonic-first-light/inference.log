@@ -1,0 +1,111 @@
+/home/arthur/sonic-lab/Sonic/.venv/lib/python3.10/site-packages/diffusers/models/transformers/transformer_2d.py:34: FutureWarning: `Transformer2DModelOutput` is deprecated and will be removed in version 1.0.0. Importing `Transformer2DModelOutput` from `diffusers.models.transformer_2d` is deprecated and this will be removed in a future version. Please use `from diffusers.models.modeling_outputs import Transformer2DModelOutput`, instead.
+  deprecate("Transformer2DModelOutput", "1.0.0", deprecation_message)
+Cannot initialize model with low cpu memory usage because `accelerate` was not found in the environment. Defaulting to `low_cpu_mem_usage=False`. It is strongly recommended to install `accelerate` for faster and less memory-intense model loading. You can do so with: 
+```
+pip install accelerate
+```
+.
+Cannot initialize model with low cpu memory usage because `accelerate` was not found in the environment. Defaulting to `low_cpu_mem_usage=False`. It is strongly recommended to install `accelerate` for faster and less memory-intense model loading. You can do so with: 
+```
+pip install accelerate
+```
+.
+/home/arthur/sonic-lab/Sonic/.venv/lib/python3.10/site-packages/torch/functional.py:507: UserWarning: torch.meshgrid: in an upcoming release, it will be required to pass the indexing argument. (Triggered internally at ../aten/src/ATen/native/TensorShape.cpp:3549.)
+  return _VF.meshgrid(tensors, **kwargs)  # type: ignore[attr-defined]
+init done
+{'face_num': 0, 'crop_bbox': (0, 0, 2048, 2048)}
+  0%|          | 0/125 [00:00<?, ?it/s]100%|██████████| 125/125 [00:00<00:00, 1486.30it/s]
+  0%|          | 0/25 [00:00<?, ?it/s]  4%|▍         | 1/25 [00:10<04:08, 10.34s/it]  8%|▊         | 2/25 [00:21<04:11, 10.92s/it] 12%|█▏        | 3/25 [00:33<04:04, 11.11s/it] 16%|█▌        | 4/25 [00:44<03:55, 11.21s/it] 20%|██        | 5/25 [00:55<03:45, 11.27s/it] 24%|██▍       | 6/25 [01:07<03:35, 11.32s/it] 28%|██▊       | 7/25 [01:18<03:24, 11.35s/it] 32%|███▏      | 8/25 [01:30<03:13, 11.38s/it] 36%|███▌      | 9/25 [01:41<03:02, 11.40s/it] 40%|████      | 10/25 [01:52<02:51, 11.42s/it] 44%|████▍     | 11/25 [02:04<02:40, 11.43s/it] 48%|████▊     | 12/25 [02:15<02:28, 11.44s/it] 52%|█████▏    | 13/25 [02:27<02:17, 11.45s/it] 56%|█████▌    | 14/25 [02:38<02:06, 11.46s/it] 60%|██████    | 15/25 [02:50<01:54, 11.47s/it] 64%|██████▍   | 16/25 [03:01<01:43, 11.48s/it] 68%|██████▊   | 17/25 [03:13<01:31, 11.48s/it] 72%|███████▏  | 18/25 [03:24<01:20, 11.49s/it] 76%|███████▌  | 19/25 [03:36<01:08, 11.49s/it] 80%|████████  | 20/25 [03:47<00:57, 11.50s/it] 84%|████████▍ | 21/25 [03:59<00:46, 11.50s/it] 88%|████████▊ | 22/25 [04:10<00:34, 11.51s/it] 92%|█████████▏| 23/25 [04:22<00:23, 11.52s/it] 96%|█████████▌| 24/25 [04:33<00:11, 11.53s/it]100%|██████████| 25/25 [04:45<00:00, 11.53s/it]100%|██████████| 25/25 [04:45<00:00, 11.42s/it]
+  0% 0/124 [00:00<?, ?it/s]  3% 4/124 [00:00<00:03, 38.16it/s] 15% 18/124 [00:00<00:01, 92.90it/s] 25% 31/124 [00:00<00:00, 109.16it/s] 35% 44/124 [00:00<00:00, 116.69it/s] 47% 58/124 [00:00<00:00, 121.73it/s] 57% 71/124 [00:00<00:00, 123.34it/s] 68% 84/124 [00:00<00:00, 124.07it/s] 78% 97/124 [00:00<00:00, 124.60it/s] 89% 110/124 [00:00<00:00, 124.80it/s] 99% 123/124 [00:01<00:00, 124.04it/s]100% 124/124 [00:01<00:00, 118.20it/s]
+ffmpeg version 8.1.2 Copyright (c) 2000-2026 the FFmpeg developers
+  built with gcc 14.3.0 (conda-forge gcc 14.3.0-19)
+  configuration: --prefix=/home/arthur/.local/share/mise/installs/ffmpeg/8.1.2 --cc=/home/conda/feedstock_root/build_artifacts/ffmpeg_1783096293470/_build_env/bin/x86_64-conda-linux-gnu-cc --cxx=/home/conda/feedstock_root/build_artifacts/ffmpeg_1783096293470/_build_env/bin/x86_64-conda-linux-gnu-c++ --nm=x86_64-conda-linux-gnu-nm --ar=x86_64-conda-linux-gnu-ar --disable-doc --enable-openssl --enable-demuxer=dash --enable-hardcoded-tables --enable-libfreetype --enable-libharfbuzz --enable-libfontconfig --enable-libopenh264 --enable-libdav1d --disable-gnutls --enable-libvpx --enable-libass --enable-libplacebo --enable-pthreads --enable-alsa --enable-libpulse --enable-libvpl --enable-vaapi --enable-libopenvino --enable-gpl --enable-libx264 --enable-libx265 --enable-libmp3lame --enable-libaom --enable-libsvtav1 --enable-libxml2 --enable-pic --enable-shared --disable-static --enable-version3 --enable-zlib --enable-libvorbis --enable-libopus --enable-librsvg --enable-libjxl --enable-libwebp --enable-ffplay --enable-vulkan --enable-libshaderc --pkg-config=/home/conda/feedstock_root/build_artifacts/ffmpeg_1783096293470/_build_env/bin/pkg-config
+  libavutil      60. 26.102 / 60. 26.102
+  libavcodec     62. 28.102 / 62. 28.102
+  libavformat    62. 12.102 / 62. 12.102
+  libavdevice    62.  3.102 / 62.  3.102
+  libavfilter    11. 14.102 / 11. 14.102
+  libswscale      9.  5.102 /  9.  5.102
+  libswresample   6.  3.102 /  6.  3.102
+Input #0, mov,mp4,m4a,3gp,3g2,mj2, from '/home/arthur/sonic-lab/sonic-claude-10s_noaudio.mp4':
+  Metadata:
+    major_brand     : isom
+    minor_version   : 512
+    compatible_brands: isomiso2avc1mp41
+    encoder         : Lavf58.29.100
+  Duration: 00:00:09.96, start: 0.000000, bitrate: 251 kb/s
+  Stream #0:0[0x1](und): Video: h264 (High) (avc1 / 0x31637661), yuv420p(progressive), 512x512, 248 kb/s, 25 fps, 25 tbr, 12800 tbn (default)
+    Metadata:
+      handler_name    : VideoHandler
+[aist#1:0/pcm_s16le @ 0x61c588db0080] Guessed Channel Layout: mono
+Input #1, wav, from '/home/arthur/sonic-lab/what-lab-10s.wav':
+  Metadata:
+    encoder         : Lavf62.12.102
+  Duration: 00:00:10.00, bitrate: 256 kb/s
+  Stream #1:0: Audio: pcm_s16le ([1][0][0][0] / 0x0001), 16000 Hz, mono, s16, 256 kb/s
+Stream mapping:
+  Stream #0:0 -> #0:0 (h264 (native) -> h264 (libx264))
+  Stream #1:0 -> #0:1 (pcm_s16le (native) -> aac (native))
+Press [q] to stop, [?] for help
+[libx264 @ 0x61c588dc3880] using cpu capabilities: MMX2 SSE2Fast SSSE3 SSE4.2 AVX FMA3 BMI2 AVX2
+[libx264 @ 0x61c588dc3880] profile High, level 3.0, 4:2:0, 8-bit
+[libx264 @ 0x61c588dc3880] 264 - core 164 r3095 baee400 - H.264/MPEG-4 AVC codec - Copyleft 2003-2022 - http://www.videolan.org/x264.html - options: cabac=1 ref=3 deblock=1:0:0 analyse=0x3:0x113 me=hex subme=7 psy=1 psy_rd=1.00:0.00 mixed_ref=1 me_range=16 chroma_me=1 trellis=1 8x8dct=1 cqm=0 deadzone=21,11 fast_pskip=1 chroma_qp_offset=-2 threads=16 lookahead_threads=2 sliced_threads=0 nr=0 decimate=1 interlaced=0 bluray_compat=0 constrained_intra=0 bframes=3 b_pyramid=2 b_adapt=1 b_bias=0 direct=1 weightb=1 open_gop=0 weightp=2 keyint=250 keyint_min=25 scenecut=40 intra_refresh=0 rc_lookahead=40 rc=crf mbtree=1 crf=18.0 qcomp=0.60 qpmin=0 qpmax=69 qpstep=4 ip_ratio=1.40 aq=1:1.00
+Output #0, mp4, to '/home/arthur/sonic-lab/sonic-claude-10s.mp4':
+  Metadata:
+    major_brand     : isom
+    minor_version   : 512
+    compatible_brands: isomiso2avc1mp41
+    encoder         : Lavf62.12.102
+  Stream #0:0(und): Video: h264 (avc1 / 0x31637661), yuv420p(tv, progressive), 512x512, q=2-31, 25 fps, 12800 tbn (default)
+    Metadata:
+      encoder         : Lavc62.28.102 libx264
+      handler_name    : VideoHandler
+    Side data:
+      CPB properties: bitrate max/min/avg: 0/0/0 buffer size: 0 vbv_delay: N/A
+  Stream #0:1: Audio: aac (LC) (mp4a / 0x6134706D), 16000 Hz, mono, fltp, 69 kb/s
+    Metadata:
+      encoder         : Lavc62.28.102 aac
+[out#0/mp4 @ 0x61c588dc2f80] video:467KiB audio:91KiB subtitle:0KiB other streams:0KiB global headers:0KiB muxing overhead: 1.357172%
+frame=  249 fps=0.0 q=-1.0 Lsize=     565KiB time=00:00:09.88 bitrate= 468.5kbits/s speed=24.6x elapsed=0:00:00.40    
+[libx264 @ 0x61c588dc3880] frame I:1     Avg QP:13.22  size: 17300
+[libx264 @ 0x61c588dc3880] frame P:72    Avg QP:13.97  size:  5010
+[libx264 @ 0x61c588dc3880] frame B:176   Avg QP:18.12  size:   564
+[libx264 @ 0x61c588dc3880] consecutive B-frames:  0.8% 13.7%  3.6% 81.9%
+[libx264 @ 0x61c588dc3880] mb I  I16..4: 25.1% 52.1% 22.8%
+[libx264 @ 0x61c588dc3880] mb P  I16..4:  0.5%  1.3%  0.2%  P16..4: 30.6% 14.8% 11.5%  0.0%  0.0%    skip:41.0%
+[libx264 @ 0x61c588dc3880] mb B  I16..4:  0.0%  0.0%  0.0%  B16..8: 26.5%  2.4%  0.4%  direct: 0.6%  skip:70.1%  L0:45.2% L1:47.4% BI: 7.4%
+[libx264 @ 0x61c588dc3880] 8x8 transform intra:60.5% inter:62.5%
+[libx264 @ 0x61c588dc3880] coded y,uvDC,uvAC intra: 38.2% 37.3% 19.5% inter: 6.0% 6.7% 1.9%
+[libx264 @ 0x61c588dc3880] i16 v,h,dc,p: 19% 33% 21% 26%
+[libx264 @ 0x61c588dc3880] i8 v,h,dc,ddl,ddr,vr,hd,vl,hu: 20% 17% 46%  3%  3%  3%  3%  2%  3%
+[libx264 @ 0x61c588dc3880] i4 v,h,dc,ddl,ddr,vr,hd,vl,hu: 26% 22% 20%  6%  5%  6%  6%  5%  5%
+[libx264 @ 0x61c588dc3880] i8c dc,h,v,p: 67% 19% 11%  3%
+[libx264 @ 0x61c588dc3880] Weighted P-Frames: Y:0.0% UV:0.0%
+[libx264 @ 0x61c588dc3880] ref P L0: 63.2%  9.3% 20.0%  7.6%
+[libx264 @ 0x61c588dc3880] ref B L0: 83.0% 14.0%  3.0%
+[libx264 @ 0x61c588dc3880] ref B L1: 97.2%  2.8%
+[libx264 @ 0x61c588dc3880] kb/s:383.40
+[aac @ 0x61c588f868c0] Qavg: 34622.328
+	Command being timed: ".venv/bin/python demo.py /home/arthur/sonic-lab/claude-suit-swag-00.png /home/arthur/sonic-lab/what-lab-10s.wav /home/arthur/sonic-lab/sonic-claude-10s.mp4 --crop --seed 72589"
+	User time (seconds): 251.04
+	System time (seconds): 124.61
+	Percent of CPU this job got: 108%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 5:46.43
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 15819888
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 373
+	Minor (reclaiming a frame) page faults: 5037952
+	Voluntary context switches: 38096
+	Involuntary context switches: 5890
+	Swaps: 0
+	File system inputs: 1121760
+	File system outputs: 29696
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0

@@ -1,0 +1,63 @@
+{
+  "device": "NVIDIA GeForce RTX 3090",
+  "torch_version": "2.7.1+cu126",
+  "cuda_version": "12.6",
+  "sample_rate": 24000,
+  "results": [
+    {
+      "file": "nothing-human-makes-it-out-am_michael.wav",
+      "voice": "am_michael",
+      "speed": 0.9,
+      "duration_seconds": 38.25,
+      "generation_seconds": 4.672193356003845,
+      "realtime_factor": 0.12214884590859726,
+      "times_realtime": 8.186733100599984,
+      "peak_vram_mib": 1170.0322265625,
+      "bytes": 1836044
+    },
+    {
+      "file": "what-lab-am_michael.wav",
+      "voice": "am_michael",
+      "speed": 0.9,
+      "duration_seconds": 33.1,
+      "generation_seconds": 0.22265503599192016,
+      "realtime_factor": 0.006726738247490035,
+      "times_realtime": 148.6604596771894,
+      "peak_vram_mib": 1162.427734375,
+      "bytes": 1588844
+    },
+    {
+      "file": "the-number-with-no-name-am_michael.wav",
+      "voice": "am_michael",
+      "speed": 0.9,
+      "duration_seconds": 40.225,
+      "generation_seconds": 0.3035195569973439,
+      "realtime_factor": 0.007545545232997984,
+      "times_realtime": 132.5285276439436,
+      "peak_vram_mib": 1128.1689453125,
+      "bytes": 1930844
+    },
+    {
+      "file": "not-a-serious-species-am_michael.wav",
+      "voice": "am_michael",
+      "speed": 0.9,
+      "duration_seconds": 32.45,
+      "generation_seconds": 0.2235997999960091,
+      "realtime_factor": 0.006890594761048046,
+      "times_realtime": 145.1253534241944,
+      "peak_vram_mib": 1146.3740234375,
+      "bytes": 1557644
+    },
+    {
+      "file": "the-number-with-no-name-am_fenrir.wav",
+      "voice": "am_fenrir",
+      "speed": 0.9,
+      "duration_seconds": 31.15,
+      "generation_seconds": 3.3849081300140824,
+      "realtime_factor": 0.10866478748038788,
+      "times_realtime": 9.202613129671677,
+      "peak_vram_mib": 977.138671875,
+      "bytes": 1495244
+    }
+  ]
+}

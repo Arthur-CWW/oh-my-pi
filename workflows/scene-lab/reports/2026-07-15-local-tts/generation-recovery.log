@@ -1,0 +1,99 @@
+/home/arthur/.venv/lib/python3.12/site-packages/torch/nn/modules/rnn.py:123: UserWarning: dropout option adds dropout after all but last recurrent layer, so non-zero dropout expects num_layers greater than 1, but got dropout=0.2 and num_layers=1
+  warnings.warn(
+/home/arthur/.venv/lib/python3.12/site-packages/torch/nn/utils/weight_norm.py:143: FutureWarning: `torch.nn.utils.weight_norm` is deprecated in favor of `torch.nn.utils.parametrizations.weight_norm`.
+  WeightNorm.apply(module, name, dim)
+Collecting en-core-web-sm==3.8.0
+  Downloading https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl (12.8 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 12.8/12.8 MB 4.8 MB/s  0:00:02
+Installing collected packages: en-core-web-sm
+Successfully installed en-core-web-sm-3.8.0
+WARNING: Defaulting repo_id to hexgrad/Kokoro-82M. Pass repo_id='hexgrad/Kokoro-82M' to suppress this warning.
+WARNING: Defaulting repo_id to hexgrad/Kokoro-82M. Pass repo_id='hexgrad/Kokoro-82M' to suppress this warning.
+[38;5;2m✔ Download and installation successful[0m
+You can now load the package via spacy.load('en_core_web_sm')
+{
+  "device": "NVIDIA GeForce RTX 3090",
+  "torch_version": "2.7.1+cu126",
+  "cuda_version": "12.6",
+  "sample_rate": 24000,
+  "results": [
+    {
+      "file": "nothing-human-makes-it-out-am_michael.wav",
+      "voice": "am_michael",
+      "speed": 0.9,
+      "duration_seconds": 38.25,
+      "generation_seconds": 4.672193356003845,
+      "realtime_factor": 0.12214884590859726,
+      "times_realtime": 8.186733100599984,
+      "peak_vram_mib": 1170.0322265625,
+      "bytes": 1836044
+    },
+    {
+      "file": "what-lab-am_michael.wav",
+      "voice": "am_michael",
+      "speed": 0.9,
+      "duration_seconds": 33.1,
+      "generation_seconds": 0.22265503599192016,
+      "realtime_factor": 0.006726738247490035,
+      "times_realtime": 148.6604596771894,
+      "peak_vram_mib": 1162.427734375,
+      "bytes": 1588844
+    },
+    {
+      "file": "the-number-with-no-name-am_michael.wav",
+      "voice": "am_michael",
+      "speed": 0.9,
+      "duration_seconds": 40.225,
+      "generation_seconds": 0.3035195569973439,
+      "realtime_factor": 0.007545545232997984,
+      "times_realtime": 132.5285276439436,
+      "peak_vram_mib": 1128.1689453125,
+      "bytes": 1930844
+    },
+    {
+      "file": "not-a-serious-species-am_michael.wav",
+      "voice": "am_michael",
+      "speed": 0.9,
+      "duration_seconds": 32.45,
+      "generation_seconds": 0.2235997999960091,
+      "realtime_factor": 0.006890594761048046,
+      "times_realtime": 145.1253534241944,
+      "peak_vram_mib": 1146.3740234375,
+      "bytes": 1557644
+    },
+    {
+      "file": "the-number-with-no-name-am_fenrir.wav",
+      "voice": "am_fenrir",
+      "speed": 0.9,
+      "duration_seconds": 31.15,
+      "generation_seconds": 3.3849081300140824,
+      "realtime_factor": 0.10866478748038788,
+      "times_realtime": 9.202613129671677,
+      "peak_vram_mib": 977.138671875,
+      "bytes": 1495244
+    }
+  ]
+}
+	Command being timed: ".venv/bin/python generate_kokoro.py --scripts scripts.json --output output --voice am_michael --comparison-voice am_fenrir --speed 0.9"
+	User time (seconds): 10.26
+	System time (seconds): 3.55
+	Percent of CPU this job got: 18%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 1:14.66
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 1874104
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 260
+	Minor (reclaiming a frame) page faults: 588301
+	Voluntary context switches: 109883
+	Involuntary context switches: 36458
+	Swaps: 0
+	File system inputs: 960008
+	File system outputs: 778632
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0
