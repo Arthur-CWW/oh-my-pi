@@ -1,0 +1,152 @@
+{
+ "status": "complete",
+ "scope": "HR-148 read-only scoping; no files modified",
+ "extraction_map": [
+  {
+   "piece": "Hub contracts and state",
+   "refs": "agent-hub.ts:346-400, 446-590",
+   "hub_specific": "AgentRegistry/observers/IRC/external peers, lifecycle, archived journals, route/rollout state, transcript renderers, timers/caches",
+   "generalizable": "Overlay owns selection/view state, row collection, preview adapter, requestRender/onClose, disposal"
+  },
+  {
+   "piece": "Projection/roster table",
+   "refs": "agent-hub.ts:917-1196, 1223-1301, 1886-2083; agent-hub-roster.ts:279-372, 484-491",
+   "hub_specific": "Registry event projection, running/idle/parked/aborted sections, tree topology/folding, archived/external rows, unread IRC, model/status lanes",
+   "generalizable": "Stable-key row model, filter/search, section headers, viewport scroll, selected-row preservation, row renderer callback. Keep topology/model helpers Hub-specific; do not move them into generic UI."
+  },
+  {
+   "piece": "Preview track",
+   "refs": "agent-hub.ts:1259-1301, 1478-1569, 1848-1859, 2496-2572, 2708-2804",
+   "hub_specific": "Selected agent/external/archive resolution, live session subscription, journal-tail/remote fetch, route/comms/prompt inspector, transcript component assembly",
+   "generalizable": "Selection-to-preview handoff, dual-lane/stacked geometry, preview render budget and resize, preview focus. A preview adapter should own transcript/inspector semantics."
+  },
+  {
+   "piece": "Lane/key routing",
+   "refs": "agent-hub.ts:2085-2177, 2180-2346, 2806-2983, 3087-3134; fields 482-590",
+   "hub_specific": "g:x/m/b/r/s actions, z/a folding, revive/kill/focus/IRC/bookmarks/errors, Hub-specific footer/help",
+   "generalizable": "Table-vs-preview focus, close, movement, filter editing, scroll delegation, stable-key selection. Inject product key handlers; do not bake Hub actions into shared component. Existing AgentHubViewerSequence is partly reusable but its action union is Hub-specific (agent-hub-viewer-sequence.ts:1-69)."
+  },
+  {
+   "piece": "Flush/dispose discipline",
+   "refs": "agent-hub.ts:692-746, 917-940, 3136-3242, 3573-3645",
+   "hub_specific": "Registry projection window, journal cache invalidation, pending tool/read-group/usage sealing, remote/sibling watchers",
+   "generalizable": "One render invalidation path, selection flush before reads/render, preview reset/seal, timer/subscription disposal. Generic shell should expose preview dispose and requestRender; retain Hub caches/queues in adapter."
+  },
+  {
+   "piece": "Overlay mount",
+   "refs": "selector-controller.ts:1294-1370",
+   "hub_specific": "Hub construction dependencies and `done` cleanup/focus restoration",
+   "generalizable": "Mount-agnostic component with host-supplied overlay geometry/onClose. Hub is bottom-center full-height (1362-1367); AgentDashboard is top-left full-screen (212-234)."
+  }
+ ],
+ "dashboard_and_tools": {
+  "agent_dashboard": {
+   "layout": "Documented as source tabs + two-column list/inspector (agent-dashboard.ts:1-16). AgentListPane is list/search/selected-row/ScrollView (194-253); AgentInspectorPane is selected detail renderer/wrapping (255-321); TwoColumnBody is fixed split/separator (323-353).",
+   "state_and_mount": "Discovery/settings/tabs/filter/selection/CRUD flows remain Dashboard-specific (355-494, 559-873); live terminal sizing/full-screen padding (496-539); layout rebuild (980-1078); outer overlay mount/focus lifecycle (selector-controller.ts:212-234).",
+   "input": "List navigation/tabs/edit/create/filter modes are Dashboard-specific (1080-1218). Shared shell can take list navigation/selection/filter/body height; leave create/editor/model-override modes outside."
+  },
+  "tools_overlay": {
+   "current_route": "command-registry.ts:275-280 calls `handleToolsCommand()` without callback. command-controller.ts:480-490 builds tools markdown; callback path is output sink (486-488), but no-callback path calls showMarkdownPanel (490), whose helper appends a TranscriptBlock through ctx.present (53-60).",
+   "existing_ephemeral_route": "CommandLineComponent has a bounded CommandOutputOverlayComponent (command-line.ts:236-256); installCommandLine wires showOutput to bottom-center overlay (329-346), and commandModeContextForInteractive passes it to handleToolsCommand (264-320, 367-370). `:tools` is the bypass.",
+   "data_needs": "Preserve getAllToolNames/getToolByName registered-tool inventory (command-controller.ts:481-485; existing test asserts inactive registered tools are included and active state is not read: test/modes/controllers/tools-command.test.ts:56-87). Adapter rows need stable name key, kind/source/registeredBy/description, deterministic sort/MCP grouping currently in tools-markdown.ts:59-108, plus preview of selected description/provenance. Do not silently change active-tool semantics."
+  },
+  "shared_api_sketch": {
+   "name": "TablePreviewComponent<Row, Key> (proposal)",
+   "boundary": "Generic shell owns stable-key selection, filtering/search text, table viewport/scroll, section labels, table/preview focus, split/stack geometry, close/requestRender hooks, and disposal. It does not know AgentRegistry, journals, tools, or transcript components.",
+   "core": "rows(): readonly Row[] or push/update projection; keyOf(row): Key; renderRow(row, {selected,width}): string; searchText(row): string; onSelectionChange(row|undefined); preview: { open(row|undefined): void|Promise<void>; render(width,height): readonly string[]; handleInput?(key): boolean; dispose?(): void }; optional footer/help and table/preview key delegates.",
+   "important_contract": "Rows are keyed, not index-addressed; preview replacement is transactional (dispose old before open new), render always flushes pending projection before reading rows, and component never writes session/transcript history. Hub adapter can retain transcript cache/live subscription; Dashboard inspector and Tools detail are pure preview adapters."
+  }
+ },
+ "dump_inventory": [
+  {
+   "sink_or_refs": "interactive-mode.ts:3224-3237; ui-helpers.ts:95-113, 649-675",
+   "current_behavior": "ctx.present/showStatus/showError/showWarning/showNewVersion mount components into chatContainer; these are visible transcript append operations but not durable session entries.",
+   "verdict": "overlay",
+   "why": "Command/status/error notifications should be ephemeral output, not conversation history. Existing command-line showOutput already proves the intended bottom overlay route (command-line.ts:236-256, 329-346)."
+  },
+  {
+   "sink_or_refs": "command-controller.ts:224-326 (session), 329-373 (advisor), 376-410 (jobs), 413-445 (usage)",
+   "current_behavior": "Informational command output uses ctx.present(Text/Spacer).",
+   "verdict": "overlay",
+   "why": "Bounded command result; route through the command output overlay, not chat transcript."
+  },
+  {
+   "sink_or_refs": "command-controller.ts:448-472 (changelog), 475-477 (hotkeys), 493-506 (context), 509-560 (memory view/stats), 623-744 (mental-model list/show/history); helper 53-60",
+   "current_behavior": "Markdown/panel commands create TranscriptBlock and call ctx.present; `:tools` shares this path at 480-490.",
+   "verdict": "view",
+   "why": "Read-only inspectable surfaces deserve a focused view/overlay; they are not transcript messages. `:tools` is the named migration target."
+  },
+  {
+   "sink_or_refs": "command-controller.ts:480-490; command-registry.ts:275-280",
+   "current_behavior": "`:tools` no-callback path renders Markdown into chatContainer; callback path is already non-transcript.",
+   "verdict": "view",
+   "why": "Replace with shared table+preview overlay. Smallest routing-only fix is passing ctx.showFeedback/showOutput, but the requested slice should retain selected-tool preview/provenance."
+  },
+  {
+   "sink_or_refs": "command-controller.ts:820-949, 1179-1212",
+   "current_behavior": "Clear/new/fork/move/handoff success messages use ctx.present/showStatus.",
+   "verdict": "overlay",
+   "why": "Lifecycle acknowledgements are transient; handoff document itself remains durable session content via the session operation, while acknowledgement does not."
+  },
+  {
+   "sink_or_refs": "command-controller.ts:961-1000 and 1002-1041; agent-session.ts:12461-12538, 12564-12576, 12578-12684, 12738-12750; session-manager.ts:1530-1553",
+   "current_behavior": "`:bash`/`:python` render execution components immediately; AgentSession records Bash/Python execution messages into agent state and durable session, deferring during streaming for order.",
+   "verdict": "legitimately-transcript",
+   "why": "Explicit user command execution and output are conversation/session artifacts. Do not remove durable append while fixing informational command output."
+  },
+  {
+   "sink_or_refs": "modes/utils/ui-helpers.ts:115-357; event-controller.ts:479-778",
+   "current_behavior": "Assistant/user/custom/file/compaction/branch messages and live tool call/result components are rendered into chat; toolResult is paired with tool-call component rather than standalone.",
+   "verdict": "legitimately-transcript",
+   "why": "These are actual model/session messages or tool execution records. Keep transcript behavior; only move command UI notices out."
+  },
+  {
+   "sink_or_refs": "agent-session.ts:2818-2858; todo-command-controller.ts:459-476",
+   "current_behavior": "Custom/developer messages, including todo system reminders, are persisted through session manager; ordinary assistant/user/developer/toolResult/fileMention entries append as session messages.",
+   "verdict": "legitimately-transcript",
+   "why": "Required model context/replay state, not UI command output."
+  },
+  {
+   "sink_or_refs": "command-controller-shared.ts:99-108; mcp-command-controller.ts:631-693, 939-940, 2156-2161; ssh-command-controller.ts:370-382",
+   "current_behavior": "MCP/SSH setup/search/connect messages use shared `showCommandMessage` or direct ctx.present.",
+   "verdict": "overlay",
+   "why": "Operational progress/result UI, not model conversation; use an operation overlay or focused selector. Do not persist in transcript."
+  },
+  {
+   "sink_or_refs": "selector-controller.ts:966-1040; extension-ui-controller.ts:184-187, 416-420, 526-527, 790-791; event-controller.ts:1047-1054",
+   "current_behavior": "OAuth prompts/progress/results, extension/tool errors, TTSR/todo reminders mount via ctx.present.",
+   "verdict": "overlay",
+   "why": "Interactive setup and notifications; they are UI state, not transcript entries."
+  },
+  {
+   "sink_or_refs": "command-line.ts:216-228",
+   "current_behavior": "Submitted colon command is persisted to HistoryStorage channel `command`.",
+   "verdict": "not-transcript (retain)",
+   "why": "Separate command-entry history, not session transcript; do not conflate with output routing."
+  },
+  {
+   "sink_or_refs": "agent-hub.ts:3187-3199, 3220-3242, 3244-3571, 3573-3645",
+   "current_behavior": "Hub builds a private TranscriptContainer from journal entries/live state and tool renderers.",
+   "verdict": "view",
+   "why": "Read-only preview cache; no ctx.present/session append. Shared shell must preserve this isolation."
+  }
+ ],
+ "slice_plan": {
+  "order": [
+   "1. Characterize: add/retain tests for (a) `:tools` never calling ctx.present/chatContainer, (b) stable selected row through tool refresh, (c) Dashboard list/inspector geometry and selection, (d) Hub preview sealing/flush; no behavior changes yet.",
+   "2. Extract generic TablePreviewComponent from the Hub table/dual-lane mechanics behind its current behavior. Keep Hub projection, row renderers, journal/live transcript caches, g/fold/IRC actions, and all lifecycle timers in Hub adapter. Preserve mount geometry in SelectorController.",
+   "3. Migrate AgentDashboard body to the shared shell. Keep async discovery/settings/tabs, model edit, create-agent editor/review, and full-screen overlay lifecycle in AgentDashboard; supply keyed agent rows and pure inspector preview.",
+   "4. Migrate `:tools` to a ToolsView/adapter using getAllToolNames/getToolByName and the shared shell; preserve deterministic provenance rendering and inactive registered rows. Route command completion/output through a view overlay, not ctx.present. Keep buildToolsMarkdown for ACP/non-TUI until callers are explicitly migrated.",
+   "5. Delete duplicate list/split/scroll code only after both consumers and Hub tests pass; then audit every remaining ctx.present in command/extension/MCP controllers and convert only command/notification outputs, leaving real transcript/tool execution persistence untouched."
+  ],
+  "smallest_honest_slice": "The genuinely low-risk first cut is shared shell + AgentDashboard body + `:tools` view, with Hub behavior unchanged behind an adapter. A routing-only `:tools` callback fix is smaller but does not satisfy selected table+preview extraction.",
+  "blast_radius": [
+   "New shared component and focused unit tests.",
+   "agent-hub.ts plus existing agent-hub-* projection/tree/dual-lane/order/queue/route/token-rate/performance tests; highest risk due to 3,691-line Hub and multiple timers/caches.",
+   "agent-dashboard.ts, selector-controller.ts overlay integration, agent-dashboard-create-editor tests.",
+   "command-registry.ts, command-line.ts (overlay focus/lifecycle), command-controller.ts, tools-markdown.ts, tools-command test; possibly a new tools-view test.",
+   "Avoid broad ui-helpers/showStatus refactor in this slice: it affects all slash commands, MCP/SSH, extension notifications, and selector flows. Instead route named `:tools` first and inventory remaining sinks separately."
+  ],
+  "verification": "No tests or typechecks run because assignment is explicitly read-only scoping; no files changed."
+ }
+}
