@@ -1,6 +1,8 @@
-import { describe, expect, it } from "bun:test";
+import { beforeAll, describe, expect, it } from "bun:test";
 import { wrapTextWithAnsi } from "@oh-my-pi/pi-tui/utils";
 import { AgentHubFoldSequence } from "@oh-my-pi/pi-coding-agent/modes/components/agent-hub-fold-sequence";
+import { renderAgentHubFooter } from "@oh-my-pi/pi-coding-agent/modes/components/agent-hub-interaction-help";
+import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import {
 	AgentHubViewerSequence,
 	applyAgentHubViewerSequenceAction,
@@ -11,6 +13,10 @@ import {
 	resolveViewerScrollDelta,
 	VIEWER_NAVIGATION_INTERACTION_IDS,
 } from "@oh-my-pi/pi-coding-agent/modes/interaction-registry";
+
+beforeAll(async () => {
+	await initTheme(false);
+});
 
 describe("Agent Hub Vim key grammar", () => {
 	it("binds za to the identity selected when the fold prefix starts", () => {
@@ -66,31 +72,31 @@ describe("Agent Hub Vim key grammar", () => {
 			interrupt: false,
 			...overrides,
 		});
-		const motion = (offset: number, key: "j" | "k", nowMs: number): number => {
-			expect(sequence.handle("g", options({ prefix: true }), nowMs)).toEqual({ kind: "pending" });
-			const action = sequence.handle(key, options(key === "j" ? { down: true } : { up: true }), nowMs + 1);
+		const motion = (offset: number, key: "j" | "k"): number => {
+			expect(sequence.handle("g", options({ prefix: true }))).toEqual({ kind: "pending" });
+			const action = sequence.handle(key, options(key === "j" ? { down: true } : { up: true }));
 			return applyAgentHubViewerSequenceAction(offset, displayRows.length - 1, action);
 		};
 
-		let offset = motion(0, "j", 0);
+		let offset = motion(0, "j");
 		expect(offset).toBe(1);
-		offset = motion(offset, "j", 2);
+		offset = motion(offset, "j");
 		expect(offset).toBe(2);
-		offset = motion(offset, "j", 4);
+		offset = motion(offset, "j");
 		expect(offset).toBe(3);
 		expect(displayRows[offset]).toBe("next");
-		offset = motion(offset, "k", 6);
+		offset = motion(offset, "k");
 		expect(offset).toBe(2);
-		expect(motion(0, "k", 8)).toBe(0);
-		expect(motion(displayRows.length - 1, "j", 10)).toBe(displayRows.length - 1);
+		expect(motion(0, "k")).toBe(0);
+		expect(motion(displayRows.length - 1, "j")).toBe(displayRows.length - 1);
 
-		expect(sequence.handle("g", options({ prefix: true }), 12)).toEqual({ kind: "pending" });
-		expect(sequence.handle("g", options({ prefix: true }), 13)).toEqual({ kind: "first-line" });
-		expect(sequence.handle("G", options({}), 14)).toEqual({ kind: "unhandled" });
+		expect(sequence.handle("g", options({ prefix: true }))).toEqual({ kind: "pending" });
+		expect(sequence.handle("g", options({ prefix: true }))).toEqual({ kind: "first-line" });
+		expect(sequence.handle("G", options({}))).toEqual({ kind: "unhandled" });
 	});
 
-	it("expires or escapes a lone g prefix without consuming the next movement", () => {
-		const sequence = new AgentHubViewerSequence(100);
+	it("waits indefinitely on g, dispatches the namespace, and cancels explicitly", () => {
+		const sequence = new AgentHubViewerSequence();
 		const base: AgentHubViewerSequenceOptions = {
 			prefix: false,
 			down: false,
@@ -98,11 +104,48 @@ describe("Agent Hub Vim key grammar", () => {
 			displayRows: true,
 			interrupt: false,
 		};
-		expect(sequence.handle("g", { ...base, prefix: true }, 0)).toEqual({ kind: "pending" });
-		expect(sequence.handle("j", { ...base, down: true }, 100)).toEqual({ kind: "unhandled" });
-		expect(sequence.handle("g", { ...base, prefix: true }, 200)).toEqual({ kind: "pending" });
-		expect(sequence.handle("\x1b", { ...base, interrupt: true }, 201)).toEqual({ kind: "cancelled" });
-		expect(sequence.handle("j", { ...base, down: true }, 202)).toEqual({ kind: "unhandled" });
+		expect(sequence.handle("g", { ...base, prefix: true })).toEqual({ kind: "pending" });
+		expect(sequence.isPending).toBe(true);
+		expect(sequence.handle("x", base)).toEqual({ kind: "open-errors" });
+		for (const [key, kind] of [
+			["m", "open-messages"],
+			["b", "open-bookmarks"],
+			["r", "refresh"],
+			["s", "send"],
+		] as const) {
+			expect(sequence.handle("g", { ...base, prefix: true })).toEqual({ kind: "pending" });
+			expect(sequence.handle(key, base)).toEqual({ kind });
+		}
+		expect(sequence.handle("g", { ...base, prefix: true })).toEqual({ kind: "pending" });
+		expect(sequence.handle("t", base)).toEqual({ kind: "unknown", chord: "gt" });
+		expect(sequence.handle("g", { ...base, prefix: true })).toEqual({ kind: "pending" });
+		expect(sequence.handle("\x1b", { ...base, interrupt: true })).toEqual({ kind: "cancelled" });
+		expect(sequence.isPending).toBe(false);
+	});
+
+	it("renders the pending continuations at the footer edge and removes them on cancel", () => {
+		const pending = Bun.stripANSI(
+			renderAgentHubFooter({
+				width: 100,
+				surface: "hub.table",
+				mode: "normal",
+				pending: "g: gg gj gk gx gm gr gs gb",
+			}),
+		);
+		expect(pending.trimEnd().endsWith("g: gg gj gk gx gm gr gs gb")).toBe(true);
+		const cancelled = Bun.stripANSI(renderAgentHubFooter({ width: 100, surface: "hub.table", mode: "normal" }));
+		expect(cancelled).not.toContain("g: gg");
+	});
+
+	it("publishes the approved roster matrix without retired aliases", () => {
+		const table = getInteractions({ surfaces: ["hub.table"], modes: ["normal"] });
+		const keys = new Map(table.map(entry => [entry.id, entry.keys]));
+		expect(keys.get("hub.table.next-row")).toEqual(["j", "↓"]);
+		expect(keys.get("hub.table.previous-row")).toEqual(["k", "↑"]);
+		expect(keys.get("hub.table.next-orchestrator")).toEqual(["n"]);
+		expect(keys.get("hub.table.previous-orchestrator")).toEqual(["p"]);
+		expect(table.some(entry => entry.keys?.includes("H") || entry.keys?.includes("L"))).toBe(false);
+		expect(table.some(entry => entry.keys?.some(key => key.includes("Ctrl+S")))).toBe(false);
 	});
 
 	it("has no Hub input mode and keeps filter text literal", () => {

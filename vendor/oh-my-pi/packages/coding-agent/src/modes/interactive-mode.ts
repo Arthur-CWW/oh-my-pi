@@ -80,6 +80,7 @@ import planModeApprovedPrompt from "../prompts/system/plan-mode-approved.md" wit
 import planModeCompactInstructionsPrompt from "../prompts/system/plan-mode-compact-instructions.md" with {
 	type: "text",
 };
+import { AgentRegistry } from "../registry/agent-registry";
 import type { AgentSession, AgentSessionEvent, ResolvedRoleModel } from "../session/agent-session";
 import { HistoryStorage } from "../session/history-storage";
 import type { SessionContext } from "../session/session-context";
@@ -462,6 +463,7 @@ export class InteractiveMode implements InteractiveModeContext, SubmittedInputRe
 	readonly #inputController: InputController;
 	readonly #selectorController: SelectorController;
 	readonly #focusController: SessionFocusController;
+	#agentHubPreviewReturnId: string | undefined;
 	get viewSession(): AgentSession {
 		return this.#focusController.target ?? this.session;
 	}
@@ -469,12 +471,32 @@ export class InteractiveMode implements InteractiveModeContext, SubmittedInputRe
 		return this.#focusController.focusedAgentId;
 	}
 	focusAgentSession(id: string): Promise<void> {
+		this.#agentHubPreviewReturnId = undefined;
 		return this.#focusController.focusAgent(id);
 	}
+	async focusAgentHubInput(id: string): Promise<void> {
+		await this.#focusController.focusAgent(id);
+		this.#agentHubPreviewReturnId = id;
+	}
+	returnToAgentHubPreview(): boolean {
+		const id = this.#agentHubPreviewReturnId;
+		if (!id || this.focusedAgentId !== id) {
+			this.#agentHubPreviewReturnId = undefined;
+			return false;
+		}
+		this.#agentHubPreviewReturnId = undefined;
+		void this.#focusController
+			.unfocus()
+			.then(() => this.showAgentHub({ initialAgentId: id, openPreview: true }))
+			.catch(error => this.showError(`Failed to return to Agent Hub preview: ${String(error)}`));
+		return true;
+	}
 	focusParentSession(): Promise<void> {
+		this.#agentHubPreviewReturnId = undefined;
 		return this.#focusController.focusParent();
 	}
 	unfocusSession(): Promise<void> {
+		this.#agentHubPreviewReturnId = undefined;
 		return this.#focusController.unfocus();
 	}
 	clearTransientSessionUi(): void {
@@ -765,6 +787,8 @@ export class InteractiveMode implements InteractiveModeContext, SubmittedInputRe
 		this.#inputController.setupKeyHandlers();
 		this.#inputController.setupEditorSubmitHandler();
 
+		this.#observerRegistry.subscribeToAgentRegistry(AgentRegistry.global());
+		await this.#observerRegistry.seedFromSessionJournals(this.sessionManager.getSessionFile() ?? undefined);
 		// Wire observer registry to EventBus
 		if (this.#eventBus) {
 			this.#observerRegistry.subscribeToEventBus(this.#eventBus);
@@ -1590,7 +1614,11 @@ export class InteractiveMode implements InteractiveModeContext, SubmittedInputRe
 	 */
 	#renderSubagentList(sessions = this.#observerRegistry.getSessions()): void {
 		this.subagentContainer.clear();
-		const lines = this.#subagentHudRenderer.render(sessions, this.ui.terminal.columns);
+		const lines = this.#subagentHudRenderer.render(
+			sessions,
+			this.ui.terminal.columns,
+			this.settings.get("task.showTokenRateBadge"),
+		);
 		if (lines.length === 0) return;
 		this.subagentContainer.addChild(new Text(lines.join("\n"), 1, 0));
 	}
@@ -2818,41 +2846,41 @@ export class InteractiveMode implements InteractiveModeContext, SubmittedInputRe
 		const { title } = resolvePlanTitle({ planContent, planFilePath });
 		await this.handlePlanApproval({ planFilePath, title, planExists: true });
 	}
-	handleErrorsCommand(args?: string): void {
+	handleErrorsCommand(args?: string, output: (message: string) => void = message => this.showStatus(message)): void {
 		const tokens = args?.trim().split(/\s+/) ?? [];
 		const verb = tokens[0]?.toLowerCase() ?? "";
 		const rest = tokens.slice(1);
 		if (verb === "clear") {
 			if (rest.length > 0) {
-				this.showStatus("Usage: :errors clear");
+				output("Usage: :errors clear");
 				return;
 			}
 			this.errorInbox.clear();
-			this.showStatus("Error history cleared.");
+			output("Error history cleared.");
 			return;
 		}
 		if (verb === "resolve") {
 			if (rest.length !== 1) {
-				this.showStatus("Usage: :errors resolve \u003cid\u003e");
+				output("Usage: :errors resolve \u003cid\u003e");
 				return;
 			}
 			const id = rest[0];
 			const ok = this.errorInbox.resolve(id);
 			if (!ok) {
-				this.showStatus(`No error with id "${id}".`);
+				output(`No error with id "${id}".`);
 				return;
 			}
-			this.showStatus(`Error ${id} resolved.`);
+			output(`Error ${id} resolved.`);
 			return;
 		}
 
 		if (verb !== "") {
-			this.showStatus("Usage: :errors [clear | resolve \u003cid\u003e]");
+			output("Usage: :errors [clear | resolve \u003cid\u003e]");
 			return;
 		}
 
 		if (this.errorInbox.getErrors().length === 0 && !this.#errorsDock.isOpen) {
-			this.showStatus("No recent errors.");
+			output("No recent errors.");
 			return;
 		}
 		this.#errorsDock.toggle();
@@ -3529,8 +3557,8 @@ export class InteractiveMode implements InteractiveModeContext, SubmittedInputRe
 		this.#commandController.handleHotkeysCommand();
 	}
 
-	handleToolsCommand(): void {
-		this.#commandController.handleToolsCommand();
+	handleToolsCommand(showOutput?: (message: string) => void): void {
+		this.#commandController.handleToolsCommand(showOutput);
 	}
 
 	handleContextCommand(): void {
@@ -3663,8 +3691,16 @@ export class InteractiveMode implements InteractiveModeContext, SubmittedInputRe
 		await this.#selectorController.showDebugSelector();
 	}
 
-	showAgentHub(options?: { requireContent?: boolean }): void {
+	showAgentHub(options?: { requireContent?: boolean; initialAgentId?: string; openPreview?: boolean }): void {
 		this.#selectorController.showAgentHub(this.#observerRegistry, options);
+	}
+
+	bookmarkCurrent(args: readonly string[]): Promise<void> {
+		return this.#selectorController.bookmarkCurrent(args);
+	}
+
+	showBookmarks(): void {
+		this.#selectorController.showBookmarks();
 	}
 
 	async showPrimitivesInspector(initialCategory?: PrimitiveCategoryId): Promise<void> {

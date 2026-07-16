@@ -6,7 +6,13 @@ export type AgentHubViewerSequenceAction =
 	| { readonly kind: "display-row-down" }
 	| { readonly kind: "display-row-up" }
 	| { readonly kind: "logical-down" }
-	| { readonly kind: "logical-up" };
+	| { readonly kind: "logical-up" }
+	| { readonly kind: "open-errors" }
+	| { readonly kind: "open-messages" }
+	| { readonly kind: "open-bookmarks" }
+	| { readonly kind: "refresh" }
+	| { readonly kind: "send" }
+	| { readonly kind: "unknown"; readonly chord: string };
 
 export interface AgentHubViewerSequenceOptions {
 	readonly prefix: boolean;
@@ -16,23 +22,23 @@ export interface AgentHubViewerSequenceOptions {
 	readonly interrupt: boolean;
 }
 
-const DEFAULT_PREFIX_TIMEOUT_MS = 750;
-
-/** Vim-style `g` prefix shared by Hub viewer lanes. */
+/** Vim-style `g` prefix shared by every Hub lane.
+ *
+ * There is deliberately no timeout: `g` has no standalone action, so waiting
+ * preserves intent without introducing a latency race. The owner renders the
+ * pending continuations until a bound second key, Escape, or an unknown key.
+ */
 export class AgentHubViewerSequence {
-	#pendingUntil = 0;
+	#pending = false;
 
-	constructor(private readonly prefixTimeoutMs = DEFAULT_PREFIX_TIMEOUT_MS) {}
+	get isPending(): boolean {
+		return this.#pending;
+	}
 
-	handle(
-		_keyData: string,
-		options: AgentHubViewerSequenceOptions,
-		nowMs = Date.now(),
-	): AgentHubViewerSequenceAction {
-		if (this.#pendingUntil !== 0 && nowMs >= this.#pendingUntil) this.reset();
-		if (this.#pendingUntil === 0) {
+	handle(keyData: string, options: AgentHubViewerSequenceOptions): AgentHubViewerSequenceAction {
+		if (!this.#pending) {
 			if (!options.prefix) return { kind: "unhandled" };
-			this.#pendingUntil = nowMs + this.prefixTimeoutMs;
+			this.#pending = true;
 			return { kind: "pending" };
 		}
 
@@ -41,11 +47,24 @@ export class AgentHubViewerSequence {
 		if (options.prefix) return { kind: "first-line" };
 		if (options.down) return { kind: options.displayRows ? "display-row-down" : "logical-down" };
 		if (options.up) return { kind: options.displayRows ? "display-row-up" : "logical-up" };
-		return { kind: "cancelled" };
+		switch (keyData) {
+			case "x":
+				return { kind: "open-errors" };
+			case "m":
+				return { kind: "open-messages" };
+			case "b":
+				return { kind: "open-bookmarks" };
+			case "r":
+				return { kind: "refresh" };
+			case "s":
+				return { kind: "send" };
+			default:
+				return { kind: "unknown", chord: `g${keyData}` };
+		}
 	}
 
 	reset(): void {
-		this.#pendingUntil = 0;
+		this.#pending = false;
 	}
 }
 

@@ -3925,6 +3925,17 @@ export const SETTINGS_SCHEMA = {
 		},
 	},
 
+	"task.showTokenRateBadge": {
+		type: "boolean",
+		default: true,
+		ui: {
+			tab: "appearance",
+			group: "Display",
+			label: "Show Token Rate Badge",
+			description: "Display each running subagent's recent token rate in the task widget",
+		},
+	},
+
 	// Skills
 	"skills.enabled": { type: "boolean", default: true },
 

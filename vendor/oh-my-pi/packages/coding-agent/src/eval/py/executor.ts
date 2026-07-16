@@ -42,6 +42,8 @@ export interface PythonExecutorOptions {
 	sessionId?: string;
 	/** Logical owner identifier for retained kernel cleanup */
 	kernelOwnerId?: string;
+	/** Override the on-disk kernel ownership root in embedded hosts/tests. */
+	kernelOwnershipRoot?: string;
 	/** Kernel mode (session reuse vs per-call) */
 	kernelMode?: PythonKernelMode;
 	/**
@@ -345,6 +347,8 @@ async function startKernel(cwd: string, options: PythonExecutorOptions): Promise
 		signal: options.signal,
 		deadlineMs: options.deadlineMs,
 		interpreter: options.interpreter,
+		ownerSessionId: options.sessionId ?? options.kernelOwnerId,
+		ownershipRoot: options.kernelOwnershipRoot,
 	});
 }
 

@@ -104,7 +104,7 @@ If the task may involve external systems, SaaS APIs, chat, tickets, databases, d
 {{/if}}
 {{#if toolListMode}}
 {{#each toolInfo}}
-- {{#if label}}{{label}}: `{{name}}`{{else}}`{{name}}`{{/if}}
+- {{#if label}}{{label}}: `{{name}}`{{else}}`{{name}}`{{/if}}{{#if originTag}} ({{originTag}}){{/if}}
 {{/each}}
 {{else}}
 {{toolInventory}}

@@ -79,9 +79,14 @@ describe("Agent Hub selected state", () => {
 		expect(items).toEqual([
 			{ kind: "error", text: "error", detail: "provider failed" },
 			{ kind: "needs-input", text: "waiting for input", detail: "workspace:worker" },
-			{ kind: "rollout", text: "restart acknowledged", detail: "2.0.0 (1234567890ab)" },
+			{
+				kind: "rollout",
+				text: "restart acknowledged",
+				detail: expect.stringContaining("2.0.0 (1234567890ab) · "),
+			},
 			{ kind: "activity", text: "provider error · retrying 1/3", detail: "retry later" },
 		]);
+		expect(items[2]?.detail).toContain("ago");
 	});
 
 	it("projects a failed rollout once as the selected error", () => {
@@ -99,6 +104,14 @@ describe("Agent Hub selected state", () => {
 			},
 		});
 
-		expect(items).toEqual([{ kind: "error", text: "rollout failed", detail: "recovery timeout" }]);
+		expect(items).toEqual([
+			{
+				kind: "error",
+				text: "rollout failed",
+				detail: expect.stringContaining("recovery timeout"),
+			},
+		]);
+		expect(items[0]?.detail).toContain("2.0.0 (fedcba098765)");
+		expect(items[0]?.detail).toContain("ago");
 	});
 });

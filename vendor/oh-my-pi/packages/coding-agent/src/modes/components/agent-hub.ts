@@ -5,7 +5,7 @@ import * as path from "node:path";
 import type { AgentMessage, AgentTool } from "@oh-my-pi/pi-agent-core";
 import type { Usage } from "@oh-my-pi/pi-ai";
 import { Container, matchesKey, padding, ScrollView, Text, type TUI, visibleWidth } from "@oh-my-pi/pi-tui";
-import { formatAge, formatBytes, formatDuration, formatNumber, getProjectDir, logger } from "@oh-my-pi/pi-utils";
+import { formatAge, formatBytes, formatDuration, formatNumber, getProjectDir, logger, VERSION } from "@oh-my-pi/pi-utils";
 import type { AdvisorMessageDetails } from "../../advisor";
 import { COLLAB_PROMPT_MESSAGE_TYPE } from "../../collab/protocol";
 import type { KeyId } from "../../config/keybindings";
@@ -44,6 +44,7 @@ import {
 	USER_INTERRUPT_LABEL,
 } from "../../session/messages";
 import type { SessionMessageEntry } from "../../session/session-entries";
+import type { BookmarkTarget } from "../../session/bookmarks";
 import { createIrcMessageCard } from "../../tools/irc";
 import { replaceTabs, shortenPath, TRUNCATE_LENGTHS, truncateToWidth } from "../../tools/render-utils";
 import { copyToClipboard } from "../../utils/clipboard";
@@ -56,9 +57,6 @@ import { theme } from "../theme/theme";
 import {
 	matchesAppInterrupt,
 	matchesNavigationBottom,
-	matchesNavigationDown,
-	matchesNavigationTop,
-	matchesNavigationUp,
 	matchesSelectDown,
 	matchesSelectUp,
 } from "../utils/keybinding-matchers";
@@ -117,6 +115,9 @@ import { formatRouteInspection, type RouteInspectionInput } from "../../task/rou
 import { UserMessageComponent } from "./user-message";
 
 const AGE_TICK_MS = 5_000;
+const SPINNER_TICK_MS = 160;
+const SPINNER_FRAMES = ["◐", "◓", "◑", "◒"] as const;
+const G_CHORD_CUE = "g: gg gj gk gx gm gr gs gb";
 const CHAT_REFRESH_DEBOUNCE_MS = 80;
 const PROJECTION_WINDOW_MS = 16;
 const LEFT_TAP_WINDOW_MS = 500;
@@ -201,6 +202,16 @@ function formatLastSeenAge(lastSeen: string): string {
 	const parsed = parseTimestampMs(lastSeen);
 	if (parsed === undefined) return "unknown age";
 	return formatAge(Math.max(1, Math.round((Date.now() - parsed) / 1000)));
+}
+
+function externalPreviewName(peer: AgentHubExternalPeer): string {
+	const raw = peer.name.trim();
+	const separator = raw.lastIndexOf("/");
+	return separator >= 0 ? raw.slice(separator + 1) || "Main" : raw || "Main";
+}
+
+function externalPreviewWorkstream(peer: AgentHubExternalPeer): string {
+	return path.basename(path.resolve(peer.cwd)) || shortenPath(peer.cwd);
 }
 
 function externalStateBadge(state: AgentHubExternalPeerDisplayState): string {
@@ -368,6 +379,10 @@ export interface AgentHubDeps {
 	/** Legacy construction field; archive discovery always uses Main's current sessionFile. */
 	parentSessionFile?: string | null;
 	sessionsDir?: string;
+	/** Open the durable errors dock, optionally scoped by the selected agent. */
+	openErrors?: (agentId?: string) => void;
+	/** Open the global bookmarks surface. */
+	openBookmarks?: () => void;
 }
 
 export interface AgentHubRetentionMetrics {
@@ -440,6 +455,8 @@ export class AgentHubOverlayComponent extends Container {
 	#hubKeys: KeyId[];
 	#unsubscribers: Array<() => void> = [];
 	#ageTimer: NodeJS.Timeout | undefined;
+	#spinnerTimer: NodeJS.Timeout | undefined;
+	#spinnerFrame = 0;
 	#projectionTimer: NodeJS.Timeout | undefined;
 	#pendingRegistryEvents: RegistryEvent[] = [];
 	#observerProjectionDirty = false;
@@ -455,6 +472,8 @@ export class AgentHubOverlayComponent extends Container {
 	#turnStatus: ((agentId: string) => AgentHubTurnStatus | undefined) | undefined;
 	#transcriptDisplay: TranscriptDisplayContext;
 	#rollout: AgentHubRolloutDataSource | null;
+	#openErrors: ((agentId?: string) => void) | undefined;
+	#openBookmarks: (() => void) | undefined;
 	#selectedLiveState: AgentHubSelectedLiveState = EMPTY_AGENT_HUB_SELECTED_LIVE_STATE;
 	#remoteFetchInFlight = false;
 	#remoteFetchToken = 0;
@@ -507,6 +526,8 @@ export class AgentHubOverlayComponent extends Container {
 	#chatAgentId: string | undefined;
 	#chatArchived: ArchivedDirectChildDescriptor | undefined;
 	#chatExternal: AgentHubExternalPeer | undefined;
+	#chatAccessMode: "read-only" | "attachable" = "read-only";
+	#inputUnavailableFlash = false;
 	#sessionUnsubscribe: (() => void) | undefined;
 	#attachedSession: AgentSession | undefined;
 	#siblingWatchDispose: (() => void) | undefined;
@@ -563,8 +584,7 @@ export class AgentHubOverlayComponent extends Container {
 	#inspectorViewportHeight = 20;
 	#dualLaneActive = false;
 
-	#detailPrefixActive = false;
-	/** Vim `g` prefix is scoped to transcript navigation. */
+	/** One no-timeout `g` namespace shared by roster, transcript, and inspector. */
 	#viewerSequence = new AgentHubViewerSequence();
 	#viewerHeaderLines: string[] = [];
 	#lastLeftTap = 0;
@@ -584,6 +604,8 @@ export class AgentHubOverlayComponent extends Container {
 		this.#turnStatus = deps.turnStatus;
 		this.#transcriptDisplay = deps.transcriptDisplay ?? DEFAULT_TRANSCRIPT_DISPLAY_CONTEXT;
 		this.#rollout = deps.rollout ?? null;
+		this.#openErrors = deps.openErrors;
+		this.#openBookmarks = deps.openBookmarks;
 		this.#ui =
 			deps.ui ??
 			({
@@ -674,6 +696,10 @@ export class AgentHubOverlayComponent extends Container {
 			clearInterval(this.#ageTimer);
 			this.#ageTimer = undefined;
 		}
+		if (this.#spinnerTimer) {
+			clearInterval(this.#spinnerTimer);
+			this.#spinnerTimer = undefined;
+		}
 		if (this.#projectionTimer) {
 			clearTimeout(this.#projectionTimer);
 			this.#projectionTimer = undefined;
@@ -722,6 +748,78 @@ export class AgentHubOverlayComponent extends Container {
 	/** Literal `:` belongs to active filter prompts; normal Hub lanes open command mode. */
 	canEnterCommandMode(): boolean {
 		return !this.#tableFilterEditing && !this.#chatSearchEditing;
+	}
+
+	/** Return the stable identity represented by the current Hub row. */
+	getSelectedBookmarkTarget(): BookmarkTarget | undefined {
+		this.#flushProjection();
+		const row = this.#selectedAgentRow();
+		if (row?.kind === "active") {
+			const sessionId = row.ref.sessionId ?? this.#sessionId;
+			if (!sessionId) return undefined;
+			if (row.ref.id === MAIN_AGENT_ID) {
+				return {
+					kind: "session",
+					sessionId,
+					title: row.ref.displayName || "Current session",
+				};
+			}
+			return {
+				kind: "agent",
+				sessionId,
+				agentId: row.ref.id,
+				title: row.ref.displayName || row.ref.id,
+			};
+		}
+		if (row?.kind === "archived") {
+			const sessionId = this.#sessionId;
+			if (!sessionId) return undefined;
+			return {
+				kind: "agent",
+				sessionId,
+				agentId: row.descriptor.agentId,
+				title: row.descriptor.agentId,
+			};
+		}
+		const external = this.#selectedExternalRow()?.peer;
+		if (!external) return undefined;
+		return { kind: "session", sessionId: external.sessionId, title: external.name || external.sessionId };
+	}
+
+	/** Select a bookmarked identity without opening or changing the preview modality. */
+	selectBookmarkTarget(target: BookmarkTarget): boolean {
+		this.#flushProjection();
+		this.#tableFilterEditing = false;
+		this.#tableFilterQuery = "";
+		this.#activeSearchFields.clear();
+		this.#applyFilter();
+		let key: string | undefined;
+		if (target.kind === "agent") {
+			const active = this.#visibleActiveRows.find(
+				ref => ref.id === target.agentId && (ref.sessionId ?? this.#sessionId) === target.sessionId,
+			);
+			if (active) key = `agent:${active.id}`;
+			else {
+				const archived = this.#visibleArchivedRows.find(row => row.agentId === target.agentId);
+				if (archived) key = `archived:${archived.childSessionFile}`;
+			}
+		} else {
+			const active = this.#visibleActiveRows.find(ref => (ref.sessionId ?? this.#sessionId) === target.sessionId);
+			if (active) key = `agent:${active.id}`;
+			else {
+				const external = this.#visibleExternalRows.find(row => row.peer.sessionId === target.sessionId);
+				if (external) key = `external:${external.peer.sessionId}`;
+			}
+		}
+		if (!key) return false;
+		const index = this.#findTableIndex(key);
+		if (index < 0) return false;
+		this.#view = "table";
+		this.#selectedRow = index;
+		this.#selectedAgentKey = key;
+		this.#syncSelectedPreview();
+		this.#requestRender();
+		return true;
 	}
 
 	override render(width: number): readonly string[] {
@@ -994,11 +1092,13 @@ export class AgentHubOverlayComponent extends Container {
 	}
 
 	#moveGroup(delta: number): void {
-		if (this.#groupStartIndexes.length === 0) return;
+		const count = this.#groupStartIndexes.length;
+		if (count === 0) return;
 		const current = this.#groupStartIndexes.findLastIndex(index => index <= this.#selectedRow);
-		const target = Math.max(0, Math.min((current < 0 ? 0 : current) + delta, this.#groupStartIndexes.length - 1));
+		const target = ((Math.max(0, current) + delta) % count + count) % count;
 		this.#selectedRow = this.#groupStartIndexes[target]!;
 		this.#syncSelectedKey();
+		this.#syncSelectedPreview();
 	}
 	#applyFilter(): void {
 		const q = this.#tableFilterQuery.toLowerCase();
@@ -1229,6 +1329,152 @@ export class AgentHubOverlayComponent extends Container {
 			rollout: identity ? this.#rollout?.latestForPeer(identity) : undefined,
 		});
 	}
+	#animatedRosterState(
+		status: AgentStatus | AgentHubExternalPeerDisplayState | undefined,
+		observed: ObservableSession | undefined,
+		sessionId: string | undefined,
+		sessionFile: string | null | undefined,
+	): string | undefined {
+		if (observed?.progress?.retryState) return "TRY";
+		const phase = this.#rollout?.latestForPeer({ sessionId, sessionFile })?.phase;
+		switch (phase) {
+			case "requested":
+				return "REQ";
+			case "acknowledged":
+				return "ACK";
+			case "applied":
+				return "APL";
+		}
+		if (status === "running") return "RUN";
+		if (status === "working") return "WRK";
+		return undefined;
+	}
+
+	#selectedIsAnimated(): boolean {
+		const ref =
+			!this.#chatExternal && !this.#chatArchived && this.#chatAgentId
+				? this.#registry.get(this.#chatAgentId)
+				: undefined;
+		if (ref)
+			return Boolean(
+				this.#animatedRosterState(
+					ref.status,
+					this.#observableFor(ref.id),
+					ref.sessionId,
+					ref.sessionFile,
+				),
+			);
+		if (this.#chatExternal)
+			return Boolean(
+				this.#animatedRosterState(
+					displayedExternalPeerState(this.#chatExternal),
+					undefined,
+					this.#chatExternal.sessionId,
+					this.#chatExternal.sessionFile,
+				),
+			);
+		return Boolean(
+			this.#animatedRosterState(undefined, undefined, undefined, this.#chatArchived?.childSessionFile),
+		);
+	}
+
+	#selectedRailIsAnimated(items: readonly AgentHubSelectedStateItem[]): boolean {
+		const kind = items[0]?.kind;
+		return this.#selectedIsAnimated() && kind !== "error" && kind !== "needs-input";
+	}
+
+	#syncSpinnerTimer(needed: boolean): void {
+		if (needed === Boolean(this.#spinnerTimer)) return;
+		if (!needed) {
+			clearInterval(this.#spinnerTimer);
+			this.#spinnerTimer = undefined;
+			this.#spinnerFrame = 0;
+			return;
+		}
+		this.#spinnerTimer = setInterval(() => {
+			this.#spinnerFrame = (this.#spinnerFrame + 1) % SPINNER_FRAMES.length;
+			this.#ui.requestComponentRender(this);
+		}, SPINNER_TICK_MS);
+		this.#spinnerTimer.unref?.();
+	}
+
+	#spinnerPrefix(): string {
+		return theme.fg("accent", SPINNER_FRAMES[this.#spinnerFrame]);
+	}
+
+	#spinnerStateLabel(label: string): string {
+		return theme.fg("accent", `${SPINNER_FRAMES[this.#spinnerFrame]} ${label}`);
+	}
+
+	#selectedRailLines(width: number): string[] {
+		if (!this.#chatAgentId) return [];
+		const innerWidth = Math.max(10, width - 2);
+		const identity = this.#chatExternal
+			? this.#chatExternal.name || this.#chatExternal.sessionId
+			: this.#chatArchived?.agentId ?? this.#chatAgentId;
+		const items = this.#selectedStateItems();
+		const rendered = renderAgentHubSelectedState(items, Math.max(1, innerWidth - 2))[0];
+		const ref =
+			!this.#chatExternal && !this.#chatArchived ? this.#registry.get(this.#chatAgentId) : undefined;
+		const fallback = this.#chatExternal
+			? displayedExternalPeerState(this.#chatExternal).replace("_", " ")
+			: this.#chatArchived
+				? `${this.#chatArchived.state} · read-only`
+				: ref?.status ?? "state unavailable";
+		const animate = this.#selectedRailIsAnimated(items);
+		const prefix = animate ? this.#spinnerPrefix() : theme.fg("dim", "·");
+		return [
+			` ${theme.fg("accent", `Selected · ${identity}`)}`,
+			truncateToWidth(` ${prefix} ${rendered ?? fallback}`, innerWidth),
+		];
+	}
+
+	#contextualMetadataLines(): string[] {
+		const states = renderAgentHubSelectedState(this.#selectedStateItems(), contentWidth()).map(line => `Status: ${line}`);
+		if (this.#chatExternal) {
+			const peer = this.#chatExternal;
+			return [
+				`Identity: ${peer.name || peer.sessionId}`,
+				`Raw handle: ${peer.name || peer.sessionId}`,
+				`Session: ${peer.sessionId}`,
+				`State: ${displayedExternalPeerState(peer).replace("_", " ")}`,
+				`Source: ${peer.sessionFile ?? "remote transcript"}`,
+				`Model: unavailable`,
+				`Version/fork: ${peer.version ?? "unknown"}${peer.buildDigest ? ` · ${peer.buildDigest.slice(0, 12)}` : ""}`,
+				...states,
+			];
+		}
+		if (this.#chatArchived) {
+			const row = this.#chatArchived;
+			return [
+				`Identity: ${row.agentId}`,
+				`State: ${row.state} · archived`,
+				`Source: ${row.childSessionFile}`,
+				`Model: ${row.modelId ?? "unknown"}${row.thinkingLevel ? `:${row.thinkingLevel}` : ""}`,
+				`Version/fork: ${VERSION}`,
+				...states,
+			];
+		}
+		const ref = this.#chatAgentId ? this.#registry.get(this.#chatAgentId) : undefined;
+		const observed = ref ? this.#observableFor(ref.id) : undefined;
+		const durable = this.#journalModels.peek(ref?.sessionFile)?.spawnRecord;
+		const progress = observed?.progress;
+		const model = progress?.resolvedModel ?? durable?.resolvedModel ?? this.#transcriptCache?.model ?? "unknown";
+		const source = progress?.definitionSourcePath ?? durable?.definitionSourcePath ?? "unknown";
+		const routeSource = progress?.routeReceipt?.source ?? durable?.route?.source ?? "unknown";
+		const buildVersion = progress?.buildVersion ?? durable?.buildVersion ?? VERSION;
+		const buildDigest = progress?.buildDigest ?? durable?.buildDigest;
+		return [
+			`Identity: ${ref?.id ?? this.#chatAgentId ?? "unknown"}`,
+			`State: ${ref?.status ?? observed?.status ?? "unknown"}`,
+			`Prompt/source: ${source}`,
+			`Route provenance: ${routeSource}`,
+			`Model: ${model}`,
+			`Version/fork: ${buildVersion}${buildDigest ? ` · ${buildDigest.slice(0, 12)}` : ""}`,
+			...states,
+		];
+	}
+
 	#renderPreview(width: number, targetHeight: number): string[] {
 		if (!this.#chatAgentId) {
 			this.#dualLaneActive = false;
@@ -1282,10 +1528,7 @@ export class AgentHubOverlayComponent extends Container {
 			: this.#chatLog.render(innerWidth);
 		const rendered = this.#plainPreview ? richRendered.map(line => Bun.stripANSI(line)) : richRendered;
 		const content = rendered.length > 0 ? rendered : [theme.fg("dim", "No messages yet.")];
-		const summary = this.#dualLaneActive
-			? undefined
-			: renderAgentHubSelectedState(this.#selectedStateItems(), innerWidth)[0];
-		this.#viewportHeight = Math.max(1, targetHeight - 2 - Number(summary !== undefined));
+		this.#viewportHeight = Math.max(1, targetHeight - 2);
 		this.#lastMaxScroll = Math.max(0, content.length - this.#viewportHeight);
 		if (this.#wasAtBottom && !this.#chatSearchQuery) this.#scrollOffset = this.#lastMaxScroll;
 		this.#scrollOffset = Math.max(0, Math.min(this.#scrollOffset, this.#lastMaxScroll));
@@ -1293,7 +1536,6 @@ export class AgentHubOverlayComponent extends Container {
 		const focus = this.#dualLaneActive && !this.#inspectorFocused ? theme.fg("accent", "●") : "";
 		const rate = this.#tokenRateBadge();
 		const lines = [` ${focus}${theme.fg("accent", "Preview transcript")}${rate ? `  ${rate}` : ""}`];
-		if (summary) lines.push(` ${summary}`);
 		for (const row of content.slice(this.#scrollOffset, this.#scrollOffset + this.#viewportHeight))
 			lines.push(` ${row}`);
 		while (lines.length < targetHeight - 1) lines.push("");
@@ -1310,8 +1552,7 @@ export class AgentHubOverlayComponent extends Container {
 				: undefined,
 			innerWidth,
 		);
-		const summaries = renderAgentHubSelectedState(this.#selectedStateItems(), innerWidth);
-		const content = summaries.length ? [...summaries, "", ...details] : details;
+		const content = details;
 		this.#inspectorViewportHeight = Math.max(1, targetHeight - 2);
 		this.#inspectorLastMaxScroll = Math.max(0, content.length - this.#inspectorViewportHeight);
 		this.#inspectorScrollOffset = Math.max(0, Math.min(this.#inspectorScrollOffset, this.#inspectorLastMaxScroll));
@@ -1662,21 +1903,27 @@ export class AgentHubOverlayComponent extends Container {
 			` ${theme.fg("accent", "Agent Hub")}${theme.fg("dim", " · tree")}${counts ? theme.fg("dim", `${theme.sep.dot}${counts}`) : ""}${terminalIndicator}${historyIndicator}${filterIndicator}`,
 		);
 		lines.push(...new DynamicBorder().render(width));
+		const rail = this.#selectedRailLines(width);
+		lines.push(...rail);
 		const previewHeight = Math.max(
 			4,
 			(process.stdout.rows || 40) -
 				ROSTER_STRIP_HEIGHT -
 				HUB_CHROME_HEIGHT -
+				rail.length -
 				(this.#showLegend ? 10 : 0) -
 				(this.#notice ? 1 : 0) -
 				(this.#tableFilterEditing ? 1 : 0),
 		);
 		lines.push(...this.#renderPreview(width, previewHeight));
 		if (this.#showLegend) {
+			for (const metadata of this.#contextualMetadataLines())
+				lines.push(`   ${theme.fg("dim", sanitizeLine(metadata, Math.max(10, width - 4)))}`);
 			lines.push(...renderAgentHubHelp(width, this.#inspectorFocused ? "hub.inspector" : "hub.table"));
 			lines.push(...new DynamicBorder().render(width));
 		}
 		const totalRows = this.#totalTableRows();
+		let animatedVisible = false;
 		if (totalRows === 0 && !this.#showHistoricalAgents)
 			lines.push(` ${theme.fg("dim", "No active subagents · . to show history")}`);
 		else if (totalRows === 0 && this.#statusCounts.parked > 0 && !this.#tableFilterQuery) {
@@ -1701,7 +1948,15 @@ export class AgentHubOverlayComponent extends Container {
 				if (section) lines.push(` ${theme.fg("accent", section.label)}`);
 				const active = this.#visibleActiveRows[i];
 				if (active) {
-					lines.push(this.#renderRow(active, i === this.#selectedRow, width));
+					const observed = this.#observableFor(active.id);
+					const animation = this.#animatedRosterState(
+						active.status,
+						observed,
+						active.sessionId,
+						active.sessionFile,
+					);
+					if (animation) animatedVisible = true;
+					lines.push(this.#renderRow(active, i === this.#selectedRow, width, observed, animation));
 					continue;
 				}
 				const archived = this.#visibleArchivedRows[i - activeRowCount];
@@ -1714,11 +1969,21 @@ export class AgentHubOverlayComponent extends Container {
 					externalHeaderShown = true;
 				}
 				const external = this.#visibleExternalRows[i - agentRowCount];
-				if (external) lines.push(this.#renderExternalRow(external, i === this.#selectedRow, width));
+				if (external) {
+					const animation = this.#animatedRosterState(
+						displayedExternalPeerState(external.peer),
+						undefined,
+						external.peer.sessionId,
+						external.peer.sessionFile,
+					);
+					if (animation) animatedVisible = true;
+					lines.push(this.#renderExternalRow(external, i === this.#selectedRow, width, animation));
+				}
 			}
 			if (end < totalRows) lines.push(` ${theme.fg("dim", `… ${totalRows - end} more`)}`);
 		}
 
+		this.#syncSpinnerTimer(animatedVisible || this.#selectedRailIsAnimated(this.#selectedStateItems()));
 		if (this.#notice) lines.push(` ${theme.fg("error", sanitizeLine(this.#notice, Math.max(10, width - 2)))}`);
 		if (this.#tableFilterEditing)
 			lines.push(` ${theme.fg("accent", "/")}${this.#tableFilterQuery}${theme.fg("accent", "▏")}`);
@@ -1729,6 +1994,7 @@ export class AgentHubOverlayComponent extends Container {
 				surface: this.#inspectorFocused ? "hub.inspector" : "hub.table",
 				mode: this.#tableFilterEditing ? "filter" : "normal",
 				extra: this.#tableFilterQuery ? ["n/N:next/previous match"] : undefined,
+				pending: this.#viewerSequence.isPending ? G_CHORD_CUE : undefined,
 			}),
 		);
 		lines.push(...new DynamicBorder().render(width));
@@ -1746,12 +2012,17 @@ export class AgentHubOverlayComponent extends Container {
 		return parts.join(theme.sep.dot);
 	}
 
-	#renderRow(ref: AgentRef, selected: boolean, width: number): string {
+	#renderRow(
+		ref: AgentRef,
+		selected: boolean,
+		width: number,
+		observed: ObservableSession | undefined,
+		animation?: string,
+	): string {
 		const cursor = selected ? theme.fg("accent", theme.nav.cursor) : " ";
 		const prefix = this.#treeGuideById.get(ref.id) ?? "";
 		const context =
 			ref.parentId === MAIN_AGENT_ID ? "MAIN CONTEXT" : ref.parentId ? "GROUP CONTEXT" : "SEPARATE/HUB-ONLY";
-		const observed = this.#observableFor(ref.id);
 		const task = projectAgentHubRowActivity(ref, observed);
 		const age = formatAge(Math.max(1, Math.round((Date.now() - ref.lastActivity) / 1000)));
 		const unread = this.#irc.unreadCount(ref.id);
@@ -1773,7 +2044,7 @@ export class AgentHubOverlayComponent extends Container {
 		const row = renderHubColumns({
 			width: Math.max(10, width - 1),
 			model,
-			state: statusBadge(ref.status),
+			state: animation ? this.#spinnerStateLabel(animation) : statusBadge(ref.status),
 			name: `${prefix}${theme.bold(replaceTabs(ref.id))} ${theme.fg("dim", replaceTabs(ref.displayName))}${rollup}`,
 			task,
 			context,
@@ -1798,18 +2069,113 @@ export class AgentHubOverlayComponent extends Container {
 		return truncateToWidth(` ${cursor} ${rendered}`, Math.max(10, width - 1));
 	}
 
-	#renderExternalRow(row: ExternalPeerRow, selected: boolean, width: number): string {
+	#renderExternalRow(row: ExternalPeerRow, selected: boolean, width: number, animation?: string): string {
 		const cursor = selected ? theme.fg("accent", theme.nav.cursor) : " ";
 		const peer = row.peer;
 		const rendered = renderHubColumns({
 			width: Math.max(10, width - 1),
-			state: externalStateBadge(displayedExternalPeerState(peer)),
+			state: animation ? this.#spinnerStateLabel(animation) : externalStateBadge(row.state),
 			name: `${theme.bold(replaceTabs(peer.name || peer.sessionId))} ${theme.fg("dim", "external")}`,
 			context: shortenPath(peer.cwd),
 			age: formatLastSeenAge(peer.lastSeen),
 		});
 		return truncateToWidth(` ${cursor} ${rendered}`, Math.max(10, width - 1));
 	}
+
+	#handleGrammarSequence(keyData: string, lane: "table" | "chat" | "inspector"): boolean {
+		const action = this.#viewerSequence.handle(keyData, {
+			prefix: keyData === "g",
+			down: keyData === "j",
+			up: keyData === "k",
+			displayRows: lane !== "chat" || this.#transcriptDisplay.transcriptWrap,
+			interrupt: matchesAppInterrupt(keyData),
+		});
+		if (action.kind === "unhandled") return false;
+		if (action.kind === "pending" || action.kind === "cancelled") {
+			this.#requestRender();
+			return true;
+		}
+		if (action.kind === "unknown") {
+			this.#notice = `unknown Control Plane chord: ${action.chord}`;
+			this.#requestRender();
+			return true;
+		}
+		if (action.kind === "first-line") {
+			if (lane === "table") {
+				this.#selectedRow = 0;
+				this.#syncSelectedKey();
+				this.#syncSelectedPreview();
+			} else if (lane === "inspector") {
+				this.#inspectorScrollOffset = 0;
+			} else {
+				this.#scrollOffset = 0;
+				this.#wasAtBottom = false;
+			}
+			this.#requestRender();
+			return true;
+		}
+		if (
+			action.kind === "display-row-down" ||
+			action.kind === "logical-down" ||
+			action.kind === "display-row-up" ||
+			action.kind === "logical-up"
+		) {
+			if (lane === "inspector") {
+				this.#inspectorScrollOffset = applyAgentHubViewerSequenceAction(
+					this.#inspectorScrollOffset,
+					this.#inspectorLastMaxScroll,
+					action,
+				);
+			} else {
+				this.#scrollOffset = applyAgentHubViewerSequenceAction(this.#scrollOffset, this.#lastMaxScroll, action);
+				this.#wasAtBottom = this.#scrollOffset >= this.#lastMaxScroll;
+			}
+			this.#requestRender();
+			return true;
+		}
+		if (action.kind === "open-errors") {
+			if (this.#openErrors) this.#openErrors(this.#chatAgentId);
+			else this.#notice = "Errors dock is unavailable.";
+		} else if (action.kind === "open-bookmarks") {
+			if (this.#openBookmarks) this.#openBookmarks();
+			else this.#notice = "Bookmarks surface is unavailable.";
+		} else if (action.kind === "open-messages") {
+			const row = this.#selectedAgentRow();
+			if (lane === "chat") this.#notice = "Messages already open.";
+			else if (row?.kind === "active") this.openChat(row.ref.id);
+			else if (row?.kind === "archived") this.#openArchivedChat(row.descriptor);
+			else {
+				const external = this.#selectedExternalRow();
+				if (external) this.#openExternalChat(external.peer);
+			}
+		} else if (action.kind === "refresh") {
+			const sessionFile = this.#selectedJournalPath();
+			if (sessionFile) this.#journalTails.invalidate(sessionFile);
+			this.#rebuildObserverSnapshot();
+			this.#refreshExternalRows();
+			this.#orderedRegistryGeneration = -1;
+			this.#refreshRows();
+			this.#rebuildChatContent();
+			this.#notice = "Control Plane projections refreshed.";
+		} else if (action.kind === "send") {
+			const ref = this.#chatAgentId ? this.#registry.get(this.#chatAgentId) : this.#selectedInternalRef();
+			if (this.#chatExternal || this.#selectedExternalRow()) this.#showExternalPeerHint();
+			else if (!ref || ref.status === "parked" || ref.status === "aborted" || !ref.session)
+				this.#notice = "Selected row is read-only; send is unavailable.";
+			else if (!this.#focusAgent) this.#notice = "Selected agent cannot be attached from this view.";
+			else
+				void this.#focusAgent(ref.id).then(
+					() => this.#onDone(),
+					error => {
+						this.#notice = error instanceof Error ? error.message : String(error);
+						this.#requestRender();
+					},
+				);
+		}
+		this.#requestRender();
+		return true;
+	}
+
 
 	#handleTableInput(keyData: string): void {
 		// Filter editing mode: capture keystrokes for the filter query
@@ -1848,6 +2214,30 @@ export class AgentHubOverlayComponent extends Container {
 			}
 			return;
 		}
+		const grammarLane = this.#dualLaneActive && this.#inspectorFocused ? "inspector" : "table";
+		if (this.#handleGrammarSequence(keyData, grammarLane)) return;
+		if (this.#tableFilterQuery && (keyData === "n" || keyData === "N")) {
+			this.#moveTableSelection(keyData === "n" ? 1 : -1);
+			this.#requestRender();
+			return;
+		}
+		if (keyData === "j" || matchesKey(keyData, "down") || keyData === "k" || matchesKey(keyData, "up")) {
+			this.#moveTableSelection(keyData === "j" || matchesKey(keyData, "down") ? 1 : -1);
+			this.#requestRender();
+			return;
+		}
+		if (keyData === "n" || keyData === "p") {
+			this.#moveGroup(keyData === "n" ? 1 : -1);
+			this.#requestRender();
+			return;
+		}
+		if (keyData === "G") {
+			this.#selectedRow = Math.max(0, this.#totalTableRows() - 1);
+			this.#syncSelectedKey();
+			this.#syncSelectedPreview();
+			this.#requestRender();
+			return;
+		}
 		if (this.#dualLaneActive && this.#inspectorFocused) {
 			if (this.#handleInspectorNavigation(keyData)) return;
 		} else if (this.#handleViewerNavigation(keyData)) return;
@@ -1861,11 +2251,6 @@ export class AgentHubOverlayComponent extends Container {
 		}
 		if (keyData === "v") {
 			this.#plainPreview = !this.#plainPreview;
-			this.#requestRender();
-			return;
-		}
-		if (keyData === "n" || keyData === "p") {
-			this.#moveTableSelection(keyData === "n" ? 1 : -1);
 			this.#requestRender();
 			return;
 		}
@@ -1916,26 +2301,6 @@ export class AgentHubOverlayComponent extends Container {
 		}
 		if (keyData === "?") {
 			this.#showLegend = !this.#showLegend;
-			this.#requestRender();
-			return;
-		}
-		if (keyData === "H") {
-			this.#moveGroup(-1);
-			this.#requestRender();
-			return;
-		}
-		if (keyData === "L") {
-			this.#moveGroup(1);
-			this.#requestRender();
-			return;
-		}
-		if (this.#tableFilterQuery && keyData === "n") {
-			this.#moveTableSelection(1);
-			this.#requestRender();
-			return;
-		}
-		if (this.#tableFilterQuery && keyData === "N") {
-			this.#moveTableSelection(-1);
 			this.#requestRender();
 			return;
 		}
@@ -2023,33 +2388,10 @@ export class AgentHubOverlayComponent extends Container {
 		this.#requestRender();
 	}
 
-	/**
-	 * Enter on a row: parked agents open the in-hub transcript without revival;
-	 * live agents focus the main view on the agent session and close the hub. The
-	 * focused transcript then renders through the regular session pipeline —
-	 * exact parity by construction. Collab guests (no local sessions) keep the
-	 * in-hub chat view.
-	 */
+	/** Enter always opens the in-Hub transcript preview without mutating lifecycle state. */
 	#activateAgent(ref: AgentRef): void {
 		this.#notice = undefined;
-		if (ref.status === "parked") {
-			this.openChat(ref.id);
-			return;
-		}
-		const focusAgent = this.#focusAgent;
-		if (this.#remote || !focusAgent) {
-			this.openChat(ref.id);
-			return;
-		}
-		void (async () => {
-			try {
-				await focusAgent(ref.id);
-				this.#onDone();
-			} catch (error) {
-				this.#notice = error instanceof Error ? error.message : String(error);
-				this.#requestRender();
-			}
-		})();
+		this.openChat(ref.id);
 	}
 
 	#reviveSelected(): void {
@@ -2161,9 +2503,15 @@ export class AgentHubOverlayComponent extends Container {
 			? ` ${theme.fg("error", sanitizeLine(this.#notice, Math.max(10, width - 2)))}`
 			: undefined;
 		const footerLines = this.#buildChatFooterLines(width);
-		const selectedSummary = renderAgentHubSelectedState(this.#selectedStateItems(), innerWidth)[0];
+		const selectedItems = this.#selectedStateItems();
+		const selectedSummary = renderAgentHubSelectedState(selectedItems, Math.max(1, innerWidth - 2))[0];
+		const selectedRailAnimated = this.#selectedRailIsAnimated(selectedItems);
+		const selectedRail =
+			selectedSummary && selectedRailAnimated
+				? `${this.#spinnerPrefix()} ${selectedSummary}`
+				: selectedSummary;
 
-		const headerChrome = this.#viewerHeaderLines.length + 2 + Number(selectedSummary !== undefined);
+		const headerChrome = this.#viewerHeaderLines.length + 2 + Number(selectedRail !== undefined);
 		const footerChrome = editorLines.length + footerLines.length + (noticeLine ? 1 : 0) + 1;
 		this.#viewportHeight = Math.max(5, termHeight - headerChrome - footerChrome);
 
@@ -2196,7 +2544,7 @@ export class AgentHubOverlayComponent extends Container {
 			const suffix = hi === 0 ? searchIndicator : "";
 			lines.push(` ${this.#viewerHeaderLines[hi]}${suffix}`);
 		}
-		if (selectedSummary) lines.push(` ${selectedSummary}`);
+		if (selectedRail) lines.push(` ${selectedRail}`);
 		lines.push(...new DynamicBorder().render(width));
 
 		if (contentLines.length <= this.#viewportHeight) {
@@ -2219,6 +2567,7 @@ export class AgentHubOverlayComponent extends Container {
 		for (const editorLine of editorLines) lines.push(` ${editorLine}`);
 		lines.push(...footerLines);
 		lines.push(...new DynamicBorder().render(width));
+		this.#syncSpinnerTimer(selectedRailAnimated);
 		return lines;
 	}
 
@@ -2230,7 +2579,9 @@ export class AgentHubOverlayComponent extends Container {
 				filterEditing: this.#chatSearchEditing,
 				showHelp: this.#showLegend,
 				archive: this.#chatArchived,
-				extra: [searchHint, "Ctrl+S n/p:cycle", "h/Backspace:back"],
+				status: this.#showLegend ? this.#contextualMetadataLines() : undefined,
+				extra: [searchHint, "h/Backspace:back"],
+				pending: this.#viewerSequence.isPending ? G_CHORD_CUE : undefined,
 			});
 		const internalId = !this.#chatExternal ? this.#chatAgentId : undefined;
 		const ref = internalId ? this.#registry.get(internalId) : undefined;
@@ -2240,14 +2591,19 @@ export class AgentHubOverlayComponent extends Container {
 			width,
 			filterEditing: this.#chatSearchEditing,
 			showHelp: this.#showLegend,
-			status: [statsLine, turnStatus ? formatAgentHubTurnStatus(turnStatus, contentWidth()) : ""],
+			status: [
+				statsLine,
+				turnStatus ? formatAgentHubTurnStatus(turnStatus, contentWidth()) : "",
+				...(this.#showLegend ? this.#contextualMetadataLines() : []),
+			],
 			extra: [
 				"h/Backspace:back",
 				searchHint,
-				"Ctrl+S n/p:cycle",
-				ref?.status === "parked" ? "R:revive" : undefined,
+				ref?.status === "parked" && this.#chatAccessMode === "attachable" ? "R:revive" : undefined,
+				this.#chatAccessMode === "attachable" ? "i:focus input" : undefined,
 				`${this.#expandKeys[0] ?? "Ctrl+O"}:expand`,
 			],
+			pending: this.#viewerSequence.isPending ? G_CHORD_CUE : undefined,
 		});
 	}
 
@@ -2304,6 +2660,51 @@ export class AgentHubOverlayComponent extends Container {
 		return parts.join(theme.sep.dot);
 	}
 
+	#updateChatAccessMode(): void {
+		if (this.#chatExternal || this.#chatArchived || this.#remote || !this.#focusAgent || !this.#chatAgentId) {
+			this.#chatAccessMode = "read-only";
+			return;
+		}
+		this.#chatAccessMode = this.#lifecycle().canResumeInPlace(this.#chatAgentId) ? "attachable" : "read-only";
+	}
+
+	#chatAccessLabel(): string {
+		if (this.#chatAccessMode === "attachable") return "attachable — i:focus input";
+		if (this.#chatExternal) return "read-only — external session";
+		if (this.#chatArchived) return "read-only — archived";
+		const ref = this.#chatAgentId ? this.#registry.get(this.#chatAgentId) : undefined;
+		if (ref?.status === "running") return "read-only — running";
+		if (ref?.status === "parked") return "read-only — no reviver";
+		return `read-only — ${ref?.status ?? "unavailable"}`;
+	}
+
+	#focusChatInput(): void {
+		this.#updateChatAccessMode();
+		const id = this.#chatAgentId;
+		const focusAgent = this.#focusAgent;
+		if (this.#chatAccessMode !== "attachable" || !id || !focusAgent) {
+			this.#inputUnavailableFlash = true;
+			this.#rebuildChatContent();
+			this.#requestRender();
+			return;
+		}
+		this.#inputUnavailableFlash = false;
+		void focusAgent(id).then(
+			() => this.#onDone(),
+			error => {
+				const message = error instanceof Error ? error.message : String(error);
+				if (message.includes("no reviver registered")) {
+					this.#updateChatAccessMode();
+					this.#inputUnavailableFlash = true;
+				} else {
+					this.#notice = message;
+				}
+				this.#rebuildChatContent();
+				this.#requestRender();
+			},
+		);
+	}
+
 	/** Rebuild the chat header and sync transcript components from new entries */
 	#rebuildChatContent(): void {
 		this.#flushProjection();
@@ -2327,13 +2728,18 @@ export class AgentHubOverlayComponent extends Container {
 			(this.#chatEntriesRef !== messageEntries || this.#chatBuiltCount < messageEntries.length);
 		if (transcriptChanged) this.#detachStreamingAssistant(false);
 
+		this.#updateChatAccessMode();
+		const accessLabel = `${this.#chatAccessLabel()}${this.#inputUnavailableFlash ? " · input unavailable" : ""}`;
 		this.#viewerHeaderLines = [];
-		this.#viewerHeaderLines.push(theme.fg("accent", `Agent Hub > ${id ?? "?"}`));
+		const title = this.#chatExternal
+			? `${externalPreviewName(this.#chatExternal)} · ${externalPreviewWorkstream(this.#chatExternal)} · ${formatLastSeenAge(this.#chatExternal.lastSeen)}`
+			: (id ?? "?");
+		this.#viewerHeaderLines.push(theme.fg("accent", `Agent Hub > ${title}`));
 		if (this.#chatExternal) {
 			const peer = this.#chatExternal;
 			const state = displayedExternalPeerState(peer);
 			this.#viewerHeaderLines.push(
-				`${theme.bold(peer.name || peer.sessionId)} ${theme.fg("warning", "READONLY")} ${theme.fg("dim", `${state} · pid ${peer.pid} · ${peer.cwd} · cmd+p to real TUI`)}`,
+				`${externalStateBadge(state)} ${theme.fg("dim", `pid ${peer.pid} · ${shortenPath(peer.cwd)} · ${accessLabel}`)}`,
 			);
 		} else if (this.#chatArchived) {
 			const archived = this.#chatArchived;
@@ -2342,7 +2748,7 @@ export class AgentHubOverlayComponent extends Container {
 				: this.#transcriptCache?.model;
 			const modelLabel = model ? `${theme.sep.dot}${modelHeaderLane(model)}` : "";
 			this.#viewerHeaderLines.push(
-				`${theme.bold(archived.agentId)} ${theme.fg("dim", `${archived.state} · archived · read-only`)}${modelLabel}`,
+				`${theme.bold(archived.agentId)} ${theme.fg("dim", `${archived.state} · archived · ${accessLabel}`)}${modelLabel}`,
 			);
 		} else if (ref) {
 			const observed = this.#observableFor(ref.id);
@@ -2355,7 +2761,7 @@ export class AgentHubOverlayComponent extends Container {
 			const source = observed?.progress?.routeReceipt?.source;
 			const sourceLabel = source ? theme.fg("dim", ` [${source}]`) : "";
 			this.#viewerHeaderLines.push(
-				`${theme.bold(ref.id)} ${statusBadge(ref.status)}${kindTag}${modelLabel}${sourceLabel}`,
+				`${theme.bold(ref.id)} ${statusBadge(ref.status)}${kindTag}${modelLabel}${sourceLabel} ${theme.fg("dim", accessLabel)}`,
 			);
 		}
 
@@ -2434,6 +2840,12 @@ export class AgentHubOverlayComponent extends Container {
 			this.#requestRender();
 			return;
 		}
+		if (keyData === "i") {
+			this.#focusChatInput();
+			return;
+		}
+		if (this.#handleGrammarSequence(keyData, "chat")) return;
+		if (this.#inputUnavailableFlash) this.#inputUnavailableFlash = false;
 		if (this.#chatExternal) {
 			this.#handleReadOnlyChatInput(keyData);
 			return;
@@ -2456,18 +2868,6 @@ export class AgentHubOverlayComponent extends Container {
 			} else {
 				this.#closeChat();
 			}
-			return;
-		}
-		if (matchesKey(keyData, "ctrl+s")) {
-			this.#detailPrefixActive = true;
-			this.#requestRender();
-			return;
-		}
-		if (this.#detailPrefixActive) {
-			this.#detailPrefixActive = false;
-			if (keyData === "n") this.#openAdjacentChat(1);
-			else if (keyData === "p") this.#openAdjacentChat(-1);
-			else this.#requestRender();
 			return;
 		}
 		if (keyData === "q") {
@@ -2552,18 +2952,6 @@ export class AgentHubOverlayComponent extends Container {
 		}
 		if (keyData === "h" || matchesKey(keyData, "backspace")) {
 			this.#closeChat();
-			return;
-		}
-		if (matchesKey(keyData, "ctrl+s")) {
-			this.#detailPrefixActive = true;
-			this.#requestRender();
-			return;
-		}
-		if (this.#detailPrefixActive) {
-			this.#detailPrefixActive = false;
-			if (keyData === "n") this.#openAdjacentChat(1);
-			else if (keyData === "p") this.#openAdjacentChat(-1);
-			else this.#requestRender();
 			return;
 		}
 		if (keyData === "]") {
@@ -2698,21 +3086,6 @@ export class AgentHubOverlayComponent extends Container {
 
 	/** Viewport scrolling for the chat transcript. Returns true when handled. */
 	#handleViewerNavigation(keyData: string): boolean {
-		const sequence = this.#viewerSequence.handle(keyData, {
-			prefix: matchesNavigationTop(keyData),
-			down: matchesNavigationDown(keyData),
-			up: matchesNavigationUp(keyData),
-			displayRows: this.#transcriptDisplay.transcriptWrap,
-			interrupt: matchesAppInterrupt(keyData),
-		});
-		if (sequence.kind !== "unhandled") {
-			if (sequence.kind !== "pending" && sequence.kind !== "cancelled") {
-				this.#scrollOffset = applyAgentHubViewerSequenceAction(this.#scrollOffset, this.#lastMaxScroll, sequence);
-				this.#wasAtBottom = this.#scrollOffset >= this.#lastMaxScroll;
-				this.#requestRender();
-			}
-			return true;
-		}
 		const maxScroll = this.#lastMaxScroll;
 		const scrollBy = (delta: number) => {
 			this.#scrollOffset = Math.max(0, Math.min(this.#scrollOffset + delta, maxScroll));
@@ -2743,24 +3116,6 @@ export class AgentHubOverlayComponent extends Container {
 	}
 	/** Viewport scrolling for the spawn-packet inspector. */
 	#handleInspectorNavigation(keyData: string): boolean {
-		const sequence = this.#viewerSequence.handle(keyData, {
-			prefix: matchesNavigationTop(keyData),
-			down: matchesNavigationDown(keyData),
-			up: matchesNavigationUp(keyData),
-			displayRows: true,
-			interrupt: matchesAppInterrupt(keyData),
-		});
-		if (sequence.kind !== "unhandled") {
-			if (sequence.kind !== "pending" && sequence.kind !== "cancelled") {
-				this.#inspectorScrollOffset = applyAgentHubViewerSequenceAction(
-					this.#inspectorScrollOffset,
-					this.#inspectorLastMaxScroll,
-					sequence,
-				);
-				this.#requestRender();
-			}
-			return true;
-		}
 		let delta = resolveViewerScrollDelta(keyData, this.#inspectorViewportHeight);
 		if (delta === undefined && matchesSelectDown(keyData)) delta = 1;
 		else if (delta === undefined && matchesSelectUp(keyData)) delta = -1;

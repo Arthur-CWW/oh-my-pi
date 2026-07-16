@@ -22,7 +22,7 @@ This is a **default slim profile** for the root `pi.skills` manifest. It trims n
 | `./skills/core/source-archive` | Source archive / reference capture |
 | `./vendor/badlogic/pi-skills/transcribe` | Transcribe / audio-to-text |
 | `./vendor/badlogic/pi-skills/youtube-transcript` | YouTube transcript extraction |
-| `./packages/borges-library/skills/borges-library` | Book / creative reference library |
+| `./packages/stema/skills/stema` | Book / creative reference library |
 
 ## Removed skills
 
@@ -182,3 +182,19 @@ For example, to bring `vscode` back into the default profile:
 ```
 
 This is a reversible default, not a blacklist. Skill directories are still on disk; only the manifest entry is removed.
+
+## 5. Primitive overlap matrix (2026-07-16)
+
+Doctrine: **strong composable primitives should be mostly non-overlapping; plugins are reserved for capabilities a builtin cannot reach.**
+
+| Surface | Provenance | Verdict | Reason |
+|---|---|---|---|
+| URL fetch | OMP builtin `read` URL pipeline (`vendor/oh-my-pi/packages/coding-agent/src/tools/fetch.ts`); web-access `fetch_content` extension (`packages/web-access/src/index.ts`); outer-harness `mcp__fetch_fetch` | **Keep `read`; scope `fetch_content`; retire `mcp-server-fetch`** | `read` already handles HTTP(S), readable content, binary dispatch, and selectors. Keep the extension only where its multi-URL/fallback extraction reaches beyond direct `read`; the redundant fetch MCP surface is not an OMP primitive. |
+| Headless browser automation | OMP builtin `browser` (`vendor/oh-my-pi/packages/coding-agent/src/tools/browser.ts`) and its CDP/tab supervisor | **Keep** | Owns scripted Chromium/CDP pages, element observation, interaction, and tab reuse; it does not pretend to be native desktop control. |
+| CUA browser/computer-use bridge | `node_repl` MCP discovered from Codex compatibility config (`/Users/arthur/.codex/config.toml:186-194`), plus `skills/browser/cua-driver` | **Keep** | This is the native macOS/browser-computer bridge. It reaches app/window/input capabilities that headless CDP cannot, so it is complementary rather than a second page automation API. |
+| In-app cmux browser CLI | OMP browser cmux backend and `skills/browser/cmux-browser-drive` | **Keep, scoped to cmux** | The in-app WebView/socket surface has cmux tab and lifecycle semantics; use it for cmux-owned pages, not as a general replacement for headless browser automation. |
+| JS execution (eval js vs node_repl) | OMP builtin `eval` JS backend (`vendor/oh-my-pi/packages/coding-agent/src/tools/eval.ts`); external `node_repl` MCP | **Keep both, separate scopes** | `eval` is the bounded, persistent session-cell runtime. `node_repl` is the bridge needed for CUA/browser-side Node modules and native integrations; neither should grow into the other's role. |
+| Python execution | OMP builtin `eval` Python backend (`vendor/oh-my-pi/packages/coding-agent/src/eval/py/`) | **Keep** | One session-owned Python execution primitive covers persistent cells and structured output; adding another Python MCP runner would duplicate lifecycle and cleanup ownership. |
+| Screenshot/image inspect | OMP builtin `inspect_image` (`vendor/oh-my-pi/packages/coding-agent/src/tools/inspect-image.ts`) | **Keep** | Image inspection is a focused vision handoff, distinct from browser screenshots and from code execution; it should remain opt-in and image-specific. |
+
+The fetch removal audit found no `mcp-server-fetch` registration in OMP's project/user `mcp.json`, `.mcp.json`, Codex-compatible discovery, dotfiles, or cmux settings. The live `mcp__fetch_fetch` name is supplied by the outer coding harness rather than OMP, so there is no OMP/dotfiles/cmux removal diff or cmux reload step to perform. A fresh isolated OMP-session regression asserts that no `mcp__fetch_fetch` or fetch-named MCP tool is discovered; builtin `read` URL behavior remains covered by its URL/binary regression tests.

@@ -16,6 +16,7 @@ import type {
 } from "../extensibility/custom-tools/types";
 import type { Theme } from "../modes/theme/theme";
 import { ToolAbortError, throwIfAborted } from "../tools/tool-errors";
+import { formatMCPServerSource, type ToolOrigin } from "../tools/tool-origin";
 import { callTool } from "./client";
 import { renderMCPCall, renderMCPResult } from "./render";
 import type { MCPContent, MCPServerConnection, MCPToolCallParams, MCPToolCallResult, MCPToolDefinition } from "./types";
@@ -294,6 +295,7 @@ export class MCPTool implements CustomTool<TSchema, MCPToolDetails> {
 	readonly mcpToolName: string;
 	/** Server name */
 	readonly mcpServerName: string;
+	readonly origin: ToolOrigin;
 	readonly approval = "write" as const;
 	/** Render completed MCP calls with the result header replacing the pending call header. */
 	readonly mergeCallAndResult = true;
@@ -314,6 +316,11 @@ export class MCPTool implements CustomTool<TSchema, MCPToolDetails> {
 		this.parameters = normalizeSchemaForMCP(tool.inputSchema) as TSchema;
 		this.mcpToolName = tool.name;
 		this.mcpServerName = connection.name;
+		this.origin = {
+			kind: "mcp",
+			source: formatMCPServerSource(connection.name, connection.config),
+			registeredBy: connection._source?.path,
+		};
 	}
 
 	renderCall(args: unknown, _options: RenderResultOptions, theme: Theme) {
@@ -380,6 +387,7 @@ export class DeferredMCPTool implements CustomTool<TSchema, MCPToolDetails> {
 	readonly mcpToolName: string;
 	/** Server name */
 	readonly mcpServerName: string;
+	readonly origin: ToolOrigin;
 	readonly approval = "write" as const;
 	/** Render completed MCP calls with the result header replacing the pending call header. */
 	readonly mergeCallAndResult = true;
@@ -394,8 +402,9 @@ export class DeferredMCPTool implements CustomTool<TSchema, MCPToolDetails> {
 		getConnection: () => Promise<MCPServerConnection>,
 		source?: SourceMeta,
 		reconnect?: MCPReconnect,
+		config?: MCPServerConnection["config"],
 	): DeferredMCPTool[] {
-		return tools.map(tool => new DeferredMCPTool(serverName, tool, getConnection, source, reconnect));
+		return tools.map(tool => new DeferredMCPTool(serverName, tool, getConnection, source, reconnect, config));
 	}
 
 	constructor(
@@ -404,6 +413,7 @@ export class DeferredMCPTool implements CustomTool<TSchema, MCPToolDetails> {
 		private readonly getConnection: () => Promise<MCPServerConnection>,
 		source?: SourceMeta,
 		private readonly reconnect?: MCPReconnect,
+		config?: MCPServerConnection["config"],
 	) {
 		this.name = createMCPToolName(serverName, tool.name);
 		this.label = `${serverName}/${tool.name}`;
@@ -413,6 +423,11 @@ export class DeferredMCPTool implements CustomTool<TSchema, MCPToolDetails> {
 		this.mcpServerName = serverName;
 		this.#fallbackProvider = source?.provider;
 		this.#fallbackProviderName = source?.providerName;
+		this.origin = {
+			kind: "mcp",
+			source: formatMCPServerSource(serverName, config ?? { type: "stdio", command: "pending discovery" }),
+			registeredBy: source?.path,
+		};
 	}
 
 	renderCall(args: unknown, _options: RenderResultOptions, theme: Theme) {

@@ -188,8 +188,10 @@ export class InputController {
 				return;
 			}
 			if (this.ctx.focusedAgentId) {
-				// Escape never interrupts the focused agent's turn: clear typed
-				// text, or return to the main session. Ctrl+Q interrupts directly.
+				// A composer entered from Agent Hub returns to that read-only
+				// preview first. Other focused views keep the established
+				// clear-draft / return-to-main behavior.
+				if (this.ctx.returnToAgentHubPreview()) return;
 				if (this.ctx.editor.getText().trim()) {
 					this.ctx.editor.setText("");
 					this.ctx.ui.requestRender();

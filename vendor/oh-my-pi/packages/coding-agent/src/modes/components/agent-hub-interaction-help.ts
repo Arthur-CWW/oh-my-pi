@@ -1,3 +1,4 @@
+import { visibleWidth } from "@oh-my-pi/pi-tui";
 import { replaceTabs, truncateToWidth } from "../../tools/render-utils";
 import {
 	renderInteractionHelp,
@@ -10,13 +11,17 @@ import { theme } from "../theme/theme";
 
 type AgentHubInteractionSurface = Extract<InteractionSurface, "hub.table" | "hub.chat" | "hub.inspector">;
 
+const TABLE_VIEWER_NAVIGATION_IDS = VIEWER_NAVIGATION_INTERACTION_IDS.filter(
+	id => id !== "viewer.line-down" && id !== "viewer.line-up",
+);
+
 const NORMAL_FOOTER_IDS: Record<AgentHubInteractionSurface, readonly string[]> = {
 	"hub.table": [
-		...VIEWER_NAVIGATION_INTERACTION_IDS,
-		"hub.table.next-agent",
-		"hub.table.previous-agent",
-		"hub.table.previous-group",
-		"hub.table.next-group",
+		...TABLE_VIEWER_NAVIGATION_IDS,
+		"hub.table.next-row",
+		"hub.table.previous-row",
+		"hub.table.next-orchestrator",
+		"hub.table.previous-orchestrator",
 		"hub.table.search",
 		"viewer.fold",
 		"viewer.previous-sibling",
@@ -96,6 +101,7 @@ export function renderAgentHubFooter(options: {
 	readonly surface: AgentHubInteractionSurface;
 	readonly mode: InteractionMode;
 	readonly extra?: readonly string[];
+	readonly pending?: string;
 }): string {
 	const ids = options.mode === "normal" ? NORMAL_FOOTER_REMAINDER_IDS[options.surface] : undefined;
 	const priorityIds = options.mode === "normal" ? NORMAL_FOOTER_PRIORITY_IDS[options.surface] : EMPTY_INTERACTION_IDS;
@@ -111,7 +117,12 @@ export function renderAgentHubFooter(options: {
 		ids,
 	});
 	const text = [...(options.extra ?? []), priorityLegend, legend].filter(Boolean).join("  ");
-	return ` ${theme.fg("dim", truncateToWidth(replaceTabs(text), Math.max(10, options.width - 2)))}`;
+	const maxWidth = Math.max(10, options.width - 2);
+	const pending = options.pending ? replaceTabs(options.pending) : "";
+	const available = Math.max(0, maxWidth - visibleWidth(pending) - Number(Boolean(pending)));
+	const left = truncateToWidth(replaceTabs(text), pending ? available : maxWidth);
+	const gap = pending ? " ".repeat(Math.max(1, maxWidth - visibleWidth(left) - visibleWidth(pending))) : "";
+	return ` ${theme.fg("dim", `${left}${gap}${pending}`)}`;
 }
 
 export function renderAgentHubChatFooter(options: {
@@ -121,6 +132,7 @@ export function renderAgentHubChatFooter(options: {
 	readonly status?: readonly string[];
 	readonly archive?: { readonly state: string; readonly modelId?: string; readonly thinkingLevel?: string | null };
 	readonly extra?: readonly (string | undefined)[];
+	readonly pending?: string;
 }): string[] {
 	const mode: InteractionMode = options.filterEditing ? "filter" : "normal";
 	const lines = options.showHelp ? [...renderAgentHubHelp(options.width, "hub.chat")] : [];
@@ -137,6 +149,7 @@ export function renderAgentHubChatFooter(options: {
 			surface: "hub.chat",
 			mode,
 			extra: options.extra?.filter((value): value is string => Boolean(value)),
+			pending: options.pending,
 		}),
 	);
 	return lines;

@@ -10,11 +10,12 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { $flag, isBunTestRuntime, logger, Snowflake } from "@oh-my-pi/pi-utils";
+import { $flag, isBunTestRuntime, logger, postmortem, Snowflake } from "@oh-my-pi/pi-utils";
 import type { Subprocess } from "bun";
 import { $ } from "bun";
 import { Settings } from "../../config/settings";
 import { type KernelDisplayOutput, renderKernelDisplay } from "./display";
+import { inspectKernelProcess, registerKernelOwnership, type KernelOwnershipHandle } from "../kernel-ownership";
 import { PYTHON_PRELUDE } from "./prelude";
 import RUNNER_SCRIPT from "./runner.py" with { type: "text" };
 import {
@@ -107,6 +108,10 @@ interface KernelStartOptions extends KernelLifecycleOptions {
 	 * settings). When set, runtime discovery is skipped entirely.
 	 */
 	interpreter?: string;
+	/** Session identity that owns this kernel. */
+	ownerSessionId?: string;
+	/** Override the profile-scoped marker root in tests or embedded hosts. */
+	ownershipRoot?: string;
 }
 
 interface KernelShutdownOptions {
@@ -138,6 +143,21 @@ function throwIfAborted(signal: AbortSignal | undefined, fallbackReason: string)
 	const reason = signal.reason;
 	if (reason instanceof Error) throw reason;
 	throw createAbortError("AbortError", typeof reason === "string" ? reason : fallbackReason);
+}
+function killKernelProcess(proc: Subprocess, signal: "SIGTERM" | "SIGKILL"): void {
+	if (process.platform !== "win32") {
+		try {
+			process.kill(-proc.pid, signal);
+			return;
+		} catch {
+			// A non-detached or already-exited child may not have a process group.
+		}
+	}
+	try {
+		proc.kill(signal);
+	} catch {
+		// The process already exited.
+	}
 }
 
 // Cache successful probes per resolved cwd + explicit interpreter: every cell
@@ -240,6 +260,8 @@ export class PythonKernel {
 	readonly id: string;
 	#proc: Subprocess | null = null;
 	#stdin: Bun.FileSink | null = null;
+	#ownership: KernelOwnershipHandle | null = null;
+	#cancelPostmortem: (() => void) | null = null;
 	#alive = true;
 	#disposed = false;
 	#shutdownConfirmed = false;
@@ -286,19 +308,22 @@ export class PythonKernel {
 
 		const scriptPath = await ensureRunnerScript();
 		const kernel = new PythonKernel(Snowflake.next());
+		const ownerSessionId = options.ownerSessionId ?? `pid:${process.pid}`;
+		const argv = [runtime.pythonPath, "-u", scriptPath];
+		spawnEnv.PI_EVAL_KERNEL_ID = kernel.id;
+		spawnEnv.PI_EVAL_KERNEL_OWNER_SESSION = ownerSessionId;
+		spawnEnv.PI_EVAL_KERNEL_OWNER_PID = String(process.pid);
 
-		const proc = Bun.spawn([runtime.pythonPath, "-u", scriptPath], {
+		const proc = Bun.spawn(argv, {
 			cwd: options.cwd,
 			env: spawnEnv,
 			stdin: "pipe",
 			stdout: "pipe",
 			stderr: "pipe",
-			// Detached from any inherited console only when the host itself
-			// has no console — kernel32!GetConsoleWindow() is authoritative
-			// (works even when every stdio stream is redirected), with a
-			// TTY-OR fallback when the FFI probe is unavailable. See #1960
-			// for the numpy/pandas LoadLibraryExW hang + SIGINT-recovery
-			// failure that motivates the predicate.
+			detached: process.platform !== "win32",
+			// Detached POSIX kernels own a process group so shutdown cannot leave
+			// user-spawned children (uv, python workers, etc.) behind.
+			// `windowsHide` remains a Win32-only console policy.
 			windowsHide: shouldHideKernelWindow({
 				platform: process.platform,
 				hostHasInheritableConsole: hostHasInheritableConsole(),
@@ -307,9 +332,27 @@ export class PythonKernel {
 		kernel.#proc = proc;
 		kernel.#stdin = proc.stdin;
 		kernel.#exitedPromise = proc.exited;
+		try {
+			kernel.#ownership = await registerKernelOwnership({
+				kind: "python",
+				kernelId: kernel.id,
+				sessionId: ownerSessionId,
+				ownerPid: process.pid,
+				kernelPid: proc.pid,
+				root: options.ownershipRoot,
+			argv,
+			});
+			kernel.#cancelPostmortem = postmortem.register(`python-kernel:${kernel.id}`, async () => {
+				await kernel.shutdown();
+			});
+		} catch (error) {
+			await kernel.shutdown().catch(() => undefined);
+			throw error;
+		}
 		void kernel.#exitedPromise.then(code => {
 			kernel.#alive = false;
 			kernel.#abortPendingExecutions(`Python kernel exited with code ${code}`, { kernelKilled: true });
+			void kernel.#unregisterOwnership();
 		});
 
 		kernel.#startReader(proc.stdout as ReadableStream<Uint8Array>);
@@ -464,6 +507,7 @@ export class PythonKernel {
 		if (!proc) {
 			this.#shutdownConfirmed = true;
 			this.#disposed = true;
+			await this.#unregisterOwnership();
 			return { confirmed: true };
 		}
 
@@ -479,29 +523,42 @@ export class PythonKernel {
 			/* ignore */
 		}
 
-		const exited = this.#waitForExitWithTimeout(timeoutMs);
-		let result = await exited;
-		if (!result) {
-			try {
-				proc.kill("SIGTERM");
-			} catch {
-				/* ignore */
-			}
-			result = await this.#waitForExitWithTimeout(timeoutMs);
+		let exited = (await this.#waitForExitWithTimeout(timeoutMs)) !== null;
+		if (!exited) {
+			killKernelProcess(proc, "SIGTERM");
+			exited = (await this.#waitForExitWithTimeout(timeoutMs)) !== null;
 		}
-		if (!result) {
-			try {
-				proc.kill("SIGKILL");
-			} catch {
-				/* ignore */
+		if (!exited) {
+			killKernelProcess(proc, "SIGKILL");
+			exited = (await this.#waitForExitWithTimeout(timeoutMs)) !== null;
+		}
+		if (!exited) {
+			// Under heavy machine load the exit event can outlive both grace windows
+			// even though the SIGKILL landed. Fall back to direct liveness polling so
+			// a dead kernel is still confirmed and its ownership marker is removed.
+			const pid = proc.pid;
+			const deadline = Date.now() + timeoutMs;
+			while (Date.now() < deadline) {
+				if (typeof pid !== "number" || !inspectKernelProcess(pid).alive) {
+					exited = true;
+					break;
+				}
+				await Bun.sleep(25);
 			}
-			result = await this.#waitForExitWithTimeout(timeoutMs);
 		}
 
-		const confirmed = !!result;
-		this.#shutdownConfirmed = confirmed;
+		this.#shutdownConfirmed = exited;
 		this.#disposed = true;
-		return { confirmed };
+		if (exited) await this.#unregisterOwnership();
+		return { confirmed: exited };
+	}
+
+	async #unregisterOwnership(): Promise<void> {
+		this.#cancelPostmortem?.();
+		this.#cancelPostmortem = null;
+		const ownership = this.#ownership;
+		this.#ownership = null;
+		await ownership?.unregister();
 	}
 
 	#abortPendingExecutions(reason: string, options?: { kernelKilled?: boolean }): void {

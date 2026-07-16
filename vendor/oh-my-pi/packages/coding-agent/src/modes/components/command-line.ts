@@ -1,9 +1,18 @@
-import { CompletionBehavior, Container, Input, matchesKey, type SelectItem, SelectList } from "@oh-my-pi/pi-tui";
+import {
+	CompletionBehavior,
+	Container,
+	Input,
+	matchesKey,
+	type SelectItem,
+	SelectList,
+	Text,
+} from "@oh-my-pi/pi-tui";
 import { logger, VERSION } from "@oh-my-pi/pi-utils";
 import type { HistoryStorage } from "../../session/history-storage";
 import { formatLoopStats } from "../../slash-commands/loopstats";
 import { formatTabs } from "../../slash-commands/tabs";
 import { buildVersionViewModel, formatVersion } from "../../slash-commands/version";
+import { DynamicBorder } from "./dynamic-border";
 import { routeCommandOutput } from "../../task/route-inspector";
 import { listTabs } from "../../tools/browser/tab-supervisor";
 import { copyToClipboard } from "../../utils/clipboard";
@@ -24,6 +33,7 @@ import type { InteractiveModeContext } from "../types";
 import { matchesSelectCancel } from "../utils/keybinding-matchers";
 
 const DEFAULT_MAX_VISIBLE = 12;
+const MAX_COMMAND_OUTPUT_LINES = 12;
 
 function feedbackError(error: Error | string): string {
 	const message = typeof error === "string" ? error : error.message;
@@ -223,6 +233,28 @@ export class CommandLineComponent extends Container {
 	}
 }
 
+/** Bottom-anchored, bounded output surface for every colon command. */
+export class CommandOutputOverlayComponent extends Container {
+	constructor(
+		private readonly message: string,
+		private readonly dismiss: () => void,
+	) {
+		super();
+	}
+
+	handleInput(_data: string): void {
+		this.dismiss();
+	}
+
+	override render(width: number): readonly string[] {
+		const border = new DynamicBorder().render(width);
+		const body = new Text(this.message, 1, 0).render(Math.max(10, width));
+		const clipped = body.slice(0, MAX_COMMAND_OUTPUT_LINES);
+		if (body.length > clipped.length) clipped[clipped.length - 1] = ` … ${body.length - clipped.length + 1} more lines`;
+		return [...border, ...clipped, ...border];
+	}
+}
+
 const installedContexts = new WeakSet<InteractiveModeContext>();
 
 export function canEnterCommandMode(ctx: InteractiveModeContext): boolean {
@@ -232,15 +264,16 @@ export function canEnterCommandMode(ctx: InteractiveModeContext): boolean {
 export function commandModeContextForInteractive(
 	ctx: InteractiveModeContext,
 	commands: readonly CommandModeCommand[],
+	showOutput: (message: string) => void = message => ctx.showStatus(message),
 ): CommandModeContext {
 	return {
 		collabGuest: ctx.collabGuest,
 		commands,
 		toggleWrap: () => toggleTranscriptWrap(ctx),
 		toggleRich: () => toggleRichTranscript(ctx),
-		handleErrorsCommand: args => ctx.handleErrorsCommand(args),
+		handleErrorsCommand: args => ctx.handleErrorsCommand(args, showOutput),
 		handleRouteCommand: async args => {
-			ctx.showStatus(
+			showOutput(
 				await routeCommandOutput({
 					mainSession: ctx.session,
 					focusedSession: ctx.viewSession,
@@ -256,19 +289,19 @@ export function commandModeContextForInteractive(
 		handleJobsCommand: () => ctx.handleJobsCommand(),
 		handleChangelogCommand: showFull => ctx.handleChangelogCommand(showFull),
 		handleHotkeysCommand: () => ctx.handleHotkeysCommand(),
-		handleToolsCommand: () => ctx.handleToolsCommand(),
+		handleToolsCommand: showOutput => ctx.handleToolsCommand(showOutput),
 		handleContextCommand: () => ctx.handleContextCommand(),
 		showVersion: async () => {
 			const viewModel = await buildVersionViewModel({
 				sessionStartedAt: ctx.viewSession.sessionManager.getHeader()?.timestamp,
 			});
-			ctx.showStatus(formatVersion(viewModel));
+			showOutput(formatVersion(viewModel));
 		},
 		showLoopStats: () => {
-			ctx.showStatus(formatLoopStats(ctx.ui.loopWatchdogSnapshot));
+			showOutput(formatLoopStats(ctx.ui.loopWatchdogSnapshot));
 		},
 		showTabs: () => {
-			ctx.showStatus(formatTabs(listTabs()));
+			showOutput(formatTabs(listTabs()));
 		},
 		getSessionIdentity: () => {
 			const viewSession = ctx.viewSession;
@@ -281,7 +314,9 @@ export function commandModeContextForInteractive(
 			};
 		},
 		copyIdentityHandle: handle => copyToClipboard(handle),
-		showFeedback: message => ctx.showStatus(message),
+		bookmarkCurrent: args => ctx.bookmarkCurrent(args),
+		showBookmarks: () => ctx.showBookmarks(),
+		showFeedback: showOutput,
 	};
 }
 
@@ -290,6 +325,25 @@ export function installCommandLine(ctx: InteractiveModeContext): void {
 	if (installedContexts.has(ctx)) return;
 	installedContexts.add(ctx);
 	const canEnter = (): boolean => canEnterCommandMode(ctx);
+	let outputOverlay: ReturnType<InteractiveModeContext["ui"]["showOverlay"]> | undefined;
+	const showOutput = (message: string): void => {
+		outputOverlay?.hide();
+		let component: CommandOutputOverlayComponent;
+		const dismiss = (): void => {
+			outputOverlay?.hide();
+			outputOverlay = undefined;
+			ctx.ui.requestRender();
+		};
+		component = new CommandOutputOverlayComponent(message, dismiss);
+		outputOverlay = ctx.ui.showOverlay(component, {
+			anchor: "bottom-center",
+			width: "100%",
+			maxHeight: MAX_COMMAND_OUTPUT_LINES + 2,
+			margin: { bottom: 1 },
+		});
+		ctx.ui.setFocus(component);
+		ctx.ui.requestRender();
+	};
 	const show = (): void => {
 		if (!canEnter()) return;
 		const commands = commandModeCommandsForView(Boolean(ctx.focusedAgentId));
@@ -310,7 +364,7 @@ export function installCommandLine(ctx: InteractiveModeContext): void {
 			ctx.ui.setFocus(priorFocus);
 			ctx.ui.requestRender();
 		};
-		commandLine = new CommandLineComponent(commandModeContextForInteractive(ctx, commands), restore, {
+		commandLine = new CommandLineComponent(commandModeContextForInteractive(ctx, commands, showOutput), restore, {
 			commands,
 			historyStorage: ctx.historyStorage,
 		});

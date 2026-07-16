@@ -477,8 +477,16 @@ export class CommandController {
 		showMarkdownPanel(this.ctx, "Keyboard Shortcuts", hotkeys);
 	}
 
-	handleToolsCommand(): void {
-		const tools = buildToolsMarkdown({ tools: this.ctx.session.agent.state.tools });
+	handleToolsCommand(showOutput?: (message: string) => void): void {
+		const registeredTools = this.ctx.session
+			.getAllToolNames()
+			.map(name => this.ctx.session.getToolByName(name))
+			.filter(tool => tool !== undefined);
+		const tools = buildToolsMarkdown({ tools: registeredTools });
+		if (showOutput) {
+			showOutput(tools);
+			return;
+		}
 		showMarkdownPanel(this.ctx, "Available Tools", tools);
 	}
 

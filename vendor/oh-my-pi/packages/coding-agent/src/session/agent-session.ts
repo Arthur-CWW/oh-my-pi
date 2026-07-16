@@ -280,6 +280,7 @@ import { normalizeLocalScheme, resolveToCwd } from "../tools/path-utils";
 import { isAutoQaEnabled } from "../tools/report-tool-issue";
 import { getLatestTodoPhasesFromEntries, type TodoItem, type TodoPhase } from "../tools/todo";
 import { ToolAbortError, ToolError } from "../tools/tool-errors";
+import { setToolOrigin, type ToolOrigin } from "../tools/tool-origin";
 import { clampTimeout } from "../tools/tool-timeouts";
 import { parseCommandArgs } from "../utils/command-args";
 import { type EditMode, resolveEditMode } from "../utils/edit-mode";
@@ -5285,8 +5286,10 @@ export class AgentSession {
 		// Order-preserving join: any reorder must produce a different signature so
 		// the rebuild fires and the new tool list reaches the API.
 		const nameSegment = toolNames.join("\u0001");
-		const describeTool = (tool: AgentTool): string =>
-			`${tool.name}=${tool.label ?? ""}|${tool.description ?? ""}|${tool.customWireName ?? ""}`;
+		const describeTool = (tool: AgentTool): string => {
+			const origin = (tool as AgentTool & { origin?: ToolOrigin }).origin;
+			return `${tool.name}=${tool.label ?? ""}|${tool.description ?? ""}|${tool.customWireName ?? ""}|${origin?.kind ?? ""}|${origin?.source ?? ""}|${origin?.registeredBy ?? ""}`;
+		};
 		const descriptionSegment = tools.map(describeTool).join("\u0002");
 		let registrySegment = "";
 		if (this.#mcpDiscoveryEnabled) {
@@ -5401,8 +5404,10 @@ export class AgentSession {
 		this.#rpcHostToolNames.clear();
 
 		for (const tool of rpcTools) {
+			const registeredTool =
+				"origin" in tool ? tool : setToolOrigin(tool, { kind: "extension", source: "rpc-host" });
 			const finalTool = (
-				this.#extensionRunner ? new ExtensionToolWrapper(tool, this.#extensionRunner) : tool
+				this.#extensionRunner ? new ExtensionToolWrapper(registeredTool, this.#extensionRunner) : registeredTool
 			) as AgentTool;
 			this.#toolRegistry.set(finalTool.name, finalTool);
 			this.#rpcHostToolNames.add(finalTool.name);
@@ -6923,7 +6928,7 @@ export class AgentSession {
 	/** Restore the latest durable plan workflow state without appending journal entries. */
 	async reconcilePlanWorkflowFromJournal(): Promise<void> {
 		const latest = this.#latestWorkflowChange();
-		if (!latest || latest.command.request.kind !== "transitionPlanMode") {
+		if (latest?.command.request.kind !== "transitionPlanMode") {
 			this.setPlanModeState(undefined);
 			const latestPlan = findLatestPlanArtifact(this.sessionManager.getBranch());
 			this.#planReferencePath = latestPlan?.data.localPath ?? "local://PLAN.md";
@@ -7231,7 +7236,7 @@ export class AgentSession {
 			}
 			for (;;) {
 				const deferred = await queue.deferredCustomPrefix();
-				if (!deferred || deferred.payload.kind !== "custom") break;
+				if (deferred?.payload.kind !== "custom") break;
 				const deferredPayload = deferred.payload;
 				const alreadyPersisted = this.sessionManager.hasDurableCustomMessage(deferred.inputId);
 				const alreadyInContext = this.#hasDurableCustomDeliveryInContext(deferred.inputId, deferredPayload.message);

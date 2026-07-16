@@ -19,13 +19,15 @@ export interface CommandModeContext {
 	handleJobsCommand(): Promise<void>;
 	handleChangelogCommand(showFull?: boolean): Promise<void>;
 	handleHotkeysCommand(): void;
-	handleToolsCommand(): void;
+	handleToolsCommand(showOutput?: (message: string) => void): void;
 	handleContextCommand(): void;
 	showVersion(): void | Promise<void>;
 	showLoopStats(): void | Promise<void>;
 	showTabs(): void | Promise<void>;
 	getSessionIdentity(): SessionIdentity;
 	copyIdentityHandle(handle: string): void | Promise<void>;
+	bookmarkCurrent?(args: readonly string[]): void | Promise<void>;
+	showBookmarks?(): void;
 	readonly commands?: readonly CommandModeCommand[];
 	showFeedback(message: string): void;
 }
@@ -96,24 +98,26 @@ function subcommandCompletion(subcommand: CommandModeSubcommand): CommandModeCom
 	};
 }
 
+function showGlobalCommandHelp(ctx: CommandModeContext): void {
+	const commands = ctx.commands ?? COMMAND_MODE_COMMANDS;
+	ctx.showFeedback(
+		`${commands
+			.map(command => {
+				const aliases = command.aliases?.length
+					? ` (alias ${command.aliases.map(alias => `:${alias}`).join(", ")})`
+					: "";
+				return `:${command.name}${aliases} — ${command.description}`;
+			})
+			.join("\n")}${renderCommandShortcutSection()}\n\nInside Agent Hub, press ? for selected-agent metadata and contextual keys.`,
+	);
+}
+
 export const COMMAND_MODE_COMMANDS: readonly CommandModeCommand[] = [
 	{
 		name: "commands",
 		description: "list TUI colon commands and shortcuts",
 		viewLocal: true,
-		run(ctx) {
-			const commands = ctx.commands ?? COMMAND_MODE_COMMANDS;
-			ctx.showFeedback(
-				`${commands
-					.map(command => {
-						const aliases = command.aliases?.length
-							? ` (alias ${command.aliases.map(alias => `:${alias}`).join(", ")})`
-							: "";
-						return `:${command.name}${aliases} — ${command.description}`;
-					})
-					.join("\n")}${renderCommandShortcutSection()}`,
-			);
-		},
+		run: showGlobalCommandHelp,
 	},
 	{
 		name: "id",
@@ -125,6 +129,12 @@ export const COMMAND_MODE_COMMANDS: readonly CommandModeCommand[] = [
 			await ctx.copyIdentityHandle(sessionIdentityHandle(identity));
 			ctx.showFeedback(formatSessionIdentity(identity));
 		},
+	},
+	{
+		name: "help",
+		description: "show global TUI commands and keyboard shortcuts",
+		viewLocal: true,
+		run: showGlobalCommandHelp,
 	},
 	{
 		name: "route",
@@ -275,6 +285,31 @@ export const COMMAND_MODE_COMMANDS: readonly CommandModeCommand[] = [
 		hostOnly: true,
 		run(ctx) {
 			ctx.handleContextCommand();
+		},
+	},
+	{
+		name: "bookmark",
+		description: "bookmark the current session or Hub selection",
+		inlineHint: "[tag words…] [--note text]",
+		viewLocal: true,
+		run(ctx, args) {
+			if (!ctx.bookmarkCurrent) {
+				ctx.showFeedback("Bookmarks are unavailable in this view.");
+				return;
+			}
+			return ctx.bookmarkCurrent(args);
+		},
+	},
+	{
+		name: "bookmarks",
+		description: "list saved bookmarks and jump to one",
+		viewLocal: true,
+		run(ctx) {
+			if (!ctx.showBookmarks) {
+				ctx.showFeedback("Bookmarks are unavailable in this view.");
+				return;
+			}
+			ctx.showBookmarks();
 		},
 	},
 ];

@@ -151,4 +151,14 @@ describe("createAgentSession deferred MCP auto discovery", () => {
 		expect(session.getActiveToolNames()).not.toContain("search_tool_bm25");
 		expect(session.isMCPDiscoveryEnabled()).toBe(false);
 	}, 40_000);
+	it("does not discover the retired fetch MCP server in a fresh isolated session", async () => {
+		const { session } = await createAgentSession({ ...baseOptions(), hasUI: false });
+		try {
+			const activeNames = session.getActiveToolNames();
+			expect(activeNames).not.toContain("mcp__fetch_fetch");
+			expect(activeNames.filter(name => name.startsWith("mcp__") && name.includes("fetch"))).toEqual([]);
+		} finally {
+			await session.dispose();
+		}
+	});
 });

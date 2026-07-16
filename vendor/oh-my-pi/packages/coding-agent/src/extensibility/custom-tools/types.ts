@@ -26,6 +26,7 @@ import type { Theme } from "../../modes/theme/theme";
 import type { TranscriptDisplayContext } from "../../modes/transcript-display";
 import type { ReadonlySessionManager } from "../../session/session-manager";
 import type { TodoItem } from "../../tools/todo";
+import type { ToolOrigin } from "../../tools/tool-origin";
 import type * as TypeBox from "../typebox";
 
 /** Alias for clarity */
@@ -201,6 +202,8 @@ export interface CustomTool<TParams extends TSchema = TSchema, TDetails = any> {
 	strict?: boolean;
 	/** Description for LLM */
 	description: string;
+	/** Provenance copied onto the live registry entry. Loaders fill this when omitted. */
+	origin?: ToolOrigin;
 	/** Parameter schema (Zod or TypeBox; TypeBox is auto-lifted to Zod at registration). */
 	parameters: TParams;
 	/** If true, tool is excluded unless explicitly listed in --tools or agent's tools field */

@@ -16,6 +16,7 @@ import {
 import { AssistantMessageComponent } from "@oh-my-pi/pi-coding-agent/modes/components/assistant-message";
 import {
 	CommandLineComponent,
+	CommandOutputOverlayComponent,
 	canEnterCommandMode,
 	installCommandLine,
 } from "@oh-my-pi/pi-coding-agent/modes/components/command-line";
@@ -185,6 +186,11 @@ describe("colon command registry", () => {
 		expect(feedback).toContain("J scroll five lines down");
 		expect(feedback).not.toContain("enter input mode");
 	});
+	it(":help remains the global command documentation surface", async () => {
+		const help = new CommandFixture();
+		expect(await dispatchCommandLine(":help", help)).toBe(true);
+		expect(help.feedback.at(-1)).toContain("press ? for selected-agent metadata");
+	});
 
 	it(":id and :whoami emit a structured identity and copy the paste-ready handle", async () => {
 		const ctx = new CommandFixture();
@@ -215,6 +221,7 @@ describe("colon command registry", () => {
 		expect(childCommands.map(command => command.name)).toEqual([
 			"commands",
 			"id",
+			"help",
 			"route",
 			"wrap",
 			"rich",
@@ -224,18 +231,21 @@ describe("colon command registry", () => {
 			"tabs",
 			"changelog",
 			"hotkeys",
+			"bookmark",
+			"bookmarks",
 		]);
 		expect(await dispatchCommandLine(":id", ctx, childCommands)).toBe(true);
 		expect(ctx.feedback.at(-1)).toContain("agent id: CardQualityAudit");
 		expect(ctx.copied.at(-1)).toBe("019f6141-df73-7000-b792-985f12d9db5d/CardQualityAudit");
 	});
 
-	it("opens from a transcript viewer and restores its focus and scroll state", () => {
+	it("renders colon output in a bottom overlay without moving transcript scroll", async () => {
 		let listener: ((data: string) => { consume?: boolean } | undefined) | undefined;
 		const editor = { getText: () => "", isShowingAutocomplete: () => false, render: () => [] };
 		const viewer = { scrollOffset: 37, render: () => [] };
 		let focused: unknown = viewer;
 		let overlayHidden = false;
+		const overlays: Array<{ component: unknown; options: Record<string, unknown> }> = [];
 		const editorContainer = new Container();
 		editorContainer.addChild(editor);
 		const ui = {
@@ -246,12 +256,20 @@ describe("colon command registry", () => {
 			setFocus: (next: unknown) => {
 				focused = next;
 			},
-			showOverlay: () => ({
-				hide: () => {
-					overlayHidden = true;
-				},
-			}),
+			showOverlay: (component: unknown, options: Record<string, unknown>) => {
+				overlays.push({ component, options });
+				return {
+					hide: () => {
+						overlayHidden = true;
+					},
+				};
+			},
 			requestRender: () => {},
+			loopWatchdogSnapshot: {
+				totalViolations: 1,
+				maxBlockedMs: 23,
+				violations: [],
+			},
 		};
 		const interactive = {
 			editor,
@@ -265,11 +283,24 @@ describe("colon command registry", () => {
 		expect(focused).toBeInstanceOf(CommandLineComponent);
 		expect(editorContainer.children).toEqual([editor]);
 
-		(focused as CommandLineComponent).handleInput("\x1b");
-		(focused as CommandLineComponent).handleInput("\x1b");
+		const commandLine = focused as CommandLineComponent;
+		commandLine.handleInput("\x1b");
+		commandLine.input.setValue("loopstats");
+		commandLine.handleInput("\r");
+		await Bun.sleep(0);
+		const output = overlays.at(-1);
+		expect(output?.component).toBeInstanceOf(CommandOutputOverlayComponent);
+		expect(output?.options).toMatchObject({
+			anchor: "bottom-center",
+			width: "100%",
+			margin: { bottom: 1 },
+		});
+		expect(Bun.stripANSI((output?.component as CommandOutputOverlayComponent).render(100).join("\n"))).toContain(
+			"Loop watchdog",
+		);
 		expect(overlayHidden).toBe(true);
-		expect(focused).toBe(viewer);
 		expect(viewer.scrollOffset).toBe(37);
+		(output?.component as CommandOutputOverlayComponent).handleInput("x");
 	});
 
 	it("respects literal-colon text prompts while enabling normal composite views", () => {

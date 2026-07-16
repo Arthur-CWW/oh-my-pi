@@ -1,4 +1,4 @@
-import { formatDuration } from "@oh-my-pi/pi-utils";
+import { formatAge, formatDuration } from "@oh-my-pi/pi-utils";
 import type { IrcExternalPeerDisplayState } from "../../irc/bus-external";
 import type { AgentRef } from "../../registry/agent-ref";
 import type { AgentSessionEvent } from "../../session/agent-session";
@@ -145,30 +145,31 @@ export function reduceAgentHubSelectedLiveState(
 	return state;
 }
 
+function rolloutDetail(snapshot: AgentHubRolloutSnapshot, reason?: string): string {
+	const target = snapshot.targetVersion
+		? `${snapshot.targetVersion} (${snapshot.targetDigest.slice(0, 12)})`
+		: snapshot.targetDigest.slice(0, 12);
+	const updatedAt = Date.parse(snapshot.updatedAt);
+	const age = Number.isFinite(updatedAt)
+		? formatAge(Math.max(1, Math.round((Date.now() - updatedAt) / 1000)))
+		: "age unknown";
+	return sanitizeText([target, age, reason].filter(Boolean).join(" · "), DETAIL_TEXT_LIMIT);
+}
+
 function rolloutLabel(snapshot: AgentHubRolloutSnapshot): AgentHubSelectedStateItem | undefined {
-	const target = sanitizeText(
-		snapshot.targetVersion
-			? `${snapshot.targetVersion} (${snapshot.targetDigest.slice(0, 12)})`
-			: snapshot.targetDigest.slice(0, 12),
-		DETAIL_TEXT_LIMIT,
-	);
 	switch (snapshot.phase) {
 		case "planned":
-			return { kind: "rollout", text: "rollout planned", detail: target };
+			return { kind: "rollout", text: "rollout planned", detail: rolloutDetail(snapshot) };
 		case "requested":
-			return { kind: "rollout", text: "restart requested", detail: target };
+			return { kind: "rollout", text: "restart requested", detail: rolloutDetail(snapshot) };
 		case "acknowledged":
-			return { kind: "rollout", text: "restart acknowledged", detail: target };
+			return { kind: "rollout", text: "restart acknowledged", detail: rolloutDetail(snapshot) };
 		case "applied":
-			return { kind: "rollout", text: "restart applied", detail: `awaiting recovery · ${target}` };
+			return { kind: "rollout", text: "restart applied", detail: rolloutDetail(snapshot, "awaiting recovery") };
 		case "recovered":
-			return { kind: "rollout", text: "rollout recovered", detail: target };
+			return { kind: "rollout", text: "rollout recovered", detail: rolloutDetail(snapshot) };
 		case "skipped":
-			return {
-				kind: "rollout",
-				text: "rollout skipped",
-				detail: sanitizeText(snapshot.reason ?? target, DETAIL_TEXT_LIMIT),
-			};
+			return { kind: "rollout", text: "rollout skipped", detail: rolloutDetail(snapshot, snapshot.reason) };
 		case "failed":
 			return undefined;
 	}
@@ -243,7 +244,9 @@ export function projectAgentHubSelectedState(input: AgentHubSelectedStateInput):
 	const rolloutFailed = input.rollout?.phase === "failed";
 	const hasTypedError = input.live.error !== undefined || retryFailure !== undefined || rolloutFailed;
 	const errorText =
-		input.live.error?.text ?? retryFailure?.errorMessage ?? (rolloutFailed ? input.rollout?.error : undefined);
+		input.live.error?.text ??
+		retryFailure?.errorMessage ??
+		(rolloutFailed ? rolloutDetail(input.rollout!, input.rollout?.error ?? input.rollout?.reason) : undefined);
 	if (hasTypedError) {
 		const detail = errorText ? sanitizeText(errorText, DETAIL_TEXT_LIMIT) : undefined;
 		items.push({

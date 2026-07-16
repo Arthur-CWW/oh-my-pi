@@ -19,6 +19,7 @@ const TOOLS = new Map<string, SystemPromptToolMetadata>([
 		{
 			label: "Read",
 			description: "Reads files from disk.",
+			origin: { kind: "builtin", source: "tools/read.ts" },
 			parameters: { type: "object", properties: { path: { type: "string" } } },
 		},
 	],
@@ -27,6 +28,11 @@ const TOOLS = new Map<string, SystemPromptToolMetadata>([
 		{
 			label: "Bash",
 			description: "Executes a shell command.",
+			origin: {
+				kind: "mcp",
+				source: "node_repl: /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl",
+				registeredBy: "~/.codex/config.toml",
+			},
 			parameters: { type: "object", properties: { command: { type: "string" } } },
 		},
 	],
@@ -64,6 +70,8 @@ describe("system prompt tool inventory", () => {
 		const text = await render({ nativeTools: true, repeatToolDescriptions: false });
 		expect(text).toContain("- Read: `read`");
 		expect(text).toContain("- Bash: `bash`");
+		expect(text).toContain("- Read: `read` (builtin)");
+		expect(text).toContain("- Bash: `bash` (mcp:node_repl ← ~/.codex/config.toml)");
 		// No full per-tool sections in list mode.
 		expect(text).not.toContain("# Tool: read");
 		expect(text).not.toContain("Reads files from disk.");
@@ -74,6 +82,8 @@ describe("system prompt tool inventory", () => {
 		expect(text).toContain("# Tool: read");
 		expect(text).toContain("# Tool: bash");
 		expect(text).toContain("Reads files from disk.");
+		expect(text).toContain("Origin: (builtin)");
+		expect(text).toContain("Origin: (mcp:node_repl ← ~/.codex/config.toml)");
 		expect(text).not.toContain("- Read: `read`");
 		// The legacy `<tool>` wrapper is gone.
 		expect(text).not.toContain("<tool name=");

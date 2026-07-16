@@ -23,6 +23,7 @@ import pragmaticPersonality from "./prompts/system/personalities/pragmatic.md" w
 import projectPromptTemplate from "./prompts/system/project-prompt.md" with { type: "text" };
 import systemPromptTemplate from "./prompts/system/system-prompt.md" with { type: "text" };
 import { shortenPath } from "./tools/render-utils";
+import { compactToolOriginTag, type ToolOrigin } from "./tools/tool-origin";
 import { AGENTS_MD_LIMIT, buildWorkspaceTree, type WorkspaceTree } from "./workspace-tree";
 
 /** Bundled personality specs, keyed by the `personality` setting value. */
@@ -336,6 +337,8 @@ export interface SystemPromptToolMetadata {
 	parameters?: TSchema;
 	/** Illustrative examples rendered into the verbose inventory. */
 	examples?: readonly ToolExample[];
+	/** Queryable tool provenance rendered into the agent-facing inventory. */
+	origin?: ToolOrigin;
 }
 
 export function buildSystemPromptToolMetadata(
@@ -344,7 +347,7 @@ export function buildSystemPromptToolMetadata(
 ): Map<string, SystemPromptToolMetadata> {
 	return new Map(
 		Array.from(tools.entries(), ([name, tool]) => {
-			const toolRecord = tool as AgentTool & { label?: string; description?: string };
+			const toolRecord = tool as AgentTool & { label?: string; description?: string; origin?: ToolOrigin };
 			const override = overrides[name];
 			const wireName =
 				override?.wireName ??
@@ -358,6 +361,7 @@ export function buildSystemPromptToolMetadata(
 					parameters: toolRecord.parameters,
 					examples: toolRecord.examples,
 					wireName,
+					origin: override?.origin ?? toolRecord.origin,
 				},
 			] as const;
 		}),
@@ -584,17 +588,22 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 	// Build tool descriptions for system prompt rendering.
 	const toolPromptNames = new Map<string, string>(toolNames.map(name => [name, tools?.get(name)?.wireName ?? name]));
 	const toolRefs = Object.fromEntries(toolPromptNames.entries());
-	const toolInfo = toolNames.map(name => ({
-		name: toolPromptNames.get(name) ?? name,
-		internalName: name,
-		label: tools?.get(name)?.label ?? "",
-		description: tools?.get(name)?.description ?? "",
-	}));
-	const inventoryTools = toolNames.map(name => {
+	const toolInfo = toolNames.map(name => {
 		const meta = tools?.get(name);
 		return {
 			name: toolPromptNames.get(name) ?? name,
+			internalName: name,
+			label: meta?.label ?? "",
 			description: meta?.description ?? "",
+			originTag: meta?.origin ? compactToolOriginTag(meta.origin, shortenPath) : "",
+		};
+	});
+	const inventoryTools = toolNames.map(name => {
+		const meta = tools?.get(name);
+		const originTag = meta?.origin ? compactToolOriginTag(meta.origin, shortenPath) : "";
+		return {
+			name: toolPromptNames.get(name) ?? name,
+			description: originTag ? `${meta?.description ?? ""}\n\nOrigin: (${originTag})` : (meta?.description ?? ""),
 			parameters: meta?.parameters ?? ({ type: "object" } as TSchema),
 			examples: meta?.examples,
 		};

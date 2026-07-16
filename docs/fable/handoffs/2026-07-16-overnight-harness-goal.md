@@ -54,3 +54,8 @@ Final union gate → checkpoint → promote → register/TASKS/handoff receipts 
 - Fleet canary: first attempt BLOCKED_CANARY_UNREACHABLE (no status row; surface alive) → operator revived with re-heartbeat protocol.
 - HR-128 → landed (guide 11 lines at workspace root, mtime-cached prepend at TaskTool.execute:884-891, tests 4/4).
 - HR-130 ExtBounds: approved narrow ExtensionContext.signal threading at extension-ui-controller.ts:489 + agent-session.ts:6450 (one-liners; durable regions untouched).
+
+## Day wave (2026-07-16, post-goal — Arthur awake)
+Landed: HR-113 flip; morning regs HR-139 bookmarks (:bookmark/:bookmarks + store, DONE), HR-140 Enter-preview modality (DONE, register flipped), HR-141 kernel ownership+doctor scanner (test-green; live reap pending), HR-143 fetch dedupe (DONE — finding: mcp fetch is the OUTER cockpit harness's injection, OMP is clean; regression pins it; overlap matrix in harness-slimming.md). HR-125 grammar ~90% (implementer capped; HR125Finish closing 2 command-mode failures + audit). In flight: ToolProvenance (HR-142 :tools + origin metadata), HR144ReloadRoster (view-reload roster seeding).
+New rows: HR-142/143/144/145. Facts recorded: effect@4.0.0-beta.92 in; lifecycle core not Scope-managed (HR-145); Kimi lane approved by Arthur but quota-blocked (projected-empty) at first attempt; codex ~15 tok/s today.
+Pending after workers land: union gate → checkpoint → promote → live kernel reap via doctor --apply → HR-141/125/142/144 register receipts.

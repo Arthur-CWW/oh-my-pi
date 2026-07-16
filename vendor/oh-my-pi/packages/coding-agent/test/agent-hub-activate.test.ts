@@ -1,7 +1,7 @@
 /**
- * Hub Enter contract: live rows delegate to the `focusAgent` dep and close the
- * hub on success; parked rows open read-only history without revival. Focus
- * failures keep the hub open and surface the error as a notice.
+ * Hub Enter contract: every row opens a transcript preview. Only lifecycle-
+ * attachable local agents allow `i` to switch to the main composer; read-only
+ * rows never invoke focus.
  */
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
@@ -35,7 +35,7 @@ type AgentHubControllerHarness = Pick<InteractiveModeContext, "hideThinkingBlock
 	};
 	editor: object;
 	collabGuest: { agentRegistry: AgentRegistry; hubRemote: undefined };
-	focusAgentSession(id: string): Promise<void>;
+	focusAgentHubInput(id: string): Promise<void>;
 	session: { getToolByName(name: string): undefined; extensionRunner: undefined };
 	sessionManager: { getCwd(): string; getSessionFile(): null; getSessionId(): string };
 };
@@ -45,8 +45,8 @@ function showAgentHubForHarness(
 	observers: SessionObserverRegistry,
 	options?: { requireContent?: boolean },
 ): void {
-	const args = options ? [observers, options] : [observers];
-	Reflect.apply(SelectorController.prototype.showAgentHub, { ctx: harness }, args);
+	const controller = new SelectorController(harness as unknown as InteractiveModeContext);
+	controller.showAgentHub(observers, options);
 }
 
 function makeHub(
@@ -55,6 +55,7 @@ function makeHub(
 		status?: AgentStatus;
 		sessionFile?: string | null;
 		lifecycle?: AgentLifecycleManager;
+		revive?: () => Promise<AgentSession>;
 		sessionId?: string;
 		copyIdentity?: (payload: string) => void;
 	} = {},
@@ -70,6 +71,8 @@ function makeHub(
 		sessionFile: options.sessionFile ?? null,
 		status,
 	});
+	const lifecycle = options.lifecycle ?? (options.revive ? new AgentLifecycleManager(agents) : undefined);
+	if (options.revive) lifecycle?.adopt(AGENT_ID, { idleTtlMs: 0, revive: options.revive });
 	let doneCalls = 0;
 	const done = Promise.withResolvers<void>();
 	const renderRequested = Promise.withResolvers<void>();
@@ -83,16 +86,17 @@ function makeHub(
 		requestRender: () => renderRequested.resolve(),
 		registry: agents,
 		irc: new IrcBus(agents),
-		lifecycle: options.lifecycle,
+		lifecycle,
 		focusAgent,
 		externalIrc: null,
 		sessionId: options.sessionId,
 		copyIdentity: options.copyIdentity,
 	});
-	return { hub, agents, doneCalls: () => doneCalls, done: done.promise, renderRequested: renderRequested.promise };
+	return { hub, agents, lifecycle, doneCalls: () => doneCalls, done: done.promise, renderRequested: renderRequested.promise };
 }
 
 it("y yanks the selected child's session handle and history URL", async () => {
+	await initTheme();
 	const copied: string[] = [];
 	const { hub } = makeHub(async () => {}, {
 		sessionId: "019f6141-df73-7000-b792-985f12d9db5d",
@@ -203,46 +207,64 @@ describe("Agent hub Enter activation", () => {
 	afterEach(() => {
 		vi.restoreAllMocks();
 		resetSettingsForTest();
+		AgentLifecycleManager.resetGlobalForTests();
 		AgentRegistry.resetGlobalForTests();
 	});
 
-	it("Enter focuses the selected agent and closes the hub", async () => {
-		const focusedIds: string[] = [];
-		const { hub, doneCalls, done } = makeHub(async id => {
-			focusedIds.push(id);
+	it("Enter on a running agent opens read-only preview and never reaches the no-reviver error", () => {
+		const message =
+			'Agent "Worker" is running and cannot be revived (no reviver registered). Its transcript remains readable at history://Worker.';
+		let focusCalls = 0;
+		const { hub, doneCalls } = makeHub(() => {
+			focusCalls++;
+			return Promise.reject(new Error(message));
 		});
 
 		hub.handleInput("\r");
-		await done; // activation is fire-and-forget async; onDone signals completion
+		let rendered = renderedText(hub);
+		expect(rendered).toContain(`Agent Hub > ${AGENT_ID}`);
+		expect(rendered).toContain("read-only — running");
+		expect(rendered).not.toContain(message);
+		expect(focusCalls).toBe(0);
+		expect(doneCalls()).toBe(0);
 
-		expect(focusedIds).toEqual([AGENT_ID]);
-		expect(doneCalls()).toBe(1);
+		hub.handleInput("i");
+		rendered = renderedText(hub);
+		expect(rendered).toContain("input unavailable");
+		expect(rendered).not.toContain(message);
+		expect(focusCalls).toBe(0);
 		hub.dispose();
 	});
 
-	it("Enter on a parked row opens history without reviving it", async () => {
+	it("Enter on a revivable parked row opens attachable preview; i focuses the composer", async () => {
 		using tempDir = TempDir.createSync("@omp-agent-hub-parked-open-");
 		const sessionFile = `${tempDir.path()}/Worker.jsonl`;
 		await Bun.write(sessionFile, "");
 		const focusedIds: string[] = [];
-		const { hub, agents, doneCalls } = makeHub(
+		const { hub, agents, lifecycle, doneCalls, done } = makeHub(
 			async id => {
 				focusedIds.push(id);
 			},
-			{ status: "parked", sessionFile },
+			{ status: "parked", sessionFile, revive: async () => liveSession() },
 		);
 
 		revealParked(hub, AGENT_ID);
 		hub.handleInput("\r");
 
-		const rendered = Bun.stripANSI(hub.render(120).join("\n"));
+		const rendered = renderedText(hub);
 		expect(focusedIds).toEqual([]);
 		expect(doneCalls()).toBe(0);
 		expect(agents.get(AGENT_ID)?.status).toBe("parked");
 		expect(rendered).toContain(`Agent Hub > ${AGENT_ID}`);
 		expect(rendered).toContain("No messages yet.");
-		expect(rendered).toContain("R:revive");
+		expect(rendered).toContain("i:focus input");
+
+		hub.handleInput("i");
+		await done;
+		expect(focusedIds).toEqual([AGENT_ID]);
+		expect(doneCalls()).toBe(1);
 		hub.dispose();
+		await lifecycle?.dispose();
 	});
 
 	it("R in parked history revives without focusing the main view", async () => {
@@ -295,16 +317,26 @@ describe("Agent hub Enter activation", () => {
 		await lifecycle.dispose();
 	});
 
-	it("a focus failure keeps the hub open and shows the error as a notice", async () => {
-		const message = 'Agent "X" is aborted and cannot be revived';
-		const { hub, doneCalls, renderRequested } = makeHub(() => Promise.reject(new Error(message)));
+	it("a non-revivable parked row stays read-only and Esc returns to the roster", async () => {
+		using tempDir = TempDir.createSync("@omp-agent-hub-non-revivable-");
+		const sessionFile = `${tempDir.path()}/Worker.jsonl`;
+		await Bun.write(sessionFile, "");
+		let focusCalls = 0;
+		const { hub } = makeHub(
+			async () => {
+				focusCalls++;
+			},
+			{ status: "parked", sessionFile },
+		);
 
+		revealParked(hub, AGENT_ID);
 		hub.handleInput("\r");
-		await renderRequested; // the rejection path requests a render after setting the notice
-
-		expect(doneCalls()).toBe(0);
-		const rendered = Bun.stripANSI(hub.render(120).join("\n"));
-		expect(rendered).toContain(message);
+		expect(renderedText(hub)).toContain("read-only — no reviver");
+		hub.handleInput("i");
+		expect(focusCalls).toBe(0);
+		expect(renderedText(hub)).toContain("input unavailable");
+		hub.handleInput("\x1b");
+		expect(renderedText(hub)).not.toContain(`Agent Hub > ${AGENT_ID}`);
 		hub.dispose();
 	});
 
@@ -438,7 +470,7 @@ describe("Agent hub Enter activation", () => {
 		hub.dispose();
 	});
 
-	it("cycles archived transcripts with brackets and Ctrl-s, then restores the drilled cursor on back", async () => {
+	it("cycles archived transcripts with brackets, then restores the drilled cursor on back", async () => {
 		using tempDir = TempDir.createSync("@omp-agent-hub-archived-cycle-");
 		const parentFile = `${tempDir.path()}/Main.jsonl`;
 		const childrenDir = `${tempDir.path()}/Main`;
@@ -491,23 +523,14 @@ describe("Agent hub Enter activation", () => {
 		expect(renderedText(hub)).toContain("Agent Hub > Older");
 		hub.handleInput("[");
 		expect(renderedText(hub)).toContain("Agent Hub > Newest");
-		hub.handleInput("\x13");
-		hub.handleInput("n");
-		expect(renderedText(hub)).toContain("Agent Hub > Older");
-		hub.handleInput("\x13");
-		hub.handleInput("p");
-		expect(renderedText(hub)).toContain("Agent Hub > Newest");
-		hub.handleInput("\x13");
-		hub.handleInput("n");
-		expect(renderedText(hub)).toContain("Agent Hub > Older");
 
 		hub.handleInput("h");
 		hub.handleInput("\r");
-		expect(renderedText(hub)).toContain("Agent Hub > Older");
+		expect(renderedText(hub)).toContain("Agent Hub > Newest");
 		hub.dispose();
 	});
 
-	it("selector controller restores focus to the editor after Enter focuses an agent", async () => {
+	it("selector controller keeps Enter in preview, then i focuses the editor", async () => {
 		const agents = AgentRegistry.global();
 		agents.register({
 			id: AGENT_ID,
@@ -516,8 +539,9 @@ describe("Agent hub Enter activation", () => {
 			parentId: "Main",
 			session: liveSession(),
 			sessionFile: null,
-			status: "running",
+			status: "idle",
 		});
+		AgentLifecycleManager.global().adopt(AGENT_ID, { idleTtlMs: 0 });
 
 		const editor = {};
 		let capturedHub: AgentHubOverlayComponent | undefined;
@@ -545,7 +569,7 @@ describe("Agent hub Enter activation", () => {
 			},
 			editor,
 			collabGuest: { agentRegistry: agents, hubRemote: undefined },
-			focusAgentSession: async id => {
+			focusAgentHubInput: async id => {
 				focusedIds.push(id);
 				focusResolved.resolve();
 			},
@@ -560,13 +584,109 @@ describe("Agent hub Enter activation", () => {
 		expect(focusTargets[0]).toBe(shownHub);
 
 		shownHub.handleInput("\r");
-		await focusResolved.promise;
+		expect(focusedIds).toEqual([]);
+		expect(hideCalls).toBe(0);
+		shownHub.handleInput("i");
 		await editorFocused.promise;
 
 		expect(focusedIds).toEqual([AGENT_ID]);
 		expect(hideCalls).toBe(1);
 		expect(focusTargets.at(-1)).toBe(editor);
 		shownHub.dispose();
+	});
+});
+
+describe("Agent hub external transcript preview", () => {
+	beforeAll(() => {
+		initTheme();
+	});
+
+	it("opens an external journal read-only with a friendly session title", async () => {
+		using tempDir = TempDir.createSync("@omp-agent-hub-external-preview-");
+		const previousControlDb = process.env.OMP_SESSION_CONTROL_DB;
+		process.env.OMP_SESSION_CONTROL_DB = `${tempDir.path()}/session-control.sqlite`;
+		const bus = new IrcExternalBus(`${tempDir.path()}/irc-bus.sqlite`);
+		let hub: AgentHubOverlayComponent | undefined;
+		try {
+			const sessionFile = `${tempDir.path()}/external.jsonl`;
+			const timestamp = "2026-07-16T08:00:00.000Z";
+			const entries = [
+				{
+					type: "session",
+					version: CURRENT_SESSION_VERSION,
+					id: "019f6699-32f0-7000-9000-000000000000",
+					timestamp,
+					cwd: `${tempDir.path()}/workstreams/alpha`,
+				},
+				{
+					type: "session_init",
+					id: "external-init",
+					parentId: null,
+					timestamp,
+					systemPrompt: "external",
+					task: "external preview",
+					tools: [],
+					subagent: {
+						agentId: "Main",
+						parentSessionFile: sessionFile,
+						parentSessionId: "external-parent",
+						displayName: "Main",
+						model: "openai-codex/gpt-5.6",
+						taskDepth: 1,
+						parentTaskPrefix: "Main",
+						isolated: false,
+					},
+				},
+				{
+					type: "message",
+					id: "external-message",
+					parentId: null,
+					timestamp,
+					message: { role: "user", content: "external transcript content", timestamp: Date.parse(timestamp) },
+				},
+			];
+			await Bun.write(sessionFile, `${entries.map(entry => JSON.stringify(entry)).join("\n")}\n`);
+			const rawHandle = "019f6699-32f0-7000-9000-000000000000/Main";
+			bus.registerPeer({
+				sessionId: "019f6699-32f0-7000-9000-000000000000",
+				name: rawHandle,
+				cwd: `${tempDir.path()}/workstreams/alpha`,
+				sessionFile,
+			});
+			let focusCalls = 0;
+			const agents = new AgentRegistry();
+			hub = new AgentHubOverlayComponent({
+				observers: new SessionObserverRegistry(),
+				hubKeys: [],
+				onDone: () => {},
+				requestRender: () => {},
+				registry: agents,
+				irc: new IrcBus(agents),
+				focusAgent: async () => {
+					focusCalls++;
+				},
+				externalIrc: bus,
+				externalSessionId: "current-test-session",
+			});
+
+			hub.handleInput("\r");
+			await waitForRenderedText(hub, "external transcript content");
+			let rendered = renderedText(hub);
+			expect(rendered).toContain("Agent Hub > Main · alpha ·");
+			expect(rendered).toContain("read-only — external session");
+			expect(rendered).toContain("external transcript content");
+			expect(rendered).not.toContain(rawHandle);
+
+			hub.handleInput("i");
+			rendered = renderedText(hub);
+			expect(rendered).toContain("input unavailable");
+			expect(focusCalls).toBe(0);
+		} finally {
+			hub?.dispose();
+			bus.close();
+			if (previousControlDb === undefined) delete process.env.OMP_SESSION_CONTROL_DB;
+			else process.env.OMP_SESSION_CONTROL_DB = previousControlDb;
+		}
 	});
 });
 
@@ -599,7 +719,7 @@ describe("Agent hub double-← gating", () => {
 			},
 			editor: {},
 			collabGuest: { agentRegistry: agents, hubRemote: undefined },
-			focusAgentSession: async () => {},
+			focusAgentHubInput: async () => {},
 			session: { getToolByName: () => undefined, extensionRunner: undefined },
 			sessionManager: { getCwd: () => "/tmp", getSessionFile: () => null, getSessionId: () => "session-test" },
 			hideThinkingBlock: false,

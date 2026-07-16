@@ -158,7 +158,8 @@ describe("Agent Hub dual-lane inspector", () => {
 				const previewTrackStart = inspectorStart >= 0 ? inspectorStart : transcriptStart;
 				const rosterStart = lines.findIndex(line => line.includes("Running (1)"));
 				expect(transcriptStart).toBeGreaterThan(0);
-				expect(rosterStart - previewTrackStart).toBe(rows - 9 - 6);
+				// 9 = header/footer chrome, 6 = compact roster, 2 = fixed selected-agent rail (HR-125)
+				expect(rosterStart - previewTrackStart).toBe(rows - 9 - 6 - 2);
 			}
 			hub.handleInput("j");
 			expect(text(hub, 120)).toContain("Full-height preview");
@@ -180,7 +181,7 @@ describe("Agent Hub dual-lane inspector", () => {
 			const rosterStart = initial.findIndex(line => line.includes("Running (1)"));
 			expect(inspectorStart).toBeGreaterThan(0);
 			expect(transcriptStart).toBeGreaterThan(inspectorStart);
-			expect(rosterStart - inspectorStart).toBe(40 - 9 - 6);
+			expect(rosterStart - inspectorStart).toBe(40 - 9 - 6 - 2);
 
 			hub.handleInput("]");
 			expect(text(hub, width)).toContain("Route [ / ] section");

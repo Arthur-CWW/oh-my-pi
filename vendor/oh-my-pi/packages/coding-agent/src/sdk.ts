@@ -109,9 +109,9 @@ import asyncResultTemplate from "./prompts/tools/async-result.md" with { type: "
 import lateDiagnosticTemplate from "./prompts/tools/lsp-late-diagnostic.md" with { type: "text" };
 import { AgentLifecycleManager } from "./registry/agent-lifecycle";
 import { type AgentQuotaAdmission, AgentRegistry, MAIN_AGENT_ID } from "./registry/agent-registry";
+import type { RunnerIdentity } from "./runner/protocol";
 import type { SessionRunner } from "./runner/session-runner";
 import { makeSessionRunnerLive } from "./runner/session-runner";
-import type { RunnerIdentity } from "./runner/protocol";
 import { createBlockedMediaConverter } from "./sdk-media-content";
 import {
 	collectEnvSecrets,
@@ -173,6 +173,7 @@ import {
 	summarizeDiscoverableTools,
 } from "./tool-discovery/tool-index";
 import {
+	applyToolFactoryOrigin,
 	BashTool,
 	BUILTIN_TOOLS,
 	computeEssentialBuiltinNames,
@@ -198,6 +199,7 @@ import {
 	setExcludedSearchProviders,
 	setPreferredImageProvider,
 	setPreferredSearchProvider,
+	setToolOrigin,
 	type Tool,
 	type ToolSession,
 	WebSearchTool,
@@ -235,7 +237,6 @@ type McpNotificationEntry = {
 	serverName: string;
 	uri: string;
 };
-
 
 function buildAsyncResultBatchMessage(entries: AsyncResultEntry[]): CustomMessage<AsyncResultDetails> | null {
 	if (entries.length === 0) return null;
@@ -345,6 +346,10 @@ function createPendingMCPTool(name: string): Tool {
 		name,
 		label,
 		description: `Pending MCP tool. ${message}`,
+		origin: {
+			kind: "mcp",
+			source: `${serverName ?? "unknown"}: pending discovery`,
+		},
 		parameters: {
 			type: "object",
 			properties: {},
@@ -936,6 +941,7 @@ function customToolToDefinition(tool: CustomTool): ToolDefinition {
 		name: tool.name,
 		label: tool.label,
 		description: tool.description,
+		origin: tool.origin,
 		parameters: tool.parameters,
 		hidden: tool.hidden,
 		deferrable: tool.deferrable,
@@ -1742,7 +1748,13 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 										const searchTool: Tool = new SearchToolBm25Tool(toolSession);
 										toolRegistry.set(
 											searchTool.name,
-											new ExtensionToolWrapper(wrapToolWithMetaNotice(searchTool), extensionRunner) as Tool,
+											new ExtensionToolWrapper(
+												applyToolFactoryOrigin(
+													wrapToolWithMetaNotice(searchTool),
+													BUILTIN_TOOLS.search_tool_bm25,
+												),
+												extensionRunner,
+											) as Tool,
 										);
 									}
 									await liveSession.setActiveToolsByName([
@@ -1806,16 +1818,22 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		// Add image tools when the active model or configured image providers can generate images.
 		const imageGenTools = await logger.time("getImageGenTools", () => getImageGenTools(modelRegistry, model));
 		if (imageGenTools.length > 0) {
-			customTools.push(...(imageGenTools as unknown as CustomTool[]));
+			customTools.push(
+				...imageGenTools.map(tool =>
+					setToolOrigin(tool as unknown as CustomTool, { kind: "builtin", source: "tools/image-gen.ts" }),
+				),
+			);
 		}
 
 		if (settings.get("speechgen.enabled")) {
-			customTools.push(ttsTool as unknown as CustomTool);
+			customTools.push(setToolOrigin(ttsTool as unknown as CustomTool, { kind: "builtin", source: "tools/tts.ts" }));
 		}
 
 		// Add web search tools
 		if (options.toolNames?.includes("web_search")) {
-			customTools.push(...getSearchTools());
+			customTools.push(
+				...getSearchTools().map(tool => setToolOrigin(tool, { kind: "builtin", source: "web/search/index.ts" })),
+			);
 		}
 
 		// Discover custom tools from `.omp/tools/`, `.claude/tools/`, plugins, etc.
@@ -1835,8 +1853,10 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		for (const { path, error } of customToolsLoadResult.errors) {
 			logger.error("Custom tool load failed", { path, error });
 		}
-		if (customToolsLoadResult.tools.length > 0) {
-			customTools.push(...customToolsLoadResult.tools.map(loaded => loaded.tool));
+		for (const loaded of customToolsLoadResult.tools) {
+			customTools.push(
+				setToolOrigin(loaded.tool, loaded.tool.origin ?? { kind: "extension", source: loaded.resolvedPath }),
+			);
 		}
 		// Forward the path list (NOT the loaded tools) to subagents so they
 		// re-bind under their own `CustomToolAPI` while skipping the FS scan.
@@ -2087,9 +2107,10 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			toolRegistry.set(tool.name, tool);
 		}
 		if (!toolRegistry.has("goal") && settings.get("goal.enabled")) {
-			const goalTool = await logger.time("createTools:goal:session", HIDDEN_TOOLS.goal, toolSession);
+			const goalFactory = HIDDEN_TOOLS.goal;
+			const goalTool = await logger.time("createTools:goal:session", goalFactory, toolSession);
 			if (goalTool) {
-				toolRegistry.set(goalTool.name, wrapToolWithMetaNotice(goalTool));
+				toolRegistry.set(goalTool.name, applyToolFactoryOrigin(wrapToolWithMetaNotice(goalTool), goalFactory));
 			}
 		}
 		for (const tool of wrappedExtensionTools) {
@@ -2124,9 +2145,13 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		if (!needsResolveTool) {
 			toolRegistry.delete("resolve");
 		} else if (!toolRegistry.has("resolve")) {
-			const resolveTool = await logger.time("createTools:resolve:session", HIDDEN_TOOLS.resolve, toolSession);
+			const resolveFactory = HIDDEN_TOOLS.resolve;
+			const resolveTool = await logger.time("createTools:resolve:session", resolveFactory, toolSession);
 			if (resolveTool) {
-				toolRegistry.set(resolveTool.name, wrapToolWithMetaNotice(resolveTool));
+				toolRegistry.set(
+					resolveTool.name,
+					applyToolFactoryOrigin(wrapToolWithMetaNotice(resolveTool), resolveFactory),
+				);
 			}
 		}
 
@@ -2141,7 +2166,10 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			const searchTool: Tool = new SearchToolBm25Tool(toolSession);
 			toolRegistry.set(
 				searchTool.name,
-				new ExtensionToolWrapper(wrapToolWithMetaNotice(searchTool), extensionRunner) as Tool,
+				new ExtensionToolWrapper(
+					applyToolFactoryOrigin(wrapToolWithMetaNotice(searchTool), BUILTIN_TOOLS.search_tool_bm25),
+					extensionRunner,
+				) as Tool,
 			);
 		}
 		let mcpDiscoveryEnabled = effectiveDiscoveryMode !== "off"; // back-compat: true when any discovery active
@@ -2153,7 +2181,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 				cwd: sessionManager.getCwd(),
 			})) as unknown as AgentTool | null;
 			if (!sshTool) return null;
-			const wrapped = wrapToolWithMetaNotice(sshTool);
+			const wrapped = applyToolFactoryOrigin(wrapToolWithMetaNotice(sshTool as Tool), BUILTIN_TOOLS.ssh);
 			return new ExtensionToolWrapper(wrapped, extensionRunner) as AgentTool;
 		};
 
@@ -2417,9 +2445,8 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 
 		const slashCommands = await slashCommandsPromise;
 
-		const convertToLlmWithBlockImages = createBlockedMediaConverter(
-			convertToLlm,
-			() => settings.get("images.blockImages"),
+		const convertToLlmWithBlockImages = createBlockedMediaConverter(convertToLlm, () =>
+			settings.get("images.blockImages"),
 		);
 
 		// Final convertToLlm: chain block-images filter with secret obfuscation
@@ -2954,8 +2981,15 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
  * AgentSession. The returned runner is the sole release authority.
  */
 export async function createSessionRunner(options: CreateSessionRunnerOptions): Promise<CreateSessionRunnerResult> {
-	const { ownership, runnerIdentity, sessionManager, mailboxCapacity, eventCapacity, childStopPolicy, ...sessionOptions } =
-		options;
+	const {
+		ownership,
+		runnerIdentity,
+		sessionManager,
+		mailboxCapacity,
+		eventCapacity,
+		childStopPolicy,
+		...sessionOptions
+	} = options;
 	let sessionResult: CreateAgentSessionResult | undefined;
 	let scope: Scope.Closeable | undefined;
 	let transferred = false;

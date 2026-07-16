@@ -28,8 +28,8 @@ import type {
 	SimpleStreamOptions,
 	Static,
 	TextContent,
-	UserContent,
 	TSchema,
+	UserContent,
 } from "@oh-my-pi/pi-ai";
 import type { OAuthCredentials, OAuthLoginCallbacks } from "@oh-my-pi/pi-ai/oauth/types";
 import type { AutocompleteItem, Component, EditorTheme, KeyId, TUI } from "@oh-my-pi/pi-tui";
@@ -59,6 +59,7 @@ import type {
 	WriteToolInput,
 } from "../../tools";
 import type { ApprovalMode } from "../../tools/approval";
+import type { ToolOrigin } from "../../tools/tool-origin";
 import type { EventBus } from "../../utils/event-bus";
 import type {
 	AgentEndEvent,
@@ -430,6 +431,8 @@ export interface ToolDefinition<TParams extends TSchema = TSchema, TDetails = un
 	label: string;
 	/** Description for LLM */
 	description: string;
+	/** Provenance copied onto the live registry entry. The extension path is the default. */
+	origin?: ToolOrigin;
 	/** Parameter schema (Zod, or TypeBox for legacy/extension compat). */
 	parameters: TParams;
 	/** If true, tool is excluded unless explicitly listed in --tools or agent's tools field */

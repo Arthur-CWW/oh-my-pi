@@ -64,6 +64,7 @@ import { SearchTool } from "./search";
 import { SearchToolBm25Tool } from "./search-tool-bm25";
 import { loadSshTool } from "./ssh";
 import { type TodoPhase, TodoTool } from "./todo";
+import { setToolOrigin, type ToolOrigin } from "./tool-origin";
 import { WriteTool } from "./write";
 import { YieldTool } from "./yield";
 
@@ -103,12 +104,13 @@ export * from "./search";
 export * from "./search-tool-bm25";
 export * from "./ssh";
 export * from "./todo";
+export * from "./tool-origin";
 export * from "./tts";
 export * from "./write";
 export * from "./yield";
 
-/** Tool type (AgentTool from pi-ai) */
-export type Tool = AgentTool<any, any, any>;
+/** Tool type carried in the session registry. Provenance is attached before registration. */
+export type Tool = AgentTool<any, any, any> & { origin?: ToolOrigin };
 
 export type ContextFileEntry = {
 	path: string;
@@ -369,7 +371,24 @@ export interface ToolSession {
 	getTelemetry?: () => AgentTelemetryConfig | undefined;
 }
 
-export type ToolFactory = (session: ToolSession) => Tool | null | Promise<Tool | null>;
+export type ToolFactory = ((session: ToolSession) => Tool | null | Promise<Tool | null>) & {
+	readonly origin?: ToolOrigin;
+};
+
+function builtinTool(
+	source: string,
+	factory: (session: ToolSession) => Tool | null | Promise<Tool | null>,
+): ToolFactory {
+	Object.defineProperty(factory, "origin", {
+		value: { kind: "builtin", source } satisfies ToolOrigin,
+		enumerable: true,
+	});
+	return factory as ToolFactory;
+}
+
+export function applyToolFactoryOrigin(tool: Tool, factory: ToolFactory): Tool {
+	return factory.origin ? setToolOrigin(tool, factory.origin) : tool;
+}
 
 export type BuiltinToolLoadMode = "essential" | "discoverable";
 
@@ -427,45 +446,45 @@ export function filterInitialToolsForDiscoveryAll(
  * `BUILTIN_TOOLS[name](session)` to construct a tool directly.
  */
 export const BUILTIN_TOOLS: Record<BuiltinToolName, ToolFactory> = {
-	read: s => new ReadTool(s),
-	bash: s => new BashTool(s),
-	edit: s => new EditTool(s),
-	ast_grep: s => new AstGrepTool(s),
-	ast_edit: s => new AstEditTool(s),
-	render_mermaid: s => new RenderMermaidTool(s),
-	ask: AskTool.createIf,
-	debug: DebugTool.createIf,
-	eval: s => new EvalTool(s),
-	ssh: loadSshTool,
-	github: GithubTool.createIf,
-	find: s => new FindTool(s),
-	search: s => new SearchTool(s),
-	lsp: LspTool.createIf,
-	inspect_image: s => new InspectImageTool(s),
-	browser: s => new BrowserTool(s),
-	checkpoint: CheckpointTool.createIf,
-	rewind: RewindTool.createIf,
-	task: s => TaskTool.create(s),
-	job: s => new JobTool(s),
-	irc: IrcTool.createIf,
-	todo: s => new TodoTool(s),
-	web_search: s => new WebSearchTool(s),
-	search_tool_bm25: SearchToolBm25Tool.createIf,
-	write: s => new WriteTool(s),
-	memory_edit: MemoryEditTool.createIf,
-	retain: MemoryRetainTool.createIf,
-	recall: MemoryRecallTool.createIf,
-	reflect: MemoryReflectTool.createIf,
-	learn: LearnTool.createIf,
-	manage_skill: ManageSkillTool.createIf,
+	read: builtinTool("tools/read.ts", s => new ReadTool(s)),
+	bash: builtinTool("tools/bash.ts", s => new BashTool(s)),
+	edit: builtinTool("edit/index.ts", s => new EditTool(s)),
+	ast_grep: builtinTool("tools/ast-grep.ts", s => new AstGrepTool(s)),
+	ast_edit: builtinTool("tools/ast-edit.ts", s => new AstEditTool(s)),
+	render_mermaid: builtinTool("tools/render-mermaid.ts", s => new RenderMermaidTool(s)),
+	ask: builtinTool("tools/ask.ts", AskTool.createIf),
+	debug: builtinTool("tools/debug.ts", DebugTool.createIf),
+	eval: builtinTool("tools/eval.ts", s => new EvalTool(s)),
+	ssh: builtinTool("tools/ssh.ts", loadSshTool),
+	github: builtinTool("tools/gh.ts", GithubTool.createIf),
+	find: builtinTool("tools/find.ts", s => new FindTool(s)),
+	search: builtinTool("tools/search.ts", s => new SearchTool(s)),
+	lsp: builtinTool("lsp/index.ts", LspTool.createIf),
+	inspect_image: builtinTool("tools/inspect-image.ts", s => new InspectImageTool(s)),
+	browser: builtinTool("tools/browser.ts", s => new BrowserTool(s)),
+	checkpoint: builtinTool("tools/checkpoint.ts", CheckpointTool.createIf),
+	rewind: builtinTool("tools/checkpoint.ts", RewindTool.createIf),
+	task: builtinTool("task/index.ts", s => TaskTool.create(s)),
+	job: builtinTool("tools/job.ts", s => new JobTool(s)),
+	irc: builtinTool("tools/irc.ts", IrcTool.createIf),
+	todo: builtinTool("tools/todo.ts", s => new TodoTool(s)),
+	web_search: builtinTool("web/search.ts", s => new WebSearchTool(s)),
+	search_tool_bm25: builtinTool("tools/search-tool-bm25.ts", SearchToolBm25Tool.createIf),
+	write: builtinTool("tools/write.ts", s => new WriteTool(s)),
+	memory_edit: builtinTool("tools/memory-edit.ts", MemoryEditTool.createIf),
+	retain: builtinTool("tools/memory-retain.ts", MemoryRetainTool.createIf),
+	recall: builtinTool("tools/memory-recall.ts", MemoryRecallTool.createIf),
+	reflect: builtinTool("tools/memory-reflect.ts", MemoryReflectTool.createIf),
+	learn: builtinTool("tools/learn.ts", LearnTool.createIf),
+	manage_skill: builtinTool("tools/manage-skill.ts", ManageSkillTool.createIf),
 };
 
 export const HIDDEN_TOOLS: Record<string, ToolFactory> = {
-	yield: s => new YieldTool(s),
-	report_finding: () => reportFindingTool,
-	report_tool_issue: s => createReportToolIssueTool(s),
-	resolve: s => new ResolveTool(s),
-	goal: s => new GoalTool(s),
+	yield: builtinTool("tools/yield.ts", s => new YieldTool(s)),
+	report_finding: builtinTool("tools/review.ts", () => reportFindingTool),
+	report_tool_issue: builtinTool("tools/report-tool-issue.ts", s => createReportToolIssueTool(s)),
+	resolve: builtinTool("tools/resolve.ts", s => new ResolveTool(s)),
+	goal: builtinTool("goals/tools/goal-tool.ts", s => new GoalTool(s)),
 };
 
 export type ToolName = BuiltinToolName;
@@ -618,14 +637,15 @@ export async function createTools(session: ToolSession, toolNames?: string[]): P
 	const baseResults = await Promise.all(
 		baseEntries.map(async ([name, factory]) => {
 			const tool = await logger.time(`createTools:${name}`, factory as ToolFactory, session);
-			return tool ? wrapToolWithMetaNotice(tool) : null;
+			return tool ? applyToolFactoryOrigin(wrapToolWithMetaNotice(tool), factory) : null;
 		}),
 	);
 	const tools = baseResults.filter((r): r is Tool => r !== null);
 	if (!tools.some(tool => tool.name === "resolve")) {
-		const resolveTool = await logger.time("createTools:resolve", HIDDEN_TOOLS.resolve, session);
+		const resolveFactory = HIDDEN_TOOLS.resolve;
+		const resolveTool = await logger.time("createTools:resolve", resolveFactory, session);
 		if (resolveTool) {
-			tools.push(wrapToolWithMetaNotice(resolveTool));
+			tools.push(applyToolFactoryOrigin(wrapToolWithMetaNotice(resolveTool), resolveFactory));
 		}
 	}
 
@@ -640,9 +660,10 @@ export async function createTools(session: ToolSession, toolNames?: string[]): P
 		const activeBuiltinNames = tools
 			.map(t => t.name)
 			.filter(name => (name in BUILTIN_TOOLS || name in HIDDEN_TOOLS) && name !== "report_tool_issue");
+		const qaFactory = HIDDEN_TOOLS.report_tool_issue;
 		const qaTool = createReportToolIssueTool(session, activeBuiltinNames);
 		if (qaTool) {
-			tools.push(wrapToolWithMetaNotice(qaTool));
+			tools.push(applyToolFactoryOrigin(wrapToolWithMetaNotice(qaTool), qaFactory));
 		}
 	}
 

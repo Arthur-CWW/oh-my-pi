@@ -53,6 +53,7 @@ import { setSessionTerminalTitle } from "../../utils/title-generator";
 import { AgentDashboard } from "../components/agent-dashboard";
 import { createAgentHubRolloutDataSource } from "../components/agent-hub-rollout-state";
 import { AgentHubOverlayComponent } from "../components/agent-hub";
+import { BookmarksSelectorComponent } from "../components/bookmarks-selector";
 import { AssistantMessageComponent } from "../components/assistant-message";
 import { CopySelectorComponent } from "../components/copy-selector";
 import { ExtensionDashboard } from "../components/extensions";
@@ -66,6 +67,7 @@ import { SessionSelectorComponent } from "../components/session-selector";
 import { ToolExecutionComponent } from "../components/tool-execution";
 import { TranscriptBlock } from "../components/transcript-container";
 import { TreeSelectorComponent } from "../components/tree-selector";
+import { BookmarksStore, type BookmarkRecord, type BookmarkTarget } from "../../session/bookmarks";
 import { UserMessageSelectorComponent } from "../components/user-message-selector";
 import type { SessionObserverRegistry } from "../session-observer-registry";
 import type { TranscriptDisplayContext } from "../transcript-display";
@@ -100,6 +102,10 @@ export function getAgentHubTurnStatus(registry: AgentRegistry, agentId: string):
 }
 
 export class SelectorController {
+	readonly #bookmarks = new BookmarksStore();
+	#activeHub: AgentHubOverlayComponent | undefined;
+	#activeHubOverlay: OverlayHandle | undefined;
+
 	constructor(private ctx: InteractiveModeContext) {}
 
 	async #refreshOAuthProviderAuthState(): Promise<void> {
@@ -1203,7 +1209,92 @@ export class SelectorController {
 		});
 	}
 
-	showAgentHub(observers: SessionObserverRegistry, options?: { requireContent?: boolean }): void {
+	#parseBookmarkArgs(args: readonly string[]): { tag?: string; note?: string } {
+		const tagParts: string[] = [];
+		let note: string | undefined;
+		for (let index = 0; index < args.length; index++) {
+			const arg = args[index]!;
+			if (arg === "--note") {
+				note = args.slice(index + 1).join(" ").trim() || undefined;
+				break;
+			}
+			if (arg.startsWith("--note=")) {
+				note = arg.slice("--note=".length).trim() || undefined;
+				continue;
+			}
+			tagParts.push(arg);
+		}
+		const tag = tagParts.join(" ").trim();
+		return { ...(tag ? { tag } : {}), ...(note ? { note } : {}) };
+	}
+
+	async bookmarkCurrent(args: readonly string[]): Promise<void> {
+		const target =
+			this.#activeHub?.getSelectedBookmarkTarget() ??
+			(() => {
+				const sessionId = this.ctx.sessionManager.getSessionId();
+				const title =
+					this.ctx.viewSession.sessionManager.getSessionName() ??
+					this.ctx.viewSession.sessionManager.getHeader()?.title ??
+					sessionId;
+				const agentId = this.ctx.focusedAgentId;
+				return agentId
+					? ({ kind: "agent", sessionId, agentId, title } satisfies BookmarkTarget)
+					: ({ kind: "session", sessionId, title } satisfies BookmarkTarget);
+			})();
+		const { tag, note } = this.#parseBookmarkArgs(args);
+		try {
+			const record = await this.#bookmarks.upsert({
+				target,
+				cwd: this.ctx.sessionManager.getCwd(),
+				tag,
+				note,
+			});
+			this.ctx.showStatus(`Bookmarked ${record.target.title}${record.tag ? ` [${record.tag}]` : ""}`);
+		} catch (error) {
+			this.ctx.showError(`Bookmark failed: ${error instanceof Error ? error.message : String(error)}`);
+		}
+	}
+
+	showBookmarks(): void {
+		void this.#bookmarks.list().then(
+			entries => {
+				let overlayHandle: OverlayHandle | undefined;
+				const dismiss = () => {
+					overlayHandle?.hide();
+					this.ctx.ui.setFocus(this.#activeHub ?? this.ctx.editor);
+					this.ctx.ui.requestRender();
+				};
+				const jump = (record: BookmarkRecord) => {
+					if (!this.#activeHub) {
+						this.ctx.showAgentHub({
+							initialAgentId: record.target.kind === "agent" ? record.target.agentId : undefined,
+						});
+					}
+					if (!this.#activeHub?.selectBookmarkTarget(record.target)) {
+						this.ctx.showStatus(`Bookmark target unavailable: ${record.target.title}`);
+						return;
+					}
+					dismiss();
+				};
+				const selector = new BookmarksSelectorComponent(entries, jump, dismiss);
+				overlayHandle = this.ctx.ui.showOverlay(selector, {
+					anchor: "bottom-center",
+					width: "100%",
+					maxHeight: "50%",
+					margin: 0,
+				});
+				this.ctx.ui.setFocus(selector);
+				this.ctx.ui.requestRender();
+			},
+			error => this.ctx.showError(`Could not read bookmarks: ${error instanceof Error ? error.message : String(error)}`),
+		);
+	}
+
+	showAgentHub(
+		observers: SessionObserverRegistry,
+		options?: { requireContent?: boolean; initialAgentId?: string; openPreview?: boolean },
+	): void {
 		const hubKeys = [
 			...this.ctx.keybindings.getKeys("app.agents.hub"),
 			...this.ctx.keybindings.getKeys("app.session.observe"),
@@ -1214,6 +1305,10 @@ export class SelectorController {
 		const done = () => {
 			hub?.dispose();
 			overlayHandle?.hide();
+			if (this.#activeHub === hub) {
+				this.#activeHub = undefined;
+				this.#activeHubOverlay = undefined;
+			}
 			this.ctx.ui.setFocus(this.ctx.editor);
 			this.ctx.ui.requestRender();
 		};
@@ -1240,11 +1335,18 @@ export class SelectorController {
 			rollout: createAgentHubRolloutDataSource(),
 			ui: this.ctx.ui,
 			getTool: name => this.ctx.session.getToolByName(name),
-			getMessageRenderer: type => this.ctx.session.extensionRunner?.getMessageRenderer(type),
+			initialAgentId: options?.initialAgentId ?? this.ctx.focusedAgentId,
 			cwd: this.ctx.sessionManager.getCwd(),
 			hideThinkingBlock: () => this.ctx.hideThinkingBlock,
-			focusAgent: id => this.ctx.focusAgentSession(id),
-			initialAgentId: this.ctx.focusedAgentId,
+			focusAgent: id => this.ctx.focusAgentHubInput(id),
+			openErrors: () => {
+				done();
+				this.ctx.handleErrorsCommand();
+			},
+			openBookmarks: () => {
+				done();
+				this.showBookmarks();
+			},
 			sessionId: this.ctx.sessionManager.getSessionId(),
 			parentSessionFile: this.ctx.sessionManager.getSessionFile(),
 		});
@@ -1254,6 +1356,8 @@ export class SelectorController {
 			hub.dispose();
 			return;
 		}
+		if (options?.openPreview && options.initialAgentId) hub.openChat(options.initialAgentId);
+		this.#activeHub = hub;
 
 		overlayHandle = this.ctx.ui.showOverlay(hub, {
 			anchor: "bottom-center",
@@ -1261,6 +1365,7 @@ export class SelectorController {
 			maxHeight: "100%",
 			margin: 0,
 		});
+		this.#activeHubOverlay = overlayHandle;
 		this.ctx.ui.setFocus(hub);
 		this.ctx.ui.requestRender();
 	}

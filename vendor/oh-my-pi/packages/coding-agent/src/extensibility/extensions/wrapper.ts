@@ -6,6 +6,7 @@ import type { ImageContent, Static, TextContent, TSchema } from "@oh-my-pi/pi-ai
 import type { Settings } from "../../config/settings";
 import type { Theme } from "../../modes/theme/theme";
 import { type ApprovalMode, formatApprovalPrompt, requiresApproval } from "../../tools/approval";
+import { setToolOrigin } from "../../tools/tool-origin";
 import { applyToolProxy } from "../tool-proxy";
 import type { ExtensionRunner } from "./runner";
 import type { RegisteredTool, ToolCallEventResult } from "./types";
@@ -27,6 +28,12 @@ export class RegisteredToolAdapter implements AgentTool<any, any, any> {
 		private registeredTool: RegisteredTool,
 		private runner: ExtensionRunner,
 	) {
+		if (!registeredTool.definition.origin) {
+			setToolOrigin(registeredTool.definition, {
+				kind: "extension",
+				source: registeredTool.extensionPath,
+			});
+		}
 		applyToolProxy(registeredTool.definition, this);
 
 		// Only define render methods when the underlying definition provides them.

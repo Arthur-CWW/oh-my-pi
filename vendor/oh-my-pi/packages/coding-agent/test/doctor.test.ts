@@ -5,6 +5,7 @@ import { formatDoctorReport, runDoctor } from "../src/commands/doctor";
 import { IrcExternalBus } from "../src/irc/bus-external";
 import { createFleetCapability } from "../src/session/fleet-capability";
 import { CURRENT_SESSION_CONTROL_PROTOCOL } from "../src/session/session-control";
+import { registerKernelOwnership } from "../src/eval/kernel-ownership";
 
 const NOW = Date.parse("2026-07-15T12:00:00.000Z");
 const BUILD_DIGEST = "a".repeat(64);
@@ -106,4 +107,45 @@ describe("omp doctor", () => {
 		expect(verify.listPeers({ includeStale: true }).map(peer => peer.sessionId)).toEqual(["live-session"]);
 		verify.close();
 	});
+	it("reports orphaned kernels with owner attribution and spares live owners", async () => {
+		using tempDir = TempDir.createSync("@omp-doctor-kernel-");
+		const dead = await registerKernelOwnership({
+			kind: "python",
+			kernelId: "dead-kernel",
+			sessionId: "dead-session",
+			ownerPid: 999_991,
+			kernelPid: 999_992,
+			root: tempDir.path(),
+		});
+		const live = await registerKernelOwnership({
+			kind: "node-repl",
+			kernelId: "live-kernel",
+			sessionId: "live-session",
+			ownerPid: process.pid,
+			kernelPid: process.pid,
+			root: tempDir.path(),
+		});
+
+		const preview = await runDoctor({
+			kernelOwnershipRoot: tempDir.path(),
+			isProcessAlive: pid => pid === process.pid,
+		});
+		expect(preview.findings.filter(item => item.kind === "orphaned-kernels")).toMatchObject([
+			{ evidence: { sessionId: "dead-session", ownerPid: 999_991 }, safeToApply: true, applied: false },
+		]);
+		expect(preview.actions.orphanedKernels).toBe(1);
+		expect(await Bun.file(dead.path).exists()).toBe(true);
+		expect(await Bun.file(live.path).exists()).toBe(true);
+
+		const applied = await runDoctor({
+			kernelOwnershipRoot: tempDir.path(),
+			apply: true,
+			isProcessAlive: pid => pid === process.pid,
+		});
+		expect(applied.actions.kernelsReaped).toBe(1);
+		expect(applied.findings.find(item => item.kind === "orphaned-kernels")?.applied).toBe(true);
+		expect(await Bun.file(dead.path).exists()).toBe(false);
+		expect(await Bun.file(live.path).exists()).toBe(true);
+		await live.unregister();
+	}, 20_000);
 });

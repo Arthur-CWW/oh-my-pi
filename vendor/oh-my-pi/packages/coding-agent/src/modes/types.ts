@@ -121,9 +121,13 @@ export interface InteractiveModeContext {
 	readonly focusedAgentId: string | undefined;
 	/** Focus the main view on an agent's live session (delegates to SessionFocusController.focusAgent). */
 	focusAgentSession(id: string): Promise<void>;
+	/** Focus an attachable Agent Hub preview in the main composer and remember the preview return target. */
+	focusAgentHubInput(id: string): Promise<void>;
+	/** Return a composer entered from Agent Hub to its transcript preview. */
+	returnToAgentHubPreview(): boolean;
 	/** Focus the focused agent's parent session, falling back to main (delegates to focusParent). */
 	focusParentSession(): Promise<void>;
-	handleErrorsCommand(args?: string): void;
+	handleErrorsCommand(args?: string, output?: (message: string) => void): void;
 	closeUnpinnedErrorsPanel(): void;
 	/** Return the view to the main session (delegates to SessionFocusController.unfocus). */
 	unfocusSession(): Promise<void>;
@@ -293,7 +297,7 @@ export interface InteractiveModeContext {
 	handleUsageCommand(reports?: UsageReport[] | null): Promise<void>;
 	handleChangelogCommand(showFull?: boolean): Promise<void>;
 	handleHotkeysCommand(): void;
-	handleToolsCommand(): void;
+	handleToolsCommand(showOutput?: (message: string) => void): void;
 	handleContextCommand(): void;
 	handleDumpCommand(isRaw?: boolean): void;
 	handleAdvisorDumpCommand(isRaw?: boolean): void;
@@ -339,7 +343,9 @@ export interface InteractiveModeContext {
 	showProviderSetup(): Promise<void>;
 	showHookConfirm(title: string, message: string): Promise<boolean>;
 	showDebugSelector(): Promise<void>;
-	showAgentHub(options?: { requireContent?: boolean }): void;
+	showAgentHub(options?: { requireContent?: boolean; initialAgentId?: string; openPreview?: boolean }): void;
+	bookmarkCurrent(args: readonly string[]): Promise<void>;
+	showBookmarks(): void;
 	showPrimitivesInspector(initialCategory?: PrimitiveCategoryId): Promise<void>;
 	resetObserverRegistry(): void;
 

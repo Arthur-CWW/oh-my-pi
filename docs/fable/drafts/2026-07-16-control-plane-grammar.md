@@ -1,6 +1,6 @@
-# HR-125 Control Plane grammar — veto draft
+# HR-125 Control Plane grammar — approved and implemented
 
-Status: proposal only; no bindings or UI are changed. Scope is the Control Plane roster, selected-agent detail/transcript, and docks. “Orchestrator” means a root/Main-level group, not every descendant.
+Status: implemented 2026-07-16. Scope is the Control Plane roster, selected-agent detail/transcript, and docks. “Orchestrator” means a root/Main-level group, not every descendant.
 
 ## 1. Navigation and action matrix
 
@@ -47,6 +47,7 @@ Rule: selection motions affect the roster; scroll motions affect only the explic
 |---|---|---|
 | `gx` | Go to e**x**ceptions: open/focus the existing docked HR-113 errors projection, scoped to selected agent when possible, otherwise fleet-wide | Existing dock; **S–M** wiring |
 | `gm` | Go to **m**essages: open the selected agent’s existing in-Hub transcript (live, parked, external, or archived) | Existing transcript; **S** |
+| `gb` | Go to **b**ookmarks: open the HR-139 durable bookmarks surface | HR-139 integration; **S** |
 | `gt` | Go to **t**odos | No Control Plane todo projection exists yet; **RESERVE**, do not bind or advertise until HR-118 supplies it; later **M–L** |
 | `gr` | Go **r**efresh: reread roster, rollout, error, and transcript projections without mutating lifecycle | Projection refresh exists internally, no key; **S** |
 | `gs` | Go **s**end: for a live internal agent, attach/focus its existing main composer; for external show the existing `omp irc send …` hint; disabled with reason for archived/read-only rows | No inline Hub composer is invented; **M** |
@@ -66,19 +67,21 @@ Unknown `g?` cancels the prefix, shows `unknown Control Plane chord: g?` briefly
 
 **Implementation cost: M.** HR-115 rollout and HR-113 error data already exist; work is projection/placement, a shared animation clock, and focused rendering tests.
 
-## 4. Taste questions (Arthur decides)
+## 4. Resolved taste questions
 
-1. **Arrow parity:** recommend **Yes**—`↑/↓` mirror `k/j` selection in the roster; detail scroll requires detail focus. No keeps arrows as detail scroll.
-2. **Chord timeout:** recommend **Yes**—keep the existing 750 ms `g` timeout, show a transient `g…` cue, and make timeout cancel silently. No means choose 500 ms or wait indefinitely.
-3. **`?` versus `:help`:** recommend **Yes**—`?` is the contextual metadata+keys sheet; `:help` remains global command documentation and links back to `?`. No means `?` metadata only, duplicating keys in `:help`.
+1. **Arrow parity: Yes.** `↑/↓` mirror `k/j` selection in the roster; detail scroll requires detail focus.
+2. **Chord timeout: no timeout.** The proposed 750 ms timeout was rejected. Neovim defaults to 1000 ms, while Zed vim-mode and Helix wait indefinitely and show pending keys. Because `g` has no standalone action here, Control Plane waits indefinitely, immediately shows a bottom-right pending indicator with the live continuations, and cancels on `Esc` or any unbound second key. There is no timer and therefore no latency race.
+3. **`?` versus `:help`: Yes.** `?` is the contextual selected-agent metadata plus key sheet. `:help` remains global command documentation and points back to `?`.
 
-**Implementation cost: S** once the choices are fixed; changing timeout/help ownership later is cheap, but arrow semantics alter muscle memory and tests.
+The colon-command output decision is also resolved: every textual colon result uses one bounded, bottom-anchored absolute overlay above the input line. Any key (including `Esc`) dismisses it, and showing it never changes transcript scroll position.
 
-## Veto checklist (mark Yes or No)
+## Resolved implementation checklist
 
-- Navigation/action matrix, including `j/k`, `n/p`, and retirement of `H/L` + `Ctrl-S n/p`: **Yes / No**
-- `g` namespace (`gx`, `gm`, reserved `gt`, `gr`, `gs`, existing `gg/gj/gk`): **Yes / No**
-- Live-status spinner, fixed selected-agent rail, and rollout/error placement: **Yes / No**
-- Q1 recommendation—arrow parity with `j/k`: **Yes / No**
-- Q2 recommendation—750 ms chord timeout with `g…` cue: **Yes / No**
-- Q3 recommendation—`?` contextual metadata+keys; `:help` global: **Yes / No**
+- [x] **Navigation/action matrix:** roster `j/k` and arrows select rows; `n/p` wrap across orchestrator roots; `u/d` and configured Ctrl-D/Ctrl-U half-page the focused viewer (`interaction-registry.ts:116-151,255-289`; `agent-hub.ts:1094-1102,2219-2243`).
+- [x] **Retired aliases:** no `H/L` root navigation or `Ctrl-S n/p` prefix remains; the registry regression rejects both (`agent-hub-key-grammar.test.ts:140-148`).
+- [x] **Shared `g` namespace:** `gg/gj/gk/gx/gm/gr/gs/gb` share one parser, `gt` remains unbound, `gx` targets the errors dock, and `gb` opens `:bookmarks` (`agent-hub-viewer-sequence.ts:31-68`; `agent-hub.ts:2085-2171`).
+- [x] **No-timeout pending cue:** `g` waits indefinitely, renders live continuations at the footer edge, rejects unknown chords, and Esc cancels (`agent-hub-viewer-sequence.ts:25-68`; `agent-hub.ts:119-120,1997,2584,2606`).
+- [x] **Live status and fixed rail:** one shared timer animates visible running/working, retry, and active rollout rows; the selected-agent rail stays above prompt/transcript; rollout/error priority, digest, age, and reasons are projected inline (`agent-hub.ts:1332-1429,1881-2001,2496-2571`; `agent-hub-selected-state.ts:148-174,241-310`).
+- [x] **Contextual/global help split:** `?` renders selected identity/state/prompt source/route/model/version plus contextual keys; `:help` remains global and points back to `?` (`agent-hub.ts:1432-1475,2302-2305,2838-2841`; `command-registry.ts:101-138`).
+- [x] **Shared colon-output overlay:** textual results from `:route`, `:loopstats`, `:tabs`, `:errors`, and every `showFeedback` command use the bounded bottom overlay; it is dismissible by any key and does not change transcript scroll (`command-line.ts:236-255,264-345`; `command-mode.test.ts:242-304`).
+- [x] **Focused proof:** `command-mode`, key grammar, Hub activation, bookmarks, and selected-state tests pass; coding-agent `check:types` passes (2026-07-16).

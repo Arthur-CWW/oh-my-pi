@@ -5,13 +5,14 @@
  * block self-clears. Sync task spawns and eval `agent()` spawns are excluded:
  * their progress is already rendered inline (tool block / eval cell).
  */
-import { beforeAll, describe, expect, it } from "bun:test";
+import { beforeAll, describe, expect, it, setSystemTime, vi } from "bun:test";
 import { renderSubagentHudLines } from "@oh-my-pi/pi-coding-agent/modes/interactive-mode";
 import {
 	type ObservableSession,
 	SessionObserverRegistry,
 } from "@oh-my-pi/pi-coding-agent/modes/session-observer-registry";
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
+import { AgentRegistry, MAIN_AGENT_ID } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import {
 	type AgentProgress,
 	type SubagentLifecyclePayload,
@@ -155,6 +156,60 @@ describe("subagent HUD lines", () => {
 		expect(out).not.toContain("Inline");
 	});
 
+	it("rehydrates a rebuilt roster from AgentRegistry without progress events", () => {
+		const agents = new AgentRegistry();
+		agents.register({
+			id: MAIN_AGENT_ID,
+			displayName: "Main Session",
+			kind: "main",
+			session: null,
+			status: "running",
+		});
+		agents.register({
+			id: "QuietRoot",
+			displayName: "Quiet root",
+			kind: "sub",
+			parentId: MAIN_AGENT_ID,
+			session: null,
+			status: "running",
+		});
+		agents.register({
+			id: "QuietRoot.ParkedLeaf",
+			displayName: "Parked leaf",
+			kind: "sub",
+			parentId: "QuietRoot",
+			session: null,
+			status: "parked",
+		});
+		agents.register({
+			id: "IdleSibling",
+			displayName: "Idle sibling",
+			kind: "sub",
+			parentId: MAIN_AGENT_ID,
+			session: null,
+			status: "idle",
+		});
+
+		const first = new SessionObserverRegistry();
+		first.subscribeToAgentRegistry(agents);
+		const expected = agents
+			.list()
+			.filter(ref => ref.kind === "sub")
+			.map(ref => ref.id);
+		expect(first.getSessions().filter(session => session.kind === "subagent").map(session => session.id)).toEqual(expected);
+		expect(first.getSessions().find(session => session.id === "QuietRoot.ParkedLeaf")).toMatchObject({
+			registryStatus: "parked",
+			parentAgentId: "QuietRoot",
+		});
+		first.dispose();
+
+		const rebuilt = new SessionObserverRegistry();
+		rebuilt.subscribeToAgentRegistry(agents);
+		expect(rebuilt.getSessions().filter(session => session.kind === "subagent").map(session => session.id)).toEqual(expected);
+		expect(render(rebuilt.getSessions())).toContain("QuietRoot: Quiet root");
+		rebuilt.dispose();
+	});
+
 	it("renders nested ids as a breadcrumb and truncates long descriptions to the viewport", () => {
 		const out = render([makeSession({ id: "Anna.Bob", description: `start ${"x".repeat(300)} end` })], 60);
 		expect(out).toContain("Anna>Bob:");
@@ -200,4 +255,40 @@ describe("subagent HUD lines", () => {
 
 		expect(activeIds()).toEqual(["SelectorSurfaces", "BlastRadius", "VariantsSurvey"]);
 	});
+	it("computes a sliding token rate and marks an event-stale running row", () => {
+		vi.useFakeTimers();
+		const registry = new SessionObserverRegistry();
+		const eventBus = new EventBus();
+		registry.subscribeToEventBus(eventBus);
+		const start = new Date("2025-01-01T00:00:00.000Z");
+		setSystemTime(start);
+		try {
+			eventBus.emit(TASK_SUBAGENT_LIFECYCLE_CHANNEL, makeLifecycle("RateWorker", 0, "rate work", true));
+			const progress = (tokens: number): SubagentProgressPayload => ({
+				...makeProgressPayload("RateWorker", 0, "rate work", true),
+				progress: makeProgress({ id: "RateWorker", index: 0, description: "rate work", tokens }),
+			});
+			eventBus.emit(TASK_SUBAGENT_PROGRESS_CHANNEL, progress(100));
+			setSystemTime(new Date(start.getTime() + 15_000));
+			eventBus.emit(TASK_SUBAGENT_PROGRESS_CHANNEL, progress(250));
+
+			const live = registry.getSessions().find(session => session.id === "RateWorker");
+			expect(live?.tokenRate).toBeCloseTo(10, 5);
+			expect(live?.tokenRateStuck).toBe(false);
+			expect(render(registry.getSessions())).toContain("10.0t/s");
+
+			setSystemTime(new Date(start.getTime() + 61_000));
+			const decayed = registry.getSessions().find(session => session.id === "RateWorker");
+			expect(decayed).toMatchObject({ tokenRate: 0, tokenRateStuck: false });
+
+			setSystemTime(new Date(start.getTime() + 76_000));
+			const stale = registry.getSessions().find(session => session.id === "RateWorker");
+			expect(stale).toMatchObject({ tokenRate: 0, tokenRateStuck: true });
+			expect(render(registry.getSessions())).toContain("RUN+0");
+		} finally {
+			registry.dispose();
+			vi.useRealTimers();
+		}
+	});
+
 });

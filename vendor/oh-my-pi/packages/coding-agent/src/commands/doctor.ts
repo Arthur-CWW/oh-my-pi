@@ -13,6 +13,13 @@ import {
 } from "../session/release-registry-validation";
 import { SessionControlBus } from "../session/session-control";
 import { loadEntriesFromFile } from "../session/session-loader";
+import {
+	inspectKernelProcess,
+	isKernelProcessMatch,
+	listKernelOwnershipRecords,
+	removeKernelOwnershipMarker,
+	terminateKernelProcess,
+} from "../eval/kernel-ownership";
 
 const DEFAULT_PEER_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const DEFAULT_RECEIPT_STALE_MS = 10 * 60 * 1000;
@@ -23,6 +30,7 @@ export type DoctorSeverity = "error" | "warning" | "info";
 export type DoctorFindingKind =
 	| "dead-stale-peer"
 	| "orphaned-test-temp-row"
+	| "orphaned-kernels"
 	| "legacy-binary-session"
 	| "journal-tail"
 	| "promote-lock"
@@ -60,6 +68,8 @@ export interface DoctorReport {
 		readonly pruneCandidates: number;
 		readonly peersPruned: number;
 		readonly stalePromoteLockCleared: boolean;
+		readonly orphanedKernels: number;
+		readonly kernelsReaped: number;
 	};
 }
 
@@ -72,6 +82,8 @@ export interface DoctorOptions {
 	readonly promoteLockPath?: string;
 	readonly peerRetentionMs?: number;
 	readonly receiptStaleMs?: number;
+	/** Override the profile-scoped eval-kernel marker root in tests/embedded hosts. */
+	readonly kernelOwnershipRoot?: string;
 	readonly lockStaleMs?: number;
 	readonly release?: ReleaseRegistryValidationOptions;
 	readonly isProcessAlive?: (pid: number) => boolean;
@@ -351,6 +363,54 @@ async function receiptFindings(
 	}
 }
 
+async function kernelFindings(options: DoctorOptions, alive: (pid: number) => boolean): Promise<{
+	findings: DoctorFinding[];
+	orphaned: number;
+	reaped: number;
+}> {
+	const findings: DoctorFinding[] = [];
+	let reaped = 0;
+	for (const marker of await listKernelOwnershipRecords(options.kernelOwnershipRoot)) {
+		const record = marker.record;
+		if (alive(record.ownerPid)) continue;
+		const processInfo = alive(record.kernelPid)
+			? inspectKernelProcess(record.kernelPid)
+			: { alive: false, argv: [] as readonly string[], ppid: null };
+		const processMatches = isKernelProcessMatch(record, processInfo);
+		const safeToApply = !processInfo.alive || processMatches;
+		let applied = false;
+		if (options.apply === true && safeToApply) {
+			if (processInfo.alive && processMatches && record.kernelPid !== process.pid) {
+				await terminateKernelProcess(record.kernelPid);
+			}
+			applied = await removeKernelOwnershipMarker(marker.path);
+			if (applied) reaped += 1;
+		}
+		findings.push(
+			finding(
+				"orphaned-kernels",
+				"warning",
+				{
+					kernelId: record.kernelId,
+					kind: record.kind,
+					sessionId: record.sessionId,
+					ownerPid: record.ownerPid,
+					ownerAlive: false,
+					kernelPid: record.kernelPid,
+					kernelAlive: processInfo.alive,
+					processMatches,
+					markerPath: marker.path,
+					rssBytes: record.rssBytes ?? null,
+				},
+				"omp doctor --apply",
+				safeToApply,
+				applied,
+			),
+		);
+	}
+	return { findings, orphaned: findings.length, reaped };
+}
+
 export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorReport> {
 	const nowMs = options.nowMs ?? Date.now();
 	const alive = options.isProcessAlive ?? isProcessAlive;
@@ -362,6 +422,8 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorRepo
 		isProcessAlive: alive,
 	});
 	const findings: DoctorFinding[] = [];
+	const kernels = await kernelFindings(options, alive);
+	findings.push(...kernels.findings);
 	for (const [candidateIndex, candidate] of prune.candidates.entries()) {
 		const evidence = {
 			sessionId: candidate.peer.sessionId,
@@ -384,9 +446,27 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorRepo
 		all: true,
 		nowMs,
 	});
+	let staleLegacyRows = 0;
 	for (const row of statusRows) {
 		if (row.compatibility === "compatible") continue;
+		// Only LIVE legacy sessions are actionable; dead historical peer rows are
+		// registry archaeology and would flood the report (observed: 6,105 rows).
+		if (row.freshness !== "fresh") {
+			staleLegacyRows += 1;
+			continue;
+		}
 		findings.push(legacyFinding(row));
+	}
+	if (staleLegacyRows > 0) {
+		findings.push(
+			finding(
+				"legacy-binary-session",
+				"info",
+				{ staleLegacyRows, note: "historical disconnected peer rows aggregated; prune handles expiry" },
+				"omp fleet prune --apply",
+				false,
+			),
+		);
 	}
 
 	const sessionsRoot = options.sessionsRoot ?? path.join(getAgentDir(), "sessions");
@@ -452,6 +532,8 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorRepo
 			pruneCandidates: prune.candidates.length,
 			peersPruned: prune.deleted,
 			stalePromoteLockCleared,
+			orphanedKernels: kernels.orphaned,
+			kernelsReaped: kernels.reaped,
 		},
 	};
 }
@@ -482,7 +564,7 @@ export default class Doctor extends Command {
 	static args = {};
 
 	static flags = {
-		apply: Flags.boolean({ description: "Apply only safe peer-prune and dead-lock repairs", default: false }),
+		apply: Flags.boolean({ description: "Apply only safe peer-prune, dead-lock, and orphaned-kernel repairs", default: false }),
 	};
 
 	static examples = ["omp doctor", "omp doctor --apply"];
