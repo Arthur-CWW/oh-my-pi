@@ -1,0 +1,55 @@
+{
+  "method": "librosa signal summary; MFCC cosine is a coarse timbre proxy, not a perceptual speaker score",
+  "files": {
+    "jimeng_ref": {
+      "duration_seconds": 29.0,
+      "peak_amplitude": 0.610443115234375,
+      "clipped_sample_fraction": 0.0,
+      "pause_frame_fraction_below_minus_40_db": 0.19558823529411765,
+      "spectral_centroid_hz_mean": 2937.791856424437,
+      "spectral_flatness_mean": 0.04944426193833351,
+      "voiced_frame_fraction": 0.6816176470588236,
+      "f0_median_hz": 121.9969395672486,
+      "f0_iqr_hz": 32.967167588748524
+    },
+    "kokoro_ref": {
+      "duration_seconds": 29.0,
+      "peak_amplitude": 0.49847412109375,
+      "clipped_sample_fraction": 0.0,
+      "pause_frame_fraction_below_minus_40_db": 0.20073529411764707,
+      "spectral_centroid_hz_mean": 2566.1705627985666,
+      "spectral_flatness_mean": 0.04731186106801033,
+      "voiced_frame_fraction": 0.6220588235294118,
+      "f0_median_hz": 113.82716948276507,
+      "f0_iqr_hz": 32.6100400030157
+    },
+    "jimeng_clone": {
+      "duration_seconds": 655.28,
+      "peak_amplitude": 0.8125,
+      "clipped_sample_fraction": 0.0,
+      "pause_frame_fraction_below_minus_40_db": 0.10878066121578386,
+      "spectral_centroid_hz_mean": 3002.563502506454,
+      "spectral_flatness_mean": 0.039370566606521606,
+      "voiced_frame_fraction": 0.18841094916459297,
+      "f0_median_hz": 184.9127823656466,
+      "f0_iqr_hz": 126.16507906699988
+    },
+    "kokoro_clone": {
+      "duration_seconds": 28.08,
+      "peak_amplitude": 0.3828125,
+      "clipped_sample_fraction": 0.0,
+      "pause_frame_fraction_below_minus_40_db": 0.126044039483675,
+      "spectral_centroid_hz_mean": 1955.2052364388849,
+      "spectral_flatness_mean": 0.023957546800374985,
+      "voiced_frame_fraction": 0.7441154138192863,
+      "f0_median_hz": 103.18106837793296,
+      "f0_iqr_hz": 24.422394402791397
+    }
+  },
+  "comparisons": {
+    "jimeng_clone_to_jimeng_ref_mfcc_cosine_first_29s": 0.9953017059285678,
+    "kokoro_clone_to_kokoro_ref_mfcc_cosine_first_29s": 0.9975395911957932,
+    "jimeng_clone_to_kokoro_ref_mfcc_cosine_first_29s": 0.9935955364045598,
+    "kokoro_clone_to_jimeng_ref_mfcc_cosine_first_29s": 0.9976203987535395
+  }
+}
