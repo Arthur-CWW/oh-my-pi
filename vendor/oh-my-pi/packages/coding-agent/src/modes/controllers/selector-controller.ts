@@ -1340,6 +1340,7 @@ export class SelectorController {
 			unfocusSession: () => this.ctx.unfocusSession(),
 			onDone: done,
 			requestRender: () => this.ctx.ui.requestRender(),
+			height: () => this.ctx.ui.terminal?.rows ?? process.stdout.rows ?? 40,
 			registry,
 			turnStatus: (agentId: string) => getAgentHubTurnStatus(registry, agentId),
 			transcriptDisplay,

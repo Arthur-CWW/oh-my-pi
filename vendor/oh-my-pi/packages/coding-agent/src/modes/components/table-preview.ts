@@ -36,11 +36,22 @@ export interface TablePreviewRowRenderContext {
 	readonly focused: boolean;
 	readonly width: number;
 }
+export interface TablePreviewSectionContext {
+	readonly index: number;
+	readonly firstVisible: boolean;
+	readonly width: number;
+}
+
 
 export interface TablePreviewKeyContext<Row> {
 	readonly focus: TablePreviewFocus;
 	readonly selected: Row | undefined;
 }
+export interface TablePreviewEmptyContext {
+	readonly query: string;
+	readonly width: number;
+}
+
 
 export interface TablePreviewOptions<Row, Key> {
 	readonly rows: () => readonly Row[];
@@ -53,10 +64,22 @@ export interface TablePreviewOptions<Row, Key> {
 	readonly flush?: () => void;
 	readonly matchesRow?: (row: Row, query: string) => boolean;
 	readonly searchText?: (row: Row) => string;
+	readonly onSearchChange?: (query: string) => void;
 	readonly onSelectionChange?: (row: Row | undefined) => void;
+	readonly previewTracksRowIdentity?: boolean;
 	readonly handleKey?: (data: string, context: TablePreviewKeyContext<Row>) => boolean;
 	readonly layout?: TablePreviewLayout;
 	readonly tableRatio?: number;
+	readonly tableHeight?: () => number;
+	readonly betweenPanes?: (width: number) => readonly string[];
+	readonly showTableHeader?: boolean;
+	readonly decorateSelectedRow?: boolean;
+	readonly showTableScrollbar?: boolean;
+	readonly fitTableHeight?: boolean;
+	readonly sectionLabel?: (row: Row, context: TablePreviewSectionContext) => string | undefined;
+	readonly renderSectionLabel?: (label: string, width: number) => string;
+	readonly renderEmpty?: (context: TablePreviewEmptyContext) => readonly string[];
+	readonly renderOverflow?: (remaining: number, width: number) => string;
 	readonly emptyMessage?: string;
 	readonly previewEmptyMessage?: string;
 }
@@ -81,6 +104,7 @@ export class TablePreviewComponent<Row, Key> implements Component {
 	#scrollOffset = 0;
 	#previewOffset = 0;
 	#query = "";
+	#searchEditing = false;
 	#focus: TablePreviewFocus = "table";
 	#previewSession: TablePreviewSession | undefined;
 	#previewError: string | undefined;
@@ -116,32 +140,93 @@ export class TablePreviewComponent<Row, Key> implements Component {
 		return this.#query;
 	}
 
+	get searchEditing(): boolean {
+		return this.#searchEditing;
+	}
+
+	get selectedIndex(): number {
+		this.#syncRows();
+		return this.#selectedIndex;
+	}
+
+	get scrollOffset(): number {
+		this.#syncRows();
+		return this.#scrollOffset;
+	}
+
 	get focus(): TablePreviewFocus {
 		return this.#focus;
 	}
 
-	refresh(options: { resetSelection?: boolean; refreshPreview?: boolean } = {}): void {
+	refresh(options: { resetSelection?: boolean; refreshPreview?: boolean; requestRender?: boolean } = {}): void {
 		if (options.resetSelection) {
 			this.#selectedIndex = 0;
 			this.#selectedKey = undefined;
 			this.#scrollOffset = 0;
 		}
 		this.#syncRows(options.refreshPreview ?? false);
+		if (options.requestRender !== false) this.#options.requestRender();
+	}
+
+	setScrollOffset(offset: number): void {
+		this.#scrollOffset = Math.max(0, offset);
+		this.#clampScroll();
+	}
+
+	setSearchQuery(query: string): void {
+		if (query === this.#query) return;
+		this.#query = query;
+		this.#options.onSearchChange?.(query);
+		this.#syncRows();
 		this.#options.requestRender();
+	}
+
+	beginSearch(options: { clear?: boolean } = {}): void {
+		this.#searchEditing = true;
+		if (options.clear ?? true) this.setSearchQuery("");
+		else this.#options.requestRender();
+	}
+
+	endSearch(): void {
+		if (!this.#searchEditing) return;
+		this.#searchEditing = false;
+		this.#options.requestRender();
+	}
+
+	handleSearchInput(data: string): boolean {
+		if (!this.#searchEditing) return false;
+		if (matchesKey(data, "enter") || data === "\r" || data === "\n") {
+			this.endSearch();
+			return true;
+		}
+		if (matchesUiDismiss(data)) {
+			this.#searchEditing = false;
+			this.setSearchQuery("");
+			return true;
+		}
+		if (matchesKey(data, "backspace")) {
+			if (!this.#query) {
+				this.endSearch();
+			} else {
+				this.setSearchQuery(this.#query.slice(0, -1));
+			}
+			return true;
+		}
+		const printable = extractPrintableText(data);
+		if (printable?.length === 1 && printable >= " ") this.setSearchQuery(this.#query + printable);
+		return true;
 	}
 
 	clearSearch(): void {
 		if (!this.#query) return;
-		this.#query = "";
-		this.#syncRows();
-		this.#options.requestRender();
+		this.setSearchQuery("");
 	}
 
 	selectKey(key: Key): boolean {
 		this.#syncRows();
 		const index = this.#rows.findIndex(row => Object.is(this.#options.keyOf(row), key));
 		if (index < 0) return false;
-		this.#selectIndex(index);
+		this.selectIndex(index);
 		return true;
 	}
 
@@ -188,19 +273,19 @@ export class TablePreviewComponent<Row, Key> implements Component {
 
 		if (this.#focus === "table") {
 			if (matchesNavigationUp(data) || matchesSelectUp(data)) {
-				this.#moveSelection(-1);
+				this.moveSelection(-1);
 				return;
 			}
 			if (matchesNavigationDown(data) || matchesSelectDown(data)) {
-				this.#moveSelection(1);
+				this.moveSelection(1);
 				return;
 			}
 			if (matchesKey(data, "home")) {
-				this.#selectIndex(0);
+				this.selectIndex(0);
 				return;
 			}
 			if (matchesKey(data, "end")) {
-				this.#selectIndex(this.#rows.length - 1);
+				this.selectIndex(this.#rows.length - 1);
 				return;
 			}
 		}
@@ -258,19 +343,21 @@ export class TablePreviewComponent<Row, Key> implements Component {
 		this.#selectedIndex = Math.max(0, nextIndex);
 		const nextRow = nextIndex >= 0 ? this.#rows[nextIndex] : undefined;
 		const nextKey = nextRow === undefined ? undefined : this.#options.keyOf(nextRow);
-		const changed = !Object.is(nextKey, this.#selectedKey) || nextRow !== this.#selectedRow;
+		const changed =
+			!Object.is(nextKey, this.#selectedKey) ||
+			(this.#options.previewTracksRowIdentity !== false && nextRow !== this.#selectedRow);
 		this.#selectedKey = nextKey;
 		this.#selectedRow = nextRow;
 		this.#clampScroll();
 		if (changed || refreshPreview) this.#selectionChanged();
 	}
 
-	#moveSelection(delta: -1 | 1): void {
+	moveSelection(delta: number): void {
 		if (this.#rows.length === 0) return;
-		this.#selectIndex(this.#selectedIndex + delta);
+		this.selectIndex(this.#selectedIndex + delta);
 	}
 
-	#selectIndex(index: number): void {
+	selectIndex(index: number): void {
 		if (this.#rows.length === 0) return;
 		const nextIndex = Math.max(0, Math.min(this.#rows.length - 1, index));
 		if (nextIndex === this.#selectedIndex && this.#selectedRow === this.#rows[nextIndex]) return;
@@ -358,8 +445,10 @@ export class TablePreviewComponent<Row, Key> implements Component {
 	#tableRowBudget(): number {
 		const height = Math.max(1, this.#options.height());
 		const tableHeight =
-			(this.#options.layout ?? "stacked") === "columns" ? height : Math.max(3, Math.floor(height / 2));
-		return Math.max(1, tableHeight - 2);
+			(this.#options.layout ?? "stacked") === "columns"
+				? height
+				: Math.max(1, Math.min(height, this.#options.tableHeight?.() ?? Math.max(3, Math.floor(height / 2))));
+		return Math.max(1, tableHeight - (this.#options.showTableHeader === false ? 0 : 2));
 	}
 
 	#renderColumns(width: number, height: number): readonly string[] {
@@ -379,45 +468,74 @@ export class TablePreviewComponent<Row, Key> implements Component {
 	}
 
 	#renderStacked(width: number, height: number): readonly string[] {
-		const previewHeight = Math.max(1, Math.ceil(height / 2));
-		const tableHeight = Math.max(1, height - previewHeight);
-		return [...this.#renderPreview(width, previewHeight), ...this.#renderTable(width, tableHeight)];
+		const configuredTableHeight = this.#options.tableHeight?.();
+		const tableHeight = Math.max(
+			1,
+			Math.min(height, configuredTableHeight ?? Math.max(1, Math.floor(height / 2))),
+		);
+		const previewHeight = Math.max(1, height - tableHeight);
+		return [
+			...this.#renderPreview(width, previewHeight),
+			...(this.#options.betweenPanes?.(width) ?? []),
+			...this.#renderTable(width, tableHeight),
+		];
 	}
 
 	#renderTable(width: number, height: number): readonly string[] {
 		const lines: string[] = [];
 		const focused = this.#focus === "table";
-		const label = focused ? theme.bold(theme.fg("accent", "Table")) : theme.fg("muted", "Table");
-		const query = this.#query || theme.fg("dim", "type to filter");
-		lines.push(`${label} ${theme.fg("muted", "Search:")} ${query}`);
-		lines.push("");
+		const showHeader = this.#options.showTableHeader !== false;
+		if (showHeader) {
+			const label = focused ? theme.bold(theme.fg("accent", "Table")) : theme.fg("muted", "Table");
+			const query = this.#query || theme.fg("dim", "type to filter");
+			lines.push(`${label} ${theme.fg("muted", "Search:")} ${query}`, "");
+		}
 		if (this.#rows.length === 0) {
-			lines.push(theme.fg("muted", this.#options.emptyMessage ?? "No rows"));
-			return this.#fit(lines, width, height);
+			lines.push(
+				...(this.#options.renderEmpty?.({ query: this.#query, width }) ?? [
+					theme.fg("muted", this.#options.emptyMessage ?? "No rows"),
+				]),
+			);
+			return this.#options.fitTableHeight === false ? lines : this.#fit(lines, width, height);
 		}
 
-		const rowBudget = Math.max(1, height - 2);
+		const rowBudget = Math.max(1, height - (showHeader ? 2 : 0));
 		const overflow = this.#rows.length > rowBudget;
-		const rowWidth = Math.max(0, width - (overflow ? 1 : 0));
+		const showScrollbar = this.#options.showTableScrollbar !== false;
+		const rowWidth = Math.max(0, width - (overflow && showScrollbar ? 1 : 0));
 		const end = Math.min(this.#scrollOffset + rowBudget, this.#rows.length);
 		const rows: string[] = [];
 		for (let index = this.#scrollOffset; index < end; index++) {
+			const row = this.#rows[index]!;
+			const section = this.#options.sectionLabel?.(row, {
+				index,
+				firstVisible: index === this.#scrollOffset,
+				width: rowWidth,
+			});
+			if (section) rows.push(this.#options.renderSectionLabel?.(section, rowWidth) ?? section);
 			const selected = index === this.#selectedIndex;
-			let line = this.#options.renderRow(this.#rows[index], { selected, focused, width: rowWidth });
-			if (selected) {
+			let line = this.#options.renderRow(row, { selected, focused, width: rowWidth });
+			if (selected && this.#options.decorateSelectedRow !== false) {
 				line = theme.bg("selectedBg", theme.bold(theme.fg(focused ? "accent" : "muted", line)));
 			}
 			rows.push(truncateToWidth(line, rowWidth));
 		}
-		const scroll = new ScrollView(rows, {
-			height: rows.length,
-			scrollbar: "auto",
-			totalRows: this.#rows.length,
-			theme: { track: text => theme.fg("muted", text), thumb: text => theme.fg("accent", text) },
-		});
-		scroll.setScrollOffset(this.#scrollOffset);
-		lines.push(...scroll.render(width));
-		return this.#fit(lines, width, height);
+		if (end < this.#rows.length && this.#options.renderOverflow) {
+			rows.push(this.#options.renderOverflow(this.#rows.length - end, rowWidth));
+		}
+		if (showScrollbar) {
+			const scroll = new ScrollView(rows, {
+				height: rows.length,
+				scrollbar: "auto",
+				totalRows: this.#rows.length,
+				theme: { track: text => theme.fg("muted", text), thumb: text => theme.fg("accent", text) },
+			});
+			scroll.setScrollOffset(this.#scrollOffset);
+			lines.push(...scroll.render(width));
+		} else {
+			lines.push(...rows);
+		}
+		return this.#options.fitTableHeight === false ? lines : this.#fit(lines, width, height);
 	}
 
 	#renderPreview(width: number, height: number): readonly string[] {
