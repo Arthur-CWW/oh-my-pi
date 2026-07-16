@@ -83,3 +83,6 @@ Do not multiply unrelated substreams in parallel. One wave in flight at a time (
 - Tracks: `data/gpu-pose-tracks/*.json` (281, full-frame, hands), `data/apple-vision-tracks/*.jsonl` (281, 2D+3D), `data/body-tracks/*.json` (73, legacy v2), comparison at `data/apple-vision-tracks/comparison-summary.json`.
 - Arbiter sole capture writer `public/capture-arbiter.ts`; dejank `public/track-motion-filter.ts`; compare player `public/lab/provider-compare/`; debug stage `public/lab/motion-debug/`; resizable `public/lab/resizable.tsx`.
 - Desktop: gpu-queue daemon tmux `gpu-queue` (`~/projects/model-bench/queue/`, Mac CLI `scripts/gpu-queue.ts`); fish shell — always `bash -lc`; no tee pipelines (T-state trap).
+
+## Routing lesson (2026-07-16)
+`companion`/`xanadu` routes flapped to 404: the stack's `bunx portless companion --app-port 4897` wrapper dies after launch (nohup/parent-exit), orphaning the server; the proxy prunes routes whose owning pid is dead. Fixed durably with static aliases (`bunx portless alias companion 4897`, `alias xanadu 4970`) — immune to wrapper lifecycle since both ports are pinned by start-stack.sh. Proxy itself: `--no-tls --port 1355`, self-healed by the stack script; state in `~/.portless/routes.json`.
