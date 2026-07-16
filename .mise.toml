@@ -299,22 +299,147 @@ mise exec erlang@28.5 elixir@1.20.1-otp-28 -- mix escript.build
 mise exec erlang@28.5 elixir@1.20.1-otp-28 -- ./bin/symphony_lite_elixir spike --root ../../data/symphony-lite-elixir-spike/run --task-list ../../data/symphony-lite-elixir-spike/tasks.txt --json
 '''
 
+# Stream tasks are thin wrappers; topology and service dependencies live in services.yml.
+# Edit services.yml when adding streams, then add the corresponding static menu entries here.
+
+[tasks."companion:up"]
+description = "Start companion and its registered dependencies"
+run = "bun scripts/streams.ts up companion"
+
+[tasks."companion:down"]
+description = "Stop the companion stream session"
+run = "bun scripts/streams.ts down companion"
+
+[tasks."companion:status"]
+description = "Show companion service health"
+run = "bun scripts/streams.ts status companion"
+
+[tasks."companion:logs"]
+description = "Follow a companion service log"
+usage = 'arg "[service]" help="Service name (defaults to the stream log)"'
+run = 'bun scripts/streams.ts logs companion ${usage_service:+"$usage_service"}'
+
+[tasks."companion:attach"]
+description = "Attach to the companion tmux session"
+interactive = true
+run = "bun scripts/streams.ts attach companion"
+
+[tasks."primer:up"]
+description = "Start primer and its registered dependencies"
+run = "bun scripts/streams.ts up primer"
+
+[tasks."primer:down"]
+description = "Stop the primer stream session"
+run = "bun scripts/streams.ts down primer"
+
+[tasks."primer:status"]
+description = "Show primer service health"
+run = "bun scripts/streams.ts status primer"
+
+[tasks."primer:logs"]
+description = "Follow a primer service log"
+usage = 'arg "[service]" help="Service name (defaults to the stream log)"'
+run = 'bun scripts/streams.ts logs primer ${usage_service:+"$usage_service"}'
+
+[tasks."primer:attach"]
+description = "Attach to the primer tmux session"
+interactive = true
+run = "bun scripts/streams.ts attach primer"
+
+[tasks."playground:up"]
+description = "Start playground and its registered dependencies"
+run = "bun scripts/streams.ts up playground"
+
+[tasks."playground:down"]
+description = "Stop the playground stream session"
+run = "bun scripts/streams.ts down playground"
+
+[tasks."playground:status"]
+description = "Show playground service health"
+run = "bun scripts/streams.ts status playground"
+
+[tasks."playground:logs"]
+description = "Follow a playground service log"
+usage = 'arg "[service]" help="Service name (defaults to the stream log)"'
+run = 'bun scripts/streams.ts logs playground ${usage_service:+"$usage_service"}'
+
+[tasks."playground:attach"]
+description = "Attach to the playground tmux session"
+interactive = true
+run = "bun scripts/streams.ts attach playground"
+
+[tasks."anichat-motion-lab:up"]
+description = "Start anichat-motion-lab and its registered dependencies"
+run = "bun scripts/streams.ts up anichat-motion-lab"
+
+[tasks."anichat-motion-lab:down"]
+description = "Stop the anichat-motion-lab stream session"
+run = "bun scripts/streams.ts down anichat-motion-lab"
+
+[tasks."anichat-motion-lab:status"]
+description = "Show anichat-motion-lab service health"
+run = "bun scripts/streams.ts status anichat-motion-lab"
+
+[tasks."anichat-motion-lab:logs"]
+description = "Follow an anichat-motion-lab service log"
+usage = 'arg "[service]" help="Service name (defaults to the stream log)"'
+run = 'bun scripts/streams.ts logs anichat-motion-lab ${usage_service:+"$usage_service"}'
+
+[tasks."anichat-motion-lab:attach"]
+description = "Attach to the anichat-motion-lab tmux session"
+interactive = true
+run = "bun scripts/streams.ts attach anichat-motion-lab"
+
+[tasks."video-eval:up"]
+description = "Start video-eval and its registered dependencies"
+run = "bun scripts/streams.ts up video-eval"
+
+[tasks."video-eval:down"]
+description = "Stop the video-eval stream session"
+run = "bun scripts/streams.ts down video-eval"
+
+[tasks."video-eval:status"]
+description = "Show video-eval service health"
+run = "bun scripts/streams.ts status video-eval"
+
+[tasks."video-eval:logs"]
+description = "Follow a video-eval service log"
+usage = 'arg "[service]" help="Service name (defaults to the stream log)"'
+run = 'bun scripts/streams.ts logs video-eval ${usage_service:+"$usage_service"}'
+
+[tasks."video-eval:attach"]
+description = "Attach to the video-eval tmux session"
+interactive = true
+run = "bun scripts/streams.ts attach video-eval"
+
 [tasks.up]
-description = "Start a registered stream and its dependencies"
-run = "bun scripts/streams.ts up"
+description = "Start a registered stream by name (or all)"
+usage = '''
+arg "<stream>" help="Registered stream name or all"
+flag "--dry" help="Print the start plan without changing services"
+'''
+run = 'bun scripts/streams.ts up "${usage_stream?}" ${usage_dry:+--dry}'
 
 [tasks.down]
-description = "Stop a registered stream tmux session"
-run = "bun scripts/streams.ts down"
+description = "Stop a registered stream by name"
+usage = 'arg "<stream>" help="Registered stream name"'
+run = 'bun scripts/streams.ts down "${usage_stream?}"'
 
 [tasks.status]
 description = "Show registered stream service health"
-run = "bun scripts/streams.ts status"
+usage = 'arg "[stream]" help="Optional registered stream name"'
+run = 'bun scripts/streams.ts status ${usage_stream:+"$usage_stream"}'
 
 [tasks.logs]
 description = "Follow a registered stream service log"
-run = "bun scripts/streams.ts logs"
+usage = '''
+arg "<stream>" help="Registered stream name"
+arg "[service]" help="Optional service name (defaults to the stream log)"
+'''
+run = 'bun scripts/streams.ts logs "${usage_stream?}" ${usage_service:+"$usage_service"}'
 
 [tasks.attach]
 description = "Attach to a registered stream tmux session"
-run = "bun scripts/streams.ts attach"
+usage = 'arg "<stream>" help="Registered stream name"'
+interactive = true
+run = 'bun scripts/streams.ts attach "${usage_stream?}"'

@@ -8,10 +8,10 @@ streams:
     services:
       portless-proxy:
         cwd: .
-        cmd: bunx portless proxy start --no-tls --port 1355
+        cmd: bunx portless proxy start
         shared: true
         health:
-          tcpPort: 1355
+          command: bunx portless list
           timeoutSec: 20
       kokoro-tts:
         cwd: apps/ai-companion-rtc
@@ -59,49 +59,49 @@ streams:
     services:
       portless-proxy:
         cwd: .
-        cmd: bunx portless proxy start --no-tls --port 1355
+        cmd: bunx portless proxy start
         shared: true
         health:
-          tcpPort: 1355
+          command: bunx portless list
           timeoutSec: 20
       primer:
         cwd: packages/primer-daemon
         cmd: bun run dev
         dependsOn: [portless-proxy]
         health:
-          url: http://primer.localhost:1355/
+          url: https://primer.localhost/
           timeoutSec: 120
   playground:
     services:
       portless-proxy:
         cwd: .
-        cmd: bunx portless proxy start --no-tls --port 1355
+        cmd: bunx portless proxy start
         shared: true
         health:
-          tcpPort: 1355
+          command: bunx portless list
           timeoutSec: 20
       scene:
         cwd: apps/scene-playground
         cmd: bun run dev
         dependsOn: [portless-proxy]
         health:
-          url: http://scene.localhost:1355/healthz
+          url: https://scene.localhost/healthz
           timeoutSec: 60
   anichat-motion-lab:
     services:
       portless-proxy:
         cwd: .
-        cmd: bunx portless proxy start --no-tls --port 1355
+        cmd: bunx portless proxy start
         shared: true
         health:
-          tcpPort: 1355
+          command: bunx portless list
           timeoutSec: 20
       anichat-motion-lab:
         cwd: packages/anichat-motion-lab
         cmd: bunx portless anichat-motion-lab bun --watch src/server.ts
         dependsOn: [portless-proxy]
         health:
-          url: http://anichat-motion-lab.localhost:1355/
+          url: https://anichat-motion-lab.localhost/
           timeoutSec: 60
   video-eval:
     services:

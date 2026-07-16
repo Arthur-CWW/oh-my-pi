@@ -86,3 +86,7 @@ Do not multiply unrelated substreams in parallel. One wave in flight at a time (
 
 ## Routing lesson (2026-07-16)
 `companion`/`xanadu` routes flapped to 404: the stack's `bunx portless companion --app-port 4897` wrapper dies after launch (nohup/parent-exit), orphaning the server; the proxy prunes routes whose owning pid is dead. Fixed durably with static aliases (`bunx portless alias companion 4897`, `alias xanadu 4970`) — immune to wrapper lifecycle since both ports are pinned by start-stack.sh. Proxy itself: `--no-tls --port 1355`, self-healed by the stack script; state in `~/.portless/routes.json`.
+
+## Portless migration — 2026-07-16
+
+The `:1355` URLs and proxy flags above are retained as historical context only. The live canonical routes are now portless HTTPS (`https://companion.localhost`, `https://xanadu.localhost`, and `https://primer.localhost`); the boot-managed proxy uses its default TLS/443 service.

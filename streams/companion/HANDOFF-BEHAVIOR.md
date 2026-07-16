@@ -68,7 +68,7 @@ Face and motion are separate transports and separate capture lanes. Do not add f
 
 #### Exact run commands
 
-Keep the Companion server running for the whole review. It must remain live at **`http://companion.localhost:1355`**; do not stop it between replay, browser, and evidence capture.
+Keep the Companion server running for the whole review. It must remain live at **`https://companion.localhost`**; do not stop it between replay, browser, and evidence capture.
 
 ```bash
 cd apps/ai-companion-rtc
@@ -88,12 +88,12 @@ With `/lab` open and `Receive Apple Vision` enabled, synthetic replay and the ag
 
 ```bash
 curl -fsS -X POST \
-  -H 'Origin: http://companion.localhost:1355' \
-  http://companion.localhost:1355/debug/motion-oracle/replay
-curl -fsS http://companion.localhost:1355/api/debug/lab-state
+  -H 'Origin: https://companion.localhost' \
+  https://companion.localhost/debug/motion-oracle/replay
+curl -fsS https://companion.localhost/api/debug/lab-state
 ```
 
-The panel socket is exactly `ws://companion.localhost:1355/ws?motionOracle=1`. Do not use `/ws`, `motionOracle=true`, or a shared assistant socket for motion data.
+The panel socket is exactly `wss://companion.localhost/ws?motionOracle=1`. Do not use `/ws`, `motionOracle=true`, or a shared assistant socket for motion data.
 
 #### Continuation outcome — 2026-07-15 (main orchestrator session)
 
@@ -142,7 +142,7 @@ Use one representative mobile landmark slice first: depthwise 3×3 → SiLU → 
 
 #### Continuation order — do not redo the completed source/protocol work
 
-1. **Browser QA.** Use a real browser at `http://companion.localhost:1355/lab`: initial shadow state, accessibility, synthetic replay and stale release, body-only and hands-only drive, overlay/telemetry, responsive 1440×900 and 1024×768, console/error log, and confirmation that Face Mirror X remains on and untouched.
+1. **Browser QA.** Use a real browser at `https://companion.localhost/lab`: initial shadow state, accessibility, synthetic replay and stale release, body-only and hands-only drive, overlay/telemetry, responsive 1440×900 and 1024×768, console/error log, and confirmation that Face Mirror X remains on and untouched.
 2. **Full-body and close-hand calibrated clips.** Record honest clips that include the full retarget core (including nose and ears required by the existing PoseGuard), both hands close enough for distal fingers, occlusion, motion blur, entering/leaving frame, and mirrored preview. Save source conditions and compare Vision against the MediaPipe shadow on the same frames.
 3. **3D Vision body adapter.** Add a separate typed source/adapter for a real 3D-capable Apple body API if the target hardware/runtime supports it. Do not relabel this 2D Vision stream as 3D and do not mutate `companion.motion-oracle/1` in place.
 4. **Independent provider arbitration.** The basic Vision adapter already chooses body and each hand independently within one packet. Extend this to explicit cross-provider arbitration with per-lane freshness, confidence, calibration, and release. L0 remains the only writer. Face is not an eligibility signal.
@@ -153,7 +153,7 @@ Use one representative mobile landmark slice first: depthwise 3×3 → SiLU → 
 
 ## Session close 2026-07-14 — embodiment/studio mega-session (session `019f4aa3`)
 
-Everything below is in the NESTED working tree (81 changed files, uncommitted — consider a commit first). Final gates all green: 236 tests / 0 fail, `tsc` clean, `build:vrm` ok, `bun run doctor` exit 0. Live: `companion.localhost:1355` (`/`, `/scene`, `/review`, **`/lab`**), stack `AI_COMPANION_LLM=omp bun run stack`.
+Everything below is in the NESTED working tree (81 changed files, uncommitted — consider a commit first). Final gates all green: 236 tests / 0 fail, `tsc` clean, `build:vrm` ok, `bun run doctor` exit 0. Live: `companion.localhost` (`/`, `/scene`, `/review`, **`/lab`**), stack `AI_COMPANION_LLM=omp bun run stack`.
 
 ### Landed and verified (pointers, not prose)
 - **Voice loop**: VAD + live partials + Whisper↔Parakeet hot-swap + duplex barge-in; ritual gate `bun run e2e:voice` (8/8 twice) — `apps/ai-companion-rtc/docs/qa-voice-e2e.md`. `bun run doctor` = one-command stack health.
@@ -299,7 +299,7 @@ If used, Ubuntu hosts replaceable inference services only: STT, TTS, small socia
 
 ## System map (current repo-grounded state)
 
-- App: `apps/ai-companion-rtc` (NESTED git repo). `bun run stack` = self-healing launcher (portless proxy → sidecars → server; `AI_COMPANION_LLM=gemini-cca` for the current real brain). Surfaces: `companion.localhost:1355` (talk + VRM stage + Rig), `/scene.html` Ghost Room, `xanadu.localhost:1355` (dashboard; post via `cd apps/xanadu && bun run post`).
+- App: `apps/ai-companion-rtc` (NESTED git repo). `bun run stack` = self-healing launcher (portless proxy → sidecars → server; `AI_COMPANION_LLM=gemini-cca` for the current real brain). Surfaces: `companion.localhost` (talk + VRM stage + Rig), `/scene.html` Ghost Room, `xanadu.localhost` (dashboard; post via `cd apps/xanadu && bun run post`).
 - Frozen expressive contract: `docs/expressive-stack.md`; implemented areas include `src/affect.ts`, `src/reactor.ts`, `src/backchannel.ts`, protocol/session-log hooks, Rig behavior controls, and browser `ChannelManifest`/`setAffect`.
 - Server: `src/server.ts` (WS, config apply-live, session-log taps), `src/server-assistant.ts` (turn pipeline, tag parser — cross-chunk incl. lone-`<`), `src/llm.ts` + `src/llm-cca.ts` (echo/gemini/kimi/gemini-cca; CCA = `omp token google-antigravity`, wire id `gemini-3.5-flash-low`, sandbox-first endpoints), `src/tts.ts` (kokoro per-request voice/speed), `src/stt.ts`, `src/personas.ts` (egregores + emotion anchors), `src/session-log.ts` (JSONL per session).
 - Sidecars (Python/MLX, single-threaded on purpose): `scripts/tts-sidecar.py` (Kokoro, 8799, mlx-audio==0.4.3 pin), `scripts/stt-sidecar.py` (whisper-turbo default + parakeet, 8798, hot `/config`).

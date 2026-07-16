@@ -111,17 +111,10 @@ async function ensurePortless(service: ServiceConfig, dry: boolean): Promise<voi
     return;
   }
   if (dry) {
-    console.log("portless-proxy: would start shared singleton");
+    console.log("portless-proxy: unavailable (dry run)");
     return;
   }
-  console.log("portless-proxy: starting (log: /tmp/portless-proxy.log)");
-  Bun.spawn(["bash", "-c", "nohup bunx portless proxy start --no-tls --port 1355 > /tmp/portless-proxy.log 2>&1 &"], {
-    cwd: root,
-    stdin: "ignore",
-    stdout: "ignore",
-    stderr: "ignore",
-  });
-  await waitHealthy("shared", "portless-proxy", service);
+  console.warn("portless-proxy: unavailable; run: bunx portless proxy start");
 }
 
 function tmuxCommand(streamName: string, serviceName: string, service: ServiceConfig): string {
