@@ -2,6 +2,7 @@
 
 Status is epistemic, not a freshness timestamp: `live` is current guidance or an active plan; `evidence-of-record` is a completed measured/acceptance record; `superseded-by-X` means the note's current-status claim is no longer authoritative; `historical` is retained context.
 
+- `anichat-gap-audit.md` — Shipped/partial/missing audit of AniChat ideas vs the expressive stack with file:line evidence; **evidence-of-record** (taste fork in Xanadu question `9abd415e`).
 - `anichat-grok-pose-investigation.md` — Pointer to the lawful AniChat/Grok pose investigation bundle; **evidence-of-record**.
 - `anichat-pipeline-recon.md` — Clean-room technical recon of AniChat/Grok rendering, face, body, and latency architecture; **historical**.
 - `avatar-landscape.md` — VRM/Live2D runtime, licensing, and body-prototype landscape; **live**.
@@ -12,6 +13,7 @@ Status is epistemic, not a freshness timestamp: `live` is current guidance or an
 - `character-pipeline-gpt.md` — Deep failure-mode analysis for expressive generated-avatar pipelines; **historical**.
 - `character-pipeline.md` — 2026 survey of image, mesh, rig, and VRM generation options; **historical**.
 - `claudesona-assets.md` — Claudesona/SkyeShark asset and licensing survey; **historical**.
+- `dating-sim-connection-research.md` — Dating-sim/light-novel connection mechanisms mapped to L2/L1.5/backchannel layers; **live** (taste experiments in Xanadu question `e00ebefd`).
 - `eidoverse-recon.md` — Clean-room Eidoverse/SkyeShark mesh and world-stack reconstruction; **live** (wave-4 direction input).
 - `expressive-motion-design.md` — Semantic motion authoring, arbitration, interruption, and 60 Hz design proposal; **live**.
 - `expressive-motion-ontology.md` — Vocabulary for producers, lanes, channels, timing, magnitude, identity, and quality; **live**.
@@ -39,6 +41,7 @@ Status is epistemic, not a freshness timestamp: `live` is current guidance or an
 - `vision-sico-batch.md` — Completed Apple Vision 281-clip offline batch and Vision/MediaPipe comparison; **evidence-of-record**.
 - `voice-hunt.md` — VTuber/ASMR voice-reference catalog for a future voice-clone lane; **historical**.
 - `workspace-editor-brief.md` — Early interactive workspace/editor product brief; **historical**.
+- `xiaomi-robotics-distillation.md` — Xiaomi-Robotics-0 VLA distillation mapped honestly onto the L0/L1/L1.5/L2 contract; **evidence-of-record** (no architecture changes proposed).
 - `anichat-grok-pose-investigation/diagrams.md` — Static architecture diagrams for the AniChat/Grok investigation; **historical**.
 - `anichat-grok-pose-investigation/probe-findings.md` — Measured older-AniChat Core ML behavioral probe suite; **evidence-of-record**.
 - `anichat-grok-pose-investigation/reproduction-index.md` — Reproduction commands and receipt index for the investigation; **evidence-of-record**.

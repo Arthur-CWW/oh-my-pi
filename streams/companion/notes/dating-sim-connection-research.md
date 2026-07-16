@@ -1,0 +1,73 @@
+# Dating-sim / light-novel connection research
+
+**Date:** 2026-07-16  
+**Scope:** taste research for the companion dialogue/behavior layer; no dialogue-system design or build proposal.
+
+## Referent identification: ranked, not resolved
+
+Arthur's phrase is ambiguous: game stores and scholarship normally say **visual novel**, not “light novel.” I found no source containing Arthur's wording verbatim, so the ranking below is an identification hypothesis, not a claim of certainty.
+
+| Rank | Candidate | Verified fit | Mismatch / uncertainty | Confidence |
+|---:|---|---|---|---|
+| 1 | **Five Hearts Under One Roof** (Storytaco, 2024) | Korean-language live-action romance; five familiar serial-drama archetypes (20-year childhood friend, former-idol first love, demanding boss, bold younger woman, recluse), first-person choices, branches, and multiple endings. That is the closest combination of “Korean,” visual-novel structure, and plural K-drama-esque plotlines ([Steam](https://store.steampowered.com/app/3021100/Five_Hearts_Under_One_Roof/)). | It is FMV rather than anime-drawn, and its official description calls it an interactive romance simulation, not a light novel ([Steam](https://store.steampowered.com/app/3021100/Five_Hearts_Under_One_Roof/)). | **Medium-high** |
+| 2 | **Motesolo: No Girlfriend Since Birth** (INDICAVA, 2020/2021) | Korean FMV about a Seoul blind date; its publisher copy says it places the player in a Korean-drama scene and branches to multiple endings ([GoNintendo, reproducing publisher description](https://www.gonintendo.com/contents/29293-motesolo-no-girlfriend-since-birth-partners-up-with-switch-today); [Steam](https://store.steampowered.com/app/1414180/Motesolo__No_Girlfriend_Since_Birth/)). | One concentrated blind-date story rather than several route-length romantic plotlines; also FMV, not anime-style. | **Medium** |
+| 3 | **Cheongchunhyang Jeon** (J Wonder, 2021) | Korean FMV modernization of *Chunhyangjeon*; a visual-novel specialist explicitly calls it an “interactive K-drama” with class difference, mixed signals, missed opportunities, comedy, hard-hitting moments, and alternate endings ([Rice Digital](https://ricedigital.co.uk/3-more-dating-sim-hidden-gems/); [Steam](https://store.steampowered.com/app/1677490/_Cheongchunhyang_Jeon/)). | Very short, single central romance; “light novel” remains an approximate genre description. | **Medium** |
+| 4 | **Mystic Messenger** (Cheritz, 2016) | South Korean, anime-styled, romance-by-conversation: the official listing describes a secret group chat and supplies call/text/chat systems ([Google Play](https://play.google.com/store/apps/details?id=com.Cheritz.MysticMessenger&hl=en_US)); its Korean developer describes its focus as games for female players ([Cheritz](http://www.cheritz.com/)). | Strong fit for “anime-style light-novel game,” weaker fit for “K-drama-esque” and not a conventional page-by-page visual novel. | **Medium-low** as the first pointer; **high** as a useful comparison title. |
+
+**Working identification:** start with *Five Hearts Under One Roof*. If Arthur remembers a single awkward cafe date, switch to *Motesolo*; if he remembers illustrated phone chats arriving through the day, it is *Mystic Messenger*. No title is treated as confirmed.
+
+## Comparison set: what “anime-style light-novel games” usefully spans
+
+| Reference | Useful design property | Source |
+|---|---|---|
+| **Mystic Messenger** | Romance inhabits an everyday communication surface—group chat, text, and calls—rather than only self-contained scenes. | [Official Google Play listing](https://play.google.com/store/apps/details?id=com.Cheritz.MysticMessenger&hl=en_US) |
+| **Our Life: Beginnings & Always** | The player controls relationship tempo; preferences are remembered; painful feelings may be expressed and met with reassurance; four life periods turn small callbacks into a long arc. | [Developer's Steam description](https://store.steampowered.com/app/1129190/Our_Life_Beginnings__Always/) |
+| **Five Hearts Under One Roof** | Distinct relational archetypes, branching events, multiple endings, epilogues, and unexpected route unlocks make attention directional rather than generic. | [Developer's Steam description](https://store.steampowered.com/app/3021100/Five_Hearts_Under_One_Roof/) |
+
+These are references, not a recommendation that a live companion imitate dating-game monetization, lock users into routes, or manufacture dependency.
+
+## Why players connect: mechanisms → our shipped layers
+
+Architecture boundary: our stack assigns L1 reflex, L1.5 social policy, and L2 speaker distinct jobs (`streams/companion/HANDOFF-BEHAVIOR.md:229-234`). Affect is already VAD `AffectVector` plus named `EmotionMix` anchors (`streams/companion/HANDOFF-BEHAVIOR.md:249-252`), and the frozen contract gives deliberate speech-timed affect to the sync/L2 lane while L1 reflexes are amplitude-capped and fast-decaying (`apps/ai-companion-rtc/docs/expressive-stack.md:9-15`). The implications below use those seams; they do not propose another architecture.
+
+| Mechanism | Evidence / example | Why it works | Our-layer implication |
+|---|---|---|---|
+| **Parasocial pacing: intimacy accrues across ordinary time** | A 2025 qualitative otome study reports that game relationships become embedded in daily life through interaction mechanics and imagination; interviewees emphasized emotional support, need fulfillment, emotion regulation, and self-identity ([Gao, Guo & You 2025](https://doi.org/10.17645/mac.8662)). *Mystic Messenger* puts the fiction into chat, text, and calls ([official listing](https://play.google.com/store/apps/details?id=com.Cheritz.MysticMessenger&hl=en_US)). | Repeated low-stakes contact lets a person form a stable model of “how this character responds” before high-intensity disclosure. Connection comes from accumulated consistency, not instant maximal warmth. | **L2 prompting:** prefer continuity and one earned step of disclosure over declaring closeness. **L1.5 social policy:** distinguish ordinary-presence turns from infrequent relationship beats; never escalate simply because a turn is long. **Backchannel/affect cadence:** keep most listening acknowledgement small so a fuller warm response remains legible. |
+| **Tension and route structure: a relationship has direction** | *Five Hearts* advertises five differentiated heroines, crucial choices, branching events, multiple endings, epilogues, and unexpected route unlocks ([developer description](https://store.steampowered.com/app/3021100/Five_Hearts_Under_One_Roof/)). | A route creates a question that can change over time (“what kind of bond is this?”). Tension needs uncertainty about meaning or timing, not uncertainty about basic care or safety. | **L2 prompting:** carry one unresolved conversational thread and revisit it when relevant rather than resolving every emotion in one turn. **L1.5 social policy:** mark a beat as open/settled without choosing a romance “route” for the user. **Affect cadence:** allow arousal to fall after a beat; constant intensity erases contrast. |
+| **Choice architecture that respects the player** | *Our Life* lets players choose the relationship's pace—from immediate love through late confession to friendship—and says personality, feelings, and preferences are reflected as characters remember them ([developer description](https://store.steampowered.com/app/1129190/Our_Life_Beginnings__Always/)). A DIS study specifically examines how choice types in narrative-rich games affect player experience ([Yin & Xiao 2022](https://doi.org/10.1145/3532106.3533459)). | Choice feels respectful when alternatives express different valid intentions and the response follows the chosen meaning; a disguised “correct affection answer” turns agency into compliance. | **L2 prompting:** when preference matters, offer semantically distinct exits (“stay with this,” “lighten it,” “switch topics”), including a no-intimacy option. **L1.5 social policy:** treat refusal, silence, correction, and topic change as valid state transitions—not relationship damage. |
+| **Drama beats: contrast, reversal, repair** | *Cheongchunhyang Jeon* is described as moving from humor into missed opportunities, mixed signals, class tension, poignant self-worth themes, and emotional alternate endings ([Rice Digital review](https://ricedigital.co.uk/3-more-dating-sim-hidden-gems/)). | Drama is contrast: setup → complication → recognition/repair. A companion need not invent crises; it can let a real misunderstanding or vulnerable admission have a beginning, a pause, and an honest repair instead of smoothing it flat. | **L2 prompting:** name the actual turn (“I misread that”) and repair specifically; never fabricate plot trouble. **L1.5 social policy:** permit brief seriousness without converting it into sustained negative mood. **Backchannel/affect cadence:** reduce fillers at the complication, then use one congruent release on repair. |
+| **Memory and callbacks: proof of attention** | *Our Life* explicitly reflects player-defined feelings/preferences later and uses the concrete example of a neighbor remembering the player's preferred drink ([developer description](https://store.steampowered.com/app/1129190/Our_Life_Beginnings__Always/)). Relationship research found that self-disclosure and perceived partner responsiveness both contribute to experienced intimacy ([Laurenceau, Barrett & Pietromonaco 1998](https://pubmed.ncbi.nlm.nih.gov/9599440/)). | A precise, relevant callback demonstrates understanding across time. Generic recall (“you told me things”) does not. Wrong or performative memory is worse than asking. | **L2 prompting:** retrieve at most one relevant detail, state uncertainty when needed, and connect it to the present turn—not a memory dump. **L1.5 social policy:** gate callbacks by confidence, relevance, sensitivity, and whether the user corrected/revoked the detail. **Affect cadence:** a small recognition cue before the words can make the callback land without overselling it. |
+| **Scarcity of affection: contrast without manipulation** | In one lab study, women who were uncertain how much several men liked them reported more attraction and thought about them more than women told the men liked them a lot ([Whitchurch, Wilson & Gilbert 2011](https://pubmed.ncbi.nlm.nih.gov/21169522/)). This is a narrow experimental result, **not** evidence that artificial withholding is ethical or durable. | What is worth borrowing is signal contrast: specific affection means more when it is contingent on a real moment. What must not be borrowed is hot/cold reinforcement, jealousy, or anxiety engineered to increase engagement. | **L1.5 social policy:** never ration baseline care, responsiveness, or safety; veto manipulative hot/cold behavior. Reserve *specific* praise, intimacy labels, and high-amplitude fond affect for supported context. **L2 prompting:** say the concrete valued thing rather than generic adoration. |
+| **Honest consequences: choices change the interaction, not the user's worth** | *Five Hearts* says choices lead to different events, romances, branches, and endings ([developer description](https://store.steampowered.com/app/3021100/Five_Hearts_Under_One_Roof/)); *Our Life* supports friendship as a valid outcome and lets the player set relationship speed ([developer description](https://store.steampowered.com/app/1129190/Our_Life_Beginnings__Always/)). | Consequence supplies causality: a boundary changes what happens next. Respect is preserved when “no” closes a topic or changes tone without punishment, affection withdrawal, or covert scorekeeping. | **L1.5 social policy:** persist explicit boundaries and corrections as policy constraints; consequence = changed behavior. **L2 prompting:** acknowledge once, adapt, and do not bargain. **Backchannel:** avoid “yes/right/exactly” before comprehension—already required by our honest-buffer rule (`streams/companion/HANDOFF-BEHAVIOR.md:281-288`). |
+
+## Synthesis: what to borrow, what to refuse
+
+| Borrow | Refuse |
+|---|---|
+| Slow accumulation; differentiated moments; specific callbacks; player-controlled tempo; unresolved-but-safe threads; repair that changes later behavior. | Affection meters exposed or hidden; “correct” answers; fake jealousy; delayed responses as a retention trick; invented crises; romance escalation inferred from engagement; remembering sensitive facts merely to demonstrate memory. |
+| **Specificity over volume:** one earned callback or one well-timed fond cue. | **Maximal warmth all the time:** it flattens affect contrast and can make care feel procedural. |
+| Consequences that alter topic, tone, or future behavior. | Consequences that punish boundaries or withdraw baseline care. |
+
+## Proposed Xanadu question
+
+**Title:** Which connection mechanism should we taste-test first?
+
+**Body:**
+
+Pick **one** bounded, reversible taste experiment; none ships or starts without your selection.
+
+1. **Callback, not memory flex** — Prepare three otherwise-identical 4-turn transcripts: no callback; one precise relevant callback; an overstuffed memory recap. Taste for “seen” versus “creepy/performative.”
+2. **Player-owned tempo** — Prepare one vulnerable-turn transcript with three explicit exits (“stay with it,” “lighten it,” “switch topics”) and a control where the companion chooses the emotional direction. Taste for respect versus menu-like stiffness.
+3. **Affect contrast** — Replay one short listening/repair scene with flat-high warmth versus restrained backchannels plus one earned `fond` release at repair. Taste whether contrast reads as connection or emotional withholding.
+
+Reply **1, 2, or 3** (or **none**). Selection authorizes only the named transcript/replay study, not implementation.
+
+## Bounded next-step menu
+
+| Pick | Next step | Deliverable | Stop condition |
+|---|---|---|---|
+| **A** | Confirm the referent only. | Arthur marks *Five Hearts*, *Motesolo*, *Cheongchunhyang*, *Mystic Messenger*, or “other.” | Stop after the title is identified; no build. |
+| **B** | Run the single Xanadu-selected taste experiment. | One side-by-side transcript or replay card, matching option 1/2/3 above. | Stop after Arthur records a preference; no prompt/policy edits. |
+| **C** | Do nothing yet. | Keep this note as research evidence. | Revisit only when dialogue/behavior taste work is explicitly scheduled. |
+
+**Recommendation:** A, then at most one of B. The evidence supports responsiveness, agency, and remembered specificity; it does not justify gamifying a live relationship.
