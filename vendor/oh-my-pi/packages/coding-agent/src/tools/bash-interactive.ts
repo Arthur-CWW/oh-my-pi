@@ -13,8 +13,8 @@ import { sanitizeText } from "@oh-my-pi/pi-utils";
 import type * as XtermModule from "@xterm/headless";
 import type { Terminal as XtermTerminalType } from "@xterm/headless";
 import { Settings } from "../config/settings";
-import type { Theme } from "../modes/theme/theme";
 import { editorKey } from "../modes/components/keybinding-hints";
+import type { Theme } from "../modes/theme/theme";
 import { matchesAppInterrupt } from "../modes/utils/keybinding-matchers";
 import { OutputSink, type OutputSummary } from "../session/streaming-output";
 import { sanitizeWithOptionalSixelPassthrough } from "../utils/sixel";
@@ -296,6 +296,38 @@ class BashInteractiveOverlayComponent implements Component {
 	}
 }
 
+export function buildInteractivePtyEnv(
+	shellEnv: Readonly<Record<string, string>>,
+	commandEnv?: Readonly<Record<string, string>>,
+): Record<string, string> {
+	return {
+		...shellEnv,
+		TERM: "xterm-256color",
+		...commandEnv,
+	};
+}
+function quotePosixShellValue(value: string): string {
+	return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+export function buildInteractivePtyCommand(
+	command: string,
+	shell: string,
+	env: Readonly<Record<string, string>>,
+): string {
+	const path = env.PATH;
+	if (path === undefined) return command;
+
+	const basename = shell.replaceAll("\\", "/").split("/").pop()?.toLowerCase() ?? "";
+	if (basename.includes("fish")) {
+		return `set -gx PATH ${quotePosixShellValue(path)}; ${command}`;
+	}
+	if (basename.includes("bash") || basename.includes("zsh") || basename === "sh") {
+		return `PATH=${quotePosixShellValue(path)}; export PATH; ${command}`;
+	}
+	return command;
+}
+
 export async function runInteractiveBashPty(
 	ui: NonNullable<AgentToolContext["ui"]>,
 	options: {
@@ -311,7 +343,8 @@ export async function runInteractiveBashPty(
 	const settings = await Settings.init();
 	// Load the xterm Terminal ctor here (async boundary) — the ui.custom factory below is sync.
 	const XtermTerminal = await loadXtermTerminal();
-	const { shell: resolvedShell } = settings.getShellConfig();
+	const { shell: resolvedShell, env: shellEnv } = settings.getShellConfig();
+	const ptyEnv = buildInteractivePtyEnv(shellEnv, options.env);
 	const sink = new OutputSink({
 		artifactPath: options.artifactPath,
 		artifactId: options.artifactId,
@@ -373,16 +406,12 @@ export async function runInteractiveBashPty(
 			void session
 				.start(
 					{
-						command: options.command,
+						command: buildInteractivePtyCommand(options.command, resolvedShell, ptyEnv),
 						cwd: options.cwd,
 						timeoutMs: options.timeoutMs,
-						// Interactive PTY: inherit the user's environment (the Rust side
-						// applies these as overrides), with a real TERM so editors,
-						// pagers, and TUIs behave like a normal terminal.
-						env: {
-							TERM: "xterm-256color",
-							...options.env,
-						},
+						// Start from the same resolved session environment as non-PTY
+						// execution, then apply PTY defaults and command overrides.
+						env: ptyEnv,
 						signal: options.signal,
 						cols,
 						rows,
