@@ -4,14 +4,12 @@
 
 These recipes describe **presentation machinery**, not subject matter. They are reusable ways to create referential density, beat grammar, aura, and performed register around any semantic payload. The semantic layer may inform the treatment, but none of the recipes requires a topic, ideology, joke, or narrator. The target is a local, mutable set of layers: assets, typography, layout, motion, edit rhythm, audio coupling, and post-processing can be swapped independently and recombined.
 
-Evidence consumed at the start of this synthesis:
+Evidence consumed across the original synthesis and this refresh:
 
-- all **56 unique video entries** then present in `docs/research/pleometric-reference-catalog.md` (30 in the original table and 26 incremental additions);
-- all **39** Whisper records in `data/inspiration/pleometric/transcripts.json` (the spoken record is sparse by design: the vibe brief identifies 13 empty transcripts and several stingers);
-- `data/inspiration/pleometric/manifest.json` as then present: 133 media records, 89 videos;
-- the two-layer steer and oral-performance evidence in `power-posting-sources/{ontology.md,vibe-brief.md}`;
-- the effect, timing, and pipeline evidence in `abelian-soup-methods/methods.md`;
-- the `scene.v1` plan and current renderer schema/runtime.
+- the original synthesis covered all **56 unique video entries** then present in `docs/research/pleometric-reference-catalog.md` (30 in the original table and 26 incremental additions);
+- the 2026-07-16 refresh covered the complete **307-entry catalog**, including the now-substantial SkyeSharkie, poetengineer__, and abelian_soup lanes;
+- the original synthesis also covered all **39** Whisper records then present in `data/inspiration/pleometric/transcripts.json`, `data/inspiration/pleometric/manifest.json` at 133 media records / 89 videos, the two-layer steer and oral-performance evidence in `power-posting-sources/{ontology.md,vibe-brief.md}`, the effect/timing evidence in `abelian-soup-methods/methods.md`, and the `scene.v1` plan/runtime;
+- the refresh additionally applies the kinesis primitive from `power-posting-sources/pleorama-synthesis.md`: faces, hands, and motion can retain attention independently of beat sync.
 
 Catalog IDs below retain the media suffix (`-1`). “Exact now” means expressible in the current `scene.v1` schema/runtime, not merely imaginable in Three.js. “Gap” names a missing renderer surface precisely.
 
@@ -24,17 +22,17 @@ The corpus supports four broad lanes, but they are **families of presentation ch
 3. **Referential-collage brainrot** — supported by Gigachad + Club Penguin + Subway Surfers split-screen (`2041310438583877970-1`), Paul Graham-as-Sonic over gameplay (`2040286299597234365-1`), Peter Griffin product theater (`2064045757515063502-1`), and Japanese-variety/security collage (`2067252216130376109-1`). Its invariant is fast traversal through an intentionally mismatched reference network.
 4. **Typographic incantation** — supported by fragmented kinetic words (`2022433309612216701-1`), equations over a clone field (`2057289057483346095-1`), tiled imperative speech (`2068025479026593909-1`), and kinetic takeoff captions (`2050364782411202781-1`). Its invariant is language acting as image and percussion.
 
-The ten recipes below split those lanes into operationally distinct grammars. They are deliberately composable: for example, **Chrome Halo Procession** can carry **Typographic Incantation**, while **Institutional Signal Hijack** can be cut with **Reference-Pile Retention Stack**.
+The twelve recipes below split those lanes into operationally distinct grammars. They are deliberately composable: for example, **Chrome Halo Procession** can carry **Typographic Incantation**, while **Institutional Signal Hijack** can be cut with **Reference-Pile Retention Stack**.
 
 ## Recipe 1 — Terminal Reliquary
 
 **Intent.** Make the frame feel like a machine delivering a revelation: austere, occult, technical, and already in progress.
 
-**Visual grammar.** Warm near-black or true black ground; bone, terminal green, or warning-red marks; monochrome diagrams, grids, ASCII, formula fragments, eye/skull/icon plates. Use one deep plane plus a restrained `grid` or `line` clone field. Typography is monospaced or narrow grotesk, aligned like telemetry rather than a poster. Motion is a slow camera push or tunnel zoom with tiny clone phase waves; edit on downbeats, with brief static or displacement accents rather than constant chaos. CRT/VHS grime is the carrier layer; occasional bloom turns selected glyphs into relics.
+**Visual grammar.** Warm near-black or true black ground; bone, terminal green, or warning-red marks; monochrome diagrams, grids, ASCII, formula fragments, eye/skull/icon plates. Use one deep plane plus a restrained `grid` or `line` clone field. Typography is monospaced or narrow grotesk, aligned like telemetry rather than a poster. Motion is a slow camera push or tunnel zoom with tiny clone phase waves; edit on downbeats, with brief static or displacement accents rather than constant chaos. CRT/VHS grime is the carrier layer; occasional bloom turns selected glyphs into relics. Live vector/wireframe telemetry and oscilloscope motion also fit when they read as instrument output rather than decorative dashboard. (rev. 2026-07-16)
 
 **Audio coupling.** Let narration or a drone establish authority. Pulse bloom or displacement on downbeats; place new diagram plates on phrase boundaries. In wordless use, hold through the beat and change on the next strong onset rather than crossfading continuously.
 
-**Exemplars.** `2070631349778579630-1`, `2049999955834568734-1`, `2040599459151720517-1`, `2023448161323221147-1`.
+**Exemplars.** `2070631349778579630-1`, `2049999955834568734-1`, `2040599459151720517-1`, `2023448161323221147-1`, `2032193475479806301-1`, `2051819441390858481-1`, `2064370218470699292-1`.
 
 **`scene.v1` implementability.**
 
@@ -50,7 +48,7 @@ The ten recipes below split those lanes into operationally distinct grammars. Th
 
 **Audio coupling.** Long tones or a slowed refrain carry the procession. Breathe halo scale/opacity at one or two beats; reserve the strongest bloom/glint or title reveal for the refrain. Silence before a beat can make the icon arrival feel heavier than another effect.
 
-**Exemplars.** `2055420576714408309-1`, `2044829644910641471-1`, `2043792556018794641-1`, `2041660739610419385-1`.
+**Exemplars.** `2055420576714408309-1`, `2044829644910641471-1`, `2043792556018794641-1`, `2041660739610419385-1`, `2067669513630343191-1`, `2072697701666574404-1`, `2057319209974329669-1`.
 
 **`scene.v1` implementability.**
 
@@ -62,11 +60,11 @@ The ten recipes below split those lanes into operationally distinct grammars. Th
 
 **Intent.** Create “infinite referential mirrors”: attention moves through a network of familiar but incompatible signs faster than any single sign can settle.
 
-**Visual grammar.** Deliberately collision-prone palette sampled from the source assets; gameplay, character cutouts, logos, reaction plates, HUDs, and captions share one frame. Use split-screen, picture-in-picture, corner inserts, sticker scatter, and abrupt scale hierarchy. Captions should be immediately readable while the surrounding frame remains overloaded. Motion alternates a stable retention plate with hard asset swaps, pop-ins, cutout dancing, and occasional feedback-tunnel depth. Edit densely on accents but leave one stable anchor.
+**Visual grammar.** Deliberately collision-prone palette sampled from the source assets; gameplay, character cutouts, logos, reaction plates, HUDs, and captions share one frame. Use split-screen, picture-in-picture, corner inserts, sticker scatter, and abrupt scale hierarchy. Captions should be immediately readable while the surrounding frame remains overloaded. Motion alternates a stable retention plate with hard asset swaps, pop-ins, cutout dancing, and occasional feedback-tunnel depth. Edit densely on accents but leave one stable anchor. The fuller corpus adds matrix grids whose active panel changes sequentially while a bouncing logo or equivalent moving marker supplies the stable anchor. (rev. 2026-07-16)
 
-**Audio coupling.** Map kick/snare or stressed syllables to insert swaps and scale pops; let a recognizable found-audio phrase command the largest reference change. For narration, change references at clause boundaries so collision adds meaning without masking the sentence.
+**Audio coupling.** Map kick/snare or stressed syllables to insert swaps and scale pops; let a recognizable found-audio phrase command the largest reference change. For narration, change references at clause boundaries so collision adds meaning without masking the sentence. Treat gameplay, a face, hands, or continuous body motion as kinesis—the retention carrier that can persist between audio accents rather than another effect to trigger. (rev. 2026-07-16)
 
-**Exemplars.** `2041310438583877970-1`, `2040286299597234365-1`, `2064045757515063502-1`, `2067252216130376109-1`.
+**Exemplars.** `2041310438583877970-1`, `2040286299597234365-1`, `2064045757515063502-1`, `2067252216130376109-1`, `2054399572081029311-1`, `2054424640085479471-1`, `2054426262278754560-1`.
 
 **`scene.v1` implementability.**
 
@@ -78,11 +76,11 @@ The ten recipes below split those lanes into operationally distinct grammars. Th
 
 **Intent.** Turn a phrase into a spell or command: words arrive as beats, repeat as architecture, and remain legible under pressure.
 
-**Visual grammar.** High-contrast two- or three-color palette; one phrase per visual breath. Alternate monumental centered type, fragmented corner words, equation/notation overlays, and tiled refrains. Use `line`/`grid` clone fields for repetition. Hard-cut text at sentence pivots; apply elastic entrances sparingly, scale-pop at rest, and opacity swaps for call-and-response. Edit rhythm follows syntax: clause, verdict, refrain.
+**Visual grammar.** High-contrast two- or three-color palette; one phrase per visual breath. Alternate monumental centered type, fragmented corner words, equation/notation overlays, and tiled refrains. Use `line`/`grid` clone fields for repetition. Hard-cut text at sentence pivots; apply elastic entrances sparingly, scale-pop at rest, and opacity swaps for call-and-response. Edit rhythm follows syntax: clause, verdict, refrain. The expanded evidence also supports text that reflows around a moving form, becomes a negative-space mask, or morphs through a data-driven sequence; legibility still governs the transition. (rev. 2026-07-16)
 
 **Audio coupling.** Time each phrase reveal to the spoken onset, not merely the global BPM. Repeated words may pulse every beat; a final word can hold while post effects decay. Song lyrics use phrase-level changes, not karaoke-by-default.
 
-**Exemplars.** `2022433309612216701-1`, `2057289057483346095-1`, `2068025479026593909-1`, `2067715247679402255-1`.
+**Exemplars.** `2022433309612216701-1`, `2057289057483346095-1`, `2068025479026593909-1`, `2067715247679402255-1`, `2042488027310698740-1`, `2038331812338942179-1`, `1998018306784305400-1`.
 
 **`scene.v1` implementability.**
 
@@ -96,9 +94,9 @@ The ten recipes below split those lanes into operationally distinct grammars. Th
 
 **Visual grammar.** One strong mascot cutout against an animated or contrasting plate. Clone as ordered grid, marching line, orbital chorus, or purposeful scatter; retain one hero clone at a different scale/depth. Palette follows the mascot, with one contrasting signal color. Motion uses clone-index phase waves, synchronized hops, turntable-like loops, and a restrained camera push. Cut between chorus formations on section boundaries rather than randomizing every frame.
 
-**Audio coupling.** Use beat pulses for group motion and a refrain for formation changes. `phasePerClone` creates a wave after each trigger; short voice loops can be mirrored by the same repeated gesture.
+**Audio coupling.** Use beat pulses for group motion and a refrain for formation changes. `phasePerClone` creates a wave after each trigger; short voice loops can be mirrored by the same repeated gesture. A readable face, hand sign, or repeated body gesture is kinesis and may carry the section continuously while the beat only reorganizes the chorus. (rev. 2026-07-16)
 
-**Exemplars.** `2044763919009386830-1`, `2057289057483346095-1`, `2042976416514334860-1`, `2067714664348229948-1`.
+**Exemplars.** `2044763919009386830-1`, `2057289057483346095-1`, `2042976416514334860-1`, `2067714664348229948-1`, `2047049529887760495-1`, `1991750566276657614-1`, `1991752603471159491-1`.
 
 **`scene.v1` implementability.**
 
@@ -114,7 +112,7 @@ The ten recipes below split those lanes into operationally distinct grammars. Th
 
 **Audio coupling.** Delivery is flat and quiet. Use restrained stings for title cards, list ticks, or disclaimer changes; visual escalation can rise while vocal performance stays level. Found audio is valid if the frame clearly establishes a new institutional context.
 
-**Exemplars.** `2049999955834568734-1`, `2056378137831682359-1`, `2067252216130376109-1`, `2064045757515063502-1`.
+**Exemplars.** `2049999955834568734-1`, `2056378137831682359-1`, `2067252216130376109-1`, `2064045757515063502-1`, `2059338854566355273-1`, `2016326052365406556-1`, `2057131489691934720-1`.
 
 **`scene.v1` implementability.**
 
@@ -126,11 +124,11 @@ The ten recipes below split those lanes into operationally distinct grammars. Th
 
 **Intent.** Reframe ordinary footage as evidence: documentary credibility, deadpan reaction, or a sentence “already found in the world.”
 
-**Visual grammar.** Black/off-white frame, vertical crop or dense grid, one dominant talking-head/reaction plate, optional duplicate angles, restrained caption bar, and small source-like marks. Use jump cuts, stable camera, mild lo-fi/VHS, and an evidence-wall grid only when comparison matters. Avoid decorative motion that competes with the found gesture or line.
+**Visual grammar.** Black/off-white frame, vertical crop or dense grid, one dominant talking-head/reaction plate, optional duplicate angles, restrained caption bar, and small source-like marks. Use jump cuts, stable camera, mild lo-fi/VHS, and an evidence-wall grid only when comparison matters. Avoid decorative motion that competes with the found gesture or line. The expanded corpus also supports restrained shot–reverse-shot or multi-angle sequences when the relation between gestures is the evidence. (rev. 2026-07-16)
 
-**Audio coupling.** Preserve the source line and room tone. Cut on breaths, gesture peaks, or sentence endings. Duplicate/reprise a clip as a beat only when repetition changes its reading; captions should land with the spoken phrase.
+**Audio coupling.** Preserve the source line and room tone. Cut on breaths, gesture peaks, or sentence endings. Duplicate/reprise a clip as a beat only when repetition changes its reading; captions should land with the spoken phrase. Name the face, hands, and consequential gesture as kinesis: their motion retains attention, while cuts and captions clarify it. (rev. 2026-07-16)
 
-**Exemplars.** `2067431750951690447-1`, `2067433262159409208-1`, `2055621213431468424-1`, `2069531636606357558-1`.
+**Exemplars.** `2067431750951690447-1`, `2067433262159409208-1`, `2055621213431468424-1`, `2069531636606357558-1`, `2071552334199660572-1`, `2014848117460582420-1`.
 
 **`scene.v1` implementability.**
 
@@ -146,7 +144,7 @@ The ten recipes below split those lanes into operationally distinct grammars. Th
 
 **Audio coupling.** Cheap stings, notification-like accents, or looped jingles can trigger flashes and button pops. Keep any narration dry against the over-selling visual surface.
 
-**Exemplars.** `2052979237678653532-1`, `2043792556018794641-1`, `2071047326869664178-1`, `2071346891367792806-1`.
+**Exemplars.** `2052979237678653532-1`, `2043792556018794641-1`, `2071047326869664178-1`, `2071346891367792806-1`, `2037030914069586165-1`, `2037148433543553172-1`, `2016326052365406556-1`.
 
 **`scene.v1` implementability.**
 
@@ -160,9 +158,9 @@ The ten recipes below split those lanes into operationally distinct grammars. Th
 
 **Visual grammar.** Dark base with iridescent, psychedelic, or warning-color highlights. Build nested/spiral clones, a tunnel plate, or split-screen corridors; keep the center readable while edges smear. Camera pushes forward; clone scale/position phase produces waves; feedback zoom/rotate accumulates a vortex. Use a few decisive reference plates rather than undifferentiated noise.
 
-**Audio coupling.** Motion should accelerate toward a beat, strike, then hold until the next wave—the timing behavior documented in the Abelian Soup pipeline. Increase trail pressure across a phrase or section; use strong onsets for plate changes and negative/glitch accents.
+**Audio coupling.** Motion should accelerate toward a beat, strike, then hold until the next wave—the timing behavior documented in the Abelian Soup pipeline. Increase trail pressure across a phrase or section; use strong onsets for plate changes and negative/glitch accents. The corridor itself is kinesis: continuous travel retains attention between accents, and beat sync is only one way to modulate that motion. (rev. 2026-07-16)
 
-**Exemplars.** `2040814218497126624-1`, `2070631349778579630-1`, `2067714664348229948-1`, `2041310438583877970-1`.
+**Exemplars.** `2040814218497126624-1`, `2070631349778579630-1`, `2067714664348229948-1`, `2041310438583877970-1`, `2020889027248009635-1`, `2021118950696943965-1`, `2026893743811596699-1`, `2033575796451995696-1`.
 
 **`scene.v1` implementability.**
 
@@ -176,15 +174,47 @@ The ten recipes below split those lanes into operationally distinct grammars. Th
 
 **Visual grammar.** Minimal palette and composition; one character, reaction, or emblem; a clean loop or held frame; one abrupt explosion, disintegration, exposure blast, or reaction button. Typography is absent or one short setup line. The edit grammar is setup → anticipation → hard event → immediate cut/reset, never a dissolve.
 
-**Audio coupling.** A short refrain, silence, or stable loop creates expectation. Trigger the event on one accent; cut the tail tightly so autoplay reconnects to the setup. The event may be visual-only, but its frame must be deliberate.
+**Audio coupling.** A short refrain, silence, or stable loop creates expectation. Trigger the event on one accent; cut the tail tightly so autoplay reconnects to the setup. The event may be visual-only, but its frame must be deliberate. Body motion or a hand/face reaction can supply kinesis during setup; the hard event works because it interrupts that readable motion. (rev. 2026-07-16)
 
-**Exemplars.** `2045554597280813392-1`, `2050907411259490462-1`, `2042039887256232267-1`, `2041710475684069845-1`.
+**Exemplars.** `2045554597280813392-1`, `2050907411259490462-1`, `2042039887256232267-1`, `2041710475684069845-1`, `2053862530561323381-1`, `2037030914069586165-1`, `2037148433543553172-1`, `2069949695628075114-1`.
 
 **`scene.v1` implementability.**
 
 - **Exact now:** opacity/scale/position keyframes for hard reveal and reset; explicit beat timing; staged effect plates; glitch/bloom/displacement spikes; deterministic looping video frames.
 - **Approximation:** bake explosions, disintegration, character action, and exposure effects into a video-frame asset; overlay and hard-cut it with opacity.
 - **Gaps:** no event/shot/loop-boundary abstraction; no particle/explosion/disintegration system; no asset source-range or one-shot playback controls; no audio event/multi-track mixer for accent plus ambience.
+
+## Recipe 11 — Simulation Workbench
+
+**Intent.** Make visible cause-and-effect feel like proof: an input, parameter change, or physical constraint produces an immediately legible system response.
+
+**Visual grammar.** Keep enough viewport, control surface, hand, cursor, or telemetry to establish causality. Favor one live system at a time, a restrained technical palette, and cuts that alternate input detail with the resulting whole. Orbit views, diagnostic overlays, parameter sweeps, time-lapse assembly, and before/after states are useful only when they expose behavior. The interface is an evidentiary frame, not decoration; crop dead chrome but preserve the control that explains the change.
+
+**Audio coupling.** Let clicks, drags, impacts, machine cycles, or short spoken hypotheses precede visible state changes. Embodied input and simulated motion are kinesis: a hand, agent, toolhead, or creature continuing to act can retain attention without a beat. Reserve music accents for state transitions or successful completion.
+
+**Exemplars.** `2072508957583962162-1`, `2073294937601503349-1`, `2032138243399917658-1`, `2041553085554663643-1`, `2062652547093967019-1`.
+
+**`scene.v1` implementability.**
+
+- **Exact now:** staged `videoFrames` or image plates; layered text/sprite callouts; opacity/position keyframes for input/result cuts; deterministic camera and explicit audio timing; mild bloom/VHS when evidenced.
+- **Approximation:** pre-record the real interaction or simulation, crop it before staging, and author pointers, parameter labels, and result emphasis as separate timed objects.
+- **Gaps:** no live WebGPU/procedural simulation, pointer/gesture input, parameter binding, chart/telemetry primitive, native crop/fit, source in/out, or multi-shot sequencing.
+
+## Recipe 12 — Morphic State Passage
+
+**Intent.** Make transformation itself carry the idea: one legible state becomes another through a continuous material, typographic, or topological passage.
+
+**Visual grammar.** Establish the source state cleanly, preserve a stable camera or silhouette, then deform, dissolve, flock, grow, tessellate, or reassemble toward a readable target. Use a limited palette and one dominant transformation law so continuity remains visible. Particles, voxels, reaction-diffusion fields, morphing grids, and object-to-object transitions qualify; an unexplained hard cut does not. Hold briefly at both endpoints so the viewer can compare them.
+
+**Audio coupling.** The transformation is kinesis and can retain attention continuously. Couple onset to the first loss of form, use rising density or pitch through the unstable middle, and land the strongest accent when the target becomes recognizable; narration should name the relation before or after the morph, not compete with its midpoint.
+
+**Exemplars.** `2072697701666574404-1`, `2023050668030750779-1`, `2054111366672273911-1`, `2058808511807578357-1`, `2014699246415683803-1`.
+
+**`scene.v1` implementability.**
+
+- **Exact now:** staged `videoFrames`; layered endpoint plates; opacity/scale/position tracks; displacement, feedback, bloom, and glitch envelopes; explicit beat timing and deterministic holds.
+- **Approximation:** pre-render the morph, particle, voxel, or growth sequence and use Scene Lab to time endpoint labels, camera emphasis, and audio.
+- **Gaps:** no mesh morph targets, particle/voxel/reaction-diffusion simulation, vector-path interpolation, per-glyph morphing, object masks, optical flow, or source-range/one-shot clip controls.
 
 ## Composition rules
 

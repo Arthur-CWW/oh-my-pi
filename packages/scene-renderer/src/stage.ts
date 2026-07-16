@@ -1,7 +1,7 @@
 import { mkdir, copyFile, readdir, rm, stat } from "node:fs/promises"
 import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path"
 import { spawn } from "node:child_process"
-import type { SceneAsset, SceneSpec } from "./schema"
+import type { SceneAsset, SceneSpec, TrackSpec } from "./schema"
 
 export interface StageOptions {
   readonly outDir: string
@@ -70,9 +70,40 @@ export async function stageAssets(spec: SceneSpec, options: StageOptions): Promi
     rewrittenAssets.push(rewritten)
   }
 
-  const stagedSpec: SceneSpec = { ...spec, assets: rewrittenAssets }
+  const specWithCues = await stageCueFiles(spec, assetsDir, sceneDir)
+  const stagedSpec: SceneSpec = { ...specWithCues, assets: rewrittenAssets }
   const audioFilePath = spec.audio ? findStagedAudioPath(stagedSpec.assets, stagedByKey, spec.audio.asset) : undefined
   return { spec: stagedSpec, publicDir, audioFilePath }
+}
+
+
+async function stageCueFiles(spec: SceneSpec, assetsDir: string, sceneDir: string): Promise<SceneSpec> {
+  const cuePaths = new Set<string>()
+  const collectTracks = (tracks: readonly TrackSpec[]): void => {
+    for (const track of tracks) if (track.timing) cuePaths.add(track.timing.cues)
+  }
+  collectTracks(spec.camera.tracks)
+  for (const object of spec.objects) collectTracks(object.tracks)
+
+  const staged = new Map<string, string>()
+  for (const cuePath of cuePaths) {
+    const absolutePath = await resolveAssetPath(cuePath, sceneDir)
+    const stagedPath = `assets/cues-${staged.size.toString().padStart(3, "0")}.json`
+    await copyFile(absolutePath, join(assetsDir, basename(stagedPath)))
+    staged.set(cuePath, stagedPath)
+  }
+
+  const rewriteTracks = (tracks: readonly TrackSpec[]): readonly TrackSpec[] =>
+    tracks.map((track) => {
+      if (!track.timing) return track
+      const stagedPath = staged.get(track.timing.cues)
+      if (!stagedPath) throw new Error(`Cue path was not staged: ${track.timing.cues}`)
+      return { ...track, timing: { ...track.timing, cues: stagedPath } }
+    })
+
+  const camera = { ...spec.camera, tracks: rewriteTracks(spec.camera.tracks) }
+  const objects = spec.objects.map((object) => ({ ...object, tracks: rewriteTracks(object.tracks) }))
+  return { ...spec, camera, objects }
 }
 
 function findStagedAudioPath(

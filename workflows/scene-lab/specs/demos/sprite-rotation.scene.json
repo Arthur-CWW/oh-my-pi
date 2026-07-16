@@ -1,0 +1,13 @@
+{
+  "schemaVersion": "scene.v1",
+  "width": 640,
+  "height": 360,
+  "fps": 30,
+  "durationSeconds": 2,
+  "background": "#0a0810",
+  "objects": [
+    { "id": "left", "kind": "sprite", "color": "#ff3b1d", "size": [4.2, 0.65], "position": [-1.15, 0, 0], "rotation": [0, 0, 0.7] },
+    { "id": "right", "kind": "sprite", "color": "#f2ead9", "size": [4.2, 0.65], "position": [1.15, 0, 0], "rotation": [0, 0, -0.7] },
+    { "id": "caption", "kind": "text", "text": "SPRITE rotation.z", "color": "#0a0810", "size": [3.2, 0.6], "position": [0, 0, 1], "rotation": [0, 0, 0.12] }
+  ]
+}

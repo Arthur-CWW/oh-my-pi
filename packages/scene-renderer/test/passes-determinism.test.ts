@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { beatScaled, frameSeed, hash11, hash21 } from "../src/runtime/post/passes/helpers";
+import { halftoneDefaults } from "../src/runtime/post/passes/halftone";
 
 describe("post pass deterministic helpers", () => {
+  test("halftone defaults to a full-strength blend", () => {
+    expect(halftoneDefaults.mix).toBe(1);
+  });
   test("hash helpers are stable and normalized", () => {
     const first = hash11(42.25);
     const second = hash11(42.25);

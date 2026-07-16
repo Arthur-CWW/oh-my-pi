@@ -38,7 +38,7 @@ Read, in order: `docs/fable/charter.md`, `streams/playground/GOAL.md` (esp. § e
 - **Recovery**: scene dev server restored (`cd apps/scene-playground && nohup ./scripts/dev-up.sh > /tmp/scene-dev-up.log 2>&1 &`); playground overlay Terra pins → luna:xhigh.
 
 ### Still Arthur-gated
-- **Labeling**: labels.sqlite still has only 5 old `rhythm` labels; ~193-item LABEL corpus waits at scene.localhost:1355.
+- **Labeling**: labels.sqlite still has only 5 old `rhythm` labels; ~193-item LABEL corpus waits at https://scene.localhost (portless moved to 443/HTTP2 on 2026-07-16; old :1355 URLs are dead; service registered in root `services.yml` — `mise run up playground`).
 - **Found-audio + register-collapse taste questions**: Arthur had lost context — re-ask only with a concrete playable example, never abstractly.
 
 ## Standing directives (carried + session-5 additions)

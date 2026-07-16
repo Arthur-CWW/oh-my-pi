@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { cloneTransforms } from "../src/runtime/layouts";
+import { snapKeyframesToOnsets } from "../src/runtime/cues";
 import { beatEnvelope, easeValue, evaluateTrack, playbackFrameForNow } from "../src/runtime/timeline";
 import type { TrackSpec } from "../src/runtime/spec";
 
@@ -18,6 +19,13 @@ describe("runtime timeline math", () => {
     expect(evaluateTrack(base("linear"), { timeSeconds: 0.5, cloneIndex: 0, fps: 30 })).toBeCloseTo(5);
     expect(evaluateTrack(base("inOut"), { timeSeconds: 0.25, cloneIndex: 0, fps: 30 })).toBeCloseTo(easeValue("inOut", 0.25) * 10);
     expect(evaluateTrack(base("outElastic"), { timeSeconds: 0.5, cloneIndex: 0, fps: 30 })).toBeCloseTo(easeValue("outElastic", 0.5) * 10);
+  });
+
+  it("snaps authored keyframe times to nearest audio onsets", () => {
+    expect(snapKeyframesToOnsets(
+      [{ t: 0.48, v: 1 }, { t: 1.08, v: 2 }],
+      [0.2, 0.51, 1.04],
+    )).toEqual([{ t: 0.51, v: 1 }, { t: 1.04, v: 2 }]);
   });
 
   it("offsets oscillator phase per clone", () => {

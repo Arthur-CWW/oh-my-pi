@@ -82,6 +82,12 @@ export interface TrackSpec {
   keyframes?: KeyframeSpec[];
   osc?: OscSpec;
   beat?: BeatSpec;
+  timing?: TrackTimingSpec;
+}
+
+export interface TrackTimingSpec {
+  cues: string;
+  mode: "snap";
 }
 
 export interface KeyframeSpec {

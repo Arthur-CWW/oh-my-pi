@@ -214,7 +214,7 @@ Supported passes:
 - `glitch`: displacement and digital tear.
 - `feedback`: trail/echo via previous-frame accumulation. Params: `decay`, `zoom`, `rotate`.
 - `displacement`: UV warp by procedural seeded noise. Params: `amplitude`, `scale`, `speed`, `seed`.
-- `halftone`: dot-screen with optional RGB separation. Params: `dotSize`, `angle`, `rgbSplit`.
+- `halftone`: dot-screen with optional RGB separation. Params: `dotSize`, `angle`, `rgbSplit`, `mix` (0 = untouched input, 1 = full halftone).
 
 `beatReactive` maps a beat envelope onto one numeric pass parameter:
 
@@ -750,10 +750,10 @@ bun run --cwd packages/scene-renderer render -- --scene workflows/scene-lab/spec
 
 Classic print look: dot-screen thresholding with optional RGB channel separation. Produces a newspaper/risograph texture. In RGB mode, three dot grids at 0°/60°/30° offsets create a rosette moiré.
 
-Params: `dotSize` (dot frequency per UV unit; default 24.0), `angle` (screen rotation in radians; default 0.785), `rgbSplit` (0 = monochrome, 1 = RGB separated screens; default 1.0).
+Params: `dotSize` (dot frequency per UV unit; default 24.0), `angle` (screen rotation in radians; default 0.785), `rgbSplit` (0 = monochrome, 1 = RGB separated screens; default 1.0), `mix` (blend with the untouched input, 0..1; default 1.0).
 
 ```json
-{ "pass": "halftone", "params": { "dotSize": 22, "angle": 0.3, "rgbSplit": 1 } }
+{ "pass": "halftone", "params": { "dotSize": 22, "angle": 0.3, "rgbSplit": 1, "mix": 0.45 } }
 ```
 
 Commands:
@@ -823,5 +823,7 @@ These names index the evidence-backed presentation recipes in `docs/research/sty
 | **Retro-Web Urgency Shrine** | Banner-era coercion as cursed nostalgia: stickers, WordArt, flashes, fake urgency | saturated ground, scatter, scale/opacity cuts, glitch/chromatic, halftone | sprite sheets, rich type effects, halftone mix/opacity, sprite rotation |
 | **Feedback Corridor Pilgrimage** | Hypnotic travel through phased depth and accumulating reference trails | spiral/orbit/grid, z tracks, feedback + displacement + bloom, explicit beats | onset/downbeat analysis, accelerate-hold envelope, post-param tracks, invert pass |
 | **Hard-Button Loop** | One setup and one timed detonation, cut for replay | keyframed reveal/reset, explicit beat, staged VFX, post spike | event/loop schema, particle VFX, one-shot clip control, audio events |
+| **Simulation Workbench** | Cause-and-effect as proof through visible controls, embodied input, telemetry, and system response | staged `videoFrames`, layered callouts, input/result cuts, deterministic camera/audio | live simulation/input, parameter binding, telemetry, crop, source ranges, shot sequencing |
+| **Morphic State Passage** | Transformation as the carrier: a legible source continuously deforms, dissolves, grows, or reassembles into a target | staged `videoFrames`, endpoint plates, transform/opacity tracks, displacement + feedback + bloom | morph targets, particles/voxels/reaction-diffusion, path/glyph morphing, masks, optical flow |
 
 Composition rule: choose one lane-level carrier (machine/CRT, chrome/aura, referential collage, or typographic incantation), add at most two supporting recipes, and keep one stable visual or sonic anchor.

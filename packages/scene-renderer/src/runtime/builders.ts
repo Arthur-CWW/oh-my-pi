@@ -23,7 +23,7 @@ function buildPlane(spec: SceneObjectSpec, texture: THREE.Texture | undefined): 
 }
 
 function buildSprite(spec: SceneObjectSpec, texture: THREE.Texture | undefined): BuiltObject {
-  const material = new THREE.SpriteMaterial({ color: texture ? 0xffffff : spec.color ?? "#ffffff", map: texture, transparent: true, opacity: spec.opacity ?? 1 });
+  const material = new THREE.SpriteMaterial({ color: texture ? 0xffffff : spec.color ?? "#ffffff", ...(texture ? { map: texture } : {}), transparent: true, opacity: spec.opacity ?? 1, rotation: spec.rotation?.[2] ?? 0 });
   const sprite = new THREE.Sprite(material);
   const size = spec.size ?? [3, 3];
   sprite.scale.set(size[0], size[1], 1);

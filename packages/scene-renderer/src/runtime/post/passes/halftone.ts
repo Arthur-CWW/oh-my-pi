@@ -9,6 +9,7 @@ uniform vec2 resolution;
 uniform float dotSize;
 uniform float angle;
 uniform float rgbSplit;
+uniform float mixAmount;
 varying vec2 vUv;
 
 float halftone(vec2 coord, float a, float freq, float brightness) {
@@ -23,18 +24,20 @@ float halftone(vec2 coord, float a, float freq, float brightness) {
 
 void main() {
   vec3 color = texture2D(inputTexture, vUv).rgb;
+  vec3 halftoned;
   float aspect = resolution.x / max(resolution.y, 1.0);
   vec2 coord = vec2(vUv.x * aspect, vUv.y);
   if (rgbSplit > 0.5) {
     float r = halftone(coord, angle, dotSize, color.r);
     float g = halftone(coord, angle + 1.0472, dotSize, color.g);
     float b = halftone(coord, angle + 0.5236, dotSize, color.b);
-    gl_FragColor = vec4(r, g, b, 1.0);
+    halftoned = vec3(r, g, b);
   } else {
     float lum = dot(color, vec3(0.2126, 0.7152, 0.0722));
     float d = halftone(coord, angle, dotSize, lum);
-    gl_FragColor = vec4(vec3(d), 1.0);
+    halftoned = vec3(d);
   }
+  gl_FragColor = vec4(mix(color, halftoned, mixAmount), 1.0);
 }
 `;
 
@@ -42,6 +45,7 @@ export const halftoneDefaults = {
   dotSize: 24.0,
   angle: 0.785,
   rgbSplit: 1.0,
+  mix: 1.0,
 } as const;
 
 export const halftonePass = (): ScenePass => {
@@ -50,6 +54,7 @@ export const halftonePass = (): ScenePass => {
     dotSize: { value: halftoneDefaults.dotSize },
     angle: { value: halftoneDefaults.angle },
     rgbSplit: { value: halftoneDefaults.rgbSplit },
+    mix: { value: halftoneDefaults.mix },
   };
   const material = makeMaterial(fragmentShader, {
     inputTexture: { value: null },
@@ -57,6 +62,7 @@ export const halftonePass = (): ScenePass => {
     dotSize: params.dotSize,
     angle: { value: params.angle.value },
     rgbSplit: { value: params.rgbSplit.value },
+    mixAmount: { value: params.mix.value },
   });
 
   return {
@@ -67,6 +73,7 @@ export const halftonePass = (): ScenePass => {
       material.uniforms.inputTexture.value = ctx.readTarget.texture;
       material.uniforms.angle.value = params.angle.value;
       material.uniforms.rgbSplit.value = params.rgbSplit.value;
+      material.uniforms.mixAmount.value = Math.min(1, Math.max(0, params.mix.value));
       renderFullscreen(ctx, material, ctx.writeTarget);
     },
   };

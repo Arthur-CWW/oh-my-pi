@@ -19,6 +19,38 @@ describe("decodeSceneSpec", () => {
     expect(spec.objects).toEqual([])
   })
 
+  test("accepts cue-snapped keyframes and bounds halftone mix", () => {
+    const spec = decodeSceneSpec({
+      schemaVersion: "scene.v1",
+      width: 320,
+      height: 180,
+      fps: 30,
+      durationSeconds: 2,
+      objects: [{
+        id: "card",
+        kind: "sprite",
+        tracks: [{
+          prop: "rotation.z",
+          mode: "keyframes",
+          keyframes: [{ t: 0.5, v: 1 }],
+          timing: { cues: "voice.cues.json", mode: "snap" },
+        }],
+      }],
+      post: [{ pass: "halftone", params: { mix: 0.4 } }],
+    })
+
+    expect(spec.objects[0]?.tracks[0]?.timing).toEqual({ cues: "voice.cues.json", mode: "snap" })
+    expect(spec.post[0]?.params.mix).toBe(0.4)
+    expect(() => decodeSceneSpec({
+      schemaVersion: "scene.v1",
+      width: 320,
+      height: 180,
+      fps: 30,
+      durationSeconds: 2,
+      post: [{ pass: "halftone", params: { mix: 1.1 } }],
+    })).toThrow(/post\[0\]\.params\.mix/)
+  })
+
   test("reports all failed paths one per line", () => {
     expect(() =>
       decodeSceneSpec({

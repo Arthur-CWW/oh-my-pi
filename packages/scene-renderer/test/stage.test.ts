@@ -36,6 +36,34 @@ describe("stageAssets", () => {
     expect(await Bun.file(join(staged.publicDir, "assets", "0-plate_one.png")).text()).toBe("image-bytes")
   })
 
+  test("copies cue files and rewrites track timing paths", async () => {
+    const root = testRoot("cues")
+    const sourceDir = join(root, "source")
+    await mkdir(sourceDir, { recursive: true })
+    await writeFile(join(sourceDir, "voice.cues.json"), '{"schemaVersion":"scene.cues.v1","onsets":[0.2]}')
+    const spec = decodeSceneSpec({
+      schemaVersion: "scene.v1",
+      width: 320,
+      height: 180,
+      fps: 30,
+      durationSeconds: 1,
+      objects: [{
+        id: "card",
+        kind: "sprite",
+        tracks: [{
+          prop: "rotation.z",
+          mode: "keyframes",
+          keyframes: [{ t: 0.18, v: 1 }],
+          timing: { cues: "voice.cues.json", mode: "snap" },
+        }],
+      }],
+    })
+
+    const staged = await stageAssets(spec, { outDir: join(root, "out"), sceneDir: sourceDir })
+    expect(staged.spec.objects[0]?.tracks[0]?.timing?.cues).toBe("assets/cues-000.json")
+    expect(await Bun.file(join(staged.publicDir, "assets", "cues-000.json")).text()).toContain("scene.cues.v1")
+  })
+
   test("resolves repo-root-relative assets before spec-dir-relative assets", async () => {
     const root = testRoot("repo-root")
     const sceneDir = join(root, "scenes", "nested")

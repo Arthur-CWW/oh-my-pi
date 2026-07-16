@@ -1,0 +1,34 @@
+{
+  "schemaVersion": "scene.v1",
+  "width": 640,
+  "height": 360,
+  "fps": 30,
+  "durationSeconds": 2,
+  "background": "#0a0810",
+  "assets": [
+    { "id": "narration", "kind": "audio", "path": "workflows/scene-lab/reports/2026-07-15-local-tts/what-lab-am_michael.wav" }
+  ],
+  "audio": { "asset": "narration", "offsetSeconds": 0, "gainDb": 0 },
+  "objects": [
+    {
+      "id": "cue-card",
+      "kind": "sprite",
+      "color": "#ff3b1d",
+      "size": [4.5, 1.2],
+      "tracks": [
+        {
+          "prop": "rotation.z",
+          "mode": "keyframes",
+          "timing": { "cues": "what-lab.cues.json", "mode": "snap" },
+          "keyframes": [
+            { "t": 0.12, "v": -0.35, "ease": "outElastic" },
+            { "t": 0.55, "v": 0.35, "ease": "outElastic" },
+            { "t": 1.05, "v": -0.18, "ease": "outElastic" },
+            { "t": 1.62, "v": 0.18, "ease": "outElastic" }
+          ]
+        }
+      ]
+    },
+    { "id": "label", "kind": "text", "text": "ONSET-SNAPPED", "color": "#f2ead9", "size": [3.5, 0.7], "position": [0, 0, 1] }
+  ]
+}

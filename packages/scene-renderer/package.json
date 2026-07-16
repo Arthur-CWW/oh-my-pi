@@ -39,6 +39,7 @@
   "scripts": {
     "build:runtime": "bun build src/runtime/index.ts --outfile dist/runtime.js --format iife --target browser",
     "render": "bun src/render.ts",
+    "analyze-audio": "bun scripts/analyze-audio.ts",
     "check": "bun src/check.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit"

@@ -1,0 +1,16 @@
+{
+  "schemaVersion": "scene.v1",
+  "width": 640,
+  "height": 360,
+  "fps": 30,
+  "durationSeconds": 2,
+  "background": "#10101a",
+  "objects": [
+    { "id": "field", "kind": "plane", "color": "#ff3b1d", "size": [8, 4], "position": [0, 0, 0] },
+    { "id": "card", "kind": "sprite", "color": "#f2ead9", "size": [4.8, 1.6], "position": [0, 0, 1], "rotation": [0, 0, 0.18] },
+    { "id": "title", "kind": "text", "text": "HALFTONE MIX 45%", "color": "#10101a", "size": [4.2, 0.8], "position": [0, 0, 2] }
+  ],
+  "post": [
+    { "pass": "halftone", "params": { "dotSize": 28, "angle": 0.3, "rgbSplit": 1, "mix": 0.45 } }
+  ]
+}

@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { loadAssets, textureForAsset, type RuntimeAssetMap } from "./assets";
 import { buildObject, disposeBuiltObject, type BuiltObject } from "./builders";
 import { cloneTransforms } from "./layouts";
+import { resolveCueTimings } from "./cues";
 import { defaultCameraPosition, defaultLookAt, type SceneObjectSpec, type SceneSpec, type TrackProp } from "./spec";
 import { durationInFrames as framesForDuration, evaluateTrack, playbackFrameForNow } from "./timeline";
 import { bloomPass, chromaticAberrationPass, displacementPass, feedbackPass, glitchPass, halftonePass, PostChain, vhsPass, type ConfiguredPass, type ScenePass } from "./post";
@@ -33,7 +34,7 @@ let state: RuntimeState | undefined;
 async function init(specInput: unknown, opts: { width: number; height: number; fps: number; assetBaseUrl: string }): Promise<void> {
   stop();
   disposeState();
-  const spec = specInput as SceneSpec;
+  const spec = await resolveCueTimings(specInput as SceneSpec, opts.assetBaseUrl);
   const canvas = document.createElement("canvas");
   canvas.id = "scene";
   canvas.width = opts.width;
@@ -132,6 +133,7 @@ function buildObjectClones(
     built.root.name = `${objectSpec.id}:${clone.index}`;
     built.root.position.set(basePosition[0] + clone.position[0], basePosition[1] + clone.position[1], basePosition[2] + clone.position[2]);
     built.root.rotation.set(baseRotation[0] + clone.rotation[0], baseRotation[1] + clone.rotation[1], baseRotation[2] + clone.rotation[2]);
+    if (built.material instanceof THREE.SpriteMaterial) built.material.rotation = built.root.rotation.z;
     built.root.scale.multiplyScalar(baseScale * clone.scale);
     const positionBeforeTracks = built.root.position.clone();
     const rotationBeforeTracks = built.root.rotation.clone();
@@ -168,7 +170,10 @@ function applyTrack(
   }
   const axis = prop.charAt(prop.length - 1) as AxisName;
   if (prop.startsWith("position")) object.position[axis] = basePosition[axis] + value;
-  if (prop.startsWith("rotation")) object.rotation[axis] = baseRotation[axis] + value;
+  if (prop.startsWith("rotation")) {
+    object.rotation[axis] = baseRotation[axis] + value;
+    if (axis === "z" && material instanceof THREE.SpriteMaterial) material.rotation = object.rotation.z;
+  }
 }
 
 function configuredPasses(spec: SceneSpec): ConfiguredPass[] {

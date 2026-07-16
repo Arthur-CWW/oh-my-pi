@@ -46,6 +46,11 @@ export interface KeyframeSpec {
   readonly ease: Ease
 }
 
+export interface TrackTimingSpec {
+  readonly cues: string
+  readonly mode: "snap"
+}
+
 export interface OscTrackSpec {
   readonly amp: number
   readonly freqBeats: number
@@ -67,6 +72,7 @@ export interface TrackSpec {
   readonly keyframes?: readonly KeyframeSpec[]
   readonly osc?: OscTrackSpec
   readonly beat?: BeatTrackSpec
+  readonly timing?: TrackTimingSpec
 }
 
 export interface CloneSpec {
@@ -141,6 +147,7 @@ const JsonValueSchema: Schema.Codec<JsonValue> = Schema.suspend((): Schema.Codec
 
 const PositiveNumber = Schema.Number.check(Schema.isGreaterThan(0))
 const NonNegativeNumber = Schema.Number.check(Schema.isGreaterThanOrEqualTo(0))
+const UnitInterval = Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 1 }))
 const Vec2Schema = Schema.Tuple([Schema.Number, Schema.Number])
 const Vec3Schema = Schema.Tuple([Schema.Number, Schema.Number, Schema.Number])
 const EmptyJsonRecordSchema = Schema.Record(Schema.String, JsonValueSchema)
@@ -156,6 +163,11 @@ export const KeyframeSchema = Schema.Struct({
   t: NonNegativeNumber,
   v: Schema.Number,
   ease: Schema.optional(Schema.Union([Schema.Literal("linear"), Schema.Literal("inOut"), Schema.Literal("outElastic")])),
+})
+
+export const TrackTimingSchema = Schema.Struct({
+  cues: Schema.String,
+  mode: Schema.Literal("snap"),
 })
 
 export const OscTrackSchema = Schema.Struct({
@@ -188,6 +200,7 @@ export const TrackSchema = Schema.Struct({
   keyframes: Schema.optional(Schema.Array(KeyframeSchema)),
   osc: Schema.optional(OscTrackSchema),
   beat: Schema.optional(BeatTrackSchema),
+  timing: Schema.optional(TrackTimingSchema),
 })
 
 export const CloneSchema = Schema.Struct({
@@ -240,7 +253,20 @@ export const BeatReactiveSchema = Schema.Struct({
   decay: NonNegativeNumber,
 })
 
-export const PostSchema = Schema.Struct({
+const HalftonePostSchema = Schema.Struct({
+  pass: Schema.Literal("halftone"),
+  params: Schema.optional(
+    Schema.Struct({
+      dotSize: Schema.optional(PositiveNumber),
+      angle: Schema.optional(Schema.Number),
+      rgbSplit: Schema.optional(Schema.Number),
+      mix: Schema.optional(UnitInterval),
+    }),
+  ),
+  beatReactive: Schema.optional(BeatReactiveSchema),
+})
+
+const OtherPostSchema = Schema.Struct({
   pass: Schema.Union([
     Schema.Literal("bloom"),
     Schema.Literal("chromaticAberration"),
@@ -248,11 +274,12 @@ export const PostSchema = Schema.Struct({
     Schema.Literal("glitch"),
     Schema.Literal("feedback"),
     Schema.Literal("displacement"),
-    Schema.Literal("halftone"),
   ]),
   params: Schema.optional(EmptyJsonRecordSchema),
   beatReactive: Schema.optional(BeatReactiveSchema),
 })
+
+export const PostSchema = Schema.Union([HalftonePostSchema, OtherPostSchema])
 
 export const AudioSchema = Schema.Struct({
   asset: Schema.String,
@@ -379,6 +406,7 @@ function normalizeTracks(raw: readonly RawTrackSpec[] | undefined): readonly Tra
         }
       : undefined,
     beat: track.beat,
+    timing: track.timing,
   }))
 }
 
