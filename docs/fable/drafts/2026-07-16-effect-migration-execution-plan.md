@@ -40,6 +40,24 @@ Plus, per hotspot, the two documents that encode "not a 1-1 port":
 
 "No regressions" then means: **parity suite green on all un-ledgered behavior + contract suite green on all ledgered behavior.** Regression = un-ledgered deviation. This keeps the Bun-grade gate meaningful while still fixing the deeper issues.
 
+## Builtin adoption: replace, never wrap (Arthur, 2026-07-16: "we keep having to reinvent/boilerplate a lot of builtin effect stuff")
+
+Hand-rolled concurrency utilities get **deleted and replaced by the Effect primitive**, not wrapped. A wrapper earns existence only by encoding a domain contract (e.g., exactly-once-across-revival), never API aesthetics — otherwise we reinvent the boilerplate one level up. Known correspondences (extend in EFFECT-PORTING.md as scouts find more):
+
+| Hand-rolled today | Effect builtin | Where |
+|---|---|---|
+| `task.maxLiveChildren` FIFO admission control | `Semaphore` / bounded `Queue` + concurrency options | H1 |
+| Jittered transient-retry windows (180s network hold, one-retry rules) | `Schedule.exponential + jittered + upTo` | H1/H2 |
+| Parked-message reservation, reply correlation ids, await-reply timeouts | `Queue`/`PubSub` mailbox + `Deferred` request/reply + `Effect.timeout` | H2 |
+| Depth-counted abort gate ("overlapping aborts keep the gate closed") | interruption regions / `Effect.uninterruptibleMask` | H3 |
+| Watchdog violation rings, sliding-window token rates | Streams/Metrics | Phase 2 |
+
+**Entry strategy (periphery vs core, resolved)**: core problems, peripheral entry points, inward ordering. H1 is core *behavior* behind a separable seam (task tool, spawn pipe, journals — no protected regions); each hotspot's port erects the Layer boundary the next plugs into, so by H3 the abort core is surrounded, not assaulted. Geographic-periphery porting (leaf utils) is explicitly NOT the path — low yield, spreads dual conventions.
+
+**H1/H2 co-design note**: spawn lifecycle events ARE messages. The H1 contract specifies its monitor/report events against the H2-shaped mailbox interface so H2 slots underneath later without rework; H1 still ships first on a thin concrete mailbox.
+
+**Scope demotion note**: Rust lifetimes were Bun's central risk (memory aliasing); ours is interruption + topology. `RESOURCES.tsv` rows read "assign exactly one owning Scope", not "prove this lifetime" — cheaper per row, still mandatory (misplaced finalizer = today's report-on-exit bug).
+
 ## Test improvement is a deliverable, not a gate-chore
 
 Per hotspot, before its port wave: a behavioral suite at the seam (observable contracts: journal records, receipts, tool results, pipe protocol — never internals), covering the contract state machine's transitions *including the failure/interrupt edges that today's tests skip*. HR-163's `subprocess-worker-reliability.test.ts` is the seed for H1. These suites outlive the migration — they are the permanent invariant Bun already had and we didn't.
