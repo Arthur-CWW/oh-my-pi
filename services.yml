@@ -1,0 +1,115 @@
+# Stream service registry for scripts/streams.ts.
+# Skipped live routes: hsk-reader and mochi-lite are launched from repositories
+# outside ~/agents; hsk-component is an ad-hoc /tmp static server with no owning
+# package; meltdown and primer-qa* are aliases/test instances owned by
+# primer-daemon without independent single dev commands.
+streams:
+  companion:
+    services:
+      portless-proxy:
+        cwd: .
+        cmd: bunx portless proxy start --no-tls --port 1355
+        shared: true
+        health:
+          tcpPort: 1355
+          timeoutSec: 20
+      kokoro-tts:
+        cwd: apps/ai-companion-rtc
+        cmd: uv run scripts/tts-sidecar.py --port 8799
+        dependsOn: [portless-proxy]
+        health:
+          url: http://127.0.0.1:8799/health
+          timeoutSec: 120
+      parakeet-stt:
+        cwd: apps/ai-companion-rtc
+        cmd: uv run scripts/stt-sidecar.py --port 8798
+        dependsOn: [portless-proxy]
+        health:
+          url: http://127.0.0.1:8798/health
+          timeoutSec: 120
+      xanadu:
+        cwd: apps/xanadu
+        cmd: PORT=4970 bun run serve
+        dependsOn: [portless-proxy]
+        health:
+          url: http://127.0.0.1:4970/api/feed
+          timeoutSec: 60
+      companion-server:
+        cwd: apps/ai-companion-rtc
+        cmd: bun run src/server.ts
+        env:
+          AI_COMPANION_TTS: kokoro
+          AI_COMPANION_LLM: omp
+          AI_COMPANION_TTS_URL: http://127.0.0.1:8799
+          AI_COMPANION_STT_URL: http://127.0.0.1:8798
+          AI_COMPANION_XANADU_URL: http://127.0.0.1:4970
+          AI_COMPANION_PORT: "4897"
+        dependsOn: [kokoro-tts, parakeet-stt, xanadu]
+        health:
+          url: http://127.0.0.1:4897/
+          timeoutSec: 60
+      motion-oracle:
+        cwd: apps/ai-companion-rtc
+        cmd: bun run oracle:motion:run -- --host 127.0.0.1 --port 49982
+        dependsOn: [companion-server]
+        health:
+          command: lsof -nP -iUDP:49982 | grep -q AppleMoti
+          timeoutSec: 30
+  primer:
+    services:
+      portless-proxy:
+        cwd: .
+        cmd: bunx portless proxy start --no-tls --port 1355
+        shared: true
+        health:
+          tcpPort: 1355
+          timeoutSec: 20
+      primer:
+        cwd: packages/primer-daemon
+        cmd: bun run dev
+        dependsOn: [portless-proxy]
+        health:
+          url: http://primer.localhost:1355/
+          timeoutSec: 120
+  playground:
+    services:
+      portless-proxy:
+        cwd: .
+        cmd: bunx portless proxy start --no-tls --port 1355
+        shared: true
+        health:
+          tcpPort: 1355
+          timeoutSec: 20
+      scene:
+        cwd: apps/scene-playground
+        cmd: bun run dev
+        dependsOn: [portless-proxy]
+        health:
+          url: http://scene.localhost:1355/healthz
+          timeoutSec: 60
+  anichat-motion-lab:
+    services:
+      portless-proxy:
+        cwd: .
+        cmd: bunx portless proxy start --no-tls --port 1355
+        shared: true
+        health:
+          tcpPort: 1355
+          timeoutSec: 20
+      anichat-motion-lab:
+        cwd: packages/anichat-motion-lab
+        cmd: bunx portless anichat-motion-lab bun --watch src/server.ts
+        dependsOn: [portless-proxy]
+        health:
+          url: http://anichat-motion-lab.localhost:1355/
+          timeoutSec: 60
+  video-eval:
+    services:
+      video-eval:
+        cwd: packages/video-eval-viewer
+        cmd: bun run dev
+        env:
+          PORT: "4933"
+        health:
+          url: http://127.0.0.1:4933/
+          timeoutSec: 30

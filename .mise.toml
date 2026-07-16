@@ -298,3 +298,23 @@ cd packages/symphony-lite-elixir
 mise exec erlang@28.5 elixir@1.20.1-otp-28 -- mix escript.build
 mise exec erlang@28.5 elixir@1.20.1-otp-28 -- ./bin/symphony_lite_elixir spike --root ../../data/symphony-lite-elixir-spike/run --task-list ../../data/symphony-lite-elixir-spike/tasks.txt --json
 '''
+
+[tasks.up]
+description = "Start a registered stream and its dependencies"
+run = "bun scripts/streams.ts up"
+
+[tasks.down]
+description = "Stop a registered stream tmux session"
+run = "bun scripts/streams.ts down"
+
+[tasks.status]
+description = "Show registered stream service health"
+run = "bun scripts/streams.ts status"
+
+[tasks.logs]
+description = "Follow a registered stream service log"
+run = "bun scripts/streams.ts logs"
+
+[tasks.attach]
+description = "Attach to a registered stream tmux session"
+run = "bun scripts/streams.ts attach"
