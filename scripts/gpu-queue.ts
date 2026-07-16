@@ -12,6 +12,7 @@ function usage(message?: string): never {
   bun scripts/gpu-queue.ts submit --kind generic -- COMMAND [ARG ...]
   bun scripts/gpu-queue.ts status
   bun scripts/gpu-queue.ts logs JOB_ID [--follow]
+  bun scripts/gpu-queue.ts fetch JOB_ID [dest]
   bun scripts/gpu-queue.ts cancel JOB_ID [--force]`);
   process.exit(2);
 }
@@ -66,6 +67,59 @@ switch (command) {
     if (!args[0] || args.length > 2 || (args[1] && args[1] !== "--follow")) usage("logs requires JOB_ID [--follow]");
     exitCode = await remote("control.sh", ["logs", ...args], args[1] === "--follow");
     break;
+  case "fetch": {
+    if (!args[0] || args.length > 2) usage("fetch requires JOB_ID [dest]");
+    const jobId = args[0];
+    if (!/^[A-Za-z0-9._-]+$/.test(jobId)) usage("fetch requires a valid JOB_ID");
+    const dest = args[1] ?? `./gpu-queue-fetch/${jobId}/`;
+    const findManifest = `set -euo pipefail
+manifest=
+for state in done failed; do
+  candidate=${REMOTE_QUEUE}/$state/${shellQuote(jobId)}.json
+  if [[ -f $candidate ]]; then manifest=$candidate; break; fi
+done
+[[ -n $manifest ]] || { printf 'job not found: %s\\n' ${shellQuote(jobId)} >&2; exit 1; }
+python3 -c ${shellQuote(`import json, os, sys
+job = json.load(open(sys.argv[1]))
+command = job.get("command", [])
+paths = []
+for index, arg in enumerate(command[:-1]):
+    if arg == "--output-dir":
+        paths.append(os.path.expanduser(command[index + 1]))
+if not paths:
+    paths.append(os.path.expanduser(job["logFile"]))
+for path in dict.fromkeys(paths):
+    sys.stdout.buffer.write(os.fsencode(path) + b"\\0")`)} "$manifest"`;
+    const lookup = Bun.spawn(["ssh", "-x", "-o", "BatchMode=yes", "--", HOST, `bash -lc ${shellQuote(findManifest)}`], {
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "inherit",
+    });
+    const sources = new TextDecoder().decode(await new Response(lookup.stdout).arrayBuffer()).split("\0").filter(Boolean);
+    if (await lookup.exited !== 0) {
+      exitCode = 1;
+      break;
+    }
+    const mkdir = Bun.spawn(["mkdir", "-p", "--", dest], { stdin: "ignore", stdout: "inherit", stderr: "inherit" });
+    if (await mkdir.exited !== 0) {
+      exitCode = 1;
+      break;
+    }
+    exitCode = 0;
+    for (const source of sources) {
+      const pull = Bun.spawn(["rsync", "-a", `${HOST}:${shellQuote(source)}`, `${dest}/`], {
+        stdin: "ignore",
+        stdout: "inherit",
+        stderr: "inherit",
+      });
+      const code = await pull.exited;
+      if (code !== 0) {
+        exitCode = code;
+        break;
+      }
+    }
+    break;
+  }
   case "cancel":
     if (!args[0] || args.length > 2 || (args[1] && args[1] !== "--force")) usage("cancel requires JOB_ID [--force]");
     exitCode = await remote("control.sh", ["cancel", ...args]);
