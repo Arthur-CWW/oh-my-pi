@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
+import * as fsSync from "node:fs";
 import { createReadStream } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import { logger } from "@oh-my-pi/pi-utils";
 import { decodeRolloutCheckpoint, type RolloutCheckpoint } from "../session/rollout-checkpoint";
 import {
 	acquireSessionOwnership,
@@ -13,8 +15,9 @@ import {
 	writeRestartHandoff,
 } from "../session/session-ownership";
 import { OPTIONAL_VALUE_FLAGS, STRING_VALUE_FLAGS } from "./flag-tables";
-
 let launchArgsForRestart: readonly string[] = [];
+let launchPathForRestart: string | undefined;
+let resolvedExecPathForRestart: string | undefined;
 
 const SESSION_SELECTOR_FLAGS: Record<string, true> = { "--resume": true, "-r": true, "--session": true };
 const DROPPED_STRING_FLAGS: Record<string, true> = { "--fork": true, "--export": true, "--api-key": true };
@@ -44,12 +47,42 @@ function restartApiKey(args: readonly string[]): string | undefined {
 }
 
 /** Capture the launch argv after profile/bootstrap rewriting, before extension reparsing mutates semantics. */
-export function captureRestartLaunchArgs(args: readonly string[]): void {
+export function captureRestartLaunchArgs(
+	args: readonly string[],
+	launchPath = process.argv0,
+	resolvedExecPath = process.execPath,
+): void {
 	launchArgsForRestart = [...args];
+	resolvedExecPathForRestart = resolvedExecPath;
+	launchPathForRestart = resolveLauncherPath(launchPath, resolvedExecPath);
 }
 
 export function getRestartLaunchArgsForTest(): readonly string[] {
 	return launchArgsForRestart;
+}
+
+function resolveLauncherPath(launchPath: string | undefined, resolvedExecPath: string): string | undefined {
+	if (!launchPath || !resolvedExecPath) return undefined;
+	const candidate = path.isAbsolute(launchPath)
+		? launchPath
+		: launchPath.includes(path.sep)
+			? path.resolve(launchPath)
+			: Bun.which(launchPath);
+	if (!candidate) return undefined;
+
+	try {
+		const launchMetadata = fsSync.lstatSync(candidate);
+		if (!launchMetadata.isSymbolicLink()) {
+			const executableMetadata = fsSync.statSync(resolvedExecPath);
+			if (launchMetadata.dev === executableMetadata.dev && launchMetadata.ino === executableMetadata.ino) return undefined;
+		}
+		if (fsSync.realpathSync(candidate) === fsSync.realpathSync(resolvedExecPath)) return candidate;
+		return launchMetadata.isFile() && (launchMetadata.mode & 0o111) !== 0 ? candidate : undefined;
+	} catch {
+		// A launch path that cannot be inspected at startup is not safe to
+		// preserve as a launcher. The resolved executable remains the fallback.
+	}
+	return undefined;
 }
 
 /**
@@ -119,7 +152,47 @@ export interface RestartSpawnSpec {
 	args: string[];
 	cwd: string;
 	env?: Record<string, string | undefined>;
+	/** Absolute launcher path captured at startup for launcher-mediated sessions. */
+	launchPath?: string;
 }
+
+export interface RestartExecutableResolution {
+	readonly executable: string;
+	readonly usedLauncher: boolean;
+	readonly fallback: boolean;
+	readonly notice?: string;
+}
+
+function launcherIsExecutable(launcherPath: string): boolean {
+	try {
+		const metadata = fsSync.statSync(launcherPath);
+		return metadata.isFile() && (metadata.mode & 0o111) !== 0;
+	} catch {
+		return false;
+	}
+}
+
+/** Resolve a captured launcher only at the final reexec boundary. */
+export function resolveRestartExecutable(spec: RestartSpawnSpec): RestartExecutableResolution {
+	if (!spec.launchPath) {
+		return { executable: spec.executable, usedLauncher: false, fallback: false };
+	}
+	if (launcherIsExecutable(spec.launchPath)) {
+		return {
+			executable: spec.launchPath,
+			usedLauncher: true,
+			fallback: false,
+			notice: `restart executable re-resolved: ${spec.executable} → ${spec.launchPath}`,
+		};
+	}
+	return {
+		executable: spec.executable,
+		usedLauncher: false,
+		fallback: true,
+		notice: `restart launcher unavailable: ${spec.launchPath}; using ${spec.executable}`,
+	};
+}
+
 const SHA256_DIGEST = /^[0-9a-f]{64}$/;
 
 export async function verifyExecutableDigest(executable: string, targetDigest: string): Promise<void> {
@@ -214,10 +287,14 @@ export function buildRestartSpawnSpec(options: {
 	const processArgv = options.processArgv ?? process.argv;
 	const launchArgs = options.launchArgs ?? launchArgsForRestart;
 	const apiKey = restartApiKey(launchArgs);
+	const executable = options.executable ?? resolvedExecPathForRestart ?? process.execPath;
 	return {
-		executable: options.executable ?? process.execPath,
+		executable,
 		args: [...processArgPrefix(processArgv, launchArgs), ...buildRestartLaunchArgs(launchArgs, options.sessionId)],
 		cwd: options.cwd,
+		...(options.executable === undefined && launchPathForRestart !== undefined
+			? { launchPath: launchPathForRestart }
+			: {}),
 		...(apiKey === undefined ? {} : { env: { ...Bun.env, [RESTART_API_KEY_ENV]: apiKey } }),
 	};
 }
@@ -259,8 +336,25 @@ export function replaceRestartProcess(spec: RestartSpawnSpec, predecessorOwnerEp
 		? { ...(spec.env ?? Bun.env), [RESTART_OWNER_EPOCH_ENV]: predecessorOwnerEpoch }
 		: (spec.env ?? Bun.env);
 	if (!process.execve) throw new Error("restart requires process.execve support");
+	const resolution = resolveRestartExecutable(spec);
+	if (resolution.notice) {
+		if (resolution.fallback) {
+			logger.warn("restart launcher unavailable; falling back to current executable", {
+				launcherPath: spec.launchPath,
+				executable: spec.executable,
+				notice: resolution.notice,
+			});
+		} else {
+			logger.info("restart executable path re-resolved through launcher", {
+				launcherPath: spec.launchPath,
+				previousExecutable: spec.executable,
+				executable: resolution.executable,
+				notice: resolution.notice,
+			});
+		}
+	}
 	process.chdir(spec.cwd);
-	process.execve(spec.executable, [spec.executable, ...spec.args], env);
+	process.execve(resolution.executable, [resolution.executable, ...spec.args], env);
 }
 
 export async function handoffRestartProcess(

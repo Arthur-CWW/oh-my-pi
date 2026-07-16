@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test, vi } from "bun:test";
 import { createHash } from "node:crypto";
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -16,7 +16,9 @@ import {
 	RESTART_CHECKPOINT_ID_ENV,
 	RESTART_ROLLOUT_ID_ENV,
 	RESTART_TARGET_DIGEST_ENV,
+	resolveRestartExecutable,
 	resolveVerifiedReleaseExecutable,
+	replaceRestartProcess,
 } from "../src/cli/restart-session";
 import { SessionManager } from "../src/session/session-manager";
 import { acquireSessionOwnership, inspectSessionOwnership, readRestartHandoff } from "../src/session/session-ownership";
@@ -522,6 +524,104 @@ describe("buildRestartSpawnSpec", () => {
 			cwd: "/work/tree",
 			args: ["src/cli.ts", "--config", "/tmp/cfg.json", "--model", "pi/large", "--resume", SESSION],
 		});
+	});
+});
+
+describe("restart executable resolution", () => {
+	test("re-resolves a swapped launcher while preserving direct-binary launches", async () => {
+		const tempDir = await mkdtemp(path.join(os.tmpdir(), "omp-restart-launcher-"));
+		const binaryA = path.join(tempDir, "omp-a");
+		const binaryB = path.join(tempDir, "omp-b");
+		const launcher = path.join(tempDir, "omp");
+		const originalCwd = process.cwd();
+		await writeFile(binaryA, "#!/bin/sh\nexit 0\n");
+		await writeFile(binaryB, "#!/bin/sh\nexit 0\n");
+		await chmod(binaryA, 0o755);
+		await chmod(binaryB, 0o755);
+		await symlink(binaryA, launcher);
+
+		const execveCalls: Array<{ executable: string; args: string[] }> = [];
+		const execve = vi.spyOn(process, "execve").mockImplementation((executable, args) => {
+			execveCalls.push({ executable, args: [...(args ?? [])] });
+			throw new Error("stop restart in test");
+		});
+
+		try {
+			captureRestartLaunchArgs([], launcher, binaryA);
+			const launcherSpec = buildRestartSpawnSpec({
+				sessionId: SESSION,
+				cwd: originalCwd,
+				processArgv: [launcher],
+				launchArgs: [],
+			});
+			expect(launcherSpec.executable).toBe(binaryA);
+			expect(launcherSpec.launchPath).toBe(launcher);
+
+			await rm(launcher);
+			await symlink(binaryB, launcher);
+			const resolution = resolveRestartExecutable(launcherSpec);
+			expect(resolution).toEqual({
+				executable: launcher,
+				usedLauncher: true,
+				fallback: false,
+				notice: `restart executable re-resolved: ${binaryA} → ${launcher}`,
+			});
+			expect(await realpath(resolution.executable)).toBe(await realpath(binaryB));
+			expect(() => replaceRestartProcess(launcherSpec)).toThrow("stop restart in test");
+			expect(execveCalls[0]).toEqual({
+				executable: launcher,
+				args: [launcher, "--resume", SESSION],
+			});
+
+			execveCalls.length = 0;
+			captureRestartLaunchArgs([], binaryA, binaryA);
+			const directSpec = buildRestartSpawnSpec({
+				sessionId: SESSION,
+				cwd: originalCwd,
+				processArgv: [binaryA],
+				launchArgs: [],
+			});
+			expect(directSpec.executable).toBe(binaryA);
+			expect(directSpec.launchPath).toBeUndefined();
+			expect(() => replaceRestartProcess(directSpec)).toThrow("stop restart in test");
+			expect(execveCalls[0]).toEqual({
+				executable: binaryA,
+				args: [binaryA, "--resume", SESSION],
+			});
+		} finally {
+			process.chdir(originalCwd);
+			execve.mockRestore();
+			captureRestartLaunchArgs([]);
+			await rm(tempDir, { recursive: true, force: true });
+		}
+	});
+
+	test("falls back to the captured executable with a visible notice when the launcher disappears", async () => {
+		const tempDir = await mkdtemp(path.join(os.tmpdir(), "omp-restart-launcher-fallback-"));
+		const binary = path.join(tempDir, "omp-a");
+		const launcher = path.join(tempDir, "omp");
+		await writeFile(binary, "#!/bin/sh\nexit 0\n");
+		await chmod(binary, 0o755);
+		await symlink(binary, launcher);
+		try {
+			captureRestartLaunchArgs([], launcher, binary);
+			const spec = buildRestartSpawnSpec({
+				sessionId: SESSION,
+				cwd: process.cwd(),
+				processArgv: [launcher],
+				launchArgs: [],
+			});
+			await rm(launcher);
+			expect(resolveRestartExecutable(spec)).toEqual({
+				executable: binary,
+				usedLauncher: false,
+				fallback: true,
+				notice: `restart launcher unavailable: ${launcher}; using ${binary}`,
+			});
+		} finally {
+			captureRestartLaunchArgs([]);
+			await rm(tempDir, { recursive: true, force: true });
+		}
 	});
 });
 

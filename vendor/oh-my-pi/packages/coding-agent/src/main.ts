@@ -985,7 +985,7 @@ export async function runRootCommand(
 	await logger.time("initTheme:initial", initTheme);
 
 	const parsedArgs = parsed;
-	captureRestartLaunchArgs(rawArgs);
+	captureRestartLaunchArgs(rawArgs, process.argv0, process.execPath);
 	const restartApiKey = process.env[RESTART_API_KEY_ENV];
 	delete process.env[RESTART_API_KEY_ENV];
 	if (parsedArgs.apiKey === undefined && restartApiKey !== undefined) parsedArgs.apiKey = restartApiKey;
