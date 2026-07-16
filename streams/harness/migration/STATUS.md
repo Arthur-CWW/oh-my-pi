@@ -7,7 +7,7 @@ Plan: [`docs/fable/drafts/2026-07-16-effect-migration-execution-plan.md`](../../
 | Artifact | Owner | State | Proof |
 |---|---|---|---|
 | H1 contract (`CONTRACTS/h1-child-lifecycle.md`) | Fable | DRAFT — awaiting Arthur approval | — |
-| `EFFECT-PORTING.md` + probe extensions | PortingGuide2 worker | IN FLIGHT (retry; first worker hung pre-write) | probe suite green |
+| `EFFECT-PORTING.md` + probe extensions | PortingGuide2 worker | DONE 2026-07-16 | 9 pattern rows each citing a green probe; probes 5→14 (28 expects); beta.92 delta documented (no Schedule.upTo → modifyDelay+recurs) |
 | H1 executable model + DST driver (`test/migration/`) | H1ModelDst worker | DONE 2026-07-16 | 300 seeds × 4 fault profiles = 1,200 runs/36ms, contract self-consistent (I1–I9 zero violations), drop-one shrinking, `OMP_DST_SEED` repro |
 | H1 seam suite (deterministic edges) | H1SeamSuite worker | DONE 2026-07-16 | 11 pass + 2 todo(D2/D3) across I1/I2/I4/I7/I8/I9 + Settings/IRC-refusal regression guards |
 | Trace conformance checker (journal → model) | TraceConformance worker | DONE 2026-07-16 | real-child journal fixture clean, I1/I2 violation fixtures detected, `OMP_CONFORMANCE_JOURNAL` opt-in replay |

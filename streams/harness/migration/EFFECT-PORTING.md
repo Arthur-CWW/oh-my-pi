@@ -11,24 +11,26 @@ This guide maps the migration idioms used by the harness lifecycle work to the i
 | `try/finally` cleanup | `Effect.acquireRelease` and `Effect.scoped`/`Scope` | Resource finalizers are scope-owned and run in reverse acquisition order (LIFO), including interruption. | Acquire with `Effect.acquireRelease`, perform work inside `Effect.scoped`, and let scope closure/interruption own release order. | `releases two interrupted resources in LIFO order` |
 | `EventEmitter` fan-out | `PubSub` | A queue is not broadcast: each message must be delivered to every subscriber, and each subscriber owns its subscription. | Create a `PubSub`, subscribe each consumer, publish once, and read one value from each subscription. | `delivers one published value to two PubSub subscribers` |
 | Ambient singleton/service locator | `Context.Service` plus `Layer` | The service is absent until provided; changing the layer wiring changes behavior without changing the consumer. | Define the service contract with `Context.Service`; expose concrete `Layer`s; provide one at the effect boundary. | `uses two alternative layers for one service contract` |
-| Hand-rolled retry and jitter | `Schedule.exponential` + jitter + cap, driven by `TestClock` | Delays are virtual only when the clock is provided; schedule policy controls retry timing and count separately. | Compose an exponential schedule with jitter and a cap; repeat/retry the effect; provide `TestClock.layer`; advance virtual time to each deadline. | `retries according to an exponential schedule under virtual time` |
+| Hand-rolled retry and jitter | `Schedule.exponential` + `Schedule.jittered` + `Schedule.modifyDelay` cap, driven by `TestClock` | Delays are virtual only when the clock is provided; schedule policy controls retry timing and count separately. | Compose exponential backoff with `Schedule.jittered`; cap each delay with `Schedule.modifyDelay`; bound retries with `Schedule.both(..., Schedule.recurs(n))`; provide `TestClock.layer` and advance virtual time. | `retries according to an exponential schedule under virtual time` |
 | FIFO admission cap | bounded `Queue` and `Semaphore` | A bounded queue controls buffered items; a semaphore controls concurrent permits. They are not interchangeable. | Use `Queue.bounded(n)` for admission buffering and `Semaphore.make(n)`/`Semaphore.withPermits` for permit ownership; release permits in guaranteed scope. | `blocks a second Semaphore acquisition until the permit is released` |
 | Correlation-id request/reply | `Deferred` plus `Effect.timeout` | Completion and timeout race; the loser must not corrupt the winner, and a timeout is an ordinary typed failure. | Allocate one `Deferred`, correlate the reply to it, await with `Effect.timeout`, and test both reply-before-timeout and timeout-before-reply. | `handles Deferred completion before and after timeout` |
 | `Date.now` and `setTimeout` | `Clock` and `TestClock` | Wall-clock reads and timers become deterministic only through the Effect clock; advancing time does not run unrelated eager promises. | Read with `Clock.currentTimeMillis`; use Effect scheduling/timers; provide `TestClock.layer` and advance it explicitly in tests. | `reads current time through Clock under TestClock` |
 
 ## Builtin adoption (replace, never wrap)
 
-The migration plan's builtin-adoption table is reproduced here as the cutover rule: use the Effect builtin directly rather than wrapping it in a local compatibility abstraction.
+The migration plan's builtin-adoption table is reproduced here as the cutover rule: use the Effect builtin directly rather than wrapping it in a local compatibility abstraction. A wrapper is justified only when it encodes a domain contract; it is not justified as an API-shaped compatibility layer.
 
-| Existing concern | Effect builtin to adopt | Rule |
-|---|---|---|
-| Cancellation and cleanup | Fiber interruption, `Effect.uninterruptibleMask`, `Effect.acquireRelease`, `Scope` | Replace; never wrap |
-| Broadcast events | `PubSub` | Replace; never wrap |
-| Dependency injection | `Context.Service`, `Layer` | Replace; never wrap |
-| Retry/backoff | `Schedule.exponential` with jitter and cap | Replace; never wrap |
-| Bounded admission | `Queue.bounded`, `Semaphore` | Replace; never wrap |
-| One-shot reply | `Deferred`, `Effect.timeout` | Replace; never wrap |
-| Time and timers | `Clock`, `TestClock` | Replace; never wrap |
+| Hand-rolled today | Effect builtin | Where | Rule |
+|---|---|---|---|
+| `task.maxLiveChildren` FIFO admission control | `Semaphore` / bounded `Queue` + concurrency options | H1 | Replace; never wrap |
+| Jittered transient-retry windows (180s network hold, one-retry rules) | `Schedule.exponential` + jittered + `upTo` (plan ideal; beta.92 uses `Schedule.modifyDelay` for the cap) | H1/H2 | Replace; never wrap |
+| Parked-message reservation, reply correlation ids, await-reply timeouts | `Queue`/`PubSub` mailbox + `Deferred` request/reply + `Effect.timeout` | H2 | Replace; never wrap |
+| Depth-counted abort gate ("overlapping aborts keep the gate closed") | interruption regions / `Effect.uninterruptibleMask` | H3 | Replace; never wrap |
+| Watchdog violation rings, sliding-window token rates | Streams/Metrics | Phase 2 | Replace; never wrap |
+
+## beta.92 API notes
+
+The installed package is `effect@4.0.0-beta.92`. It does not export the plan's older `Schedule.upTo` helper. The probe uses `Schedule.modifyDelay` to cap the duration after `Schedule.jittered`, and uses `Schedule.both(schedule, Schedule.recurs(n))` to cap retry count. `Schedule.during` is the beta.92 time-window alternative. The other constructs in this guide are the beta.92 names used by the probes: `PubSub.unbounded`, `PubSub.subscribe`, `PubSub.publish`, `Context.Service`, `Layer.succeed`, `Semaphore.make`, `Semaphore.take`, `Semaphore.withPermitsIfAvailable`, `Deferred.make`, `Effect.timeout`, `Clock.currentTimeMillis`, and `TestClock.layer`.
 
 ## When NOT to Effect
 
