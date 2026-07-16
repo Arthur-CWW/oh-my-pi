@@ -4,6 +4,12 @@ import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { BuildRevision, RunnerInstanceIdentity } from "../runner/protocol";
+import type { TerminalSessionTransport } from "../runner/terminal-session-transport";
+import {
+	UnixSocketTerminalSessionTransport,
+	type TerminalSessionWireClientHello,
+} from "../runner/wire/client";
+import { UnixTerminalSessionServer } from "../runner/wire/server";
 
 export interface ProcessIdentity {
 	readonly bootId: string;
@@ -84,6 +90,9 @@ export interface SessionOwnershipHandle {
 	readonly ownerKind: "agent-mux" | "omp";
 	readonly buildRevision: BuildRevision;
 	readonly runnerInstanceIdentity: RunnerInstanceIdentity;
+	readonly socketPath?: string;
+	/** Makes runner view traffic available on the already-bound ownership endpoint. */
+	bindTerminalSessionTransportFactory?(createTransport: () => TerminalSessionTransport): void;
 	isCurrent(): Promise<boolean>;
 	/** Synchronous fence for append-only hot paths after a heartbeat discovers loss. */
 	isFenced?(): boolean;
@@ -593,7 +602,7 @@ function decodeOwnerProof(value: unknown): OwnerProof | undefined {
 		return undefined;
 	return value as unknown as OwnerProof;
 }
-async function probeLease(lease: SessionLeaseV1, identity?: OwnerIdentitySidecarV1): Promise<boolean> {
+async function probeMuxLease(lease: SessionLeaseV1): Promise<boolean> {
 	const nonce = randomUUID();
 	const result = Promise.withResolvers<boolean>();
 	const socket = net.createConnection(lease.socketPath);
@@ -621,11 +630,6 @@ async function probeLease(lease: SessionLeaseV1, identity?: OwnerIdentitySidecar
 				proof !== undefined &&
 					proof.nonce === nonce &&
 					leaseMatchesEpoch(lease, proof.ownerEpoch) &&
-					(identity === undefined ||
-						(proof.buildRevision !== undefined &&
-							proof.runnerInstanceId !== undefined &&
-							sameBuildRevision(identity.buildRevision, proof.buildRevision) &&
-							identity.runnerInstanceId === proof.runnerInstanceId)) &&
 					proof.phase === lease.phase,
 			);
 		} catch {
@@ -638,18 +642,61 @@ async function probeLease(lease: SessionLeaseV1, identity?: OwnerIdentitySidecar
 				t: "ownerProbe",
 				nonce,
 				expectedEpoch: lease.ownerEpoch,
-				...(identity === undefined
-					? {}
-					: {
-							expectedBuildRevision: identity.buildRevision,
-							expectedRunnerInstanceId: identity.runnerInstanceId,
-						}),
 				sessionFile: lease.sessionFile,
 				sessionId: lease.sessionId,
 			})}\n`,
 		),
 	);
 	return result.promise;
+}
+
+function terminalWireHello(
+	lease: SessionLeaseV1,
+	identity: OwnerIdentitySidecarV1,
+	capability: "controller" | "observer",
+): TerminalSessionWireClientHello {
+	return {
+		protocol: { minMajor: 1, maxMajor: 1, maxMinor: 0 },
+		sessionId: lease.sessionId,
+		ownerEpoch: lease.ownerEpoch,
+		runnerInstanceId: identity.runnerInstanceId,
+		build: identity.buildRevision,
+		authority: {
+			uid: typeof process.getuid === "function" ? process.getuid() : 0,
+			canonicalSessionPath: lease.sessionFile,
+			namespaceDigest: path.basename(path.dirname(path.dirname(lease.socketPath))),
+		},
+		requestedCapability: capability,
+		features: ["event-resync"],
+	};
+}
+
+async function probeLease(lease: SessionLeaseV1, identity?: OwnerIdentitySidecarV1): Promise<boolean> {
+	if (lease.ownerKind !== "omp") return probeMuxLease(lease);
+	if (!identity) return false;
+	const nonce = randomUUID();
+	const client = new UnixSocketTerminalSessionTransport({
+		socketPath: lease.socketPath,
+		hello: terminalWireHello(lease, identity, "observer"),
+		requestTimeoutMs: 500,
+	});
+	try {
+		const proof = decodeOwnerProof(await client.ownerProof({ nonce }));
+		return (
+			proof !== undefined &&
+			proof.nonce === nonce &&
+			leaseMatchesEpoch(lease, proof.ownerEpoch) &&
+			proof.buildRevision !== undefined &&
+			proof.runnerInstanceId !== undefined &&
+			sameBuildRevision(identity.buildRevision, proof.buildRevision) &&
+			identity.runnerInstanceId === proof.runnerInstanceId &&
+			proof.phase === lease.phase
+		);
+	} catch {
+		return false;
+	} finally {
+		await client.close().catch(() => {});
+	}
 }
 
 async function attemptBindMuxReservation(
@@ -716,153 +763,62 @@ function processIdentity(): ProcessIdentity {
 	);
 }
 
-interface OwnerProbe {
-	readonly t: "ownerProbe";
-	readonly nonce: string;
-	readonly expectedEpoch: string;
-	readonly expectedBuildRevision: BuildRevision;
-	readonly expectedRunnerInstanceId: string;
-	readonly sessionFile: string;
-	readonly sessionId: string;
-}
-
-function decodeOwnerProbe(value: unknown): OwnerProbe | undefined {
-	if (!isRecord(value)) return undefined;
-	const keys = Object.keys(value);
-	if (
-		keys.length !== 7 ||
-		!keys.every(key =>
-			[
-				"t",
-				"nonce",
-				"expectedEpoch",
-				"expectedBuildRevision",
-				"expectedRunnerInstanceId",
-				"sessionFile",
-				"sessionId",
-			].includes(key),
-		) ||
-		value.t !== "ownerProbe" ||
-		typeof value.nonce !== "string" ||
-		value.nonce.length === 0 ||
-		!isUuid(value.expectedEpoch) ||
-		!isBuildRevision(value.expectedBuildRevision) ||
-		typeof value.expectedRunnerInstanceId !== "string" ||
-		!isUuid(value.expectedRunnerInstanceId) ||
-		typeof value.sessionFile !== "string" ||
-		typeof value.sessionId !== "string"
-	)
-		return undefined;
-	return {
-		t: "ownerProbe",
-		nonce: value.nonce,
-		expectedEpoch: value.expectedEpoch,
-		expectedBuildRevision: value.expectedBuildRevision,
-		expectedRunnerInstanceId: value.expectedRunnerInstanceId,
-		sessionFile: value.sessionFile,
-		sessionId: value.sessionId,
-	};
-}
-
-class DirectOwnerProbeServer {
+class DirectRunnerEndpoint {
 	readonly #location: LeaseLocation;
 	readonly #lease: SessionLeaseV1;
 	readonly #identity: OwnerIdentitySidecarV1;
-	readonly #server: net.Server;
-	readonly #sockets = new Set<net.Socket>();
+	readonly #server: UnixTerminalSessionServer;
+	#createTransport: (() => TerminalSessionTransport) | undefined;
 	#live = false;
-	#closing: Promise<void> | undefined;
 
 	constructor(location: LeaseLocation, lease: SessionLeaseV1, identity: OwnerIdentitySidecarV1) {
 		this.#location = location;
 		this.#lease = lease;
 		this.#identity = identity;
-		this.#server = net.createServer(socket => this.#serve(socket));
-		this.#server.on("error", () => void this.close().catch(() => {}));
+		this.#server = new UnixTerminalSessionServer({
+			socketPath: lease.socketPath,
+			createTransport: () => {
+				const createTransport = this.#createTransport;
+				if (!createTransport) throw new Error("Runner terminal transport is not available");
+				return createTransport();
+			},
+			hello: {
+				protocol: { minMajor: 1, maxMajor: 1, maxMinor: 0 },
+				sessionId: lease.sessionId,
+				ownerEpoch: identity.ownerEpoch,
+				runnerInstanceId: identity.runnerInstanceId,
+				build: identity.buildRevision,
+				authority: terminalWireHello(lease, identity, "controller").authority,
+				grantedCapability: "controller",
+				features: ["event-resync"],
+			},
+			ownerProof: async payload => JSON.parse(JSON.stringify(await this.#ownerProof(payload))),
+		});
 	}
 
-	async listen(): Promise<void> {
-		const listening = Promise.withResolvers<void>();
-		const onError = (error: Error): void => listening.reject(error);
-		this.#server.once("error", onError);
-		this.#server.listen(this.#lease.socketPath, () => {
-			this.#server.off("error", onError);
-			this.#server.unref();
-			listening.resolve();
-		});
-		await listening.promise;
+	listen(): Promise<void> {
+		return this.#server.listen();
 	}
 
 	activate(): void {
 		this.#live = true;
 	}
 
+	bindTerminalSessionTransportFactory(createTransport: () => TerminalSessionTransport): void {
+		if (!this.#live) throw new Error("Cannot bind transport to an inactive ownership endpoint");
+		this.#createTransport = createTransport;
+	}
+
 	async close(): Promise<void> {
-		if (this.#closing) return this.#closing;
 		this.#live = false;
-		this.#closing = (async () => {
-			for (const socket of this.#sockets) socket.destroy();
-			if (this.#server.listening) {
-				await new Promise<void>((resolve, reject) =>
-					this.#server.close(error => (error ? reject(error) : resolve())),
-				);
-			}
-			await fs.rm(this.#lease.socketPath, { force: true });
-		})();
-		return this.#closing;
+		this.#createTransport = undefined;
+		await this.#server.close();
 	}
 
-	#serve(socket: net.Socket): void {
-		this.#sockets.add(socket);
-		socket.once("close", () => this.#sockets.delete(socket));
-		let body = "";
-		let handled = false;
-		const reject = (): void => {
-			handled = true;
-			socket.destroy();
-		};
-		socket.on("data", chunk => {
-			if (handled) return;
-			body += chunk.toString();
-			if (body.length > 16_384) {
-				reject();
-				return;
-			}
-			const newline = body.indexOf("\n");
-			if (newline < 0) return;
-			if (newline !== body.length - 1) {
-				reject();
-				return;
-			}
-			handled = true;
-			let probe: OwnerProbe | undefined;
-			try {
-				probe = decodeOwnerProbe(JSON.parse(body.slice(0, newline)));
-			} catch {
-				socket.destroy();
-				return;
-			}
-			if (
-				!probe ||
-				!this.#live ||
-				probe.expectedEpoch !== this.#identity.ownerEpoch ||
-				!sameBuildRevision(probe.expectedBuildRevision, this.#identity.buildRevision) ||
-				probe.expectedRunnerInstanceId !== this.#identity.runnerInstanceId ||
-				probe.sessionFile !== this.#lease.sessionFile ||
-				probe.sessionId !== this.#lease.sessionId
-			) {
-				socket.destroy();
-				return;
-			}
-			void this.#reply(socket, probe);
-		});
-		socket.once("end", () => {
-			if (!handled) socket.destroy();
-		});
-		socket.once("error", () => {});
-	}
-
-	async #reply(socket: net.Socket, probe: OwnerProbe): Promise<void> {
+	async #ownerProof(payload: unknown): Promise<OwnerProof> {
+		if (!isRecord(payload) || Object.keys(payload).length !== 1 || typeof payload.nonce !== "string") {
+			throw new Error("Invalid owner proof request");
+		}
 		const [lease, identity] = await Promise.all([
 			readLease(this.#location).catch(() => null),
 			readOwnerIdentity(this.#location).catch(() => undefined),
@@ -882,26 +838,23 @@ class DirectOwnerProbeServer {
 			lease.sessionId !== this.#lease.sessionId ||
 			lease.phase !== "running"
 		) {
-			socket.destroy();
-			return;
+			throw new Error("Ownership proof is no longer current");
 		}
-		socket.end(
-			`${JSON.stringify({
-				t: "ownerProof",
-				nonce: probe.nonce,
-				ownerEpoch: lease.ownerEpoch,
-				buildRevision: this.#identity.buildRevision,
-				runnerInstanceId: this.#identity.runnerInstanceId,
-				sessionMatch: true,
-				phase: lease.phase,
-			})}\n`,
-		);
+		return {
+			t: "ownerProof",
+			nonce: payload.nonce,
+			ownerEpoch: lease.ownerEpoch,
+			buildRevision: this.#identity.buildRevision,
+			runnerInstanceId: this.#identity.runnerInstanceId,
+			sessionMatch: true,
+			phase: lease.phase,
+		};
 	}
 }
 
 class DirectOwnershipHandle implements SessionOwnershipHandle {
 	readonly #location: LeaseLocation;
-	readonly #probeServer: DirectOwnerProbeServer;
+	readonly #endpoint: DirectRunnerEndpoint;
 	readonly sessionFile: string;
 	readonly ownershipRoot: string;
 	readonly sessionId: string;
@@ -909,6 +862,7 @@ class DirectOwnershipHandle implements SessionOwnershipHandle {
 	readonly ownerKind = "omp" as const;
 	readonly buildRevision: BuildRevision;
 	readonly runnerInstanceIdentity: RunnerInstanceIdentity;
+	readonly socketPath: string;
 	#released = false;
 	#heartbeat: ReturnType<typeof setInterval> | undefined;
 	#heartbeatTask: Promise<void> | undefined;
@@ -918,16 +872,17 @@ class DirectOwnershipHandle implements SessionOwnershipHandle {
 		lease: SessionLeaseV1,
 		buildRevision: BuildRevision,
 		runnerInstanceIdentity: RunnerInstanceIdentity,
-		probeServer: DirectOwnerProbeServer,
+		endpoint: DirectRunnerEndpoint,
 	) {
 		this.#location = location;
 		this.ownershipRoot = location.root;
-		this.#probeServer = probeServer;
+		this.#endpoint = endpoint;
 		this.sessionFile = lease.sessionFile;
 		this.sessionId = lease.sessionId;
 		this.ownerEpoch = lease.ownerEpoch;
 		this.buildRevision = buildRevision;
 		this.runnerInstanceIdentity = runnerInstanceIdentity;
+		this.socketPath = lease.socketPath;
 		this.#heartbeat = setInterval(() => {
 			if (this.#heartbeatTask) return;
 			const task = this.#beat();
@@ -942,6 +897,11 @@ class DirectOwnershipHandle implements SessionOwnershipHandle {
 			);
 		}, 2_000);
 		this.#heartbeat.unref?.();
+	}
+
+	bindTerminalSessionTransportFactory(createTransport: () => TerminalSessionTransport): void {
+		if (this.#released) throw new Error("Cannot bind transport after ownership release");
+		this.#endpoint.bindTerminalSessionTransportFactory(createTransport);
 	}
 
 	async isCurrent(): Promise<boolean> {
@@ -960,7 +920,7 @@ class DirectOwnershipHandle implements SessionOwnershipHandle {
 		if (this.#released) return;
 		this.#released = true;
 		clearInterval(this.#heartbeat);
-		await this.#probeServer.close();
+		await this.#endpoint.close();
 	}
 
 	async #beat(): Promise<void> {
@@ -1002,7 +962,7 @@ class DirectOwnershipHandle implements SessionOwnershipHandle {
 
 	async release(): Promise<void> {
 		if (this.#released) {
-			await this.#probeServer.close();
+			await this.#endpoint.close();
 			return;
 		}
 		this.#released = true;
@@ -1015,13 +975,13 @@ class DirectOwnershipHandle implements SessionOwnershipHandle {
 			!leaseMatchesEpoch(lease, this.ownerEpoch) ||
 			!identityMatches(identity, this.ownerEpoch, this.buildRevision, this.runnerInstanceIdentity.runnerInstanceId)
 		) {
-			await this.#probeServer.close();
+			await this.#endpoint.close();
 			return;
 		}
 		try {
 			await writeLease(this.#location, { ...lease, phase: "releasing" });
 		} finally {
-			await this.#probeServer.close();
+			await this.#endpoint.close();
 		}
 		const retired = path.join(this.#location.parent, `retired-${this.ownerEpoch}`);
 		try {
@@ -1241,15 +1201,15 @@ export async function acquireSessionOwnership(
 		startedAt: options.runnerInstanceIdentity.startedAt,
 		muxHint: process.env.CMUX_SURFACE_ID ?? process.env.TMUX_PANE ?? null,
 	};
-	let probeServer: DirectOwnerProbeServer | undefined;
+	let endpoint: DirectRunnerEndpoint | undefined;
 	try {
 		await writeLease(location, lease);
 		await writeOwnerIdentity(location, identity);
-		probeServer = new DirectOwnerProbeServer(location, lease, identity);
-		await probeServer.listen();
+		endpoint = new DirectRunnerEndpoint(location, lease, identity);
+		await endpoint.listen();
 		const runningLease = { ...lease, phase: "running" as const, heartbeatSeq: 1, heartbeatAtUnixMs: Date.now() };
 		await writeLease(location, runningLease);
-		probeServer.activate();
+		endpoint.activate();
 		const view = cmuxOwnerViewFromEnvironment(epoch);
 		if (view) await writeCmuxOwnerView(location, view).catch(() => {});
 		return new DirectOwnershipHandle(
@@ -1257,10 +1217,10 @@ export async function acquireSessionOwnership(
 			runningLease,
 			options.buildRevision,
 			options.runnerInstanceIdentity,
-			probeServer,
+			endpoint,
 		);
 	} catch (error) {
-		await probeServer?.close().catch(() => {});
+		await endpoint?.close().catch(() => {});
 		await fs.rm(location.claim, { recursive: true, force: true });
 		throw error;
 	}

@@ -15,6 +15,7 @@ import {
 	resolveAgentMuxRoot,
 	type CmuxOwnerView,
 } from "@oh-my-pi/pi-coding-agent/session/session-ownership";
+import { UnixSocketTerminalSessionTransport } from "../../src/runner/wire/client";
 
 const roots: string[] = [];
 
@@ -37,26 +38,29 @@ const runnerInstanceIdentity = {
 async function acquireFixtureOwnership(
 	sessionFile: string,
 	sessionId: string,
-	options: Omit<NonNullable<Parameters<typeof acquireSessionOwnership>[2]>, "buildRevision" | "runnerInstanceIdentity"> = {},
+	options: Omit<
+		NonNullable<Parameters<typeof acquireSessionOwnership>[2]>,
+		"buildRevision" | "runnerInstanceIdentity"
+	> = {},
 ) {
 	return acquireSessionOwnership(sessionFile, sessionId, { ...options, buildRevision, runnerInstanceIdentity });
 }
 
-	it("surfaces epoch-bound owner identity for takeover diagnostics", async () => {
-		const { root, session } = await fixture();
-		const ownership = await acquireFixtureOwnership(session, "parent", { root });
+it("surfaces epoch-bound owner identity for takeover diagnostics", async () => {
+	const { root, session } = await fixture();
+	const ownership = await acquireFixtureOwnership(session, "parent", { root });
 
-		const details = await inspectLiveSessionOwnerDetails(session, "parent", { root });
-		expect(details).toEqual({
-			ownerEpoch: ownership.ownerEpoch,
-			pid: process.pid,
-			cwd: process.cwd(),
-			startedAt: runnerInstanceIdentity.startedAt,
-			muxHint: process.env.CMUX_SURFACE_ID ?? process.env.TMUX_PANE ?? null,
-		});
-
-		await ownership.release();
+	const details = await inspectLiveSessionOwnerDetails(session, "parent", { root });
+	expect(details).toEqual({
+		ownerEpoch: ownership.ownerEpoch,
+		pid: process.pid,
+		cwd: process.cwd(),
+		startedAt: runnerInstanceIdentity.startedAt,
+		muxHint: process.env.CMUX_SURFACE_ID ?? process.env.TMUX_PANE ?? null,
 	});
+
+	await ownership.release();
+});
 
 async function claimPath(root: string): Promise<string> {
 	const [key] = await fs.readdir(path.join(root, "owners-v1"));
@@ -112,7 +116,10 @@ async function requestOwner(socketPath: string, request: string): Promise<string
 	return result.promise;
 }
 
-function setCmuxEnvironment(name: "CMUX_WORKSPACE_ID" | "CMUX_SURFACE_ID" | "CMUX_SOCKET_PATH", value: string | undefined): void {
+function setCmuxEnvironment(
+	name: "CMUX_WORKSPACE_ID" | "CMUX_SURFACE_ID" | "CMUX_SOCKET_PATH",
+	value: string | undefined,
+): void {
 	if (value === undefined) delete process.env[name];
 	else process.env[name] = value;
 }
@@ -156,8 +163,12 @@ describe("owners-v1 OMP guard", () => {
 		expect(decodeCmuxOwnerView(view)).toEqual(view);
 		expect(decodeCmuxOwnerView({ ...view, extra: true })).toBeUndefined();
 		expect(decodeCmuxOwnerView({ ...view, cmux: { workspaceId, surfaceId } })).toBeUndefined();
-		expect(decodeCmuxOwnerView({ ...view, cmux: { workspaceId: "invalid", surfaceId, socketPath: "/tmp/cmux.sock" } })).toBeUndefined();
-		expect(decodeCmuxOwnerView({ ...view, cmux: { workspaceId, surfaceId, socketPath: "relative.sock" } })).toBeUndefined();
+		expect(
+			decodeCmuxOwnerView({ ...view, cmux: { workspaceId: "invalid", surfaceId, socketPath: "/tmp/cmux.sock" } }),
+		).toBeUndefined();
+		expect(
+			decodeCmuxOwnerView({ ...view, cmux: { workspaceId, surfaceId, socketPath: "relative.sock" } }),
+		).toBeUndefined();
 	});
 
 	it("resolves explicit, environment, and default agent-mux roots", () => {
@@ -198,18 +209,21 @@ describe("owners-v1 OMP guard", () => {
 		const original = process.env.AGENT_MUX_DIR;
 		try {
 			process.env.AGENT_MUX_DIR = root;
-			await withCmuxEnvironment(async () => {
-				const ownership = await acquireFixtureOwnership(session, "parent");
-				try {
-					expect(await inspectLiveSessionOwnerView(session, "parent")).toEqual({
-						version: 1,
-						ownerEpoch: ownership.ownerEpoch,
-						cmux: { workspaceId, surfaceId, socketPath: cmuxSocket },
-					});
-				} finally {
-					await ownership.release();
-				}
-			}, { workspaceId, surfaceId, socketPath: cmuxSocket });
+			await withCmuxEnvironment(
+				async () => {
+					const ownership = await acquireFixtureOwnership(session, "parent");
+					try {
+						expect(await inspectLiveSessionOwnerView(session, "parent")).toEqual({
+							version: 1,
+							ownerEpoch: ownership.ownerEpoch,
+							cmux: { workspaceId, surfaceId, socketPath: cmuxSocket },
+						});
+					} finally {
+						await ownership.release();
+					}
+				},
+				{ workspaceId, surfaceId, socketPath: cmuxSocket },
+			);
 		} finally {
 			if (original === undefined) delete process.env.AGENT_MUX_DIR;
 			else process.env.AGENT_MUX_DIR = original;
@@ -223,7 +237,10 @@ describe("owners-v1 OMP guard", () => {
 			const claim = await claimPath(root);
 			try {
 				expect(await inspectLiveSessionOwnerView(session, "parent", { root })).toBeUndefined();
-				await fs.writeFile(path.join(claim, "view.json"), JSON.stringify({ version: 1, ownerEpoch: ownership.ownerEpoch }));
+				await fs.writeFile(
+					path.join(claim, "view.json"),
+					JSON.stringify({ version: 1, ownerEpoch: ownership.ownerEpoch }),
+				);
 				expect(await inspectLiveSessionOwnerView(session, "parent", { root })).toBeUndefined();
 				await fs.writeFile(path.join(claim, "view.json"), "{");
 				expect(await inspectLiveSessionOwnerView(session, "parent", { root })).toBeUndefined();
@@ -258,17 +275,20 @@ describe("owners-v1 OMP guard", () => {
 
 	it("ignores unavailable sidecar metadata without fencing ownership", async () => {
 		const { root, session } = await fixture();
-		await withCmuxEnvironment(async () => {
-			const ownership = await acquireFixtureOwnership(session, "parent", { root });
-			const claim = await claimPath(root);
-			await fs.mkdir(path.join(claim, "view.json"));
-			try {
-				expect(await ownership.isCurrent()).toBe(true);
-				expect(await inspectLiveSessionOwnerView(session, "parent", { root })).toBeUndefined();
-			} finally {
-				await ownership.release();
-			}
-		}, { workspaceId: "invalid", surfaceId, socketPath: path.join(root, "cmux.sock") });
+		await withCmuxEnvironment(
+			async () => {
+				const ownership = await acquireFixtureOwnership(session, "parent", { root });
+				const claim = await claimPath(root);
+				await fs.mkdir(path.join(claim, "view.json"));
+				try {
+					expect(await ownership.isCurrent()).toBe(true);
+					expect(await inspectLiveSessionOwnerView(session, "parent", { root })).toBeUndefined();
+				} finally {
+					await ownership.release();
+				}
+			},
+			{ workspaceId: "invalid", surfaceId, socketPath: path.join(root, "cmux.sock") },
+		);
 	});
 
 	it("acquires and releases only its own epoch", async () => {
@@ -279,22 +299,13 @@ describe("owners-v1 OMP guard", () => {
 		expect(await inspectSessionOwnership(session, "parent", { root })).toEqual({ status: "none" });
 	});
 
-	it("persists epoch-bound runner identity in a strict sidecar and fences direct owner probes", async () => {
+	it("serves owner proof on the framed ownership endpoint and refuses identity mismatch", async () => {
 		const { root, session } = await fixture();
 		const ownership = await acquireFixtureOwnership(session, "parent", { root });
 		const claim = await claimPath(root);
 		const lease = decodeSessionLeaseV1(JSON.parse(await fs.readFile(path.join(claim, "lease.json"), "utf8")));
 		if (!lease) throw new Error("missing direct lease");
 		const identity = JSON.parse(await fs.readFile(path.join(claim, `identity-v1-${lease.ownerEpoch}.json`), "utf8"));
-		const probe = {
-			t: "ownerProbe",
-			nonce: "proof-nonce",
-			expectedEpoch: ownership.ownerEpoch,
-			expectedBuildRevision: buildRevision,
-			expectedRunnerInstanceId: runnerInstanceIdentity.runnerInstanceId,
-			sessionFile: lease.sessionFile,
-			sessionId: "parent",
-		};
 		expect(lease.buildRevision).toBeUndefined();
 		expect(lease.runnerInstanceId).toBeUndefined();
 		expect(identity).toEqual({
@@ -307,7 +318,22 @@ describe("owners-v1 OMP guard", () => {
 			startedAt: runnerInstanceIdentity.startedAt,
 			muxHint: process.env.CMUX_SURFACE_ID ?? process.env.TMUX_PANE ?? null,
 		});
-		expect(JSON.parse(await requestOwner(lease.socketPath, `${JSON.stringify(probe)}\n`))).toEqual({
+		const hello = {
+			protocol: { minMajor: 1, maxMajor: 1, maxMinor: 0 },
+			sessionId: "parent",
+			ownerEpoch: ownership.ownerEpoch,
+			runnerInstanceId: runnerInstanceIdentity.runnerInstanceId,
+			build: buildRevision,
+			authority: {
+				uid: typeof process.getuid === "function" ? process.getuid() : 0,
+				canonicalSessionPath: lease.sessionFile,
+				namespaceDigest: path.basename(path.dirname(path.dirname(lease.socketPath))),
+			},
+			requestedCapability: "observer" as const,
+			features: ["event-resync"],
+		};
+		const client = new UnixSocketTerminalSessionTransport({ socketPath: lease.socketPath, hello });
+		const expectedProof = {
 			t: "ownerProof",
 			nonce: "proof-nonce",
 			ownerEpoch: ownership.ownerEpoch,
@@ -315,25 +341,17 @@ describe("owners-v1 OMP guard", () => {
 			runnerInstanceId: runnerInstanceIdentity.runnerInstanceId,
 			sessionMatch: true,
 			phase: "running",
+		};
+		expect(await client.ownerProof<typeof expectedProof>({ nonce: "proof-nonce" })).toEqual(expectedProof);
+		await client.close();
+		const mismatched = new UnixSocketTerminalSessionTransport({
+			socketPath: lease.socketPath,
+			hello: { ...hello, runnerInstanceId: "44444444-4444-4444-8444-444444444444" },
+			requestTimeoutMs: 250,
 		});
-		expect(await requestOwner(lease.socketPath, "{\n")).toBe("");
-		expect(await requestOwner(lease.socketPath, `${JSON.stringify({ ...probe, expectedEpoch: "wrong" })}\n`)).toBe("");
-		expect(
-			await requestOwner(
-				lease.socketPath,
-				`${JSON.stringify({ ...probe, expectedBuildRevision: { ...buildRevision, digest: "b".repeat(64) } })}\n`,
-			),
-		).toBe("");
-		expect(
-			await requestOwner(
-				lease.socketPath,
-				`${JSON.stringify({ ...probe, expectedRunnerInstanceId: "44444444-4444-4444-8444-444444444444" })}\n`,
-			),
-		).toBe("");
-		expect(await requestOwner(lease.socketPath, `${JSON.stringify({ ...probe, extra: true })}\n`)).toBe("");
-		expect(await requestOwner(lease.socketPath, `${JSON.stringify(probe)}\n{}\n`)).toBe("");
+		await expect(mismatched.ownerProof({ nonce: "wrong-runner" })).rejects.toBeInstanceOf(Error);
+		await mismatched.close().catch(() => {});
 		await ownership.release();
-		expect(await requestOwner(lease.socketPath, `${JSON.stringify(probe)}\n`)).toBe("");
 		await expect(fs.stat(lease.socketPath)).rejects.toMatchObject({ code: "ENOENT" });
 		expect(await inspectSessionOwnership(session, "parent", { root })).toEqual({ status: "none" });
 	});
@@ -427,7 +445,13 @@ describe("owners-v1 OMP guard", () => {
 		const suppliedSocket = path.join(root, "mux-race.sock");
 		await fs.writeFile(
 			leaseFile,
-			JSON.stringify({ ...lease, ownerKind: "agent-mux", ownerEpoch: suppliedEpoch, socketPath: suppliedSocket, phase: "running" }),
+			JSON.stringify({
+				...lease,
+				ownerKind: "agent-mux",
+				ownerEpoch: suppliedEpoch,
+				socketPath: suppliedSocket,
+				phase: "running",
+			}),
 		);
 		const replacementIdentity = {
 			version: 1,
@@ -440,7 +464,13 @@ describe("owners-v1 OMP guard", () => {
 			if (String(source).endsWith(`.identity-${suppliedEpoch}.tmp`)) {
 				await fs.writeFile(
 					leaseFile,
-					JSON.stringify({ ...lease, ownerKind: "agent-mux", ownerEpoch: replacementEpoch, socketPath: suppliedSocket, phase: "running" }),
+					JSON.stringify({
+						...lease,
+						ownerKind: "agent-mux",
+						ownerEpoch: replacementEpoch,
+						socketPath: suppliedSocket,
+						phase: "running",
+					}),
 				);
 				await fs.writeFile(identityFile, JSON.stringify(replacementIdentity));
 			}

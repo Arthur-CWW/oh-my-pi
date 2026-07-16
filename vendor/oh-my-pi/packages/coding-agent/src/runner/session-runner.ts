@@ -4021,15 +4021,62 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 		if (command.capability !== "observer" && command.capability !== "controller") {
 			return yield* Effect.fail(new InvalidRunnerCommandError({ issue: "Invalid view capability" }));
 		}
+		if (
+			(command.takeover === true) !== (command.expectedControllerEpoch !== undefined) ||
+			(command.expectedControllerEpoch !== undefined &&
+				(!Number.isInteger(command.expectedControllerEpoch) || command.expectedControllerEpoch < 0)) ||
+			(command.capability !== "controller" &&
+				(command.takeover !== undefined || command.expectedControllerEpoch !== undefined))
+		) {
+			return yield* Effect.fail(new InvalidRunnerCommandError({ issue: "Invalid controller takeover fence" }));
+		}
 		const attached = yield* enqueue(
 			Effect.gen(function* () {
 				yield* requireRevision(command.expectedRevision);
 				if (views.has(command.viewId)) {
 					return yield* Effect.fail(new RunnerViewAlreadyAttachedError({ viewId: command.viewId }));
 				}
+				if (command.capability === "controller" && command.takeover === true && !activeController) {
+					return yield* Effect.fail(
+						new StaleRunnerControllerLeaseError({
+							viewId: command.viewId,
+							expectedControllerEpoch: command.expectedControllerEpoch as number,
+							actualControllerEpoch: undefined,
+						}),
+					);
+				}
+				if (
+					command.capability === "controller" &&
+					command.takeover === true &&
+					activeController &&
+					command.expectedControllerEpoch !== activeController.epoch
+				) {
+					return yield* Effect.fail(
+						new StaleRunnerControllerLeaseError({
+							viewId: command.viewId,
+							expectedControllerEpoch: command.expectedControllerEpoch as number,
+							actualControllerEpoch: activeController.epoch,
+						}),
+					);
+				}
+				if (command.capability === "controller" && command.takeover !== true && activeController) {
+					return yield* Effect.fail(
+						new RunnerControllerConflictError({
+							requestedViewId: command.viewId,
+							activeViewId: activeController.viewId,
+							controllerEpoch: activeController.epoch,
+						}),
+					);
+				}
 				if (command.capability === "controller" && activeController) {
 					const displaced = views.get(activeController.viewId);
-					if (displaced) views.set(activeController.viewId, { ...displaced, capability: "observer", controllerEpoch: undefined });
+					if (displaced) {
+						views.set(activeController.viewId, {
+							...displaced,
+							capability: "observer",
+							controllerEpoch: undefined,
+						});
+					}
 				}
 				const epoch = command.capability === "controller" ? nextControllerEpoch++ : undefined;
 				views.set(command.viewId, {

@@ -40,6 +40,7 @@ import {
 	decodeTransitionPlanModeCommand,
 	InvalidRunnerCommandError,
 	RunnerCompactionCommandConflictError,
+	RunnerControllerConflictError,
 	RunnerCompactionTargetError,
 	RunnerCompactionUnavailableError,
 	type RunnerControlMetadata,
@@ -124,11 +125,15 @@ const attach = (
 	viewId: string,
 	capability: "observer" | "controller",
 	expectedRevision: number,
+	takeover?: { readonly expectedControllerEpoch: number },
 ): AttachRunnerViewCommand => ({
 	...metadata(`attach-${viewId}`, expectedRevision),
 	kind: "attachView",
 	viewId,
 	capability,
+	...(takeover === undefined
+		? {}
+		: { takeover: true as const, expectedControllerEpoch: takeover.expectedControllerEpoch }),
 });
 
 const detach = (viewId: string, expectedRevision: number, controllerEpoch?: number): DetachRunnerViewCommand => ({
@@ -565,21 +570,37 @@ describe("live SessionRunner", () => {
 		await replacementOwnership.release();
 	});
 
-	it("atomically preempts and fences the displaced controller", async () => {
+	it("rejects implicit and stale displacement, then atomically fences an explicit takeover", async () => {
 		const fixture = await createLiveFixture();
 		await Effect.runPromise(
 			Effect.scoped(
 				Effect.gen(function* () {
 					const runner = yield* makeSessionRunnerLive(fixture, { mailboxCapacity: 1, eventCapacity: 4 });
 					const local = yield* runner.attachView(attach("local-controller", "controller", 0));
-					const remote = yield* runner.attachView(attach("remote-controller", "controller", 0));
-					if (local.capability !== "controller" || remote.capability !== "controller")
-						throw new Error("expected controllers");
+					if (local.capability !== "controller") throw new Error("expected controller");
+					const implicit = yield* Effect.flip(
+						runner.attachView(attach("implicit-controller", "controller", 0)),
+					);
+					expect(implicit).toBeInstanceOf(RunnerControllerConflictError);
+					const staleTakeover = yield* Effect.flip(
+						runner.attachView(
+							attach("stale-controller", "controller", 0, {
+								expectedControllerEpoch: local.controllerEpoch + 1,
+							}),
+						),
+					);
+					expect(staleTakeover).toBeInstanceOf(StaleRunnerControllerLeaseError);
+					const remote = yield* runner.attachView(
+						attach("remote-controller", "controller", 0, {
+							expectedControllerEpoch: local.controllerEpoch,
+						}),
+					);
+					if (remote.capability !== "controller") throw new Error("expected controller");
 					expect(remote.controllerEpoch).toBeGreaterThan(local.controllerEpoch);
-					const stale = yield* Effect.flip(
+					const fenced = yield* Effect.flip(
 						local.submitInput(submit(local.viewId, local.controllerEpoch, "displaced", 0)),
 					);
-					expect(stale).toBeInstanceOf(StaleRunnerControllerLeaseError);
+					expect(fenced).toBeInstanceOf(StaleRunnerControllerLeaseError);
 				}),
 			),
 		);
@@ -592,7 +613,11 @@ describe("live SessionRunner", () => {
 				Effect.gen(function* () {
 					const runner = yield* makeSessionRunnerLive(fixture, { mailboxCapacity: 1, eventCapacity: 4 });
 					const terminal = yield* runner.attachTerminalView(attach("terminal-controller", "controller", 0));
-					const remote = yield* runner.attachView(attach("remote-controller", "controller", 0));
+					const remote = yield* runner.attachView(
+						attach("remote-controller", "controller", 0, {
+							expectedControllerEpoch: terminal.epoch,
+						}),
+					);
 					if (remote.capability !== "controller") throw new Error("expected controller");
 					yield* terminal.detach();
 					yield* remote.snapshot();

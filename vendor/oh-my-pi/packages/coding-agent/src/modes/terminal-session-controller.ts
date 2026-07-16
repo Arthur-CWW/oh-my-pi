@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { Effect, Exit, Scope } from "effect";
 import type { MediaContent } from "@oh-my-pi/pi-ai";
 import type {
 	CancelCompactionReceipt,
@@ -64,7 +63,11 @@ import {
 	RunnerLocalOperationTargetError,
 } from "../runner/protocol";
 import type { InteractiveHostIntent } from "./interactive-host-intent";
-import type { RunnerFailure, SessionRunner } from "../runner/session-runner";
+import type { SessionRunner } from "../runner/session-runner";
+import {
+	LocalTerminalSessionTransport,
+	type TerminalSessionTransport,
+} from "../runner/terminal-session-transport";
 import type {
 	TerminalAdvisorStats,
 	TerminalAsyncJobSnapshot,
@@ -76,7 +79,6 @@ import type {
 	TerminalSessionMetadataSnapshot,
 	TerminalSessionSnapshot,
 	TerminalSessionStats,
-	TerminalSessionView,
 	TerminalToolCatalog,
 	TerminalTurnLifecycle,
 	TerminalWorkflowEligibility,
@@ -405,80 +407,68 @@ const stripHostTransitionMetadata = (intent: TerminalPrepareHostTransitionIntent
 	}
 };
 
-/** Promise boundary for terminal code; all authority remains in the Effect-native view. */
+/** Promise boundary for terminal code; transport owns runner authority and delivery scope. */
 export async function createTerminalSessionController(
-	runner: SessionRunner,
+	source: SessionRunner | TerminalSessionTransport,
 	options: TerminalSessionControllerOptions = {},
 ): Promise<TerminalSessionController> {
-	const scope = Scope.makeUnsafe("sequential");
-	const run = <A>(effect: Effect.Effect<A, RunnerFailure, Scope.Scope>): Promise<A> =>
-		Effect.runPromise(Scope.provide(scope)(effect));
-	const runnerSnapshot = await run(runner.snapshot());
+	const transport =
+		"attachTerminalView" in source ? new LocalTerminalSessionTransport(source) : source;
 	const viewId = options.viewId ?? `terminal:${randomUUID()}`;
 	const attachCommandId = options.commandId ?? randomUUID();
-	let view: TerminalSessionView | undefined;
+	let attachment: Awaited<ReturnType<TerminalSessionTransport["attach"]>> | undefined;
 	let closed = false;
+	let unsubscribeTransport: (() => void) | undefined;
 	try {
-		view = await run(
-			runner.attachTerminalView({
-				schemaVersion: RUNNER_SCHEMA_VERSION,
-				kind: "attachView",
-				commandId: attachCommandId,
-				correlationId: options.correlationId ?? attachCommandId,
-				expectedRevision: runnerSnapshot.revision,
-				viewId,
-				capability: "controller",
-			}),
-		);
-		const subscription = await run(view.subscribe());
-		let latest = await run(view.snapshot());
+		attachment = await transport.attach({
+			commandId: attachCommandId,
+			correlationId: options.correlationId ?? attachCommandId,
+			viewId,
+		});
 		const listeners = new Set<(event: AgentSessionEvent) => void>();
 		const localOperationOutputListeners = new Set<(output: TerminalLocalOperationOutput) => void>();
 		const ephemeralTurnOutputListeners = new Set<(output: TerminalEphemeralTurnOutput) => void>();
+		let latest!: TerminalSessionSnapshot;
 		const refresh = async (): Promise<TerminalSessionSnapshot> => {
-			latest = await run(view!.snapshot());
+			latest = await transport.requestSnapshot();
 			return latest;
 		};
-		const pump = Effect.forever(
-			subscription.take.pipe(
-				Effect.flatMap(delivery =>
-					Effect.tryPromise({
-						try: async () => {
-							if (delivery.kind === "resyncRequired") {
-								latest = delivery.snapshot;
-								return;
-							}
-							if (delivery.kind === "runnerEvent") {
-								const output = delivery.event.localOperationOutput;
-								const operationGeneration = delivery.event.targetOperationGeneration;
-								if (output !== undefined && operationGeneration !== undefined) {
-									const projected = {
-										commandId: delivery.event.commandId,
-										operationGeneration,
-										...output,
-									} satisfies TerminalLocalOperationOutput;
-									for (const listener of localOperationOutputListeners) listener(projected);
-								}
-								const ephemeralOutput = delivery.event.ephemeralTurnOutput;
-								if (ephemeralOutput !== undefined && operationGeneration !== undefined) {
-									const projected = {
-										commandId: delivery.event.commandId,
-										operationGeneration,
-										...ephemeralOutput,
-									} satisfies TerminalEphemeralTurnOutput;
-									for (const listener of ephemeralTurnOutputListeners) listener(projected);
-								}
-								await refresh();
-								return;
-							}
-							for (const listener of listeners) listener(delivery.event);
-						},
-						catch: () => undefined,
-					}),
-				),
-			),
-		);
-		await Effect.runPromise(Scope.provide(scope)(Effect.forkScoped(pump)));
+		let deliveryChain = Promise.resolve();
+		unsubscribeTransport = transport.subscribe(delivery => {
+			deliveryChain = deliveryChain
+				.then(async () => {
+					if (delivery.kind === "resyncRequired") {
+						latest = delivery.snapshot;
+						return;
+					}
+					if (delivery.kind === "runnerEvent") {
+						const output = delivery.event.localOperationOutput;
+						const operationGeneration = delivery.event.targetOperationGeneration;
+						if (output !== undefined && operationGeneration !== undefined) {
+							const projected = {
+								commandId: delivery.event.commandId,
+								operationGeneration,
+								...output,
+							} satisfies TerminalLocalOperationOutput;
+							for (const listener of localOperationOutputListeners) listener(projected);
+						}
+						const ephemeralOutput = delivery.event.ephemeralTurnOutput;
+						if (ephemeralOutput !== undefined && operationGeneration !== undefined) {
+							const projected = {
+								commandId: delivery.event.commandId,
+								operationGeneration,
+								...ephemeralOutput,
+							} satisfies TerminalEphemeralTurnOutput;
+							for (const listener of ephemeralTurnOutputListeners) listener(projected);
+						}
+						await refresh();
+						return;
+					}
+					for (const listener of listeners) listener(delivery.event);
+				})
+				.catch(() => {});
+		});
+		await refresh();
 		const fenced = async (
 			operation: (snapshot: TerminalSessionSnapshot) => Promise<RunnerCommandReceipt>,
 		): Promise<RunnerCommandReceipt> => {
@@ -493,7 +483,7 @@ export async function createTerminalSessionController(
 		};
 		return {
 			viewId,
-			epoch: view.epoch,
+			epoch: attachment.epoch,
 			snapshot: () => latest,
 			subscribeAgentEvents: listener => {
 				listeners.add(listener);
@@ -508,124 +498,104 @@ export async function createTerminalSessionController(
 				return () => ephemeralTurnOutputListeners.delete(listener);
 			},
 			refresh,
-			getContextUsage: queryOptions => run(view!.getContextUsage(queryOptions)),
-			getSessionStats: () => run(view!.getSessionStats()),
-			getAdvisorStats: () => run(view!.getAdvisorStats()),
-			getAsyncJobSnapshot: queryOptions => run(view!.getAsyncJobSnapshot(queryOptions)),
-			getHindsightSessionState: () => run(view!.getHindsightSessionState()),
-			getAllToolNames: () => run(view!.getAllToolNames()),
-			formatSessionAsText: queryOptions => run(view!.formatSessionAsText(queryOptions)),
-			formatAdvisorHistoryAsText: queryOptions => run(view!.formatAdvisorHistoryAsText(queryOptions)),
-			getModelCatalog: () => run(view!.getModelCatalog()),
-			getToolCatalog: () => run(view!.getToolCatalog()),
-			getSessionMetadataSnapshot: () => run(view!.getSessionMetadataSnapshot()),
-			getWorkflowEligibility: () => run(view!.getWorkflowEligibility()),
-			getTurnLifecycle: () => run(view!.getTurnLifecycle()),
-			saveDraft: text => run(view!.saveDraft(text)),
-			consumeDraft: () => run(view!.consumeDraft()),
-			invokeExtensionCommand: (name, args) => run(view!.invokeExtensionCommand(name, args)),
-			invokePlanResolve: input => run(view!.invokePlanResolve(input)),
-			requestGoalContinuation: () => run(view!.requestGoalContinuation()),
+			getContextUsage: queryOptions => transport.request("getContextUsage", [queryOptions]),
+			getSessionStats: () => transport.request("getSessionStats", []),
+			getAdvisorStats: () => transport.request("getAdvisorStats", []),
+			getAsyncJobSnapshot: queryOptions => transport.request("getAsyncJobSnapshot", [queryOptions]),
+			getHindsightSessionState: () => transport.request("getHindsightSessionState", []),
+			getAllToolNames: () => transport.request("getAllToolNames", []),
+			formatSessionAsText: queryOptions => transport.request("formatSessionAsText", [queryOptions]),
+			formatAdvisorHistoryAsText: queryOptions => transport.request("formatAdvisorHistoryAsText", [queryOptions]),
+			getModelCatalog: () => transport.request("getModelCatalog", []),
+			getToolCatalog: () => transport.request("getToolCatalog", []),
+			getSessionMetadataSnapshot: () => transport.request("getSessionMetadataSnapshot", []),
+			getWorkflowEligibility: () => transport.request("getWorkflowEligibility", []),
+			getTurnLifecycle: () => transport.request("getTurnLifecycle", []),
+			saveDraft: text => transport.request("saveDraft", [text]),
+			consumeDraft: () => transport.request("consumeDraft", []),
+			invokeExtensionCommand: (name, args) => transport.request("invokeExtensionCommand", [name, args]),
+			invokePlanResolve: input => transport.request("invokePlanResolve", [input]),
+			requestGoalContinuation: () => transport.request("requestGoalContinuation", []),
 			submit: intent =>
 				fenced(async current => {
 					const ids = metadata(intent);
-					return run(
-						view!.submit(
-							decodeSubmitInputCommand({
+					return transport.sendCommand(decodeSubmitInputCommand({
 								schemaVersion: RUNNER_SCHEMA_VERSION,
 								kind: "submitInput",
 								...ids,
 								...(intent.causationId === undefined ? {} : { causationId: intent.causationId }),
 								expectedRevision: current.runner.revision,
 								viewId,
-								controllerEpoch: view!.epoch,
+								controllerEpoch: attachment!.epoch,
 								payload: {
 									text: intent.text,
 									...(intent.attachments === undefined ? {} : { attachments: [...intent.attachments] }),
 									deliveryClass: intent.deliveryClass,
 								},
-							}),
-						),
-					);
+							}));
 				}),
 			submitCustomMessage: intent =>
 				fenced(async current => {
 					const ids = metadata(intent);
-					return run(
-						view!.submitCustomMessage(
-							decodeSubmitCustomMessageCommand({
+					return transport.sendCommand(decodeSubmitCustomMessageCommand({
 								schemaVersion: RUNNER_SCHEMA_VERSION,
 								kind: "submitCustomMessage",
 								...ids,
 								...(intent.causationId === undefined ? {} : { causationId: intent.causationId }),
 								expectedRevision: current.runner.revision,
 								viewId,
-								controllerEpoch: view!.epoch,
+								controllerEpoch: attachment!.epoch,
 								payload: intent.payload,
-							}),
-						),
-					);
+							}));
 				}),
 			edit: intent =>
 				fenced(async current => {
 					const ids = metadata(intent);
-					return run(
-						view!.edit(
-							decodeEditQueuedInputCommand({
+					return transport.sendCommand(decodeEditQueuedInputCommand({
 								schemaVersion: RUNNER_SCHEMA_VERSION,
 								kind: "editQueuedInput",
 								...ids,
 								...(intent.causationId === undefined ? {} : { causationId: intent.causationId }),
 								expectedRevision: current.runner.revision,
 								viewId,
-								controllerEpoch: view!.epoch,
+								controllerEpoch: attachment!.epoch,
 								inputId: intent.inputId,
 								itemRevision: intent.itemRevision,
 								payload: {
 									text: intent.text,
 									...(intent.attachments === undefined ? {} : { attachments: [...intent.attachments] }),
 								},
-							}),
-						),
-					);
+							}));
 				}),
 			cancel: intent =>
 				fenced(async current => {
 					const ids = metadata(intent);
-					return run(
-						view!.cancel(
-							decodeCancelQueuedInputCommand({
+					return transport.sendCommand(decodeCancelQueuedInputCommand({
 								schemaVersion: RUNNER_SCHEMA_VERSION,
 								kind: "cancelQueuedInput",
 								...ids,
 								...(intent.causationId === undefined ? {} : { causationId: intent.causationId }),
 								expectedRevision: current.runner.revision,
 								viewId,
-								controllerEpoch: view!.epoch,
+								controllerEpoch: attachment!.epoch,
 								inputId: intent.inputId,
 								itemRevision: intent.itemRevision,
-							}),
-						),
-					);
+							}));
 				}),
 			setActiveTools: async intent => {
 				const current = await refresh();
 				try {
 					const ids = metadata(intent);
-					const receipt = await run(
-						view!.setActiveTools(
-							decodeSetActiveToolsCommand({
+					const receipt = await transport.sendCommand(decodeSetActiveToolsCommand({
 								schemaVersion: RUNNER_SCHEMA_VERSION,
 								kind: "setActiveTools",
 								...ids,
 								...(intent.causationId === undefined ? {} : { causationId: intent.causationId }),
 								viewId,
-								controllerEpoch: view!.epoch,
+								controllerEpoch: attachment!.epoch,
 								expectedToolConfigurationGeneration: current.runner.toolConfigurationGeneration,
 								toolNames: [...intent.toolNames],
-							}),
-						),
-					);
+							}));
 					await refresh();
 					return receipt;
 				} catch (error) {
@@ -637,23 +607,19 @@ export async function createTerminalSessionController(
 				const current = await refresh();
 				try {
 					const ids = metadata(intent);
-					const receipt = await run(
-						view!.replaceTodos(
-							decodeReplaceTodosCommand({
+					const receipt = await transport.sendCommand(decodeReplaceTodosCommand({
 								schemaVersion: RUNNER_SCHEMA_VERSION,
 								kind: "replaceTodos",
 								...ids,
 								...(intent.causationId === undefined ? {} : { causationId: intent.causationId }),
 								viewId,
-								controllerEpoch: view!.epoch,
+								controllerEpoch: attachment!.epoch,
 								expectedTodoGeneration: current.runner.todoGeneration,
 								phases: intent.phases.map(phase => ({
 									name: phase.name,
 									tasks: phase.tasks.map(task => ({ content: task.content, status: task.status })),
 								})),
-							}),
-						),
-					);
+							}));
 					await refresh();
 					return receipt;
 				} catch (error) {
@@ -665,20 +631,16 @@ export async function createTerminalSessionController(
 				const current = await refresh();
 				try {
 					const ids = metadata(intent);
-					const receipt = await run(
-						view!.refreshSshTool(
-							decodeRefreshSshToolCommand({
+					const receipt = await transport.sendCommand(decodeRefreshSshToolCommand({
 								schemaVersion: RUNNER_SCHEMA_VERSION,
 								kind: "refreshSshTool",
 								...ids,
 								...(intent.causationId === undefined ? {} : { causationId: intent.causationId }),
 								viewId,
-								controllerEpoch: view!.epoch,
+								controllerEpoch: attachment!.epoch,
 								expectedToolConfigurationGeneration: current.runner.toolConfigurationGeneration,
 								activateIfAvailable: intent.activateIfAvailable,
-							}),
-						),
-					);
+							}));
 					await refresh();
 					return receipt;
 				} catch (error) {
@@ -689,25 +651,21 @@ export async function createTerminalSessionController(
 			setModel: async intent => {
 				try {
 					const ids = metadata(intent);
-					const receipt = await run(
-						view!.setModel(
-							decodeSetModelCommand({
+					const receipt = await transport.sendCommand(decodeSetModelCommand({
 								schemaVersion: RUNNER_SCHEMA_VERSION,
 								kind: "setModel",
 								...ids,
 								...(intent.causationId === undefined ? {} : { causationId: intent.causationId }),
 								expectedSessionRevision: latest.runner.sessionRevision,
 								viewId,
-								controllerEpoch: view!.epoch,
+								controllerEpoch: attachment!.epoch,
 								payload: {
 									provider: intent.provider,
 									id: intent.id,
 									...(intent.role === undefined ? {} : { role: intent.role }),
 								},
-							}),
-						),
-					);
-					latest = await run(view!.snapshot());
+							}));
+					latest = await transport.requestSnapshot();
 					return receipt;
 				} catch (error) {
 					await refresh();
@@ -718,20 +676,16 @@ export async function createTerminalSessionController(
 				const current = await refresh();
 				try {
 					const ids = metadata(intent);
-					const receipt = await run(
-						view!.cycleModel(
-							decodeCycleModelCommand({
+					const receipt = await transport.sendCommand(decodeCycleModelCommand({
 								schemaVersion: RUNNER_SCHEMA_VERSION,
 								kind: "cycleModel",
 								...ids,
 								...(intent.causationId === undefined ? {} : { causationId: intent.causationId }),
 								expectedSessionRevision: current.runner.sessionRevision,
 								viewId,
-								controllerEpoch: view!.epoch,
+								controllerEpoch: attachment!.epoch,
 								direction: intent.direction ?? "forward",
-							}),
-						),
-					);
+							}));
 					await refresh();
 					return receipt;
 				} catch (error) {
@@ -742,20 +696,16 @@ export async function createTerminalSessionController(
 			setThinkingLevel: async intent => {
 				try {
 					const ids = metadata(intent);
-					const receipt = await run(
-						view!.setThinkingLevel(
-							decodeSetThinkingLevelCommand({
+					const receipt = await transport.sendCommand(decodeSetThinkingLevelCommand({
 								schemaVersion: RUNNER_SCHEMA_VERSION,
 								kind: "setThinkingLevel",
 								...ids,
 								...(intent.causationId === undefined ? {} : { causationId: intent.causationId }),
 								expectedSessionRevision: latest.runner.sessionRevision,
 								viewId,
-								controllerEpoch: view!.epoch,
+								controllerEpoch: attachment!.epoch,
 								...(intent.thinkingLevel === undefined ? {} : { thinkingLevel: intent.thinkingLevel }),
-							}),
-						),
-					);
+							}));
 					latest = {
 						...latest,
 						runner: {
@@ -773,20 +723,16 @@ export async function createTerminalSessionController(
 				const current = await refresh();
 				try {
 					const ids = metadata(intent);
-					const receipt = await run(
-						view!.transitionPlanMode(
-							decodeTransitionPlanModeCommand({
+					const receipt = await transport.sendCommand(decodeTransitionPlanModeCommand({
 								schemaVersion: RUNNER_SCHEMA_VERSION,
 								kind: "transitionPlanMode",
 								...ids,
 								...(intent.causationId === undefined ? {} : { causationId: intent.causationId }),
 								expectedSessionRevision: current.runner.sessionRevision,
 								viewId,
-								controllerEpoch: view!.epoch,
+								controllerEpoch: attachment!.epoch,
 								transition: intent.transition,
-							}),
-						),
-					);
+							}));
 					await refresh();
 					return receipt;
 				} catch (error) {
@@ -798,20 +744,16 @@ export async function createTerminalSessionController(
 				const current = await refresh();
 				try {
 					const ids = metadata(intent);
-					const receipt = await run(
-						view!.transitionGoalMode(
-							decodeTransitionGoalModeCommand({
+					const receipt = await transport.sendCommand(decodeTransitionGoalModeCommand({
 								schemaVersion: RUNNER_SCHEMA_VERSION,
 								kind: "transitionGoalMode",
 								...ids,
 								...(intent.causationId === undefined ? {} : { causationId: intent.causationId }),
 								expectedSessionRevision: current.runner.sessionRevision,
 								viewId,
-								controllerEpoch: view!.epoch,
+								controllerEpoch: attachment!.epoch,
 								transition: intent.transition,
-							}),
-						),
-					);
+							}));
 					await refresh();
 					return receipt;
 				} catch (error) {
@@ -823,20 +765,16 @@ export async function createTerminalSessionController(
 				const current = await refresh();
 				try {
 					const ids = metadata(intent);
-					const receipt = await run(
-						view!.shake(
-							decodeRunShakeCommand({
+					const receipt = await transport.sendCommand(decodeRunShakeCommand({
 								schemaVersion: RUNNER_SCHEMA_VERSION,
 								kind: "runShake",
 								...ids,
 								...(intent.causationId === undefined ? {} : { causationId: intent.causationId }),
 								expectedSessionRevision: current.runner.sessionRevision,
 								viewId,
-								controllerEpoch: view!.epoch,
+								controllerEpoch: attachment!.epoch,
 								mode: intent.mode,
-							}),
-						),
-					);
+							}));
 					await refresh();
 					return receipt;
 				} catch (error) {
@@ -851,20 +789,16 @@ export async function createTerminalSessionController(
 					throw new InvalidRunnerCommandError({ issue: "No active shake operation" });
 				}
 				const ids = metadata(intent);
-				const receipt = await run(
-					view!.cancelShake(
-						decodeCancelShakeCommand({
+				const receipt = await transport.sendCommand(decodeCancelShakeCommand({
 							schemaVersion: RUNNER_SCHEMA_VERSION,
 							kind: "cancelShake",
 							...ids,
 							...(intent.causationId === undefined ? {} : { causationId: intent.causationId }),
 							viewId,
-							controllerEpoch: view!.epoch,
+							controllerEpoch: attachment!.epoch,
 							targetCommandId: active.commandId,
 							targetOperationGeneration: active.operationGeneration,
-						}),
-					),
-				);
+						}));
 				await refresh();
 				return receipt;
 			},
@@ -872,22 +806,18 @@ export async function createTerminalSessionController(
 				const current = await refresh();
 				try {
 					const ids = metadata(intent);
-					const receipt = await run(
-						view!.handoff(
-							decodeRunHandoffCommand({
+					const receipt = await transport.sendCommand(decodeRunHandoffCommand({
 								schemaVersion: RUNNER_SCHEMA_VERSION,
 								kind: "runHandoff",
 								...ids,
 								...(intent.causationId === undefined ? {} : { causationId: intent.causationId }),
 								expectedSessionRevision: current.runner.sessionRevision,
 								viewId,
-								controllerEpoch: view!.epoch,
+								controllerEpoch: attachment!.epoch,
 								...(intent.customInstructions === undefined
 									? {}
 									: { customInstructions: intent.customInstructions }),
-							}),
-						),
-					);
+							}));
 					await refresh();
 					return receipt;
 				} catch (error) {
@@ -902,38 +832,30 @@ export async function createTerminalSessionController(
 					throw new InvalidRunnerCommandError({ issue: "No active handoff operation" });
 				}
 				const ids = metadata(intent);
-				const receipt = await run(
-					view!.cancelHandoff(
-						decodeCancelHandoffCommand({
+				const receipt = await transport.sendCommand(decodeCancelHandoffCommand({
 							schemaVersion: RUNNER_SCHEMA_VERSION,
 							kind: "cancelHandoff",
 							...ids,
 							...(intent.causationId === undefined ? {} : { causationId: intent.causationId }),
 							viewId,
-							controllerEpoch: view!.epoch,
+							controllerEpoch: attachment!.epoch,
 							targetCommandId: active.commandId,
 							targetOperationGeneration: active.operationGeneration,
-						}),
-					),
-				);
+						}));
 				await refresh();
 				return receipt;
 			},
 			getCheckpointState: async (intent = {}) => {
 				const ids = metadata(intent);
 				try {
-					return await run(
-						view!.getCheckpointState(
-							decodeGetCheckpointStateCommand({
+					return await transport.sendCommand(decodeGetCheckpointStateCommand({
 								schemaVersion: RUNNER_SCHEMA_VERSION,
 								kind: "getCheckpointState",
 								...ids,
 								...(intent.causationId === undefined ? {} : { causationId: intent.causationId }),
 								viewId,
-								controllerEpoch: view!.epoch,
-							}),
-						),
-					);
+								controllerEpoch: attachment!.epoch,
+							}));
 				} catch (error) {
 					await refresh();
 					throw error;
@@ -943,20 +865,16 @@ export async function createTerminalSessionController(
 				const current = await refresh();
 				try {
 					const ids = metadata(intent);
-					const receipt = await run(
-						view!.setCheckpointState(
-							decodeSetCheckpointStateCommand({
+					const receipt = await transport.sendCommand(decodeSetCheckpointStateCommand({
 								schemaVersion: RUNNER_SCHEMA_VERSION,
 								kind: "setCheckpointState",
 								...ids,
 								...(intent.causationId === undefined ? {} : { causationId: intent.causationId }),
 								viewId,
-								controllerEpoch: view!.epoch,
+								controllerEpoch: attachment!.epoch,
 								expectedCheckpointRevision: current.runner.checkpointRevision,
 								state: intent.state,
-							}),
-						),
-					);
+							}));
 					await refresh();
 					return receipt;
 				} catch (error) {
@@ -968,19 +886,15 @@ export async function createTerminalSessionController(
 				const current = await refresh();
 				try {
 					const ids = metadata(intent);
-					const receipt = await run(
-						view!.reload(
-							decodeReloadSessionCommand({
+					const receipt = await transport.sendCommand(decodeReloadSessionCommand({
 								schemaVersion: RUNNER_SCHEMA_VERSION,
 								kind: "reloadSession",
 								...ids,
 								...(intent.causationId === undefined ? {} : { causationId: intent.causationId }),
 								expectedSessionRevision: current.runner.sessionRevision,
 								viewId,
-								controllerEpoch: view!.epoch,
-							}),
-						),
-					);
+								controllerEpoch: attachment!.epoch,
+							}));
 					await refresh();
 					return receipt;
 				} catch (error) {
@@ -992,20 +906,16 @@ export async function createTerminalSessionController(
 				const current = await refresh();
 				try {
 					const ids = metadata(intent);
-					const receipt = await run(
-						view!.prepareHostTransition(
-							decodePrepareHostTransitionCommand({
+					const receipt = await transport.sendCommand(decodePrepareHostTransitionCommand({
 								schemaVersion: RUNNER_SCHEMA_VERSION,
 								kind: "prepareHostTransition",
 								...ids,
 								...(intent.causationId === undefined ? {} : { causationId: intent.causationId }),
 								expectedSessionRevision: current.runner.sessionRevision,
 								viewId,
-								controllerEpoch: view!.epoch,
+								controllerEpoch: attachment!.epoch,
 								intent: stripHostTransitionMetadata(intent),
-							}),
-						),
-					);
+							}));
 					await refresh();
 					return receipt;
 				} catch (error) {
@@ -1017,22 +927,18 @@ export async function createTerminalSessionController(
 				const current = await refresh();
 				try {
 					const ids = metadata(intent);
-					const receipt = await run(
-						view!.compact(
-							decodeRunCompactionCommand({
+					const receipt = await transport.sendCommand(decodeRunCompactionCommand({
 								schemaVersion: RUNNER_SCHEMA_VERSION,
 								kind: "runCompaction",
 								...ids,
 								...(intent.causationId === undefined ? {} : { causationId: intent.causationId }),
 								expectedSessionRevision: current.runner.sessionRevision,
 								viewId,
-								controllerEpoch: view!.epoch,
+								controllerEpoch: attachment!.epoch,
 								...(intent.customInstructions === undefined
 									? {}
 									: { customInstructions: intent.customInstructions }),
-							}),
-						),
-					);
+							}));
 					await refresh();
 					return receipt;
 				} catch (error) {
@@ -1050,20 +956,16 @@ export async function createTerminalSessionController(
 					});
 				}
 				const ids = metadata(intent);
-				const receipt = await run(
-					view!.cancelCompaction(
-						decodeCancelCompactionCommand({
+				const receipt = await transport.sendCommand(decodeCancelCompactionCommand({
 							schemaVersion: RUNNER_SCHEMA_VERSION,
 							kind: "cancelCompaction",
 							...ids,
 							...(intent.causationId === undefined ? {} : { causationId: intent.causationId }),
 							viewId,
-							controllerEpoch: view!.epoch,
+							controllerEpoch: attachment!.epoch,
 							targetCommandId: activeCompaction.commandId,
 							targetOperationGeneration: activeCompaction.operationGeneration,
-						}),
-					),
-				);
+						}));
 				await refresh();
 				return receipt;
 			},
@@ -1071,20 +973,16 @@ export async function createTerminalSessionController(
 				const current = await refresh();
 				try {
 					const ids = metadata(intent);
-					const receipt = await run(
-						view!.runEphemeralTurn(
-							decodeRunEphemeralTurnCommand({
+					const receipt = await transport.sendCommand(decodeRunEphemeralTurnCommand({
 								schemaVersion: RUNNER_SCHEMA_VERSION,
 								kind: "runEphemeralTurn",
 								...ids,
 								...(intent.causationId === undefined ? {} : { causationId: intent.causationId }),
 								expectedSessionRevision: current.runner.sessionRevision,
 								viewId,
-								controllerEpoch: view!.epoch,
+								controllerEpoch: attachment!.epoch,
 								prompt: intent.prompt,
-							}),
-						),
-					);
+							}));
 					await refresh();
 					return receipt;
 				} catch (error) {
@@ -1102,21 +1000,17 @@ export async function createTerminalSessionController(
 					});
 				}
 				const ids = metadata(intent);
-				const receipt = await run(
-					view!.cancelEphemeralTurn(
-						decodeCancelEphemeralTurnCommand({
+				const receipt = await transport.sendCommand(decodeCancelEphemeralTurnCommand({
 							schemaVersion: RUNNER_SCHEMA_VERSION,
 							kind: "cancelEphemeralTurn",
 							...ids,
 							...(intent.causationId === undefined ? {} : { causationId: intent.causationId }),
 							expectedSessionRevision: current.runner.sessionRevision,
 							viewId,
-							controllerEpoch: view!.epoch,
+							controllerEpoch: attachment!.epoch,
 							targetCommandId: active.commandId,
 							targetOperationGeneration: active.operationGeneration,
-						}),
-					),
-				);
+						}));
 				await refresh();
 				return receipt;
 			},
@@ -1124,16 +1018,14 @@ export async function createTerminalSessionController(
 				const current = await refresh();
 				try {
 					const ids = metadata(intent);
-					const receipt = await run(
-						view!.runLocalOperation(
-							decodeRunLocalOperationCommand({
+					const receipt = await transport.sendCommand(decodeRunLocalOperationCommand({
 								schemaVersion: RUNNER_SCHEMA_VERSION,
 								kind: "runLocalOperation",
 								...ids,
 								...(intent.causationId === undefined ? {} : { causationId: intent.causationId }),
 								expectedSessionRevision: current.runner.sessionRevision,
 								viewId,
-								controllerEpoch: view!.epoch,
+								controllerEpoch: attachment!.epoch,
 								operation:
 									intent.kind === "bash"
 										? {
@@ -1147,9 +1039,7 @@ export async function createTerminalSessionController(
 												code: intent.code,
 												excludeFromContext: intent.excludeFromContext,
 											},
-							}),
-						),
-					);
+							}));
 					await refresh();
 					return receipt;
 				} catch (error) {
@@ -1167,21 +1057,17 @@ export async function createTerminalSessionController(
 					});
 				}
 				const ids = metadata(intent);
-				const receipt = await run(
-					view!.cancelLocalOperation(
-						decodeCancelLocalOperationCommand({
+				const receipt = await transport.sendCommand(decodeCancelLocalOperationCommand({
 							schemaVersion: RUNNER_SCHEMA_VERSION,
 							kind: "cancelLocalOperation",
 							...ids,
 							...(intent.causationId === undefined ? {} : { causationId: intent.causationId }),
 							expectedSessionRevision: current.runner.sessionRevision,
 							viewId,
-							controllerEpoch: view!.epoch,
+							controllerEpoch: attachment!.epoch,
 							targetCommandId: active.commandId,
 							targetOperationGeneration: active.operationGeneration,
-						}),
-					),
-				);
+						}));
 				await refresh();
 				return receipt;
 			},
@@ -1189,19 +1075,15 @@ export async function createTerminalSessionController(
 				try {
 					const ids = metadata(intent);
 					const targetGeneration = (await refresh()).session.promptOperation.generation;
-					const receipt = await run(
-						view!.interruptPrompt(
-							decodeInterruptPromptCommand({
+					const receipt = await transport.sendCommand(decodeInterruptPromptCommand({
 								schemaVersion: RUNNER_SCHEMA_VERSION,
 								kind: "interruptPrompt",
 								...ids,
 								...(intent.causationId === undefined ? {} : { causationId: intent.causationId }),
 								viewId,
-								controllerEpoch: view!.epoch,
+								controllerEpoch: attachment!.epoch,
 								targetGeneration,
-							}),
-						),
-					);
+							}));
 					await refresh();
 					return receipt;
 				} catch (error) {
@@ -1212,18 +1094,20 @@ export async function createTerminalSessionController(
 			close: async () => {
 				if (closed) return;
 				closed = true;
+				unsubscribeTransport?.();
+				unsubscribeTransport = undefined;
 				try {
-					await run(view!.detach());
+					await attachment!.detach();
 				} finally {
 					listeners.clear();
 					localOperationOutputListeners.clear();
 					ephemeralTurnOutputListeners.clear();
-					await Effect.runPromise(Scope.close(scope, Exit.void));
 				}
 			},
 		};
 	} catch (error) {
-		await Effect.runPromise(Scope.close(scope, Exit.void));
+		unsubscribeTransport?.();
+		await attachment?.detach().catch(() => {});
 		throw error;
 	}
 }

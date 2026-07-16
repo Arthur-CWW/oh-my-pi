@@ -489,6 +489,9 @@ export interface AttachRunnerViewCommand extends RunnerControlMetadata {
 	readonly kind: "attachView";
 	readonly viewId: string;
 	readonly capability: RunnerCapability;
+	/** Controller authority may only be displaced by an explicit, epoch-fenced takeover. */
+	readonly takeover?: true;
+	readonly expectedControllerEpoch?: number;
 }
 
 export interface AcquireRunnerControllerCommand extends RunnerControlMetadata {
