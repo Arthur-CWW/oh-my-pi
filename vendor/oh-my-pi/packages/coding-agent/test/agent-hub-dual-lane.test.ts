@@ -226,7 +226,7 @@ describe("Agent Hub dual-lane inspector", () => {
 	it("uses compact labels in the roster and standalone labels in the preview header", () => {
 		const { hub, observers } = fixture("Effort-visible preview");
 		try {
-			expect(text(hub, 160)).toContain("OX5.6sol m");
+			expect(text(hub, 160)).toContain("OX5.6solm");
 			hub.handleInput("\r");
 			expect(text(hub, 160)).toContain("codex 5.6sol medium");
 		} finally {

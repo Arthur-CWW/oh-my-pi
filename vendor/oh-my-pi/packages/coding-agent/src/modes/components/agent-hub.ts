@@ -68,11 +68,21 @@ import {
 	matchesSelectDown,
 	matchesSelectUp,
 } from "../utils/keybinding-matchers";
+import {
+	CMUX_OWNER_UNAVAILABLE_MESSAGE,
+	focusLiveCmuxOwner,
+	type FocusCmuxOwnerResult,
+} from "../utils/cmux-owner-navigation";
 import { createAdvisorMessageCard } from "./advisor-message";
 import { agentHubYankPayload } from "./agent-hub-identity";
 import { AgentHubViewerSequence, applyAgentHubViewerSequenceAction } from "./agent-hub-viewer-sequence";
 import { AgentHubFoldSequence } from "./agent-hub-fold-sequence";
-import { renderAgentHubChatFooter, renderAgentHubFooter, renderAgentHubHelp } from "./agent-hub-interaction-help";
+import {
+	AGENT_HUB_G_CHORD_CUE,
+	renderAgentHubChatFooter,
+	renderAgentHubFooter,
+	renderAgentHubHelp,
+} from "./agent-hub-interaction-help";
 import { AgentHubJournalTailCache, recordAgentHubProjectionRebuild } from "./agent-hub-performance";
 import type { AgentHubRolloutDataSource, AgentHubRolloutPeerIdentity } from "./agent-hub-rollout-state";
 import {
@@ -122,7 +132,6 @@ import { UserMessageComponent } from "./user-message";
 const AGE_TICK_MS = 5_000;
 const SPINNER_TICK_MS = 160;
 const SPINNER_FRAMES = ["◐", "◓", "◑", "◒"] as const;
-const G_CHORD_CUE = "g: gg gj gk gx gm gr gs gb";
 const CHAT_REFRESH_DEBOUNCE_MS = 80;
 const PROJECTION_WINDOW_MS = 16;
 const LEFT_TAP_WINDOW_MS = 500;
@@ -324,8 +333,7 @@ export interface AgentHubRemote {
 	readTranscript(id: string, fromByte: number): Promise<{ text: string; newSize: number } | null>;
 }
 
-export interface AgentHubDeps {
-	observers: SessionObserverRegistry;
+export interface AgentHubDeps { interruptKeys?: KeyId[]; unfocusSession?: () => Promise<void>; initialSelection?: { kind: "agent" | "external"; id: string; viewportOffset: number }; observers: SessionObserverRegistry;
 	hubKeys: KeyId[];
 	onDone: () => void;
 	requestRender: () => void;
@@ -340,6 +348,8 @@ export interface AgentHubDeps {
 	expandKeys?: KeyId[];
 	/** Focus the main view on this agent's live session (ctx.focusAgentSession). When absent (collab guest, tests), Enter opens the in-hub chat view instead. */
 	focusAgent?: (id: string) => Promise<void>;
+	/** Focus an external peer's live owner surface in cmux; defaults to live owner navigation. */
+	focusExternalOwner?: (sessionFile: string, sessionId: string) => Promise<FocusCmuxOwnerResult>;
 	/** Clipboard sink for selected-agent identity yanks; defaults to OSC52-capable copyToClipboard. */
 	copyIdentity?: (payload: string) => void | Promise<void>;
 	/** Root session id shared by Main and all child handles. */
@@ -363,8 +373,7 @@ export interface AgentHubDeps {
 	/** Open the durable errors dock, optionally scoped by the selected agent. */
 	openErrors?: (agentId?: string) => void;
 	/** Open the global bookmarks surface. */
-	openBookmarks?: () => void;
-}
+	openBookmarks?: () => void; }
 
 export interface AgentHubRetentionMetrics {
 	activeIdentities: number;
@@ -424,7 +433,8 @@ function boundedRouteInspectionLines(input: RouteInspectionInput, resolvedModel?
 	return lines.slice(0, ROUTE_INSPECTOR_PANE_LINES);
 }
 
-export class AgentHubOverlayComponent extends Container {
+export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[] = [];
+	#unfocusSession: (() => Promise<void>) | undefined;
 	#registry: AgentRegistry;
 	#observers: SessionObserverRegistry;
 	#irc: IrcBus;
@@ -532,6 +542,7 @@ export class AgentHubOverlayComponent extends Container {
 	#hideThinkingBlock: (() => boolean) | undefined;
 	#expandKeys: KeyId[];
 	#focusAgent: ((id: string) => Promise<void>) | undefined;
+	#focusExternalOwner: (sessionFile: string, sessionId: string) => Promise<FocusCmuxOwnerResult>;
 	#copyIdentity: (payload: string) => void | Promise<void>;
 	#sessionId: string | undefined;
 	#chatLog = new TranscriptContainer();
@@ -579,6 +590,8 @@ export class AgentHubOverlayComponent extends Container {
 		// registry, so only touch it when revive/kill actually needs it.
 		this.#lifecycle = () => deps.lifecycle ?? AgentLifecycleManager.global();
 		this.#onDone = deps.onDone;
+		this.#interruptKeys = deps.interruptKeys ?? [];
+		this.#unfocusSession = deps.unfocusSession;
 		this.#requestRender = deps.requestRender;
 		this.#hubKeys = deps.hubKeys;
 		this.#remote = deps.remote;
@@ -601,6 +614,7 @@ export class AgentHubOverlayComponent extends Container {
 		this.#hideThinkingBlock = deps.hideThinkingBlock;
 		this.#expandKeys = deps.expandKeys ?? ["ctrl+o"];
 		this.#focusAgent = deps.focusAgent;
+		this.#focusExternalOwner = deps.focusExternalOwner ?? focusLiveCmuxOwner;
 		this.#copyIdentity = deps.copyIdentity ?? copyToClipboard;
 		this.#sessionId = deps.sessionId ?? this.#registry.get(MAIN_AGENT_ID)?.session?.sessionManager.getSessionId();
 		this.#sessionsDir = deps.sessionsDir;
@@ -634,10 +648,15 @@ export class AgentHubOverlayComponent extends Container {
 		if (this.#totalTableRows() > 0) {
 			this.#selectedRow = 0;
 			this.#selectedAgentKey = this.#selectedTableKey();
-			const initialIndex = deps.initialAgentId ? this.#findTableIndex(`agent:${deps.initialAgentId}`) : -1;
+			const initialSelection = deps.initialAgentId
+				? { kind: "agent" as const, id: deps.initialAgentId, viewportOffset: 0 }
+				: deps.initialSelection;
+			const initialKey = initialSelection ? this.#selectionKey(initialSelection) : undefined;
+			const initialIndex = initialKey ? this.#findTableIndex(initialKey) : -1;
 			if (initialIndex >= 0) {
 				this.#selectedRow = initialIndex;
-				this.#selectedAgentKey = `agent:${deps.initialAgentId}`;
+				this.#selectedAgentKey = initialKey;
+				this.#tableScrollOffset = Math.max(0, initialSelection?.viewportOffset ?? 0);
 			}
 			this.#syncSelectedPreview();
 		}
@@ -726,9 +745,7 @@ export class AgentHubOverlayComponent extends Container {
 		this.#selectedAgentKey = undefined;
 	}
 
-	/** Return the stable identity represented by the current Hub row. */
-	getSelectedBookmarkTarget(): BookmarkTarget | undefined {
-		this.#flushProjection();
+	/** Return the stable identity represented by the current Hub row. */ getSelectedBookmarkTarget(): BookmarkTarget | undefined { this.#flushProjection();
 		const row = this.#selectedAgentRow();
 		if (row?.kind === "active") {
 			const sessionId = row.ref.sessionId ?? this.#sessionId;
@@ -759,10 +776,17 @@ export class AgentHubOverlayComponent extends Container {
 		}
 		const external = this.#selectedExternalRow()?.peer;
 		if (!external) return undefined;
-		return { kind: "session", sessionId: external.sessionId, title: external.name || external.sessionId };
-	}
+		return { kind: "session", sessionId: external.sessionId, title: external.name || external.sessionId }; }
 
-	/** Select a bookmarked identity without opening or changing the preview modality. */
+	/** Return the stable row identity and viewport offset for the current selection. */
+	getSelectedSelection(): { kind: "agent" | "external"; id: string; viewportOffset: number } | undefined {
+		this.#flushProjection();
+		const row = this.#selectedAgentRow();
+		if (row?.kind === "active") return { kind: "agent", id: row.ref.id, viewportOffset: this.#tableScrollOffset };
+		if (row?.kind === "archived") return { kind: "agent", id: row.descriptor.agentId, viewportOffset: this.#tableScrollOffset };
+		const external = this.#selectedExternalRow()?.peer;
+		return external ? { kind: "external", id: external.sessionId, viewportOffset: this.#tableScrollOffset } : undefined;
+	} /** Select a bookmarked identity without opening or changing the preview modality. */
 	selectBookmarkTarget(target: BookmarkTarget): boolean {
 		this.#flushProjection();
 		this.#tableFilterEditing = false;
@@ -806,9 +830,14 @@ export class AgentHubOverlayComponent extends Container {
 			if (this.#view === "chat" || this.#cockpitPreview) this.#rebuildChatContent();
 		}
 		return this.#view === "table" ? this.#renderTable(width) : this.#renderChat(width);
-	}
-
-	handleInput(keyData: string): void {
+	} handleInput(keyData: string): void {
+		for (const key of this.#interruptKeys) {
+			if (matchesKey(keyData, key)) {
+				this.#onDone();
+				void this.#unfocusSession?.();
+				return;
+			}
+		}
 		// The hub/observe keys always close the overlay (toggle semantics)
 		for (const key of this.#hubKeys) {
 			if (matchesKey(keyData, key)) {
@@ -821,9 +850,7 @@ export class AgentHubOverlayComponent extends Container {
 		} else {
 			this.#handleChatInput(keyData);
 		}
-	}
-
-	/** Open the chat view for an agent id (public for table Enter and tests). */
+	} /** Open the chat view for an agent id (public for table Enter and tests). */
 	openChat(id: string): void {
 		if (!this.#registry.get(id)) return;
 		this.#view = "chat";
@@ -949,11 +976,7 @@ export class AgentHubOverlayComponent extends Container {
 		for (const ref of this.#registryRefs.values()) {
 			const observed = this.#observableFor(ref.id);
 			const task = observed?.description ?? observed?.progress?.task ?? "";
-			const model =
-				withModelSelectorEffort(
-					observed?.progress?.resolvedModel,
-					observed?.progress?.routeReceipt?.route.thinking,
-				) ?? "";
+			const model = this.#resolvedModelSelector(ref, observed) ?? "";
 			const source = observed?.progress?.routeReceipt?.source ?? "";
 			this.#activeSearchFields.set(
 				ref.id,
@@ -1167,6 +1190,7 @@ export class AgentHubOverlayComponent extends Container {
 		this.#visibleExternalRows = filteredExternal;
 		this.#filterDirty = false;
 		this.#resolveSelection();
+		this.#syncSelectedPreview();
 	}
 
 	#toggleHistoricalAgents(): void {
@@ -1407,7 +1431,7 @@ export class AgentHubOverlayComponent extends Container {
 				`Session: ${peer.sessionId}`,
 				`State: ${displayedExternalPeerState(peer).replace("_", " ")}`,
 				`Source: ${peer.sessionFile ?? "remote transcript"}`,
-				`Model: ${durableModelSelector(this.#journalModels.peek(peer.sessionFile)) ?? "unknown"}`,
+				`Model: ${withModelSelectorEffort(durableModelSelector(this.#journalModels.peek(peer.sessionFile)), {}) ?? "unknown"}`,
 				`Version/fork: ${peer.version ?? "unknown"}${peer.buildDigest ? ` · ${peer.buildDigest.slice(0, 12)}` : ""}`,
 				...states,
 			];
@@ -1418,7 +1442,7 @@ export class AgentHubOverlayComponent extends Container {
 				`Identity: ${row.agentId}`,
 				`State: ${row.state} · archived`,
 				`Source: ${row.childSessionFile}`,
-				`Model: ${row.modelId ?? "unknown"}${row.thinkingLevel ? `:${row.thinkingLevel}` : ""}`,
+				`Model: ${withModelSelectorEffort(row.modelId, { session: row.thinkingLevel }) ?? "unknown"}`,
 				`Version/fork: ${VERSION}`,
 				...states,
 			];
@@ -1428,9 +1452,8 @@ export class AgentHubOverlayComponent extends Container {
 		const durable = this.#journalModels.peek(ref?.sessionFile)?.spawnRecord;
 		const progress = observed?.progress;
 		const model =
-			withModelSelectorEffort(progress?.resolvedModel, progress?.routeReceipt?.route.thinking) ??
-			withModelSelectorEffort(durable?.resolvedModel, durable?.route?.route.thinking) ??
-			withModelSelectorEffort(this.#transcriptCache?.model, this.#transcriptCache?.thinking) ??
+			(ref ? this.#resolvedModelSelector(ref, observed) : undefined) ??
+			withModelSelectorEffort(durable?.resolvedModel, { route: durable?.route?.route.thinking }) ??
 			"unknown";
 		const source = progress?.definitionSourcePath ?? durable?.definitionSourcePath ?? "unknown";
 		const routeSource = progress?.routeReceipt?.source ?? durable?.route?.source ?? "unknown";
@@ -1619,14 +1642,16 @@ export class AgentHubOverlayComponent extends Container {
 		const progress = observed?.progress;
 		const receipt = progress?.routeReceipt ?? durableSpawn?.route;
 		if (!receipt) {
+			const ref = this.#chatAgentId ? this.#registry.get(this.#chatAgentId) : undefined;
 			const model =
-				withModelSelectorEffort(progress?.resolvedModel, progress?.routeReceipt?.route.thinking) ??
-				withModelSelectorEffort(durableSpawn?.resolvedModel, durableSpawn?.route?.route.thinking);
+				(ref ? this.#resolvedModelSelector(ref, observed) : undefined) ??
+				withModelSelectorEffort(durableSpawn?.resolvedModel, { route: durableSpawn?.route?.route.thinking });
 			return model
 				? ["ROUTE", `Model: ${model}`, "No route provenance available."]
 				: ["ROUTE", "No route provenance available."];
 		}
 		const agentId = this.#chatAgentId ?? "selected agent";
+		const ref = this.#chatAgentId ? this.#registry.get(this.#chatAgentId) : undefined;
 		const explicitOverride =
 			receipt.source === "spawn_explicit"
 				? receipt.consulted.find(candidate => candidate.explicit)?.selectors.join(",")
@@ -1642,9 +1667,9 @@ export class AgentHubOverlayComponent extends Container {
 				receiptSource: `spawn receipt ${agentId}`,
 				...(explicitOverride ? { explicitOverride } : {}),
 			},
-			withModelSelectorEffort(progress?.resolvedModel, progress?.routeReceipt?.route.thinking) ??
-				withModelSelectorEffort(durableSpawn?.resolvedModel, durableSpawn?.route?.route.thinking) ??
-				`${receipt.route.provider}/${receipt.route.selector}`,
+			(ref ? this.#resolvedModelSelector(ref, observed) : undefined) ??
+				withModelSelectorEffort(durableSpawn?.resolvedModel, { route: durableSpawn?.route?.route.thinking }) ??
+				withModelSelectorEffort(`${receipt.route.provider}/${receipt.route.model}`, { route: receipt.route.thinking })!,
 		);
 	}
 
@@ -1683,10 +1708,7 @@ export class AgentHubOverlayComponent extends Container {
 		if (row?.kind === "archived") return `archived:${row.descriptor.childSessionFile}`;
 		const external = this.#selectedExternalRow();
 		return external ? `external:${external.peer.sessionId}` : undefined;
-	}
-
-	#findTableIndex(key: string): number {
-		if (key.startsWith("agent:")) {
+	} #findTableIndex(key: string): number { if (key.startsWith("agent:")) {
 			const id = key.slice("agent:".length);
 			return this.#visibleActiveRows.findIndex(ref => ref.id === id);
 		}
@@ -1698,10 +1720,14 @@ export class AgentHubOverlayComponent extends Container {
 		if (!key.startsWith("external:")) return -1;
 		const sessionId = key.slice("external:".length);
 		const externalIndex = this.#visibleExternalRows.findIndex(row => row.peer.sessionId === sessionId);
-		return externalIndex >= 0 ? this.#visibleAgentRowCount() + externalIndex : -1;
-	}
+		return externalIndex >= 0 ? this.#visibleAgentRowCount() + externalIndex : -1; }
 
-	#selectedAgentRow(): HubAgentRow | undefined {
+	#selectionKey(selection: { kind: "agent" | "external"; id: string; viewportOffset: number }): string {
+		if (selection.kind === "external") return `external:${selection.id}`;
+		if (this.#findTableIndex(`agent:${selection.id}`) >= 0) return `agent:${selection.id}`;
+		const archivedIndex = this.#visibleArchivedRows.findIndex(row => row.agentId === selection.id);
+		return archivedIndex >= 0 ? `archived:${this.#visibleArchivedRows[archivedIndex]!.childSessionFile}` : `agent:${selection.id}`;
+	} #selectedAgentRow(): HubAgentRow | undefined {
 		return this.#tableAgentRowAt(this.#selectedRow);
 	}
 
@@ -1718,6 +1744,77 @@ export class AgentHubOverlayComponent extends Container {
 	#selectedExternalRow(): ExternalPeerRow | undefined {
 		const externalIndex = this.#selectedRow - this.#visibleAgentRowCount();
 		return externalIndex >= 0 ? this.#visibleExternalRows[externalIndex] : undefined;
+	}
+
+	#copyHubPayload(payload: string | undefined, label: string): void {
+		if (!payload) {
+			this.#notice = `Nothing to copy for ${label}.`;
+			this.#requestRender();
+			return;
+		}
+		void Promise.resolve(this.#copyIdentity(payload)).then(
+			() => {
+				this.#notice = `Copied ${label}.`;
+				this.#requestRender();
+			},
+			error => {
+				this.#notice = `Could not copy ${label}: ${error instanceof Error ? error.message : String(error)}`;
+				this.#requestRender();
+			},
+		);
+	}
+
+	#copySelectedTableRow(full: boolean): void {
+		const row = this.#selectedAgentRow();
+		if (row?.kind === "active") {
+			const ref = row.ref;
+			const name = ref.displayName && ref.displayName !== ref.id ? `${ref.id} · ${ref.displayName}` : ref.id;
+			if (!full) return this.#copyHubPayload(name, "row");
+			const observed = this.#observableFor(ref.id);
+			const payload = [
+				name,
+				ref.status,
+				this.#resolvedModelSelector(ref, observed),
+				projectAgentHubRowActivity(ref, observed),
+				ref.parentId ? `parent ${ref.parentId}` : undefined,
+			]
+				.filter((value): value is string => Boolean(value))
+				.join(" · ");
+			return this.#copyHubPayload(payload, "full row");
+		}
+		if (row?.kind === "archived") {
+			const archived = row.descriptor;
+			const payload = full
+				? [
+						archived.agentId,
+						archived.state,
+						withModelSelectorEffort(archived.modelId, { session: archived.thinkingLevel }),
+						archived.childSessionFile,
+					].filter(Boolean).join(" · ")
+				: archived.agentId;
+			return this.#copyHubPayload(payload, full ? "full row" : "row");
+		}
+		const external = this.#selectedExternalRow();
+		if (!external) return this.#copyHubPayload(undefined, "row");
+		const peer = external.peer;
+		const name = peer.name || peer.sessionId;
+		const payload = full
+			? [name, external.state, peer.cwd, peer.sessionId].filter(Boolean).join(" · ")
+			: name;
+		this.#copyHubPayload(payload, full ? "full row" : "row");
+	}
+
+	#copyTranscriptUnit(full: boolean): void {
+		const lines = this.#chatRenderedContent.map(line => Bun.stripANSI(line).trimEnd());
+		if (full) return this.#copyHubPayload(lines.join("\n").trim(), "transcript section");
+		let index = Math.min(this.#scrollOffset, Math.max(0, lines.length - 1));
+		while (index < lines.length && !lines[index]?.trim()) index++;
+		if (index >= lines.length) return this.#copyHubPayload(undefined, "transcript paragraph");
+		let start = index;
+		let end = index + 1;
+		while (start > 0 && lines[start - 1]?.trim()) start--;
+		while (end < lines.length && lines[end]?.trim()) end++;
+		this.#copyHubPayload(lines.slice(start, end).join("\n").trim(), "transcript paragraph");
 	}
 
 	#loadArchivedRows(): void {
@@ -1860,6 +1957,25 @@ export class AgentHubOverlayComponent extends Container {
 		return this.#observerById.get(id);
 	}
 
+	#resolvedModelSelector(ref: AgentRef, observed: ObservableSession | undefined): string | undefined {
+		const progress = observed?.progress;
+		const cachedModel = this.#transcriptCache?.path === ref.sessionFile ? this.#transcriptCache.model : undefined;
+		const cachedThinking = this.#transcriptCache?.path === ref.sessionFile ? this.#transcriptCache.thinking : undefined;
+		const selector =
+			progress?.resolvedModel ??
+			cachedModel ??
+			ref.recovery?.hotswapModel ??
+			ref.recovery?.model ??
+			durableModelSelector(this.#journalModels.peek(ref.sessionFile));
+		const liveModel = ref.session?.model;
+		return withModelSelectorEffort(selector, {
+			session: ref.session?.thinkingLevel ?? cachedThinking ?? ref.recovery?.thinkingLevel,
+			route: progress?.routeReceipt?.route.thinking,
+			modelDefault: liveModel?.thinking?.defaultLevel,
+			reasoning: liveModel?.reasoning,
+		});
+	}
+
 	// ========================================================================
 	// Table view
 	// ========================================================================
@@ -1991,7 +2107,7 @@ export class AgentHubOverlayComponent extends Container {
 				surface: this.#inspectorFocused ? "hub.inspector" : "hub.table",
 				mode: this.#tableFilterEditing ? "filter" : "normal",
 				extra: this.#tableFilterQuery ? ["n/N:next/previous match"] : undefined,
-				pending: this.#viewerSequence.isPending ? G_CHORD_CUE : undefined,
+				pending: this.#viewerSequence.isPending ? AGENT_HUB_G_CHORD_CUE : undefined,
 			}),
 		);
 		lines.push(...new DynamicBorder().render(width));
@@ -2028,17 +2144,7 @@ export class AgentHubOverlayComponent extends Container {
 			? theme.fg("dim", ` (+${hiddenDescendants} · ${this.#hiddenRunningById.get(ref.id) ?? 0} run)`)
 			: "";
 		const tail = unread > 0 ? `⧉ ${unread}` : "";
-		const cachedRoute =
-			this.#transcriptCache?.path === ref.sessionFile &&
-			withModelSelectorEffort(this.#transcriptCache?.model, this.#transcriptCache?.thinking)
-				? `${this.#transcriptCache.model}${this.#transcriptCache.thinking ? `:${this.#transcriptCache.thinking}` : ""}`
-				: undefined;
-		const model =
-			withModelSelectorEffort(observed?.progress?.resolvedModel, observed?.progress?.routeReceipt?.route.thinking) ??
-			cachedRoute ??
-			withModelSelectorEffort(ref.recovery?.hotswapModel, ref.recovery?.thinkingLevel) ??
-			withModelSelectorEffort(ref.recovery?.model, ref.recovery?.thinkingLevel) ??
-			durableModelSelector(this.#journalModels.peek(ref.sessionFile));
+		const model = this.#resolvedModelSelector(ref, observed);
 		const row = renderHubColumns({
 			width: Math.max(10, width - 1),
 			model,
@@ -2053,7 +2159,7 @@ export class AgentHubOverlayComponent extends Container {
 
 	#renderArchivedRow(row: ArchivedDirectChildDescriptor, selected: boolean, width: number): string {
 		const cursor = selected ? theme.fg("accent", theme.nav.cursor) : " ";
-		const model = row.modelId ? `${row.modelId}${row.thinkingLevel ? `:${row.thinkingLevel}` : ""}` : undefined;
+		const model = withModelSelectorEffort(row.modelId, { session: row.thinkingLevel });
 		const updatedAt = parseTimestampMs(row.updatedAt);
 		const age =
 			updatedAt === undefined ? undefined : formatAge(Math.max(1, Math.round((Date.now() - updatedAt) / 1000)));
@@ -2074,11 +2180,50 @@ export class AgentHubOverlayComponent extends Container {
 			width: Math.max(10, width - 1),
 			state: animation ? this.#spinnerStateLabel(animation) : externalStateBadge(row.state),
 			name: `${theme.bold(replaceTabs(peer.name || peer.sessionId))} ${theme.fg("dim", "external")}`,
-			model: durableModelSelector(this.#journalModels.peek(peer.sessionFile)) ?? "-",
+			model: withModelSelectorEffort(durableModelSelector(this.#journalModels.peek(peer.sessionFile)), {}) ?? "-",
 			context: shortenPath(peer.cwd),
 			age: formatLastSeenAge(peer.lastSeen),
 		});
 		return truncateToWidth(` ${cursor} ${rendered}`, Math.max(10, width - 1));
+	}
+
+
+	#attachSelectedExternalOwner(): void {
+		const row = this.#selectedExternalRow();
+		if (!row) {
+			this.#notice = "ga targets external peers only.";
+			this.#requestRender();
+			return;
+		}
+		const peer = row.peer;
+		const name = peer.name || peer.sessionId;
+		if (!peer.sessionFile) {
+			this.#notice = "peer publishes no session file (older build)";
+			this.#requestRender();
+			return;
+		}
+		this.#notice = `attaching ${name} in cmux…`;
+		this.#requestRender();
+		void this.#focusExternalOwner(peer.sessionFile, peer.sessionId).then(
+			result => {
+				switch (result.kind) {
+					case "focused":
+						this.#notice = `focused ${name} in cmux`;
+						break;
+					case "unavailable":
+						this.#notice = CMUX_OWNER_UNAVAILABLE_MESSAGE;
+						break;
+					case "failed":
+						this.#notice = result.reason;
+						break;
+				}
+				this.#requestRender();
+			},
+			error => {
+				this.#notice = error instanceof Error ? error.message : String(error);
+				this.#requestRender();
+			},
+		);
 	}
 
 	#handleGrammarSequence(keyData: string, lane: "table" | "chat" | "inspector"): boolean {
@@ -2132,7 +2277,9 @@ export class AgentHubOverlayComponent extends Container {
 			this.#requestRender();
 			return true;
 		}
-		if (action.kind === "open-errors") {
+		if (action.kind === "attach-owner") {
+			this.#attachSelectedExternalOwner();
+		} else if (action.kind === "open-errors") {
 			if (this.#openErrors) this.#openErrors(this.#chatAgentId);
 			else this.#notice = "Errors dock is unavailable.";
 		} else if (action.kind === "open-bookmarks") {
@@ -2214,6 +2361,10 @@ export class AgentHubOverlayComponent extends Container {
 		}
 		const grammarLane = this.#dualLaneActive && this.#inspectorFocused ? "inspector" : "table";
 		if (this.#handleGrammarSequence(keyData, grammarLane)) return;
+		if (keyData === "c" || keyData === "C") {
+			this.#copySelectedTableRow(keyData === "C");
+			return;
+		}
 		if (this.#tableFilterQuery && (keyData === "n" || keyData === "N")) {
 			this.#moveTableSelection(keyData === "n" ? 1 : -1);
 			this.#requestRender();
@@ -2575,7 +2726,7 @@ export class AgentHubOverlayComponent extends Container {
 				archive: this.#chatArchived,
 				status: this.#showLegend ? this.#contextualMetadataLines() : undefined,
 				extra: [searchHint, "h/Backspace:back"],
-				pending: this.#viewerSequence.isPending ? G_CHORD_CUE : undefined,
+				pending: this.#viewerSequence.isPending ? AGENT_HUB_G_CHORD_CUE : undefined,
 			});
 		const internalId = !this.#chatExternal ? this.#chatAgentId : undefined;
 		const ref = internalId ? this.#registry.get(internalId) : undefined;
@@ -2597,7 +2748,7 @@ export class AgentHubOverlayComponent extends Container {
 				this.#chatAccessMode === "attachable" ? "i:focus input" : undefined,
 				`${this.#expandKeys[0] ?? "Ctrl+O"}:expand`,
 			],
-			pending: this.#viewerSequence.isPending ? G_CHORD_CUE : undefined,
+			pending: this.#viewerSequence.isPending ? AGENT_HUB_G_CHORD_CUE : undefined,
 		});
 	}
 
@@ -2732,28 +2883,23 @@ export class AgentHubOverlayComponent extends Container {
 		if (this.#chatExternal) {
 			const peer = this.#chatExternal;
 			const state = displayedExternalPeerState(peer);
-			const model = durableModelSelector(this.#journalModels.peek(peer.sessionFile));
+			const model = withModelSelectorEffort(durableModelSelector(this.#journalModels.peek(peer.sessionFile)), {});
 			const modelLabel = model ? ` ${modelHeaderLane(model)}` : ` ${theme.fg("dim", "-")}`;
 			this.#viewerHeaderLines.push(
 				`${externalStateBadge(state)} ${theme.fg("dim", `pid ${peer.pid} · ${shortenPath(peer.cwd)} · ${accessLabel}`)}${modelLabel}`,
 			);
 		} else if (this.#chatArchived) {
 			const archived = this.#chatArchived;
-			const model = archived.modelId
-				? `${archived.modelId}${archived.thinkingLevel ? `:${archived.thinkingLevel}` : ""}`
-				: withModelSelectorEffort(this.#transcriptCache?.model, this.#transcriptCache?.thinking);
+			const model = withModelSelectorEffort(archived.modelId ?? this.#transcriptCache?.model, {
+				session: archived.thinkingLevel ?? this.#transcriptCache?.thinking,
+			});
 			const modelLabel = model ? ` ${modelHeaderLane(model)}` : "";
 			this.#viewerHeaderLines.push(
 				`${theme.bold(archived.agentId)} ${theme.fg("dim", `${archived.state} · archived · ${accessLabel}`)}${modelLabel}`,
 			);
 		} else if (ref) {
 			const observed = this.#observableFor(ref.id);
-			const cachedRoute = withModelSelectorEffort(this.#transcriptCache?.model, this.#transcriptCache?.thinking);
-			const model =
-				withModelSelectorEffort(
-					observed?.progress?.resolvedModel,
-					observed?.progress?.routeReceipt?.route.thinking,
-				) ?? cachedRoute;
+			const model = this.#resolvedModelSelector(ref, observed);
 			const kindTag = theme.fg("dim", ` ${ref.parentId ? `${ref.kind} · of ${ref.parentId}` : ref.kind}`);
 			const modelLabel = model ? ` ${modelHeaderLane(model)}` : "";
 			const source = observed?.progress?.routeReceipt?.source;
@@ -2842,6 +2988,10 @@ export class AgentHubOverlayComponent extends Container {
 			this.#focusChatInput();
 			return;
 		}
+		if (keyData === "c" || keyData === "C") {
+			this.#copyTranscriptUnit(keyData === "C");
+			return;
+		}
 		if (this.#handleGrammarSequence(keyData, "chat")) return;
 		if (this.#inputUnavailableFlash) this.#inputUnavailableFlash = false;
 		if (this.#chatExternal) {
@@ -2925,6 +3075,10 @@ export class AgentHubOverlayComponent extends Container {
 	}
 
 	#handleReadOnlyChatInput(keyData: string): void {
+		if (keyData === "c" || keyData === "C") {
+			this.#copyTranscriptUnit(keyData === "C");
+			return;
+		}
 		if (matchesUiDismiss(keyData)) {
 			if (this.#chatSearchQuery) {
 				this.#chatSearchQuery = "";
@@ -3648,5 +3802,4 @@ export class AgentHubOverlayComponent extends Container {
 				if (token === this.#remoteFetchToken) this.#remoteFetchInFlight = false;
 				logger.warn("Agent hub: remote transcript fetch failed", { id, error: String(error) });
 			});
-	}
-}
+	} }

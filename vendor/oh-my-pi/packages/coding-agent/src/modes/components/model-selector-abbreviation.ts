@@ -13,7 +13,7 @@ export interface ModelSelectorAbbreviation {
  * Tiered model-label vocabulary.
  *
  * Compact labels are reserved for dense comparison tables:
- *   openai-codex/gpt-5.6-sol:xhigh -> OX5.6sol xh
+ *   openai-codex/gpt-5.6-sol:xhigh -> OX5.6solxh
  *
  * Standalone labels favor recognition over width:
  *   openai-codex/gpt-5.6-sol:xhigh -> codex 5.6sol xhigh
@@ -92,6 +92,7 @@ const EFFORT_LABELS: Readonly<Record<string, { compact: string; standalone: stri
 	medium: { compact: "m", standalone: "medium" },
 	high: { compact: "h", standalone: "high" },
 	xhigh: { compact: "xh", standalone: "xhigh" },
+	max: { compact: "mx", standalone: "max" },
 };
 
 const MODEL_VARIANTS: readonly [RegExp, string][] = [
@@ -193,23 +194,57 @@ export function formatModelSelectorAbbreviation(
 	};
 }
 
-/** Add receipt/session effort only when the selector does not already carry one. */
+export interface ModelSelectorEffortSources {
+	/** Effective effort recorded by the live session. */
+	session?: string | null;
+	/** Effective effort recorded by the route receipt. */
+	route?: string | null;
+	/** Model-scoped default used when neither runtime source has resolved yet. */
+	modelDefault?: string | null;
+	/** Explicitly false means the model's effective effort is off. */
+	reasoning?: boolean;
+}
+
+/**
+ * Attach the effective effort to a selector.
+ *
+ * Live session state wins over the spawn receipt because it reflects model
+ * switches. Before a session exists, the model default is authoritative.
+ * Rows with no richer metadata still render an honest `inherit` (or `off` for
+ * non-reasoning models) rather than silently dropping the effort segment.
+ */
 export function withModelSelectorEffort(
 	selector: string | undefined,
-	effort: string | null | undefined,
+	sources: ModelSelectorEffortSources,
 ): string | undefined {
-	if (!selector || !effort) return selector;
+	if (!selector) return undefined;
 	const providerSeparator = selector.indexOf("/");
 	const model = providerSeparator >= 0 ? selector.slice(providerSeparator + 1) : selector;
-	if (splitEffortSuffix(model).effort) return selector;
+	const parsed = splitEffortSuffix(model);
+	const runtimeEffort = sources.session ?? sources.route;
+	if (!runtimeEffort && parsed.effort) return selector;
+	const effort = runtimeEffort ?? sources.modelDefault ?? (sources.reasoning === false ? "off" : "inherit");
+	if (parsed.effort) return `${selector.slice(0, selector.length - model.length)}${parsed.base}:${effort}`;
 	return `${selector}:${effort}`;
+}
+/** Render the status-line label: model name plus compact effort, without provider. */
+export function renderModelSelectorStatusLabel(selector: string): string {
+	const abbreviation = formatModelSelectorAbbreviation(selector, "compact");
+	const effort =
+		abbreviation.effort && abbreviation.effort !== "0"
+			? ` ${theme.fg(MODEL_ABBREVIATION_COLOR_ROLES.effort, abbreviation.effort)}`
+			: "";
+	return `${theme.fg("statusLineModel", abbreviation.model)}${effort}`;
 }
 
 /** Render a model label; compact is only for dense comparison rows. */
 export function renderModelSelectorAbbreviation(selector: string, tier: ModelSelectorLabelTier): string {
 	const abbreviation = formatModelSelectorAbbreviation(selector, tier);
 	const providerModelSeparator = tier === "compact" ? "" : " ";
-	const effort = abbreviation.effort ? ` ${theme.fg(MODEL_ABBREVIATION_COLOR_ROLES.effort, abbreviation.effort)}` : "";
+	const effortSeparator = tier === "compact" ? "" : " ";
+	const effort = abbreviation.effort
+		? `${effortSeparator}${theme.fg(MODEL_ABBREVIATION_COLOR_ROLES.effort, abbreviation.effort)}`
+		: "";
 	return (
 		theme.fg(MODEL_ABBREVIATION_COLOR_ROLES.provider, abbreviation.provider) +
 		providerModelSeparator +

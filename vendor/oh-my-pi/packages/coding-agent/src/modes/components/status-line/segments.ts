@@ -8,7 +8,7 @@ import { type ThemeColor, theme } from "../../../modes/theme/theme";
 import { shortenPath } from "../../../tools/render-utils";
 import { getSessionAccentAnsi, getSessionAccentHex } from "../../../utils/session-color";
 import { sanitizeStatusText } from "../../shared";
-import { renderModelSelectorAbbreviation, withModelSelectorEffort } from "../model-selector-abbreviation";
+import { renderModelSelectorStatusLabel, withModelSelectorEffort } from "../model-selector-abbreviation";
 import { formatContextUsage, getContextUsageLevel, getContextUsageThemeColor } from "./context-thresholds";
 import { processMemoryFootprintSampler } from "./memory-footprint";
 import { mainTokenRateSegment } from "./main-token-rate";
@@ -91,8 +91,15 @@ const modelSegment: StatusLineSegment = {
 			if (ctx.session.isAutoThinking) effort = ctx.session.autoResolvedThinkingLevel() ?? "auto";
 			else if (state.thinkingLevel && state.thinkingLevel !== ThinkingLevel.Off) effort = state.thinkingLevel;
 		}
-		const selector = withModelSelectorEffort(baseSelector, effort) ?? baseSelector;
-		const label = renderModelSelectorAbbreviation(selector, "standalone");
+		const selector =
+			opts.showThinkingLevel === false
+				? baseSelector
+				: (withModelSelectorEffort(baseSelector, {
+					session: effort,
+					modelDefault: model?.thinking?.defaultLevel,
+					reasoning: model?.reasoning,
+				}) ?? baseSelector);
+		const label = renderModelSelectorStatusLabel(selector);
 		let content = theme.icon.model ? `${theme.fg("statusLineModel", `${theme.icon.model} `)}${label}` : label;
 		if (ctx.session.isAdvisorActive()) content += theme.fg("success", "++");
 		if (ctx.session.isFastModeActive() && theme.icon.fast) {

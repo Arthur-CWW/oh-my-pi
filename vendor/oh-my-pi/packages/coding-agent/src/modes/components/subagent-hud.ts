@@ -47,7 +47,7 @@ function subagentDepth(session: ObservableSession, sessionsById: ReadonlyMap<str
 }
 
 function modelSelector(session: ObservableSession): string | undefined {
-	return withModelSelectorEffort(session.progress?.resolvedModel, session.progress?.routeReceipt?.route.thinking);
+	return withModelSelectorEffort(session.progress?.resolvedModel, { route: session.progress?.routeReceipt?.route.thinking });
 }
 
 /** Incremental, column-aligned renderer for the detached-subagent HUD tree. */

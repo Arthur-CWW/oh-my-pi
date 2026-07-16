@@ -102,12 +102,23 @@ function makeHub(
 	};
 }
 
+it("c and C copy semantic Hub row units instead of characters", async () => {
+	await initTheme();
+	const copied: string[] = [];
+	const { hub } = makeHub(async () => {}, { copyIdentity: payload => copied.push(payload) });
+	hub.handleInput("c");
+	hub.handleInput("C");
+	await Bun.sleep(0);
+	expect(copied).toEqual(["Worker", "Worker · running · parent Main"]);
+	hub.dispose();
+});
+
 it("y yanks the selected child's session handle and history URL", async () => {
 	await initTheme();
 	const copied: string[] = [];
 	const { hub } = makeHub(async () => {}, {
 		sessionId: "019f6141-df73-7000-b792-985f12d9db5d",
-		copyIdentity: payload => copied.push(payload),
+		copyIdentity: payload => { copied.push(payload); },
 	});
 	hub.handleInput("y");
 	await Bun.sleep(0);
@@ -431,6 +442,7 @@ describe("Agent hub Enter activation", () => {
 			message: "archived transcript body",
 		});
 		const before = await Bun.file(childFile).text();
+		const copied: string[] = [];
 		const agents = new AgentRegistry();
 		agents.register({
 			id: "Main",
@@ -449,6 +461,7 @@ describe("Agent hub Enter activation", () => {
 			irc: new IrcBus(agents),
 			focusAgent: async () => {},
 			externalIrc: null,
+			copyIdentity: payload => { copied.push(payload); },
 		});
 
 		await waitForRenderedText(hub, "Archived");
@@ -460,6 +473,12 @@ describe("Agent hub Enter activation", () => {
 		expect(opened).toContain("completed archived · openai-codex/gpt-5.6-terra:high · read-only");
 		expect(opened).not.toContain("Enter:send");
 		expect(opened).not.toContain("R:revive");
+
+		hub.handleInput("c");
+		hub.handleInput("C");
+		await Bun.sleep(0);
+		expect(copied[0]?.length).toBeGreaterThan(1);
+		expect(copied[1]).toContain("archived transcript body");
 
 		hub.handleInput("R");
 		hub.handleInput("x");

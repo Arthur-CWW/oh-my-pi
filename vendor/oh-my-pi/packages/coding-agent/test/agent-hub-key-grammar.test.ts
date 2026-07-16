@@ -114,6 +114,8 @@ describe("Agent Hub Vim key grammar", () => {
 		});
 		expect(sequence.handle("g", { ...options("g"), prefix: true })).toEqual({ kind: "pending" });
 		expect(sequence.isPending).toBe(true);
+		expect(sequence.handle("a", options("a"))).toEqual({ kind: "attach-owner" });
+		expect(sequence.handle("g", { ...options("g"), prefix: true })).toEqual({ kind: "pending" });
 		expect(sequence.handle("x", options("x"))).toEqual({ kind: "open-errors" });
 		for (const [key, kind] of [
 			["m", "open-messages"],
@@ -147,10 +149,10 @@ describe("Agent Hub Vim key grammar", () => {
 				width: 100,
 				surface: "hub.table",
 				mode: "normal",
-				pending: "g: gg gj gk gx gm gr gs gb",
+				pending: "g: gg gj gk gx gm gr gs gb ga",
 			}),
 		);
-		expect(pending.trimEnd().endsWith("g: gg gj gk gx gm gr gs gb")).toBe(true);
+		expect(pending.trimEnd().endsWith("g: gg gj gk gx gm gr gs gb ga")).toBe(true);
 		const cancelled = Bun.stripANSI(renderAgentHubFooter({ width: 100, surface: "hub.table", mode: "normal" }));
 		expect(cancelled).not.toContain("g: gg");
 	});

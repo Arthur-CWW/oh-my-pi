@@ -103,6 +103,7 @@ export function getAgentHubTurnStatus(registry: AgentRegistry, agentId: string):
 }
 
 export class SelectorController {
+	#lastHubSelection: { kind: "agent" | "external"; id: string; viewportOffset: number } | undefined;
 	readonly #bookmarks = new BookmarksStore();
 	#activeHub: AgentHubOverlayComponent | undefined;
 	#activeHubOverlay: OverlayHandle | undefined;
@@ -1309,6 +1310,8 @@ export class SelectorController {
 		let overlayHandle: OverlayHandle | undefined;
 
 		const done = () => {
+			const selection = hub?.getSelectedSelection();
+			if (selection) this.#lastHubSelection = selection;
 			hub?.dispose();
 			overlayHandle?.hide();
 			if (this.#activeHub === hub) {
@@ -1317,7 +1320,7 @@ export class SelectorController {
 			}
 			this.ctx.ui.setFocus(this.ctx.editor);
 			this.ctx.ui.requestRender();
-		};
+		}
 
 		const registry = AgentRegistry.global();
 		const ctx = this.ctx;
@@ -1333,6 +1336,8 @@ export class SelectorController {
 			observers,
 			hubKeys,
 			expandKeys: this.ctx.keybindings.getKeys("app.tools.expand"),
+			interruptKeys: this.ctx.keybindings.getKeys("app.interrupt"),
+			unfocusSession: () => this.ctx.unfocusSession(),
 			onDone: done,
 			requestRender: () => this.ctx.ui.requestRender(),
 			registry,
@@ -1342,6 +1347,7 @@ export class SelectorController {
 			ui: this.ctx.ui,
 			getTool: name => this.ctx.session.getToolByName(name),
 			initialAgentId: options?.initialAgentId ?? this.ctx.focusedAgentId,
+			initialSelection: options?.initialAgentId || this.ctx.focusedAgentId ? undefined : this.#lastHubSelection,
 			cwd: this.ctx.sessionManager.getCwd(),
 			hideThinkingBlock: () => this.ctx.hideThinkingBlock,
 			focusAgent: id => this.ctx.focusAgentHubInput(id),

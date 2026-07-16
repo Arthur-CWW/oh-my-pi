@@ -351,7 +351,10 @@ export class InputController {
 			...this.ctx.keybindings.getKeys("app.session.observe"),
 		]);
 		for (const key of hubKeys) {
-			this.ctx.editor.setCustomKeyHandler(key, () => this.ctx.showAgentHub());
+			this.ctx.editor.setCustomKeyHandler(key, () => {
+				const focusedAgentId = this.ctx.focusedAgentId;
+				this.ctx.showAgentHub(focusedAgentId ? { initialAgentId: focusedAgentId } : undefined);
+			});
 		}
 
 		// Double-tap left arrow on an empty editor: opens the agent hub from the

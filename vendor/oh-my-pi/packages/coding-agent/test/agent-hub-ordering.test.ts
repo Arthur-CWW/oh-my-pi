@@ -191,7 +191,7 @@ function renderedAgentIds(hub: AgentHubOverlayComponent): string[] {
 			const prefix = line.slice(0, 3);
 			if (prefix !== " ❯ " && prefix !== "   ") return false;
 			const stateCol = line.slice(17, 23).trim();
-			return /[●○■×◌·✓~]/.test(stateCol);
+			return /[●○■×◌·✓~◐◓◑◒]/.test(stateCol);
 		})
 		.map(line => {
 			const namePart = line.slice(23).trim();
@@ -210,7 +210,7 @@ function renderedExternalPeerNames(hub: AgentHubOverlayComponent): string[] {
 			const prefix = line.slice(0, 3);
 			if (prefix !== " ❯ " && prefix !== "   ") return false;
 			const stateCol = line.slice(17, 23).trim();
-			if (!/[●○■×◌·✓~]/.test(stateCol)) return false;
+			if (!/[●○■×◌·✓~◐◓◑◒]/.test(stateCol)) return false;
 			return line.slice(23).toLowerCase().includes("external");
 		})
 		.map(line => {
@@ -310,8 +310,8 @@ describe("Agent hub row ordering", () => {
 		expect(renderedExternalPeerNames(hub)).toEqual(["alpha", "beta"]);
 		hub.handleInput("\r");
 		const siblingView = Bun.stripANSI(hub.render(120).join("\n"));
-		expect(siblingView).toContain("READONLY");
-		expect(siblingView).toContain("cmd+p to real TUI");
+		expect(siblingView).toContain("read-only");
+		expect(siblingView).toContain("cmd+p to navigate to its real TUI");
 		expect(siblingView).toContain("Sibling transcript path unavailable");
 		hub.handleInput("\x1b");
 
@@ -348,7 +348,7 @@ describe("Agent hub row ordering", () => {
 		expect(hub.getRetentionMetrics().externalOrderEntries).toBe(1);
 
 		expect(renderedText(hub)).toContain("peer-2000");
-		expect(renderedText(hub)).not.toContain("peer-0");
+		expect(renderedText(hub)).not.toMatch(/peer-0(?:\s|$)/);
 		hub.dispose();
 		expect(hub.getRetentionMetrics().externalOrderEntries).toBe(0);
 	});
@@ -463,7 +463,7 @@ describe("Agent hub row ordering", () => {
 		const row = renderedText(hub)
 			.split("\n")
 			.find(line => line.includes("Worker") && line.includes("5.6terra"));
-		expect(row).toContain("OX5.6terra h");
+		expect(row).toContain("OX5.6terrah");
 		hub.dispose();
 	});
 
@@ -495,7 +495,7 @@ describe("Agent hub row ordering", () => {
 		const row = renderedText(hub)
 			.split("\n")
 			.find(line => line.includes("Parent.Child") && line.includes("4.5opus"));
-		expect(row).toContain("AN4.5opus m");
+		expect(row).toContain("AN4.5opusm");
 		hub.dispose();
 	});
 

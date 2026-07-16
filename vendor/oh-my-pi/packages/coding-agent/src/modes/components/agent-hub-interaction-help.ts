@@ -11,6 +11,8 @@ import { theme } from "../theme/theme";
 
 type AgentHubInteractionSurface = Extract<InteractionSurface, "hub.table" | "hub.chat" | "hub.inspector">;
 
+export const AGENT_HUB_G_CHORD_CUE = "g: gg gj gk gx gm gr gs gb ga";
+
 const TABLE_VIEWER_NAVIGATION_IDS = VIEWER_NAVIGATION_INTERACTION_IDS.filter(
 	id => id !== "viewer.line-down" && id !== "viewer.line-up",
 );

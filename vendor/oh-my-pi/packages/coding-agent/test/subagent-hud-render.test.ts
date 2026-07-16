@@ -337,9 +337,9 @@ describe("subagent HUD lines", () => {
 			.split("\n")
 			.filter(line => line.includes("["));
 		expect(rendered).toHaveLength(3);
-		expect(rendered[0]).toContain("[OX5.6sol xh] HR147ColonMode: Colon-mode UX implementer");
-		expect(rendered[1]).toContain("[AN4.6sonnet h] HR151DismissAction: Modal input-action migration specialist");
-		expect(rendered[2]).toContain("[KMkimi m] DismissSelectors: Selector dismissal migration specialist");
+		expect(rendered[0]).toContain("[OX5.6solxh] HR147ColonMode: Colon-mode UX implementer");
+		expect(rendered[1]).toContain("[AN4.6sonneth] HR151DismissAction: Modal input-action migration specialist");
+		expect(rendered[2]).toContain("[KMkimim] DismissSelectors: Selector dismissal migration specialist");
 		expect(rendered.join("\n")).not.toContain("HR147ColonMode.HR151DismissAction");
 		expect(rendered.map(line => Bun.stringWidth(line))).toEqual([99, 99, 99]);
 		expect(rendered[0]).toMatch(/\s10\s+RUN$/);

@@ -39,3 +39,13 @@ Everything that should be running is just… running. Arthur never babysits a se
 3. Fleet tab in the zellij layout; kill the bespoke companion watchdog + stray tmux sessions.
 4. Desktop: same registry pattern, systemd-user, gpu-queue absorbed.
 5. `omp services` seam (harness request register; not now).
+
+## Control-plane seam: ownership and lifetimes (decided 2026-07-16)
+
+Arthur asked whether lane/dev services should merge into the OMP control plane / service daemons. Direction:
+
+- **Two lifetimes, never conflated.** Lane services (dev servers, daemons, dashboards) are machine-scoped: they live with the login session and must survive any OMP session death, promote waves, and TUI restarts. OMP session runners (HR-026 per-session runner daemon) are session-scoped and die with their session's purpose. Dev servers therefore NEVER run inside an OMP daemon.
+- **Merge the surface, not the supervisor.** process-compose stays the sole process owner (registry-driven, launchd/systemd-user boot glue). OMP gets a read/act seam over its API: `omp services` CLI + a Control Plane services pane (status / health / logs / restart). The control plane is a projection and actuator, never a second writer or owner of processes (HR-162).
+- **Ownership.** The registry file declares services; each stream owns its entries; the harness stream owns the supervisor + seam. Per-stream always-on dev servers (the "check progress anytime" ask) are registry entries; bespoke `dev:up` restart loops and watchdogs get absorbed into supervisor restart policies and deleted.
+- **Lifetimes.** Supervisor = login session (KeepAlive). Services = restart-on-crash per registry policy. OMP sessions = ephemeral clients. Agent QA still boots its own instances — registry services are Arthur's review surfaces, not QA fixtures.
+- **Two views, one API.** The zellij fleet tab remains the human home (step 3 above); the Control Plane services pane is the agent/operator view. Both read the same process-compose API — no second convention.

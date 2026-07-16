@@ -7,6 +7,7 @@ export type AgentHubViewerSequenceAction =
 	| { readonly kind: "display-row-up" }
 	| { readonly kind: "logical-down" }
 	| { readonly kind: "logical-up" }
+	| { readonly kind: "attach-owner" }
 	| { readonly kind: "open-errors" }
 	| { readonly kind: "open-messages" }
 	| { readonly kind: "open-bookmarks" }
@@ -49,6 +50,8 @@ export class AgentHubViewerSequence {
 		if (options.down) return { kind: options.displayRows ? "display-row-down" : "logical-down" };
 		if (options.up) return { kind: options.displayRows ? "display-row-up" : "logical-up" };
 		switch (keyData) {
+			case "a":
+				return { kind: "attach-owner" };
 			case "x":
 				return { kind: "open-errors" };
 			case "m":
