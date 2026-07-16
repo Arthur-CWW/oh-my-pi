@@ -40,6 +40,8 @@ export * from "./sdk";
 export * from "./session/agent-session";
 // Auth and model registry
 export * from "./session/auth-storage";
+export * from "./session/bookmarks";
+export * from "./session/handoff-provenance";
 export * from "./session/indexed-session-storage";
 export * from "./session/messages";
 export * from "./session/redis-session-storage";
@@ -51,7 +53,6 @@ export * from "./session/session-listing";
 export * from "./session/session-loader";
 export * from "./session/session-manager";
 export * from "./session/session-migrations";
-export * from "./session/bookmarks";
 export * from "./session/session-storage";
 export * from "./session/sql-session-storage";
 export * from "./task/executor";

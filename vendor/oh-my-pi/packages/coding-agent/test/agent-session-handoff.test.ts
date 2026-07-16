@@ -11,8 +11,14 @@ import { ExtensionRunner, loadExtensions } from "@oh-my-pi/pi-coding-agent/exten
 import { SecretObfuscator } from "@oh-my-pi/pi-coding-agent/secrets";
 import { AgentSession, type AgentSessionEvent } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
+import {
+	findLatestHandoffProvenanceEntry,
+	HANDOFF_PROVENANCE_CUSTOM_TYPE,
+	type HandoffPredecessorProvenanceRecord,
+	renderHandoffProvenanceBlock,
+} from "@oh-my-pi/pi-coding-agent/session/handoff-provenance";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
-import { TempDir } from "@oh-my-pi/pi-utils";
+import { TempDir, VERSION } from "@oh-my-pi/pi-utils";
 
 const HANDOFF_SECRET = "HANDOFF_SECRET_TOKEN_12345";
 
@@ -146,7 +152,8 @@ describe("AgentSession handoff", () => {
 		await drainMaintenance();
 
 		expect(generateHandoffSpy).toHaveBeenCalledTimes(1);
-		expect(result?.document).toBe(handoffText);
+		expect(result?.document.startsWith("## Provenance\n")).toBe(true);
+		expect(result?.document.endsWith(`\n\n${handoffText}`)).toBe(true);
 
 		expect(events.filter(event => event.type === "auto_compaction_start")).toHaveLength(0);
 		expect(events.filter(event => event.type === "auto_compaction_end")).toHaveLength(0);
@@ -596,11 +603,12 @@ describe("AgentSession handoff", () => {
 			.split("\n")
 			.map(line => JSON.parse(line) as PersistedEntry);
 
-		expect(result?.document).toBe(handoffText);
+		expect(result?.document.startsWith("## Provenance\n")).toBe(true);
+		expect(result?.document.endsWith(`\n\n${handoffText}`)).toBe(true);
 		expect(session.getLastAssistantText()).toBeUndefined();
 		expect(session.hasCopyCandidateAssistantMessage()).toBe(false);
 		expect(session.getLastVisibleHandoffText()).toBe(
-			`<handoff-context>\n${handoffText}\n</handoff-context>\n\nThe above is a handoff document from a previous session. Use this context to continue the work seamlessly.`,
+			`<handoff-context>\n${result?.document}\n</handoff-context>\n\nThe above is a handoff document from a previous session. Use this context to continue the work seamlessly.`,
 		);
 		expect(handoffSessionFile).not.toBe(previousSessionFile);
 		expect(handoffEntries[0]).toMatchObject({ type: "session", parentSession: previousSessionFile });
@@ -612,6 +620,99 @@ describe("AgentSession handoff", () => {
 
 		const previousSessionText = await Bun.file(previousSessionFile).text();
 		expect(previousSessionText).toContain('"text":"seed"');
+	});
+
+	it("renders the exact code-generated provenance block", () => {
+		const record: HandoffPredecessorProvenanceRecord = {
+			schemaVersion: 1,
+			predecessorSessionId: "22222222-2222-4222-8222-222222222222",
+			predecessorJournalPath: "/sessions/predecessor.jsonl",
+			predecessorSessionDir: "/sessions",
+			binaryVersion: "16.0.1+fork.468ef51ae3c1",
+			timestamp: "2026-07-16T12:34:56.789Z",
+			cwd: "/Users/arthur/agents",
+			predecessorHandoff: {
+				sessionId: "22222222-2222-4222-8222-222222222222",
+				journalPath: "/sessions/predecessor.jsonl",
+				entryId: "01J00000000000000000000000",
+			},
+		};
+
+		expect(renderHandoffProvenanceBlock(record)).toBe(
+			[
+				"## Provenance",
+				"",
+				"- Predecessor session: `22222222-2222-4222-8222-222222222222`",
+				"- Predecessor journal: `/sessions/predecessor.jsonl`",
+				"- Predecessor session dir: `/sessions`",
+				"- Predecessor binary: `16.0.1+fork.468ef51ae3c1`",
+				"- Predecessor handoff chain: `/sessions/predecessor.jsonl#entry=01J00000000000000000000000` → this handoff",
+				"- Written: 2026-07-16T12:34:56.789Z, cwd `/Users/arthur/agents`, by OMP handoff",
+			].join("\n"),
+		);
+	});
+
+	it("stamps the generated document and successor journal with a walkable predecessor chain", async () => {
+		const predecessorSessionId = sessionManager.getSessionId();
+		const predecessorJournalPath = sessionManager.getSessionFile();
+		if (!predecessorJournalPath) throw new Error("Expected predecessor journal path");
+		const predecessorSessionDir = sessionManager.getSessionDir();
+		const cwd = sessionManager.getCwd();
+		const grandparentRecord: HandoffPredecessorProvenanceRecord = {
+			schemaVersion: 1,
+			predecessorSessionId: "11111111-1111-4111-8111-111111111111",
+			predecessorJournalPath: path.join(predecessorSessionDir, "grandparent.jsonl"),
+			predecessorSessionDir,
+			binaryVersion: "16.0.0+fork.grandparent",
+			timestamp: "2026-07-15T12:00:00.000Z",
+			cwd,
+			predecessorHandoff: null,
+		};
+		const grandparentHandoffEntryId = sessionManager.appendCustomEntry(
+			HANDOFF_PROVENANCE_CUSTOM_TYPE,
+			grandparentRecord,
+		);
+		const handoffBody = "## Goal\nContinue from here";
+		vi.spyOn(compactionModule, "generateHandoff").mockResolvedValue(handoffBody);
+
+		const result = await session.handoff();
+		const successorJournalPath = sessionManager.getSessionFile();
+		if (!result || !successorJournalPath) throw new Error("Expected persisted successor handoff");
+		const persistedEntries = (await Bun.file(successorJournalPath).text())
+			.trim()
+			.split("\n")
+			.map(line => JSON.parse(line) as unknown);
+		const provenanceEntry = findLatestHandoffProvenanceEntry(persistedEntries);
+		if (!provenanceEntry) throw new Error("Expected typed successor provenance entry");
+
+		expect(provenanceEntry.data).toEqual({
+			schemaVersion: 1,
+			predecessorSessionId,
+			predecessorJournalPath,
+			predecessorSessionDir,
+			binaryVersion: VERSION,
+			timestamp: provenanceEntry.data.timestamp,
+			cwd,
+			predecessorHandoff: {
+				sessionId: predecessorSessionId,
+				journalPath: predecessorJournalPath,
+				entryId: grandparentHandoffEntryId,
+			},
+		});
+		expect(result.document).toBe(
+			[
+				"## Provenance",
+				"",
+				`- Predecessor session: \`${predecessorSessionId}\``,
+				`- Predecessor journal: \`${predecessorJournalPath}\``,
+				`- Predecessor session dir: \`${predecessorSessionDir}\``,
+				`- Predecessor binary: \`${VERSION}\``,
+				`- Predecessor handoff chain: \`${predecessorJournalPath}#entry=${grandparentHandoffEntryId}\` → this handoff`,
+				`- Written: ${provenanceEntry.data.timestamp}, cwd \`${cwd}\`, by OMP handoff`,
+				"",
+				handoffBody,
+			].join("\n"),
+		);
 	});
 
 	it("does not run auto maintenance when strategy is off", async () => {

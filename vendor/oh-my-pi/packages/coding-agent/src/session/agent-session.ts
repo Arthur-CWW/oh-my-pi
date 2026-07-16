@@ -121,6 +121,7 @@ import {
 	prompt,
 	relativePathWithinRoot,
 	Snowflake,
+	VERSION,
 } from "@oh-my-pi/pi-utils";
 import * as snapcompact from "@oh-my-pi/snapcompact";
 import {
@@ -322,6 +323,12 @@ import {
 } from "./fallback-approval";
 import { createFleetCapability } from "./fleet-capability";
 import {
+	findLatestHandoffProvenanceEntry,
+	HANDOFF_PROVENANCE_CUSTOM_TYPE,
+	type HandoffPredecessorProvenanceRecord,
+	renderHandoffProvenanceBlock,
+} from "./handoff-provenance";
+import {
 	type BashExecutionMessage,
 	type CustomMessage,
 	convertToLlm,
@@ -361,7 +368,6 @@ import type {
 import { EPHEMERAL_MODEL_CHANGE_ROLE } from "./session-entries";
 import { formatSessionHistoryMarkdown } from "./session-history-format";
 import { type SessionManager, SessionStateCommandInFlightError } from "./session-manager";
-import { handoffSessionOwnership, type SessionOwnershipHandle } from "./session-ownership";
 import {
 	type ActiveRetryFallbackState,
 	compactionPreparationHasVideo,
@@ -385,6 +391,7 @@ import {
 	toRestoredQueuedMessage,
 	validateRetryFallbackChains,
 } from "./session-media";
+import { handoffSessionOwnership, type SessionOwnershipHandle } from "./session-ownership";
 import type { ShakeMode, ShakeResult } from "./shake-types";
 import { ToolChoiceQueue } from "./tool-choice-queue";
 import { classifyUnexpectedStop, isUnexpectedStopCandidate } from "./unexpected-stop-classifier";
@@ -9767,17 +9774,39 @@ export class AgentSession {
 				},
 				handoffSignal,
 			);
-			const handoffText = this.#deobfuscateFromProvider(rawHandoffText);
+			const handoffBody = this.#deobfuscateFromProvider(rawHandoffText);
 
 			if (handoffSignal.aborted) {
 				throw new Error("Handoff cancelled");
 			}
-			if (!handoffText) {
+			if (!handoffBody) {
 				return undefined;
 			}
+			const predecessorSessionId = this.sessionManager.getSessionId();
+			const predecessorJournalPath = this.sessionManager.getSessionFile() ?? null;
+			const predecessorSessionDir = this.sessionManager.getSessionDir();
+			const predecessorEntry = findLatestHandoffProvenanceEntry(this.sessionManager.getEntries());
+			const predecessorProvenance: HandoffPredecessorProvenanceRecord = {
+				schemaVersion: 1,
+				predecessorSessionId,
+				predecessorJournalPath,
+				predecessorSessionDir,
+				binaryVersion: VERSION,
+				timestamp: new Date().toISOString(),
+				cwd: this.sessionManager.getCwd(),
+				predecessorHandoff:
+					predecessorJournalPath && predecessorEntry
+						? {
+								sessionId: predecessorSessionId,
+								journalPath: predecessorJournalPath,
+								entryId: predecessorEntry.id,
+							}
+						: null,
+			};
+			const handoffText = `${renderHandoffProvenanceBlock(predecessorProvenance)}\n\n${handoffBody}`;
 
 			// Start a new session
-			const previousSessionFile = this.sessionFile;
+			const previousSessionFile = predecessorJournalPath ?? undefined;
 			const previousOwnership = this.sessionManager.getSessionOwnership();
 			await this.sessionManager.flush();
 			this.#cancelOwnAsyncJobs();
@@ -9797,6 +9826,7 @@ export class AgentSession {
 			this.#todoReminderAwaitingProgress = false;
 
 			// Inject the handoff document as a custom message
+			this.sessionManager.appendCustomEntry(HANDOFF_PROVENANCE_CUSTOM_TYPE, predecessorProvenance);
 			const handoffContent = createHandoffContext(handoffText);
 			this.sessionManager.appendCustomMessageEntry("handoff", handoffContent, true, undefined, "agent");
 			await this.sessionManager.ensureOnDisk();

@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- Generated handoffs now begin with a code-stamped predecessor provenance block, and successor journals store schema-decoded lineage records with walkable handoff-chain pointers.
 - Shared Scope-managed `TablePreviewComponent` (table + live preview + key routing + guaranteed finalizers on unmount); `/agents` dashboard is the first consumer — selection, filtering, scrolling, and preview assembly are no longer reimplemented per surface.
 - Model labels are tier-aware: dense comparative rows (HUD, Hub roster) use the fused compact form (`OX5.6solxh`) with consistent segment colors and the effort rendered on every row including the cursor row; the main/thread status line shows just the model name plus compact effort (`5fable m`) with no provider word; wide detail panes keep the spelled-out form. Variant names always spell out (5.6sol/5.6terra/opus/haiku — one-letter lane codes removed), and decorative `•` spacers are gone.
 - Agent Hub `ga` chord: on an external-peer row, attach to that peer's actual cli/cmux tab (owner-view revalidation, then cmux workspace+surface focus), with distinct notices for unavailable owners, older-build peers without a session file, and non-external rows; the hub stays open with the cursor unchanged.
