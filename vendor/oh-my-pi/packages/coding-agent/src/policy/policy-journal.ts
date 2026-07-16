@@ -373,7 +373,7 @@ export class PolicyJournal {
 			source: input.source,
 			reason: input.reason,
 			rollbackOf: target.transactionId,
-			registry: { version: POLICY_REGISTRY_VERSION, digest: POLICY_REGISTRY_DIGEST },
+			registry: target.registry,
 			mutations: target.mutations.map(mutation => this.#inverseMutation(records, target.sequence, mutation)),
 		};
 	}
@@ -421,11 +421,11 @@ export class PolicyJournal {
 				reason: "author uid and pid must own the foreground lease",
 			});
 		}
-		if (draft.registry.version !== POLICY_REGISTRY_VERSION || draft.registry.digest !== POLICY_REGISTRY_DIGEST) {
+		if (draft.registry.version !== POLICY_REGISTRY_VERSION) {
 			throw new PolicyJournalIoError({
 				operation: "append",
 				path: this.journalPath,
-				reason: "registry version or digest does not match the active closed policy registry",
+				reason: "registry version is not supported by this policy journal",
 			});
 		}
 		if (records.some(record => record.transactionId === draft.transactionId)) {

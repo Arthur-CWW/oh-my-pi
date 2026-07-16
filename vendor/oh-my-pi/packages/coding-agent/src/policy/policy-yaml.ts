@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 import { YAML } from "bun";
+import type { PolicyFragmentRegistry, PolicyJsonValue } from "./policy-fragment-registry";
+import { projectPolicy, type PolicyFragmentNotice } from "./policy-projection";
 import {
 	CORE_BUDGET_FRAGMENT_VERSION,
 	CORE_FALLBACK_FRAGMENT_VERSION,
@@ -10,6 +12,9 @@ import {
 	isCoreFallbackKey,
 	isCoreProviderKey,
 	isCoreRoutingKey,
+	isPolicyKey,
+	type ExtensionPolicyKey,
+	isExtensionPolicyKey,
 	type PolicyKey,
 	type PolicyMutationV1,
 	type PolicyScope,
@@ -437,8 +442,9 @@ export function exportLegacyPolicyYaml(records: readonly PolicyTransactionV1[]):
 	for (const record of records) {
 		for (const mutation of record.mutations) {
 			if (mutation.scope.kind !== "global") continue;
+			if (!isPolicyKey(mutation.key)) continue;
 			if (mutation.op === "clear") applied.delete(mutation.key);
-			else applied.set(mutation.key, mutation.value);
+			else applied.set(mutation.key, mutation.value as PolicyValue);
 		}
 	}
 	const modelRoles: Record<string, string> = {};
@@ -537,4 +543,146 @@ export function ignoreImportedYamlForPolicyRuntime(
 	const notice = `Policy-capable runtime ignored journal-owned YAML keys from ${options.sourcePath}: ${ignoredKeyPaths.join(", ")}`;
 	options.onNotice?.(notice);
 	return { settings: filtered, ignoredKeyPaths, notice };
+}
+
+export interface PolicyFragmentExportEntry {
+	readonly fragmentVersion: number;
+	readonly registration: string;
+	readonly value: PolicyJsonValue;
+	readonly provenance: {
+		readonly sourceLayer: string;
+		readonly scope: PolicyScope;
+		readonly transactionId: string;
+		readonly sequence: number;
+		readonly recordHash: string;
+		readonly author: PolicyTransactionV1["author"];
+		readonly source: PolicyTransactionV1["source"];
+		readonly reason: string;
+	};
+}
+
+export interface GeneratedPolicyFragmentExport {
+	readonly sequence: number;
+	readonly hash: string;
+	readonly fragments: Readonly<Partial<Record<ExtensionPolicyKey, PolicyFragmentExportEntry>>>;
+	readonly notices: readonly PolicyFragmentNotice[];
+	readonly preservedMutations: readonly {
+		readonly transactionId: string;
+		readonly sequence: number;
+		readonly recordHash: string;
+		readonly author: PolicyTransactionV1["author"];
+		readonly source: PolicyTransactionV1["source"];
+		readonly reason: string;
+		readonly mutation: PolicyTransactionV1["mutations"][number];
+	}[];
+}
+
+export interface PolicyFragmentImportResult {
+	readonly mutations: readonly PolicyMutationV1[];
+	readonly keys: readonly ExtensionPolicyKey[];
+}
+
+/**
+ * Exports decoded effective values plus every inert/raw mutation. Raw journal
+ * bytes remain authoritative; this is a read-only transfer representation.
+ */
+export function exportPolicyFragments(
+	records: readonly PolicyTransactionV1[],
+	fragmentRegistry: PolicyFragmentRegistry,
+	options: { readonly at?: string; readonly workstream?: string } = {},
+): GeneratedPolicyFragmentExport {
+	const head = records.at(-1);
+	const snapshot = projectPolicy(records, {
+		at: options.at ?? head?.createdAt ?? new Date(0).toISOString(),
+		workstream: options.workstream,
+		fragmentRegistry,
+	});
+	const fragments: Partial<Record<ExtensionPolicyKey, PolicyFragmentExportEntry>> = {};
+	for (const [rawKey, effective] of Object.entries(snapshot.fragmentValues ?? {})) {
+		if (effective === undefined || !isExtensionPolicyKey(rawKey)) continue;
+		const transaction = records.find(record => record.transactionId === effective.transactionId);
+		if (transaction === undefined) continue;
+		fragments[rawKey] = {
+			fragmentVersion: effective.fragmentVersion,
+			registration: effective.registration,
+			value: effective.value,
+			provenance: {
+				sourceLayer: effective.sourceLayer,
+				scope: effective.scope,
+				transactionId: effective.transactionId,
+				sequence: effective.sequence,
+				recordHash: effective.recordHash,
+				author: transaction.author,
+				source: transaction.source,
+				reason: transaction.reason,
+			},
+		};
+	}
+	const preservedMutations: GeneratedPolicyFragmentExport["preservedMutations"][number][] = [];
+	for (const record of records) {
+		for (const mutation of record.mutations) {
+			if (!isExtensionPolicyKey(mutation.key)) continue;
+			preservedMutations.push({
+				transactionId: record.transactionId,
+				sequence: record.sequence,
+				recordHash: record.recordHash,
+				author: record.author,
+				source: record.source,
+				reason: record.reason,
+				mutation,
+			});
+		}
+	}
+	return {
+		sequence: head?.sequence ?? 0,
+		hash: head?.recordHash ?? "0".repeat(64),
+		fragments,
+		notices: snapshot.fragmentNotices ?? [],
+		preservedMutations,
+	};
+}
+
+/**
+ * Imports effective fragment entries through the currently registered schema.
+ * Older entries migrate in memory and are journaled at the current version.
+ */
+export function importPolicyFragments(
+	input: Pick<GeneratedPolicyFragmentExport, "fragments">,
+	fragmentRegistry: PolicyFragmentRegistry,
+	options: { readonly sourcePath: string; readonly scope?: PolicyScope },
+): PolicyFragmentImportResult {
+	const mutations: PolicyMutationV1[] = [];
+	const keys: ExtensionPolicyKey[] = [];
+	const issues: PolicyImportIssue[] = [];
+	for (const [rawKey, entry] of Object.entries(input.fragments)) {
+		if (!isExtensionPolicyKey(rawKey) || entry === undefined) {
+			issues.push({ sourcePath: options.sourcePath, keyPath: rawKey, reason: "invalid extension policy key" });
+			continue;
+		}
+		const projected = fragmentRegistry.project(rawKey, entry.fragmentVersion, entry.value);
+		if (projected.status !== "active") {
+			issues.push({ sourcePath: options.sourcePath, keyPath: rawKey, reason: projected.notice });
+			continue;
+		}
+		const registration = fragmentRegistry.resolve(rawKey);
+		if (registration === undefined) {
+			issues.push({
+				sourcePath: options.sourcePath,
+				keyPath: rawKey,
+				reason: "extension namespace is not registered",
+			});
+			continue;
+		}
+		mutations.push({
+			op: "set",
+			key: rawKey,
+			scope: options.scope ?? { kind: "global" },
+			fragmentVersion: registration.version,
+			value: projected.value,
+			importProvenance: { sourcePath: options.sourcePath, keyPath: `fragments.${rawKey}.value` },
+		});
+		keys.push(rawKey);
+	}
+	if (issues.length > 0) throw new PolicyImportValidationError(issues);
+	return { mutations, keys };
 }

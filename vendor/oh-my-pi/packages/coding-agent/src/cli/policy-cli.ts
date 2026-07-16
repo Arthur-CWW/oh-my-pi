@@ -3,13 +3,16 @@ import * as path from "node:path";
 import { getAgentDir } from "@oh-my-pi/pi-utils";
 import { Effect } from "effect";
 import { commitPolicyWithPreview } from "../policy/policy-apply";
+import type { PolicyFragmentRegistry, PolicyJsonValue } from "../policy/policy-fragment-registry";
 import { listLivePolicySessions, type PolicyLiveSession } from "../policy/policy-inspection";
 import { POLICY_REGISTRY_DIGEST, PolicyJournal } from "../policy/policy-journal";
 import {
+	type AnyPolicyValue,
 	decodePolicyValueForKey,
 	isCoreBudgetKey,
 	isCoreRoutingKey,
 	isPolicyKey,
+	isExtensionPolicyKey,
 	POLICY_REGISTRY_VERSION,
 	type PolicyScope,
 	type PolicyTransactionDraftV1,
@@ -67,6 +70,7 @@ export interface PolicyCliOptions {
 	readonly ircDbPath?: string;
 	readonly controlDbPath?: string;
 	readonly liveSessions?: () => readonly PolicyLiveSession[];
+	readonly fragmentRegistry?: PolicyFragmentRegistry;
 }
 
 export interface PolicyImportReport {
@@ -86,8 +90,7 @@ const DURATION_UNITS_MS = {
 	w: 604_800_000,
 } as const;
 
-function decodeSetValue(key: string, value: string): PolicyValue {
-	if (!isPolicyKey(key)) throw new Error(`Unknown policy key: ${key}`);
+function decodeSetValue(key: string, value: string, fragmentRegistry?: PolicyFragmentRegistry): AnyPolicyValue {
 	if (isCoreRoutingKey(key)) return decodePolicyValueForKey(key, value);
 	let parsed: unknown;
 	try {
@@ -98,6 +101,11 @@ function decodeSetValue(key: string, value: string): PolicyValue {
 			`policy set ${key} requires ${isCoreBudgetKey(key) ? "valid JSON" : "a valid JSON object"}: ${reason}`,
 		);
 	}
+	if (isExtensionPolicyKey(key)) {
+		if (fragmentRegistry === undefined) throw new Error(`Extension policy namespace is not registered: ${key}`);
+		return fragmentRegistry.decodeCurrent(key, parsed as PolicyJsonValue);
+	}
+	if (!isPolicyKey(key)) throw new Error(`Unknown policy key: ${key}`);
 	if (!isCoreBudgetKey(key) && !isRecord(parsed)) throw new Error(`policy set ${key} requires a JSON object`);
 	return decodePolicyValueForKey(key, parsed);
 }
@@ -260,7 +268,7 @@ async function withPolicyService<T>(
 		now: options.now,
 	});
 	try {
-		return await run(journal, makePolicyService(journal));
+		return await run(journal, makePolicyService(journal, { fragmentRegistry: options.fragmentRegistry }));
 	} finally {
 		await journal.release();
 	}
@@ -343,7 +351,7 @@ export async function runPolicyCommand(request: PolicyCliRequest, options: Polic
 						json,
 					);
 				}
-				const value = decodeSetValue(request.key, request.value);
+				const value = decodeSetValue(request.key, request.value, resolvedOptions.fragmentRegistry);
 				const interval = resolveSetInterval(request, now);
 				return formatOutput(
 					await Effect.runPromise(
@@ -370,7 +378,7 @@ export async function runPolicyCommand(request: PolicyCliRequest, options: Polic
 				);
 			case "set": {
 				if (!request.key || request.value === undefined) throw new Error("policy set requires a key and value");
-				const value = decodeSetValue(request.key, request.value);
+				const value = decodeSetValue(request.key, request.value, resolvedOptions.fragmentRegistry);
 				const interval = resolveSetInterval(request, now);
 				const set = {
 					key: request.key,

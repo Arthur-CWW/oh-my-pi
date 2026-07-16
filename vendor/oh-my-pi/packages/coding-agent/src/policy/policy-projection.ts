@@ -1,3 +1,4 @@
+import type { PolicyFragmentRegistry, PolicyJsonValue } from "./policy-fragment-registry";
 import {
 	CORE_NON_PROVIDER_KEYS,
 	CORE_PROVIDER_KEYS,
@@ -8,7 +9,9 @@ import {
 	type CoreProviderValue,
 	type CoreRoutingKey,
 	type CoreRoutingValue,
+	type ExtensionPolicyKey,
 	isCoreProviderKey,
+	isExtensionPolicyKey,
 	type ModelDenyValue,
 	type PolicyMutationV1,
 	type PolicyScope,
@@ -87,6 +90,46 @@ export interface EffectiveProviderPolicyValue {
 	readonly shadowed: readonly ProviderPolicyCandidate[];
 }
 
+export interface FragmentPolicyCandidate {
+	readonly key: ExtensionPolicyKey;
+	readonly operation: PolicyMutationV1["op"];
+	readonly value?: PolicyJsonValue;
+	readonly fragmentVersion: number;
+	readonly registration: string;
+	readonly sourceLayer: PolicySourceLayer;
+	readonly scope: PolicyScope;
+	readonly transactionId: string;
+	readonly sequence: number;
+	readonly recordHash: string;
+}
+
+export interface EffectiveFragmentPolicyValue {
+	readonly key: ExtensionPolicyKey;
+	readonly value: PolicyJsonValue;
+	readonly fragmentVersion: number;
+	readonly registration: string;
+	readonly sourceLayer: PolicySourceLayer;
+	readonly scope: PolicyScope;
+	readonly transactionId: string;
+	readonly sequence: number;
+	readonly recordHash: string;
+	readonly shadowed: readonly FragmentPolicyCandidate[];
+}
+
+export interface PolicyFragmentNotice {
+	readonly key: ExtensionPolicyKey;
+	readonly status: "unregistered" | "newer-version" | "invalid";
+	readonly notice: string;
+	readonly storedVersion: number;
+	readonly currentVersion?: number;
+	readonly registration?: string;
+	readonly operation: PolicyMutationV1["op"];
+	readonly scope: PolicyScope;
+	readonly transactionId: string;
+	readonly sequence: number;
+	readonly recordHash: string;
+}
+
 export type ProviderPostureState = "active" | "future" | "expired";
 
 export interface ProviderPostureEntry {
@@ -124,6 +167,8 @@ export interface PolicySnapshot {
 	 * callers that construct routing-only snapshots remain source-compatible.
 	 */
 	readonly providerPosture?: ProviderPostureProjection;
+	readonly fragmentValues?: Readonly<Partial<Record<ExtensionPolicyKey, EffectiveFragmentPolicyValue>>>;
+	readonly fragmentNotices?: readonly PolicyFragmentNotice[];
 	readonly transactions: readonly PolicyTransactionV1[];
 	readonly expiredTransactionIds: readonly string[];
 	readonly futureTransactionIds: readonly string[];
@@ -138,6 +183,7 @@ export interface PolicyProjectionOptions extends PolicyProjectionOverrides {
 	readonly at?: string;
 	readonly workstream?: string;
 	readonly builtIns?: Readonly<Partial<Record<CoreRoutingKey, CoreRoutingValue>>>;
+	readonly fragmentRegistry?: PolicyFragmentRegistry;
 }
 
 function layerFor(record: PolicyTransactionV1, scope: PolicyScope): PolicySourceLayer {
@@ -146,8 +192,8 @@ function layerFor(record: PolicyTransactionV1, scope: PolicyScope): PolicySource
 }
 
 function policyCandidateFromMutation(record: PolicyTransactionV1, mutation: PolicyMutationV1): PolicyCandidate {
-	if (isCoreProviderKey(mutation.key))
-		throw new Error(`Provider mutation passed to ordinary policy projection: ${mutation.key}`);
+	if (isCoreProviderKey(mutation.key) || isExtensionPolicyKey(mutation.key))
+		throw new Error(`Non-core mutation passed to ordinary policy projection: ${mutation.key}`);
 	return {
 		key: mutation.key,
 		operation: mutation.op,
@@ -213,6 +259,8 @@ export function projectPolicy(
 	const candidatesByKey: Partial<Record<CoreNonProviderKey, PolicyCandidate[]>> = {};
 	const providerCandidatesByKey: Partial<Record<CoreProviderKey, ProviderPolicyCandidate[]>> = {};
 	const providerEntries: ProviderPostureEntry[] = [];
+	const fragmentCandidatesByKey: Partial<Record<ExtensionPolicyKey, FragmentPolicyCandidate[]>> = {};
+	const fragmentNotices: PolicyFragmentNotice[] = [];
 
 	for (const record of records) {
 		const effectiveMillis = Date.parse(record.effectiveFrom);
@@ -228,6 +276,79 @@ export function projectPolicy(
 
 		for (const mutation of record.mutations) {
 			if (!scopeParticipates(mutation.scope, options.workstream)) continue;
+			if (isExtensionPolicyKey(mutation.key)) {
+				const registration = options.fragmentRegistry?.resolve(mutation.key);
+				if (registration === undefined) {
+					fragmentNotices.push({
+						key: mutation.key,
+						status: "unregistered",
+						notice: `Extension policy fragment ${mutation.key} is inert because its namespace is not registered`,
+						storedVersion: mutation.fragmentVersion,
+						operation: mutation.op,
+						scope: mutation.scope,
+						transactionId: record.transactionId,
+						sequence: record.sequence,
+						recordHash: record.recordHash,
+					});
+					continue;
+				}
+				if (mutation.fragmentVersion > registration.version) {
+					fragmentNotices.push({
+						key: mutation.key,
+						status: "newer-version",
+						notice: `Extension policy fragment ${mutation.key} was written by newer registration version ${mutation.fragmentVersion}`,
+						storedVersion: mutation.fragmentVersion,
+						currentVersion: registration.version,
+						registration: registration.registration,
+						operation: mutation.op,
+						scope: mutation.scope,
+						transactionId: record.transactionId,
+						sequence: record.sequence,
+						recordHash: record.recordHash,
+					});
+					continue;
+				}
+				let value: PolicyJsonValue | undefined;
+				if (mutation.op === "set") {
+					const projection = options.fragmentRegistry!.project(
+						mutation.key,
+						mutation.fragmentVersion,
+						mutation.value,
+					);
+					if (projection.status !== "active") {
+						fragmentNotices.push({
+							key: mutation.key,
+							status: projection.status,
+							notice: projection.notice,
+							storedVersion: projection.storedVersion,
+							...(projection.currentVersion === undefined ? {} : { currentVersion: projection.currentVersion }),
+							...(projection.registration === undefined ? {} : { registration: projection.registration }),
+							operation: mutation.op,
+							scope: mutation.scope,
+							transactionId: record.transactionId,
+							sequence: record.sequence,
+							recordHash: record.recordHash,
+						});
+						continue;
+					}
+					value = projection.value;
+				}
+				if (state === "active") {
+					appendCandidate(fragmentCandidatesByKey, mutation.key, {
+						key: mutation.key,
+						operation: mutation.op,
+						...(value === undefined ? {} : { value }),
+						fragmentVersion: registration.version,
+						registration: registration.registration,
+						sourceLayer: layerFor(record, mutation.scope),
+						scope: mutation.scope,
+						transactionId: record.transactionId,
+						sequence: record.sequence,
+						recordHash: record.recordHash,
+					});
+				}
+				continue;
+			}
 			if (isCoreProviderKey(mutation.key)) {
 				const candidate = providerCandidateFromMutation(record, mutation);
 				providerEntries.push({
@@ -343,6 +464,31 @@ export function projectPolicy(
 		};
 	}
 
+	const fragmentValues: Partial<Record<ExtensionPolicyKey, EffectiveFragmentPolicyValue>> = {};
+	for (const key of Object.keys(fragmentCandidatesByKey) as ExtensionPolicyKey[]) {
+		const candidates = fragmentCandidatesByKey[key];
+		if (candidates === undefined) continue;
+		candidates.sort(compareCandidates);
+		const latestByLayer: Partial<Record<PolicySourceLayer, FragmentPolicyCandidate>> = {};
+		for (const candidate of candidates) latestByLayer[candidate.sourceLayer] ??= candidate;
+		const winner = POLICY_LAYER_PRECEDENCE.map(layer => latestByLayer[layer]).find(
+			(candidate): candidate is FragmentPolicyCandidate => candidate?.operation === "set",
+		);
+		if (winner === undefined || winner.value === undefined) continue;
+		fragmentValues[key] = {
+			key,
+			value: winner.value,
+			fragmentVersion: winner.fragmentVersion,
+			registration: winner.registration,
+			sourceLayer: winner.sourceLayer,
+			scope: winner.scope,
+			transactionId: winner.transactionId,
+			sequence: winner.sequence,
+			recordHash: winner.recordHash,
+			shadowed: candidates.filter(candidate => candidate !== winner),
+		};
+	}
+
 	const deniedProviderIds = [
 		...((providerValues["core.providers.deny.providers"]?.value as ProviderDenyValue | undefined)?.providerIds ?? []),
 	].sort();
@@ -361,6 +507,8 @@ export function projectPolicy(
 		...(options.workstream === undefined ? {} : { workstream: options.workstream }),
 		values: values as PolicySnapshot["values"],
 		providerPosture: { values: providerValues, deniedProviderIds, deniedModels, entries },
+		fragmentValues,
+		fragmentNotices,
 		transactions: [...records],
 		expiredTransactionIds,
 		futureTransactionIds,

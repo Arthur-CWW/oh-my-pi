@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import type { PolicyJsonValue } from "./policy-fragment-registry";
 
 export const POLICY_SCHEMA_VERSION = 1 as const;
 export const POLICY_REGISTRY_VERSION = 3 as const;
@@ -145,6 +146,26 @@ export type PolicyValueForKey<Key extends PolicyKey> = Key extends "core.provide
 				? CoreBudgetValue
 				: CoreRoutingValue;
 
+export type ExtensionPolicyKey = `ext.${string}`;
+export type AnyPolicyKey = PolicyKey | ExtensionPolicyKey;
+export type AnyPolicyValue = PolicyValue | PolicyJsonValue;
+
+function isPolicyJsonValue(value: unknown): value is PolicyJsonValue {
+	if (value === null || typeof value === "boolean" || typeof value === "string") return true;
+	if (typeof value === "number") return Number.isFinite(value);
+	if (Array.isArray(value)) return value.every(isPolicyJsonValue);
+	if (typeof value !== "object") return false;
+	for (const property of Object.values(value)) {
+		if (!isPolicyJsonValue(property)) return false;
+	}
+	return true;
+}
+
+export const ExtensionPolicyKeySchema = Schema.String.pipe(
+	Schema.refine((key): key is ExtensionPolicyKey => /^ext\.[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(key)),
+);
+export const PolicyJsonValueSchema = Schema.Unknown.pipe(Schema.refine(isPolicyJsonValue));
+
 export const GlobalPolicyScopeSchema = Schema.Struct({ kind: Schema.Literal("global") });
 export const WorkstreamPolicyScopeSchema = Schema.Struct({
 	kind: Schema.Literal("workstream"),
@@ -222,18 +243,33 @@ const ClearBudgetPolicyMutationV1Schema = Schema.Struct({
 	...MutationScopeFields,
 	fragmentVersion: Schema.Literal(CORE_BUDGET_FRAGMENT_VERSION),
 });
+const SetExtensionPolicyMutationV1Schema = Schema.Struct({
+	op: Schema.Literal("set"),
+	key: ExtensionPolicyKeySchema,
+	...MutationScopeFields,
+	fragmentVersion: PositiveIntSchema,
+	value: PolicyJsonValueSchema,
+});
+const ClearExtensionPolicyMutationV1Schema = Schema.Struct({
+	op: Schema.Literal("clear"),
+	key: ExtensionPolicyKeySchema,
+	...MutationScopeFields,
+	fragmentVersion: PositiveIntSchema,
+});
 export const SetPolicyMutationV1Schema = Schema.Union([
 	SetCoreRoutingPolicyMutationV1Schema,
 	SetProviderDenyPolicyMutationV1Schema,
 	SetModelDenyPolicyMutationV1Schema,
 	SetFallbackPolicyMutationV1Schema,
 	SetBudgetPolicyMutationV1Schema,
+	SetExtensionPolicyMutationV1Schema,
 ]);
 export const ClearPolicyMutationV1Schema = Schema.Union([
 	ClearCoreRoutingPolicyMutationV1Schema,
 	ClearProviderPolicyMutationV1Schema,
 	ClearFallbackPolicyMutationV1Schema,
 	ClearBudgetPolicyMutationV1Schema,
+	ClearExtensionPolicyMutationV1Schema,
 ]);
 export const PolicyMutationV1Schema = Schema.Union([SetPolicyMutationV1Schema, ClearPolicyMutationV1Schema]);
 export type SetPolicyMutationV1 = typeof SetPolicyMutationV1Schema.Type;
@@ -419,6 +455,10 @@ export function isCoreBudgetKey(key: string): key is CoreBudgetKey {
 
 export function isPolicyKey(key: string): key is PolicyKey {
 	return (CORE_POLICY_KEYS as readonly string[]).includes(key);
+}
+
+export function isExtensionPolicyKey(key: string): key is ExtensionPolicyKey {
+	return /^ext\.[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(key);
 }
 
 export function decodePolicyValueForKey<Key extends PolicyKey>(key: Key, input: unknown): PolicyValueForKey<Key> {

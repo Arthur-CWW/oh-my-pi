@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Effect } from "effect";
+import { FragmentValueError, type PolicyFragmentRegistry, type PolicyJsonValue } from "./policy-fragment-registry";
 import type { PolicyLiveSession } from "./policy-inspection";
 import {
 	POLICY_REGISTRY_DIGEST,
@@ -8,14 +9,17 @@ import {
 	type PolicyJournal,
 } from "./policy-journal";
 import {
+	type EffectiveFragmentPolicyValue,
 	type EffectivePolicyValue,
 	type EffectiveProviderPolicyValue,
 	POLICY_LAYER_PRECEDENCE,
 	type PolicyCandidate,
+	type FragmentPolicyCandidate,
 	type PolicyProjectionOptions,
 	type PolicySnapshot,
 	type PolicySourceLayer,
 	type ProviderPolicyCandidate,
+	type PolicyFragmentNotice,
 	type ProviderPostureEntry,
 	projectPolicy,
 } from "./policy-projection";
@@ -28,13 +32,17 @@ import {
 	CORE_PROVIDER_FRAGMENT_VERSION,
 	CORE_PROVIDER_KEYS,
 	CORE_ROUTING_FRAGMENT_VERSION,
+	type AnyPolicyKey,
+	type AnyPolicyValue,
 	type CoreBudgetValue,
 	type CoreNonProviderKey,
 	type CoreProviderKey,
 	type CoreRoutingValue,
+	type ExtensionPolicyKey,
 	decodePolicyValueForKey,
 	type FallbackChainsValue,
 	isCoreProviderKey,
+	isExtensionPolicyKey,
 	isPolicyKey,
 	type ModelDenyValue,
 	POLICY_REGISTRY_VERSION,
@@ -60,19 +68,20 @@ export type PolicyServiceFailure =
 	| StalePolicyHeadError
 	| PolicyLeaseConflictError
 	| UnknownPolicyKeyError
+	| FragmentValueError
 	| PolicyJournalIoError;
 
 export interface PolicyExplainLayer {
 	readonly layer: PolicySourceLayer;
-	readonly candidates: readonly (PolicyCandidate | ProviderPolicyCandidate)[];
+	readonly candidates: readonly (PolicyCandidate | ProviderPolicyCandidate | FragmentPolicyCandidate)[];
 }
 
 export type PolicyWindowState = "active" | "future" | "expired";
 
 export interface PolicyProvenanceEntry {
-	readonly key: PolicyKey;
+	readonly key: AnyPolicyKey;
 	readonly operation: PolicyTransactionV1["mutations"][number]["op"];
-	readonly value?: PolicyValue;
+	readonly value?: AnyPolicyValue;
 	readonly layer: PolicySourceLayer;
 	readonly precedence: number;
 	readonly scope: PolicyScope;
@@ -86,6 +95,11 @@ export interface PolicyProvenanceEntry {
 	readonly expiresAt?: string;
 	readonly state: PolicyWindowState;
 	readonly importProvenance?: PolicyImportProvenance;
+	readonly projectionStatus?: "active" | "unregistered" | "newer-version" | "invalid";
+	readonly storedVersion?: number;
+	readonly currentVersion?: number;
+	readonly registration?: string;
+	readonly notice?: string;
 }
 
 export interface RoutingPolicyExplanation {
@@ -111,12 +125,21 @@ export interface ProviderPolicyExplanation {
 	readonly stack: readonly PolicyProvenanceEntry[];
 }
 
-export type PolicyExplanation = RoutingPolicyExplanation | ProviderPolicyExplanation;
+export interface FragmentPolicyExplanation {
+	readonly key: ExtensionPolicyKey;
+	readonly consultedLayers: readonly PolicyExplainLayer[];
+	readonly winner?: EffectiveFragmentPolicyValue;
+	readonly shadowed: readonly FragmentPolicyCandidate[];
+	readonly notices: readonly PolicyFragmentNotice[];
+	readonly stack: readonly PolicyProvenanceEntry[];
+}
+
+export type PolicyExplanation = RoutingPolicyExplanation | ProviderPolicyExplanation | FragmentPolicyExplanation;
 
 export interface PolicyDiffChange {
-	readonly key: PolicyKey;
-	readonly before?: EffectivePolicyValue | EffectiveProviderPolicyValue;
-	readonly after?: EffectivePolicyValue | EffectiveProviderPolicyValue;
+	readonly key: AnyPolicyKey;
+	readonly before?: EffectivePolicyValue | EffectiveProviderPolicyValue | EffectiveFragmentPolicyValue;
+	readonly after?: EffectivePolicyValue | EffectiveProviderPolicyValue | EffectiveFragmentPolicyValue;
 }
 
 export interface PolicyDiff {
@@ -130,6 +153,7 @@ export interface PolicyDiffInput {
 	readonly to: string;
 	readonly workstream?: string;
 	readonly builtIns?: PolicyProjectionOptions["builtIns"];
+	readonly fragmentRegistry?: PolicyFragmentRegistry;
 }
 
 export interface PolicyHistoryInput {
@@ -153,12 +177,12 @@ export interface PolicyHistoryRow {
 }
 
 export interface PolicyDriftValue {
-	readonly value?: PolicyValue;
+	readonly value?: AnyPolicyValue;
 	readonly sequence: number;
 }
 
 export interface PolicyDriftRow {
-	readonly key: PolicyKey;
+	readonly key: AnyPolicyKey;
 	readonly applied: PolicyDriftValue;
 	readonly head: PolicyDriftValue;
 }
@@ -177,7 +201,7 @@ export interface PolicyImpactSession {
 	readonly name?: string;
 	readonly workstream?: string;
 	readonly appliedSequence: number;
-	readonly keys: readonly PolicyKey[];
+	readonly keys: readonly AnyPolicyKey[];
 }
 
 export interface PolicyImpactPreview {
@@ -188,7 +212,7 @@ export interface PolicyImpactPreview {
 
 export interface PolicySetInput {
 	readonly key: string;
-	readonly value: PolicyValue;
+	readonly value: AnyPolicyValue;
 	readonly scope: PolicyScope;
 	readonly reason: string;
 	readonly author?: PolicyTransactionDraftV1["author"];
@@ -229,7 +253,10 @@ export interface PolicyService {
 	readonly get: (
 		key: string,
 		options?: PolicyProjectionOptions,
-	) => Effect.Effect<EffectivePolicyValue | EffectiveProviderPolicyValue | undefined, PolicyServiceFailure>;
+	) => Effect.Effect<
+		EffectivePolicyValue | EffectiveProviderPolicyValue | EffectiveFragmentPolicyValue | undefined,
+		PolicyServiceFailure
+	>;
 	readonly explain: (
 		key: string,
 		options?: PolicyProjectionOptions,
@@ -238,7 +265,7 @@ export interface PolicyService {
 	readonly history: (input?: PolicyHistoryInput) => Effect.Effect<readonly PolicyHistoryRow[], PolicyServiceFailure>;
 	readonly drift: (
 		sessions: readonly PolicyLiveSession[],
-		options?: Pick<PolicyProjectionOptions, "at" | "builtIns">,
+		options?: Pick<PolicyProjectionOptions, "at" | "builtIns" | "fragmentRegistry">,
 	) => Effect.Effect<readonly PolicySessionDrift[], PolicyServiceFailure>;
 	readonly impactSet: (
 		input: PolicySetInput,
@@ -263,6 +290,7 @@ function asPolicyServiceFailure(error: unknown): PolicyServiceFailure {
 		error instanceof StalePolicyHeadError ||
 		error instanceof PolicyLeaseConflictError ||
 		error instanceof UnknownPolicyKeyError ||
+		error instanceof FragmentValueError ||
 		error instanceof PolicyJournalIoError
 	) {
 		return error;
@@ -274,8 +302,8 @@ function asPolicyServiceFailure(error: unknown): PolicyServiceFailure {
 	});
 }
 
-function requirePolicyKey(key: string): PolicyKey {
-	if (isPolicyKey(key)) return key;
+function requirePolicyKey(key: string): AnyPolicyKey {
+	if (isPolicyKey(key) || isExtensionPolicyKey(key)) return key;
 	const normalized = key.toLowerCase();
 	const suggestions = CORE_POLICY_KEYS.filter(
 		candidate => candidate.includes(normalized) || normalized.includes(candidate.slice(candidate.indexOf(".") + 1)),
@@ -287,12 +315,32 @@ function requirePolicyKey(key: string): PolicyKey {
 }
 
 function setMutation(
-	key: PolicyKey,
-	value: PolicyValue,
+	key: AnyPolicyKey,
+	value: AnyPolicyValue,
 	scope: PolicyScope,
+	fragmentRegistry: PolicyFragmentRegistry | undefined,
 	importProvenance?: PolicyImportProvenance,
 ): SetPolicyMutationV1 {
 	const provenance = importProvenance === undefined ? {} : { importProvenance };
+	if (isExtensionPolicyKey(key)) {
+		const registration = fragmentRegistry?.resolve(key);
+		if (registration === undefined) {
+			throw new FragmentValueError({
+				key,
+				propertyPath: "$",
+				registration: "unregistered",
+				reason: "extension namespace is not registered",
+			});
+		}
+		return {
+			op: "set",
+			key,
+			scope,
+			...provenance,
+			fragmentVersion: registration.version,
+			value: value as PolicyJsonValue,
+		};
+	}
 	switch (key) {
 		case "core.providers.deny.providers":
 			return {
@@ -345,45 +393,65 @@ function setMutation(
 	}
 }
 
-function samePolicyValue(left: PolicyValue | undefined, right: PolicyValue | undefined): boolean {
+function samePolicyValue(left: AnyPolicyValue | undefined, right: AnyPolicyValue | undefined): boolean {
 	if (left === right) return true;
 	if (left === undefined || right === undefined || typeof left !== "object" || typeof right !== "object") return false;
-	if ("providerIds" in left) {
-		if (!("providerIds" in right) || left.providerIds.length !== right.providerIds.length) return false;
+	if (left === null || right === null) return false;
+	if (Array.isArray(left)) {
+		if (!Array.isArray(right) || left.length !== right.length) return false;
+		for (let index = 0; index < left.length; index += 1) {
+			if (!samePolicyValue(left[index], right[index])) return false;
+		}
+		return true;
+	}
+	if (Array.isArray(right)) return false;
+	if ("providerIds" in left && Array.isArray(left.providerIds)) {
+		if (
+			!("providerIds" in right) ||
+			!Array.isArray(right.providerIds) ||
+			left.providerIds.length !== right.providerIds.length
+		)
+			return false;
 		for (const provider of left.providerIds) if (!right.providerIds.includes(provider)) return false;
 		return true;
 	}
-	if ("models" in left) {
-		if (!("models" in right) || left.models.length !== right.models.length) return false;
+	if ("models" in left && Array.isArray(left.models)) {
+		if (!("models" in right) || !Array.isArray(right.models) || left.models.length !== right.models.length)
+			return false;
 		for (const model of left.models) {
-			let matched = false;
-			for (const candidate of right.models) {
-				if (candidate.provider === model.provider && candidate.model === model.model) {
-					matched = true;
-					break;
-				}
-			}
-			if (!matched) return false;
+			if (
+				typeof model !== "object" ||
+				model === null ||
+				!("provider" in model) ||
+				!("model" in model) ||
+				!right.models.some(
+					candidate =>
+						typeof candidate === "object" &&
+						candidate !== null &&
+						"provider" in candidate &&
+						"model" in candidate &&
+						candidate.provider === model.provider &&
+						candidate.model === model.model,
+				)
+			)
+				return false;
 		}
 		return true;
 	}
-	if (!("chains" in left) || !("chains" in right)) return false;
-	const roles = Object.keys(left.chains);
-	if (roles.length !== Object.keys(right.chains).length) return false;
-	for (const role of roles) {
-		const leftChain = left.chains[role];
-		const rightChain = right.chains[role];
-		if (leftChain === undefined || rightChain === undefined || leftChain.length !== rightChain.length) return false;
-		for (let index = 0; index < leftChain.length; index += 1) {
-			if (leftChain[index] !== rightChain[index]) return false;
-		}
+	const leftRecord = left as Readonly<Record<string, AnyPolicyValue>>;
+	const rightRecord = right as Readonly<Record<string, AnyPolicyValue>>;
+	const leftKeys = Object.keys(leftRecord);
+	const rightKeys = Object.keys(rightRecord);
+	if (leftKeys.length !== rightKeys.length) return false;
+	for (const key of leftKeys) {
+		if (!(key in rightRecord) || !samePolicyValue(leftRecord[key], rightRecord[key])) return false;
 	}
 	return true;
 }
 
 function sameEffectiveValue(
-	left: EffectivePolicyValue | EffectiveProviderPolicyValue | undefined,
-	right: EffectivePolicyValue | EffectiveProviderPolicyValue | undefined,
+	left: EffectivePolicyValue | EffectiveProviderPolicyValue | EffectiveFragmentPolicyValue | undefined,
+	right: EffectivePolicyValue | EffectiveProviderPolicyValue | EffectiveFragmentPolicyValue | undefined,
 ): boolean {
 	return (
 		samePolicyValue(left?.value, right?.value) &&
@@ -415,13 +483,27 @@ function diffSnapshots(before: PolicySnapshot, after: PolicySnapshot): PolicyDif
 			...(next === undefined ? {} : { after: next }),
 		});
 	}
+	const fragmentKeys = new Set<ExtensionPolicyKey>([
+		...(Object.keys(before.fragmentValues ?? {}) as ExtensionPolicyKey[]),
+		...(Object.keys(after.fragmentValues ?? {}) as ExtensionPolicyKey[]),
+	]);
+	for (const key of fragmentKeys) {
+		const previous = before.fragmentValues?.[key];
+		const next = after.fragmentValues?.[key];
+		if (sameEffectiveValue(previous, next)) continue;
+		changes.push({
+			key,
+			...(previous === undefined ? {} : { before: previous }),
+			...(next === undefined ? {} : { after: next }),
+		});
+	}
 	return { before, after, changes };
 }
 
 function provenanceStack(
 	records: readonly PolicyTransactionV1[],
-	key: PolicyKey,
-	options: Pick<PolicyProjectionOptions, "at" | "workstream">,
+	key: AnyPolicyKey,
+	options: Pick<PolicyProjectionOptions, "at" | "workstream" | "fragmentRegistry">,
 ): readonly PolicyProvenanceEntry[] {
 	const at = Date.parse(options.at ?? new Date().toISOString());
 	const stack: PolicyProvenanceEntry[] = [];
@@ -439,6 +521,53 @@ function provenanceStack(
 					: mutation.scope.kind === "workstream"
 						? "workstream-durable"
 						: "global-durable";
+			let projection:
+				| {
+						readonly projectionStatus: "active" | "unregistered" | "newer-version" | "invalid";
+						readonly storedVersion: number;
+						readonly currentVersion?: number;
+						readonly registration?: string;
+						readonly notice?: string;
+				  }
+				| undefined;
+			if (isExtensionPolicyKey(mutation.key)) {
+				const registration = options.fragmentRegistry?.resolve(mutation.key);
+				if (registration === undefined) {
+					projection = {
+						projectionStatus: "unregistered",
+						storedVersion: mutation.fragmentVersion,
+						notice: `Extension policy fragment ${mutation.key} is inert because its namespace is not registered`,
+					};
+				} else if (mutation.fragmentVersion > registration.version) {
+					projection = {
+						projectionStatus: "newer-version",
+						storedVersion: mutation.fragmentVersion,
+						currentVersion: registration.version,
+						registration: registration.registration,
+						notice: `Extension policy fragment ${mutation.key} was written by newer registration version ${mutation.fragmentVersion}`,
+					};
+				} else if (mutation.op === "set") {
+					const projected = options.fragmentRegistry!.project(
+						mutation.key,
+						mutation.fragmentVersion,
+						mutation.value,
+					);
+					projection = {
+						projectionStatus: projected.status,
+						storedVersion: projected.storedVersion,
+						...(projected.currentVersion === undefined ? {} : { currentVersion: projected.currentVersion }),
+						...(projected.registration === undefined ? {} : { registration: projected.registration }),
+						notice: projected.notice,
+					};
+				} else {
+					projection = {
+						projectionStatus: "active",
+						storedVersion: mutation.fragmentVersion,
+						currentVersion: registration.version,
+						registration: registration.registration,
+					};
+				}
+			}
 			stack.push({
 				key,
 				operation: mutation.op,
@@ -456,6 +585,7 @@ function provenanceStack(
 				...(record.expiresAt === undefined ? {} : { expiresAt: record.expiresAt }),
 				...(mutation.importProvenance === undefined ? {} : { importProvenance: mutation.importProvenance }),
 				state,
+				...(projection ?? {}),
 			});
 		}
 	}
@@ -465,7 +595,7 @@ function provenanceStack(
 function sequenceSnapshot(
 	records: readonly PolicyTransactionV1[],
 	point: string,
-	options: Pick<PolicyProjectionOptions, "workstream" | "builtIns">,
+	options: Pick<PolicyProjectionOptions, "workstream" | "builtIns" | "fragmentRegistry">,
 ): PolicySnapshot {
 	if (/^(?:0|[1-9]\d*)$/.test(point)) {
 		const sequence = Number(point);
@@ -484,12 +614,16 @@ function impactSessions(
 	transaction: PolicyTransactionV1,
 	sessions: readonly PolicyLiveSession[],
 	at: string,
-	builtIns: PolicyProjectionOptions["builtIns"],
+	projectionDefaults: Pick<PolicyProjectionOptions, "builtIns" | "fragmentRegistry">,
 ): readonly PolicyImpactSession[] {
 	const impacted: PolicyImpactSession[] = [];
 	for (const session of sessions) {
-		const before = projectPolicy(records, { at, workstream: session.workstream, builtIns });
-		const after = projectPolicy([...records, transaction], { at, workstream: session.workstream, builtIns });
+		const before = projectPolicy(records, { ...projectionDefaults, at, workstream: session.workstream });
+		const after = projectPolicy([...records, transaction], {
+			...projectionDefaults,
+			at,
+			workstream: session.workstream,
+		});
 		const keys = diffSnapshots(before, after).changes.map(change => change.key);
 		if (keys.length === 0) continue;
 		impacted.push({
@@ -505,7 +639,7 @@ function impactSessions(
 
 export function makePolicyService(
 	journal: PolicyJournal,
-	defaults: Pick<PolicyProjectionOptions, "builtIns"> = {},
+	defaults: Pick<PolicyProjectionOptions, "builtIns" | "fragmentRegistry"> = {},
 	projectionStore = new PolicyProjectionStore(journal.journalPath),
 ): PolicyService {
 	const replay = Effect.fn("PolicyService.replay")(function* () {
@@ -522,16 +656,54 @@ export function makePolicyService(
 	const get = Effect.fn("PolicyService.get")(function* (key: string, options: PolicyProjectionOptions = {}) {
 		const validatedKey = yield* Effect.try({ try: () => requirePolicyKey(key), catch: asPolicyServiceFailure });
 		const projected = yield* snapshot(options);
-		return isCoreProviderKey(validatedKey)
-			? projected.providerPosture?.values[validatedKey]
-			: projected.values[validatedKey];
+		return isExtensionPolicyKey(validatedKey)
+			? projected.fragmentValues?.[validatedKey]
+			: isCoreProviderKey(validatedKey)
+				? projected.providerPosture?.values[validatedKey]
+				: projected.values[validatedKey];
 	});
 	const explain = Effect.fn("PolicyService.explain")(function* (key: string, options: PolicyProjectionOptions = {}) {
 		const validatedKey = yield* Effect.try({ try: () => requirePolicyKey(key), catch: asPolicyServiceFailure });
 		const records = yield* replay();
 		const at = options.at ?? new Date().toISOString();
 		const projected = projectPolicy(records, { ...defaults, ...options, at });
-		const stack = provenanceStack(records, validatedKey, { at, workstream: options.workstream });
+		const stack = provenanceStack(records, validatedKey, {
+			at,
+			workstream: options.workstream,
+			fragmentRegistry: options.fragmentRegistry ?? defaults.fragmentRegistry,
+		});
+		if (isExtensionPolicyKey(validatedKey)) {
+			const winner = projected.fragmentValues?.[validatedKey];
+			const candidates: readonly FragmentPolicyCandidate[] =
+				winner === undefined
+					? []
+					: [
+							{
+								key: winner.key,
+								operation: "set",
+								value: winner.value,
+								fragmentVersion: winner.fragmentVersion,
+								registration: winner.registration,
+								sourceLayer: winner.sourceLayer,
+								scope: winner.scope,
+								transactionId: winner.transactionId,
+								sequence: winner.sequence,
+								recordHash: winner.recordHash,
+							},
+							...winner.shadowed,
+						];
+			return {
+				key: validatedKey,
+				consultedLayers: POLICY_LAYER_PRECEDENCE.map(layer => ({
+					layer,
+					candidates: candidates.filter(candidate => candidate.sourceLayer === layer),
+				})),
+				...(winner === undefined ? {} : { winner }),
+				shadowed: winner?.shadowed ?? [],
+				notices: (projected.fragmentNotices ?? []).filter(notice => notice.key === validatedKey),
+				stack,
+			};
+		}
 		if (isCoreProviderKey(validatedKey)) {
 			const entries = projected.providerPosture?.entries.filter(entry => entry.key === validatedKey) ?? [];
 			const winner = projected.providerPosture?.values[validatedKey];
@@ -628,6 +800,7 @@ export function makePolicyService(
 		const projectionOptions = {
 			workstream: input.workstream,
 			builtIns: input.builtIns ?? defaults.builtIns,
+			fragmentRegistry: input.fragmentRegistry ?? defaults.fragmentRegistry,
 		};
 		const before = yield* Effect.try({
 			try: () => sequenceSnapshot(records, input.from, projectionOptions),
@@ -701,7 +874,7 @@ export function makePolicyService(
 	});
 	const drift = Effect.fn("PolicyService.drift")(function* (
 		sessions: readonly PolicyLiveSession[],
-		options: Pick<PolicyProjectionOptions, "at" | "builtIns"> = {},
+		options: Pick<PolicyProjectionOptions, "at" | "builtIns" | "fragmentRegistry"> = {},
 	) {
 		const records = yield* replay();
 		const at = options.at ?? new Date().toISOString();
@@ -713,16 +886,38 @@ export function makePolicyService(
 				at,
 				workstream: session.workstream,
 				builtIns: options.builtIns ?? defaults.builtIns,
+				fragmentRegistry: options.fragmentRegistry ?? defaults.fragmentRegistry,
 			});
 			const head = projectPolicy(records, {
 				at,
 				workstream: session.workstream,
 				builtIns: options.builtIns ?? defaults.builtIns,
+				fragmentRegistry: options.fragmentRegistry ?? defaults.fragmentRegistry,
 			});
 			const rows: PolicyDriftRow[] = [];
 			for (const key of CORE_POLICY_KEYS) {
 				const appliedValue = isCoreProviderKey(key) ? applied.providerPosture?.values[key] : applied.values[key];
 				const headValue = isCoreProviderKey(key) ? head.providerPosture?.values[key] : head.values[key];
+				if (sameEffectiveValue(appliedValue, headValue)) continue;
+				rows.push({
+					key,
+					applied: {
+						...(appliedValue?.value === undefined ? {} : { value: appliedValue.value }),
+						sequence: appliedValue?.sequence ?? 0,
+					},
+					head: {
+						...(headValue?.value === undefined ? {} : { value: headValue.value }),
+						sequence: headValue?.sequence ?? 0,
+					},
+				});
+			}
+			const fragmentKeys = new Set<ExtensionPolicyKey>([
+				...(Object.keys(applied.fragmentValues ?? {}) as ExtensionPolicyKey[]),
+				...(Object.keys(head.fragmentValues ?? {}) as ExtensionPolicyKey[]),
+			]);
+			for (const key of fragmentKeys) {
+				const appliedValue = applied.fragmentValues?.[key];
+				const headValue = head.fragmentValues?.[key];
 				if (sameEffectiveValue(appliedValue, headValue)) continue;
 				rows.push({
 					key,
@@ -751,7 +946,18 @@ export function makePolicyService(
 	const set = Effect.fn("PolicyService.set")(function* (input: PolicySetInput) {
 		const key = yield* Effect.try({ try: () => requirePolicyKey(input.key), catch: asPolicyServiceFailure });
 		const value = yield* Effect.try({
-			try: () => decodePolicyValueForKey(key, input.value),
+			try: () =>
+				isExtensionPolicyKey(key)
+					? (defaults.fragmentRegistry?.decodeCurrent(key, input.value as PolicyJsonValue) ??
+						(() => {
+							throw new FragmentValueError({
+								key,
+								propertyPath: "$",
+								registration: "unregistered",
+								reason: "extension namespace is not registered",
+							});
+						})())
+					: decodePolicyValueForKey(key, input.value),
 			catch: asPolicyServiceFailure,
 		});
 		const recordsBefore = yield* replay();
@@ -764,8 +970,11 @@ export function makePolicyService(
 			author: input.author ?? { kind: "cli", uid: journal.uid, pid: journal.pid },
 			source: input.source ?? { kind: "cli", uri: journal.journalPath },
 			reason: input.reason,
-			registry: { version: POLICY_REGISTRY_VERSION, digest: POLICY_REGISTRY_DIGEST },
-			mutations: [setMutation(key, value, input.scope, input.importProvenance)],
+			registry: {
+				version: POLICY_REGISTRY_VERSION,
+				digest: defaults.fragmentRegistry?.digest ?? POLICY_REGISTRY_DIGEST,
+			},
+			mutations: [setMutation(key, value, input.scope, defaults.fragmentRegistry, input.importProvenance)],
 		};
 		const appendOptions: PolicyAppendOptions =
 			input.expectedHead === undefined ? {} : { expectedHead: input.expectedHead };
@@ -813,13 +1022,7 @@ export function makePolicyService(
 		return {
 			committed: false as const,
 			transaction: preview.transaction,
-			sessions: impactSessions(
-				records,
-				preview.transaction,
-				sessions,
-				preview.transaction.effectiveFrom,
-				defaults.builtIns,
-			),
+			sessions: impactSessions(records, preview.transaction, sessions, preview.transaction.effectiveFrom, defaults),
 		};
 	});
 	const impactRollback = Effect.fn("PolicyService.impactRollback")(function* (
@@ -831,13 +1034,7 @@ export function makePolicyService(
 		return {
 			committed: false as const,
 			transaction: preview.transaction,
-			sessions: impactSessions(
-				records,
-				preview.transaction,
-				sessions,
-				preview.transaction.effectiveFrom,
-				defaults.builtIns,
-			),
+			sessions: impactSessions(records, preview.transaction, sessions, preview.transaction.effectiveFrom, defaults),
 		};
 	});
 	const rebuildProjection = Effect.fn("PolicyService.rebuildProjection")(function* (
