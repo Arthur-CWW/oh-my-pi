@@ -59,3 +59,14 @@ One GPU → one serialized queue → one integration contract. Four layers on to
 - No containers/k8s — uv venvs + manifests are sufficient and match fleet practice.
 - No Mac-side realtime moves to the desktop (routing policy stands).
 - No sudo anywhere in this plan.
+
+## Review — companion orchestrator (overnight-2 session, 2026-07-16)
+
+Kernel-owner review of §Ownership; ACCEPT with four binding amendments:
+
+1. **No back-compat aliases in step 5.** Workspace rule is clean cutover (charter: no backwards compatibility; the only exception is data continuity). Rename `gpu-pose-batch`→`companion.gpu-pose-batch` etc. in ONE change that also updates every submitter (`scripts/gpu-queue.ts`, lab submit route in `apps/ai-companion-rtc/src/server.ts`, docs). Aliases rot; don't add them.
+2. **Data continuity across the results-path change.** Existing manifests/results (`results/gpu-pose-batch/*`, the 281-clip corpus run) must remain resolvable after the `results/<kind>/<job-id>/` migration — migrate or symlink the old run dirs in the same change, and `fetch` must resolve pre-migration job ids.
+3. **Licensed lanes stay fail-closed under namespacing.** `companion.gvhmr-mesh`/`companion.wilor-3d` keep `preflight-licensed.sh` gating exactly as-is; a kind rename must not touch the preflight contract.
+4. **Sequencing: no `kinds.sh`/kernel edits during the 2026-07-16 overnight program.** The `gpu-queue` tmux lane is live and surfaced read-only in the companion lab pipeline monitor. Steps 1–4 (ledger, env manifests, playground kinds, `fetch`) touch nothing companion-owned and can start anytime; step 5 lands after tonight's program wraps, coordinated on the bus.
+
+Layer 0–4 design otherwise matches the kernel's assumptions (serialized claim, per-kind preflight, manifest-first). `DISK.md` verdict rows for companion dirs: `companion-batch` venv is active (owner: companion), `results/gpu-pose-batch` is evidence-of-record — keep both.
