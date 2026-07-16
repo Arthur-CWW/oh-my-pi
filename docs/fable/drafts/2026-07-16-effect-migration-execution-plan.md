@@ -1,74 +1,80 @@
-# HR-164 execution plan: Effect/OTP migration, run massively parallel with no regressions
+# HR-164 execution plan v2: hotspot-scoped Effect migration with contract-first redesign
 
-Provenance: Arthur, 2026-07-16 — "rewrite all the tricky concurrency, lifecycles, scope, cleanup with effect … architect this so you run and test this massively parallel with no regressions … see bun migration from zig to rust blog post as reference … mixture of sol orchestrator / luna/opus (implementer) / kimi".
-Companion to the design brief (`2026-07-16-effect-otp-supervision-brief.md` — the WHAT). This is the HOW.
-Reference methodology archived verbatim: `docs/research/bun-rust-migration/cleaned/bun-in-rust.md` (Bun's Zig→Rust port: 535k LOC, 11 days, 64 concurrent agents, 0 tests skipped, 19 known regressions all fixed).
+Provenance: Arthur, 2026-07-16 — three directives, in order: (1) "rewrite all the tricky concurrency, lifecycles, scope, cleanup with effect … massively parallel with no regressions … bun blog post as reference … sol orchestrator / luna/opus implementer / kimi"; (2) "not just lifecycles … think from effect primitives how they map over … higher level concurrency behavior before hand is wrong in some of the cases … intention is not just 1-1 port but to fix some of the deeper issues"; (3) "focus on the most important parts to migrate / most complicated and error prone and do those and improve the test there".
+Companion to the design brief (`2026-07-16-effect-otp-supervision-brief.md`). Reference methodology archived: `docs/research/bun-rust-migration/cleaned/bun-in-rust.md`. Supersedes v1 of this file (organ-complete waves) — v1's loop mechanics survive; its scope does not.
 
-## What transfers from the Bun playbook — and what doesn't
+## The two deltas from Bun's situation — and what they force
 
-| Bun move | Our analog | Delta |
+1. **Bun's behavior was correct; ours partially isn't.** Their test suite was ground truth, so a faithful 1-1 port gated by parity was sound. Parts of our concurrency behavior are wrong by design (silence-ambiguous children, report-on-exit, singleton fallbacks, revive races, abort re-entrancy). A pure parity gate would freeze those bugs in. Therefore: **contract-first for broken protocols, parity for everything else**, with an explicit divergence ledger separating the two.
+2. **Lifetimes were Rust's load-bearing discipline; Effect has five.** Bun inventoried LIFETIMES.tsv because that's what the borrow checker adjudicates. The Effect-primitive inventory set (below) is the analog — each primitive is a lens that extracts a different class of latent bug from the same code.
+
+## Scope: evidence-ranked hotspots, not organs
+
+Selection criterion: incident density (register rows, changelog Fixed entries, protected-region markers, this session's failure cluster). Migrate + redesign + **improve the tests at that seam** — nothing else moves.
+
+| # | Hotspot | Evidence of pain | Contract to formalize first |
+|---|---|---|---|
+| H1 | **Spawn/worker lifecycle + report delivery** (`task/executor.ts` park/dispose ordering, `spawn-worker-client.ts`, `spawn-worker-entry.ts`) | Today's entire cluster (HR-163: 4 hostage yields, 1 yield→SpawnWorkerError, dead child IRC, dead `edit`); death modes 1–3 "routine"; HR-163 patched the symptoms — the state machine is still implicit | **Child lifecycle state machine**: spawn → running → (yield \| crash \| timeout \| interrupt) → park → (revive \| reap), with report delivery an event of *yield*, never of exit; every transition observable (journal record + monitor message) |
+| H2 | **Park/revive + bus delivery races** (`irc/bus.ts`, lifecycle registry, revive path) | Changelog: "reserve parked-agent messages before revival", "replacement identities across revive races", "released or replaced while reviving"; revived agents losing tool inventories; subprocess loopback (HR-163) | **Mailbox contract**: delivery/reservation/revival as a serialized state machine (GenServer-shape); a message to a parked agent has exactly-once semantics across revival, defined ordering, and a typed dead-letter outcome |
+| H3 | **Durable-input/abort core** (`agent-session.ts` protected ranges ~2691–2727, 6086–6104, 7040–7440, 8249–8290) | The depth-counted abort gate is hand-rolled structured concurrency; changelog: Ctrl-Q/abort race "permanently wedged durable follow-up delivery"; marked "surgical, sign-off required" — the single most complicated + error-prone region in the codebase | **Admission/abort protocol**: interruption regions with guaranteed finalizers; which sections are uninterruptible (journal flush, queue drain); re-entrant abort defined as idempotent by construction, not by counter |
+
+H1 → H2 → H3 strictly ordered: each raises confidence + test infrastructure for the next; H3 (protected) goes last, under the existing sign-off ritual, only after H1/H2 soak. Anything outside these seams is out of scope until a hotspot earns its way onto the table with evidence.
+
+## Prep artifacts, primitive-mapped (the LIFETIMES.tsv analog, plural — scoped per hotspot)
+
+Generated per hotspot by scout workflows + 2 adversarial reviewers, read end-to-end by Fable/Sol; each is a lens over the SAME code:
+
+| Effect primitive (lens) | Artifact | Row shape |
 |---|---|---|
-| PORTING.md: pattern-mapping doc written *before any code*, adversarially reviewed | `EFFECT-PORTING.md`: Promise/callback/singleton/AbortSignal patterns → Effect constructs (Scope, Layer, Deferred, Queue, interruption regions, `Effect.fn`) | We already have the API probe test pinning beta.92 semantics; the porting guide cites it per pattern |
-| LIFETIMES.tsv: per-struct-field lifetime inventory, generated by a workflow + 2 adversarial reviewers | `LIFECYCLES.tsv`: every resource with a lifecycle in the target organs — creator, cleanup trigger (abort/exit/park/timeout/scope-close), current mechanism (try/finally, dispose, depth-counted gate, process exit), target Effect construct, hazard notes | This is the highest-value prep artifact. Today's incident = exactly one row of it (child report lifetime coupled to process exit) |
-| Language-independent test suite as the invariant (TS suite, runtime-agnostic) | **We don't have this** — our unit tests import internals. Must build the invariant first: a behavioral parity suite at stable seams (tool results, spawn/yield/park/kill observable contracts, journal/receipt records, IRC receipts, wire protocols) that passes on TODAY's implementation unchanged | Non-negotiable precondition. No parity suite → no "no regressions" claim, only vibes |
-| All-at-once port, mechanical first, idiomatic later | All-at-once **per organ** (task runner, spawn pipe, bus, lifecycle registry), organs sequenced P1→P3; mechanical Effect port that preserves call shapes, idiomatic refactor passes after green | Whole-codebase all-at-once is wrong here: the harness is live and self-hosting; organs are separable at seams the way Bun's single compilation unit wasn't |
-| 1 implementer + 2 adversarial reviewers + 1 fixer per unit; reviewer never implements, implementer never reviews; split context windows | Same loop, as OMP spawn templates (`implementer`, `reviewer` ×2, fixer = `implementer` re-spawn with review packet) | Native to our harness; reviewers get the porting guide + LIFECYCLES.tsv + the old/new file pair, nothing else |
-| Fix the *process*, not the code (edit the workflow prompt when a failure class appears) | Loop prompts live in `streams/harness/migration/loops/*.md`, versioned; a failure class ⇒ prompt edit + rerun, never hand-patching worker output | Bun's "paragraph-long justification comment ⇒ reject" rule adopted verbatim as a reviewer rule |
-| Compiler errors as sharded work queue, crate-by-crate | `tsgo` errors per package + parity-suite failures per seam file as the queue; shard by module, one agent per shard | Same discipline: check runs once per wave start, no slow commands inside loops |
-| 4 worktrees × 16 Claudes; no `git stash/reset`; commit one file at a time | `git worktree` per workstream shard; workers NEVER run destructive git; coordinator owns integration commits (existing rule). OMP fleet = multiple sessions × 32-subagent cap | Our promote/bless pipeline replaces Bun's CI-merge; gate = staged-snapshot checkpoint + parity suite |
-| Merge ≠ release; canary first; regression classes pre-named | Bless ≠ adopt: canary binary soaks on a dedicated session before fleet rollout (`prepare-rollout` machinery already exists) | — |
+| Error channel (typed failure vs defect vs interruption) | `ERRORS.tsv` | every throw/reject/catch/swallow site → expected-or-defect, owner, current swallow hazard, target `Schema.TaggedErrorClass` |
+| Interruption | `CANCELLATION.tsv` | every AbortSignal/timeout/kill path → cleanup guarantee, double-fire hazard, interruptible vs uninterruptible region |
+| Scope/acquireRelease | `RESOURCES.tsv` | acquire/release pairs (procs, ptys, sockets, DB handles, locks, temp dirs) → current mechanism, ordering constraints, leak history |
+| Fiber/Queue/Deferred (topology) | `CONCURRENCY.tsv` | mutable state owner, must-serialize operations, backpressure points, races currently "handled" by sleeps/retries |
+| Schedule/Clock | `TIME.tsv` | every setTimeout/Date.now/retry/TTL → target Schedule policy, TestClock determinism plan |
+| Layer/Context | (in brief) singleton burn-down list | `.global()`/`getInstance()` callsites in the hotspot |
 
-## Pre-named regression classes (our "debug_assert!" list)
+Plus, per hotspot, the two documents that encode "not a 1-1 port":
 
-Syntactically-similar, semantically-different traps between Promise-world and Effect-world — reviewers check these explicitly:
+- **`CONTRACTS/<hotspot>.md`** — the *intended* protocol as an explicit state machine (states, transitions, events, invariants), written and Arthur/Fable-approved BEFORE porting. This is the OTP move: design the gen_server/supervision protocol first, then implement it.
+- **`DIVERGENCES.md`** — append-only ledger: every place new behavior ≠ old behavior, each row citing its contract clause. **Finite and small by intent** — if a hotspot's ledger sprawls, the redesign is under-specified; stop and fix the contract. Everything NOT in the ledger must match old behavior exactly.
 
-1. **Eagerness**: a `Promise` runs at creation; an `Effect` runs only when run. A dropped `yield*`/un-run effect silently *never executes* (the dual of Bun's erased `debug_assert!` side effect).
-2. **Interruption ≠ AbortSignal**: signal listeners fire-and-forget; fiber interruption unwinds with guaranteed finalizers but *when* differs (interruption points). Code that assumed "abort handler ran synchronously" breaks.
-3. **Finalizer ordering**: nested try/finally order vs Scope finalizer LIFO — audit every place cleanup order matters (pty teardown, journal flush before pipe close).
-4. **Microtask timing**: Effect runtime scheduling shifts event ordering the TUI render loop may implicitly depend on — TUI stays out of Effect (brief non-goal), but seams must be tested for reentrancy.
-5. **Error channel splits**: thrown vs typed failure vs defect. A `catch` that used to swallow everything now sees only defects — parity suite asserts observable error *behavior*, not channel.
+"No regressions" then means: **parity suite green on all un-ledgered behavior + contract suite green on all ledgered behavior.** Regression = un-ledgered deviation. This keeps the Bun-grade gate meaningful while still fixing the deeper issues.
 
-## Phases
+## Test improvement is a deliverable, not a gate-chore
 
-### Phase 0 — invariant + prep (sequential, small, taste-gated)
-- **Parity suite**: behavioral tests at stable seams, passing against current `main` untouched. Seams: task spawn/yield/park/kill/timeout observable contract (job resolution, journal records, receipts); IRC send/wait/inbox receipts incl. subprocess children; session-control actions; runner pipe protocol conformance; tool-result shapes for `task`/`job`/`irc`. Target ~code that HR-163's new tests already started.
-- **`EFFECT-PORTING.md`** + **`LIFECYCLES.tsv`** generated by dedicated scout workflows over the four organs; 2 adversarial reviewers each; Fable/Sol reads both end-to-end (Bun: "I also manually read over it").
-- **Trial run**: 3 files (one per organ class: a lifecycle owner, a bus, a pipe handler) through the full loop before any fan-out. Calibrates prompts, surfaces false starts cheaply.
+Per hotspot, before its port wave: a behavioral suite at the seam (observable contracts: journal records, receipts, tool results, pipe protocol — never internals), covering the contract state machine's transitions *including the failure/interrupt edges that today's tests skip*. HR-163's `subprocess-worker-reliability.test.ts` is the seed for H1. These suites outlive the migration — they are the permanent invariant Bun already had and we didn't.
 
-### Phase 1 — organ waves (the parallel part)
-Per organ (P1 AgentCell/task runner → P2 capability layers → P3 mailbox buses, per the brief):
-1. Coordinator shards the organ's files into work packets (module-sized, collision-free by construction — one owner per file).
-2. Wave A: implementers port mechanically per guide (isolated worktrees/spawns).
-3. Wave B: 2 adversarial reviewers per packet, split contexts, reject-list rules active.
-4. Wave C: fixers apply review packets.
-5. Gate: typecheck queue burn-down → parity suite → focused suites → staged-snapshot checkpoint. Coordinator commits; organ cutover DELETES the replaced path (no dual paths past the wave).
-6. Soak: canary session runs the blessed binary under real load (this session's own children are the load generator) before fleet rollout.
+## Pre-named regression classes (reviewer reject-list, unchanged from v1)
 
-### Phase 2 — idiomatic + hardening passes (parallel, low-risk)
-Refactor mechanical port toward idiomatic Effect (Bun's post-merge unsafe-reduction analog), delete scaffolding, ratchet lints: no new `.global()`, no raw Promise orchestration inside migrated organs, no un-run Effect values (lint for dropped effects).
+1. **Eagerness**: an un-run Effect silently never executes (dual of Bun's erased `debug_assert!` side effect) — lint for dropped effects.
+2. **Interruption ≠ AbortSignal** timing; code assuming synchronous abort handlers.
+3. **Finalizer ordering**: try/finally nesting vs Scope LIFO (journal flush before pipe close).
+4. **Microtask reordering** at TUI seams (TUI itself stays out of Effect).
+5. **Error-channel splits**: catches that used to swallow everything now see only defects.
+6. Bun's comment rule, verbatim: a paragraph-long justification for a workaround ⇒ the code is wrong.
 
-## Lane mix (Arthur's directive, resolved against routing doctrine)
+## The loop (per hotspot, unchanged mechanics from v1 / Bun)
 
-| Role | Lane | Why |
-|---|---|---|
-| Meta-orchestrator, taste, integration commits, prompt-edits to loops | **Fable** (this session) / **Sol medium+** for delegated wave-coordination | Synthesis/architecture/final integration never below Sol |
-| Implementers (mechanical port, fixers) | **Luna xhigh**, **Opus** | Bounded, spec'd packets; two vendors diversifies failure modes |
-| Adversarial reviewers | **Kimi** (volume) + at least one **Opus/Luna** reviewer per packet | Reviewer swarm is the high-volume cheap work; never the same model family as the packet's implementer for at least one reviewer |
-| Scouts (LIFECYCLES.tsv rows, inventory) | Kimi/Luna | Mechanical tracing with adversarial check |
+1. Scouts produce the six inventories; contract drafted; adversarial review of both; Arthur reads the CONTRACT (the taste gate).
+2. Seam test suite written + green (parity portions against `main` unchanged; contract portions red-until-ported where behavior diverges).
+3. Trial run: 1–3 files through the full loop (1 implementer + 2 adversarial reviewers, ≥1 from a different model family + 1 fixer) before fan-out.
+4. Fan-out sharded by module, one owner per file; workers never run project gates or destructive git; prompts live in `streams/harness/migration/loops/*.md` — failure classes fix the prompt, never hand-patch output.
+5. Gate: typecheck queue → seam suite (parity + contract) → staged-snapshot checkpoint → coordinator commits; cutover deletes the replaced path.
+6. Bless ≠ adopt: canary soak (this session's own children as load) before fleet rollout.
 
-Rules: reviewer never implements; implementer never reviews; at least one reviewer from a different model family than the implementer; workers never run project-wide gates (coordinator gates); all lane assignments resolve live from `.omp/*.yml` at spawn time, never cached here.
+## Lane mix (unchanged)
 
-## Preconditions before Phase 1 fan-out
+Fable/Sol: orchestration, contracts, taste gates, prompt edits, integration commits. Luna xhigh + Opus: implementers/fixers. Kimi: scout volume + adversarial reviewer swarm (≥1 reviewer per packet from a non-implementer family). Lanes resolve live from `.omp/*.yml` at spawn time.
 
-1. **HR-163 landed** — we cannot run 50-worker waves on a harness that holds yield reports hostage and has no child IRC. The migration's own execution depends on the organs it replaces. (Bootstrapping order: P0 fix ships as plain TS first.)
-2. Parity suite green on `main`.
-3. Prep docs adversarially reviewed + read by Arthur/Fable.
-4. Disk/worktree budget checked (Bun lesson: IOPS/disk exhaustion was their repeated killer); browser-reaper-style janitor for stale worktrees.
+## Preconditions
+
+1. HR-163 blessed binary adopted by the coordinating session (the waves run ON these organs) — done 2026-07-16 (`468ef51ae3c1`), adopt via fresh `omp`.
+2. H1 contract approved by Arthur before any H1 port packet spawns.
+3. Worktree/disk janitor in place (Bun's IOPS lesson).
 
 ## Success criteria
 
-- Parity suite: 100% pass on the migrated binary, zero tests skipped/deleted (Bun standard).
-- Death modes 1–3 have failing-before/passing-after tests.
-- Organ cutovers leave no dual paths, no compat shims.
-- Regression ledger: every post-bless regression gets a row (Bun shipped 19, fixed all — honest budget, not zero-fantasy) with a parity-suite test added.
-- Rework leaderboard per lane (acceptance-rate of implementer packets) recorded in the migration ledger — feeds future lane routing.
+- Per hotspot: seam suite 100% green (parity + contract), zero tests skipped/deleted; divergence ledger complete and small; death modes/races named in the contract have failing-before/passing-after tests.
+- Cutovers leave no dual paths or shims; replaced code deleted in the same wave.
+- Post-bless regression ledger (Bun shipped 19, fixed all — honest budget, not zero-fantasy); every regression adds a seam test.
+- Rework leaderboard per lane recorded — feeds routing doctrine.
