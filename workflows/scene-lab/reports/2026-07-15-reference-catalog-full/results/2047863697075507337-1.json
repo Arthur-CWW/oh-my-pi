@@ -1,0 +1,64 @@
+{
+  "id": "2047863697075507337-1",
+  "handle": "voooooogel",
+  "status": "ok",
+  "date": "Apr 25, 2026",
+  "tweet_text": "",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Are ya winning, son?\",\n      \"kind\": \"meme\",\n      \"confidence\": 0.99,\n      \"evidence\": \"The layout features the classic format of a father entering a room asking 'Are ya winning, son?' modified here to 'Are the traditions of all dead generations weighing like a nightmare on ya, son?' with a crying son figure lying on the floor.\"\n    },\n    {\n      \"name\": \"Karl Marx\",\n      \"kind\": \"person\",\n      \"confidence\": 0.98,\n      \"evidence\": \"The text 'the traditions of all dead generations weighing like a nightmare on ya' is a direct play on Marx's famous quote from The Eighteenth Brumaire of Louis Bonaparte: 'The tradition of all dead generations weighs like a nightmare on the brains of the living.'\"\n    },\n    {\n      \"name\": \"Equestrian Statue of Marcus Aurelius\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.95,\n      \"evidence\": \"The father is drawn as a Roman emperor riding a horse, directly mimicking the composition and pose of the famous Equestrian Statue of Marcus Aurelius.\"\n    },\n    {\n      \"name\": \"Crucifixion of Jesus Christ\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.98,\n      \"evidence\": \"Frames 2, 3, and 4 show a 3D scan of a medieval/gothic bronze crucifix sculpture of Jesus Christ in the center of the thought bubble.\"\n    },\n    {\n      \"name\": \"Kouros\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.90,\n      \"evidence\": \"Frame 1 shows two Greek Kouros (youth) statues flanking a female deity statue inside the thought bubble.\"\n    },\n    {\n      \"name\": \"Chola Bronze Goddess\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.85,\n      \"evidence\": \"Frame 1 features a central female bronze statue in tribhanga pose, characteristic of Chola dynasty bronzes of Hindu deities like Parvati.\"\n    }\n  ],\n  \"techniques\": [\n    \"3D model rendering\",\n    \"turntable animation\",\n    \"digital collage\",\n    \"meme overlay\"\n  ],\n  \"style_tags\": [\n    \"doomer\",\n    \"history-lore\",\n    \"philosophical-shitpost\",\n    \"classical-art\",\n    \"surrealist\"\n  ],\n  \"one_line\": \"A philosophical shitpost adapting the 'Are ya winning, son?' meme template with a Karl Marx quote about historical tradition weighing down a doomer stick figure dreaming of rotating 3D historical sculptures.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Are ya winning, son?",
+        "kind": "meme",
+        "confidence": 0.99,
+        "evidence": "The layout features the classic format of a father entering a room asking 'Are ya winning, son?' modified here to 'Are the traditions of all dead generations weighing like a nightmare on ya, son?' with a crying son figure lying on the floor."
+      },
+      {
+        "name": "Karl Marx",
+        "kind": "person",
+        "confidence": 0.98,
+        "evidence": "The text 'the traditions of all dead generations weighing like a nightmare on ya' is a direct play on Marx's famous quote from The Eighteenth Brumaire of Louis Bonaparte: 'The tradition of all dead generations weighs like a nightmare on the brains of the living.'"
+      },
+      {
+        "name": "Equestrian Statue of Marcus Aurelius",
+        "kind": "artwork",
+        "confidence": 0.95,
+        "evidence": "The father is drawn as a Roman emperor riding a horse, directly mimicking the composition and pose of the famous Equestrian Statue of Marcus Aurelius."
+      },
+      {
+        "name": "Crucifixion of Jesus Christ",
+        "kind": "artwork",
+        "confidence": 0.98,
+        "evidence": "Frames 2, 3, and 4 show a 3D scan of a medieval/gothic bronze crucifix sculpture of Jesus Christ in the center of the thought bubble."
+      },
+      {
+        "name": "Kouros",
+        "kind": "artwork",
+        "confidence": 0.9,
+        "evidence": "Frame 1 shows two Greek Kouros (youth) statues flanking a female deity statue inside the thought bubble."
+      },
+      {
+        "name": "Chola Bronze Goddess",
+        "kind": "artwork",
+        "confidence": 0.85,
+        "evidence": "Frame 1 features a central female bronze statue in tribhanga pose, characteristic of Chola dynasty bronzes of Hindu deities like Parvati."
+      }
+    ],
+    "techniques": [
+      "3D model rendering",
+      "turntable animation",
+      "digital collage",
+      "meme overlay"
+    ],
+    "style_tags": [
+      "doomer",
+      "history-lore",
+      "philosophical-shitpost",
+      "classical-art",
+      "surrealist"
+    ],
+    "one_line": "A philosophical shitpost adapting the 'Are ya winning, son?' meme template with a Karl Marx quote about historical tradition weighing down a doomer stick figure dreaming of rotating 3D historical sculptures."
+  },
+  "attempts": 1
+}

@@ -1,0 +1,38 @@
+{
+  "id": "2064410366915022967-1",
+  "handle": "pleometric",
+  "status": "ok",
+  "date": "Jun 9, 2026",
+  "tweet_text": "I'm SF until sunday hit me up if you want to hang out!",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Super Mario 64 Penguin\",\n      \"kind\": \"character\",\n      \"confidence\": 0.95,\n      \"evidence\": \"Low-poly 3D model of the penguin from Super Mario 64, recolored purple.\"\n    },\n    {\n      \"name\": \"Heart Eyes Emoji\",\n      \"kind\": \"meme\",\n      \"confidence\": 0.90,\n      \"evidence\": \"The penguin character has red hearts instead of pupils/eyes.\"\n    }\n  ],\n  \"techniques\": [\n    \"3D character animation\",\n    \"Low-poly rendering\",\n    \"Looping animation\"\n  ],\n  \"style_tags\": [\n    \"internet-lore\",\n    \"low-poly\",\n    \"shitposting\",\n    \"retro-gaming\"\n  ],\n  \"one_line\": \"A purple Super Mario 64 penguin wearing a Santa hat and heart eyes dances against a black background.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Super Mario 64 Penguin",
+        "kind": "character",
+        "confidence": 0.95,
+        "evidence": "Low-poly 3D model of the penguin from Super Mario 64, recolored purple."
+      },
+      {
+        "name": "Heart Eyes Emoji",
+        "kind": "meme",
+        "confidence": 0.9,
+        "evidence": "The penguin character has red hearts instead of pupils/eyes."
+      }
+    ],
+    "techniques": [
+      "3D character animation",
+      "Low-poly rendering",
+      "Looping animation"
+    ],
+    "style_tags": [
+      "internet-lore",
+      "low-poly",
+      "shitposting",
+      "retro-gaming"
+    ],
+    "one_line": "A purple Super Mario 64 penguin wearing a Santa hat and heart eyes dances against a black background."
+  },
+  "attempts": 1
+}

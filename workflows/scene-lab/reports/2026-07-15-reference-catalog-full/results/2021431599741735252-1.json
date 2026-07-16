@@ -1,0 +1,52 @@
+{
+  "id": "2021431599741735252-1",
+  "handle": "abelian_soup",
+  "status": "ok",
+  "date": "Feb 11, 2026",
+  "tweet_text": "forgot to repost the @norvid_studies doc here. for completeness",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Gigachad\",\n      \"kind\": \"meme\",\n      \"confidence\": 0.85,\n      \"evidence\": \"Exaggerated jawline, cleft chin, and extremely muscular physique in a suit, typical of the Gigachad or 'buff guy explaining' meme format.\"\n    },\n    {\n      \"name\": \"norvid_studies\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.95,\n      \"evidence\": \"The background features a warped Twitter profile interface displaying the username, follower count, and post history of the account @norvid_studies.\"\n    },\n    {\n      \"name\": \"Vince McMahon\",\n      \"kind\": \"person\",\n      \"confidence\": 0.75,\n      \"evidence\": \"The stylized character's slicked-back white hair, facial structure, and muscular build in a suit closely resemble a caricature of Vince McMahon.\"\n    },\n    {\n      \"name\": \"Non-Euclidean Chess\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.9,\n      \"evidence\": \"3D mathematical projections of chessboards onto a sphere and a dodecahedron floating in the background.\"\n    }\n  ],\n  \"techniques\": [\n    \"kinetic typography\",\n    \"AI character animation\",\n    \"pinch distortion\",\n    \"motion graphics\",\n    \"chroma keying\"\n  ],\n  \"style_tags\": [\n    \"surrealist\",\n    \"internet-lore\",\n    \"academic-shitpost\",\n    \"abstract\"\n  ],\n  \"one_line\": \"A surreal, AI-animated video of a muscular man in a suit speaking over floating non-Euclidean chessboards and a warped Twitter interface.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Gigachad",
+        "kind": "meme",
+        "confidence": 0.85,
+        "evidence": "Exaggerated jawline, cleft chin, and extremely muscular physique in a suit, typical of the Gigachad or 'buff guy explaining' meme format."
+      },
+      {
+        "name": "norvid_studies",
+        "kind": "brand",
+        "confidence": 0.95,
+        "evidence": "The background features a warped Twitter profile interface displaying the username, follower count, and post history of the account @norvid_studies."
+      },
+      {
+        "name": "Vince McMahon",
+        "kind": "person",
+        "confidence": 0.75,
+        "evidence": "The stylized character's slicked-back white hair, facial structure, and muscular build in a suit closely resemble a caricature of Vince McMahon."
+      },
+      {
+        "name": "Non-Euclidean Chess",
+        "kind": "artwork",
+        "confidence": 0.9,
+        "evidence": "3D mathematical projections of chessboards onto a sphere and a dodecahedron floating in the background."
+      }
+    ],
+    "techniques": [
+      "kinetic typography",
+      "AI character animation",
+      "pinch distortion",
+      "motion graphics",
+      "chroma keying"
+    ],
+    "style_tags": [
+      "surrealist",
+      "internet-lore",
+      "academic-shitpost",
+      "abstract"
+    ],
+    "one_line": "A surreal, AI-animated video of a muscular man in a suit speaking over floating non-Euclidean chessboards and a warped Twitter interface."
+  },
+  "attempts": 1
+}

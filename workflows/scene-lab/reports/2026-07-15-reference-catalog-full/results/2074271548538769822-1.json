@@ -1,0 +1,44 @@
+{
+  "id": "2074271548538769822-1",
+  "handle": "SkyeSharkie",
+  "status": "ok",
+  "date": "Jul 6, 2026",
+  "tweet_text": "did a quick and interesting test of something with Fable in a raw context: can they 3d model by placing each individual vertex, in the way they had to before the Utah teapot? turns out yes! this may look unimpressive if you think about it in terms of primitives... but there are absolutely no primitives in this model, each vertex coordinate was placed manually by fable and then triangles were added between them",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Fable\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.95,\n      \"evidence\": \"Mentioned in tweet text describing the manual modeling experiment.\"\n    },\n    {\n      \"name\": \"Utah teapot\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.9,\n      \"evidence\": \"Mentioned in tweet text as a historical computer graphics reference.\"\n    },\n    {\n      \"name\": \"Star Fox\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.8,\n      \"evidence\": \"Visual design of the SF-9 Kestrel resembles the retro-3D Arwing spaceship.\"\n    }\n  ],\n  \"techniques\": [\n    \"3D turntable rotation\",\n    \"Low-poly rendering\",\n    \"Interactive UI overlay simulation\"\n  ],\n  \"style_tags\": [\n    \"retro-futuristic\",\n    \"low-poly\",\n    \"retro-3D\",\n    \"tech-showcase\"\n  ],\n  \"one_line\": \"Showcase of a low-poly 3D starfighter built vertex-by-vertex by an AI agent.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Fable",
+        "kind": "brand",
+        "confidence": 0.95,
+        "evidence": "Mentioned in tweet text describing the manual modeling experiment."
+      },
+      {
+        "name": "Utah teapot",
+        "kind": "artwork",
+        "confidence": 0.9,
+        "evidence": "Mentioned in tweet text as a historical computer graphics reference."
+      },
+      {
+        "name": "Star Fox",
+        "kind": "artwork",
+        "confidence": 0.8,
+        "evidence": "Visual design of the SF-9 Kestrel resembles the retro-3D Arwing spaceship."
+      }
+    ],
+    "techniques": [
+      "3D turntable rotation",
+      "Low-poly rendering",
+      "Interactive UI overlay simulation"
+    ],
+    "style_tags": [
+      "retro-futuristic",
+      "low-poly",
+      "retro-3D",
+      "tech-showcase"
+    ],
+    "one_line": "Showcase of a low-poly 3D starfighter built vertex-by-vertex by an AI agent."
+  },
+  "attempts": 1
+}

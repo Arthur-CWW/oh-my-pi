@@ -1,0 +1,38 @@
+{
+  "id": "2074403539913494963-1",
+  "handle": "SkyeSharkie",
+  "status": "ok",
+  "date": "Jul 7, 2026",
+  "tweet_text": "hand made this modular modern urban building kit a long time ago, it won a sketchfab challenge, given the sensor system success, i'm going to add it to eidoverse-video for the agents to use, I updated the billboards, lol",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Claude\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.98,\n      \"evidence\": \"A rooftop billboard advertising a service to 'wet your Claudes' with a cartoon mascot, humorously referencing Anthropic's Claude AI.\"\n    },\n    {\n      \"name\": \"Sketchfab\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.90,\n      \"evidence\": \"Mentioned in the creator's tweet text as the platform where the original modular building kit won a challenge.\"\n    }\n  ],\n  \"techniques\": [\n    \"3D turntable animation\",\n    \"Camera orbiting\",\n    \"Close-up scanning\"\n  ],\n  \"style_tags\": [\n    \"internet-lore\",\n    \"parody\",\n    \"surrealist\",\n    \"tech-humor\"\n  ],\n  \"one_line\": \"A 3D showcase of a modular urban building model featuring parody billboards about Claude AI and flying sharks.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Claude",
+        "kind": "brand",
+        "confidence": 0.98,
+        "evidence": "A rooftop billboard advertising a service to 'wet your Claudes' with a cartoon mascot, humorously referencing Anthropic's Claude AI."
+      },
+      {
+        "name": "Sketchfab",
+        "kind": "brand",
+        "confidence": 0.9,
+        "evidence": "Mentioned in the creator's tweet text as the platform where the original modular building kit won a challenge."
+      }
+    ],
+    "techniques": [
+      "3D turntable animation",
+      "Camera orbiting",
+      "Close-up scanning"
+    ],
+    "style_tags": [
+      "internet-lore",
+      "parody",
+      "surrealist",
+      "tech-humor"
+    ],
+    "one_line": "A 3D showcase of a modular urban building model featuring parody billboards about Claude AI and flying sharks."
+  },
+  "attempts": 1
+}

@@ -1,0 +1,39 @@
+{
+  "id": "2041710475684069845-1",
+  "handle": "pleometric",
+  "status": "ok",
+  "date": "Apr 8, 2026",
+  "tweet_text": "Did You See The Claude Mythos Announcement?🤯🤯🤯",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Anthropic\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.99,\n      \"evidence\": \"The brand name Anthropic is displayed alongside its logo styled as a character's head.\"\n    },\n    {\n      \"name\": \"Claude\",\n      \"kind\": \"character\",\n      \"confidence\": 0.95,\n      \"evidence\": \"The character's head is the multi-spoke star logo of the Claude AI assistant.\"\n    }\n  ],\n  \"techniques\": [\n    \"3D character animation\",\n    \"radial zoom blur\",\n    \"VFX explosion\",\n    \"subtitled typography\"\n  ],\n  \"style_tags\": [\n    \"accelerationist\",\n    \"tech-hype\",\n    \"cyberpunk\",\n    \"internet-lore\"\n  ],\n  \"one_line\": \"A cool Claude mascot wearing a leather coat walks away from a server room explosion in a tech hype promo parody.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Anthropic",
+        "kind": "brand",
+        "confidence": 0.99,
+        "evidence": "The brand name Anthropic is displayed alongside its logo styled as a character's head."
+      },
+      {
+        "name": "Claude",
+        "kind": "character",
+        "confidence": 0.95,
+        "evidence": "The character's head is the multi-spoke star logo of the Claude AI assistant."
+      }
+    ],
+    "techniques": [
+      "3D character animation",
+      "radial zoom blur",
+      "VFX explosion",
+      "subtitled typography"
+    ],
+    "style_tags": [
+      "accelerationist",
+      "tech-hype",
+      "cyberpunk",
+      "internet-lore"
+    ],
+    "one_line": "A cool Claude mascot wearing a leather coat walks away from a server room explosion in a tech hype promo parody."
+  },
+  "attempts": 1
+}

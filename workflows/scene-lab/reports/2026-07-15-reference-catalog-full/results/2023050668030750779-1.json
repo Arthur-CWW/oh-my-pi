@@ -1,0 +1,40 @@
+{
+  "id": "2023050668030750779-1",
+  "handle": "poetengineer__",
+  "status": "ok",
+  "date": "Feb 15, 2026",
+  "tweet_text": "assemblage ◦⦿○",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Voxel Art\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.95,\n      \"evidence\": \"3D colorful cube sculpture.\"\n    },\n    {\n      \"name\": \"Assemblage\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.9,\n      \"evidence\": \"Title text and Chinese translation '集合'.\"\n    }\n  ],\n  \"techniques\": [\n    \"Isometric 3D projection\",\n    \"Voxel shape morphing\",\n    \"Generative animation\",\n    \"Wireframe overlays\",\n    \"Typography transition\"\n  ],\n  \"style_tags\": [\n    \"generative-art\",\n    \"retro-futuristic\",\n    \"creative-coding\",\n    \"minimalist\"\n  ],\n  \"one_line\": \"A morphing voxel sculpture in a blue isometric space with mathematical wireframe overlays.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Voxel Art",
+        "kind": "artwork",
+        "confidence": 0.95,
+        "evidence": "3D colorful cube sculpture."
+      },
+      {
+        "name": "Assemblage",
+        "kind": "artwork",
+        "confidence": 0.9,
+        "evidence": "Title text and Chinese translation '集合'."
+      }
+    ],
+    "techniques": [
+      "Isometric 3D projection",
+      "Voxel shape morphing",
+      "Generative animation",
+      "Wireframe overlays",
+      "Typography transition"
+    ],
+    "style_tags": [
+      "generative-art",
+      "retro-futuristic",
+      "creative-coding",
+      "minimalist"
+    ],
+    "one_line": "A morphing voxel sculpture in a blue isometric space with mathematical wireframe overlays."
+  },
+  "attempts": 1
+}

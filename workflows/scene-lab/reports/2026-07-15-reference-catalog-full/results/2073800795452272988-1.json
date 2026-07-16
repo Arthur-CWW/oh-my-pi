@@ -1,0 +1,41 @@
+{
+  "id": "2073800795452272988-1",
+  "handle": "SkyeSharkie",
+  "status": "ok",
+  "date": "Jul 5, 2026",
+  "tweet_text": "excuse me but people should be allowed to drive their car at 180 mph while high out of their minds on strange substances on empty desert playas with no one around for miles, THIS IS AMERICA\n\nHOW DARE YOU HAVE POSTED THIS ON THE 4TH OF JULY",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Randy Marsh\",\n      \"kind\": \"character\",\n      \"confidence\": 0.99,\n      \"evidence\": \"Depicts Randy Marsh bruised and in underwear escorted by police.\"\n    },\n    {\n      \"name\": \"South Park\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.99,\n      \"evidence\": \"Features the show's signature cut-paper animation style and watermarked hashtag.\"\n    },\n    {\n      \"name\": \"I Thought This Was America\",\n      \"kind\": \"meme\",\n      \"confidence\": 0.99,\n      \"evidence\": \"The exact quote and scene used as a classic reaction image/clip.\"\n    }\n  ],\n  \"techniques\": [\n    \"Reaction clip\",\n    \"Text overlay\"\n  ],\n  \"style_tags\": [\n    \"satirical\",\n    \"internet-lore\"\n  ],\n  \"one_line\": \"A South Park reaction clip of Randy Marsh used to satirize complaints about public safety laws.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Randy Marsh",
+        "kind": "character",
+        "confidence": 0.99,
+        "evidence": "Depicts Randy Marsh bruised and in underwear escorted by police."
+      },
+      {
+        "name": "South Park",
+        "kind": "brand",
+        "confidence": 0.99,
+        "evidence": "Features the show's signature cut-paper animation style and watermarked hashtag."
+      },
+      {
+        "name": "I Thought This Was America",
+        "kind": "meme",
+        "confidence": 0.99,
+        "evidence": "The exact quote and scene used as a classic reaction image/clip."
+      }
+    ],
+    "techniques": [
+      "Reaction clip",
+      "Text overlay"
+    ],
+    "style_tags": [
+      "satirical",
+      "internet-lore"
+    ],
+    "one_line": "A South Park reaction clip of Randy Marsh used to satirize complaints about public safety laws."
+  },
+  "attempts": 1
+}

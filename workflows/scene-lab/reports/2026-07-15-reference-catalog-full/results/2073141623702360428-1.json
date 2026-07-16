@@ -1,0 +1,38 @@
+{
+  "id": "2073141623702360428-1",
+  "handle": "voooooogel",
+  "status": "ok",
+  "date": "Jul 3, 2026",
+  "tweet_text": "how future ais will have to talk to 2020s humans",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Woody\",\n      \"kind\": \"character\",\n      \"confidence\": 0.95,\n      \"evidence\": \"A CGI character featuring the face of Woody from Toy Story on a wooden log body.\"\n    },\n    {\n      \"name\": \"Wooden Woody\",\n      \"kind\": \"meme\",\n      \"confidence\": 0.9,\n      \"evidence\": \"Cursed CGI render of Woody made of wood, holding a baseball bat.\"\n    }\n  ],\n  \"techniques\": [\n    \"CGI rendering\",\n    \"Extreme close-up zoom\",\n    \"Kinetic typography\"\n  ],\n  \"style_tags\": [\n    \"Surrealist\",\n    \"Shitposting\",\n    \"Sci-fi\",\n    \"Internet-lore\"\n  ],\n  \"one_line\": \"A CGI wooden Woody puppet in a spaceship delivers a dramatic message about space being destroyed.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Woody",
+        "kind": "character",
+        "confidence": 0.95,
+        "evidence": "A CGI character featuring the face of Woody from Toy Story on a wooden log body."
+      },
+      {
+        "name": "Wooden Woody",
+        "kind": "meme",
+        "confidence": 0.9,
+        "evidence": "Cursed CGI render of Woody made of wood, holding a baseball bat."
+      }
+    ],
+    "techniques": [
+      "CGI rendering",
+      "Extreme close-up zoom",
+      "Kinetic typography"
+    ],
+    "style_tags": [
+      "Surrealist",
+      "Shitposting",
+      "Sci-fi",
+      "Internet-lore"
+    ],
+    "one_line": "A CGI wooden Woody puppet in a spaceship delivers a dramatic message about space being destroyed."
+  },
+  "attempts": 1
+}

@@ -1,0 +1,44 @@
+{
+  "id": "2056942689916948636-1",
+  "handle": "poetengineer__",
+  "status": "ok",
+  "date": "May 20, 2026",
+  "tweet_text": "i finally achieved my dream of vjing in the browser🪩- super fun collab with @isofluff to build Ribbit in Flow! 🥳",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Google Veo\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.95,\n      \"evidence\": \"Veo watermark on video frame.\"\n    },\n    {\n      \"name\": \"Ribbit\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.99,\n      \"evidence\": \"Ribbit logo in the top right sidebar.\"\n    },\n    {\n      \"name\": \"Corgi\",\n      \"kind\": \"meme\",\n      \"confidence\": 0.9,\n      \"evidence\": \"Rear view of four corgis on hind legs.\"\n    }\n  ],\n  \"techniques\": [\n    \"Kaleidoscope effect\",\n    \"Real-time video effects processing\",\n    \"AI video generation\",\n    \"VJ loop mixing\"\n  ],\n  \"style_tags\": [\n    \"creative-tech\",\n    \"software-aesthetic\",\n    \"generative-art\"\n  ],\n  \"one_line\": \"Showcase of Ribbit, a browser VJ tool applying live effects to AI video loops.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Google Veo",
+        "kind": "brand",
+        "confidence": 0.95,
+        "evidence": "Veo watermark on video frame."
+      },
+      {
+        "name": "Ribbit",
+        "kind": "brand",
+        "confidence": 0.99,
+        "evidence": "Ribbit logo in the top right sidebar."
+      },
+      {
+        "name": "Corgi",
+        "kind": "meme",
+        "confidence": 0.9,
+        "evidence": "Rear view of four corgis on hind legs."
+      }
+    ],
+    "techniques": [
+      "Kaleidoscope effect",
+      "Real-time video effects processing",
+      "AI video generation",
+      "VJ loop mixing"
+    ],
+    "style_tags": [
+      "creative-tech",
+      "software-aesthetic",
+      "generative-art"
+    ],
+    "one_line": "Showcase of Ribbit, a browser VJ tool applying live effects to AI video loops."
+  },
+  "attempts": 1
+}

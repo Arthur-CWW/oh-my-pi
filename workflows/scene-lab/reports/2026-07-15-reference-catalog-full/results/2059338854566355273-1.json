@@ -1,0 +1,45 @@
+{
+  "id": "2059338854566355273-1",
+  "handle": "pleometric",
+  "status": "ok",
+  "date": "May 26, 2026",
+  "tweet_text": "I am a known Pangram shill, but 98% of people fail this test:\n\nWhich of these videos is AI?",
+  "transcript_excerpt": "Which video is AI?",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Swole Doge\",\n      \"kind\": \"meme\",\n      \"confidence\": 0.85,\n      \"evidence\": \"Muscular orange animal body in frame 3 resembling the buff doge meme.\"\n    },\n    {\n      \"name\": \"Pangram Pangram\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.9,\n      \"evidence\": \"Mentioned in the tweet text.\"\n    },\n    {\n      \"name\": \"Nara Deer\",\n      \"kind\": \"character\",\n      \"confidence\": 0.95,\n      \"evidence\": \"Deer shown interacting with a tourist in Japan.\"\n    }\n  ],\n  \"techniques\": [\n    \"split-screen\",\n    \"scrolling ticker banner\",\n    \"countdown timer overlay\",\n    \"jump cut\",\n    \"explosion effect\"\n  ],\n  \"style_tags\": [\n    \"engagement-bait\",\n    \"shitpost\",\n    \"internet-lore\"\n  ],\n  \"one_line\": \"A split-screen quiz video testing viewers to identify the AI version before cutting to a meme character and explosion.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Swole Doge",
+        "kind": "meme",
+        "confidence": 0.85,
+        "evidence": "Muscular orange animal body in frame 3 resembling the buff doge meme."
+      },
+      {
+        "name": "Pangram Pangram",
+        "kind": "brand",
+        "confidence": 0.9,
+        "evidence": "Mentioned in the tweet text."
+      },
+      {
+        "name": "Nara Deer",
+        "kind": "character",
+        "confidence": 0.95,
+        "evidence": "Deer shown interacting with a tourist in Japan."
+      }
+    ],
+    "techniques": [
+      "split-screen",
+      "scrolling ticker banner",
+      "countdown timer overlay",
+      "jump cut",
+      "explosion effect"
+    ],
+    "style_tags": [
+      "engagement-bait",
+      "shitpost",
+      "internet-lore"
+    ],
+    "one_line": "A split-screen quiz video testing viewers to identify the AI version before cutting to a meme character and explosion."
+  },
+  "attempts": 1
+}

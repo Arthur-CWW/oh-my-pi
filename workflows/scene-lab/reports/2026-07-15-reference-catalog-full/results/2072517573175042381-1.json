@@ -1,0 +1,35 @@
+{
+  "id": "2072517573175042381-1",
+  "handle": "SkyeSharkie",
+  "status": "ok",
+  "date": "Jul 2, 2026",
+  "tweet_text": "i needed trees!",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Aloysius O'Hare\",\n      \"kind\": \"character\",\n      \"confidence\": 0.98,\n      \"evidence\": \"Distinctive bowl-cut hairstyle and short stature of the antagonist from The Lorax.\"\n    },\n    {\n      \"name\": \"The Lorax\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.95,\n      \"evidence\": \"Scene and character model from the 2012 animated movie adaptation.\"\n    }\n  ],\n  \"techniques\": [\n    \"Image macro layout\",\n    \"Impact font overlay\"\n  ],\n  \"style_tags\": [\n    \"Internet-lore\",\n    \"Meme-culture\"\n  ],\n  \"one_line\": \"A meme featuring O'Hare from The Lorax walking down a green hallway with motivational text.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Aloysius O'Hare",
+        "kind": "character",
+        "confidence": 0.98,
+        "evidence": "Distinctive bowl-cut hairstyle and short stature of the antagonist from The Lorax."
+      },
+      {
+        "name": "The Lorax",
+        "kind": "artwork",
+        "confidence": 0.95,
+        "evidence": "Scene and character model from the 2012 animated movie adaptation."
+      }
+    ],
+    "techniques": [
+      "Image macro layout",
+      "Impact font overlay"
+    ],
+    "style_tags": [
+      "Internet-lore",
+      "Meme-culture"
+    ],
+    "one_line": "A meme featuring O'Hare from The Lorax walking down a green hallway with motivational text."
+  },
+  "attempts": 1
+}

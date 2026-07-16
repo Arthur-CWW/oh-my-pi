@@ -1,0 +1,32 @@
+{
+  "id": "2069633215640576461-1",
+  "handle": "abelian_soup",
+  "status": "ok",
+  "date": "Jun 24, 2026",
+  "tweet_text": "update: I have unearthed my scribblings. some work required to wring them into half-coherent anything post, but it will happen. the abelian production machine is unbearably slow but my newfound enlightened tactic urges I accept this as the immutable state. so it goes.",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Kawaii food mascot\",\n      \"kind\": \"character\",\n      \"confidence\": 0.8,\n      \"evidence\": \"Cute bowl character with a face, chef's hat, and red apron.\"\n    }\n  ],\n  \"techniques\": [\n    \"3D character animation\",\n    \"Shallow depth of field\",\n    \"Tracking shot\",\n    \"Golden hour lighting\"\n  ],\n  \"style_tags\": [\n    \"whimsical\",\n    \"cozycore\",\n    \"kawaii-aesthetic\"\n  ],\n  \"one_line\": \"A whimsical 3D animated bowl chef walking through a golden wheat field.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Kawaii food mascot",
+        "kind": "character",
+        "confidence": 0.8,
+        "evidence": "Cute bowl character with a face, chef's hat, and red apron."
+      }
+    ],
+    "techniques": [
+      "3D character animation",
+      "Shallow depth of field",
+      "Tracking shot",
+      "Golden hour lighting"
+    ],
+    "style_tags": [
+      "whimsical",
+      "cozycore",
+      "kawaii-aesthetic"
+    ],
+    "one_line": "A whimsical 3D animated bowl chef walking through a golden wheat field."
+  },
+  "attempts": 1
+}

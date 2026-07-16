@@ -1,0 +1,40 @@
+{
+  "id": "2073682660476805576-1",
+  "handle": "SkyeSharkie",
+  "status": "ok",
+  "date": "Jul 5, 2026",
+  "tweet_text": "it gets much cooler",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Googly Eyes\",\n      \"kind\": \"meme\",\n      \"confidence\": 0.95,\n      \"evidence\": \"Two white spheres with black pupils roll down a ramp in the first frame and attach to the head of the worm to give it a humorous, derpy look.\"\n    },\n    {\n      \"name\": \"Sandworm\",\n      \"kind\": \"character\",\n      \"confidence\": 0.8,\n      \"evidence\": \"A brown, striped worm-like creature crawling through a yellow, desert-like landscape with low-poly rocks, evoking a cartoonish depiction of the Dune sandworm.\"\n    }\n  ],\n  \"techniques\": [\n    \"Procedural animation\",\n    \"Low-poly 3D rendering\",\n    \"Physics simulation\",\n    \"Inverse kinematics\"\n  ],\n  \"style_tags\": [\n    \"minimalist\",\n    \"playful\",\n    \"indie-game-dev\",\n    \"satisfying\",\n    \"derpy\"\n  ],\n  \"one_line\": \"Googly eyes roll down a ramp and attach to a low-poly worm, which procedurally slithers through a desert terrain populated by geometric rocks.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Googly Eyes",
+        "kind": "meme",
+        "confidence": 0.95,
+        "evidence": "Two white spheres with black pupils roll down a ramp in the first frame and attach to the head of the worm to give it a humorous, derpy look."
+      },
+      {
+        "name": "Sandworm",
+        "kind": "character",
+        "confidence": 0.8,
+        "evidence": "A brown, striped worm-like creature crawling through a yellow, desert-like landscape with low-poly rocks, evoking a cartoonish depiction of the Dune sandworm."
+      }
+    ],
+    "techniques": [
+      "Procedural animation",
+      "Low-poly 3D rendering",
+      "Physics simulation",
+      "Inverse kinematics"
+    ],
+    "style_tags": [
+      "minimalist",
+      "playful",
+      "indie-game-dev",
+      "satisfying",
+      "derpy"
+    ],
+    "one_line": "Googly eyes roll down a ramp and attach to a low-poly worm, which procedurally slithers through a desert terrain populated by geometric rocks."
+  },
+  "attempts": 1
+}

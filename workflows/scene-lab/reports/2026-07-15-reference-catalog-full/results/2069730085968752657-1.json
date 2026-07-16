@@ -1,0 +1,39 @@
+{
+  "id": "2069730085968752657-1",
+  "handle": "SkyeSharkie",
+  "status": "ok",
+  "date": "Jun 24, 2026",
+  "tweet_text": "seeing if i can accomplish something here with claude, very basic footprint from geodata so far, but trying to do way more regarding creating a 3d @vibecamp_",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Vibecamp\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.99,\n      \"evidence\": \"The tweet text explicitly mentions creating a 3D model of @vibecamp_, and the frames show a 3D representation of a camp with cabins, fields, and roads on a hilly terrain.\"\n    },\n    {\n      \"name\": \"Claude\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.95,\n      \"evidence\": \"The tweet text mentions using the AI assistant Claude to help build the 3D footprint from geodata.\"\n    }\n  ],\n  \"techniques\": [\n    \"3D fly-through animation\",\n    \"Low-poly 3D modeling\",\n    \"Geodata-based terrain generation\",\n    \"Screen recording\"\n  ],\n  \"style_tags\": [\n    \"lo-fi-3d\",\n    \"tech-builder\",\n    \"digital-twin\",\n    \"internet-lore\"\n  ],\n  \"one_line\": \"A low-poly 3D fly-through visualization of a camp environment reconstructed from geodata using Claude AI.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Vibecamp",
+        "kind": "brand",
+        "confidence": 0.99,
+        "evidence": "The tweet text explicitly mentions creating a 3D model of @vibecamp_, and the frames show a 3D representation of a camp with cabins, fields, and roads on a hilly terrain."
+      },
+      {
+        "name": "Claude",
+        "kind": "brand",
+        "confidence": 0.95,
+        "evidence": "The tweet text mentions using the AI assistant Claude to help build the 3D footprint from geodata."
+      }
+    ],
+    "techniques": [
+      "3D fly-through animation",
+      "Low-poly 3D modeling",
+      "Geodata-based terrain generation",
+      "Screen recording"
+    ],
+    "style_tags": [
+      "lo-fi-3d",
+      "tech-builder",
+      "digital-twin",
+      "internet-lore"
+    ],
+    "one_line": "A low-poly 3D fly-through visualization of a camp environment reconstructed from geodata using Claude AI."
+  },
+  "attempts": 1
+}

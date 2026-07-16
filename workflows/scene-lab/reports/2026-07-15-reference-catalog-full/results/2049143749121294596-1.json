@@ -1,0 +1,38 @@
+{
+  "id": "2049143749121294596-1",
+  "handle": "pleometric",
+  "status": "ok",
+  "date": "Apr 28, 2026",
+  "tweet_text": "I had a fantastic time at ICLR but I'm sleep deprived, I'll get to all unread messages soon\n\nenjoy this MONTAGEM PLEOMETRICA",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Tux\",\n      \"kind\": \"character\",\n      \"confidence\": 0.9,\n      \"evidence\": \"3D penguin model structure matches the classic Linux mascot, customized with purple skin and a headband.\"\n    },\n    {\n      \"name\": \"ICLR\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.95,\n      \"evidence\": \"Referenced in the tweet text as the conference attended by the author.\"\n    }\n  ],\n  \"techniques\": [\n    \"motion blur\",\n    \"chromatic aberration\",\n    \"strobe cuts\",\n    \"looping animation\"\n  ],\n  \"style_tags\": [\n    \"internet-lore\",\n    \"retro-3d\",\n    \"shitpost\"\n  ],\n  \"one_line\": \"A high-energy meme edit featuring a stylized Linux penguin mascot dancing to Brazilian funk aesthetics.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Tux",
+        "kind": "character",
+        "confidence": 0.9,
+        "evidence": "3D penguin model structure matches the classic Linux mascot, customized with purple skin and a headband."
+      },
+      {
+        "name": "ICLR",
+        "kind": "brand",
+        "confidence": 0.95,
+        "evidence": "Referenced in the tweet text as the conference attended by the author."
+      }
+    ],
+    "techniques": [
+      "motion blur",
+      "chromatic aberration",
+      "strobe cuts",
+      "looping animation"
+    ],
+    "style_tags": [
+      "internet-lore",
+      "retro-3d",
+      "shitpost"
+    ],
+    "one_line": "A high-energy meme edit featuring a stylized Linux penguin mascot dancing to Brazilian funk aesthetics."
+  },
+  "attempts": 1
+}

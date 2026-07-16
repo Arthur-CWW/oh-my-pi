@@ -1,0 +1,37 @@
+{
+  "id": "2046981454748360759-1",
+  "handle": "poetengineer__",
+  "status": "ok",
+  "date": "Apr 22, 2026",
+  "tweet_text": "syntaxes of the mind",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"vector display graphics\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.90,\n      \"evidence\": \"Oscilloscope-style line animations and orbital plots.\"\n    },\n    {\n      \"name\": \"neural network visualization\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.85,\n      \"evidence\": \"Branching node diagram representing complex connections.\"\n    }\n  ],\n  \"techniques\": [\n    \"vector graphics animation\",\n    \"3D wireframe rendering\",\n    \"phase space plotting\"\n  ],\n  \"style_tags\": [\n    \"retro-futuristic\",\n    \"cybernetic\",\n    \"scientific-aesthetic\"\n  ],\n  \"one_line\": \"Retro scientific vector animation mapping network, orbital, and surface coordinates.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "vector display graphics",
+        "kind": "artwork",
+        "confidence": 0.9,
+        "evidence": "Oscilloscope-style line animations and orbital plots."
+      },
+      {
+        "name": "neural network visualization",
+        "kind": "artwork",
+        "confidence": 0.85,
+        "evidence": "Branching node diagram representing complex connections."
+      }
+    ],
+    "techniques": [
+      "vector graphics animation",
+      "3D wireframe rendering",
+      "phase space plotting"
+    ],
+    "style_tags": [
+      "retro-futuristic",
+      "cybernetic",
+      "scientific-aesthetic"
+    ],
+    "one_line": "Retro scientific vector animation mapping network, orbital, and surface coordinates."
+  },
+  "attempts": 1
+}

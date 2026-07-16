@@ -1,0 +1,37 @@
+{
+  "id": "2073754256549749206-1",
+  "handle": "SkyeSharkie",
+  "status": "ok",
+  "date": "Jul 5, 2026",
+  "tweet_text": "adding improvements to the saguaro in SeedThree: flesh damage slider",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"SeedThree\",\n      \"kind\": \"brand\",\n      \"confidence\": 1.0,\n      \"evidence\": \"UI header displays 'SeedThree'.\"\n    },\n    {\n      \"name\": \"Saguaro\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.95,\n      \"evidence\": \"3D procedural desert scene showing saguaro cacti models.\"\n    }\n  ],\n  \"techniques\": [\n    \"Procedural modeling\",\n    \"Screen recording\",\n    \"UI demonstration\"\n  ],\n  \"style_tags\": [\n    \"creative-coding\",\n    \"gamedev\",\n    \"tech-demo\"\n  ],\n  \"one_line\": \"Demonstration of the new flesh damage slider for procedural saguaro cacti in SeedThree.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "SeedThree",
+        "kind": "brand",
+        "confidence": 1.0,
+        "evidence": "UI header displays 'SeedThree'."
+      },
+      {
+        "name": "Saguaro",
+        "kind": "artwork",
+        "confidence": 0.95,
+        "evidence": "3D procedural desert scene showing saguaro cacti models."
+      }
+    ],
+    "techniques": [
+      "Procedural modeling",
+      "Screen recording",
+      "UI demonstration"
+    ],
+    "style_tags": [
+      "creative-coding",
+      "gamedev",
+      "tech-demo"
+    ],
+    "one_line": "Demonstration of the new flesh damage slider for procedural saguaro cacti in SeedThree."
+  },
+  "attempts": 1
+}

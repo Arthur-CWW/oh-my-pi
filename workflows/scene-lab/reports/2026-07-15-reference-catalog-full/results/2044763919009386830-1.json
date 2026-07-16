@@ -1,0 +1,38 @@
+{
+  "id": "2044763919009386830-1",
+  "handle": "pleometric",
+  "status": "ok",
+  "date": "Apr 16, 2026",
+  "tweet_text": "unc still got it ✌️😂\n\ntook me 42 days, not bad",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Club Penguin\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.98,\n      \"evidence\": \"Avatars and profile design use the distinct 3D art style of Club Penguin penguins.\"\n    },\n    {\n      \"name\": \"pleometric\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.95,\n      \"evidence\": \"TikTok profile card displaying the username @pleometric.\"\n    }\n  ],\n  \"techniques\": [\n    \"clone fields\",\n    \"3D character animation\",\n    \"animated background\",\n    \"screen recording integration\"\n  ],\n  \"style_tags\": [\n    \"internet-lore\",\n    \"nostalgia-posting\",\n    \"shitposting\"\n  ],\n  \"one_line\": \"Milestone video tracking a TikTok creator's follower growth surrounded by dancing 3D Club Penguin avatars.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Club Penguin",
+        "kind": "brand",
+        "confidence": 0.98,
+        "evidence": "Avatars and profile design use the distinct 3D art style of Club Penguin penguins."
+      },
+      {
+        "name": "pleometric",
+        "kind": "brand",
+        "confidence": 0.95,
+        "evidence": "TikTok profile card displaying the username @pleometric."
+      }
+    ],
+    "techniques": [
+      "clone fields",
+      "3D character animation",
+      "animated background",
+      "screen recording integration"
+    ],
+    "style_tags": [
+      "internet-lore",
+      "nostalgia-posting",
+      "shitposting"
+    ],
+    "one_line": "Milestone video tracking a TikTok creator's follower growth surrounded by dancing 3D Club Penguin avatars."
+  },
+  "attempts": 1
+}

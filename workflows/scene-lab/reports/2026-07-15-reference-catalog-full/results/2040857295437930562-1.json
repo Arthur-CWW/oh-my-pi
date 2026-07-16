@@ -1,0 +1,33 @@
+{
+  "id": "2040857295437930562-1",
+  "handle": "poetengineer__",
+  "status": "ok",
+  "date": "Apr 5, 2026",
+  "tweet_text": "everything orbits what it cannot reach",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Eye of Providence\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.85,\n      \"evidence\": \"Central diamond containing concentric circles and a red center node representing a symbolic eye.\"\n    }\n  ],\n  \"techniques\": [\n    \"vector graphics animation\",\n    \"orbital path simulation\",\n    \"3D wireframe rendering\",\n    \"particle system animation\"\n  ],\n  \"style_tags\": [\n    \"cybernetic\",\n    \"retro-futuristic\",\n    \"abstract-technical\",\n    \"cosmological\"\n  ],\n  \"one_line\": \"Abstract cybernetic animation depicting orbital trajectories and data structures revolving around a central eye.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Eye of Providence",
+        "kind": "artwork",
+        "confidence": 0.85,
+        "evidence": "Central diamond containing concentric circles and a red center node representing a symbolic eye."
+      }
+    ],
+    "techniques": [
+      "vector graphics animation",
+      "orbital path simulation",
+      "3D wireframe rendering",
+      "particle system animation"
+    ],
+    "style_tags": [
+      "cybernetic",
+      "retro-futuristic",
+      "abstract-technical",
+      "cosmological"
+    ],
+    "one_line": "Abstract cybernetic animation depicting orbital trajectories and data structures revolving around a central eye."
+  },
+  "attempts": 1
+}

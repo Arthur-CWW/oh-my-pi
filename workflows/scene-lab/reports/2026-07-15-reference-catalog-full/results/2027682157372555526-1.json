@@ -1,0 +1,33 @@
+{
+  "id": "2027682157372555526-1",
+  "handle": "poetengineer__",
+  "status": "ok",
+  "date": "Feb 28, 2026",
+  "tweet_text": "accretion",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Generative Art\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.95,\n      \"evidence\": \"Visuals show a code-generated particle network simulation depicting accretion dynamics\"\n    }\n  ],\n  \"techniques\": [\n    \"particle system simulation\",\n    \"network visualization\",\n    \"3D orbital rotation\",\n    \"force-directed graph layout\"\n  ],\n  \"style_tags\": [\n    \"generative-art\",\n    \"creative-coding\",\n    \"abstract-sci-fi\",\n    \"complexity-theory\"\n  ],\n  \"one_line\": \"A rotating spherical generative network simulation depicting particle accretion dynamics.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Generative Art",
+        "kind": "artwork",
+        "confidence": 0.95,
+        "evidence": "Visuals show a code-generated particle network simulation depicting accretion dynamics"
+      }
+    ],
+    "techniques": [
+      "particle system simulation",
+      "network visualization",
+      "3D orbital rotation",
+      "force-directed graph layout"
+    ],
+    "style_tags": [
+      "generative-art",
+      "creative-coding",
+      "abstract-sci-fi",
+      "complexity-theory"
+    ],
+    "one_line": "A rotating spherical generative network simulation depicting particle accretion dynamics."
+  },
+  "attempts": 1
+}

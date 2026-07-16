@@ -1,0 +1,38 @@
+{
+  "id": "2074422796172841075-1",
+  "handle": "SkyeSharkie",
+  "status": "ok",
+  "date": "Jul 7, 2026",
+  "tweet_text": "what about weather?",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"World Trade Center\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.85,\n      \"evidence\": \"Two grey rectangular pillars resembling the Twin Towers.\"\n    },\n    {\n      \"name\": \"Monolith\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.9,\n      \"evidence\": \"Minimalist grey pillars in a barren simulated landscape.\"\n    }\n  ],\n  \"techniques\": [\n    \"3D rendering\",\n    \"Particle system simulation\",\n    \"Dynamic lighting\"\n  ],\n  \"style_tags\": [\n    \"liminal-space\",\n    \"cgi-simulation\",\n    \"minimalist\",\n    \"tech-demo\"\n  ],\n  \"one_line\": \"CGI physics demonstration of simulated rain moving past two monolithic pillars.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "World Trade Center",
+        "kind": "artwork",
+        "confidence": 0.85,
+        "evidence": "Two grey rectangular pillars resembling the Twin Towers."
+      },
+      {
+        "name": "Monolith",
+        "kind": "artwork",
+        "confidence": 0.9,
+        "evidence": "Minimalist grey pillars in a barren simulated landscape."
+      }
+    ],
+    "techniques": [
+      "3D rendering",
+      "Particle system simulation",
+      "Dynamic lighting"
+    ],
+    "style_tags": [
+      "liminal-space",
+      "cgi-simulation",
+      "minimalist",
+      "tech-demo"
+    ],
+    "one_line": "CGI physics demonstration of simulated rain moving past two monolithic pillars."
+  },
+  "attempts": 1
+}

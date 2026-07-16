@@ -1,0 +1,31 @@
+{
+  "id": "2066897194775454205-1",
+  "handle": "pleometric",
+  "status": "ok",
+  "date": "Jun 16, 2026",
+  "tweet_text": "this is a good example of what I call an \"erotic proxy\", gesturing at eroticism / sex without being explicit.  \n\nIt's one of the most effective forms of humor in short form because it's kinetic and allows the audience to show they're in on the joke (or express shock)",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Soft-body physics simulation\",\n      \"kind\": \"meme\",\n      \"confidence\": 0.95,\n      \"evidence\": \"Phallic glass cylinder deforming based on designated percentage values.\"\n    }\n  ],\n  \"techniques\": [\n    \"3D soft-body simulation\",\n    \"Kinetic typography\",\n    \"Looping animation\"\n  ],\n  \"style_tags\": [\n    \"oddly-satisfying\",\n    \"erotic-proxy\",\n    \"minimalist-render\"\n  ],\n  \"one_line\": \"A 3D physics simulation demonstrating a glass phallic object deforming at various softness levels.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Soft-body physics simulation",
+        "kind": "meme",
+        "confidence": 0.95,
+        "evidence": "Phallic glass cylinder deforming based on designated percentage values."
+      }
+    ],
+    "techniques": [
+      "3D soft-body simulation",
+      "Kinetic typography",
+      "Looping animation"
+    ],
+    "style_tags": [
+      "oddly-satisfying",
+      "erotic-proxy",
+      "minimalist-render"
+    ],
+    "one_line": "A 3D physics simulation demonstrating a glass phallic object deforming at various softness levels."
+  },
+  "attempts": 1
+}

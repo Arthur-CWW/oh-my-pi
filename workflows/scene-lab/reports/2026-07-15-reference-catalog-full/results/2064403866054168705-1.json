@@ -1,0 +1,44 @@
+{
+  "id": "2064403866054168705-1",
+  "handle": "pleometric",
+  "status": "ok",
+  "date": "Jun 9, 2026",
+  "tweet_text": "after 185 days, I have finished the word list for HSK1-5\n\nnow I have to read a lot and practice my speaking. I believe I am on track to take my examination in 6 months!",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Club Penguin Penguin\",\n      \"kind\": \"character\",\n      \"confidence\": 0.95,\n      \"evidence\": \"Two low-poly rotating purple 3D penguins with heart eyes, styled after the Club Penguin avatar design, wearing a cowboy hat and a beret.\"\n    },\n    {\n      \"name\": \"Anki\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.99,\n      \"evidence\": \"The top half of the screen displays the Anki flashcard application's 'Card Counts' statistics and daily review heatmap.\"\n    },\n    {\n      \"name\": \"Flag of China\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.99,\n      \"evidence\": \"A waving 3D flag of the People's Republic of China is centered in the lower section of the screen.\"\n    }\n  ],\n  \"techniques\": [\n    \"3D model rotation\",\n    \"split-screen layout\",\n    \"dashboard screencast\"\n  ],\n  \"style_tags\": [\n    \"internet-lore\",\n    \"study-aesthetic\",\n    \"surrealist\",\n    \"low-poly\"\n  ],\n  \"one_line\": \"An Anki statistics progress report for Chinese HSK learning paired with spinning 3D Club Penguin avatars and a waving Chinese flag.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Club Penguin Penguin",
+        "kind": "character",
+        "confidence": 0.95,
+        "evidence": "Two low-poly rotating purple 3D penguins with heart eyes, styled after the Club Penguin avatar design, wearing a cowboy hat and a beret."
+      },
+      {
+        "name": "Anki",
+        "kind": "brand",
+        "confidence": 0.99,
+        "evidence": "The top half of the screen displays the Anki flashcard application's 'Card Counts' statistics and daily review heatmap."
+      },
+      {
+        "name": "Flag of China",
+        "kind": "artwork",
+        "confidence": 0.99,
+        "evidence": "A waving 3D flag of the People's Republic of China is centered in the lower section of the screen."
+      }
+    ],
+    "techniques": [
+      "3D model rotation",
+      "split-screen layout",
+      "dashboard screencast"
+    ],
+    "style_tags": [
+      "internet-lore",
+      "study-aesthetic",
+      "surrealist",
+      "low-poly"
+    ],
+    "one_line": "An Anki statistics progress report for Chinese HSK learning paired with spinning 3D Club Penguin avatars and a waving Chinese flag."
+  },
+  "attempts": 1
+}

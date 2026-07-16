@@ -1,0 +1,40 @@
+{
+  "id": "2058664043867451744-1",
+  "handle": "poetengineer__",
+  "status": "ok",
+  "date": "May 24, 2026",
+  "tweet_text": "decipherment",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Lissajous curves\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.95,\n      \"evidence\": \"Distinct orange looping waveforms on the left side of the frames, characteristic of Lissajous figures displayed on oscilloscopes.\"\n    },\n    {\n      \"name\": \"Oscilloscope graphics\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.9,\n      \"evidence\": \"Sharp glowing vector lines on a pure black background resembling early computer vector displays and analog oscilloscope art.\"\n    }\n  ],\n  \"techniques\": [\n    \"vector graphics animation\",\n    \"wireframe rendering\",\n    \"particle system simulation\",\n    \"oscilloscope drawing\"\n  ],\n  \"style_tags\": [\n    \"retro-futuristic\",\n    \"cybernetic\",\n    \"analog-core\",\n    \"math-art\",\n    \"academic-tech\"\n  ],\n  \"one_line\": \"An abstract, retro-futuristic vector animation depicting mathematical waveforms, particle flows, and wireframe grids, evoking early cybernetics and decipherment.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Lissajous curves",
+        "kind": "artwork",
+        "confidence": 0.95,
+        "evidence": "Distinct orange looping waveforms on the left side of the frames, characteristic of Lissajous figures displayed on oscilloscopes."
+      },
+      {
+        "name": "Oscilloscope graphics",
+        "kind": "artwork",
+        "confidence": 0.9,
+        "evidence": "Sharp glowing vector lines on a pure black background resembling early computer vector displays and analog oscilloscope art."
+      }
+    ],
+    "techniques": [
+      "vector graphics animation",
+      "wireframe rendering",
+      "particle system simulation",
+      "oscilloscope drawing"
+    ],
+    "style_tags": [
+      "retro-futuristic",
+      "cybernetic",
+      "analog-core",
+      "math-art",
+      "academic-tech"
+    ],
+    "one_line": "An abstract, retro-futuristic vector animation depicting mathematical waveforms, particle flows, and wireframe grids, evoking early cybernetics and decipherment."
+  },
+  "attempts": 1
+}

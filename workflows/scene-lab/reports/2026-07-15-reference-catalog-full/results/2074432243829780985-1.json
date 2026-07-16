@@ -1,0 +1,47 @@
+{
+  "id": "2074432243829780985-1",
+  "handle": "poetengineer__",
+  "status": "ok",
+  "date": "Jul 7, 2026",
+  "tweet_text": "·⚬◎‿◦○⚬·˙",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Nelson Max\",\n      \"kind\": \"person\",\n      \"confidence\": 0.95,\n      \"evidence\": \"Visual match to the wireframe animation style and mathematical subject matter of his 1976 educational computer graphics film 'Turning a Sphere Inside Out'.\"\n    },\n    {\n      \"name\": \"Sphere Eversion\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.98,\n      \"evidence\": \"The sequence shows the topological eversion (turning inside out) of a wireframe sphere with self-intersecting loops and lobes.\"\n    },\n    {\n      \"name\": \"Stephen Smale\",\n      \"kind\": \"person\",\n      \"confidence\": 0.90,\n      \"evidence\": \"The animation visualizes Smale's paradox, a theorem in differential topology proved by Stephen Smale in 1957.\"\n    }\n  ],\n  \"techniques\": [\n    \"Wireframe rendering\",\n    \"Vector graphics simulation\",\n    \"Chromatic aberration\",\n    \"3D coordinate grid overlay\",\n    \"CRT phosphor glow simulation\"\n  ],\n  \"style_tags\": [\n    \"Retro-futuristic\",\n    \"Early computer graphics\",\n    \"Mathematical aesthetics\",\n    \"Academic tech demo\",\n    \"Vectrex aesthetic\"\n  ],\n  \"one_line\": \"A retro vector wireframe animation demonstrating the mathematical eversion (turning inside out) of a sphere within a 3D coordinate system.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Nelson Max",
+        "kind": "person",
+        "confidence": 0.95,
+        "evidence": "Visual match to the wireframe animation style and mathematical subject matter of his 1976 educational computer graphics film 'Turning a Sphere Inside Out'."
+      },
+      {
+        "name": "Sphere Eversion",
+        "kind": "artwork",
+        "confidence": 0.98,
+        "evidence": "The sequence shows the topological eversion (turning inside out) of a wireframe sphere with self-intersecting loops and lobes."
+      },
+      {
+        "name": "Stephen Smale",
+        "kind": "person",
+        "confidence": 0.9,
+        "evidence": "The animation visualizes Smale's paradox, a theorem in differential topology proved by Stephen Smale in 1957."
+      }
+    ],
+    "techniques": [
+      "Wireframe rendering",
+      "Vector graphics simulation",
+      "Chromatic aberration",
+      "3D coordinate grid overlay",
+      "CRT phosphor glow simulation"
+    ],
+    "style_tags": [
+      "Retro-futuristic",
+      "Early computer graphics",
+      "Mathematical aesthetics",
+      "Academic tech demo",
+      "Vectrex aesthetic"
+    ],
+    "one_line": "A retro vector wireframe animation demonstrating the mathematical eversion (turning inside out) of a sphere within a 3D coordinate system."
+  },
+  "attempts": 1
+}

@@ -1,0 +1,30 @@
+{
+  "id": "2057153454854819863-1",
+  "handle": "pleometric",
+  "status": "ok",
+  "date": "May 20, 2026",
+  "tweet_text": "big fan of peppers",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Club Penguin Penguin\",\n      \"kind\": \"character\",\n      \"confidence\": 0.85,\n      \"evidence\": \"Purple body, yellow beak, and feet typical of Club Penguin avatars.\"\n    }\n  ],\n  \"techniques\": [\n    \"Turntable rotation\",\n    \"Low-poly 3D rendering\",\n    \"Looping animation\"\n  ],\n  \"style_tags\": [\n    \"internet-lore\",\n    \"retro-3d\"\n  ],\n  \"one_line\": \"A low-poly 3D animation of a purple penguin wearing a red chili pepper hat rotating in a loop.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Club Penguin Penguin",
+        "kind": "character",
+        "confidence": 0.85,
+        "evidence": "Purple body, yellow beak, and feet typical of Club Penguin avatars."
+      }
+    ],
+    "techniques": [
+      "Turntable rotation",
+      "Low-poly 3D rendering",
+      "Looping animation"
+    ],
+    "style_tags": [
+      "internet-lore",
+      "retro-3d"
+    ],
+    "one_line": "A low-poly 3D animation of a purple penguin wearing a red chili pepper hat rotating in a loop."
+  },
+  "attempts": 1
+}

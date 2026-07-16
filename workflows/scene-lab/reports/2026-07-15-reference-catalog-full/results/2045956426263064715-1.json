@@ -1,0 +1,30 @@
+{
+  "id": "2045956426263064715-1",
+  "handle": "poetengineer__",
+  "status": "ok",
+  "date": "Apr 19, 2026",
+  "tweet_text": "experimenting with optical flow",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"OpenCV\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.8,\n      \"evidence\": \"Sparse optical flow tracking vectors overlaid on moving subjects.\"\n    }\n  ],\n  \"techniques\": [\n    \"optical flow tracking\",\n    \"motion vector overlay\"\n  ],\n  \"style_tags\": [\n    \"creative-coding\",\n    \"tech-demo\",\n    \"scientific-visualization\"\n  ],\n  \"one_line\": \"Jellyfish motion tracked using optical flow vector overlays in a blue aquarium.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "OpenCV",
+        "kind": "brand",
+        "confidence": 0.8,
+        "evidence": "Sparse optical flow tracking vectors overlaid on moving subjects."
+      }
+    ],
+    "techniques": [
+      "optical flow tracking",
+      "motion vector overlay"
+    ],
+    "style_tags": [
+      "creative-coding",
+      "tech-demo",
+      "scientific-visualization"
+    ],
+    "one_line": "Jellyfish motion tracked using optical flow vector overlays in a blue aquarium."
+  },
+  "attempts": 1
+}

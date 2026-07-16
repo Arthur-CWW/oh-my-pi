@@ -1,0 +1,44 @@
+{
+  "id": "2065499214692667535-1",
+  "handle": "pleometric",
+  "status": "ok",
+  "date": "Jun 12, 2026",
+  "tweet_text": "Reminder: You Have Until June 22nd",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Leopold Aschenbrenner\",\n      \"kind\": \"person\",\n      \"confidence\": 0.98,\n      \"evidence\": \"A portrait of Leopold Aschenbrenner with glasses, holding a wine glass and a cigar, centered on the left side of the screen with text about escaping the underclass.\"\n    },\n    {\n      \"name\": \"Elon Musk\",\n      \"kind\": \"person\",\n      \"confidence\": 0.98,\n      \"evidence\": \"A cutout image of Elon Musk's face featured on the right-hand sidebar.\"\n    },\n    {\n      \"name\": \"One Weird Trick\",\n      \"kind\": \"meme\",\n      \"confidence\": 0.95,\n      \"evidence\": \"Text reading 'I made TRILLIONS with this one weird trick' mimicking classic early-internet clickbait ads.\"\n    }\n  ],\n  \"techniques\": [\n    \"Split-screen layout\",\n    \"Animated explosion overlay\",\n    \"Cutout collage\",\n    \"Spam banner aesthetic\"\n  ],\n  \"style_tags\": [\n    \"accelerationist\",\n    \"internet-lore\",\n    \"shitpost\"\n  ],\n  \"one_line\": \"An ironic split-screen clickbait advertisement warning the viewer they have until June 22nd to escape the underclass, featuring Leopold Aschenbrenner in front of an explosion and Elon Musk.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Leopold Aschenbrenner",
+        "kind": "person",
+        "confidence": 0.98,
+        "evidence": "A portrait of Leopold Aschenbrenner with glasses, holding a wine glass and a cigar, centered on the left side of the screen with text about escaping the underclass."
+      },
+      {
+        "name": "Elon Musk",
+        "kind": "person",
+        "confidence": 0.98,
+        "evidence": "A cutout image of Elon Musk's face featured on the right-hand sidebar."
+      },
+      {
+        "name": "One Weird Trick",
+        "kind": "meme",
+        "confidence": 0.95,
+        "evidence": "Text reading 'I made TRILLIONS with this one weird trick' mimicking classic early-internet clickbait ads."
+      }
+    ],
+    "techniques": [
+      "Split-screen layout",
+      "Animated explosion overlay",
+      "Cutout collage",
+      "Spam banner aesthetic"
+    ],
+    "style_tags": [
+      "accelerationist",
+      "internet-lore",
+      "shitpost"
+    ],
+    "one_line": "An ironic split-screen clickbait advertisement warning the viewer they have until June 22nd to escape the underclass, featuring Leopold Aschenbrenner in front of an explosion and Elon Musk."
+  },
+  "attempts": 1
+}

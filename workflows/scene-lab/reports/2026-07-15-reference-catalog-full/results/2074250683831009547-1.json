@@ -1,0 +1,43 @@
+{
+  "id": "2074250683831009547-1",
+  "handle": "SkyeSharkie",
+  "status": "ok",
+  "date": "Jul 6, 2026",
+  "tweet_text": "About to push the SeedThree commit that adds an eidoverse integration, headless agent api style usage for generating plants through it to use in eidoverse-video scenes, quick scrap low res test render by Fable proving it works here, rendered through eidoverse",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"SeedThree\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.95,\n      \"evidence\": \"Named in tweet as the repository receiving the integration.\"\n    },\n    {\n      \"name\": \"Eidoverse\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.95,\n      \"evidence\": \"Named in tweet as the 3D rendering pipeline.\"\n    },\n    {\n      \"name\": \"Fable\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.95,\n      \"evidence\": \"Named in tweet as developer of the render.\"\n    }\n  ],\n  \"techniques\": [\n    \"3D procedural asset rendering\",\n    \"Static viewport test\",\n    \"Low-resolution preview\"\n  ],\n  \"style_tags\": [\n    \"tech-demo\",\n    \"lo-fi-3d\",\n    \"minimalist-simulation\"\n  ],\n  \"one_line\": \"A low-resolution preview showing procedurally generated trees and cacti rendered on a flat plane.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "SeedThree",
+        "kind": "brand",
+        "confidence": 0.95,
+        "evidence": "Named in tweet as the repository receiving the integration."
+      },
+      {
+        "name": "Eidoverse",
+        "kind": "brand",
+        "confidence": 0.95,
+        "evidence": "Named in tweet as the 3D rendering pipeline."
+      },
+      {
+        "name": "Fable",
+        "kind": "brand",
+        "confidence": 0.95,
+        "evidence": "Named in tweet as developer of the render."
+      }
+    ],
+    "techniques": [
+      "3D procedural asset rendering",
+      "Static viewport test",
+      "Low-resolution preview"
+    ],
+    "style_tags": [
+      "tech-demo",
+      "lo-fi-3d",
+      "minimalist-simulation"
+    ],
+    "one_line": "A low-resolution preview showing procedurally generated trees and cacti rendered on a flat plane."
+  },
+  "attempts": 1
+}

@@ -1,0 +1,45 @@
+{
+  "id": "2067669513630343191-1",
+  "handle": "pleometric",
+  "status": "ok",
+  "date": "Jun 18, 2026",
+  "tweet_text": "I betrayed him",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Club Penguin Penguin\",\n      \"kind\": \"character\",\n      \"confidence\": 0.95,\n      \"evidence\": \"A purple low-poly 3D penguin character styled after the customizable player avatars from the game Club Penguin, wearing a Santa hat and heart eyes.\"\n    },\n    {\n      \"name\": \"Club Penguin\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.95,\n      \"evidence\": \"The design of the penguin avatar, including the proportions, feet, and beak, originates from the Club Penguin franchise.\"\n    },\n    {\n      \"name\": \"Unemployed Friend Meme\",\n      \"kind\": \"meme\",\n      \"confidence\": 0.90,\n      \"evidence\": \"The rotating golden 3D text reading 'UNEMPLOYED!' references the viral internet meme format celebrating or poking fun at the daily life of unemployed friends.\"\n    }\n  ],\n  \"techniques\": [\n    \"3D text rotation\",\n    \"low-poly 3D modeling\",\n    \"looping animation\",\n    \"kinetic typography\"\n  ],\n  \"style_tags\": [\n    \"internet-lore\",\n    \"retro-3d\",\n    \"shitpost\",\n    \"surrealist\"\n  ],\n  \"one_line\": \"A purple Club Penguin penguin wearing a Santa hat waves under a rotating golden 3D text ring spelling 'UNEMPLOYED!' on a black background.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Club Penguin Penguin",
+        "kind": "character",
+        "confidence": 0.95,
+        "evidence": "A purple low-poly 3D penguin character styled after the customizable player avatars from the game Club Penguin, wearing a Santa hat and heart eyes."
+      },
+      {
+        "name": "Club Penguin",
+        "kind": "brand",
+        "confidence": 0.95,
+        "evidence": "The design of the penguin avatar, including the proportions, feet, and beak, originates from the Club Penguin franchise."
+      },
+      {
+        "name": "Unemployed Friend Meme",
+        "kind": "meme",
+        "confidence": 0.9,
+        "evidence": "The rotating golden 3D text reading 'UNEMPLOYED!' references the viral internet meme format celebrating or poking fun at the daily life of unemployed friends."
+      }
+    ],
+    "techniques": [
+      "3D text rotation",
+      "low-poly 3D modeling",
+      "looping animation",
+      "kinetic typography"
+    ],
+    "style_tags": [
+      "internet-lore",
+      "retro-3d",
+      "shitpost",
+      "surrealist"
+    ],
+    "one_line": "A purple Club Penguin penguin wearing a Santa hat waves under a rotating golden 3D text ring spelling 'UNEMPLOYED!' on a black background."
+  },
+  "attempts": 1
+}

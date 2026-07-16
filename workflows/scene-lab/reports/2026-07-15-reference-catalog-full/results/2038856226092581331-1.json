@@ -1,0 +1,32 @@
+{
+  "id": "2038856226092581331-1",
+  "handle": "poetengineer__",
+  "status": "ok",
+  "date": "Mar 31, 2026",
+  "tweet_text": "wait this reminds me of aeon flux",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Æon Flux\",\n      \"kind\": \"artwork\",\n      \"confidence\": 1.0,\n      \"evidence\": \"Extreme close-up animation of an eye trapping a fly in its eyelashes, the iconic opening shot of the 1990s MTV animated series.\"\n    }\n  ],\n  \"techniques\": [\n    \"Traditional hand-drawn cell animation\",\n    \"Extreme close-up\",\n    \"Macro perspective\"\n  ],\n  \"style_tags\": [\n    \"90s MTV aesthetic\",\n    \"avant-garde\",\n    \"surrealist\",\n    \"cyberpunk\"\n  ],\n  \"one_line\": \"Classic animation sequence showing an eye trapping a fly in its eyelashes, referencing the opening of Æon Flux.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Æon Flux",
+        "kind": "artwork",
+        "confidence": 1.0,
+        "evidence": "Extreme close-up animation of an eye trapping a fly in its eyelashes, the iconic opening shot of the 1990s MTV animated series."
+      }
+    ],
+    "techniques": [
+      "Traditional hand-drawn cell animation",
+      "Extreme close-up",
+      "Macro perspective"
+    ],
+    "style_tags": [
+      "90s MTV aesthetic",
+      "avant-garde",
+      "surrealist",
+      "cyberpunk"
+    ],
+    "one_line": "Classic animation sequence showing an eye trapping a fly in its eyelashes, referencing the opening of Æon Flux."
+  },
+  "attempts": 1
+}

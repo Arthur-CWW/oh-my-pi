@@ -1,0 +1,38 @@
+{
+  "id": "2071278369035944329-1",
+  "handle": "pleometric",
+  "status": "ok",
+  "date": "Jun 28, 2026",
+  "tweet_text": "",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Club Penguin\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.99,\n      \"evidence\": \"The model features the iconic round body, yellow beak, yellow feet, and white stomach layout of a Club Penguin avatar.\"\n    },\n    {\n      \"name\": \"Banana Hat\",\n      \"kind\": \"character\",\n      \"confidence\": 0.95,\n      \"evidence\": \"The penguin wears a yellow banana peel on its head, which is a classic headwear item from the Club Penguin catalog.\"\n    }\n  ],\n  \"techniques\": [\n    \"3D turntable animation\",\n    \"Low-poly rendering\",\n    \"Looping animation\"\n  ],\n  \"style_tags\": [\n    \"retro-gaming\",\n    \"internet-lore\",\n    \"low-poly\",\n    \"nostalgia\"\n  ],\n  \"one_line\": \"A low-poly purple Club Penguin avatar wearing a banana peel hat and heart eyes spinning on a black background.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Club Penguin",
+        "kind": "brand",
+        "confidence": 0.99,
+        "evidence": "The model features the iconic round body, yellow beak, yellow feet, and white stomach layout of a Club Penguin avatar."
+      },
+      {
+        "name": "Banana Hat",
+        "kind": "character",
+        "confidence": 0.95,
+        "evidence": "The penguin wears a yellow banana peel on its head, which is a classic headwear item from the Club Penguin catalog."
+      }
+    ],
+    "techniques": [
+      "3D turntable animation",
+      "Low-poly rendering",
+      "Looping animation"
+    ],
+    "style_tags": [
+      "retro-gaming",
+      "internet-lore",
+      "low-poly",
+      "nostalgia"
+    ],
+    "one_line": "A low-poly purple Club Penguin avatar wearing a banana peel hat and heart eyes spinning on a black background."
+  },
+  "attempts": 1
+}

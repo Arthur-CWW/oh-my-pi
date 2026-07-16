@@ -1,0 +1,50 @@
+{
+  "id": "2056455730069176362-1",
+  "handle": "pleometric",
+  "status": "ok",
+  "date": "May 18, 2026",
+  "tweet_text": "Lawsuit update",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Sam Altman\",\n      \"kind\": \"person\",\n      \"confidence\": 1.0,\n      \"evidence\": \"Man in dark suit on left corresponding to Sam Altman.\"\n    },\n    {\n      \"name\": \"Elon Musk\",\n      \"kind\": \"person\",\n      \"confidence\": 1.0,\n      \"evidence\": \"Man in white suit on right corresponding to Elon Musk.\"\n    },\n    {\n      \"name\": \"OpenAI\",\n      \"kind\": \"brand\",\n      \"confidence\": 1.0,\n      \"evidence\": \"OpenAI logo visible behind the dancer on the left.\"\n    },\n    {\n      \"name\": \"X\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.95,\n      \"evidence\": \"X logo visible behind the dancer on the right.\"\n    }\n  ],\n  \"techniques\": [\n    \"split-screen\",\n    \"AI motion transfer\",\n    \"digital cutouts\",\n    \"text overlay\"\n  ],\n  \"style_tags\": [\n    \"shitpost\",\n    \"AI-generated\",\n    \"internet-lore\"\n  ],\n  \"one_line\": \"AI-generated split-screen dance-off depicting Sam Altman as winner and Elon Musk as loser.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Sam Altman",
+        "kind": "person",
+        "confidence": 1.0,
+        "evidence": "Man in dark suit on left corresponding to Sam Altman."
+      },
+      {
+        "name": "Elon Musk",
+        "kind": "person",
+        "confidence": 1.0,
+        "evidence": "Man in white suit on right corresponding to Elon Musk."
+      },
+      {
+        "name": "OpenAI",
+        "kind": "brand",
+        "confidence": 1.0,
+        "evidence": "OpenAI logo visible behind the dancer on the left."
+      },
+      {
+        "name": "X",
+        "kind": "brand",
+        "confidence": 0.95,
+        "evidence": "X logo visible behind the dancer on the right."
+      }
+    ],
+    "techniques": [
+      "split-screen",
+      "AI motion transfer",
+      "digital cutouts",
+      "text overlay"
+    ],
+    "style_tags": [
+      "shitpost",
+      "AI-generated",
+      "internet-lore"
+    ],
+    "one_line": "AI-generated split-screen dance-off depicting Sam Altman as winner and Elon Musk as loser."
+  },
+  "attempts": 1
+}

@@ -1,0 +1,37 @@
+{
+  "id": "2055458083036430819-1",
+  "handle": "pleometric",
+  "status": "ok",
+  "date": "May 16, 2026",
+  "tweet_text": "",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Principal Shepherd\",\n      \"kind\": \"character\",\n      \"confidence\": 0.98,\n      \"evidence\": \"Principal Shepherd from the animated sitcom Family Guy is shown walking down a school hallway in his purple suit.\"\n    },\n    {\n      \"name\": \"Family Guy\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.99,\n      \"evidence\": \"The visual style and character design are from the animated TV show Family Guy.\"\n    }\n  ],\n  \"techniques\": [\n    \"text overlay\",\n    \"looping animation\",\n    \"screen recording\"\n  ],\n  \"style_tags\": [\n    \"shitposting\",\n    \"internet-lore\",\n    \"brainrot\"\n  ],\n  \"one_line\": \"Principal Shepherd from Family Guy walking down a school hallway with repetitive 'Son 😭' text overlays.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Principal Shepherd",
+        "kind": "character",
+        "confidence": 0.98,
+        "evidence": "Principal Shepherd from the animated sitcom Family Guy is shown walking down a school hallway in his purple suit."
+      },
+      {
+        "name": "Family Guy",
+        "kind": "artwork",
+        "confidence": 0.99,
+        "evidence": "The visual style and character design are from the animated TV show Family Guy."
+      }
+    ],
+    "techniques": [
+      "text overlay",
+      "looping animation",
+      "screen recording"
+    ],
+    "style_tags": [
+      "shitposting",
+      "internet-lore",
+      "brainrot"
+    ],
+    "one_line": "Principal Shepherd from Family Guy walking down a school hallway with repetitive 'Son 😭' text overlays."
+  },
+  "attempts": 1
+}

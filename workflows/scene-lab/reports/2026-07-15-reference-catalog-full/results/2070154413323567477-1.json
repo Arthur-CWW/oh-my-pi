@@ -1,0 +1,50 @@
+{
+  "id": "2070154413323567477-1",
+  "handle": "SkyeSharkie",
+  "status": "ok",
+  "date": "Jun 25, 2026",
+  "tweet_text": "",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Jude Law\",\n      \"kind\": \"person\",\n      \"confidence\": 0.99,\n      \"evidence\": \"The actor Jude Law is visually depicted in the frames wearing a blue suit and red tie.\"\n    },\n    {\n      \"name\": \"Brad Stand\",\n      \"kind\": \"character\",\n      \"confidence\": 0.95,\n      \"evidence\": \"Jude Law's character Brad Stand from the movie I Heart Huckabees, delivering his famous existential line.\"\n    },\n    {\n      \"name\": \"I Heart Huckabees\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.99,\n      \"evidence\": \"The setting, character styling, and specific dialogue 'How am I not myself?' are directly from the 2004 film directed by David O. Russell.\"\n    },\n    {\n      \"name\": \"How am I not myself?\",\n      \"kind\": \"meme\",\n      \"confidence\": 0.90,\n      \"evidence\": \"The phrase is overlaid across the bottom of the frames in white capital letters, formatted as a classic reaction image or meme.\"\n    }\n  ],\n  \"techniques\": [\n    \"impact font captioning\",\n    \"reaction GIF format\",\n    \"medium close-up\"\n  ],\n  \"style_tags\": [\n    \"existentialist\",\n    \"absurdist\",\n    \"philosophical-meme\",\n    \"internet-lore\"\n  ],\n  \"one_line\": \"A reaction clip of Brad Stand (Jude Law) in I Heart Huckabees repeating his existential crisis line 'How am I not myself?'\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Jude Law",
+        "kind": "person",
+        "confidence": 0.99,
+        "evidence": "The actor Jude Law is visually depicted in the frames wearing a blue suit and red tie."
+      },
+      {
+        "name": "Brad Stand",
+        "kind": "character",
+        "confidence": 0.95,
+        "evidence": "Jude Law's character Brad Stand from the movie I Heart Huckabees, delivering his famous existential line."
+      },
+      {
+        "name": "I Heart Huckabees",
+        "kind": "artwork",
+        "confidence": 0.99,
+        "evidence": "The setting, character styling, and specific dialogue 'How am I not myself?' are directly from the 2004 film directed by David O. Russell."
+      },
+      {
+        "name": "How am I not myself?",
+        "kind": "meme",
+        "confidence": 0.9,
+        "evidence": "The phrase is overlaid across the bottom of the frames in white capital letters, formatted as a classic reaction image or meme."
+      }
+    ],
+    "techniques": [
+      "impact font captioning",
+      "reaction GIF format",
+      "medium close-up"
+    ],
+    "style_tags": [
+      "existentialist",
+      "absurdist",
+      "philosophical-meme",
+      "internet-lore"
+    ],
+    "one_line": "A reaction clip of Brad Stand (Jude Law) in I Heart Huckabees repeating his existential crisis line 'How am I not myself?'"
+  },
+  "attempts": 1
+}

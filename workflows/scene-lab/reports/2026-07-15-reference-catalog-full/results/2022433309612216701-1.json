@@ -1,0 +1,34 @@
+{
+  "id": "2022433309612216701-1",
+  "handle": "poetengineer__",
+  "status": "ok",
+  "date": "Feb 13, 2026",
+  "tweet_text": "MORE PLAY",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Kinetic Pop Art\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.85,\n      \"evidence\": \"Multi-line retro striped typography paired with vibrant cloud-like vector patterns referencing 1970s pop art and retro graphic design.\"\n    }\n  ],\n  \"techniques\": [\n    \"kinetic typography\",\n    \"word fragmentation\",\n    \"symmetric layouts\",\n    \"corner framing\",\n    \"vector animation\"\n  ],\n  \"style_tags\": [\n    \"retro-pop\",\n    \"pop-art\",\n    \"minimalist\",\n    \"graphic-design\"\n  ],\n  \"one_line\": \"A dynamic kinetic typography piece showcasing the phrase 'MORE PLAY' fragmented across colorful cloud-shaped graphics.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Kinetic Pop Art",
+        "kind": "artwork",
+        "confidence": 0.85,
+        "evidence": "Multi-line retro striped typography paired with vibrant cloud-like vector patterns referencing 1970s pop art and retro graphic design."
+      }
+    ],
+    "techniques": [
+      "kinetic typography",
+      "word fragmentation",
+      "symmetric layouts",
+      "corner framing",
+      "vector animation"
+    ],
+    "style_tags": [
+      "retro-pop",
+      "pop-art",
+      "minimalist",
+      "graphic-design"
+    ],
+    "one_line": "A dynamic kinetic typography piece showcasing the phrase 'MORE PLAY' fragmented across colorful cloud-shaped graphics."
+  },
+  "attempts": 1
+}

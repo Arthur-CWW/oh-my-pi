@@ -1,0 +1,31 @@
+{
+  "id": "2044764591960236527-1",
+  "handle": "pleometric",
+  "status": "ok",
+  "date": "Apr 16, 2026",
+  "tweet_text": "",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Unc\",\n      \"kind\": \"meme\",\n      \"confidence\": 0.98,\n      \"evidence\": \"Video caption reads 'Unc still got it' depicting a middle-aged uncle figure.\"\n    }\n  ],\n  \"techniques\": [\n    \"Snapchat-style text overlay\",\n    \"Handheld camera tracking\",\n    \"Lo-fi resolution\"\n  ],\n  \"style_tags\": [\n    \"internet-lore\",\n    \"viral-video\",\n    \"shitpost\"\n  ],\n  \"one_line\": \"An older man slides down an asphalt path on a small board with a caption praising his youthful spirit.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Unc",
+        "kind": "meme",
+        "confidence": 0.98,
+        "evidence": "Video caption reads 'Unc still got it' depicting a middle-aged uncle figure."
+      }
+    ],
+    "techniques": [
+      "Snapchat-style text overlay",
+      "Handheld camera tracking",
+      "Lo-fi resolution"
+    ],
+    "style_tags": [
+      "internet-lore",
+      "viral-video",
+      "shitpost"
+    ],
+    "one_line": "An older man slides down an asphalt path on a small board with a caption praising his youthful spirit."
+  },
+  "attempts": 1
+}

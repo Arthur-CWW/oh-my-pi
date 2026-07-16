@@ -1,0 +1,39 @@
+{
+  "id": "2062959990252380567-1",
+  "handle": "poetengineer__",
+  "status": "ok",
+  "date": "Jun 5, 2026",
+  "tweet_text": "fed the hopfield network chinese glyphs this time - radicals and components instead of latin letters. \n\nas memory decays it starts drafting characters that don’t exist - forgetting becomes a way of inventing.",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Hopfield Network\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.95,\n      \"evidence\": \"UI layout monitors associative memory recall and decay rates\"\n    },\n    {\n      \"name\": \"Chinese Radicals\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.99,\n      \"evidence\": \"Pixelated character components like 木 and 山 mutate on screen\"\n    }\n  ],\n  \"techniques\": [\n    \"Sci-fi HUD overlay\",\n    \"Generative decay simulation\",\n    \"3D wireframe terrain rendering\",\n    \"Pixel art animation\"\n  ],\n  \"style_tags\": [\n    \"cyberpunk\",\n    \"retro-futuristic\",\n    \"generative-art\",\n    \"tech-doomer\"\n  ],\n  \"one_line\": \"A sci-fi interface visualizes Chinese glyphs dissolving and mutating as a neural network's memory decays.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Hopfield Network",
+        "kind": "artwork",
+        "confidence": 0.95,
+        "evidence": "UI layout monitors associative memory recall and decay rates"
+      },
+      {
+        "name": "Chinese Radicals",
+        "kind": "artwork",
+        "confidence": 0.99,
+        "evidence": "Pixelated character components like 木 and 山 mutate on screen"
+      }
+    ],
+    "techniques": [
+      "Sci-fi HUD overlay",
+      "Generative decay simulation",
+      "3D wireframe terrain rendering",
+      "Pixel art animation"
+    ],
+    "style_tags": [
+      "cyberpunk",
+      "retro-futuristic",
+      "generative-art",
+      "tech-doomer"
+    ],
+    "one_line": "A sci-fi interface visualizes Chinese glyphs dissolving and mutating as a neural network's memory decays."
+  },
+  "attempts": 1
+}

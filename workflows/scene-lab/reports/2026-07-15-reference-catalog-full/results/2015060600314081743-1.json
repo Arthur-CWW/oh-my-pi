@@ -1,0 +1,38 @@
+{
+  "id": "2015060600314081743-1",
+  "handle": "abelian_soup",
+  "status": "ok",
+  "date": "Jan 24, 2026",
+  "tweet_text": "this is theory, chat. Taijitu opening",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"M.C. Escher\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.98,\n      \"evidence\": \"Visual transition of a geometric grid into interlocking bird silhouettes mimics Escher's famous tessellation prints.\"\n    },\n    {\n      \"name\": \"Taijitu\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.95,\n      \"evidence\": \"Referenced in text, visually represented through the dualistic black-and-white negative space composition.\"\n    }\n  ],\n  \"techniques\": [\n    \"tessellation morphing\",\n    \"positive-negative space transition\",\n    \"vector animation\"\n  ],\n  \"style_tags\": [\n    \"op-art\",\n    \"monochrome\",\n    \"surrealist\",\n    \"math-art\"\n  ],\n  \"one_line\": \"An animation morphing a checkerboard grid into an interlocking M.C. Escher-style bird tessellation.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "M.C. Escher",
+        "kind": "artwork",
+        "confidence": 0.98,
+        "evidence": "Visual transition of a geometric grid into interlocking bird silhouettes mimics Escher's famous tessellation prints."
+      },
+      {
+        "name": "Taijitu",
+        "kind": "artwork",
+        "confidence": 0.95,
+        "evidence": "Referenced in text, visually represented through the dualistic black-and-white negative space composition."
+      }
+    ],
+    "techniques": [
+      "tessellation morphing",
+      "positive-negative space transition",
+      "vector animation"
+    ],
+    "style_tags": [
+      "op-art",
+      "monochrome",
+      "surrealist",
+      "math-art"
+    ],
+    "one_line": "An animation morphing a checkerboard grid into an interlocking M.C. Escher-style bird tessellation."
+  },
+  "attempts": 1
+}

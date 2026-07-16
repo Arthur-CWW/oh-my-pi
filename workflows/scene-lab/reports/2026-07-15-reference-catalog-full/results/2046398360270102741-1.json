@@ -1,0 +1,36 @@
+{
+  "id": "2046398360270102741-1",
+  "handle": "pleometric",
+  "status": "ok",
+  "date": "Apr 21, 2026",
+  "tweet_text": "ok hear me out: durag pleometric",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Club Penguin Penguin\",\n      \"kind\": \"character\",\n      \"confidence\": 0.98,\n      \"evidence\": \"Purple low-poly penguin avatar styled after Club Penguin.\"\n    },\n    {\n      \"name\": \"Durag\",\n      \"kind\": \"meme\",\n      \"confidence\": 0.95,\n      \"evidence\": \"The character wears a red durag tied on its head.\"\n    }\n  ],\n  \"techniques\": [\n    \"3D turntable render\",\n    \"low-poly modeling\"\n  ],\n  \"style_tags\": [\n    \"retro-gaming\",\n    \"internet-lore\",\n    \"shitpost\"\n  ],\n  \"one_line\": \"A turntable showcase of a purple low-poly Club Penguin avatar wearing a red durag.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Club Penguin Penguin",
+        "kind": "character",
+        "confidence": 0.98,
+        "evidence": "Purple low-poly penguin avatar styled after Club Penguin."
+      },
+      {
+        "name": "Durag",
+        "kind": "meme",
+        "confidence": 0.95,
+        "evidence": "The character wears a red durag tied on its head."
+      }
+    ],
+    "techniques": [
+      "3D turntable render",
+      "low-poly modeling"
+    ],
+    "style_tags": [
+      "retro-gaming",
+      "internet-lore",
+      "shitpost"
+    ],
+    "one_line": "A turntable showcase of a purple low-poly Club Penguin avatar wearing a red durag."
+  },
+  "attempts": 1
+}

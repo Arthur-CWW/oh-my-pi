@@ -1,0 +1,30 @@
+{
+  "id": "2067389155349241956-1",
+  "handle": "pleometric",
+  "status": "ok",
+  "date": "Jun 17, 2026",
+  "tweet_text": "my account got locked when I posted the first version of this post with actual spam text le meow",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Club Penguin\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.98,\n      \"evidence\": \"Low-poly purple penguin avatar styled after the online game.\"\n    }\n  ],\n  \"techniques\": [\n    \"Smash cut\",\n    \"3D animation\"\n  ],\n  \"style_tags\": [\n    \"Shitpost\",\n    \"Surrealist\",\n    \"Nostalgia-bait\"\n  ],\n  \"one_line\": \"A dancing purple Club Penguin character suddenly perishes in a massive explosion.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Club Penguin",
+        "kind": "brand",
+        "confidence": 0.98,
+        "evidence": "Low-poly purple penguin avatar styled after the online game."
+      }
+    ],
+    "techniques": [
+      "Smash cut",
+      "3D animation"
+    ],
+    "style_tags": [
+      "Shitpost",
+      "Surrealist",
+      "Nostalgia-bait"
+    ],
+    "one_line": "A dancing purple Club Penguin character suddenly perishes in a massive explosion."
+  },
+  "attempts": 1
+}

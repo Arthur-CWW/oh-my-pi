@@ -1,0 +1,45 @@
+{
+  "id": "2069786696934211959-1",
+  "handle": "pleometric",
+  "status": "ok",
+  "date": "Jun 24, 2026",
+  "tweet_text": "that was a horrible week",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Microsoft 3D Movie Maker\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.98,\n      \"evidence\": \"Penguin character asset and animation style from the 1995 software.\"\n    },\n    {\n      \"name\": \"Nokia 3310\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.95,\n      \"evidence\": \"Classic mobile phone model displaying a caller on screen.\"\n    },\n    {\n      \"name\": \"Point-and-click adventure games\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.90,\n      \"evidence\": \"Retro inventory bar, item slots, and cursor design.\"\n    }\n  ],\n  \"techniques\": [\n    \"Retro UI overlay\",\n    \"Mouth-tracking overlay\",\n    \"Sprite fire effect\",\n    \"Low-framerate 3D rendering\"\n  ],\n  \"style_tags\": [\n    \"weirdcore\",\n    \"retro-gaming\",\n    \"lo-fi\",\n    \"surrealist\"\n  ],\n  \"one_line\": \"A sick 3D Movie Maker penguin interacts with a Nokia phone in a retro game HUD and combusts.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Microsoft 3D Movie Maker",
+        "kind": "brand",
+        "confidence": 0.98,
+        "evidence": "Penguin character asset and animation style from the 1995 software."
+      },
+      {
+        "name": "Nokia 3310",
+        "kind": "brand",
+        "confidence": 0.95,
+        "evidence": "Classic mobile phone model displaying a caller on screen."
+      },
+      {
+        "name": "Point-and-click adventure games",
+        "kind": "artwork",
+        "confidence": 0.9,
+        "evidence": "Retro inventory bar, item slots, and cursor design."
+      }
+    ],
+    "techniques": [
+      "Retro UI overlay",
+      "Mouth-tracking overlay",
+      "Sprite fire effect",
+      "Low-framerate 3D rendering"
+    ],
+    "style_tags": [
+      "weirdcore",
+      "retro-gaming",
+      "lo-fi",
+      "surrealist"
+    ],
+    "one_line": "A sick 3D Movie Maker penguin interacts with a Nokia phone in a retro game HUD and combusts."
+  },
+  "attempts": 1
+}

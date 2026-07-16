@@ -1,0 +1,51 @@
+{
+  "id": "2046777890247741579-1",
+  "handle": "pleometric",
+  "status": "ok",
+  "date": "Apr 22, 2026",
+  "tweet_text": "BJM",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Luigi\",\n      \"kind\": \"character\",\n      \"confidence\": 0.99,\n      \"evidence\": \"Caricatured character wearing a green cap with 'L' and green overalls.\"\n    },\n    {\n      \"name\": \"Goomba\",\n      \"kind\": \"character\",\n      \"confidence\": 0.90,\n      \"evidence\": \"Small muscular brown figures wearing miner helmets resembling Mario enemy Goombas.\"\n    },\n    {\n      \"name\": \"Mochi 1\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.95,\n      \"evidence\": \"Purple penguin watermark logo indicating Genmo's AI model.\"\n    },\n    {\n      \"name\": \"Big John\",\n      \"kind\": \"meme\",\n      \"confidence\": 0.85,\n      \"evidence\": \"Text overlay spells out 'big John'.\"\n    }\n  ],\n  \"techniques\": [\n    \"3D character animation\",\n    \"kinetic typography\",\n    \"character distortion\",\n    \"caricature rendering\"\n  ],\n  \"style_tags\": [\n    \"brainrot\",\n    \"surrealist\",\n    \"cgi\",\n    \"shitpost\"\n  ],\n  \"one_line\": \"A surreal 3D animation featuring a distorted Luigi and miner Goombas with text overlays.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Luigi",
+        "kind": "character",
+        "confidence": 0.99,
+        "evidence": "Caricatured character wearing a green cap with 'L' and green overalls."
+      },
+      {
+        "name": "Goomba",
+        "kind": "character",
+        "confidence": 0.9,
+        "evidence": "Small muscular brown figures wearing miner helmets resembling Mario enemy Goombas."
+      },
+      {
+        "name": "Mochi 1",
+        "kind": "brand",
+        "confidence": 0.95,
+        "evidence": "Purple penguin watermark logo indicating Genmo's AI model."
+      },
+      {
+        "name": "Big John",
+        "kind": "meme",
+        "confidence": 0.85,
+        "evidence": "Text overlay spells out 'big John'."
+      }
+    ],
+    "techniques": [
+      "3D character animation",
+      "kinetic typography",
+      "character distortion",
+      "caricature rendering"
+    ],
+    "style_tags": [
+      "brainrot",
+      "surrealist",
+      "cgi",
+      "shitpost"
+    ],
+    "one_line": "A surreal 3D animation featuring a distorted Luigi and miner Goombas with text overlays."
+  },
+  "attempts": 1
+}

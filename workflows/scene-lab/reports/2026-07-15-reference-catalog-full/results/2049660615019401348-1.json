@@ -1,0 +1,36 @@
+{
+  "id": "2049660615019401348-1",
+  "handle": "pleometric",
+  "status": "ok",
+  "date": "Apr 30, 2026",
+  "tweet_text": "",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Club Penguin\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.95,\n      \"evidence\": \"Purple penguin model matching Club Penguin's aesthetic.\"\n    },\n    {\n      \"name\": \"Banana Peel Hat\",\n      \"kind\": \"meme\",\n      \"confidence\": 0.9,\n      \"evidence\": \"Yellow banana peel worn as headwear.\"\n    }\n  ],\n  \"techniques\": [\n    \"3D turntable rotation\",\n    \"Low-poly rendering\"\n  ],\n  \"style_tags\": [\n    \"internet-nostalgia\",\n    \"retro-game\",\n    \"y2k\"\n  ],\n  \"one_line\": \"Rotating low-poly purple Club Penguin character wearing a banana hat.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Club Penguin",
+        "kind": "brand",
+        "confidence": 0.95,
+        "evidence": "Purple penguin model matching Club Penguin's aesthetic."
+      },
+      {
+        "name": "Banana Peel Hat",
+        "kind": "meme",
+        "confidence": 0.9,
+        "evidence": "Yellow banana peel worn as headwear."
+      }
+    ],
+    "techniques": [
+      "3D turntable rotation",
+      "Low-poly rendering"
+    ],
+    "style_tags": [
+      "internet-nostalgia",
+      "retro-game",
+      "y2k"
+    ],
+    "one_line": "Rotating low-poly purple Club Penguin character wearing a banana hat."
+  },
+  "attempts": 1
+}

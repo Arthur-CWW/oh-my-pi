@@ -1,0 +1,40 @@
+{
+  "id": "1998018306784305400-1",
+  "handle": "abelian_soup",
+  "status": "ok",
+  "date": "Dec 8, 2025",
+  "tweet_text": "good start, but so much apophenia left on the table!\n\nFull Names Whose Successive Levenshtein Distances Appear In OEIS A375110: 'Lexicographically Earliest Sequence Of Positive Integers Such That The Pairs (a(n) mod a(n+1), a(n+1)) Are All Distinct'",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"On-Line Encyclopedia of Integer Sequences (OEIS)\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.99,\n      \"evidence\": \"Explicitly referenced in the tweet text, and sequence values are tracked and displayed in the top-left corner of the video frames.\"\n    },\n    {\n      \"name\": \"Vladimir Levenshtein\",\n      \"kind\": \"person\",\n      \"confidence\": 0.9,\n      \"evidence\": \"The text and animation measure successive Levenshtein distances (edit distance) between names, a computational metric named after him.\"\n    }\n  ],\n  \"techniques\": [\n    \"kinetic typography\",\n    \"minimalist motion graphics\",\n    \"data visualization\",\n    \"ghosting effect\",\n    \"bounding box overlay\"\n  ],\n  \"style_tags\": [\n    \"generative-art\",\n    \"minimalist\",\n    \"creative-coding\",\n    \"data-art\"\n  ],\n  \"one_line\": \"A minimalist generative animation visualizing a sequence of names mutating into each other based on Levenshtein distances matching OEIS sequence A375110.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "On-Line Encyclopedia of Integer Sequences (OEIS)",
+        "kind": "brand",
+        "confidence": 0.99,
+        "evidence": "Explicitly referenced in the tweet text, and sequence values are tracked and displayed in the top-left corner of the video frames."
+      },
+      {
+        "name": "Vladimir Levenshtein",
+        "kind": "person",
+        "confidence": 0.9,
+        "evidence": "The text and animation measure successive Levenshtein distances (edit distance) between names, a computational metric named after him."
+      }
+    ],
+    "techniques": [
+      "kinetic typography",
+      "minimalist motion graphics",
+      "data visualization",
+      "ghosting effect",
+      "bounding box overlay"
+    ],
+    "style_tags": [
+      "generative-art",
+      "minimalist",
+      "creative-coding",
+      "data-art"
+    ],
+    "one_line": "A minimalist generative animation visualizing a sequence of names mutating into each other based on Levenshtein distances matching OEIS sequence A375110."
+  },
+  "attempts": 1
+}

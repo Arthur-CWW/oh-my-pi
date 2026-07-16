@@ -1,0 +1,43 @@
+{
+  "id": "2069884764182778325-1",
+  "handle": "SkyeSharkie",
+  "status": "ok",
+  "date": "Jun 24, 2026",
+  "tweet_text": "doing some more @vibecamp_ stuff here, for the canteen and pool i had a single angle aerial shot i found online, but i don't yet have any data for any of the other buildings, so i'm messing around taking pictures from google maps and having gptimage2 improve the fidelity of them to run @MeshyAI",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Vibecamp\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.99,\n      \"evidence\": \"Mentioned in the tweet text as the destination project target.\"\n    },\n    {\n      \"name\": \"MeshyAI\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.99,\n      \"evidence\": \"Mentioned in the tweet text as the tool used for generating 3D meshes.\"\n    },\n    {\n      \"name\": \"Google Maps\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.95,\n      \"evidence\": \"Mentioned in the tweet text as the source material for the building pictures.\"\n    }\n  ],\n  \"techniques\": [\n    \"3D turntable rotation\",\n    \"low-poly rendering\",\n    \"image-to-3D asset generation\"\n  ],\n  \"style_tags\": [\n    \"indie-dev\",\n    \"tech-diy\",\n    \"spatial-computing\"\n  ],\n  \"one_line\": \"A turntable rotation of simple 3D building models reconstructed from Google Maps imagery using AI tools for Vibecamp.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Vibecamp",
+        "kind": "brand",
+        "confidence": 0.99,
+        "evidence": "Mentioned in the tweet text as the destination project target."
+      },
+      {
+        "name": "MeshyAI",
+        "kind": "brand",
+        "confidence": 0.99,
+        "evidence": "Mentioned in the tweet text as the tool used for generating 3D meshes."
+      },
+      {
+        "name": "Google Maps",
+        "kind": "brand",
+        "confidence": 0.95,
+        "evidence": "Mentioned in the tweet text as the source material for the building pictures."
+      }
+    ],
+    "techniques": [
+      "3D turntable rotation",
+      "low-poly rendering",
+      "image-to-3D asset generation"
+    ],
+    "style_tags": [
+      "indie-dev",
+      "tech-diy",
+      "spatial-computing"
+    ],
+    "one_line": "A turntable rotation of simple 3D building models reconstructed from Google Maps imagery using AI tools for Vibecamp."
+  },
+  "attempts": 1
+}

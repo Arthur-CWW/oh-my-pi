@@ -1,0 +1,38 @@
+{
+  "id": "2074275282975105530-1",
+  "handle": "SkyeSharkie",
+  "status": "ok",
+  "date": "Jul 6, 2026",
+  "tweet_text": "another one, absolutely no mathematical proceduralism here except Fable's own brain... all raw, typed out 3d model coordinates, confirmed in code",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Edwin Catmull's 1972 3D Hand\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.99,\n      \"evidence\": \"UI text explicitly reads 'CATMULL '72 HOMAGE' accompanied by a digitized low-poly 3D hand model.\"\n    },\n    {\n      \"name\": \"WebGPU\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.95,\n      \"evidence\": \"UI overlay displays 'WEBGPU' in the top-right corner.\"\n    }\n  ],\n  \"techniques\": [\n    \"3D real-time rendering\",\n    \"Gouraud shading\",\n    \"Interactive camera orbit\",\n    \"Low-polygon modeling\"\n  ],\n  \"style_tags\": [\n    \"retro-futuristic\",\n    \"computer-graphics-history\",\n    \"minimalist\"\n  ],\n  \"one_line\": \"A real-time WebGPU interactive rendering homage to Ed Catmull's pioneering 1972 digitized 3D hand.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Edwin Catmull's 1972 3D Hand",
+        "kind": "artwork",
+        "confidence": 0.99,
+        "evidence": "UI text explicitly reads 'CATMULL '72 HOMAGE' accompanied by a digitized low-poly 3D hand model."
+      },
+      {
+        "name": "WebGPU",
+        "kind": "brand",
+        "confidence": 0.95,
+        "evidence": "UI overlay displays 'WEBGPU' in the top-right corner."
+      }
+    ],
+    "techniques": [
+      "3D real-time rendering",
+      "Gouraud shading",
+      "Interactive camera orbit",
+      "Low-polygon modeling"
+    ],
+    "style_tags": [
+      "retro-futuristic",
+      "computer-graphics-history",
+      "minimalist"
+    ],
+    "one_line": "A real-time WebGPU interactive rendering homage to Ed Catmull's pioneering 1972 digitized 3D hand."
+  },
+  "attempts": 1
+}

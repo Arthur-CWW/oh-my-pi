@@ -1,0 +1,37 @@
+{
+  "id": "1991743943294464465-1",
+  "handle": "abelian_soup",
+  "status": "ok",
+  "date": "Nov 21, 2025",
+  "tweet_text": "now down to 20 seconds gist.github.com/abeliansoup/…",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"You Know I Had to Do It to 'Em\",\n      \"kind\": \"meme\",\n      \"confidence\": 0.9,\n      \"evidence\": \"Crow clasps wings in front of chest in the classic meme stance.\"\n    },\n    {\n      \"name\": \"Crow\",\n      \"kind\": \"character\",\n      \"confidence\": 0.95,\n      \"evidence\": \"Pixel art crow is the central subject.\"\n    }\n  ],\n  \"techniques\": [\n    \"Pixel art animation\",\n    \"Sprite sheet animation\",\n    \"Text bubble overlay\"\n  ],\n  \"style_tags\": [\n    \"retro-gaming\",\n    \"internet-lore\",\n    \"minimalist\"\n  ],\n  \"one_line\": \"Pixel art animation of a crow striking a meme pose and displaying a 'CLAIM' speech bubble.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "You Know I Had to Do It to 'Em",
+        "kind": "meme",
+        "confidence": 0.9,
+        "evidence": "Crow clasps wings in front of chest in the classic meme stance."
+      },
+      {
+        "name": "Crow",
+        "kind": "character",
+        "confidence": 0.95,
+        "evidence": "Pixel art crow is the central subject."
+      }
+    ],
+    "techniques": [
+      "Pixel art animation",
+      "Sprite sheet animation",
+      "Text bubble overlay"
+    ],
+    "style_tags": [
+      "retro-gaming",
+      "internet-lore",
+      "minimalist"
+    ],
+    "one_line": "Pixel art animation of a crow striking a meme pose and displaying a 'CLAIM' speech bubble."
+  },
+  "attempts": 1
+}

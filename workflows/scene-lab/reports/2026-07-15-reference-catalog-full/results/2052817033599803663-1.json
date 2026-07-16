@@ -1,0 +1,47 @@
+{
+  "id": "2052817033599803663-1",
+  "handle": "pleometric",
+  "status": "ok",
+  "date": "May 8, 2026",
+  "tweet_text": "Claude's Code... Enjoy Your Weekend...",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Claude\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.9,\n      \"evidence\": \"Mentioned in the tweet text 'Claude's Code... Enjoy Your Weekend...', framing the dancing mascot as a celebration of successful AI code generation.\"\n    },\n    {\n      \"name\": \"OutRun\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.85,\n      \"evidence\": \"The sunset highway backdrop with a sports car references the classic Sega arcade racer aesthetic.\"\n    },\n    {\n      \"name\": \"City Pop\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.8,\n      \"evidence\": \"The retro Japanese neon signs, night cityscapes, and laidback vibe heavily reference the 1980s Japanese City Pop aesthetic.\"\n    }\n  ],\n  \"techniques\": [\n    \"CRT scanlines\",\n    \"VHS glitch effects\",\n    \"Chromatic aberration\",\n    \"Loop animation\",\n    \"Kinetic typography\"\n  ],\n  \"style_tags\": [\n    \"synthwave\",\n    \"vaporwave\",\n    \"retro-futuristic\",\n    \"city-pop\",\n    \"lofi\"\n  ],\n  \"one_line\": \"A retro CRT-style loop of a sun-headed character in a suit dancing against neon cityscapes and highway backdrops to celebrate functioning code.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Claude",
+        "kind": "brand",
+        "confidence": 0.9,
+        "evidence": "Mentioned in the tweet text 'Claude's Code... Enjoy Your Weekend...', framing the dancing mascot as a celebration of successful AI code generation."
+      },
+      {
+        "name": "OutRun",
+        "kind": "artwork",
+        "confidence": 0.85,
+        "evidence": "The sunset highway backdrop with a sports car references the classic Sega arcade racer aesthetic."
+      },
+      {
+        "name": "City Pop",
+        "kind": "artwork",
+        "confidence": 0.8,
+        "evidence": "The retro Japanese neon signs, night cityscapes, and laidback vibe heavily reference the 1980s Japanese City Pop aesthetic."
+      }
+    ],
+    "techniques": [
+      "CRT scanlines",
+      "VHS glitch effects",
+      "Chromatic aberration",
+      "Loop animation",
+      "Kinetic typography"
+    ],
+    "style_tags": [
+      "synthwave",
+      "vaporwave",
+      "retro-futuristic",
+      "city-pop",
+      "lofi"
+    ],
+    "one_line": "A retro CRT-style loop of a sun-headed character in a suit dancing against neon cityscapes and highway backdrops to celebrate functioning code."
+  },
+  "attempts": 1
+}

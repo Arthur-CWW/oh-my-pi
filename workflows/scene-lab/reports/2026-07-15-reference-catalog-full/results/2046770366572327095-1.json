@@ -1,0 +1,36 @@
+{
+  "id": "2046770366572327095-1",
+  "handle": "pleometric",
+  "status": "ok",
+  "date": "Apr 22, 2026",
+  "tweet_text": "OK I got it: tiny hats but with a strand of hair...",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Club Penguin\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.95,\n      \"evidence\": \"Purple low-poly penguin avatar with classic yellow beak, yellow feet, and white belly.\"\n    },\n    {\n      \"name\": \"Fez\",\n      \"kind\": \"meme\",\n      \"confidence\": 0.9,\n      \"evidence\": \"Red cylindrical fez hat with a black tassel worn by the penguin character.\"\n    }\n  ],\n  \"techniques\": [\n    \"3D model turntable\",\n    \"low-poly rendering\"\n  ],\n  \"style_tags\": [\n    \"retro-game-aesthetic\",\n    \"internet-lore\",\n    \"web-nostalgia\"\n  ],\n  \"one_line\": \"A turntable rotation of a purple low-poly Club Penguin avatar wearing a red fez.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Club Penguin",
+        "kind": "brand",
+        "confidence": 0.95,
+        "evidence": "Purple low-poly penguin avatar with classic yellow beak, yellow feet, and white belly."
+      },
+      {
+        "name": "Fez",
+        "kind": "meme",
+        "confidence": 0.9,
+        "evidence": "Red cylindrical fez hat with a black tassel worn by the penguin character."
+      }
+    ],
+    "techniques": [
+      "3D model turntable",
+      "low-poly rendering"
+    ],
+    "style_tags": [
+      "retro-game-aesthetic",
+      "internet-lore",
+      "web-nostalgia"
+    ],
+    "one_line": "A turntable rotation of a purple low-poly Club Penguin avatar wearing a red fez."
+  },
+  "attempts": 1
+}

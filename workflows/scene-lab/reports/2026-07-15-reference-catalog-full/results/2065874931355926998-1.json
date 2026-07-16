@@ -1,0 +1,38 @@
+{
+  "id": "2065874931355926998-1",
+  "handle": "pleometric",
+  "status": "ok",
+  "date": "Jun 13, 2026",
+  "tweet_text": "I have met over 30 mutuals these past 3 weeks",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Club Penguin\",\n      \"kind\": \"character\",\n      \"confidence\": 0.9,\n      \"evidence\": \"Purple penguins with heart eyes, one wearing a banana peel hat, another wearing a Japanese hachimaki headband, and a third wearing a blue cap, styled after the Club Penguin avatar aesthetic.\"\n    },\n    {\n      \"name\": \"Dancing Cylinder\",\n      \"kind\": \"meme\",\n      \"confidence\": 0.95,\n      \"evidence\": \"Two brown wooden cylinder-shaped figures with smug human-like faces dancing symmetrically in the upper corners.\"\n    }\n  ],\n  \"techniques\": [\n    \"Heart tunnel background\",\n    \"Animation loop\",\n    \"Symmetrical framing\"\n  ],\n  \"style_tags\": [\n    \"shitpost\",\n    \"webcore\",\n    \"cutecore\",\n    \"surrealist\"\n  ],\n  \"one_line\": \"A surreal shitpost animation loop featuring dancing Club Penguin avatars and wooden cylinders over a pulsing neon heart tunnel.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Club Penguin",
+        "kind": "character",
+        "confidence": 0.9,
+        "evidence": "Purple penguins with heart eyes, one wearing a banana peel hat, another wearing a Japanese hachimaki headband, and a third wearing a blue cap, styled after the Club Penguin avatar aesthetic."
+      },
+      {
+        "name": "Dancing Cylinder",
+        "kind": "meme",
+        "confidence": 0.95,
+        "evidence": "Two brown wooden cylinder-shaped figures with smug human-like faces dancing symmetrically in the upper corners."
+      }
+    ],
+    "techniques": [
+      "Heart tunnel background",
+      "Animation loop",
+      "Symmetrical framing"
+    ],
+    "style_tags": [
+      "shitpost",
+      "webcore",
+      "cutecore",
+      "surrealist"
+    ],
+    "one_line": "A surreal shitpost animation loop featuring dancing Club Penguin avatars and wooden cylinders over a pulsing neon heart tunnel."
+  },
+  "attempts": 1
+}

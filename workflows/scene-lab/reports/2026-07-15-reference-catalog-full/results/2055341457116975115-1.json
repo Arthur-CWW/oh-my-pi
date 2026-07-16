@@ -1,0 +1,51 @@
+{
+  "id": "2055341457116975115-1",
+  "handle": "poetengineer__",
+  "status": "ok",
+  "date": "May 15, 2026",
+  "tweet_text": "i made a reading interface for spinoza and its commentaries throughout centuries, inspire by talmud:\n- scroll to adjust each era's thickness\n- hover to discover cross-references between commentators\n\nsrc code for subscribers ↓",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Baruch Spinoza\",\n      \"kind\": \"person\",\n      \"confidence\": 0.99,\n      \"evidence\": \"The title of the interface reads 'SPINOZA ETHICS II PROPOSITION 7' and contains text from Spinoza's Ethics.\"\n    },\n    {\n      \"name\": \"Talmud\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.95,\n      \"evidence\": \"The layout features a central text surrounded by concentric columns of commentary from different eras, mimicking the traditional Talmudic page layout.\"\n    },\n    {\n      \"name\": \"Gottfried Wilhelm Leibniz\",\n      \"kind\": \"person\",\n      \"confidence\": 0.95,\n      \"evidence\": \"Leibniz is mentioned in the 'EARLY' era column and the central text area discussing his annotations.\"\n    },\n    {\n      \"name\": \"G. W. F. Hegel\",\n      \"kind\": \"person\",\n      \"confidence\": 0.95,\n      \"evidence\": \"Hegel is mentioned under the 'IDEALISM' era column discussing his lectures on the history of philosophy.\"\n    }\n  ],\n  \"techniques\": [\n    \"dynamic column resizing\",\n    \"interactive tooltips\",\n    \"relationship connector lines\",\n    \"screen recording demonstration\"\n  ],\n  \"style_tags\": [\n    \"digital humanities\",\n    \"data visualization\",\n    \"intellectual history\",\n    \"minimalist UI\"\n  ],\n  \"one_line\": \"An interactive digital reading interface mapping historical commentary on Spinoza's Ethics using a Talmud-inspired layout and dynamic relationship connectors.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Baruch Spinoza",
+        "kind": "person",
+        "confidence": 0.99,
+        "evidence": "The title of the interface reads 'SPINOZA ETHICS II PROPOSITION 7' and contains text from Spinoza's Ethics."
+      },
+      {
+        "name": "Talmud",
+        "kind": "artwork",
+        "confidence": 0.95,
+        "evidence": "The layout features a central text surrounded by concentric columns of commentary from different eras, mimicking the traditional Talmudic page layout."
+      },
+      {
+        "name": "Gottfried Wilhelm Leibniz",
+        "kind": "person",
+        "confidence": 0.95,
+        "evidence": "Leibniz is mentioned in the 'EARLY' era column and the central text area discussing his annotations."
+      },
+      {
+        "name": "G. W. F. Hegel",
+        "kind": "person",
+        "confidence": 0.95,
+        "evidence": "Hegel is mentioned under the 'IDEALISM' era column discussing his lectures on the history of philosophy."
+      }
+    ],
+    "techniques": [
+      "dynamic column resizing",
+      "interactive tooltips",
+      "relationship connector lines",
+      "screen recording demonstration"
+    ],
+    "style_tags": [
+      "digital humanities",
+      "data visualization",
+      "intellectual history",
+      "minimalist UI"
+    ],
+    "one_line": "An interactive digital reading interface mapping historical commentary on Spinoza's Ethics using a Talmud-inspired layout and dynamic relationship connectors."
+  },
+  "attempts": 1
+}

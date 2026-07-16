@@ -1,0 +1,31 @@
+{
+  "id": "2070440512897847323-1",
+  "handle": "SkyeSharkie",
+  "status": "ok",
+  "date": "Jun 26, 2026",
+  "tweet_text": "some more progress on 3d @vibecamp_, messing around with tree placement, obviously the trees won't be exact to the real ones, but i'm trying to get mostly correct species at least... building placeholders are really highpoly and have some inaccuracies regarding like door styles and stuff, but i'll be replacing them with authored lowpolies later... i could use more regular ground level images from around vc, btw, to get more information about small incidental things on the ground like the slide and bench that i've already located",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"vibecamp\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.99,\n      \"evidence\": \"Visual recreation of camp venue cabins and explicit mention in the tweet text.\"\n    }\n  ],\n  \"techniques\": [\n    \"3D camera flythrough\",\n    \"Viewport screen recording\",\n    \"3D environment blockout\"\n  ],\n  \"style_tags\": [\n    \"Indie devlog\",\n    \"Virtual world building\",\n    \"Lofi 3D rendering\"\n  ],\n  \"one_line\": \"A viewport flythrough showing progress on a 3D recreation of the Vibecamp venue layout.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "vibecamp",
+        "kind": "brand",
+        "confidence": 0.99,
+        "evidence": "Visual recreation of camp venue cabins and explicit mention in the tweet text."
+      }
+    ],
+    "techniques": [
+      "3D camera flythrough",
+      "Viewport screen recording",
+      "3D environment blockout"
+    ],
+    "style_tags": [
+      "Indie devlog",
+      "Virtual world building",
+      "Lofi 3D rendering"
+    ],
+    "one_line": "A viewport flythrough showing progress on a 3D recreation of the Vibecamp venue layout."
+  },
+  "attempts": 1
+}

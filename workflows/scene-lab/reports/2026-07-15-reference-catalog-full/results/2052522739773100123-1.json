@@ -1,0 +1,45 @@
+{
+  "id": "2052522739773100123-1",
+  "handle": "pleometric",
+  "status": "ok",
+  "date": "May 7, 2026",
+  "tweet_text": "✶ Dancing...",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Sun-headed character\",\n      \"kind\": \"character\",\n      \"confidence\": 0.9,\n      \"evidence\": \"3D suit-wearing figure with sunglasses and orange sun rays around its face.\"\n    },\n    {\n      \"name\": \"Mandelbrot fractal\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.95,\n      \"evidence\": \"Psychedelic, multicolored swirling mathematical fractal patterns in the background.\"\n    },\n    {\n      \"name\": \"Fog Lamps\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.85,\n      \"evidence\": \"Stylized text overlay reading 'FOG LAMPS' at the bottom of the frame.\"\n    }\n  ],\n  \"techniques\": [\n    \"character cloning\",\n    \"kinetic typography\",\n    \"3D animation loops\",\n    \"chromatic aberration\"\n  ],\n  \"style_tags\": [\n    \"weirdcore\",\n    \"cyberdelic\",\n    \"programmer-humor\",\n    \"surrealist\"\n  ],\n  \"one_line\": \"Sun-headed suit avatar dancing amidst colorful fractals and floating developer action verbs.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Sun-headed character",
+        "kind": "character",
+        "confidence": 0.9,
+        "evidence": "3D suit-wearing figure with sunglasses and orange sun rays around its face."
+      },
+      {
+        "name": "Mandelbrot fractal",
+        "kind": "artwork",
+        "confidence": 0.95,
+        "evidence": "Psychedelic, multicolored swirling mathematical fractal patterns in the background."
+      },
+      {
+        "name": "Fog Lamps",
+        "kind": "brand",
+        "confidence": 0.85,
+        "evidence": "Stylized text overlay reading 'FOG LAMPS' at the bottom of the frame."
+      }
+    ],
+    "techniques": [
+      "character cloning",
+      "kinetic typography",
+      "3D animation loops",
+      "chromatic aberration"
+    ],
+    "style_tags": [
+      "weirdcore",
+      "cyberdelic",
+      "programmer-humor",
+      "surrealist"
+    ],
+    "one_line": "Sun-headed suit avatar dancing amidst colorful fractals and floating developer action verbs."
+  },
+  "attempts": 1
+}

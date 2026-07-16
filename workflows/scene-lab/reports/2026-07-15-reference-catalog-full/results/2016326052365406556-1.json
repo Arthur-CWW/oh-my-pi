@@ -1,0 +1,37 @@
+{
+  "id": "2016326052365406556-1",
+  "handle": "abelian_soup",
+  "status": "ok",
+  "date": "Jan 28, 2026",
+  "tweet_text": "this with antipatterns repelling boxes from your cursor, mandatory potion upsells to heal theta burn and fog of war price discovery",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Euphoria Finance\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.99,\n      \"evidence\": \"Brand logo 'euphoria' and URL 'testnet.euphoria.finance' visible in browser frame\"\n    },\n    {\n      \"name\": \"Ethereum\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.9,\n      \"evidence\": \"Asset price tracking around 3820, matching ETH/USD trading range\"\n    }\n  ],\n  \"techniques\": [\n    \"screen recording\",\n    \"real-time data visualization\",\n    \"interactive UI demonstration\"\n  ],\n  \"style_tags\": [\n    \"gamified-finance\",\n    \"dark-mode\",\n    \"cyberpunk-ui\"\n  ],\n  \"one_line\": \"Mobile screen capture demonstrating gamified options trading on the Euphoria testnet interface\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Euphoria Finance",
+        "kind": "brand",
+        "confidence": 0.99,
+        "evidence": "Brand logo 'euphoria' and URL 'testnet.euphoria.finance' visible in browser frame"
+      },
+      {
+        "name": "Ethereum",
+        "kind": "brand",
+        "confidence": 0.9,
+        "evidence": "Asset price tracking around 3820, matching ETH/USD trading range"
+      }
+    ],
+    "techniques": [
+      "screen recording",
+      "real-time data visualization",
+      "interactive UI demonstration"
+    ],
+    "style_tags": [
+      "gamified-finance",
+      "dark-mode",
+      "cyberpunk-ui"
+    ],
+    "one_line": "Mobile screen capture demonstrating gamified options trading on the Euphoria testnet interface"
+  },
+  "attempts": 1
+}

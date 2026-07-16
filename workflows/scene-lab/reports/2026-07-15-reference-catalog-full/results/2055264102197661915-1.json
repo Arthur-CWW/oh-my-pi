@@ -1,0 +1,38 @@
+{
+  "id": "2055264102197661915-1",
+  "handle": "abelian_soup",
+  "status": "ok",
+  "date": "May 15, 2026",
+  "tweet_text": "",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Mira Calligraphiae Monumenta\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.99,\n      \"evidence\": \"Renaissance nature illuminations with Latin inscriptions within gold ovals.\"\n    },\n    {\n      \"name\": \"Joris Hoefnagel\",\n      \"kind\": \"person\",\n      \"confidence\": 0.98,\n      \"evidence\": \"16th-century Flemish artist known for these specific natural history manuscript illuminations.\"\n    }\n  ],\n  \"techniques\": [\n    \"Slide-show transitions\",\n    \"Zooming\",\n    \"Pacing cuts\"\n  ],\n  \"style_tags\": [\n    \"academic\",\n    \"renaissance-art\",\n    \"scientific-illustration\",\n    \"archival\"\n  ],\n  \"one_line\": \"A showcase of 16th-century natural history plates by Joris Hoefnagel.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Mira Calligraphiae Monumenta",
+        "kind": "artwork",
+        "confidence": 0.99,
+        "evidence": "Renaissance nature illuminations with Latin inscriptions within gold ovals."
+      },
+      {
+        "name": "Joris Hoefnagel",
+        "kind": "person",
+        "confidence": 0.98,
+        "evidence": "16th-century Flemish artist known for these specific natural history manuscript illuminations."
+      }
+    ],
+    "techniques": [
+      "Slide-show transitions",
+      "Zooming",
+      "Pacing cuts"
+    ],
+    "style_tags": [
+      "academic",
+      "renaissance-art",
+      "scientific-illustration",
+      "archival"
+    ],
+    "one_line": "A showcase of 16th-century natural history plates by Joris Hoefnagel."
+  },
+  "attempts": 1
+}

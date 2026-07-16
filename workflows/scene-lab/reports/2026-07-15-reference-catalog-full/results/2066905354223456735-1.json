@@ -1,0 +1,40 @@
+{
+  "id": "2066905354223456735-1",
+  "handle": "pleometric",
+  "status": "ok",
+  "date": "Jun 16, 2026",
+  "tweet_text": "may I propose I solution",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Club Penguin\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.99,\n      \"evidence\": \"The purple character is a low-poly 3D model of the customizable player penguin avatar from the Disney MMO game Club Penguin.\"\n    },\n    {\n      \"name\": \"Santa Hat\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.95,\n      \"evidence\": \"The penguin is wearing the classic red and white Christmas hat accessory common in the game.\"\n    }\n  ],\n  \"techniques\": [\n    \"Abrupt cut\",\n    \"3D character animation\",\n    \"Low-poly rendering\",\n    \"Visual juxtaposition\"\n  ],\n  \"style_tags\": [\n    \"shitpost\",\n    \"surrealist\",\n    \"gaming-nostalgia\",\n    \"internet-lore\",\n    \"chaotic\"\n  ],\n  \"one_line\": \"A cute 3D Club Penguin character dancing with heart eyes is abruptly cut to a massive, chaotic explosion.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Club Penguin",
+        "kind": "brand",
+        "confidence": 0.99,
+        "evidence": "The purple character is a low-poly 3D model of the customizable player penguin avatar from the Disney MMO game Club Penguin."
+      },
+      {
+        "name": "Santa Hat",
+        "kind": "artwork",
+        "confidence": 0.95,
+        "evidence": "The penguin is wearing the classic red and white Christmas hat accessory common in the game."
+      }
+    ],
+    "techniques": [
+      "Abrupt cut",
+      "3D character animation",
+      "Low-poly rendering",
+      "Visual juxtaposition"
+    ],
+    "style_tags": [
+      "shitpost",
+      "surrealist",
+      "gaming-nostalgia",
+      "internet-lore",
+      "chaotic"
+    ],
+    "one_line": "A cute 3D Club Penguin character dancing with heart eyes is abruptly cut to a massive, chaotic explosion."
+  },
+  "attempts": 1
+}

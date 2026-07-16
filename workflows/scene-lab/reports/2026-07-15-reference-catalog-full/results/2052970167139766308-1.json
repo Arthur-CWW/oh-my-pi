@@ -1,0 +1,37 @@
+{
+  "id": "2052970167139766308-1",
+  "handle": "pleometric",
+  "status": "ok",
+  "date": "May 9, 2026",
+  "tweet_text": "make big accounts seethe with this one weird trick",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Club Penguin\",\n      \"kind\": \"character\",\n      \"confidence\": 0.98,\n      \"evidence\": \"Pink penguin sprite with heart eyes and custom purple penguin label on the pill bottle.\"\n    },\n    {\n      \"name\": \"Male Enhancement Spam Ads\",\n      \"kind\": \"meme\",\n      \"confidence\": 0.95,\n      \"evidence\": \"Parody banner layout reading 'ENLARGE YOUR AUDIENCE' with pill bottles and click here prompts.\"\n    }\n  ],\n  \"techniques\": [\n    \"Collage\",\n    \"GIF animation\",\n    \"Text overlay\"\n  ],\n  \"style_tags\": [\n    \"ironic-ad\",\n    \"shitpost\",\n    \"web-retro\"\n  ],\n  \"one_line\": \"An ironic Web 1.0 banner ad parodying audience-growth strategies using Club Penguin graphics.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Club Penguin",
+        "kind": "character",
+        "confidence": 0.98,
+        "evidence": "Pink penguin sprite with heart eyes and custom purple penguin label on the pill bottle."
+      },
+      {
+        "name": "Male Enhancement Spam Ads",
+        "kind": "meme",
+        "confidence": 0.95,
+        "evidence": "Parody banner layout reading 'ENLARGE YOUR AUDIENCE' with pill bottles and click here prompts."
+      }
+    ],
+    "techniques": [
+      "Collage",
+      "GIF animation",
+      "Text overlay"
+    ],
+    "style_tags": [
+      "ironic-ad",
+      "shitpost",
+      "web-retro"
+    ],
+    "one_line": "An ironic Web 1.0 banner ad parodying audience-growth strategies using Club Penguin graphics."
+  },
+  "attempts": 1
+}

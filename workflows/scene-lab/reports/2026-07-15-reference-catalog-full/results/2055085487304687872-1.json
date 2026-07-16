@@ -1,0 +1,42 @@
+{
+  "id": "2055085487304687872-1",
+  "handle": "abelian_soup",
+  "status": "ok",
+  "date": "May 15, 2026",
+  "tweet_text": "I generated five thousand AI knockoffs then selected the worst of them to showcase how far \"state of the art\" is from approximating real art",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"The Expulsion of Adam and Eve from Paradise\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.95,\n      \"evidence\": \"Frame 1 shows the angel banishing Adam and Eve, matching Benjamin West's neoclassical painting.\"\n    },\n    {\n      \"name\": \"Medieval Jousting Manuscript\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.85,\n      \"evidence\": \"Frame 3 shows a watercolor illustration of tournament jousting in historical manuscript style.\"\n    },\n    {\n      \"name\": \"The Three Graces\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.85,\n      \"evidence\": \"Frame 4 features a classical chalk sketch of three female figures and a cherub.\"\n    }\n  ],\n  \"techniques\": [\n    \"Slideshow transitions\",\n    \"Static framing\"\n  ],\n  \"style_tags\": [\n    \"Classical art\",\n    \"Art criticism\",\n    \"Fine art mimicry\"\n  ],\n  \"one_line\": \"A presentation of AI-generated approximations attempting to replicate classical historical artworks.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "The Expulsion of Adam and Eve from Paradise",
+        "kind": "artwork",
+        "confidence": 0.95,
+        "evidence": "Frame 1 shows the angel banishing Adam and Eve, matching Benjamin West's neoclassical painting."
+      },
+      {
+        "name": "Medieval Jousting Manuscript",
+        "kind": "artwork",
+        "confidence": 0.85,
+        "evidence": "Frame 3 shows a watercolor illustration of tournament jousting in historical manuscript style."
+      },
+      {
+        "name": "The Three Graces",
+        "kind": "artwork",
+        "confidence": 0.85,
+        "evidence": "Frame 4 features a classical chalk sketch of three female figures and a cherub."
+      }
+    ],
+    "techniques": [
+      "Slideshow transitions",
+      "Static framing"
+    ],
+    "style_tags": [
+      "Classical art",
+      "Art criticism",
+      "Fine art mimicry"
+    ],
+    "one_line": "A presentation of AI-generated approximations attempting to replicate classical historical artworks."
+  },
+  "attempts": 1
+}

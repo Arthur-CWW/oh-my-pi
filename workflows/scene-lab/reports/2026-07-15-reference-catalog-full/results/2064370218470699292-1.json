@@ -1,0 +1,32 @@
+{
+  "id": "2064370218470699292-1",
+  "handle": "poetengineer__",
+  "status": "ok",
+  "date": "Jun 9, 2026",
+  "tweet_text": "luminous",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Vintage Vector Computer Graphics\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.90,\n      \"evidence\": \"Monochrome wireframe grids, coordinate scales, and particle plots mimicking 1980s terminal displays.\"\n    }\n  ],\n  \"techniques\": [\n    \"Wireframe rendering\",\n    \"CRT display emulation\",\n    \"Chromatic aberration\",\n    \"Vector line animation\"\n  ],\n  \"style_tags\": [\n    \"retro-futuristic\",\n    \"cyberpunk\",\n    \"analog-horror\"\n  ],\n  \"one_line\": \"Vector wireframe animation of a sphere hovering over terrain on a simulated retro CRT terminal.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Vintage Vector Computer Graphics",
+        "kind": "artwork",
+        "confidence": 0.9,
+        "evidence": "Monochrome wireframe grids, coordinate scales, and particle plots mimicking 1980s terminal displays."
+      }
+    ],
+    "techniques": [
+      "Wireframe rendering",
+      "CRT display emulation",
+      "Chromatic aberration",
+      "Vector line animation"
+    ],
+    "style_tags": [
+      "retro-futuristic",
+      "cyberpunk",
+      "analog-horror"
+    ],
+    "one_line": "Vector wireframe animation of a sphere hovering over terrain on a simulated retro CRT terminal."
+  },
+  "attempts": 1
+}

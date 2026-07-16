@@ -1,0 +1,29 @@
+{
+  "id": "2073693270346174656-1",
+  "handle": "SkyeSharkie",
+  "status": "ok",
+  "date": "Jul 5, 2026",
+  "tweet_text": "spider with a tophat lol, also the one with the cyan wings looks like someones oc fursona or something xD",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Spore\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.95,\n      \"evidence\": \"Modular animated 3D creature designs and walk cycles typical of the Spore Creature Creator.\"\n    }\n  ],\n  \"techniques\": [\n    \"3D character animation\",\n    \"Walk cycle simulation\"\n  ],\n  \"style_tags\": [\n    \"retro-gaming\",\n    \"surrealist\"\n  ],\n  \"one_line\": \"A lineup of custom low-poly 3D creatures showing off walk animations.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Spore",
+        "kind": "brand",
+        "confidence": 0.95,
+        "evidence": "Modular animated 3D creature designs and walk cycles typical of the Spore Creature Creator."
+      }
+    ],
+    "techniques": [
+      "3D character animation",
+      "Walk cycle simulation"
+    ],
+    "style_tags": [
+      "retro-gaming",
+      "surrealist"
+    ],
+    "one_line": "A lineup of custom low-poly 3D creatures showing off walk animations."
+  },
+  "attempts": 1
+}

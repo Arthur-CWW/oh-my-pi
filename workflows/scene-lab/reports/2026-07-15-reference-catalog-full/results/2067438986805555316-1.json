@@ -1,0 +1,31 @@
+{
+  "id": "2067438986805555316-1",
+  "handle": "pleometric",
+  "status": "ok",
+  "date": "Jun 18, 2026",
+  "tweet_text": "Pre-Order @midjourney's sensory-isolation tanks for full dive VR today!",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Midjourney\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.99,\n      \"evidence\": \"Midjourney sailboat logo in the upper right corner and brand mention in the tweet text.\"\n    }\n  ],\n  \"techniques\": [\n    \"glitch effects\",\n    \"scanlines\",\n    \"3D rendering\"\n  ],\n  \"style_tags\": [\n    \"retro-futuristic\",\n    \"cyberpunk\",\n    \"surrealist\"\n  ],\n  \"one_line\": \"A mock advertisement for a Midjourney-branded sensory-isolation VR suit.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Midjourney",
+        "kind": "brand",
+        "confidence": 0.99,
+        "evidence": "Midjourney sailboat logo in the upper right corner and brand mention in the tweet text."
+      }
+    ],
+    "techniques": [
+      "glitch effects",
+      "scanlines",
+      "3D rendering"
+    ],
+    "style_tags": [
+      "retro-futuristic",
+      "cyberpunk",
+      "surrealist"
+    ],
+    "one_line": "A mock advertisement for a Midjourney-branded sensory-isolation VR suit."
+  },
+  "attempts": 1
+}

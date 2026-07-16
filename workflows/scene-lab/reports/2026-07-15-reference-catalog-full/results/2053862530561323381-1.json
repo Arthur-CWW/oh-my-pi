@@ -1,0 +1,44 @@
+{
+  "id": "2053862530561323381-1",
+  "handle": "pleometric",
+  "status": "ok",
+  "date": "May 11, 2026",
+  "tweet_text": "Darwin didn't wrote among the machines you STUPID PENGUIN argument invalid",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Club Penguin\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.99,\n      \"evidence\": \"3D purple penguin avatar with heart eyes and a Santa hat.\"\n    },\n    {\n      \"name\": \"Darwin among the Machines\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.95,\n      \"evidence\": \"Tweet text references the title of Samuel Butler's 1863 article.\"\n    },\n    {\n      \"name\": \"Samuel Butler\",\n      \"kind\": \"person\",\n      \"confidence\": 0.90,\n      \"evidence\": \"Implicitly referenced as the actual author of 'Darwin among the Machines'.\"\n    }\n  ],\n  \"techniques\": [\n    \"3D animation\",\n    \"Chroma keying\",\n    \"Explosion visual effect overlay\",\n    \"Match cut\"\n  ],\n  \"style_tags\": [\n    \"internet-lore\",\n    \"shitpost\",\n    \"academic-meme\"\n  ],\n  \"one_line\": \"A dancing Club Penguin character is vaporized by an explosion after its Darwin citation is corrected.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Club Penguin",
+        "kind": "brand",
+        "confidence": 0.99,
+        "evidence": "3D purple penguin avatar with heart eyes and a Santa hat."
+      },
+      {
+        "name": "Darwin among the Machines",
+        "kind": "artwork",
+        "confidence": 0.95,
+        "evidence": "Tweet text references the title of Samuel Butler's 1863 article."
+      },
+      {
+        "name": "Samuel Butler",
+        "kind": "person",
+        "confidence": 0.9,
+        "evidence": "Implicitly referenced as the actual author of 'Darwin among the Machines'."
+      }
+    ],
+    "techniques": [
+      "3D animation",
+      "Chroma keying",
+      "Explosion visual effect overlay",
+      "Match cut"
+    ],
+    "style_tags": [
+      "internet-lore",
+      "shitpost",
+      "academic-meme"
+    ],
+    "one_line": "A dancing Club Penguin character is vaporized by an explosion after its Darwin citation is corrected."
+  },
+  "attempts": 1
+}

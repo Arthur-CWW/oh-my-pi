@@ -1,0 +1,37 @@
+{
+  "id": "2073750668612129244-1",
+  "handle": "SkyeSharkie",
+  "status": "ok",
+  "date": "Jul 5, 2026",
+  "tweet_text": "some more test creatures:",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Virtual Creatures simulation\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.8,\n      \"evidence\": \"Low-poly procedural animals designed for locomotion physics testing.\"\n    },\n    {\n      \"name\": \"Totally Accurate Battle Simulator\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.7,\n      \"evidence\": \"Stylized, noodle-limbed humanoid models with sphere heads.\"\n    }\n  ],\n  \"techniques\": [\n    \"3D animation\",\n    \"low-poly modeling\",\n    \"procedural animation\"\n  ],\n  \"style_tags\": [\n    \"indie-game\",\n    \"tech-demo\",\n    \"minimalist\"\n  ],\n  \"one_line\": \"A showcase of simple low-poly 3D humanoids and animal-like creatures performing basic movement tests.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Virtual Creatures simulation",
+        "kind": "artwork",
+        "confidence": 0.8,
+        "evidence": "Low-poly procedural animals designed for locomotion physics testing."
+      },
+      {
+        "name": "Totally Accurate Battle Simulator",
+        "kind": "brand",
+        "confidence": 0.7,
+        "evidence": "Stylized, noodle-limbed humanoid models with sphere heads."
+      }
+    ],
+    "techniques": [
+      "3D animation",
+      "low-poly modeling",
+      "procedural animation"
+    ],
+    "style_tags": [
+      "indie-game",
+      "tech-demo",
+      "minimalist"
+    ],
+    "one_line": "A showcase of simple low-poly 3D humanoids and animal-like creatures performing basic movement tests."
+  },
+  "attempts": 1
+}

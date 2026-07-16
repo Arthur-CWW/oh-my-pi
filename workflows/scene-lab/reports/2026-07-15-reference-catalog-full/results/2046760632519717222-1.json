@@ -1,0 +1,39 @@
+{
+  "id": "2046760632519717222-1",
+  "handle": "pleometric",
+  "status": "ok",
+  "date": "Apr 22, 2026",
+  "tweet_text": "we'll have to do something about that bald spot eventually",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Club Penguin Penguin\",\n      \"kind\": \"character\",\n      \"confidence\": 0.90,\n      \"evidence\": \"The purple 3D model's plump body shape, yellow beak, oval white belly patch, and flat feet strongly resemble the classic penguin avatars from Club Penguin.\"\n    },\n    {\n      \"name\": \"Hachimaki\",\n      \"kind\": \"meme\",\n      \"confidence\": 0.95,\n      \"evidence\": \"The character is wearing a traditional Japanese hachimaki headband featuring the red hinomaru (sun disc) and the kanji 一番 (Ichiban, meaning number one).\"\n    }\n  ],\n  \"techniques\": [\n    \"3D model turntable\",\n    \"Looping animation\",\n    \"Character showcase rotation\"\n  ],\n  \"style_tags\": [\n    \"retro-3d\",\n    \"low-poly\",\n    \"nostalgia\",\n    \"cute-core\",\n    \"y2k-aesthetic\"\n  ],\n  \"one_line\": \"A low-poly 3D purple Club Penguin character wearing a Japanese Ichiban headband rotates on a black background, revealing a rounded bald head.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Club Penguin Penguin",
+        "kind": "character",
+        "confidence": 0.9,
+        "evidence": "The purple 3D model's plump body shape, yellow beak, oval white belly patch, and flat feet strongly resemble the classic penguin avatars from Club Penguin."
+      },
+      {
+        "name": "Hachimaki",
+        "kind": "meme",
+        "confidence": 0.95,
+        "evidence": "The character is wearing a traditional Japanese hachimaki headband featuring the red hinomaru (sun disc) and the kanji 一番 (Ichiban, meaning number one)."
+      }
+    ],
+    "techniques": [
+      "3D model turntable",
+      "Looping animation",
+      "Character showcase rotation"
+    ],
+    "style_tags": [
+      "retro-3d",
+      "low-poly",
+      "nostalgia",
+      "cute-core",
+      "y2k-aesthetic"
+    ],
+    "one_line": "A low-poly 3D purple Club Penguin character wearing a Japanese Ichiban headband rotates on a black background, revealing a rounded bald head."
+  },
+  "attempts": 1
+}

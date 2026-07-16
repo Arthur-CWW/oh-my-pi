@@ -1,0 +1,39 @@
+{
+  "id": "2049681350832103743-1",
+  "handle": "pleometric",
+  "status": "ok",
+  "date": "Apr 30, 2026",
+  "tweet_text": "ok ready to get back into the game, \n\nthe brainjoy machine turns back on tomorrow",
+  "transcript_excerpt": "Star!",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"brainjoy\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.95,\n      \"evidence\": \"Tweet mentions brainjoy; matches creator's signature low-poly 3D animation style.\"\n    },\n    {\n      \"name\": \"Club Penguin\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.8,\n      \"evidence\": \"Style of the central purple penguin avatar.\"\n    }\n  ],\n  \"techniques\": [\n    \"Low-poly 3D animation\",\n    \"Character loop\",\n    \"Particle effects\",\n    \"Sprite-collision visualization\"\n  ],\n  \"style_tags\": [\n    \"retro-futuristic\",\n    \"internet-lore\",\n    \"cute-em-up\",\n    \"surrealist\"\n  ],\n  \"one_line\": \"A low-poly purple penguin with a banana hat wards off falling mini-monsters in an arcade game style loop.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "brainjoy",
+        "kind": "brand",
+        "confidence": 0.95,
+        "evidence": "Tweet mentions brainjoy; matches creator's signature low-poly 3D animation style."
+      },
+      {
+        "name": "Club Penguin",
+        "kind": "brand",
+        "confidence": 0.8,
+        "evidence": "Style of the central purple penguin avatar."
+      }
+    ],
+    "techniques": [
+      "Low-poly 3D animation",
+      "Character loop",
+      "Particle effects",
+      "Sprite-collision visualization"
+    ],
+    "style_tags": [
+      "retro-futuristic",
+      "internet-lore",
+      "cute-em-up",
+      "surrealist"
+    ],
+    "one_line": "A low-poly purple penguin with a banana hat wards off falling mini-monsters in an arcade game style loop."
+  },
+  "attempts": 1
+}

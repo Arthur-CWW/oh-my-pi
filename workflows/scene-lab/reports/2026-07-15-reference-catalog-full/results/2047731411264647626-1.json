@@ -1,0 +1,51 @@
+{
+  "id": "2047731411264647626-1",
+  "handle": "pleometric",
+  "status": "ok",
+  "date": "Apr 24, 2026",
+  "tweet_text": "I just got access Alibaba's Happy Horse. \n\nComparison video with Seedance 2 below.\n\nWeaknesses:\n\n1. No multi media references (video and audio)\n2. Data clearly not up to par with Bytedance. BD hired film students to do labeling and you can see that clearly in the output.",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Gigachad Cat\",\n      \"kind\": \"meme\",\n      \"confidence\": 0.95,\n      \"evidence\": \"Muscular anthropomorphic cat performing bodybuilding poses.\"\n    },\n    {\n      \"name\": \"Happy Horse\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.98,\n      \"evidence\": \"On-screen text denoting Alibaba's AI video generator.\"\n    },\n    {\n      \"name\": \"Seedance 2.0\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.98,\n      \"evidence\": \"On-screen text denoting ByteDance's AI video generator.\"\n    },\n    {\n      \"name\": \"Werewolf\",\n      \"kind\": \"character\",\n      \"confidence\": 0.95,\n      \"evidence\": \"Monstrous canine beasts attacking and then defeated on the floor.\"\n    }\n  ],\n  \"techniques\": [\n    \"AI video synthesis\",\n    \"Dramatic studio lighting\",\n    \"Text overlay\",\n    \"Sequential comparison\"\n  ],\n  \"style_tags\": [\n    \"internet-lore\",\n    \"surrealist\",\n    \"generative-ai\",\n    \"meme-culture\"\n  ],\n  \"one_line\": \"AI video generation comparison featuring a muscular meme cat posing and defeating werewolves.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Gigachad Cat",
+        "kind": "meme",
+        "confidence": 0.95,
+        "evidence": "Muscular anthropomorphic cat performing bodybuilding poses."
+      },
+      {
+        "name": "Happy Horse",
+        "kind": "brand",
+        "confidence": 0.98,
+        "evidence": "On-screen text denoting Alibaba's AI video generator."
+      },
+      {
+        "name": "Seedance 2.0",
+        "kind": "brand",
+        "confidence": 0.98,
+        "evidence": "On-screen text denoting ByteDance's AI video generator."
+      },
+      {
+        "name": "Werewolf",
+        "kind": "character",
+        "confidence": 0.95,
+        "evidence": "Monstrous canine beasts attacking and then defeated on the floor."
+      }
+    ],
+    "techniques": [
+      "AI video synthesis",
+      "Dramatic studio lighting",
+      "Text overlay",
+      "Sequential comparison"
+    ],
+    "style_tags": [
+      "internet-lore",
+      "surrealist",
+      "generative-ai",
+      "meme-culture"
+    ],
+    "one_line": "AI video generation comparison featuring a muscular meme cat posing and defeating werewolves."
+  },
+  "attempts": 1
+}

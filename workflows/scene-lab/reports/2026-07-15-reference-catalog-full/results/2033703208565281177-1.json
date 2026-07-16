@@ -1,0 +1,39 @@
+{
+  "id": "2033703208565281177-1",
+  "handle": "abelian_soup",
+  "status": "ok",
+  "date": "Mar 17, 2026",
+  "tweet_text": "counterpoint: not all this experimentation is good",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Tech enthusiast meme figure\",\n      \"kind\": \"meme\",\n      \"confidence\": 0.75,\n      \"evidence\": \"Repeated face of a man with round glasses mapped as a texture onto the 3D shape.\"\n    },\n    {\n      \"name\": \"DeFi / Crypto trading interface\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.85,\n      \"evidence\": \"Faded background text showing transactional terms like DeFi, swap, buy, and sell.\"\n    }\n  ],\n  \"techniques\": [\n    \"3D texture mapping\",\n    \"Torus knot projection\",\n    \"Kaleidoscopic repetition\",\n    \"UV mapping distortion\"\n  ],\n  \"style_tags\": [\n    \"weirdcore\",\n    \"surrealist\",\n    \"techno-psychedelic\",\n    \"internet-lore\"\n  ],\n  \"one_line\": \"A hypnotic 3D mathematical knot textured with repeating meme faces rotating over a cryptocurrency interface.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Tech enthusiast meme figure",
+        "kind": "meme",
+        "confidence": 0.75,
+        "evidence": "Repeated face of a man with round glasses mapped as a texture onto the 3D shape."
+      },
+      {
+        "name": "DeFi / Crypto trading interface",
+        "kind": "brand",
+        "confidence": 0.85,
+        "evidence": "Faded background text showing transactional terms like DeFi, swap, buy, and sell."
+      }
+    ],
+    "techniques": [
+      "3D texture mapping",
+      "Torus knot projection",
+      "Kaleidoscopic repetition",
+      "UV mapping distortion"
+    ],
+    "style_tags": [
+      "weirdcore",
+      "surrealist",
+      "techno-psychedelic",
+      "internet-lore"
+    ],
+    "one_line": "A hypnotic 3D mathematical knot textured with repeating meme faces rotating over a cryptocurrency interface."
+  },
+  "attempts": 1
+}

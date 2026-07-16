@@ -1,0 +1,37 @@
+{
+  "id": "2050635695199301742-1",
+  "handle": "pleometric",
+  "status": "ok",
+  "date": "May 2, 2026",
+  "tweet_text": "",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Club Penguin\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.98,\n      \"evidence\": \"3D purple penguin avatar with signature yellow beak and white belly.\"\n    },\n    {\n      \"name\": \"Banana Hat\",\n      \"kind\": \"meme\",\n      \"confidence\": 0.95,\n      \"evidence\": \"Yellow banana peel cosmetic item worn on the head.\"\n    }\n  ],\n  \"techniques\": [\n    \"3D turnaround\",\n    \"low-poly rendering\",\n    \"looping animation\"\n  ],\n  \"style_tags\": [\n    \"retro-internet\",\n    \"y2k-aesthetic\",\n    \"low-poly\"\n  ],\n  \"one_line\": \"A 3D purple Club Penguin character with heart eyes and a banana hat rotating on a black background.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Club Penguin",
+        "kind": "brand",
+        "confidence": 0.98,
+        "evidence": "3D purple penguin avatar with signature yellow beak and white belly."
+      },
+      {
+        "name": "Banana Hat",
+        "kind": "meme",
+        "confidence": 0.95,
+        "evidence": "Yellow banana peel cosmetic item worn on the head."
+      }
+    ],
+    "techniques": [
+      "3D turnaround",
+      "low-poly rendering",
+      "looping animation"
+    ],
+    "style_tags": [
+      "retro-internet",
+      "y2k-aesthetic",
+      "low-poly"
+    ],
+    "one_line": "A 3D purple Club Penguin character with heart eyes and a banana hat rotating on a black background."
+  },
+  "attempts": 1
+}

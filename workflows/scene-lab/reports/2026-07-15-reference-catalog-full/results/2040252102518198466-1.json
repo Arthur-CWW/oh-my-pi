@@ -1,0 +1,50 @@
+{
+  "id": "2040252102518198466-1",
+  "handle": "pleometric",
+  "status": "ok",
+  "date": "Apr 4, 2026",
+  "tweet_text": "FYI there is a new gpt image model on arena and it's great",
+  "transcript_excerpt": "",
+  "result": {
+    "references": [
+      {
+        "name": "Chris Griffin",
+        "kind": "character",
+        "confidence": 0.95,
+        "evidence": "Central claymation figure with signature hair, face shape, and blue shirt."
+      },
+      {
+        "name": "Globglogabgalab",
+        "kind": "meme",
+        "confidence": 0.9,
+        "evidence": "Four colorful, chubby clay heads surrounding the central figure."
+      },
+      {
+        "name": "Club Penguin",
+        "kind": "brand",
+        "confidence": 0.95,
+        "evidence": "Purple penguin icon with heart eyes in the corner."
+      },
+      {
+        "name": "Vans",
+        "kind": "brand",
+        "confidence": 0.85,
+        "evidence": "Sneaker with signature brown waffle-sole pattern."
+      }
+    ],
+    "techniques": [
+      "3D CGI animation",
+      "Kinetic typography",
+      "Watermarking",
+      "Collage framing"
+    ],
+    "style_tags": [
+      "surrealist",
+      "internet-lore",
+      "weirdcore",
+      "claymation"
+    ],
+    "one_line": "A surreal claymation-style music video featuring Chris Griffin and singing colored heads presenting a sneaker."
+  },
+  "attempts": 1
+}

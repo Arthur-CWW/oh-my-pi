@@ -1,0 +1,38 @@
+{
+  "id": "2043082958433657118-1",
+  "handle": "pleometric",
+  "status": "ok",
+  "date": "Apr 11, 2026",
+  "tweet_text": "I had a lot on my mind today, \n\nthankfully walking solves everything!",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Club Penguin\",\n      \"kind\": \"character\",\n      \"confidence\": 0.98,\n      \"evidence\": \"Pink penguin avatar wearing a Santa hat and heart eyes, matching the style of the game Club Penguin.\"\n    },\n    {\n      \"name\": \"Relive\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.90,\n      \"evidence\": \"3D GPS route visualization showing steps progress and path overlay.\"\n    }\n  ],\n  \"techniques\": [\n    \"3D path rendering\",\n    \"Avatar overlay\",\n    \"Route visualization\",\n    \"Time-lapse animation\"\n  ],\n  \"style_tags\": [\n    \"internet-lore\",\n    \"fitness-posting\",\n    \"gaming-nostalgia\"\n  ],\n  \"one_line\": \"A Club Penguin avatar walks a massive 27,017-step route shown on a 3D map.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Club Penguin",
+        "kind": "character",
+        "confidence": 0.98,
+        "evidence": "Pink penguin avatar wearing a Santa hat and heart eyes, matching the style of the game Club Penguin."
+      },
+      {
+        "name": "Relive",
+        "kind": "brand",
+        "confidence": 0.9,
+        "evidence": "3D GPS route visualization showing steps progress and path overlay."
+      }
+    ],
+    "techniques": [
+      "3D path rendering",
+      "Avatar overlay",
+      "Route visualization",
+      "Time-lapse animation"
+    ],
+    "style_tags": [
+      "internet-lore",
+      "fitness-posting",
+      "gaming-nostalgia"
+    ],
+    "one_line": "A Club Penguin avatar walks a massive 27,017-step route shown on a 3D map."
+  },
+  "attempts": 1
+}

@@ -1,0 +1,38 @@
+{
+  "id": "2074387474705789352-1",
+  "handle": "SkyeSharkie",
+  "status": "ok",
+  "date": "Jul 7, 2026",
+  "tweet_text": "building this @threejs webgpu raymarch volumetric cloud sky with day cycle and NASA imagery, soon to be free and open source as part of eidoverse-video :)",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Three.js\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.99,\n      \"evidence\": \"Tweet text mentions @threejs for the WebGPU implementation.\"\n    },\n    {\n      \"name\": \"NASA\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.95,\n      \"evidence\": \"Tweet text notes the use of NASA imagery for the sky simulation.\"\n    }\n  ],\n  \"techniques\": [\n    \"volumetric raymarching\",\n    \"day-night cycle simulation\",\n    \"3D real-time rendering\",\n    \"time-lapse\"\n  ],\n  \"style_tags\": [\n    \"creative-coding\",\n    \"minimalist\",\n    \"ambient\"\n  ],\n  \"one_line\": \"A WebGPU 3D simulation of a day-night cycle with volumetric clouds over minimalist pillars.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Three.js",
+        "kind": "brand",
+        "confidence": 0.99,
+        "evidence": "Tweet text mentions @threejs for the WebGPU implementation."
+      },
+      {
+        "name": "NASA",
+        "kind": "brand",
+        "confidence": 0.95,
+        "evidence": "Tweet text notes the use of NASA imagery for the sky simulation."
+      }
+    ],
+    "techniques": [
+      "volumetric raymarching",
+      "day-night cycle simulation",
+      "3D real-time rendering",
+      "time-lapse"
+    ],
+    "style_tags": [
+      "creative-coding",
+      "minimalist",
+      "ambient"
+    ],
+    "one_line": "A WebGPU 3D simulation of a day-night cycle with volumetric clouds over minimalist pillars."
+  },
+  "attempts": 1
+}

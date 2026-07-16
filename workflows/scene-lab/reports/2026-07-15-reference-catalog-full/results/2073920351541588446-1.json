@@ -1,0 +1,44 @@
+{
+  "id": "2073920351541588446-1",
+  "handle": "pleometric",
+  "status": "ok",
+  "date": "Jul 6, 2026",
+  "tweet_text": "I made a shadowing tool to help me work on my pronunciation, it extracts character wise subtitles using FireRedASR2S. \n\nIt can slow down audio, repeat sentences, jump forward or back sentence wise and let's you select between pinyin, hanzi or both.",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Xi Jinping\",\n      \"kind\": \"person\",\n      \"confidence\": 1.0,\n      \"evidence\": \"Xi Jinping is shown speaking in a formal setting, dressed in a suit with a red tie.\"\n    },\n    {\n      \"name\": \"CGTN\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.98,\n      \"evidence\": \"The CGTN logo is displayed in the upper-left corner of the video player.\"\n    },\n    {\n      \"name\": \"Great Wall of China\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.95,\n      \"evidence\": \"A large mural of the Great Wall of China is depicted in the background of the news broadcast.\"\n    }\n  ],\n  \"techniques\": [\n    \"Screencast\",\n    \"Dynamic subtitle highlighting\",\n    \"Interactive text overlay\"\n  ],\n  \"style_tags\": [\n    \"Educational\",\n    \"Language learning\",\n    \"Productivity tool\",\n    \"Software demonstration\"\n  ],\n  \"one_line\": \"A product demonstration of an interactive Chinese pronunciation shadowing and subtitle alignment tool.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Xi Jinping",
+        "kind": "person",
+        "confidence": 1.0,
+        "evidence": "Xi Jinping is shown speaking in a formal setting, dressed in a suit with a red tie."
+      },
+      {
+        "name": "CGTN",
+        "kind": "brand",
+        "confidence": 0.98,
+        "evidence": "The CGTN logo is displayed in the upper-left corner of the video player."
+      },
+      {
+        "name": "Great Wall of China",
+        "kind": "artwork",
+        "confidence": 0.95,
+        "evidence": "A large mural of the Great Wall of China is depicted in the background of the news broadcast."
+      }
+    ],
+    "techniques": [
+      "Screencast",
+      "Dynamic subtitle highlighting",
+      "Interactive text overlay"
+    ],
+    "style_tags": [
+      "Educational",
+      "Language learning",
+      "Productivity tool",
+      "Software demonstration"
+    ],
+    "one_line": "A product demonstration of an interactive Chinese pronunciation shadowing and subtitle alignment tool."
+  },
+  "attempts": 1
+}

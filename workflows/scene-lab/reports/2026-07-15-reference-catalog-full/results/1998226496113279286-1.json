@@ -1,0 +1,49 @@
+{
+  "id": "1998226496113279286-1",
+  "handle": "abelian_soup",
+  "status": "ok",
+  "date": "Dec 9, 2025",
+  "tweet_text": "I was one of the beta testers and tbf I hardly noticed it",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Gone with the Wind\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.99,\n      \"evidence\": \"B&W scene featuring Rhett Butler and Scarlett O'Hara.\"\n    },\n    {\n      \"name\": \"Apple\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.95,\n      \"evidence\": \"AirPods, Apple Watch, and spatial computing UI tags.\"\n    },\n    {\n      \"name\": \"Louis Vuitton\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.99,\n      \"evidence\": \"Monogram backpack composited on the female character.\"\n    },\n    {\n      \"name\": \"JanSport\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.99,\n      \"evidence\": \"Yellow backpack composited on the male character.\"\n    }\n  ],\n  \"techniques\": [\n    \"Selective colorization\",\n    \"Asset compositing\",\n    \"AR interface simulation\"\n  ],\n  \"style_tags\": [\n    \"satirical\",\n    \"tech-dystopian\",\n    \"augmented-reality\"\n  ],\n  \"one_line\": \"Satirical depiction of Gone with the Wind overrun by intrusive AR product placements.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Gone with the Wind",
+        "kind": "artwork",
+        "confidence": 0.99,
+        "evidence": "B&W scene featuring Rhett Butler and Scarlett O'Hara."
+      },
+      {
+        "name": "Apple",
+        "kind": "brand",
+        "confidence": 0.95,
+        "evidence": "AirPods, Apple Watch, and spatial computing UI tags."
+      },
+      {
+        "name": "Louis Vuitton",
+        "kind": "brand",
+        "confidence": 0.99,
+        "evidence": "Monogram backpack composited on the female character."
+      },
+      {
+        "name": "JanSport",
+        "kind": "brand",
+        "confidence": 0.99,
+        "evidence": "Yellow backpack composited on the male character."
+      }
+    ],
+    "techniques": [
+      "Selective colorization",
+      "Asset compositing",
+      "AR interface simulation"
+    ],
+    "style_tags": [
+      "satirical",
+      "tech-dystopian",
+      "augmented-reality"
+    ],
+    "one_line": "Satirical depiction of Gone with the Wind overrun by intrusive AR product placements."
+  },
+  "attempts": 1
+}

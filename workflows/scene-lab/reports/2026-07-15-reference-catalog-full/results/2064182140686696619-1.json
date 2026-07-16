@@ -1,0 +1,44 @@
+{
+  "id": "2064182140686696619-1",
+  "handle": "pleometric",
+  "status": "ok",
+  "date": "Jun 9, 2026",
+  "tweet_text": "my honest reaction",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Club Penguin\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.95,\n      \"evidence\": \"The purple penguin model wearing a yellow banana peel hat is a direct reference to the visual style and cosmetic items from the game Club Penguin.\"\n    },\n    {\n      \"name\": \"My Honest Reaction\",\n      \"kind\": \"meme\",\n      \"confidence\": 0.98,\n      \"evidence\": \"The accompanying text 'my honest reaction' directly references the popular social media meme format.\"\n    },\n    {\n      \"name\": \"Defeated Man in the Rain\",\n      \"kind\": \"meme\",\n      \"confidence\": 0.9,\n      \"evidence\": \"The background contains a video of a man lying face down on the ground under a heavy downpour of water, which is a common visual trope representing dramatic sadness or defeat.\"\n    }\n  ],\n  \"techniques\": [\n    \"3D character animation\",\n    \"Chroma key compositing\",\n    \"Found footage background\"\n  ],\n  \"style_tags\": [\n    \"internet-lore\",\n    \"ironic\",\n    \"surrealist\",\n    \"shitposting\"\n  ],\n  \"one_line\": \"An ironic reaction meme featuring a 3D animated purple penguin with a banana hat dancing in front of a man lying face down under a heavy downpour.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Club Penguin",
+        "kind": "brand",
+        "confidence": 0.95,
+        "evidence": "The purple penguin model wearing a yellow banana peel hat is a direct reference to the visual style and cosmetic items from the game Club Penguin."
+      },
+      {
+        "name": "My Honest Reaction",
+        "kind": "meme",
+        "confidence": 0.98,
+        "evidence": "The accompanying text 'my honest reaction' directly references the popular social media meme format."
+      },
+      {
+        "name": "Defeated Man in the Rain",
+        "kind": "meme",
+        "confidence": 0.9,
+        "evidence": "The background contains a video of a man lying face down on the ground under a heavy downpour of water, which is a common visual trope representing dramatic sadness or defeat."
+      }
+    ],
+    "techniques": [
+      "3D character animation",
+      "Chroma key compositing",
+      "Found footage background"
+    ],
+    "style_tags": [
+      "internet-lore",
+      "ironic",
+      "surrealist",
+      "shitposting"
+    ],
+    "one_line": "An ironic reaction meme featuring a 3D animated purple penguin with a banana hat dancing in front of a man lying face down under a heavy downpour."
+  },
+  "attempts": 1
+}

@@ -1,0 +1,45 @@
+{
+  "id": "2052504444093235369-1",
+  "handle": "pleometric",
+  "status": "ok",
+  "date": "May 7, 2026",
+  "tweet_text": "",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Patrick Star\",\n      \"kind\": \"character\",\n      \"confidence\": 0.99,\n      \"evidence\": \"Patrick Star from SpongeBob SquarePants is shown walking up to and opening the glass doors of the Krusty Krab.\"\n    },\n    {\n      \"name\": \"SpongeBob SquarePants\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.99,\n      \"evidence\": \"The background environment and cartoon art style match the Krusty Krab restaurant from the animated series.\"\n    },\n    {\n      \"name\": \"Minor Spelling Mistake\",\n      \"kind\": \"meme\",\n      \"confidence\": 0.98,\n      \"evidence\": \"The text 'minor spelling mistake' at the top combined with Patrick's face shrinking and his subsequent vaporization is the classic internet meme template used to show an argument being instantly destroyed over a typo.\"\n    }\n  ],\n  \"techniques\": [\n    \"Face distortion\",\n    \"Text overlay\",\n    \"Disintegration transition\",\n    \"Jump cut\"\n  ],\n  \"style_tags\": [\n    \"internet-lore\",\n    \"shitpost\",\n    \"surrealist\",\n    \"meme-format\"\n  ],\n  \"one_line\": \"A classic meme format where Patrick Star is instantly vaporized by a massive energy blast due to a minor spelling mistake.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Patrick Star",
+        "kind": "character",
+        "confidence": 0.99,
+        "evidence": "Patrick Star from SpongeBob SquarePants is shown walking up to and opening the glass doors of the Krusty Krab."
+      },
+      {
+        "name": "SpongeBob SquarePants",
+        "kind": "artwork",
+        "confidence": 0.99,
+        "evidence": "The background environment and cartoon art style match the Krusty Krab restaurant from the animated series."
+      },
+      {
+        "name": "Minor Spelling Mistake",
+        "kind": "meme",
+        "confidence": 0.98,
+        "evidence": "The text 'minor spelling mistake' at the top combined with Patrick's face shrinking and his subsequent vaporization is the classic internet meme template used to show an argument being instantly destroyed over a typo."
+      }
+    ],
+    "techniques": [
+      "Face distortion",
+      "Text overlay",
+      "Disintegration transition",
+      "Jump cut"
+    ],
+    "style_tags": [
+      "internet-lore",
+      "shitpost",
+      "surrealist",
+      "meme-format"
+    ],
+    "one_line": "A classic meme format where Patrick Star is instantly vaporized by a massive energy blast due to a minor spelling mistake."
+  },
+  "attempts": 1
+}

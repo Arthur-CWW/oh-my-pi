@@ -1,0 +1,45 @@
+{
+  "id": "2057463884051628504-1",
+  "handle": "pleometric",
+  "status": "ok",
+  "date": "May 21, 2026",
+  "tweet_text": "",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Nike\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.99,\n      \"evidence\": \"The subject is wearing a white and grey Nike Tech Fleece hoodie with the black Nike swoosh logo clearly visible on the right chest.\"\n    },\n    {\n      \"name\": \"Scam Rap\",\n      \"kind\": \"meme\",\n      \"confidence\": 0.95,\n      \"evidence\": \"The subject is holding up credit/debit cards and doing a signature flexing dance, which directly parodies the aesthetics and tropes of the 'scam rap' music genre.\"\n    },\n    {\n      \"name\": \"Nike Tech Fleece\",\n      \"kind\": \"meme\",\n      \"confidence\": 0.9,\n      \"evidence\": \"The outfit is the iconic Nike Tech Fleece, which holds meme status representing urban 'roadman' fashion or internet 'scammer' tropes.\"\n    }\n  ],\n  \"techniques\": [\n    \"Extreme close-up\",\n    \"Handheld camera movement\",\n    \"Direct-to-camera address\"\n  ],\n  \"style_tags\": [\n    \"shitpost\",\n    \"internet-lore\",\n    \"satirical\",\n    \"streetwear\",\n    \"lo-fi\"\n  ],\n  \"one_line\": \"A humorous TikTok parody of scam rap aesthetics, featuring a teen in a Nike Tech Fleece gesturing and dancing with credit cards.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Nike",
+        "kind": "brand",
+        "confidence": 0.99,
+        "evidence": "The subject is wearing a white and grey Nike Tech Fleece hoodie with the black Nike swoosh logo clearly visible on the right chest."
+      },
+      {
+        "name": "Scam Rap",
+        "kind": "meme",
+        "confidence": 0.95,
+        "evidence": "The subject is holding up credit/debit cards and doing a signature flexing dance, which directly parodies the aesthetics and tropes of the 'scam rap' music genre."
+      },
+      {
+        "name": "Nike Tech Fleece",
+        "kind": "meme",
+        "confidence": 0.9,
+        "evidence": "The outfit is the iconic Nike Tech Fleece, which holds meme status representing urban 'roadman' fashion or internet 'scammer' tropes."
+      }
+    ],
+    "techniques": [
+      "Extreme close-up",
+      "Handheld camera movement",
+      "Direct-to-camera address"
+    ],
+    "style_tags": [
+      "shitpost",
+      "internet-lore",
+      "satirical",
+      "streetwear",
+      "lo-fi"
+    ],
+    "one_line": "A humorous TikTok parody of scam rap aesthetics, featuring a teen in a Nike Tech Fleece gesturing and dancing with credit cards."
+  },
+  "attempts": 1
+}

@@ -1,0 +1,32 @@
+{
+  "id": "2026554200881050056-1",
+  "handle": "poetengineer__",
+  "status": "ok",
+  "date": "Feb 25, 2026",
+  "tweet_text": "particle life in 3d",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Particle Life\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.99,\n      \"evidence\": \"3D cellular automata particle system showing colored attraction/repulsion clusters.\"\n    }\n  ],\n  \"techniques\": [\n    \"3D particle simulation\",\n    \"wireframe rendering\",\n    \"telemetry overlay\",\n    \"motion trails\"\n  ],\n  \"style_tags\": [\n    \"generative-art\",\n    \"simulation-core\",\n    \"sci-art\"\n  ],\n  \"one_line\": \"A 3D particle life simulation showing emergent structures with real-time physical telemetry.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Particle Life",
+        "kind": "artwork",
+        "confidence": 0.99,
+        "evidence": "3D cellular automata particle system showing colored attraction/repulsion clusters."
+      }
+    ],
+    "techniques": [
+      "3D particle simulation",
+      "wireframe rendering",
+      "telemetry overlay",
+      "motion trails"
+    ],
+    "style_tags": [
+      "generative-art",
+      "simulation-core",
+      "sci-art"
+    ],
+    "one_line": "A 3D particle life simulation showing emergent structures with real-time physical telemetry."
+  },
+  "attempts": 1
+}

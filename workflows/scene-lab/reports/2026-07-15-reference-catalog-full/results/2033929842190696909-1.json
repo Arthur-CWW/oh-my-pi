@@ -1,0 +1,38 @@
+{
+  "id": "2033929842190696909-1",
+  "handle": "poetengineer__",
+  "status": "ok",
+  "date": "Mar 17, 2026",
+  "tweet_text": "strange flowers of the mind are blossoming, silently and very fast.",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"H.G. Wells\",\n      \"kind\": \"person\",\n      \"confidence\": 0.9,\n      \"evidence\": \"The tweet text 'strange flowers of the mind are blossoming, silently and very fast' is a quote from his novel The Time Machine.\"\n    },\n    {\n      \"name\": \"MediaPipe\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.85,\n      \"evidence\": \"The real-time anchoring of visual elements to finger joints and palm rotation indicates webcam-based machine learning hand tracking.\"\n    }\n  ],\n  \"techniques\": [\n    \"hand tracking\",\n    \"generative particle effects\",\n    \"augmented reality overlay\",\n    \"procedural animation\"\n  ],\n  \"style_tags\": [\n    \"creative-coding\",\n    \"cyber-organic\",\n    \"biopunk\"\n  ],\n  \"one_line\": \"A developer showcases a real-time webcam demo where colorful generative flower-like particles and circular glyphs sprout from tracked hand movements.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "H.G. Wells",
+        "kind": "person",
+        "confidence": 0.9,
+        "evidence": "The tweet text 'strange flowers of the mind are blossoming, silently and very fast' is a quote from his novel The Time Machine."
+      },
+      {
+        "name": "MediaPipe",
+        "kind": "brand",
+        "confidence": 0.85,
+        "evidence": "The real-time anchoring of visual elements to finger joints and palm rotation indicates webcam-based machine learning hand tracking."
+      }
+    ],
+    "techniques": [
+      "hand tracking",
+      "generative particle effects",
+      "augmented reality overlay",
+      "procedural animation"
+    ],
+    "style_tags": [
+      "creative-coding",
+      "cyber-organic",
+      "biopunk"
+    ],
+    "one_line": "A developer showcases a real-time webcam demo where colorful generative flower-like particles and circular glyphs sprout from tracked hand movements."
+  },
+  "attempts": 1
+}

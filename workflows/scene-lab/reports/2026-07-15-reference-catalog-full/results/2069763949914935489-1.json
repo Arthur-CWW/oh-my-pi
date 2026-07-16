@@ -1,0 +1,32 @@
+{
+  "id": "2069763949914935489-1",
+  "handle": "SkyeSharkie",
+  "status": "ok",
+  "date": "Jun 24, 2026",
+  "tweet_text": "this could be a lot better, but i don't need a lot of images of individual buildings to get things that are decent, this is a first pass at generating something from a single angle shot of the canteen/pool area, if you've been to @vibecamp_ and have images of the buildings, please share them with me!",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Vibecamp\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.99,\n      \"evidence\": \"Explicitly mentioned in the tweet text as the subject venue of the 3D generation.\"\n    }\n  ],\n  \"techniques\": [\n    \"3D reconstruction\",\n    \"photogrammetry\",\n    \"turntable animation\",\n    \"screen recording\"\n  ],\n  \"style_tags\": [\n    \"tech-demo\",\n    \"lo-fi 3D\",\n    \"diy-tech\"\n  ],\n  \"one_line\": \"A turntable rotation showing a rough 3D reconstruction of the Vibecamp canteen and pool area.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Vibecamp",
+        "kind": "brand",
+        "confidence": 0.99,
+        "evidence": "Explicitly mentioned in the tweet text as the subject venue of the 3D generation."
+      }
+    ],
+    "techniques": [
+      "3D reconstruction",
+      "photogrammetry",
+      "turntable animation",
+      "screen recording"
+    ],
+    "style_tags": [
+      "tech-demo",
+      "lo-fi 3D",
+      "diy-tech"
+    ],
+    "one_line": "A turntable rotation showing a rough 3D reconstruction of the Vibecamp canteen and pool area."
+  },
+  "attempts": 1
+}

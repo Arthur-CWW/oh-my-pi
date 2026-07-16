@@ -1,0 +1,44 @@
+{
+  "id": "2042079241966117369-1",
+  "handle": "pleometric",
+  "status": "ok",
+  "date": "Apr 9, 2026",
+  "tweet_text": "if ur worried about ur data and privacy peter highkey has good tips here 😂🙏🌹❤️‍🩹❤️‍🩹",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Peter Griffin\",\n      \"kind\": \"character\",\n      \"confidence\": 0.99,\n      \"evidence\": \"3D realistic model of Peter Griffin from Family Guy wearing signature glasses and white shirt.\"\n    },\n    {\n      \"name\": \"The Matrix\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.85,\n      \"evidence\": \"Dancing flower characters dressed in Neo's black trench coat and sunglasses.\"\n    },\n    {\n      \"name\": \"Club Penguin\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.9,\n      \"evidence\": \"Small purple penguin mascot watermark in the lower corner.\"\n    }\n  ],\n  \"techniques\": [\n    \"kinetic typography\",\n    \"radial blur\",\n    \"3D character rendering\",\n    \"video overlay\"\n  ],\n  \"style_tags\": [\n    \"surrealist\",\n    \"internet-lore\",\n    \"tech-doomer\"\n  ],\n  \"one_line\": \"A surreal tech shitpost featuring a realistic 3D Peter Griffin discussing data privacy.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Peter Griffin",
+        "kind": "character",
+        "confidence": 0.99,
+        "evidence": "3D realistic model of Peter Griffin from Family Guy wearing signature glasses and white shirt."
+      },
+      {
+        "name": "The Matrix",
+        "kind": "artwork",
+        "confidence": 0.85,
+        "evidence": "Dancing flower characters dressed in Neo's black trench coat and sunglasses."
+      },
+      {
+        "name": "Club Penguin",
+        "kind": "brand",
+        "confidence": 0.9,
+        "evidence": "Small purple penguin mascot watermark in the lower corner."
+      }
+    ],
+    "techniques": [
+      "kinetic typography",
+      "radial blur",
+      "3D character rendering",
+      "video overlay"
+    ],
+    "style_tags": [
+      "surrealist",
+      "internet-lore",
+      "tech-doomer"
+    ],
+    "one_line": "A surreal tech shitpost featuring a realistic 3D Peter Griffin discussing data privacy."
+  },
+  "attempts": 1
+}

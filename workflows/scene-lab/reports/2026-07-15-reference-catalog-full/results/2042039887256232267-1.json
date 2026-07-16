@@ -1,0 +1,43 @@
+{
+  "id": "2042039887256232267-1",
+  "handle": "pleometric",
+  "status": "ok",
+  "date": "Apr 9, 2026",
+  "tweet_text": "scraped*",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Louisoix Leveilleur\",\n      \"kind\": \"character\",\n      \"confidence\": 0.99,\n      \"evidence\": \"Bearded elf character from Final Fantasy XIV dissolving into light.\"\n    },\n    {\n      \"name\": \"Minor Spelling Mistake\",\n      \"kind\": \"meme\",\n      \"confidence\": 0.99,\n      \"evidence\": \"Text header reading 'minor spelling mistake' placed over a disintegrating character.\"\n    },\n    {\n      \"name\": \"Final Fantasy XIV\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.99,\n      \"evidence\": \"Visuals sourced directly from the 'End of an Era' cinematic trailer.\"\n    }\n  ],\n  \"techniques\": [\n    \"Text overlay\",\n    \"Slow-motion disintegration\",\n    \"High-exposure fade\"\n  ],\n  \"style_tags\": [\n    \"Internet-lore\",\n    \"Shitpost\",\n    \"Melodramatic\"\n  ],\n  \"one_line\": \"A meme showing a Final Fantasy XIV character vaporized in light over a spelling error.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Louisoix Leveilleur",
+        "kind": "character",
+        "confidence": 0.99,
+        "evidence": "Bearded elf character from Final Fantasy XIV dissolving into light."
+      },
+      {
+        "name": "Minor Spelling Mistake",
+        "kind": "meme",
+        "confidence": 0.99,
+        "evidence": "Text header reading 'minor spelling mistake' placed over a disintegrating character."
+      },
+      {
+        "name": "Final Fantasy XIV",
+        "kind": "artwork",
+        "confidence": 0.99,
+        "evidence": "Visuals sourced directly from the 'End of an Era' cinematic trailer."
+      }
+    ],
+    "techniques": [
+      "Text overlay",
+      "Slow-motion disintegration",
+      "High-exposure fade"
+    ],
+    "style_tags": [
+      "Internet-lore",
+      "Shitpost",
+      "Melodramatic"
+    ],
+    "one_line": "A meme showing a Final Fantasy XIV character vaporized in light over a spelling error."
+  },
+  "attempts": 1
+}

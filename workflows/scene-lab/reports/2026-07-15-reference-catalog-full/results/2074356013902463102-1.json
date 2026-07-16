@@ -1,0 +1,38 @@
+{
+  "id": "2074356013902463102-1",
+  "handle": "SkyeSharkie",
+  "status": "ok",
+  "date": "Jul 7, 2026",
+  "tweet_text": "I did some testing with Fable on the assembly task for this raw as well and the sensor system ALSO improves Fable's own kitbashing ability! without it, Fable has issues with gaps, odd usage of the pipes, stairs to nowhere, etc.",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Fable\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.9,\n      \"evidence\": \"The tweet text refers to Fable's performance on assembly and kitbashing tasks, corresponding to the 3D model showcase.\"\n    },\n    {\n      \"name\": \"New York Brownstone\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.95,\n      \"evidence\": \"The visual frames display a classic multi-story brick tenement/brownstone apartment building complete with fire escapes.\"\n    }\n  ],\n  \"techniques\": [\n    \"3D camera orbit\",\n    \"3D viewport navigation\",\n    \"Turntable animation\"\n  ],\n  \"style_tags\": [\n    \"tech-demo\",\n    \"3d-modeling\",\n    \"simulation-environment\",\n    \"game-development\"\n  ],\n  \"one_line\": \"A 3D viewport showcase demonstrating a kitbashed brownstone building model assembled by the Fable AI agent.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Fable",
+        "kind": "brand",
+        "confidence": 0.9,
+        "evidence": "The tweet text refers to Fable's performance on assembly and kitbashing tasks, corresponding to the 3D model showcase."
+      },
+      {
+        "name": "New York Brownstone",
+        "kind": "artwork",
+        "confidence": 0.95,
+        "evidence": "The visual frames display a classic multi-story brick tenement/brownstone apartment building complete with fire escapes."
+      }
+    ],
+    "techniques": [
+      "3D camera orbit",
+      "3D viewport navigation",
+      "Turntable animation"
+    ],
+    "style_tags": [
+      "tech-demo",
+      "3d-modeling",
+      "simulation-environment",
+      "game-development"
+    ],
+    "one_line": "A 3D viewport showcase demonstrating a kitbashed brownstone building model assembled by the Fable AI agent."
+  },
+  "attempts": 1
+}

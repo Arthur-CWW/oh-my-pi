@@ -1,0 +1,39 @@
+{
+  "id": "2047049529887760495-1",
+  "handle": "pleometric",
+  "status": "ok",
+  "date": "Apr 22, 2026",
+  "tweet_text": "Pleometric the Purple Penguin🎶",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Club Penguin\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.98,\n      \"evidence\": \"The character models are 3D rendered purple penguins with yellow beaks and feet, wearing customizable accessories (sombrero, fez, army helmet, Santa hat) identical to the iconic style of the game Club Penguin.\"\n    },\n    {\n      \"name\": \"pleometric\",\n      \"kind\": \"character\",\n      \"confidence\": 0.99,\n      \"evidence\": \"The video displays a social media profile card featuring the handle 'pleometric' and the bio 'Pernicious Purple Penguin'.\"\n    }\n  ],\n  \"techniques\": [\n    \"3D character animation\",\n    \"clone fields\",\n    \"UI overlay\",\n    \"looping background\"\n  ],\n  \"style_tags\": [\n    \"internet-lore\",\n    \"meme-aesthetic\",\n    \"web2-nostalgia\",\n    \"surrealist\"\n  ],\n  \"one_line\": \"A group of 3D purple Club Penguin avatars dance around a TikTok profile display against a neon heart tunnel backdrop.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Club Penguin",
+        "kind": "brand",
+        "confidence": 0.98,
+        "evidence": "The character models are 3D rendered purple penguins with yellow beaks and feet, wearing customizable accessories (sombrero, fez, army helmet, Santa hat) identical to the iconic style of the game Club Penguin."
+      },
+      {
+        "name": "pleometric",
+        "kind": "character",
+        "confidence": 0.99,
+        "evidence": "The video displays a social media profile card featuring the handle 'pleometric' and the bio 'Pernicious Purple Penguin'."
+      }
+    ],
+    "techniques": [
+      "3D character animation",
+      "clone fields",
+      "UI overlay",
+      "looping background"
+    ],
+    "style_tags": [
+      "internet-lore",
+      "meme-aesthetic",
+      "web2-nostalgia",
+      "surrealist"
+    ],
+    "one_line": "A group of 3D purple Club Penguin avatars dance around a TikTok profile display against a neon heart tunnel backdrop."
+  },
+  "attempts": 1
+}

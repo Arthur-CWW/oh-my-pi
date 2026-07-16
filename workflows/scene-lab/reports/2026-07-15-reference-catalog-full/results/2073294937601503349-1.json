@@ -1,0 +1,39 @@
+{
+  "id": "2073294937601503349-1",
+  "handle": "SkyeSharkie",
+  "status": "ok",
+  "date": "Jul 4, 2026",
+  "tweet_text": "missing the intended \"today\" of the third on releasing the first version of SeedThree for @threejs, but check it out, will be pushing the first version up soon :) ... sorry about the screen recorder compression artifacts, but you'll have the actual thing soon",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Three.js\",\n      \"kind\": \"brand\",\n      \"confidence\": 1.0,\n      \"evidence\": \"Explicitly named in the tweet text and reflected in the tool name SeedThree.\"\n    },\n    {\n      \"name\": \"WebGPU\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.95,\n      \"evidence\": \"Visible in the diagnostic performance HUD in the top-left corner of the interface.\"\n    }\n  ],\n  \"techniques\": [\n    \"Procedural 3D asset generation\",\n    \"Real-time environment rendering\",\n    \"Performance diagnostic HUD overlay\",\n    \"UI state transitions\"\n  ],\n  \"style_tags\": [\n    \"Tech-demo\",\n    \"Developer-utility\",\n    \"Procedural-nature\",\n    \"Interactive-graphics\"\n  ],\n  \"one_line\": \"Screen recording demo showcasing SeedThree, an interactive procedural tree and terrain generator built for Three.js.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Three.js",
+        "kind": "brand",
+        "confidence": 1.0,
+        "evidence": "Explicitly named in the tweet text and reflected in the tool name SeedThree."
+      },
+      {
+        "name": "WebGPU",
+        "kind": "brand",
+        "confidence": 0.95,
+        "evidence": "Visible in the diagnostic performance HUD in the top-left corner of the interface."
+      }
+    ],
+    "techniques": [
+      "Procedural 3D asset generation",
+      "Real-time environment rendering",
+      "Performance diagnostic HUD overlay",
+      "UI state transitions"
+    ],
+    "style_tags": [
+      "Tech-demo",
+      "Developer-utility",
+      "Procedural-nature",
+      "Interactive-graphics"
+    ],
+    "one_line": "Screen recording demo showcasing SeedThree, an interactive procedural tree and terrain generator built for Three.js."
+  },
+  "attempts": 1
+}

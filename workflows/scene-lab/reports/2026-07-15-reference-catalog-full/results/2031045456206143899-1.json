@@ -1,0 +1,52 @@
+{
+  "id": "2031045456206143899-1",
+  "handle": "poetengineer__",
+  "status": "ok",
+  "date": "Mar 9, 2026",
+  "tweet_text": "the feature ive been working on: cross-pollination of ideas.\n✦ particles drift between plants: when one touches two, it generates a brand new idea from both.\na garden that doesn't just show your thinking - it extends it.\nreleasing to x subscribers today <3",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Idea Garden\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.98,\n      \"evidence\": \"The tool header explicitly displays the title 'IDEA GARDEN'.\"\n    },\n    {\n      \"name\": \"Vercel\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.95,\n      \"evidence\": \"A tag containing the name 'VERCEL' is displayed under the left list of category tags.\"\n    },\n    {\n      \"name\": \"ChatGPT\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.95,\n      \"evidence\": \"A tag containing the name 'CHATGPT' is displayed under the right list of category tags.\"\n    },\n    {\n      \"name\": \"Moleskine\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.90,\n      \"evidence\": \"A tag containing the name 'MOLESKINE' is visible in the left column.\"\n    }\n  ],\n  \"techniques\": [\n    \"Data visualization\",\n    \"Generative growth simulation\",\n    \"Particle system animation\",\n    \"Color-coded tagging\"\n  ],\n  \"style_tags\": [\n    \"minimalist-tech\",\n    \"tools-for-thought\",\n    \"digital-botany\",\n    \"generative-art\",\n    \"cyber-garden\"\n  ],\n  \"one_line\": \"An interactive digital garden visualization where thoughts and ideas are represented as growing plants that cross-pollinate through floating particles.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Idea Garden",
+        "kind": "brand",
+        "confidence": 0.98,
+        "evidence": "The tool header explicitly displays the title 'IDEA GARDEN'."
+      },
+      {
+        "name": "Vercel",
+        "kind": "brand",
+        "confidence": 0.95,
+        "evidence": "A tag containing the name 'VERCEL' is displayed under the left list of category tags."
+      },
+      {
+        "name": "ChatGPT",
+        "kind": "brand",
+        "confidence": 0.95,
+        "evidence": "A tag containing the name 'CHATGPT' is displayed under the right list of category tags."
+      },
+      {
+        "name": "Moleskine",
+        "kind": "brand",
+        "confidence": 0.9,
+        "evidence": "A tag containing the name 'MOLESKINE' is visible in the left column."
+      }
+    ],
+    "techniques": [
+      "Data visualization",
+      "Generative growth simulation",
+      "Particle system animation",
+      "Color-coded tagging"
+    ],
+    "style_tags": [
+      "minimalist-tech",
+      "tools-for-thought",
+      "digital-botany",
+      "generative-art",
+      "cyber-garden"
+    ],
+    "one_line": "An interactive digital garden visualization where thoughts and ideas are represented as growing plants that cross-pollinate through floating particles."
+  },
+  "attempts": 1
+}

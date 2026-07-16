@@ -1,0 +1,62 @@
+{
+  "id": "2033581070311199109-1",
+  "handle": "abelian_soup",
+  "status": "ok",
+  "date": "Mar 16, 2026",
+  "tweet_text": "initial test",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Subway Surfers\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.98,\n      \"evidence\": \"Railway tracks, steel bridge structures, and coins from the mobile game Subway Surfers are visible in the background and within masks.\"\n    },\n    {\n      \"name\": \"Super Mario\",\n      \"kind\": \"character\",\n      \"confidence\": 0.9,\n      \"evidence\": \"A small 3D model of Mario wearing his signature red cap is visible at the bottom center of the first frame.\"\n    },\n    {\n      \"name\": \"ASMR Slime\",\n      \"kind\": \"meme\",\n      \"confidence\": 0.95,\n      \"evidence\": \"Hands playing with a dark blue and green glittery slime mixture in a glass bowl.\"\n    },\n    {\n      \"name\": \"Mandelbrot Set\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.95,\n      \"evidence\": \"The transition frame uses a silhouette shape of the Mandelbrot set fractal to mask the Subway Surfers footage.\"\n    },\n    {\n      \"name\": \"Chrome Cyborg Avatar\",\n      \"kind\": \"character\",\n      \"confidence\": 0.85,\n      \"evidence\": \"A metallic chrome female humanoid avatar with a halo headpiece and a black hole symbol on her chest.\"\n    }\n  ],\n  \"techniques\": [\n    \"kinetic typography\",\n    \"fractal zoom\",\n    \"CRT scanline overlay\",\n    \"analog glitch distortion\",\n    \"chromatic aberration\",\n    \"sensory video insert\",\n    \"reaction-diffusion pattern\"\n  ],\n  \"style_tags\": [\n    \"brainrot\",\n    \"hyper-stimulated\",\n    \"cyberpunk\",\n    \"surrealist\",\n    \"internet-lore\",\n    \"retro-futuristic\"\n  ],\n  \"one_line\": \"A hyper-stimulated, glitch-art aesthetic video combining mobile gaming footage, ASMR slime, and surreal cybernetic 3D avatars.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Subway Surfers",
+        "kind": "brand",
+        "confidence": 0.98,
+        "evidence": "Railway tracks, steel bridge structures, and coins from the mobile game Subway Surfers are visible in the background and within masks."
+      },
+      {
+        "name": "Super Mario",
+        "kind": "character",
+        "confidence": 0.9,
+        "evidence": "A small 3D model of Mario wearing his signature red cap is visible at the bottom center of the first frame."
+      },
+      {
+        "name": "ASMR Slime",
+        "kind": "meme",
+        "confidence": 0.95,
+        "evidence": "Hands playing with a dark blue and green glittery slime mixture in a glass bowl."
+      },
+      {
+        "name": "Mandelbrot Set",
+        "kind": "artwork",
+        "confidence": 0.95,
+        "evidence": "The transition frame uses a silhouette shape of the Mandelbrot set fractal to mask the Subway Surfers footage."
+      },
+      {
+        "name": "Chrome Cyborg Avatar",
+        "kind": "character",
+        "confidence": 0.85,
+        "evidence": "A metallic chrome female humanoid avatar with a halo headpiece and a black hole symbol on her chest."
+      }
+    ],
+    "techniques": [
+      "kinetic typography",
+      "fractal zoom",
+      "CRT scanline overlay",
+      "analog glitch distortion",
+      "chromatic aberration",
+      "sensory video insert",
+      "reaction-diffusion pattern"
+    ],
+    "style_tags": [
+      "brainrot",
+      "hyper-stimulated",
+      "cyberpunk",
+      "surrealist",
+      "internet-lore",
+      "retro-futuristic"
+    ],
+    "one_line": "A hyper-stimulated, glitch-art aesthetic video combining mobile gaming footage, ASMR slime, and surreal cybernetic 3D avatars."
+  },
+  "attempts": 1
+}

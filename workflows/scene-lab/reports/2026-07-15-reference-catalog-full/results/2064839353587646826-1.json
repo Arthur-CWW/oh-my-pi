@@ -1,0 +1,38 @@
+{
+  "id": "2064839353587646826-1",
+  "handle": "poetengineer__",
+  "status": "ok",
+  "date": "Jun 10, 2026",
+  "tweet_text": "what words do llms use when prompted to write sth \"beautiful\"? or \"poetic\", or \"unique\"?\ni counted every word in 240 generations (qwen + llama) vs a plain \"write something\":\nbeautiful: ethereal, velvet, diamonds, \"time stood still\"\npoetic: moonlit, shadows, silent, whispers\nmoving: her, tears, grandmother, piano\nunique: tapestry, forgotten, \"not just…\"",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Meta LLaMA\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.95,\n      \"evidence\": \"Frame 3 text overlay notes LLaMA-3.1-8B token extraction.\"\n    },\n    {\n      \"name\": \"Qwen\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.9,\n      \"evidence\": \"Mentioned in the accompanying tweet text as a source model.\"\n    }\n  ],\n  \"techniques\": [\n    \"typographic word cloud\",\n    \"simulated depth of field blur\",\n    \"HUD interface overlays\",\n    \"screen transition\"\n  ],\n  \"style_tags\": [\n    \"tech-minimalism\",\n    \"data-art\",\n    \"information-design\"\n  ],\n  \"one_line\": \"Data visualization mapping word frequencies and raw token activations from creative LLM prompts.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Meta LLaMA",
+        "kind": "brand",
+        "confidence": 0.95,
+        "evidence": "Frame 3 text overlay notes LLaMA-3.1-8B token extraction."
+      },
+      {
+        "name": "Qwen",
+        "kind": "brand",
+        "confidence": 0.9,
+        "evidence": "Mentioned in the accompanying tweet text as a source model."
+      }
+    ],
+    "techniques": [
+      "typographic word cloud",
+      "simulated depth of field blur",
+      "HUD interface overlays",
+      "screen transition"
+    ],
+    "style_tags": [
+      "tech-minimalism",
+      "data-art",
+      "information-design"
+    ],
+    "one_line": "Data visualization mapping word frequencies and raw token activations from creative LLM prompts."
+  },
+  "attempts": 1
+}

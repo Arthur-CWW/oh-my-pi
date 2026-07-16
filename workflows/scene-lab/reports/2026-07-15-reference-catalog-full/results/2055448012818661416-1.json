@@ -1,0 +1,37 @@
+{
+  "id": "2055448012818661416-1",
+  "handle": "pleometric",
+  "status": "ok",
+  "date": "May 16, 2026",
+  "tweet_text": "",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Club Penguin\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.95,\n      \"evidence\": \"Low-poly 3D purple penguin model with Santa hat.\"\n    },\n    {\n      \"name\": \"Explosion Meme\",\n      \"kind\": \"meme\",\n      \"confidence\": 0.90,\n      \"evidence\": \"Abrupt transition from dancing character to detonation footage.\"\n    }\n  ],\n  \"techniques\": [\n    \"Jump cut\",\n    \"Animation loop\",\n    \"Visual juxtaposition\"\n  ],\n  \"style_tags\": [\n    \"shitpost\",\n    \"internet-lore\",\n    \"surrealist\"\n  ],\n  \"one_line\": \"A dancing purple Club Penguin character suddenly explodes.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Club Penguin",
+        "kind": "brand",
+        "confidence": 0.95,
+        "evidence": "Low-poly 3D purple penguin model with Santa hat."
+      },
+      {
+        "name": "Explosion Meme",
+        "kind": "meme",
+        "confidence": 0.9,
+        "evidence": "Abrupt transition from dancing character to detonation footage."
+      }
+    ],
+    "techniques": [
+      "Jump cut",
+      "Animation loop",
+      "Visual juxtaposition"
+    ],
+    "style_tags": [
+      "shitpost",
+      "internet-lore",
+      "surrealist"
+    ],
+    "one_line": "A dancing purple Club Penguin character suddenly explodes."
+  },
+  "attempts": 1
+}

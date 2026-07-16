@@ -1,0 +1,43 @@
+{
+  "id": "2042976416514334860-1",
+  "handle": "pleometric",
+  "status": "ok",
+  "date": "Apr 11, 2026",
+  "tweet_text": "enjoy the banned video",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Elvis Presley\",\n      \"kind\": \"person\",\n      \"confidence\": 0.99,\n      \"evidence\": \"Signature pompadour, sideburns, and white jumpsuits on the hotdog figures.\"\n    },\n    {\n      \"name\": \"Gigachad\",\n      \"kind\": \"meme\",\n      \"confidence\": 0.9,\n      \"evidence\": \"Chiseled, exaggerated jawline on the main face mapping.\"\n    },\n    {\n      \"name\": \"Club Penguin Penguin\",\n      \"kind\": \"character\",\n      \"confidence\": 0.85,\n      \"evidence\": \"Small purple cartoon penguin avatar at the bottom.\"\n    }\n  ],\n  \"techniques\": [\n    \"Kinetic typography\",\n    \"Face mapping\",\n    \"Cutout animation\"\n  ],\n  \"style_tags\": [\n    \"surrealist\",\n    \"shitpost\",\n    \"absurdist\"\n  ],\n  \"one_line\": \"A surreal video featuring an Elvis-faced corndog alongside dancing hotdog clones.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Elvis Presley",
+        "kind": "person",
+        "confidence": 0.99,
+        "evidence": "Signature pompadour, sideburns, and white jumpsuits on the hotdog figures."
+      },
+      {
+        "name": "Gigachad",
+        "kind": "meme",
+        "confidence": 0.9,
+        "evidence": "Chiseled, exaggerated jawline on the main face mapping."
+      },
+      {
+        "name": "Club Penguin Penguin",
+        "kind": "character",
+        "confidence": 0.85,
+        "evidence": "Small purple cartoon penguin avatar at the bottom."
+      }
+    ],
+    "techniques": [
+      "Kinetic typography",
+      "Face mapping",
+      "Cutout animation"
+    ],
+    "style_tags": [
+      "surrealist",
+      "shitpost",
+      "absurdist"
+    ],
+    "one_line": "A surreal video featuring an Elvis-faced corndog alongside dancing hotdog clones."
+  },
+  "attempts": 1
+}

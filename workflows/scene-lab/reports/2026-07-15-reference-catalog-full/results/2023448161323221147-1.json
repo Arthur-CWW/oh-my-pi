@@ -1,0 +1,33 @@
+{
+  "id": "2023448161323221147-1",
+  "handle": "poetengineer__",
+  "status": "ok",
+  "date": "Feb 16, 2026",
+  "tweet_text": "happy year of the horse 🐎",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Chinese Zodiac Horse\",\n      \"kind\": \"character\",\n      \"confidence\": 0.98,\n      \"evidence\": \"A running horse silhouette constructed from ASCII text reading 'HAPPY YEAR OF HORSE'.\"\n    }\n  ],\n  \"techniques\": [\n    \"ASCII art animation\",\n    \"Split-screen tiling\",\n    \"Kinetic typography\",\n    \"Monochrome display\"\n  ],\n  \"style_tags\": [\n    \"retro-futuristic\",\n    \"terminal-core\",\n    \"net-art\",\n    \"minimalist\"\n  ],\n  \"one_line\": \"An animated monochrome ASCII art video of running horses formed by scrolling terminal text.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Chinese Zodiac Horse",
+        "kind": "character",
+        "confidence": 0.98,
+        "evidence": "A running horse silhouette constructed from ASCII text reading 'HAPPY YEAR OF HORSE'."
+      }
+    ],
+    "techniques": [
+      "ASCII art animation",
+      "Split-screen tiling",
+      "Kinetic typography",
+      "Monochrome display"
+    ],
+    "style_tags": [
+      "retro-futuristic",
+      "terminal-core",
+      "net-art",
+      "minimalist"
+    ],
+    "one_line": "An animated monochrome ASCII art video of running horses formed by scrolling terminal text."
+  },
+  "attempts": 1
+}

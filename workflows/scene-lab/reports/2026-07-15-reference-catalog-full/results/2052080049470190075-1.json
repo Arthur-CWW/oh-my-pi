@@ -1,0 +1,37 @@
+{
+  "id": "2052080049470190075-1",
+  "handle": "poetengineer__",
+  "status": "ok",
+  "date": "May 6, 2026",
+  "tweet_text": "experimenting with color-coded flow fields to map personal interests: embedded my x bookmarks into 33 topic clusters, each acting as a gravitational attractor; their mass is calculated by cluster size, recency, or public engagement.",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"X\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.95,\n      \"evidence\": \"Tweet mentions X bookmarks; UI displays cluster nodes.\"\n    },\n    {\n      \"name\": \"Frankenstein\",\n      \"kind\": \"character\",\n      \"confidence\": 0.90,\n      \"evidence\": \"T-shirt graphic of Frankenstein's monster.\"\n    }\n  ],\n  \"techniques\": [\n    \"Data visualization overlay\",\n    \"Particle flow field simulation\",\n    \"Interactive gesture demonstration\"\n  ],\n  \"style_tags\": [\n    \"generative-art\",\n    \"dataviz\",\n    \"indie-tech\"\n  ],\n  \"one_line\": \"Interactive visualization mapping personal bookmarks into gravitational particle flow fields.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "X",
+        "kind": "brand",
+        "confidence": 0.95,
+        "evidence": "Tweet mentions X bookmarks; UI displays cluster nodes."
+      },
+      {
+        "name": "Frankenstein",
+        "kind": "character",
+        "confidence": 0.9,
+        "evidence": "T-shirt graphic of Frankenstein's monster."
+      }
+    ],
+    "techniques": [
+      "Data visualization overlay",
+      "Particle flow field simulation",
+      "Interactive gesture demonstration"
+    ],
+    "style_tags": [
+      "generative-art",
+      "dataviz",
+      "indie-tech"
+    ],
+    "one_line": "Interactive visualization mapping personal bookmarks into gravitational particle flow fields."
+  },
+  "attempts": 1
+}

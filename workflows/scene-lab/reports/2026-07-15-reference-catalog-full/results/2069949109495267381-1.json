@@ -1,0 +1,31 @@
+{
+  "id": "2069949109495267381-1",
+  "handle": "SkyeSharkie",
+  "status": "ok",
+  "date": "Jun 25, 2026",
+  "tweet_text": "improved barn model thanks to @Lithros's drone imagery, still going to use these as a first base for building the whole scene and then i can later manually model using these as references and even add some interiors",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Lithros\",\n      \"kind\": \"person\",\n      \"confidence\": 0.9,\n      \"evidence\": \"Mentioned in the tweet text as the provider of drone imagery used to construct the model\"\n    }\n  ],\n  \"techniques\": [\n    \"3D viewport rotation\",\n    \"Turntable render\",\n    \"Screen recording\"\n  ],\n  \"style_tags\": [\n    \"gamedev-log\",\n    \"low-poly\",\n    \"3d-modeling\"\n  ],\n  \"one_line\": \"A 3D viewport turntable rotation showing a low-poly red barn model created using drone imagery.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Lithros",
+        "kind": "person",
+        "confidence": 0.9,
+        "evidence": "Mentioned in the tweet text as the provider of drone imagery used to construct the model"
+      }
+    ],
+    "techniques": [
+      "3D viewport rotation",
+      "Turntable render",
+      "Screen recording"
+    ],
+    "style_tags": [
+      "gamedev-log",
+      "low-poly",
+      "3d-modeling"
+    ],
+    "one_line": "A 3D viewport turntable rotation showing a low-poly red barn model created using drone imagery."
+  },
+  "attempts": 1
+}

@@ -1,0 +1,30 @@
+{
+  "id": "2064048851636392225-1",
+  "handle": "pleometric",
+  "status": "ok",
+  "date": "Jun 8, 2026",
+  "tweet_text": "thank   you i  hope  you are  well   hopes",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Hampter\",\n      \"kind\": \"meme\",\n      \"confidence\": 0.98,\n      \"evidence\": \"A round, grey dwarf hamster sitting upright on a striped fabric background while holding and chewing a tiny slice of orange food, which is the signature visual of the Hampter meme.\"\n    }\n  ],\n  \"techniques\": [\n    \"low-resolution compression\",\n    \"looping animation\"\n  ],\n  \"style_tags\": [\n    \"internet-lore\",\n    \"shitpost\",\n    \"cute-core\"\n  ],\n  \"one_line\": \"A low-fidelity loop of the classic Hampter meme chewing on a small carrot slice, paired with a polite well-wishing message.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Hampter",
+        "kind": "meme",
+        "confidence": 0.98,
+        "evidence": "A round, grey dwarf hamster sitting upright on a striped fabric background while holding and chewing a tiny slice of orange food, which is the signature visual of the Hampter meme."
+      }
+    ],
+    "techniques": [
+      "low-resolution compression",
+      "looping animation"
+    ],
+    "style_tags": [
+      "internet-lore",
+      "shitpost",
+      "cute-core"
+    ],
+    "one_line": "A low-fidelity loop of the classic Hampter meme chewing on a small carrot slice, paired with a polite well-wishing message."
+  },
+  "attempts": 1
+}

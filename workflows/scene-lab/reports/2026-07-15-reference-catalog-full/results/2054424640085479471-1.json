@@ -1,0 +1,65 @@
+{
+  "id": "2054424640085479471-1",
+  "handle": "abelian_soup",
+  "status": "ok",
+  "date": "May 13, 2026",
+  "tweet_text": "the pleowall is a highly experimental feature, not officially supported at this time",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Homer Simpson\",\n      \"kind\": \"character\",\n      \"confidence\": 0.98,\n      \"evidence\": \"Uncanny 3D rendered yellow characters resembling Homer Simpson in various poses, including inside a toilet and holding a donut.\"\n    },\n    {\n      \"name\": \"Freddy Fazbear\",\n      \"kind\": \"character\",\n      \"confidence\": 0.95,\n      \"evidence\": \"3D animated brown bear character with a black top hat and bowtie on a checkerboard background.\"\n    },\n    {\n      \"name\": \"Elvis Presley\",\n      \"kind\": \"person\",\n      \"confidence\": 0.95,\n      \"evidence\": \"3D caricature stylized portrait with lightning effects and text reading 'Elvis' and 'Hound Dog'.\"\n    },\n    {\n      \"name\": \"Princess Peach\",\n      \"kind\": \"character\",\n      \"confidence\": 0.90,\n      \"evidence\": \"Stylized 3D model of a blonde female character wearing a crown.\"\n    },\n    {\n      \"name\": \"Boyfriend (Friday Night Funkin')\",\n      \"kind\": \"character\",\n      \"confidence\": 0.85,\n      \"evidence\": \"Blue-haired 3D character with a backwards cap appearing in the top row.\"\n    },\n    {\n      \"name\": \"DVD Video Screensaver\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.98,\n      \"evidence\": \"The classic red and yellow 'DVD Video' logo bouncing across the screen grid.\"\n    }\n  ],\n  \"techniques\": [\n    \"Grid split-screen layout\",\n    \"Active panel highlighting\",\n    \"Bouncing logo overlay\",\n    \"Kinetic typography\",\n    \"Looping 3D character animations\"\n  ],\n  \"style_tags\": [\n    \"brainrot\",\n    \"weirdcore\",\n    \"surrealist\",\n    \"shitpost\",\n    \"low-poly\"\n  ],\n  \"one_line\": \"A grid matrix compilation of surreal, low-poly 3D animated meme characters highlighted sequentially under a bouncing DVD logo screensaver.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Homer Simpson",
+        "kind": "character",
+        "confidence": 0.98,
+        "evidence": "Uncanny 3D rendered yellow characters resembling Homer Simpson in various poses, including inside a toilet and holding a donut."
+      },
+      {
+        "name": "Freddy Fazbear",
+        "kind": "character",
+        "confidence": 0.95,
+        "evidence": "3D animated brown bear character with a black top hat and bowtie on a checkerboard background."
+      },
+      {
+        "name": "Elvis Presley",
+        "kind": "person",
+        "confidence": 0.95,
+        "evidence": "3D caricature stylized portrait with lightning effects and text reading 'Elvis' and 'Hound Dog'."
+      },
+      {
+        "name": "Princess Peach",
+        "kind": "character",
+        "confidence": 0.9,
+        "evidence": "Stylized 3D model of a blonde female character wearing a crown."
+      },
+      {
+        "name": "Boyfriend (Friday Night Funkin')",
+        "kind": "character",
+        "confidence": 0.85,
+        "evidence": "Blue-haired 3D character with a backwards cap appearing in the top row."
+      },
+      {
+        "name": "DVD Video Screensaver",
+        "kind": "brand",
+        "confidence": 0.98,
+        "evidence": "The classic red and yellow 'DVD Video' logo bouncing across the screen grid."
+      }
+    ],
+    "techniques": [
+      "Grid split-screen layout",
+      "Active panel highlighting",
+      "Bouncing logo overlay",
+      "Kinetic typography",
+      "Looping 3D character animations"
+    ],
+    "style_tags": [
+      "brainrot",
+      "weirdcore",
+      "surrealist",
+      "shitpost",
+      "low-poly"
+    ],
+    "one_line": "A grid matrix compilation of surreal, low-poly 3D animated meme characters highlighted sequentially under a bouncing DVD logo screensaver."
+  },
+  "attempts": 1
+}

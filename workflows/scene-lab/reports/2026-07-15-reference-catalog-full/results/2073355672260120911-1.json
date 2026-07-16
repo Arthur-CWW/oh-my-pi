@@ -1,0 +1,38 @@
+{
+  "id": "2073355672260120911-1",
+  "handle": "SkyeSharkie",
+  "status": "ok",
+  "date": "Jul 4, 2026",
+  "tweet_text": "my first few pushes of this lacked proper shadow behavior, I've now pushed full Crimson Dawn parity with options for different shadow styles (full self-shadowing relief, carved shadowing only for proper silhouettes but no self shadowing, geometry only, off), it also has sliders for moving the lighting around to see the shadowing properly, now live on the repo, demo link and threejs pr contribution candidate, apologies to @threejs for a bit of thrashing with claude on the pr",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"three.js\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.99,\n      \"evidence\": \"Title and logo displayed at the top left of the rendering interface.\"\n    },\n    {\n      \"name\": \"Claude\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.9,\n      \"evidence\": \"Mentioned in the tweet text regarding PR contributions.\"\n    }\n  ],\n  \"techniques\": [\n    \"parallax occlusion mapping\",\n    \"real-time 3D rendering\",\n    \"interactive GUI adjustment\",\n    \"screen recording\"\n  ],\n  \"style_tags\": [\n    \"gamedev\",\n    \"sci-fi\",\n    \"tech-demo\"\n  ],\n  \"one_line\": \"A WebGL showcase of parallax occlusion mapping shadow configurations in Three.js.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "three.js",
+        "kind": "brand",
+        "confidence": 0.99,
+        "evidence": "Title and logo displayed at the top left of the rendering interface."
+      },
+      {
+        "name": "Claude",
+        "kind": "brand",
+        "confidence": 0.9,
+        "evidence": "Mentioned in the tweet text regarding PR contributions."
+      }
+    ],
+    "techniques": [
+      "parallax occlusion mapping",
+      "real-time 3D rendering",
+      "interactive GUI adjustment",
+      "screen recording"
+    ],
+    "style_tags": [
+      "gamedev",
+      "sci-fi",
+      "tech-demo"
+    ],
+    "one_line": "A WebGL showcase of parallax occlusion mapping shadow configurations in Three.js."
+  },
+  "attempts": 1
+}

@@ -1,0 +1,40 @@
+{
+  "id": "2030676580071014639-1",
+  "handle": "poetengineer__",
+  "status": "ok",
+  "date": "Mar 8, 2026",
+  "tweet_text": "networks we live by",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Self-Organizing Map\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.90,\n      \"evidence\": \"An undulating blue coordinate grid with numbers mapping to curved orange connection lines, mimicking Kohonen neural network topology visualizations.\"\n    },\n    {\n      \"name\": \"Tektronix\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.85,\n      \"evidence\": \"The glowing vector graphics, precise line-drawing style, and orange-and-blue on black palette are characteristic of vintage Tektronix vector terminals.\"\n    }\n  ],\n  \"techniques\": [\n    \"Vector wireframe rendering\",\n    \"CRT phosphorus emulation\",\n    \"Dynamic network topology visualization\",\n    \"3D computer graphic simulation\"\n  ],\n  \"style_tags\": [\n    \"cybernetic\",\n    \"retro-futuristic\",\n    \"vector-aesthetic\",\n    \"tech-historical\",\n    \"information-theory\"\n  ],\n  \"one_line\": \"A vintage vector animation showing a glowing orange network mapping nodes onto an undulating blue wireframe grid.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Self-Organizing Map",
+        "kind": "artwork",
+        "confidence": 0.9,
+        "evidence": "An undulating blue coordinate grid with numbers mapping to curved orange connection lines, mimicking Kohonen neural network topology visualizations."
+      },
+      {
+        "name": "Tektronix",
+        "kind": "brand",
+        "confidence": 0.85,
+        "evidence": "The glowing vector graphics, precise line-drawing style, and orange-and-blue on black palette are characteristic of vintage Tektronix vector terminals."
+      }
+    ],
+    "techniques": [
+      "Vector wireframe rendering",
+      "CRT phosphorus emulation",
+      "Dynamic network topology visualization",
+      "3D computer graphic simulation"
+    ],
+    "style_tags": [
+      "cybernetic",
+      "retro-futuristic",
+      "vector-aesthetic",
+      "tech-historical",
+      "information-theory"
+    ],
+    "one_line": "A vintage vector animation showing a glowing orange network mapping nodes onto an undulating blue wireframe grid."
+  },
+  "attempts": 1
+}

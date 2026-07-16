@@ -1,0 +1,30 @@
+{
+  "id": "2047021422086627633-1",
+  "handle": "pleometric",
+  "status": "ok",
+  "date": "Apr 22, 2026",
+  "tweet_text": "",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Club Penguin\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.98,\n      \"evidence\": \"Purple low-poly penguin avatar design matching the online game franchise.\"\n    }\n  ],\n  \"techniques\": [\n    \"3D model turntable rotation\",\n    \"Low-poly rendering\"\n  ],\n  \"style_tags\": [\n    \"internet-lore\",\n    \"retro-digital\",\n    \"y2k-nostalgia\"\n  ],\n  \"one_line\": \"Turntable loop showcasing a 3D purple Club Penguin avatar holding a trumpet.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Club Penguin",
+        "kind": "brand",
+        "confidence": 0.98,
+        "evidence": "Purple low-poly penguin avatar design matching the online game franchise."
+      }
+    ],
+    "techniques": [
+      "3D model turntable rotation",
+      "Low-poly rendering"
+    ],
+    "style_tags": [
+      "internet-lore",
+      "retro-digital",
+      "y2k-nostalgia"
+    ],
+    "one_line": "Turntable loop showcasing a 3D purple Club Penguin avatar holding a trumpet."
+  },
+  "attempts": 1
+}

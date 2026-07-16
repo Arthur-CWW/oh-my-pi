@@ -1,0 +1,31 @@
+{
+  "id": "2034907731786666262-1",
+  "handle": "poetengineer__",
+  "status": "ok",
+  "date": "Mar 20, 2026",
+  "tweet_text": "🌸✨\nprototyping for personal website in touchdesigner",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"TouchDesigner\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.99,\n      \"evidence\": \"Explicitly named in the tweet metadata as the tool used for prototyping the visual system.\"\n    }\n  ],\n  \"techniques\": [\n    \"particle system simulation\",\n    \"real-time 3D rendering\",\n    \"vector field velocity mapping\"\n  ],\n  \"style_tags\": [\n    \"generative-art\",\n    \"solarpunk\",\n    \"dreamcore\"\n  ],\n  \"one_line\": \"A generative 3D terrarium scene with swirling orbital particles designed in TouchDesigner.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "TouchDesigner",
+        "kind": "brand",
+        "confidence": 0.99,
+        "evidence": "Explicitly named in the tweet metadata as the tool used for prototyping the visual system."
+      }
+    ],
+    "techniques": [
+      "particle system simulation",
+      "real-time 3D rendering",
+      "vector field velocity mapping"
+    ],
+    "style_tags": [
+      "generative-art",
+      "solarpunk",
+      "dreamcore"
+    ],
+    "one_line": "A generative 3D terrarium scene with swirling orbital particles designed in TouchDesigner."
+  },
+  "attempts": 1
+}

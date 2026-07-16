@@ -1,0 +1,35 @@
+{
+  "id": "2041271870771597643-1",
+  "handle": "pleometric",
+  "status": "ok",
+  "date": "Apr 6, 2026",
+  "tweet_text": "it's called GachiMuchi and it remains undefeated",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Steve Rambo\",\n      \"kind\": \"person\",\n      \"confidence\": 0.95,\n      \"evidence\": \"Actor Steve Rambo in a suit with a wine glass, a staple of Gachimuchi memes.\"\n    },\n    {\n      \"name\": \"Gachimuchi\",\n      \"kind\": \"meme\",\n      \"confidence\": 0.98,\n      \"evidence\": \"Explicitly mentioned in the tweet text and visually fits the subculture's source material.\"\n    }\n  ],\n  \"techniques\": [\n    \"Reaction template\",\n    \"Retro lo-fi aesthetic\"\n  ],\n  \"style_tags\": [\n    \"internet-lore\",\n    \"retro\"\n  ],\n  \"one_line\": \"Steve Rambo in a suit holding and drinking from a wine glass.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Steve Rambo",
+        "kind": "person",
+        "confidence": 0.95,
+        "evidence": "Actor Steve Rambo in a suit with a wine glass, a staple of Gachimuchi memes."
+      },
+      {
+        "name": "Gachimuchi",
+        "kind": "meme",
+        "confidence": 0.98,
+        "evidence": "Explicitly mentioned in the tweet text and visually fits the subculture's source material."
+      }
+    ],
+    "techniques": [
+      "Reaction template",
+      "Retro lo-fi aesthetic"
+    ],
+    "style_tags": [
+      "internet-lore",
+      "retro"
+    ],
+    "one_line": "Steve Rambo in a suit holding and drinking from a wine glass."
+  },
+  "attempts": 1
+}

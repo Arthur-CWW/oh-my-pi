@@ -1,0 +1,37 @@
+{
+  "id": "2073103304612012202-1",
+  "handle": "poetengineer__",
+  "status": "ok",
+  "date": "Jul 3, 2026",
+  "tweet_text": "what does ai actually add to open-ended creative work? my first attempt at giving it a process signature: from a real project's transcripts i pulled 146 ideation events; the cubes are the moments ai forked the ideas open, laid along a 3d chronological trace of the sessions.",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Obsidian Graph View\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.7,\n      \"evidence\": \"3D network graph node design on dark background\"\n    },\n    {\n      \"name\": \"Generative AI\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.9,\n      \"evidence\": \"Legend tracks AI-forked ideas in creative process\"\n    }\n  ],\n  \"techniques\": [\n    \"3D camera pan\",\n    \"Node-link visualization\",\n    \"UI screencast\"\n  ],\n  \"style_tags\": [\n    \"cybernetic\",\n    \"analytical\",\n    \"minimalist\"\n  ],\n  \"one_line\": \"3D chronological graph mapping AI and human ideation events\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Obsidian Graph View",
+        "kind": "brand",
+        "confidence": 0.7,
+        "evidence": "3D network graph node design on dark background"
+      },
+      {
+        "name": "Generative AI",
+        "kind": "brand",
+        "confidence": 0.9,
+        "evidence": "Legend tracks AI-forked ideas in creative process"
+      }
+    ],
+    "techniques": [
+      "3D camera pan",
+      "Node-link visualization",
+      "UI screencast"
+    ],
+    "style_tags": [
+      "cybernetic",
+      "analytical",
+      "minimalist"
+    ],
+    "one_line": "3D chronological graph mapping AI and human ideation events"
+  },
+  "attempts": 1
+}

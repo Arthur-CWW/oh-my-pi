@@ -1,0 +1,45 @@
+{
+  "id": "2070155051566510318-1",
+  "handle": "SkyeSharkie",
+  "status": "ok",
+  "date": "Jun 25, 2026",
+  "tweet_text": "",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Omega Mart\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.99,\n      \"evidence\": \"The fictional parody cereals 'Omega Oats' and 'Frosted Hay' are signature products sold at Meow Wolf's interactive art installation, Omega Mart.\"\n    },\n    {\n      \"name\": \"Meow Wolf\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.95,\n      \"evidence\": \"The art collective behind the creation and design of the Omega Mart grocery store environment and its parody media campaign.\"\n    },\n    {\n      \"name\": \"Gnome\",\n      \"kind\": \"character\",\n      \"confidence\": 0.80,\n      \"evidence\": \"The subject wears a tall, blue pointed cone hat reminiscent of a classic lawn gnome or wizard aesthetic.\"\n    }\n  ],\n  \"techniques\": [\n    \"VHS emulation\",\n    \"analog color grading\",\n    \"deadpan center-framing\",\n    \"retro commercial lighting\"\n  ],\n  \"style_tags\": [\n    \"surrealist\",\n    \"corporate satire\",\n    \"weirdcore\",\n    \"dreamcore\"\n  ],\n  \"one_line\": \"A surreal parody commercial clip featuring a character in a blue cone hat standing in a supermarket aisle stocked with Omega Mart cereal boxes.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Omega Mart",
+        "kind": "brand",
+        "confidence": 0.99,
+        "evidence": "The fictional parody cereals 'Omega Oats' and 'Frosted Hay' are signature products sold at Meow Wolf's interactive art installation, Omega Mart."
+      },
+      {
+        "name": "Meow Wolf",
+        "kind": "brand",
+        "confidence": 0.95,
+        "evidence": "The art collective behind the creation and design of the Omega Mart grocery store environment and its parody media campaign."
+      },
+      {
+        "name": "Gnome",
+        "kind": "character",
+        "confidence": 0.8,
+        "evidence": "The subject wears a tall, blue pointed cone hat reminiscent of a classic lawn gnome or wizard aesthetic."
+      }
+    ],
+    "techniques": [
+      "VHS emulation",
+      "analog color grading",
+      "deadpan center-framing",
+      "retro commercial lighting"
+    ],
+    "style_tags": [
+      "surrealist",
+      "corporate satire",
+      "weirdcore",
+      "dreamcore"
+    ],
+    "one_line": "A surreal parody commercial clip featuring a character in a blue cone hat standing in a supermarket aisle stocked with Omega Mart cereal boxes."
+  },
+  "attempts": 1
+}

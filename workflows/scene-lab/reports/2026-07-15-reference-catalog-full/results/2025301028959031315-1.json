@@ -1,0 +1,33 @@
+{
+  "id": "2025301028959031315-1",
+  "handle": "poetengineer__",
+  "status": "ok",
+  "date": "Feb 21, 2026",
+  "tweet_text": "grapheis",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"grapheis\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.95,\n      \"evidence\": \"Matches the mathematical vector art style of computational artist @grapheis and the tweet text.\"\n    }\n  ],\n  \"techniques\": [\n    \"vector animation\",\n    \"mathematical visualization\",\n    \"mesh deformation\",\n    \"particle routing\"\n  ],\n  \"style_tags\": [\n    \"retro-futuristic\",\n    \"generative-art\",\n    \"vector-aesthetic\",\n    \"mathematical\"\n  ],\n  \"one_line\": \"A retro mathematical vector animation showing undulating numerical grids, connecting curves, and orbits on a black background.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "grapheis",
+        "kind": "brand",
+        "confidence": 0.95,
+        "evidence": "Matches the mathematical vector art style of computational artist @grapheis and the tweet text."
+      }
+    ],
+    "techniques": [
+      "vector animation",
+      "mathematical visualization",
+      "mesh deformation",
+      "particle routing"
+    ],
+    "style_tags": [
+      "retro-futuristic",
+      "generative-art",
+      "vector-aesthetic",
+      "mathematical"
+    ],
+    "one_line": "A retro mathematical vector animation showing undulating numerical grids, connecting curves, and orbits on a black background."
+  },
+  "attempts": 1
+}

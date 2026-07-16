@@ -1,0 +1,32 @@
+{
+  "id": "2027244542848643486-1",
+  "handle": "poetengineer__",
+  "status": "ok",
+  "date": "Feb 27, 2026",
+  "tweet_text": "e x h a l e",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Generative Particle Art\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.9,\n      \"evidence\": \"Green and yellow glowing particle rings morphing in a dark void\"\n    }\n  ],\n  \"techniques\": [\n    \"particle simulation\",\n    \"generative design\",\n    \"oscilloscope emulation\",\n    \"zoom transition\"\n  ],\n  \"style_tags\": [\n    \"minimalist\",\n    \"ambient\",\n    \"digital-art\"\n  ],\n  \"one_line\": \"An abstract generative particle simulation of expanding green circular waveforms.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Generative Particle Art",
+        "kind": "artwork",
+        "confidence": 0.9,
+        "evidence": "Green and yellow glowing particle rings morphing in a dark void"
+      }
+    ],
+    "techniques": [
+      "particle simulation",
+      "generative design",
+      "oscilloscope emulation",
+      "zoom transition"
+    ],
+    "style_tags": [
+      "minimalist",
+      "ambient",
+      "digital-art"
+    ],
+    "one_line": "An abstract generative particle simulation of expanding green circular waveforms."
+  },
+  "attempts": 1
+}

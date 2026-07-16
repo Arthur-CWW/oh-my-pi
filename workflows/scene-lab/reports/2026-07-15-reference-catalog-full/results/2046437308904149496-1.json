@@ -1,0 +1,44 @@
+{
+  "id": "2046437308904149496-1",
+  "handle": "pleometric",
+  "status": "ok",
+  "date": "Apr 21, 2026",
+  "tweet_text": "I woke up in a haze because I dreamt of this video. \n\nlet me know how it makes you feel in the comments 👇",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Simba\",\n      \"kind\": \"character\",\n      \"confidence\": 0.9,\n      \"evidence\": \"Muscular anthropomorphic lion with a prominent red mane.\"\n    },\n    {\n      \"name\": \"Yassification\",\n      \"kind\": \"meme\",\n      \"confidence\": 0.95,\n      \"evidence\": \"Lion styled with heavy makeup, black lipstick, and long eyelashes.\"\n    },\n    {\n      \"name\": \"Genmo Mochi\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.98,\n      \"evidence\": \"Purple penguin mascot with a cowboy hat watermark in the bottom corner.\"\n    }\n  ],\n  \"techniques\": [\n    \"AI video generation\",\n    \"Kinetic typography\",\n    \"Psychedelic background loop\"\n  ],\n  \"style_tags\": [\n    \"camp\",\n    \"surrealist\",\n    \"internet-lore\",\n    \"AI-generated\"\n  ],\n  \"one_line\": \"A yassified, muscular AI lion posing in a blue shirt against a shifting psychedelic background.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Simba",
+        "kind": "character",
+        "confidence": 0.9,
+        "evidence": "Muscular anthropomorphic lion with a prominent red mane."
+      },
+      {
+        "name": "Yassification",
+        "kind": "meme",
+        "confidence": 0.95,
+        "evidence": "Lion styled with heavy makeup, black lipstick, and long eyelashes."
+      },
+      {
+        "name": "Genmo Mochi",
+        "kind": "brand",
+        "confidence": 0.98,
+        "evidence": "Purple penguin mascot with a cowboy hat watermark in the bottom corner."
+      }
+    ],
+    "techniques": [
+      "AI video generation",
+      "Kinetic typography",
+      "Psychedelic background loop"
+    ],
+    "style_tags": [
+      "camp",
+      "surrealist",
+      "internet-lore",
+      "AI-generated"
+    ],
+    "one_line": "A yassified, muscular AI lion posing in a blue shirt against a shifting psychedelic background."
+  },
+  "attempts": 1
+}

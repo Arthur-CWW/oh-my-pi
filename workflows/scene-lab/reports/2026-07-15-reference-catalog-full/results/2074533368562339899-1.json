@@ -1,0 +1,43 @@
+{
+  "id": "2074533368562339899-1",
+  "handle": "SkyeSharkie",
+  "status": "ok",
+  "date": "Jul 7, 2026",
+  "tweet_text": "here we go, whole new volumetric clouds sky system for eidoverse-video in @threejs that includes this option, a ring world orbiting a rock giant, i used to work on Halo, so i had to, lol. about to push, some issues with lighting on the ring itself and 2d high cloud layering, but it'll be in eidoverse, in a few mins, with the whole normal day/night/clouds/weather system that has the moon at night and no halo array/culture orbital :)",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Halo\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.99,\n      \"evidence\": \"Ring world structure curving into sky; tweet mentions Halo.\"\n    },\n    {\n      \"name\": \"Three.js\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.99,\n      \"evidence\": \"Tweet mentions three.js; rendering features basic reflective test geometries.\"\n    },\n    {\n      \"name\": \"Culture Orbital\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.9,\n      \"evidence\": \"Tweet mentions the Culture orbital megastructure design.\"\n    }\n  ],\n  \"techniques\": [\n    \"Volumetric cloud rendering\",\n    \"Day-night cycle lighting simulation\",\n    \"Environment reflection mapping\"\n  ],\n  \"style_tags\": [\n    \"sci-fi\",\n    \"tech-demo\",\n    \"retro-futuristic\"\n  ],\n  \"one_line\": \"Three.js graphics demonstration of a volumetric cloud system over a Halo-inspired ring world during lighting transitions.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Halo",
+        "kind": "brand",
+        "confidence": 0.99,
+        "evidence": "Ring world structure curving into sky; tweet mentions Halo."
+      },
+      {
+        "name": "Three.js",
+        "kind": "brand",
+        "confidence": 0.99,
+        "evidence": "Tweet mentions three.js; rendering features basic reflective test geometries."
+      },
+      {
+        "name": "Culture Orbital",
+        "kind": "artwork",
+        "confidence": 0.9,
+        "evidence": "Tweet mentions the Culture orbital megastructure design."
+      }
+    ],
+    "techniques": [
+      "Volumetric cloud rendering",
+      "Day-night cycle lighting simulation",
+      "Environment reflection mapping"
+    ],
+    "style_tags": [
+      "sci-fi",
+      "tech-demo",
+      "retro-futuristic"
+    ],
+    "one_line": "Three.js graphics demonstration of a volumetric cloud system over a Halo-inspired ring world during lighting transitions."
+  },
+  "attempts": 1
+}

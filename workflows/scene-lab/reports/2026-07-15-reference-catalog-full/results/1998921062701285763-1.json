@@ -1,0 +1,51 @@
+{
+  "id": "1998921062701285763-1",
+  "handle": "abelian_soup",
+  "status": "ok",
+  "date": "Dec 11, 2025",
+  "tweet_text": "",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Sauron\",\n      \"kind\": \"character\",\n      \"confidence\": 0.98,\n      \"evidence\": \"The central bird figure wears the iconic spiked crown/helm of Sauron from The Lord of the Rings.\"\n    },\n    {\n      \"name\": \"The Eye of Sauron\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.98,\n      \"evidence\": \"A glowing, vertical-slit eye resembling the Eye of Sauron is embedded on the forehead of the character's helmet.\"\n    },\n    {\n      \"name\": \"The One Ring Inscription\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.95,\n      \"evidence\": \"A glowing circular band of Elvish Tengwar-style script appears behind the figure, referencing the inscription on the One Ring.\"\n    },\n    {\n      \"name\": \"Raven\",\n      \"kind\": \"character\",\n      \"confidence\": 0.90,\n      \"evidence\": \"The subject is a black-feathered bird (raven or crow) with glowing white eyes.\"\n    }\n  ],\n  \"techniques\": [\n    \"Kinetic typography\",\n    \"Digital illustration\",\n    \"Glow effects\",\n    \"Looping animation\"\n  ],\n  \"style_tags\": [\n    \"dark-fantasy\",\n    \"internet-lore\",\n    \"meme-mashup\",\n    \"crypto-culture\"\n  ],\n  \"one_line\": \"An animated dark fantasy illustration of a raven dressed as Sauron, with the word 'CLAIM' pulsing over a glowing ring of Elvish-style script.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Sauron",
+        "kind": "character",
+        "confidence": 0.98,
+        "evidence": "The central bird figure wears the iconic spiked crown/helm of Sauron from The Lord of the Rings."
+      },
+      {
+        "name": "The Eye of Sauron",
+        "kind": "artwork",
+        "confidence": 0.98,
+        "evidence": "A glowing, vertical-slit eye resembling the Eye of Sauron is embedded on the forehead of the character's helmet."
+      },
+      {
+        "name": "The One Ring Inscription",
+        "kind": "artwork",
+        "confidence": 0.95,
+        "evidence": "A glowing circular band of Elvish Tengwar-style script appears behind the figure, referencing the inscription on the One Ring."
+      },
+      {
+        "name": "Raven",
+        "kind": "character",
+        "confidence": 0.9,
+        "evidence": "The subject is a black-feathered bird (raven or crow) with glowing white eyes."
+      }
+    ],
+    "techniques": [
+      "Kinetic typography",
+      "Digital illustration",
+      "Glow effects",
+      "Looping animation"
+    ],
+    "style_tags": [
+      "dark-fantasy",
+      "internet-lore",
+      "meme-mashup",
+      "crypto-culture"
+    ],
+    "one_line": "An animated dark fantasy illustration of a raven dressed as Sauron, with the word 'CLAIM' pulsing over a glowing ring of Elvish-style script."
+  },
+  "attempts": 1
+}

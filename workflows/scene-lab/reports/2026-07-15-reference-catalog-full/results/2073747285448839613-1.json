@@ -1,0 +1,33 @@
+{
+  "id": "2073747285448839613-1",
+  "handle": "SkyeSharkie",
+  "status": "ok",
+  "date": "Jul 5, 2026",
+  "tweet_text": "also this is the best one",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Max Headroom\",\n      \"kind\": \"character\",\n      \"confidence\": 0.99,\n      \"evidence\": \"Fictional AI character with distinct prosthetic makeup, suit, and striped background.\"\n    }\n  ],\n  \"techniques\": [\n    \"Analog glitch\",\n    \"Scan lines\",\n    \"Chroma keying\",\n    \"Frame stuttering\"\n  ],\n  \"style_tags\": [\n    \"Retro-futuristic\",\n    \"Cyberpunk\",\n    \"80s aesthetic\",\n    \"Glitch art\"\n  ],\n  \"one_line\": \"Footage of the 80s virtual host Max Headroom talking against a moving striped background.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Max Headroom",
+        "kind": "character",
+        "confidence": 0.99,
+        "evidence": "Fictional AI character with distinct prosthetic makeup, suit, and striped background."
+      }
+    ],
+    "techniques": [
+      "Analog glitch",
+      "Scan lines",
+      "Chroma keying",
+      "Frame stuttering"
+    ],
+    "style_tags": [
+      "Retro-futuristic",
+      "Cyberpunk",
+      "80s aesthetic",
+      "Glitch art"
+    ],
+    "one_line": "Footage of the 80s virtual host Max Headroom talking against a moving striped background."
+  },
+  "attempts": 1
+}

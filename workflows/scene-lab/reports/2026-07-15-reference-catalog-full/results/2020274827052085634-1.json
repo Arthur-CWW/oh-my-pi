@@ -1,0 +1,37 @@
+{
+  "id": "2020274827052085634-1",
+  "handle": "abelian_soup",
+  "status": "ok",
+  "date": "Feb 7, 2026",
+  "tweet_text": "my pleobot tiling is still encountering issues.. this may not happen pre-singularity. just a heads up",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Pudgy Penguins\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.95,\n      \"evidence\": \"Tessellated purple cartoon penguins with heart eyes matching the NFT collection design.\"\n    },\n    {\n      \"name\": \"Singularity\",\n      \"kind\": \"meme\",\n      \"confidence\": 0.85,\n      \"evidence\": \"Tweet text mentions pre-singularity timeline.\"\n    }\n  ],\n  \"techniques\": [\n    \"Tessellation\",\n    \"Kaleidoscope effect\",\n    \"Polar coordinates warp\"\n  ],\n  \"style_tags\": [\n    \"psychedelic\",\n    \"tech-humor\",\n    \"internet-lore\"\n  ],\n  \"one_line\": \"A tessellated pattern of purple cartoon penguins warps into a distorted kaleidoscopic vortex.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Pudgy Penguins",
+        "kind": "brand",
+        "confidence": 0.95,
+        "evidence": "Tessellated purple cartoon penguins with heart eyes matching the NFT collection design."
+      },
+      {
+        "name": "Singularity",
+        "kind": "meme",
+        "confidence": 0.85,
+        "evidence": "Tweet text mentions pre-singularity timeline."
+      }
+    ],
+    "techniques": [
+      "Tessellation",
+      "Kaleidoscope effect",
+      "Polar coordinates warp"
+    ],
+    "style_tags": [
+      "psychedelic",
+      "tech-humor",
+      "internet-lore"
+    ],
+    "one_line": "A tessellated pattern of purple cartoon penguins warps into a distorted kaleidoscopic vortex."
+  },
+  "attempts": 1
+}

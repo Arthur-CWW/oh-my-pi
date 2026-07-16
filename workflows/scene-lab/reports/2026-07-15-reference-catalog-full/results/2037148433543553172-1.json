@@ -1,0 +1,44 @@
+{
+  "id": "2037148433543553172-1",
+  "handle": "abelian_soup",
+  "status": "ok",
+  "date": "Mar 26, 2026",
+  "tweet_text": "doomed",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Hermann Grassmann\",\n      \"kind\": \"person\",\n      \"confidence\": 0.95,\n      \"evidence\": \"Explicitly named in the Twitter post draft describing his mathematical ideas and contemporary reception.\"\n    },\n    {\n      \"name\": \"Gotthold Eisenstein\",\n      \"kind\": \"person\",\n      \"confidence\": 0.95,\n      \"evidence\": \"Explicitly named in the Twitter post draft text as Grassmann's younger contemporary.\"\n    },\n    {\n      \"name\": \"X\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.99,\n      \"evidence\": \"The user interface shown throughout the video is the desktop version of X/Twitter.\"\n    }\n  ],\n  \"techniques\": [\n    \"Screen recording\",\n    \"Pixelated fire simulation\",\n    \"Digital stamp overlay\",\n    \"Particle dissolution\"\n  ],\n  \"style_tags\": [\n    \"tech-doomer\",\n    \"internet-lore\",\n    \"academic-shitpost\"\n  ],\n  \"one_line\": \"A screen recording of a math history quote on X that is violently cleared by a pixelated fire overlay reading 'FUCK YOU NOT TODAY'.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Hermann Grassmann",
+        "kind": "person",
+        "confidence": 0.95,
+        "evidence": "Explicitly named in the Twitter post draft describing his mathematical ideas and contemporary reception."
+      },
+      {
+        "name": "Gotthold Eisenstein",
+        "kind": "person",
+        "confidence": 0.95,
+        "evidence": "Explicitly named in the Twitter post draft text as Grassmann's younger contemporary."
+      },
+      {
+        "name": "X",
+        "kind": "brand",
+        "confidence": 0.99,
+        "evidence": "The user interface shown throughout the video is the desktop version of X/Twitter."
+      }
+    ],
+    "techniques": [
+      "Screen recording",
+      "Pixelated fire simulation",
+      "Digital stamp overlay",
+      "Particle dissolution"
+    ],
+    "style_tags": [
+      "tech-doomer",
+      "internet-lore",
+      "academic-shitpost"
+    ],
+    "one_line": "A screen recording of a math history quote on X that is violently cleared by a pixelated fire overlay reading 'FUCK YOU NOT TODAY'."
+  },
+  "attempts": 1
+}

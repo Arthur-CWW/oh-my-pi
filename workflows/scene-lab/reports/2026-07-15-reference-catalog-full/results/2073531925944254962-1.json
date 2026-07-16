@@ -1,0 +1,46 @@
+{
+  "id": "2073531925944254962-1",
+  "handle": "pleometric",
+  "status": "ok",
+  "date": "Jul 4, 2026",
+  "tweet_text": "Pleometric update",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Club Penguin\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.9,\n      \"evidence\": \"The 3D purple penguin character is styled directly after the avatar designs from the online game Club Penguin.\"\n    },\n    {\n      \"name\": \"Stairway to Heaven\",\n      \"kind\": \"meme\",\n      \"confidence\": 0.95,\n      \"evidence\": \"The bright blue staircase leading up into the clouds and light is a classic depiction of the Stairway to Heaven.\"\n    },\n    {\n      \"name\": \"Emperor Penguin\",\n      \"kind\": \"meme\",\n      \"confidence\": 0.95,\n      \"evidence\": \"The final frames feature real nature documentary footage of Emperor Penguins standing in a snowy landscape.\"\n    }\n  ],\n  \"techniques\": [\n    \"3D animation\",\n    \"chroma keying\",\n    \"image compositing\",\n    \"digital collage\"\n  ],\n  \"style_tags\": [\n    \"surrealist\",\n    \"absurdist\",\n    \"weirdcore\",\n    \"dreamcore\",\n    \"internet-lore\"\n  ],\n  \"one_line\": \"A surreal 3D animation of a purple penguin jumping up the Stairway to Heaven and being transported to a real-world colony of Emperor penguins.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Club Penguin",
+        "kind": "brand",
+        "confidence": 0.9,
+        "evidence": "The 3D purple penguin character is styled directly after the avatar designs from the online game Club Penguin."
+      },
+      {
+        "name": "Stairway to Heaven",
+        "kind": "meme",
+        "confidence": 0.95,
+        "evidence": "The bright blue staircase leading up into the clouds and light is a classic depiction of the Stairway to Heaven."
+      },
+      {
+        "name": "Emperor Penguin",
+        "kind": "meme",
+        "confidence": 0.95,
+        "evidence": "The final frames feature real nature documentary footage of Emperor Penguins standing in a snowy landscape."
+      }
+    ],
+    "techniques": [
+      "3D animation",
+      "chroma keying",
+      "image compositing",
+      "digital collage"
+    ],
+    "style_tags": [
+      "surrealist",
+      "absurdist",
+      "weirdcore",
+      "dreamcore",
+      "internet-lore"
+    ],
+    "one_line": "A surreal 3D animation of a purple penguin jumping up the Stairway to Heaven and being transported to a real-world colony of Emperor penguins."
+  },
+  "attempts": 1
+}

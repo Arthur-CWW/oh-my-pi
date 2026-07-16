@@ -1,0 +1,48 @@
+{
+  "id": "2055362005519724650-1",
+  "handle": "pleometric",
+  "status": "ok",
+  "date": "May 15, 2026",
+  "tweet_text": "How is it Friday again? Enjoy your weekend, everyone...",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"SunCat\",\n      \"kind\": \"character\",\n      \"confidence\": 0.9,\n      \"evidence\": \"An orange sun-headed character with a cat face (:3), sunglasses, and a tail, wearing a black suit.\"\n    },\n    {\n      \"name\": \"OutRun\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.85,\n      \"evidence\": \"The highway sunset driving background in the first frame mimics the classic Sega arcade game aesthetic.\"\n    },\n    {\n      \"name\": \"City Pop\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.9,\n      \"evidence\": \"Neon Japanese signage including 'アフターファイブ' (After Five) and retro anime city night skylines.\"\n    }\n  ],\n  \"techniques\": [\n    \"CRT scanlines\",\n    \"VHS glitch effect\",\n    \"Kinetic typography\",\n    \"3D character compositing\",\n    \"Ghosting trails\",\n    \"Pixel art backgrounds\"\n  ],\n  \"style_tags\": [\n    \"vaporwave\",\n    \"future funk\",\n    \"retro-futuristic\",\n    \"city pop\",\n    \"internet-lore\"\n  ],\n  \"one_line\": \"A 3D sun-headed cat character in a suit dances in front of retro synthwave and Japanese cityscapes to celebrate the arrival of the weekend.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "SunCat",
+        "kind": "character",
+        "confidence": 0.9,
+        "evidence": "An orange sun-headed character with a cat face (:3), sunglasses, and a tail, wearing a black suit."
+      },
+      {
+        "name": "OutRun",
+        "kind": "artwork",
+        "confidence": 0.85,
+        "evidence": "The highway sunset driving background in the first frame mimics the classic Sega arcade game aesthetic."
+      },
+      {
+        "name": "City Pop",
+        "kind": "artwork",
+        "confidence": 0.9,
+        "evidence": "Neon Japanese signage including 'アフターファイブ' (After Five) and retro anime city night skylines."
+      }
+    ],
+    "techniques": [
+      "CRT scanlines",
+      "VHS glitch effect",
+      "Kinetic typography",
+      "3D character compositing",
+      "Ghosting trails",
+      "Pixel art backgrounds"
+    ],
+    "style_tags": [
+      "vaporwave",
+      "future funk",
+      "retro-futuristic",
+      "city pop",
+      "internet-lore"
+    ],
+    "one_line": "A 3D sun-headed cat character in a suit dances in front of retro synthwave and Japanese cityscapes to celebrate the arrival of the weekend."
+  },
+  "attempts": 1
+}

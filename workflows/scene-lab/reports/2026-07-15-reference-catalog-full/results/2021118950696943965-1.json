@@ -1,0 +1,33 @@
+{
+  "id": "2021118950696943965-1",
+  "handle": "abelian_soup",
+  "status": "ok",
+  "date": "Feb 10, 2026",
+  "tweet_text": "final moments of dualism at the end of time",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Sun-headed Mascot\",\n      \"kind\": \"character\",\n      \"confidence\": 0.85,\n      \"evidence\": \"Humanoid with orange sun-ray head, white face, blue blazer, red tie, and yellow pants dancing in the frames.\"\n    }\n  ],\n  \"techniques\": [\n    \"infinite corridor\",\n    \"clone fields\",\n    \"3D fractal shader rendering\",\n    \"psychedelic kaleidoscope\"\n  ],\n  \"style_tags\": [\n    \"psychedelic\",\n    \"weirdcore\",\n    \"surrealist\",\n    \"dreamcore\"\n  ],\n  \"one_line\": \"A sun-headed character in a suit dances through a trippy, infinite psychedelic fractal tunnel.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Sun-headed Mascot",
+        "kind": "character",
+        "confidence": 0.85,
+        "evidence": "Humanoid with orange sun-ray head, white face, blue blazer, red tie, and yellow pants dancing in the frames."
+      }
+    ],
+    "techniques": [
+      "infinite corridor",
+      "clone fields",
+      "3D fractal shader rendering",
+      "psychedelic kaleidoscope"
+    ],
+    "style_tags": [
+      "psychedelic",
+      "weirdcore",
+      "surrealist",
+      "dreamcore"
+    ],
+    "one_line": "A sun-headed character in a suit dances through a trippy, infinite psychedelic fractal tunnel."
+  },
+  "attempts": 1
+}

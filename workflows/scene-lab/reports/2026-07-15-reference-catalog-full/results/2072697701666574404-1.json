@@ -1,0 +1,38 @@
+{
+  "id": "2072697701666574404-1",
+  "handle": "SkyeSharkie",
+  "status": "ok",
+  "date": "Jul 2, 2026",
+  "tweet_text": "here you go",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Ava (Ex Machina)\",\n      \"kind\": \"character\",\n      \"confidence\": 0.75,\n      \"evidence\": \"The humanoid robot's sleek, translucent female form with visible internal mechanics and glowing circuit patterns resembles the character design of Ava from Ex Machina.\"\n    },\n    {\n      \"name\": \"Cloud Computing\",\n      \"kind\": \"meme\",\n      \"confidence\": 0.85,\n      \"evidence\": \"Holographic, amber-colored 3D cloud and database icons float above the robot's hand, representing cloud data storage.\"\n    }\n  ],\n  \"techniques\": [\n    \"generative AI morphing\",\n    \"fluid simulation\",\n    \"holographic UI overlay\",\n    \"cinematic depth of field\"\n  ],\n  \"style_tags\": [\n    \"surrealist\",\n    \"sleek-futuristic\",\n    \"commercial-aesthetic\"\n  ],\n  \"one_line\": \"A cup of coffee morphs into a translucent, amber-glass humanoid robot displaying cloud computing holograms before reverting to coffee.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Ava (Ex Machina)",
+        "kind": "character",
+        "confidence": 0.75,
+        "evidence": "The humanoid robot's sleek, translucent female form with visible internal mechanics and glowing circuit patterns resembles the character design of Ava from Ex Machina."
+      },
+      {
+        "name": "Cloud Computing",
+        "kind": "meme",
+        "confidence": 0.85,
+        "evidence": "Holographic, amber-colored 3D cloud and database icons float above the robot's hand, representing cloud data storage."
+      }
+    ],
+    "techniques": [
+      "generative AI morphing",
+      "fluid simulation",
+      "holographic UI overlay",
+      "cinematic depth of field"
+    ],
+    "style_tags": [
+      "surrealist",
+      "sleek-futuristic",
+      "commercial-aesthetic"
+    ],
+    "one_line": "A cup of coffee morphs into a translucent, amber-glass humanoid robot displaying cloud computing holograms before reverting to coffee."
+  },
+  "attempts": 1
+}

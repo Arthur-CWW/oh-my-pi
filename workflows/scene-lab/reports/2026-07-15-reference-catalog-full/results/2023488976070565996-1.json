@@ -1,0 +1,57 @@
+{
+  "id": "2023488976070565996-1",
+  "handle": "poetengineer__",
+  "status": "ok",
+  "date": "Feb 16, 2026",
+  "tweet_text": "turning this into a little tool, kunstkammer, that shows an entire folder of files on one page without scrolling 🌿\nkunstkammer: art chamber, a cabinet of wonders; to see everything at once and let your eyes wander, finding the connections 🪸\n\navailable for subscribers <3",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Suzuki Harunobu\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.95,\n      \"evidence\": \"A Japanese ukiyo-e woodblock print featuring two women and a lantern, signed by Suzuki Harunobu on the bottom left, is displayed in the preview panel.\"\n    },\n    {\n      \"name\": \"Wunderkammer (Cabinet of Curiosities)\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.95,\n      \"evidence\": \"A classical painting depicting a cabinet of wonders containing globes, skulls, and specimens is used for the splash screen of the application.\"\n    },\n    {\n      \"name\": \"Claude\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.90,\n      \"evidence\": \"A card in the grid is titled 'claude soul document'.\"\n    },\n    {\n      \"name\": \"Jakob Nielsen\",\n      \"kind\": \"person\",\n      \"confidence\": 0.95,\n      \"evidence\": \"A text card in the interactive grid references a 'multimedia and hypertext Article by Jakob Nielsen'.\"\n    },\n    {\n      \"name\": \"Walter Ong\",\n      \"kind\": \"person\",\n      \"confidence\": 0.95,\n      \"evidence\": \"A text card in the interactive grid is titled 'Walter Ong and Writing'.\"\n    }\n  ],\n  \"techniques\": [\n    \"split-screen\",\n    \"dense grid layout\",\n    \"interactive preview panel\",\n    \"dynamic categorization sorting\"\n  ],\n  \"style_tags\": [\n    \"academic\",\n    \"information-dense\",\n    \"minimalist\",\n    \"tools-for-thought\"\n  ],\n  \"one_line\": \"A product demo of Kunstkammer, an interactive tool designed to visualize an entire folder of files on a single, non-scrolling grid with immediate side-by-side previews.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Suzuki Harunobu",
+        "kind": "artwork",
+        "confidence": 0.95,
+        "evidence": "A Japanese ukiyo-e woodblock print featuring two women and a lantern, signed by Suzuki Harunobu on the bottom left, is displayed in the preview panel."
+      },
+      {
+        "name": "Wunderkammer (Cabinet of Curiosities)",
+        "kind": "artwork",
+        "confidence": 0.95,
+        "evidence": "A classical painting depicting a cabinet of wonders containing globes, skulls, and specimens is used for the splash screen of the application."
+      },
+      {
+        "name": "Claude",
+        "kind": "brand",
+        "confidence": 0.9,
+        "evidence": "A card in the grid is titled 'claude soul document'."
+      },
+      {
+        "name": "Jakob Nielsen",
+        "kind": "person",
+        "confidence": 0.95,
+        "evidence": "A text card in the interactive grid references a 'multimedia and hypertext Article by Jakob Nielsen'."
+      },
+      {
+        "name": "Walter Ong",
+        "kind": "person",
+        "confidence": 0.95,
+        "evidence": "A text card in the interactive grid is titled 'Walter Ong and Writing'."
+      }
+    ],
+    "techniques": [
+      "split-screen",
+      "dense grid layout",
+      "interactive preview panel",
+      "dynamic categorization sorting"
+    ],
+    "style_tags": [
+      "academic",
+      "information-dense",
+      "minimalist",
+      "tools-for-thought"
+    ],
+    "one_line": "A product demo of Kunstkammer, an interactive tool designed to visualize an entire folder of files on a single, non-scrolling grid with immediate side-by-side previews."
+  },
+  "attempts": 1
+}

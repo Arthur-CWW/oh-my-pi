@@ -1,0 +1,41 @@
+{
+  "id": "2070323077087412226-1",
+  "handle": "pleometric",
+  "status": "ok",
+  "date": "Jun 26, 2026",
+  "tweet_text": "Finally, the Pleometric Machine is complete",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Ophanim\",\n      \"kind\": \"character\",\n      \"confidence\": 0.85,\n      \"evidence\": \"A rotating mechanical cube covered with multiple human eyes on its faces, evoking the multi-eyed design of biblically accurate angels.\"\n    },\n    {\n      \"name\": \"Weirdcore\",\n      \"kind\": \"meme\",\n      \"confidence\": 0.9,\n      \"evidence\": \"Surreal imagery utilizing low-resolution digital graphics, saturated CRT style filters, disorienting text boxes with nonsense phrases, and a fixation on human eyes.\"\n    }\n  ],\n  \"techniques\": [\n    \"3D animation\",\n    \"Chromatic aberration\",\n    \"Scanline emulation\",\n    \"Glitch distortion\",\n    \"Kinetic typography\"\n  ],\n  \"style_tags\": [\n    \"weirdcore\",\n    \"surrealist\",\n    \"retro-futuristic\",\n    \"internet-lore\",\n    \"lo-fi\"\n  ],\n  \"one_line\": \"A surreal, glitched 3D animation of a multi-eyed device named the Pleometric Machine rotating against a black background with nonsensical blue text boxes.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Ophanim",
+        "kind": "character",
+        "confidence": 0.85,
+        "evidence": "A rotating mechanical cube covered with multiple human eyes on its faces, evoking the multi-eyed design of biblically accurate angels."
+      },
+      {
+        "name": "Weirdcore",
+        "kind": "meme",
+        "confidence": 0.9,
+        "evidence": "Surreal imagery utilizing low-resolution digital graphics, saturated CRT style filters, disorienting text boxes with nonsense phrases, and a fixation on human eyes."
+      }
+    ],
+    "techniques": [
+      "3D animation",
+      "Chromatic aberration",
+      "Scanline emulation",
+      "Glitch distortion",
+      "Kinetic typography"
+    ],
+    "style_tags": [
+      "weirdcore",
+      "surrealist",
+      "retro-futuristic",
+      "internet-lore",
+      "lo-fi"
+    ],
+    "one_line": "A surreal, glitched 3D animation of a multi-eyed device named the Pleometric Machine rotating against a black background with nonsensical blue text boxes."
+  },
+  "attempts": 1
+}

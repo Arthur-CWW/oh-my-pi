@@ -1,0 +1,38 @@
+{
+  "id": "1991736806925324537-1",
+  "handle": "abelian_soup",
+  "status": "ok",
+  "date": "Nov 21, 2025",
+  "tweet_text": "such a delight",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Super Saiyan Blue\",\n      \"kind\": \"meme\",\n      \"confidence\": 0.98,\n      \"evidence\": \"The pixel art crow undergoes a dramatic transformation, sprouting yellow and blue spiky hair accompanied by a roaring blue energy aura, directly mimicking the Super Saiyan Blue form from the Dragon Ball anime series.\"\n    },\n    {\n      \"name\": \"Cryptocurrency Airdrop\",\n      \"kind\": \"meme\",\n      \"confidence\": 0.90,\n      \"evidence\": \"The repeated pixelated text 'CLAIM' framing the powered-up crow references the common crypto/Web3 action of claiming tokens or minting NFTs.\"\n    }\n  ],\n  \"techniques\": [\n    \"pixel art animation\",\n    \"energy aura effect\",\n    \"kinetic text overlays\"\n  ],\n  \"style_tags\": [\n    \"pixel-art\",\n    \"shonen-anime\",\n    \"web3-culture\",\n    \"retro-gaming\"\n  ],\n  \"one_line\": \"A pixel-art crow transforms into a Super Saiyan Blue powered-up state surrounded by bold 'CLAIM' text overlays.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Super Saiyan Blue",
+        "kind": "meme",
+        "confidence": 0.98,
+        "evidence": "The pixel art crow undergoes a dramatic transformation, sprouting yellow and blue spiky hair accompanied by a roaring blue energy aura, directly mimicking the Super Saiyan Blue form from the Dragon Ball anime series."
+      },
+      {
+        "name": "Cryptocurrency Airdrop",
+        "kind": "meme",
+        "confidence": 0.9,
+        "evidence": "The repeated pixelated text 'CLAIM' framing the powered-up crow references the common crypto/Web3 action of claiming tokens or minting NFTs."
+      }
+    ],
+    "techniques": [
+      "pixel art animation",
+      "energy aura effect",
+      "kinetic text overlays"
+    ],
+    "style_tags": [
+      "pixel-art",
+      "shonen-anime",
+      "web3-culture",
+      "retro-gaming"
+    ],
+    "one_line": "A pixel-art crow transforms into a Super Saiyan Blue powered-up state surrounded by bold 'CLAIM' text overlays."
+  },
+  "attempts": 1
+}

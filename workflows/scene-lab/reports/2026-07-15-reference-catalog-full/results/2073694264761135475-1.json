@@ -1,0 +1,52 @@
+{
+  "id": "2073694264761135475-1",
+  "handle": "SkyeSharkie",
+  "status": "ok",
+  "date": "Jul 5, 2026",
+  "tweet_text": "\"The freak parade is rendered and it's everything I hoped\" - Claude Fable",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Shaggy Rogers (Scooby-Doo)\",\n      \"kind\": \"character\",\n      \"confidence\": 0.75,\n      \"evidence\": \"The leftmost dog-like character wears Shaggy's signature green shirt and purple pants color scheme.\"\n    },\n    {\n      \"name\": \"Artist Mannequin\",\n      \"kind\": \"character\",\n      \"confidence\": 0.9,\n      \"evidence\": \"A classic wooden or metallic artist drawing mannequin is shown walking in the background of the lineup.\"\n    },\n    {\n      \"name\": \"Octopus with Top Hat\",\n      \"kind\": \"meme\",\n      \"confidence\": 0.8,\n      \"evidence\": \"A pink octopus wearing a black top hat and sunglasses, evoking whimsical internet-lore or surreal web animation characters.\"\n    },\n    {\n      \"name\": \"Untitled Goose Game\",\n      \"kind\": \"character\",\n      \"confidence\": 0.7,\n      \"evidence\": \"A white goose/duck character walking in the center wearing sunglasses, reminiscent of the protagonist from Untitled Goose Game.\"\n    }\n  ],\n  \"techniques\": [\n    \"low-poly 3D rendering\",\n    \"character walk cycles\",\n    \"flat-shaded 3D animation\",\n    \"minimalist environment design\"\n  ],\n  \"style_tags\": [\n    \"surrealist\",\n    \"weirdcore\",\n    \"retro-3D\",\n    \"internet-lore\",\n    \"low-poly\"\n  ],\n  \"one_line\": \"A surreal parade of low-poly 3D characters, animals, and mannequins walking across a minimalist orange desert landscape.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Shaggy Rogers (Scooby-Doo)",
+        "kind": "character",
+        "confidence": 0.75,
+        "evidence": "The leftmost dog-like character wears Shaggy's signature green shirt and purple pants color scheme."
+      },
+      {
+        "name": "Artist Mannequin",
+        "kind": "character",
+        "confidence": 0.9,
+        "evidence": "A classic wooden or metallic artist drawing mannequin is shown walking in the background of the lineup."
+      },
+      {
+        "name": "Octopus with Top Hat",
+        "kind": "meme",
+        "confidence": 0.8,
+        "evidence": "A pink octopus wearing a black top hat and sunglasses, evoking whimsical internet-lore or surreal web animation characters."
+      },
+      {
+        "name": "Untitled Goose Game",
+        "kind": "character",
+        "confidence": 0.7,
+        "evidence": "A white goose/duck character walking in the center wearing sunglasses, reminiscent of the protagonist from Untitled Goose Game."
+      }
+    ],
+    "techniques": [
+      "low-poly 3D rendering",
+      "character walk cycles",
+      "flat-shaded 3D animation",
+      "minimalist environment design"
+    ],
+    "style_tags": [
+      "surrealist",
+      "weirdcore",
+      "retro-3D",
+      "internet-lore",
+      "low-poly"
+    ],
+    "one_line": "A surreal parade of low-poly 3D characters, animals, and mannequins walking across a minimalist orange desert landscape."
+  },
+  "attempts": 1
+}

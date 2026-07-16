@@ -1,0 +1,47 @@
+{
+  "id": "2074189012378464436-1",
+  "handle": "poetengineer__",
+  "status": "ok",
+  "date": "Jul 6, 2026",
+  "tweet_text": "found a home for these works:",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Rosetta Stone\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.9,\n      \"evidence\": \"The visualization features multiple upright tablets inscribed with historical writing systems (Latin, Chinese, Egyptian, Linear A) undergoing mutation and translation.\"\n    },\n    {\n      \"name\": \"Monolith (2001: A Space Odyssey)\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.85,\n      \"evidence\": \"The visual representation of glyphs on vertical, dark, rectangular slabs set against 3D wireframe space grids.\"\n    },\n    {\n      \"name\": \"Hopfield Network\",\n      \"kind\": \"meme\",\n      \"confidence\": 0.98,\n      \"evidence\": \"Explicitly named in the user interface text and visually represented via active node state grids mutating pixel glyphs.\"\n    }\n  ],\n  \"techniques\": [\n    \"3D wireframe rendering\",\n    \"Generative typography\",\n    \"Split-screen interface\",\n    \"Particle system simulation\",\n    \"Data visualization lineage tree\"\n  ],\n  \"style_tags\": [\n    \"retro-futuristic\",\n    \"cybernetic\",\n    \"generative-art\",\n    \"speculative-design\",\n    \"minimalist-tech\"\n  ],\n  \"one_line\": \"An interactive generative art dashboard showcasing a Hopfield neural network that simulates the decay and hallucination of historical writing systems on monolith-like steles.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Rosetta Stone",
+        "kind": "artwork",
+        "confidence": 0.9,
+        "evidence": "The visualization features multiple upright tablets inscribed with historical writing systems (Latin, Chinese, Egyptian, Linear A) undergoing mutation and translation."
+      },
+      {
+        "name": "Monolith (2001: A Space Odyssey)",
+        "kind": "artwork",
+        "confidence": 0.85,
+        "evidence": "The visual representation of glyphs on vertical, dark, rectangular slabs set against 3D wireframe space grids."
+      },
+      {
+        "name": "Hopfield Network",
+        "kind": "meme",
+        "confidence": 0.98,
+        "evidence": "Explicitly named in the user interface text and visually represented via active node state grids mutating pixel glyphs."
+      }
+    ],
+    "techniques": [
+      "3D wireframe rendering",
+      "Generative typography",
+      "Split-screen interface",
+      "Particle system simulation",
+      "Data visualization lineage tree"
+    ],
+    "style_tags": [
+      "retro-futuristic",
+      "cybernetic",
+      "generative-art",
+      "speculative-design",
+      "minimalist-tech"
+    ],
+    "one_line": "An interactive generative art dashboard showcasing a Hopfield neural network that simulates the decay and hallucination of historical writing systems on monolith-like steles."
+  },
+  "attempts": 1
+}

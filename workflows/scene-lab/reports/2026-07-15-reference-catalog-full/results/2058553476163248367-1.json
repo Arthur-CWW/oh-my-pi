@@ -1,0 +1,38 @@
+{
+  "id": "2058553476163248367-1",
+  "handle": "abelian_soup",
+  "status": "ok",
+  "date": "May 24, 2026",
+  "tweet_text": "most  of these are just balloons",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Eliezer Yudkowsky\",\n      \"kind\": \"person\",\n      \"confidence\": 0.95,\n      \"evidence\": \"Glitched facial portrait with glasses and beard, matching Yudkowsky's likeness, paired with text referencing a 'measly little system'.\"\n    },\n    {\n      \"name\": \"Gimbal UAP\",\n      \"kind\": \"meme\",\n      \"confidence\": 0.98,\n      \"evidence\": \"Monochrome FLIR military targeting screen tracking an aerial object over clouds.\"\n    }\n  ],\n  \"techniques\": [\n    \"Chromatic aberration\",\n    \"Glitch effects\",\n    \"Analog noise\",\n    \"FLIR simulation\"\n  ],\n  \"style_tags\": [\n    \"tech-doomer\",\n    \"schizoposting\",\n    \"analog-horror\"\n  ],\n  \"one_line\": \"A glitched tech-doomer edit juxtaposing Eliezer Yudkowsky with UAP tracking footage.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Eliezer Yudkowsky",
+        "kind": "person",
+        "confidence": 0.95,
+        "evidence": "Glitched facial portrait with glasses and beard, matching Yudkowsky's likeness, paired with text referencing a 'measly little system'."
+      },
+      {
+        "name": "Gimbal UAP",
+        "kind": "meme",
+        "confidence": 0.98,
+        "evidence": "Monochrome FLIR military targeting screen tracking an aerial object over clouds."
+      }
+    ],
+    "techniques": [
+      "Chromatic aberration",
+      "Glitch effects",
+      "Analog noise",
+      "FLIR simulation"
+    ],
+    "style_tags": [
+      "tech-doomer",
+      "schizoposting",
+      "analog-horror"
+    ],
+    "one_line": "A glitched tech-doomer edit juxtaposing Eliezer Yudkowsky with UAP tracking footage."
+  },
+  "attempts": 1
+}

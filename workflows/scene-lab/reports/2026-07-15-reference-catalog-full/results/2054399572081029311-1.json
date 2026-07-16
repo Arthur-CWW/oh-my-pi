@@ -1,0 +1,51 @@
+{
+  "id": "2054399572081029311-1",
+  "handle": "abelian_soup",
+  "status": "ok",
+  "date": "May 13, 2026",
+  "tweet_text": "tired of your screens and attention just working? fry both with Screenrot™! currently in private beta, reply \"MELTDOWN\" for access",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Subway Surfers\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.99,\n      \"evidence\": \"Gameplay footage of train tracks and subway tunnels.\"\n    },\n    {\n      \"name\": \"DVD Video Logo\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.99,\n      \"evidence\": \"Bouncing DVD Video logo overlaid on multiple scenes.\"\n    },\n    {\n      \"name\": \"Slime ASMR\",\n      \"kind\": \"meme\",\n      \"confidence\": 0.95,\n      \"evidence\": \"Hands squeezing colorful sensory slime in a container.\"\n    },\n    {\n      \"name\": \"G-Man\",\n      \"kind\": \"character\",\n      \"confidence\": 0.85,\n      \"evidence\": \"Glitched character in a suit over circuit boards.\"\n    }\n  ],\n  \"techniques\": [\n    \"split-screen grid\",\n    \"kinetic typography\",\n    \"glitch effects\",\n    \"reaction-diffusion simulation\"\n  ],\n  \"style_tags\": [\n    \"brain-rot\",\n    \"surrealist\",\n    \"tech-doomer\",\n    \"accelerationist\"\n  ],\n  \"one_line\": \"A multi-panel sensory overload parodying internet brain-rot using gameplay, ASMR slime, and glitched CGI.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Subway Surfers",
+        "kind": "brand",
+        "confidence": 0.99,
+        "evidence": "Gameplay footage of train tracks and subway tunnels."
+      },
+      {
+        "name": "DVD Video Logo",
+        "kind": "brand",
+        "confidence": 0.99,
+        "evidence": "Bouncing DVD Video logo overlaid on multiple scenes."
+      },
+      {
+        "name": "Slime ASMR",
+        "kind": "meme",
+        "confidence": 0.95,
+        "evidence": "Hands squeezing colorful sensory slime in a container."
+      },
+      {
+        "name": "G-Man",
+        "kind": "character",
+        "confidence": 0.85,
+        "evidence": "Glitched character in a suit over circuit boards."
+      }
+    ],
+    "techniques": [
+      "split-screen grid",
+      "kinetic typography",
+      "glitch effects",
+      "reaction-diffusion simulation"
+    ],
+    "style_tags": [
+      "brain-rot",
+      "surrealist",
+      "tech-doomer",
+      "accelerationist"
+    ],
+    "one_line": "A multi-panel sensory overload parodying internet brain-rot using gameplay, ASMR slime, and glitched CGI."
+  },
+  "attempts": 1
+}

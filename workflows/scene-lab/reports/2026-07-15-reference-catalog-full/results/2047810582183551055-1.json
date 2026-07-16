@@ -1,0 +1,30 @@
+{
+  "id": "2047810582183551055-1",
+  "handle": "pleometric",
+  "status": "ok",
+  "date": "Apr 24, 2026",
+  "tweet_text": "see you all soon everyone",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Club Penguin\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.98,\n      \"evidence\": \"Distinctive low-poly 3D purple penguin avatar wearing the iconic in-game banana peel hat.\"\n    }\n  ],\n  \"techniques\": [\n    \"3D turntable rotation\",\n    \"looping animation\"\n  ],\n  \"style_tags\": [\n    \"retro-gaming\",\n    \"nostalgic\",\n    \"internet-lore\"\n  ],\n  \"one_line\": \"A rotating 3D showcase of a purple Club Penguin avatar wearing a banana peel hat.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Club Penguin",
+        "kind": "brand",
+        "confidence": 0.98,
+        "evidence": "Distinctive low-poly 3D purple penguin avatar wearing the iconic in-game banana peel hat."
+      }
+    ],
+    "techniques": [
+      "3D turntable rotation",
+      "looping animation"
+    ],
+    "style_tags": [
+      "retro-gaming",
+      "nostalgic",
+      "internet-lore"
+    ],
+    "one_line": "A rotating 3D showcase of a purple Club Penguin avatar wearing a banana peel hat."
+  },
+  "attempts": 1
+}

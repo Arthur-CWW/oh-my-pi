@@ -1,0 +1,35 @@
+{
+  "id": "1993294990571913430-1",
+  "handle": "abelian_soup",
+  "status": "ok",
+  "date": "Nov 25, 2025",
+  "tweet_text": "> Oblivious Soul: hey X, can you prepare my data archive?\n> the Accursed Place: my pain is constant and sharp and I do not hope for a better world for anyone—sure thing, champ! here you go.\n> me: oh gr—\n> the Forever Gift:",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"X\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.99,\n      \"evidence\": \"X logo and x.com interface visible in all keyframes.\"\n    },\n    {\n      \"name\": \"American Psycho\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.95,\n      \"evidence\": \"Tweet text quotes Patrick Bateman's iconic inner monologue.\"\n    }\n  ],\n  \"techniques\": [\n    \"Screen recording\",\n    \"Looping\"\n  ],\n  \"style_tags\": [\n    \"tech-doomer\",\n    \"internet-lore\"\n  ],\n  \"one_line\": \"A screen recording depicting the broken, looping flow of attempting to download data on X.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "X",
+        "kind": "brand",
+        "confidence": 0.99,
+        "evidence": "X logo and x.com interface visible in all keyframes."
+      },
+      {
+        "name": "American Psycho",
+        "kind": "artwork",
+        "confidence": 0.95,
+        "evidence": "Tweet text quotes Patrick Bateman's iconic inner monologue."
+      }
+    ],
+    "techniques": [
+      "Screen recording",
+      "Looping"
+    ],
+    "style_tags": [
+      "tech-doomer",
+      "internet-lore"
+    ],
+    "one_line": "A screen recording depicting the broken, looping flow of attempting to download data on X."
+  },
+  "attempts": 1
+}

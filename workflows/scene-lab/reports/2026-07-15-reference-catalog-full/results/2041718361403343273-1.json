@@ -1,0 +1,45 @@
+{
+  "id": "2041718361403343273-1",
+  "handle": "pleometric",
+  "status": "ok",
+  "date": "Apr 8, 2026",
+  "tweet_text": "my usual workflow these days is scoping more complex scenes in blender, to get the target motion I want like in this example video. Then, I use it as a ref for the model, usually Seedance 2. \n\nFor this video it was model only because I did this in like 30 min.",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Blender\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.99,\n      \"evidence\": \"Mentioned in text as the software used for animating the scene.\"\n    },\n    {\n      \"name\": \"Seedance 2\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.95,\n      \"evidence\": \"Mentioned in text as the AI generation model.\"\n    },\n    {\n      \"name\": \"3D Art Mannequin\",\n      \"kind\": \"character\",\n      \"confidence\": 0.9,\n      \"evidence\": \"Visual representation of jointed red and blue dummy models fighting in a ring.\"\n    }\n  ],\n  \"techniques\": [\n    \"3D character animation\",\n    \"Pose-to-pose blocking\",\n    \"Ragdoll physics simulation\",\n    \"Minimalist viewport rendering\"\n  ],\n  \"style_tags\": [\n    \"previsualization\",\n    \"minimalist\",\n    \"technical-demo\",\n    \"indie-dev\"\n  ],\n  \"one_line\": \"A minimalist 3D animation test showing a red dummy punching a blue dummy in a boxing ring.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Blender",
+        "kind": "brand",
+        "confidence": 0.99,
+        "evidence": "Mentioned in text as the software used for animating the scene."
+      },
+      {
+        "name": "Seedance 2",
+        "kind": "brand",
+        "confidence": 0.95,
+        "evidence": "Mentioned in text as the AI generation model."
+      },
+      {
+        "name": "3D Art Mannequin",
+        "kind": "character",
+        "confidence": 0.9,
+        "evidence": "Visual representation of jointed red and blue dummy models fighting in a ring."
+      }
+    ],
+    "techniques": [
+      "3D character animation",
+      "Pose-to-pose blocking",
+      "Ragdoll physics simulation",
+      "Minimalist viewport rendering"
+    ],
+    "style_tags": [
+      "previsualization",
+      "minimalist",
+      "technical-demo",
+      "indie-dev"
+    ],
+    "one_line": "A minimalist 3D animation test showing a red dummy punching a blue dummy in a boxing ring."
+  },
+  "attempts": 1
+}

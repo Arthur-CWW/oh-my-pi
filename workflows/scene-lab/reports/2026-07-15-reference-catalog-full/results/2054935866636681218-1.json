@@ -1,0 +1,43 @@
+{
+  "id": "2054935866636681218-1",
+  "handle": "pleometric",
+  "status": "ok",
+  "date": "May 14, 2026",
+  "tweet_text": "",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Patrick Star\",\n      \"kind\": \"character\",\n      \"confidence\": 1.0,\n      \"evidence\": \"Patrick Star from SpongeBob SquarePants is shown walking through the doors of the Krusty Krab.\"\n    },\n    {\n      \"name\": \"SpongeBob SquarePants\",\n      \"kind\": \"brand\",\n      \"confidence\": 1.0,\n      \"evidence\": \"The setting is the Krusty Krab restaurant and the character is Patrick Star, both from the Nickelodeon series SpongeBob SquarePants.\"\n    },\n    {\n      \"name\": \"Minor Spelling Mistake\",\n      \"kind\": \"meme\",\n      \"confidence\": 1.0,\n      \"evidence\": \"The meme template features the caption 'minor spelling mistake' paired with a character being instantly vaporized by an energy beam.\"\n    }\n  ],\n  \"techniques\": [\n    \"Caption overlay\",\n    \"Hard cut\",\n    \"Disintegration effect\"\n  ],\n  \"style_tags\": [\n    \"internet-lore\",\n    \"shitposting\",\n    \"surrealist\"\n  ],\n  \"one_line\": \"Patrick Star enters the Krusty Krab and is instantly vaporized by a massive energy beam under the caption 'minor spelling mistake'.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Patrick Star",
+        "kind": "character",
+        "confidence": 1.0,
+        "evidence": "Patrick Star from SpongeBob SquarePants is shown walking through the doors of the Krusty Krab."
+      },
+      {
+        "name": "SpongeBob SquarePants",
+        "kind": "brand",
+        "confidence": 1.0,
+        "evidence": "The setting is the Krusty Krab restaurant and the character is Patrick Star, both from the Nickelodeon series SpongeBob SquarePants."
+      },
+      {
+        "name": "Minor Spelling Mistake",
+        "kind": "meme",
+        "confidence": 1.0,
+        "evidence": "The meme template features the caption 'minor spelling mistake' paired with a character being instantly vaporized by an energy beam."
+      }
+    ],
+    "techniques": [
+      "Caption overlay",
+      "Hard cut",
+      "Disintegration effect"
+    ],
+    "style_tags": [
+      "internet-lore",
+      "shitposting",
+      "surrealist"
+    ],
+    "one_line": "Patrick Star enters the Krusty Krab and is instantly vaporized by a massive energy beam under the caption 'minor spelling mistake'."
+  },
+  "attempts": 1
+}

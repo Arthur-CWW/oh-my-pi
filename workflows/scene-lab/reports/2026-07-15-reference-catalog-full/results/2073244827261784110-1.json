@@ -1,0 +1,39 @@
+{
+  "id": "2073244827261784110-1",
+  "handle": "SkyeSharkie",
+  "status": "ok",
+  "date": "Jul 4, 2026",
+  "tweet_text": "check this out, this is complete flat geometry",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Three.js\",\n      \"kind\": \"brand\",\n      \"confidence\": 1.0,\n      \"evidence\": \"UI text explicitly states 'three.js Parallax Occlusion Mapping' in the top-left corner.\"\n    },\n    {\n      \"name\": \"Three.js Shading Language\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.95,\n      \"evidence\": \"Description text notes height fields ray marched in 'TSL'.\"\n    }\n  ],\n  \"techniques\": [\n    \"parallax occlusion mapping\",\n    \"raymarching\",\n    \"real-time 3D viewport navigation\",\n    \"screen recording\"\n  ],\n  \"style_tags\": [\n    \"tech-demo\",\n    \"creative-coding\",\n    \"sci-fi-aesthetic\",\n    \"computer-graphics\"\n  ],\n  \"one_line\": \"A tech demo showing detailed sci-fi structures rendered on flat geometry using Three.js parallax occlusion mapping.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Three.js",
+        "kind": "brand",
+        "confidence": 1.0,
+        "evidence": "UI text explicitly states 'three.js Parallax Occlusion Mapping' in the top-left corner."
+      },
+      {
+        "name": "Three.js Shading Language",
+        "kind": "brand",
+        "confidence": 0.95,
+        "evidence": "Description text notes height fields ray marched in 'TSL'."
+      }
+    ],
+    "techniques": [
+      "parallax occlusion mapping",
+      "raymarching",
+      "real-time 3D viewport navigation",
+      "screen recording"
+    ],
+    "style_tags": [
+      "tech-demo",
+      "creative-coding",
+      "sci-fi-aesthetic",
+      "computer-graphics"
+    ],
+    "one_line": "A tech demo showing detailed sci-fi structures rendered on flat geometry using Three.js parallax occlusion mapping."
+  },
+  "attempts": 1
+}

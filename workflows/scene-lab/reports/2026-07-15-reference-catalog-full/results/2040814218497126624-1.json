@@ -1,0 +1,33 @@
+{
+  "id": "2040814218497126624-1",
+  "handle": "pleometric",
+  "status": "ok",
+  "date": "Apr 5, 2026",
+  "tweet_text": "\"slop\" makes the process of conversion-through-mimesis overload so much more efficient \n\nit's all repetition and memorable visuals",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Wojak\",\n      \"kind\": \"character\",\n      \"confidence\": 0.9,\n      \"evidence\": \"Distorted 3D glass model of the Wojak meme face.\"\n    }\n  ],\n  \"techniques\": [\n    \"split-screen\",\n    \"kinetic typography\",\n    \"feedback tunnel\",\n    \"3D glassmorphism\"\n  ],\n  \"style_tags\": [\n    \"corecore\",\n    \"schizoposting\",\n    \"accelerationist\",\n    \"slop\"\n  ],\n  \"one_line\": \"A split-screen video looping iridescent 3D Wojak heads and psychedelic corridors with existential text overlays.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Wojak",
+        "kind": "character",
+        "confidence": 0.9,
+        "evidence": "Distorted 3D glass model of the Wojak meme face."
+      }
+    ],
+    "techniques": [
+      "split-screen",
+      "kinetic typography",
+      "feedback tunnel",
+      "3D glassmorphism"
+    ],
+    "style_tags": [
+      "corecore",
+      "schizoposting",
+      "accelerationist",
+      "slop"
+    ],
+    "one_line": "A split-screen video looping iridescent 3D Wojak heads and psychedelic corridors with existential text overlays."
+  },
+  "attempts": 1
+}

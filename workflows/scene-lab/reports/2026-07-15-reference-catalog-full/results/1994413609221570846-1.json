@@ -1,0 +1,37 @@
+{
+  "id": "1994413609221570846-1",
+  "handle": "abelian_soup",
+  "status": "ok",
+  "date": "Nov 28, 2025",
+  "tweet_text": "total @voooooogel TL victory",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Ethan Mollick\",\n      \"kind\": \"person\",\n      \"confidence\": 0.9,\n      \"evidence\": \"Animation of his 'jagged frontier' diagram, featuring a star character with his glasses and mustache.\"\n    },\n    {\n      \"name\": \"Jagged Frontier\",\n      \"kind\": \"meme\",\n      \"confidence\": 0.95,\n      \"evidence\": \"Direct quote of 'jagged frontier' and replication of the overlapping capability diagram.\"\n    }\n  ],\n  \"techniques\": [\n    \"2D character animation\",\n    \"infographic animation\",\n    \"sliding transitions\"\n  ],\n  \"style_tags\": [\n    \"tech-satire\",\n    \"webcomic\",\n    \"minimalist\"\n  ],\n  \"one_line\": \"Animated infographic explaining Ethan Mollick's 'jagged frontier' of AI capability.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Ethan Mollick",
+        "kind": "person",
+        "confidence": 0.9,
+        "evidence": "Animation of his 'jagged frontier' diagram, featuring a star character with his glasses and mustache."
+      },
+      {
+        "name": "Jagged Frontier",
+        "kind": "meme",
+        "confidence": 0.95,
+        "evidence": "Direct quote of 'jagged frontier' and replication of the overlapping capability diagram."
+      }
+    ],
+    "techniques": [
+      "2D character animation",
+      "infographic animation",
+      "sliding transitions"
+    ],
+    "style_tags": [
+      "tech-satire",
+      "webcomic",
+      "minimalist"
+    ],
+    "one_line": "Animated infographic explaining Ethan Mollick's 'jagged frontier' of AI capability."
+  },
+  "attempts": 1
+}

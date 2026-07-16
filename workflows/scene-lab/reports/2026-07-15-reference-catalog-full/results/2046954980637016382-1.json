@@ -1,0 +1,50 @@
+{
+  "id": "2046954980637016382-1",
+  "handle": "pleometric",
+  "status": "ok",
+  "date": "Apr 22, 2026",
+  "tweet_text": "here you go Norvid",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Fishstick\",\n      \"kind\": \"character\",\n      \"confidence\": 0.95,\n      \"evidence\": \"Fish characters in miner outfits resemble the Fortnite Fishstick skin.\"\n    },\n    {\n      \"name\": \"Minecraft\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.95,\n      \"evidence\": \"The background consists of Minecraft dirt and stone blocks.\"\n    },\n    {\n      \"name\": \"16 Tons\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.95,\n      \"evidence\": \"The main character wears a cap labeled '16 TONS'.\"\n    },\n    {\n      \"name\": \"Zombie\",\n      \"kind\": \"character\",\n      \"confidence\": 0.9,\n      \"evidence\": \"A stylized green zombie character performs in the foreground.\"\n    }\n  ],\n  \"techniques\": [\n    \"3D character animation\",\n    \"Lip-syncing\",\n    \"Kinetic typography\",\n    \"Facial motion capture tracking markers\"\n  ],\n  \"style_tags\": [\n    \"internet-lore\",\n    \"gaming-meme\",\n    \"surrealist\"\n  ],\n  \"one_line\": \"An animated zombie and Fortnite Fishstick miners sing '16 Tons' in a Minecraft setting.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Fishstick",
+        "kind": "character",
+        "confidence": 0.95,
+        "evidence": "Fish characters in miner outfits resemble the Fortnite Fishstick skin."
+      },
+      {
+        "name": "Minecraft",
+        "kind": "brand",
+        "confidence": 0.95,
+        "evidence": "The background consists of Minecraft dirt and stone blocks."
+      },
+      {
+        "name": "16 Tons",
+        "kind": "artwork",
+        "confidence": 0.95,
+        "evidence": "The main character wears a cap labeled '16 TONS'."
+      },
+      {
+        "name": "Zombie",
+        "kind": "character",
+        "confidence": 0.9,
+        "evidence": "A stylized green zombie character performs in the foreground."
+      }
+    ],
+    "techniques": [
+      "3D character animation",
+      "Lip-syncing",
+      "Kinetic typography",
+      "Facial motion capture tracking markers"
+    ],
+    "style_tags": [
+      "internet-lore",
+      "gaming-meme",
+      "surrealist"
+    ],
+    "one_line": "An animated zombie and Fortnite Fishstick miners sing '16 Tons' in a Minecraft setting."
+  },
+  "attempts": 1
+}

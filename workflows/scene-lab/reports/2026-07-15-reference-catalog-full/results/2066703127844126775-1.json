@@ -1,0 +1,45 @@
+{
+  "id": "2066703127844126775-1",
+  "handle": "pleometric",
+  "status": "ok",
+  "date": "Jun 16, 2026",
+  "tweet_text": "Happy Birthday @kalomaze \n\nHere's to a 100 more 🥂🎇",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Dropout Bear\",\n      \"kind\": \"character\",\n      \"confidence\": 0.98,\n      \"evidence\": \"A 3D rendered brown bear with yellow sleepy eyes wearing a school uniform blazer and tie, which is Kanye West's mascot from The College Dropout and Late Registration.\"\n    },\n    {\n      \"name\": \"Kalomaze\",\n      \"kind\": \"person\",\n      \"confidence\": 0.99,\n      \"evidence\": \"The tweet explicitly tags @kalomaze and the text overlay contains a pun on their name ('maze' and 'amaze').\"\n    },\n    {\n      \"name\": \"Neural Network Graph\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.90,\n      \"evidence\": \"A complex 3D network diagram of nodes and connections in the background, resembling neural network weight or attention visualizations commonly shared by AI researchers.\"\n    }\n  ],\n  \"techniques\": [\n    \"3D camera orbit\",\n    \"superimposed text\",\n    \"3D model rendering\",\n    \"data visualization overlay\"\n  ],\n  \"style_tags\": [\n    \"internet-lore\",\n    \"tech-doomer\",\n    \"meme\",\n    \"retro-futuristic\"\n  ],\n  \"one_line\": \"A birthday tribute video for AI researcher kalomaze featuring a 3D Kanye West Dropout Bear mascot rotating in front of a neural network visualization.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Dropout Bear",
+        "kind": "character",
+        "confidence": 0.98,
+        "evidence": "A 3D rendered brown bear with yellow sleepy eyes wearing a school uniform blazer and tie, which is Kanye West's mascot from The College Dropout and Late Registration."
+      },
+      {
+        "name": "Kalomaze",
+        "kind": "person",
+        "confidence": 0.99,
+        "evidence": "The tweet explicitly tags @kalomaze and the text overlay contains a pun on their name ('maze' and 'amaze')."
+      },
+      {
+        "name": "Neural Network Graph",
+        "kind": "artwork",
+        "confidence": 0.9,
+        "evidence": "A complex 3D network diagram of nodes and connections in the background, resembling neural network weight or attention visualizations commonly shared by AI researchers."
+      }
+    ],
+    "techniques": [
+      "3D camera orbit",
+      "superimposed text",
+      "3D model rendering",
+      "data visualization overlay"
+    ],
+    "style_tags": [
+      "internet-lore",
+      "tech-doomer",
+      "meme",
+      "retro-futuristic"
+    ],
+    "one_line": "A birthday tribute video for AI researcher kalomaze featuring a 3D Kanye West Dropout Bear mascot rotating in front of a neural network visualization."
+  },
+  "attempts": 1
+}

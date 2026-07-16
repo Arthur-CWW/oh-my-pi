@@ -1,0 +1,35 @@
+{
+  "id": "2051819441390858481-1",
+  "handle": "poetengineer__",
+  "status": "ok",
+  "date": "May 6, 2026",
+  "tweet_text": "gravitational survey",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Generative Art\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.95,\n      \"evidence\": \"The visualization uses a classic particle flow field simulation, and the HUD text explicitly lists '$12 gen art' alongside '$7 cognition'.\"\n    }\n  ],\n  \"techniques\": [\n    \"FUI (Fantasy User Interface)\",\n    \"Flow field particle simulation\",\n    \"CRT emulation\",\n    \"Chromatic aberration\",\n    \"HUD data overlay\"\n  ],\n  \"style_tags\": [\n    \"retro-futuristic\",\n    \"sci-fi\",\n    \"cyberpunk\",\n    \"creative-coding\",\n    \"lo-fi-tech\"\n  ],\n  \"one_line\": \"A retro-futuristic CRT visualization showing a gravitational survey of a rotating sphere covered in particle flow fields and HUD telemetry.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Generative Art",
+        "kind": "artwork",
+        "confidence": 0.95,
+        "evidence": "The visualization uses a classic particle flow field simulation, and the HUD text explicitly lists '$12 gen art' alongside '$7 cognition'."
+      }
+    ],
+    "techniques": [
+      "FUI (Fantasy User Interface)",
+      "Flow field particle simulation",
+      "CRT emulation",
+      "Chromatic aberration",
+      "HUD data overlay"
+    ],
+    "style_tags": [
+      "retro-futuristic",
+      "sci-fi",
+      "cyberpunk",
+      "creative-coding",
+      "lo-fi-tech"
+    ],
+    "one_line": "A retro-futuristic CRT visualization showing a gravitational survey of a rotating sphere covered in particle flow fields and HUD telemetry."
+  },
+  "attempts": 1
+}

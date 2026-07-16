@@ -1,0 +1,34 @@
+{
+  "id": "2052268558386667645-1",
+  "handle": "poetengineer__",
+  "status": "ok",
+  "date": "May 7, 2026",
+  "tweet_text": "shape study",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"SLR Camera\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.85,\n      \"evidence\": \"The voxel structure morphs and resolves into the distinct shape of a camera with a lens, body, and top dials in the later frames.\"\n    }\n  ],\n  \"techniques\": [\n    \"voxel animation\",\n    \"3D morphing\",\n    \"isometric projection\",\n    \"procedural generation\",\n    \"ambient occlusion rendering\"\n  ],\n  \"style_tags\": [\n    \"voxel-art\",\n    \"generative\",\n    \"minimalist\",\n    \"satisfying-loop\"\n  ],\n  \"one_line\": \"A satisfying 3D voxel animation of shifting grey blocks morphing into the shape of a camera against a black background.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "SLR Camera",
+        "kind": "artwork",
+        "confidence": 0.85,
+        "evidence": "The voxel structure morphs and resolves into the distinct shape of a camera with a lens, body, and top dials in the later frames."
+      }
+    ],
+    "techniques": [
+      "voxel animation",
+      "3D morphing",
+      "isometric projection",
+      "procedural generation",
+      "ambient occlusion rendering"
+    ],
+    "style_tags": [
+      "voxel-art",
+      "generative",
+      "minimalist",
+      "satisfying-loop"
+    ],
+    "one_line": "A satisfying 3D voxel animation of shifting grey blocks morphing into the shape of a camera against a black background."
+  },
+  "attempts": 1
+}

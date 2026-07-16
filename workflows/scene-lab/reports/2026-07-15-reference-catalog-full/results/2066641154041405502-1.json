@@ -1,0 +1,43 @@
+{
+  "id": "2066641154041405502-1",
+  "handle": "pleometric",
+  "status": "ok",
+  "date": "Jun 15, 2026",
+  "tweet_text": "Cat got your writing? \n\nPangram can help.",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"It's More Likely Than You Think meme\",\n      \"kind\": \"meme\",\n      \"confidence\": 0.95,\n      \"evidence\": \"Phrasing 'In my writing? it's more likely than you think' mimics the classic internet meme format.\"\n    },\n    {\n      \"name\": \"Pangram\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.99,\n      \"evidence\": \"Brand name and logo displayed in the top right corner.\"\n    },\n    {\n      \"name\": \"Le Chaton Fat\",\n      \"kind\": \"character\",\n      \"confidence\": 0.90,\n      \"evidence\": \"French cat illustration with a beret and wine glass under a magnifying glass.\"\n    }\n  ],\n  \"techniques\": [\n    \"Meme template replication\",\n    \"Stop-motion expression swapping\",\n    \"UI button click simulation\"\n  ],\n  \"style_tags\": [\n    \"internet-lore\",\n    \"corporate-meme\",\n    \"shitpost-marketing\"\n  ],\n  \"one_line\": \"Startup advertisement parodying classic internet memes to market an AI text detector.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "It's More Likely Than You Think meme",
+        "kind": "meme",
+        "confidence": 0.95,
+        "evidence": "Phrasing 'In my writing? it's more likely than you think' mimics the classic internet meme format."
+      },
+      {
+        "name": "Pangram",
+        "kind": "brand",
+        "confidence": 0.99,
+        "evidence": "Brand name and logo displayed in the top right corner."
+      },
+      {
+        "name": "Le Chaton Fat",
+        "kind": "character",
+        "confidence": 0.9,
+        "evidence": "French cat illustration with a beret and wine glass under a magnifying glass."
+      }
+    ],
+    "techniques": [
+      "Meme template replication",
+      "Stop-motion expression swapping",
+      "UI button click simulation"
+    ],
+    "style_tags": [
+      "internet-lore",
+      "corporate-meme",
+      "shitpost-marketing"
+    ],
+    "one_line": "Startup advertisement parodying classic internet memes to market an AI text detector."
+  },
+  "attempts": 1
+}

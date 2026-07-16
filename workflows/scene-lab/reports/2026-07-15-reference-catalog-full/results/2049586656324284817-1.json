@@ -1,0 +1,44 @@
+{
+  "id": "2049586656324284817-1",
+  "handle": "pleometric",
+  "status": "ok",
+  "date": "Apr 29, 2026",
+  "tweet_text": "best part form Powell's last FOMC 😂 \n\nunc still got it ❤️‍🩹",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Jerome Powell\",\n      \"kind\": \"person\",\n      \"confidence\": 0.99,\n      \"evidence\": \"Fed Chair Jerome Powell speaking at the FOMC podium.\"\n    },\n    {\n      \"name\": \"Modelo Especial\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.98,\n      \"evidence\": \"Beer can edited into Powell's hand and placed on the podium.\"\n    },\n    {\n      \"name\": \"Unc\",\n      \"kind\": \"meme\",\n      \"confidence\": 0.9,\n      \"evidence\": \"Tweet text calls Powell 'unc', referencing the internet slang/meme.\"\n    }\n  ],\n  \"techniques\": [\n    \"Object insertion\",\n    \"Color inversion\",\n    \"Open captions\",\n    \"Vignette filter\"\n  ],\n  \"style_tags\": [\n    \"shitpost\",\n    \"political-satire\",\n    \"finance-meme\"\n  ],\n  \"one_line\": \"A satirical edit of Jerome Powell drinking a Modelo and swearing during an FOMC press briefing.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Jerome Powell",
+        "kind": "person",
+        "confidence": 0.99,
+        "evidence": "Fed Chair Jerome Powell speaking at the FOMC podium."
+      },
+      {
+        "name": "Modelo Especial",
+        "kind": "brand",
+        "confidence": 0.98,
+        "evidence": "Beer can edited into Powell's hand and placed on the podium."
+      },
+      {
+        "name": "Unc",
+        "kind": "meme",
+        "confidence": 0.9,
+        "evidence": "Tweet text calls Powell 'unc', referencing the internet slang/meme."
+      }
+    ],
+    "techniques": [
+      "Object insertion",
+      "Color inversion",
+      "Open captions",
+      "Vignette filter"
+    ],
+    "style_tags": [
+      "shitpost",
+      "political-satire",
+      "finance-meme"
+    ],
+    "one_line": "A satirical edit of Jerome Powell drinking a Modelo and swearing during an FOMC press briefing."
+  },
+  "attempts": 1
+}

@@ -1,0 +1,45 @@
+{
+  "id": "2065638815100752142-1",
+  "handle": "pleometric",
+  "status": "ok",
+  "date": "Jun 13, 2026",
+  "tweet_text": "IMPORTANT UPDATE:",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Newman\",\n      \"kind\": \"character\",\n      \"confidence\": 0.95,\n      \"evidence\": \"Wayne Knight's character Newman from Seinfeld is shown on the left with curly hair and glasses, flashing to a skeleton.\"\n    },\n    {\n      \"name\": \"Donald Trump\",\n      \"kind\": \"person\",\n      \"confidence\": 0.9,\n      \"evidence\": \"A stylized gigachad/mewing version of Donald Trump is shown in the right-hand banner.\"\n    },\n    {\n      \"name\": \"Got Milk?\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.85,\n      \"evidence\": \"The 'Got Fable?' ad format parodies the classic 'Got Milk?' slogan and layout.\"\n    }\n  ],\n  \"techniques\": [\n    \"Split-screen\",\n    \"X-ray skull flash transition\",\n    \"Deep-fried posterization\",\n    \"Impact font text overlay\"\n  ],\n  \"style_tags\": [\n    \"deep-fried\",\n    \"tech-doomer\",\n    \"shitpost\",\n    \"schizopost\"\n  ],\n  \"one_line\": \"A deep-fried tech-doomer shitpost pairing Seinfeld's Newman flashing into a skeleton with a gigachad Trump Fable advertisement.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Newman",
+        "kind": "character",
+        "confidence": 0.95,
+        "evidence": "Wayne Knight's character Newman from Seinfeld is shown on the left with curly hair and glasses, flashing to a skeleton."
+      },
+      {
+        "name": "Donald Trump",
+        "kind": "person",
+        "confidence": 0.9,
+        "evidence": "A stylized gigachad/mewing version of Donald Trump is shown in the right-hand banner."
+      },
+      {
+        "name": "Got Milk?",
+        "kind": "brand",
+        "confidence": 0.85,
+        "evidence": "The 'Got Fable?' ad format parodies the classic 'Got Milk?' slogan and layout."
+      }
+    ],
+    "techniques": [
+      "Split-screen",
+      "X-ray skull flash transition",
+      "Deep-fried posterization",
+      "Impact font text overlay"
+    ],
+    "style_tags": [
+      "deep-fried",
+      "tech-doomer",
+      "shitpost",
+      "schizopost"
+    ],
+    "one_line": "A deep-fried tech-doomer shitpost pairing Seinfeld's Newman flashing into a skeleton with a gigachad Trump Fable advertisement."
+  },
+  "attempts": 1
+}

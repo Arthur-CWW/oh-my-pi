@@ -1,0 +1,37 @@
+{
+  "id": "2042597455921909918-1",
+  "handle": "pleometric",
+  "status": "ok",
+  "date": "Apr 10, 2026",
+  "tweet_text": "the people LOVE seeing their dreams made manifest by synthetic media. In other words: people love AI slop. \n\nIt seems that what they HATE is how this exposes a preference for simulacra. You could jump through a lot of hoops and insist you really liked the signifier! The Real!",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Leopold Aschenbrenner\",\n      \"kind\": \"person\",\n      \"confidence\": 0.95,\n      \"evidence\": \"3D dancing model of Leopold Aschenbrenner.\"\n    },\n    {\n      \"name\": \"Club Penguin Penguin\",\n      \"kind\": \"character\",\n      \"confidence\": 0.95,\n      \"evidence\": \"Dancing purple Club Penguin character.\"\n    }\n  ],\n  \"techniques\": [\n    \"split-screen\",\n    \"3D character animation\",\n    \"overlay graphics\"\n  ],\n  \"style_tags\": [\n    \"internet-lore\",\n    \"accelerationist\",\n    \"surrealist\"\n  ],\n  \"one_line\": \"Split-screen TikTok comparing construction work to dancing 3D avatars.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Leopold Aschenbrenner",
+        "kind": "person",
+        "confidence": 0.95,
+        "evidence": "3D dancing model of Leopold Aschenbrenner."
+      },
+      {
+        "name": "Club Penguin Penguin",
+        "kind": "character",
+        "confidence": 0.95,
+        "evidence": "Dancing purple Club Penguin character."
+      }
+    ],
+    "techniques": [
+      "split-screen",
+      "3D character animation",
+      "overlay graphics"
+    ],
+    "style_tags": [
+      "internet-lore",
+      "accelerationist",
+      "surrealist"
+    ],
+    "one_line": "Split-screen TikTok comparing construction work to dancing 3D avatars."
+  },
+  "attempts": 1
+}

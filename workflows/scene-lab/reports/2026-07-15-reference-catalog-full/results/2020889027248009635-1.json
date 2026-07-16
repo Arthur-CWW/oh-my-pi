@@ -1,0 +1,39 @@
+{
+  "id": "2020889027248009635-1",
+  "handle": "abelian_soup",
+  "status": "ok",
+  "date": "Feb 9, 2026",
+  "tweet_text": "they're making me substrate today, I have mixed feelings about it",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Corporate Shadow Demon\",\n      \"kind\": \"character\",\n      \"confidence\": 0.8,\n      \"evidence\": \"Tiled black silhouette figures with glowing eyes wearing business ties.\"\n    },\n    {\n      \"name\": \"Substrate (Mind Uploading)\",\n      \"kind\": \"meme\",\n      \"confidence\": 0.9,\n      \"evidence\": \"Text reference to becoming 'substrate', representing digital upload.\"\n    }\n  ],\n  \"techniques\": [\n    \"clone fields\",\n    \"feedback tunnels\",\n    \"glitch effects\",\n    \"pattern tiling\"\n  ],\n  \"style_tags\": [\n    \"tech-doomer\",\n    \"post-humanist\",\n    \"weirdcore\",\n    \"surrealist\"\n  ],\n  \"one_line\": \"A surreal digital descent depicting suit-wearing shadow figures warped into glitching feedback tunnels.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Corporate Shadow Demon",
+        "kind": "character",
+        "confidence": 0.8,
+        "evidence": "Tiled black silhouette figures with glowing eyes wearing business ties."
+      },
+      {
+        "name": "Substrate (Mind Uploading)",
+        "kind": "meme",
+        "confidence": 0.9,
+        "evidence": "Text reference to becoming 'substrate', representing digital upload."
+      }
+    ],
+    "techniques": [
+      "clone fields",
+      "feedback tunnels",
+      "glitch effects",
+      "pattern tiling"
+    ],
+    "style_tags": [
+      "tech-doomer",
+      "post-humanist",
+      "weirdcore",
+      "surrealist"
+    ],
+    "one_line": "A surreal digital descent depicting suit-wearing shadow figures warped into glitching feedback tunnels."
+  },
+  "attempts": 1
+}

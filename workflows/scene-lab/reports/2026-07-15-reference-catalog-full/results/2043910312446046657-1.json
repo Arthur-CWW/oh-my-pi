@@ -1,0 +1,39 @@
+{
+  "id": "2043910312446046657-1",
+  "handle": "abelian_soup",
+  "status": "ok",
+  "date": "Apr 14, 2026",
+  "tweet_text": "interesting WAN family artefact. when audio is left disconnected on an i2v model with speaking instructions but no dialogue provided, the model injects its own protolanguage to fill the time",
+  "transcript_excerpt": "",
+  "raw_output": "{\n  \"references\": [\n    {\n      \"name\": \"Wan AI\",\n      \"kind\": \"brand\",\n      \"confidence\": 0.95,\n      \"evidence\": \"Tweet mentions WAN family i2v model.\"\n    },\n    {\n      \"name\": \"Dogu\",\n      \"kind\": \"artwork\",\n      \"confidence\": 0.85,\n      \"evidence\": \"Clay figure design resembles prehistoric Jōmon period figurines.\"\n    }\n  ],\n  \"techniques\": [\n    \"Image-to-video generation\",\n    \"Claymation simulation\",\n    \"Subtle character motion\",\n    \"Flame overlay animation\"\n  ],\n  \"style_tags\": [\n    \"surrealist\",\n    \"folk-horror\",\n    \"claymation\",\n    \"synthetic-media\"\n  ],\n  \"one_line\": \"An AI-generated multi-eyed clay idol holding a magical torch, showcasing image-to-video motion.\"\n}\n",
+  "result": {
+    "references": [
+      {
+        "name": "Wan AI",
+        "kind": "brand",
+        "confidence": 0.95,
+        "evidence": "Tweet mentions WAN family i2v model."
+      },
+      {
+        "name": "Dogu",
+        "kind": "artwork",
+        "confidence": 0.85,
+        "evidence": "Clay figure design resembles prehistoric Jōmon period figurines."
+      }
+    ],
+    "techniques": [
+      "Image-to-video generation",
+      "Claymation simulation",
+      "Subtle character motion",
+      "Flame overlay animation"
+    ],
+    "style_tags": [
+      "surrealist",
+      "folk-horror",
+      "claymation",
+      "synthetic-media"
+    ],
+    "one_line": "An AI-generated multi-eyed clay idol holding a magical torch, showcasing image-to-video motion."
+  },
+  "attempts": 1
+}
