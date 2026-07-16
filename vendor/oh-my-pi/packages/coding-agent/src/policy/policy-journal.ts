@@ -6,7 +6,6 @@ import { Schema } from "effect";
 import {
 	decodePolicyTransactionV1,
 	NonNegativeIntSchema,
-	NonEmptyStringSchema,
 	POLICY_GENESIS_HASH,
 	POLICY_REGISTRY_VERSION,
 	POLICY_SCHEMA_VERSION,
@@ -17,7 +16,6 @@ import {
 	type PolicyTransactionDraftV1,
 	type PolicyTransactionV1,
 	PositiveIntSchema,
-	SHA256DigestSchema,
 	StalePolicyHeadError,
 	TimestampSchema,
 	TornPolicyJournalError,
@@ -31,7 +29,7 @@ const POLICY_LOCK_FILENAME = "policy-v1.lock";
 
 export const POLICY_REGISTRY_DIGEST = createHash("sha256")
 	.update(
-		"registry:v2;core.routing:v1-2:default,smol,slow,vision,plan,designer,commit,title,implementer,qa,operator,synthesizer,task,advisor;core.providers:v1:deny.providers{providerIds[]},deny.models{models[{provider,model}]}",
+		"registry:v3;core.routing:v1-3:default,smol,slow,vision,plan,designer,commit,title,implementer,qa,operator,synthesizer,task,advisor;core.providers:v1:deny.providers{providerIds[]},deny.models{models[{provider,model}]};core.fallback:v1:chains{role:[selector+]};core.budgets.task:v1:maxConcurrency,maxLiveChildren,maxRuntimeMs,softRequestBudget{nonnegative-int}",
 	)
 	.digest("hex");
 
@@ -358,10 +356,7 @@ export class PolicyJournal {
 		});
 	}
 
-	#rollbackDraft(
-		input: PolicyRollbackInput,
-		records: readonly PolicyTransactionV1[],
-	): PolicyTransactionDraftV1 {
+	#rollbackDraft(input: PolicyRollbackInput, records: readonly PolicyTransactionV1[]): PolicyTransactionDraftV1 {
 		const target = records.find(record => record.transactionId === input.transactionId);
 		if (target === undefined) {
 			throw new PolicyJournalIoError({

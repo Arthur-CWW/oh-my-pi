@@ -1,28 +1,29 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import * as path from "node:path";
 import { getAgentDir } from "@oh-my-pi/pi-utils";
-import { YAML } from "bun";
-import { Effect, Schema } from "effect";
+import { Effect } from "effect";
 import { commitPolicyWithPreview } from "../policy/policy-apply";
-import { POLICY_REGISTRY_DIGEST, PolicyJournal } from "../policy/policy-journal";
 import { listLivePolicySessions, type PolicyLiveSession } from "../policy/policy-inspection";
+import { POLICY_REGISTRY_DIGEST, PolicyJournal } from "../policy/policy-journal";
 import {
-	CORE_PROVIDER_FRAGMENT_VERSION,
-	CORE_PROVIDER_KEYS,
-	CORE_ROUTING_KEYS,
-	type CoreRoutingValue,
-	CoreRoutingValueSchema,
 	decodePolicyValueForKey,
-	isCoreProviderKey,
+	isCoreBudgetKey,
+	isCoreRoutingKey,
 	isPolicyKey,
 	POLICY_REGISTRY_VERSION,
-	type PolicyMutationV1,
 	type PolicyScope,
 	type PolicyTransactionDraftV1,
 	type PolicyTransactionV1,
 	type PolicyValue,
 } from "../policy/policy-records";
 import { makePolicyService, type PolicyService } from "../policy/policy-service";
+import {
+	compilePolicyImportCandidates,
+	exportLegacyPolicyYaml,
+	importPolicyYaml,
+	type PolicyImportCandidate,
+	type PolicyImportConflictV1,
+} from "../policy/policy-yaml";
 
 export type PolicyCliAction =
 	| "get"
@@ -50,6 +51,7 @@ export interface PolicyCliRequest {
 	readonly sourcePaths?: readonly string[];
 	readonly frontmatterPaths?: readonly string[];
 	readonly dryRun?: boolean;
+	readonly apply?: boolean;
 	readonly json?: boolean;
 	readonly reason?: string;
 	readonly workstream?: string;
@@ -67,39 +69,12 @@ export interface PolicyCliOptions {
 	readonly liveSessions?: () => readonly PolicyLiveSession[];
 }
 
-export interface PolicyImportConflict {
-	readonly sourcePath: string;
-	readonly key: string;
-	readonly candidates: readonly string[];
-	readonly winningValue?: string;
-	readonly shadowedValues: readonly string[];
-	readonly classification: "policy" | "unsupported";
-	readonly requiredManualResolution: boolean;
-}
-
 export interface PolicyImportReport {
 	readonly digest: string;
 	readonly sourcePaths: readonly string[];
-	readonly conflicts: readonly PolicyImportConflict[];
-	readonly unsupported: readonly string[];
+	readonly conflicts: readonly PolicyImportConflictV1[];
 	readonly transaction?: PolicyTransactionV1;
 	readonly committed: boolean;
-}
-
-interface ImportCandidate {
-	readonly sourcePath: string;
-	readonly key: string;
-	readonly value: string;
-}
-
-type ParsedYaml = Record<string, unknown>;
-
-function routingKey(role: string): string {
-	return `core.routing.${role}`;
-}
-
-function decodeRoutingValue(value: string): CoreRoutingValue {
-	return Schema.decodeUnknownSync(CoreRoutingValueSchema)(value);
 }
 
 const DURATION_UNITS_MS = {
@@ -113,15 +88,17 @@ const DURATION_UNITS_MS = {
 
 function decodeSetValue(key: string, value: string): PolicyValue {
 	if (!isPolicyKey(key)) throw new Error(`Unknown policy key: ${key}`);
-	if (!isCoreProviderKey(key)) return decodeRoutingValue(value);
+	if (isCoreRoutingKey(key)) return decodePolicyValueForKey(key, value);
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(value);
 	} catch (error) {
 		const reason = error instanceof Error ? error.message : String(error);
-		throw new Error(`policy set ${key} requires a valid JSON object: ${reason}`);
+		throw new Error(
+			`policy set ${key} requires ${isCoreBudgetKey(key) ? "valid JSON" : "a valid JSON object"}: ${reason}`,
+		);
 	}
-	if (!isRecord(parsed)) throw new Error(`policy set ${key} requires a JSON object`);
+	if (!isCoreBudgetKey(key) && !isRecord(parsed)) throw new Error(`policy set ${key} requires a JSON object`);
 	return decodePolicyValueForKey(key, parsed);
 }
 
@@ -179,163 +156,40 @@ function resolveNow(now: (() => Date) | undefined): Date {
 	return resolved;
 }
 
-function isRecord(value: unknown): value is ParsedYaml {
+function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-async function readYamlCandidate(filePath: string, role: string): Promise<ImportCandidate[]> {
-	const content = await Bun.file(filePath).text();
-	const parsed: unknown = YAML.parse(content);
-	if (!isRecord(parsed)) return [];
-	const rawRoles = parsed.modelRoles;
-	if (!isRecord(rawRoles)) return [];
-	const raw = rawRoles[role];
-	return typeof raw === "string" && raw.trim().length > 0
-		? [{ sourcePath: filePath, key: routingKey(role), value: decodeRoutingValue(raw) }]
-		: [];
-}
-
-async function readProviderDenyCandidate(filePath: string): Promise<ImportCandidate[]> {
-	const content = await Bun.file(filePath).text();
-	const parsed: unknown = YAML.parse(content);
-	if (!isRecord(parsed) || !Array.isArray(parsed.disabledProviders)) return [];
-	const providerIds = [
-		...new Set(
-			parsed.disabledProviders.flatMap(value =>
-				typeof value === "string" && value.trim().length > 0 ? [value.trim()] : [],
-			),
-		),
-	];
-	return providerIds.length === 0
-		? []
-		: [
-				{
-					sourcePath: filePath,
-					key: "core.providers.deny.providers",
-					value: JSON.stringify({ providerIds }),
-				},
-			];
-}
-
-async function readFrontmatterCandidate(filePath: string): Promise<ImportCandidate[]> {
-	const content = await Bun.file(filePath).text();
-	const match = /^---\s*\n([\s\S]*?)\n---(?:\s*\n|$)/.exec(content);
-	if (!match?.[1]) return [];
-	const parsed: unknown = YAML.parse(match[1]);
-	if (!isRecord(parsed) || typeof parsed.model !== "string" || parsed.model.trim().length === 0) return [];
-	return [{ sourcePath: filePath, key: "core.routing.task", value: decodeRoutingValue(parsed.model) }];
-}
-
-async function sourceDigest(paths: readonly string[]): Promise<string> {
-	const hash = createHash("sha256");
-	for (const filePath of paths) {
-		hash.update(filePath, "utf8");
-		hash.update("\0", "utf8");
-		hash.update(new Uint8Array(await Bun.file(filePath).arrayBuffer()));
-		hash.update("\0", "utf8");
-	}
-	return hash.digest("hex");
-}
-
-function importMutations(candidates: readonly ImportCandidate[]): {
-	readonly mutations: readonly PolicyMutationV1[];
-	readonly conflicts: readonly PolicyImportConflict[];
-	readonly unsupported: readonly string[];
+function importMutations(candidates: readonly PolicyImportCandidate[]): {
+	readonly mutations: ReturnType<typeof compilePolicyImportCandidates>["mutations"];
+	readonly conflicts: ReturnType<typeof compilePolicyImportCandidates>["conflicts"];
+	readonly unsupported: readonly [];
 } {
-	const grouped = new Map<string, ImportCandidate[]>();
-	const unsupported: string[] = [];
-	for (const candidate of candidates) {
-		if (
-			!(CORE_ROUTING_KEYS as readonly string[]).includes(candidate.key) &&
-			!(CORE_PROVIDER_KEYS as readonly string[]).includes(candidate.key)
-		) {
-			unsupported.push(`${candidate.sourcePath}:${candidate.key}`);
-			continue;
-		}
-		let values = grouped.get(candidate.key);
-		if (!values) {
-			values = [];
-			grouped.set(candidate.key, values);
-		}
-		values.push(candidate);
-	}
-	const conflicts: PolicyImportConflict[] = [];
-	const mutations: PolicyMutationV1[] = [];
-	for (const [key, values] of grouped) {
-		const winner = values.at(-1);
-		if (!winner) continue;
-		const candidatesForKey = values.map(value => value.value);
-		const shadowedValues = values.slice(0, -1).map(value => value.value);
-		conflicts.push({
-			sourcePath: winner.sourcePath,
-			key,
-			candidates: candidatesForKey,
-			winningValue: winner.value,
-			shadowedValues,
-			classification: "policy",
-			requiredManualResolution: new Set(candidatesForKey).size > 1,
-		});
-		if (key === "core.providers.deny.providers") {
-			mutations.push({
-				op: "set",
-				key,
-				scope: { kind: "global" },
-				fragmentVersion: CORE_PROVIDER_FRAGMENT_VERSION,
-				value: decodePolicyValueForKey(key, JSON.parse(winner.value)),
-			});
-		} else if (key === "core.providers.deny.models") {
-			mutations.push({
-				op: "set",
-				key,
-				scope: { kind: "global" },
-				fragmentVersion: CORE_PROVIDER_FRAGMENT_VERSION,
-				value: decodePolicyValueForKey(key, JSON.parse(winner.value)),
-			});
-		} else {
-			mutations.push({
-				op: "set",
-				key: key as (typeof CORE_ROUTING_KEYS)[number],
-				scope: { kind: "global" },
-				fragmentVersion: POLICY_REGISTRY_VERSION,
-				value: decodeRoutingValue(winner.value),
-			});
-		}
-	}
-	return { mutations, conflicts, unsupported };
+	return { ...compilePolicyImportCandidates(candidates), unsupported: [] };
 }
 
 async function collectImport(
 	configPath: string,
 	frontmatterPaths: readonly string[],
+	projectPaths: readonly string[] = [],
+	workstream?: string,
 ): Promise<{
-	readonly candidates: readonly ImportCandidate[];
+	readonly candidates: readonly PolicyImportCandidate[];
 	readonly report: Omit<PolicyImportReport, "transaction" | "committed">;
 }> {
-	const candidates: ImportCandidate[] = [];
-	const roles = [
-		"default",
-		"smol",
-		"slow",
-		"vision",
-		"plan",
-		"designer",
-		"commit",
-		"title",
-		"implementer",
-		"qa",
-		"operator",
-		"synthesizer",
-		"task",
-		"advisor",
-	];
-	for (const role of roles) candidates.push(...(await readYamlCandidate(configPath, role)));
-	candidates.push(...(await readProviderDenyCandidate(configPath)));
-	for (const filePath of frontmatterPaths) candidates.push(...(await readFrontmatterCandidate(filePath)));
-	const sourcePaths = [configPath, ...frontmatterPaths];
-	const { mutations: _, ...details } = importMutations(candidates);
+	const projectScope: PolicyScope = workstream === undefined ? { kind: "global" } : { kind: "workstream", workstream };
+	const imported = await importPolicyYaml([
+		{ sourcePath: configPath, layer: "global", scope: { kind: "global" } },
+		...projectPaths.map(sourcePath => ({ sourcePath, layer: "project" as const, scope: projectScope })),
+		...frontmatterPaths.map(sourcePath => ({ sourcePath, layer: "frontmatter" as const, scope: projectScope })),
+	]);
 	return {
-		candidates,
-		report: { digest: await sourceDigest(sourcePaths), sourcePaths, ...details },
+		candidates: imported.candidates,
+		report: {
+			digest: imported.digest,
+			sourcePaths: imported.sourcePaths,
+			conflicts: imported.conflicts,
+		},
 	};
 }
 
@@ -352,10 +206,10 @@ async function runImport(
 	request: PolicyCliRequest,
 	now: () => Date,
 ): Promise<PolicyImportReport> {
-	const sourcePaths = request.sourcePaths ?? [];
-	const configPath = sourcePaths[0] ?? request.configPath ?? path.join(getAgentDir(), "config.yml");
-	const frontmatterPaths = [...(request.frontmatterPaths ?? []), ...sourcePaths.slice(1)];
-	const collected = await collectImport(configPath, frontmatterPaths);
+	const explicitPaths = request.sourcePaths ?? [];
+	const configPath = request.configPath ?? explicitPaths[0] ?? path.join(getAgentDir(), "config.yml");
+	const projectPaths = request.configPath === undefined ? explicitPaths.slice(1) : explicitPaths;
+	const collected = await collectImport(configPath, request.frontmatterPaths ?? [], projectPaths, request.workstream);
 	const detail = importMutations(collected.candidates);
 	const at = now();
 	const draft: PolicyTransactionDraftV1 = {
@@ -370,27 +224,13 @@ async function runImport(
 	};
 	if (draft.mutations.length === 0) throw new Error("policy import found no supported policy candidates");
 	const preview = await journal.previewAppend(draft);
-	const transaction =
-		request.dryRun === true
-			? preview
-			: await journal.append(draft, {
-					expectedHead: { sequence: preview.sequence - 1, hash: preview.previousHash },
-				});
-	return { ...collected.report, transaction, committed: request.dryRun !== true };
-}
-
-function redactedTransaction(transaction: PolicyTransactionV1): Record<string, unknown> {
-	return {
-		...transaction,
-		author: {
-			kind: transaction.author.kind,
-			...(transaction.author.sessionId ? { sessionId: transaction.author.sessionId } : {}),
-		},
-		source: {
-			kind: transaction.source.kind,
-			...(transaction.source.importDigest ? { importDigest: transaction.source.importDigest } : {}),
-		},
-	};
+	const shouldCommit = request.apply === true && request.dryRun !== true;
+	const transaction = shouldCommit
+		? await journal.append(draft, {
+				expectedHead: { sequence: preview.sequence - 1, hash: preview.previousHash },
+			})
+		: preview;
+	return { ...collected.report, transaction, committed: shouldCommit };
 }
 
 function formatOutput(value: unknown, json: boolean): string {
@@ -437,7 +277,7 @@ export async function runPolicyCommand(request: PolicyCliRequest, options: Polic
 	}
 	if (request.action === "export") {
 		const records = await withPolicyService(resolvedOptions, journal => journal.replay());
-		return formatOutput({ schemaVersion: 1, transactions: records.map(redactedTransaction) }, json);
+		return exportLegacyPolicyYaml(records).yaml;
 	}
 	return withPolicyService(resolvedOptions, async (journal, service) => {
 		switch (request.action) {
@@ -476,10 +316,7 @@ export async function runPolicyCommand(request: PolicyCliRequest, options: Polic
 						controlDbPath: resolvedOptions.controlDbPath,
 						nowMs: now.getTime(),
 					});
-				return formatOutput(
-					await Effect.runPromise(service.drift(sessions, { at: nowIso })),
-					json,
-				);
+				return formatOutput(await Effect.runPromise(service.drift(sessions, { at: nowIso })), json);
 			}
 			case "impact": {
 				if (!request.key) throw new Error("policy impact requires a policy key or transaction ID");
@@ -569,4 +406,4 @@ export async function runPolicyCommand(request: PolicyCliRequest, options: Polic
 	});
 }
 
-export { collectImport, importMutations, redactedTransaction };
+export { collectImport, importMutations };

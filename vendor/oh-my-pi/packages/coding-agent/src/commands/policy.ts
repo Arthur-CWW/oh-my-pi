@@ -26,7 +26,11 @@ export default class Policy extends Command {
 
 	static flags = {
 		json: Flags.boolean({ description: "Output JSON", default: false }),
-		"dry-run": Flags.boolean({ description: "Preview set, rollback, or import without appending", default: false }),
+		"dry-run": Flags.boolean({ description: "Preview set or rollback without appending", default: false }),
+		apply: Flags.boolean({
+			description: "Commit a validated policy import (imports are dry-run by default)",
+			default: false,
+		}),
 		config: Flags.string({ description: "Global config.yml path" }),
 		frontmatter: Flags.string({ description: "Agent frontmatter path", multiple: true }),
 		from: Flags.string({ description: "Diff start sequence or ISO timestamp" }),
@@ -57,6 +61,7 @@ export default class Policy extends Command {
 			sourcePaths: action === "import" ? values : undefined,
 			frontmatterPaths: flags.frontmatter,
 			dryRun: flags["dry-run"],
+			apply: flags.apply,
 			json: flags.json,
 			reason: flags.reason,
 			workstream: flags.workstream,

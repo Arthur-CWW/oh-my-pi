@@ -1,4 +1,9 @@
 import { Effect } from "effect";
+import {
+	classifyFleetCompatibility,
+	type FleetCompatibilityProfile,
+	selectPolicyApplyFeature,
+} from "../session/fleet-capability";
 import type { PolicyHead } from "./policy-journal";
 import {
 	decodePolicyTransactionV1,
@@ -38,6 +43,38 @@ export class PolicyApplyTargetVerificationError extends Error {
 		super(reason);
 		this.name = "PolicyApplyTargetVerificationError";
 	}
+}
+
+export class PolicyApplyCapabilityBlockError extends Error {
+	readonly _tag = "PolicyApplyCapabilityBlockError" as const;
+	readonly classification: "LegacyIncompatible" | "newer-blocked";
+
+	constructor(
+		readonly targetSessionId: string,
+		classification: "LegacyIncompatible" | "newer-blocked",
+		readonly reasons: readonly string[],
+	) {
+		super(`Policy apply blocked for ${targetSessionId} (${classification}): ${reasons.join("; ")}`);
+		this.name = "PolicyApplyCapabilityBlockError";
+		this.classification = classification;
+	}
+}
+
+export function assertPolicyApplyCapability(
+	target: { readonly sessionId: string; readonly fleetCapability?: unknown },
+	local: FleetCompatibilityProfile,
+): "policy-apply-v1" {
+	const compatibility = classifyFleetCompatibility(target, local);
+	if (compatibility.kind !== "compatible") {
+		throw new PolicyApplyCapabilityBlockError(target.sessionId, compatibility.kind, compatibility.reasons);
+	}
+	const feature = selectPolicyApplyFeature("policy-apply-v1", local, target);
+	if (feature === undefined) {
+		throw new PolicyApplyCapabilityBlockError(target.sessionId, "LegacyIncompatible", [
+			"peer did not advertise policy-apply-v1",
+		]);
+	}
+	return feature;
 }
 
 export interface PolicyApplyOutcome {
@@ -216,6 +253,21 @@ export function policyApplyCommandFromTransaction(input: {
 		expectedAppliedSequence: input.expectedAppliedSequence,
 		impactedPolicyClasses: [...input.impactedPolicyClasses],
 	});
+}
+
+export function policyApplyCommandForPeer(
+	input: Parameters<typeof policyApplyCommandFromTransaction>[0] & {
+		readonly peer: { readonly sessionId: string; readonly fleetCapability?: unknown };
+		readonly localCapability: FleetCompatibilityProfile;
+	},
+): PolicyApplyCommandV1 {
+	assertPolicyApplyCapability(input.peer, input.localCapability);
+	if (input.peer.sessionId !== input.targetSessionId) {
+		throw new PolicyApplyTargetVerificationError(
+			`Policy target session mismatch: expected ${input.targetSessionId}, found ${input.peer.sessionId}`,
+		);
+	}
+	return policyApplyCommandFromTransaction(input);
 }
 
 export function validatePolicyApplyRecord(record: PolicyApplyRecordV1): PolicyApplyRecordV1 {

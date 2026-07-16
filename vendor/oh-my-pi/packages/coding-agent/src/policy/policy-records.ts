@@ -1,9 +1,11 @@
 import { Schema } from "effect";
 
 export const POLICY_SCHEMA_VERSION = 1 as const;
-export const POLICY_REGISTRY_VERSION = 2 as const;
+export const POLICY_REGISTRY_VERSION = 3 as const;
 export const CORE_ROUTING_FRAGMENT_VERSION = 1 as const;
 export const CORE_PROVIDER_FRAGMENT_VERSION = 1 as const;
+export const CORE_FALLBACK_FRAGMENT_VERSION = 1 as const;
+export const CORE_BUDGET_FRAGMENT_VERSION = 1 as const;
 export const POLICY_GENESIS_HASH = "0".repeat(64);
 
 export const UUIDSchema = Schema.String.pipe(
@@ -105,15 +107,43 @@ export const ModelDenyValueSchema = Schema.Struct({ models: ProviderModelSelecto
 export type ModelDenyValue = typeof ModelDenyValueSchema.Type;
 export type CoreProviderValue = ProviderDenyValue | ModelDenyValue;
 
-export const CORE_POLICY_KEYS = [...CORE_ROUTING_KEYS, ...CORE_PROVIDER_KEYS] as const;
+export const CORE_FALLBACK_KEYS = ["core.fallback.chains"] as const;
+export const CoreFallbackKeySchema = Schema.Literals(CORE_FALLBACK_KEYS);
+export type CoreFallbackKey = typeof CoreFallbackKeySchema.Type;
+const FallbackSelectorChainSchema = Schema.Array(NonEmptyStringSchema).pipe(Schema.check(Schema.isMinLength(1)));
+export const FallbackChainsValueSchema = Schema.Struct({
+	chains: Schema.Record(Schema.String, FallbackSelectorChainSchema),
+});
+export type FallbackChainsValue = typeof FallbackChainsValueSchema.Type;
+export type CoreFallbackValue = FallbackChainsValue;
+
+export const CORE_BUDGET_KEYS = [
+	"core.budgets.task.maxConcurrency",
+	"core.budgets.task.maxLiveChildren",
+	"core.budgets.task.maxRuntimeMs",
+	"core.budgets.task.softRequestBudget",
+] as const;
+export const CoreBudgetKeySchema = Schema.Literals(CORE_BUDGET_KEYS);
+export type CoreBudgetKey = typeof CoreBudgetKeySchema.Type;
+export const CoreBudgetValueSchema = NonNegativeIntSchema;
+export type CoreBudgetValue = typeof CoreBudgetValueSchema.Type;
+
+export const CORE_NON_PROVIDER_KEYS = [...CORE_ROUTING_KEYS, ...CORE_FALLBACK_KEYS, ...CORE_BUDGET_KEYS] as const;
+export type CoreNonProviderKey = (typeof CORE_NON_PROVIDER_KEYS)[number];
+export type CoreNonProviderValue = CoreRoutingValue | CoreFallbackValue | CoreBudgetValue;
+export const CORE_POLICY_KEYS = [...CORE_NON_PROVIDER_KEYS, ...CORE_PROVIDER_KEYS] as const;
 export const PolicyKeySchema = Schema.Literals(CORE_POLICY_KEYS);
 export type PolicyKey = typeof PolicyKeySchema.Type;
-export type PolicyValue = CoreRoutingValue | CoreProviderValue;
+export type PolicyValue = CoreNonProviderValue | CoreProviderValue;
 export type PolicyValueForKey<Key extends PolicyKey> = Key extends "core.providers.deny.providers"
 	? ProviderDenyValue
 	: Key extends "core.providers.deny.models"
 		? ModelDenyValue
-		: CoreRoutingValue;
+		: Key extends CoreFallbackKey
+			? FallbackChainsValue
+			: Key extends CoreBudgetKey
+				? CoreBudgetValue
+				: CoreRoutingValue;
 
 export const GlobalPolicyScopeSchema = Schema.Struct({ kind: Schema.Literal("global") });
 export const WorkstreamPolicyScopeSchema = Schema.Struct({
@@ -123,14 +153,21 @@ export const WorkstreamPolicyScopeSchema = Schema.Struct({
 export const PolicyScopeSchema = Schema.Union([GlobalPolicyScopeSchema, WorkstreamPolicyScopeSchema]);
 export type PolicyScope = typeof PolicyScopeSchema.Type;
 
+export const PolicyImportProvenanceSchema = Schema.Struct({
+	sourcePath: NonEmptyStringSchema,
+	keyPath: NonEmptyStringSchema,
+});
+export type PolicyImportProvenance = typeof PolicyImportProvenanceSchema.Type;
+
 const MutationScopeFields = {
 	scope: PolicyScopeSchema,
+	importProvenance: Schema.optional(PolicyImportProvenanceSchema),
 };
 const SetCoreRoutingPolicyMutationV1Schema = Schema.Struct({
 	op: Schema.Literal("set"),
 	key: CoreRoutingKeySchema,
 	...MutationScopeFields,
-	fragmentVersion: Schema.Literals([1, POLICY_REGISTRY_VERSION]),
+	fragmentVersion: Schema.Literals([1, 2, POLICY_REGISTRY_VERSION]),
 	value: CoreRoutingValueSchema,
 });
 const SetProviderDenyPolicyMutationV1Schema = Schema.Struct({
@@ -151,7 +188,7 @@ const ClearCoreRoutingPolicyMutationV1Schema = Schema.Struct({
 	op: Schema.Literal("clear"),
 	key: CoreRoutingKeySchema,
 	...MutationScopeFields,
-	fragmentVersion: Schema.Literals([1, POLICY_REGISTRY_VERSION]),
+	fragmentVersion: Schema.Literals([1, 2, POLICY_REGISTRY_VERSION]),
 });
 const ClearProviderPolicyMutationV1Schema = Schema.Struct({
 	op: Schema.Literal("clear"),
@@ -159,14 +196,44 @@ const ClearProviderPolicyMutationV1Schema = Schema.Struct({
 	...MutationScopeFields,
 	fragmentVersion: Schema.Literal(CORE_PROVIDER_FRAGMENT_VERSION),
 });
+const SetFallbackPolicyMutationV1Schema = Schema.Struct({
+	op: Schema.Literal("set"),
+	key: CoreFallbackKeySchema,
+	...MutationScopeFields,
+	fragmentVersion: Schema.Literal(CORE_FALLBACK_FRAGMENT_VERSION),
+	value: FallbackChainsValueSchema,
+});
+const SetBudgetPolicyMutationV1Schema = Schema.Struct({
+	op: Schema.Literal("set"),
+	key: CoreBudgetKeySchema,
+	...MutationScopeFields,
+	fragmentVersion: Schema.Literal(CORE_BUDGET_FRAGMENT_VERSION),
+	value: CoreBudgetValueSchema,
+});
+const ClearFallbackPolicyMutationV1Schema = Schema.Struct({
+	op: Schema.Literal("clear"),
+	key: CoreFallbackKeySchema,
+	...MutationScopeFields,
+	fragmentVersion: Schema.Literal(CORE_FALLBACK_FRAGMENT_VERSION),
+});
+const ClearBudgetPolicyMutationV1Schema = Schema.Struct({
+	op: Schema.Literal("clear"),
+	key: CoreBudgetKeySchema,
+	...MutationScopeFields,
+	fragmentVersion: Schema.Literal(CORE_BUDGET_FRAGMENT_VERSION),
+});
 export const SetPolicyMutationV1Schema = Schema.Union([
 	SetCoreRoutingPolicyMutationV1Schema,
 	SetProviderDenyPolicyMutationV1Schema,
 	SetModelDenyPolicyMutationV1Schema,
+	SetFallbackPolicyMutationV1Schema,
+	SetBudgetPolicyMutationV1Schema,
 ]);
 export const ClearPolicyMutationV1Schema = Schema.Union([
 	ClearCoreRoutingPolicyMutationV1Schema,
 	ClearProviderPolicyMutationV1Schema,
+	ClearFallbackPolicyMutationV1Schema,
+	ClearBudgetPolicyMutationV1Schema,
 ]);
 export const PolicyMutationV1Schema = Schema.Union([SetPolicyMutationV1Schema, ClearPolicyMutationV1Schema]);
 export type SetPolicyMutationV1 = typeof SetPolicyMutationV1Schema.Type;
@@ -189,7 +256,7 @@ export const PolicySourceV1Schema = Schema.Struct({
 export type PolicySourceV1 = typeof PolicySourceV1Schema.Type;
 
 export const PolicyRegistryV1Schema = Schema.Struct({
-	version: Schema.Literals([1, POLICY_REGISTRY_VERSION]),
+	version: Schema.Literals([1, 2, POLICY_REGISTRY_VERSION]),
 	digest: SHA256DigestSchema,
 });
 export type PolicyRegistryV1 = typeof PolicyRegistryV1Schema.Type;
@@ -342,6 +409,14 @@ export function isCoreProviderKey(key: string): key is CoreProviderKey {
 	return (CORE_PROVIDER_KEYS as readonly string[]).includes(key);
 }
 
+export function isCoreFallbackKey(key: string): key is CoreFallbackKey {
+	return (CORE_FALLBACK_KEYS as readonly string[]).includes(key);
+}
+
+export function isCoreBudgetKey(key: string): key is CoreBudgetKey {
+	return (CORE_BUDGET_KEYS as readonly string[]).includes(key);
+}
+
 export function isPolicyKey(key: string): key is PolicyKey {
 	return (CORE_POLICY_KEYS as readonly string[]).includes(key);
 }
@@ -353,6 +428,13 @@ export function decodePolicyValueForKey<Key extends PolicyKey>(key: Key, input: 
 			return Schema.decodeUnknownSync(ProviderDenyValueSchema)(input, options) as PolicyValueForKey<Key>;
 		case "core.providers.deny.models":
 			return Schema.decodeUnknownSync(ModelDenyValueSchema)(input, options) as PolicyValueForKey<Key>;
+		case "core.fallback.chains":
+			return Schema.decodeUnknownSync(FallbackChainsValueSchema)(input, options) as PolicyValueForKey<Key>;
+		case "core.budgets.task.maxConcurrency":
+		case "core.budgets.task.maxLiveChildren":
+		case "core.budgets.task.maxRuntimeMs":
+		case "core.budgets.task.softRequestBudget":
+			return Schema.decodeUnknownSync(CoreBudgetValueSchema)(input, options) as PolicyValueForKey<Key>;
 		default:
 			return Schema.decodeUnknownSync(CoreRoutingValueSchema)(input, options) as PolicyValueForKey<Key>;
 	}

@@ -1,37 +1,47 @@
 import { randomUUID } from "node:crypto";
 import { Effect } from "effect";
 import type { PolicyLiveSession } from "./policy-inspection";
-import { type PolicyAppendOptions, type PolicyHead, PolicyJournal, POLICY_REGISTRY_DIGEST } from "./policy-journal";
+import {
+	POLICY_REGISTRY_DIGEST,
+	type PolicyAppendOptions,
+	type PolicyHead,
+	type PolicyJournal,
+} from "./policy-journal";
 import {
 	type EffectivePolicyValue,
 	type EffectiveProviderPolicyValue,
 	POLICY_LAYER_PRECEDENCE,
 	type PolicyCandidate,
-	projectPolicy,
 	type PolicyProjectionOptions,
 	type PolicySnapshot,
 	type PolicySourceLayer,
 	type ProviderPolicyCandidate,
 	type ProviderPostureEntry,
+	projectPolicy,
 } from "./policy-projection";
 import { PolicyProjectionStore } from "./policy-projection-store";
 import {
+	CORE_BUDGET_FRAGMENT_VERSION,
+	CORE_FALLBACK_FRAGMENT_VERSION,
+	CORE_NON_PROVIDER_KEYS,
 	CORE_POLICY_KEYS,
-	CORE_PROVIDER_KEYS,
 	CORE_PROVIDER_FRAGMENT_VERSION,
-	CORE_ROUTING_KEYS,
+	CORE_PROVIDER_KEYS,
 	CORE_ROUTING_FRAGMENT_VERSION,
+	type CoreBudgetValue,
+	type CoreNonProviderKey,
 	type CoreProviderKey,
-	type CoreRoutingKey,
 	type CoreRoutingValue,
 	decodePolicyValueForKey,
-	isCoreRoutingKey,
+	type FallbackChainsValue,
+	isCoreProviderKey,
 	isPolicyKey,
 	type ModelDenyValue,
 	POLICY_REGISTRY_VERSION,
-	type PolicyKey,
 	PolicyForkDetectedError,
+	type PolicyImportProvenance,
 	PolicyJournalIoError,
+	type PolicyKey,
 	PolicyLeaseConflictError,
 	type PolicyScope,
 	type PolicyTransactionDraftV1,
@@ -75,10 +85,11 @@ export interface PolicyProvenanceEntry {
 	readonly effectiveFrom: string;
 	readonly expiresAt?: string;
 	readonly state: PolicyWindowState;
+	readonly importProvenance?: PolicyImportProvenance;
 }
 
 export interface RoutingPolicyExplanation {
-	readonly key: CoreRoutingKey;
+	readonly key: CoreNonProviderKey;
 	readonly consultedLayers: readonly PolicyExplainLayer[];
 	readonly winner?: EffectivePolicyValue;
 	readonly shadowed: readonly PolicyCandidate[];
@@ -187,6 +198,7 @@ export interface PolicySetInput {
 	readonly expectedHead?: PolicyHead;
 	readonly dryRun?: boolean;
 	readonly workstream?: string;
+	readonly importProvenance?: PolicyImportProvenance;
 }
 
 export interface PolicySetResult {
@@ -274,13 +286,20 @@ function requirePolicyKey(key: string): PolicyKey {
 	});
 }
 
-function setMutation(key: PolicyKey, value: PolicyValue, scope: PolicyScope): SetPolicyMutationV1 {
+function setMutation(
+	key: PolicyKey,
+	value: PolicyValue,
+	scope: PolicyScope,
+	importProvenance?: PolicyImportProvenance,
+): SetPolicyMutationV1 {
+	const provenance = importProvenance === undefined ? {} : { importProvenance };
 	switch (key) {
 		case "core.providers.deny.providers":
 			return {
 				op: "set",
 				key,
 				scope,
+				...provenance,
 				fragmentVersion: CORE_PROVIDER_FRAGMENT_VERSION,
 				value: value as ProviderDenyValue,
 			};
@@ -289,14 +308,37 @@ function setMutation(key: PolicyKey, value: PolicyValue, scope: PolicyScope): Se
 				op: "set",
 				key,
 				scope,
+				...provenance,
 				fragmentVersion: CORE_PROVIDER_FRAGMENT_VERSION,
 				value: value as ModelDenyValue,
+			};
+		case "core.fallback.chains":
+			return {
+				op: "set",
+				key,
+				scope,
+				...provenance,
+				fragmentVersion: CORE_FALLBACK_FRAGMENT_VERSION,
+				value: value as FallbackChainsValue,
+			};
+		case "core.budgets.task.maxConcurrency":
+		case "core.budgets.task.maxLiveChildren":
+		case "core.budgets.task.maxRuntimeMs":
+		case "core.budgets.task.softRequestBudget":
+			return {
+				op: "set",
+				key,
+				scope,
+				...provenance,
+				fragmentVersion: CORE_BUDGET_FRAGMENT_VERSION,
+				value: value as CoreBudgetValue,
 			};
 		default:
 			return {
 				op: "set",
 				key,
 				scope,
+				...provenance,
 				fragmentVersion: CORE_ROUTING_FRAGMENT_VERSION,
 				value: value as CoreRoutingValue,
 			};
@@ -305,22 +347,36 @@ function setMutation(key: PolicyKey, value: PolicyValue, scope: PolicyScope): Se
 
 function samePolicyValue(left: PolicyValue | undefined, right: PolicyValue | undefined): boolean {
 	if (left === right) return true;
-	if (left === undefined || right === undefined || typeof left === "string" || typeof right === "string") return false;
+	if (left === undefined || right === undefined || typeof left !== "object" || typeof right !== "object") return false;
 	if ("providerIds" in left) {
 		if (!("providerIds" in right) || left.providerIds.length !== right.providerIds.length) return false;
 		for (const provider of left.providerIds) if (!right.providerIds.includes(provider)) return false;
 		return true;
 	}
-	if (!("models" in right) || left.models.length !== right.models.length) return false;
-	for (const model of left.models) {
-		let matched = false;
-		for (const candidate of right.models) {
-			if (candidate.provider === model.provider && candidate.model === model.model) {
-				matched = true;
-				break;
+	if ("models" in left) {
+		if (!("models" in right) || left.models.length !== right.models.length) return false;
+		for (const model of left.models) {
+			let matched = false;
+			for (const candidate of right.models) {
+				if (candidate.provider === model.provider && candidate.model === model.model) {
+					matched = true;
+					break;
+				}
 			}
+			if (!matched) return false;
 		}
-		if (!matched) return false;
+		return true;
+	}
+	if (!("chains" in left) || !("chains" in right)) return false;
+	const roles = Object.keys(left.chains);
+	if (roles.length !== Object.keys(right.chains).length) return false;
+	for (const role of roles) {
+		const leftChain = left.chains[role];
+		const rightChain = right.chains[role];
+		if (leftChain === undefined || rightChain === undefined || leftChain.length !== rightChain.length) return false;
+		for (let index = 0; index < leftChain.length; index += 1) {
+			if (leftChain[index] !== rightChain[index]) return false;
+		}
 	}
 	return true;
 }
@@ -339,7 +395,7 @@ function sameEffectiveValue(
 
 function diffSnapshots(before: PolicySnapshot, after: PolicySnapshot): PolicyDiff {
 	const changes: PolicyDiffChange[] = [];
-	for (const key of CORE_ROUTING_KEYS) {
+	for (const key of CORE_NON_PROVIDER_KEYS) {
 		const previous = before.values[key];
 		const next = after.values[key];
 		if (sameEffectiveValue(previous, next)) continue;
@@ -361,7 +417,6 @@ function diffSnapshots(before: PolicySnapshot, after: PolicySnapshot): PolicyDif
 	}
 	return { before, after, changes };
 }
-
 
 function provenanceStack(
 	records: readonly PolicyTransactionV1[],
@@ -399,6 +454,7 @@ function provenanceStack(
 				reason: record.reason,
 				effectiveFrom: record.effectiveFrom,
 				...(record.expiresAt === undefined ? {} : { expiresAt: record.expiresAt }),
+				...(mutation.importProvenance === undefined ? {} : { importProvenance: mutation.importProvenance }),
 				state,
 			});
 		}
@@ -466,9 +522,9 @@ export function makePolicyService(
 	const get = Effect.fn("PolicyService.get")(function* (key: string, options: PolicyProjectionOptions = {}) {
 		const validatedKey = yield* Effect.try({ try: () => requirePolicyKey(key), catch: asPolicyServiceFailure });
 		const projected = yield* snapshot(options);
-		return isCoreRoutingKey(validatedKey)
-			? projected.values[validatedKey]
-			: projected.providerPosture?.values[validatedKey];
+		return isCoreProviderKey(validatedKey)
+			? projected.providerPosture?.values[validatedKey]
+			: projected.values[validatedKey];
 	});
 	const explain = Effect.fn("PolicyService.explain")(function* (key: string, options: PolicyProjectionOptions = {}) {
 		const validatedKey = yield* Effect.try({ try: () => requirePolicyKey(key), catch: asPolicyServiceFailure });
@@ -476,7 +532,7 @@ export function makePolicyService(
 		const at = options.at ?? new Date().toISOString();
 		const projected = projectPolicy(records, { ...defaults, ...options, at });
 		const stack = provenanceStack(records, validatedKey, { at, workstream: options.workstream });
-		if (!isCoreRoutingKey(validatedKey)) {
+		if (isCoreProviderKey(validatedKey)) {
 			const entries = projected.providerPosture?.entries.filter(entry => entry.key === validatedKey) ?? [];
 			const winner = projected.providerPosture?.values[validatedKey];
 			const activeEntry = entries.find(entry => entry.state === "active" && entry.effective);
@@ -594,7 +650,8 @@ export function makePolicyService(
 				: yield* Effect.try({
 						try: () => {
 							const timestamp = Date.parse(input.since!);
-							if (!Number.isFinite(timestamp)) throw new Error("Policy history --since requires a valid timestamp");
+							if (!Number.isFinite(timestamp))
+								throw new Error("Policy history --since requires a valid timestamp");
 							return timestamp;
 						},
 						catch: asPolicyServiceFailure,
@@ -611,7 +668,8 @@ export function makePolicyService(
 			) {
 				continue;
 			}
-			const mutations = key === undefined ? record.mutations : record.mutations.filter(mutation => mutation.key === key);
+			const mutations =
+				key === undefined ? record.mutations : record.mutations.filter(mutation => mutation.key === key);
 			if (mutations.length === 0) continue;
 			const scopes: PolicyScope[] = [];
 			for (const mutation of mutations) {
@@ -663,8 +721,8 @@ export function makePolicyService(
 			});
 			const rows: PolicyDriftRow[] = [];
 			for (const key of CORE_POLICY_KEYS) {
-				const appliedValue = isCoreRoutingKey(key) ? applied.values[key] : applied.providerPosture?.values[key];
-				const headValue = isCoreRoutingKey(key) ? head.values[key] : head.providerPosture?.values[key];
+				const appliedValue = isCoreProviderKey(key) ? applied.providerPosture?.values[key] : applied.values[key];
+				const headValue = isCoreProviderKey(key) ? head.providerPosture?.values[key] : head.values[key];
 				if (sameEffectiveValue(appliedValue, headValue)) continue;
 				rows.push({
 					key,
@@ -707,7 +765,7 @@ export function makePolicyService(
 			source: input.source ?? { kind: "cli", uri: journal.journalPath },
 			reason: input.reason,
 			registry: { version: POLICY_REGISTRY_VERSION, digest: POLICY_REGISTRY_DIGEST },
-			mutations: [setMutation(key, value, input.scope)],
+			mutations: [setMutation(key, value, input.scope, input.importProvenance)],
 		};
 		const appendOptions: PolicyAppendOptions =
 			input.expectedHead === undefined ? {} : { expectedHead: input.expectedHead };

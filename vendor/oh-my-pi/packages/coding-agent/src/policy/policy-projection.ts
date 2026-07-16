@@ -1,6 +1,9 @@
 import {
+	CORE_NON_PROVIDER_KEYS,
 	CORE_PROVIDER_KEYS,
 	CORE_ROUTING_KEYS,
+	type CoreNonProviderKey,
+	type CoreNonProviderValue,
 	type CoreProviderKey,
 	type CoreProviderValue,
 	type CoreRoutingKey,
@@ -32,9 +35,9 @@ export const POLICY_LAYER_PRECEDENCE: readonly PolicySourceLayer[] = [
 ];
 
 export interface PolicyCandidate {
-	readonly key: CoreRoutingKey;
+	readonly key: CoreNonProviderKey;
 	readonly operation: PolicyMutationV1["op"];
-	readonly value?: CoreRoutingValue;
+	readonly value?: CoreNonProviderValue;
 	readonly sourceLayer: PolicySourceLayer;
 	readonly scope:
 		| PolicyScope
@@ -47,8 +50,8 @@ export interface PolicyCandidate {
 }
 
 export interface EffectivePolicyValue {
-	readonly key: CoreRoutingKey;
-	readonly value: CoreRoutingValue;
+	readonly key: CoreNonProviderKey;
+	readonly value: CoreNonProviderValue;
 	readonly sourceLayer: PolicySourceLayer;
 	readonly scope: PolicyCandidate["scope"];
 	readonly transactionId?: string;
@@ -56,6 +59,11 @@ export interface EffectivePolicyValue {
 	readonly recordHash?: string;
 	readonly shadowed: readonly PolicyCandidate[];
 }
+
+export type EffectiveRoutingPolicyValue = Omit<EffectivePolicyValue, "key" | "value"> & {
+	readonly key: CoreRoutingKey;
+	readonly value: CoreRoutingValue;
+};
 
 export interface ProviderPolicyCandidate {
 	readonly key: CoreProviderKey;
@@ -107,7 +115,10 @@ export interface ProviderPostureProjection {
 export interface PolicySnapshot {
 	readonly at: string;
 	readonly workstream?: string;
-	readonly values: Readonly<Partial<Record<CoreRoutingKey, EffectivePolicyValue>>>;
+	readonly values: Readonly<
+		Partial<Record<CoreNonProviderKey, EffectivePolicyValue>> &
+			Partial<Record<CoreRoutingKey, EffectiveRoutingPolicyValue>>
+	>;
 	/**
 	 * Always present on snapshots produced by projectPolicy. Optional only so older
 	 * callers that construct routing-only snapshots remain source-compatible.
@@ -134,13 +145,13 @@ function layerFor(record: PolicyTransactionV1, scope: PolicyScope): PolicySource
 	return scope.kind === "workstream" ? "workstream-durable" : "global-durable";
 }
 
-function routingCandidateFromMutation(record: PolicyTransactionV1, mutation: PolicyMutationV1): PolicyCandidate {
+function policyCandidateFromMutation(record: PolicyTransactionV1, mutation: PolicyMutationV1): PolicyCandidate {
 	if (isCoreProviderKey(mutation.key))
-		throw new Error(`Provider mutation passed to routing projection: ${mutation.key}`);
+		throw new Error(`Provider mutation passed to ordinary policy projection: ${mutation.key}`);
 	return {
 		key: mutation.key,
 		operation: mutation.op,
-		...(mutation.op === "set" ? { value: mutation.value as CoreRoutingValue } : {}),
+		...(mutation.op === "set" ? { value: mutation.value as CoreNonProviderValue } : {}),
 		sourceLayer: layerFor(record, mutation.scope),
 		scope: mutation.scope,
 		transactionId: record.transactionId,
@@ -154,7 +165,7 @@ function providerCandidateFromMutation(
 	mutation: PolicyMutationV1,
 ): ProviderPolicyCandidate {
 	if (!isCoreProviderKey(mutation.key))
-		throw new Error(`Routing mutation passed to provider projection: ${mutation.key}`);
+		throw new Error(`Non-provider mutation passed to provider projection: ${mutation.key}`);
 	return {
 		key: mutation.key,
 		operation: mutation.op,
@@ -176,6 +187,16 @@ function compareCandidates(
 	return layerDifference === 0 ? right.sequence - left.sequence : layerDifference;
 }
 
+function appendCandidate<Key extends PropertyKey, Candidate>(
+	groups: Partial<Record<Key, Candidate[]>>,
+	key: Key,
+	candidate: Candidate,
+): void {
+	const current = groups[key];
+	if (current) current.push(candidate);
+	else groups[key] = [candidate];
+}
+
 function scopeParticipates(scope: PolicyScope, workstream: string | undefined): boolean {
 	return scope.kind === "global" || scope.workstream === workstream;
 }
@@ -189,7 +210,7 @@ export function projectPolicy(
 	if (!Number.isFinite(atMillis)) throw new Error(`Invalid projection time: ${at}`);
 	const expiredTransactionIds: string[] = [];
 	const futureTransactionIds: string[] = [];
-	const candidatesByKey: Partial<Record<CoreRoutingKey, PolicyCandidate[]>> = {};
+	const candidatesByKey: Partial<Record<CoreNonProviderKey, PolicyCandidate[]>> = {};
 	const providerCandidatesByKey: Partial<Record<CoreProviderKey, ProviderPolicyCandidate[]>> = {};
 	const providerEntries: ProviderPostureEntry[] = [];
 
@@ -230,12 +251,12 @@ export function projectPolicy(
 					scope: candidate.scope,
 					recordHash: record.recordHash,
 				});
-				if (state === "active") (providerCandidatesByKey[candidate.key] ??= []).push(candidate);
+				if (state === "active") appendCandidate(providerCandidatesByKey, candidate.key, candidate);
 				continue;
 			}
 			if (state === "active") {
-				const candidate = routingCandidateFromMutation(record, mutation);
-				(candidatesByKey[candidate.key] ??= []).push(candidate);
+				const candidate = policyCandidateFromMutation(record, mutation);
+				appendCandidate(candidatesByKey, candidate.key, candidate);
 			}
 		}
 	}
@@ -243,7 +264,7 @@ export function projectPolicy(
 	for (const key of CORE_ROUTING_KEYS) {
 		const invocation = options.invocation?.[key];
 		if (invocation !== undefined) {
-			(candidatesByKey[key] ??= []).push({
+			appendCandidate(candidatesByKey, key, {
 				key,
 				operation: "set",
 				value: invocation,
@@ -254,7 +275,7 @@ export function projectPolicy(
 		}
 		const session = options.session?.[key];
 		if (session !== undefined) {
-			(candidatesByKey[key] ??= []).push({
+			appendCandidate(candidatesByKey, key, {
 				key,
 				operation: "set",
 				value: session,
@@ -265,7 +286,7 @@ export function projectPolicy(
 		}
 		const builtIn = options.builtIns?.[key];
 		if (builtIn !== undefined) {
-			(candidatesByKey[key] ??= []).push({
+			appendCandidate(candidatesByKey, key, {
 				key,
 				operation: "set",
 				value: builtIn,
@@ -276,8 +297,8 @@ export function projectPolicy(
 		}
 	}
 
-	const values: Partial<Record<CoreRoutingKey, EffectivePolicyValue>> = {};
-	for (const key of CORE_ROUTING_KEYS) {
+	const values: Partial<Record<CoreNonProviderKey, EffectivePolicyValue>> = {};
+	for (const key of CORE_NON_PROVIDER_KEYS) {
 		const candidates = candidatesByKey[key];
 		if (candidates === undefined) continue;
 		candidates.sort(compareCandidates);
@@ -338,7 +359,7 @@ export function projectPolicy(
 	return {
 		at,
 		...(options.workstream === undefined ? {} : { workstream: options.workstream }),
-		values,
+		values: values as PolicySnapshot["values"],
 		providerPosture: { values: providerValues, deniedProviderIds, deniedModels, entries },
 		transactions: [...records],
 		expiredTransactionIds,
