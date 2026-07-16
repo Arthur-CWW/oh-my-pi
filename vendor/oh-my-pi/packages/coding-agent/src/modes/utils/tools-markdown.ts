@@ -1,7 +1,7 @@
 import type { Tool } from "../../tools";
 import type { ToolOrigin } from "../../tools/tool-origin";
 
-type DisplayTool = Pick<Tool, "description" | "name"> & {
+export type DisplayTool = Pick<Tool, "description" | "name"> & {
 	readonly origin?: ToolOrigin;
 };
 
@@ -9,7 +9,7 @@ export interface ToolsMarkdownBindings {
 	tools: ReadonlyArray<DisplayTool>;
 }
 
-interface ToolRow {
+export interface ToolDisplayRow {
 	readonly name: string;
 	readonly description: string;
 	readonly kind: ToolOrigin["kind"] | "unknown";
@@ -32,22 +32,25 @@ function escapeInlineCode(value: string): string {
 	return value.replace(/`/g, "\\`");
 }
 
-function toolRow(tool: DisplayTool): ToolRow {
-	const registeredBy = tool.origin?.registeredBy;
+function toolRow(tool: DisplayTool): ToolDisplayRow {
+	const registeredBy = tool.origin?.registeredBy?.trim();
 	return {
 		name: tool.name,
-		description: escapeTableCell(tool.description) || "No description provided.",
+		description: tool.description.trim() || "No description provided.",
 		kind: tool.origin?.kind ?? "unknown",
-		source: escapeTableCell(tool.origin?.source ?? "unknown") || "unknown",
-		registeredBy: registeredBy ? escapeTableCell(registeredBy) || "unknown" : undefined,
+		source: tool.origin?.source.trim() || "unknown",
+		registeredBy: registeredBy || undefined,
 	};
 }
 
-function renderTable(tools: readonly ToolRow[]): string[] {
+function renderTable(tools: readonly ToolDisplayRow[]): string[] {
 	return [
 		"| Tool | Kind | Source | Description |",
 		"|------|------|--------|-------------|",
-		...tools.map(tool => `| \`${tool.name}\` | ${tool.kind} | ${tool.source} | ${tool.description} |`),
+		...tools.map(
+			tool =>
+				`| \`${tool.name}\` | ${tool.kind} | ${escapeTableCell(tool.source)} | ${escapeTableCell(tool.description)} |`,
+		),
 	];
 }
 
@@ -56,12 +59,12 @@ function mcpServerName(source: string): string {
 	return separator > 0 ? source.slice(0, separator).trim() : source;
 }
 
-export function buildToolsMarkdown(bindings: ToolsMarkdownBindings): string {
-	if (bindings.tools.length === 0) {
-		return "No tools are registered.";
-	}
-
-	const rows = bindings.tools.map(toolRow);
+/**
+ * Project registered tools into the deterministic order shared by the TUI and
+ * text renderers: non-MCP tools first, then MCP tools grouped by source.
+ */
+export function buildToolRows(tools: ReadonlyArray<DisplayTool>): ToolDisplayRow[] {
+	const rows = tools.map(toolRow);
 	const otherTools = rows
 		.filter(tool => tool.kind !== "mcp")
 		.sort(
@@ -70,7 +73,20 @@ export function buildToolsMarkdown(bindings: ToolsMarkdownBindings): string {
 				compareText(left.source, right.source) ||
 				compareText(left.name, right.name),
 		);
-	const mcpGroups = new Map<string, ToolRow[]>();
+	const mcpTools = rows
+		.filter(tool => tool.kind === "mcp")
+		.sort((left, right) => compareText(left.source, right.source) || compareText(left.name, right.name));
+	return [...otherTools, ...mcpTools];
+}
+
+export function buildToolsMarkdown(bindings: ToolsMarkdownBindings): string {
+	if (bindings.tools.length === 0) {
+		return "No tools are registered.";
+	}
+
+	const rows = buildToolRows(bindings.tools);
+	const otherTools = rows.filter(tool => tool.kind !== "mcp");
+	const mcpGroups = new Map<string, ToolDisplayRow[]>();
 	for (const tool of rows) {
 		if (tool.kind !== "mcp") continue;
 		const group = mcpGroups.get(tool.source);

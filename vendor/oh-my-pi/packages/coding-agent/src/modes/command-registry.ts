@@ -273,7 +273,7 @@ export const COMMAND_MODE_COMMANDS: readonly CommandModeCommand[] = [
 	},
 	{
 		name: "tools",
-		description: "show tools currently visible to the agent",
+		description: "inspect registered tools and provenance",
 		hostOnly: true,
 		run(ctx) {
 			ctx.handleToolsCommand();

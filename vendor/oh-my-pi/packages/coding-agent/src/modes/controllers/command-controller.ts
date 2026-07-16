@@ -9,7 +9,7 @@ import {
 	type UsageLimit,
 	type UsageReport,
 } from "@oh-my-pi/pi-ai";
-import { Loader, Markdown, padding, Spacer, Text, visibleWidth } from "@oh-my-pi/pi-tui";
+import { Loader, Markdown, type OverlayHandle, padding, Spacer, Text, visibleWidth } from "@oh-my-pi/pi-tui";
 import { formatDuration, Snowflake } from "@oh-my-pi/pi-utils";
 import { shouldEnableAppendOnlyContext } from "../../config/append-only-context-mode";
 import { type LoadedCustomShare, loadCustomShare } from "../../export/custom-share";
@@ -30,12 +30,15 @@ import { BashExecutionComponent } from "../../modes/components/bash-execution";
 import { BorderedLoader } from "../../modes/components/bordered-loader";
 import { DynamicBorder } from "../../modes/components/dynamic-border";
 import { keyHint } from "../../modes/components/keybinding-hints";
+import { CommandOutputOverlayComponent } from "../../modes/components/command-line";
+import { ToolsView } from "../../modes/components/tools-view";
 import { EvalExecutionComponent } from "../../modes/components/eval-execution";
 import { TranscriptBlock } from "../../modes/components/transcript-container";
 import { getMarkdownTheme, getSymbolTheme, theme } from "../../modes/theme/theme";
 import type { InteractiveModeContext } from "../../modes/types";
 import { computeContextBreakdown, renderContextUsage } from "../../modes/utils/context-usage";
 import { buildHotkeysMarkdown } from "../../modes/utils/hotkeys-markdown";
+import type { DisplayTool } from "../../modes/utils/tools-markdown";
 import { buildToolsMarkdown } from "../../modes/utils/tools-markdown";
 import type { AsyncJobSnapshotItem } from "../../session/agent-session";
 import type { AuthStorage, OAuthAccountIdentity } from "../../session/auth-storage";
@@ -62,7 +65,59 @@ function showMarkdownPanel(ctx: InteractiveModeContext, title: string, markdown:
 }
 
 export class CommandController {
+	#commandOutputOverlay: OverlayHandle | undefined;
+	#toolsOverlay: OverlayHandle | undefined;
+	#toolsView: ToolsView | undefined;
+
 	constructor(private readonly ctx: InteractiveModeContext) {}
+
+	#showCommandOutput(message: string): void {
+		this.#commandOutputOverlay?.hide();
+		let component: CommandOutputOverlayComponent;
+		const dismiss = (): void => {
+			this.#commandOutputOverlay?.hide();
+			this.#commandOutputOverlay = undefined;
+			this.ctx.ui.requestRender();
+		};
+		component = new CommandOutputOverlayComponent(message, dismiss);
+		this.#commandOutputOverlay = this.ctx.ui.showOverlay(component, {
+			anchor: "bottom-center",
+			width: "100%",
+			maxHeight: 14,
+			margin: { bottom: 1 },
+		});
+		this.ctx.ui.setFocus(component);
+		this.ctx.ui.requestRender();
+	}
+
+	#showToolsView(tools: ReadonlyArray<DisplayTool>): void {
+		this.#toolsOverlay?.hide();
+		if (this.#toolsView) void this.#toolsView.dispose();
+		let view: ToolsView;
+		const dismiss = (): void => {
+			this.#toolsOverlay?.hide();
+			this.#toolsOverlay = undefined;
+			if (this.#toolsView === view) this.#toolsView = undefined;
+			void view.dispose();
+			this.ctx.ui.setFocus(this.ctx.editor);
+			this.ctx.ui.requestRender();
+		};
+		view = new ToolsView(tools, {
+			height: () => this.ctx.ui.terminal.rows ?? 24,
+			requestRender: () => this.ctx.ui.requestRender(),
+			onClose: dismiss,
+		});
+		this.#toolsView = view;
+		this.#toolsOverlay = this.ctx.ui.showOverlay(view, {
+			anchor: "top-left",
+			width: "100%",
+			maxHeight: "100%",
+			margin: 0,
+			fullscreen: true,
+		});
+		this.ctx.ui.setFocus(view);
+		this.ctx.ui.requestRender();
+	}
 
 	openInBrowser(urlOrPath: string): void {
 		openPath(urlOrPath);
@@ -222,7 +277,7 @@ export class CommandController {
 		}
 	}
 
-	async handleSessionCommand(): Promise<void> {
+	async handleSessionCommand(showOutput: (message: string) => void = message => this.#showCommandOutput(message)): Promise<void> {
 		const stats = this.ctx.session.getSessionStats();
 		const premiumRequests =
 			"premiumRequests" in stats && typeof stats.premiumRequests === "number"
@@ -324,22 +379,19 @@ export class CommandController {
 			}
 		}
 
-		this.ctx.present([new Spacer(1), new Text(info, 1, 0)]);
+		showOutput(info);
 	}
 
-	async handleAdvisorStatusCommand(): Promise<void> {
+	async handleAdvisorStatusCommand(
+		showOutput: (message: string) => void = message => this.#showCommandOutput(message),
+	): Promise<void> {
 		const stats = this.ctx.session.getAdvisorStats();
 		if (!stats.active) {
-			this.ctx.present([
-				new Spacer(1),
-				new Text(
-					stats.configured
-						? "Advisor setting is enabled, but no model is assigned to the 'advisor' role."
-						: "Advisor is disabled.",
-					1,
-					0,
-				),
-			]);
+			showOutput(
+				stats.configured
+					? "Advisor setting is enabled, but no model is assigned to the 'advisor' role."
+					: "Advisor is disabled.",
+			);
 			return;
 		}
 		const model = stats.model!;
@@ -371,10 +423,10 @@ export class CommandController {
 			info += `\n${theme.bold("Cost")}\n`;
 			info += `${theme.fg("dim", "Total:")} $${stats.cost.toFixed(4)}\n`;
 		}
-		this.ctx.present([new Spacer(1), new Text(info, 1, 0)]);
+		showOutput(info);
 	}
 
-	async handleJobsCommand(): Promise<void> {
+	async handleJobsCommand(showOutput: (message: string) => void = message => this.#showCommandOutput(message)): Promise<void> {
 		const snapshot = this.ctx.session.getAsyncJobSnapshot({ recentLimit: 5 });
 		if (!snapshot) {
 			this.ctx.showWarning("Async background jobs are unavailable in this session.");
@@ -388,7 +440,7 @@ export class CommandController {
 
 		if (snapshot.running.length === 0 && snapshot.recent.length === 0) {
 			info += `\n${theme.fg("dim", "No async jobs yet.")}\n`;
-			this.ctx.present([new Spacer(1), new Text(info, 1, 0)]);
+			showOutput(info);
 			return;
 		}
 
@@ -408,10 +460,13 @@ export class CommandController {
 			}
 		}
 
-		this.ctx.present([new Spacer(1), new Text(info.trimEnd(), 1, 0)]);
+		showOutput(info.trimEnd());
 	}
 
-	async handleUsageCommand(reports?: UsageReport[] | null): Promise<void> {
+	async handleUsageCommand(
+		reports?: UsageReport[] | null,
+		showOutput: (message: string) => void = message => this.#showCommandOutput(message),
+	): Promise<void> {
 		let usageReports = reports ?? null;
 		if (!usageReports) {
 			const provider = this.ctx.session as { fetchUsageReports?: () => Promise<UsageReport[] | null> };
@@ -443,7 +498,7 @@ export class CommandController {
 		const output = renderUsageReports(usageReports, theme, Date.now(), availableWidth, provider =>
 			provider === currentProvider ? activeAccount : undefined,
 		);
-		this.ctx.present([new Spacer(1), new Text(output, 1, 0)]);
+		showOutput(output);
 	}
 
 	async handleChangelogCommand(showFull = false): Promise<void> {
@@ -483,12 +538,11 @@ export class CommandController {
 			.getAllToolNames()
 			.map(name => this.ctx.session.getToolByName(name))
 			.filter(tool => tool !== undefined);
-		const tools = buildToolsMarkdown({ tools: registeredTools });
 		if (showOutput) {
-			showOutput(tools);
+			showOutput(buildToolsMarkdown({ tools: registeredTools }));
 			return;
 		}
-		showMarkdownPanel(this.ctx, "Available Tools", tools);
+		this.#showToolsView(registeredTools);
 	}
 
 	handleContextCommand(): void {
@@ -845,7 +899,7 @@ export class CommandController {
 		this.ctx.streamingMessage = undefined;
 		this.ctx.pendingTools.clear();
 
-		this.ctx.present([new Spacer(1), new Text(`${theme.fg("accent", `${theme.status.success} ${label}`)}`, 1, 1)]);
+		this.#showCommandOutput(`${theme.status.success} ${label}`);
 		await this.ctx.reloadTodos();
 		this.ctx.ui.requestRender(true, { clearScrollback: true });
 	}
@@ -863,7 +917,9 @@ export class CommandController {
 		const stateLabel = result.closedProviderSessions === 1 ? "provider state" : "provider states";
 		this.ctx.statusLine.invalidate();
 		this.ctx.updateEditorTopBorder();
-		this.ctx.showStatus(`Fresh provider session started (${result.closedProviderSessions} ${stateLabel} pruned).`);
+		this.#showCommandOutput(
+			`Fresh provider session started (${result.closedProviderSessions} ${stateLabel} pruned).`,
+		);
 	}
 
 	async handleDropCommand(): Promise<void> {
@@ -896,10 +952,7 @@ export class CommandController {
 
 		const sessionFile = this.ctx.session.sessionFile;
 		const shortPath = sessionFile ? sessionFile.split("/").pop() : "new session";
-		this.ctx.present([
-			new Spacer(1),
-			new Text(`${theme.fg("accent", `${theme.status.success} Session forked to ${shortPath}`)}`, 1, 1),
-		]);
+		this.#showCommandOutput(`${theme.status.success} Session forked to ${shortPath}`);
 	}
 
 	async handleMoveCommand(targetPath: string): Promise<void> {
@@ -933,10 +986,7 @@ export class CommandController {
 			await this.ctx.sessionManager.moveTo(resolvedPath);
 			await this.ctx.applyCwdChange(resolvedPath);
 
-			this.ctx.present([
-				new Spacer(1),
-				new Text(`${theme.fg("accent", `${theme.status.success} Session moved to ${resolvedPath}`)}`, 1, 1),
-			]);
+			this.#showCommandOutput(`${theme.status.success} Session moved to ${resolvedPath}`);
 		} catch (err) {
 			this.ctx.showError(`Move failed: ${err instanceof Error ? err.message : String(err)}`);
 		}
@@ -953,7 +1003,7 @@ export class CommandController {
 			setSessionTerminalTitle(name, this.ctx.sessionManager.getCwd());
 			this.ctx.statusLine.invalidate();
 			this.ctx.updateEditorBorderColor();
-			this.ctx.showStatus(`Session renamed to "${name}".`);
+			this.#showCommandOutput(`Session renamed to "${name}".`);
 		} catch (err) {
 			this.ctx.showError(`Rename failed: ${err instanceof Error ? err.message : String(err)}`);
 		}
@@ -1204,13 +1254,9 @@ export class CommandController {
 			this.ctx.updateEditorBorderColor();
 			await this.ctx.reloadTodos();
 
-			this.ctx.present([
-				new Spacer(1),
-				new Text(`${theme.fg("accent", `${theme.status.success} New session started with handoff context`)}`, 1, 1),
-			]);
-			if (result.savedPath) {
-				this.ctx.showStatus(`Handoff document saved to: ${result.savedPath}`);
-			}
+			let acknowledgement = `${theme.status.success} New session started with handoff context`;
+			if (result.savedPath) acknowledgement += `\nHandoff document saved to: ${result.savedPath}`;
+			this.#showCommandOutput(acknowledgement);
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			if (message === "Handoff cancelled" || (error instanceof Error && error.name === "AbortError")) {
