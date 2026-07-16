@@ -1098,6 +1098,36 @@ export async function inspectLiveSessionOwnerView(
 	const view = await readCmuxOwnerView(await leaseLocation(sessionFile, sessionId, options.root));
 	return view?.ownerEpoch === ownership.lease.ownerEpoch ? view : undefined;
 }
+export interface SessionOwnershipHandoffTarget {
+	getSessionFile(): string | undefined;
+	getSessionId(): string;
+	bindSessionOwnership(ownership: SessionOwnershipHandle): void;
+}
+
+/**
+ * Transfers a persistent session manager to its already-created successor
+ * session. The predecessor lease is fully retired before the successor claim,
+ * matching the release-then-acquire ordering used by process restart.
+ */
+export async function handoffSessionOwnership(
+	target: SessionOwnershipHandoffTarget,
+	predecessor: SessionOwnershipHandle,
+): Promise<SessionOwnershipHandle> {
+	const successorFile = target.getSessionFile();
+	if (!successorFile) throw new Error("Cannot hand off ownership to a non-persistent session");
+	const successorId = target.getSessionId();
+	if (successorId === predecessor.sessionId)
+		throw new Error("Cannot hand off ownership before creating the successor session");
+
+	await predecessor.release();
+	const successor = await acquireSessionOwnership(successorFile, successorId, {
+		root: predecessor.ownershipRoot,
+		buildRevision: predecessor.buildRevision,
+		runnerInstanceIdentity: predecessor.runnerInstanceIdentity,
+	});
+	target.bindSessionOwnership(successor);
+	return successor;
+}
 
 export async function acquireSessionOwnership(
 	sessionFile: string,

@@ -361,6 +361,7 @@ import type {
 import { EPHEMERAL_MODEL_CHANGE_ROLE } from "./session-entries";
 import { formatSessionHistoryMarkdown } from "./session-history-format";
 import { type SessionManager, SessionStateCommandInFlightError } from "./session-manager";
+import { handoffSessionOwnership, type SessionOwnershipHandle } from "./session-ownership";
 import {
 	type ActiveRetryFallbackState,
 	compactionPreparationHasVideo,
@@ -9656,6 +9657,32 @@ export class AgentSession {
 		return this.#handoffAbortController !== undefined;
 	}
 
+	async #adoptHandoffSessionOwnership(predecessor: SessionOwnershipHandle): Promise<void> {
+		await this.#durableInputQueue;
+		const successor = await handoffSessionOwnership(this.sessionManager, predecessor);
+		if (this.#durableRateLimitRetryTimer) clearTimeout(this.#durableRateLimitRetryTimer);
+		this.#durableRateLimitRetryTimer = undefined;
+		this.#durableRateLimitRetryAt = undefined;
+		this.#durableQueuedInputProjection = Object.freeze([]);
+		this.#durableInputQueueError = undefined;
+		this.#durableInputQueueRequired = true;
+		this.#durableInputQueue = DurableInputQueue.open(successor)
+			.then(async queue => {
+				await queue.adopt();
+				await this.#refreshDurableQueuedInputProjection(queue);
+				await this.#reconcileDurableInputAttempts(queue);
+				await this.#scheduleDurableRetry(queue);
+				return queue;
+			})
+			.catch(error => {
+				if (this.#handleDurableOwnershipLoss(error as Error)) return undefined;
+				const failure = error instanceof Error ? error : new Error(String(error));
+				this.#durableInputQueueError = failure;
+				logger.error("Durable input queue handoff failed", { error: failure.message });
+				return undefined;
+			});
+	}
+
 	/**
 	 * Generate a handoff document with a oneshot LLM call, then start a new session with it.
 	 *
@@ -9751,9 +9778,12 @@ export class AgentSession {
 
 			// Start a new session
 			const previousSessionFile = this.sessionFile;
+			const previousOwnership = this.sessionManager.getSessionOwnership();
 			await this.sessionManager.flush();
 			this.#cancelOwnAsyncJobs();
 			await this.sessionManager.newSession(previousSessionFile ? { parentSession: previousSessionFile } : undefined);
+			if (previousOwnership) await this.#adoptHandoffSessionOwnership(previousOwnership);
+			this.#rekeyExternalIrcPeerAfterHandoff();
 			this.agent.reset();
 			this.#freshProviderSessionId = undefined;
 			this.#syncAgentSessionId();
@@ -13052,11 +13082,27 @@ export class AgentSession {
 		return messages;
 	}
 
-	#registerExternalIrcPeer(): { bus: IrcExternalBus; sessionId: string; name: string } {
+	#rekeyExternalIrcPeerAfterHandoff(): void {
+		const predecessorSessionId = this.#ircExternalSessionId;
+		if (!predecessorSessionId) return;
+		const state = this.#ircExternalPeerState;
+		this.#ircExternalSessionId = undefined;
+		this.#ircExternalPeerState = undefined;
+		try {
+			this.#registerExternalIrcPeer(predecessorSessionId);
+		} catch (error) {
+			this.#ircExternalSessionId = predecessorSessionId;
+			this.#ircExternalPeerState = state;
+			logger.warn("Failed to rekey external IRC peer after handoff", { error: String(error) });
+			return;
+		}
+		if (state) this.#updateExternalIrcPeerState(state);
+	}
+
+	#registerExternalIrcPeer(predecessorSessionId?: string): { bus: IrcExternalBus; sessionId: string; name: string } {
 		const cwd = this.sessionManager.getCwd();
 		const ownership = this.sessionManager.getSessionOwnership();
 		const sessionId = this.#ircExternalSessionId ?? ownership?.sessionId ?? `${cwd}:${process.pid}`;
-		this.#ircExternalSessionId = sessionId;
 		const name =
 			this.#ircExternalPeerName ??
 			resolveIrcExternalPeerName({
@@ -13064,9 +13110,8 @@ export class AgentSession {
 				cwd,
 				sessionId,
 			});
-		this.#ircExternalPeerName = name;
 		const bus = this.#externalIrcBus ?? IrcExternalBus.global();
-		bus.registerPeer({
+		const register = {
 			sessionId,
 			name,
 			cwd,
@@ -13085,7 +13130,11 @@ export class AgentSession {
 							controlProtocol: CURRENT_SESSION_CONTROL_PROTOCOL,
 							workstream: this.sessionManager.getWorkstream(),
 						}),
-		});
+		};
+		if (predecessorSessionId) bus.handoffPeer(predecessorSessionId, register);
+		else bus.registerPeer(register);
+		this.#ircExternalSessionId = sessionId;
+		this.#ircExternalPeerName = name;
 		return { bus, sessionId, name };
 	}
 

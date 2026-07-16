@@ -383,6 +383,15 @@ export class IrcExternalBus {
 		);
 	}
 
+	handoffPeer(predecessorSessionId: string, successor: IrcExternalRegistration): IrcExternalPeer {
+		const registered = this.registerPeer(successor);
+		if (predecessorSessionId === registered.sessionId) return registered;
+		this.#db
+			.query("DELETE FROM peers WHERE session_id = $sessionId AND pid = $pid")
+			.run({ $sessionId: predecessorSessionId, $pid: registered.pid });
+		return registered;
+	}
+
 	heartbeat(sessionId: string): void {
 		this.#db.query("UPDATE peers SET last_seen = $lastSeen WHERE session_id = $sessionId").run({
 			$sessionId: sessionId,
