@@ -145,7 +145,7 @@ describe("Agent Hub nested roster tree", () => {
 		hub.dispose();
 	});
 
-	it("cycles siblings at the selected depth without entering descendants", () => {
+	it("cycles siblings with brackets and raw arrow sequences without entering descendants", () => {
 		useGeometry();
 		const registry = new AgentRegistry();
 		add(registry, "Alpha");
@@ -159,6 +159,10 @@ describe("Agent Hub nested roster tree", () => {
 		hub.handleInput("]");
 		expect(selectedId(hub)).toBe("Alpha.Two");
 		hub.handleInput("[");
+		expect(selectedId(hub)).toBe("Alpha.One");
+		hub.handleInput("\u001b[C");
+		expect(selectedId(hub)).toBe("Alpha.Two");
+		hub.handleInput("\u001b[D");
 		expect(selectedId(hub)).toBe("Alpha.One");
 		hub.dispose();
 	});

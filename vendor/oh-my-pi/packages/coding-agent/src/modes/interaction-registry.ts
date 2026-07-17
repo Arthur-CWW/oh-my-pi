@@ -348,7 +348,7 @@ export const INTERACTIONS: readonly InteractionEntry[] = [
 		id: "hub.inspector.cycle-sections",
 		surface: "hub.inspector",
 		mode: "normal",
-		keys: ["[ / ]"],
+		keys: ["[ / ]", "← / →"],
 		description: "cycle inspector sections",
 		semantics: "cycle-sections",
 		group: "navigate",

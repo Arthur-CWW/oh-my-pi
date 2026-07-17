@@ -131,9 +131,10 @@ describe("Agent Hub dual-lane inspector", () => {
 	it("cycles sections and switches lane focus with h/l", () => {
 		const { hub, observers } = fixture("Prompt body");
 		text(hub, 160);
-		hub.handleInput("]");
+		hub.handleInput("\u001b[C");
 		expect(text(hub, 160)).toContain("Route [ / ] section");
 		hub.handleInput("h");
+		expect(text(hub, 160)).toContain("●Route");
 		hub.handleInput("j");
 		hub.handleInput("j");
 		expect(text(hub, 160)).toContain("quota evidence favored");

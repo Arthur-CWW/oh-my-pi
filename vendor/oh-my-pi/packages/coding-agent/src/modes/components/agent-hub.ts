@@ -1573,7 +1573,7 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 		this.#inspectorScrollOffset = Math.max(0, Math.min(this.#inspectorScrollOffset, this.#inspectorLastMaxScroll));
 		const focus = this.#inspectorFocused ? theme.fg("accent", "●") : "";
 		const label = this.#inspectorSection[0].toUpperCase() + this.#inspectorSection.slice(1);
-		const lines = [` ${focus}${theme.fg("accent", label)} ${theme.fg("dim", "[ / ] section")}`];
+		const lines = [` ${focus}${theme.fg("accent", label)} ${theme.fg("dim", "[ / ] section · ← / →")}`];
 		for (const row of content.slice(
 			this.#inspectorScrollOffset,
 			this.#inspectorScrollOffset + this.#inspectorViewportHeight,
@@ -2008,7 +2008,7 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 		for (const metadata of this.#contextualMetadataLines())
 			lines.push(`   ${theme.fg("dim", sanitizeLine(metadata, Math.max(10, width - 4)))}`);
 		lines.push(...renderAgentHubHelp(width, this.#inspectorFocused ? "hub.inspector" : "hub.table"));
-		lines.push(`   ${theme.fg("dim", "[ / ] cycle siblings")}`);
+		lines.push(`   ${theme.fg("dim", "[ / ] cycle siblings · ← / →")}`);
 		lines.push(...new DynamicBorder().render(width));
 		return lines;
 	}
@@ -2360,29 +2360,20 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 			return;
 		}
 		if (keyData === "[" || keyData === "]") {
-			const selected = this.#selectedInternalRef();
-			const sibling = selected
-				? cycleVisibleAgentSibling(this.#visibleActiveRows, selected.id, keyData === "]" ? 1 : -1)
-				: undefined;
-			if (sibling && sibling.id !== selected?.id) {
-				this.#tablePreview.selectKey(`agent:${sibling.id}`);
-			} else if (this.#dualLaneActive) {
-				const sections = ["prompt", "route", "comms"] as const;
-				const current = sections.indexOf(this.#inspectorSection);
-				this.#inspectorSection =
-					sections[(current + (keyData === "]" ? 1 : sections.length - 1)) % sections.length];
-				this.#inspectorScrollOffset = 0;
-				this.#requestRender();
-			}
+			this.#cycleSiblingOrSection(keyData === "]" ? 1 : -1);
 			return;
 		}
-		if (keyData === "h" || matchesKey(keyData, "left")) {
+		if (matchesKey(keyData, "left") || matchesKey(keyData, "right")) {
+			this.#cycleSiblingOrSection(matchesKey(keyData, "right") ? 1 : -1);
+			return;
+		}
+		if (keyData === "h") {
 			if (!this.#toggleFold(this.#selectedInternalRef()?.id ?? "", false) && this.#dualLaneActive)
 				this.#inspectorFocused = true;
 			this.#requestRender();
 			return;
 		}
-		if (keyData === "l" || matchesKey(keyData, "right")) {
+		if (keyData === "l") {
 			if (!this.#toggleFold(this.#selectedInternalRef()?.id ?? "", true) && this.#dualLaneActive)
 				this.#inspectorFocused = false;
 			this.#requestRender();
@@ -3163,6 +3154,22 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 		this.#refreshRows();
 		if (selectedKey) this.#tablePreview.selectKey(selectedKey);
 		this.#requestRender();
+	}
+	/** `[`/`]` and bare arrow-key view cycling: next/previous visible sibling agent, falling back to inspector sections in dual-lane. */
+	#cycleSiblingOrSection(direction: 1 | -1): void {
+		const selected = this.#selectedInternalRef();
+		const sibling = selected
+			? cycleVisibleAgentSibling(this.#visibleActiveRows, selected.id, direction)
+			: undefined;
+		if (sibling && sibling.id !== selected?.id) {
+			this.#tablePreview.selectKey(`agent:${sibling.id}`);
+		} else if (this.#dualLaneActive) {
+			const sections = ["prompt", "route", "comms"] as const;
+			const current = sections.indexOf(this.#inspectorSection);
+			this.#inspectorSection = sections[(current + (direction === 1 ? 1 : sections.length - 1)) % sections.length];
+			this.#inspectorScrollOffset = 0;
+			this.#requestRender();
+		}
 	}
 
 	/** Viewport scrolling for the chat transcript. Returns true when handled. */
