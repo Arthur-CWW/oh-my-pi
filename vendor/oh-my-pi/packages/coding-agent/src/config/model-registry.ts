@@ -41,12 +41,6 @@ const STARTUP_MODEL_CACHE_PROVIDER_IDS: readonly string[] = [
 	...SPECIAL_MODEL_MANAGER_PROVIDER_IDS,
 ];
 
-const GPT_5_6_CODEX_LIMITS: Readonly<Record<string, { contextWindow: number; maxTokens: number }>> = {
-	"gpt-5.6-sol": { contextWindow: 1_050_000, maxTokens: 128_000 },
-	"gpt-5.6-terra": { contextWindow: 1_050_000, maxTokens: 128_000 },
-	"gpt-5.6-luna": { contextWindow: 1_050_000, maxTokens: 128_000 },
-};
-
 import type { ApiKeyResolver, FetchImpl } from "@oh-my-pi/pi-ai";
 import { registerOAuthProvider, unregisterOAuthProviders } from "@oh-my-pi/pi-ai/oauth";
 import type { OAuthCredentials, OAuthLoginCallbacks } from "@oh-my-pi/pi-ai/oauth/types";
@@ -94,6 +88,15 @@ import {
 import { ModelsConfigFile, type ProviderValidationModel, validateProviderConfiguration } from "./models-config";
 import type { ModelOverride, ModelsConfig, ProviderAuthMode } from "./models-config-schema";
 import { settings } from "./settings";
+
+// Generated from vendor/openai/codex/codex-rs/models-manager/models.json.
+// Keep the vendored Codex bundle as the sole default authority for GPT-5.6 limits.
+const BUNDLED_GPT_5_6_CODEX_MODELS = new Map<string, Model<Api>>();
+for (const model of getBundledModels("openai-codex")) {
+	if (model.api === "openai-codex-responses" && model.id.startsWith("gpt-5.6-")) {
+		BUNDLED_GPT_5_6_CODEX_MODELS.set(model.id, model);
+	}
+}
 
 export type { CanonicalModelIndex, CanonicalModelRecord, CanonicalModelVariant, ModelEquivalenceConfig };
 
@@ -654,7 +657,6 @@ export class ModelRegistry {
 	#fetch: FetchImpl;
 	#availability: ModelAvailability;
 
-
 	#resolveCommandBackedApiKey(provider: string): CommandApiKeyResolution {
 		const keyConfig = this.#customProviderApiKeys.get(provider);
 		if (!isCommandConfigValue(keyConfig)) return { configured: false };
@@ -854,7 +856,7 @@ export class ModelRegistry {
 		const combined = this.#mergeCustomModels(withConfigModels, this.#runtimeModelOverlays);
 		// Custom/config providers bypass the model-manager merge point —
 		// collapse effort-tier variants here so X/X-thinking twins fold.
-		const withGpt56CodexLimits = this.#applyGpt56CodexLimits(collapseBuiltModelVariants(combined));
+		const withGpt56CodexLimits = this.#resolveGpt56CodexLimits(collapseBuiltModelVariants(combined));
 		const withModelOverrides = this.#applyModelOverrides(withGpt56CodexLimits, this.#modelOverrides);
 		this.#models = this.#applyRuntimeProviderOverrides(withModelOverrides);
 		this.#rebuildCanonicalIndex();
@@ -1225,7 +1227,8 @@ export class ModelRegistry {
 		const withConfigModels = this.#mergeCustomModels(resolved, this.#customModelOverlays);
 		// Merge runtime extension models so they survive online discovery completion
 		const combined = this.#mergeCustomModels(withConfigModels, this.#runtimeModelOverlays);
-		const withModelOverrides = this.#applyModelOverrides(collapseBuiltModelVariants(combined), this.#modelOverrides);
+		const withGpt56CodexLimits = this.#resolveGpt56CodexLimits(collapseBuiltModelVariants(combined));
+		const withModelOverrides = this.#applyModelOverrides(withGpt56CodexLimits, this.#modelOverrides);
 		this.#models = this.#applyRuntimeProviderOverrides(withModelOverrides);
 		this.#rebuildCanonicalIndex();
 	}
@@ -1555,7 +1558,7 @@ export class ModelRegistry {
 		});
 	}
 	#applyHardcodedModelPolicies(models: Model<Api>[]): Model<Api>[] {
-		return this.#applyGpt56CodexLimits(models).map(model => {
+		return models.map(model => {
 			if (model.id !== "gpt-5.4" || model.provider === "github-copilot") {
 				return model;
 			}
@@ -1569,13 +1572,50 @@ export class ModelRegistry {
 			});
 		});
 	}
-	#applyGpt56CodexLimits(models: Model<Api>[]): Model<Api>[] {
+	/** Resolve GPT-5.6 bundled Codex limits after source overlays while retaining explicit user intent. */
+	#resolveGpt56CodexLimits(models: Model<Api>[]): Model<Api>[] {
+		let liveKeys: Set<string> | null = null;
+		const hasLiveModel = (provider: string, id: string) => {
+			liveKeys ??= new Set(models.map(model => `${model.provider}\u0000${model.id}`));
+			return liveKeys.has(`${provider}\u0000${id}`);
+		};
+		const hasExplicitOverlay = (model: Model<Api>, field: "contextWindow" | "maxTokens"): boolean => {
+			for (const overlay of this.#customModelOverlays) {
+				if (overlay.provider === model.provider && overlay.id === model.id && overlay[field] !== undefined) {
+					return true;
+				}
+			}
+			for (const overlay of this.#runtimeModelOverlays) {
+				if (overlay.provider === model.provider && overlay.id === model.id && overlay[field] !== undefined) {
+					return true;
+				}
+			}
+			return false;
+		};
+
 		return models.map(model => {
-			const publishedLimits =
+			const upstreamModel =
 				model.provider === "openai-codex" && model.api === "openai-codex-responses"
-					? GPT_5_6_CODEX_LIMITS[model.id]
+					? BUNDLED_GPT_5_6_CODEX_MODELS.get(model.id)
 					: undefined;
-			return publishedLimits ? applyModelOverride(model, publishedLimits) : model;
+			if (!upstreamModel) return model;
+
+			const providerOverrides = this.#modelOverrides.get(model.provider);
+			const modelOverride = providerOverrides
+				? resolveModelOverrideWithAliases(providerOverrides, model, hasLiveModel)
+				: undefined;
+			const contextWindowOverridden =
+				hasExplicitOverlay(model, "contextWindow") || modelOverride?.contextWindow !== undefined;
+			const maxTokensOverridden = hasExplicitOverlay(model, "maxTokens") || modelOverride?.maxTokens !== undefined;
+			return {
+				...model,
+				contextWindow: contextWindowOverridden ? model.contextWindow : upstreamModel.contextWindow,
+				maxTokens: maxTokensOverridden ? model.maxTokens : upstreamModel.maxTokens,
+				codex: {
+					...model.codex,
+					contextWindowSource: contextWindowOverridden ? "user-override" : "codex-upstream",
+				},
+			};
 		});
 	}
 
@@ -2216,7 +2256,6 @@ export class ModelRegistry {
 	clearSuppressedSelectors(): void {
 		this.#suppressedSelectors.clear();
 	}
-
 }
 
 /**

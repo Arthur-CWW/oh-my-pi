@@ -9,7 +9,12 @@ import { shortenPath } from "../../../tools/render-utils";
 import { getSessionAccentAnsi, getSessionAccentHex } from "../../../utils/session-color";
 import { sanitizeStatusText } from "../../shared";
 import { renderModelSelectorStatusLabel, withModelSelectorEffort } from "../model-selector-abbreviation";
-import { formatContextUsage, getContextUsageLevel, getContextUsageThemeColor } from "./context-thresholds";
+import {
+	formatContextUsage,
+	formatContextWindow,
+	getContextUsageLevel,
+	getContextUsageThemeColor,
+} from "./context-thresholds";
 import { processMemoryFootprintSampler } from "./memory-footprint";
 import { mainTokenRateSegment } from "./main-token-rate";
 import type { RenderedSegment, SegmentContext, StatusLineSegment, StatusLineSegmentId } from "./types";
@@ -319,7 +324,7 @@ const contextPctSegment: StatusLineSegment = {
 		const window = ctx.contextWindow;
 
 		const autoIcon = ctx.autoCompactEnabled && theme.icon.auto ? ` ${theme.icon.auto}` : "";
-		const text = `${formatContextUsage(pct, window)}${autoIcon}`;
+		const text = `${formatContextUsage(pct, window, ctx.contextWindowSource)}${autoIcon}`;
 
 		const color = getContextUsageThemeColor(getContextUsageLevel(pct ?? 0, window));
 		const content = withIcon(theme.icon.context, theme.fg(color, text));
@@ -334,7 +339,10 @@ const contextTotalSegment: StatusLineSegment = {
 		const window = ctx.contextWindow;
 		if (!window) return { content: "", visible: false };
 		return {
-			content: theme.fg("statusLineContext", withIcon(theme.icon.context, formatNumber(window))),
+			content: theme.fg(
+				"statusLineContext",
+				withIcon(theme.icon.context, formatContextWindow(window, ctx.contextWindowSource)),
+			),
 			visible: true,
 		};
 	},

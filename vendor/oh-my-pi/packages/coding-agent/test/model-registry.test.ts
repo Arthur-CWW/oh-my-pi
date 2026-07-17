@@ -3,11 +3,14 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } fr
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { shouldCompact } from "@oh-my-pi/pi-agent-core/compaction/compaction";
 import { Effort, type FetchImpl, type Model, type OpenAICompat, type ThinkingConfig } from "@oh-my-pi/pi-ai";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { writeModelCache } from "@oh-my-pi/pi-catalog/model-cache";
+import { getBundledModels } from "@oh-my-pi/pi-catalog/models";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { resolveCompactionModelCandidates } from "@oh-my-pi/pi-coding-agent/session/session-media";
 import { AuthStorage, SqliteAuthCredentialStore } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { Snowflake } from "@oh-my-pi/pi-utils";
 
@@ -797,7 +800,7 @@ describe("ModelRegistry", () => {
 		let openaiGpt54Explicit: ModelRegistry;
 		let openaiGpt54Override: ModelRegistry;
 		let minimaxReplace: ModelRegistry;
-		let codexGpt56Stale: ModelRegistry;
+		let codexGpt56Config: ModelRegistry;
 		beforeAll(() => {
 			anthropicCustom = readonlyRegistry({
 				providers: { anthropic: providerConfig("https://my-proxy.example.com/v1", [{ id: "claude-custom" }]) },
@@ -946,17 +949,17 @@ describe("ModelRegistry", () => {
 					},
 				},
 			});
-			codexGpt56Stale = readonlyRegistry({
+			codexGpt56Config = readonlyRegistry({
 				providers: {
-					"openai-codex": providerConfig(
-						"https://chatgpt.com/backend-api",
-						[
-							{ id: "gpt-5.6-sol", contextWindow: 272_000 },
-							{ id: "gpt-5.6-terra", contextWindow: 272_000 },
-							{ id: "gpt-5.6-luna", contextWindow: 272_000 },
-						],
-						"openai-codex-responses",
-					),
+					"openai-codex": {
+						baseUrl: "https://chatgpt.com/backend-api",
+						apiKey: "TEST_KEY",
+						api: "openai-codex-responses",
+						models: [{ id: "gpt-5.6-sol" }, { id: "gpt-5.6-terra", contextWindow: 272_000 }],
+						modelOverrides: {
+							"gpt-5.6-luna": { contextWindow: 512_000, maxTokens: 96_000 },
+						},
+					},
 				},
 			});
 		});
@@ -1054,12 +1057,123 @@ describe("ModelRegistry", () => {
 			expect(openaiGpt54Override.find("openai", "gpt-5.4")?.contextWindow).toBe(512000);
 		});
 
-		test("Codex GPT-5.6 models correct stale cached limits", () => {
+		test("Codex GPT-5.6 defaults match bundled Codex upstream metadata", () => {
+			const bundledModels = getBundledModels("openai-codex");
 			for (const id of ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]) {
-				const model = codexGpt56Stale.find("openai-codex", id);
-				expect(model?.contextWindow).toBe(1_050_000);
-				expect(model?.maxTokens).toBe(128_000);
+				const upstream = bundledModels.find(model => model.id === id);
+				expect(upstream).toBeDefined();
+				const resolved = sharedBuiltin.find("openai-codex", id);
+				expect(resolved?.contextWindow).toBe(upstream!.contextWindow);
+				expect(resolved?.maxTokens).toBe(upstream!.maxTokens);
+				expect(resolved?.codex?.contextWindowSource).toBe("codex-upstream");
 			}
+
+			const upstreamSol = bundledModels.find(model => model.id === "gpt-5.6-sol");
+			expect(upstreamSol).toBeDefined();
+			const customOmitted = codexGpt56Config.find("openai-codex", "gpt-5.6-sol");
+			expect(customOmitted?.contextWindow).toBe(upstreamSol!.contextWindow);
+			expect(customOmitted?.maxTokens).toBe(upstreamSol!.maxTokens);
+			expect(customOmitted?.codex?.contextWindowSource).toBe("codex-upstream");
+		});
+
+		test("Codex GPT-5.6 explicit model config and modelOverrides preserve user context windows", () => {
+			const customExplicit = codexGpt56Config.find("openai-codex", "gpt-5.6-terra");
+			expect(customExplicit?.contextWindow).toBe(272_000);
+			expect(customExplicit?.maxTokens).toBe(128_000);
+			expect(customExplicit?.codex?.contextWindowSource).toBe("user-override");
+
+			const modelOverride = codexGpt56Config.find("openai-codex", "gpt-5.6-luna");
+			expect(modelOverride?.contextWindow).toBe(512_000);
+			expect(modelOverride?.maxTokens).toBe(96_000);
+			expect(modelOverride?.codex?.contextWindowSource).toBe("user-override");
+		});
+
+		test("Codex GPT-5.6 upstream limits and user overrides survive an offline discovery refresh", async () => {
+			const upstreamSol = getBundledModels("openai-codex").find(model => model.id === "gpt-5.6-sol");
+			if (!upstreamSol || upstreamSol.contextWindow === null || upstreamSol.maxTokens === null) {
+				throw new Error("Bundled gpt-5.6-sol limits are missing");
+			}
+			writeRawModelsJson({
+				"openai-codex": {
+					baseUrl: "https://chatgpt.com/backend-api",
+					apiKey: "TEST_KEY",
+					api: "openai-codex-responses",
+					models: [{ id: "gpt-5.6-sol" }, { id: "gpt-5.6-terra", contextWindow: upstreamSol.contextWindow }],
+				},
+			});
+			writeModelCache(
+				"openai-codex",
+				Date.now(),
+				[
+					buildModel({
+						id: "gpt-5.6-sol",
+						name: "GPT-5.6 Sol",
+						api: "openai-codex-responses",
+						provider: "openai-codex",
+						baseUrl: "https://chatgpt.com/backend-api/codex",
+						reasoning: true,
+						input: ["text"],
+						cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+						contextWindow: upstreamSol.contextWindow + 1,
+						maxTokens: upstreamSol.maxTokens - 1,
+					}),
+				],
+				true,
+				"",
+				path.join(tempDir, "models.db"),
+			);
+			const registry = new ModelRegistry(authStorage, modelsJsonPath);
+			const startupModel = registry.find("openai-codex", "gpt-5.6-sol");
+			expect(startupModel?.contextWindow).toBe(upstreamSol.contextWindow);
+			expect(startupModel?.maxTokens).toBe(upstreamSol.maxTokens);
+			expect(startupModel?.codex?.contextWindowSource).toBe("codex-upstream");
+			const startupOverride = registry.find("openai-codex", "gpt-5.6-terra");
+			expect(startupOverride?.contextWindow).toBe(upstreamSol.contextWindow);
+			expect(startupOverride?.codex?.contextWindowSource).toBe("user-override");
+
+			await registry.refresh("offline");
+
+			const model = registry.find("openai-codex", "gpt-5.6-sol");
+			expect(model?.contextWindow).toBe(upstreamSol.contextWindow);
+			expect(model?.maxTokens).toBe(upstreamSol.maxTokens);
+			expect(model?.codex?.contextWindowSource).toBe("codex-upstream");
+			const refreshedOverride = registry.find("openai-codex", "gpt-5.6-terra");
+			expect(refreshedOverride?.contextWindow).toBe(upstreamSol.contextWindow);
+			expect(refreshedOverride?.codex?.contextWindowSource).toBe("user-override");
+		});
+
+		test("resolved Codex GPT-5.6 window drives 90% compaction and fallback ordering", () => {
+			const resolved = sharedBuiltin.find("openai-codex", "gpt-5.6-sol");
+			expect(resolved).toBeDefined();
+			const settings = {
+				enabled: true,
+				thresholdPercent: 90,
+				reserveTokens: 10_000,
+				keepRecentTokens: 20_000,
+			};
+			expect(shouldCompact(334_799, resolved!.contextWindow!, settings)).toBe(false);
+			expect(shouldCompact(334_800, resolved!.contextWindow!, settings)).toBe(true);
+
+			const preferred: Model = {
+				...resolved!,
+				id: "preferred-small-context",
+				provider: "test",
+				contextWindow: 100_000,
+			};
+			const larger: Model = {
+				...resolved!,
+				id: "larger-than-upstream-default",
+				provider: "test",
+				contextWindow: 500_000,
+			};
+			const candidates = resolveCompactionModelCandidates({
+				preferredModel: preferred,
+				availableModels: [resolved!, larger],
+				requiresVideo: false,
+				roleIds: [],
+				resolveRoleModel: () => undefined,
+			});
+			expect(candidates.map(model => model.id)).toEqual(["preferred-small-context", "larger-than-upstream-default"]);
 		});
 
 		test("discoverable bundled replacement survives refresh", async () => {
@@ -1626,7 +1740,10 @@ describe("ModelRegistry", () => {
 				const registry = new ModelRegistry(refreshAuth, modelsJsonPath);
 				const codexIds = (snapshot: ReturnType<ModelRegistry["getAvailabilitySnapshot"]>) =>
 					snapshot.models
-						.filter(model => model.provider === "openai-codex" && (model.id === "gpt-5.5" || model.id === "gpt-5.6-sol"))
+						.filter(
+							model =>
+								model.provider === "openai-codex" && (model.id === "gpt-5.5" || model.id === "gpt-5.6-sol"),
+						)
 						.map(model => model.id)
 						.sort();
 				const transitions: Array<{ refreshing: readonly string[]; stale: readonly string[]; ids: string[] }> = [];
@@ -2300,6 +2417,5 @@ describe("ModelRegistry", () => {
 			expect(suppressible.isSelectorSuppressed("google-antigravity/gemini-3-pro-low")).toBe(true);
 			expect(suppressible.isSelectorSuppressed("google-antigravity/gemini-2.5-pro")).toBe(false);
 		});
-
 	});
 });

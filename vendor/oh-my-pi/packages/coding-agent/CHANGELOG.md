@@ -70,6 +70,7 @@
 - Eval `agent()`/`agentType` defaults, gallery fixtures, and the task tool prompt now use named responsibility templates; catch-all `task` is documented as a deprecated migration alias.
 - `Enter` on an empty prompt during streaming now aborts and delivers the next queued durable follow-up exactly once (removing it from the queue); with an empty queue it remains abort-only.
 ### Fixed
+- GPT-5.6 Codex models now use one vendored-upstream limit resolver across startup and discovery refresh, preserve explicit model-config overrides, and label the resolved window source in the status line and `:context`.
 - Bash commands run with `pty: true` now start from the resolved shell-session environment and restore its `PATH` after login startup files, keeping mise-managed tools available just as they are in non-PTY bash commands.
 - Colon mode now opens uniformly from every non-text-entry surface, `Tab` writes each cycled completion into the command line, and the Ctrl+S Agent Hub uses the alternate screen so opening it preserves both followed-tail and scrolled-up transcript viewports.
 - Added an independently remappable `ui.dismiss` action (Escape by default) for overlays, selectors, previews, filters, and pending chords; `app.interrupt` and its mandatory Ctrl+Q path now cancel active work only. Ctrl+Q is consequently reserved from the older follow-up binding contract; follow-up remains on Ctrl+Enter.

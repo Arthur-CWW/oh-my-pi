@@ -5,14 +5,19 @@
  * actually receive — not by stringifying the Zod instance's enumerable
  * internals (`def` tree), which massively overcounts.
  */
-import { describe, expect, it } from "bun:test";
+import { beforeAll, describe, expect, it } from "bun:test";
 import { zodToWireSchema } from "@oh-my-pi/pi-ai/utils/schema";
+import { initTheme, theme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import {
 	type ContextBreakdown,
 	estimateToolSchemaTokens,
 	renderContextUsage,
 } from "@oh-my-pi/pi-coding-agent/modes/utils/context-usage";
 import { z } from "zod/v4";
+
+beforeAll(async () => {
+	await initTheme();
+});
 
 describe("estimateToolSchemaTokens", () => {
 	it("counts Zod tool schemas by their wire JSON Schema, not Zod internals", () => {
@@ -84,5 +89,37 @@ describe("renderContextUsage snapcompact section", () => {
 	it("omits the section entirely when no snapcompact setting is on", () => {
 		const output = renderContextUsage(breakdownWith(undefined), themeStub);
 		expect(output).not.toContain("Snapcompact");
+	});
+});
+
+describe("renderContextUsage model provenance", () => {
+	function breakdown(model: ContextBreakdown["model"], contextWindow: number): ContextBreakdown {
+		return {
+			model,
+			contextWindow,
+			categories: [],
+			usedTokens: 0,
+			autoCompactBufferTokens: 0,
+			freeTokens: contextWindow,
+		};
+	}
+
+	it("labels a user-overridden Codex window in the model header", () => {
+		const model = {
+			id: "gpt-5.6",
+			name: "GPT-5.6",
+			contextWindow: 372_000,
+			codex: { contextWindowSource: "user-override" },
+		} as ContextBreakdown["model"];
+
+		expect(renderContextUsage(breakdown(model, 372_000), theme)).toContain("372K (user override)");
+	});
+
+	it("preserves the existing non-Codex model header", () => {
+		const model = { id: "test-model", name: "Test Model", contextWindow: 372_000 } as ContextBreakdown["model"];
+
+		const output = renderContextUsage(breakdown(model, 372_000), theme).replaceAll(/\x1b\[[0-9;]*m/g, "");
+		expect(output).toContain("Test Model (372k context)");
+		expect(output).not.toContain("user override");
 	});
 });

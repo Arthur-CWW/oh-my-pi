@@ -491,7 +491,9 @@ export class StatusLineComponent implements Component {
 		};
 		const usageStats = aggregateUsageStats;
 
-		let contextWindow = state.model?.contextWindow ?? this.session.model?.contextWindow ?? 0;
+		const model = state.model ?? this.session.model;
+		let contextWindow = model?.contextWindow ?? 0;
+		let contextWindowSource = model?.codex?.contextWindowSource;
 		let contextPercent: number | null = 0;
 		if (includeContext) {
 			const breakdown = this.getCachedContextBreakdown();
@@ -506,6 +508,7 @@ export class StatusLineComponent implements Component {
 		if (collabState?.contextUsage) {
 			contextWindow = collabState.contextUsage.contextWindow || contextWindow;
 			contextPercent = collabState.contextUsage.percent ?? contextPercent;
+			contextWindowSource = undefined;
 		}
 
 		return {
@@ -521,6 +524,7 @@ export class StatusLineComponent implements Component {
 			usageStats,
 			contextPercent,
 			contextWindow,
+			contextWindowSource,
 			autoCompactEnabled: this.#autoCompactEnabled,
 			subagentCount: this.#subagentCount,
 			sessionStartTime: this.#sessionStartTime,

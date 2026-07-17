@@ -8,6 +8,7 @@ import type { Skill } from "../../extensibility/skills";
 import type { AgentSession } from "../../session/agent-session";
 import { estimateInlineSavings, type SnapcompactSavingsEstimate } from "../../session/snapcompact-inline";
 import type { Tool } from "../../tools";
+import { formatContextWindow } from "../components/status-line/context-thresholds";
 import type { theme as Theme } from "../theme/theme";
 
 const GRID_COLS = 20;
@@ -288,8 +289,11 @@ function buildLegendLines(breakdown: ContextBreakdown, theme: typeof Theme): str
 	const modelName = model?.name ?? model?.id ?? "no model";
 	const modelId = model?.id ?? "unknown";
 	const windowLabel = formatNumber(contextWindow).toLowerCase();
+	const modelWindowLabel = model?.codex?.contextWindowSource
+		? formatContextWindow(contextWindow, model.codex.contextWindowSource)
+		: windowLabel;
 
-	lines.push(theme.bold(`${modelName}`) + theme.fg("dim", ` (${windowLabel} context)`));
+	lines.push(theme.bold(`${modelName}`) + theme.fg("dim", ` (${modelWindowLabel} context)`));
 	lines.push(theme.fg("muted", `${modelId}[${windowLabel}]`));
 	lines.push(
 		`${theme.bold(formatNumber(usedTokens))}${theme.fg("dim", `/${windowLabel} tokens`)}` +

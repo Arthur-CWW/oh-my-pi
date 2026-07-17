@@ -1,3 +1,4 @@
+import type { ContextWindowSource } from "@oh-my-pi/pi-catalog/types";
 import type { CollabSessionState } from "../../collab-presentation-types";
 import type { StatusLinePreset, StatusLineSegmentId, StatusLineSeparatorStyle } from "../../../config/settings-schema";
 import type { AgentSession } from "../../../session/agent-session";
@@ -75,6 +76,8 @@ export interface SegmentContext {
 	/** Context usage percent, or null when unknown (e.g. right after compaction). */
 	contextPercent: number | null;
 	contextWindow: number;
+	/** Provenance for the displayed model context window, when known. */
+	contextWindowSource?: ContextWindowSource;
 	autoCompactEnabled: boolean;
 	subagentCount: number;
 	sessionStartTime: number;

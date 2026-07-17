@@ -59,6 +59,9 @@ export interface CodexServiceTier {
 	description: string;
 }
 
+/** Provenance for the effective context window exposed to consumers. */
+export type ContextWindowSource = "endpoint" | "fallback" | "codex-upstream" | "user-override";
+
 /** Live Codex `/models` capability metadata, retained without inferred aliases. */
 export interface CodexModelCapabilities {
 	description?: string;
@@ -76,7 +79,11 @@ export interface CodexModelCapabilities {
 	supportsReasoningSummaries?: boolean;
 	modelMessages?: {
 		instructionsTemplate?: string;
-		instructionsVariables?: { personalityDefault?: string; personalityFriendly?: string; personalityPragmatic?: string };
+		instructionsVariables?: {
+			personalityDefault?: string;
+			personalityFriendly?: string;
+			personalityPragmatic?: string;
+		};
 		approvals?: { onRequest?: string; onRequestAutoReview?: string };
 	};
 	defaultReasoningSummary?: string;
@@ -103,7 +110,7 @@ export interface CodexModelCapabilities {
 	/** Codex client-side Ultra orchestration capability, never inferred from efforts. */
 	supportsUltraOrchestration?: boolean;
 	/** Provenance for values that may be absent from the current endpoint. */
-	contextWindowSource?: "endpoint" | "fallback";
+	contextWindowSource?: ContextWindowSource;
 	maxTokensSource?: "endpoint" | "fallback";
 	costSource?: "endpoint" | "fallback";
 }
