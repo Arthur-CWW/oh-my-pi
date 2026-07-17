@@ -402,6 +402,22 @@ import { ToolChoiceQueue } from "./tool-choice-queue";
 import { classifyUnexpectedStop, isUnexpectedStopCandidate } from "./unexpected-stop-classifier";
 import { YieldQueue } from "./yield-queue";
 
+type CompactionFailureClass =
+	| "auth"
+	| "content-blocked"
+	| "network"
+	| "rate-limit"
+	| "timeout"
+	| "provider-stream-abort"
+	| "provider-error"
+	| "user-interrupt"
+	| "parent-cancel";
+
+interface CompactionCandidateFailure {
+	model: string;
+	failureClass: CompactionFailureClass;
+}
+
 /** Session-specific events that extend the core AgentEvent */
 export type AgentSessionEvent =
 	| AgentEvent
@@ -10957,6 +10973,37 @@ export class AgentSession {
 		return /auth_unavailable|no auth available/i.test(error.message);
 	}
 
+	#isCompactionContentBlockFailure(error: unknown): boolean {
+		let current: unknown = error;
+		for (let depth = 0; current !== undefined && current !== null && depth < 8; depth++) {
+			const message = current instanceof Error ? current.message : typeof current === "string" ? current : "";
+			if (
+				/\binvalid[_ -]?prompt\b|\brequest (?:was )?blocked\b|\b(?:output|prompt) blocked by (?:the )?content filter\b|\bcontent[_ -]?filter(?:ed)?\b/i.test(
+					message,
+				) ||
+				/\bfinish reason:\s*(?:BLOCKLIST|PROHIBITED_CONTENT|SPII|SAFETY|IMAGE_SAFETY|IMAGE_PROHIBITED_CONTENT|IMAGE_RECITATION|RECITATION)\b/i.test(
+					message,
+				)
+			) {
+				return true;
+			}
+			if (typeof current !== "object") return false;
+			const record = current as Record<string, unknown>;
+			const code = getStringProperty(record, "code") ?? getStringProperty(record, "type");
+			if (code === "invalid_prompt" || code === "content_filter" || code === "content_filtered") return true;
+			current = record.cause;
+		}
+		return false;
+	}
+
+	#classifyCompactionFailure(error: unknown): CompactionFailureClass {
+		// A content-policy response may use HTTP 403, so it must win over the
+		// status-based auth classification.
+		if (this.#isCompactionContentBlockFailure(error)) return "content-blocked";
+		if (this.#isCompactionAuthFailure(error)) return "auth";
+		return classifyRequestFailure(error instanceof Error || typeof error === "string" ? error : String(error));
+	}
+
 	#buildCompactionAuthError(): Error {
 		const currentModel = this.model;
 		if (!currentModel) {
@@ -10970,6 +11017,14 @@ export class AgentSession {
 		);
 	}
 
+	#buildCompactionCandidatesError(failures: CompactionCandidateFailure[]): Error {
+		return new Error(
+			`Compaction failed for all attempted models: ${failures
+				.map(failure => `${failure.model}: ${failure.failureClass}`)
+				.join("; ")}`,
+		);
+	}
+
 	async #compactWithFallbackModel(
 		preparation: CompactionPreparation,
 		customInstructions: string | undefined,
@@ -10978,8 +11033,10 @@ export class AgentSession {
 	): Promise<{ result: CompactionResult; summaryModel: string }> {
 		const candidates = this.#getCompactionModelCandidates(this.#modelRegistry.getAvailable(), preparation);
 		const telemetry = resolveTelemetry(this.agent.telemetry, this.sessionId);
+		const failures: CompactionCandidateFailure[] = [];
 
-		for (const candidate of candidates) {
+		for (let candidateIndex = 0; candidateIndex < candidates.length; candidateIndex++) {
+			const candidate = candidates[candidateIndex]!;
 			const apiKey = await this.#modelRegistry.getApiKey(candidate, this.sessionId);
 			if (!apiKey) continue;
 
@@ -11004,12 +11061,17 @@ export class AgentSession {
 				);
 				return { result, summaryModel: `${candidate.provider}/${candidate.id}` };
 			} catch (error) {
-				if (!this.#isCompactionAuthFailure(error)) {
-					throw error;
+				if (signal.aborted) throw error;
+				const message = error instanceof Error ? error.message : String(error);
+				const model = `${candidate.provider}/${candidate.id}`;
+				failures.push({ model, failureClass: this.#classifyCompactionFailure(error) });
+				if (candidateIndex < candidates.length - 1) {
+					logger.warn("Compaction failed, trying next model", { error: message, model });
 				}
 			}
 		}
 
+		if (failures.length > 0) throw this.#buildCompactionCandidatesError(failures);
 		throw this.#buildCompactionAuthError();
 	}
 
@@ -11387,10 +11449,11 @@ export class AgentSession {
 				const candidates = this.#getCompactionModelCandidates(availableModels, preparation);
 				const retrySettings = this.settings.getGroup("retry");
 				const telemetry = resolveTelemetry(this.agent.telemetry, this.sessionId);
+				const failures: CompactionCandidateFailure[] = [];
 				let compactResult: CompactionResult | undefined;
-				let lastError: unknown;
 
-				for (const candidate of candidates) {
+				for (let candidateIndex = 0; candidateIndex < candidates.length; candidateIndex++) {
+					const candidate = candidates[candidateIndex]!;
 					const apiKey = await this.#modelRegistry.getApiKey(candidate, this.sessionId);
 					if (!apiKey) continue;
 
@@ -11426,8 +11489,20 @@ export class AgentSession {
 							}
 
 							const message = error instanceof Error ? error.message : String(error);
-							if (this.#isCompactionAuthFailure(error)) {
-								lastError = this.#buildCompactionAuthError();
+							const model = `${candidate.provider}/${candidate.id}`;
+							const failureClass = this.#classifyCompactionFailure(error);
+							if (failureClass === "content-blocked") {
+								failures.push({ model, failureClass });
+								if (candidateIndex < candidates.length - 1) {
+									logger.warn("Auto-compaction content blocked, trying next model", {
+										error: message,
+										model,
+									});
+								}
+								break;
+							}
+							if (failureClass === "auth") {
+								failures.push({ model, failureClass });
 								break;
 							}
 							const retryAfterMs = this.#parseRetryAfterMsFromError(message);
@@ -11438,7 +11513,7 @@ export class AgentSession {
 									this.#isTransientErrorMessage(message) ||
 									isUsageLimitError(message));
 							if (!shouldRetry) {
-								lastError = error;
+								failures.push({ model, failureClass });
 								break;
 							}
 
@@ -11447,19 +11522,15 @@ export class AgentSession {
 
 							// If retry delay is too long (>30s), try next candidate instead of waiting
 							const maxAcceptableDelayMs = 30_000;
-							if (delayMs > maxAcceptableDelayMs) {
-								const hasMoreCandidates = candidates.indexOf(candidate) < candidates.length - 1;
-								if (hasMoreCandidates) {
-									logger.warn("Auto-compaction retry delay too long, trying next model", {
-										delayMs,
-										retryAfterMs,
-										error: message,
-										model: `${candidate.provider}/${candidate.id}`,
-									});
-									lastError = error;
-									break; // Exit retry loop, continue to next candidate
-								}
-								// No more candidates - we have to wait
+							if (delayMs > maxAcceptableDelayMs && candidateIndex < candidates.length - 1) {
+								logger.warn("Auto-compaction retry delay too long, trying next model", {
+									delayMs,
+									retryAfterMs,
+									error: message,
+									model,
+								});
+								failures.push({ model, failureClass });
+								break; // Exit retry loop, continue to next candidate
 							}
 
 							attempt++;
@@ -11469,7 +11540,7 @@ export class AgentSession {
 								delayMs,
 								retryAfterMs,
 								error: message,
-								model: `${candidate.provider}/${candidate.id}`,
+								model,
 							});
 							await scheduler.wait(delayMs, { signal: autoCompactionSignal });
 						}
@@ -11481,8 +11552,8 @@ export class AgentSession {
 				}
 
 				if (!compactResult) {
-					if (lastError) {
-						throw lastError;
+					if (failures.length > 0) {
+						throw this.#buildCompactionCandidatesError(failures);
 					}
 					throw new Error("Compaction failed: no available model");
 				}

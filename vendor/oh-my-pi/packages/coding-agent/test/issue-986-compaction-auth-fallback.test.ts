@@ -116,7 +116,7 @@ describe("issue #986 compaction auth fallback", () => {
 		]);
 	});
 
-	it("fails fast with a clear provider-specific error when no authenticated fallback exists", async () => {
+	it("lists the current model auth failure when no authenticated fallback exists", async () => {
 		const { currentModel } = await createSession({ configureFallbackAuth: false });
 		vi.spyOn(compactionModule, "compact").mockImplementation(async (_preparation, model) => {
 			if (model.provider === currentModel.provider && model.id === currentModel.id) {
@@ -134,7 +134,7 @@ describe("issue #986 compaction auth fallback", () => {
 		const error = await session.compact().catch(err => err);
 		expect(error).toBeInstanceOf(Error);
 		expect((error as Error).message).toContain(
-			`Compaction requires usable credentials for ${currentModel.provider}/${currentModel.id}`,
+			`${currentModel.provider}/${currentModel.id}: auth`,
 		);
 		expect((error as Error).message).not.toMatch(/auth_unavailable/i);
 	});
@@ -184,7 +184,7 @@ describe("issue #986 compaction auth fallback", () => {
 		]);
 	});
 
-	it("fails fast with the configured-credentials hint when a 401 has no authenticated fallback", async () => {
+	it("lists the current model auth failure when a 401 has no authenticated fallback", async () => {
 		const { currentModel } = await createSession({ configureFallbackAuth: false });
 		vi.spyOn(compactionModule, "compact").mockImplementation(async (_preparation, model) => {
 			if (model.provider === currentModel.provider && model.id === currentModel.id) {
@@ -205,7 +205,7 @@ describe("issue #986 compaction auth fallback", () => {
 		const error = await session.compact().catch(err => err);
 		expect(error).toBeInstanceOf(Error);
 		expect((error as Error).message).toContain(
-			`Compaction requires usable credentials for ${currentModel.provider}/${currentModel.id}`,
+			`${currentModel.provider}/${currentModel.id}: auth`,
 		);
 		// The raw provider envelope must not leak into the actionable error.
 		expect((error as Error).message).not.toContain("authentication_error");
