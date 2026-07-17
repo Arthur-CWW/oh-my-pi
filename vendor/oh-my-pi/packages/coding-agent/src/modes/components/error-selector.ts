@@ -7,6 +7,9 @@ import { DynamicBorder } from "./dynamic-border";
 import { keyHint } from "./keybinding-hints";
 export type DiagnosticActionHandler = (action: FocusCmuxOwnerAction) => Promise<FocusCmuxOwnerResult>;
 
+// Leave room for the selected detail in a half-height HUD on a 20-row terminal.
+const ERROR_LIST_MAX_VISIBLE = 5;
+
 export interface ErrorSelectorOptions {
 	readonly onAction?: DiagnosticActionHandler;
 	readonly onUpdate?: () => void;
@@ -124,7 +127,7 @@ export class ErrorSelectorComponent extends Container {
 		const pendingActions = new Map<string, number>();
 		const detailText = new Text(formatDiagnosticDetail(selectedError ?? null), 1, 0);
 
-		this.#selectList = new SelectList(items, Math.min(items.length, 10), getSelectListTheme());
+		this.#selectList = new SelectList(items, Math.min(items.length, ERROR_LIST_MAX_VISIBLE), getSelectListTheme());
 		this.#selectList.onSelect = item => {
 			const selected = byId.get(item.value);
 			if (selected?.action?.kind !== "focus_cmux_owner" || !options.onAction) {

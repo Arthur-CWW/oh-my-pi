@@ -56,6 +56,26 @@ describe("ErrorSelectorComponent", () => {
 		expect(content).toContain("Resolve: :errors resolve err-1");
 	});
 
+	test("keeps a long build digest on one detail line at 140 columns", () => {
+		const digest = `sha256:${"a".repeat(64)}`;
+		const selector = new ErrorSelectorComponent([{ ...dummyEvent, buildDigest: digest }], mock());
+
+		expect(renderText(selector, 140)).toContain(`Build digest: ${digest}`);
+	});
+
+	test("keeps the selected detail visible within a half-height 30-row HUD", () => {
+		const errors = Array.from({ length: 10 }, (_, index) => ({
+			...dummyEvent,
+			id: `err-${index}`,
+		}));
+		const selector = new ErrorSelectorComponent(errors, mock());
+		const lines = selector.render(140).map(line => stripVTControlCharacters(line));
+		const detailStart = lines.findIndex(line => line.includes("Occurrences:"));
+
+		expect(detailStart).toBeGreaterThanOrEqual(0);
+		expect(detailStart).toBeLessThan(15);
+	});
+
 	test("formatDiagnosticDetail handles missing fields gracefully", () => {
 		const minimal: DiagnosticEvent = {
 			id: "min",

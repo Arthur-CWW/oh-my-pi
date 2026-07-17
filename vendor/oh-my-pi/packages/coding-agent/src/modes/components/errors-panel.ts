@@ -75,7 +75,7 @@ export function createErrorsDock(
 		() => dock.close(),
 		() => ui.requestComponentRender(panel),
 	);
-	dock = new DockablePanelController(ui, panel, { preferredDock: "right", interruptOwner, onPinChange });
+	dock = new DockablePanelController(ui, panel, { interruptOwner, onPinChange });
 	ui.addInputListener(data => {
 		if (!dock.isOpen || dock.isFocused) return undefined;
 		return dock.handleGlobalInput(data) ? { consume: true } : undefined;

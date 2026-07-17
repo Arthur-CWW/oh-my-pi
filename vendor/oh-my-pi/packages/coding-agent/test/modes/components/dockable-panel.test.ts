@@ -4,7 +4,6 @@ import {
 	DockablePanelController,
 	type DockablePanelHost,
 	resolveDockablePanelLayout,
-	SIDE_DOCK_MIN_TERMINAL_WIDTH,
 } from "../../../src/modes/components/dockable-panel";
 
 const OWNER: Component = { render: () => ["owner"] };
@@ -58,37 +57,52 @@ function createHost(width = 120, height = 30): {
 }
 
 describe("resolveDockablePanelLayout", () => {
-	test("uses a one-third-height bottom dock below the side threshold", () => {
-		const layout = resolveDockablePanelLayout(SIDE_DOCK_MIN_TERMINAL_WIDTH - 1, 30, "right");
-		expect(layout).toEqual({ dock: "bottom", anchor: "bottom-center", width: "100%", maxHeight: 10 });
+	test("uses full-width bottom HUD geometry", () => {
+		expect(resolveDockablePanelLayout(30)).toEqual({
+			anchor: "bottom-center",
+			width: "100%",
+			maxHeight: 15,
+		});
 	});
 
-	test("uses a 40-column right dock at the threshold", () => {
-		const layout = resolveDockablePanelLayout(SIDE_DOCK_MIN_TERMINAL_WIDTH, 30, "right");
-		expect(layout).toEqual({ dock: "right", anchor: "right-center", width: 40, maxHeight: "100%" });
-	});
-
-	test("honors a left-side preference on wide terminals and falls back on narrow ones", () => {
-		expect(resolveDockablePanelLayout(160, 30, "left").dock).toBe("left");
-		expect(resolveDockablePanelLayout(119, 30, "left").dock).toBe("bottom");
+	test("bounds the HUD to half the terminal while preserving one row", () => {
+		expect(resolveDockablePanelLayout(31).maxHeight).toBe(15);
+		expect(resolveDockablePanelLayout(1).maxHeight).toBe(1);
 	});
 });
 
 describe("DockablePanelController", () => {
-	test("mounts with resolved overlay options and Escape closes it", () => {
-		const harness = createHost();
+	test("mounts as a bottom HUD at 140 columns and Escape closes it", () => {
+		const harness = createHost(140, 30);
 		const openChanges: boolean[] = [];
 		const controller = new DockablePanelController(harness.host, CONTENT, {
 			onOpenChange: open => openChanges.push(open),
 		});
 
 		controller.open();
-		expect(harness.options()?.anchor).toBe("right-center");
-		expect(harness.options()?.width).toBe(40);
+		expect(harness.options()?.anchor).toBe("bottom-center");
+		expect(harness.options()?.width).toBe("100%");
+		expect(harness.options()?.maxHeight).toBe(15);
 		expect(controller.handleInput("\x1b")).toBe(true);
 		expect(controller.isOpen).toBe(false);
 		expect(harness.hideCount()).toBe(1);
 		expect(openChanges).toEqual([true, false]);
+	});
+
+	test("toggle preserves bottom HUD geometry at 60 columns and does not change pin state", () => {
+		const harness = createHost(60, 20);
+		const controller = new DockablePanelController(harness.host, CONTENT);
+
+		controller.toggle();
+		expect(controller.isOpen).toBe(true);
+		expect(controller.isPinned).toBe(false);
+		expect(harness.options()?.anchor).toBe("bottom-center");
+		expect(harness.options()?.width).toBe("100%");
+
+		controller.toggle();
+		expect(controller.isOpen).toBe(false);
+		expect(controller.isPinned).toBe(false);
+		expect(harness.hideCount()).toBe(1);
 	});
 
 	test("p toggles the pinned state and hook", () => {

@@ -10,45 +10,23 @@ import {
 } from "@oh-my-pi/pi-tui";
 import { matchesUiDismiss } from "../utils/keybinding-matchers";
 
-export type DockPosition = "bottom" | "right" | "left";
-
-export const SIDE_PANEL_WIDTH = 40;
-export const MIN_TRANSCRIPT_WIDTH_WITH_SIDE_PANEL = 80;
-export const SIDE_DOCK_MIN_TERMINAL_WIDTH = SIDE_PANEL_WIDTH + MIN_TRANSCRIPT_WIDTH_WITH_SIDE_PANEL;
-
 export interface DockablePanelLayout {
-	readonly dock: DockPosition;
 	readonly anchor: OverlayAnchor;
 	readonly width: SizeValue;
 	readonly maxHeight: SizeValue;
 }
 
-/** Resolve responsive overlay geometry without consulting terminal or UI state. */
-export function resolveDockablePanelLayout(
-	terminalWidth: number,
-	terminalHeight: number,
-	preferredDock: DockPosition = "right",
-): DockablePanelLayout {
-	const sideDock = preferredDock !== "bottom" && terminalWidth >= SIDE_DOCK_MIN_TERMINAL_WIDTH;
-	if (sideDock) {
-		return {
-			dock: preferredDock,
-			anchor: preferredDock === "left" ? "left-center" : "right-center",
-			width: SIDE_PANEL_WIDTH,
-			maxHeight: "100%",
-		};
-	}
-
+/** Resolve the full-width bottom HUD geometry without consulting UI state. */
+export function resolveDockablePanelLayout(terminalHeight: number): DockablePanelLayout {
 	return {
-		dock: "bottom",
 		anchor: "bottom-center",
 		width: "100%",
-		maxHeight: Math.max(1, Math.floor(terminalHeight / 3)),
+		maxHeight: Math.max(1, Math.floor(terminalHeight / 2)),
 	};
 }
 
 export interface DockablePanelHost {
-	readonly terminal: Pick<TUI["terminal"], "columns" | "rows">;
+	readonly terminal: Pick<TUI["terminal"], "rows">;
 	showOverlay(component: Component, options?: OverlayOptions): OverlayHandle;
 	setFocus(component: Component | null): void;
 	getFocused(): Component | null;
@@ -62,8 +40,6 @@ export interface DockablePanelCallbacks {
 }
 
 export interface DockablePanelOptions extends DockablePanelCallbacks {
-	/** A side preference falls back to bottom below 120 columns. */
-	preferredDock?: DockPosition;
 	/** Explicit focus destination when Ctrl-W w leaves the panel. */
 	returnFocus?: Component;
 	/** The only focus target allowed to receive Ctrl-Q while the panel is open. */
@@ -109,21 +85,17 @@ export class DockablePanelController {
 	readonly #overlay: DockablePanelOverlay;
 	readonly #overlayOptions: OverlayOptions;
 	#handle: OverlayHandle | undefined;
-	#preferredDock: DockPosition;
 	#returnFocus: Component | null = null;
 	#pinned = false;
 	#waitingForFocusChord = false;
 	#cachedLayout: DockablePanelLayout | undefined;
-	#cachedWidth = -1;
 	#cachedHeight = -1;
-	#cachedPreferredDock: DockPosition | undefined;
 
 	constructor(
 		private readonly host: DockablePanelHost,
 		content: Component,
 		private readonly options: DockablePanelOptions = {},
 	) {
-		this.#preferredDock = options.preferredDock ?? "right";
 		this.#overlay = new DockablePanelOverlay(content, data => this.handleInput(data));
 		const controller = this;
 		this.#overlayOptions = {
@@ -153,18 +125,10 @@ export class DockablePanelController {
 	}
 
 	get layout(): DockablePanelLayout {
-		const width = this.host.terminal.columns;
 		const height = this.host.terminal.rows;
-		if (
-			!this.#cachedLayout ||
-			width !== this.#cachedWidth ||
-			height !== this.#cachedHeight ||
-			this.#preferredDock !== this.#cachedPreferredDock
-		) {
-			this.#cachedWidth = width;
+		if (!this.#cachedLayout || height !== this.#cachedHeight) {
 			this.#cachedHeight = height;
-			this.#cachedPreferredDock = this.#preferredDock;
-			this.#cachedLayout = resolveDockablePanelLayout(width, height, this.#preferredDock);
+			this.#cachedLayout = resolveDockablePanelLayout(height);
 		}
 		return this.#cachedLayout;
 	}
@@ -202,13 +166,6 @@ export class DockablePanelController {
 
 	togglePin(): void {
 		this.setPinned(!this.#pinned);
-	}
-
-	setPreferredDock(dock: DockPosition): void {
-		if (dock === this.#preferredDock) return;
-		this.#preferredDock = dock;
-		this.#cachedLayout = undefined;
-		this.host.requestRender();
 	}
 
 	toggleFocus(): boolean {
