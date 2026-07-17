@@ -79,7 +79,7 @@ export interface SessionObserverPerformanceCounters {
 
 export class SessionObserverRegistry {
 	#sessions = new Map<string, ObservableSession>();
-	#tokenSamples = new Map<string, Array<{ at: number; tokens: number }>>();
+	#tokenSamples = new Map<string, Array<{ at: number; tokens: number; outputTokens: number }>>();
 	#listeners = new Set<() => void>();
 	#eventBusUnsubscribers: Array<() => void> = [];
 	#sortOrderById = new Map<string, number>();
@@ -115,9 +115,9 @@ export class SessionObserverRegistry {
 		}, 0);
 	}
 
-	#recordProgressRate(id: string, tokens: number, at: number): void {
+	#recordProgressRate(id: string, tokens: number, outputTokens: number, at: number): void {
 		const samples = this.#tokenSamples.get(id) ?? [];
-		samples.push({ at, tokens });
+		samples.push({ at, tokens, outputTokens });
 		const cutoff = at - TOKEN_RATE_STALE_MS;
 		while (samples.length > 2 && samples[0]!.at < cutoff) samples.shift();
 		this.#tokenSamples.set(id, samples);
@@ -135,7 +135,10 @@ export class SessionObserverRegistry {
 
 			while (samples.length > 2 && samples[0]!.at < now - TOKEN_RATE_STALE_MS) samples.shift();
 			const latest = samples[samples.length - 1]!;
-			if (now - latest.at > TOKEN_RATE_WINDOW_MS) {
+			// Stuck detection keys off ANY token advance (total counter) so
+			// cache-heavy turns still register as alive.
+			const latestTotalAdvanceAt = latest.at;
+			if (now - latestTotalAdvanceAt > TOKEN_RATE_WINDOW_MS) {
 				session.tokenRate = 0;
 			} else {
 				// Use the latest cumulative snapshot at or before the window
@@ -147,9 +150,15 @@ export class SessionObserverRegistry {
 					start = sample;
 				}
 				const elapsed = latest.at - start.at;
-				session.tokenRate = elapsed > 0 ? Math.max(0, latest.tokens - start.tokens) / elapsed * 1000 : 0;
+				// Display rate uses output tokens only (generation speed).
+				// Fall back to total when outputTokens is absent (old child).
+				const useOutput = latest.outputTokens > 0 || start.outputTokens > 0;
+				const delta = useOutput
+					? latest.outputTokens - start.outputTokens
+					: latest.tokens - start.tokens;
+				session.tokenRate = elapsed > 0 ? Math.max(0, delta) / elapsed * 1000 : 0;
 			}
-			session.tokenRateStuck = session.status === "active" && session.tokenRate === 0 && now - latest.at > TOKEN_RATE_STALE_MS;
+			session.tokenRateStuck = session.status === "active" && session.tokenRate === 0 && now - latestTotalAdvanceAt > TOKEN_RATE_STALE_MS;
 		}
 	}
 
@@ -483,7 +492,7 @@ export class SessionObserverRegistry {
 				const id = progress.id;
 				const sortOrder = this.#ensureSortOrder(id);
 				this.#ensureParentSortOrder(payload.parentToolCallId, sortOrder);
-				this.#recordProgressRate(id, progress.tokens, Date.now());
+				this.#recordProgressRate(id, progress.tokens, progress.outputTokens ?? 0, Date.now());
 				this.#queueUpdate({
 					id,
 					agent: payload.agent,

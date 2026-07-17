@@ -309,6 +309,8 @@ export interface AgentProgress {
 	requests: number;
 	/** Cumulative input + output + cacheWrite tokens across all turns. Excludes cacheRead (re-reads cached context every turn, making cumulative sum misleading). */
 	tokens: number;
+	/** Cumulative output tokens across all turns. Drives the HUD generation-speed rate (output tok/s). */
+	outputTokens?: number;
 	/**
 	 * Current per-turn context size: latest assistant message's `usage.totalTokens`.
 	 * This is the number to compare against `contextWindow` — what compaction
@@ -389,6 +391,8 @@ export interface SingleResult {
 	durationMs: number;
 	/** Cumulative input + output + cacheWrite tokens across all turns. Excludes cacheRead (re-reads cached context every turn, making cumulative sum misleading). */
 	tokens: number;
+	/** Cumulative output tokens across all turns. See `AgentProgress.outputTokens`. */
+	outputTokens?: number;
 	/** Count of assistant requests (assistant message_end events) across the run. */
 	requests: number;
 	/** Latest per-turn context size at task completion. See `AgentProgress.contextTokens`. */

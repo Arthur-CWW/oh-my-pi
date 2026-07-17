@@ -261,6 +261,7 @@ export function updateFinalizedSubagentProgress(
 	progress.status = result?.aborted ? "aborted" : resultFailed ? "failed" : "completed";
 	progress.durationMs = result?.durationMs ?? Math.max(0, Date.now() - startedAt);
 	progress.tokens = result?.tokens ?? 0;
+	progress.outputTokens = result?.outputTokens;
 	progress.requests = result?.requests ?? 0;
 	progress.contextTokens = result?.contextTokens;
 	progress.contextWindow = result?.contextWindow;

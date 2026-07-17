@@ -58,7 +58,7 @@ import { buildNamedToolChoice } from "../utils/tool-choice";
 import type { WorkspaceTree } from "../workspace-tree";
 import { appendChildLifecycleRecord, type ChildLifecycleState } from "./child-lifecycle";
 import { type RestorableSessionModel, resolveRestorableSessionModel } from "./hotswap";
-import { getNumberField, getProgressUsageTokens } from "./progress-usage";
+import { getNumberField, getProgressUsageOutputTokens, getProgressUsageTokens } from "./progress-usage";
 import type { SpawnRouteReceipt } from "./route-resolution";
 import { createSpawnRecord } from "./spawn-record";
 import type { SpawnWorkerRunRequest } from "./spawn-worker-protocol";
@@ -1508,6 +1508,7 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
 					}
 					// Accumulate tokens for progress display
 					progress.tokens += getProgressUsageTokens(messageUsage);
+					progress.outputTokens = (progress.outputTokens ?? 0) + getProgressUsageOutputTokens(messageUsage);
 					// Track latest per-turn context size so the UI can show
 					// "current context", not just cumulative billing volume.
 					if (role === "assistant") {
@@ -1984,6 +1985,7 @@ async function finalizeRunResult(args: FinalizeRunArgs): Promise<SingleResult> {
 		truncated: Boolean(truncated),
 		durationMs: Date.now() - args.startTime,
 		tokens: progress.tokens,
+		outputTokens: progress.outputTokens,
 		requests: progress.requests,
 		contextTokens: progress.contextTokens,
 		contextWindow: progress.contextWindow,

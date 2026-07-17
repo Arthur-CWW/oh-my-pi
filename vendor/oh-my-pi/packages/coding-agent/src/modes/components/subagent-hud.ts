@@ -83,8 +83,16 @@ export class SubagentHudRenderer {
 		const sessionsById = new Map(sessions.map(session => [session.id, session]));
 		const lastSiblingByParent = new Map<string | undefined, string>();
 		for (const session of visible) lastSiblingByParent.set(session.parentAgentId, session.id);
-		const tokenColumnWidth = showTokenRateBadge
-			? Math.max(1, ...visible.map(session => String(Math.round(session.tokenRate ?? 0)).length))
+		const badgeTexts = showTokenRateBadge
+			? visible.map(session => {
+					const liveness = session.progress?.livenessState;
+					if (liveness === "dead") return "DEAD";
+					if (liveness === "stalled") return "STALLED";
+					return `${Math.round(session.tokenRate ?? 0)} t/s`;
+				})
+			: visible.map(() => "");
+		const badgeColumnWidth = showTokenRateBadge
+			? Math.max(1, ...badgeTexts.map(t => t.length))
 			: 0;
 		const rows: HudRow[] = visible.map(session => {
 			const depth = subagentDepth(session, sessionsById);
@@ -105,25 +113,17 @@ export class SubagentHudRenderer {
 		});
 
 		const lines = ["", `  ${theme.bold(theme.fg("accent", "Subagents"))}`];
-		for (const input of rows) {
-			const rate = input.tokenRate === undefined ? "" : String(Math.round(input.tokenRate));
-			const state =
-				input.livenessState === "dead"
-					? "DEAD"
-					: input.livenessState === "stalled"
-						? "STALLED"
-						: input.tokenRateStuck
-							? "RUN+0"
-							: "RUN";
+		for (let i = 0; i < rows.length; i++) {
+			const input = rows[i]!;
+			const badge = badgeTexts[i] ?? "";
 			const fingerprint = [
 				input.prefix,
 				input.displayId,
 				input.description ?? "",
 				input.task ?? "",
 				input.modelSelector ?? "",
-				rate,
-				state,
-				tokenColumnWidth,
+				badge,
+				badgeColumnWidth,
 			].join("\u0000");
 			let cached = this.#rows.get(input.session.id);
 			if (!cached || cached.columns !== columns || cached.fingerprint !== fingerprint) {
@@ -131,7 +131,7 @@ export class SubagentHudRenderer {
 					columns,
 					fingerprint,
 					generation,
-					row: this.#buildRow(input, rate, state, tokenColumnWidth, columns),
+					row: this.#buildRow(input, badge, badgeColumnWidth, columns),
 				};
 				this.#rows.set(input.session.id, cached);
 				this.#rowRebuilds++;
@@ -146,7 +146,7 @@ export class SubagentHudRenderer {
 		return lines;
 	}
 
-	#buildRow(input: HudRow, rate: string, state: string, tokenColumnWidth: number, columns: number): string {
+	#buildRow(input: HudRow, badge: string, badgeColumnWidth: number, columns: number): string {
 		const abbreviation = input.modelSelector
 			? renderModelSelectorAbbreviation(input.modelSelector, "compact")
 			: theme.fg("dim", "?");
@@ -157,19 +157,21 @@ export class SubagentHudRenderer {
 			left += ` ${theme.fg("muted", replaceTabs(input.task))}`;
 		}
 
-		const tokenLane = tokenColumnWidth > 0 ? rate.padStart(tokenColumnWidth) : "";
-		const stateLane = state.padStart(5);
+		const badgeLane = badge.padStart(badgeColumnWidth);
 		// Leave the terminal's final cell unused. Exact-width rows arm the terminal's
 		// pending-wrap state, so the next cursor move can appear on a second display line.
 		const rowWidth = Math.max(1, columns - 1);
-		const tailWidth = tokenColumnWidth + (tokenColumnWidth > 0 ? 1 : 0) + stateLane.length;
-		const leftWidth = Math.max(1, rowWidth - tailWidth - 1);
+		const tailWidth = badgeColumnWidth + 1;
+		const leftWidth = Math.max(1, rowWidth - tailWidth);
 		left = truncateToWidth(left, Math.max(TRUNCATE_LENGTHS.SHORT, leftWidth));
 		left = truncateToWidth(left, leftWidth);
 		left += padding(Math.max(0, leftWidth - visibleWidth(left)));
-		const token = tokenColumnWidth > 0 ? `${theme.fg("dim", tokenLane)} ` : "";
-		const status = theme.fg(input.livenessState === "dead" ? "error" : state === "RUN" ? "success" : "warning", stateLane);
-		return `${left} ${token}${status}`;
+		const badgeColor = input.livenessState === "dead"
+			? "error"
+			: (input.tokenRateStuck || input.livenessState === "stalled")
+				? "warning"
+				: "success";
+		return `${left} ${theme.fg(badgeColor, badgeLane)}`;
 	}
 }
 

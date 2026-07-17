@@ -31,6 +31,13 @@ export function getProgressUsageTokens(usage: unknown): number {
 	return computed > 0 ? computed : (firstNumberField(record, ["totalTokens", "total_tokens"]) ?? 0);
 }
 
+/** Output tokens only, for generation-speed rate display. */
+export function getProgressUsageOutputTokens(usage: unknown): number {
+	if (!usage || typeof usage !== "object") return 0;
+	const record = usage as Record<string, unknown>;
+	return firstNumberField(record, ["output", "output_tokens", "outputTokens"]) ?? 0;
+}
+
 export function createUsageTotals(): Usage {
 	return {
 		input: 0,

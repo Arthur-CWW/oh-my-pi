@@ -275,19 +275,19 @@ describe("subagent HUD lines", () => {
 		setSystemTime(start);
 		try {
 			eventBus.emit(TASK_SUBAGENT_LIFECYCLE_CHANNEL, makeLifecycle("RateWorker", 0, "rate work", true));
-			const progress = (tokens: number): SubagentProgressPayload => ({
+			const progress = (tokens: number, outputTokens?: number): SubagentProgressPayload => ({
 				...makeProgressPayload("RateWorker", 0, "rate work", true),
-				progress: makeProgress({ id: "RateWorker", index: 0, description: "rate work", tokens }),
+				progress: makeProgress({ id: "RateWorker", index: 0, description: "rate work", tokens, outputTokens }),
 			});
-			eventBus.emit(TASK_SUBAGENT_PROGRESS_CHANNEL, progress(100));
+			eventBus.emit(TASK_SUBAGENT_PROGRESS_CHANNEL, progress(100, 10));
 			setSystemTime(new Date(start.getTime() + 15_000));
-			eventBus.emit(TASK_SUBAGENT_PROGRESS_CHANNEL, progress(250));
+			eventBus.emit(TASK_SUBAGENT_PROGRESS_CHANNEL, progress(250, 25));
 
 			const live = registry.getSessions().find(session => session.id === "RateWorker");
-			expect(live?.tokenRate).toBeCloseTo(10, 5);
+			// Rate is computed from outputTokens: (25-10)/15s = 1 t/s
+			expect(live?.tokenRate).toBeCloseTo(1, 5);
 			expect(live?.tokenRateStuck).toBe(false);
-			expect(render(registry.getSessions())).toMatch(/\s10\s+RUN$/m);
-			expect(render(registry.getSessions())).not.toContain("t/s");
+			expect(render(registry.getSessions())).toMatch(/\s1 t\/s$/m);
 
 			setSystemTime(new Date(start.getTime() + 61_000));
 			const decayed = registry.getSessions().find(session => session.id === "RateWorker");
@@ -296,14 +296,14 @@ describe("subagent HUD lines", () => {
 			setSystemTime(new Date(start.getTime() + 76_000));
 			const stale = registry.getSessions().find(session => session.id === "RateWorker");
 			expect(stale).toMatchObject({ tokenRate: 0, tokenRateStuck: true });
-			expect(render(registry.getSessions())).toContain("RUN+0");
+			expect(render(registry.getSessions())).toMatch(/\s0 t\/s$/m);
 		} finally {
 			registry.dispose();
 			vi.useRealTimers();
 		}
 	});
 
-	it("renders parent-probed liveness states instead of RUN+0", () => {
+	it("renders parent-probed liveness states instead of 0 t/s", () => {
 		const out = render([
 			makeSession({
 				id: "StalledWorker",
@@ -319,10 +319,10 @@ describe("subagent HUD lines", () => {
 
 		expect(out).toContain("STALLED");
 		expect(out).toContain("DEAD");
-		expect(out).not.toContain("RUN+0");
+		expect(out).not.toContain("0 t/s");
 	});
 
-	it("renders a three-deep short-name tree with aligned integer rate and state columns", () => {
+	it("renders a three-deep short-name tree with aligned badge columns", () => {
 		const rows = [
 			makeSession({
 				id: "HR147ColonMode",
@@ -361,10 +361,9 @@ describe("subagent HUD lines", () => {
 		expect(rendered[2]).toContain("[KMkimim] DismissSelectors: Selector dismissal migration specialist");
 		expect(rendered.join("\n")).not.toContain("HR147ColonMode.HR151DismissAction");
 		expect(rendered.map(line => Bun.stringWidth(line))).toEqual([99, 99, 99]);
-		expect(rendered[0]).toMatch(/\s10\s+RUN$/);
-		expect(rendered[1]).toMatch(/\s123\s+RUN$/);
-		expect(rendered[2]).toMatch(/\s1\s+RUN\+0$/);
-		expect(rendered.join("\n")).not.toMatch(/\d+\.\d+t\/s/);
+		expect(rendered[0]).toMatch(/\s10 t\/s$/);
+		expect(rendered[1]).toMatch(/\s123 t\/s$/);
+		expect(rendered[2]).toMatch(/\s1 t\/s$/);
 	});
 
 	it("keeps long-role rows on one display line at narrow, normal, and wide widths", () => {
@@ -381,8 +380,92 @@ describe("subagent HUD lines", () => {
 			const rendered = renderSubagentHudLines([row], width).at(-1)!;
 			const plain = Bun.stripANSI(rendered);
 			expect(Bun.stringWidth(plain)).toBe(width - 1);
-			expect(plain).toMatch(/…\s+123\s+RUN$/);
+			expect(plain).toMatch(/…\s+123 t\/s$/);
 			expect(plain.split("\n")).toHaveLength(1);
+		}
+	});
+
+	it("cache-heavy turn yields output-rate not billing-volume rate", () => {
+		vi.useFakeTimers();
+		const registry = new SessionObserverRegistry();
+		const eventBus = new EventBus();
+		registry.subscribeToEventBus(eventBus);
+		const start = new Date("2025-06-01T00:00:00.000Z");
+		setSystemTime(start);
+		try {
+			eventBus.emit(TASK_SUBAGENT_LIFECYCLE_CHANNEL, makeLifecycle("CacheHeavy", 0, "cache work", true));
+			const progress = (tokens: number, outputTokens: number): SubagentProgressPayload => ({
+				...makeProgressPayload("CacheHeavy", 0, "cache work", true),
+				progress: makeProgress({ id: "CacheHeavy", index: 0, description: "cache work", tokens, outputTokens }),
+			});
+			// Turn 1: 150k total (input+cacheWrite), 100 output
+			eventBus.emit(TASK_SUBAGENT_PROGRESS_CHANNEL, progress(150_000, 100));
+			setSystemTime(new Date(start.getTime() + 10_000));
+			// Turn 2: 300k total, 400 output (300 new output tokens in 10s => 30 t/s)
+			eventBus.emit(TASK_SUBAGENT_PROGRESS_CHANNEL, progress(300_000, 400));
+
+			const session = registry.getSessions().find(s => s.id === "CacheHeavy");
+			// Rate should be ~30 (output-based), NOT ~15000 (total-based)
+			expect(session?.tokenRate).toBeCloseTo(30, 5);
+			expect(session?.tokenRate).toBeLessThan(100);
+			expect(render(registry.getSessions())).toMatch(/\s30 t\/s$/m);
+		} finally {
+			registry.dispose();
+			vi.useRealTimers();
+		}
+	});
+
+	it("old child without outputTokens falls back to total for rate", () => {
+		vi.useFakeTimers();
+		const registry = new SessionObserverRegistry();
+		const eventBus = new EventBus();
+		registry.subscribeToEventBus(eventBus);
+		const start = new Date("2025-06-01T00:00:00.000Z");
+		setSystemTime(start);
+		try {
+			eventBus.emit(TASK_SUBAGENT_LIFECYCLE_CHANNEL, makeLifecycle("OldChild", 0, "legacy work", true));
+			// Simulate old child that does not send outputTokens
+			const progress = (tokens: number): SubagentProgressPayload => ({
+				...makeProgressPayload("OldChild", 0, "legacy work", true),
+				progress: makeProgress({ id: "OldChild", index: 0, description: "legacy work", tokens }),
+			});
+			eventBus.emit(TASK_SUBAGENT_PROGRESS_CHANNEL, progress(500));
+			setSystemTime(new Date(start.getTime() + 10_000));
+			eventBus.emit(TASK_SUBAGENT_PROGRESS_CHANNEL, progress(1000));
+
+			const session = registry.getSessions().find(s => s.id === "OldChild");
+			// Falls back to total: (1000-500)/10s = 50 t/s
+			expect(session?.tokenRate).toBeCloseTo(50, 5);
+		} finally {
+			registry.dispose();
+			vi.useRealTimers();
+		}
+	});
+
+	it("stuck detection fires on total-advance stagnation even when outputTokens grows", () => {
+		vi.useFakeTimers();
+		const registry = new SessionObserverRegistry();
+		const eventBus = new EventBus();
+		registry.subscribeToEventBus(eventBus);
+		const start = new Date("2025-06-01T00:00:00.000Z");
+		setSystemTime(start);
+		try {
+			eventBus.emit(TASK_SUBAGENT_LIFECYCLE_CHANNEL, makeLifecycle("StuckWorker", 0, "stuck work", true));
+			const progress = (tokens: number, outputTokens: number): SubagentProgressPayload => ({
+				...makeProgressPayload("StuckWorker", 0, "stuck work", true),
+				progress: makeProgress({ id: "StuckWorker", index: 0, description: "stuck work", tokens, outputTokens }),
+			});
+			// Single progress update, then silence
+			eventBus.emit(TASK_SUBAGENT_PROGRESS_CHANNEL, progress(1000, 50));
+
+			// After 76s of no new progress events, stuck should fire
+			setSystemTime(new Date(start.getTime() + 76_000));
+			const session = registry.getSessions().find(s => s.id === "StuckWorker");
+			expect(session?.tokenRate).toBe(0);
+			expect(session?.tokenRateStuck).toBe(true);
+		} finally {
+			registry.dispose();
+			vi.useRealTimers();
 		}
 	});
 });
