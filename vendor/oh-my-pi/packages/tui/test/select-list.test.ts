@@ -188,6 +188,40 @@ describe("SelectList", () => {
 		expect(list.getSelectedItem()?.value).toBe("opencode-go");
 	});
 
+	it("supports Vim motion keys when text filtering is disabled", () => {
+		const items = Array.from({ length: 8 }, (_, index) => ({ value: `v${index}`, label: `Item ${index}` }));
+		const list = new SelectList(items, 4, testTheme, { overflowSearch: false });
+		list.setSelectedIndex(3);
+
+		list.handleInput("j");
+		expect(list.getSelectedItem()?.value).toBe("v4");
+		list.handleInput("k");
+		expect(list.getSelectedItem()?.value).toBe("v3");
+		list.handleInput("G");
+		expect(list.getSelectedItem()?.value).toBe("v7");
+		list.handleInput("g");
+		expect(list.getSelectedItem()?.value).toBe("v0");
+		list.handleInput("\x04");
+		expect(list.getSelectedItem()?.value).toBe("v2");
+		list.handleInput("\x15");
+		expect(list.getSelectedItem()?.value).toBe("v0");
+	});
+
+	it("keeps Vim letters as filter input for overflowing searchable lists", () => {
+		const items = [
+			{ value: "joke", label: "Joke" },
+			{ value: "jacket", label: "Jacket" },
+			{ value: "alpha", label: "Alpha" },
+		];
+		const list = new SelectList(items, 2, testTheme);
+
+		list.handleInput("j");
+		list.handleInput("k");
+
+		expect(list.render(80).join("\n")).toContain("Search: jk");
+		expect(list.getSelectedItem()?.value).toBe("joke");
+	});
+
 	it("keeps printable keys inert when the list does not overflow", () => {
 		const items = [
 			{ value: "alpha", label: "Alpha" },

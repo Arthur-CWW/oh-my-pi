@@ -237,6 +237,7 @@ export class SelectList implements Component {
 		}
 
 		if (this.#filteredItems.length === 0) return;
+		const vimNavigationEnabled = !this.#canEditSearch();
 		// Up arrow - wrap to bottom when at top
 		if (kb.matches(keyData, "tui.select.up")) {
 			this.#selectedIndex = this.#selectedIndex === 0 ? this.#filteredItems.length - 1 : this.#selectedIndex - 1;
@@ -247,6 +248,23 @@ export class SelectList implements Component {
 			this.#selectedIndex = this.#selectedIndex === this.#filteredItems.length - 1 ? 0 : this.#selectedIndex + 1;
 			this.#notifySelectionChange();
 		}
+		// Vim line navigation is reserved for selectors without text search.
+		else if (vimNavigationEnabled && kb.matches(keyData, "tui.select.vimUp")) {
+			this.#selectedIndex = this.#selectedIndex === 0 ? this.#filteredItems.length - 1 : this.#selectedIndex - 1;
+			this.#notifySelectionChange();
+		}
+		else if (vimNavigationEnabled && kb.matches(keyData, "tui.select.vimDown")) {
+			this.#selectedIndex = this.#selectedIndex === this.#filteredItems.length - 1 ? 0 : this.#selectedIndex + 1;
+			this.#notifySelectionChange();
+		}
+		else if (vimNavigationEnabled && kb.matches(keyData, "tui.select.first")) {
+			this.#selectedIndex = 0;
+			this.#notifySelectionChange();
+		}
+		else if (vimNavigationEnabled && kb.matches(keyData, "tui.select.last")) {
+			this.#selectedIndex = this.#filteredItems.length - 1;
+			this.#notifySelectionChange();
+		}
 		// PageUp - jump up by one visible page
 		else if (kb.matches(keyData, "tui.select.pageUp")) {
 			this.#selectedIndex = Math.max(0, this.#selectedIndex - this.maxVisible);
@@ -255,6 +273,17 @@ export class SelectList implements Component {
 		// PageDown - jump down by one visible page
 		else if (kb.matches(keyData, "tui.select.pageDown")) {
 			this.#selectedIndex = Math.min(this.#filteredItems.length - 1, this.#selectedIndex + this.maxVisible);
+			this.#notifySelectionChange();
+		}
+		else if (vimNavigationEnabled && kb.matches(keyData, "tui.select.halfPageUp")) {
+			this.#selectedIndex = Math.max(0, this.#selectedIndex - Math.max(1, Math.floor(this.maxVisible / 2)));
+			this.#notifySelectionChange();
+		}
+		else if (vimNavigationEnabled && kb.matches(keyData, "tui.select.halfPageDown")) {
+			this.#selectedIndex = Math.min(
+				this.#filteredItems.length - 1,
+				this.#selectedIndex + Math.max(1, Math.floor(this.maxVisible / 2)),
+			);
 			this.#notifySelectionChange();
 		}
 		// Enter

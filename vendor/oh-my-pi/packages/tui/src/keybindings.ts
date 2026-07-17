@@ -40,6 +40,12 @@ export interface Keybindings {
 	"tui.select.pageDown": true;
 	"tui.select.confirm": true;
 	"tui.select.cancel": true;
+	"tui.select.vimUp": true;
+	"tui.select.vimDown": true;
+	"tui.select.first": true;
+	"tui.select.last": true;
+	"tui.select.halfPageUp": true;
+	"tui.select.halfPageDown": true;
 }
 
 export type Keybinding = keyof Keybindings;
@@ -131,6 +137,12 @@ export const TUI_KEYBINDINGS = {
 		defaultKeys: "pageDown",
 		description: "Selection page down",
 	},
+	"tui.select.vimUp": { defaultKeys: "k", description: "Move selection up (Vim)" },
+	"tui.select.vimDown": { defaultKeys: "j", description: "Move selection down (Vim)" },
+	"tui.select.first": { defaultKeys: "g", description: "Select first item" },
+	"tui.select.last": { defaultKeys: "shift+g", description: "Select last item" },
+	"tui.select.halfPageUp": { defaultKeys: "ctrl+u", description: "Selection half-page up" },
+	"tui.select.halfPageDown": { defaultKeys: "ctrl+d", description: "Selection half-page down" },
 	"tui.select.confirm": { defaultKeys: "enter", description: "Confirm selection" },
 	"tui.select.cancel": {
 		defaultKeys: ["escape", "ctrl+c"],

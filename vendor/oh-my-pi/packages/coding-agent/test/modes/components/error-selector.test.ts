@@ -134,6 +134,33 @@ describe("ErrorSelectorComponent", () => {
 		expect(text).toContain("No recent errors");
 	});
 
+	test("supports Vim navigation through the errors HUD", () => {
+		const errors = Array.from({ length: 8 }, (_, index) => ({
+			...dummyEvent,
+			id: `err-${index}`,
+			message: `Error ${index}`,
+		}));
+		const selector = new ErrorSelectorComponent(errors, mock());
+		const hints = renderText(selector);
+		expect(hints).toContain("j down");
+		expect(hints).toContain("shift+g last");
+		expect(hints).toContain("ctrl+d half-page down");
+		const selectList = selector.getSelectList();
+
+		selector.handleInput("j");
+		expect(selectList.getSelectedItem()?.value).toBe("err-1");
+		selector.handleInput("k");
+		expect(selectList.getSelectedItem()?.value).toBe("err-0");
+		selector.handleInput("G");
+		expect(selectList.getSelectedItem()?.value).toBe("err-7");
+		selector.handleInput("g");
+		expect(selectList.getSelectedItem()?.value).toBe("err-0");
+		selector.handleInput("\x04");
+		expect(selectList.getSelectedItem()?.value).toBe("err-2");
+		selector.handleInput("\x15");
+		expect(selectList.getSelectedItem()?.value).toBe("err-0");
+	});
+
 	test("selection change updates the detail pane", () => {
 		const second: DiagnosticEvent = {
 			id: "err-2",

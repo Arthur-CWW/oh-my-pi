@@ -127,7 +127,9 @@ export class ErrorSelectorComponent extends Container {
 		const pendingActions = new Map<string, number>();
 		const detailText = new Text(formatDiagnosticDetail(selectedError ?? null), 1, 0);
 
-		this.#selectList = new SelectList(items, Math.min(items.length, ERROR_LIST_MAX_VISIBLE), getSelectListTheme());
+		this.#selectList = new SelectList(items, Math.min(items.length, ERROR_LIST_MAX_VISIBLE), getSelectListTheme(), {
+			overflowSearch: false,
+		});
 		this.#selectList.onSelect = item => {
 			const selected = byId.get(item.value);
 			if (selected?.action?.kind !== "focus_cmux_owner" || !options.onAction) {
@@ -181,6 +183,18 @@ export class ErrorSelectorComponent extends Container {
 			new Text(
 				theme.bold("Error History") +
 					theme.fg("dim", "  p pin/unpin · Ctrl-W w focus · ") +
+					keyHint("tui.select.vimDown", "down") +
+					theme.fg("dim", " · ") +
+					keyHint("tui.select.vimUp", "up") +
+					theme.fg("dim", " · ") +
+					keyHint("tui.select.first", "first") +
+					theme.fg("dim", " · ") +
+					keyHint("tui.select.last", "last") +
+					theme.fg("dim", " · ") +
+					keyHint("tui.select.halfPageDown", "half-page down") +
+					theme.fg("dim", " · ") +
+					keyHint("tui.select.halfPageUp", "half-page up") +
+					theme.fg("dim", " · ") +
 					keyHint("ui.dismiss", "close"),
 				1,
 				0,
