@@ -1,0 +1,108 @@
+{
+  "schemaVersion": 1,
+  "gate": "phase-two-runner-view",
+  "observedAt": "2026-07-13T02:27:18.256Z",
+  "status": "pass",
+  "checks": [
+    {
+      "name": "runner-view-reload-and-stale-epoch",
+      "command": [
+        "bun",
+        "test",
+        "packages/coding-agent/test/runner/session-runner-process.test.ts",
+        "packages/coding-agent/test/modes/disposable-terminal-host.test.ts",
+        "packages/coding-agent/test/modes/disposable-interactive-mode.test.ts"
+      ],
+      "exitCode": 0,
+      "durationMs": 2026,
+      "stdout": "bun test v1.4.0-canary.1 (65aa83bba)\n",
+      "stderr": "\n 20 pass\n 0 fail\n 87 expect() calls\nRan 20 tests across 3 files. [2.02s]\n"
+    },
+    {
+      "name": "real-pty-terminal-restoration",
+      "command": [
+        "bun",
+        "packages/coding-agent/test/process/disposable-tui-pty-proof.ts"
+      ],
+      "exitCode": 0,
+      "durationMs": 5684,
+      "stdout": "disposable PTY proof passed: pid=32409 session=019f594c-2030-7000-b704-70a66a41c43e termios=gfmt1:cflag=4b00:iflag=2b02:lflag=5cb:oflag=3:discard=f:dsusp=19:eof=4:eol=ff:eol2=ff:erase=7f:intr=3:kill=15:lnext=16:min=1:quit=1c:reprint=12:start=11:status=14:stop=13:susp=1a:time=0:werase=17:ispeed=9600:ospeed=9600\n",
+      "stderr": ""
+    },
+    {
+      "name": "encrypted-collaboration-authority",
+      "command": [
+        "bun",
+        "test",
+        "packages/coding-agent/test/collab/crypto.test.ts",
+        "packages/coding-agent/test/collab/host-v2.test.ts"
+      ],
+      "exitCode": 0,
+      "durationMs": 24,
+      "stdout": "bun test v1.4.0-canary.1 (65aa83bba)\n",
+      "stderr": "\n 26 pass\n 0 fail\n 82 expect() calls\nRan 26 tests across 2 files. [19.00ms]\n"
+    },
+    {
+      "name": "durable-queue-restart-and-identity",
+      "command": [
+        "bun",
+        "test",
+        "packages/coding-agent/test/session/durable-input-queue-process.test.ts",
+        "packages/coding-agent/test/session/durable-input-queue-agent-session-process.test.ts",
+        "packages/coding-agent/test/agent-session-queued-steer-delivery.test.ts"
+      ],
+      "exitCode": 0,
+      "durationMs": 6389,
+      "stdout": "bun test v1.4.0-canary.1 (65aa83bba)\n",
+      "stderr": "\n 15 pass\n 0 fail\n 92 expect() calls\nRan 15 tests across 3 files. [6.38s]\n"
+    },
+    {
+      "name": "candidate-registry-bless-rollback-handoff",
+      "command": [
+        "bun",
+        "test",
+        "scripts/link-omp.test.ts"
+      ],
+      "exitCode": 0,
+      "durationMs": 3461,
+      "stdout": "bun test v1.4.0-canary.1 (65aa83bba)\n",
+      "stderr": "\n 7 pass\n 0 fail\n 89 expect() calls\nRan 7 tests across 1 file. [3.46s]\n"
+    },
+    {
+      "name": "actual-candidate-build",
+      "command": [
+        "bun",
+        "--cwd=packages/coding-agent",
+        "run",
+        "build"
+      ],
+      "exitCode": 0,
+      "durationMs": 2674,
+      "stdout": "Building Tailwind CSS...\nBuilding React app...\nBuild complete\nGenerated src/embedded-client.generated.txt\n [199ms]  bundle  3275 modules\n [273ms] compile  packages/coding-agent/dist/omp\nReset src/embedded-client.generated.txt\n",
+      "stderr": "$ bun scripts/build-binary.ts\n$ bun run build.ts\n$ bun scripts/embed-native.ts\n/Users/arthur/agents/vendor/oh-my-pi/packages/coding-agent/dist/omp: replacing existing signature\n$ bun scripts/embed-native.ts --reset\n"
+    },
+    {
+      "name": "actual-candidate-readiness-receipt",
+      "command": [
+        "bun",
+        "packages/coding-agent/scripts/runner-canary-readiness.ts",
+        "--candidate",
+        "/Users/arthur/agents/vendor/oh-my-pi/local/omp-961f358cc61199cf0faa388a252960216269681d81bbb23c81828a4252a9e972",
+        "--fixture-root",
+        "/Users/arthur/agents/vendor/oh-my-pi/local/phase-two-canary-fixture",
+        "--output",
+        "/Users/arthur/agents/vendor/oh-my-pi/local/phase-two-canary-receipt.json"
+      ],
+      "exitCode": 0,
+      "durationMs": 31456,
+      "stdout": "",
+      "stderr": ""
+    }
+  ],
+  "residuals": [],
+  "summary": {
+    "passed": 7,
+    "failed": 0,
+    "residualCount": 0
+  }
+}

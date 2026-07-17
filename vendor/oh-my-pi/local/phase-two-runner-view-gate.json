@@ -1,0 +1,114 @@
+{
+  "schemaVersion": 1,
+  "gate": "phase-two-runner-view",
+  "observedAt": "2026-07-12T06:42:04.825Z",
+  "status": "fail",
+  "checks": [
+    {
+      "name": "runner-view-reload-and-stale-epoch",
+      "command": [
+        "bun",
+        "test",
+        "packages/coding-agent/test/runner/session-runner-process.test.ts",
+        "packages/coding-agent/test/modes/disposable-terminal-host.test.ts",
+        "packages/coding-agent/test/modes/disposable-interactive-mode.test.ts"
+      ],
+      "exitCode": 0,
+      "durationMs": 2238,
+      "stdout": "bun test v1.4.0-canary.1 (65aa83bba)\n",
+      "stderr": "\n 19 pass\n 0 fail\n 82 expect() calls\nRan 19 tests across 3 files. [2.23s]\n"
+    },
+    {
+      "name": "real-pty-terminal-restoration",
+      "command": [
+        "bun",
+        "packages/coding-agent/test/process/disposable-tui-pty-proof.ts"
+      ],
+      "exitCode": 0,
+      "durationMs": 757,
+      "stdout": "disposable PTY proof passed: pid=90458 session=019f550f-1c30-7000-927a-a5c9e01d55ae termios=gfmt1:cflag=4b00:iflag=2b02:lflag=5cb:oflag=3:discard=f:dsusp=19:eof=4:eol=ff:eol2=ff:erase=7f:intr=3:kill=15:lnext=16:min=1:quit=1c:reprint=12:start=11:status=14:stop=13:susp=1a:time=0:werase=17:ispeed=9600:ospeed=9600\n",
+      "stderr": ""
+    },
+    {
+      "name": "encrypted-collaboration-authority",
+      "command": [
+        "bun",
+        "test",
+        "packages/coding-agent/test/collab/crypto.test.ts",
+        "packages/coding-agent/test/collab/host-v2.test.ts"
+      ],
+      "exitCode": 0,
+      "durationMs": 25,
+      "stdout": "bun test v1.4.0-canary.1 (65aa83bba)\n",
+      "stderr": "\n 26 pass\n 0 fail\n 82 expect() calls\nRan 26 tests across 2 files. [20.00ms]\n"
+    },
+    {
+      "name": "durable-queue-restart-and-identity",
+      "command": [
+        "bun",
+        "test",
+        "packages/coding-agent/test/session/durable-input-queue-process.test.ts",
+        "packages/coding-agent/test/session/durable-input-queue-agent-session-process.test.ts",
+        "packages/coding-agent/test/agent-session-queued-steer-delivery.test.ts"
+      ],
+      "exitCode": 1,
+      "durationMs": 4098,
+      "stdout": "bun test v1.4.0-canary.1 (65aa83bba)\n",
+      "stderr": "\npackages/coding-agent/test/session/durable-input-queue-agent-session-process.test.ts:\n877 | \tconst [exitCode, stdout, stderr] = await Promise.all([\n878 | \t\tprocessHandle.exited,\n879 | \t\tnew Response(processHandle.stdout).text(),\n880 | \t\tnew Response(processHandle.stderr).text(),\n881 | \t]);\n882 | \tif (exitCode !== 0) throw new Error(`agent-session durable queue child failed (${exitCode}): ${stderr}`);\n                                     ^\nerror: agent-session durable queue child failed (1): \n[Uncaught Exception] ExternalSessionOwnerUnverifiable: Session ownership cannot be safely verified: owner_record_corrupt\n    at acquireSessionOwnership (/Users/arthur/agents/vendor/oh-my-pi/packages/coding-agent/src/session/session-ownership.ts:906:13)\n    at createSession (/Users/arthur/agents/vendor/oh-my-pi/packages/coding-agent/[eval]:229:30)\n\n      at runChild (/Users/arthur/agents/vendor/oh-my-pi/packages/coding-agent/test/session/durable-input-queue-agent-session-process.test.ts:882:32)\n      at async <anonymous> (/Users/arthur/agents/vendor/oh-my-pi/packages/coding-agent/test/session/durable-input-queue-agent-session-process.test.ts:919:24)\n(fail) AgentSession durable input queue process replacement > delivers one idle typed submission through one durable attempt without residue [558.66ms]\n877 | \tconst [exitCode, stdout, stderr] = await Promise.all([\n878 | \t\tprocessHandle.exited,\n879 | \t\tnew Response(processHandle.stdout).text(),\n880 | \t\tnew Response(processHandle.stderr).text(),\n881 | \t]);\n882 | \tif (exitCode !== 0) throw new Error(`agent-session durable queue child failed (${exitCode}): ${stderr}`);\n                                     ^\nerror: agent-session durable queue child failed (1): \n[Uncaught Exception] ExternalSessionOwnerUnverifiable: Session ownership cannot be safely verified: owner_record_corrupt\n    at acquireSessionOwnership (/Users/arthur/agents/vendor/oh-my-pi/packages/coding-agent/src/session/session-ownership.ts:906:13)\n    at createSession (/Users/arthur/agents/vendor/oh-my-pi/packages/coding-agent/[eval]:229:30)\n\n      at runChild (/Users/arthur/agents/vendor/oh-my-pi/packages/coding-agent/test/session/durable-input-queue-agent-session-process.test.ts:882:32)\n      at async <anonymous> (/Users/arthur/agents/vendor/oh-my-pi/packages/coding-agent/test/session/durable-input-queue-agent-session-process.test.ts:941:23)\n(fail) AgentSession durable input queue process replacement > resumes one idle InputController submission after usage-limit owner replacement [546.34ms]\n877 | \tconst [exitCode, stdout, stderr] = await Promise.all([\n878 | \t\tprocessHandle.exited,\n879 | \t\tnew Response(processHandle.stdout).text(),\n880 | \t\tnew Response(processHandle.stderr).text(),\n881 | \t]);\n882 | \tif (exitCode !== 0) throw new Error(`agent-session durable queue child failed (${exitCode}): ${stderr}`);\n                                     ^\nerror: agent-session durable queue child failed (1): \n[Uncaught Exception] ExternalSessionOwnerUnverifiable: Session ownership cannot be safely verified: owner_record_corrupt\n    at acquireSessionOwnership (/Users/arthur/agents/vendor/oh-my-pi/packages/coding-agent/src/session/session-ownership.ts:906:13)\n    at createSession (/Users/arthur/agents/vendor/oh-my-pi/packages/coding-agent/[eval]:229:30)\n\n      at runChild (/Users/arthur/agents/vendor/oh-my-pi/packages/coding-agent/test/session/durable-input-queue-agent-session-process.test.ts:882:32)\n      at async <anonymous> (/Users/arthur/agents/vendor/oh-my-pi/packages/coding-agent/test/session/durable-input-queue-agent-session-process.test.ts:993:23)\n(fail) AgentSession durable input queue process replacement > preserves capture order when an earlier follow-up blocks a later steer at the tool boundary [556.75ms]\n877 | \tconst [exitCode, stdout, stderr] = await Promise.all([\n878 | \t\tprocessHandle.exited,\n879 | \t\tnew Response(processHandle.stdout).text(),\n880 | \t\tnew Response(processHandle.stderr).text(),\n881 | \t]);\n882 | \tif (exitCode !== 0) throw new Error(`agent-session durable queue child failed (${exitCode}): ${stderr}`);\n                                     ^\nerror: agent-session durable queue child failed (1): \n[Uncaught Exception] ExternalSessionOwnerUnverifiable: Session ownership cannot be safely verified: owner_record_corrupt\n    at acquireSessionOwnership (/Users/arthur/agents/vendor/oh-my-pi/packages/coding-agent/src/session/session-ownership.ts:906:13)\n    at createSession (/Users/arthur/agents/vendor/oh-my-pi/packages/coding-agent/[eval]:229:30)\n\n      at runChild (/Users/arthur/agents/vendor/oh-my-pi/packages/coding-agent/test/session/durable-input-queue-agent-session-process.test.ts:882:32)\n      at async <anonymous> (/Users/arthur/agents/vendor/oh-my-pi/packages/coding-agent/test/session/durable-input-queue-agent-session-process.test.ts:1023:28)\n(fail) AgentSession durable input queue process replacement > holds queued input behind a durable manual compaction boundary [543.63ms]\n877 | \tconst [exitCode, stdout, stderr] = await Promise.all([\n878 | \t\tprocessHandle.exited,\n879 | \t\tnew Response(processHandle.stdout).text(),\n880 | \t\tnew Response(processHandle.stderr).text(),\n881 | \t]);\n882 | \tif (exitCode !== 0) throw new Error(`agent-session durable queue child failed (${exitCode}): ${stderr}`);\n                                     ^\nerror: agent-session durable queue child failed (1): \n[Uncaught Exception] ExternalSessionOwnerUnverifiable: Session ownership cannot be safely verified: owner_record_corrupt\n    at acquireSessionOwnership (/Users/arthur/agents/vendor/oh-my-pi/packages/coding-agent/src/session/session-ownership.ts:906:13)\n    at createSession (/Users/arthur/agents/vendor/oh-my-pi/packages/coding-agent/[eval]:229:30)\n\n      at runChild (/Users/arthur/agents/vendor/oh-my-pi/packages/coding-agent/test/session/durable-input-queue-agent-session-process.test.ts:882:32)\n      at async <anonymous> (/Users/arthur/agents/vendor/oh-my-pi/packages/coding-agent/test/session/durable-input-queue-agent-session-process.test.ts:1056:22)\n(fail) AgentSession durable input queue process replacement > rejects repeated input promptly after queue ownership loss without retrying [544.81ms]\n\n 10 pass\n 5 fail\n 51 expect() calls\nRan 15 tests across 3 files. [4.09s]\n"
+    },
+    {
+      "name": "candidate-registry-bless-rollback-handoff",
+      "command": [
+        "bun",
+        "test",
+        "scripts/link-omp.test.ts"
+      ],
+      "exitCode": 0,
+      "durationMs": 3740,
+      "stdout": "bun test v1.4.0-canary.1 (65aa83bba)\n",
+      "stderr": "\n 6 pass\n 0 fail\n 82 expect() calls\nRan 6 tests across 1 file. [3.73s]\n"
+    },
+    {
+      "name": "actual-candidate-build",
+      "command": [
+        "bun",
+        "--cwd=packages/coding-agent",
+        "run",
+        "build"
+      ],
+      "exitCode": 0,
+      "durationMs": 3483,
+      "stdout": "Building Tailwind CSS...\nBuilding React app...\nBuild complete\nGenerated src/embedded-client.generated.txt\n [370ms]  bundle  3258 modules\n [353ms] compile  packages/coding-agent/dist/omp\nReset src/embedded-client.generated.txt\n",
+      "stderr": "$ bun scripts/build-binary.ts\n$ bun run build.ts\n$ bun scripts/embed-native.ts\n/Users/arthur/agents/vendor/oh-my-pi/packages/coding-agent/dist/omp: replacing existing signature\n$ bun scripts/embed-native.ts --reset\n"
+    },
+    {
+      "name": "actual-candidate-readiness-receipt",
+      "command": [
+        "bun",
+        "packages/coding-agent/scripts/runner-canary-readiness.ts",
+        "--candidate",
+        "/Users/arthur/agents/vendor/oh-my-pi/local/omp-02fffc1c9574237d9bb7ebb4086e8150ad2b989cbdf151df906f30444b06d3d0",
+        "--fixture-root",
+        "/Users/arthur/agents/vendor/oh-my-pi/local/phase-two-canary-fixture",
+        "--output",
+        "/Users/arthur/agents/vendor/oh-my-pi/local/phase-two-canary-receipt.json"
+      ],
+      "exitCode": 0,
+      "durationMs": 31745,
+      "stdout": "",
+      "stderr": ""
+    }
+  ],
+  "residuals": [
+    {
+      "id": "default-terminal-selection",
+      "severity": "phase-blocker",
+      "detail": "The default interactive launch still constructs legacy InteractiveMode; disposable runner/view shell remains opt-in."
+    }
+  ],
+  "summary": {
+    "passed": 6,
+    "failed": 1,
+    "residualCount": 1
+  }
+}

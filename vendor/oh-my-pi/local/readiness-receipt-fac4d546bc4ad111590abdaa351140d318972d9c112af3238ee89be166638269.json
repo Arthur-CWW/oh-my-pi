@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "buildDigest": "fac4d546bc4ad111590abdaa351140d318972d9c112af3238ee89be166638269",
+  "version": "16.0.1+fork.809de128c7d9",
+  "runnerInstanceId": "1282d061-1ad2-4045-a049-163e86dc02e1",
+  "fixtureSessionId": "019f66a9-2be8-7000-a7af-c7049538317e",
+  "ownerEpoch": "31d36abc-7ff5-48db-b3e4-80836af5383e",
+  "startedAt": "2026-07-15T16:43:10.697Z",
+  "stoppedAt": "2026-07-15T16:43:11.151Z",
+  "initialSnapshotRevision": 0,
+  "finalSnapshotRevision": 1,
+  "commandId": "61bb51a4-d31e-4bde-b449-a1ff833f110a",
+  "proof": {
+    "mutationAppliedExactlyOnce": true,
+    "leaseReleased": true,
+    "leaseReacquired": true,
+    "jsonlPersisted": true,
+    "queuePersisted": true
+  }
+}
