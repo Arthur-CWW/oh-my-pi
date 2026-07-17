@@ -12,6 +12,12 @@ All six deliverables plus your three pre-sleep backlog items landed. Nested chec
 
 **Cross-stream:** playground's desktop-model-infra consolidation proposal reviewed as queue-kernel owner — accepted with four amendments (no back-compat aliases, data continuity for existing results, licensed preflights unchanged, no kinds.sh edits until this program wrapped): `docs/plans/desktop-model-infra.md` §Review.
 
+**Post-wrap addendum (late-night bus traffic):**
+- **Dating-sim referent upgraded:** a straggler scout surfaced *Lunar Romance* (App Store id1586821762) — its official copy contains **"a text based romance otome game in a light novel game style" verbatim** plus a K-drama-episodes review; I re-verified the listing and reranked it #1 (Medium-high, unconfirmed) in `dating-sim-connection-research.md`. Question `e00ebefd`'s menu row A now includes it.
+- **Desktop model-infra:** playground shipped steps 1–4 (DISK.md ledger, env manifests, playground kinds appended with byte-exact-prefix proof, `fetch` subcommand resolving pre-migration job ids). Step 5 (companion kind renames, clean cutover) is **cleared post-wrap** with the review protocol recorded in `docs/plans/desktop-model-infra.md` §Review addendum — the next companion session reviews the diff.
+- **OMP rollout hold released:** dotfiles shell-env matrix is GREEN and its cutover is live (their master 9a2c874..9cf6da6), so the inherited hold on OMP redeploy is lifted; agents-e0g9qf is promoting build 0ad0c4202 (SessionManager.list hang fix).
+- **Power alert resolved as stale:** a 5%-battery report named the motion-oracle sidecar; live check showed 70% charging, sidecar at normal 16.6% CPU — left up per stream contract. CuaDriver (45.8% CPU, 1.5 days) is not companion-owned; redirected to its owner.
+
 ## Status
 
 Complete. Objective and constraints inherited from [`HANDOFF-OVERNIGHT2.md`](../HANDOFF-OVERNIGHT2.md); measured outcomes and checkpoint evidence per wave below.
