@@ -103,6 +103,7 @@ async function writeTerminalWorkerExtension(
 	sessionFile: string,
 	payload: TerminalPayload,
 	termination: "kill" | "exit",
+	delayMs = 30,
 ): Promise<void> {
 	const journal = [
 		JSON.stringify({ type: "session", version: 4, id: "session-1", timestamp: JOURNAL_TIMESTAMP, cwd: tmpDir }),
@@ -124,7 +125,7 @@ async function writeTerminalWorkerExtension(
 	await Bun.write(
 		extensionFile,
 		`export default async function() {
-	await Bun.sleep(30);
+	await Bun.sleep(${delayMs});
 	await Bun.write(${JSON.stringify(sessionFile)}, ${JSON.stringify(journal)});
 	${terminate}
 }
@@ -138,16 +139,22 @@ describe("subprocess worker reliability", () => {
 		const extensionFile = path.join(tmpDir, "kill-after-yield.ts");
 		const payload = { ok: true, boundary: "yield-written" };
 		await writeTerminalWorkerExtension(extensionFile, sessionFile, payload, "kill");
+		const livenessStates: Array<"stalled" | "dead" | undefined> = [];
 
 		const request = requestFor(sessionFile);
 		const result = await runSubagentSpawnProcess(
-			{ ...request.options, preloadedExtensionPaths: [extensionFile] },
+			{
+				...request.options,
+				preloadedExtensionPaths: [extensionFile],
+				onProgress: progress => livenessStates.push(progress.livenessState),
+			},
 			Settings.isolated(),
 		);
 
 		expect(result.exitCode).toBe(0);
 		expect(result.output).toBe(JSON.stringify(payload, null, 2));
 		expect(result.extractedToolData?.yield).toHaveLength(1);
+		expect(livenessStates).not.toContain("dead");
 	});
 
 	it("[I4] recovers a terminal journal exactly when the pipe is torn and empty", async () => {
@@ -171,11 +178,16 @@ describe("subprocess worker reliability", () => {
 		const extensionFile = path.join(tmpDir, "crash-nonzero.ts");
 		await Bun.write(extensionFile, 'export default function() { process.exit(23); }\n');
 
+		const livenessStates: Array<"stalled" | "dead" | undefined> = [];
 		const request = requestFor(sessionFile);
 		let outcomes = 0;
 		let typedError: SpawnWorkerError | undefined;
 		const pending: Promise<SingleResult> = runSubagentSpawnProcess(
-			{ ...request.options, preloadedExtensionPaths: [extensionFile] },
+			{
+				...request.options,
+				preloadedExtensionPaths: [extensionFile],
+				onProgress: progress => livenessStates.push(progress.livenessState),
+			},
 			Settings.isolated(),
 		).then(
 			result => {
@@ -197,6 +209,28 @@ describe("subprocess worker reliability", () => {
 
 		expect(typedError?.code).toBe("exit");
 		expect(outcomes).toBe(1);
+		expect(livenessStates).toContain("dead");
+	});
+	it("[I1] probes a live slow child without terminating it", async () => {
+		const sessionFile = path.join(tmpDir, "child-live-slow.jsonl");
+		const extensionFile = path.join(tmpDir, "live-slow.ts");
+		const payload = { ok: true, boundary: "slow-tool" };
+		await writeTerminalWorkerExtension(extensionFile, sessionFile, payload, "exit", 150);
+		const livenessStates: Array<"stalled" | "dead" | undefined> = [];
+
+		const request = requestFor(sessionFile);
+		const result = await runSubagentSpawnProcess(
+			{
+				...request.options,
+				preloadedExtensionPaths: [extensionFile],
+				onProgress: progress => livenessStates.push(progress.livenessState),
+			},
+			Settings.isolated({ "task.stallThresholdMs": 25 }),
+		);
+
+		expect(result.output).toBe(JSON.stringify(payload, null, 2));
+		expect(livenessStates).toContain("stalled");
+		expect(livenessStates).not.toContain("dead");
 	});
 
 	it("[I1] turns a pre-yield signal exit into exactly one typed error", async () => {

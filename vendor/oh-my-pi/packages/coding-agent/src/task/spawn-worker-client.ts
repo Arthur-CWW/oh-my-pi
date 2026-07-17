@@ -1,3 +1,4 @@
+import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { isCompiledBinary, popLoopPhase, pushLoopPhase, workerHostEntry } from "@oh-my-pi/pi-utils";
 import type { Settings } from "../config/settings";
@@ -18,12 +19,13 @@ import {
 	type SpawnWorkerRunRequest,
 	type SpawnWorkerSyntheticRequest,
 } from "./spawn-worker-protocol";
-import type { SingleResult } from "./types";
+import type { AgentProgress, SingleResult } from "./types";
 
 const DEFAULT_MAX_RSS_BYTES = 1536 * 1024 * 1024;
 const RSS_SAMPLE_INTERVAL_MS = 250;
 const STDERR_CAP_BYTES = 64 * 1024;
 const SETUP_TIMEOUT_GRACE_MS = 60_000;
+const DEFAULT_STALL_THRESHOLD_MS = 5 * 60_000;
 let spawnLaunchTail: Promise<void> = Promise.resolve();
 
 async function launchSpawnProcess(
@@ -72,6 +74,8 @@ export interface SpawnWorkerClientOptions {
 	signal?: AbortSignal;
 	maxRssBytes?: number;
 	timeoutMs?: number;
+	/** Delay before a no-token/no-journal-activity worker is probed for liveness. */
+	stallThresholdMs?: number;
 	onProgress?: ExecutorOptions["onProgress"];
 	eventBus?: EventBus;
 	onPhase?: (phase: Extract<SpawnWorkerRecord, { type: "phase" }>["phase"]) => void;
@@ -335,6 +339,37 @@ export async function recoverSpawnWorkerResultFromJournal(
 	}
 }
 
+function isProcessAlive(pid: number): boolean {
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch (error) {
+		return isRecord(error) && error.code === "EPERM";
+	}
+}
+
+function initialWorkerProgress(request: SpawnWorkerRunRequest): AgentProgress {
+	return {
+		index: request.options.index,
+		id: request.options.id,
+		agent: request.options.agent.name,
+		agentSource: request.options.agent.source,
+		status: "running",
+		task: request.options.task,
+		assignment: request.options.assignment,
+		description: request.options.description,
+		recentTools: [],
+		recentOutput: [],
+		toolCount: 0,
+		requests: 0,
+		tokens: 0,
+		cost: 0,
+		durationMs: 0,
+		modelOverride: request.options.modelOverride,
+		routeReceipt: request.options.routeReceipt,
+	};
+}
+
 async function runRequest(
 	request: SpawnWorkerRequest,
 	options: SpawnWorkerClientOptions,
@@ -349,14 +384,57 @@ async function runRequest(
 		throw new SpawnWorkerError("spawn", error instanceof Error ? error.message : String(error));
 	}
 
+	const startedAt = Date.now();
+	const terminal = Promise.withResolvers<void>();
+	let terminalClaimed = false;
 	let terminalError: SpawnWorkerError | undefined;
 	let result: SingleResult | SyntheticSpawnResult | undefined;
 	let sawReady = false;
+	let latestProgress = request.type === "run" ? initialWorkerProgress(request) : undefined;
+	let latestTokens = latestProgress?.tokens ?? 0;
+	let lastTokenAdvanceAt = startedAt;
+	let probeInFlight = false;
 	const maxRssBytes = Math.max(1, Math.trunc(options.maxRssBytes ?? DEFAULT_MAX_RSS_BYTES));
-	const failAndKill = (error: SpawnWorkerError): void => {
-		terminalError ??= error;
-		killProcessTree(proc);
+	const stallThresholdMs = Math.max(1, Math.trunc(options.stallThresholdMs ?? DEFAULT_STALL_THRESHOLD_MS));
+	const probeIntervalMs = Math.max(10, Math.min(30_000, Math.trunc(stallThresholdMs / 4)));
+
+	const emitLiveness = (state: "stalled" | "dead"): void => {
+		if (!latestProgress) return;
+		latestProgress = { ...latestProgress, livenessState: state, durationMs: Date.now() - startedAt };
+		options.onProgress?.(latestProgress);
 	};
+	const claimError = (error: SpawnWorkerError, kill = true): void => {
+		if (terminalClaimed) return;
+		terminalClaimed = true;
+		terminalError = error;
+		if (kill) killProcessTree(proc);
+		terminal.resolve();
+	};
+	const claimResult = (value: SingleResult | SyntheticSpawnResult, terminateWorker = false): void => {
+		if (terminalClaimed) return;
+		terminalClaimed = true;
+		result = value;
+		if (terminateWorker) {
+			try {
+				proc.kill();
+			} catch {
+				// The worker may already be exiting.
+			}
+		}
+		terminal.resolve();
+	};
+	const recoverAfterDeath = async (message: string): Promise<void> => {
+		if (terminalClaimed) return;
+		const recovered = request.type === "run" ? await recoverSpawnWorkerResultFromJournal(request) : undefined;
+		if (terminalClaimed) return;
+		if (recovered) {
+			claimResult(recovered);
+			return;
+		}
+		if (request.type === "run") emitLiveness("dead");
+		claimError(new SpawnWorkerError("exit", message), false);
+	};
+	const failAndKill = (error: SpawnWorkerError): void => claimError(error);
 	const onAbort = (): void => failAndKill(new SpawnWorkerError("aborted", "Subagent subprocess aborted"));
 	options.signal?.addEventListener("abort", onAbort, { once: true });
 	const timeout = options.timeoutMs && options.timeoutMs > 0
@@ -374,6 +452,7 @@ async function runRequest(
 		const decoder = new TextDecoder();
 		let buffer = "";
 		const handleLine = (line: string): void => {
+			if (terminalClaimed) return;
 			if (new TextEncoder().encode(line).byteLength > SPAWN_WORKER_MAX_RECORD_BYTES) {
 				failAndKill(new SpawnWorkerError("protocol", "Subagent subprocess emitted an oversized record"));
 				return;
@@ -400,19 +479,19 @@ async function runRequest(
 				case "registry":
 					projectRegistry(record.ref);
 					break;
-				case "progress":
-					options.onProgress?.(record.progress);
+				case "progress": {
+					const now = Date.now();
+					if (record.progress.tokens > latestTokens) lastTokenAdvanceAt = now;
+					latestTokens = record.progress.tokens;
+					latestProgress = { ...record.progress, livenessState: undefined };
+					options.onProgress?.(latestProgress);
 					break;
+				}
 				case "event":
 					options.eventBus?.emit(record.channel, record.payload);
 					break;
 				case "result":
-					result = record.result;
-					try {
-						proc.kill();
-					} catch {
-						// The worker may already be exiting; proc.exited remains authoritative.
-					}
+					claimResult(record.result, true);
 					break;
 				case "synthetic-result":
 					result = { allocatedBytes: record.allocatedBytes, rssBytes: record.rssBytes };
@@ -446,24 +525,75 @@ async function runRequest(
 		}
 	})();
 
-	try {
-		proc.stdin.write(`${JSON.stringify(request)}\n`);
-		proc.stdin.end();
-		const [exitCode, stderr] = await Promise.all([proc.exited, stderrPromise, stdoutPromise]).then(values => [values[0], values[1]] as const);
-		if (terminalError) throw terminalError;
-		if (!sawReady) throw new SpawnWorkerError("protocol", "Subagent subprocess exited before ready");
-		if (!result && request.type === "run") {
-			result = await recoverSpawnWorkerResultFromJournal(request);
-		}
-		if (!result) {
-			if (exitCode !== 0) {
-				throw new SpawnWorkerError("exit", `Subagent subprocess exited with code ${exitCode}${stderr.trim() ? `: ${stderr.trim()}` : ""}`);
+	const probeLiveness = async (): Promise<void> => {
+		if (terminalClaimed || probeInFlight || request.type !== "run") return;
+		probeInFlight = true;
+		try {
+			const now = Date.now();
+			let journalStale = false;
+			const sessionFile = request.options.sessionFile;
+			if (sessionFile) {
+				try {
+					const stat = await fs.stat(sessionFile);
+					journalStale = now - stat.mtimeMs >= stallThresholdMs;
+				} catch {
+					journalStale = now - startedAt >= stallThresholdMs;
+				}
 			}
-			throw new SpawnWorkerError("protocol", "Subagent subprocess exited without a result");
+			const tokenRateStuck = now - lastTokenAdvanceAt >= stallThresholdMs;
+			if (!tokenRateStuck && !journalStale) return;
+			emitLiveness("stalled");
+			if (isProcessAlive(proc.pid)) return;
+			await recoverAfterDeath(`Subagent subprocess pid ${proc.pid} died without a terminal journal record`);
+		} finally {
+			probeInFlight = false;
 		}
+	};
+	const livenessTimer = request.type === "run"
+		? setInterval(() => {
+				void probeLiveness();
+			}, probeIntervalMs)
+		: undefined;
+
+	const naturalCompletion = (async (): Promise<void> => {
+		try {
+			proc.stdin.write(`${JSON.stringify(request)}\n`);
+			proc.stdin.end();
+			const [exitCode, stderr] = await Promise.all([proc.exited, stderrPromise, stdoutPromise]).then(values =>
+				[values[0], values[1]] as const
+			);
+			if (terminalClaimed) return;
+			if (!sawReady) {
+				await recoverAfterDeath("Subagent subprocess exited before ready or writing a terminal journal record");
+				return;
+			}
+			if (result) {
+				claimResult(result);
+				return;
+			}
+			await recoverAfterDeath(
+				exitCode !== 0
+					? `Subagent subprocess exited with code ${exitCode}${stderr.trim() ? `: ${stderr.trim()}` : ""}`
+					: "Subagent subprocess exited without a result or terminal journal record",
+			);
+		} catch (error) {
+			claimError(
+				error instanceof SpawnWorkerError
+					? error
+					: new SpawnWorkerError("protocol", error instanceof Error ? error.message : String(error)),
+			);
+		}
+	})();
+	void naturalCompletion;
+
+	try {
+		await terminal.promise;
+		if (terminalError) throw terminalError;
+		if (!result) throw new SpawnWorkerError("protocol", "Subagent subprocess settled without an outcome");
 		return result;
 	} finally {
 		clearTimeout(timeout);
+		clearInterval(livenessTimer);
 		stopRssWatch();
 		options.signal?.removeEventListener("abort", onAbort);
 	}
@@ -497,6 +627,7 @@ export function runSubagentSpawnProcess(options: ExecutorOptions, settings: Sett
 	return runRequest(request, {
 		signal: options.signal,
 		timeoutMs,
+		stallThresholdMs: settings.get("task.stallThresholdMs"),
 		onProgress: options.onProgress,
 		eventBus: options.eventBus,
 	}).then(result => result as SingleResult);

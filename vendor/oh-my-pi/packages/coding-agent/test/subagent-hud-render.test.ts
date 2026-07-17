@@ -303,6 +303,25 @@ describe("subagent HUD lines", () => {
 		}
 	});
 
+	it("renders parent-probed liveness states instead of RUN+0", () => {
+		const out = render([
+			makeSession({
+				id: "StalledWorker",
+				tokenRateStuck: true,
+				progress: makeProgress({ id: "StalledWorker", livenessState: "stalled" }),
+			}),
+			makeSession({
+				id: "DeadWorker",
+				tokenRateStuck: true,
+				progress: makeProgress({ id: "DeadWorker", livenessState: "dead" }),
+			}),
+		]);
+
+		expect(out).toContain("STALLED");
+		expect(out).toContain("DEAD");
+		expect(out).not.toContain("RUN+0");
+	});
+
 	it("renders a three-deep short-name tree with aligned integer rate and state columns", () => {
 		const rows = [
 			makeSession({

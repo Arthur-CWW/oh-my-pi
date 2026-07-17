@@ -2760,27 +2760,31 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 		};
 	};
 
-	const done = await runSubagent();
-	const result = await finalizeRunResult({
-		monitor,
-		done,
-		index,
-		id,
-		agent,
-		task,
-		assignment,
-		description: options.description,
-		modelOverride,
-		routeReceipt,
-		outputSchema,
-		signal,
-		artifactsDir: options.artifactsDir,
-		eventBus: options.eventBus,
-		parentToolCallId: options.parentToolCallId,
-		detached: options.detached,
-		sessionFile: subtaskSessionFile,
-		startTime,
-	});
-	followUpResultRouter.arm();
-	return result;
+	try {
+		const done = await runSubagent();
+		const result = await finalizeRunResult({
+			monitor,
+			done,
+			index,
+			id,
+			agent,
+			task,
+			assignment,
+			description: options.description,
+			modelOverride,
+			routeReceipt,
+			outputSchema,
+			signal,
+			artifactsDir: options.artifactsDir,
+			eventBus: options.eventBus,
+			parentToolCallId: options.parentToolCallId,
+			detached: options.detached,
+			sessionFile: subtaskSessionFile,
+			startTime,
+		});
+		followUpResultRouter.arm();
+		return result;
+	} finally {
+		monitor.finish();
+	}
 }

@@ -287,6 +287,8 @@ export interface AgentProgress {
 	agent: string;
 	agentSource: AgentSource;
 	status: "pending" | "running" | "completed" | "failed" | "aborted";
+	/** Parent-side worker liveness projection. Set only while a subprocess is being probed or confirmed dead. */
+	livenessState?: "stalled" | "dead";
 	task: string;
 	assignment?: string;
 	/** Shared spawn context supplied alongside the per-agent assignment. */

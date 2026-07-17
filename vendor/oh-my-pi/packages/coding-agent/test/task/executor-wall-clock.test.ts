@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
+import { getEventListeners } from "node:events";
 import type { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { LoadExtensionsResult } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/types";
@@ -69,6 +70,38 @@ function mockCreateAgentSession(session: AgentSession) {
 	} satisfies CreateAgentSessionResult);
 }
 
+function createFastYieldSession(): AgentSession {
+	const session: Partial<AgentSession> = {
+		state: { messages: [] } as never,
+		agent: { state: { systemPrompt: ["test"] } } as never,
+		extensionRunner: undefined as never,
+		sessionManager: { appendSessionInit: () => {} } as never,
+		getActiveToolNames: () => ["read", "yield"],
+		setActiveToolsByName: async () => {},
+		subscribe: (listener: (event: AgentSessionEvent) => void) => {
+			queueMicrotask(() => {
+				listener({
+					type: "tool_execution_end",
+					toolCallId: "tool-fast",
+					toolName: "yield",
+					result: {
+						content: [{ type: "text", text: "Result submitted." }],
+						details: { status: "success", data: { ok: true } },
+					},
+					isError: false,
+				} as AgentSessionEvent);
+			});
+			return () => {};
+		},
+		prompt: async () => true,
+		waitForIdle: async () => {},
+		getLastAssistantMessage: () => undefined,
+		abort: async () => {},
+		dispose: async () => {},
+	};
+	return session as AgentSession;
+}
+
 describe("runSubprocess wall clock (task.maxRuntimeMs)", () => {
 	beforeEach(() => {
 		vi.spyOn(logger, "warn").mockImplementation(() => {});
@@ -124,37 +157,8 @@ describe("runSubprocess wall clock (task.maxRuntimeMs)", () => {
 		// Stub session resolves immediately to a no-op yield so we don't actually
 		// hang; we only need to assert that NO timeout fires when maxRuntimeMs=0.
 		const settings = Settings.isolated({ "task.maxRuntimeMs": 0 });
-		const fastSession: Partial<AgentSession> = {
-			state: { messages: [] } as never,
-			agent: { state: { systemPrompt: ["test"] } } as never,
-			extensionRunner: undefined as never,
-			sessionManager: { appendSessionInit: () => {} } as never,
-			getActiveToolNames: () => ["read", "yield"],
-			setActiveToolsByName: async () => {},
-			subscribe: (listener: (event: AgentSessionEvent) => void) => {
-				// Fire a synthetic yield on the next tick to drive runSubprocess to
-				// completion without depending on the real agent loop.
-				queueMicrotask(() => {
-					listener({
-						type: "tool_execution_end",
-						toolCallId: "tool-fast",
-						toolName: "yield",
-						result: {
-							content: [{ type: "text", text: "Result submitted." }],
-							details: { status: "success", data: { ok: true } },
-						},
-						isError: false,
-					} as AgentSessionEvent);
-				});
-				return () => {};
-			},
-			prompt: async () => true,
-			waitForIdle: async () => {},
-			getLastAssistantMessage: () => undefined,
-			abort: async () => {},
-			dispose: async () => {},
-		};
-		mockCreateAgentSession(fastSession as AgentSession);
+		const fastSession = createFastYieldSession();
+		mockCreateAgentSession(fastSession);
 
 		const result = await runSubprocess({
 			...baseOptions,
@@ -164,6 +168,25 @@ describe("runSubprocess wall clock (task.maxRuntimeMs)", () => {
 
 		expect(result.aborted).toBe(false);
 		expect(result.abortReason).toBeUndefined();
+	});
+
+	it("disarms its runtime timer and caller abort listener after terminal completion", async () => {
+		const controller = new AbortController();
+		const settings = Settings.isolated({ "task.maxRuntimeMs": 100 });
+		mockCreateAgentSession(createFastYieldSession());
+
+		const result = await runSubprocess({
+			...baseOptions,
+			id: "subagent-monitor-cleanup",
+			settings,
+			signal: controller.signal,
+		});
+
+		expect(result.exitCode).toBe(0);
+		expect(getEventListeners(controller.signal, "abort")).toHaveLength(0);
+		vi.clearAllMocks();
+		await Bun.sleep(150);
+		expect(logger.warn).not.toHaveBeenCalled();
 	});
 
 	it("aborts before prompting when the timer fires during session setup", async () => {

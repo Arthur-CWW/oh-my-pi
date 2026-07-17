@@ -21,6 +21,7 @@ interface HudRow {
 	modelSelector?: string;
 	tokenRate?: number;
 	tokenRateStuck: boolean;
+	livenessState?: "stalled" | "dead";
 }
 
 export interface SubagentHudPerformanceCounters {
@@ -99,13 +100,21 @@ export class SubagentHudRenderer {
 				modelSelector: modelSelector(session),
 				tokenRate: showTokenRateBadge ? session.tokenRate : undefined,
 				tokenRateStuck: session.tokenRateStuck === true,
+				livenessState: session.progress?.livenessState,
 			};
 		});
 
 		const lines = ["", `  ${theme.bold(theme.fg("accent", "Subagents"))}`];
 		for (const input of rows) {
 			const rate = input.tokenRate === undefined ? "" : String(Math.round(input.tokenRate));
-			const state = input.tokenRateStuck ? "RUN+0" : "RUN";
+			const state =
+				input.livenessState === "dead"
+					? "DEAD"
+					: input.livenessState === "stalled"
+						? "STALLED"
+						: input.tokenRateStuck
+							? "RUN+0"
+							: "RUN";
 			const fingerprint = [
 				input.prefix,
 				input.displayId,
@@ -159,7 +168,7 @@ export class SubagentHudRenderer {
 		left = truncateToWidth(left, leftWidth);
 		left += padding(Math.max(0, leftWidth - visibleWidth(left)));
 		const token = tokenColumnWidth > 0 ? `${theme.fg("dim", tokenLane)} ` : "";
-		const status = theme.fg(input.tokenRateStuck ? "warning" : "success", stateLane);
+		const status = theme.fg(input.livenessState === "dead" ? "error" : state === "RUN" ? "success" : "warning", stateLane);
 		return `${left} ${token}${status}`;
 	}
 }

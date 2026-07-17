@@ -3819,6 +3819,23 @@ export const SETTINGS_SCHEMA = {
 		},
 	},
 
+	"task.stallThresholdMs": {
+		type: "number",
+		default: 300_000,
+		ui: {
+			tab: "tasks",
+			group: "Subagents",
+			label: "Subagent Stall Threshold",
+			description:
+				"How long a subprocess may show no token progress or journal activity before OMP probes its PID and durable journal (ms). Live workers are never terminated by this probe.",
+			options: [
+				{ value: "120000", label: "2 minutes" },
+				{ value: "300000", label: "5 minutes", description: "Default" },
+				{ value: "600000", label: "10 minutes" },
+			],
+		},
+	},
+
 	"task.agentIdleTtlMs": {
 		type: "number",
 		default: 420_000,
