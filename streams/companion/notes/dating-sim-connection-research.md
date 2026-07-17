@@ -5,7 +5,7 @@
 
 ## Referent identification: ranked, not resolved
 
-Arthur's phrase is ambiguous: game stores and scholarship normally say **visual novel**, not "light novel." One candidate's official copy does contain the phrase "light novel game style" verbatim (Lunar Romance, below); that makes it the strongest lexical match, not a confirmed identification.
+Arthur's phrase is ambiguous. Only one candidate's official copy contains "light novel game style" verbatim (Lunar Romance, below); that makes it the strongest lexical match, not a confirmed identification.
 
 | Rank | Candidate | Verified fit | Mismatch / uncertainty | Confidence |
 |---:|---|---|---|---|
@@ -17,13 +17,14 @@ Arthur's phrase is ambiguous: game stores and scholarship normally say **visual 
 
 **Working identification:** start with *Lunar Romance* — its official copy uniquely matches Arthur's phrasing verbatim ("light novel game style") plus "Korean," dating-sim structure, and a K-drama-episodes review. If Arthur remembers live-action video, it is one of the FMV titles (*Cheongchunhyang*, *Motesolo*, *Five Hearts*); if illustrated phone chats arriving through the day, *Mystic Messenger*. No title is treated as confirmed.
 
-## Comparison set: what “anime-style light-novel games” usefully spans
+## Comparison set: what the illustrated and route-structured references usefully span
 
 | Reference | Useful design property | Source |
 |---|---|---|
 | **Mystic Messenger** | Romance inhabits an everyday communication surface—group chat, text, and calls—rather than only self-contained scenes. | [Official Google Play listing](https://play.google.com/store/apps/details?id=com.Cheritz.MysticMessenger&hl=en_US) |
+| **Lunar Romance** | Serialized, episode-shaped drama in illustrated form: events and endings collected over time, dating through chat/messages/calls with full voiceovers; a reviewer experiences it as K-drama episodes with the player as MC. | [Official App Store listing + review](https://apps.apple.com/us/app/lunar-romance/id1586821762) |
 | **Our Life: Beginnings & Always** | The player controls relationship tempo; preferences are remembered; painful feelings may be expressed and met with reassurance; four life periods turn small callbacks into a long arc. | [Developer's Steam description](https://store.steampowered.com/app/1129190/Our_Life_Beginnings__Always/) |
-| **Five Hearts Under One Roof** | Distinct relational archetypes, branching events, multiple endings, epilogues, and unexpected route unlocks make attention directional rather than generic. | [Developer's Steam description](https://store.steampowered.com/app/3021100/Five_Hearts_Under_One_Roof/) |
+| **Five Hearts Under One Roof** (FMV, for route structure not art style) | Distinct relational archetypes, branching events, multiple endings, epilogues, and unexpected route unlocks make attention directional rather than generic. | [Developer's Steam description](https://store.steampowered.com/app/3021100/Five_Hearts_Under_One_Roof/) |
 
 These are references, not a recommendation that a live companion imitate dating-game monetization, lock users into routes, or manufacture dependency.
 
