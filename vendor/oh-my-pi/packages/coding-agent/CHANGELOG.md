@@ -103,6 +103,7 @@
 - Fixed session resume/listing recovery for JSONL journals where a title metadata record was written before the session header, and changed synchronous first-write rewrites to use atomic replacement instead of in-place truncation.
 - Suppressed GPT-5.6's whitespace-only HTML comment separators in displayed/ACP-forwarded thinking while preserving raw session reasoning, final text, fenced literals, non-empty comments, and split-stream live/replay parity.
 - Fixed model-selector availability flicker by fencing auth refreshes with credential-generation CAS and ignoring stale registry refresh responses.
+- Bounded terminal session hello negotiation and live-owner listing probes so wedged lease sockets no longer hang `omp --resume` or session completion.
 
 ## [16.0.1] - 2026-06-15
 

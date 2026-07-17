@@ -89,6 +89,7 @@ const SESSION_LIST_PREFIX_BYTES = 4096;
 const SESSION_LIST_SUFFIX_BYTES = 32_768;
 const SESSION_LIST_PARALLEL_THRESHOLD = 64;
 const SESSION_LIST_MAX_WORKERS = 16;
+const SESSION_LIST_OWNER_PROBE_TIMEOUT_MS = 2_000;
 
 function sanitizeSessionName(value: string | undefined): string | undefined {
 	if (!value) return undefined;
@@ -420,7 +421,18 @@ async function scanSessionFile(
 
 		firstMessage ||= extractFirstUserMessageFromPrefix(content) ?? "";
 		const messageCount = Math.max(parsedMessageCount, countMessageMarkers(content));
-		const owner = withStatus ? await inspectLiveSessionOwnerDetails(file, header.id).catch(() => undefined) : undefined;
+		let owner: SessionOwnerDetails | undefined;
+		if (withStatus) {
+			const timedOut = Promise.withResolvers<undefined>();
+			const timeout = setTimeout(() => timedOut.resolve(undefined), SESSION_LIST_OWNER_PROBE_TIMEOUT_MS);
+			try {
+				owner = await Promise.race([inspectLiveSessionOwnerDetails(file, header.id), timedOut.promise]);
+			} catch {
+				owner = undefined;
+			} finally {
+				clearTimeout(timeout);
+			}
+		}
 		return {
 			session: {
 				path: file,

@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { randomUUID } from "node:crypto";
 import * as fs from "node:fs/promises";
-import * as os from "node:os";
 import * as net from "node:net";
+import * as os from "node:os";
 import * as path from "node:path";
 import { createTerminalSessionController } from "../../../src/modes/terminal-session-controller";
 import type {
@@ -17,7 +17,10 @@ import type {
 	TerminalSessionTransport,
 } from "../../../src/runner/terminal-session-transport";
 import type { TerminalSessionDelivery, TerminalSessionSnapshot } from "../../../src/runner/terminal-session-view";
-import { UnixSocketTerminalSessionTransport } from "../../../src/runner/wire/client";
+import {
+	TerminalSessionWireConnectionError,
+	UnixSocketTerminalSessionTransport,
+} from "../../../src/runner/wire/client";
 import {
 	DEFAULT_MAX_WIRE_FRAME_BYTES,
 	IncrementalWireFrameDecoder,
@@ -225,11 +228,56 @@ async function waitUntil(predicate: () => boolean): Promise<void> {
 }
 
 describe("framed runner socket transport", () => {
+	it("times out silent hello negotiation and cleans up the socket", async () => {
+		const root = await fs.mkdtemp(path.join(os.tmpdir(), "omp-wire-silent-"));
+		roots.push(root);
+		const socketPath = path.join(root, "runner.sock");
+		const server = net.createServer(() => {});
+		const listening = Promise.withResolvers<void>();
+		server.once("error", listening.reject);
+		server.listen(socketPath, listening.resolve);
+		await listening.promise;
+		const client = new UnixSocketTerminalSessionTransport({
+			socketPath,
+			hello: {
+				protocol: { minMajor: 1, maxMajor: 1, maxMinor: 0 },
+				sessionId: "silent-session",
+				ownerEpoch: randomUUID(),
+				runnerInstanceId: randomUUID(),
+				build: { version: "test", digest: "digest" },
+				authority: {
+					uid: typeof process.getuid === "function" ? process.getuid() : 0,
+					canonicalSessionPath: path.join(root, "session.jsonl"),
+					namespaceDigest: "namespace",
+				},
+				requestedCapability: "observer",
+				features: ["event-resync"],
+			},
+			helloTimeoutMs: 100,
+		});
+		const startedAt = performance.now();
+		try {
+			const error = await client.ownerProof({ nonce: "silent" }).then(
+				() => undefined,
+				rejection => rejection,
+			);
+			expect(error).toBeInstanceOf(TerminalSessionWireConnectionError);
+			expect(error).toMatchObject({ message: "hello negotiation timed out" });
+			expect(performance.now() - startedAt).toBeLessThan(1_000);
+		} finally {
+			await client.close().catch(() => {});
+			const closed = Promise.withResolvers<void>();
+			server.close(error => (error ? closed.reject(error) : closed.resolve()));
+			await closed.promise;
+		}
+	});
+
 	it("negotiates identity, serves owner proof, and refuses a mismatched hello", async () => {
 		const { server, socketPath, hello } = await fixture();
 		const observer = new UnixSocketTerminalSessionTransport({
 			socketPath,
 			hello: { ...hello, requestedCapability: "observer" },
+			helloTimeoutMs: 500,
 		});
 		const expectedProof = {
 			ownerEpoch: hello.ownerEpoch,

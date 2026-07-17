@@ -41,6 +41,7 @@ export interface UnixSocketTerminalSessionTransportOptions {
 	readonly hello: TerminalSessionWireClientHello;
 	readonly maxFrameBytes?: number;
 	readonly requestTimeoutMs?: number;
+	readonly helloTimeoutMs?: number;
 	readonly reconnectAttempts?: number;
 }
 
@@ -177,6 +178,7 @@ class ClientConnection {
 	readonly #hello: ClientHelloFrame;
 	#negotiated = false;
 	#closed = false;
+	#helloTimeout: NodeJS.Timeout | undefined;
 
 	constructor(
 		options: UnixSocketTerminalSessionTransportOptions,
@@ -187,6 +189,11 @@ class ClientConnection {
 		this.#onEvent = onEvent;
 		this.#onResync = onResync;
 		this.#socket = net.createConnection(options.socketPath);
+		if (options.helloTimeoutMs !== undefined) {
+			this.#helloTimeout = setTimeout(() => {
+				this.#fail(new TerminalSessionWireConnectionError("hello negotiation timed out"));
+			}, options.helloTimeoutMs);
+		}
 		this.#decoder = new IncrementalWireFrameDecoder(options.maxFrameBytes ?? DEFAULT_MAX_WIRE_FRAME_BYTES);
 		this.#hello = { kind: "clientHello", correlationId: randomUUID(), ...options.hello };
 		this.#socket.once("connect", () => {
@@ -268,6 +275,7 @@ class ClientConnection {
 					const hello = decodeServerHelloFrame(frame);
 					validateServerHello(hello, this.#hello);
 					this.#negotiated = true;
+					this.#clearHelloTimeout();
 					this.#helloReady.resolve();
 				} catch (error) {
 					this.#fail(error);
@@ -312,7 +320,15 @@ class ClientConnection {
 		}
 	}
 
+	#clearHelloTimeout(): void {
+		const timeout = this.#helloTimeout;
+		if (timeout === undefined) return;
+		clearTimeout(timeout);
+		this.#helloTimeout = undefined;
+	}
+
 	#fail(cause: unknown): void {
+		this.#clearHelloTimeout();
 		if (this.#closed) return;
 		this.#closed = true;
 		const error =
@@ -378,6 +394,12 @@ export class UnixSocketTerminalSessionTransport implements TerminalSessionTransp
 			(!Number.isFinite(options.requestTimeoutMs) || options.requestTimeoutMs <= 0)
 		) {
 			throw new RangeError("requestTimeoutMs must be positive");
+		}
+		if (
+			options.helloTimeoutMs !== undefined &&
+			(!Number.isFinite(options.helloTimeoutMs) || options.helloTimeoutMs <= 0)
+		) {
+			throw new RangeError("helloTimeoutMs must be positive");
 		}
 		if (options.maxFrameBytes !== undefined) new IncrementalWireFrameDecoder(options.maxFrameBytes);
 		this.#options = options;

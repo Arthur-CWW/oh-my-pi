@@ -679,6 +679,7 @@ async function probeLease(lease: SessionLeaseV1, identity?: OwnerIdentitySidecar
 		socketPath: lease.socketPath,
 		hello: terminalWireHello(lease, identity, "observer"),
 		requestTimeoutMs: 500,
+		helloTimeoutMs: 500,
 	});
 	try {
 		const proof = decodeOwnerProof(await client.ownerProof({ nonce }));
