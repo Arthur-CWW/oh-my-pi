@@ -35,10 +35,12 @@ Rejected: subagents writing their own status reports ("we don't want to add extr
 Adopted: **the observer pattern** (HR-199 fleet summarizer). A smol background agent:
 - watches `fleet overview --json` + journal deltas; change-detection threshold, never fixed-interval LLM burn;
 - refreshes each peer's summary / display name / workstream in `label_json`;
-- maintains each thread's **rolling digest** — the institutional memory row (also = HR-181 digest, HR-195 delta packet: one daemon, three consumers);
+- maintains each thread's **STATE DOC**, not a report (Arthur, 2026-07-18: "i don't really like reports tbh, and prefer actual well thought out design docs/interfaces with actual artifacts/deliverables, and less so the words") — a structured file with progressive disclosure (shape in §8.5); this is the institutional memory row (also = HR-181 digest, HR-195 delta packet: one daemon, three consumers);
 - never writes to journals, never sends control commands; rename keeps spawn-id provenance.
 
 The worker just works. Compression is externalized to an agent whose ONLY job is compression.
+
+**Files are the shared state; messages are doorbells** (Arthur: "the files are easier and cheaper shared state than outputting a bunch of tokens over irc"). Cross-workstream sync = another agent READS the state doc (overview first, deeper on need); IRC carries only "state doc updated, decision pending at §X" pointers. This is already repo law for subagents (share via local://, never pasted blobs) — promoted to the fleet-wide communication principle.
 
 ## 4. Native patterns we keep; human patterns we reject (for now)
 
@@ -123,6 +125,25 @@ The creative industries converged on artifact-centric coordination (never report
 4. **Presence is computed** — no performative status; labels/digests derived from actual work (observers, N6 non-interference).
 5. **Review at the artifact, decisions as typed notes** — the dailies/crit pattern: feedback lands as cards/claims, never as prose that evaporates.
 6. **Compression is a role, not a tax** — observers/summarizers own it; workers never self-report (§3).
+7. **Files are shared state; messages are doorbells** — state docs and artifacts carry the payload; IRC/channels carry pointers ("updated, decision at §X"). Token streams never transport what a file can hold.
+
+### 8.5 State docs and the decision surface (Arthur, 2026-07-18: docs over reports; "surface decision points, and interface on top, to unblock — save me time")
+
+**The state doc** — one per workstream (lead-owned) and one per substantial task/thread (observer-maintained), replacing "reports" everywhere. Fixed shape, progressive disclosure — each layer sufficient alone, deeper layers on need:
+
+```
+L0 header     what/why in ≤3 lines + status word + away-relevant freshness stamp
+L1 overview   current approach, what changed lately, what's next (≤15 lines)
+L2 design     the actual thinking: decisions made + why, interfaces/contracts frozen,
+              rejected alternatives — the "well thought out design doc" layer
+L3 artifacts  links to LIVE deliverables + proof bundles (never descriptions of them)
+L4 decisions  PENDING decision points (typed, see below)
+L5 depth      journal/history:// pointers, commits, related state docs
+```
+
+Harness stream already lives this shape ad hoc (STATUS.md + contracts + proofs); the design generalizes it. Other agents sync by reading L0–L1; they go L2+ only when their work genuinely intersects ("overview deeper view of what they are doing and why").
+
+**Decision points as typed objects** — extracted from L4 across ALL state docs into ONE surface (board lane "Needs Arthur" + brief section 1 + optional HR-184 push). Each carries enough to decide IN PLACE, no thread-visiting: `{id, source doc §, one-paragraph context, options[] with tradeoff clause each, recommendation + why, what it blocks, age}`. Resolving one writes the ruling back into the source doc's L2 (decisions-made) with provenance — the decision queue is an INBOX, the state doc is the RECORD. This is the "interface on top to unblock": Arthur's time is spent ruling, never reconstructing.
 
 ## 9. Open questions for Arthur (answer in next session's first message)
 
