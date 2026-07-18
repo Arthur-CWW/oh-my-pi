@@ -1,11 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import {
+  applyBoardPatches,
   buildBoardModel,
   columnForRegisterStatus,
   columnForSessionState,
   diffBoardModels,
   isVersionSkewed,
   modalVersion,
+  type BoardRenderState,
   type FleetSession,
   type RegisterCard,
 } from "../public/board";
@@ -65,9 +67,10 @@ describe("version skew", () => {
 });
 
 describe("minimal board patches", () => {
-  test("emits no patch when nothing changed", () => {
-    const model = buildBoardModel([session()], [card()]);
-    expect(diffBoardModels(model, model)).toEqual([]);
+  test("emits no patch for identical snapshots", () => {
+    const before = buildBoardModel([session()], [card()]);
+    const after = buildBoardModel([session()], [card()]);
+    expect(diffBoardModels(before, after)).toEqual([]);
   });
 
   test("updates only the changed session cell", () => {
@@ -84,4 +87,150 @@ describe("minimal board patches", () => {
       { op: "update", key: "session:session-1", fields: ["state"] },
     ]);
   });
+});
+
+class MiniElement {
+  className = "";
+  dataset: Record<string, string> = {};
+  hidden = false;
+  textContent = "";
+  readonly children: MiniElement[] = [];
+  parent: MiniElement | null = null;
+  private _innerHTML = "";
+
+  set innerHTML(value: string) {
+    this._innerHTML = value;
+    this.children.length = 0;
+    const fields = /<([a-z0-9]+)\b([^>]*)>/gi;
+    for (const match of value.matchAll(fields)) {
+      const attributes = match[2] ?? "";
+      const field = /\bdata-field="([^"]+)"/i.exec(attributes)?.[1];
+      if (!field) continue;
+      const child = new MiniElement();
+      child.dataset.field = field;
+      child.className = /\bclass="([^"]+)"/i.exec(attributes)?.[1] ?? "";
+      child.hidden = /\bhidden(?:\s|=|$)/i.test(attributes);
+      this.append(child);
+    }
+  }
+
+  get innerHTML() {
+    return this._innerHTML;
+  }
+
+  get classList() {
+    return {
+      add: (...names: string[]) => {
+        const values = new Set(this.className.split(/\s+/).filter(Boolean));
+        for (const name of names) values.add(name);
+        this.className = [...values].join(" ");
+      },
+      remove: (...names: string[]) => {
+        const values = new Set(this.className.split(/\s+/).filter(Boolean));
+        for (const name of names) values.delete(name);
+        this.className = [...values].join(" ");
+      },
+      contains: (name: string) => this.className.split(/\s+/).includes(name),
+    };
+  }
+
+  querySelector<T extends Element = Element>(selector: string): T | null {
+    const field = /^\[data-field="([^"]+)"\]$/.exec(selector)?.[1];
+    if (!field) return null;
+    for (const child of this.children) {
+      if (child.dataset.field === field) return child as unknown as T;
+      const nested = child.querySelector<T>(selector);
+      if (nested) return nested;
+    }
+    return null;
+  }
+
+  append(node: MiniElement) {
+    node.remove();
+    node.parent = this;
+    this.children.push(node);
+  }
+
+  insertBefore(node: MiniElement, before: MiniElement) {
+    if (node === before) return;
+    node.remove();
+    const index = this.children.indexOf(before);
+    if (index < 0) {
+      this.append(node);
+      return;
+    }
+    node.parent = this;
+    this.children.splice(index, 0, node);
+  }
+
+  remove() {
+    if (!this.parent) return;
+    const index = this.parent.children.indexOf(this);
+    if (index >= 0) this.parent.children.splice(index, 1);
+    this.parent = null;
+  }
+}
+
+class MiniDocument {
+  readonly columns = new Map<string, MiniElement>();
+  readonly counts = new Map<string, MiniElement>();
+
+  constructor() {
+    for (const column of ["needs-arthur", "in-progress", "held-deferred", "recently-implemented"]) {
+      this.columns.set(column, new MiniElement());
+      this.counts.set(column, new MiniElement());
+    }
+  }
+
+  querySelector<T extends Element = Element>(selector: string): T | null {
+    const cards = /^\[data-cards="([^"]+)"\]$/.exec(selector)?.[1];
+    if (cards) return (this.columns.get(cards) as unknown as T | undefined) ?? null;
+    const count = /^\[data-count="([^"]+)"\]$/.exec(selector)?.[1];
+    if (count) return (this.counts.get(count) as unknown as T | undefined) ?? null;
+    return null;
+  }
+
+  createElement(_tagName: string) {
+    return new MiniElement() as unknown as HTMLElement;
+  }
+}
+
+test("applies board patches without rebuilding card nodes", () => {
+  const root = new MiniDocument();
+  const state: BoardRenderState = { current: null, selectedKey: null, nodes: new Map() };
+  const before = buildBoardModel(
+    [session({ last_seen: null }), session({ session_id: "session-2", summary: "Stable summary", last_seen: null })],
+    [],
+  );
+  applyBoardPatches(before, diffBoardModels(null, before), state, root);
+
+  const firstNode = state.nodes.get("session:session-1");
+  const stableNode = state.nodes.get("session:session-2");
+  const selectedKey = state.selectedKey;
+  const after = buildBoardModel(
+    [session({ last_seen: null }), session({ session_id: "session-2", summary: "Changed summary", last_seen: null })],
+    [],
+  );
+  const patches = diffBoardModels(before, after);
+  expect(patches).toEqual([{ op: "update", key: "session:session-2", fields: ["summary"] }]);
+
+  applyBoardPatches(after, patches, state, root);
+
+  expect(state.nodes.get("session:session-1")).toBe(firstNode);
+  expect(state.nodes.get("session:session-2")).toBe(stableNode);
+  expect(state.selectedKey).toBe(selectedKey);
+  expect((state.nodes.get("session:session-1") as unknown as MiniElement).classList.contains("is-selected")).toBe(true);
+  expect((stableNode as unknown as MiniElement).querySelector<HTMLElement>('[data-field="summary"]')?.textContent).toBe("Changed summary");
+  expect(root.columns.get("in-progress")?.children).toHaveLength(2);
+});
+
+test("does not move existing nodes when an item is inserted before them", () => {
+  const before = buildBoardModel([], [card({ id: "HR-198", status: "IMPLEMENTED" })]);
+  const after = buildBoardModel([], [
+    card({ id: "HR-198", status: "IMPLEMENTED" }),
+    card({ id: "HR-204", status: "IMPLEMENTED" }),
+  ]);
+  expect(diffBoardModels(before, after)).toEqual([
+    { op: "insert", key: "card:HR-204", item: after.items["card:HR-204"], column: "recently-implemented", index: 0 },
+  ]);
 });

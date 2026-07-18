@@ -201,24 +201,62 @@ function diffBoardModels(previous, next) {
   }
   const patches = [];
   const nextKeys = new Set(allKeys(next));
-  for (const key of allKeys(previous)) {
-    if (!nextKeys.has(key)) {
-      const position = itemPosition(previous, key);
-      if (position)
-        patches.push({ op: "remove", key, ...position });
-    }
-  }
   const previousKeys = new Set(allKeys(previous));
+  const working = {
+    "needs-arthur": previous.columns["needs-arthur"].map((item) => item.key),
+    "in-progress": previous.columns["in-progress"].map((item) => item.key),
+    "held-deferred": previous.columns["held-deferred"].map((item) => item.key),
+    "recently-implemented": previous.columns["recently-implemented"].map((item) => item.key)
+  };
+  for (const key of allKeys(previous)) {
+    if (nextKeys.has(key))
+      continue;
+    const position = itemPosition(previous, key);
+    if (!position)
+      continue;
+    const currentIndex = working[position.column].indexOf(key);
+    if (currentIndex >= 0)
+      working[position.column].splice(currentIndex, 1);
+    patches.push({ op: "remove", key, ...position });
+  }
   for (const column of BOARD_COLUMNS) {
     for (const [index, item] of next.columns[column].entries()) {
-      if (!previousKeys.has(item.key)) {
-        patches.push({ op: "insert", key: item.key, item, column, index });
+      if (previousKeys.has(item.key))
         continue;
-      }
-      const oldPosition = itemPosition(previous, item.key);
-      if (!oldPosition || oldPosition.column !== column || oldPosition.index !== index) {
+      working[column].splice(index, 0, item.key);
+      patches.push({ op: "insert", key: item.key, item, column, index });
+    }
+  }
+  for (const column of BOARD_COLUMNS) {
+    for (const item of next.columns[column]) {
+      if (!previousKeys.has(item.key))
+        continue;
+      const currentColumn = BOARD_COLUMNS.find((candidate) => working[candidate].includes(item.key));
+      if (!currentColumn || currentColumn === column)
+        continue;
+      const currentIndex = working[currentColumn].indexOf(item.key);
+      working[currentColumn].splice(currentIndex, 1);
+      const destinationIndex = working[column].length;
+      working[column].splice(destinationIndex, 0, item.key);
+      patches.push({ op: "move", key: item.key, column, index: destinationIndex });
+    }
+  }
+  for (const column of BOARD_COLUMNS) {
+    for (const [index, item] of next.columns[column].entries()) {
+      const currentIndex = working[column].indexOf(item.key);
+      if (currentIndex < 0)
+        continue;
+      if (currentIndex !== index) {
+        working[column].splice(currentIndex, 1);
+        working[column].splice(index, 0, item.key);
         patches.push({ op: "move", key: item.key, column, index });
       }
+    }
+  }
+  for (const column of BOARD_COLUMNS) {
+    for (const item of next.columns[column]) {
+      if (!previousKeys.has(item.key))
+        continue;
       const oldItem = previous.items[item.key];
       const oldFields = itemFieldValues(oldItem);
       const newFields = itemFieldValues(item);
@@ -229,8 +267,8 @@ function diffBoardModels(previous, next) {
   }
   return patches;
 }
-function createSessionCard(item) {
-  const card = document.createElement("article");
+function createSessionCard(item, root) {
+  const card = root.createElement("article");
   card.className = "board-card session-card";
   card.dataset.key = item.key;
   card.dataset.kind = "session";
@@ -245,8 +283,8 @@ function createSessionCard(item) {
   updateSessionCard(card, item);
   return card;
 }
-function createRegisterCard(item) {
-  const card = document.createElement("article");
+function createRegisterCard(item, root) {
+  const card = root.createElement("article");
   card.className = "board-card register-card";
   card.dataset.key = item.key;
   card.dataset.kind = "register";
@@ -307,29 +345,74 @@ function updateRegisterCard(node, item, fields) {
   if (should("status"))
     setText(node, "status", item.status);
 }
-function createCard(item) {
-  return item.kind === "session" ? createSessionCard(item) : createRegisterCard(item);
+function createCard(item, root) {
+  return item.kind === "session" ? createSessionCard(item, root) : createRegisterCard(item, root);
 }
-function columnCards(column) {
-  return document.querySelector(`[data-cards="${column}"]`);
+function columnCards(root, column) {
+  return root.querySelector(`[data-cards="${column}"]`);
 }
-function insertAt(column, node, index) {
-  const parent = columnCards(column);
+function insertAt(root, column, node, index) {
+  const parent = columnCards(root, column);
   if (!parent)
     return;
   const before = parent.children[index];
-  if (before)
+  if (before && before !== node)
     parent.insertBefore(node, before);
-  else
+  else if (!before)
     parent.append(node);
 }
-function updateCounts(model) {
+function updateCounts(root, model) {
   for (const column of BOARD_COLUMNS) {
-    const count = document.querySelector(`[data-count="${column}"]`);
+    const count = root.querySelector(`[data-count="${column}"]`);
     const value = String(model.columns[column].length);
     if (count && count.textContent !== value)
       count.textContent = value;
   }
+}
+function setSelectedNode(state, key) {
+  if (state.selectedKey === key) {
+    if (key)
+      state.nodes.get(key)?.classList.add("is-selected");
+    return;
+  }
+  if (state.selectedKey)
+    state.nodes.get(state.selectedKey)?.classList.remove("is-selected");
+  state.selectedKey = key;
+  if (key)
+    state.nodes.get(key)?.classList.add("is-selected");
+}
+function applyBoardPatches(next, patches, state, root = document) {
+  for (const patch of patches) {
+    if (patch.op === "remove") {
+      state.nodes.get(patch.key)?.remove();
+      state.nodes.delete(patch.key);
+    } else if (patch.op === "insert") {
+      const node = createCard(patch.item, root);
+      state.nodes.set(patch.key, node);
+      insertAt(root, patch.column, node, patch.index);
+    } else if (patch.op === "move") {
+      const node = state.nodes.get(patch.key);
+      if (node)
+        insertAt(root, patch.column, node, patch.index);
+    } else {
+      const item = next.items[patch.key];
+      const node = state.nodes.get(patch.key);
+      if (!item || !node)
+        continue;
+      if (item.kind === "session")
+        updateSessionCard(node, item, patch.fields);
+      else
+        updateRegisterCard(node, item, patch.fields);
+    }
+  }
+  updateCounts(root, next);
+  if (!state.selectedKey || !next.items[state.selectedKey]) {
+    const first = BOARD_COLUMNS.flatMap((column) => next.columns[column])[0];
+    setSelectedNode(state, first?.key ?? null);
+  } else {
+    setSelectedNode(state, state.selectedKey);
+  }
+  state.current = next;
 }
 function reportClientError(error) {
   const payload = JSON.stringify({
@@ -343,8 +426,8 @@ function reportClientError(error) {
   });
 }
 function bootstrap() {
-  const modelState = { current: null, selectedKey: null };
-  const nodes = new Map;
+  const modelState = { current: null, selectedKey: null, nodes: new Map };
+  const nodes = modelState.nodes;
   const generated = document.querySelector("[data-generated-at]");
   const boardGrid = document.querySelector("#board-grid");
   if (boardGrid && "ResizeObserver" in window) {
@@ -356,45 +439,9 @@ function bootstrap() {
     });
     resizeObserver.observe(boardGrid);
   }
-  const setSelected = (key) => {
-    if (modelState.selectedKey === key)
-      return;
-    if (modelState.selectedKey)
-      nodes.get(modelState.selectedKey)?.classList.remove("is-selected");
-    modelState.selectedKey = key;
-    if (key)
-      nodes.get(key)?.classList.add("is-selected");
-  };
+  const setSelected = (key) => setSelectedNode(modelState, key);
   const applyPatches = (next, patches) => {
-    for (const patch of patches) {
-      if (patch.op === "remove") {
-        nodes.get(patch.key)?.remove();
-        nodes.delete(patch.key);
-      } else if (patch.op === "insert") {
-        const node = createCard(patch.item);
-        nodes.set(patch.key, node);
-        insertAt(patch.column, node, patch.index);
-      } else if (patch.op === "move") {
-        const node = nodes.get(patch.key);
-        if (node)
-          insertAt(patch.column, node, patch.index);
-      } else {
-        const item = next.items[patch.key];
-        const node = nodes.get(patch.key);
-        if (!item || !node)
-          continue;
-        if (item.kind === "session")
-          updateSessionCard(node, item, patch.fields);
-        else
-          updateRegisterCard(node, item, patch.fields);
-      }
-    }
-    updateCounts(next);
-    if (!modelState.selectedKey || !next.items[modelState.selectedKey]) {
-      const first = BOARD_COLUMNS.flatMap((column) => next.columns[column])[0];
-      setSelected(first?.key ?? null);
-    }
-    modelState.current = next;
+    applyBoardPatches(next, patches, modelState, document);
   };
   const moveSelection = (direction) => {
     const model = modelState.current;
@@ -467,6 +514,7 @@ export {
   columnForSessionState,
   columnForRegisterStatus,
   buildBoardModel,
+  applyBoardPatches,
   BOARD_COLUMN_LABELS,
   BOARD_COLUMNS
 };

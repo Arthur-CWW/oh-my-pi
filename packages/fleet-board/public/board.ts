@@ -79,6 +79,17 @@ export type BoardPatch =
   | { op: "move"; key: string; column: BoardColumn; index: number }
   | { op: "update"; key: string; fields: string[] };
 
+export interface BoardDomRoot {
+  querySelector<T extends Element = Element>(selectors: string): T | null;
+  createElement(tagName: string): HTMLElement;
+}
+
+export interface BoardRenderState {
+  current: BoardModel | null;
+  selectedKey: string | null;
+  nodes: Map<string, HTMLElement>;
+}
+
 export interface FleetResponse {
   generatedAt?: string;
   sessions?: FleetSession[];
@@ -304,24 +315,59 @@ export function diffBoardModels(previous: BoardModel | null, next: BoardModel): 
 
   const patches: BoardPatch[] = [];
   const nextKeys = new Set(allKeys(next));
+  const previousKeys = new Set(allKeys(previous));
+  const working: Record<BoardColumn, string[]> = {
+    "needs-arthur": previous.columns["needs-arthur"].map((item) => item.key),
+    "in-progress": previous.columns["in-progress"].map((item) => item.key),
+    "held-deferred": previous.columns["held-deferred"].map((item) => item.key),
+    "recently-implemented": previous.columns["recently-implemented"].map((item) => item.key),
+  };
+
   for (const key of allKeys(previous)) {
-    if (!nextKeys.has(key)) {
-      const position = itemPosition(previous, key);
-      if (position) patches.push({ op: "remove", key, ...position });
+    if (nextKeys.has(key)) continue;
+    const position = itemPosition(previous, key);
+    if (!position) continue;
+    const currentIndex = working[position.column].indexOf(key);
+    if (currentIndex >= 0) working[position.column].splice(currentIndex, 1);
+    patches.push({ op: "remove", key, ...position });
+  }
+
+  for (const column of BOARD_COLUMNS) {
+    for (const [index, item] of next.columns[column].entries()) {
+      if (previousKeys.has(item.key)) continue;
+      working[column].splice(index, 0, item.key);
+      patches.push({ op: "insert", key: item.key, item, column, index });
     }
   }
 
-  const previousKeys = new Set(allKeys(previous));
+  for (const column of BOARD_COLUMNS) {
+    for (const item of next.columns[column]) {
+      if (!previousKeys.has(item.key)) continue;
+      const currentColumn = BOARD_COLUMNS.find((candidate) => working[candidate].includes(item.key));
+      if (!currentColumn || currentColumn === column) continue;
+      const currentIndex = working[currentColumn].indexOf(item.key);
+      working[currentColumn].splice(currentIndex, 1);
+      const destinationIndex = working[column].length;
+      working[column].splice(destinationIndex, 0, item.key);
+      patches.push({ op: "move", key: item.key, column, index: destinationIndex });
+    }
+  }
+
   for (const column of BOARD_COLUMNS) {
     for (const [index, item] of next.columns[column].entries()) {
-      if (!previousKeys.has(item.key)) {
-        patches.push({ op: "insert", key: item.key, item, column, index });
-        continue;
-      }
-      const oldPosition = itemPosition(previous, item.key);
-      if (!oldPosition || oldPosition.column !== column || oldPosition.index !== index) {
+      const currentIndex = working[column].indexOf(item.key);
+      if (currentIndex < 0) continue;
+      if (currentIndex !== index) {
+        working[column].splice(currentIndex, 1);
+        working[column].splice(index, 0, item.key);
         patches.push({ op: "move", key: item.key, column, index });
       }
+    }
+  }
+
+  for (const column of BOARD_COLUMNS) {
+    for (const item of next.columns[column]) {
+      if (!previousKeys.has(item.key)) continue;
       const oldItem = previous.items[item.key];
       const oldFields = itemFieldValues(oldItem);
       const newFields = itemFieldValues(item);
@@ -336,8 +382,8 @@ function esc(value: string) {
   return value.replace(/[&<>\"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '\"': "&quot;" })[character] ?? character);
 }
 
-function createSessionCard(item: SessionBoardItem) {
-  const card = document.createElement("article");
+function createSessionCard(item: SessionBoardItem, root: BoardDomRoot) {
+  const card = root.createElement("article");
   card.className = "board-card session-card";
   card.dataset.key = item.key;
   card.dataset.kind = "session";
@@ -353,8 +399,8 @@ function createSessionCard(item: SessionBoardItem) {
   return card;
 }
 
-function createRegisterCard(item: RegisterBoardItem) {
-  const card = document.createElement("article");
+function createRegisterCard(item: RegisterBoardItem, root: BoardDomRoot) {
+  const card = root.createElement("article");
   card.className = "board-card register-card";
   card.dataset.key = item.key;
   card.dataset.kind = "register";
@@ -407,28 +453,73 @@ function updateRegisterCard(node: HTMLElement, item: RegisterBoardItem, fields?:
   if (should("status")) setText(node, "status", item.status);
 }
 
-function createCard(item: BoardItem) {
-  return item.kind === "session" ? createSessionCard(item) : createRegisterCard(item);
+function createCard(item: BoardItem, root: BoardDomRoot) {
+  return item.kind === "session" ? createSessionCard(item, root) : createRegisterCard(item, root);
 }
 
-function columnCards(column: BoardColumn) {
-  return document.querySelector<HTMLElement>(`[data-cards="${column}"]`);
+function columnCards(root: BoardDomRoot, column: BoardColumn) {
+  return root.querySelector<HTMLElement>(`[data-cards="${column}"]`);
 }
 
-function insertAt(column: BoardColumn, node: HTMLElement, index: number) {
-  const parent = columnCards(column);
+function insertAt(root: BoardDomRoot, column: BoardColumn, node: HTMLElement, index: number) {
+  const parent = columnCards(root, column);
   if (!parent) return;
   const before = parent.children[index] as HTMLElement | undefined;
-  if (before) parent.insertBefore(node, before);
-  else parent.append(node);
+  if (before && before !== node) parent.insertBefore(node, before);
+  else if (!before) parent.append(node);
 }
 
-function updateCounts(model: BoardModel) {
+function updateCounts(root: BoardDomRoot, model: BoardModel) {
   for (const column of BOARD_COLUMNS) {
-    const count = document.querySelector<HTMLElement>(`[data-count="${column}"]`);
+    const count = root.querySelector<HTMLElement>(`[data-count="${column}"]`);
     const value = String(model.columns[column].length);
     if (count && count.textContent !== value) count.textContent = value;
   }
+}
+
+function setSelectedNode(state: BoardRenderState, key: string | null) {
+  if (state.selectedKey === key) {
+    if (key) state.nodes.get(key)?.classList.add("is-selected");
+    return;
+  }
+  if (state.selectedKey) state.nodes.get(state.selectedKey)?.classList.remove("is-selected");
+  state.selectedKey = key;
+  if (key) state.nodes.get(key)?.classList.add("is-selected");
+}
+
+export function applyBoardPatches(
+  next: BoardModel,
+  patches: readonly BoardPatch[],
+  state: BoardRenderState,
+  root: BoardDomRoot = document,
+) {
+  for (const patch of patches) {
+    if (patch.op === "remove") {
+      state.nodes.get(patch.key)?.remove();
+      state.nodes.delete(patch.key);
+    } else if (patch.op === "insert") {
+      const node = createCard(patch.item, root);
+      state.nodes.set(patch.key, node);
+      insertAt(root, patch.column, node, patch.index);
+    } else if (patch.op === "move") {
+      const node = state.nodes.get(patch.key);
+      if (node) insertAt(root, patch.column, node, patch.index);
+    } else {
+      const item = next.items[patch.key];
+      const node = state.nodes.get(patch.key);
+      if (!item || !node) continue;
+      if (item.kind === "session") updateSessionCard(node, item, patch.fields);
+      else updateRegisterCard(node, item, patch.fields);
+    }
+  }
+  updateCounts(root, next);
+  if (!state.selectedKey || !next.items[state.selectedKey]) {
+    const first = BOARD_COLUMNS.flatMap((column) => next.columns[column])[0];
+    setSelectedNode(state, first?.key ?? null);
+  } else {
+    setSelectedNode(state, state.selectedKey);
+  }
+  state.current = next;
 }
 
 function reportClientError(error: unknown) {
@@ -442,8 +533,8 @@ function reportClientError(error: unknown) {
 }
 
 function bootstrap() {
-  const modelState: { current: BoardModel | null; selectedKey: string | null } = { current: null, selectedKey: null };
-  const nodes = new Map<string, HTMLElement>();
+  const modelState: BoardRenderState = { current: null, selectedKey: null, nodes: new Map() };
+  const nodes = modelState.nodes;
   const generated = document.querySelector<HTMLElement>("[data-generated-at]");
   const boardGrid = document.querySelector<HTMLElement>("#board-grid");
   if (boardGrid && "ResizeObserver" in window) {
@@ -455,39 +546,10 @@ function bootstrap() {
     resizeObserver.observe(boardGrid);
   }
 
-  const setSelected = (key: string | null) => {
-    if (modelState.selectedKey === key) return;
-    if (modelState.selectedKey) nodes.get(modelState.selectedKey)?.classList.remove("is-selected");
-    modelState.selectedKey = key;
-    if (key) nodes.get(key)?.classList.add("is-selected");
-  };
+  const setSelected = (key: string | null) => setSelectedNode(modelState, key);
 
   const applyPatches = (next: BoardModel, patches: readonly BoardPatch[]) => {
-    for (const patch of patches) {
-      if (patch.op === "remove") {
-        nodes.get(patch.key)?.remove();
-        nodes.delete(patch.key);
-      } else if (patch.op === "insert") {
-        const node = createCard(patch.item);
-        nodes.set(patch.key, node);
-        insertAt(patch.column, node, patch.index);
-      } else if (patch.op === "move") {
-        const node = nodes.get(patch.key);
-        if (node) insertAt(patch.column, node, patch.index);
-      } else {
-        const item = next.items[patch.key];
-        const node = nodes.get(patch.key);
-        if (!item || !node) continue;
-        if (item.kind === "session") updateSessionCard(node, item, patch.fields);
-        else updateRegisterCard(node, item, patch.fields);
-      }
-    }
-    updateCounts(next);
-    if (!modelState.selectedKey || !next.items[modelState.selectedKey]) {
-      const first = BOARD_COLUMNS.flatMap((column) => next.columns[column])[0];
-      setSelected(first?.key ?? null);
-    }
-    modelState.current = next;
+    applyBoardPatches(next, patches, modelState, document);
   };
 
   const moveSelection = (direction: "j" | "k" | "h" | "l") => {
