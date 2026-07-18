@@ -84,10 +84,53 @@ The company exists to satisfy these; every slice in §7 must name which it serve
 
 Explicitly deferred beyond this plan: standups/scheduled self-reports; automated meta-fix application (classification stays human/Fable in v1); Effect-migration fan-out (own program, gated on the H1 contract read — Arthur has signaled intent to scale parallel agents at it after test hardening; the DST/fuzz suite is that program's §7-equivalent).
 
-## 8. Open questions for Arthur (answer in next session's first message)
+## 8. Interfaces — the trinity, the studio practices, and the agent-native adaptations
+
+(Arthur, 2026-07-18: "slack + linear + vercel-kind-of-thing... symphony-pilled. kanban board + what do designers/artists use to coordinate and show artifacts. and how would we adapt it to agent-native.")
+
+### 8.1 The trinity, mapped
+
+| Human tool | What it actually contributes | Our substrate today | Agent-native adaptation |
+|---|---|---|---|
+| **Slack** | topic-scoped persistent channels (not DMs), threads, @mentions, presence, bots posting INTO channels | IRC bus (peer DMs + broadcast), cmux inbox | **Channels per workstream** where Arthur + lead + hands + observers coexist; every message is a TYPED event with a prose rendering (frictions, asks, receipts, digests are payloads first) — humans read the rendering, agents decode the payload. Presence is computed from labels/digests (HR-180/199), never performed. HR-184's phone bridge is just one more channel member. |
+| **Linear** | durable work OBJECTS: issues with states, dependencies, cycles, triage inbox — the model, not the view | register rows + TASKS.md + goal/todo (fragmented) | **One work-object store** (cards) that the register/TASKS converge into; cards are CLAIMABLE by agents (HR-181 ownership), carry machine-checkable acceptance where possible, and **transition on gate events** — a card moves to Done because the gate ran green and the bless landed, never because someone said so. HR-200's board is this model's view. |
+| **Vercel previews** | every change = a live clickable deployment; you review the artifact, not the diff | ALREADY REPO LAW: Bret Victor rule, portless per stream, artifact-viewer/dashboard pattern, proof-of-work-qa | Converge the per-stream dashboards (xanadu, primer-daemon) into one **artifact feed**: every card links its LIVE preview + proof bundle; "preview deliverables from different streams" = one feed, stream-filtered. The third consumer that AGENTS.md says triggers extracting the shared package. |
+
+### 8.2 Symphony-pilled: the dispatch loop the board needs
+
+Symphony's model (vendor/openai/symphony, README+SPEC): watch a work board → spawn isolated autonomous runs per card → agents return **proof-of-work bundles** (CI status, review feedback, complexity, walkthrough video) → human ACCEPTS → agent lands it safely. "Manage work, not agents."
+
+Adopted as the board's semantics (this is the piece HR-200 lacked): a card in Ready state is a spawnable packet (the HR-196 assignment format); the run is isolated (worktree/`isolated:true`); completion returns the proof bundle onto the card; Arthur's accept action lands+blesses. Tonight's manual practice (packet → gate ritual → proof-in-commit → register flip) IS this loop hand-cranked — Symphony-mode automates the crank without changing the contract. Next-session note: read SPEC.md properly before building; the elixir reference stays vendored, we implement against the spec on our own substrate (the gate ritual is our CI).
+
+### 8.3 What non-software studios use — and their agent analogs
+
+The creative industries converged on artifact-centric coordination (never report-centric) — closer to agent-native than software's standup culture:
+
+| Studio practice | What it does | Agent analog |
+|---|---|---|
+| **Dailies** (animation/VFX) | yesterday's rendered frames screened every morning; the director gives notes ON THE FOOTAGE; notes become the day's line items | The morning brief fused with the artifact feed: Arthur reviews yesterday's deliverables inline, his notes become typed cards. This is his existing review-products-not-commits culture, given a cadence. |
+| **The crit / pin-up** (design school, studios) | work pinned on the wall; peers respond to the artifact, adversarially, in front of everyone | Adversarial review generalized beyond code: designer/writer agents' outputs get pinned to the feed and critiqued by a second independent-context agent BEFORE Arthur sees them (his taste stays the final gate, not the first filter). |
+| **Moodboard / reference wall** | shared visual context that CONSTRAINS without specifying | Per-stream reference artifacts agents must consult before producing (companion/primer already have creative-framing.md — make it a first-class card attachment, images included). |
+| **Writers' room board / storyboard** | the whole structure visible at a glance; reordering is cheap and physical | The board's dependency view — narrative order as drag-reorder, which is why local-first matters (latency of thought). |
+| **Call sheet** (film production) | one page, produced every night by the AD: who's needed where tomorrow, what's shooting | The overnight handoff doc — already practiced (this session ran on one). Formalize: the chief-of-staff emits tomorrow's call sheet as part of the evening close. |
+| **Conductor & score** (the name is no accident) | the score is the shared contract; sections rehearse separately; the conductor keeps time and never plays an instrument | Contracts (H1/H2 style) = the score; leads = section principals; chief-of-staff = conductor: keeps time (cadences, gates), never implements. |
+
+### 8.4 Agent-native adaptation principles (what changes when the workers aren't human)
+
+1. **Artifacts are alive** — previews and runnable surfaces, never screenshots of them (Bret Victor rule already in law).
+2. **One event, two projections** — everything typed under the prose; every UI has `--json`, every payload has a rendering. Humans and agents consume the SAME stream.
+3. **State moves on evidence, not assertion** — card transitions are gate-driven (test green, bless landed, proof attached); "I'm done" is not a state transition.
+4. **Presence is computed** — no performative status; labels/digests derived from actual work (observers, N6 non-interference).
+5. **Review at the artifact, decisions as typed notes** — the dailies/crit pattern: feedback lands as cards/claims, never as prose that evaporates.
+6. **Compression is a role, not a tax** — observers/summarizers own it; workers never self-report (§3).
+
+## 9. Open questions for Arthur (answer in next session's first message)
 
 1. Name for the top agent (chief of staff / assistant / leader-orchestrator?) — it appears in UI and IRC ids, so it's worth choosing once.
 2. Observer rename authority: may HR-199 rename ANY session's display name, or only subagents (leads keep self-naming)?
 3. Morning brief delivery: in-session on demand only, or also pushed (cmux inbox / HR-184 phone bridge) at a fixed hour?
 4. `report_friction` visibility: do hands see each other's reports (bias risk) or write-only up the ladder?
 5. Confirm §7 order or reorder — especially whether the board (5) should jump ahead of the report ladder (4).
+6. Symphony loop adoption: make the board's Ready→spawn→proof-bundle→accept→land loop the DEFAULT dispatch semantics for register/board cards (§8.2), or keep manual dispatch and add Symphony-mode per-stream opt-in? (Recommendation: opt-in per stream, harness stream first — it already runs the loop hand-cranked.)
+7. Channels: adopt workstream channels on the IRC bus (§8.1, typed-events-with-renderings) in the summarizer slice, or defer to the chief-of-staff slice? Affects whether HR-199 digests post into a channel or only into label_json.
+8. Dailies cadence: fuse the morning brief with the artifact feed as a proper dailies review (yesterday's deliverables inline, your notes become cards), or keep brief and feed separate surfaces for now?
