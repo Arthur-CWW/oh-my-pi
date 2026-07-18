@@ -84,5 +84,5 @@ for package in "${packages[@]-}"; do
 done
 
 if (( $# )); then
-	(cd "$snapshot_root" && "$@") || exit $?
+	(cd "$snapshot_root" && export OMP_FLEET_REGISTER=0 && "$@") || exit $?
 fi

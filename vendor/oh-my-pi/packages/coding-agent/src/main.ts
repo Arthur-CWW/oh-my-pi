@@ -1073,6 +1073,9 @@ export async function runRootCommand(
 	const pipedInput = isProtocolMode ? undefined : await logger.time("readPipedInput", readPipedInput);
 	const autoPrint = pipedInput !== undefined && !parsedArgs.print && parsedArgs.mode === undefined;
 	const isInteractive = !parsedArgs.print && !autoPrint && parsedArgs.mode === undefined;
+	// Print mode still constructs a full AgentSession, but must not publish a roster peer.
+	// Fence the environment only around construction so later in-process callers are unaffected.
+	const fleetRegistrationDisabled = parsedArgs.print || autoPrint;
 
 	// Initialize discovery system with settings for provider persistence
 	logger.time("initializeWithSettings", initializeWithSettings, settingsInstance);
@@ -1327,12 +1330,21 @@ export async function runRootCommand(
 
 	const createAgentSessionImpl = deps.createAgentSession ?? createAgentSession;
 	const createSession = async (options: CreateAgentSessionOptions): Promise<CreateAgentSessionResult> => {
-		const result = await logger.time("createAgentSession", createAgentSessionImpl, options);
-		// Kick off background model discovery only after createAgentSession finishes its parallel
-		// discovery arms; running these concurrently contends for the event loop and stretches
-		// every parallel arm by ~30ms.
-		modelRegistry.refreshInBackground();
-		return result;
+		const previousFleetRegistration = process.env.OMP_FLEET_REGISTER;
+		if (fleetRegistrationDisabled) process.env.OMP_FLEET_REGISTER = "0";
+		try {
+			const result = await logger.time("createAgentSession", createAgentSessionImpl, options);
+			// Kick off background model discovery only after createAgentSession finishes its parallel
+			// discovery arms; running these concurrently contends for the event loop and stretches
+			// every parallel arm by ~30ms.
+			modelRegistry.refreshInBackground();
+			return result;
+		} finally {
+			if (fleetRegistrationDisabled) {
+				if (previousFleetRegistration === undefined) delete process.env.OMP_FLEET_REGISTER;
+				else process.env.OMP_FLEET_REGISTER = previousFleetRegistration;
+			}
+		}
 	};
 
 	if (mode === "acp") {

@@ -2,12 +2,15 @@ import { describe, expect, it } from "bun:test";
 import { TempDir } from "@oh-my-pi/pi-utils";
 import { IrcExternalBus, type IrcExternalPeerLabels } from "../../src/irc/bus-external";
 
-function withIsolatedBus(test: (bus: IrcExternalBus) => void): void {
+function withIsolatedBus(test: (bus: IrcExternalBus) => void, fleetRegistration: "0" | "unset" = "unset"): void {
 	using tmp = TempDir.createSync("@omp-irc-bus-");
 	const previousHome = process.env.HOME;
 	const previousControlDb = process.env.OMP_SESSION_CONTROL_DB;
+	const previousFleetRegistration = process.env.OMP_FLEET_REGISTER;
 	process.env.HOME = tmp.path();
 	process.env.OMP_SESSION_CONTROL_DB = `${tmp.path()}/session-control.sqlite`;
+	if (fleetRegistration === "0") process.env.OMP_FLEET_REGISTER = "0";
+	else delete process.env.OMP_FLEET_REGISTER;
 	const bus = new IrcExternalBus(`${tmp.path()}/irc-bus.sqlite`);
 	try {
 		test(bus);
@@ -17,6 +20,8 @@ function withIsolatedBus(test: (bus: IrcExternalBus) => void): void {
 		else process.env.HOME = previousHome;
 		if (previousControlDb === undefined) delete process.env.OMP_SESSION_CONTROL_DB;
 		else process.env.OMP_SESSION_CONTROL_DB = previousControlDb;
+		if (previousFleetRegistration === undefined) delete process.env.OMP_FLEET_REGISTER;
+		else process.env.OMP_FLEET_REGISTER = previousFleetRegistration;
 	}
 }
 
@@ -49,6 +54,23 @@ describe("external IRC peer labels", () => {
 			expect(bus.mergePeerLabels("missing-peer", { summary: "not created" })).toBe(false);
 			expect(bus.listPeers({ includeStale: true })).toHaveLength(1);
 		});
+	});
+
+	it("leaves the roster unchanged when fleet registration is disabled", () => {
+		withIsolatedBus(
+			bus => {
+				const before = bus.listPeers({ includeStale: true });
+				bus.registerPeer({
+					sessionId: "disabled-peer",
+					name: "disabled",
+					cwd: "/tmp/irc-bus-test",
+				});
+				bus.heartbeat("disabled-peer", { activity: "must not persist" });
+				bus.updatePeerState("disabled-peer", "working");
+				expect(bus.listPeers({ includeStale: true })).toEqual(before);
+			},
+			"0",
+		);
 	});
 
 	it("preserves observer summary while heartbeat refreshes activity", () => {

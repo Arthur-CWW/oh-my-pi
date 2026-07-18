@@ -127,6 +127,7 @@ describe("ACP stdout hygiene", () => {
 				PI_CODING_AGENT_DIR: agentDir,
 				PI_NO_TITLE: "1",
 				NO_COLOR: "1",
+				OMP_FLEET_REGISTER: "0",
 			},
 		});
 		activeProc = proc;

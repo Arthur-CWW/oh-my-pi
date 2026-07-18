@@ -278,6 +278,25 @@ function toPeer(row: PeerRow): IrcExternalPeer {
 		labels: decodeLabelJson(row.label_json),
 	};
 }
+function toUnregisteredPeer(peer: IrcExternalRegistration, pid: number): IrcExternalPeer {
+	return {
+		sessionId: peer.sessionId,
+		name: peer.name,
+		cwd: peer.cwd,
+		pid,
+		lastSeen: nowIso(),
+		state: "unknown",
+		stateTs: null,
+		explicitName: Boolean(peer.explicitName),
+		sessionFile: peer.sessionFile,
+		ownerEpoch: peer.ownerEpoch,
+		buildDigest: peer.buildDigest,
+		version: peer.version,
+		fleetCapability: peer.fleetCapability,
+		labels: normalizePeerLabels(peer.labels),
+	};
+}
+
 
 function toMessage(row: MessageRow): IrcExternalMessage {
 	return {
@@ -306,6 +325,9 @@ export class IrcExternalBus {
 	}
 
 	readonly #db: Database;
+	/** Registration is evaluated once per bus so print-mode fences cannot leak after construction. */
+	readonly #registrationEnabled: boolean;
+
 	#fleetCapabilitySelect = "fleet_capability_json";
 	#labelSelect = "label_json";
 
@@ -366,6 +388,7 @@ export class IrcExternalBus {
 	}
 
 	constructor(readonly dbPath: string = DEFAULT_DB_PATH, options: IrcExternalBusOptions = {}) {
+		this.#registrationEnabled = process.env.OMP_FLEET_REGISTER !== "0";
 		if (!options.readonly) fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 		this.#db = options.readonly ? new Database(dbPath, { readonly: true }) : new Database(dbPath);
 		this.#db.run("PRAGMA busy_timeout = 3000");
@@ -420,6 +443,7 @@ export class IrcExternalBus {
 
 	registerPeer(peer: IrcExternalRegistration): IrcExternalPeer {
 		const pid = peer.pid ?? process.pid;
+		if (!this.#registrationEnabled) return toUnregisteredPeer(peer, pid);
 		const lastSeen = nowIso();
 		const labels = normalizePeerLabels(peer.labels);
 		this.#db
@@ -474,6 +498,7 @@ export class IrcExternalBus {
 	}
 
 	handoffPeer(predecessorSessionId: string, successor: IrcExternalRegistration): IrcExternalPeer {
+		if (!this.#registrationEnabled) return toUnregisteredPeer(successor, successor.pid ?? process.pid);
 		const registered = this.registerPeer(successor);
 		if (predecessorSessionId === registered.sessionId) return registered;
 		this.#db
@@ -511,6 +536,7 @@ export class IrcExternalBus {
 	}
 
 	heartbeat(sessionId: string, labels?: IrcExternalPeerLabels): void {
+		if (!this.#registrationEnabled) return;
 		// Session heartbeats provide the complete self-owned label set (including
 		// empty values for cleared fields); merging preserves observer-owned fields
 		// such as summary when they are absent from the heartbeat payload.
@@ -537,6 +563,7 @@ export class IrcExternalBus {
 	}
 
 	updatePeerState(sessionId: string, state: Exclude<IrcExternalPeerState, "unknown">): void {
+		if (!this.#registrationEnabled) return;
 		const ts = nowIso();
 		this.#db
 			.query(
