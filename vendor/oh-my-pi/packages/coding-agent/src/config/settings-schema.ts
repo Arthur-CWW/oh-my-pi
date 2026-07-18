@@ -3254,6 +3254,17 @@ export const SETTINGS_SCHEMA = {
 		},
 	},
 
+	"reminders.scrapingDesktop": {
+		type: "boolean",
+		default: true,
+		ui: {
+			tab: "tools",
+			group: "Search & Browser",
+			label: "Scraping Desktop Reminder",
+			description: "Suggest the Ubuntu desktop lane when scraping-class work starts on macOS",
+		},
+	},
+
 	...BROWSER_SETTINGS_SCHEMA,
 
 	// Tool execution

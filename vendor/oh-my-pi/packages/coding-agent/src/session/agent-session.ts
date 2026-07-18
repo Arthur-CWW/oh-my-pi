@@ -345,6 +345,13 @@ import {
 } from "./messages";
 import { OversizedPromptRecoveryGuard, recoverOversizedPrompt } from "./oversized-prompt-recovery";
 import {
+	SCRAPING_DESKTOP_REMINDER,
+	SCRAPING_DESKTOP_REMINDER_MESSAGE_TYPE,
+	SCRAPING_DESKTOP_REMINDER_STATE_TYPE,
+	type ScrapingDesktopActivity,
+	shouldInjectScrapingDesktopReminder,
+} from "./scraping-desktop-reminder";
+import {
 	decideRefusalReroute,
 	REFUSAL_REROUTE_ANNOTATION,
 	type RefusalRerouteDecision,
@@ -629,6 +636,8 @@ export interface AgentSessionConfig {
 	externalIrcBus?: IrcExternalBus;
 	/** Test seam for shortening the idle heartbeat interval; production uses four minutes. */
 	externalIrcHeartbeatIntervalMs?: number;
+	/** Test seam for deterministic scraping-reminder host gating. */
+	scrapingDesktopRuntime?: { platform: NodeJS.Platform; hostname: string };
 	/** Test seams for the opt-in announcement feed watcher. Production callers leave this unset. */
 	feedWatcher?: Omit<FeedWatcherOptions, "fetch" | "complete" | "notice" | "irc" | "sources"> & {
 		fetch?: FeedWatcherOptions["fetch"];
@@ -1436,6 +1445,9 @@ export class AgentSession {
 	// Extension system
 	#extensionRunner: ExtensionRunner | undefined = undefined;
 	#turnIndex = 0;
+	readonly #scrapingDesktopRuntime: { platform: NodeJS.Platform; hostname: string };
+	#scrapingDesktopBrowserOpenCount = 0;
+	#scrapingDesktopReminderInjectionPending = false;
 
 	#skills: Skill[];
 	#skillWarnings: SkillWarning[];
@@ -1716,6 +1728,10 @@ export class AgentSession {
 	constructor(config: AgentSessionConfig) {
 		this.agent = config.agent;
 		this.sessionManager = config.sessionManager;
+		this.#scrapingDesktopRuntime = config.scrapingDesktopRuntime ?? {
+			platform: process.platform,
+			hostname: os.hostname(),
+		};
 		this.#externalIrcBus = config.externalIrcBus;
 		const configuredExternalIrcHeartbeatIntervalMs = config.externalIrcHeartbeatIntervalMs;
 		this.#externalIrcHeartbeatIntervalMs =
@@ -2682,6 +2698,44 @@ export class AgentSession {
 		return suppressOwnershipLoss(this.#processAgentEvent(event));
 	};
 
+	async #maybeInjectScrapingDesktopReminder(activity: ScrapingDesktopActivity): Promise<void> {
+		if (!this.settings.get("reminders.scrapingDesktop") || this.#scrapingDesktopReminderInjectionPending) return;
+		if (
+			this.sessionManager
+				.getBranch()
+				.some(entry => entry.type === "custom" && entry.customType === SCRAPING_DESKTOP_REMINDER_STATE_TYPE)
+		) {
+			return;
+		}
+		if (
+			!shouldInjectScrapingDesktopReminder({
+				...this.#scrapingDesktopRuntime,
+				cwd: this.sessionManager.getCwd(),
+				activity,
+			})
+		) {
+			return;
+		}
+
+		this.#scrapingDesktopReminderInjectionPending = true;
+		try {
+			await this.sendCustomMessage(
+				{
+					customType: SCRAPING_DESKTOP_REMINDER_MESSAGE_TYPE,
+					content: SCRAPING_DESKTOP_REMINDER,
+					display: false,
+					details: { skills: ["gpu-workload-dispatch", "remote-chrome-control"], host: "desktop.eth" },
+				},
+				{ deliverAs: "nextTurn" },
+			);
+			this.sessionManager.appendCustomEntry(SCRAPING_DESKTOP_REMINDER_STATE_TYPE, { version: 1 });
+		} catch (error) {
+			logger.warn("Failed to inject the advisory scraping desktop reminder", { error: String(error) });
+		} finally {
+			this.#scrapingDesktopReminderInjectionPending = false;
+		}
+	}
+
 	#processAgentEvent = async (event: AgentEvent): Promise<void> => {
 		// Plan-mode → compaction transition: stamp `SILENT_ABORT_MARKER` on the
 		// persisted message BEFORE the obfuscator's display-side copy below.
@@ -2728,6 +2782,7 @@ export class AgentSession {
 				cacheRead: usage.cacheRead,
 				cacheWrite: usage.cacheWrite,
 			});
+			this.#scrapingDesktopBrowserOpenCount = 0;
 		}
 
 		await this.#emitSessionEvent(displayEvent);
@@ -2804,6 +2859,24 @@ export class AgentSession {
 			} else {
 				await this.#goalRuntime.onToolCompleted(event.toolName);
 			}
+		}
+		if (event.type === "tool_execution_start") {
+			const args = event.args;
+			if (
+				event.toolName === "browser" &&
+				typeof args === "object" &&
+				args !== null &&
+				"action" in args &&
+				args.action === "open"
+			) {
+				this.#scrapingDesktopBrowserOpenCount += 1;
+			}
+			await this.#maybeInjectScrapingDesktopReminder({
+				type: "tool",
+				toolName: event.toolName,
+				args,
+				browserOpenCount: this.#scrapingDesktopBrowserOpenCount,
+			});
 		}
 		if (event.type === "tool_execution_end" && event.toolName === "yield" && !event.isError) {
 			this.#lastSuccessfulYieldToolCallId = event.toolCallId;
@@ -6295,6 +6368,9 @@ export class AgentSession {
 		let keywordNotices: CustomMessage[] = [];
 		if (message.customType === SKILL_PROMPT_MESSAGE_TYPE && message.attribution === "user") {
 			const details = message.details;
+			if (details && typeof details === "object" && "name" in details && typeof details.name === "string") {
+				await this.#maybeInjectScrapingDesktopReminder({ type: "skill", skillName: details.name });
+			}
 			let skillArgs = "";
 			if (details && typeof details === "object" && "args" in details && typeof details.args === "string") {
 				skillArgs = details.args;
@@ -7887,6 +7963,15 @@ export class AgentSession {
 			deliveryLease?: AdvisorDeliveryLease;
 		},
 	): Promise<boolean> {
+		if (
+			message.customType === SKILL_PROMPT_MESSAGE_TYPE &&
+			message.details &&
+			typeof message.details === "object" &&
+			"name" in message.details &&
+			typeof message.details.name === "string"
+		) {
+			await this.#maybeInjectScrapingDesktopReminder({ type: "skill", skillName: message.details.name });
+		}
 		const details =
 			options?.queueChipText && options.deliverAs !== "nextTurn"
 				? ({
