@@ -102,6 +102,56 @@ export function composePromotionReport(
 	return { ...report, incompleteLine: `ROLLOUT incomplete: ${reason}` };
 }
 
+export interface PromotionOptions {
+	readonly noRollout: boolean;
+	readonly verbose: boolean;
+}
+
+export function parsePromotionOptions(
+	argv: readonly string[] = process.argv.slice(2),
+	environment: NodeJS.ProcessEnv = process.env,
+): PromotionOptions {
+	let verbose = false;
+	let noRollout = environment.OMP_PROMOTE_ROLLOUT === "0";
+	for (const arg of argv) {
+		if (arg === "--verbose") verbose = true;
+		else if (arg === "--no-rollout") noRollout = true;
+		else throw new Error(`unknown option: ${arg}`);
+	}
+	return { noRollout, verbose };
+}
+
+export interface RolloutSummaryCounts {
+	readonly restarted: number;
+	readonly skipped: number;
+	readonly unresponsive: number;
+	readonly legacy: number;
+	readonly remaining: number;
+}
+
+export function rolloutSummaryCounts(stdout: string): RolloutSummaryCounts {
+	let restarted = 0;
+	let skipped = 0;
+	let unresponsive = 0;
+	let legacy = 0;
+	let remaining = 0;
+	for (const line of stdout.split(/\r?\n/)) {
+		if (line.startsWith("restarted ")) restarted += 1;
+		else if (line.startsWith("skip ")) {
+			skipped += 1;
+			const reason = line.includes("reason=") ? line.slice(line.indexOf("reason=") + "reason=".length) : "";
+			if (reason === "unresponsive") unresponsive += 1;
+			if (reason.startsWith("legacy")) legacy += 1;
+		} else if (line.startsWith("failed ") || line.startsWith("untouched ")) remaining += 1;
+	}
+	return { restarted, skipped, unresponsive, legacy, remaining };
+}
+
+export function formatRolloutSummary(stdout: string): string {
+	const counts = rolloutSummaryCounts(stdout);
+	return `rollout: ${counts.restarted} restarted, ${counts.skipped} skipped (unresponsive: ${counts.unresponsive}, legacy: ${counts.legacy}), ${counts.remaining} remaining`;
+}
+
 async function readCandidateBuildRevision(binary: string, cwd: string): Promise<BuildRevision> {
 	return parseBuildRevision(await run([binary, "--runner-build-revision"], cwd));
 }
@@ -235,14 +285,11 @@ async function writePromotionNote(temporary: string, digest: string, version: st
 	await fs.writeFile(temporary, `${lines.join("\n")}\n`, { flag: "wx", mode: 0o600 });
 }
 
-class RolloutIncompleteError extends Error {
-	constructor(readonly reportLine: string) {
-		super(reportLine);
-		this.name = "RolloutIncompleteError";
-	}
-}
 
-export async function promote(config: Config = configFromEnvironment()): Promise<void> {
+export async function promote(
+	config: Config = configFromEnvironment(),
+	options: PromotionOptions = parsePromotionOptions(),
+): Promise<void> {
 	const stable = path.join(config.binDir, "omp");
 	const linkEnvironment = {
 		...process.env,
@@ -314,16 +361,23 @@ export async function promote(config: Config = configFromEnvironment()): Promise
 		console.log(`digest ${digest}`);
 		console.log(`version ${revision.version}`);
 		console.log(`receipt ${receiptDisplay} ${receiptDigest}`);
+		if (options.noRollout) {
+			console.log("rollout: disabled");
+			return;
+		}
 		let rollout: PromotionCommandResult;
 		try {
 			rollout = await command([stable, "rollout", "--auto"], config.repoRoot);
 		} catch (error) {
 			const reason = error instanceof Error ? error.message : String(error);
-			throw new RolloutIncompleteError(`ROLLOUT incomplete: ${reason}`);
+			rollout = { exitCode: 1, stdout: "", stderr: reason };
 		}
-		const rolloutReport = composePromotionReport(revision.version, digest, rollout);
-		if (rolloutReport.rolloutStdout) process.stdout.write(rolloutReport.rolloutStdout);
-		if (rolloutReport.incompleteLine) throw new RolloutIncompleteError(rolloutReport.incompleteLine);
+		if (options.verbose) {
+			if (rollout.stdout) process.stdout.write(rollout.stdout);
+			if (rollout.stderr) process.stderr.write(rollout.stderr.endsWith("\n") ? rollout.stderr : `${rollout.stderr}\n`);
+		} else {
+			console.log(formatRolloutSummary(rollout.stdout));
+		}
 	} finally {
 		if (noteTemporary) await fs.rm(noteTemporary, { force: true });
 		if (worktreeAdded && worktree) {
@@ -340,8 +394,8 @@ export async function promote(config: Config = configFromEnvironment()): Promise
 }
 
 if (import.meta.main) {
-	promote().catch(error => {
-		console.error(error instanceof RolloutIncompleteError ? error.reportLine : `ERROR task failed: ${error instanceof Error ? error.message : String(error)}`);
+	promote(undefined, parsePromotionOptions()).catch(error => {
+		console.error(`ERROR task failed: ${error instanceof Error ? error.message : String(error)}`);
 		process.exitCode = 1;
 	});
 }

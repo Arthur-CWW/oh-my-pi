@@ -44,11 +44,32 @@ const SKIP_REASON_REPORT: Record<SkipReason, string> = {
 	legacy: "legacy binary — restart manually once; future rollouts will manage it",
 };
 
+export interface RolloutSkip {
+	readonly sessionId: string;
+	readonly name: string;
+	readonly reason: "unresponsive";
+}
+
+export class RolloutUnresponsiveError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = "RolloutUnresponsiveError";
+	}
+}
+
+export class RolloutHealthError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = "RolloutHealthError";
+	}
+}
+
 export interface RolloutSummary {
 	readonly targetDigest: string;
 	readonly targetVersion: string;
 	readonly entries: readonly RolloutPlanEntry[];
 	readonly restarted: readonly string[];
+	readonly skipped: readonly RolloutSkip[];
 	readonly failed?: { readonly sessionId: string; readonly name: string; readonly error: string };
 }
 
@@ -77,16 +98,22 @@ export function createRolloutPlan(
 export async function executeRolloutPlan(
 	entries: readonly RolloutPlanEntry[],
 	restart: (peer: RolloutPeer) => Promise<void>,
-): Promise<{ restarted: string[]; failed?: RolloutSummary["failed"] }> {
+): Promise<{ restarted: string[]; skipped: RolloutSkip[]; failed?: RolloutSummary["failed"] }> {
 	const restarted: string[] = [];
+	const skipped: RolloutSkip[] = [];
 	for (const entry of entries) {
 		if (entry.action !== "restart") continue;
 		try {
 			await restart(entry.peer);
 			restarted.push(entry.peer.sessionId);
 		} catch (error) {
+			if (isUnresponsiveFailure(error)) {
+				skipped.push({ sessionId: entry.peer.sessionId, name: entry.peer.name, reason: "unresponsive" });
+				continue;
+			}
 			return {
 				restarted,
+				skipped,
 				failed: {
 					sessionId: entry.peer.sessionId,
 					name: entry.peer.name,
@@ -95,8 +122,23 @@ export async function executeRolloutPlan(
 			};
 		}
 	}
-	return { restarted };
+	return { restarted, skipped };
 }
+function asErrorMessage(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}
+
+function isTimeoutMessage(message: string): boolean {
+	return /timed out waiting/i.test(message);
+}
+
+function isUnresponsiveFailure(error: unknown): boolean {
+	return (
+		error instanceof RolloutUnresponsiveError ||
+		(!(error instanceof RolloutHealthError) && isTimeoutMessage(asErrorMessage(error)))
+	);
+}
+
 
 async function executableDigest(): Promise<string> {
 	const hash = createHash("sha256");
@@ -162,7 +204,7 @@ export async function runRollout(options: RunRolloutOptions = {}): Promise<Rollo
 		const initiators = options.initiatorPids ?? (await ancestorPids());
 		const peers = activeBus.listPeers();
 		const entries = createRolloutPlan(peers, targetDigest, initiators, options.initiatorSessionIds);
-		if (options.dryRun) return { targetDigest, targetVersion, entries, restarted: [] };
+		if (options.dryRun) return { targetDigest, targetVersion, entries, restarted: [], skipped: [] };
 		const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 		const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
 		const sourceInstanceId = randomUUID();
@@ -218,16 +260,23 @@ export async function runRollout(options: RunRolloutOptions = {}): Promise<Rollo
 					requestedAt: new Date().toISOString(),
 					intent: { kind: "restart", executable: targetExecutable },
 				});
-				const receipt = await activeControlBus.waitForTerminal(commandId, {
-					timeoutMs,
-					pollIntervalMs,
-					onReceipt: next => {
-						if (next.state === "requested") updatePeer(current, "requested");
-						else if (next.state === "acknowledged") updatePeer(current, "acknowledged");
-						else if (next.state === "applied") updatePeer(current, "applied");
-						else updatePeer(current, "failed", { error: next.error ?? "restart control command failed" });
-					},
-				});
+				let receipt: Awaited<ReturnType<SessionControlBus["waitForTerminal"]>>;
+				try {
+					receipt = await activeControlBus.waitForTerminal(commandId, {
+						timeoutMs,
+						pollIntervalMs,
+						onReceipt: next => {
+							if (next.state === "requested") updatePeer(current, "requested");
+							else if (next.state === "acknowledged") updatePeer(current, "acknowledged");
+							else if (next.state === "applied") updatePeer(current, "applied");
+							else updatePeer(current, "failed", { error: next.error ?? "restart control command failed" });
+						},
+					});
+				} catch (error) {
+					const message = asErrorMessage(error);
+					if (isTimeoutMessage(message)) throw new RolloutUnresponsiveError(message);
+					throw error;
+				}
 				if (receipt.state === "failed") throw new Error(receipt.error ?? "restart control command failed");
 				const deadline = Date.now() + timeoutMs;
 				for (;;) {
@@ -240,16 +289,21 @@ export async function runRollout(options: RunRolloutOptions = {}): Promise<Rollo
 							targetDigest,
 						}),
 					);
-					if (recovered && (!recovered.version || recovered.version === targetVersion)) {
+					if (recovered) {
+						if (recovered.version && recovered.version !== targetVersion)
+							throw new RolloutHealthError(
+								`health regression on ${current.name}: expected version ${targetVersion}, got ${recovered.version}`,
+							);
 						updatePeer({ ...current, sessionFile: recovered.sessionFile ?? current.sessionFile }, "recovered");
 						return;
 					}
 					if (Date.now() >= deadline)
-						throw new Error(`timed out waiting for recovery on ${targetDigest.slice(0, 12)}`);
+						throw new RolloutUnresponsiveError(`timed out waiting for recovery on ${targetDigest.slice(0, 12)}`);
 					await Bun.sleep(Math.min(pollIntervalMs, Math.max(1, deadline - Date.now())));
 				}
 			} catch (error) {
-				updatePeer(current, "failed", { error: error instanceof Error ? error.message : String(error) });
+				if (isUnresponsiveFailure(error)) updatePeer(current, "skipped", { reason: "unresponsive" });
+				else updatePeer(current, "failed", { error: asErrorMessage(error) });
 				throw error;
 			}
 		});
@@ -281,14 +335,18 @@ function printSummary(summary: RolloutSummary, dryRun: boolean): void {
 		if (entry.action === "skip")
 			process.stdout.write(`skip ${identity} reason=${SKIP_REASON_REPORT[entry.reason]}\n`);
 		else {
-			const outcome = summary.restarted.includes(entry.peer.sessionId)
-				? "restarted"
-				: summary.failed?.sessionId === entry.peer.sessionId
-					? "failed"
-					: dryRun
-						? "would-restart"
-						: "untouched";
-			process.stdout.write(`${outcome} ${identity}\n`);
+			const skipped = summary.skipped.find(item => item.sessionId === entry.peer.sessionId);
+			if (skipped) process.stdout.write(`skip ${entry.peer.name} reason=${skipped.reason}\n`);
+			else {
+				const outcome = summary.restarted.includes(entry.peer.sessionId)
+					? "restarted"
+					: summary.failed?.sessionId === entry.peer.sessionId
+						? "failed"
+						: dryRun
+							? "would-restart"
+							: "untouched";
+				process.stdout.write(`${outcome} ${identity}\n`);
+			}
 		}
 	}
 	if (summary.failed)

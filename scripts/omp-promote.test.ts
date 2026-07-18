@@ -8,8 +8,10 @@ import {
 	blessedCommitFromVersion,
 	composePromotionReport,
 	decidePromotion,
+	formatRolloutSummary,
 	parseBuildRevision,
 	parseInstalledVersion,
+	parsePromotionOptions,
 	promotionBuildEnvironment,
 	readInstalledBuildRevision,
 } from "./omp-promote";
@@ -101,6 +103,30 @@ describe("promotion reporting", () => {
 			rolloutStdout: "rollout target def\n",
 			incompleteLine: "ROLLOUT incomplete: rollout aborted at peer-2: recovery timeout",
 		});
+	});
+});
+
+describe("rollout options and summary", () => {
+	it("parses rollout controls from flags and environment", () => {
+		expect(parsePromotionOptions(["--verbose"], {})).toEqual({ noRollout: false, verbose: true });
+		expect(parsePromotionOptions(["--no-rollout"], {})).toEqual({ noRollout: true, verbose: false });
+		expect(parsePromotionOptions([], { OMP_PROMOTE_ROLLOUT: "0" })).toEqual({ noRollout: true, verbose: false });
+		expect(() => parsePromotionOptions(["--unexpected"], {})).toThrow("unknown option");
+	});
+
+	it("summarizes restarted, unresponsive, legacy, and remaining sessions", () => {
+		expect(
+			formatRolloutSummary(
+				[
+					"rollout target digest (version)",
+					"restarted alpha session=a",
+					"skip beta session=b reason=unresponsive",
+					"skip legacy session=l reason=legacy binary — restart manually once",
+					"failed canary session=c",
+					"untouched later session=d",
+				].join("\n"),
+			),
+		).toBe("rollout: 1 restarted, 2 skipped (unresponsive: 1, legacy: 1), 2 remaining");
 	});
 });
 
