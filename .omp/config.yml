@@ -2,13 +2,17 @@ task:
   isolation:
     mode: apfs
   softRequestBudget: 80
-# Base worker roles (2026-07-07): guarantees the Fable-subagent guard always has
-# a non-Fable fallback — without these, sessions running Fable as main silently
-# spawned Fable subagents (guard exhaustion -> undefined -> pi/default = Fable).
-modelRoles:
-  task: openai-codex/gpt-5.6-terra:medium
-  # smol: oogle-antigravity/gemini-3.5-flash
-  # slow: openai-codex/gpt-5.6-terra:medium
+# 2026-07-17 (Arthur directive, remove after 2026-07-18 eve): quota-admission
+# projections model zero resets until the weekly boundary while Codex resets
+# near-daily (docs/state/model-availability.md 07-13/07-17 rows) — admission was
+# refusing 5.6 spawns during the explicit burn-the-reset window. Real fix is
+# HR-183 (reset-aware projection); re-enable when it lands.
+quotaAdmission:
+  enabled: false
+# Base worker routing keeps bounded work on Terra medium and orchestration on
+# Sol high, including when this project config overlays the global settings.
+modelRoles: {}
+serviceTier: none
 providers:
   webSearch: kagi
 # Control-plane telemetry publisher (2026-07-07): every ~/agents session appends
@@ -16,4 +20,21 @@ providers:
 # source-first); ingest via `cd packages/control-plane && bun run cli ingest`.
 # Bundled dist entry — rebuild with `bun run build:extension` after src changes.
 extensions:
+  # Project arrays replace global arrays, so retain web-access explicitly here.
+  - ./packages/web-access/src/index.ts
   - ./packages/control-plane
+  - ./packages/computer-use-bridge
+  - ./packages/ast-grep-guard
+  - ./packages/mermaid-preview
+  - ./packages/browser-use
+  - ./packages/stema
+  - ./extensions/browser-automation-guard.ts
+skills:
+  ignoredSkills:
+    - gmcli
+  customDirectories:
+    - ./skills/browser
+    - ./skills/core
+    - ./skills/fleet
+    - ./vendor/badlogic/pi-skills
+    - ./packages/stema/skills
