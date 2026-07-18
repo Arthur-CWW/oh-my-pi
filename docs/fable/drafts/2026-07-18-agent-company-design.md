@@ -1,6 +1,6 @@
 # Agent company — operating model & execution plan (DRAFT)
 
-Status: PLANNED THIS SESSION per Arthur, 2026-07-18 ("maybe we'll plan it out first in this session, and then we'll continue in the next session with all of these"). Implementation is HELD until he lifts it; the next session executes from §7 in order.
+Status: EXECUTING as of 2026-07-18 — Arthur answered §9 (rulings in §9a) and lifted the implementation hold; the session executes §7 in order, HR-188+204 first.
 
 Provenance: Arthur voice memos 2026-07-17/18 (fleet coordination, summarizer, org shape, sampling+reporting, morning brief), synthesized against what already shipped (HR-165..194) and what is filed-and-held (HR-195..204). Companion doc: `2026-07-18-capability-architecture.md` (the four layers; this doc is the layer-3 operating model).
 
@@ -173,3 +173,17 @@ Confirmed: the current ask shape (question + options with descriptions + recomme
 8. Dailies cadence: fuse the morning brief with the artifact feed as a proper dailies review (yesterday's deliverables inline, your notes become cards), or keep brief and feed separate surfaces for now?
 9. Delivery adapter first target: Slack or Discord? (One first, per clean-cutover habit — the adapter interface makes the second cheap.) And which message classes may escalate to the phone by default: decision points only, or also DEAD/STALLED incidents?
 10. Capability nomination authority: leads only, or may the observer auto-nominate on detecting a new tool surface in a thread's artifacts? (Recommendation: leads nominate in v1; observer flags candidates without nominating.)
+## 9a. Rulings (Arthur, 2026-07-18, first message of the execution session — verbatim fragments quoted; unanswered items resolved by Fable under his delegation "please just figure it out" + "swallow the bitterpill, and think from that perspective")
+
+1. DELEGATED (follow-up: "you can decide for most of these... just figure it out/choose") → resolved: top agent named **chief-of-staff**, IRC id `Chief` — descriptive over cute, chosen once.
+2. RULED: "any doesn't matter" — observer may rename ANY session's display name, not only subagents.
+3. RULED: "when i ask + if i queue up alot of work in the background/overnight" — brief on demand always; pushed only after queued background/overnight work; no fixed hour.
+4. DELEGATED ("idk, pls help") → resolved: friction rows readable by all (files are shared state; no ACL machinery in v1); bias risk handled at the aggregation layer, not by hiding rows.
+5. META-RULING, applies to every slice: "maybe stop making it so structure,>be more bitter lessoned<, shard the context at the right places, progressive disclosure of context + searchiblility , make it discoverable." Applied: §7 order stands, but each slice ships minimal-first; state docs are plain searchable markdown behind an index, not rigid typed schemas; typed rows ONLY where machines must join on them (friction store, decision queue); prefer general+searchable over hand-crafted structure.
+6. DELEGATED → per doc recommendation: Symphony-mode opt-in per stream, harness stream first.
+7. DELEGATED → resolved: channels deferred to the chief-of-staff slice; HR-199 digests land in label_json + state-doc files only.
+8. RULED: "keep separate, have an index file so i can jump around as needed" — brief and artifact feed stay separate surfaces joined by one index file.
+9. RULED: "discord" — Discord adapter first. Phone-escalation half unanswered → conservative default: decision points only.
+10. DELEGATED ("what is this stuff") → per doc recommendation: leads nominate in v1; observer flags candidates without nominating.
+
+GOVERNING GENERATOR (Arthur, 2026-07-18, follow-up message; tier A): "they don't seem to be reality cleaving/important cruxes, so you can just figure it out/choose. the models will get better i just want to approach harness-building philosophy with that in mind." Scope: all agent-company/§7 design choices. Consequence: build minimal general primitives (searchable files, read-only transcripts, one URI/ask primitive) and NEVER encode today's model weaknesses as durable architecture — the epistemics "band-aids die with the model" rule promoted from docs to design law. Fable holds decision authority on non-crux choices; cruxes (spend, security, taste) still go to Arthur.
