@@ -349,6 +349,7 @@ export class InteractiveMode implements InteractiveModeContext, SubmittedInputRe
 	ui: TUI;
 	chatContainer: TranscriptContainer;
 	pendingMessagesContainer: Container;
+	usageContainer: Container;
 	statusContainer: Container;
 	todoContainer: Container;
 	subagentContainer: Container;
@@ -509,6 +510,7 @@ export class InteractiveMode implements InteractiveModeContext, SubmittedInputRe
 			this.loadingAnimation = undefined;
 		}
 		this.statusContainer.clear();
+		this.usageContainer?.clear();
 		this.pendingMessagesContainer.clear();
 		this.#cancelModelCycleClearTimer();
 		this.modelCycleContainer.clear();
@@ -594,6 +596,7 @@ export class InteractiveMode implements InteractiveModeContext, SubmittedInputRe
 		this.chatContainer = new TranscriptContainer();
 		this.pendingMessagesContainer = new Container();
 		this.statusContainer = new StatusContainer();
+		this.usageContainer = new Container();
 		this.todoContainer = new Container();
 		this.subagentContainer = new Container();
 		this.btwContainer = new Container();
@@ -783,6 +786,7 @@ export class InteractiveMode implements InteractiveModeContext, SubmittedInputRe
 		this.ui.addChild(this.chatContainer);
 		this.ui.addChild(this.pendingMessagesContainer);
 		this.ui.addChild(this.statusContainer);
+		this.ui.addChild(this.usageContainer);
 		this.ui.addChild(this.todoContainer);
 		this.ui.addChild(this.subagentContainer);
 		this.ui.addChild(this.btwContainer);

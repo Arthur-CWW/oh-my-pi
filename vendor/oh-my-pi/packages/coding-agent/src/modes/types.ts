@@ -99,6 +99,7 @@ export interface InteractiveModeContext {
 	chatContainer: TranscriptContainer;
 	pendingMessagesContainer: Container;
 	statusContainer: Container;
+	usageContainer?: Container;
 	todoContainer: Container;
 	subagentContainer: Container;
 	btwContainer: Container;

@@ -32,6 +32,7 @@ import { DynamicBorder } from "../../modes/components/dynamic-border";
 import { keyHint } from "../../modes/components/keybinding-hints";
 import { CommandOutputOverlayComponent } from "../../modes/components/command-line";
 import { ToolsView } from "../../modes/components/tools-view";
+import { UsageHudComponent } from "../../modes/components/usage-hud";
 import { EvalExecutionComponent } from "../../modes/components/eval-execution";
 import { TranscriptBlock } from "../../modes/components/transcript-container";
 import { getMarkdownTheme, getSymbolTheme, theme } from "../../modes/theme/theme";
@@ -67,6 +68,7 @@ function showMarkdownPanel(ctx: InteractiveModeContext, title: string, markdown:
 export class CommandController {
 	#commandOutputOverlay: OverlayHandle | undefined;
 	#toolsOverlay: OverlayHandle | undefined;
+	#usageHud: UsageHudComponent | undefined;
 	#toolsView: ToolsView | undefined;
 
 	constructor(private readonly ctx: InteractiveModeContext) {}
@@ -86,6 +88,23 @@ export class CommandController {
 			maxHeight: 14,
 			margin: { bottom: 1 },
 		});
+		this.ctx.ui.setFocus(component);
+		this.ctx.ui.requestRender();
+	}
+	#showUsageHud(message: string): void {
+		const container = this.ctx.usageContainer ?? this.ctx.statusContainer;
+		container.clear();
+		let component: UsageHudComponent;
+		const dismiss = (): void => {
+			if (this.#usageHud !== component) return;
+			this.#usageHud = undefined;
+			container.clear();
+			this.ctx.ui.setFocus(this.ctx.editor);
+			this.ctx.ui.requestRender();
+		};
+		component = new UsageHudComponent(message, dismiss, () => this.ctx.ui.terminal.rows ?? 24);
+		this.#usageHud = component;
+		container.addChild(component);
 		this.ctx.ui.setFocus(component);
 		this.ctx.ui.requestRender();
 	}
@@ -463,10 +482,7 @@ export class CommandController {
 		showOutput(info.trimEnd());
 	}
 
-	async handleUsageCommand(
-		reports?: UsageReport[] | null,
-		showOutput: (message: string) => void = message => this.#showCommandOutput(message),
-	): Promise<void> {
+	async handleUsageCommand(reports?: UsageReport[] | null): Promise<void> {
 		let usageReports = reports ?? null;
 		if (!usageReports) {
 			const provider = this.ctx.session as { fetchUsageReports?: () => Promise<UsageReport[] | null> };
@@ -498,7 +514,7 @@ export class CommandController {
 		const output = renderUsageReports(usageReports, theme, Date.now(), availableWidth, provider =>
 			provider === currentProvider ? activeAccount : undefined,
 		);
-		showOutput(output);
+		this.#showUsageHud(output);
 	}
 
 	async handleChangelogCommand(showFull = false): Promise<void> {
