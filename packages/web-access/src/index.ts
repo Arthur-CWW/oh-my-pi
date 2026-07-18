@@ -8,12 +8,6 @@ import { storeSearch, storeFetch, getStored } from "./store"
 import { getTranscript } from "./youtube"
 import { openChatGptHandoff } from "./chatgpt"
 import {
-  isCuaDriverAction,
-  runCuaDriver,
-  type CuaDriverAction,
-  type JsonValue,
-} from "./cua-driver"
-import {
   chatGptLoginFrontendBrowser,
   collectFrontendBrowser,
   frontendBrowserProjects,
@@ -26,18 +20,11 @@ import {
   type FrontendProvider,
 } from "./frontend-browser"
 import { registerCodexResume } from "./codex"
-import registerVimLite from "./vim-lite"
 import { registerAgentCockpit } from "./agent-cockpit-extension"
 import { registerAgentHistory } from "./agent-history-extension"
 import { registerDiscordAgentServer } from "./discord-agent-server-extension.boundary"
 import { registerSymphonyxOpen } from "./symphonyx-open"
 import { toErrorMessage } from "./schemas"
-import {
-  executeComputerUseAction,
-  getGlobalPolicyState,
-  runComputerUseAction,
-  setGlobalPolicyState,
-} from "./computer-use"
 
 // Boundary note for T-2026-06-09-005:
 // this entrypoint is the temporary registration seam while web-access is split.
@@ -52,180 +39,6 @@ function truncateText(text: string, limit: number): string {
   return `${text.slice(0, Math.max(0, limit - 80))}\n\n... truncated ${text.length - limit} chars ...`
 }
 
-// ─── Tool: cua_driver ────────────────────────────────────────────────
-
-function registerCuaDriver(pi: ExtensionAPI): void {
-  pi.registerTool({
-    name: "cua_driver",
-    label: "CuaDriver",
-    description:
-      "Background-safe macOS GUI/browser automation through installed cua-driver. Use capture/get_window_state before element-indexed actions.",
-    parameters: Type.Object({
-      action: Type.String({
-        description: "status, permissions, list_apps, list_windows, launch_app, capture, get_window_state, click, double_click, right_click, type_text, press_key, hotkey, scroll, drag, set_value, page, zoom, start_recording, or stop_recording",
-      }),
-      args: Type.Optional(Type.Any({ description: "JSON object passed to the underlying cua-driver tool" })),
-      executable: Type.Optional(Type.String({ description: "Optional cua-driver executable path" })),
-      timeoutMs: Type.Optional(Type.Number({ description: "Execution timeout in milliseconds" })),
-    }),
-    async execute(_callId, rawParams) {
-      const params = rawParams as {
-        action?: string
-        args?: JsonValue
-        executable?: string
-        timeoutMs?: number
-      }
-      if (!params.action || !isCuaDriverAction(params.action)) {
-        return {
-          content: [{ type: "text", text: "Error: unsupported cua_driver action." }],
-          details: { action: "", error: "Unsupported action", json: "", text: "" },
-        }
-      }
-
-      const result = await run(
-        Effect.match(runCuaDriver({
-          action: params.action as CuaDriverAction,
-          args: params.args,
-          executable: params.executable,
-          timeoutMs: params.timeoutMs,
-        }), {
-          onFailure: (err) => ({ error: toErrorMessage(err), ok: false as const }),
-          onSuccess: (data) => ({ data, ok: true as const }),
-        }),
-      )
-
-      if (result.ok === false) {
-        return {
-          content: [{ type: "text", text: `Error: ${result.error}` }],
-          details: { action: params.action, error: result.error, json: "", text: "" },
-        }
-      }
-
-      const output = result.data.json === null ? result.data.text : JSON.stringify(result.data.json, null, 2)
-      const text = [
-        `cua_driver ${result.data.action}: ok`,
-        "",
-        truncateText(output, 24_000),
-      ].join("\n")
-      return {
-        content: [{ type: "text", text }],
-        details: {
-          action: result.data.action,
-          error: "",
-          json: result.data.json === null ? "" : JSON.stringify(result.data.json),
-          text: result.data.text,
-        },
-      }
-    },
-  })
-}
-
-// ─── Tool: computer_use ──────────────────────────────────────────────
-
-function registerComputerUse(pi: ExtensionAPI): void {
-  pi.registerTool({
-    name: "computer_use",
-    label: "ComputerUse",
-    description:
-      "Higher-level background computer use extension. Executes safe action mapping, policy classification, and runs the action via CuaDriver.",
-    parameters: Type.Object({
-      action: Type.String({
-        description: "The computer use action: status, list_apps, get_app_state, capture, click, type, key",
-      }),
-      args: Type.Optional(Type.Any({ description: "JSON object containing arguments for the action" })),
-    }),
-    async execute(_callId, rawParams) {
-      const params = rawParams as {
-        action?: string
-        args?: Record<string, JsonValue>
-      }
-
-      const rawAction = {
-        type: params.action,
-        ...(params.args || {}),
-      }
-
-      const result = await runComputerUseAction(
-        rawAction,
-        getGlobalPolicyState(),
-        async (options) => {
-          const runRes = await run(
-            Effect.match(runCuaDriver(options), {
-              onFailure: (err) => ({ error: toErrorMessage(err), ok: false as const }),
-              onSuccess: (data) => ({ data, ok: true as const }),
-            })
-          )
-          if (!runRes.ok) {
-            throw new Error(runRes.error)
-          }
-          return runRes.data
-        }
-      )
-
-      if (result.updatedState && !result.error && result.allowed) {
-        setGlobalPolicyState(result.updatedState)
-      }
-
-      if (!result.allowed) {
-        return {
-          content: [{ type: "text", text: `Error: ${result.reason}` }],
-          details: {
-            action: params.action || "",
-            error: result.reason || "Policy violation",
-            json: JSON.stringify({
-              allowed: false,
-              reason: result.reason,
-              updatedState: result.updatedState,
-            }),
-            text: `Error: ${result.reason}`,
-          },
-        }
-      }
-
-      if (result.error) {
-        return {
-          content: [{ type: "text", text: `Error: ${result.error}` }],
-          details: {
-            action: params.action || "",
-            error: result.error,
-            json: JSON.stringify({
-              allowed: true,
-              mappedAction: result.mappedAction,
-              error: result.error,
-              updatedState: result.updatedState,
-            }),
-            text: `Error: ${result.error}`,
-          },
-        }
-      }
-
-      const output = result.output!
-      const outputText = output.json === null ? output.text : JSON.stringify(output.json, null, 2)
-      const text = [
-        `computer_use ${params.action}: ok`,
-        `Mapped CuaDriver action: ${result.mappedAction?.action}`,
-        `Updated policy state: ${JSON.stringify(result.updatedState)}`,
-        "",
-        truncateText(outputText, 24_000),
-      ].join("\n")
-
-      return {
-        content: [{ type: "text", text }],
-        details: {
-          action: params.action || "",
-          error: "",
-          json: JSON.stringify({
-            allowed: true,
-            mappedAction: result.mappedAction,
-            updatedState: result.updatedState,
-            output: output.json,
-          }),
-          text: output.text,
-        },
-      }
-    },
-  })
-}
 
 // ─── Tool: web_search ─────────────────────────────────────────────────
 
@@ -859,8 +672,6 @@ function registerLlmFrontendBrowser(pi: ExtensionAPI): void {
 // ─── Entrypoint ───────────────────────────────────────────────────────
 
 export default function (pi: ExtensionAPI): void {
-  registerCuaDriver(pi)
-  registerComputerUse(pi)
   registerWebSearch(pi)
   registerFetchContent(pi)
   registerGetContent(pi)
@@ -869,7 +680,6 @@ export default function (pi: ExtensionAPI): void {
   registerChatGptHandoff(pi)
   registerLlmFrontendBrowser(pi)
   registerCodexResume(pi)
-  registerVimLite(pi)
   registerAgentCockpit(pi)
   registerAgentHistory(pi)
   registerDiscordAgentServer(pi)

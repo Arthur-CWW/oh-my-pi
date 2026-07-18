@@ -28,6 +28,7 @@ export * from "./fuzzy";
 export * from "./keybindings";
 // Kitty keyboard protocol helpers
 export * from "./keys";
+export * from "./vim-grammar";
 // Kitty graphics: Unicode placeholders
 export * from "./kitty-graphics";
 // SGR mouse report parsing

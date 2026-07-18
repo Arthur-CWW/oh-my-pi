@@ -1,6 +1,6 @@
 # packages/web-access
 
-Pi extension bundle (`@wirebabel/pi-web-access`): web search, content fetching, YouTube transcripts, browser integration, and the vim-lite editor.
+Pi extension bundle (`@wirebabel/pi-web-access`): web search, content fetching, YouTube transcripts, and browser integration.
 
 ## Build
 
@@ -15,7 +15,7 @@ bun run web-access:help   # verify extension loads
 
 ```
 src/
-  index.ts             entrypoint: registers tools + vim-lite
+  index.ts             entrypoint: registers tools
   schemas.ts           Effect Schema types + errors
   config.ts            ~/.pi/web-search.json reader
   store.ts             JSON file KV store with TTL
@@ -25,16 +25,9 @@ src/
   kagi.ts              Kagi search client (auth: X-Kagi-Authorization header)
   gemini.ts            Gemini API client
   cookies.ts           Browser cookie integration (macOS)
-  cua-driver.ts        CuaDriver CLI wrapper
   codex.ts             Codex session listing/import, /codex-resume command
-  vim-lite.ts          Vim-like modal editor, /vim-lite command
   frontend-browser.ts  Frontend LLM browser automation
-test/                  Tests + vim-lite snapshots
+test/                  Tests
 vendor/kagi-chrome-extension/  Kagi extension submodule (reference)
 ```
 
-## vim-lite
-
-Registered via `registerVimLite(pi)` in `index.ts`. Commands: `/vim-lite` (enable), `/vim-lite off` (disable), `/vim-lite help` (show), `/vim-lite hide` (dismiss help). Yanks (`y`/`yy`/`Y`/visual `y`) write to system clipboard; deletes only touch internal register unless explicit register used. `"+p` pastes system clipboard.
-
-Tests: `test/vim-lite.test.ts` + `test/__snapshots__/vim-lite-visual.snap.txt`.

@@ -1184,6 +1184,17 @@ export const SETTINGS_SCHEMA = {
 	// Interaction
 	// ────────────────────────────────────────────────────────────────────────
 
+	"editor.vim": {
+		type: "boolean",
+		default: false,
+		ui: {
+			tab: "interaction",
+			group: "Input",
+			label: "Vim Editing",
+			description: "Start the prompt editor in Vim mode",
+		},
+	},
+
 	// Conversation flow
 	steeringMode: {
 		type: "enum",

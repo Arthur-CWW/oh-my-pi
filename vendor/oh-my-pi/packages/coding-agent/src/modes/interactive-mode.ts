@@ -601,6 +601,7 @@ export class InteractiveMode implements InteractiveModeContext, SubmittedInputRe
 		this.errorBannerContainer = new Container();
 		this.modelCycleContainer = new Container();
 		this.editor = new CustomEditor(getEditorTheme());
+		this.editor.setVimEnabled(this.settings.get("editor.vim"));
 		this.editor.setUseTerminalCursor(this.ui.getShowHardwareCursor());
 		this.editor.setAutocompleteMaxVisible(settings.get("autocompleteMaxVisible"));
 		this.editor.onAutocompleteCancel = () => {
@@ -3200,6 +3201,7 @@ export class InteractiveMode implements InteractiveModeContext, SubmittedInputRe
 		const nextEditor = factory
 			? factory(this.ui, getEditorTheme(), this.keybindings)
 			: new CustomEditor(getEditorTheme());
+		nextEditor.setVimEnabled(previousEditor.isVimEnabled());
 
 		nextEditor.setUseTerminalCursor(this.ui.getShowHardwareCursor());
 		nextEditor.setAutocompleteMaxVisible(this.settings.get("autocompleteMaxVisible"));

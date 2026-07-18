@@ -61,6 +61,7 @@ import type {
 	TuiSlashCommandRuntime,
 } from "./types";
 import { VERSION_COMMAND_SPEC } from "./version";
+import { VIM_COMMAND_SPEC } from "./vim";
 
 export type { BuiltinSlashCommand, SubcommandDef } from "./types";
 /** TUI-specific runtime accepted by `executeBuiltinSlashCommand`. */
@@ -1080,6 +1081,7 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<SlashCommandSpec> = [
 		},
 	},
 	FEEDS_COMMAND_SPEC,
+	VIM_COMMAND_SPEC,
 	VERSION_COMMAND_SPEC,
 	LOOPSTATS_COMMAND_SPEC,
 	{

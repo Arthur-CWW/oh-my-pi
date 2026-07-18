@@ -1,4 +1,17 @@
-import { addKeyAliases, canonicalKeyId, Editor, type KeyId, parseKey, parseKittySequence } from "@oh-my-pi/pi-tui";
+import {
+	addKeyAliases,
+	canonicalKeyId,
+	createVimState,
+	Editor,
+	parseKey,
+	parseKittySequence,
+	reduceVimKey,
+	type KeyId,
+	type VimEffect,
+	type VimKey,
+	type VimMode,
+	type VimPosition,
+} from "@oh-my-pi/pi-tui";
 import type { AppKeybinding } from "../../config/keybindings";
 import { isSettingsInitialized, settings } from "../../config/settings";
 import { imageReferenceHyperlink, PLACEHOLDER_REGEX, renderPlaceholders } from "../image-references";
@@ -140,6 +153,15 @@ export function extractBracketedImagePastePath(data: string): string | undefined
 /**
  * Custom editor that handles configurable app-level shortcuts for coding-agent.
  */
+type CustomVimTarget = Extract<VimEffect, { type: "delete" | "change" | "yank" }>["target"];
+type CustomVimSelection = {
+	text: string;
+	linewise: boolean;
+	startOffset: number;
+	endOffset: number;
+	startLine: number;
+	endLine: number;
+};
 export class CustomEditor extends Editor {
 	imageLinks?: readonly (string | undefined)[];
 
@@ -289,6 +311,459 @@ export class CustomEditor extends Editor {
 			buildMatchKeys(keys),
 		]),
 	);
+	#vimEnabled = false;
+	#vimState = createVimState();
+	#vimInsertGroupOpen = false;
+	#vimVisualAnchor: VimPosition | undefined;
+
+	/** Optional host bridge for the named system clipboard register (+). */
+	onVimClipboardRead?: () => string | undefined;
+	onVimClipboardWrite?: (text: string, linewise: boolean) => void;
+
+	setVimEnabled(on: boolean): void {
+		if (on === this.#vimEnabled) return;
+		if (!on && this.#vimInsertGroupOpen) this.#closeVimInsertGroup(false);
+		this.#vimEnabled = on;
+	}
+
+	isVimEnabled(): boolean {
+		return this.#vimEnabled;
+	}
+
+	getVimMode(): VimMode | null {
+		return this.#vimEnabled ? this.#vimState.mode : null;
+	}
+
+	#startVimInsertGroup(): void {
+		if (this.#vimInsertGroupOpen) return;
+		this.beginUndoGroup();
+		this.#vimInsertGroupOpen = true;
+	}
+
+	#closeVimInsertGroup(normalizeCursor: boolean): void {
+		if (this.#vimInsertGroupOpen) {
+			this.endUndoGroup();
+			this.#vimInsertGroupOpen = false;
+		}
+		if (normalizeCursor) this.#normalizeVimNormalCursor();
+	}
+
+	#normalizeVimNormalCursor(): void {
+		const cursor = this.getCursor();
+		const line = this.getLines()[cursor.line] ?? "";
+		if (line.length > 0 && cursor.col >= line.length) {
+			this.#moveVimCursor({ line: cursor.line, col: line.length - 1 });
+		}
+	}
+
+	#vimKey(data: string, canonical: string | undefined): VimKey {
+		const printable = data.length === 1 && data.charCodeAt(0) >= 32 ? data : undefined;
+		if (!canonical) return { char: data };
+		const parts = canonical.split("+");
+		const raw = parts.pop() ?? canonical;
+		return {
+			...(printable === undefined ? { key: raw } : { char: printable }),
+			ctrl: parts.includes("ctrl"),
+			alt: parts.includes("alt"),
+			meta: parts.includes("meta") || parts.includes("super"),
+			shift: parts.includes("shift"),
+		};
+	}
+
+	#isSinglePrintable(data: string): boolean {
+		return data.length === 1 && data.charCodeAt(0) >= 32;
+	}
+
+	#applyVimPassthrough(data: string, mode: VimMode): void {
+		if (mode === "insert") {
+			this.#startVimInsertGroup();
+			super.handleInput(data);
+			return;
+		}
+		if (!this.#isSinglePrintable(data)) super.handleInput(data);
+	}
+
+	#moveVimCursor(position: VimPosition): void {
+		const lines = this.getLines();
+		const targetLine = Math.max(0, Math.min(position.line, lines.length - 1));
+		const targetCol = Math.max(0, Math.min(position.col, lines[targetLine]?.length ?? 0));
+		let cursor = this.getCursor();
+		while (cursor.line > 0) {
+			super.handleInput("\x1b[A");
+			cursor = this.getCursor();
+		}
+		while (cursor.line < targetLine) {
+			super.handleInput("\x1b[B");
+			cursor = this.getCursor();
+			if (cursor.line === targetLine) break;
+		}
+		this.moveToLineStart();
+		for (let col = 0; col < targetCol; col++) super.handleInput("\x1b[C");
+	}
+
+	#vimOffset(position: VimPosition): number {
+		const lines = this.getLines();
+		let offset = 0;
+		for (let line = 0; line < position.line; line++) offset += (lines[line]?.length ?? 0) + 1;
+		return offset + position.col;
+	}
+
+	#vimPosition(offset: number): VimPosition {
+		const text = this.getText();
+		const clamped = Math.max(0, Math.min(offset, text.length));
+		let line = 0;
+		let lineStart = 0;
+		for (;;) {
+			const newline = text.indexOf("\n", lineStart);
+			if (newline === -1 || clamped <= newline) return { line, col: clamped - lineStart };
+			line++;
+			lineStart = newline + 1;
+		}
+	}
+
+	#vimWordChar(char: string | undefined, wide: boolean): boolean {
+		if (char === undefined || char === "\n" || /\s/.test(char)) return false;
+		return wide ? true : /[A-Za-z0-9_]/.test(char);
+	}
+
+	#vimWordForward(offset: number, count: number, wide: boolean): number {
+		const text = this.getText();
+		let result = offset;
+		for (let n = 0; n < count; n++) {
+			if (result < text.length && this.#vimWordChar(text[result], wide)) {
+				while (result < text.length && this.#vimWordChar(text[result], wide)) result++;
+			}
+			while (result < text.length && !this.#vimWordChar(text[result], wide)) result++;
+		}
+		return result;
+	}
+
+	#vimWordBackward(offset: number, count: number, wide: boolean): number {
+		const text = this.getText();
+		let result = offset;
+		for (let n = 0; n < count; n++) {
+			result = Math.max(0, result - 1);
+			while (result > 0 && !this.#vimWordChar(text[result], wide)) result--;
+			while (result > 0 && this.#vimWordChar(text[result - 1], wide)) result--;
+		}
+		return result;
+	}
+
+	#vimWordEnd(offset: number, count: number, wide: boolean): number {
+		const text = this.getText();
+		let result = offset;
+		for (let n = 0; n < count; n++) {
+			if (result < text.length && this.#vimWordChar(text[result], wide)) {
+				while (result + 1 < text.length && this.#vimWordChar(text[result + 1], wide)) result++;
+			} else {
+				while (result < text.length && !this.#vimWordChar(text[result], wide)) result++;
+				if (result < text.length) while (result + 1 < text.length && this.#vimWordChar(text[result + 1], wide)) result++;
+			}
+		}
+		return result;
+	}
+
+	#vimMotion(position: VimPosition, motion: string, count: number, explicit = false): VimPosition {
+		const lines = this.getLines();
+		const line = lines[position.line] ?? "";
+		switch (motion) {
+			case "h":
+				return { line: position.line, col: Math.max(0, position.col - count) };
+			case "l":
+				return { line: position.line, col: Math.min(line.length, position.col + count) };
+			case "j":
+				return {
+					line: Math.min(lines.length - 1, position.line + count),
+					col: Math.min(lines[Math.min(lines.length - 1, position.line + count)]?.length ?? 0, position.col),
+				};
+			case "k":
+				return {
+					line: Math.max(0, position.line - count),
+					col: Math.min(lines[Math.max(0, position.line - count)]?.length ?? 0, position.col),
+				};
+			case "0":
+				return { line: position.line, col: 0 };
+			case "^": {
+				const first = line.search(/\S/);
+				return { line: position.line, col: first < 0 ? 0 : first };
+			}
+			case "$":
+				return { line: position.line, col: line.length };
+			case "w":
+				return this.#vimPosition(this.#vimWordForward(this.#vimOffset(position), count, false));
+			case "W":
+				return this.#vimPosition(this.#vimWordForward(this.#vimOffset(position), count, true));
+			case "b":
+				return this.#vimPosition(this.#vimWordBackward(this.#vimOffset(position), count, false));
+			case "B":
+				return this.#vimPosition(this.#vimWordBackward(this.#vimOffset(position), count, true));
+			case "e":
+				return this.#vimPosition(this.#vimWordEnd(this.#vimOffset(position), count, false));
+			case "E":
+				return this.#vimPosition(this.#vimWordEnd(this.#vimOffset(position), count, true));
+			case "gg":
+				return { line: explicit ? Math.min(lines.length - 1, count - 1) : 0, col: 0 };
+			case "G":
+				return {
+					line: explicit ? Math.min(lines.length - 1, count - 1) : lines.length - 1,
+					col: 0,
+				};
+			default:
+				return position;
+		}
+	}
+
+	#vimSelection(target: CustomVimTarget): {
+		text: string;
+		linewise: boolean;
+		startOffset: number;
+		endOffset: number;
+		startLine: number;
+		endLine: number;
+	} | undefined {
+		const cursor = this.getCursor();
+		const lines = this.getLines();
+		if (target.kind === "line" || target.kind === "vertical" || target.kind === "goto" || (target.kind === "visual" && target.linewise)) {
+			let startLine = cursor.line;
+			let endLine = cursor.line;
+			if (target.kind === "line") endLine = Math.min(lines.length - 1, cursor.line + target.count - 1);
+			if (target.kind === "vertical") {
+				if (target.direction === "down") endLine = Math.min(lines.length - 1, cursor.line + target.count);
+				else startLine = Math.max(0, cursor.line - target.count);
+			}
+			if (target.kind === "goto") {
+				const targetLine = target.line === "last" ? lines.length - 1 : Math.max(0, Math.min(lines.length - 1, target.line));
+				if (targetLine < cursor.line) startLine = targetLine;
+				else endLine = targetLine;
+			}
+			if (target.kind === "visual") {
+				const anchor = this.#vimVisualAnchor ?? cursor;
+				startLine = Math.min(anchor.line, cursor.line);
+				endLine = Math.max(anchor.line, cursor.line);
+			}
+			return {
+				text: lines.slice(startLine, endLine + 1).join("\n"),
+				linewise: true,
+				startOffset: this.#vimOffset({ line: startLine, col: 0 }),
+				endOffset: this.#vimOffset({ line: endLine, col: lines[endLine]?.length ?? 0 }),
+				startLine,
+				endLine,
+			};
+		}
+		let startOffset: number;
+		let endOffset: number;
+		if (target.kind === "characters") {
+			const cursorOffset = this.#vimOffset(cursor);
+			if (target.direction === "forward") {
+				startOffset = cursorOffset;
+				endOffset = Math.min(this.getText().length, cursorOffset + target.count);
+			} else {
+				startOffset = Math.max(0, cursorOffset - target.count);
+				endOffset = cursorOffset;
+			}
+		} else if (target.kind === "line-end") {
+			startOffset = this.#vimOffset(cursor);
+			endOffset = this.#vimOffset({ line: cursor.line, col: (lines[cursor.line] ?? "").length });
+		} else if (target.kind === "visual") {
+			const anchor = this.#vimVisualAnchor ?? cursor;
+			const anchorOffset = this.#vimOffset(anchor);
+			const cursorOffset = this.#vimOffset(cursor);
+			startOffset = Math.min(anchorOffset, cursorOffset);
+			endOffset = Math.max(anchorOffset, cursorOffset) + 1;
+			endOffset = Math.min(this.getText().length, endOffset);
+		} else {
+			const endpoint = this.#vimMotion(cursor, target.motion, target.count);
+			const cursorOffset = this.#vimOffset(cursor);
+			const endpointOffset = this.#vimOffset(endpoint);
+			if (target.motion === "h" || target.motion === "b" || target.motion === "B" || target.motion === "0" || target.motion === "^") {
+				startOffset = Math.min(cursorOffset, endpointOffset);
+				endOffset = Math.max(cursorOffset, endpointOffset);
+			} else if (target.motion === "e" || target.motion === "E") {
+				startOffset = Math.min(cursorOffset, endpointOffset);
+				endOffset = Math.min(this.getText().length, Math.max(cursorOffset, endpointOffset) + 1);
+			} else {
+				startOffset = Math.min(cursorOffset, endpointOffset);
+				endOffset = Math.max(cursorOffset, endpointOffset);
+			}
+		}
+		if (endOffset <= startOffset) return undefined;
+		const start = this.#vimPosition(startOffset);
+		const end = this.#vimPosition(endOffset);
+		return {
+			text: this.getText().slice(startOffset, endOffset),
+			linewise: false,
+			startOffset,
+			endOffset,
+			startLine: start.line,
+			endLine: end.line,
+		};
+	}
+
+	#writeVimRegister(text: string, linewise: boolean, registerName?: "+"): void {
+		this.#vimState = { ...this.#vimState, register: { text, linewise } };
+		if (registerName === "+") this.onVimClipboardWrite?.(text, linewise);
+	}
+
+	#deleteVimSelection(selection: CustomVimSelection): void {
+		if (selection.linewise) {
+			const lines = this.getLines();
+			const next = lines.slice(0, selection.startLine).concat(lines.slice(selection.endLine + 1));
+			this.setText(next.join("\n"));
+			this.#moveVimCursor({ line: Math.min(selection.startLine, next.length - 1), col: 0 });
+		} else {
+			const text = this.getText();
+			this.setText(text.slice(0, selection.startOffset) + text.slice(selection.endOffset));
+			this.#moveVimCursor(this.#vimPosition(Math.min(selection.startOffset, this.getText().length)));
+		}
+	}
+
+	#applyVimOperation(type: "delete" | "change" | "yank", target: CustomVimTarget, registerName?: "+"): void {
+		const selection = this.#vimSelection(target);
+		if (!selection) return;
+		this.#writeVimRegister(selection.text, selection.linewise, registerName);
+		if (type === "yank") return;
+		if (type === "change") {
+			this.#startVimInsertGroup();
+			this.#deleteVimSelection(selection);
+			return;
+		}
+		this.beginUndoGroup();
+		this.#deleteVimSelection(selection);
+		this.endUndoGroup();
+	}
+
+	#applyVimPut(effect: Extract<VimEffect, { type: "put" }>): void {
+		if (!effect.register.text) return;
+		this.beginUndoGroup();
+		if (effect.register.linewise) {
+			const lines = this.getLines();
+			const registerLines = effect.register.text.split("\n");
+			const inserted: string[] = [];
+			for (let n = 0; n < effect.count; n++) inserted.push(...registerLines);
+			const cursor = this.getCursor();
+			const index = effect.before ? cursor.line : cursor.line + 1;
+			lines.splice(index, 0, ...inserted);
+			this.setText(lines.join("\n"));
+			this.#moveVimCursor({ line: index, col: 0 });
+		} else {
+			const text = effect.register.text.repeat(effect.count);
+			const cursorOffset = this.#vimOffset(this.getCursor());
+			const point = effect.before ? cursorOffset : Math.min(this.getText().length, cursorOffset + 1);
+			this.setText(this.getText().slice(0, point) + text + this.getText().slice(point));
+			this.#moveVimCursor(this.#vimPosition(point + Math.max(0, text.length - 1)));
+		}
+		this.endUndoGroup();
+	}
+
+	#applyVimReplace(char: string, count: number): void {
+		const cursor = this.getCursor();
+		const line = this.getLines()[cursor.line] ?? "";
+		const length = Math.min(count, Math.max(0, line.length - cursor.col));
+		if (length === 0) return;
+		this.beginUndoGroup();
+		const start = this.#vimOffset(cursor);
+		const text = this.getText();
+		this.setText(text.slice(0, start) + char.repeat(length) + text.slice(start + length));
+		this.#moveVimCursor({ line: cursor.line, col: cursor.col + length - 1 });
+		this.endUndoGroup();
+	}
+
+	#applyVimEnterInsert(variant: Extract<VimEffect, { type: "enter-insert" }>["variant"], count: number): void {
+		this.#startVimInsertGroup();
+		const cursor = this.getCursor();
+		const lines = this.getLines();
+		switch (variant) {
+			case "line-start":
+				this.moveToLineStart();
+				break;
+			case "line-end":
+				this.moveToLineEnd();
+				break;
+			case "after-cursor":
+				if ((lines[cursor.line] ?? "").length > cursor.col) this.#moveVimCursor({ line: cursor.line, col: cursor.col + 1 });
+				break;
+			case "open-below": {
+				const inserted = Array.from({ length: count }, () => "");
+				lines.splice(cursor.line + 1, 0, ...inserted);
+				this.setText(lines.join("\n"));
+				this.#moveVimCursor({ line: cursor.line + 1, col: 0 });
+				break;
+			}
+			case "open-above": {
+				const inserted = Array.from({ length: count }, () => "");
+				lines.splice(cursor.line, 0, ...inserted);
+				this.setText(lines.join("\n"));
+				this.#moveVimCursor({ line: cursor.line, col: 0 });
+				break;
+			}
+			case "cursor":
+				break;
+		}
+	}
+
+	#applyVimEffect(effect: VimEffect): void {
+		switch (effect.type) {
+			case "passthrough":
+				this.#applyVimPassthrough(this.#vimPassthroughData, this.#vimPassthroughMode);
+				break;
+			case "motion":
+				this.#moveVimCursor(this.#vimMotion(this.getCursor(), effect.motion, effect.count, effect.explicit));
+				break;
+			case "enter-insert":
+				this.#applyVimEnterInsert(effect.variant, effect.count);
+				break;
+			case "delete":
+			case "change":
+			case "yank":
+				this.#applyVimOperation(effect.type, effect.target, effect.registerName);
+				break;
+			case "put":
+				this.#applyVimPut(effect);
+				break;
+			case "replace-char":
+				this.#applyVimReplace(effect.char, effect.count);
+				break;
+			case "undo":
+				for (let i = 0; i < effect.count; i++) if (!this.undo()) break;
+				break;
+			case "redo":
+				for (let i = 0; i < effect.count; i++) if (!this.redo()) break;
+				break;
+			case "set-visual-anchor":
+				this.#vimVisualAnchor = this.getCursor();
+				break;
+			case "clear-visual-anchor":
+				this.#vimVisualAnchor = undefined;
+				break;
+			case "swap-visual-anchor":
+				this.#vimVisualAnchor = this.getCursor();
+				break;
+			case "toggle-paste":
+				this.expandPasteAtCursor();
+				break;
+			case "end-insert-session":
+				this.#closeVimInsertGroup(true);
+				break;
+			case "mode":
+				break;
+		}
+	}
+
+	#vimPassthroughData = "";
+	#vimPassthroughMode: VimMode = "insert";
+
+	#handleVimInput(data: string, canonical: string | undefined): void {
+		if (this.#vimState.selectedRegister === "+" && this.onVimClipboardRead) {
+			const clipboardText = this.onVimClipboardRead();
+			if (clipboardText !== undefined) this.#vimState = { ...this.#vimState, register: { text: clipboardText, linewise: false } };
+		}
+		const mode = this.#vimState.mode;
+		const result = reduceVimKey(this.#vimState, this.#vimKey(data, canonical));
+		this.#vimState = result.state;
+		this.#vimPassthroughData = data;
+		this.#vimPassthroughMode = mode;
+		for (const effect of result.effects) this.#applyVimEffect(effect);
+	}
 
 	setActionKeys(action: ConfigurableEditorAction, keys: KeyId[]): void {
 		this.#actionKeys.set(action, [...keys]);
@@ -400,6 +875,7 @@ export class CustomEditor extends Editor {
 	}
 
 	dispose(): void {
+		if (this.#vimInsertGroupOpen) this.#closeVimInsertGroup(false);
 		if (this.#disposed) return;
 		this.#disposed = true;
 		if (this.#shimmerTimer) clearTimeout(this.#shimmerTimer);
@@ -446,8 +922,9 @@ export class CustomEditor extends Editor {
 			return;
 		}
 
-		// Space-hold push-to-talk: a sustained space bar starts/stops STT instead of typing spaces.
-		if (this.#handleSpaceHold(data, canonical)) return;
+		// Space-hold push-to-talk remains an insert-mode overlay; normal-mode
+		// spaces must be owned by the Vim reducer.
+		if ((!this.#vimEnabled || this.#vimState.mode === "insert") && this.#handleSpaceHold(data, canonical)) return;
 
 		if (canonical !== undefined) {
 			// Intercept configured image paste (async - fires and handles result)
@@ -574,6 +1051,10 @@ export class CustomEditor extends Editor {
 				handler();
 				return;
 			}
+		}
+		if (this.#vimEnabled) {
+			this.#handleVimInput(data, canonical);
+			return;
 		}
 
 		// Pass to parent for normal handling
