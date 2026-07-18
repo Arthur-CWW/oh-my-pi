@@ -17,8 +17,9 @@ import {
 	formatFleetStatus,
 	pruneFleetPeers,
 } from "../cli/fleet-cli";
+import { collectFleetOverview, formatFleetOverview, formatFleetOverviewJson } from "../cli/fleet-overview";
 
-const ACTIONS = ["status", "errors", "prune", "pause", "resume", "rollout", "rollback", "pin", "unpin"] as const;
+const ACTIONS = ["status", "overview", "errors", "prune", "pause", "resume", "rollout", "rollback", "pin", "unpin"] as const;
 
 function fail(message: string): never {
 	throw new Error(`fleet: ${message}`);
@@ -31,7 +32,7 @@ export default class Fleet extends Command {
 		action: Args.string({
 			description: "Fleet action",
 			required: true,
-			options: ACTIONS,
+			options: [...ACTIONS],
 		}),
 		selector: Args.string({
 			description: "Session ID, exact peer handle, or workstream:<slug>",
@@ -59,6 +60,7 @@ export default class Fleet extends Command {
 		since: Flags.string({ description: "Errors since ISO time or duration (for example 2h or 7d)" }),
 		session: Flags.string({ description: "Filter errors by session ID" }),
 		rollout: Flags.string({ description: "Filter errors by rollout ID" }),
+		json: Flags.boolean({ description: "Output as JSON (overview)", default: false }),
 	};
 
 	static examples = [
@@ -70,6 +72,8 @@ export default class Fleet extends Command {
 		"# Pin one peer to an immutable digest\n  omp fleet pin agent-handle <sha256>",
 		"# Journal a blessed rollout plan\n  omp fleet rollout --blessed --dry-run",
 		"# Roll back one durable rollout to N-1\n  omp fleet rollback <rollout-id> --to previous",
+		"# High-level fleet overview\n  omp fleet overview",
+		"# Machine-readable fleet overview\n  omp fleet overview --json",
 	];
 
 	async run(): Promise<void> {
@@ -106,6 +110,19 @@ export default class Fleet extends Command {
 						row.workstream === `workstream:${selector}`,
 				);
 			process.stdout.write(formatFleetStatus(rows));
+			return;
+		}
+
+		if (action === "overview") {
+			let rows = collectFleetOverview({ workstream: flags.workstream, all: flags.all });
+			if (selector)
+				rows = rows.filter(
+					row =>
+						row.sessionId === selector ||
+						row.name === selector ||
+						row.workstream === selector,
+				);
+			process.stdout.write(flags.json ? formatFleetOverviewJson(rows) : formatFleetOverview(rows));
 			return;
 		}
 

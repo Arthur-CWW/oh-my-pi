@@ -218,6 +218,7 @@ import { IrcBus, type IrcMessage } from "../irc/bus";
 import {
 	IRC_EXTERNAL_IDLE_HEARTBEAT_MS,
 	IrcExternalBus,
+	type IrcExternalPeerLabels,
 	type IrcExternalPeerState,
 	resolveIrcExternalPeerName,
 } from "../irc/bus-external";
@@ -1415,6 +1416,8 @@ export class AgentSession {
 	readonly #externalIrcBus: IrcExternalBus | undefined;
 	#externalIrcHeartbeatTimer: ReturnType<typeof setInterval> | undefined;
 	readonly #externalIrcHeartbeatIntervalMs: number;
+	/** Best-effort activity label for external bus publication; set on user prompt and tool result. */
+	#peerActivityLabel = "";
 	#ambientAgentRenamer: AmbientAgentRenamer | undefined;
 	#feedWatcher: FeedWatcher | undefined;
 	// Agent identity (registry id) used for IRC routing and job ownership.
@@ -2902,6 +2905,17 @@ export class AgentSession {
 			if (event.message.role === "assistant") {
 				this.#lastAssistantMessage = event.message;
 				const assistantMsg = event.message as AssistantMessage;
+				// Track latest tool intent for external bus activity publication
+				for (let ci = assistantMsg.content.length - 1; ci >= 0; ci--) {
+					const block = assistantMsg.content[ci];
+					if (block.type === "toolCall") {
+						const intent = block.arguments?._i;
+						if (typeof intent === "string" && intent.trim()) {
+							this.#peerActivityLabel = intent.trim().length > 120 ? `${intent.trim().slice(0, 117)}...` : intent.trim();
+							break;
+						}
+					}
+				}
 				if (assistantMsg.stopReason !== "aborted" && assistantMsg.stopReason !== "error" && assistantMsg.usage) {
 					this.#lastProviderUsageNonMessage = {
 						provider: assistantMsg.provider,
@@ -6343,6 +6357,9 @@ export class AgentSession {
 			this.#todoReminderAwaitingProgress = false;
 			this.#emptyStopRetryCount = 0;
 			this.#unexpectedStopRetryCount = 0;
+			// Track activity for external bus publication
+			const firstLine = expandedText.split("\n", 1)[0]?.trim();
+			if (firstLine) this.#peerActivityLabel = firstLine.length > 120 ? `${firstLine.slice(0, 117)}...` : firstLine;
 
 			await this.#maybeRestoreRetryFallbackPrimary();
 
@@ -13242,7 +13259,7 @@ export class AgentSession {
 		if (!sessionId) return;
 		try {
 			const bus = this.#externalIrcBus ?? IrcExternalBus.global();
-			bus.heartbeat(sessionId);
+			bus.heartbeat(sessionId, this.#gatherPeerLabels());
 		} catch (error) {
 			logger.warn("Failed to refresh external IRC peer heartbeat", { error: String(error) });
 		}
@@ -13279,12 +13296,58 @@ export class AgentSession {
 							controlProtocol: CURRENT_SESSION_CONTROL_PROTOCOL,
 							workstream: this.sessionManager.getWorkstream(),
 						}),
+			labels: this.#gatherPeerLabels(),
 		};
 		if (predecessorSessionId) bus.handoffPeer(predecessorSessionId, register);
 		else bus.registerPeer(register);
 		this.#ircExternalSessionId = sessionId;
 		this.#ircExternalPeerName = name;
 		return { bus, sessionId, name };
+	}
+
+	#gatherPeerLabels(): IrcExternalPeerLabels {
+		const goal = this.#goalModeState?.goal;
+		const objective =
+			goal && (goal.status === "active" || goal.status === "paused")
+				? goal.objective.length > 120
+					? `${goal.objective.slice(0, 117)}...`
+					: goal.objective
+				: "";
+		const ws = this.sessionManager.getWorkstream();
+		const workstream = ws?.kind === "workstream" ? ws.id : ws?.kind === "adhoc" ? "adhoc" : "";
+		const phases = this.getTodoPhases();
+		let todoHead = "";
+		for (const phase of phases) {
+			for (const task of phase.tasks) {
+				if (task.status === "in_progress") {
+					todoHead = task.content.length > 120 ? `${task.content.slice(0, 117)}...` : task.content;
+					break;
+				}
+			}
+			if (todoHead) break;
+		}
+		// If no in-progress, take first pending
+		if (!todoHead) {
+			for (const phase of phases) {
+				for (const task of phase.tasks) {
+					if (task.status === "pending") {
+						todoHead = task.content.length > 120 ? `${task.content.slice(0, 117)}...` : task.content;
+						break;
+					}
+				}
+				if (todoHead) break;
+			}
+		}
+		const model = this.model ? `${this.model.provider}/${this.model.id}` : "";
+		const label = this.sessionManager.getSessionName() ?? "";
+		return {
+			objective,
+			workstream,
+			activity: this.#peerActivityLabel,
+			todoHead,
+			label,
+			model,
+		};
 	}
 
 	#updateExternalIrcPeerState(state: Exclude<IrcExternalPeerState, "unknown">): void {

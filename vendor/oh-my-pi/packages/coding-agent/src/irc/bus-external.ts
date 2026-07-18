@@ -13,6 +13,22 @@ export type IrcExternalPeerState = "unknown" | "working" | "waiting_input" | "id
 export type IrcExternalPeerDisplayState = IrcExternalPeerState | "disconnected";
 export type IrcExternalMessageOrigin = IrcMessageOrigin;
 
+/** Structured self-description published by a session at registration and heartbeat. */
+export interface IrcExternalPeerLabels {
+	/** Active goal objective, truncated ~120ch; empty when no goal. */
+	objective?: string;
+	/** Goal workstream slug. */
+	workstream?: string;
+	/** Short mechanical label of the current turn: latest user-ask first line or active tool intent _i. */
+	activity?: string;
+	/** Current in-progress todo content, if a todo list exists. */
+	todoHead?: string;
+	/** Optional user/session-set display name. */
+	label?: string;
+	/** Resolved model selector (provider/modelId). */
+	model?: string;
+}
+
 export interface IrcExternalPeer {
 	sessionId: string;
 	name: string;
@@ -28,6 +44,7 @@ export interface IrcExternalPeer {
 	buildDigest?: string;
 	version?: string;
 	fleetCapability?: FleetCapability;
+	labels?: IrcExternalPeerLabels;
 }
 
 export interface IrcExternalMessage {
@@ -53,6 +70,7 @@ interface PeerRow {
 	build_digest: string | null;
 	version: string | null;
 	fleet_capability_json: string | null;
+	label_json: string | null;
 }
 
 interface MessageRow {
@@ -80,6 +98,7 @@ export interface IrcExternalRegistration {
 	buildDigest?: string;
 	version?: string;
 	fleetCapability?: FleetCapability;
+	labels?: IrcExternalPeerLabels;
 }
 
 export interface IrcExternalBusOptions {
@@ -149,6 +168,24 @@ function decodeFleetCapabilityJson(value: string | null): FleetCapability | unde
 	}
 }
 
+function decodeLabelJson(value: string | null): IrcExternalPeerLabels | undefined {
+	if (value === null) return undefined;
+	try {
+		const parsed = JSON.parse(value);
+		if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return undefined;
+		const labels: IrcExternalPeerLabels = {};
+		if (typeof parsed.objective === "string") labels.objective = parsed.objective;
+		if (typeof parsed.workstream === "string") labels.workstream = parsed.workstream;
+		if (typeof parsed.activity === "string") labels.activity = parsed.activity;
+		if (typeof parsed.todoHead === "string") labels.todoHead = parsed.todoHead;
+		if (typeof parsed.label === "string") labels.label = parsed.label;
+		if (typeof parsed.model === "string") labels.model = parsed.model;
+		return Object.keys(labels).length > 0 ? labels : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
 export function getIrcExternalPeerDisplayState(
 	peer: Pick<IrcExternalPeer, "lastSeen" | "state">,
 	nowMs = Date.now(),
@@ -200,6 +237,7 @@ function toPeer(row: PeerRow): IrcExternalPeer {
 		buildDigest: row.build_digest ?? undefined,
 		version: row.version ?? undefined,
 		fleetCapability: decodeFleetCapabilityJson(row.fleet_capability_json),
+		labels: decodeLabelJson(row.label_json),
 	};
 }
 
@@ -231,6 +269,7 @@ export class IrcExternalBus {
 
 	readonly #db: Database;
 	#fleetCapabilitySelect = "fleet_capability_json";
+	#labelSelect = "label_json";
 
 	#ensurePeerStateColumns(): void {
 		const columns = new Set(
@@ -263,6 +302,9 @@ export class IrcExternalBus {
 		if (!columns.has("fleet_capability_json")) {
 			this.#db.run("ALTER TABLE peers ADD COLUMN fleet_capability_json TEXT");
 		}
+		if (!columns.has("label_json")) {
+			this.#db.run("ALTER TABLE peers ADD COLUMN label_json TEXT");
+		}
 	}
 	#ensureMessageOriginColumn(): void {
 		const columns = new Set(
@@ -279,7 +321,7 @@ export class IrcExternalBus {
 	#getPeerBySessionId(sessionId: string): IrcExternalPeer | undefined {
 		const row = this.#db
 			.query<PeerRow, { $sessionId: string }>(
-				`SELECT session_id, name, cwd, pid, last_seen, state, state_ts, explicit_name, session_file, owner_epoch, build_digest, version, ${this.#fleetCapabilitySelect} FROM peers WHERE session_id = $sessionId`,
+				`SELECT session_id, name, cwd, pid, last_seen, state, state_ts, explicit_name, session_file, owner_epoch, build_digest, version, ${this.#fleetCapabilitySelect}, ${this.#labelSelect} FROM peers WHERE session_id = $sessionId`,
 			)
 			.get({ $sessionId: sessionId });
 		return row ? toPeer(row) : undefined;
@@ -293,6 +335,9 @@ export class IrcExternalBus {
 			const columns = this.#db.query<TableInfoRow, []>("PRAGMA table_info(peers)").all();
 			if (!columns.some(column => column.name === "fleet_capability_json")) {
 				this.#fleetCapabilitySelect = "NULL AS fleet_capability_json";
+			}
+			if (!columns.some(column => column.name === "label_json")) {
+				this.#labelSelect = "NULL AS label_json";
 			}
 			return;
 		}
@@ -311,7 +356,8 @@ export class IrcExternalBus {
 				owner_epoch TEXT,
 				build_digest TEXT,
 				version TEXT,
-				fleet_capability_json TEXT
+				fleet_capability_json TEXT,
+				label_json TEXT
 			)
 		`);
 		this.#ensurePeerStateColumns();
@@ -339,8 +385,8 @@ export class IrcExternalBus {
 		const lastSeen = nowIso();
 		this.#db
 			.query(
-				`INSERT INTO peers (session_id, name, cwd, pid, last_seen, explicit_name, session_file, owner_epoch, build_digest, version, fleet_capability_json)
-				 VALUES ($sessionId, $name, $cwd, $pid, $lastSeen, $explicitName, $sessionFile, $ownerEpoch, $buildDigest, $version, $fleetCapabilityJson)
+				`INSERT INTO peers (session_id, name, cwd, pid, last_seen, explicit_name, session_file, owner_epoch, build_digest, version, fleet_capability_json, label_json)
+				 VALUES ($sessionId, $name, $cwd, $pid, $lastSeen, $explicitName, $sessionFile, $ownerEpoch, $buildDigest, $version, $fleetCapabilityJson, $labelJson)
 				 ON CONFLICT(session_id) DO UPDATE SET
 					name = CASE WHEN peers.explicit_name = 1 THEN peers.name ELSE excluded.name END,
 					cwd = excluded.cwd,
@@ -351,7 +397,8 @@ export class IrcExternalBus {
 					owner_epoch = excluded.owner_epoch,
 					build_digest = excluded.build_digest,
 					version = excluded.version,
-					fleet_capability_json = excluded.fleet_capability_json`,
+					fleet_capability_json = excluded.fleet_capability_json,
+					label_json = excluded.label_json`,
 			)
 			.run({
 				$sessionId: peer.sessionId,
@@ -365,6 +412,7 @@ export class IrcExternalBus {
 				$buildDigest: peer.buildDigest ?? null,
 				$version: peer.version ?? null,
 				$fleetCapabilityJson: peer.fleetCapability === undefined ? null : JSON.stringify(peer.fleetCapability),
+				$labelJson: peer.labels === undefined ? null : JSON.stringify(peer.labels),
 			});
 		return (
 			this.#getPeerBySessionId(peer.sessionId) ?? {
@@ -381,6 +429,7 @@ export class IrcExternalBus {
 				buildDigest: peer.buildDigest,
 				version: peer.version,
 				fleetCapability: peer.fleetCapability,
+				labels: peer.labels,
 			}
 		);
 	}
@@ -394,11 +443,17 @@ export class IrcExternalBus {
 		return registered;
 	}
 
-	heartbeat(sessionId: string): void {
-		this.#db.query("UPDATE peers SET last_seen = $lastSeen WHERE session_id = $sessionId").run({
-			$sessionId: sessionId,
-			$lastSeen: nowIso(),
-		});
+	heartbeat(sessionId: string, labels?: IrcExternalPeerLabels): void {
+		if (labels !== undefined) {
+			this.#db
+				.query("UPDATE peers SET last_seen = $lastSeen, label_json = $labelJson WHERE session_id = $sessionId")
+				.run({ $sessionId: sessionId, $lastSeen: nowIso(), $labelJson: JSON.stringify(labels) });
+		} else {
+			this.#db.query("UPDATE peers SET last_seen = $lastSeen WHERE session_id = $sessionId").run({
+				$sessionId: sessionId,
+				$lastSeen: nowIso(),
+			});
+		}
 	}
 
 	/** Rename a peer through the shared metadata path. Explicit operator names are immutable. */
@@ -435,7 +490,7 @@ export class IrcExternalBus {
 		const staleMs = options.staleMs ?? IRC_EXTERNAL_STALE_MS;
 		return this.#db
 			.query<PeerRow, []>(
-				`SELECT session_id, name, cwd, pid, last_seen, state, state_ts, explicit_name, session_file, owner_epoch, build_digest, version, ${this.#fleetCapabilitySelect} FROM peers ORDER BY last_seen DESC`,
+				`SELECT session_id, name, cwd, pid, last_seen, state, state_ts, explicit_name, session_file, owner_epoch, build_digest, version, ${this.#fleetCapabilitySelect}, ${this.#labelSelect} FROM peers ORDER BY last_seen DESC`,
 			)
 			.all()
 			.filter(
@@ -482,7 +537,7 @@ export class IrcExternalBus {
 	findPeerByName(name: string, options: { excludeSessionId?: string } = {}): IrcExternalPeer | undefined {
 		const rows = this.#db
 			.query<PeerRow, { $name: string }>(
-				`SELECT session_id, name, cwd, pid, last_seen, state, state_ts, explicit_name, session_file, owner_epoch, build_digest, version, ${this.#fleetCapabilitySelect} FROM peers WHERE name = $name ORDER BY last_seen DESC`,
+				`SELECT session_id, name, cwd, pid, last_seen, state, state_ts, explicit_name, session_file, owner_epoch, build_digest, version, ${this.#fleetCapabilitySelect}, ${this.#labelSelect} FROM peers WHERE name = $name ORDER BY last_seen DESC`,
 			)
 			.all({ $name: name });
 		const row = rows.find(
