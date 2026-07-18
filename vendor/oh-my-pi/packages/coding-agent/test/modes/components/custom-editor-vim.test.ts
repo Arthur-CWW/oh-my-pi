@@ -48,6 +48,63 @@ describe("CustomEditor Vim integration", () => {
 		expect(chars.getText()).toBe("bc def");
 	});
 
+	it("consumes Escape before app clear actions in every Vim mode", () => {
+		const value = editor();
+		let appEscapes = 0;
+		value.onEscape = () => {
+			appEscapes++;
+			value.setText("");
+		};
+
+		press(value, "draft\u001b");
+		expect(value.getText()).toBe("draft");
+		expect(value.getVimMode()).toBe("normal");
+		expect(appEscapes).toBe(0);
+
+		press(value, "d\u001b");
+		expect(value.getText()).toBe("draft");
+		expect(appEscapes).toBe(0);
+		press(value, "\u001b");
+		expect(value.getText()).toBe("draft");
+		expect(appEscapes).toBe(0);
+	});
+
+	it("restores cursor and text across insert sessions and keeps empty undo a no-op", () => {
+		const value = editor();
+		value.setText("abcd");
+		press(value, "X\u001b");
+		press(value, "iY\u001b");
+		const afterSecondInsert = { text: value.getText(), cursor: value.getCursor() };
+
+		press(value, "u");
+		expect(value.getText()).toBe("abcdX");
+		expect(value.getCursor()).toEqual({ line: 0, col: 4 });
+		press(value, "\u0012");
+		expect(value.getText()).toBe(afterSecondInsert.text);
+		expect(value.getCursor()).toEqual(afterSecondInsert.cursor);
+
+		const emptyUndo = editor();
+		emptyUndo.setText("keep");
+		press(emptyUndo, "\u001bu");
+		expect(emptyUndo.getText()).toBe("keep");
+	});
+
+	it("keeps whole-buffer Vim wipes undoable as one operation", () => {
+		const deleted = editor();
+		deleted.setText("only");
+		press(deleted, "\u001b0dd");
+		expect(deleted.getText()).toBe("");
+		press(deleted, "u");
+		expect(deleted.getText()).toBe("only");
+
+		const changed = editor();
+		changed.setText("only");
+		press(changed, "\u001b0cc\u001b");
+		expect(changed.getText()).toBe("");
+		press(changed, "u");
+		expect(changed.getText()).toBe("only");
+	});
+
 	it("groups insert sessions into one undo and supports undo/redo", () => {
 		const value = editor();
 		value.setText("a");

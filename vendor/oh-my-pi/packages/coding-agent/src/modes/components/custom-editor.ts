@@ -380,6 +380,9 @@ export class CustomEditor extends Editor {
 			super.handleInput(data);
 			return;
 		}
+		// Normal-mode Escape is a Vim grammar cancel/consume key, not a
+		// request for the base editor or its app-level handlers to act.
+		if (mode === "normal" && data === "\x1b") return;
 		if (!this.#isSinglePrintable(data)) super.handleInput(data);
 	}
 
@@ -617,19 +620,24 @@ export class CustomEditor extends Editor {
 		}
 	}
 
-	#applyVimOperation(type: "delete" | "change" | "yank", target: CustomVimTarget, registerName?: "+"): void {
+	#applyVimOperation(
+		type: "delete" | "change" | "yank",
+		target: CustomVimTarget,
+		registerName?: "+",
+	): boolean {
 		const selection = this.#vimSelection(target);
-		if (!selection) return;
+		if (!selection) return false;
 		this.#writeVimRegister(selection.text, selection.linewise, registerName);
-		if (type === "yank") return;
+		if (type === "yank") return true;
 		if (type === "change") {
 			this.#startVimInsertGroup();
 			this.#deleteVimSelection(selection);
-			return;
+			return true;
 		}
 		this.beginUndoGroup();
 		this.#deleteVimSelection(selection);
 		this.endUndoGroup();
+		return true;
 	}
 
 	#applyVimPut(effect: Extract<VimEffect, { type: "put" }>): void {
@@ -714,9 +722,17 @@ export class CustomEditor extends Editor {
 				break;
 			case "delete":
 			case "change":
-			case "yank":
-				this.#applyVimOperation(effect.type, effect.target, effect.registerName);
+			case "yank": {
+				const changed = this.#applyVimOperation(effect.type, effect.target, effect.registerName);
+				// The grammar emits a bare change effect for operator motions such as
+				// `cc`/`cw`; those operations must enter insert mode after opening the
+				// same undo group as the deletion.
+				if (effect.type === "change" && changed && this.#vimState.mode === "normal") {
+					this.#vimState = { ...this.#vimState, mode: "insert" };
+					this.#applyVimEnterInsert("cursor", 1);
+				}
 				break;
+			}
 			case "put":
 				this.#applyVimPut(effect);
 				break;
@@ -906,6 +922,16 @@ export class CustomEditor extends Editor {
 
 		const parsedKey = parseKey(data);
 		const canonical = parsedKey !== undefined ? canonicalKeyId(parsedKey) : undefined;
+
+		// Vim owns Escape before app-level dismiss/clear actions. The base editor
+		// still gets first refusal when its autocomplete overlay is open so an
+		// Escape dismisses that overlay without touching the buffer; the next
+		// Escape is then consumed by the Vim grammar.
+		if (this.#vimEnabled && canonical === "escape") {
+			if (this.isShowingAutocomplete()) super.handleInput(data);
+			else this.#handleVimInput(data, canonical);
+			return;
+		}
 
 		// Ctrl+Q always reaches the direct-interrupt lifecycle before any
 		// configurable action or local editor overlay can claim the key.
