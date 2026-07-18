@@ -236,4 +236,23 @@ describe("fleet overview", () => {
 		expect(names).toContain("StaleAlive");
 		expect(names).not.toContain("DeadPeer");
 	});
+
+	it("stale-alive waiting_input peers keep their recorded state", () => {
+		using tmp = TempDir.createSync("@omp-fleet-overview-");
+		const dbPath = `${tmp.path()}/bus.sqlite`;
+		const bus = new IrcExternalBus(dbPath);
+		registerPeer(bus, "stale-waiting", { name: "StaleWaiting", pid: process.pid });
+		bus.updatePeerState("stale-waiting", "waiting_input");
+		bus.close();
+
+		const futureNow = Date.now() + 20 * 60 * 1000;
+		const rows = collectFleetOverview({
+			ircDbPath: dbPath,
+			nowMs: futureNow,
+			isProcessAlive: pid => pid === process.pid,
+		});
+		// A session blocked on input must never be relabeled idle — operators
+		// would read "needs nothing" for a session that needs them.
+		expect(rows.find(r => r.name === "StaleWaiting")?.displayState).toBe("waiting_input");
+	});
 });

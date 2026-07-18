@@ -116,7 +116,13 @@ export class SessionObserverRegistry {
 	}
 
 	#recordProgressRate(id: string, tokens: number, outputTokens: number, at: number): void {
-		const samples = this.#tokenSamples.get(id) ?? [];
+		let samples = this.#tokenSamples.get(id) ?? [];
+		// A revived/restarted child reuses its agent id but restarts its
+		// cumulative counters. A regression against the previous run's high
+		// baseline would clamp the delta to zero for the whole retention
+		// window — discard the stale samples and start a fresh baseline.
+		const last = samples[samples.length - 1];
+		if (last && (tokens < last.tokens || outputTokens < last.outputTokens)) samples = [];
 		samples.push({ at, tokens, outputTokens });
 		const cutoff = at - TOKEN_RATE_STALE_MS;
 		while (samples.length > 2 && samples[0]!.at < cutoff) samples.shift();

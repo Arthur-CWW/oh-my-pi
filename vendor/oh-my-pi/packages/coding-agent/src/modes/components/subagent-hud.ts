@@ -83,17 +83,16 @@ export class SubagentHudRenderer {
 		const sessionsById = new Map(sessions.map(session => [session.id, session]));
 		const lastSiblingByParent = new Map<string | undefined, string>();
 		for (const session of visible) lastSiblingByParent.set(session.parentAgentId, session.id);
-		const badgeTexts = showTokenRateBadge
-			? visible.map(session => {
-					const liveness = session.progress?.livenessState;
-					if (liveness === "dead") return "DEAD";
-					if (liveness === "stalled") return "STALLED";
-					return `${Math.round(session.tokenRate ?? 0)} t/s`;
-				})
-			: visible.map(() => "");
-		const badgeColumnWidth = showTokenRateBadge
-			? Math.max(1, ...badgeTexts.map(t => t.length))
-			: 0;
+		// Liveness badges (STALLED/DEAD) render regardless of the token-rate
+		// setting — showTokenRateBadge suppresses only the numeric rate; hiding
+		// a failed liveness probe would silence the only HUD failure signal.
+		const badgeTexts = visible.map(session => {
+			const liveness = session.progress?.livenessState;
+			if (liveness === "dead") return "DEAD";
+			if (liveness === "stalled") return "STALLED";
+			return showTokenRateBadge ? `${Math.round(session.tokenRate ?? 0)} t/s` : "";
+		});
+		const badgeColumnWidth = Math.max(showTokenRateBadge ? 1 : 0, ...badgeTexts.map(t => t.length));
 		const rows: HudRow[] = visible.map(session => {
 			const depth = subagentDepth(session, sessionsById);
 			const branch =
@@ -123,6 +122,9 @@ export class SubagentHudRenderer {
 				input.task ?? "",
 				input.modelSelector ?? "",
 				badge,
+				// Badge color derives from stuck state, not just text — a healthy
+				// "0 t/s" and a stuck "0 t/s" must not share a cached row.
+				input.tokenRateStuck ? "stuck" : "ok",
 				badgeColumnWidth,
 			].join("\u0000");
 			let cached = this.#rows.get(input.session.id);

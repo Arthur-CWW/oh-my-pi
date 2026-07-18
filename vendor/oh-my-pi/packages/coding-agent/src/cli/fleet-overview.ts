@@ -78,7 +78,10 @@ export function collectFleetOverview(options: FleetOverviewOptions = {}): readon
 			rows.push({
 				sessionId: peer.sessionId,
 				name: peer.name,
-				displayState: staleLiveIdle ? "idle" : displayState,
+				// Preserve the recorded state for stale-live rows — rewriting
+				// waiting_input to idle would tell operators a session needs
+				// nothing when it is blocked on input (fleet status preserves it).
+				displayState: staleLiveIdle ? peer.state : displayState,
 				model: labelStr(peer.labels, "model"),
 				workstream,
 				objective: labelStr(peer.labels, "objective"),
