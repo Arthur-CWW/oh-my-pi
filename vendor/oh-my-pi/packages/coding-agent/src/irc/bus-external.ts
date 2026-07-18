@@ -27,7 +27,15 @@ export interface IrcExternalPeerLabels {
 	label?: string;
 	/** Resolved model selector (provider/modelId). */
 	model?: string;
+	/** Observer-written prose summary, limited to 280 characters at write time. */
+	summary?: string;
+	/** Original ambient name captured on the first rename. */
+	spawnName?: string;
 }
+
+export type IrcExternalPeerLabelPatch = {
+	[K in keyof IrcExternalPeerLabels]?: IrcExternalPeerLabels[K] | null;
+};
 
 export interface IrcExternalPeer {
 	sessionId: string;
@@ -151,10 +159,6 @@ function parseTime(value: string): number {
 	return Number.isFinite(parsed) ? parsed : 0;
 }
 
-export function isIrcExternalPeerFresh(lastSeen: string, nowMs = Date.now(), staleMs = IRC_EXTERNAL_STALE_MS): boolean {
-	return nowMs - parseTime(lastSeen) <= staleMs;
-}
-
 function normalizePeerState(value: string): IrcExternalPeerState {
 	return value === "working" || value === "waiting_input" || value === "idle" || value === "paused" ? value : "unknown";
 }
@@ -166,6 +170,38 @@ function decodeFleetCapabilityJson(value: string | null): FleetCapability | unde
 	} catch {
 		return undefined;
 	}
+}
+
+export function isIrcExternalPeerFresh(lastSeen: string, nowMs = Date.now(), staleMs = IRC_EXTERNAL_STALE_MS): boolean {
+	return nowMs - parseTime(lastSeen) <= staleMs;
+}
+
+const MAX_SUMMARY_LENGTH = 280;
+const PEER_LABEL_KEYS: readonly (keyof IrcExternalPeerLabels)[] = [
+	"objective",
+	"workstream",
+	"activity",
+	"todoHead",
+	"label",
+	"model",
+	"summary",
+	"spawnName",
+];
+
+function parseLabelObject(value: string | null): Record<string, unknown> {
+	if (value === null) return {};
+	try {
+		const parsed: unknown = JSON.parse(value);
+		if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
+		return parsed as Record<string, unknown>;
+	} catch {
+		return {};
+	}
+}
+
+function normalizePeerLabels(labels: IrcExternalPeerLabels | undefined): IrcExternalPeerLabels | undefined {
+	if (labels === undefined || labels.summary === undefined || labels.summary.length <= MAX_SUMMARY_LENGTH) return labels;
+	return { ...labels, summary: labels.summary.slice(0, MAX_SUMMARY_LENGTH) };
 }
 
 function decodeLabelJson(value: string | null): IrcExternalPeerLabels | undefined {
@@ -180,6 +216,8 @@ function decodeLabelJson(value: string | null): IrcExternalPeerLabels | undefine
 		if (typeof parsed.todoHead === "string") labels.todoHead = parsed.todoHead;
 		if (typeof parsed.label === "string") labels.label = parsed.label;
 		if (typeof parsed.model === "string") labels.model = parsed.model;
+		if (typeof parsed.summary === "string") labels.summary = parsed.summary;
+		if (typeof parsed.spawnName === "string") labels.spawnName = parsed.spawnName;
 		return Object.keys(labels).length > 0 ? labels : undefined;
 	} catch {
 		return undefined;
@@ -383,6 +421,7 @@ export class IrcExternalBus {
 	registerPeer(peer: IrcExternalRegistration): IrcExternalPeer {
 		const pid = peer.pid ?? process.pid;
 		const lastSeen = nowIso();
+		const labels = normalizePeerLabels(peer.labels);
 		this.#db
 			.query(
 				`INSERT INTO peers (session_id, name, cwd, pid, last_seen, explicit_name, session_file, owner_epoch, build_digest, version, fleet_capability_json, label_json)
@@ -412,7 +451,7 @@ export class IrcExternalBus {
 				$buildDigest: peer.buildDigest ?? null,
 				$version: peer.version ?? null,
 				$fleetCapabilityJson: peer.fleetCapability === undefined ? null : JSON.stringify(peer.fleetCapability),
-				$labelJson: peer.labels === undefined ? null : JSON.stringify(peer.labels),
+				$labelJson: labels === undefined ? null : JSON.stringify(labels),
 			});
 		return (
 			this.#getPeerBySessionId(peer.sessionId) ?? {
@@ -429,7 +468,7 @@ export class IrcExternalBus {
 				buildDigest: peer.buildDigest,
 				version: peer.version,
 				fleetCapability: peer.fleetCapability,
-				labels: peer.labels,
+				labels,
 			}
 		);
 	}
@@ -442,28 +481,59 @@ export class IrcExternalBus {
 			.run({ $sessionId: predecessorSessionId, $pid: registered.pid });
 		return registered;
 	}
+	/**
+	 * Merge label fields without creating a peer row. Null values remove their
+	 * keys; omitted fields remain untouched.
+	 */
+	mergePeerLabels(sessionId: string, patch: IrcExternalPeerLabelPatch): boolean {
+		const row = this.#db
+			.query<{ label_json: string | null }, { $sessionId: string }>(
+				"SELECT label_json FROM peers WHERE session_id = $sessionId",
+			)
+			.get({ $sessionId: sessionId });
+		if (!row) return false;
+
+		const labels = parseLabelObject(row.label_json);
+		for (const key of PEER_LABEL_KEYS) {
+			if (!(key in patch)) continue;
+			const value = patch[key];
+			if (value === null) {
+				delete labels[key];
+			} else if (value !== undefined) {
+				labels[key] = key === "summary" ? value.slice(0, MAX_SUMMARY_LENGTH) : value;
+			}
+		}
+		const labelJson = Object.keys(labels).length > 0 ? JSON.stringify(labels) : null;
+		const result = this.#db
+			.query("UPDATE peers SET label_json = $labelJson WHERE session_id = $sessionId")
+			.run({ $sessionId: sessionId, $labelJson: labelJson });
+		return result.changes > 0;
+	}
 
 	heartbeat(sessionId: string, labels?: IrcExternalPeerLabels): void {
-		if (labels !== undefined) {
-			this.#db
-				.query("UPDATE peers SET last_seen = $lastSeen, label_json = $labelJson WHERE session_id = $sessionId")
-				.run({ $sessionId: sessionId, $lastSeen: nowIso(), $labelJson: JSON.stringify(labels) });
-		} else {
-			this.#db.query("UPDATE peers SET last_seen = $lastSeen WHERE session_id = $sessionId").run({
-				$sessionId: sessionId,
-				$lastSeen: nowIso(),
-			});
-		}
+		// Session heartbeats provide the complete self-owned label set (including
+		// empty values for cleared fields); merging preserves observer-owned fields
+		// such as summary when they are absent from the heartbeat payload.
+		if (labels !== undefined) this.mergePeerLabels(sessionId, labels);
+		this.#db.query("UPDATE peers SET last_seen = $lastSeen WHERE session_id = $sessionId").run({
+			$sessionId: sessionId,
+			$lastSeen: nowIso(),
+		});
 	}
 
 	/** Rename a peer through the shared metadata path. Explicit operator names are immutable. */
 	updatePeerName(sessionId: string, name: string): boolean {
 		const normalized = name.trim();
 		if (!normalized) return false;
+		const peer = this.#getPeerBySessionId(sessionId);
+		if (!peer || peer.explicitName || peer.name === normalized) return false;
+		const originalName = peer.name;
 		const result = this.#db
 			.query("UPDATE peers SET name = $name WHERE session_id = $sessionId AND explicit_name = 0 AND name <> $name")
 			.run({ $sessionId: sessionId, $name: normalized });
-		return result.changes > 0;
+		if (result.changes === 0) return false;
+		if (peer.labels?.spawnName === undefined) this.mergePeerLabels(sessionId, { spawnName: originalName });
+		return true;
 	}
 
 	updatePeerState(sessionId: string, state: Exclude<IrcExternalPeerState, "unknown">): void {

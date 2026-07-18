@@ -28,6 +28,8 @@ export interface FleetOverviewRow {
 	readonly activity: string;
 	readonly todoHead: string;
 	readonly label: string;
+	readonly summary: string;
+	readonly spawnName: string;
 	readonly lastSeen: string;
 	readonly cwd: string;
 	readonly pid: number;
@@ -88,6 +90,8 @@ export function collectFleetOverview(options: FleetOverviewOptions = {}): readon
 				activity: labelStr(peer.labels, "activity"),
 				todoHead: labelStr(peer.labels, "todoHead"),
 				label: labelStr(peer.labels, "label"),
+				summary: labelStr(peer.labels, "summary"),
+				spawnName: labelStr(peer.labels, "spawnName"),
 				lastSeen: peer.lastSeen,
 				cwd: peer.cwd,
 				pid: peer.pid,
@@ -161,6 +165,8 @@ export interface FleetOverviewJsonRow {
 	readonly activity: string;
 	readonly todo_head: string;
 	readonly label: string;
+	readonly summary: string;
+	readonly spawn_name: string;
 	readonly last_seen: string;
 	readonly cwd: string;
 	readonly pid: number;
@@ -179,6 +185,8 @@ export function formatFleetOverviewJson(rows: readonly FleetOverviewRow[]): stri
 		activity: row.activity,
 		todo_head: row.todoHead,
 		label: row.label,
+		summary: row.summary,
+		spawn_name: row.spawnName,
 		last_seen: row.lastSeen,
 		cwd: row.cwd,
 		pid: row.pid,

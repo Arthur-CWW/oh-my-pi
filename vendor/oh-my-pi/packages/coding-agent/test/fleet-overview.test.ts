@@ -175,6 +175,8 @@ describe("fleet overview", () => {
 				todoHead: "Validate schema",
 				label: "TestLabel",
 				model: "anthropic/claude-opus-4",
+				summary: "Observer summary",
+				spawnName: "Original spawned name",
 			},
 			workstream: { kind: "workstream", id: "harness" },
 		});
@@ -202,6 +204,8 @@ describe("fleet overview", () => {
 		expect(row.activity).toBe("Running tests");
 		expect(row.todo_head).toBe("Validate schema");
 		expect(row.label).toBe("TestLabel");
+		expect(row.summary).toBe("Observer summary");
+		expect(row.spawn_name).toBe("Original spawned name");
 		expect(row.last_seen).toBeTruthy();
 		expect(row.cwd).toBe("/tmp/test");
 		expect(row.pid).toBeGreaterThan(0);
