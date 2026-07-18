@@ -136,3 +136,12 @@ streams:
           # Loop liveness: heartbeat file stamped each pass; stale >6min (3x interval) = down.
           command: test -n "$(find data/fleet-observer/heartbeat -mmin -6 2>/dev/null)"
           timeoutSec: 10
+      fleet-board:
+        cwd: packages/fleet-board
+        cmd: bun run dev
+        env:
+          OMP_BIN: omp
+        health:
+          # portless terminates TLS; plain-http hostname probe returns empty here, so curl -k the https name.
+          command: curl -sk -m 3 https://fleet-board.localhost/healthz | grep -qx ok
+          timeoutSec: 15

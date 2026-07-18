@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#0c1118" />
+    <title>Fleet watch · gemba view</title>
+    <link rel="stylesheet" href="./watch.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="./index.html" aria-label="Back to fleet board">FLEET BOARD</a>
+      <span class="topbar-divider" aria-hidden="true">/</span>
+      <span class="view-label">WATCH · GEMBA</span>
+      <span id="refresh-status" class="refresh-status" role="status" aria-live="polite">Connecting…</span>
+    </header>
+
+    <div class="watch-layout">
+      <aside class="session-rail" aria-label="Live sessions">
+        <div class="rail-heading">
+          <div>
+            <p class="eyebrow">LIVE FLEET</p>
+            <h1>Sessions</h1>
+          </div>
+          <span id="session-count" class="session-count">0</span>
+        </div>
+        <div id="session-list" class="session-list" role="listbox" aria-label="Select a session">
+          <p class="rail-empty">No sessions reported.</p>
+        </div>
+      </aside>
+
+      <main id="watch-main" class="watch-main" tabindex="-1">
+        <section id="empty-state" class="empty-state" aria-live="polite">
+          <div class="empty-mark" aria-hidden="true">◎</div>
+          <p class="eyebrow">SELECT A THREAD</p>
+          <h2>Choose a live session</h2>
+          <p>The observation pane follows one thread at a time. Fleet data refreshes every five seconds.</p>
+        </section>
+
+        <section id="session-view" class="session-view" hidden>
+          <header class="session-header">
+            <div class="session-title-wrap">
+              <div class="state-line">
+                <span id="detail-state-dot" class="state-dot" aria-hidden="true"></span>
+                <span id="detail-state" class="state-value">unknown</span>
+              </div>
+              <h2 id="detail-name">Session</h2>
+              <p id="detail-id" class="session-id"></p>
+            </div>
+            <div class="header-meta">
+              <p class="eyebrow">LAST SEEN</p>
+              <time id="detail-last-seen">—</time>
+            </div>
+          </header>
+
+          <div class="action-strip" aria-label="Session links and commands">
+            <div class="copy-group">
+              <span class="copy-label">HISTORY URI</span>
+              <code id="history-uri" class="copy-value">history://</code>
+              <button class="copy-button" type="button" data-copy-target="history-uri">Copy</button>
+            </div>
+            <div class="copy-group">
+              <span class="copy-label">LABEL COMMAND</span>
+              <code id="label-command" class="copy-value">omp fleet label</code>
+              <button class="copy-button" type="button" data-copy-target="label-command">Copy</button>
+            </div>
+          </div>
+
+          <div class="detail-grid">
+            <section class="detail-card labels-card" aria-labelledby="labels-heading">
+              <div class="card-heading">
+                <p class="eyebrow" id="labels-heading">LIVE LABELS</p>
+              </div>
+              <dl id="label-fields" class="label-fields"></dl>
+            </section>
+            <section class="detail-card provenance-card" aria-labelledby="provenance-heading">
+              <div class="card-heading">
+                <p class="eyebrow" id="provenance-heading">RUNTIME</p>
+              </div>
+              <dl class="label-fields">
+                <div><dt>journal</dt><dd id="detail-journal" class="mono">—</dd></div>
+                <div><dt>cwd</dt><dd id="detail-cwd" class="mono">—</dd></div>
+                <div><dt>version</dt><dd id="detail-version" class="mono">—</dd></div>
+                <div><dt>digest</dt><dd id="detail-digest" class="mono">—</dd></div>
+              </dl>
+            </section>
+          </div>
+
+          <section class="state-doc-card" aria-labelledby="state-doc-heading">
+            <div class="state-doc-heading">
+              <div>
+                <p class="eyebrow">OBSERVER DIGEST</p>
+                <h3 id="state-doc-heading">State document</h3>
+              </div>
+              <span id="doc-version" class="doc-version">—</span>
+            </div>
+            <div id="state-doc" class="state-doc" aria-live="polite">
+              <p class="doc-placeholder">Loading state document…</p>
+            </div>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <script type="module" src="./watch.js"></script>
+  </body>
+</html>

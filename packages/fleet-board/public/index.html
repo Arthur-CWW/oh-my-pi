@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#0e1117" />
+    <title>Fleet Board</title>
+    <link rel="stylesheet" href="board.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <a class="brand" href="index.html" aria-label="Fleet Board home">
+        <span class="brand-mark" aria-hidden="true">▦</span>
+        <span>FLEET BOARD</span>
+      </a>
+      <nav class="app-nav" aria-label="Primary navigation">
+        <a class="nav-tab active" href="index.html" aria-current="page">Board</a>
+        <a class="nav-tab" href="watch.html">Watch</a>
+      </nav>
+      <div class="header-status"><span class="live-dot"></span><span data-generated-at>Connecting…</span></div>
+    </header>
+    <main class="board-page">
+      <div class="board-heading">
+        <div>
+          <p class="eyebrow">PROGRAM CONTROL / LIVE FLEET</p>
+          <h1>What needs attention?</h1>
+        </div>
+        <p class="key-hint"><kbd>j</kbd><kbd>k</kbd> move · <kbd>h</kbd><kbd>l</kbd> switch columns</p>
+      </div>
+      <div class="board-grid" id="board-grid" aria-label="Fleet kanban board">
+        <section class="board-column" data-column="needs-arthur" aria-labelledby="heading-needs-arthur">
+          <div class="column-heading"><h2 id="heading-needs-arthur">Needs Arthur</h2><span class="column-count" data-count="needs-arthur">0</span></div>
+          <div class="column-cards" data-cards="needs-arthur"></div>
+        </section>
+        <section class="board-column" data-column="in-progress" aria-labelledby="heading-in-progress">
+          <div class="column-heading"><h2 id="heading-in-progress">In Progress</h2><span class="column-count" data-count="in-progress">0</span></div>
+          <div class="column-cards" data-cards="in-progress"></div>
+        </section>
+        <section class="board-column" data-column="held-deferred" aria-labelledby="heading-held-deferred">
+          <div class="column-heading"><h2 id="heading-held-deferred">Held / Deferred</h2><span class="column-count" data-count="held-deferred">0</span></div>
+          <div class="column-cards" data-cards="held-deferred"></div>
+        </section>
+        <section class="board-column" data-column="recently-implemented" aria-labelledby="heading-recently-implemented">
+          <div class="column-heading"><h2 id="heading-recently-implemented">Recently Implemented</h2><span class="column-count" data-count="recently-implemented">0</span></div>
+          <div class="column-cards" data-cards="recently-implemented"></div>
+        </section>
+      </div>
+    </main>
+    <script type="module" src="board.js"></script>
+  </body>
+</html>
