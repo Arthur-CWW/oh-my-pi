@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readdir, readFile, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, test } from "bun:test"
@@ -55,7 +55,7 @@ describe("observer thresholds and cursors", () => {
     const runner = async (argv: readonly string[]): Promise<CommandResult> => {
       mutableCalls.push([...argv])
       if (argv.includes("overview")) {
-        return result(JSON.stringify([{ session_id: "peer", state: "working", session_journal: journal, summary: "stable", name: "Peer" }]))
+        return result(JSON.stringify([{ session_id: "019f2783-4f07-7000-ac94-347ad8de223d", state: "working", session_journal: journal, summary: "stable", name: "Peer" }]))
       }
       throw new Error("LLM should not run")
     }
@@ -133,17 +133,17 @@ test("writes labels, state doc, index, and cursor after a successful observation
     if (argv.includes("-p")) return result("SUMMARY: Implementing observer\nNAME: Observer Work\nWORKSTREAM: harness")
     if (argv.includes("overview")) {
       return result(JSON.stringify([
-        { session_id: "peer-success", state: "working", session_journal: journal, summary: "", name: "Peer" },
+        { session_id: "019f2b27-15f1-7000-8aa8-679d94ad06b1", state: "working", session_journal: journal, summary: "", name: "Peer" },
       ]))
     }
     return result()
   }
   const pass = await runObserverPass({ paths, model: "fixture-model", runCommand: runner })
   expect(pass.observed).toBe(1)
-  expect(calls.some(argv => argv.includes("label") && argv.includes("peer-success"))).toBe(true)
-  expect(await readFile(join(paths.stateDocsDir, "peer-success.md"), "utf8")).toContain("Implementing observer")
-  expect(await readFile(paths.indexPath, "utf8")).toContain("peer-success\tObserver Work\tharness")
-  expect(await readFile(paths.cursorPath, "utf8")).toContain("peer-success")
+  expect(calls.some(argv => argv.includes("label") && argv.includes("019f2b27-15f1-7000-8aa8-679d94ad06b1"))).toBe(true)
+  expect(await readFile(join(paths.stateDocsDir, "019f2b27-15f1-7000-8aa8-679d94ad06b1.md"), "utf8")).toContain("Implementing observer")
+  expect(await readFile(paths.indexPath, "utf8")).toContain("019f2b27-15f1-7000-8aa8-679d94ad06b1\tObserver Work\tharness")
+  expect(await readFile(paths.cursorPath, "utf8")).toContain("019f2b27-15f1-7000-8aa8-679d94ad06b1")
 })
 
 test("appends one peer failure and continues the pass", async () => {
@@ -156,7 +156,7 @@ test("appends one peer failure and continues the pass", async () => {
     calls.push([...argv])
     if (argv.includes("overview")) {
       return result(JSON.stringify([
-        { session_id: "peer-failing", state: "working", session_journal: journal, summary: "", name: "Peer" },
+        { session_id: "019f365a-59d0-7000-b5bb-9931cc9e51c0", state: "working", session_journal: journal, summary: "", name: "Peer" },
       ]))
     }
     if (argv.includes("-p")) return result("provider failure", 1, "simulated model failure")
@@ -167,12 +167,88 @@ test("appends one peer failure and continues the pass", async () => {
   expect(pass.failed).toBe(1)
   expect(calls.some(argv => argv.includes("-p"))).toBe(true)
   const errors = await readFile(paths.errorLogPath, "utf8")
-  expect(errors).toContain("peer-failing")
+  expect(errors).toContain("019f365a-59d0-7000-b5bb-9931cc9e51c0")
   expect(errors).toContain("simulated model failure")
 })
 
 test("parses overview aliases used by fleet JSON", () => {
   expect(parseOverviewJson(JSON.stringify([{ session_id: "s", spawn_name: "origin", session_journal: "/tmp/s", state: "idle", summary: "x", name: "S", workstream: "harness" }]))).toEqual([
-    { sessionId: "s", spawnName: "origin", sessionJournal: "/tmp/s", state: "idle", summary: "x", name: "S", workstream: "harness" },
+    { sessionId: "s", spawnName: "origin", sessionJournal: "/tmp/s", state: "idle", summary: "x", name: "S", workstream: "harness", cwd: "" },
   ])
+})
+
+test("skips phantom rows before stat and threshold without writing docs or errors", async () => {
+  const root = await tempRoot()
+  const paths = pathsAt(root)
+  const journal = join(root, "peer.jsonl")
+  await writeFile(journal, '{"type":"message","message":{"role":"user","content":"phantom"}}\n')
+  const cwd = process.cwd()
+  const valid = "019f2783-4f07-7000-ac94-347ad8de223d"
+  const rows = [
+    { session_id: "019f2b27-15f1-7000-8aa8-679d94ad06b1", state: "working", session_journal: "", cwd },
+    { session_id: "019f365a-59d0-7000-b5bb-9931cc9e51c0", state: "working", session_journal: join(root, "missing.jsonl"), cwd },
+    { session_id: "legacy-cwd:1234", state: "working", session_journal: journal, cwd },
+    { session_id: "legacy-cwd-1234", state: "working", session_journal: journal, cwd },
+    { session_id: "019f5e2f-cdaa-7000-a7a3-eedec7f1ea52", state: "working", session_journal: journal, cwd: tmpdir() },
+    { session_id: `${valid}:escape`, state: "working", session_journal: journal, cwd },
+  ]
+  const pass = await runObserverPass({
+    paths,
+    runCommand: async argv => (argv.includes("overview") ? result(JSON.stringify(rows)) : result()),
+  })
+  expect(pass.observed).toBe(0)
+  expect(pass.failed).toBe(0)
+  expect(pass.skipped).toBe(rows.length)
+  expect(pass.skippedReasons).toEqual({
+    "missing-session-journal": 1,
+    "missing-journal-file": 1,
+    "invalid-session-id": 1,
+    "tmp-cwd": 1,
+    "unsafe-session-id": 2,
+  })
+  expect(await readdir(paths.stateDocsDir)).toEqual(["INDEX.md"])
+  await expect(stat(paths.errorLogPath)).rejects.toThrow()
+})
+
+test("regenerates the index from current surviving docs", async () => {
+  const root = await tempRoot()
+  const paths = pathsAt(root)
+  const journal = join(root, "peer.jsonl")
+  const current = "019f6047-a362-7000-9218-6bc3b3946cf0"
+  await writeFile(journal, '{"type":"message","message":{"role":"user","content":"unchanged"}}\n')
+  const journalStat = await stat(journal)
+  await mkdir(paths.stateDocsDir, { recursive: true })
+  await writeFile(
+    join(paths.stateDocsDir, `${current}.md`),
+    renderStateDoc({
+      sessionId: current,
+      name: "Current",
+      state: "working",
+      workstream: "harness",
+      summary: "Still current",
+      journalPath: journal,
+      stamp: "2026-07-18T12:00:00.000Z",
+    }),
+  )
+  await writeFile(
+    paths.indexPath,
+    [
+      "- dead-session\tDead\tharness\t2026-07-18T11:00:00.000Z",
+      `- ${current}\tCurrent\tharness\t2026-07-18T12:00:00.000Z`,
+      "",
+    ].join("\n"),
+  )
+  await mkdir(join(root, "data"), { recursive: true })
+  await writeFile(paths.cursorPath, JSON.stringify({ [current]: journalStat }))
+  const pass = await runObserverPass({
+    paths,
+    runCommand: async argv =>
+      argv.includes("overview")
+        ? result(JSON.stringify([{ session_id: current, state: "working", session_journal: journal, cwd: process.cwd(), summary: "stable" }]))
+        : result(),
+  })
+  expect(pass.skipped).toBe(1)
+  const index = await readFile(paths.indexPath, "utf8")
+  expect(index).toContain(current)
+  expect(index).not.toContain("dead-session")
 })

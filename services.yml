@@ -128,7 +128,8 @@ streams:
         cmd: bun run observe -- --loop
         env:
           OMP_BIN: omp
-          OBSERVER_MODEL: openai-codex/gpt-5.6-terra:medium
+          # smol lane per ~/.omp/agent/config.yml roles.smol — NEVER terra (banned, Arthur 2026-07-15)
+          OBSERVER_MODEL: openai-codex/gpt-5.6-luna:xhigh
           OBSERVER_THRESHOLD_BYTES: "65536"
           OBSERVER_INTERVAL_SECONDS: "120"
         health:

@@ -1,11 +1,13 @@
 import { appendFile, mkdir, readFile, stat } from "node:fs/promises"
 import { dirname, join, resolve } from "node:path"
+import { tmpdir } from "node:os"
 
 export interface FleetOverviewRow {
   readonly sessionId: string
   readonly name: string
   readonly state: string
   readonly workstream: string
+  readonly cwd: string
   readonly sessionJournal: string
   readonly summary: string
   readonly spawnName: string
@@ -69,6 +71,7 @@ export interface ObserverOptions {
   readonly readText?: TextReader
   readonly statJournal?: JournalStatReader
   readonly overviewFixturePath?: string
+  readonly includeAll?: boolean
 }
 
 export interface ObserverPassResult {
@@ -77,6 +80,7 @@ export interface ObserverPassResult {
   readonly observed: number
   readonly skipped: number
   readonly failed: number
+  readonly skippedReasons: Readonly<Record<string, number>>
 }
 
 const DEFAULT_THRESHOLD_BYTES = 65_536
@@ -85,6 +89,8 @@ const MAX_SUMMARY_CHARS = 280
 const MAX_NAME_WORDS = 4
 const DEFAULT_TAIL_LINES = 200
 const DEFAULT_EXCERPT_CHARS = 12_000
+const UUID_LIKE_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 
 function recordOf(value: unknown): Record<string, unknown> | undefined {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined
@@ -123,6 +129,49 @@ function normaliseWorkstream(value: string): string | undefined {
     .replace(/[^a-z0-9_-]+/g, "-")
     .replace(/^-+|-+$/g, "")
   return slug || undefined
+}
+
+function isUuidLike(sessionId: string): boolean {
+  return UUID_LIKE_PATTERN.test(sessionId)
+}
+
+function isSafeSessionId(sessionId: string): boolean {
+  return sessionId.length > 0 && !/[/:]/.test(sessionId)
+}
+
+function isUnderDirectory(candidate: string, directory: string): boolean {
+  const resolvedCandidate = resolve(candidate)
+  const resolvedDirectory = resolve(directory)
+  return resolvedCandidate === resolvedDirectory || resolvedCandidate.startsWith(`${resolvedDirectory}/`)
+}
+
+function isTmpCwd(cwd: string): boolean {
+  return Boolean(cwd) && isUnderDirectory(cwd, tmpdir())
+}
+
+function errorCode(error: unknown): string | undefined {
+  const record = recordOf(error)
+  return typeof record?.code === "string" ? record.code : undefined
+}
+
+function isMissingJournalError(error: unknown): boolean {
+  return errorCode(error) === "ENOENT"
+}
+
+function incrementReason(reasons: Record<string, number>, reason: string): void {
+  reasons[reason] = (reasons[reason] ?? 0) + 1
+}
+
+function formatSkippedReasons(reasons: Readonly<Record<string, number>>): string {
+  const entries = Object.entries(reasons)
+    .filter(([, count]) => count > 0)
+    .sort(([left], [right]) => left.localeCompare(right))
+  return entries.length > 0 ? entries.map(([reason, count]) => `${reason}=${count}`).join(", ") : "none"
+}
+
+function stateDocPath(paths: ObserverPaths, sessionId: string): string {
+  if (!isSafeSessionId(sessionId)) throw new Error(`unsafe session id for state doc: ${sessionId}`)
+  return join(paths.stateDocsDir, `${sessionId}.md`)
 }
 
 export function defaultObserverPaths(repoRoot = process.env.OBSERVER_REPO_ROOT ?? resolve(import.meta.dir, "../../..")): ObserverPaths {
@@ -202,6 +251,7 @@ export function parseOverviewJson(stdout: string): readonly FleetOverviewRow[] {
       name: stringField(record, "name"),
       state: stringField(record, "state", "display_state"),
       workstream: stringField(record, "workstream"),
+      cwd: stringField(record, "cwd"),
       sessionJournal: stringField(record, "session_journal", "sessionJournal"),
       summary: stringField(record, "summary"),
       spawnName: stringField(record, "spawnName", "spawn_name"),
@@ -377,10 +427,9 @@ async function readIndexRecords(filePath: string): Promise<readonly IndexRecord[
     return []
   }
 }
-
 async function writeStateFiles(paths: ObserverPaths, input: StateDocInput): Promise<void> {
   await mkdir(paths.stateDocsDir, { recursive: true })
-  await Bun.write(join(paths.stateDocsDir, `${input.sessionId}.md`), renderStateDoc(input))
+  await Bun.write(stateDocPath(paths, input.sessionId), renderStateDoc(input))
   const existing = await readIndexRecords(paths.indexPath)
   const bySession = new Map(existing.map(record => [record.sessionId, record]))
   bySession.set(input.sessionId, {
@@ -390,6 +439,22 @@ async function writeStateFiles(paths: ObserverPaths, input: StateDocInput): Prom
     stamp: input.stamp,
   })
   await Bun.write(paths.indexPath, renderIndex([...bySession.values()]))
+}
+
+async function regenerateIndex(paths: ObserverPaths, survivingSessionIds: ReadonlySet<string>): Promise<void> {
+  const existing = await readIndexRecords(paths.indexPath)
+  const surviving: IndexRecord[] = []
+  for (const record of existing) {
+    if (!survivingSessionIds.has(record.sessionId)) continue
+    try {
+      await stat(stateDocPath(paths, record.sessionId))
+      surviving.push(record)
+    } catch {
+      // An index entry without its state document is stale.
+    }
+  }
+  await mkdir(dirname(paths.indexPath), { recursive: true })
+  await Bun.write(paths.indexPath, renderIndex(surviving))
 }
 
 async function defaultCommandRunner(argv: readonly string[]): Promise<CommandResult> {
@@ -432,6 +497,7 @@ export async function runObserverPass(options: ObserverOptions = {}): Promise<Ob
   const stamp = (options.now ?? (() => new Date()))().toISOString()
   const threshold = options.thresholdBytes ?? thresholdBytesFromEnv()
   const overviewFixturePath = options.overviewFixturePath ?? process.env.OBSERVER_OVERVIEW_FIXTURE
+  const includeAll = options.includeAll ?? false
 
   let overviewText: string
   if (overviewFixturePath) {
@@ -445,20 +511,57 @@ export async function runObserverPass(options: ObserverOptions = {}): Promise<Ob
   const peers = parseOverviewJson(overviewText)
   const cursors = await loadCursorStore(paths.cursorPath)
   const nextCursors: Record<string, JournalCursor> = { ...cursors }
+  const survivingSessionIds = new Set<string>()
+  const skippedReasons: Record<string, number> = {}
   let observed = 0
   let skipped = 0
   let failed = 0
 
   for (const peer of peers) {
+    if (!peer.sessionJournal.trim()) {
+      incrementReason(skippedReasons, "missing-session-journal")
+      skipped++
+      continue
+    }
+    if (!isSafeSessionId(peer.sessionId)) {
+      incrementReason(skippedReasons, "unsafe-session-id")
+      skipped++
+      continue
+    }
+    if (!includeAll && !isUuidLike(peer.sessionId)) {
+      incrementReason(skippedReasons, "invalid-session-id")
+      skipped++
+      continue
+    }
+    if (!includeAll && isTmpCwd(peer.cwd)) {
+      incrementReason(skippedReasons, "tmp-cwd")
+      skipped++
+      continue
+    }
+
+    let current: JournalStat
     try {
-      if (!peer.sessionJournal) {
-        if (!peer.summary.trim()) throw new Error("overview row has no session journal")
+      current = await statJournal(peer.sessionJournal)
+    } catch (error) {
+      if (isMissingJournalError(error)) {
+        incrementReason(skippedReasons, "missing-journal-file")
         skipped++
         continue
       }
-      const current = await statJournal(peer.sessionJournal)
+      failed++
+      try {
+        await appendErrorLog(paths.errorLogPath, peer.sessionId, error, stamp)
+      } catch (logError) {
+        console.error(`fleet observer error log failed: ${logError instanceof Error ? logError.message : String(logError)}`)
+      }
+      continue
+    }
+    survivingSessionIds.add(peer.sessionId)
+
+    try {
       if (!shouldObserve(peer, cursors[peer.sessionId], current, threshold)) {
         nextCursors[peer.sessionId] = current
+        incrementReason(skippedReasons, "below-threshold")
         skipped++
         continue
       }
@@ -497,21 +600,28 @@ export async function runObserverPass(options: ObserverOptions = {}): Promise<Ob
     }
   }
 
+  await regenerateIndex(paths, survivingSessionIds)
   await saveCursorStore(paths.cursorPath, nextCursors)
-  return { ran: true, peers: peers.length, observed, skipped, failed }
+  return { ran: true, peers: peers.length, observed, skipped, failed, skippedReasons }
 }
 
 async function main(argv: readonly string[]): Promise<number> {
   const once = argv.includes("--once")
   const loop = argv.includes("--loop")
-  if (argv.some(argument => argument !== "--once" && argument !== "--loop") || (once && loop)) {
-    console.error("usage: bun run observe -- [--once|--loop]")
+  const includeAll = argv.includes("--include-all")
+  if (
+    argv.some(argument => argument !== "--once" && argument !== "--loop" && argument !== "--include-all") ||
+    (once && loop)
+  ) {
+    console.error("usage: bun run observe -- [--once|--loop] [--include-all]")
     return 2
   }
   do {
     try {
-      const result = await runObserverPass()
-      process.stdout.write(`fleet observer: ${result.observed} observed, ${result.skipped} skipped, ${result.failed} failed\n`)
+      const result = await runObserverPass({ includeAll })
+      process.stdout.write(
+        `fleet observer: ${result.observed} observed, ${result.skipped} skipped, ${result.failed} failed; skip reasons: ${formatSkippedReasons(result.skippedReasons)}\n`,
+      )
     } catch (error) {
       await appendErrorLog(defaultObserverPaths().errorLogPath, "_pass", error)
       console.error(error instanceof Error ? error.message : String(error))
