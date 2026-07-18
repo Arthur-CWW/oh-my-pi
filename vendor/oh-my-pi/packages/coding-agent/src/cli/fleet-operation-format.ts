@@ -1,5 +1,5 @@
 import type { SessionControlReceipt } from "../session/session-control";
-import type { FleetRolloutFailureReceipt } from "../session/fleet-rollout-plan";
+import type { FleetRolloutFailureReceipt, FleetRolloutSkipReceipt } from "../session/fleet-rollout-plan";
 
 import type { FleetRolloutOperationResult } from "./fleet-operations";
 
@@ -16,6 +16,7 @@ export function formatFleetReceipt(receipt: SessionControlReceipt): string {
 			`completedAt=${receipt.completedAt ?? "-"}`,
 			`result=${receipt.result === undefined ? "-" : JSON.stringify(receipt.result)}`,
 			`error=${receipt.error ?? "-"}`,
+			`failureCode=${receipt.failureCode ?? "-"}`,
 		].join("\t") + "\n"
 	);
 }
@@ -39,6 +40,17 @@ function formatFleetRolloutFailure(failure: FleetRolloutFailureReceipt): string 
 	].join("\t");
 }
 
+function formatFleetRolloutSkip(skip: FleetRolloutSkipReceipt): string {
+	return [
+		"SKIPPED",
+		`targetId=${skip.targetId}`,
+		`sessionId=${skip.sessionId}`,
+		`phase=${skip.phaseReached}`,
+		`commandId=${skip.commandId ?? "-"}`,
+		`reason=${inline(skip.reason)}`,
+	].join("\t");
+}
+
 export function formatFleetRolloutPlan(result: FleetRolloutOperationResult): string {
 	const lines = [
 		`ROLLOUT_ID\t${result.plan.fleetRolloutId}`,
@@ -57,6 +69,7 @@ export function formatFleetRolloutPlan(result: FleetRolloutOperationResult): str
 	if (result.reason) lines.push(`REASON\t${result.reason}`);
 	if (result.execution) {
 		lines.push(`EXECUTION\t${result.execution.state}\t${result.execution.completed.join(",") || "-"}`);
+		for (const skip of result.execution.skipped) lines.push(formatFleetRolloutSkip(skip));
 		if (result.execution.state === "Frozen") {
 			for (const failure of result.execution.failures) lines.push(formatFleetRolloutFailure(failure));
 		}

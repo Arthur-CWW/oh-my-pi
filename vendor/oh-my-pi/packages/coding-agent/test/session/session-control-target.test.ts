@@ -6,6 +6,7 @@ import * as path from "node:path";
 import { InvalidRunnerCommandError } from "../../src/runner/errors";
 import { SessionControlBus, type SessionControlCommand } from "../../src/session/session-control";
 import { type SessionControlTargetActions, startSessionControlTarget } from "../../src/session/session-control-target";
+import { SessionStateCommandInFlightError } from "../../src/session/session-manager";
 import type { SessionOwnershipHandle } from "../../src/session/session-ownership";
 
 const cleanupRoots: string[] = [];
@@ -97,6 +98,25 @@ function requestPrepare(bus: SessionControlBus, ownerEpoch = "owner-a"): Session
 			expectedDigest: "old-digest",
 			drainTimeoutMs: 25,
 		},
+	};
+	bus.request(command);
+	return command;
+}
+
+function requestPauseState(bus: SessionControlBus, kind: "pause" | "resume"): SessionControlCommand {
+	const command: SessionControlCommand = {
+		schemaVersion: 1,
+		commandId: crypto.randomUUID(),
+		source: {
+			kind: "local-cli",
+			instanceId: crypto.randomUUID(),
+			pid: process.pid,
+			...(process.getuid ? { uid: process.getuid() } : {}),
+		},
+		sessionId: "session-a",
+		targetOwnerEpoch: "owner-a",
+		requestedAt: new Date().toISOString(),
+		intent: { kind },
 	};
 	bus.request(command);
 	return command;
@@ -309,6 +329,100 @@ describe("session control prepare rollout", () => {
 			}),
 		});
 		expect(flushCalls).toBe(1);
+		await target.stop();
+		bus.close();
+	});
+
+	it("turns a state-command collision into a typed receipt without an unhandled rejection", async () => {
+		const { bus, ownership } = await fixture();
+		const unhandled: unknown[] = [];
+		const onUnhandled = (reason: unknown): void => {
+			unhandled.push(reason);
+		};
+		process.on("unhandledRejection", onUnhandled);
+		let target: Awaited<ReturnType<typeof startSessionControlTarget>> | undefined;
+		try {
+			const targetActions = actions(() => {});
+			target = await startSessionControlTarget({
+				bus,
+				ownership,
+				pollIntervalMs: 1,
+				diagnosticJournal: {
+					appendCustomEntry: () => {
+						throw new SessionStateCommandInFlightError();
+					},
+				},
+				actions: {
+					...targetActions,
+					prepareRollout: () => {
+						throw new SessionStateCommandInFlightError();
+					},
+				},
+			});
+			const command = requestPrepare(bus);
+			const receipt = await bus.waitForTerminal(command.commandId, { timeoutMs: 1_000, pollIntervalMs: 1 });
+			await Bun.sleep(10);
+
+			expect(receipt).toMatchObject({
+				state: "failed",
+				failureCode: "session_state_command_in_flight",
+				error: "SessionStateCommandInFlightError: A session state command is awaiting durable persistence",
+			});
+			expect(unhandled).toEqual([]);
+			await expect(target.stop()).resolves.toBeUndefined();
+		} finally {
+			process.off("unhandledRejection", onUnhandled);
+			await target?.stop();
+			bus.close();
+		}
+	});
+
+	it("defers pause until an ask-bound turn reaches its boundary and resume clears the durable hold", async () => {
+		const { bus, ownership } = await fixture();
+		const boundary = Promise.withResolvers<void>();
+		let askPending = true;
+		let admissionPaused = false;
+		const targetActions = actions(() => {});
+		const target = await startSessionControlTarget({
+			bus,
+			ownership,
+			pollIntervalMs: 1,
+			actions: {
+				...targetActions,
+				pause: async () => {
+					admissionPaused = true;
+					await boundary.promise;
+				},
+				resume: () => {
+					admissionPaused = false;
+				},
+			},
+		});
+		const pause = requestPauseState(bus, "pause");
+		for (let index = 0; index < 100 && bus.getReceipt(pause.commandId)?.state !== "acknowledged"; index++) {
+			await Bun.sleep(1);
+		}
+
+		expect(bus.getReceipt(pause.commandId)?.state).toBe("acknowledged");
+		expect(bus.getPaused(ownership.sessionId)).toBe(false);
+		expect({ askPending, admissionPaused }).toEqual({ askPending: true, admissionPaused: true });
+
+		askPending = false;
+		boundary.resolve();
+		const paused = await bus.waitForTerminal(pause.commandId, { timeoutMs: 1_000, pollIntervalMs: 1 });
+		expect(paused).toMatchObject({ state: "applied", result: { kind: "pause", paused: true } });
+		expect(bus.listPaused()).toEqual([
+			expect.objectContaining({ sessionId: ownership.sessionId, ownerEpoch: ownership.ownerEpoch }),
+		]);
+
+		const resume = requestPauseState(bus, "resume");
+		const resumed = await bus.waitForTerminal(resume.commandId, { timeoutMs: 1_000, pollIntervalMs: 1 });
+		expect(resumed).toMatchObject({ state: "applied", result: { kind: "resume", paused: false } });
+		expect({ askPending, admissionPaused, pausedRows: bus.listPaused() }).toEqual({
+			askPending: false,
+			admissionPaused: false,
+			pausedRows: [],
+		});
 		await target.stop();
 		bus.close();
 	});

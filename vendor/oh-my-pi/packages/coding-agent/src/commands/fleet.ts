@@ -17,6 +17,7 @@ import {
 	formatFleetStatus,
 	pruneFleetPeers,
 } from "../cli/fleet-cli";
+import { SessionControlBus } from "../session/session-control";
 import { collectFleetOverview, formatFleetOverview, formatFleetOverviewJson } from "../cli/fleet-overview";
 
 const ACTIONS = ["status", "overview", "errors", "prune", "pause", "resume", "rollout", "rollback", "pin", "unpin"] as const;
@@ -60,6 +61,8 @@ export default class Fleet extends Command {
 		since: Flags.string({ description: "Errors since ISO time or duration (for example 2h or 7d)" }),
 		session: Flags.string({ description: "Filter errors by session ID" }),
 		rollout: Flags.string({ description: "Filter errors by rollout ID" }),
+		status: Flags.boolean({ description: "Show pause status instead of issuing a command", default: false }),
+		"include-paused": Flags.boolean({ description: "Include paused sessions in rollout", default: false }),
 		json: Flags.boolean({ description: "Output as JSON (overview)", default: false }),
 	};
 
@@ -173,19 +176,34 @@ export default class Fleet extends Command {
 		}
 
 		if (action === "pause" || action === "resume") {
+			if (flags.status && action === "pause") {
+				const bus = new SessionControlBus();
+				try {
+					const paused = bus.listPaused();
+					if (paused.length === 0) {
+						process.stdout.write("No sessions are currently paused.\n");
+					} else {
+						const lines = paused.map(
+							row => `PAUSED\tsessionId=${row.sessionId}\townerEpoch=${row.ownerEpoch}\tsince=${row.updatedAt}\n`,
+						);
+						process.stdout.write(lines.join(""));
+					}
+				} finally {
+					bus.close();
+				}
+				return;
+			}
 			if (
-				!selector ||
 				value ||
 				flags.digest ||
 				flags.blessed ||
 				flags.canary ||
 				flags.to ||
 				flags["wave-size"] !== 1 ||
-				flags["dry-run"] ||
-				flags.all
+				flags["dry-run"]
 			)
-				fail(`${action} requires one selector and no value flags`);
-			const targets = await resolveFleetSelectors({ selectors, workstream: flags.workstream });
+				fail(`${action} accepts a selector (default all) and --workstream`);
+			const targets = await resolveFleetSelectors({ selectors, workstream: flags.workstream, all: !selector });
 			if (targets.length === 0) fail(`${action} selector matched no fresh target`);
 			const receipts = [];
 			for (const target of targets) receipts.push(await issueFleetControl({ action, peer: target.peer }));
@@ -263,6 +281,7 @@ export default class Fleet extends Command {
 				canarySelector: flags.canary,
 				waveSize: flags["wave-size"],
 				dryRun: flags["dry-run"],
+				includePaused: flags["include-paused"],
 			});
 			process.stdout.write(formatFleetRolloutPlan(result));
 			if (result.execution?.state === "Frozen")

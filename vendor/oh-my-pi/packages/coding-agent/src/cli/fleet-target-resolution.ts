@@ -74,7 +74,7 @@ export async function resolveFleetSelectors(options: FleetSelectorOptions = {}):
 			const fresh = isIrcExternalPeerFresh(peer.lastSeen, options.nowMs);
 			if (!fresh) {
 				const isAlive = (options.isProcessAlive ?? isIrcExternalPeerProcessAlive)(peer.pid);
-				const isIdle = peer.state === "idle" || peer.state === "waiting_input";
+				const isIdle = peer.state === "idle" || peer.state === "waiting_input" || peer.state === "paused";
 				if (!isAlive || (!options.all && !isIdle)) continue;
 			}
 			const workstream = await peerWorkstream(peer);

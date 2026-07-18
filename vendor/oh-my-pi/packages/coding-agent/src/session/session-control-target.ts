@@ -16,6 +16,7 @@ import {
 	stopConfirmationToken,
 	toPolicyApplyCommandV1,
 } from "./session-control";
+import { SessionStateCommandInFlightError } from "./session-manager";
 import type { SessionOwnershipHandle } from "./session-ownership";
 
 export interface SessionControlTargetActions {
@@ -82,29 +83,36 @@ async function recordControlFailure(
 	failure: string,
 ): Promise<void> {
 	if (!journal) return;
-	const timestamp = Date.now();
-	const separator = failure.indexOf(":");
-	const persisted = appendErrorInboxEvent(journal, {
-		id: `session-control:${command.commandId}`,
-		firstTimestamp: timestamp,
-		lastTimestamp: timestamp,
-		message: failure,
-		count: 1,
-		source: "session-control-target",
-		category: "session-control",
-		errorClass: separator > 0 ? failure.slice(0, separator) : "ControlFailure",
-		session: ownership.sessionId,
-		operation: command.intent.kind,
-		...(command.intent.kind === "prepare-rollout" ? { fleetRolloutId: command.intent.rolloutId } : {}),
-		unread: true,
-		resolved: false,
-	});
-	if (!persisted) return;
 	try {
-		await journal.flush?.();
+		const timestamp = Date.now();
+		const separator = failure.indexOf(":");
+		const persisted = appendErrorInboxEvent(journal, {
+			id: `session-control:${command.commandId}`,
+			firstTimestamp: timestamp,
+			lastTimestamp: timestamp,
+			message: failure,
+			count: 1,
+			source: "session-control-target",
+			category: "session-control",
+			errorClass: separator > 0 ? failure.slice(0, separator) : "ControlFailure",
+			session: ownership.sessionId,
+			operation: command.intent.kind,
+			...(command.intent.kind === "prepare-rollout" ? { fleetRolloutId: command.intent.rolloutId } : {}),
+			unread: true,
+			resolved: false,
+		});
+		if (persisted) await journal.flush?.();
 	} catch {
-		// Receipt completion must not recurse through a diagnostic-journal failure.
+		// A diagnostic journal can share the session-state persistence gate that
+		// rejected the action. Receipt completion must never recurse through it.
 	}
+}
+
+/** Detect transient busy errors that should produce a typed receipt, never an unhandled rejection. */
+export function isSessionBusyError(error: unknown): boolean {
+	if (error instanceof SessionStateCommandInFlightError) return true;
+	if (error instanceof Error && error.name === "SessionStateCommandInFlightError") return true;
+	return false;
 }
 
 /**
@@ -275,13 +283,19 @@ export async function startSessionControlTarget(options: SessionControlTargetOpt
 			}
 		} catch (error) {
 			const failure = formatSessionControlFailure(error);
-			await recordControlFailure(options.diagnosticJournal, ownership, command, failure);
+			if (isSessionBusyError(error)) {
+				bus.fail(command.commandId, ownership.ownerEpoch, failure, "session_state_command_in_flight");
+				await recordControlFailure(options.diagnosticJournal, ownership, command, failure);
+				return;
+			}
 			if (terminalAction) {
 				const receipt = bus.getReceipt(command.commandId);
 				if (receipt?.state !== "applied") bus.fail(command.commandId, ownership.ownerEpoch, failure);
+				await recordControlFailure(options.diagnosticJournal, ownership, command, failure);
 				throw error;
 			}
 			bus.fail(command.commandId, ownership.ownerEpoch, failure);
+			await recordControlFailure(options.diagnosticJournal, ownership, command, failure);
 		}
 	};
 

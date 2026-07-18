@@ -317,6 +317,18 @@ function createSpawnCordonRefusal(cordon: SessionSpawnCordon): AgentToolResult<T
 		details: { projectAgentsDir: null, results: [], totalDurationMs: 0, spawnRefusal: cordon },
 	};
 }
+function createSessionPausedRefusal(): AgentToolResult<TaskToolDetails> {
+	return {
+		content: [{ type: "text", text: "Spawn refused: session is paused by fleet control." }],
+		details: {
+			projectAgentsDir: null,
+			results: [],
+			totalDurationMs: 0,
+			pauseRefusal: { kind: "SessionControlPaused", reason: "session paused by fleet control" },
+		},
+	};
+}
+
 
 /**
  * Reject fields the current configuration does not accept. `schema` is never
@@ -879,6 +891,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 		if (validationError) {
 			return createTaskModeError(validationError);
 		}
+		if (this.session.isSessionControlPaused?.()) return createSessionPausedRefusal();
 		const cordon = this.session.getSessionId ? getSessionSpawnCordon(this.session.getSessionId() ?? "") : undefined;
 		if (cordon) return createSpawnCordonRefusal(cordon);
 
@@ -1449,6 +1462,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 		} catch (error) {
 			logger.warn("task: failed to reload settings before spawning subagent", { error: String(error) });
 		}
+		if (this.session.isSessionControlPaused?.()) return createSessionPausedRefusal();
 		const cordon = this.session.getSessionId ? getSessionSpawnCordon(this.session.getSessionId() ?? "") : undefined;
 		if (cordon) return createSpawnCordonRefusal(cordon);
 		const { agents, projectAgentsDir } = await discoverAgents(this.session.cwd);

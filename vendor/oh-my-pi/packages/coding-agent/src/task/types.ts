@@ -434,6 +434,11 @@ export interface SingleResult {
 	outputMeta?: { lineCount: number; charCount: number };
 }
 
+export interface SessionControlPauseRefusal {
+	readonly kind: "SessionControlPaused";
+	readonly reason: "session paused by fleet control";
+}
+
 /** Tool details for TUI rendering */
 export interface TaskToolDetails {
 	projectAgentsDir: string | null;
@@ -441,6 +446,8 @@ export interface TaskToolDetails {
 	totalDurationMs: number;
 	/** Typed spawn-admission refusal while the parent session is rollout-cordoned. */
 	spawnRefusal?: SessionSpawnCordon;
+	/** Typed spawn-admission refusal while fleet control is paused. */
+	pauseRefusal?: SessionControlPauseRefusal;
 	/** Aggregated usage across all subagents. */
 	usage?: Usage;
 	outputPaths?: string[];

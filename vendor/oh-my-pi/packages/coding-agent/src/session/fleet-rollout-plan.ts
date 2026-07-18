@@ -69,24 +69,36 @@ export interface FleetRolloutFailureReceipt {
 	readonly buildDigest?: string;
 	readonly cause: string;
 }
+export interface FleetRolloutSkipReceipt {
+	readonly targetId: string;
+	readonly sessionId: string;
+	readonly phaseReached: FleetTargetState;
+	readonly commandId?: string;
+	readonly reason: string;
+}
+
 
 export class FleetRolloutTargetError extends Error {
 	readonly receipt: FleetRolloutFailureReceipt;
 	readonly terminalState: FleetTargetState;
+	/** True when the target was transiently busy (ask-pending, state-command in-flight). The rollout should skip and continue. */
+	readonly recoverable: boolean;
 
-	constructor(receipt: FleetRolloutFailureReceipt, terminalState: FleetTargetState) {
+	constructor(receipt: FleetRolloutFailureReceipt, terminalState: FleetTargetState, recoverable = false) {
 		super(receipt.cause);
 		this.name = "FleetRolloutTargetError";
 		this.receipt = receipt;
 		this.terminalState = terminalState;
+		this.recoverable = recoverable;
 	}
 }
 
 export type FleetRolloutExecutionResult =
-	| { readonly state: "Succeeded"; readonly completed: readonly string[] }
+	| { readonly state: "Succeeded"; readonly completed: readonly string[]; readonly skipped: readonly FleetRolloutSkipReceipt[] }
 	| {
 			readonly state: "Frozen";
 			readonly completed: readonly string[];
+			readonly skipped: readonly FleetRolloutSkipReceipt[];
 			readonly failures: readonly FleetRolloutFailureReceipt[];
 	  };
 
@@ -234,6 +246,8 @@ export interface CreateFleetRolloutPlanOptions {
 	readonly initiatorSessionIds: ReadonlySet<string>;
 	readonly initiatorPids?: ReadonlySet<number>;
 	readonly sessionPins?: ReadonlyMap<string, string>;
+	readonly pausedSessionIds?: ReadonlySet<string>;
+	readonly includePaused?: boolean;
 	readonly canarySessionId?: string;
 	readonly waveSize?: number;
 	readonly nowMs?: number;
@@ -252,7 +266,7 @@ export function isFleetOwnerProcessAlive(pid: number): boolean {
 }
 
 function stateRank(peer: IrcExternalPeer): number {
-	return peer.state === "idle" ? 0 : peer.state === "waiting_input" ? 1 : 2;
+	return peer.state === "idle" ? 0 : peer.state === "waiting_input" || peer.state === "paused" ? 1 : 2;
 }
 
 function comparePeers(left: IrcExternalPeer, right: IrcExternalPeer): number {
@@ -294,8 +308,11 @@ function classifyPeer(
 	const pin = options.sessionPins?.get(peer.sessionId);
 	if (pin !== undefined && pin !== options.target.digest)
 		return { state: "PinnedElsewhere", reason: `pinned to ${pin}` };
+	if (!options.includePaused && (options.pausedSessionIds?.has(peer.sessionId) || peer.state === "paused")) {
+		return { state: "BusyDeferred", reason: "paused" };
+	}
 	if (peer.state === "working") return { state: "BusyDeferred", reason: "working peer is not safe to cordon" };
-	if (peer.state !== "idle" && peer.state !== "waiting_input") {
+	if (peer.state !== "idle" && peer.state !== "waiting_input" && !(options.includePaused && peer.state === "paused")) {
 		return { state: "BusyDeferred", reason: `unsafe peer state ${peer.state}` };
 	}
 	if (peer.buildDigest === options.target.digest) return { state: "Classified", reason: "already at target digest" };
@@ -433,6 +450,8 @@ export interface ExecuteFleetRolloutOptions {
 	readonly compatibility: FleetCompatibilityProfile;
 	readonly initiatorSessionIds: ReadonlySet<string>;
 	readonly sessionPins?: ReadonlyMap<string, string>;
+	readonly pausedSessionIds?: ReadonlySet<string>;
+	readonly includePaused?: boolean;
 	readonly executeTarget: (target: FleetRolloutTarget) => Promise<void>;
 	readonly reobserveTarget?: (target: FleetRolloutTarget) => Promise<void>;
 	readonly nowMs?: number;
@@ -479,6 +498,17 @@ export async function executeFleetRolloutPlan(
 	options: ExecuteFleetRolloutOptions,
 ): Promise<FleetRolloutExecutionResult> {
 	const completed: string[] = [];
+	const skipped: FleetRolloutSkipReceipt[] = [];
+	const transition = (target: FleetRolloutTarget, phase: "requested" | "skipped" | "applied" | "recovered" | "failed", detail?: { reason?: string; error?: string }): void => {
+		options.rolloutIndex?.updatePeer({
+			rolloutId: options.plan.fleetRolloutId,
+			sessionId: target.sessionId,
+			...(target.peer.sessionFile ? { sessionFile: target.peer.sessionFile } : {}),
+			name: target.peer.name,
+			phase,
+			...detail,
+		});
+	};
 	for (const excluded of options.plan.excluded)
 		appendFleetRecord(options.journal, targetRecord(options, excluded, excluded.state, excluded.reason));
 	for (let index = 0; index < options.plan.orderedTargets.length; index++) {
@@ -492,6 +522,8 @@ export async function executeFleetRolloutPlan(
 					compatibility: options.compatibility,
 					initiatorSessionIds: options.initiatorSessionIds,
 					sessionPins: options.sessionPins,
+					pausedSessionIds: options.pausedSessionIds,
+					includePaused: options.includePaused,
 					nowMs: options.nowMs,
 					isProcessAlive: options.isProcessAlive,
 				})
@@ -501,12 +533,21 @@ export async function executeFleetRolloutPlan(
 			(current.ownerEpoch !== planned.expectedOwnerEpoch || current.pid !== planned.peer.pid);
 		if (!current || reclassified.state !== "Classified" || reclassified.reason !== undefined || ownershipChanged) {
 			const state = ownershipChanged ? "BusyDeferred" : reclassified.state;
-			const reason = ownershipChanged
-				? current.ownerEpoch !== planned.expectedOwnerEpoch
-					? "owner epoch changed before command"
-					: "owner process changed before command"
-				: reclassified.reason;
+			const reason =
+				(ownershipChanged
+					? current.ownerEpoch !== planned.expectedOwnerEpoch
+						? "owner epoch changed before command"
+						: "owner process changed before command"
+					: reclassified.reason) ?? "target became ineligible before command";
 			appendFleetRecord(options.journal, targetRecord(options, planned, state, reason));
+			transition(planned, "skipped", { reason });
+			skipped.push({
+				targetId: planned.targetId,
+				sessionId: planned.sessionId,
+				phaseReached: state,
+				commandId: planned.commandId,
+				reason,
+			});
 			continue;
 		}
 		const priorRequest = fleetRolloutRecords(options.journal, options.plan.fleetRolloutId).some(
@@ -526,17 +567,14 @@ export async function executeFleetRolloutPlan(
 			continue;
 		}
 		appendFleetRecord(options.journal, targetRecord(options, planned, "CordonRequested"));
-		options.rolloutIndex?.updatePeer({
-			rolloutId: options.plan.fleetRolloutId,
-			sessionId: planned.sessionId,
-			...(planned.peer.sessionFile ? { sessionFile: planned.peer.sessionFile } : {}),
-			name: planned.peer.name,
-			phase: "requested",
-		});
+		transition(planned, "requested");
 		try {
 			await options.executeTarget(planned);
 			completed.push(planned.sessionId);
+			transition(planned, "applied");
+			transition(planned, "recovered");
 		} catch (error) {
+			const recoverable = error instanceof FleetRolloutTargetError && error.recoverable;
 			const failure =
 				error instanceof FleetRolloutTargetError
 					? error.receipt
@@ -552,25 +590,30 @@ export async function executeFleetRolloutPlan(
 							cause: error instanceof Error ? error.message : String(error),
 						};
 			const terminalState = error instanceof FleetRolloutTargetError ? error.terminalState : "RestartFailed";
-			appendFleetRecord(options.journal, targetRecord(options, planned, terminalState, failure.cause, failure));
-			options.rolloutIndex?.updatePeer({
-				rolloutId: options.plan.fleetRolloutId,
-				sessionId: planned.sessionId,
-				...(planned.peer.sessionFile ? { sessionFile: planned.peer.sessionFile } : {}),
-				name: planned.peer.name,
-				phase: "failed",
-				error: failure.cause,
-			});
-			for (const later of options.plan.orderedTargets.slice(index + 1)) {
-				appendFleetRecord(
-					options.journal,
-					targetRecord(options, later, "Frozen", `frozen after ${planned.sessionId} failed`),
-				);
+			if (recoverable) {
+				const skip = {
+					targetId: planned.targetId,
+					sessionId: planned.sessionId,
+					phaseReached: failure.phaseReached,
+					...(failure.commandId === undefined ? {} : { commandId: failure.commandId }),
+					reason: failure.cause,
+				} satisfies FleetRolloutSkipReceipt;
+				appendFleetRecord(options.journal, targetRecord(options, planned, "BusyDeferred", skip.reason));
+				transition(planned, "skipped", { reason: skip.reason });
+				skipped.push(skip);
+				continue;
 			}
-			return { state: "Frozen", completed, failures: [failure] };
+			appendFleetRecord(options.journal, targetRecord(options, planned, terminalState, failure.cause, failure));
+			transition(planned, "failed", { error: failure.cause });
+			for (const later of options.plan.orderedTargets.slice(index + 1)) {
+				const reason = `frozen after ${planned.sessionId} failed`;
+				appendFleetRecord(options.journal, targetRecord(options, later, "Frozen", reason));
+				transition(later, "skipped", { reason });
+			}
+			return { state: "Frozen", completed, skipped, failures: [failure] };
 		}
 	}
-	return { state: "Succeeded", completed };
+	return { state: "Succeeded", completed, skipped };
 }
 
 export interface StartFleetRolloutOptions

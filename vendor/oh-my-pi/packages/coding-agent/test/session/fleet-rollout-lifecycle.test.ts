@@ -688,7 +688,7 @@ describe("fleet rollout lifecycle proof", () => {
 				if (wave.kind === "canary") controllerIntent(journal, plan, "ObserveCanary");
 			},
 		});
-		expect(execution).toEqual({ state: "Succeeded", completed: targets.map(target => target.peer.sessionId) });
+		expect(execution).toEqual({ state: "Succeeded", completed: targets.map(target => target.peer.sessionId), skipped: [] });
 		controllerIntent(journal, plan, "Succeeded");
 		const records = fleetRolloutRecords(journal, fleetRolloutId);
 		for (const target of plan.orderedTargets) {

@@ -30,11 +30,13 @@ import {
 } from "../session/fleet-rollout-plan";
 import { resolveReleaseValidationPaths } from "../session/release-registry-validation";
 import { matchesFleetRecovery } from "../session/rollout";
+import { RolloutJournal } from "../session/rollout-journal";
 import {
 	CURRENT_SESSION_CONTROL_PROTOCOL,
 	decodeSessionControlCommand,
 	type FleetPinChannel,
 	SessionControlBus,
+	SESSION_CONTROL_DB_PATH,
 	type SessionControlCommand,
 	type SessionControlReceipt,
 	selectSessionControlCommandKind,
@@ -115,6 +117,7 @@ export interface FleetRolloutOperationOptions {
 	readonly canarySelector?: string;
 	readonly waveSize?: number;
 	readonly dryRun?: boolean;
+	readonly includePaused?: boolean;
 	readonly ircDbPath?: string;
 	readonly bus?: IrcExternalBus;
 	readonly controlDbPath?: string;
@@ -425,6 +428,7 @@ function checkpointFromReceipt(receipt: SessionControlReceipt): unknown {
 		throw new Error(receipt.error ?? "Rollout checkpoint command failed");
 	return receipt.result.checkpoint;
 }
+
 function targetExecutionError(input: {
 	readonly target: FleetRolloutTarget;
 	readonly phaseReached: FleetTargetState;
@@ -433,6 +437,7 @@ function targetExecutionError(input: {
 	readonly cause: string;
 	readonly timedOut?: boolean;
 	readonly commandId?: string;
+	readonly recoverable?: boolean;
 }): FleetRolloutTargetError {
 	return new FleetRolloutTargetError(
 		{
@@ -447,6 +452,7 @@ function targetExecutionError(input: {
 			cause: input.cause,
 		},
 		input.terminalState,
+		input.recoverable,
 	);
 }
 
@@ -478,13 +484,15 @@ async function awaitAppliedReceipt(input: {
 		}
 	}
 	if (receipt.state !== "applied") {
+		const receiptError = receipt.error ?? `${input.awaitedCondition} failed with receipt state ${receipt.state}`;
 		throw targetExecutionError({
 			target: input.target,
 			phaseReached: input.phaseReached,
 			awaitedCondition: input.awaitedCondition,
 			terminalState: input.terminalState,
 			commandId: receipt.commandId,
-			cause: receipt.error ?? `${input.awaitedCondition} failed with receipt state ${receipt.state}`,
+			cause: receiptError,
+			recoverable: receipt.failureCode === "session_state_command_in_flight",
 		});
 	}
 	return receipt;
@@ -797,6 +805,7 @@ export async function executeFleetRollout(options: FleetRolloutOperationOptions)
 		throw new Error(`--canary ${options.canarySelector} must identify exactly one target`);
 	const rolloutId = randomUUID();
 	const controller = await controllerFor(options.controller, rolloutId);
+	const rolloutIndex = options.dryRun ? undefined : new RolloutJournal(options.controlDbPath);
 	try {
 		const inventory = {
 			hasArtifact: async (digest: string) => {
@@ -817,8 +826,16 @@ export async function executeFleetRollout(options: FleetRolloutOperationOptions)
 			},
 			previousDigest: release.registry.previous ?? undefined,
 		};
+		const planningDbPath = options.controlDbPath ?? SESSION_CONTROL_DB_PATH;
+		const pausedSessionIds = new Set<string>();
+		if (await Bun.file(planningDbPath).exists()) {
+			const planningBus = new SessionControlBus(planningDbPath);
+			for (const row of planningBus.listPaused()) pausedSessionIds.add(row.sessionId);
+			planningBus.close();
+		}
 		const started = await startFleetRollout({
 			journal: controller.journal,
+			rolloutIndex,
 			lease: controller.lease,
 			resolveTarget:
 				release.requestedChannel === "blessed"
@@ -829,8 +846,11 @@ export async function executeFleetRollout(options: FleetRolloutOperationOptions)
 			targetVersion: release.version,
 			compatibility: LOCAL_COMPATIBILITY,
 			initiatorSessionIds: new Set([controller.manager.getSessionId()]),
+			pausedSessionIds,
+			includePaused: options.includePaused,
 			canarySessionId: canary?.peer.sessionId,
 			fleetRolloutId: rolloutId,
+			waveSize: options.waveSize,
 			isProcessAlive: options.isProcessAlive,
 		});
 		if (started.mode === "read-only")
@@ -856,10 +876,13 @@ export async function executeFleetRollout(options: FleetRolloutOperationOptions)
 			const execution = await executeFleetRolloutPlan({
 				plan: started.plan,
 				journal: controller.journal,
+				rolloutIndex,
 				listPeers: allPeers,
 				compatibility: LOCAL_COMPATIBILITY,
 				isProcessAlive: options.isProcessAlive,
 				initiatorSessionIds: new Set([controller.manager.getSessionId()]),
+				pausedSessionIds,
+				includePaused: options.includePaused,
 				executeTarget: async target => {
 					const wave = started.plan.waves.find(item => item.waveId === target.waveId);
 					if (wave?.kind === "rolling" && !rollingStarted) {
@@ -884,47 +907,17 @@ export async function executeFleetRollout(options: FleetRolloutOperationOptions)
 					if (wave?.kind === "canary") appendIntentLifecycle(controller.journal, started.plan, "ObserveCanary");
 				},
 			});
-			const terminalExecution: FleetRolloutExecutionResult =
-				execution.state === "Succeeded" && execution.completed.length !== started.plan.orderedTargets.length
-					? {
-							state: "Frozen",
-							completed: execution.completed,
-							failures: started.plan.orderedTargets
-								.filter(target => !execution.completed.includes(target.sessionId))
-								.map(target => {
-									const record = fleetRolloutRecords(controller.journal, started.plan.fleetRolloutId)
-										.filter(
-											item =>
-												item.record === "target" &&
-												item.sessionId === target.sessionId &&
-												item.state !== "CordonRequested",
-										)
-										.at(-1);
-									return {
-										targetId: target.targetId,
-										sessionId: target.sessionId,
-										phaseReached: "Classified" as const,
-										awaitedCondition: "current owner verification" as const,
-										commandId: target.commandId,
-										timedOut: false,
-										cause:
-											record?.record === "target"
-												? (record.reason ?? "target became ineligible before command dispatch")
-												: "target became ineligible before command dispatch",
-									};
-								}),
-						}
-					: execution;
 			appendIntentLifecycle(
 				controller.journal,
 				started.plan,
-				terminalExecution.state === "Succeeded" ? "Succeeded" : "Frozen",
+				execution.state === "Succeeded" ? "Succeeded" : "Frozen",
 			);
-			return { mode: "active", plan: started.plan, execution: terminalExecution };
+			return { mode: "active", plan: started.plan, execution };
 		} finally {
 			controlBus.close();
 		}
 	} finally {
+		rolloutIndex?.close();
 		await controller.release();
 		if (ownsLiveBus) liveBus.close();
 	}

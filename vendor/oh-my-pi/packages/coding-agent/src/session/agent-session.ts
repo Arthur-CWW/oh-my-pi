@@ -1264,6 +1264,13 @@ export interface SessionDisposeOptions {
 	childPolicy?: "detach" | "restart" | "stop";
 }
 
+export class SessionControlPausedError extends Error {
+	constructor() {
+		super("Session is paused by fleet control");
+		this.name = "SessionControlPausedError";
+	}
+}
+
 export class AgentSession {
 	readonly agent: Agent;
 	readonly sessionManager: SessionManager;
@@ -2572,10 +2579,10 @@ export class AgentSession {
 
 	/** Emit an event to all listeners */
 	#emit(event: AgentSessionEvent): void {
-		if (event.type === "agent_start") {
+		if (event.type === "agent_start" && !this.#sessionControlPaused) {
 			this.#updateExternalIrcPeerState("working");
 		} else if (event.type === "agent_end") {
-			this.#updateExternalIrcPeerState("waiting_input");
+			this.#updateExternalIrcPeerState(this.#sessionControlPaused ? "paused" : "waiting_input");
 		}
 		// Copy array before iteration to avoid mutation during iteration.
 		const listeners = [...this.#eventListeners];
@@ -6151,6 +6158,8 @@ export class AgentSession {
 			}
 		}
 
+		if (this.#sessionControlPaused) throw new SessionControlPausedError();
+
 		// Expand file-based prompt templates if requested
 		const expandedText = expandPromptTemplates ? expandPromptTemplate(text, [...this.#promptTemplates]) : text;
 
@@ -6274,6 +6283,7 @@ export class AgentSession {
 		message: Pick<CustomMessage<T>, "customType" | "content" | "display" | "details" | "attribution">,
 		options?: Pick<PromptOptions, "streamingBehavior" | "toolChoice"> & { queueChipText?: string },
 	): Promise<void> {
+		if (this.#sessionControlPaused) throw new SessionControlPausedError();
 		const textContent =
 			typeof message.content === "string"
 				? message.content
@@ -7968,6 +7978,7 @@ export class AgentSession {
 			this.#scheduleIdleQueueDrain();
 			return false;
 		}
+		if (options?.triggerTurn && this.#sessionControlPaused) throw new SessionControlPausedError();
 		if (options?.triggerTurn) {
 			if (this.#clientBridge?.deferAgentInitiatedTurns && !this.#allowAcpAgentInitiatedTurns) {
 				this.#queueHiddenNextTurnMessage(normalizedAppMessage, false);
@@ -8324,11 +8335,16 @@ export class AgentSession {
 		this.#sessionControlPaused = paused;
 		if (paused) {
 			this.#durableQueueDrainPending = true;
-			if (this.isStreaming || this.#activeDurableInputId) {
-				await this.abort({ reason: USER_INTERRUPT_LABEL });
+			// Admission closes immediately, while the current tool or ask retains
+			// ownership of its turn and reaches the boundary without cancellation.
+			if (this.isStreaming || this.#activeDurableInputId || this.hasPostPromptWork) {
+				await this.agent.waitForIdle();
+				await this.#waitForPostPromptRecovery();
 			}
+			this.#updateExternalIrcPeerState("paused");
 			return;
 		}
+		this.#updateExternalIrcPeerState(this.isStreaming ? "working" : "waiting_input");
 		this.#scheduleDurableQueueDrainAfterIdle();
 		this.#scheduleIdleQueueDrain();
 	}

@@ -190,7 +190,7 @@ export async function collectFleetStatus(options: FleetStatusOptions = {}): Prom
 			const displayState = getIrcExternalPeerDisplayState(peer, nowMs);
 			const staleLiveIdle =
 				displayState === "disconnected" &&
-				(peer.state === "idle" || peer.state === "waiting_input") &&
+				(peer.state === "idle" || peer.state === "waiting_input" || peer.state === "paused") &&
 				isProcessAlive(peer.pid);
 			if (!options.all && displayState === "disconnected" && !staleLiveIdle) continue;
 			const capability = peer.fleetCapability;

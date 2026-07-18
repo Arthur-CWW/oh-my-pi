@@ -13,6 +13,7 @@ import {
 	executeFleetRolloutPlan,
 	type FleetControllerJournal,
 	FleetControllerLease,
+	FleetRolloutTargetError,
 	fleetRolloutRecords,
 	preflightFleetTarget,
 	resolveFleetTarget,
@@ -143,6 +144,21 @@ describe("fleet rollout planning", () => {
 		expect(plan.maxUnavailable).toBe(1);
 	});
 
+	it("skips paused sessions by default and includes them only when requested", () => {
+		const paused = peer("paused", "paused");
+		const excluded = planFor([paused], { pausedSessionIds: new Set(["paused"]) });
+		expect(excluded.orderedTargets).toEqual([]);
+		expect(excluded.excluded).toContainEqual(
+			expect.objectContaining({ sessionId: "paused", state: "BusyDeferred", reason: "paused" }),
+		);
+
+		const included = planFor([paused], {
+			pausedSessionIds: new Set(["paused"]),
+			includePaused: true,
+		});
+		expect(included.orderedTargets.map(target => target.sessionId)).toEqual(["paused"]);
+	});
+
 	it("puts an eligible explicit canary first", () => {
 		const plan = planFor([peer("a"), peer("b")], { canarySessionId: "b" });
 		expect(plan.orderedTargets.map(item => item.sessionId)).toEqual(["b", "a"]);
@@ -244,7 +260,19 @@ describe("fleet rollout planning", () => {
 			now: () => NOW,
 		});
 
-		expect(result).toEqual({ state: "Succeeded", completed: [] });
+		expect(result).toEqual({
+			state: "Succeeded",
+			completed: [],
+			skipped: [
+				{
+					targetId: "removed",
+					sessionId: "removed",
+					phaseReached: "BusyDeferred",
+					commandId: plan.orderedTargets[0]?.commandId,
+					reason: "durable session journal not materialized",
+				},
+			],
+		});
 		expect(sent).toBe(false);
 		expect(fleetRolloutRecords(journal, plan.fleetRolloutId)).toContainEqual(
 			expect.objectContaining({
@@ -354,6 +382,7 @@ describe("fleet rollout authority and execution", () => {
 		expect(result).toEqual({
 			state: "Frozen",
 			completed: [],
+			skipped: [],
 			failures: [
 				{
 					targetId: "a",
@@ -387,6 +416,61 @@ describe("fleet rollout authority and execution", () => {
 		);
 		await manager.close();
 	});
+
+	it("skips a transiently busy target and continues the rollout", async () => {
+		const { manager, journal } = await controllerJournal();
+		const peers = [peer("busy"), peer("next")];
+		const plan = planFor(peers);
+		const attempted: string[] = [];
+		const result = await executeFleetRolloutPlan({
+			plan,
+			journal,
+			listPeers: () => peers,
+			compatibility,
+			initiatorSessionIds: new Set(),
+			executeTarget: async item => {
+				attempted.push(item.sessionId);
+				if (item.sessionId !== "busy") return;
+				throw new FleetRolloutTargetError(
+					{
+						targetId: item.targetId,
+						sessionId: item.sessionId,
+						phaseReached: "CordonRequested",
+						awaitedCondition: "prepare-rollout terminal receipt",
+						commandId: item.commandId,
+						timedOut: false,
+						cause: "SessionStateCommandInFlightError: A session state command is awaiting durable persistence",
+					},
+					"BusyDeferred",
+					true,
+				);
+			},
+			nowMs: Date.parse(NOW),
+			now: () => NOW,
+		});
+
+		expect(result).toEqual({
+			state: "Succeeded",
+			completed: ["next"],
+			skipped: [
+				{
+					targetId: "busy",
+					sessionId: "busy",
+					phaseReached: "CordonRequested",
+					commandId: plan.orderedTargets[0]?.commandId,
+					reason: "SessionStateCommandInFlightError: A session state command is awaiting durable persistence",
+				},
+			],
+		});
+		expect(attempted).toEqual(["busy", "next"]);
+		expect(
+			fleetRolloutRecords(journal, plan.fleetRolloutId)
+				.filter(record => record.record === "target" && record.sessionId === "busy")
+				.at(-1),
+		).toMatchObject({ state: "BusyDeferred", reason: expect.stringContaining("SessionStateCommandInFlightError") });
+		await manager.close();
+	});
+
 
 	it("re-reads and defers a peer whose epoch changes before command", async () => {
 		const { manager, journal } = await controllerJournal();
@@ -433,7 +517,19 @@ describe("fleet rollout authority and execution", () => {
 			now: () => NOW,
 		});
 
-		expect(result).toEqual({ state: "Succeeded", completed: [] });
+		expect(result).toEqual({
+			state: "Succeeded",
+			completed: [],
+			skipped: [
+				{
+					targetId: "dead-before-command",
+					sessionId: "dead-before-command",
+					phaseReached: "BusyDeferred",
+					commandId: plan.orderedTargets[0]?.commandId,
+					reason: "owner process is not alive",
+				},
+			],
+		});
 		expect(sent).toBe(false);
 		expect(fleetRolloutRecords(journal, plan.fleetRolloutId)).toMatchObject([
 			{
@@ -487,7 +583,7 @@ describe("fleet rollout authority and execution", () => {
 			now: () => NOW,
 		});
 
-		expect(result).toEqual({ state: "Succeeded", completed: ["resume"] });
+		expect(result).toEqual({ state: "Succeeded", completed: ["resume"], skipped: [] });
 		expect({ sent, observed }).toEqual({ sent: 0, observed: 1 });
 		await manager.close();
 	});

@@ -240,6 +240,8 @@ function externalStateBadge(state: AgentHubExternalPeerDisplayState): string {
 			return theme.fg("warning", "◌ WAIT");
 		case "idle":
 			return theme.fg("success", "○ IDLE");
+		case "paused":
+			return theme.fg("warning", "Ⅱ PAUSE");
 		case "disconnected":
 			return theme.fg("muted", "× DISC");
 		case "unknown":
@@ -252,6 +254,7 @@ function normalizeExternalPeerState(state: AgentHubExternalPeer["state"]): Agent
 		case "working":
 		case "waiting_input":
 		case "idle":
+		case "paused":
 		case "unknown":
 			return state;
 		default:

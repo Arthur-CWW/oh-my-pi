@@ -67,7 +67,7 @@ export function collectFleetOverview(options: FleetOverviewOptions = {}): readon
 			const displayState = getIrcExternalPeerDisplayState(peer, nowMs);
 			const staleLiveIdle =
 				displayState === "disconnected" &&
-				(peer.state === "idle" || peer.state === "waiting_input") &&
+				(peer.state === "idle" || peer.state === "waiting_input" || peer.state === "paused") &&
 				isProcessAlive(peer.pid);
 			// Default: include fresh and stale-alive; --all includes everything
 			if (!options.all && displayState === "disconnected" && !staleLiveIdle) continue;

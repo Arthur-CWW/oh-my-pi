@@ -210,6 +210,9 @@ export function selectSessionControlCommandKind(
 		: undefined;
 }
 
+export const SessionControlFailureCodeSchema = Schema.Literal("session_state_command_in_flight");
+export type SessionControlFailureCode = typeof SessionControlFailureCodeSchema.Type;
+
 const ReceiptStateSchema = Schema.Literals(["requested", "acknowledged", "applied", "failed"]);
 export const SessionControlReceiptSchema = Schema.Struct({
 	schemaVersion: Schema.Literal(SESSION_CONTROL_SCHEMA_VERSION),
@@ -222,6 +225,7 @@ export const SessionControlReceiptSchema = Schema.Struct({
 	completedAt: Schema.optional(TimestampSchema),
 	result: Schema.optional(Schema.Unknown),
 	error: Schema.optional(NonEmptyStringSchema),
+	failureCode: Schema.optional(SessionControlFailureCodeSchema),
 });
 export type SessionControlReceiptState = typeof ReceiptStateSchema.Type;
 export type SessionControlReceipt = typeof SessionControlReceiptSchema.Type;
@@ -267,6 +271,7 @@ interface ReceiptRow {
 	completed_at: string | null;
 	result_json: string | null;
 	error: string | null;
+	failure_code: string | null;
 }
 interface PausedRow {
 	paused: number;
@@ -364,6 +369,7 @@ function decodeReceiptRow(row: ReceiptRow): SessionControlReceipt {
 		...(row.completed_at === null ? {} : { completedAt: row.completed_at }),
 		...(row.result_json === null ? {} : { result: JSON.parse(row.result_json) }),
 		...(row.error === null ? {} : { error: row.error }),
+		...(row.failure_code === null ? {} : { failureCode: row.failure_code }),
 	});
 }
 
@@ -400,9 +406,21 @@ export class SessionControlBus {
 				acknowledged_at TEXT,
 				completed_at TEXT,
 				result_json TEXT,
-				error TEXT
+				error TEXT,
+				failure_code TEXT CHECK(failure_code IS NULL OR failure_code='session_state_command_in_flight')
 			)
 		`);
+		const receiptColumns = new Set(
+			this.#db
+				.query<{ name: string }, []>("PRAGMA table_info(control_receipts)")
+				.all()
+				.map(column => column.name),
+		);
+		if (!receiptColumns.has("failure_code")) {
+			this.#db.run(
+				"ALTER TABLE control_receipts ADD COLUMN failure_code TEXT CHECK(failure_code IS NULL OR failure_code='session_state_command_in_flight')",
+			);
+		}
 		this.#db.run(`
 			CREATE TABLE IF NOT EXISTS control_targets (
 				session_id TEXT PRIMARY KEY,
@@ -549,7 +567,7 @@ export class SessionControlBus {
 		const completedAt = nowIso();
 		const updated = this.#db
 			.query(
-				"UPDATE control_receipts SET state='applied', completed_at=$at, result_json=$result, error=NULL WHERE command_id=$commandId AND target_owner_epoch=$ownerEpoch AND state='acknowledged'",
+				"UPDATE control_receipts SET state='applied', completed_at=$at, result_json=$result, error=NULL, failure_code=NULL WHERE command_id=$commandId AND target_owner_epoch=$ownerEpoch AND state='acknowledged'",
 			)
 			.run({ $at: completedAt, $result: JSON.stringify(result), $commandId: commandId, $ownerEpoch: ownerEpoch });
 		if (updated.changes !== 1)
@@ -557,16 +575,22 @@ export class SessionControlBus {
 		return this.getReceipt(commandId)!;
 	}
 
-	fail(commandId: string, ownerEpoch: string, error: unknown): SessionControlReceipt {
+	fail(
+		commandId: string,
+		ownerEpoch: string,
+		error: unknown,
+		failureCode?: SessionControlFailureCode,
+	): SessionControlReceipt {
 		const completedAt = nowIso();
 		const message = formatSessionControlFailure(error);
 		const updated = this.#db
 			.query(
-				"UPDATE control_receipts SET state='failed', completed_at=$at, result_json=NULL, error=$error WHERE command_id=$commandId AND target_owner_epoch=$ownerEpoch AND state='acknowledged'",
+				"UPDATE control_receipts SET state='failed', completed_at=$at, result_json=NULL, error=$error, failure_code=$failureCode WHERE command_id=$commandId AND target_owner_epoch=$ownerEpoch AND state='acknowledged'",
 			)
 			.run({
 				$at: completedAt,
 				$error: message,
+				$failureCode: failureCode ?? null,
 				$commandId: commandId,
 				$ownerEpoch: ownerEpoch,
 			});
@@ -578,7 +602,7 @@ export class SessionControlBus {
 	getReceipt(commandId: string): SessionControlReceipt | undefined {
 		const row = this.#db
 			.query<ReceiptRow, { $commandId: string }>(
-				"SELECT command_id,session_id,target_owner_epoch,state,requested_at,acknowledged_at,completed_at,result_json,error FROM control_receipts WHERE command_id=$commandId",
+				"SELECT command_id,session_id,target_owner_epoch,state,requested_at,acknowledged_at,completed_at,result_json,error,failure_code FROM control_receipts WHERE command_id=$commandId",
 			)
 			.get({ $commandId: commandId });
 		return row ? decodeReceiptRow(row) : undefined;
@@ -586,7 +610,7 @@ export class SessionControlBus {
 	listReceipts(): SessionControlReceipt[] {
 		return this.#db
 			.query<ReceiptRow, []>(
-				"SELECT command_id,session_id,target_owner_epoch,state,requested_at,acknowledged_at,completed_at,result_json,error FROM control_receipts ORDER BY requested_at, rowid",
+				"SELECT command_id,session_id,target_owner_epoch,state,requested_at,acknowledged_at,completed_at,result_json,error,failure_code FROM control_receipts ORDER BY requested_at, rowid",
 			)
 			.all()
 			.map(decodeReceiptRow);
@@ -628,6 +652,15 @@ export class SessionControlBus {
 			)
 			.run({ $paused: paused ? 1 : 0, $at: nowIso(), $sessionId: sessionId, $ownerEpoch: ownerEpoch });
 		if (result.changes !== 1) throw new Error(`Owner ${ownerEpoch} is not the bound control target for ${sessionId}`);
+	}
+
+	listPaused(): { readonly sessionId: string; readonly ownerEpoch: string; readonly updatedAt: string }[] {
+		return this.#db
+			.query<{ session_id: string; owner_epoch: string; updated_at: string }, []>(
+				"SELECT session_id, owner_epoch, updated_at FROM control_state WHERE paused=1 ORDER BY updated_at",
+			)
+			.all()
+			.map(row => ({ sessionId: row.session_id, ownerEpoch: row.owner_epoch, updatedAt: row.updated_at }));
 	}
 
 	getCordon(sessionId: string): SessionSpawnCordon | undefined {

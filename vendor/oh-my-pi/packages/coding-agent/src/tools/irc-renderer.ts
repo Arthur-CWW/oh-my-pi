@@ -34,6 +34,7 @@ const PEER_STATUS_ORDER: Record<string, number> = {
 	working: 0,
 	waiting_input: 1,
 	idle: 2,
+	paused: 2,
 	parked: 3,
 	unknown: 4,
 	disconnected: 5,
@@ -68,6 +69,8 @@ function peerStatusBadge(status: string, theme: Theme): string {
 			return theme.fg("warning", `${theme.status.pending} waiting_input`);
 		case "idle":
 			return theme.fg("success", `${theme.status.enabled} idle`);
+		case "paused":
+			return theme.fg("warning", `${theme.status.pending} paused`);
 		case "parked":
 			return theme.fg("muted", `${theme.status.shadowed} parked`);
 		case "unknown":

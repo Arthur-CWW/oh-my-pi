@@ -9,7 +9,7 @@ import {
 } from "../session/fleet-capability";
 import type { IrcDeliveryRecord, IrcMessageOrigin } from "./bus";
 
-export type IrcExternalPeerState = "unknown" | "working" | "waiting_input" | "idle";
+export type IrcExternalPeerState = "unknown" | "working" | "waiting_input" | "idle" | "paused";
 export type IrcExternalPeerDisplayState = IrcExternalPeerState | "disconnected";
 export type IrcExternalMessageOrigin = IrcMessageOrigin;
 
@@ -156,7 +156,7 @@ export function isIrcExternalPeerFresh(lastSeen: string, nowMs = Date.now(), sta
 }
 
 function normalizePeerState(value: string): IrcExternalPeerState {
-	return value === "working" || value === "waiting_input" || value === "idle" ? value : "unknown";
+	return value === "working" || value === "waiting_input" || value === "idle" || value === "paused" ? value : "unknown";
 }
 
 function decodeFleetCapabilityJson(value: string | null): FleetCapability | undefined {

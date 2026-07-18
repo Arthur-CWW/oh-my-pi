@@ -387,6 +387,7 @@ describe("fleet inspection projections", () => {
 			execution: {
 				state: "Frozen",
 				completed: [],
+				skipped: [],
 				failures: [
 					{
 						targetId: "target-1",
@@ -407,4 +408,38 @@ describe("fleet inspection projections", () => {
 			"TARGET_ERROR\ttargetId=target-1\tsessionId=session-1\tphase=CordonRequested\tawaited=prepare-rollout terminal receipt\tcommandId=command-1\ttimedOut=true\tbuildVersion=16.0.1\tbuildDigest=digest-target\tcause=Timed out last receipt state=requested",
 		);
 	});
+	it("prints succeeded rollout skips once with a normalized reason", () => {
+		const output = formatFleetRolloutPlan({
+			mode: "active",
+			plan: {
+				fleetRolloutId: "rollout-skipped",
+				target: { digest: "a".repeat(64), source: { kind: "blessed" } },
+				previousDigest: "b".repeat(64),
+				waves: [],
+				excluded: [],
+				orderedTargets: [],
+				maxUnavailable: 1,
+			},
+			execution: {
+				state: "Succeeded",
+				completed: ["session-2"],
+				skipped: [
+					{
+						targetId: "target-1",
+						sessionId: "session-1",
+						phaseReached: "CordonRequested",
+						commandId: "command-1",
+						reason: "state command\nstill in flight",
+					},
+				],
+			},
+		});
+		expect(output).toContain("EXECUTION\tSucceeded\tsession-2");
+		expect(output).toContain(
+			"SKIPPED\ttargetId=target-1\tsessionId=session-1\tphase=CordonRequested\tcommandId=command-1\treason=state command still in flight",
+		);
+		expect(output).not.toContain("TARGET_ERROR");
+		expect(output.match(/^SKIPPED\t/gm)).toHaveLength(1);
+	});
+
 });

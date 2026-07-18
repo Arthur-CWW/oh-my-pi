@@ -117,7 +117,7 @@ function peerKey(sessionId: string): string {
 const NEXT_PHASES: Record<RolloutPeerPhase, Partial<Record<RolloutPeerPhase, true>>> = {
 	planned: { planned: true, skipped: true, requested: true, failed: true },
 	skipped: { skipped: true },
-	requested: { requested: true, acknowledged: true, applied: true, failed: true },
+	requested: { requested: true, acknowledged: true, applied: true, skipped: true, failed: true },
 	acknowledged: { acknowledged: true, applied: true, failed: true },
 	applied: { applied: true, recovered: true, failed: true },
 	recovered: { recovered: true },
