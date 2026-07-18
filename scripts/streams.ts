@@ -141,6 +141,13 @@ function startWindow(streamName: string, serviceName: string, service: ServiceCo
   } else {
     result = run(["tmux", "new-window", "-d", "-t", session, "-n", serviceName, "-c", cwd, "bash", "-lc", shellCommand]);
   }
+  // Login shells auto-rename windows (to the hostname), breaking the
+  // has-session -t session:window ownership probe. Pin the name.
+  if (result.exitCode === 0) {
+    run(["tmux", "set-option", "-w", "-t", `${session}:${serviceName}`, "automatic-rename", "off"]);
+    run(["tmux", "set-option", "-w", "-t", `${session}:${serviceName}`, "allow-rename", "off"]);
+    run(["tmux", "rename-window", "-t", `${session}:${serviceName}`, serviceName]);
+  }
   if (result.exitCode !== 0) throw new Error(new TextDecoder().decode(result.stderr).trim());
 }
 
