@@ -390,8 +390,11 @@ export class InputController {
 				// back to the main editor would have buried the text in the detached
 				// editor while the modal Input had focus (#2127).
 				const focused = this.ctx.ui.getFocused();
-				const target = focused && focused !== this.ctx.editor && hasPasteText(focused) ? focused : this.ctx.editor;
-				target.pasteText(text);
+				if (focused && focused !== this.ctx.editor && hasPasteText(focused)) {
+					focused.pasteText(text);
+				} else {
+					this.ctx.editor.applyPaste(text);
+				}
 				this.ctx.ui.requestRender();
 			},
 			pasteImage: async image => {
@@ -1222,7 +1225,7 @@ export class InputController {
 				// Path resolved but is not a readable image (e.g. a zero-byte or
 				// locked transient screenshot file). Prefer the clipboard bytes.
 				if (await this.#tryPasteClipboardImage()) return;
-				this.ctx.editor.pasteText(path);
+				this.ctx.editor.applyPaste(path);
 				this.ctx.ui.requestRender();
 				this.ctx.showStatus("Pasted path is not a supported image");
 				return;
@@ -1233,7 +1236,7 @@ export class InputController {
 			);
 		} catch (error) {
 			if (error instanceof ImageInputTooLargeError) {
-				this.ctx.editor.pasteText(path);
+				this.ctx.editor.applyPaste(path);
 				this.ctx.ui.requestRender();
 				this.ctx.showStatus(error.message);
 				return;
@@ -1267,7 +1270,7 @@ export class InputController {
 				return;
 			}
 			if (await this.#tryPasteClipboardImage()) return;
-			this.ctx.editor.pasteText(path);
+			this.ctx.editor.applyPaste(path);
 			this.ctx.ui.requestRender();
 			this.ctx.showStatus("Failed to read pasted image path");
 		}
@@ -1290,8 +1293,11 @@ export class InputController {
 				// Route to the focused component when it accepts pastes (modal
 				// Input prompts), matching the enhanced-paste text path (#2127).
 				const focused = this.ctx.ui.getFocused();
-				const target = focused && focused !== this.ctx.editor && hasPasteText(focused) ? focused : this.ctx.editor;
-				target.pasteText(text);
+				if (focused && focused !== this.ctx.editor && hasPasteText(focused)) {
+					focused.pasteText(text);
+				} else {
+					this.ctx.editor.applyPaste(text);
+				}
 				this.ctx.ui.requestRender();
 				return true;
 			}
@@ -1365,17 +1371,17 @@ export class InputController {
 
 		switch (choice) {
 			case WRAPPED_BLOCK:
-				this.ctx.editor.insertPaste(wrapPasteInAttachmentBlock(text));
+				this.ctx.editor.applyPaste(wrapPasteInAttachmentBlock(text), { asMarker: true });
 				break;
 			case LOCAL_FILE:
 				await this.#attachPasteAsFile(text, lineCount);
 				break;
 			case INLINE:
-				this.ctx.editor.insertPaste(text);
+				this.ctx.editor.applyPaste(text, { asMarker: true });
 				break;
 			default:
 				// Esc / cancel: keep the original behavior — collapse to an inline paste marker.
-				this.ctx.editor.insertPaste(text);
+				this.ctx.editor.applyPaste(text, { asMarker: true });
 				break;
 		}
 		this.ctx.ui.requestRender();
@@ -1409,7 +1415,7 @@ export class InputController {
 			logger.warn("failed to save large paste to file", {
 				error: error instanceof Error ? error.message : String(error),
 			});
-			this.ctx.editor.insertPaste(text);
+			this.ctx.editor.applyPaste(text, { asMarker: true });
 			this.ctx.showError("Failed to save paste to a file — pasted inline instead");
 		}
 	}

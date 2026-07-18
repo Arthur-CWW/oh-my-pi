@@ -9,18 +9,20 @@
 import { describe, expect, it, vi } from "bun:test";
 import { InputController } from "@oh-my-pi/pi-coding-agent/modes/controllers/input-controller";
 import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
+import { Editor } from "@oh-my-pi/pi-tui";
+import { defaultEditorTheme } from "../../tui/test/test-themes";
 
 function createContext(options?: { focused?: { pasteText(text: string): void } }) {
-	const pasteText = vi.fn();
+	const applyPaste = vi.fn();
 	const insertText = vi.fn();
 	const requestRender = vi.fn();
 	const showStatus = vi.fn();
 	const ctx = {
-		editor: { pasteText, insertText } as unknown as InteractiveModeContext["editor"],
+		editor: { applyPaste, insertText } as unknown as InteractiveModeContext["editor"],
 		ui: { requestRender, getFocused: () => options?.focused ?? null } as unknown as InteractiveModeContext["ui"],
 		showStatus,
 	} as unknown as InteractiveModeContext;
-	return { ctx, spies: { pasteText, insertText, requestRender, showStatus } };
+	return { ctx, spies: { applyPaste, insertText, requestRender, showStatus } };
 }
 
 describe("InputController.handleImagePaste smart-paste fallback", () => {
@@ -39,7 +41,7 @@ describe("InputController.handleImagePaste smart-paste fallback", () => {
 
 		expect(result).toBe(false);
 		expect(readText).not.toHaveBeenCalled();
-		expect(spies.pasteText).not.toHaveBeenCalled();
+		expect(spies.applyPaste).not.toHaveBeenCalled();
 		expect(spies.showStatus).toHaveBeenCalledWith("Unsupported clipboard image format: image/tiff");
 	});
 
@@ -53,9 +55,26 @@ describe("InputController.handleImagePaste smart-paste fallback", () => {
 		const result = await controller.handleImagePaste();
 
 		expect(result).toBe(true);
-		expect(spies.pasteText).toHaveBeenCalledWith("copied text\nsecond line");
+		expect(spies.applyPaste).toHaveBeenCalledWith("copied text\nsecond line");
 		expect(spies.requestRender).toHaveBeenCalled();
 		expect(spies.showStatus).not.toHaveBeenCalled();
+	});
+
+	it("routes clipboard fallback through one editor undo unit", async () => {
+		const { ctx } = createContext();
+		const editor = new Editor(defaultEditorTheme);
+		ctx.editor = editor as unknown as InteractiveModeContext["editor"];
+		const controller = new InputController(ctx, {
+			readImage: async () => null,
+			readText: async () => "first line\nsecond line",
+		});
+
+		await controller.handleImagePaste();
+
+		expect(editor.getText()).toBe("first line\nsecond line");
+		expect(editor.undo()).toBe(true);
+		expect(editor.getText()).toBe("");
+		expect(editor.undo()).toBe(false);
 	});
 
 	it("routes the text fallback to a focused paste-capable component (#2127 contract)", async () => {
@@ -70,7 +89,7 @@ describe("InputController.handleImagePaste smart-paste fallback", () => {
 
 		expect(result).toBe(true);
 		expect(focusedPasteText).toHaveBeenCalledWith("api-key-123");
-		expect(spies.pasteText).not.toHaveBeenCalled();
+		expect(spies.applyPaste).not.toHaveBeenCalled();
 	});
 
 	it("reports an empty clipboard when neither image nor text is available", async () => {
@@ -83,7 +102,7 @@ describe("InputController.handleImagePaste smart-paste fallback", () => {
 		const result = await controller.handleImagePaste();
 
 		expect(result).toBe(false);
-		expect(spies.pasteText).not.toHaveBeenCalled();
+		expect(spies.applyPaste).not.toHaveBeenCalled();
 		expect(spies.showStatus).toHaveBeenCalledWith("Clipboard is empty");
 	});
 
@@ -99,7 +118,7 @@ describe("InputController.handleImagePaste smart-paste fallback", () => {
 		const result = await controller.handleImagePaste();
 
 		expect(result).toBe(false);
-		expect(spies.pasteText).not.toHaveBeenCalled();
+		expect(spies.applyPaste).not.toHaveBeenCalled();
 		expect(spies.showStatus).toHaveBeenCalledWith("Failed to read clipboard");
 	});
 });

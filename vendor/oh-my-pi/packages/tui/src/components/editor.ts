@@ -326,12 +326,17 @@ function maxSegmentVisualCol(text: string, isLastSegment: boolean): number {
 
 const DEFAULT_PAGE_SCROLL_LINES = 10;
 
-const MAX_UNDO_STACK = 100;
+const MAX_UNDO_STACK = 300;
 
 interface EditorState {
 	lines: string[];
 	cursorLine: number;
 	cursorCol: number;
+}
+
+interface EditorSnapshot extends EditorState {
+	pastes: Map<number, string>;
+	pasteCounter: number;
 }
 
 interface LayoutLine {
@@ -442,14 +447,17 @@ export class Editor implements Component, Focusable {
 	// Bracketed paste mode buffering
 	#pasteHandler = new BracketedPasteHandler();
 
+	// Undo stack for editor state changes
+	#undoStack: EditorSnapshot[] = [];
+	#redoStack: EditorSnapshot[] = [];
+	#undoGroupDepth = 0;
+	#undoGroupSnapshot: EditorSnapshot | undefined;
+	#undoGroupChanged = false;
+	#suspendUndo = false;
 	// Prompt history for up/down navigation
 	#history: string[] = [];
-	#historyIndex: number = -1; // -1 = not browsing, 0 = most recent, 1 = older, etc.
+	#historyIndex: number = -1;
 	#historyStorage?: HistoryStorage;
-
-	// Undo stack for editor state changes
-	#undoStack: EditorState[] = [];
-	#suspendUndo = false;
 
 	// Debounce timer for autocomplete updates
 	#autocompleteTimeout?: NodeJS.Timeout;
@@ -611,7 +619,12 @@ export class Editor implements Component, Focusable {
 	}
 	/** Internal setText that doesn't reset history state - used by navigateHistory */
 	#setTextInternal(text: string, cursorAnchor: HistoryCursorAnchor = "end"): void {
-		this.#undoStack.length = 0;
+		if (this.#undoGroupDepth > 0) {
+			this.#recordUndoState();
+		} else {
+			this.#undoStack.length = 0;
+			this.#redoStack.length = 0;
+		}
 		const lines = sanitizeLoadedText(text).split("\n");
 		this.#state.lines = lines.length === 0 ? [""] : lines;
 		if (cursorAnchor === "start") {
@@ -1049,7 +1062,7 @@ export class Editor implements Component, Focusable {
 		const paste = this.#pasteHandler.process(data);
 		if (paste.handled) {
 			if (paste.pasteContent !== undefined) {
-				this.#handlePaste(paste.pasteContent);
+				this.applyPaste(paste.pasteContent);
 				if (paste.remaining.length > 0) {
 					this.handleInput(paste.remaining);
 				}
@@ -1532,6 +1545,26 @@ export class Editor implements Component, Focusable {
 	getCursor(): { line: number; col: number } {
 		return { line: this.#state.cursorLine, col: this.#state.cursorCol };
 	}
+	beginUndoGroup(): void {
+		if (this.#undoGroupDepth === 0) {
+			this.#undoGroupSnapshot = this.#captureSnapshot();
+			this.#undoGroupChanged = false;
+		}
+		this.#undoGroupDepth++;
+	}
+
+	endUndoGroup(): void {
+		if (this.#undoGroupDepth === 0) return;
+		this.#undoGroupDepth--;
+		if (this.#undoGroupDepth !== 0) return;
+
+		const snapshot = this.#undoGroupSnapshot;
+		if (this.#undoGroupChanged && snapshot !== undefined) {
+			this.#pushUndoSnapshot(snapshot);
+		}
+		this.#undoGroupSnapshot = undefined;
+		this.#undoGroupChanged = false;
+	}
 
 	moveToLineStart(): void {
 		this.#moveToLineStart();
@@ -1702,21 +1735,21 @@ export class Editor implements Component, Focusable {
 		}
 	}
 
+	/** Run one paste operation as a single undo transaction. */
+	applyPaste(payload: string, options: { asMarker?: boolean } = {}): void {
+		this.#withPasteTransaction(() => this.#handlePaste(payload, options.asMarker === true));
+	}
+
 	/** Apply terminal paste semantics to text from non-bracketed paste transports. */
 	pasteText(text: string): void {
-		this.#handlePaste(text);
+		this.applyPaste(text);
 	}
 
 	/** Insert `content` as a collapsed `[Paste #N]` marker (stored for expansion on submit via
 	 *  {@link getExpandedText}). Hosts that intercept large pastes through {@link onLargePaste} use
 	 *  this to re-insert a (possibly transformed) paste without re-triggering the interception hook. */
 	insertPaste(content: string): void {
-		this.#historyIndex = -1;
-		this.#resetKillSequence();
-		this.#recordUndoState();
-		this.#withUndoSuspended(() => {
-			this.#storePasteMarker(content, content.split("\n").length);
-		});
+		this.applyPaste(content, { asMarker: true });
 	}
 
 	/**
@@ -1740,13 +1773,15 @@ export class Editor implements Component, Focusable {
 			const pasteContent = this.#pastes.get(pasteId);
 			if (pasteContent === undefined) return false;
 
-			this.#historyIndex = -1;
-			this.#resetKillSequence();
-			this.#recordUndoState();
-			this.#state.lines[this.#state.cursorLine] = line.slice(0, markerStart) + line.slice(markerEnd);
-			this.#setCursorCol(markerStart);
-			this.#withUndoSuspended(() => this.#insertTextAtCursor(pasteContent));
-			return true;
+			return this.#withPasteTransaction(() => {
+				this.#historyIndex = -1;
+				this.#resetKillSequence();
+				this.#recordUndoState();
+				this.#state.lines[this.#state.cursorLine] = line.slice(0, markerStart) + line.slice(markerEnd);
+				this.#setCursorCol(markerStart);
+				this.#withUndoSuspended(() => this.#insertTextAtCursor(pasteContent));
+				return true;
+			});
 		}
 	}
 
@@ -1846,7 +1881,15 @@ export class Editor implements Component, Focusable {
 		}
 	}
 
-	#handlePaste(pastedText: string): void {
+	#handlePaste(pastedText: string, forceMarker = false): void {
+		if (forceMarker) {
+			this.#historyIndex = -1;
+			this.#resetKillSequence();
+			this.#recordUndoState();
+			this.#withUndoSuspended(() => this.#storePasteMarker(pastedText, pastedText.split("\n").length));
+			return;
+		}
+
 		let filteredText = this.#sanitizePastedText(pastedText);
 
 		// If pasting a file path (starts with /, ~, or .) and the character before
@@ -2006,6 +2049,7 @@ export class Editor implements Component, Focusable {
 		this.#historyIndex = -1;
 		this.#scrollOffset = 0;
 		this.#undoStack.length = 0;
+		this.#redoStack.length = 0;
 
 		if (this.onChange) this.onChange("");
 		if (this.onSubmit) this.onSubmit(result);
@@ -2259,22 +2303,62 @@ export class Editor implements Component, Focusable {
 		}
 	}
 
-	#recordUndoState(): void {
-		if (this.#suspendUndo) return;
-		this.#undoStack.push(structuredClone(this.#state));
+	#withPasteTransaction<T>(fn: () => T): T {
+		this.beginUndoGroup();
+		try {
+			return fn();
+		} finally {
+			this.endUndoGroup();
+		}
+	}
+
+	#captureSnapshot(): EditorSnapshot {
+		return {
+			lines: [...this.#state.lines],
+			cursorLine: this.#state.cursorLine,
+			cursorCol: this.#state.cursorCol,
+			pastes: new Map(this.#pastes),
+			pasteCounter: this.#pasteCounter,
+		};
+	}
+
+	#pushUndoSnapshot(snapshot: EditorSnapshot): void {
+		this.#undoStack.push(snapshot);
 		if (this.#undoStack.length > MAX_UNDO_STACK) {
 			this.#undoStack.shift();
 		}
 	}
 
-	#applyUndo(): void {
-		const snapshot = this.#undoStack.pop();
-		if (!snapshot) return;
+	#pushRedoSnapshot(snapshot: EditorSnapshot): void {
+		this.#redoStack.push(snapshot);
+		if (this.#redoStack.length > MAX_UNDO_STACK) {
+			this.#redoStack.shift();
+		}
+	}
 
+	#recordUndoState(): void {
+		if (this.#suspendUndo) return;
+		if (this.#undoGroupDepth > 0) {
+			this.#undoGroupChanged = true;
+			this.#redoStack.length = 0;
+			return;
+		}
+		this.#pushUndoSnapshot(this.#captureSnapshot());
+		this.#redoStack.length = 0;
+	}
+
+	#restoreSnapshot(snapshot: EditorSnapshot): void {
+		this.#state.lines = [...snapshot.lines];
+		this.#state.cursorLine = snapshot.cursorLine;
+		this.#state.cursorCol = snapshot.cursorCol;
+		this.#pastes = new Map(snapshot.pastes);
+		this.#pasteCounter = snapshot.pasteCounter;
+	}
+
+	#notifyUndoRestore(): void {
 		this.#historyIndex = -1;
 		this.#resetKillSequence();
 		this.#preferredVisualCol = null;
-		Object.assign(this.#state, snapshot);
 
 		if (this.onChange) {
 			this.onChange(this.getText());
@@ -2295,6 +2379,30 @@ export class Editor implements Component, Focusable {
 				this.#tryTriggerAutocomplete();
 			}
 		}
+	}
+
+	undo(): boolean {
+		if (this.#undoGroupDepth > 0) return false;
+		const snapshot = this.#undoStack.pop();
+		if (snapshot === undefined) return false;
+		this.#pushRedoSnapshot(this.#captureSnapshot());
+		this.#restoreSnapshot(snapshot);
+		this.#notifyUndoRestore();
+		return true;
+	}
+
+	redo(): boolean {
+		if (this.#undoGroupDepth > 0) return false;
+		const snapshot = this.#redoStack.pop();
+		if (snapshot === undefined) return false;
+		this.#pushUndoSnapshot(this.#captureSnapshot());
+		this.#restoreSnapshot(snapshot);
+		this.#notifyUndoRestore();
+		return true;
+	}
+
+	#applyUndo(): void {
+		this.undo();
 	}
 
 	#matchesTransientUndoSnapshot(

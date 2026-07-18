@@ -2501,4 +2501,103 @@ describe("Editor component", () => {
 			expect(editor.getText()).toBe("single line");
 		});
 	});
+	describe("Transactional undo and paste", () => {
+		it("round-trips text and cursor through undo and redo", () => {
+			const editor = new Editor(defaultEditorTheme);
+
+			editor.insertText("abc");
+			const afterEdit = editor.getCursor();
+			expect(editor.undo()).toBe(true);
+			expect(editor.getText()).toBe("");
+			expect(editor.getCursor()).toEqual({ line: 0, col: 0 });
+
+			expect(editor.redo()).toBe(true);
+			expect(editor.getText()).toBe("abc");
+			expect(editor.getCursor()).toEqual(afterEdit);
+
+			expect(editor.undo()).toBe(true);
+			editor.insertText("x");
+			expect(editor.redo()).toBe(false);
+			expect(editor.getText()).toBe("x");
+		});
+
+		it("collapses reentrant undo groups into one step", () => {
+			const editor = new Editor(defaultEditorTheme);
+
+			editor.beginUndoGroup();
+			editor.insertText("a");
+			editor.beginUndoGroup();
+			editor.insertText("b");
+			editor.endUndoGroup();
+			editor.insertText("c");
+			editor.endUndoGroup();
+
+			expect(editor.getText()).toBe("abc");
+			expect(editor.undo()).toBe(true);
+			expect(editor.getText()).toBe("");
+			expect(editor.undo()).toBe(false);
+			expect(editor.redo()).toBe(true);
+			expect(editor.getText()).toBe("abc");
+		});
+
+		it("preserves a group's base when setText is called inside it", () => {
+			const editor = new Editor(defaultEditorTheme);
+
+			editor.insertText("before");
+			editor.beginUndoGroup();
+			editor.setText("replacement");
+			editor.insertText("!");
+			editor.endUndoGroup();
+
+			expect(editor.undo()).toBe(true);
+			expect(editor.getText()).toBe("before");
+			expect(editor.redo()).toBe(true);
+			expect(editor.getText()).toBe("replacement!");
+		});
+
+		it("makes applyPaste one undo unit and restores marker metadata", () => {
+			const editor = new Editor(defaultEditorTheme);
+			const pastedText = Array.from({ length: 12 }, (_, i) => `line ${i}`).join("\n");
+
+			editor.applyPaste(pastedText);
+			expect(editor.getExpandedText()).toBe(pastedText);
+			expect(editor.undo()).toBe(true);
+			expect(editor.getText()).toBe("");
+			expect(editor.getExpandedText()).toBe("");
+			expect(editor.undo()).toBe(false);
+			expect(editor.redo()).toBe(true);
+			expect(editor.getExpandedText()).toBe(pastedText);
+		});
+
+		it("routes pasteText and insertPaste through one undo unit", () => {
+			const editor = new Editor(defaultEditorTheme);
+			const pastedText = Array.from({ length: 12 }, (_, i) => `row ${i}`).join("\n");
+
+			editor.pasteText("short paste");
+			expect(editor.undo()).toBe(true);
+			expect(editor.getText()).toBe("");
+			expect(editor.undo()).toBe(false);
+
+			editor.insertPaste(pastedText);
+			expect(editor.getExpandedText()).toBe(pastedText);
+			expect(editor.undo()).toBe(true);
+			expect(editor.getText()).toBe("");
+			expect(editor.getExpandedText()).toBe("");
+			expect(editor.redo()).toBe(true);
+			expect(editor.getExpandedText()).toBe(pastedText);
+		});
+
+		it("routes bracketed paste through one undo unit", () => {
+			const editor = new Editor(defaultEditorTheme);
+			const pastedText = "bracketed\npaste";
+
+			editor.handleInput(`\x1b[200~${pastedText}\x1b[201~`);
+			expect(editor.getText()).toBe(pastedText);
+			expect(editor.undo()).toBe(true);
+			expect(editor.getText()).toBe("");
+			expect(editor.undo()).toBe(false);
+			expect(editor.redo()).toBe(true);
+			expect(editor.getText()).toBe(pastedText);
+		});
+	});
 });
