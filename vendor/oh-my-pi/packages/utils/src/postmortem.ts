@@ -23,6 +23,17 @@ export enum Reason {
 
 // Internal list of active cleanup callbacks (in registration order)
 const callbackList: ((reason: Reason) => Promise<void> | void)[] = [];
+export type UnhandledRejectionInterceptor = (
+	reason: unknown,
+	promise: Promise<unknown>,
+) => boolean | Promise<boolean>;
+
+interface UnhandledRejectionInterceptorRecord {
+	readonly id: string;
+	readonly intercept: UnhandledRejectionInterceptor;
+}
+
+const unhandledRejectionInterceptors: UnhandledRejectionInterceptorRecord[] = [];
 // Tracks cleanup run state (to prevent recursion/reentry issues)
 let cleanupStage: "idle" | "running" | "complete" = "idle";
 
@@ -60,6 +71,19 @@ function runCleanup(reason: Reason): Promise<void> {
 	});
 }
 
+async function interceptUnhandledRejection(reason: unknown, promise: Promise<unknown>): Promise<boolean> {
+	for (let index = unhandledRejectionInterceptors.length - 1; index >= 0; index--) {
+		const record = unhandledRejectionInterceptors[index];
+		try {
+			if (await record.intercept(reason, promise)) return true;
+		} catch (error) {
+			const err = error instanceof Error ? error : new Error(String(error));
+			logger.error("Unhandled rejection interceptor failed", { err, id: record.id, stack: err.stack });
+		}
+	}
+	return false;
+}
+
 // Register signal and error event handlers to trigger cleanup before exit.
 // Main thread: full signal handling (SIGINT, SIGTERM, SIGHUP) + exceptions + exit
 // Worker thread: exit only (workers use self.addEventListener for exceptions)
@@ -93,7 +117,8 @@ if (isMainThread) {
 			await runCleanup(Reason.UNCAUGHT_EXCEPTION);
 			process.exit(1);
 		})
-		.on("unhandledRejection", async reason => {
+		.on("unhandledRejection", async (reason, promise) => {
+			if (await interceptUnhandledRejection(reason, promise)) return;
 			const err = reason instanceof Error ? reason : new Error(String(reason));
 			process.stderr.write(formatFatalError("Unhandled Rejection", err));
 			logger.error("Unhandled rejection", { err });
@@ -119,6 +144,25 @@ if (isMainThread) {
 	process.on("exit", () => {
 		void runCleanup(Reason.EXIT);
 	});
+}
+
+/**
+ * Register a session-scoped interceptor for a narrowly recoverable unhandled rejection.
+ * Returning true claims the rejection and prevents fatal postmortem handling.
+ */
+export function registerUnhandledRejectionInterceptor(
+	id: string,
+	interceptor: UnhandledRejectionInterceptor,
+): () => void {
+	const record = { id, intercept: interceptor };
+	unhandledRejectionInterceptors.push(record);
+	let registered = true;
+	return () => {
+		if (!registered) return;
+		registered = false;
+		const index = unhandledRejectionInterceptors.indexOf(record);
+		if (index >= 0) unhandledRejectionInterceptors.splice(index, 1);
+	};
 }
 
 /**
