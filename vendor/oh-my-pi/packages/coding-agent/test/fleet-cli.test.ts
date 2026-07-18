@@ -11,6 +11,7 @@ import {
 	formatFleetStatus,
 	pruneFleetPeers,
 } from "../src/cli/fleet-cli";
+import { collectFleetOverview, formatFleetOverviewJson } from "../src/cli/fleet-overview";
 import { formatFleetRolloutPlan } from "../src/cli/fleet-operation-format";
 
 import { IrcExternalBus } from "../src/irc/bus-external";
@@ -20,6 +21,10 @@ import { CURRENT_SESSION_CONTROL_PROTOCOL } from "../src/session/session-control
 import { FleetIncidentStore } from "../src/task/fleet-incident";
 
 const NOW = Date.parse("2026-07-15T12:00:00.000Z");
+
+// checkpoint-gate exports OMP_FLEET_REGISTER=0 (ephemeral-session roster guard);
+// these fixtures construct real buses in tmp dbs and must register anyway.
+process.env.OMP_FLEET_REGISTER = "1";
 
 const FLEET_CONFIG: CliConfig = {
 	bin: "omp",
@@ -166,6 +171,58 @@ describe("fleet label action", () => {
 			},
 		);
 	});
+	it("sets repeatable claims as a full set, clears them, and exposes them in overview JSON", async () => {
+		await withFleetLabelFixture(
+			(bus, root) => {
+				bus.registerPeer({
+					sessionId: "claims-peer",
+					name: "claims-peer",
+					cwd: root,
+					labels: { claims: ["old-claim"] },
+				});
+			},
+			async ircDbPath => {
+				const setOutput = await runFleetWithOutput([
+					"label",
+					"claims-peer",
+					"--claim",
+					"src/",
+					"--claim",
+					"stream-alpha",
+				]);
+				expect(setOutput).toBe("APPLIED\tsessionId=claims-peer\tfield=claims\n");
+
+				const afterSet = new IrcExternalBus(ircDbPath, { readonly: true });
+				try {
+					expect(afterSet.listPeers({ includeStale: true }).find(peer => peer.sessionId === "claims-peer")?.labels?.claims).toEqual([
+						"src",
+						"stream-alpha",
+					]);
+				} finally {
+					afterSet.close();
+				}
+
+				const clearOutput = await runFleetWithOutput(["label", "claims-peer", "--claim", ""]);
+				expect(clearOutput).toBe("APPLIED\tsessionId=claims-peer\tfield=claims\n");
+				const afterClear = new IrcExternalBus(ircDbPath, { readonly: true });
+				try {
+					expect(afterClear.listPeers({ includeStale: true }).find(peer => peer.sessionId === "claims-peer")?.labels?.claims).toBeUndefined();
+				} finally {
+					afterClear.close();
+				}
+
+				const setAgainOutput = await runFleetWithOutput(["label", "claims-peer", "--claim", "src"]);
+				expect(setAgainOutput).toBe("APPLIED\tsessionId=claims-peer\tfield=claims\n");
+				const overviewOutput = await runFleetWithOutput(["overview", "--json"]);
+				expect(() => JSON.parse(overviewOutput)).not.toThrow();
+				const overviewRows = JSON.parse(
+					formatFleetOverviewJson(collectFleetOverview({ ircDbPath, isProcessAlive: () => true })),
+				) as Array<{ session_id: string; claims: readonly string[] }>;
+				expect(overviewRows.find(row => row.session_id === "claims-peer")?.claims).toEqual(["src"]);
+			},
+		);
+	});
+
 
 	it("skips an explicit peer name while applying another field", async () => {
 		await withFleetLabelFixture(

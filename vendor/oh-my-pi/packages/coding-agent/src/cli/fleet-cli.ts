@@ -38,13 +38,14 @@ export interface FleetPruneOptions {
 	readonly isProcessAlive?: (pid: number) => boolean;
 }
 
-export type FleetLabelField = "summary" | "name" | "workstream";
+export type FleetLabelField = "summary" | "name" | "workstream" | "claims";
 
 export interface FleetLabelOptions {
 	readonly sessionId: string;
 	readonly summary?: string;
 	readonly name?: string;
 	readonly workstream?: string;
+	readonly claims?: readonly string[];
 	readonly ircDbPath?: string;
 }
 
@@ -335,6 +336,10 @@ export function applyFleetLabel(options: FleetLabelOptions): FleetLabelResult {
 		}
 		if (options.workstream !== undefined && bus.mergePeerLabels(options.sessionId, { workstream: options.workstream })) {
 			applied.push("workstream");
+		}
+		if (options.claims !== undefined) {
+			const claims = options.claims.length > 0 ? [...options.claims] : null;
+			if (bus.mergePeerLabels(options.sessionId, { claims })) applied.push("claims");
 		}
 		return { sessionId: options.sessionId, found: true, applied, skippedName };
 	} finally {

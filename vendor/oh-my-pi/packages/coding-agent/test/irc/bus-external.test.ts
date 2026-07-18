@@ -55,6 +55,30 @@ describe("external IRC peer labels", () => {
 			expect(bus.listPeers({ includeStale: true })).toHaveLength(1);
 		});
 	});
+	it("round-trips claims through mergePeerLabels with deliberate normalization bounds", () => {
+		withIsolatedBus(bus => {
+			registerPeer(bus, "claims-peer", "claims", { claims: ["initial/"] });
+
+			expect(bus.mergePeerLabels("claims-peer", { claims: ["src///", "stream-slug/", "////", ""] })).toBe(true);
+			expect(bus.listPeers({ includeStale: true }).find(peer => peer.sessionId === "claims-peer")?.labels?.claims).toEqual([
+				"src",
+				"stream-slug",
+			]);
+
+			const firstSixteen = Array.from({ length: 16 }, (_, index) => `claim-${index}/`);
+			expect(bus.mergePeerLabels("claims-peer", { claims: [...firstSixteen, "claim-17/"] })).toBe(true);
+			const bounded = bus.listPeers({ includeStale: true }).find(peer => peer.sessionId === "claims-peer")?.labels?.claims;
+			expect(bounded).toEqual(firstSixteen.map(claim => claim.slice(0, -1)));
+			expect(bounded).not.toContain("claim-17");
+
+			const oversized = "x".repeat(121);
+			expect(bus.mergePeerLabels("claims-peer", { claims: [oversized] })).toBe(true);
+			expect(bus.listPeers({ includeStale: true }).find(peer => peer.sessionId === "claims-peer")?.labels?.claims).toEqual([
+				"x".repeat(120),
+			]);
+		});
+	});
+
 
 	it("leaves the roster unchanged when fleet registration is disabled", () => {
 		withIsolatedBus(

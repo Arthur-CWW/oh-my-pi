@@ -3,6 +3,7 @@ import {
 	getIrcExternalPeerDisplayState,
 	IrcExternalBus,
 	IRC_EXTERNAL_STALE_MS,
+	isIrcExternalPeerFresh,
 	isIrcExternalPeerProcessAlive,
 	type IrcExternalPeer,
 	type IrcExternalPeerDisplayState,
@@ -18,6 +19,11 @@ export interface FleetOverviewOptions {
 	readonly isProcessAlive?: (pid: number) => boolean;
 }
 
+export interface FleetClaimConflict {
+	readonly with: string;
+	readonly path: string;
+}
+
 export interface FleetOverviewRow {
 	readonly sessionId: string;
 	readonly name: string;
@@ -30,6 +36,8 @@ export interface FleetOverviewRow {
 	readonly label: string;
 	readonly summary: string;
 	readonly spawnName: string;
+	readonly claims: readonly string[];
+	readonly claimConflicts: readonly FleetClaimConflict[];
 	readonly lastSeen: string;
 	readonly cwd: string;
 	readonly pid: number;
@@ -48,9 +56,20 @@ function resolveWorkstream(peer: IrcExternalPeer): string {
 	}
 	return "";
 }
-
 function labelStr(labels: IrcExternalPeerLabels | undefined, key: keyof IrcExternalPeerLabels): string {
-	return labels?.[key] ?? "";
+	const value = labels?.[key];
+	return typeof value === "string" ? value : "";
+}
+
+function claimConflictPath(left: string, right: string): string | undefined {
+	const normalizedLeft = left.replace(/\/+$/, "");
+	const normalizedRight = right.replace(/\/+$/, "");
+	if (normalizedLeft === normalizedRight) return normalizedLeft || undefined;
+	if (!normalizedLeft || !normalizedRight) return undefined;
+	if (!normalizedLeft.includes("/") && !normalizedRight.includes("/")) return undefined;
+	if (normalizedRight.startsWith(`${normalizedLeft}/`)) return normalizedLeft;
+	if (normalizedLeft.startsWith(`${normalizedRight}/`)) return normalizedRight;
+	return undefined;
 }
 
 export function collectFleetOverview(options: FleetOverviewOptions = {}): readonly FleetOverviewRow[] {
@@ -92,6 +111,8 @@ export function collectFleetOverview(options: FleetOverviewOptions = {}): readon
 				label: labelStr(peer.labels, "label"),
 				summary: labelStr(peer.labels, "summary"),
 				spawnName: labelStr(peer.labels, "spawnName"),
+				claims: peer.labels?.claims ?? [],
+				claimConflicts: [],
 				lastSeen: peer.lastSeen,
 				cwd: peer.cwd,
 				pid: peer.pid,
@@ -99,9 +120,48 @@ export function collectFleetOverview(options: FleetOverviewOptions = {}): readon
 				version: peer.fleetCapability?.productVersion ?? peer.version ?? "",
 			});
 		}
+
+		const freshSessionIds = new Set(
+			rows.filter(row => isIrcExternalPeerFresh(row.lastSeen, nowMs)).map(row => row.sessionId),
+		);
+		const conflicts = new Map<string, FleetClaimConflict[]>();
+		const addConflict = (sessionId: string, conflict: FleetClaimConflict): void => {
+			const existing = conflicts.get(sessionId) ?? [];
+			if (!existing.some(candidate => candidate.with === conflict.with && candidate.path === conflict.path))
+				existing.push(conflict);
+			conflicts.set(sessionId, existing);
+		};
+		for (let leftIndex = 0; leftIndex < rows.length; leftIndex += 1) {
+			const left = rows[leftIndex];
+			if (!freshSessionIds.has(left.sessionId)) continue;
+			for (let rightIndex = leftIndex + 1; rightIndex < rows.length; rightIndex += 1) {
+				const right = rows[rightIndex];
+				if (!freshSessionIds.has(right.sessionId)) continue;
+				const paths = new Set<string>();
+				for (const leftClaim of left.claims) {
+					for (const rightClaim of right.claims) {
+						const path = claimConflictPath(leftClaim, rightClaim);
+						if (path !== undefined) paths.add(path);
+					}
+				}
+				for (const path of paths) {
+					addConflict(left.sessionId, { with: right.sessionId, path });
+					addConflict(right.sessionId, { with: left.sessionId, path });
+				}
+			}
+		}
+
+		const decoratedRows = rows.map(row => ({
+			...row,
+			claimConflicts: (conflicts.get(row.sessionId) ?? []).sort(
+				(left, right) => left.with.localeCompare(right.with) || left.path.localeCompare(right.path),
+			),
+		}));
 		// Group by workstream then cwd
-		rows.sort((a, b) => a.workstream.localeCompare(b.workstream) || a.cwd.localeCompare(b.cwd) || a.name.localeCompare(b.name));
-		return rows;
+		decoratedRows.sort(
+			(a, b) => a.workstream.localeCompare(b.workstream) || a.cwd.localeCompare(b.cwd) || a.name.localeCompare(b.name),
+		);
+		return decoratedRows;
 	} finally {
 		bus.close();
 	}
@@ -144,7 +204,9 @@ export function formatFleetOverview(rows: readonly FleetOverviewRow[], nowMs = D
 		lines.push(
 			[
 				printable(row.name),
-				printable(row.displayState),
+				printable(
+					row.claimConflicts.length > 0 ? `${row.displayState} [CONFLICT]` : row.displayState,
+				),
 				printable(truncate(row.model, 40)),
 				printable(row.workstream),
 				printable(truncate(objectiveOrActivity, 80)),
@@ -167,6 +229,8 @@ export interface FleetOverviewJsonRow {
 	readonly label: string;
 	readonly summary: string;
 	readonly spawn_name: string;
+	readonly claims: readonly string[];
+	readonly claimConflicts: readonly FleetClaimConflict[];
 	readonly last_seen: string;
 	readonly cwd: string;
 	readonly pid: number;
@@ -185,6 +249,8 @@ export function formatFleetOverviewJson(rows: readonly FleetOverviewRow[]): stri
 		activity: row.activity,
 		todo_head: row.todoHead,
 		label: row.label,
+		claims: row.claims,
+		claimConflicts: row.claimConflicts,
 		summary: row.summary,
 		spawn_name: row.spawnName,
 		last_seen: row.lastSeen,

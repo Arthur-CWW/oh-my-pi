@@ -56,7 +56,7 @@ function overviewReject(token: string): never {
 	fail(`overview does not accept ${token}; valid flags: ${OVERVIEW_VALID_FLAGS}`);
 }
 
-const LABEL_FLAG_NAMES = ["--summary", "--name", "--workstream"] as const;
+const LABEL_FLAG_NAMES = ["--summary", "--name", "--workstream", "--claim"] as const;
 const LABEL_VALID_FLAGS = LABEL_FLAG_NAMES.join(", ");
 
 function findLabelInvalidFlag(argv: readonly string[]): string | undefined {
@@ -104,6 +104,7 @@ export default class Fleet extends Command {
 		to: Flags.string({ description: "Rollback target: previous or an exact digest" }),
 		workstream: Flags.string({ description: "Filter by durable workstream ID" }),
 		summary: Flags.string({ description: "Observer summary to store on a peer" }),
+		claim: Flags.string({ description: "Workspace path prefix or stream slug claim (repeatable)", multiple: true }),
 		name: Flags.string({ description: "Ambient peer display name" }),
 		all: Flags.boolean({ description: "Include stale peers or select all peers", default: false }),
 		since: Flags.string({ description: "Errors since ISO time or duration (for example 2h or 7d)" }),
@@ -148,6 +149,7 @@ export default class Fleet extends Command {
 		const selector = args.selector;
 		const value = args.value;
 		const selectors = selector ? [selector] : [];
+		if (flags.claim !== undefined && action !== "label") fail("--claim is accepted only by fleet label");
 
 		if (flags.digest && flags.blessed) fail("--digest and --blessed are mutually exclusive");
 		if (flags["wave-size"] !== undefined && (!Number.isSafeInteger(flags["wave-size"]) || flags["wave-size"] < 1))
@@ -200,13 +202,22 @@ export default class Fleet extends Command {
 			if (invalidFlag) labelReject(invalidFlag);
 			if (!selector) fail("label requires a session ID");
 			if (value) labelReject(value);
-			if (flags.summary === undefined && flags.name === undefined && flags.workstream === undefined)
-				fail("label requires at least one of --summary, --name, --workstream");
+			const claimValues =
+				flags.claim === undefined ? undefined : Array.isArray(flags.claim) ? flags.claim : [flags.claim];
+			const claims = claimValues?.some(claim => claim === "") ? [] : claimValues;
+			if (
+				flags.summary === undefined &&
+				flags.name === undefined &&
+				flags.workstream === undefined &&
+				claims === undefined
+			)
+				fail("label requires at least one of --summary, --name, --workstream, --claim");
 			const result = applyFleetLabel({
 				sessionId: selector,
 				summary: flags.summary,
 				name: flags.name,
 				workstream: flags.workstream,
+				claims,
 			});
 			if (!result.found) fail(`label unknown session ${selector}`);
 			process.stdout.write(formatFleetLabel(result));

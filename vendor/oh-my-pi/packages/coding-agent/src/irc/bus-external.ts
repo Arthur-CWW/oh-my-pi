@@ -29,6 +29,8 @@ export interface IrcExternalPeerLabels {
 	model?: string;
 	/** Observer-written prose summary, limited to 280 characters at write time. */
 	summary?: string;
+	/** Workspace-relative path prefixes or stream slugs currently owned by this session. */
+	claims?: string[];
 	/** Original ambient name captured on the first rename. */
 	spawnName?: string;
 }
@@ -177,6 +179,8 @@ export function isIrcExternalPeerFresh(lastSeen: string, nowMs = Date.now(), sta
 }
 
 const MAX_SUMMARY_LENGTH = 280;
+const MAX_CLAIMS = 16;
+const MAX_CLAIM_LENGTH = 120;
 const PEER_LABEL_KEYS: readonly (keyof IrcExternalPeerLabels)[] = [
 	"objective",
 	"workstream",
@@ -185,6 +189,7 @@ const PEER_LABEL_KEYS: readonly (keyof IrcExternalPeerLabels)[] = [
 	"label",
 	"model",
 	"summary",
+	"claims",
 	"spawnName",
 ];
 
@@ -199,9 +204,23 @@ function parseLabelObject(value: string | null): Record<string, unknown> {
 	}
 }
 
+function normalizeClaims(claims: readonly string[]): string[] {
+	return claims
+		.slice(0, MAX_CLAIMS)
+		.map(claim => claim.replace(/\/+$/, "").slice(0, MAX_CLAIM_LENGTH))
+		.filter(claim => claim.length > 0);
+}
+
 function normalizePeerLabels(labels: IrcExternalPeerLabels | undefined): IrcExternalPeerLabels | undefined {
-	if (labels === undefined || labels.summary === undefined || labels.summary.length <= MAX_SUMMARY_LENGTH) return labels;
-	return { ...labels, summary: labels.summary.slice(0, MAX_SUMMARY_LENGTH) };
+	if (labels === undefined) return undefined;
+	let normalized = labels;
+	if (labels.summary !== undefined && labels.summary.length > MAX_SUMMARY_LENGTH) {
+		normalized = { ...normalized, summary: labels.summary.slice(0, MAX_SUMMARY_LENGTH) };
+	}
+	if (labels.claims !== undefined) {
+		normalized = { ...normalized, claims: normalizeClaims(labels.claims) };
+	}
+	return normalized;
 }
 
 function decodeLabelJson(value: string | null): IrcExternalPeerLabels | undefined {
@@ -217,12 +236,17 @@ function decodeLabelJson(value: string | null): IrcExternalPeerLabels | undefine
 		if (typeof parsed.label === "string") labels.label = parsed.label;
 		if (typeof parsed.model === "string") labels.model = parsed.model;
 		if (typeof parsed.summary === "string") labels.summary = parsed.summary;
+		if (Array.isArray(parsed.claims)) {
+			const claims = parsed.claims.filter((claim: unknown): claim is string => typeof claim === "string");
+			labels.claims = normalizeClaims(claims);
+		}
 		if (typeof parsed.spawnName === "string") labels.spawnName = parsed.spawnName;
 		return Object.keys(labels).length > 0 ? labels : undefined;
 	} catch {
 		return undefined;
 	}
 }
+
 
 export function getIrcExternalPeerDisplayState(
 	peer: Pick<IrcExternalPeer, "lastSeen" | "state">,
@@ -525,7 +549,9 @@ export class IrcExternalBus {
 			if (value === null) {
 				delete labels[key];
 			} else if (value !== undefined) {
-				labels[key] = key === "summary" ? value.slice(0, MAX_SUMMARY_LENGTH) : value;
+				if (key === "summary") labels[key] = (value as string).slice(0, MAX_SUMMARY_LENGTH);
+				else if (key === "claims") labels[key] = normalizeClaims(value as readonly string[]);
+				else labels[key] = value;
 			}
 		}
 		const labelJson = Object.keys(labels).length > 0 ? JSON.stringify(labels) : null;

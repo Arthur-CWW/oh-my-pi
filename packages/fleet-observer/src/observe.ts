@@ -61,6 +61,12 @@ export interface IndexRecord {
   readonly workstream: string
   readonly stamp: string
 }
+export interface ParkCandidate {
+  readonly sessionId: string
+  readonly name: string
+  readonly idleMs: number
+}
+
 
 export interface ObserverOptions {
   readonly paths?: ObserverPaths
@@ -81,16 +87,20 @@ export interface ObserverPassResult {
   readonly observed: number
   readonly skipped: number
   readonly failed: number
+  readonly parkCandidates: number
   readonly skippedReasons: Readonly<Record<string, number>>
 }
 
+
 const DEFAULT_THRESHOLD_BYTES = 65_536
 const DEFAULT_INTERVAL_SECONDS = 120
+const DEFAULT_PARK_IDLE_HOURS = 12
 const MAX_SUMMARY_CHARS = 280
 const MAX_NAME_WORDS = 4
 const DEFAULT_TAIL_LINES = 200
 const DEFAULT_EXCERPT_CHARS = 12_000
 const UUID_LIKE_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 
 
 function recordOf(value: unknown): Record<string, unknown> | undefined {
@@ -191,6 +201,12 @@ export function thresholdBytesFromEnv(env: Readonly<Record<string, string | unde
   const parsed = Number(env.OBSERVER_THRESHOLD_BYTES ?? DEFAULT_THRESHOLD_BYTES)
   return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : DEFAULT_THRESHOLD_BYTES
 }
+
+export function parkIdleHoursFromEnv(env: Readonly<Record<string, string | undefined>> = process.env): number {
+  const parsed = Number(env.OBSERVER_PARK_IDLE_HOURS ?? DEFAULT_PARK_IDLE_HOURS)
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : DEFAULT_PARK_IDLE_HOURS
+}
+
 
 export function intervalMsFromEnv(env: Readonly<Record<string, string | undefined>> = process.env): number {
   const milliseconds = Number(env.OBSERVER_INTERVAL_MS)
@@ -406,12 +422,30 @@ export function renderStateDoc(input: StateDocInput): string {
   ].join("\n")
 }
 
-export function renderIndex(records: readonly IndexRecord[]): string {
-  return [...records]
+function formatIdleDuration(idleMs: number): string {
+  const minutes = Math.max(0, Math.floor(idleMs / 60_000))
+  if (minutes < 60) return `${minutes}m`
+  const hours = Math.floor(minutes / 60)
+  const remainderMinutes = minutes % 60
+  return remainderMinutes === 0 ? `${hours}h` : `${hours}h ${remainderMinutes}m`
+}
+
+export function renderIndex(records: readonly IndexRecord[], parkCandidates: readonly ParkCandidate[] = []): string {
+  const rows = [...records]
     .sort((left, right) => left.sessionId.localeCompare(right.sessionId))
     .map(record => `- ${record.sessionId}\t${oneLine(record.name) || record.sessionId}\t${oneLine(record.workstream) || "uncategorized"}\t${record.stamp}`)
-    .join("\n") + (records.length > 0 ? "\n" : "")
+  const candidates = [...parkCandidates]
+    .sort((left, right) => left.sessionId.localeCompare(right.sessionId))
+    .map(candidate => `- ${oneLine(candidate.name) || candidate.sessionId} — idle ${formatIdleDuration(candidate.idleMs)} — [state doc](./${candidate.sessionId}.md)`)
+  return [
+    ...rows,
+    "",
+    "## Park candidates",
+    ...(candidates.length > 0 ? candidates : ["— none"]),
+    "",
+  ].join("\n")
 }
+
 
 async function readIndexRecords(filePath: string): Promise<readonly IndexRecord[]> {
   try {
@@ -443,21 +477,42 @@ async function writeStateFiles(paths: ObserverPaths, input: StateDocInput): Prom
   await Bun.write(paths.indexPath, renderIndex([...bySession.values()]))
 }
 
-async function regenerateIndex(paths: ObserverPaths, survivingSessionIds: ReadonlySet<string>): Promise<void> {
+async function regenerateIndex(
+  paths: ObserverPaths,
+  survivingSessionIds: ReadonlySet<string>,
+  journalStats: ReadonlyMap<string, JournalStat>,
+  nowMs: number,
+  parkIdleHours: number,
+): Promise<number> {
   const existing = await readIndexRecords(paths.indexPath)
   const surviving: IndexRecord[] = []
+  const stateDocMtimes = new Map<string, number>()
   for (const record of existing) {
     if (!survivingSessionIds.has(record.sessionId)) continue
     try {
-      await stat(stateDocPath(paths, record.sessionId))
+      const stateDocStat = await stat(stateDocPath(paths, record.sessionId))
+      stateDocMtimes.set(record.sessionId, stateDocStat.mtimeMs)
       surviving.push(record)
     } catch {
       // An index entry without its state document is stale.
     }
   }
+  const idleThresholdMs = parkIdleHours * 60 * 60 * 1_000
+  const parkCandidates: ParkCandidate[] = []
+  for (const record of surviving) {
+    if (!isUuidLike(record.sessionId)) continue
+    const journalStat = journalStats.get(record.sessionId)
+    const stateDocMtime = stateDocMtimes.get(record.sessionId)
+    if (journalStat === undefined || stateDocMtime === undefined) continue
+    const idleMs = nowMs - journalStat.mtimeMs
+    if (idleMs <= idleThresholdMs || stateDocMtime < journalStat.mtimeMs) continue
+    parkCandidates.push({ sessionId: record.sessionId, name: record.name, idleMs })
+  }
   await mkdir(dirname(paths.indexPath), { recursive: true })
-  await Bun.write(paths.indexPath, renderIndex(surviving))
+  await Bun.write(paths.indexPath, renderIndex(surviving, parkCandidates))
+  return parkCandidates.length
 }
+
 
 async function defaultCommandRunner(argv: readonly string[]): Promise<CommandResult> {
   const child = Bun.spawn([...argv], { stdin: "ignore", stdout: "pipe", stderr: "pipe" })
@@ -496,10 +551,13 @@ export async function runObserverPass(options: ObserverOptions = {}): Promise<Ob
   const runner = options.runCommand ?? defaultCommandRunner
   const readText = options.readText ?? (async filePath => Bun.file(filePath).text())
   const statJournal = options.statJournal ?? defaultJournalStatReader
-  const stamp = (options.now ?? (() => new Date()))().toISOString()
+  const now = (options.now ?? (() => new Date()))()
+  const stamp = now.toISOString()
   const threshold = options.thresholdBytes ?? thresholdBytesFromEnv()
+  const parkIdleHours = parkIdleHoursFromEnv()
   const overviewFixturePath = options.overviewFixturePath ?? process.env.OBSERVER_OVERVIEW_FIXTURE
   const includeAll = options.includeAll ?? false
+
 
   let overviewText: string
   if (overviewFixturePath) {
@@ -513,11 +571,13 @@ export async function runObserverPass(options: ObserverOptions = {}): Promise<Ob
   const peers = parseOverviewJson(overviewText)
   const cursors = await loadCursorStore(paths.cursorPath)
   const nextCursors: Record<string, JournalCursor> = { ...cursors }
+  const journalStats = new Map<string, JournalStat>()
   const survivingSessionIds = new Set<string>()
   const skippedReasons: Record<string, number> = {}
   let observed = 0
   let skipped = 0
   let failed = 0
+
 
   for (const peer of peers) {
     if (!peer.sessionJournal.trim()) {
@@ -559,6 +619,7 @@ export async function runObserverPass(options: ObserverOptions = {}): Promise<Ob
       continue
     }
     survivingSessionIds.add(peer.sessionId)
+    journalStats.set(peer.sessionId, current)
 
     try {
       if (!shouldObserve(peer, cursors[peer.sessionId], current, threshold)) {
@@ -602,9 +663,10 @@ export async function runObserverPass(options: ObserverOptions = {}): Promise<Ob
     }
   }
 
-  await regenerateIndex(paths, survivingSessionIds)
+  const parkCandidates = await regenerateIndex(paths, survivingSessionIds, journalStats, now.getTime(), parkIdleHours)
   await saveCursorStore(paths.cursorPath, nextCursors)
-  return { ran: true, peers: peers.length, observed, skipped, failed, skippedReasons }
+  return { ran: true, peers: peers.length, observed, skipped, failed, parkCandidates, skippedReasons }
+
 }
 
 async function main(argv: readonly string[]): Promise<number> {
@@ -626,7 +688,7 @@ async function main(argv: readonly string[]): Promise<number> {
     try {
       const result = await runObserverPass({ includeAll })
       process.stdout.write(
-        `fleet observer: ${result.observed} observed, ${result.skipped} skipped, ${result.failed} failed; skip reasons: ${formatSkippedReasons(result.skippedReasons)}\n`,
+        `fleet observer: ${result.observed} observed, ${result.skipped} skipped, ${result.failed} failed; park candidates: ${result.parkCandidates}; skip reasons: ${formatSkippedReasons(result.skippedReasons)}\n`,
       )
     } catch (error) {
       await appendErrorLog(defaultObserverPaths().errorLogPath, "_pass", error)

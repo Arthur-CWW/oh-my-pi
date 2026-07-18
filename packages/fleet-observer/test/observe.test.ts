@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readdir, readFile, stat, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readdir, readFile, stat, utimes, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, test } from "bun:test"
@@ -9,6 +9,7 @@ import {
   compressExcerpt,
   parseOverviewJson,
   parseSummaryOutput,
+  parkIdleHoursFromEnv,
   renderIndex,
   renderStateDoc,
   runObserverPass,
@@ -93,7 +94,7 @@ test("renders compact state docs and one-line index records", () => {
   expect(doc).toContain("- History: history://peer-1")
   expect(doc.split("\n").filter(line => line.startsWith("Current") || line.startsWith("Recent") || line.startsWith("Next")).length).toBeLessThanOrEqual(15)
   const index = renderIndex([{ sessionId: "peer-1", name: "Fleet Observer", workstream: "harness", stamp: "2026-07-18T12:00:00.000Z" }])
-  expect(index).toBe("- peer-1\tFleet Observer\tharness\t2026-07-18T12:00:00.000Z\n")
+  expect(index).toBe("- peer-1\tFleet Observer\tharness\t2026-07-18T12:00:00.000Z\n\n## Park candidates\n— none\n")
 })
 
 test("constructs overview, summary, and label argv arrays", () => {
@@ -252,4 +253,135 @@ test("regenerates the index from current surviving docs", async () => {
   const index = await readFile(paths.indexPath, "utf8")
   expect(index).toContain(current)
   expect(index).not.toContain("dead-session")
+})
+test("reports only idle peers with a fresh digest", async () => {
+  const root = await tempRoot()
+  const paths = pathsAt(root)
+  const now = new Date("2026-07-18T12:00:00.000Z")
+  const hour = 60 * 60 * 1_000
+  const peers = [
+    {
+      sessionId: "019f6047-a362-7000-9218-6bc3b3946cf0",
+      name: "Fresh Peer",
+      journalAge: 24 * hour,
+      stateAge: 23 * hour,
+    },
+    {
+      sessionId: "019f6047-a362-7000-9218-6bc3b3946cf1",
+      name: "Stale Peer",
+      journalAge: 24 * hour,
+      stateAge: 25 * hour,
+    },
+    {
+      sessionId: "019f6047-a362-7000-9218-6bc3b3946cf2",
+      name: "Active Peer",
+      journalAge: hour,
+      stateAge: 30 * 60 * 1_000,
+    },
+  ]
+  const records = []
+  const cursors: Record<string, { byteSize: number; mtimeMs: number }> = {}
+  for (const peer of peers) {
+    const journalPath = join(root, `${peer.sessionId}.jsonl`)
+    const journalMtime = new Date(now.getTime() - peer.journalAge)
+    const stateMtime = new Date(now.getTime() - peer.stateAge)
+    await writeFile(journalPath, '{"type":"message","message":{"role":"user","content":"unchanged"}}\n')
+    await utimes(journalPath, journalMtime, journalMtime)
+    const journalStat = await stat(journalPath)
+    await mkdir(paths.stateDocsDir, { recursive: true })
+    const statePath = join(paths.stateDocsDir, `${peer.sessionId}.md`)
+    await writeFile(
+      statePath,
+      renderStateDoc({
+        sessionId: peer.sessionId,
+        name: peer.name,
+        state: "idle",
+        workstream: "harness",
+        summary: "Unchanged",
+        journalPath,
+        stamp: now.toISOString(),
+      }),
+    )
+    await utimes(statePath, stateMtime, stateMtime)
+    records.push({ sessionId: peer.sessionId, name: peer.name, workstream: "harness", stamp: now.toISOString() })
+    cursors[peer.sessionId] = { byteSize: journalStat.size, mtimeMs: journalStat.mtimeMs }
+  }
+  await writeFile(paths.indexPath, renderIndex(records))
+  await mkdir(join(root, "data"), { recursive: true })
+  await writeFile(paths.cursorPath, JSON.stringify(cursors))
+
+  const previousIdleHours = process.env.OBSERVER_PARK_IDLE_HOURS
+  process.env.OBSERVER_PARK_IDLE_HOURS = "12"
+  try {
+    const pass = await runObserverPass({
+      paths,
+      now: () => now,
+      runCommand: async argv =>
+        argv.includes("overview")
+          ? result(JSON.stringify(peers.map(peer => ({
+              session_id: peer.sessionId,
+              state: "idle",
+              session_journal: join(root, `${peer.sessionId}.jsonl`),
+              cwd: process.cwd(),
+              summary: "stable",
+            }))))
+          : result(),
+    })
+    expect(pass.parkCandidates).toBe(1)
+    const index = await readFile(paths.indexPath, "utf8")
+    expect(index).toContain("## Park candidates\n- Fresh Peer — idle 24h — [state doc](./019f6047-a362-7000-9218-6bc3b3946cf0.md)")
+    expect(index).not.toContain("- Stale Peer — idle")
+    expect(index).not.toContain("- Active Peer — idle")
+  } finally {
+    if (previousIdleHours === undefined) delete process.env.OBSERVER_PARK_IDLE_HOURS
+    else process.env.OBSERVER_PARK_IDLE_HOURS = previousIdleHours
+  }
+})
+
+test("respects the park idle-hour environment threshold", async () => {
+  const root = await tempRoot()
+  const paths = pathsAt(root)
+  const now = new Date("2026-07-18T12:00:00.000Z")
+  const journalPath = join(root, "threshold-peer.jsonl")
+  const journalMtime = new Date(now.getTime() - 13 * 60 * 60 * 1_000)
+  const stateMtime = new Date(now.getTime() - 12 * 60 * 60 * 1_000)
+  const sessionId = "019f6047-a362-7000-9218-6bc3b3946cf3"
+  await writeFile(journalPath, '{"type":"message","message":{"role":"user","content":"unchanged"}}\n')
+  await utimes(journalPath, journalMtime, journalMtime)
+  const journalStat = await stat(journalPath)
+  await mkdir(paths.stateDocsDir, { recursive: true })
+  const statePath = join(paths.stateDocsDir, `${sessionId}.md`)
+  await writeFile(
+    statePath,
+    renderStateDoc({
+      sessionId,
+      name: "Threshold Peer",
+      state: "idle",
+      workstream: "harness",
+      summary: "Unchanged",
+      journalPath,
+      stamp: now.toISOString(),
+    }),
+  )
+  await utimes(statePath, stateMtime, stateMtime)
+  await writeFile(paths.indexPath, renderIndex([{ sessionId, name: "Threshold Peer", workstream: "harness", stamp: now.toISOString() }]))
+  await mkdir(join(root, "data"), { recursive: true })
+  await writeFile(paths.cursorPath, JSON.stringify({ [sessionId]: journalStat }))
+
+  const previousIdleHours = process.env.OBSERVER_PARK_IDLE_HOURS
+  const runner = async (argv: readonly string[]): Promise<CommandResult> =>
+    argv.includes("overview")
+      ? result(JSON.stringify([{ session_id: sessionId, state: "idle", session_journal: journalPath, cwd: process.cwd(), summary: "stable" }]))
+      : result()
+  try {
+    process.env.OBSERVER_PARK_IDLE_HOURS = "24"
+    expect(parkIdleHoursFromEnv()).toBe(24)
+    expect((await runObserverPass({ paths, now: () => now, runCommand: runner })).parkCandidates).toBe(0)
+    process.env.OBSERVER_PARK_IDLE_HOURS = "12"
+    expect(parkIdleHoursFromEnv()).toBe(12)
+    expect((await runObserverPass({ paths, now: () => now, runCommand: runner })).parkCandidates).toBe(1)
+  } finally {
+    if (previousIdleHours === undefined) delete process.env.OBSERVER_PARK_IDLE_HOURS
+    else process.env.OBSERVER_PARK_IDLE_HOURS = previousIdleHours
+  }
 })

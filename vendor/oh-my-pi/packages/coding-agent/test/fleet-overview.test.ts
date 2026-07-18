@@ -1,3 +1,4 @@
+import { Database } from "bun:sqlite";
 import { describe, expect, it } from "bun:test";
 import { TempDir } from "@oh-my-pi/pi-utils";
 import { IrcExternalBus, type IrcExternalPeerLabels } from "../src/irc/bus-external";
@@ -6,6 +7,10 @@ import { createFleetCapability } from "../src/session/fleet-capability";
 import { CURRENT_SESSION_CONTROL_PROTOCOL } from "../src/session/session-control";
 
 const NOW = Date.parse("2026-07-17T12:00:00.000Z");
+
+// checkpoint-gate exports OMP_FLEET_REGISTER=0 (ephemeral-session roster guard);
+// these fixtures construct real buses in tmp dbs and must register anyway.
+process.env.OMP_FLEET_REGISTER = "1";
 
 function registerPeer(
 	bus: IrcExternalBus,
@@ -212,6 +217,79 @@ describe("fleet overview", () => {
 		expect(row.session_journal).toBe("/tmp/sessions/test.jsonl");
 		expect(row.version).toBe("1.0.0");
 	});
+	it("computes claim conflicts only for fresh peers with path-boundary matching", () => {
+		using tmp = TempDir.createSync("@omp-fleet-overview-claims-");
+		const previousHome = process.env.HOME;
+		const previousControlDb = process.env.OMP_SESSION_CONTROL_DB;
+		process.env.HOME = tmp.path();
+		process.env.OMP_SESSION_CONTROL_DB = `${tmp.path()}/control.sqlite`;
+		const dbPath = `${tmp.path()}/bus.sqlite`;
+		const bus = new IrcExternalBus(dbPath);
+		try {
+			registerPeer(bus, "equal-left", { labels: { claims: ["equal"] } });
+			registerPeer(bus, "equal-right", { labels: { claims: ["equal"] } });
+			registerPeer(bus, "nested-left", { labels: { claims: ["src"] } });
+			registerPeer(bus, "nested-right", { labels: { claims: ["src/lib"] } });
+			registerPeer(bus, "sibling-left", { labels: { claims: ["x/ab"] } });
+			registerPeer(bus, "sibling-right", { labels: { claims: ["x/abc"] } });
+			registerPeer(bus, "stream-equal-left", { labels: { claims: ["stream-alpha"] } });
+			registerPeer(bus, "stream-equal-right", { labels: { claims: ["stream-alpha"] } });
+			registerPeer(bus, "stream-different-left", { labels: { claims: ["stream-a"] } });
+			registerPeer(bus, "stream-different-right", { labels: { claims: ["stream-ab"] } });
+			registerPeer(bus, "fresh-peer", { labels: { claims: ["stale-path"] } });
+			registerPeer(bus, "stale-peer", { labels: { claims: ["stale-path"] } });
+			bus.updatePeerState("stale-peer", "idle");
+		} finally {
+			bus.close();
+		}
+
+		const editDb = new Database(dbPath);
+		editDb
+			.query("UPDATE peers SET last_seen = $lastSeen WHERE session_id <> 'stale-peer'")
+			.run({ $lastSeen: new Date(NOW - 1_000).toISOString() });
+		editDb
+			.query("UPDATE peers SET last_seen = $lastSeen WHERE session_id = 'stale-peer'")
+			.run({ $lastSeen: new Date(NOW - 20 * 60_000).toISOString() });
+		editDb.close();
+
+		try {
+			const rows = collectFleetOverview({
+				ircDbPath: dbPath,
+				all: true,
+				nowMs: NOW,
+				isProcessAlive: () => true,
+			});
+			const byId = new Map(rows.map(row => [row.sessionId, row]));
+
+			expect(byId.get("equal-left")?.claimConflicts).toEqual([{ with: "equal-right", path: "equal" }]);
+			expect(byId.get("equal-right")?.claimConflicts).toEqual([{ with: "equal-left", path: "equal" }]);
+			expect(byId.get("nested-left")?.claimConflicts).toEqual([{ with: "nested-right", path: "src" }]);
+			expect(byId.get("nested-right")?.claimConflicts).toEqual([{ with: "nested-left", path: "src" }]);
+			expect(byId.get("sibling-left")?.claimConflicts).toEqual([]);
+			expect(byId.get("sibling-right")?.claimConflicts).toEqual([]);
+			expect(byId.get("stream-equal-left")?.claimConflicts).toEqual([
+				{ with: "stream-equal-right", path: "stream-alpha" },
+			]);
+			expect(byId.get("stream-equal-right")?.claimConflicts).toEqual([
+				{ with: "stream-equal-left", path: "stream-alpha" },
+			]);
+			expect(byId.get("stream-different-left")?.claimConflicts).toEqual([]);
+			expect(byId.get("stream-different-right")?.claimConflicts).toEqual([]);
+			expect(byId.get("fresh-peer")?.claimConflicts).toEqual([]);
+			expect(byId.get("stale-peer")?.claimConflicts).toEqual([]);
+
+			const jsonRows: FleetOverviewJsonRow[] = JSON.parse(formatFleetOverviewJson(rows));
+			const equalJson = jsonRows.find(row => row.session_id === "equal-left");
+			expect(equalJson?.claimConflicts).toEqual([{ with: "equal-right", path: "equal" }]);
+			expect(Object.keys(equalJson?.claimConflicts[0] ?? {})).toEqual(["with", "path"]);
+		} finally {
+			if (previousHome === undefined) delete process.env.HOME;
+			else process.env.HOME = previousHome;
+			if (previousControlDb === undefined) delete process.env.OMP_SESSION_CONTROL_DB;
+			else process.env.OMP_SESSION_CONTROL_DB = previousControlDb;
+		}
+	});
+
 
 	it("stale-alive peers included, dead-pid peers excluded", () => {
 		using tmp = TempDir.createSync("@omp-fleet-overview-");
