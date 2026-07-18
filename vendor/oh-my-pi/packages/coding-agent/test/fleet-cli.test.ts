@@ -46,6 +46,32 @@ async function runFleetWithOutput(argv: readonly string[]): Promise<string> {
 	}
 }
 
+async function withFleetLabelFixture(
+	setup: (bus: IrcExternalBus, root: string) => void,
+	run: (ircDbPath: string) => Promise<void>,
+): Promise<void> {
+	using tempDir = TempDir.createSync("@omp-fleet-cli-label-");
+	const previousHome = process.env.HOME;
+	const previousControlDb = process.env.OMP_SESSION_CONTROL_DB;
+	process.env.HOME = tempDir.path();
+	process.env.OMP_SESSION_CONTROL_DB = `${tempDir.path()}/control.sqlite`;
+	const ircDbPath = `${tempDir.path()}/.omp/agent/irc-bus.sqlite`;
+	try {
+		const bus = new IrcExternalBus(ircDbPath);
+		try {
+			setup(bus, tempDir.path());
+		} finally {
+			bus.close();
+		}
+		await run(ircDbPath);
+	} finally {
+		if (previousHome === undefined) delete process.env.HOME;
+		else process.env.HOME = previousHome;
+		if (previousControlDb === undefined) delete process.env.OMP_SESSION_CONTROL_DB;
+		else process.env.OMP_SESSION_CONTROL_DB = previousControlDb;
+	}
+}
+
 describe("fleet overview argument validation", () => {
 	it("rejects unknown flags with the offending token and valid flags", async () => {
 		await expect(runFleet(["overview", "--unknown-flag"])).rejects.toThrow(
@@ -71,6 +97,131 @@ describe("fleet overview argument validation", () => {
 	it("accepts the real overview flags", async () => {
 		const output = await runFleetWithOutput(["overview", "--json", "--all", "--workstream", "fleet-alpha"]);
 		expect(() => JSON.parse(output)).not.toThrow();
+	});
+});
+
+describe("fleet label action", () => {
+	it("applies summary, name, and workstream flags alone and together", async () => {
+		await withFleetLabelFixture(
+			(bus, root) => {
+				for (const [sessionId, name] of [
+					["summary-peer", "summary-spawn"],
+					["name-peer", "name-spawn"],
+					["workstream-peer", "workstream-spawn"],
+					["combined-peer", "combined-spawn"],
+				]) {
+					bus.registerPeer({ sessionId, name, cwd: root });
+				}
+			},
+			async ircDbPath => {
+				const summaryOutput = await runFleetWithOutput(["label", "summary-peer", "--summary", "s".repeat(300)]);
+				expect(summaryOutput).toBe("APPLIED\tsessionId=summary-peer\tfield=summary\n");
+
+				const nameOutput = await runFleetWithOutput(["label", "name-peer", "--name", "name-renamed"]);
+				expect(nameOutput).toBe("APPLIED\tsessionId=name-peer\tfield=name\n");
+
+				const workstreamOutput = await runFleetWithOutput([
+					"label",
+					"workstream-peer",
+					"--workstream",
+					"fleet-alpha",
+				]);
+				expect(workstreamOutput).toBe("APPLIED\tsessionId=workstream-peer\tfield=workstream\n");
+
+				const combinedOutput = await runFleetWithOutput([
+					"label",
+					"combined-peer",
+					"--summary",
+					"combined summary",
+					"--name",
+					"combined-renamed",
+					"--workstream",
+					"fleet-beta",
+				]);
+				expect(combinedOutput).toBe(
+					[
+						"APPLIED\tsessionId=combined-peer\tfield=summary",
+						"APPLIED\tsessionId=combined-peer\tfield=name",
+						"APPLIED\tsessionId=combined-peer\tfield=workstream",
+						"",
+					].join("\n"),
+				);
+
+				const verify = new IrcExternalBus(ircDbPath, { readonly: true });
+				try {
+					const peers = new Map(verify.listPeers({ includeStale: true }).map(peer => [peer.sessionId, peer]));
+					expect(peers.get("summary-peer")?.labels?.summary).toHaveLength(280);
+					expect(peers.get("name-peer")?.name).toBe("name-renamed");
+					expect(peers.get("name-peer")?.labels?.spawnName).toBe("name-spawn");
+					expect(peers.get("workstream-peer")?.labels?.workstream).toBe("fleet-alpha");
+					expect(peers.get("combined-peer")?.name).toBe("combined-renamed");
+					expect(peers.get("combined-peer")?.labels).toMatchObject({
+						summary: "combined summary",
+						workstream: "fleet-beta",
+						spawnName: "combined-spawn",
+					});
+				} finally {
+					verify.close();
+				}
+			},
+		);
+	});
+
+	it("skips an explicit peer name while applying another field", async () => {
+		await withFleetLabelFixture(
+			(bus, root) => {
+				bus.registerPeer({
+					sessionId: "explicit-peer",
+					name: "operator-name",
+					cwd: root,
+					explicitName: true,
+				});
+			},
+			async ircDbPath => {
+				const output = await runFleetWithOutput([
+					"label",
+					"explicit-peer",
+					"--summary",
+					"observer summary",
+					"--name",
+					"ambient-name",
+				]);
+				expect(output).toBe(
+					[
+						"APPLIED\tsessionId=explicit-peer\tfield=summary",
+						"SKIPPED\tsessionId=explicit-peer\tfield=name\treason=explicit_name",
+						"",
+					].join("\n"),
+				);
+				const verify = new IrcExternalBus(ircDbPath, { readonly: true });
+				try {
+					const peer = verify.listPeers({ includeStale: true }).find(item => item.sessionId === "explicit-peer");
+					expect(peer?.name).toBe("operator-name");
+					expect(peer?.labels?.summary).toBe("observer summary");
+				} finally {
+					verify.close();
+				}
+			},
+		);
+	});
+
+	it("rejects unknown sessions, zero flags, and unknown flags", async () => {
+		await expect(runFleet(["label", "label-peer"])).rejects.toThrow(
+			"label requires at least one of --summary, --name, --workstream",
+		);
+		await expect(runFleet(["label", "label-peer", "--unknown-flag"])).rejects.toThrow(
+			"label does not accept --unknown-flag; valid flags: --summary, --name, --workstream",
+		);
+		await withFleetLabelFixture(
+			(bus, root) => {
+				bus.registerPeer({ sessionId: "known-peer", name: "known", cwd: root });
+			},
+			async () => {
+				await expect(runFleet(["label", "missing-peer", "--summary", "summary"])).rejects.toThrow(
+					"label unknown session missing-peer",
+				);
+			},
+		);
 	});
 });
 

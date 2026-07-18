@@ -121,3 +121,16 @@ streams:
         health:
           url: http://127.0.0.1:4933/
           timeoutSec: 30
+  harness:
+    services:
+      fleet-observer:
+        cwd: packages/fleet-observer
+        cmd: bun run observe -- --loop
+        env:
+          OMP_BIN: omp
+          OBSERVER_MODEL: openai-codex/gpt-5.6-terra:medium
+          OBSERVER_THRESHOLD_BYTES: "65536"
+          OBSERVER_INTERVAL_SECONDS: "120"
+        health:
+          command: cd packages/fleet-observer && OBSERVER_OVERVIEW_FIXTURE=/dev/null OBSERVER_DATA_DIR=/tmp/omp-fleet-observer-health-data OBSERVER_STATE_DOCS_DIR=/tmp/omp-fleet-observer-health-state bun run observe -- --once
+          timeoutSec: 30

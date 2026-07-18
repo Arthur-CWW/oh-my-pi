@@ -10,9 +10,11 @@ import {
 	resolveFleetSelectors,
 } from "../cli/fleet-operations";
 import {
+	applyFleetLabel,
 	collectFleetErrors,
 	collectFleetStatus,
 	formatFleetErrors,
+	formatFleetLabel,
 	formatFleetPrune,
 	formatFleetStatus,
 	pruneFleetPeers,
@@ -20,7 +22,19 @@ import {
 import { SessionControlBus } from "../session/session-control";
 import { collectFleetOverview, formatFleetOverview, formatFleetOverviewJson } from "../cli/fleet-overview";
 
-const ACTIONS = ["status", "overview", "errors", "prune", "pause", "resume", "rollout", "rollback", "pin", "unpin"] as const;
+const ACTIONS = [
+	"status",
+	"overview",
+	"errors",
+	"prune",
+	"pause",
+	"resume",
+	"rollout",
+	"rollback",
+	"pin",
+	"unpin",
+	"label",
+] as const;
 
 function fail(message: string): never {
 	throw new Error(`fleet: ${message}`);
@@ -40,6 +54,22 @@ function findOverviewInvalidFlag(argv: readonly string[]): string | undefined {
 
 function overviewReject(token: string): never {
 	fail(`overview does not accept ${token}; valid flags: ${OVERVIEW_VALID_FLAGS}`);
+}
+
+const LABEL_FLAG_NAMES = ["--summary", "--name", "--workstream"] as const;
+const LABEL_VALID_FLAGS = LABEL_FLAG_NAMES.join(", ");
+
+function findLabelInvalidFlag(argv: readonly string[]): string | undefined {
+	for (const token of argv) {
+		if (token === "--" || !token.startsWith("-")) continue;
+		if (LABEL_FLAG_NAMES.some(flag => token === flag || token.startsWith(`${flag}=`))) continue;
+		return token;
+	}
+	return undefined;
+}
+
+function labelReject(token: string): never {
+	fail(`label does not accept ${token}; valid flags: ${LABEL_VALID_FLAGS}`);
 }
 
 export default class Fleet extends Command {
@@ -73,6 +103,8 @@ export default class Fleet extends Command {
 		apply: Flags.boolean({ description: "Apply a fleet prune (prune defaults to dry-run)", default: false }),
 		to: Flags.string({ description: "Rollback target: previous or an exact digest" }),
 		workstream: Flags.string({ description: "Filter by durable workstream ID" }),
+		summary: Flags.string({ description: "Observer summary to store on a peer" }),
+		name: Flags.string({ description: "Ambient peer display name" }),
 		all: Flags.boolean({ description: "Include stale peers or select all peers", default: false }),
 		since: Flags.string({ description: "Errors since ISO time or duration (for example 2h or 7d)" }),
 		session: Flags.string({ description: "Filter errors by session ID" }),
@@ -103,6 +135,10 @@ export default class Fleet extends Command {
 				if (this.argv[0] === "overview") {
 					const invalidFlag = findOverviewInvalidFlag(this.argv.slice(1));
 					if (invalidFlag) overviewReject(invalidFlag);
+				}
+				if (this.argv[0] === "label") {
+					const invalidFlag = findLabelInvalidFlag(this.argv.slice(1));
+					if (invalidFlag) labelReject(invalidFlag);
 				}
 				throw error;
 			}
@@ -156,6 +192,24 @@ export default class Fleet extends Command {
 						row.workstream === selector,
 				);
 			process.stdout.write(flags.json ? formatFleetOverviewJson(rows) : formatFleetOverview(rows));
+			return;
+		}
+
+		if (action === "label") {
+			const invalidFlag = findLabelInvalidFlag(this.argv.slice(1));
+			if (invalidFlag) labelReject(invalidFlag);
+			if (!selector) fail("label requires a session ID");
+			if (value) labelReject(value);
+			if (flags.summary === undefined && flags.name === undefined && flags.workstream === undefined)
+				fail("label requires at least one of --summary, --name, --workstream");
+			const result = applyFleetLabel({
+				sessionId: selector,
+				summary: flags.summary,
+				name: flags.name,
+				workstream: flags.workstream,
+			});
+			if (!result.found) fail(`label unknown session ${selector}`);
+			process.stdout.write(formatFleetLabel(result));
 			return;
 		}
 

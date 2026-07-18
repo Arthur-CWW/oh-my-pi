@@ -38,6 +38,24 @@ export interface FleetPruneOptions {
 	readonly isProcessAlive?: (pid: number) => boolean;
 }
 
+export type FleetLabelField = "summary" | "name" | "workstream";
+
+export interface FleetLabelOptions {
+	readonly sessionId: string;
+	readonly summary?: string;
+	readonly name?: string;
+	readonly workstream?: string;
+	readonly ircDbPath?: string;
+}
+
+
+export interface FleetLabelResult {
+	readonly sessionId: string;
+	readonly found: boolean;
+	readonly applied: readonly FleetLabelField[];
+	readonly skippedName?: "explicit_name" | "unchanged";
+}
+
 export interface FleetStatusRow {
 	readonly sessionId: string;
 	readonly name: string;
@@ -293,6 +311,44 @@ export function formatFleetStatus(rows: readonly FleetStatusRow[]): string {
 				.join("\t"),
 		)
 		.join("\n")}\n`;
+}
+
+function defaultFleetIrcDbPath(): string | undefined {
+	const home = process.env.HOME;
+	return home ? path.join(home, ".omp", "agent", "irc-bus.sqlite") : undefined;
+}
+
+export function applyFleetLabel(options: FleetLabelOptions): FleetLabelResult {
+	const bus = new IrcExternalBus(options.ircDbPath ?? defaultFleetIrcDbPath());
+	try {
+		const peer = bus.listPeers({ includeStale: true }).find(candidate => candidate.sessionId === options.sessionId);
+		if (!peer) return { sessionId: options.sessionId, found: false, applied: [] };
+
+		const applied: FleetLabelField[] = [];
+		let skippedName: FleetLabelResult["skippedName"];
+		if (options.summary !== undefined && bus.mergePeerLabels(options.sessionId, { summary: options.summary })) {
+			applied.push("summary");
+		}
+		if (options.name !== undefined) {
+			if (bus.updatePeerName(options.sessionId, options.name)) applied.push("name");
+			else skippedName = peer.explicitName ? "explicit_name" : "unchanged";
+		}
+		if (options.workstream !== undefined && bus.mergePeerLabels(options.sessionId, { workstream: options.workstream })) {
+			applied.push("workstream");
+		}
+		return { sessionId: options.sessionId, found: true, applied, skippedName };
+	} finally {
+		bus.close();
+	}
+}
+
+export function formatFleetLabel(result: FleetLabelResult): string {
+	if (!result.found) return "";
+	const lines = result.applied.map(field => `APPLIED\tsessionId=${printable(result.sessionId)}\tfield=${field}`);
+	if (result.skippedName !== undefined) {
+		lines.push(`SKIPPED\tsessionId=${printable(result.sessionId)}\tfield=name\treason=${result.skippedName}`);
+	}
+	return lines.length > 0 ? `${lines.join("\n")}\n` : "";
 }
 
 export function pruneFleetPeers(options: FleetPruneOptions = {}): IrcPeerPruneResult {
