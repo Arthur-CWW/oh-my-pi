@@ -198,7 +198,8 @@ import type { CompactOptions, ContextUsage, RegisteredTool } from "../extensibil
 import { ExtensionToolWrapper, RegisteredToolAdapter } from "../extensibility/extensions/wrapper";
 import type { HookCommandContext } from "../extensibility/hooks/types";
 import type { Skill, SkillWarning } from "../extensibility/skills";
-import { expandSlashCommand, type FileSlashCommand } from "../extensibility/slash-commands";
+import { expandSlashCommandAsync, type FileSlashCommand } from "../extensibility/slash-commands";
+import type { PromptVariableContext } from "../commands/prompt-vars";
 import {
 	FeedWatcher,
 	type FeedWatcherCompletion,
@@ -5099,6 +5100,15 @@ export class AgentSession {
 				validToolNames.push("report_tool_issue");
 			}
 		}
+		// Friction reporting is local and privacy-neutral; keep it available after
+		// any runtime tool-set mutation for every agent.
+		if (!validToolNames.includes("report_friction")) {
+			const frictionTool = this.#toolRegistry.get("report_friction");
+			if (frictionTool) {
+				tools.push(this.#wrapToolForAcpPermission(frictionTool));
+				validToolNames.push("report_friction");
+			}
+		}
 		if (this.#mcpDiscoveryEnabled) {
 			this.#selectedMCPToolNames = new Set(
 				validToolNames.filter(
@@ -6227,7 +6237,7 @@ export class AgentSession {
 			// Try file-based slash commands (markdown files from commands/ directories)
 			// Only if text still starts with "/" (wasn't transformed by custom command)
 			if (text.startsWith("/")) {
-				text = expandSlashCommand(text, this.#slashCommands);
+				text = await expandSlashCommandAsync(text, this.#slashCommands, this.#promptVariableContext());
 			}
 		}
 
@@ -13404,6 +13414,34 @@ export class AgentSession {
 		this.#ircExternalSessionId = sessionId;
 		this.#ircExternalPeerName = name;
 		return { bus, sessionId, name };
+	}
+
+	#promptVariableContext(): PromptVariableContext {
+		const workstream = this.sessionManager.getWorkstream();
+		const goal = this.#goalModeState?.goal;
+		const phases = this.getTodoPhases();
+		let todoHead = "";
+		for (const phase of phases) {
+			const task = phase.tasks.find(item => item.status === "in_progress" || item.status === "pending");
+			if (task) {
+				todoHead = task.content;
+				break;
+			}
+		}
+		const ownership = this.sessionManager.getSessionOwnership();
+		return {
+			session: {
+				sessionId: this.sessionManager.getSessionId(),
+				name: this.sessionManager.getSessionName() ?? "",
+				workstream: workstream?.kind === "workstream" ? workstream.id : workstream?.kind === "adhoc" ? "adhoc" : "",
+				...(goal ? { goal: { objective: goal.objective, status: goal.status } } : {}),
+				todoHead,
+				journalPath: this.sessionManager.getSessionFile() ?? "",
+				binaryVersion: ownership?.buildRevision.version ?? VERSION,
+				binaryDigest: ownership?.buildRevision.digest ?? "unknown",
+			},
+			fleet: this.#externalIrcBus ? { ircDbPath: this.#externalIrcBus.dbPath } : undefined,
+		};
 	}
 
 	#gatherPeerLabels(): IrcExternalPeerLabels {

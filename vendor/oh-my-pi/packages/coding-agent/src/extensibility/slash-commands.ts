@@ -5,6 +5,7 @@ import type { SlashCommand } from "../discovery";
 import { loadCapability } from "../discovery";
 import { EMBEDDED_COMMAND_TEMPLATES } from "../task/commands";
 import { parseCommandArgs, substituteArgs } from "../utils/command-args";
+import { resolvePromptVariables, type PromptVariableContext } from "../commands/prompt-vars";
 
 export type SlashCommandSource = "extension" | "prompt" | "skill";
 
@@ -128,4 +129,32 @@ export function expandSlashCommand(text: string, fileCommands: FileSlashCommand[
 	}
 
 	return text;
+}
+
+/**
+ * Expand a slash command and resolve harness-provided prompt variables.
+ * The legacy synchronous helper above remains available for callers that do not
+ * need session-backed variables.
+ */
+export async function expandSlashCommandAsync(
+	text: string,
+	fileCommands: FileSlashCommand[],
+	context: PromptVariableContext,
+): Promise<string> {
+	if (!text.startsWith("/")) return text;
+
+	const spaceIndex = text.indexOf(" ");
+	const commandName = spaceIndex === -1 ? text.slice(1) : text.slice(1, spaceIndex);
+	const argsString = spaceIndex === -1 ? "" : text.slice(spaceIndex + 1);
+
+	const fileCommand = fileCommands.find(cmd => cmd.name === commandName);
+	if (!fileCommand) return text;
+
+	const args = parseCommandArgs(argsString);
+	const argsText = args.join(" ");
+	const resolved = await resolvePromptVariables(fileCommand.content, context);
+	const usesInlineArgPlaceholders = templateUsesInlineArgPlaceholders(resolved);
+	const substituted = substituteArgs(resolved, args);
+	const rendered = prompt.render(substituted, { args, ARGUMENTS: argsText, arguments: argsText });
+	return appendInlineArgsFallback(rendered, argsText, usesInlineArgPlaceholders);
 }
