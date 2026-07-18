@@ -485,9 +485,12 @@ export class SessionRevisionConflictError extends Error {
 }
 
 export class SessionStateCommandInFlightError extends Error {
-	constructor() {
+	readonly commandId: string | undefined;
+
+	constructor(commandId?: string) {
 		super("A session state command is awaiting durable persistence");
 		this.name = "SessionStateCommandInFlightError";
+		this.commandId = commandId;
 	}
 }
 

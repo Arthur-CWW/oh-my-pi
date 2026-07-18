@@ -25,6 +25,7 @@ import {
 	decodeGetCheckpointStateCommand,
 	decodeInterruptPromptCommand,
 	decodeRefreshSshToolCommand,
+	decodePrepareHostTransitionCommand,
 	decodeReloadSessionCommand,
 	decodeRunCompactionCommand,
 	decodeRunEphemeralTurnCommand,
@@ -1350,6 +1351,22 @@ describe("live SessionRunner", () => {
 					.getEntries()
 					.some(entry => entry.type === "workflow_change" && entry.command.commandId === busyGoal.commandId),
 			).toBe(false);
+			const hostTransitionRevision = (await run(terminal.snapshot())).runner.sessionRevision;
+			const hostTransition = decodePrepareHostTransitionCommand({
+				schemaVersion: 1,
+				kind: "prepareHostTransition",
+				commandId: "restart-during-drain",
+				correlationId: "restart-during-drain-correlation",
+				expectedSessionRevision: hostTransitionRevision,
+				viewId: terminal.viewId,
+				controllerEpoch: terminal.epoch,
+				intent: { kind: "restartProcess" },
+			});
+			const hostTransitionFailure = await run(terminal.prepareHostTransition(hostTransition)).catch(error => error);
+			expect(hostTransitionFailure).toBeInstanceOf(SessionStateCommandInFlightError);
+			expect((hostTransitionFailure as SessionStateCommandInFlightError).commandId).toBe(
+				hostTransition.commandId,
+			);
 			expect((await run(runner.snapshot())).status).toBe("running");
 
 			const replay = await run(terminal.setThinkingLevel(committedCommand));

@@ -1,3 +1,4 @@
+import { postmortem } from "@oh-my-pi/pi-utils";
 import { randomUUID } from "node:crypto";
 import { SessionOwnershipLostError } from "../../session/durable-input-queue";
 import type {
@@ -7,6 +8,7 @@ import type {
 	ErrorInboxWriter,
 } from "../../session/error-inbox-ledger";
 import { appendErrorInboxEvent, enrichErrorInboxEvent } from "../../session/error-inbox-ledger";
+import { SessionStateCommandInFlightError } from "../../session/session-manager";
 import type { SessionEntry } from "../../session/session-entries";
 import type { SubagentFailureClass } from "../../task/subagent-failure";
 
@@ -521,4 +523,61 @@ export class ErrorInbox {
 			}
 		});
 	}
+}
+
+interface SessionStateCommandRejection {
+	readonly commandId?: string;
+	readonly message: string;
+}
+
+function decodeSessionStateCommandRejection(reason: unknown): SessionStateCommandRejection | undefined {
+	if (
+		!(reason instanceof SessionStateCommandInFlightError) &&
+		(typeof reason !== "object" ||
+			reason === null ||
+			!("name" in reason) ||
+			reason.name !== "SessionStateCommandInFlightError")
+	) {
+		return undefined;
+	}
+	const message =
+		"message" in reason && typeof reason.message === "string"
+			? reason.message
+			: "A session state command is awaiting durable persistence";
+	const commandId =
+		"commandId" in reason && typeof reason.commandId === "string" && reason.commandId.length > 0
+			? reason.commandId
+			: undefined;
+	return { message, commandId };
+}
+
+/** Capture the recoverable session-state rejection in the live, durable error inbox. */
+export function captureSessionStateCommandUnhandledRejection(
+	inbox: ErrorInbox,
+	sessionId: string,
+	reason: unknown,
+): boolean {
+	const decoded = decodeSessionStateCommandRejection(reason);
+	if (!decoded) return false;
+	inbox.recordError({
+		id: decoded.commandId
+			? `session-control:${decoded.commandId}`
+			: `session-control:unhandled:${sessionId}`,
+		message: `SessionStateCommandInFlightError: ${decoded.message}`,
+		source: "process-unhandled-rejection",
+		category: "session-control",
+		errorClass: "SessionStateCommandInFlightError",
+		session: sessionId,
+		operation: decoded.commandId ? `unhandledRejection:${decoded.commandId}` : "unhandledRejection",
+		code: "session_state_command_in_flight",
+	});
+	return true;
+}
+
+/** Install the session-lifetime belt before postmortem's fatal rejection path. */
+export function registerSessionStateCommandRejectionBelt(inbox: ErrorInbox, sessionId: string): () => void {
+	return postmortem.registerUnhandledRejectionInterceptor(
+		`session-state-command-rejection:${sessionId}`,
+		reason => captureSessionStateCommandUnhandledRejection(inbox, sessionId, reason),
+	);
 }

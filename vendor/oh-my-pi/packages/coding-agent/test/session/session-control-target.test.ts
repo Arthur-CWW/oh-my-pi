@@ -333,33 +333,31 @@ describe("session control prepare rollout", () => {
 		bus.close();
 	});
 
-	it("turns a state-command collision into a typed receipt without an unhandled rejection", async () => {
+	it("turns a restart host-transition collision into a typed receipt without an unhandled rejection", async () => {
 		const { bus, ownership } = await fixture();
 		const unhandled: unknown[] = [];
+		const journalEntries: Array<{ type: string; data: unknown }> = [];
 		const onUnhandled = (reason: unknown): void => {
 			unhandled.push(reason);
 		};
 		process.on("unhandledRejection", onUnhandled);
 		let target: Awaited<ReturnType<typeof startSessionControlTarget>> | undefined;
 		try {
-			const targetActions = actions(() => {});
 			target = await startSessionControlTarget({
 				bus,
 				ownership,
 				pollIntervalMs: 1,
 				diagnosticJournal: {
-					appendCustomEntry: () => {
-						throw new SessionStateCommandInFlightError();
+					appendCustomEntry: (type, data) => {
+						journalEntries.push({ type, data });
+						return crypto.randomUUID();
 					},
 				},
-				actions: {
-					...targetActions,
-					prepareRollout: () => {
-						throw new SessionStateCommandInFlightError();
-					},
-				},
+				actions: actions(command => {
+					throw new SessionStateCommandInFlightError(command.commandId);
+				}),
 			});
-			const command = requestPrepare(bus);
+			const command = requestRestart(bus);
 			const receipt = await bus.waitForTerminal(command.commandId, { timeoutMs: 1_000, pollIntervalMs: 1 });
 			await Bun.sleep(10);
 
@@ -367,6 +365,17 @@ describe("session control prepare rollout", () => {
 				state: "failed",
 				failureCode: "session_state_command_in_flight",
 				error: "SessionStateCommandInFlightError: A session state command is awaiting durable persistence",
+			});
+			expect(journalEntries).toContainEqual({
+				type: "ui_error",
+				data: expect.objectContaining({
+					version: 2,
+					id: `session-control:${command.commandId}`,
+					category: "session-control",
+					errorClass: "SessionStateCommandInFlightError",
+					session: ownership.sessionId,
+					operation: "restart",
+				}),
 			});
 			expect(unhandled).toEqual([]);
 			await expect(target.stop()).resolves.toBeUndefined();

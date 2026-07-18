@@ -185,7 +185,11 @@ import type {
 	TodoPhase,
 	TranscriptMode,
 } from "./types";
-import { type DiagnosticEventInput, ErrorInbox } from "./utils/error-inbox";
+import {
+	type DiagnosticEventInput,
+	ErrorInbox,
+	registerSessionStateCommandRejectionBelt,
+} from "./utils/error-inbox";
 import { UiHelpers } from "./utils/ui-helpers";
 
 const HINT_SHIMMER_PALETTE: ShimmerPalette = {
@@ -429,6 +433,7 @@ export class InteractiveMode implements InteractiveModeContext, SubmittedInputRe
 
 	#pendingSlashCommands: SlashCommand[] = [];
 	#cleanupUnsubscribe?: () => void;
+	#sessionStateCommandRejectionUnsubscribe?: () => void;
 	readonly #version: string;
 	readonly #changelogMarkdown: string | undefined;
 	#planModePreviousTools: string[] | undefined;
@@ -697,6 +702,10 @@ export class InteractiveMode implements InteractiveModeContext, SubmittedInputRe
 
 		// Register session manager flush for signal handlers (SIGINT, SIGTERM, SIGHUP)
 		this.#cleanupUnsubscribe = postmortem.register("session-manager-flush", () => this.sessionManager.flush());
+		this.#sessionStateCommandRejectionUnsubscribe = registerSessionStateCommandRejectionBelt(
+			this.errorInbox,
+			this.session.sessionId,
+		);
 
 		// Wire the report_tool_issue consent gate to the Yes/No dialog popup.
 		// The handler is process-global — subagent tools (which can't reach
@@ -3103,6 +3112,10 @@ export class InteractiveMode implements InteractiveModeContext, SubmittedInputRe
 		}
 		if (this.#cleanupUnsubscribe) {
 			this.#cleanupUnsubscribe();
+		}
+		if (this.#sessionStateCommandRejectionUnsubscribe) {
+			this.#sessionStateCommandRejectionUnsubscribe();
+			this.#sessionStateCommandRejectionUnsubscribe = undefined;
 		}
 		// Clear the process-global consent handler so it doesn't outlive this
 		// InteractiveMode instance (e.g. test harnesses, headless re-init).

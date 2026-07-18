@@ -1,8 +1,14 @@
 import { describe, expect, mock, test } from "bun:test";
-import { diagnosticInputFromError, ErrorInbox, type DiagnosticEventInput } from "../../../src/modes/utils/error-inbox";
+import {
+	captureSessionStateCommandUnhandledRejection,
+	diagnosticInputFromError,
+	ErrorInbox,
+	type DiagnosticEventInput,
+} from "../../../src/modes/utils/error-inbox";
 import type { SessionEntry } from "../../../src/session/session-entries";
 import type { ErrorInboxWriter } from "../../../src/session/error-inbox-ledger";
 import { SessionOwnershipLostError } from "../../../src/session/durable-input-queue";
+import { SessionStateCommandInFlightError } from "../../../src/session/session-manager";
 
 describe("ErrorInbox", () => {
 	test("recordError appends payload with default unread/resolved state", () => {
@@ -93,6 +99,49 @@ describe("ErrorInbox", () => {
 		inbox.recordError({ message: "msg", provider: "b" }, "src", { nowMs: 2000 });
 
 		expect(inbox.getErrors().length).toBe(2);
+	});
+
+
+	test("captures the rejection belt as one session-control error per command", () => {
+		const appendCustomEntry = mock<(type: string, data?: unknown) => string>(() => "");
+		const inbox = new ErrorInbox({ appendCustomEntry });
+
+		expect(
+			captureSessionStateCommandUnhandledRejection(
+				inbox,
+				"session-a",
+				new SessionStateCommandInFlightError("command-a"),
+			),
+		).toBe(true);
+		expect(
+			captureSessionStateCommandUnhandledRejection(
+				inbox,
+				"session-a",
+				new SessionStateCommandInFlightError("command-a"),
+			),
+		).toBe(true);
+		expect(
+			captureSessionStateCommandUnhandledRejection(
+				inbox,
+				"session-a",
+				new SessionStateCommandInFlightError("command-b"),
+			),
+		).toBe(true);
+		expect(captureSessionStateCommandUnhandledRejection(inbox, "session-a", new Error("fatal"))).toBe(false);
+
+		expect(inbox.getErrors()).toHaveLength(2);
+		expect(inbox.getErrors().find(error => error.id === "session-control:command-a")).toMatchObject({
+			message:
+				"SessionStateCommandInFlightError: A session state command is awaiting durable persistence",
+			count: 2,
+			category: "session-control",
+			source: "process-unhandled-rejection",
+			errorClass: "SessionStateCommandInFlightError",
+			session: "session-a",
+			operation: "unhandledRejection:command-a",
+			code: "session_state_command_in_flight",
+		});
+		expect(inbox.getErrors().find(error => error.id === "session-control:command-b")?.count).toBe(1);
 	});
 
 	test("does not dedupe outside window", () => {

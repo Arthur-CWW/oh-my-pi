@@ -1529,7 +1529,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 		transcriptLastEntryId = entries.at(-1)?.id;
 	};
 
-	const requireSessionOperationAvailable = (): Effect.Effect<void, RunnerFailure> => {
+	const requireSessionOperationAvailable = (commandId: string): Effect.Effect<void, RunnerFailure> => {
 		if (
 			activeSessionOperation !== undefined ||
 			activeCompaction !== undefined ||
@@ -1540,7 +1540,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 			resources.session.isRetrying ||
 			resources.session.isGeneratingHandoff
 		) {
-			return Effect.fail(new SessionStateCommandInFlightError());
+			return Effect.fail(new SessionStateCommandInFlightError(commandId));
 		}
 		return Effect.void;
 	};
@@ -1585,9 +1585,9 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 						new SessionRevisionConflictError(command.expectedSessionRevision, sessionRevision),
 					);
 				}
-				yield* requireSessionOperationAvailable();
+				yield* requireSessionOperationAvailable(command.commandId);
 				if (!reserveOperationCapacity(shakeCommands)) {
-					return yield* Effect.fail(new SessionStateCommandInFlightError());
+					return yield* Effect.fail(new SessionStateCommandInFlightError(command.commandId));
 				}
 				const deferred = yield* Deferred.make<RunShakeReceipt, RunnerFailure>();
 				const record: LiveShakeRecord = {
@@ -1764,9 +1764,9 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 						new SessionRevisionConflictError(command.expectedSessionRevision, sessionRevision),
 					);
 				}
-				yield* requireSessionOperationAvailable();
+				yield* requireSessionOperationAvailable(command.commandId);
 				if (!reserveOperationCapacity(handoffCommands)) {
-					return yield* Effect.fail(new SessionStateCommandInFlightError());
+					return yield* Effect.fail(new SessionStateCommandInFlightError(command.commandId));
 				}
 				const deferred = yield* Deferred.make<RunHandoffReceipt, RunnerFailure>();
 				const record: LiveHandoffRecord = {
@@ -2095,9 +2095,9 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 						new SessionRevisionConflictError(command.expectedSessionRevision, sessionRevision),
 					);
 				}
-				yield* requireSessionOperationAvailable();
+				yield* requireSessionOperationAvailable(command.commandId);
 				if (!reserveOperationCapacity(reloadCommands)) {
-					return yield* Effect.fail(new SessionStateCommandInFlightError());
+					return yield* Effect.fail(new SessionStateCommandInFlightError(command.commandId));
 				}
 				const deferred = yield* Deferred.make<ReloadSessionReceipt, RunnerFailure>();
 				const record: LiveReloadRecord = {
@@ -2340,9 +2340,9 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 						new SessionRevisionConflictError(command.expectedSessionRevision, sessionRevision),
 					);
 				}
-				yield* requireSessionOperationAvailable();
+				yield* requireSessionOperationAvailable(command.commandId);
 				if (!reserveOperationCapacity(hostTransitionCommands)) {
-					return yield* Effect.fail(new SessionStateCommandInFlightError());
+					return yield* Effect.fail(new SessionStateCommandInFlightError(command.commandId));
 				}
 				const deferred = yield* Deferred.make<PrepareHostTransitionReceipt, RunnerFailure>();
 				const record: LiveHostTransitionRecord = {
