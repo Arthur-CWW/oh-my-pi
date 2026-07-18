@@ -133,5 +133,6 @@ streams:
           OBSERVER_THRESHOLD_BYTES: "65536"
           OBSERVER_INTERVAL_SECONDS: "120"
         health:
-          command: cd packages/fleet-observer && OBSERVER_OVERVIEW_FIXTURE=/dev/null OBSERVER_DATA_DIR=/tmp/omp-fleet-observer-health-data OBSERVER_STATE_DOCS_DIR=/tmp/omp-fleet-observer-health-state bun run observe -- --once
-          timeoutSec: 30
+          # Loop liveness: heartbeat file stamped each pass; stale >6min (3x interval) = down.
+          command: test -n "$(find data/fleet-observer/heartbeat -mmin -6 2>/dev/null)"
+          timeoutSec: 10

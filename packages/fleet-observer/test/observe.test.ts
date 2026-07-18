@@ -26,6 +26,7 @@ function pathsAt(root: string): ObserverPaths {
   return {
     cursorPath: join(root, "data", "cursors.json"),
     errorLogPath: join(root, "data", "errors.log"),
+    heartbeatPath: join(root, "data", "heartbeat"),
     stateDocsDir,
     indexPath: join(stateDocsDir, "INDEX.md"),
   }

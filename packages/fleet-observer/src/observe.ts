@@ -24,6 +24,7 @@ export type CursorStore = Readonly<Record<string, JournalCursor>>
 export interface ObserverPaths {
   readonly cursorPath: string
   readonly errorLogPath: string
+  readonly heartbeatPath: string
   readonly stateDocsDir: string
   readonly indexPath: string
 }
@@ -180,6 +181,7 @@ export function defaultObserverPaths(repoRoot = process.env.OBSERVER_REPO_ROOT ?
   return {
     cursorPath: process.env.OBSERVER_CURSOR_PATH ?? join(dataDir, "cursors.json"),
     errorLogPath: process.env.OBSERVER_ERROR_LOG ?? join(dataDir, "errors.log"),
+    heartbeatPath: process.env.OBSERVER_HEARTBEAT_PATH ?? join(dataDir, "heartbeat"),
     stateDocsDir,
     indexPath: process.env.OBSERVER_INDEX_PATH ?? join(stateDocsDir, "INDEX.md"),
   }
@@ -617,6 +619,10 @@ async function main(argv: readonly string[]): Promise<number> {
     return 2
   }
   do {
+    // Liveness for the supervisor health check: stamp before AND after each
+    // pass so a long summarize burst never reads as dead.
+    const heartbeatPath = defaultObserverPaths().heartbeatPath
+    await Bun.write(heartbeatPath, new Date().toISOString())
     try {
       const result = await runObserverPass({ includeAll })
       process.stdout.write(
@@ -628,6 +634,7 @@ async function main(argv: readonly string[]): Promise<number> {
       if (!loop) return 1
     }
     if (!loop) return 0
+    await Bun.write(heartbeatPath, new Date().toISOString())
     await Bun.sleep(jitteredIntervalMs(intervalMsFromEnv()))
   } while (true)
 }
