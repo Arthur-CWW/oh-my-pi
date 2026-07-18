@@ -12,6 +12,7 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import type { AgentRef } from "../registry/agent-registry";
+import { IrcExternalBus, type IrcExternalPeer } from "../irc/bus-external";
 import { AgentRegistry } from "../registry/agent-registry";
 import { formatSessionHistoryMarkdown } from "../session/session-history-format";
 import { loadSessionMessagesReadOnly } from "../session/session-loader";
@@ -21,7 +22,7 @@ import {
 	latestChildLifecycleRecord,
 	type ChildLifecycleRecord,
 } from "../task/child-lifecycle";
-import type { InternalResource, InternalUrl, ProtocolHandler, UrlCompletion } from "./types";
+import type { InternalResource, InternalUrl, ProtocolHandler, ResolveContext, UrlCompletion } from "./types";
 
 /** Humanize a last-activity timestamp as `Ns/Nm/Nh/Nd ago`. */
 function formatAgo(timestamp: number): string {
@@ -227,6 +228,70 @@ export async function listArchivedChildHistories(refs: readonly AgentRef[]): Pro
 	);
 }
 
+function malformedHistoryPath(): Error {
+	return new Error("Malformed history URL: expected history://<session-id>/<agent-id> with exactly one path segment");
+}
+
+function parseHistoryPath(url: InternalUrl): string[] {
+	const rawPathname = url.rawPathname ?? url.pathname;
+	if (!rawPathname) return [];
+	if (!rawPathname.startsWith("/")) throw malformedHistoryPath();
+	const rawSegments = rawPathname.slice(1).split("/");
+	if (rawSegments.length !== 1 || rawSegments[0].length === 0) throw malformedHistoryPath();
+	const rawSegment = rawSegments[0];
+	if (/%2f|%5c|%2e/i.test(rawSegment)) throw malformedHistoryPath();
+	let segment: string;
+	try {
+		segment = decodeURIComponent(rawSegment);
+	} catch {
+		throw malformedHistoryPath();
+	}
+	if (
+		!segment ||
+		segment === "." ||
+		segment === ".." ||
+		segment.includes("/") ||
+		segment.includes("\\") ||
+		/%2f|%5c|%2e/i.test(segment)
+	)
+		throw malformedHistoryPath();
+	return [segment];
+}
+
+function findFleetPeer(peers: readonly IrcExternalPeer[], sessionId: string): IrcExternalPeer | undefined {
+	return peers.find(peer => peer.sessionId === sessionId) ?? peers.find(peer => peer.sessionId.toLowerCase() === sessionId.toLowerCase());
+}
+
+async function isJournalFile(file: string): Promise<boolean> {
+	try {
+		return (await fs.stat(file)).isFile();
+	} catch {
+		return false;
+	}
+}
+
+function isWithinDirectory(directory: string, file: string): boolean {
+	const root = path.resolve(directory);
+	const target = path.resolve(file);
+	return target === root || target.startsWith(`${root}${path.sep}`);
+}
+
+async function isWithinRealDirectory(directory: string, file: string): Promise<boolean> {
+	try {
+		const [realDirectory, realFile] = await Promise.all([fs.realpath(directory), fs.realpath(file)]);
+		return isWithinDirectory(realDirectory, realFile);
+	} catch {
+		return false;
+	}
+}
+
+function childJournalFile(parentSessionFile: string, childId: string): string {
+	const childrenDir = parentSessionFile.endsWith(".jsonl") ? parentSessionFile.slice(0, -".jsonl".length) : "";
+	const childFile = path.resolve(childrenDir, `${childId}.jsonl`);
+	if (!childrenDir || !isWithinDirectory(childrenDir, childFile)) throw malformedHistoryPath();
+	return childFile;
+}
+
 /**
  * Handler for history:// URLs.
  *
@@ -235,10 +300,12 @@ export async function listArchivedChildHistories(refs: readonly AgentRef[]): Pro
  */
 export class HistoryProtocolHandler implements ProtocolHandler {
 	readonly scheme = "history";
-	readonly immutable = false;
+	readonly immutable = true;
 
-	async resolve(url: InternalUrl): Promise<InternalResource> {
+	async resolve(url: InternalUrl, context?: ResolveContext): Promise<InternalResource> {
 		const agentId = url.rawHost || url.hostname;
+		const pathSegments = parseHistoryPath(url);
+		if (!agentId && pathSegments.length > 0) throw malformedHistoryPath();
 		const registry = AgentRegistry.global();
 		const refs = registry.list();
 		const archives = await listArchivedChildHistories(refs);
@@ -248,6 +315,14 @@ export class HistoryProtocolHandler implements ProtocolHandler {
 			return { url: url.href, content, contentType: "text/markdown", size: Buffer.byteLength(content, "utf-8") };
 		}
 
+		if (pathSegments.length > 0) {
+			const remote = await this.#resolveFleet(url.href, agentId, pathSegments[0], context?.ircDbPath, false);
+			if (!remote) throw new Error(`Unknown session: ${agentId} (missing or stale from fleet sessions index)`);
+			return remote;
+		}
+
+		// Preserve the short local form's precedence: a local registry agent wins
+		// over a fleet session with the same id.
 		let ref = registry.get(agentId);
 		if (!ref) {
 			const lower = agentId.toLowerCase();
@@ -255,6 +330,8 @@ export class HistoryProtocolHandler implements ProtocolHandler {
 		}
 		const archive = ref ? undefined : archives.find(candidate => candidate.id.toLowerCase() === agentId.toLowerCase());
 		if (!ref && !archive) {
+			const remote = await this.#resolveFleet(url.href, agentId, undefined, context?.ircDbPath, true);
+			if (remote) return remote;
 			const known = [...refs.map(candidate => candidate.id), ...archives.map(candidate => candidate.id)];
 			const knownStr = known.length > 0 ? known.join(", ") : "none";
 			throw new Error(`Unknown agent: ${agentId}\nKnown agents: ${knownStr}\nList all with history://`);
@@ -286,6 +363,59 @@ export class HistoryProtocolHandler implements ProtocolHandler {
 			sourcePath: archive?.sessionFile ?? ref!.sessionFile ?? undefined,
 			notes,
 		};
+	}
+
+	async #resolveFleet(
+		url: string,
+		sessionId: string,
+		agentId: string | undefined,
+		dbPath: string | undefined,
+		allowMissing: boolean,
+	): Promise<InternalResource | undefined> {
+		let bus: IrcExternalBus;
+		try {
+			bus = new IrcExternalBus(dbPath, { readonly: true });
+		} catch {
+			if (allowMissing) return undefined;
+			throw new Error(`Unable to read fleet sessions index for session ${sessionId}`);
+		}
+		try {
+			const peer = findFleetPeer(bus.listPeers(), sessionId);
+			if (!peer) {
+				if (allowMissing) return undefined;
+				throw new Error(`Unknown session: ${sessionId} (missing or stale from fleet sessions index)`);
+			}
+			const sessionFile = peer.sessionFile?.trim();
+			if (!sessionFile) throw new Error(`Session ${sessionId} has no session_file in fleet sessions index`);
+			if (!(await isJournalFile(sessionFile))) throw new Error(`Session ${sessionId} journal does not exist: ${sessionFile}`);
+
+			const isMain = agentId === undefined || agentId.toLowerCase() === "main";
+			let targetFile = sessionFile;
+			if (!isMain) {
+				targetFile = childJournalFile(sessionFile, agentId);
+				const childDirectory = sessionFile.slice(0, -".jsonl".length);
+				if (!isWithinDirectory(childDirectory, targetFile))
+					throw new Error(`Session ${sessionId} child journal escapes the parent journal directory`);
+				if (!(await isJournalFile(targetFile)))
+					throw new Error(`Session ${sessionId} child journal does not exist: ${targetFile}`);
+				if (!(await isWithinRealDirectory(childDirectory, targetFile)))
+					throw new Error(`Session ${sessionId} child journal escapes the parent journal directory`);
+			}
+
+			const messages = await loadSessionMessagesReadOnly(targetFile);
+			const displayId = isMain ? peer.sessionId : agentId;
+			const content = formatSessionHistoryMarkdown(messages, { title: `${displayId} (remote)` });
+			return {
+				url,
+				content,
+				contentType: "text/markdown",
+				size: Buffer.byteLength(content, "utf-8"),
+				sourcePath: targetFile,
+				notes: [`Source: remote session file (read-only, ${peer.state})`],
+			};
+		} finally {
+			bus.close();
+		}
 	}
 
 	#renderIndex(refs: AgentRef[], archives: readonly ArchivedHistoryRef[]): string {

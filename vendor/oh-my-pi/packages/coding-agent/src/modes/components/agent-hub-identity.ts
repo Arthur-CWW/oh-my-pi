@@ -4,5 +4,5 @@ export interface AgentHubYankIdentity {
 }
 
 export function agentHubYankPayload(identity: AgentHubYankIdentity): string {
-	return `${identity.sessionId}/${identity.agentId}\nhistory://${identity.agentId}`;
+	return `${identity.sessionId}/${identity.agentId}\nhistory://${identity.sessionId}/${identity.agentId}`;
 }

@@ -13,6 +13,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { InternalUrlRouter } from "@oh-my-pi/pi-coding-agent/internal-urls";
+import { IrcExternalBus } from "@oh-my-pi/pi-coding-agent/irc/bus-external";
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { CURRENT_SESSION_VERSION } from "@oh-my-pi/pi-coding-agent/session/session-entries";
@@ -26,6 +27,25 @@ async function withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
 	} finally {
 		await fs.rm(dir, { recursive: true, force: true });
 	}
+}
+
+let testHome = "";
+let fleetDbPath = "";
+let previousHome: string | undefined;
+let previousControlDb: string | undefined;
+
+function fleetContext(): { ircDbPath: string } {
+	return { ircDbPath: fleetDbPath };
+}
+
+function registerFleetPeer(sessionId: string, sessionFile: string): void {
+	const bus = new IrcExternalBus(fleetDbPath);
+	bus.registerPeer({ sessionId, name: sessionId, cwd: "/tmp/history-protocol", pid: process.pid, sessionFile });
+	bus.close();
+}
+
+async function sha256(file: string): Promise<string> {
+	return new Bun.SHA256().update(await fs.readFile(file)).digest("hex");
 }
 
 function fakeLiveSession(messages: unknown[]): AgentSession {
@@ -144,14 +164,27 @@ async function writeDirectChildJournal(options: {
 }
 
 describe("history:// protocol", () => {
-	beforeEach(() => {
+	beforeEach(async () => {
 		AgentRegistry.resetGlobalForTests();
 		InternalUrlRouter.resetForTests();
+		previousHome = process.env.HOME;
+		previousControlDb = process.env.OMP_SESSION_CONTROL_DB;
+		testHome = await fs.mkdtemp(path.join(os.tmpdir(), "history-protocol-home-"));
+		fleetDbPath = path.join(testHome, "irc-bus.sqlite");
+		process.env.HOME = testHome;
+		process.env.OMP_SESSION_CONTROL_DB = path.join(testHome, "session-control.sqlite");
 	});
 
-	afterEach(() => {
+	afterEach(async () => {
 		InternalUrlRouter.resetForTests();
 		AgentRegistry.resetGlobalForTests();
+		if (previousHome === undefined) delete process.env.HOME;
+		else process.env.HOME = previousHome;
+		if (previousControlDb === undefined) delete process.env.OMP_SESSION_CONTROL_DB;
+		else process.env.OMP_SESSION_CONTROL_DB = previousControlDb;
+		await fs.rm(testHome, { recursive: true, force: true });
+		testHome = "";
+		fleetDbPath = "";
 	});
 
 	it("bare history:// renders an index listing registered agents", async () => {
@@ -327,7 +360,7 @@ describe("history:// protocol", () => {
 		});
 
 		const error = await InternalUrlRouter.instance()
-			.resolve("history://Nope")
+			.resolve("history://Nope", fleetContext())
 			.then(
 				() => null,
 				err => err as Error,
@@ -357,4 +390,130 @@ describe("history:// protocol", () => {
 
 		expect(error?.message).toContain("no transcript");
 	});
+	it("prefers a local one-segment ref over an identically named fleet session", async () => {
+		await withTempDir(async dir => {
+			const remoteFile = path.join(dir, "remote.jsonl");
+			await Bun.write(remoteFile, sessionFixtureJsonl());
+			registerFleetPeer("Shared", remoteFile);
+			AgentRegistry.global().register({
+				id: "Shared",
+				displayName: "local",
+				kind: "sub",
+				session: fakeLiveSession([{ role: "user", content: "local transcript", timestamp: 1 }]),
+				status: "idle",
+			});
+
+			const resource = await InternalUrlRouter.instance().resolve("history://Shared", fleetContext());
+
+			expect(resource.content).toContain("local transcript");
+			expect(resource.content).not.toContain("parked hello");
+		});
+	});
+
+	it("falls back to a fleet session for an unmatched one-segment id", async () => {
+		await withTempDir(async dir => {
+			const remoteFile = path.join(dir, "remote.jsonl");
+			await Bun.write(remoteFile, sessionFixtureJsonl());
+			registerFleetPeer("remote-session", remoteFile);
+			const beforeJournal = await sha256(remoteFile);
+			const beforeDatabase = await sha256(fleetDbPath);
+
+			const resource = await InternalUrlRouter.instance().resolve("history://remote-session", fleetContext());
+
+			expect(resource.content).toContain("# remote-session (remote)");
+			expect(resource.content).toContain("parked hello");
+			expect(resource.sourcePath).toBe(remoteFile);
+			expect(resource.immutable).toBe(true);
+			expect(await sha256(remoteFile)).toBe(beforeJournal);
+			expect(await sha256(fleetDbPath)).toBe(beforeDatabase);
+		});
+	});
+
+	it("resolves remote Main and child journals through a two-segment URL", async () => {
+		await withTempDir(async dir => {
+			const parentFile = path.join(dir, "parent.jsonl");
+			const childrenDir = parentFile.slice(0, -".jsonl".length);
+			const childFile = path.join(childrenDir, "Child.jsonl");
+			await fs.mkdir(childrenDir);
+			await Bun.write(parentFile, sessionFixtureJsonl());
+			await Bun.write(childFile, sessionFixtureJsonl());
+			registerFleetPeer("remote-parent", parentFile);
+
+			const main = await InternalUrlRouter.instance().resolve("history://remote-parent/Main", fleetContext());
+			const child = await InternalUrlRouter.instance().resolve("history://remote-parent/Child", fleetContext());
+
+			expect(main.sourcePath).toBe(parentFile);
+			expect(main.content).toContain("# remote-parent (remote)");
+			expect(child.sourcePath).toBe(childFile);
+			expect(child.content).toContain("# Child (remote)");
+			expect(child.content).toContain("parked hello");
+		});
+	});
+
+	it("rejects malformed, dot, extra, and encoded-slash child segments", async () => {
+		for (const input of [
+			"history://remote-parent/",
+			"history://remote-parent/.",
+			"history://remote-parent/..",
+			"history://remote-parent/Child/extra",
+			"history://remote-parent/%2FChild",
+			"history://remote-parent/%ZZ",
+		]) {
+			const error = await InternalUrlRouter.instance()
+				.resolve(input, fleetContext())
+				.then(
+					() => null,
+					err => err as Error,
+				);
+			expect(error?.message).toContain("Malformed history URL");
+		}
+	});
+
+	it("reports missing peers, empty session files, and missing journals distinctly", async () => {
+		const fleetDb = new IrcExternalBus(fleetDbPath);
+		fleetDb.close();
+		const missing = await InternalUrlRouter.instance()
+			.resolve("history://missing-session/Main", fleetContext())
+			.then(
+				() => null,
+				err => err as Error,
+			);
+		const emptyFileId = "empty-session";
+		registerFleetPeer(emptyFileId, "");
+		const empty = await InternalUrlRouter.instance()
+			.resolve(`history://${emptyFileId}/Main`, fleetContext())
+			.then(
+				() => null,
+				err => err as Error,
+			);
+		const missingJournalId = "missing-journal";
+		const missingJournal = path.join(testHome, "does-not-exist.jsonl");
+		registerFleetPeer(missingJournalId, missingJournal);
+		const nonexistent = await InternalUrlRouter.instance()
+			.resolve(`history://${missingJournalId}/Main`, fleetContext())
+			.then(
+				() => null,
+				err => err as Error,
+			);
+
+		expect(missing?.message).toContain("Unknown session: missing-session");
+		expect(empty?.message).toContain(`Session ${emptyFileId} has no session_file`);
+		expect(nonexistent?.message).toContain(`Session ${missingJournalId} journal does not exist`);
+		expect(new Set([missing?.message, empty?.message, nonexistent?.message]).size).toBe(3);
+	});
+
+	it("continues offering local history references in completions", async () => {
+		AgentRegistry.global().register({
+			id: "CompletionAgent",
+			displayName: "task",
+			kind: "sub",
+			session: fakeLiveSession([]),
+			status: "idle",
+		});
+
+		const completions = await InternalUrlRouter.instance().complete("history", "");
+
+		expect(completions?.some(completion => completion.value === "CompletionAgent")).toBe(true);
+	});
+
 });

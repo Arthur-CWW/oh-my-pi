@@ -197,6 +197,7 @@ URL selectors are parsed separately in `packages/coding-agent/src/tools/fetch.ts
 ### Internal URLs
 - `read` does not resolve these itself; it delegates to `session.internalRouter.resolve()`.
 - Registered protocols are outside this file, but the router in `packages/coding-agent/src/internal-urls/router.ts` is built for `agent://`, `artifact://`, `history://`, `issue://`, `local://`, `mcp://`, `memory://`, `omp://`, `pr://`, `rule://`, `skill://`, and `vault://`.
+- `history://<agentId>` is an agent transcript; `history://<session-id>/<agent-id>` and `history://<session-id>` are global read-only forms resolved via the sessions index (the short form stays session-local).
 - `#handleInternalUrl()` behavior:
   - parses the URL with `parseInternalUrl()` so colons inside the host segment are legal
   - for `agent://`, treats non-root path extraction or `?q=` extraction as a special no-pagination mode

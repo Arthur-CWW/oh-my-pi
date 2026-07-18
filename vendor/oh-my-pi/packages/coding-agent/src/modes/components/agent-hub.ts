@@ -2486,7 +2486,7 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 		const payload = agentHubYankPayload({ sessionId, agentId });
 		void Promise.resolve(this.#copyIdentity(payload)).then(
 			() => {
-				this.#notice = `Yanked ${sessionId}/${agentId} + history://${agentId}`;
+				this.#notice = `Yanked ${sessionId}/${agentId} + history://${sessionId}/${agentId}`;
 				this.#requestRender();
 			},
 			error => {

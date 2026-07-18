@@ -90,6 +90,12 @@ export interface ResolveContext {
 	 * [#1608](https://github.com/can1357/oh-my-pi/issues/1608).
 	 */
 	localProtocolOptions?: LocalProtocolOptions;
+	/**
+	 * Optional SQLite path for the read-only fleet sessions index used by
+	 * `history://` remote-session resolution. Production callers omit this so
+	 * the bus uses its default path; tests inject an isolated database.
+	 */
+	ircDbPath?: string;
 }
 
 /**

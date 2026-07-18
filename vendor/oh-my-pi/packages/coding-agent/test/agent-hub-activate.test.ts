@@ -122,8 +122,8 @@ it("y yanks the selected child's session handle and history URL", async () => {
 	});
 	hub.handleInput("y");
 	await Bun.sleep(0);
-	expect(copied).toEqual(["019f6141-df73-7000-b792-985f12d9db5d/Worker\nhistory://Worker"]);
-	expect(renderedText(hub)).toContain("Yanked 019f6141-df73-7000-b792-985f12d9db5d/Worker + history://Worker");
+	expect(copied).toEqual(["019f6141-df73-7000-b792-985f12d9db5d/Worker\nhistory://019f6141-df73-7000-b792-985f12d9db5d/Worker"]);
+	expect(renderedText(hub)).toContain("Yanked 019f6141-df73-7000-b792-985f12d9db5d/Worker + history://019f6141-df73-7000-b792-985f12d9db5d/Worker");
 	hub.dispose();
 });
 function renderedText(hub: AgentHubOverlayComponent): string {
