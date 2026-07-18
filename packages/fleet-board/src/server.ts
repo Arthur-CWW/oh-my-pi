@@ -97,6 +97,7 @@ async function staticResponse(publicDir: string, pathname: string): Promise<Resp
 export function createRequestHandler(options: FleetBoardServerOptions = {}): RequestHandler {
   const paths = options.paths ?? defaultPaths()
   const ompBin = options.ompBin ?? process.env.OMP_BIN ?? "omp"
+  const uiDistDir = `${paths.repoRoot}/packages/fleet-board/ui/dist`
   const now = options.now ?? Date.now
   const overviewRunner = options.runOverview ?? runOverview
   let fleetCache: FleetPayload | undefined
@@ -164,7 +165,9 @@ export function createRequestHandler(options: FleetBoardServerOptions = {}): Req
         await appendErrorLog(paths.errorLogPath, "client-error", body || "empty client error")
         return new Response(null, { status: 204 })
       }
-      if (request.method === "GET") return staticResponse(paths.publicDir, url.pathname)
+      if (request.method === "GET") {
+        return staticResponse(uiDistDir, url.pathname)
+      }
       return new Response("Not found", { status: 404 })
     } catch (error) {
       await appendErrorLog(paths.errorLogPath, `${request.method} ${url.pathname}`, error)

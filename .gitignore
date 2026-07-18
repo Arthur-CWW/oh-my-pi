@@ -103,6 +103,12 @@ vendor/nexu-io--open-design/**/.od/
 vendor/nexu-io--open-design/**/.next/
 packages/web-access/vendor/*
 !packages/web-access/vendor/kagi-chrome-extension/
+!vendor/ln-dev7/
+vendor/ln-dev7/*
+!vendor/ln-dev7/circle/
+!vendor/ln-dev7/circle/**
+vendor/ln-dev7/circle/node_modules/
+vendor/ln-dev7/circle/.next/
 skills/chrome-devtools-mcp/
 packages/web-access/skills/chrome-devtools-mcp/
 vendor/badlogic/pi-skills/browser-tools/output/

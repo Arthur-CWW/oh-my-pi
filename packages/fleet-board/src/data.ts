@@ -47,7 +47,6 @@ export interface FleetBoardPaths {
   readonly stateDocsDir: string
   readonly registerPath: string
   readonly errorLogPath: string
-  readonly publicDir: string
 }
 
 export interface RegisterSnapshot {
@@ -261,7 +260,6 @@ export function pathsAt(repoRoot: string): FleetBoardPaths {
     stateDocsDir: join(root, "local", "state-docs"),
     registerPath: join(root, "docs", "fable", "harness-request-register.md"),
     errorLogPath: join(root, "data", "fleet-board", "errors.log"),
-    publicDir: join(root, "packages", "fleet-board", "public"),
   }
 }
 

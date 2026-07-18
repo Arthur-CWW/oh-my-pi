@@ -7,7 +7,9 @@
     "skipLibCheck": true,
     "noEmit": true,
     "allowImportingTsExtensions": true,
+    "jsx": "react-jsx",
+    "paths": { "@/*": ["./ui/src/*"] },
     "types": ["bun-types", "node"]
   },
-  "include": ["src/**/*.ts", "public/**/*.ts", "test/**/*.ts"]
+  "include": ["src/**/*.ts", "test/**/*.ts"]
 }
