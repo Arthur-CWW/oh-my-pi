@@ -40,7 +40,8 @@ export default class Policy extends Command {
 		"expires-in": Flags.string({ description: "Positive duration from effective-from (for example 30m, 2h, 1d)" }),
 		reason: Flags.string({ description: "Transaction reason" }),
 		workstream: Flags.string({ description: "Workstream scope" }),
-		author: Flags.string({ description: "History author kind, UID, or session ID" }),
+		author: Flags.string({ description: "Transaction author identity or history author filter" }),
+		source: Flags.string({ description: "Policy transaction source or register row" }),
 		since: Flags.string({ description: "History lower-bound timestamp" }),
 	};
 
@@ -66,6 +67,7 @@ export default class Policy extends Command {
 			reason: flags.reason,
 			workstream: flags.workstream,
 			author: flags.author,
+			source: flags.source,
 			since: flags.since,
 			configPath: flags.config,
 		};

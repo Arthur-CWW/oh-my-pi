@@ -124,6 +124,7 @@ function denySnapshot(options: {
 			values: {},
 			deniedProviderIds: effective ? providers : [],
 			deniedModels: effective ? models : [],
+			deniedRoutes: [],
 			entries,
 		},
 		transactions: [],

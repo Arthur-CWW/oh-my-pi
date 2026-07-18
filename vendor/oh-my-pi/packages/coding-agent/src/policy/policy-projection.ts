@@ -18,6 +18,8 @@ import {
 	type PolicyTransactionV1,
 	type ProviderDenyValue,
 	type ProviderModelSelector,
+	type ProviderRouteDenyValue,
+	type ProviderRouteSelector,
 } from "./policy-records";
 
 export type PolicySourceLayer =
@@ -152,6 +154,7 @@ export interface ProviderPostureProjection {
 	readonly values: Readonly<Partial<Record<CoreProviderKey, EffectiveProviderPolicyValue>>>;
 	readonly deniedProviderIds: readonly string[];
 	readonly deniedModels: readonly ProviderModelSelector[];
+	readonly deniedRoutes: readonly ProviderRouteSelector[];
 	readonly entries: readonly ProviderPostureEntry[];
 }
 
@@ -495,6 +498,11 @@ export function projectPolicy(
 	const deniedModels = [
 		...((providerValues["core.providers.deny.models"]?.value as ModelDenyValue | undefined)?.models ?? []),
 	].sort((left, right) => left.provider.localeCompare(right.provider) || left.model.localeCompare(right.model));
+	const deniedRoutes = [
+		...((providerValues["core.providers.deny.routes"]?.value as ProviderRouteDenyValue | undefined)?.routes ?? []),
+	].sort(
+		(left, right) => left.provider.localeCompare(right.provider) || left.modelFamily.localeCompare(right.modelFamily),
+	);
 	const entries = providerEntries.map(entry => {
 		const winner = providerValues[entry.key];
 		return winner?.transactionId === entry.transactionId && winner.sequence === entry.sequence
@@ -506,7 +514,7 @@ export function projectPolicy(
 		at,
 		...(options.workstream === undefined ? {} : { workstream: options.workstream }),
 		values: values as PolicySnapshot["values"],
-		providerPosture: { values: providerValues, deniedProviderIds, deniedModels, entries },
+		providerPosture: { values: providerValues, deniedProviderIds, deniedModels, deniedRoutes, entries },
 		fragmentValues,
 		fragmentNotices,
 		transactions: [...records],
@@ -528,6 +536,14 @@ export type ProviderDenyMatch =
 			readonly provider: string;
 			readonly model: string;
 			readonly entry: ProviderPostureEntry;
+	  }
+	| {
+			readonly kind: "route";
+			readonly key: "core.providers.deny.routes";
+			readonly provider: string;
+			readonly model: string;
+			readonly modelFamily: ProviderRouteSelector["modelFamily"];
+			readonly entry: ProviderPostureEntry;
 	  };
 
 function effectivePostureEntry(snapshot: PolicySnapshot, key: CoreProviderKey): ProviderPostureEntry | undefined {
@@ -539,13 +555,33 @@ function effectivePostureEntry(snapshot: PolicySnapshot, key: CoreProviderKey): 
 export function isProviderDenied(snapshot: PolicySnapshot, provider: string): boolean {
 	return snapshot.providerPosture?.deniedProviderIds.includes(provider) ?? false;
 }
+const CLAUDE_MODEL_ID_PATTERN = /^claude(?:[-_.@]|$)/i;
 
-export function isModelDenied(snapshot: PolicySnapshot, provider: string, model: string): boolean {
+function modelMatchesFamily(model: string, family: ProviderRouteSelector["modelFamily"]): boolean {
+	switch (family) {
+		case "claude":
+			return CLAUDE_MODEL_ID_PATTERN.test(model);
+	}
+}
+
+export function isProviderRouteDenied(snapshot: PolicySnapshot, provider: string, model: string): boolean {
+	return (
+		snapshot.providerPosture?.deniedRoutes.some(
+			route => route.provider === provider && modelMatchesFamily(model, route.modelFamily),
+		) ?? false
+	);
+}
+
+function isExactModelDenied(snapshot: PolicySnapshot, provider: string, model: string): boolean {
 	return (
 		snapshot.providerPosture?.deniedModels.some(
 			selector => selector.provider === provider && selector.model === model,
 		) ?? false
 	);
+}
+
+export function isModelDenied(snapshot: PolicySnapshot, provider: string, model: string): boolean {
+	return isExactModelDenied(snapshot, provider, model) || isProviderRouteDenied(snapshot, provider, model);
 }
 
 export function providerDenyMatches(
@@ -564,7 +600,7 @@ export function providerDenyMatches(
 				entry,
 			});
 	}
-	if (isModelDenied(snapshot, provider, model)) {
+	if (isExactModelDenied(snapshot, provider, model)) {
 		const entry = effectivePostureEntry(snapshot, "core.providers.deny.models");
 		if (entry !== undefined)
 			matches.push({
@@ -572,6 +608,21 @@ export function providerDenyMatches(
 				key: "core.providers.deny.models",
 				provider,
 				model,
+				entry,
+			});
+	}
+	if (isProviderRouteDenied(snapshot, provider, model)) {
+		const entry = effectivePostureEntry(snapshot, "core.providers.deny.routes");
+		const route = snapshot.providerPosture?.deniedRoutes.find(
+			candidate => candidate.provider === provider && modelMatchesFamily(model, candidate.modelFamily),
+		);
+		if (entry !== undefined && route !== undefined)
+			matches.push({
+				kind: "route",
+				key: "core.providers.deny.routes",
+				provider,
+				model,
+				modelFamily: route.modelFamily,
 				entry,
 			});
 	}

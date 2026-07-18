@@ -108,6 +108,79 @@ describe("provider policy CLI", () => {
 		).rejects.toThrow(/extra|is unexpected/);
 	});
 
+	it("dry-runs and applies the HR-176 Claude provider-route deny with visible provenance", async () => {
+		const directory = await temporaryDirectory();
+		const options = { directory, now: fixedClock("2026-07-17T23:00:00.000Z") };
+		const request = {
+			action: "set" as const,
+			key: "core.providers.deny.routes",
+			value: '{"routes":[{"provider":"google-antigravity","modelFamily":"claude"},{"provider":"google-vertex","modelFamily":"claude"}]}',
+			author: "fable-overnight",
+			source: "HR-176",
+			reason: "Arthur 2026-07-17: deny Claude on Antigravity and GCP/Vertex provider routes",
+			json: true,
+		};
+
+		const dryRun = JSON.parse(await runPolicyCommand({ ...request, dryRun: true }, options));
+		expect(dryRun).toMatchObject({
+			committed: false,
+			transaction: {
+				author: { kind: "cli", sessionId: "fable-overnight" },
+				source: { kind: "cli", uri: "HR-176" },
+				reason: expect.stringContaining("Arthur 2026-07-17"),
+				registry: { version: 4 },
+				mutations: [
+					{
+						key: "core.providers.deny.routes",
+						fragmentVersion: 2,
+						value: {
+							routes: [
+								{ provider: "google-antigravity", modelFamily: "claude" },
+								{ provider: "google-vertex", modelFamily: "claude" },
+							],
+						},
+					},
+				],
+			},
+		});
+
+		const applied = JSON.parse(await runPolicyCommand(request, options));
+		expect(applied.committed).toMatchObject({
+			committed: true,
+			transaction: {
+				author: expect.objectContaining({ sessionId: "fable-overnight" }),
+				source: { kind: "cli", uri: "HR-176" },
+				reason: expect.stringContaining("Arthur 2026-07-17"),
+			},
+		});
+		const get = JSON.parse(
+			await runPolicyCommand({ action: "get", key: "core.providers.deny.routes", json: true }, options),
+		);
+		expect(get).toMatchObject({
+			key: "core.providers.deny.routes",
+			value: {
+				routes: [
+					{ provider: "google-antigravity", modelFamily: "claude" },
+					{ provider: "google-vertex", modelFamily: "claude" },
+				],
+			},
+		});
+		const explain = JSON.parse(
+			await runPolicyCommand({ action: "explain", key: "core.providers.deny.routes", json: true }, options),
+		);
+		expect(explain).toMatchObject({
+			key: "core.providers.deny.routes",
+			status: "active",
+			stack: [
+				expect.objectContaining({
+					author: expect.objectContaining({ sessionId: "fable-overnight" }),
+					source: { kind: "cli", uri: "HR-176" },
+					reason: expect.stringContaining("Arthur 2026-07-17"),
+				}),
+			],
+		});
+	});
+
 	it("canonicalizes effective and expiry timestamps and rejects invalid intervals", async () => {
 		const directory = await temporaryDirectory();
 		const options = { directory, now: fixedClock("2026-01-01T10:00:00.000Z") };
@@ -214,9 +287,7 @@ describe("provider policy CLI", () => {
 		const options = {
 			directory,
 			now: fixedClock("2026-01-01T10:00:00.000Z"),
-			liveSessions: () => [
-				{ sessionId: "session-behind", name: "Behind", workstream: "alpha", appliedSequence: 1 },
-			],
+			liveSessions: () => [{ sessionId: "session-behind", name: "Behind", workstream: "alpha", appliedSequence: 1 }],
 		};
 		await runPolicyCommand(
 			{ action: "set", key: "core.routing.default", value: "openai/gpt-5.6", reason: "baseline" },
@@ -252,9 +323,7 @@ describe("provider policy CLI", () => {
 		expect(history.map((row: { sequence: number }) => row.sequence)).toEqual([1, 2]);
 		await assertJournalUnchanged();
 
-		const diff = JSON.parse(
-			await runPolicyCommand({ action: "diff", from: "1", to: "2", json: true }, options),
-		);
+		const diff = JSON.parse(await runPolicyCommand({ action: "diff", from: "1", to: "2", json: true }, options));
 		expect(diff.changes.map((change: { key: string }) => change.key)).toEqual(["core.routing.default"]);
 		await assertJournalUnchanged();
 

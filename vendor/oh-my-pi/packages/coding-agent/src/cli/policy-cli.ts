@@ -11,13 +11,12 @@ import {
 	decodePolicyValueForKey,
 	isCoreBudgetKey,
 	isCoreRoutingKey,
-	isPolicyKey,
 	isExtensionPolicyKey,
+	isPolicyKey,
 	POLICY_REGISTRY_VERSION,
 	type PolicyScope,
 	type PolicyTransactionDraftV1,
 	type PolicyTransactionV1,
-	type PolicyValue,
 } from "../policy/policy-records";
 import { makePolicyService, type PolicyService } from "../policy/policy-service";
 import {
@@ -59,6 +58,7 @@ export interface PolicyCliRequest {
 	readonly reason?: string;
 	readonly workstream?: string;
 	readonly author?: string;
+	readonly source?: string;
 	readonly since?: string;
 	readonly configPath?: string;
 }
@@ -201,12 +201,25 @@ async function collectImport(
 	};
 }
 
-function authorFor(journal: PolicyJournal, kind: "cli" | "import"): PolicyTransactionDraftV1["author"] {
-	return { kind, uid: journal.uid, pid: journal.pid };
+function authorFor(
+	journal: PolicyJournal,
+	kind: "cli" | "import",
+	identity?: string,
+): PolicyTransactionDraftV1["author"] {
+	return {
+		kind,
+		uid: journal.uid,
+		pid: journal.pid,
+		...(identity === undefined ? {} : { sessionId: identity }),
+	};
 }
 
 function sourceFor(digest: string, uri: string): PolicyTransactionDraftV1["source"] {
 	return { kind: "import", uri, importDigest: digest };
+}
+
+function cliSourceFor(journal: PolicyJournal, source: string | undefined): PolicyTransactionDraftV1["source"] {
+	return { kind: "cli", uri: source ?? journal.journalPath };
 }
 
 async function runImport(
@@ -224,7 +237,7 @@ async function runImport(
 		transactionId: randomUUID(),
 		createdAt: at.toISOString(),
 		effectiveFrom: at.toISOString(),
-		author: authorFor(journal, "import"),
+		author: authorFor(journal, "import", request.author),
 		source: sourceFor(collected.report.digest, configPath),
 		reason: request.reason ?? "bootstrap policy import",
 		registry: { version: POLICY_REGISTRY_VERSION, digest: POLICY_REGISTRY_DIGEST },
@@ -342,8 +355,8 @@ export async function runPolicyCommand(request: PolicyCliRequest, options: Polic
 								{
 									transactionId: request.transactionId ?? request.key,
 									reason: request.reason ?? "policy rollback impact preview",
-									author: authorFor(journal, "cli"),
-									source: { kind: "cli", uri: journal.journalPath },
+									author: authorFor(journal, "cli", request.author),
+									source: cliSourceFor(journal, request.source),
 								},
 								sessions,
 							),
@@ -361,8 +374,8 @@ export async function runPolicyCommand(request: PolicyCliRequest, options: Polic
 								value,
 								scope: { kind: "global" },
 								reason: request.reason ?? "policy set impact preview",
-								author: authorFor(journal, "cli"),
-								source: { kind: "cli", uri: journal.journalPath },
+								author: authorFor(journal, "cli", request.author),
+								source: cliSourceFor(journal, request.source),
 								...interval,
 							},
 							sessions,
@@ -385,8 +398,8 @@ export async function runPolicyCommand(request: PolicyCliRequest, options: Polic
 					value,
 					scope: { kind: "global" } satisfies PolicyScope,
 					reason: request.reason ?? "policy set",
-					author: authorFor(journal, "cli"),
-					source: { kind: "cli" as const, uri: journal.journalPath },
+					author: authorFor(journal, "cli", request.author),
+					source: cliSourceFor(journal, request.source),
 					...interval,
 				};
 				if (request.dryRun === true) {
@@ -401,8 +414,8 @@ export async function runPolicyCommand(request: PolicyCliRequest, options: Polic
 						service.rollback({
 							transactionId: request.transactionId,
 							reason: request.reason ?? "policy rollback",
-							author: authorFor(journal, "cli"),
-							source: { kind: "cli", uri: journal.journalPath },
+							author: authorFor(journal, "cli", request.author),
+							source: cliSourceFor(journal, request.source),
 							dryRun: request.dryRun,
 						}),
 					),

@@ -31,6 +31,7 @@
 		"fix": "biome check --write --unsafe .",
 		"fmt": "biome format --write .",
 		"generate-models": "bun scripts/generate-models.ts",
+		"generate": "bun scripts/generate-models.ts",
 		"check:codex-bundle": "bun scripts/check-codex-bundle-drift.ts"
 	},
 	"dependencies": {

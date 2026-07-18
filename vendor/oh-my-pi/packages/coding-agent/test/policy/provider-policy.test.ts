@@ -4,10 +4,10 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { Effect } from "effect";
 import { PolicyJournal } from "../../src/policy/policy-journal";
-import { isModelDenied, isProviderDenied } from "../../src/policy/policy-projection";
-import { makePolicyService } from "../../src/policy/policy-service";
+import { isModelDenied, isProviderDenied, providerDenyMatches } from "../../src/policy/policy-projection";
 import { PolicyProjectionStore } from "../../src/policy/policy-projection-store";
 import { decodePolicyTransactionV1, POLICY_GENESIS_HASH } from "../../src/policy/policy-records";
+import { makePolicyService } from "../../src/policy/policy-service";
 
 const temporaryDirectories: string[] = [];
 const openJournals: PolicyJournal[] = [];
@@ -104,6 +104,66 @@ describe("core.providers policy projection", () => {
 		expect((await journal.replay()).length).toBe(recordCountBeforeProjection);
 	});
 
+	it("enforces typed Claude-family denies only on the selected provider routes with journal provenance", async () => {
+		const journal = await createJournal();
+		const service = makePolicyService(journal);
+		const set = await Effect.runPromise(
+			service.set({
+				key: "core.providers.deny.routes",
+				value: {
+					routes: [
+						{ provider: "google-antigravity", modelFamily: "claude" },
+						{ provider: "google-vertex", modelFamily: "claude" },
+					],
+				},
+				scope: { kind: "global" },
+				reason: "Arthur 2026-07-17: deny Claude on Antigravity and Vertex routes",
+				author: { kind: "cli", uid: journal.uid, pid: journal.pid, sessionId: "fable-overnight" },
+				source: { kind: "cli", uri: "HR-176" },
+				effectiveFrom: "2026-07-17T00:00:00.000Z",
+			}),
+		);
+
+		const snapshot = await Effect.runPromise(service.snapshot({ at: "2026-07-17T01:00:00.000Z" }));
+		expect(snapshot.providerPosture?.deniedRoutes).toEqual([
+			{ provider: "google-antigravity", modelFamily: "claude" },
+			{ provider: "google-vertex", modelFamily: "claude" },
+		]);
+		expect(isModelDenied(snapshot, "google-antigravity", "claude-sonnet-4-5")).toBe(true);
+		expect(isModelDenied(snapshot, "google-vertex", "claude-opus-4@20250514")).toBe(true);
+		expect(isModelDenied(snapshot, "google-vertex", "gemini-2.5-pro")).toBe(false);
+		expect(isModelDenied(snapshot, "anthropic", "claude-opus-4")).toBe(false);
+		expect(providerDenyMatches(snapshot, "google-antigravity", "claude-sonnet-4-5")).toEqual([
+			expect.objectContaining({
+				kind: "route",
+				key: "core.providers.deny.routes",
+				modelFamily: "claude",
+				entry: expect.objectContaining({ transactionId: set.transaction.transactionId, effective: true }),
+			}),
+		]);
+		expect(await Effect.runPromise(service.get("core.providers.deny.routes", { at: snapshot.at }))).toMatchObject({
+			value: {
+				routes: [
+					{ provider: "google-antigravity", modelFamily: "claude" },
+					{ provider: "google-vertex", modelFamily: "claude" },
+				],
+			},
+		});
+		expect(await Effect.runPromise(service.explain("core.providers.deny.routes", { at: snapshot.at }))).toMatchObject(
+			{
+				status: "active",
+				winner: { key: "core.providers.deny.routes" },
+				stack: [
+					expect.objectContaining({
+						author: expect.objectContaining({ sessionId: "fable-overnight" }),
+						source: { kind: "cli", uri: "HR-176" },
+						reason: expect.stringContaining("Arthur 2026-07-17"),
+					}),
+				],
+			},
+		);
+	});
+
 	it("matches exact provider/model selectors and restores the prior typed deny on rollback", async () => {
 		const journal = await createJournal();
 		const service = makePolicyService(journal);
@@ -154,7 +214,7 @@ describe("core.providers policy projection", () => {
 				op: "set",
 				key: "core.providers.deny.providers",
 				scope: { kind: "global" },
-				fragmentVersion: 1,
+				fragmentVersion: 2,
 				value: { providerIds: ["openai"] },
 			},
 		]);
@@ -213,6 +273,15 @@ describe("core.providers policy projection", () => {
 			}),
 		);
 		expect(excessExit._tag).toBe("Failure");
+		const untypedFamilyExit = await Effect.runPromiseExit(
+			service.set({
+				key: "core.providers.deny.routes",
+				value: { routes: [{ provider: "google-antigravity", modelFamily: "claude-series" }] } as never,
+				scope: { kind: "global" },
+				reason: "invalid free-text family",
+			}),
+		);
+		expect(untypedFamilyExit._tag).toBe("Failure");
 		expect(await journal.replay()).toEqual([]);
 	});
 	it("rebuilds the SQLite projection identically and exposes immutable inspection surfaces", async () => {
@@ -256,16 +325,14 @@ describe("core.providers policy projection", () => {
 
 		await Effect.runPromise(service.get("core.routing.default", { workstream: "alpha", at }));
 		await assertJournalUnchanged();
-		const explanation = await Effect.runPromise(
-			service.explain("core.routing.default", { workstream: "alpha", at }),
-		);
+		const explanation = await Effect.runPromise(service.explain("core.routing.default", { workstream: "alpha", at }));
 		expect(explanation.stack.map(entry => [entry.layer, entry.reason])).toEqual([
 			["temporary-posture", "temporary incident route"],
 			["workstream-durable", "alpha override"],
 			["global-durable", "global baseline"],
 		]);
 		expect(explanation.stack).toEqual(
-			explanation.stack.map(entry =>
+			explanation.stack.map(() =>
 				expect.objectContaining({
 					author: expect.objectContaining({ kind: "cli" }),
 					source: expect.objectContaining({ kind: "cli" }),
@@ -286,10 +353,9 @@ describe("core.providers policy projection", () => {
 		await assertJournalUnchanged();
 
 		const drift = await Effect.runPromise(
-			service.drift(
-				[{ sessionId: "session-behind", name: "Behind", workstream: "alpha", appliedSequence: 1 }],
-				{ at },
-			),
+			service.drift([{ sessionId: "session-behind", name: "Behind", workstream: "alpha", appliedSequence: 1 }], {
+				at,
+			}),
 		);
 		expect(drift).toEqual([
 			expect.objectContaining({

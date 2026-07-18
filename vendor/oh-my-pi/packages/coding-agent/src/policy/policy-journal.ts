@@ -29,7 +29,7 @@ const POLICY_LOCK_FILENAME = "policy-v1.lock";
 
 export const POLICY_REGISTRY_DIGEST = createHash("sha256")
 	.update(
-		"registry:v3;core.routing:v1-3:default,smol,slow,vision,plan,designer,commit,title,implementer,qa,operator,synthesizer,task,advisor;core.providers:v1:deny.providers{providerIds[]},deny.models{models[{provider,model}]};core.fallback:v1:chains{role:[selector+]};core.budgets.task:v1:maxConcurrency,maxLiveChildren,maxRuntimeMs,softRequestBudget{nonnegative-int}",
+		"registry:v4;core.routing:v1-3:default,smol,slow,vision,plan,designer,commit,title,implementer,qa,operator,synthesizer,task,advisor;core.providers:v2:deny.providers{providerIds[]},deny.models{models[{provider,model}]},deny.routes{routes[{provider,modelFamily:claude}]};core.fallback:v1:chains{role:[selector+]};core.budgets.task:v1:maxConcurrency,maxLiveChildren,maxRuntimeMs,softRequestBudget{nonnegative-int}",
 	)
 	.digest("hex");
 

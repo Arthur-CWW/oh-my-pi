@@ -2,9 +2,9 @@ import { Schema } from "effect";
 import type { PolicyJsonValue } from "./policy-fragment-registry";
 
 export const POLICY_SCHEMA_VERSION = 1 as const;
-export const POLICY_REGISTRY_VERSION = 3 as const;
+export const POLICY_REGISTRY_VERSION = 4 as const;
 export const CORE_ROUTING_FRAGMENT_VERSION = 1 as const;
-export const CORE_PROVIDER_FRAGMENT_VERSION = 1 as const;
+export const CORE_PROVIDER_FRAGMENT_VERSION = 2 as const;
 export const CORE_FALLBACK_FRAGMENT_VERSION = 1 as const;
 export const CORE_BUDGET_FRAGMENT_VERSION = 1 as const;
 export const POLICY_GENESIS_HASH = "0".repeat(64);
@@ -62,7 +62,11 @@ export type CoreRoutingKey = typeof CoreRoutingKeySchema.Type;
 export const CoreRoutingValueSchema = NonEmptyStringSchema;
 export type CoreRoutingValue = typeof CoreRoutingValueSchema.Type;
 
-export const CORE_PROVIDER_KEYS = ["core.providers.deny.providers", "core.providers.deny.models"] as const;
+export const CORE_PROVIDER_KEYS = [
+	"core.providers.deny.providers",
+	"core.providers.deny.models",
+	"core.providers.deny.routes",
+] as const;
 export const CoreProviderKeySchema = Schema.Literals(CORE_PROVIDER_KEYS);
 export type CoreProviderKey = typeof CoreProviderKeySchema.Type;
 export const ProviderIdSchema = NonEmptyStringSchema;
@@ -72,6 +76,13 @@ export const ProviderModelSelectorSchema = Schema.Struct({
 	model: NonEmptyStringSchema,
 });
 export type ProviderModelSelector = typeof ProviderModelSelectorSchema.Type;
+export const ProviderModelFamilySchema = Schema.Literals(["claude"]);
+export type ProviderModelFamily = typeof ProviderModelFamilySchema.Type;
+export const ProviderRouteSelectorSchema = Schema.Struct({
+	provider: ProviderIdSchema,
+	modelFamily: ProviderModelFamilySchema,
+});
+export type ProviderRouteSelector = typeof ProviderRouteSelectorSchema.Type;
 
 function hasUniqueProviderIds(providerIds: readonly ProviderId[]): boolean {
 	for (let index = 0; index < providerIds.length; index += 1) {
@@ -94,6 +105,19 @@ function hasUniqueModelSelectors(models: readonly ProviderModelSelector[]): bool
 	return true;
 }
 
+function hasUniqueRouteSelectors(routes: readonly ProviderRouteSelector[]): boolean {
+	for (let index = 0; index < routes.length; index += 1) {
+		const route = routes[index];
+		if (route === undefined) continue;
+		for (let compared = index + 1; compared < routes.length; compared += 1) {
+			const other = routes[compared];
+			if (other !== undefined && route.provider === other.provider && route.modelFamily === other.modelFamily)
+				return false;
+		}
+	}
+	return true;
+}
+
 const ProviderIdsSchema = Schema.Array(ProviderIdSchema).pipe(
 	Schema.check(Schema.isMinLength(1)),
 	Schema.refine((providerIds): providerIds is readonly ProviderId[] => hasUniqueProviderIds(providerIds)),
@@ -102,11 +126,17 @@ const ProviderModelSelectorsSchema = Schema.Array(ProviderModelSelectorSchema).p
 	Schema.check(Schema.isMinLength(1)),
 	Schema.refine((models): models is readonly ProviderModelSelector[] => hasUniqueModelSelectors(models)),
 );
+const ProviderRouteSelectorsSchema = Schema.Array(ProviderRouteSelectorSchema).pipe(
+	Schema.check(Schema.isMinLength(1)),
+	Schema.refine((routes): routes is readonly ProviderRouteSelector[] => hasUniqueRouteSelectors(routes)),
+);
 export const ProviderDenyValueSchema = Schema.Struct({ providerIds: ProviderIdsSchema });
 export type ProviderDenyValue = typeof ProviderDenyValueSchema.Type;
 export const ModelDenyValueSchema = Schema.Struct({ models: ProviderModelSelectorsSchema });
 export type ModelDenyValue = typeof ModelDenyValueSchema.Type;
-export type CoreProviderValue = ProviderDenyValue | ModelDenyValue;
+export const ProviderRouteDenyValueSchema = Schema.Struct({ routes: ProviderRouteSelectorsSchema });
+export type ProviderRouteDenyValue = typeof ProviderRouteDenyValueSchema.Type;
+export type CoreProviderValue = ProviderDenyValue | ModelDenyValue | ProviderRouteDenyValue;
 
 export const CORE_FALLBACK_KEYS = ["core.fallback.chains"] as const;
 export const CoreFallbackKeySchema = Schema.Literals(CORE_FALLBACK_KEYS);
@@ -140,11 +170,13 @@ export type PolicyValueForKey<Key extends PolicyKey> = Key extends "core.provide
 	? ProviderDenyValue
 	: Key extends "core.providers.deny.models"
 		? ModelDenyValue
-		: Key extends CoreFallbackKey
-			? FallbackChainsValue
-			: Key extends CoreBudgetKey
-				? CoreBudgetValue
-				: CoreRoutingValue;
+		: Key extends "core.providers.deny.routes"
+			? ProviderRouteDenyValue
+			: Key extends CoreFallbackKey
+				? FallbackChainsValue
+				: Key extends CoreBudgetKey
+					? CoreBudgetValue
+					: CoreRoutingValue;
 
 export type ExtensionPolicyKey = `ext.${string}`;
 export type AnyPolicyKey = PolicyKey | ExtensionPolicyKey;
@@ -188,34 +220,41 @@ const SetCoreRoutingPolicyMutationV1Schema = Schema.Struct({
 	op: Schema.Literal("set"),
 	key: CoreRoutingKeySchema,
 	...MutationScopeFields,
-	fragmentVersion: Schema.Literals([1, 2, POLICY_REGISTRY_VERSION]),
+	fragmentVersion: Schema.Literals([1, 2, 3]),
 	value: CoreRoutingValueSchema,
 });
 const SetProviderDenyPolicyMutationV1Schema = Schema.Struct({
 	op: Schema.Literal("set"),
 	key: Schema.Literal("core.providers.deny.providers"),
 	...MutationScopeFields,
-	fragmentVersion: Schema.Literal(CORE_PROVIDER_FRAGMENT_VERSION),
+	fragmentVersion: Schema.Literals([1, CORE_PROVIDER_FRAGMENT_VERSION]),
 	value: ProviderDenyValueSchema,
 });
 const SetModelDenyPolicyMutationV1Schema = Schema.Struct({
 	op: Schema.Literal("set"),
 	key: Schema.Literal("core.providers.deny.models"),
 	...MutationScopeFields,
-	fragmentVersion: Schema.Literal(CORE_PROVIDER_FRAGMENT_VERSION),
+	fragmentVersion: Schema.Literals([1, CORE_PROVIDER_FRAGMENT_VERSION]),
 	value: ModelDenyValueSchema,
+});
+const SetProviderRouteDenyPolicyMutationV1Schema = Schema.Struct({
+	op: Schema.Literal("set"),
+	key: Schema.Literal("core.providers.deny.routes"),
+	...MutationScopeFields,
+	fragmentVersion: Schema.Literal(CORE_PROVIDER_FRAGMENT_VERSION),
+	value: ProviderRouteDenyValueSchema,
 });
 const ClearCoreRoutingPolicyMutationV1Schema = Schema.Struct({
 	op: Schema.Literal("clear"),
 	key: CoreRoutingKeySchema,
 	...MutationScopeFields,
-	fragmentVersion: Schema.Literals([1, 2, POLICY_REGISTRY_VERSION]),
+	fragmentVersion: Schema.Literals([1, 2, 3]),
 });
 const ClearProviderPolicyMutationV1Schema = Schema.Struct({
 	op: Schema.Literal("clear"),
 	key: CoreProviderKeySchema,
 	...MutationScopeFields,
-	fragmentVersion: Schema.Literal(CORE_PROVIDER_FRAGMENT_VERSION),
+	fragmentVersion: Schema.Literals([1, CORE_PROVIDER_FRAGMENT_VERSION]),
 });
 const SetFallbackPolicyMutationV1Schema = Schema.Struct({
 	op: Schema.Literal("set"),
@@ -260,6 +299,7 @@ export const SetPolicyMutationV1Schema = Schema.Union([
 	SetCoreRoutingPolicyMutationV1Schema,
 	SetProviderDenyPolicyMutationV1Schema,
 	SetModelDenyPolicyMutationV1Schema,
+	SetProviderRouteDenyPolicyMutationV1Schema,
 	SetFallbackPolicyMutationV1Schema,
 	SetBudgetPolicyMutationV1Schema,
 	SetExtensionPolicyMutationV1Schema,
@@ -292,7 +332,7 @@ export const PolicySourceV1Schema = Schema.Struct({
 export type PolicySourceV1 = typeof PolicySourceV1Schema.Type;
 
 export const PolicyRegistryV1Schema = Schema.Struct({
-	version: Schema.Literals([1, 2, POLICY_REGISTRY_VERSION]),
+	version: Schema.Literals([1, 2, 3, POLICY_REGISTRY_VERSION]),
 	digest: SHA256DigestSchema,
 });
 export type PolicyRegistryV1 = typeof PolicyRegistryV1Schema.Type;
@@ -468,6 +508,8 @@ export function decodePolicyValueForKey<Key extends PolicyKey>(key: Key, input: 
 			return Schema.decodeUnknownSync(ProviderDenyValueSchema)(input, options) as PolicyValueForKey<Key>;
 		case "core.providers.deny.models":
 			return Schema.decodeUnknownSync(ModelDenyValueSchema)(input, options) as PolicyValueForKey<Key>;
+		case "core.providers.deny.routes":
+			return Schema.decodeUnknownSync(ProviderRouteDenyValueSchema)(input, options) as PolicyValueForKey<Key>;
 		case "core.fallback.chains":
 			return Schema.decodeUnknownSync(FallbackChainsValueSchema)(input, options) as PolicyValueForKey<Key>;
 		case "core.budgets.task.maxConcurrency":
