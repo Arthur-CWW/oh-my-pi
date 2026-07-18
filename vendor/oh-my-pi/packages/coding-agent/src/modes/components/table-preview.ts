@@ -243,7 +243,10 @@ export class TablePreviewComponent<Row, Key> implements Component {
 		this.#syncRows();
 
 		if (matchesUiDismiss(data)) {
-			if (this.#query) {
+			if (this.#focus === "preview") {
+				this.#focus = "table";
+				this.#options.requestRender();
+			} else if (this.#query) {
 				this.clearSearch();
 			} else {
 				this.#options.onClose();

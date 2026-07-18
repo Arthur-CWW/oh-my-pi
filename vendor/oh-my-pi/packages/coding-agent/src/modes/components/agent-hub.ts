@@ -863,6 +863,10 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 		}
 		return this.#view === "table" ? this.#renderTable(width) : this.#renderChat(width);
 	} handleInput(keyData: string): void {
+		if (matchesKey(keyData, "ctrl+c") || keyData === "q") {
+			this.#onDone();
+			return;
+		}
 		for (const key of this.#interruptKeys) {
 			if (matchesKey(keyData, key)) {
 				this.#onDone();
@@ -882,7 +886,8 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 		} else {
 			this.#handleChatInput(keyData);
 		}
-	} /** Open the chat view for an agent id (public for table Enter and tests). */
+	}
+	/** Open the chat view for an agent id (public for table Enter and tests). */
 	openChat(id: string): void {
 		if (!this.#registry.get(id)) return;
 		this.#view = "chat";
@@ -2322,8 +2327,41 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 			if (!this.#tableSearchEditing() && !this.#tableQuery()) this.#activeSearchFields.clear();
 			return;
 		}
+		const dismiss = matchesUiDismiss(keyData);
 		const grammarLane = this.#dualLaneActive && this.#inspectorFocused ? "inspector" : "table";
+		if (this.#viewerSequence.isPending && this.#handleGrammarSequence(keyData, grammarLane)) return;
+		if (dismiss) {
+			if (this.#tablePreview.focus === "preview") {
+				this.#tablePreview.handleInput(keyData);
+				return;
+			}
+			if (this.#dualLaneActive && this.#inspectorFocused) {
+				this.#inspectorFocused = false;
+				this.#requestRender();
+				return;
+			}
+			const fold = this.#foldSequence.handle(keyData, this.#selectedInternalRef()?.id, true);
+			if (fold.kind !== "unhandled") {
+				this.#requestRender();
+				return;
+			}
+			if (this.#tableQuery()) {
+				this.#tablePreview.clearSearch();
+				this.#activeSearchFields.clear();
+				return;
+			}
+			this.#onDone();
+			return;
+		}
+		if (this.#tablePreview.focus === "preview") {
+			this.#tablePreview.handleInput(keyData);
+			return;
+		}
 		if (this.#handleGrammarSequence(keyData, grammarLane)) return;
+		if (matchesKey(keyData, "ctrl+w")) {
+			this.#tablePreview.handleInput(keyData);
+			return;
+		}
 		if (keyData === "c" || keyData === "C") {
 			this.#copySelectedTableRow(keyData === "C");
 			return;
@@ -2392,16 +2430,6 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 			this.#yankSelectedIdentity();
 			return;
 		}
-		if (matchesUiDismiss(keyData)) {
-			// Dismiss clears an active filter first, then closes the hub
-			if (this.#tableQuery()) {
-				this.#tablePreview.clearSearch();
-				this.#activeSearchFields.clear();
-				return;
-			}
-			this.#onDone();
-			return;
-		}
 		if (keyData === "?") {
 			this.#showLegend = !this.#showLegend;
 			this.#requestRender();
@@ -2430,10 +2458,6 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 					if (external) this.#openExternalChat(external.peer);
 				}
 			}
-			return;
-		}
-		if (keyData === "q") {
-			this.#onDone();
 			return;
 		}
 		if (keyData === "r") {
