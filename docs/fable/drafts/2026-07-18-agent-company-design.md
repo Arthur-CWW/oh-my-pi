@@ -145,6 +145,22 @@ Harness stream already lives this shape ad hoc (STATUS.md + contracts + proofs);
 
 **Decision points as typed objects** — extracted from L4 across ALL state docs into ONE surface (board lane "Needs Arthur" + brief section 1 + optional HR-184 push). Each carries enough to decide IN PLACE, no thread-visiting: `{id, source doc §, one-paragraph context, options[] with tradeoff clause each, recommendation + why, what it blocks, age}`. Resolving one writes the ruling back into the source doc's L2 (decisions-made) with provenance — the decision queue is an INBOX, the state doc is the RECORD. This is the "interface on top to unblock": Arthur's time is spent ruling, never reconstructing.
 
+### 8.6 Swappable delivery layer — one logical bus, many transports (Arthur, 2026-07-18)
+
+"Agents can use the same IRC primitives to comm with me over slack/discord (delivery layer right, make it swappable?), when I'm not at my computer. Same for our personal linear-like localfirst-ish thing."
+
+Design: the IRC bus stays the ONE logical layer (peers, messages, asks, receipts — agents learn no new API). **Arthur is a peer whose delivery adapter is resolved by presence**: at the terminal → cmux/TUI; away → Slack or Discord adapter (bot DM carrying the rendered projection + a reply channel that feeds back into the bus as a normal message). Adapters are pluggable per-recipient and per-message-class (decision points may escalate to phone; digest doorbells never do). The same adapter layer serves the work-object store: a card's decision point or a proof-bundle-ready event is deliverable through any transport, because it is a typed event with a rendering (principle 2). This SUBSUMES HR-184's "bot bridge" — not a separate bridge, a delivery adapter on primitives that already exist. Secrets via the existing credential store; adapters are HR-196-contract capabilities (registered, health-checked).
+
+### 8.7 Capability surfacing — supply meets the demand ladder (Arthur, 2026-07-18)
+
+"A way to surface up useful new tools/plugin sets so we can reuse them in other threads — e.g. when we're shopping around with agents making a new powerful primitive to scrape and control my android phone."
+
+The friction ladder (§5) captures capability DEMAND ("this agent doesn't have the tool it needs"). This is the SUPPLY side: when a thread mints a powerful primitive (the Android scrape/control work in the device thread is the live example), it must not stay thread-local. Loop: the lead (or observer, on noticing a new tool surface in a thread's artifacts) NOMINATES it → packaging through the HR-196 contract (manifest: tools + doctrine + commands + registration) → it appears in the capability registry, visible in overview/board ("new capabilities" feed) and matchable against open capability-gap frictions — demand rows and supply rows meet in one place. Nomination is cheap (a typed row pointing at the thread + artifact); packaging is a normal card a hand can execute.
+
+### 8.8 The ask tool is the decision-point primitive (Arthur: "it could be a more powerful primitive, not much change from current design")
+
+Confirmed: the current ask shape (question + options with descriptions + recommendation + resolve) is ALREADY the §8.5 decision-point object. The generalization is plumbing, not redesign: (a) DURABLE — every ask persists as a typed row (survives session death, appears in the decision surface/L4, not just a blocking prompt); (b) NON-BLOCKING variants — the asker can continue on other work while the ask is open (HR-184's parent-visibility included); (c) ROUTABLE — delivery through §8.6 adapters with per-class escalation timers; (d) RESOLUTION WRITES BACK — the ruling lands in the source state doc's L2 with provenance, and the asker gets it as a normal bus message. One primitive: in-session prompts, fleet decision queue, and phone approvals are the same object at different delivery endpoints.
+
 ## 9. Open questions for Arthur (answer in next session's first message)
 
 1. Name for the top agent (chief of staff / assistant / leader-orchestrator?) — it appears in UI and IRC ids, so it's worth choosing once.
@@ -155,3 +171,5 @@ Harness stream already lives this shape ad hoc (STATUS.md + contracts + proofs);
 6. Symphony loop adoption: make the board's Ready→spawn→proof-bundle→accept→land loop the DEFAULT dispatch semantics for register/board cards (§8.2), or keep manual dispatch and add Symphony-mode per-stream opt-in? (Recommendation: opt-in per stream, harness stream first — it already runs the loop hand-cranked.)
 7. Channels: adopt workstream channels on the IRC bus (§8.1, typed-events-with-renderings) in the summarizer slice, or defer to the chief-of-staff slice? Affects whether HR-199 digests post into a channel or only into label_json.
 8. Dailies cadence: fuse the morning brief with the artifact feed as a proper dailies review (yesterday's deliverables inline, your notes become cards), or keep brief and feed separate surfaces for now?
+9. Delivery adapter first target: Slack or Discord? (One first, per clean-cutover habit — the adapter interface makes the second cheap.) And which message classes may escalate to the phone by default: decision points only, or also DEAD/STALLED incidents?
+10. Capability nomination authority: leads only, or may the observer auto-nominate on detecting a new tool surface in a thread's artifacts? (Recommendation: leads nominate in v1; observer flags candidates without nominating.)
