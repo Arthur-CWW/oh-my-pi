@@ -1,6 +1,8 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, it } from "bun:test";
 import { TempDir } from "@oh-my-pi/pi-utils";
+import type { CliConfig, CommandCtor } from "@oh-my-pi/pi-utils/cli";
+import Fleet from "../src/commands/fleet";
 import {
 	collectFleetErrors,
 	collectFleetStatus,
@@ -18,6 +20,59 @@ import { CURRENT_SESSION_CONTROL_PROTOCOL } from "../src/session/session-control
 import { FleetIncidentStore } from "../src/task/fleet-incident";
 
 const NOW = Date.parse("2026-07-15T12:00:00.000Z");
+
+const FLEET_CONFIG: CliConfig = {
+	bin: "omp",
+	version: "test",
+	commands: new Map<string, CommandCtor>(),
+};
+
+async function runFleet(argv: readonly string[]): Promise<void> {
+	await new Fleet([...argv], FLEET_CONFIG).run();
+}
+
+async function runFleetWithOutput(argv: readonly string[]): Promise<string> {
+	const originalWrite = process.stdout.write.bind(process.stdout);
+	let output = "";
+	process.stdout.write = ((chunk: string | Uint8Array): boolean => {
+		output += typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk);
+		return true;
+	}) as typeof process.stdout.write;
+	try {
+		await runFleet(argv);
+		return output;
+	} finally {
+		process.stdout.write = originalWrite;
+	}
+}
+
+describe("fleet overview argument validation", () => {
+	it("rejects unknown flags with the offending token and valid flags", async () => {
+		await expect(runFleet(["overview", "--unknown-flag"])).rejects.toThrow(
+			"overview does not accept --unknown-flag; valid flags: --all, --json, --workstream",
+		);
+	});
+
+	it("rejects misspelled and irrelevant flags", async () => {
+		await expect(runFleet(["overview", "--jso"])).rejects.toThrow(
+			"overview does not accept --jso; valid flags: --all, --json, --workstream",
+		);
+		await expect(runFleet(["overview", "--digest", "abc"])).rejects.toThrow(
+			"overview does not accept --digest; valid flags: --all, --json, --workstream",
+		);
+	});
+
+	it("rejects extra positional arguments", async () => {
+		await expect(runFleet(["overview", "session-a", "unexpected"])).rejects.toThrow(
+			"overview does not accept unexpected; valid flags: --all, --json, --workstream",
+		);
+	});
+
+	it("accepts the real overview flags", async () => {
+		const output = await runFleetWithOutput(["overview", "--json", "--all", "--workstream", "fleet-alpha"]);
+		expect(() => JSON.parse(output)).not.toThrow();
+	});
+});
 
 function journalText(args: {
 	id: string;

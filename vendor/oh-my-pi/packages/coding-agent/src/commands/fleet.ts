@@ -26,6 +26,22 @@ function fail(message: string): never {
 	throw new Error(`fleet: ${message}`);
 }
 
+const OVERVIEW_FLAG_NAMES = ["--all", "--json", "--workstream"] as const;
+const OVERVIEW_VALID_FLAGS = OVERVIEW_FLAG_NAMES.join(", ");
+
+function findOverviewInvalidFlag(argv: readonly string[]): string | undefined {
+	for (const token of argv) {
+		if (token === "--" || !token.startsWith("-")) continue;
+		if (OVERVIEW_FLAG_NAMES.some(flag => token === flag || token.startsWith(`${flag}=`))) continue;
+		return token;
+	}
+	return undefined;
+}
+
+function overviewReject(token: string): never {
+	fail(`overview does not accept ${token}; valid flags: ${OVERVIEW_VALID_FLAGS}`);
+}
+
 export default class Fleet extends Command {
 	static description = "Inspect and operate the local OMP fleet";
 
@@ -80,7 +96,18 @@ export default class Fleet extends Command {
 	];
 
 	async run(): Promise<void> {
-		const { args, flags } = await this.parse(Fleet);
+		const parseFleet = async () => {
+			try {
+				return await this.parse(Fleet);
+			} catch (error) {
+				if (this.argv[0] === "overview") {
+					const invalidFlag = findOverviewInvalidFlag(this.argv.slice(1));
+					if (invalidFlag) overviewReject(invalidFlag);
+				}
+				throw error;
+			}
+		};
+		const { args, flags } = await parseFleet();
 		const action = args.action;
 		const selector = args.selector;
 		const value = args.value;
@@ -117,6 +144,9 @@ export default class Fleet extends Command {
 		}
 
 		if (action === "overview") {
+			const invalidFlag = findOverviewInvalidFlag(this.argv.slice(1));
+			if (invalidFlag) overviewReject(invalidFlag);
+			if (value) overviewReject(value);
 			let rows = collectFleetOverview({ workstream: flags.workstream, all: flags.all });
 			if (selector)
 				rows = rows.filter(
