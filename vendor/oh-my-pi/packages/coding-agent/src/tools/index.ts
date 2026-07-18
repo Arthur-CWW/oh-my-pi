@@ -58,6 +58,7 @@ import { wrapToolWithMetaNotice } from "./output-meta";
 import { ReadTool } from "./read";
 import { RenderMermaidTool } from "./render-mermaid";
 import { createReportToolIssueTool, isAutoQaEnabled } from "./report-tool-issue";
+import { createReportFrictionTool } from "../session/friction-ledger";
 import { ResolveTool } from "./resolve";
 import { reportFindingTool } from "./review";
 import { SearchTool } from "./search";
@@ -97,6 +98,7 @@ export * from "./memory-reflect";
 export * from "./memory-retain";
 export * from "./read";
 export * from "./render-mermaid";
+export * from "../session/friction-ledger";
 export * from "./report-tool-issue";
 export * from "./resolve";
 export * from "./review";
@@ -485,6 +487,7 @@ export const HIDDEN_TOOLS: Record<string, ToolFactory> = {
 	yield: builtinTool("tools/yield.ts", s => new YieldTool(s)),
 	report_finding: builtinTool("tools/review.ts", () => reportFindingTool),
 	report_tool_issue: builtinTool("tools/report-tool-issue.ts", s => createReportToolIssueTool(s)),
+	report_friction: builtinTool("session/friction-ledger.ts", s => createReportFrictionTool(s)),
 	resolve: builtinTool("tools/resolve.ts", s => new ResolveTool(s)),
 	goal: builtinTool("goals/tools/goal-tool.ts", s => new GoalTool(s)),
 };
@@ -666,6 +669,13 @@ export async function createTools(session: ToolSession, toolNames?: string[]): P
 		const qaTool = createReportToolIssueTool(session, activeBuiltinNames);
 		if (qaTool) {
 			tools.push(applyToolFactoryOrigin(wrapToolWithMetaNotice(qaTool), qaFactory));
+		}
+	}
+	if (!tools.some(t => t.name === "report_friction")) {
+		const frictionFactory = HIDDEN_TOOLS.report_friction;
+		const frictionTool = await logger.time("createTools:report_friction", frictionFactory, session);
+		if (frictionTool) {
+			tools.push(applyToolFactoryOrigin(wrapToolWithMetaNotice(frictionTool), frictionFactory));
 		}
 	}
 
