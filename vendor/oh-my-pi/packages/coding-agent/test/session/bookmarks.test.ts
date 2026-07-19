@@ -1,7 +1,12 @@
+import * as Effect from "effect/Effect";
 import { afterEach, beforeAll, describe, expect, it } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { MVU_KEYMAP_TABLES } from "@oh-my-pi/pi-coding-agent/config/mvu-keybindings";
+import { KeybindingsManager } from "@oh-my-pi/pi-coding-agent/config/keybindings";
+import { compileKeymapRegistry } from "@oh-my-pi/pi-coding-agent/modes/mvu/keymap-registry";
+import { makeTerminalInputAdapter } from "@oh-my-pi/pi-coding-agent/modes/mvu/input-adapter";
 import { BookmarksSelectorComponent } from "../../src/modes/components/bookmarks-selector";
 import { BookmarkTargetSchema, BookmarksStore } from "../../src/session/bookmarks";
 import { initTheme } from "../../src/modes/theme/theme";
@@ -18,6 +23,21 @@ afterEach(async () => {
 
 function target(agentId = "worker-a") {
 	return { kind: "agent" as const, sessionId: "session-a", agentId, title: "Worker A" };
+}
+
+function dispatchConfirm(selector: BookmarksSelectorComponent): void {
+	const spec = selector.mountSpec;
+	const adapter = makeTerminalInputAdapter();
+	const registry = Effect.runSync(compileKeymapRegistry(MVU_KEYMAP_TABLES, KeybindingsManager.inMemory()));
+	const model = spec.initialModel;
+	const event = adapter.decode("\n");
+	if (event === undefined || (event._tag !== "Press" && event._tag !== "Release")) throw new Error("Expected enter key event");
+	const action = registry.resolve(spec.route.context(model), event.key);
+	if (action === undefined) throw new Error("Unmapped bookmark confirmation key");
+	const envelope = spec.route.actionToMsg(action, event);
+	if (envelope === undefined) throw new Error("Unmapped bookmark confirmation action");
+	const transition = spec.update(model, envelope);
+	for (const command of transition.commands) Effect.runSync(spec.interpret(command));
 }
 
 describe("bookmarks store", () => {
@@ -61,7 +81,7 @@ describe("bookmark selector", () => {
 		expect(rendered).toContain("triage");
 		expect(rendered).toContain("1h ago");
 		expect(rendered).toContain("origin: session-a");
-		selector.getSelectList().onSelect?.({ value: "bookmark-a", label: "Worker A" });
+		dispatchConfirm(selector);
 		expect(jumped).toBe("worker-a");
 	});
 });

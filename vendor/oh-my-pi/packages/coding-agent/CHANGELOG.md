@@ -3,6 +3,12 @@
 ## [Unreleased]
 
 ### Added
+- Effect v4 MVU now owns terminal interaction through Schema-decoded tagged messages, pure `update(Model, Msg)` reducers, bounded asynchronous message queues, data-defined keymaps, and keyed adapters into the existing pi-tui renderer.
+- Input handoff is atomic through scoped leases, and asynchronous source/command settlements carry route stamps so stale generations cannot mutate the active model or receipt.
+- The eight TUI convergence slices now share selector, table/preview, status/receipt, Hub attention, keyed tree, modal, setup/picker, and route-host contracts instead of per-surface input ownership.
+- Composer and overlay handoff preserve nonblank drafts: Esc and Ctrl-R history dismissal restore the draft rather than clearing it while ownership moves between MVU routes.
+- cmux ask integration queries the read-only active surface and emits one targeted `cmux notify` with the question only when the session surface is unfocused; the commission transaction now captures and restores the pane's selected tab using the verified `focus-panel` surface-selection verb.
+- Subprocess task workers now register stable agent IDs on the external IRC bus at spawn, route worker/coordinator sends through that bus even when local sessions are absent, and deregister after terminal yield.
 - Generated handoffs now begin with a code-stamped predecessor provenance block, and successor journals store schema-decoded lineage records with walkable handoff-chain pointers.
 - Shared Scope-managed `TablePreviewComponent` (table + live preview + key routing + guaranteed finalizers on unmount); `/agents` dashboard is the first consumer — selection, filtering, scrolling, and preview assembly are no longer reimplemented per surface.
 - Model labels are tier-aware: dense comparative rows (HUD, Hub roster) use the fused compact form (`OX5.6solxh`) with consistent segment colors and the effort rendered on every row including the cursor row; the main/thread status line shows just the model name plus compact effort (`5fable m`) with no provider word; wide detail panes keep the spelled-out form. Variant names always spell out (5.6sol/5.6terra/opus/haiku — one-letter lane codes removed), and decorative `•` spacers are gone.
@@ -64,6 +70,7 @@
 - Added the registry-backed `:` popup/`:commands`, strict read-only Hub preview, normal-mode navigation, and one-source Neovim viewer help.
 
 ### Changed
+- Implicit small-model selection now prefers GPT-5.6 Luna, then direct Claude Sonnet 5; Haiku is excluded from that fallback and Terra is absent from slow priority. Project/global explore overrides and the Haiku subagent block remain configuration, not a universal package ban.
 
 - IRC communication and tool-result bodies now honor `:wrap`/`:rich` while receipts, errors, metadata, and roster rows remain bounded single-line projections.
 - Task spawning now refuses revivable `NameResume`/exact-id duplicates, warns on running or archived matches with in-band IRC/history guidance, preserves live registry ids during allocation, and reports resume-in-place or transcript-salvage instructions after task failures and restarts.
@@ -71,7 +78,10 @@
 - Eval `agent()`/`agentType` defaults, gallery fixtures, and the task tool prompt now use named responsibility templates; catch-all `task` is documented as a deprecated migration alias.
 - `Enter` on an empty prompt during streaming now aborts and delivers the next queued durable follow-up exactly once (removing it from the queue); with an empty queue it remains abort-only.
 ### Fixed
+- Setup scenes now receive Ctrl-C and SGR mouse input through their active MVU lease: Ctrl-C exits through the outro (or cancels an in-progress OAuth sign-in), while clicks, hover, and wheel reports are decoded once and routed with scene-local coordinates.
 - Agent Hub exit keys now have deterministic focus precedence: Ctrl-C and `q` always leave the Hub, owned Ctrl-Q returns to the main thread, and Escape unwinds filter editing, pending chords, preview focus, inspector focus, and filtered-table state before closing without trapping input.
+- Normal main-composer Escape now preserves nonblank drafts and disarms the double-Escape timer instead of clearing input.
+- Ctrl-R in the normal composer now opens reverse history search with draft-preserving Escape, older-match cycling, and Enter acceptance; redo remains on the Ctrl+Shift-minus/underscore editor binding and Vim Ctrl-R stays unchanged.
 - GPT-5.6 Codex models now use one vendored-upstream limit resolver across startup and discovery refresh, preserve explicit model-config overrides, and label the resolved window source in the status line and `:context`.
 - Bash commands run with `pty: true` now start from the resolved shell-session environment and restore its `PATH` after login startup files, keeping mise-managed tools available just as they are in non-PTY bash commands.
 - Colon mode now opens uniformly from every non-text-entry surface, `Tab` writes each cycled completion into the command line, and the Ctrl+S Agent Hub uses the alternate screen so opening it preserves both followed-tail and scrolled-up transcript viewports.

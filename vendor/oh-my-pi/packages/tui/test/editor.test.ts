@@ -1804,6 +1804,19 @@ describe("Editor component", () => {
 			expect(editor.getCursor()).toEqual({ line: 0, col: 0 });
 		});
 
+		it("reaches redo through the default Ctrl+Shift-minus binding after undo", () => {
+			const editor = new Editor(defaultEditorTheme);
+
+			editor.handleInput("abc");
+			expect(editor.getText()).toBe("abc");
+
+			editor.handleInput("\x1b[45;5u"); // Ctrl+- (undo)
+			expect(editor.getText()).toBe("");
+
+			editor.handleInput("\x1b[45;6u"); // Ctrl+Shift+- (redo)
+			expect(editor.getText()).toBe("abc");
+		});
+
 		it("does not swallow keys rebound to copy", () => {
 			setKeybindings(
 				new KeybindingsManager(TUI_KEYBINDINGS, {

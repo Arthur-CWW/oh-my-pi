@@ -2,6 +2,7 @@
  * Agent Hub roster filtering, transcript search, stable-ID selection anchoring,
  * and default-to-oldest-registration behavior.
  */
+import { pressHub } from "./helpers/agent-hub-input";
 import { afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
 import * as fs from "node:fs/promises";
 import { KeybindingsManager } from "@oh-my-pi/pi-coding-agent/config/keybindings";
@@ -168,9 +169,9 @@ function renderedText(hub: AgentHubOverlayComponent): string {
 		.join("\n");
 }
 function revealParked(hub: AgentHubOverlayComponent, id: string): void {
-	hub.handleInput("/");
-	for (const character of id) hub.handleInput(character);
-	hub.handleInput("\r");
+	pressHub(hub, "/");
+	for (const character of id) pressHub(hub, character);
+	pressHub(hub, "\r");
 }
 
 function renderedRowAgentId(line: string): string | undefined {
@@ -222,14 +223,14 @@ describe("Agent Hub selection and filter", () => {
 		const { hub } = makeHub(agents);
 		expect(renderedAgentIds(hub)).toEqual(["Alpha", "Beta", "Gamma"]);
 		expect(selectedAgentId(hub)).toBe("Alpha");
-		hub.handleInput("n");
+		pressHub(hub, "n");
 		expect(selectedAgentId(hub)).toBe("Beta");
-		hub.handleInput("p");
+		pressHub(hub, "p");
 		expect(selectedAgentId(hub)).toBe("Alpha");
-		hub.handleInput("n");
-		hub.handleInput("n");
+		pressHub(hub, "n");
+		pressHub(hub, "n");
 		expect(selectedAgentId(hub)).toBe("Gamma");
-		hub.handleInput("p");
+		pressHub(hub, "p");
 		expect(selectedAgentId(hub)).toBe("Beta");
 		hub.dispose();
 	});
@@ -242,9 +243,9 @@ describe("Agent Hub selection and filter", () => {
 		registerAgent(agents, "Gamma");
 		const { hub } = makeHub(agents, { initialAgentId: "Beta" });
 		expect(selectedAgentId(hub)).toBe("Beta");
-		hub.handleInput("n");
+		pressHub(hub, "n");
 		expect(selectedAgentId(hub)).toBe("Gamma");
-		hub.handleInput("p");
+		pressHub(hub, "p");
 		expect(selectedAgentId(hub)).toBe("Beta");
 		hub.dispose();
 	});
@@ -255,9 +256,9 @@ describe("Agent Hub selection and filter", () => {
 		registerAgent(agents, "Alpha");
 		registerAgent(agents, "Beta");
 		const { hub } = makeHub(agents);
-		hub.handleInput("i");
+		pressHub(hub, "i");
 		expect(renderedText(hub)).not.toContain("INPUT");
-		hub.handleInput("n");
+		pressHub(hub, "n");
 		expect(selectedAgentId(hub)).toBe("Beta");
 		hub.dispose();
 	});
@@ -274,27 +275,27 @@ describe("Agent Hub selection and filter", () => {
 		});
 
 		expect(renderedAgentIds(hub)).toEqual(["Alpha", "Delta", "Beta", "Gamma"]);
-		hub.handleInput("n");
-		hub.handleInput("n");
+		pressHub(hub, "n");
+		pressHub(hub, "n");
 		expect(selectedAgentId(hub)).toBe("Beta");
 
-		hub.handleInput(".");
+		pressHub(hub, ".");
 		expect(renderedAgentIds(hub)).toEqual(["Alpha", "Delta"]);
 		expect(selectedAgentId(hub)).toBe("Delta");
 		expect(renderedText(hub)).toContain("2 hidden");
 
-		hub.handleInput(".");
+		pressHub(hub, ".");
 		expect(renderedAgentIds(hub)).toEqual(["Alpha", "Delta", "Beta", "Gamma"]);
 		expect(selectedAgentId(hub)).toBe("Delta");
-		hub.handleInput("?");
+		pressHub(hub, "?");
 		expect(renderedText(hub)).toContain(". toggle agent history");
-		hub.handleInput("?");
+		pressHub(hub, "?");
 
-		hub.handleInput("/");
-		hub.handleInput(".");
+		pressHub(hub, "/");
+		pressHub(hub, ".");
 		expect(renderedText(hub)).toContain("/.");
-		hub.handleInput("\x1b");
-		hub.handleInput("\x1b");
+		pressHub(hub, "\x1b");
+		pressHub(hub, "\x1b");
 		hub.dispose();
 	});
 
@@ -307,7 +308,7 @@ describe("Agent Hub selection and filter", () => {
 			turnStatus: id => (id === "Completed" ? { inputId: "done", state: "completed", canCancel: false } : undefined),
 		});
 
-		hub.handleInput(".");
+		pressHub(hub, ".");
 		const text = renderedText(hub);
 		expect(text).toContain("No active subagents · . to show history");
 		expect(text).toContain("2 hidden");
@@ -330,7 +331,7 @@ describe("Agent Hub selection and filter", () => {
 		expect(selectedAgentId(hub)).toBe("Alpha");
 
 		// Non-first stable selection regression test
-		hub.handleInput("n");
+		pressHub(hub, "n");
 		expect(selectedAgentId(hub)).toBe("Beta");
 		registerAgent(agents, "Delta");
 		await waitForRenderedText(hub, "Delta");
@@ -351,10 +352,10 @@ describe("Agent Hub selection and filter", () => {
 		const { hub } = makeHub(agents, { focusAgent });
 		expect(selectedAgentId(hub)).toBe("Alpha");
 
-		hub.handleInput("j");
-		hub.handleInput("j");
+		pressHub(hub, "j");
+		pressHub(hub, "j");
 		expect(selectedAgentId(hub)).toBe("Gamma");
-		hub.handleInput("k");
+		pressHub(hub, "k");
 		expect(selectedAgentId(hub)).toBe("Beta");
 		expect(focusAgent).not.toHaveBeenCalled();
 
@@ -377,12 +378,12 @@ describe("Agent Hub selection and filter", () => {
 			activeSearchFieldEntries: 0,
 			materializedRows: 3,
 		});
-		for (let i = 0; i < 10_000; i++) hub.handleInput("j");
+		for (let i = 0; i < 10_000; i++) pressHub(hub, "j");
 		expect(renderedAgentIds(hub)).toEqual(["Agent9997", "Agent9998", "Agent9999"]);
 
-		hub.handleInput("/");
+		pressHub(hub, "/");
 		expect(hub.getRetentionMetrics().activeSearchFieldEntries).toBe(10_000);
-		hub.handleInput("\x1b");
+		pressHub(hub, "\x1b");
 		expect(hub.getRetentionMetrics().activeSearchFieldEntries).toBe(0);
 		hub.dispose();
 	});
@@ -402,12 +403,12 @@ describe("Agent Hub selection and filter", () => {
 		expect(renderedAgentIds(hub)).toEqual(["AuthLoader", "DataParser", "AuthValidator"]);
 
 		// Type / to enter filter mode
-		hub.handleInput("/");
+		pressHub(hub, "/");
 		// Type "auth" incrementally
-		hub.handleInput("a");
-		hub.handleInput("u");
-		hub.handleInput("t");
-		hub.handleInput("h");
+		pressHub(hub, "a");
+		pressHub(hub, "u");
+		pressHub(hub, "t");
+		pressHub(hub, "h");
 
 		// Only Auth* agents should be visible
 		const filtered = renderedAgentIds(hub);
@@ -428,8 +429,8 @@ describe("Agent Hub selection and filter", () => {
 		registerAgent(agents, "JkJKWorker");
 		const { hub } = makeHub(agents);
 
-		hub.handleInput("/");
-		for (const character of "jkJK") hub.handleInput(character);
+		pressHub(hub, "/");
+		for (const character of "jkJK") pressHub(hub, character);
 
 		expect(renderedText(hub)).toContain("/jkJK");
 		expect(renderedAgentIds(hub)).toEqual(["JkJKWorker"]);
@@ -444,22 +445,22 @@ describe("Agent Hub selection and filter", () => {
 		registerAgent(agents, "DataParser");
 
 		const { hub, doneCalls } = makeHub(agents);
-		hub.handleInput("/");
-		for (const key of "auth") hub.handleInput(key);
-		hub.handleInput("\r");
+		pressHub(hub, "/");
+		for (const key of "auth") pressHub(hub, key);
+		pressHub(hub, "\r");
 		expect(renderedAgentIds(hub)).toEqual(["AuthLoader"]);
 
-		hub.handleInput(CTRL_Q);
+		pressHub(hub, CTRL_Q);
 		expect(renderedAgentIds(hub)).toEqual(["AuthLoader"]);
 		expect(doneCalls()).toBe(0);
 
-		hub.handleInput(ESCAPE);
+		pressHub(hub, ESCAPE);
 		expect(renderedAgentIds(hub)).toEqual(["AuthLoader", "DataParser"]);
 		expect(doneCalls()).toBe(0);
 
-		hub.handleInput(CTRL_Q);
+		pressHub(hub, CTRL_Q);
 		expect(doneCalls()).toBe(0);
-		hub.handleInput(ESCAPE);
+		pressHub(hub, ESCAPE);
 		expect(doneCalls()).toBe(1);
 
 		hub.dispose();
@@ -473,22 +474,22 @@ describe("Agent Hub selection and filter", () => {
 		registerAgent(agents, "DataParser");
 
 		const { hub, doneCalls } = makeHub(agents);
-		hub.handleInput("/");
-		for (const key of "auth") hub.handleInput(key);
-		hub.handleInput("\r");
+		pressHub(hub, "/");
+		for (const key of "auth") pressHub(hub, key);
+		pressHub(hub, "\r");
 		expect(renderedAgentIds(hub)).toEqual(["AuthLoader"]);
 
-		hub.handleInput(ESCAPE);
+		pressHub(hub, ESCAPE);
 		expect(renderedAgentIds(hub)).toEqual(["AuthLoader"]);
 		expect(doneCalls()).toBe(0);
 
-		hub.handleInput(CTRL_G);
+		pressHub(hub, CTRL_G);
 		expect(renderedAgentIds(hub)).toEqual(["AuthLoader", "DataParser"]);
 		expect(doneCalls()).toBe(0);
 
-		hub.handleInput(ESCAPE);
+		pressHub(hub, ESCAPE);
 		expect(doneCalls()).toBe(0);
-		hub.handleInput(CTRL_G);
+		pressHub(hub, CTRL_G);
 		expect(doneCalls()).toBe(1);
 
 		hub.dispose();
@@ -506,13 +507,13 @@ describe("Agent Hub selection and filter", () => {
 		// Default selects Alpha (oldest). Keep Alpha selected while filtering.
 
 		// Apply a filter that includes Alpha.
-		hub.handleInput("/");
-		hub.handleInput("A");
-		hub.handleInput("l");
-		hub.handleInput("p");
-		hub.handleInput("h");
-		hub.handleInput("a");
-		hub.handleInput("\r"); // confirm filter
+		pressHub(hub, "/");
+		pressHub(hub, "A");
+		pressHub(hub, "l");
+		pressHub(hub, "p");
+		pressHub(hub, "h");
+		pressHub(hub, "a");
+		pressHub(hub, "\r"); // confirm filter
 
 		// Alpha and AlphaChild visible; Alpha should still be selected.
 		expect(renderedAgentIds(hub)).toEqual(["Alpha", "AlphaChild"]);
@@ -528,10 +529,10 @@ describe("Agent Hub selection and filter", () => {
 		registerAgent(agents, "Beta");
 		registerAgent(agents, "Gamma");
 		const { hub } = makeHub(agents);
-		hub.handleInput("n");
+		pressHub(hub, "n");
 		expect(selectedAgentId(hub)).toBe("Beta");
-		hub.handleInput("/");
-		for (const key of "Alpha") hub.handleInput(key);
+		pressHub(hub, "/");
+		for (const key of "Alpha") pressHub(hub, key);
 		expect(selectedAgentId(hub)).toBe("Alpha");
 		hub.dispose();
 	});
@@ -582,18 +583,18 @@ describe("Agent Hub selection and filter", () => {
 		await waitForRenderedText(hub, "FinishedBuild");
 		expect(renderedAgentIds(hub)).toEqual(["FinishedBuild", "FailedAuth", "LegacyWorker"]);
 
-		hub.handleInput(".");
+		pressHub(hub, ".");
 		expect(renderedAgentIds(hub)).toEqual([]);
 		expect(renderedText(hub)).toContain("3 hidden");
-		hub.handleInput(".");
+		pressHub(hub, ".");
 		expect(renderedAgentIds(hub)).toEqual(["FinishedBuild", "FailedAuth", "LegacyWorker"]);
 
-		hub.handleInput("/");
-		for (const key of "failed") hub.handleInput(key);
+		pressHub(hub, "/");
+		for (const key of "failed") pressHub(hub, key);
 		expect(renderedAgentIds(hub)).toEqual(["FailedAuth"]);
-		hub.handleInput("\x1b");
-		hub.handleInput("/");
-		for (const key of "terra") hub.handleInput(key);
+		pressHub(hub, "\x1b");
+		pressHub(hub, "/");
+		for (const key of "terra") pressHub(hub, key);
 		expect(renderedAgentIds(hub)).toEqual(["FinishedBuild"]);
 		expect(agents.list().map(ref => ref.id)).toEqual(["Main"]);
 		hub.dispose();
@@ -608,12 +609,12 @@ describe("Agent Hub selection and filter", () => {
 			registerAgent(agents, `Agent${String(i).padStart(2, "0")}`, i === 8 ? "parked" : "running");
 		}
 		const { hub } = makeHub(agents);
-		for (let i = 0; i < 7; i++) hub.handleInput("n");
+		for (let i = 0; i < 7; i++) pressHub(hub, "n");
 		const before = renderedAgentIds(hub);
-		hub.handleInput("\r");
-		hub.handleInput("h");
+		pressHub(hub, "\r");
+		pressHub(hub, "h");
 		expect(renderedAgentIds(hub)).toEqual(before);
-		hub.handleInput("n");
+		pressHub(hub, "n");
 		expect(selectedAgentId(hub)).toBe("Agent10");
 		hub.dispose();
 	});
@@ -629,8 +630,8 @@ describe("Agent Hub selection and filter", () => {
 		const { hub } = makeHub(agents);
 
 		revealParked(hub, "Beta");
-		hub.handleInput("\r");
-		hub.handleInput("\x1b");
+		pressHub(hub, "\r");
+		pressHub(hub, "\x1b");
 		expect(selectedAgentId(hub)).toBe("Beta");
 
 		hub.dispose();
@@ -655,27 +656,27 @@ describe("Agent Hub transcript search", () => {
 
 		const { hub, doneCalls } = makeHub(agents);
 		revealParked(hub, "Worker");
-		hub.handleInput("\r");
+		pressHub(hub, "\r");
 		expect(renderedText(hub)).toContain("Agent Hub > Worker");
 
-		hub.handleInput("/");
-		for (const key of "test") hub.handleInput(key);
-		hub.handleInput("\r");
+		pressHub(hub, "/");
+		for (const key of "test") pressHub(hub, key);
+		pressHub(hub, "\r");
 		expect(renderedText(hub)).toContain("/test");
 
-		hub.handleInput(CTRL_Q);
+		pressHub(hub, CTRL_Q);
 		expect(renderedText(hub)).toContain("/test");
 		expect(doneCalls()).toBe(0);
 
-		hub.handleInput(ESCAPE);
+		pressHub(hub, ESCAPE);
 		expect(renderedText(hub)).toContain("Agent Hub > Worker");
 		expect(renderedText(hub)).not.toContain("/test");
 
-		hub.handleInput(CTRL_Q);
+		pressHub(hub, CTRL_Q);
 		expect(renderedText(hub)).toContain("Agent Hub > Worker");
 		expect(doneCalls()).toBe(0);
 
-		hub.handleInput(ESCAPE);
+		pressHub(hub, ESCAPE);
 		expect(renderedText(hub)).toContain("Agent Hub");
 		expect(renderedText(hub)).not.toContain("Agent Hub > Worker");
 		expect(doneCalls()).toBe(0);
@@ -691,23 +692,23 @@ describe("Agent Hub transcript search", () => {
 
 		const { hub } = makeHub(agents);
 		revealParked(hub, "Worker");
-		hub.handleInput("\r");
-		hub.handleInput("/");
-		for (const key of "test") hub.handleInput(key);
-		hub.handleInput("\r");
+		pressHub(hub, "\r");
+		pressHub(hub, "/");
+		for (const key of "test") pressHub(hub, key);
+		pressHub(hub, "\r");
 		expect(renderedText(hub)).toContain("/test");
 
-		hub.handleInput(ESCAPE);
+		pressHub(hub, ESCAPE);
 		expect(renderedText(hub)).toContain("/test");
 
-		hub.handleInput(CTRL_G);
+		pressHub(hub, CTRL_G);
 		expect(renderedText(hub)).toContain("Agent Hub > Worker");
 		expect(renderedText(hub)).not.toContain("/test");
 
-		hub.handleInput(ESCAPE);
+		pressHub(hub, ESCAPE);
 		expect(renderedText(hub)).toContain("Agent Hub > Worker");
 
-		hub.handleInput(CTRL_G);
+		pressHub(hub, CTRL_G);
 		expect(renderedText(hub)).toContain("Agent Hub");
 		expect(renderedText(hub)).not.toContain("Agent Hub > Worker");
 
@@ -721,14 +722,14 @@ describe("Agent Hub transcript search", () => {
 
 		const { hub } = makeHub(agents);
 		revealParked(hub, "Worker");
-		hub.handleInput("\r"); // open chat
+		pressHub(hub, "\r"); // open chat
 
 		// Enter search, type, then Esc during editing
-		hub.handleInput("/");
-		hub.handleInput("f");
-		hub.handleInput("o");
-		hub.handleInput("o");
-		hub.handleInput("\x1b"); // Esc during editing
+		pressHub(hub, "/");
+		pressHub(hub, "f");
+		pressHub(hub, "o");
+		pressHub(hub, "o");
+		pressHub(hub, "\x1b"); // Esc during editing
 
 		const text = renderedText(hub);
 		// Should still be in chat view but search cleared
@@ -751,25 +752,25 @@ describe("Agent Hub transcript search", () => {
 
 		const { hub } = makeHub(agents);
 
-		hub.handleInput("/");
-		hub.handleInput("d");
-		hub.handleInput("a");
-		hub.handleInput("t");
-		hub.handleInput("a");
-		hub.handleInput("p");
+		pressHub(hub, "/");
+		pressHub(hub, "d");
+		pressHub(hub, "a");
+		pressHub(hub, "t");
+		pressHub(hub, "a");
+		pressHub(hub, "p");
 
 		// "datap" matches only DataParser
 		expect(renderedAgentIds(hub)).toEqual(["DataParser"]);
 
 		// Backspace to "dat" — matches DataParser and AuthValidator (authvaliDATor)
-		hub.handleInput("\x7f"); // backspace
-		hub.handleInput("\x7f");
+		pressHub(hub, "\x7f"); // backspace
+		pressHub(hub, "\x7f");
 		expect(renderedAgentIds(hub)).toEqual(["DataParser", "AuthValidator"]);
 
 		// Backspace all remaining chars
-		hub.handleInput("\x7f");
-		hub.handleInput("\x7f");
-		hub.handleInput("\x7f");
+		pressHub(hub, "\x7f");
+		pressHub(hub, "\x7f");
+		pressHub(hub, "\x7f");
 
 		// Filter is now empty — all agents visible
 		expect(renderedAgentIds(hub)).toEqual(["AuthLoader", "DataParser", "AuthValidator"]);
@@ -787,15 +788,15 @@ describe("Agent Hub transcript search", () => {
 		// Normal table and chat footers expose search; filter-mode details are contextual.
 		let text = renderedText(hub);
 		expect(text).toContain("/:search");
-		hub.handleInput("/");
+		pressHub(hub, "/");
 		text = renderedText(hub);
 		expect(text).toContain("text:enter filter text");
 		expect(text).toContain("Esc:clear filter and return");
-		hub.handleInput("\x1b");
+		pressHub(hub, "\x1b");
 
 		// Enter on parked agent opens chat view (not focusAgent)
 		revealParked(hub, "Worker");
-		hub.handleInput("\r");
+		pressHub(hub, "\r");
 		text = renderedText(hub);
 		expect(text).toContain("/:search");
 
@@ -815,7 +816,7 @@ describe("Agent Hub transcript search", () => {
 		});
 		const { hub } = makeHub(agents);
 		expect(renderedText(hub)).toContain("Agent Hub · tree");
-		hub.handleInput("n");
+		pressHub(hub, "n");
 		expect(renderedText(hub)).toContain("Pod.Leaf");
 		hub.dispose();
 	});
@@ -836,7 +837,7 @@ describe("Agent Hub transcript search", () => {
 			});
 		}
 		const { hub } = makeHub(agents);
-		hub.handleInput("h");
+		pressHub(hub, "h");
 		expect(renderedText(hub)).toContain("(+10000 · 10000 run)");
 		expect(hub.getRetentionMetrics().materializedRows).toBeLessThan(20);
 		hub.dispose();

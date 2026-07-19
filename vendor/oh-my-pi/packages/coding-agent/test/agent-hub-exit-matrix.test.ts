@@ -1,3 +1,4 @@
+import { pressHub } from "./helpers/agent-hub-input";
 import { beforeAll, describe, expect, it } from "bun:test";
 import { KeybindingsManager } from "@oh-my-pi/pi-coding-agent/config/keybindings";
 import { IrcBus } from "@oh-my-pi/pi-coding-agent/irc/bus";
@@ -59,7 +60,7 @@ function renderedText(hub: AgentHubOverlayComponent, width = TABLE_WIDTH): strin
 }
 
 function typeText(hub: AgentHubOverlayComponent, value: string): void {
-	for (const character of value) hub.handleInput(character);
+	for (const character of value) pressHub(hub, character);
 }
 
 function createFixture(): ExitFixture {
@@ -145,9 +146,9 @@ const EXIT_STATES: readonly ExitState[] = [
 	{
 		name: "base filtered table",
 		arrange: ({ hub }) => {
-			hub.handleInput("/");
+			pressHub(hub, "/");
 			typeText(hub, AGENT_ID);
-			hub.handleInput("\r");
+			pressHub(hub, "\r");
 			const output = renderedText(hub);
 			expect(output).toContain(`/${AGENT_ID} (1/1)`);
 			expect(output).not.toContain(`/${AGENT_ID}▏`);
@@ -158,7 +159,7 @@ const EXIT_STATES: readonly ExitState[] = [
 		name: "preview-focused table",
 		arrange: ({ hub, doneCalls }) => {
 			expect(renderedText(hub)).toContain("Preview transcript");
-			hub.handleInput(CTRL_W);
+			pressHub(hub, CTRL_W);
 			expect(doneCalls()).toBe(0);
 		},
 		escapeSteps: [{ includes: ["Preview transcript"] }, {}],
@@ -166,7 +167,7 @@ const EXIT_STATES: readonly ExitState[] = [
 	{
 		name: "filter-editing table",
 		arrange: ({ hub }) => {
-			hub.handleInput("/");
+			pressHub(hub, "/");
 			typeText(hub, "Exit");
 			expect(renderedText(hub)).toContain("/Exit▏");
 		},
@@ -176,7 +177,7 @@ const EXIT_STATES: readonly ExitState[] = [
 		name: "dual-lane inspector-focused table",
 		arrange: ({ hub }) => {
 			renderedText(hub, DUAL_LANE_WIDTH);
-			hub.handleInput("h");
+			pressHub(hub, "h");
 			expect(renderedText(hub, DUAL_LANE_WIDTH)).toContain("●Prompt [ / ] section");
 		},
 		escapeSteps: [
@@ -192,8 +193,8 @@ const EXIT_STATES: readonly ExitState[] = [
 		name: "cycled inspector-focused table",
 		arrange: ({ hub }) => {
 			renderedText(hub, DUAL_LANE_WIDTH);
-			hub.handleInput("]");
-			hub.handleInput("h");
+			pressHub(hub, "]");
+			pressHub(hub, "h");
 			expect(renderedText(hub, DUAL_LANE_WIDTH)).toContain("●Route [ / ] section");
 		},
 		escapeSteps: [
@@ -208,7 +209,7 @@ const EXIT_STATES: readonly ExitState[] = [
 	{
 		name: "pending g chord",
 		arrange: ({ hub }) => {
-			hub.handleInput("g");
+			pressHub(hub, "g");
 			expect(renderedText(hub)).toContain("g: gg gj gk gx gm gr gs gb ga");
 		},
 		escapeSteps: [{ excludes: ["g: gg gj gk gx gm gr gs gb ga"] }, {}],
@@ -237,7 +238,7 @@ const EXIT_STATES: readonly ExitState[] = [
 		name: "large chat search-editing",
 		arrange: ({ hub }) => {
 			hub.openChat(AGENT_ID);
-			hub.handleInput("/");
+			pressHub(hub, "/");
 			typeText(hub, "needle");
 			const output = renderedText(hub);
 			expect(output).toContain(`Agent Hub > ${AGENT_ID}`);
@@ -267,7 +268,7 @@ describe("Agent Hub exit-key state matrix", () => {
 			state.arrange(fixture);
 			expect(fixture.doneCalls()).toBe(0);
 			expect(fixture.unfocusCalls()).toBe(0);
-			fixture.hub.handleInput(key.data);
+			pressHub(fixture.hub, key.data);
 
 			if (key.data !== ESCAPE) {
 				expect(fixture.doneCalls()).toBe(1);
@@ -280,7 +281,7 @@ describe("Agent Hub exit-key state matrix", () => {
 				const finalStep = stepIndex === state.escapeSteps.length - 1;
 				expect(fixture.doneCalls()).toBe(finalStep ? 1 : 0);
 				assertEscapeStep(fixture, state.escapeSteps[stepIndex]);
-				if (!finalStep) fixture.hub.handleInput(ESCAPE);
+				if (!finalStep) pressHub(fixture.hub, ESCAPE);
 			}
 		} finally {
 			fixture.cleanup();
@@ -291,18 +292,18 @@ describe("Agent Hub exit-key state matrix", () => {
 		const fixture = createFixture();
 		try {
 			expect(renderedText(fixture.hub)).toContain("Preview transcript");
-			fixture.hub.handleInput("\x17");
+			pressHub(fixture.hub, "\x17");
 			for (const arrow of ["\x1b[A", "\x1b[B", "\x1b[C", "\x1b[D"]) {
-				fixture.hub.handleInput(arrow);
+				pressHub(fixture.hub, arrow);
 				expect(fixture.doneCalls()).toBe(0);
 				expect(fixture.unfocusCalls()).toBe(0);
 				expect(renderedText(fixture.hub)).toContain("Preview transcript");
 			}
 
-			fixture.hub.handleInput(ESCAPE);
+			pressHub(fixture.hub, ESCAPE);
 			expect(fixture.doneCalls()).toBe(0);
 			expect(fixture.unfocusCalls()).toBe(0);
-			fixture.hub.handleInput(ESCAPE);
+			pressHub(fixture.hub, ESCAPE);
 			expect(fixture.doneCalls()).toBe(1);
 			expect(fixture.unfocusCalls()).toBe(0);
 		} finally {

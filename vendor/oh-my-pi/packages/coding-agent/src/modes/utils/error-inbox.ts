@@ -101,6 +101,10 @@ function isSameAction(a: DiagnosticAction | undefined, b: DiagnosticAction | und
 }
 
 export const DEDUPE_WINDOW_MS = 60 * 1000; // 1 minute window for deduping
+export interface ErrorInboxProjection {
+	readonly sourceRevision: number;
+	readonly errors: ReadonlyArray<DiagnosticEvent>;
+}
 
 function isObject(val: unknown): val is Record<string, unknown> {
 	return typeof val === "object" && val !== null;
@@ -321,6 +325,7 @@ function isSameCauseChain(a: string[] | undefined, b: string[] | undefined): boo
 
 export class ErrorInbox {
 	#errors: DiagnosticEvent[] = [];
+	#sourceRevision = 0;
 	readonly #maxErrors = 100;
 	readonly #sessionManager: ErrorInboxWriter;
 	readonly #subscribers = new Set<() => void>();
@@ -360,11 +365,19 @@ export class ErrorInbox {
 		this.#errors = Array.from(decoded.values())
 			.sort((a, b) => b.lastTimestamp - a.lastTimestamp)
 			.slice(0, this.#maxErrors);
+		this.#sourceRevision++;
 		this.#scheduleNotification();
 	}
 
 	getErrors(): ReadonlyArray<DiagnosticEvent> {
 		return this.#errors;
+	}
+
+	getProjection(): ErrorInboxProjection {
+		return {
+			sourceRevision: this.#sourceRevision,
+			errors: this.#errors,
+		};
 	}
 
 	recordError(input: string | DiagnosticEventInput, source?: string, options?: { nowMs?: number; id?: string }): void {
@@ -472,6 +485,7 @@ export class ErrorInbox {
 		}
 
 		appendErrorInboxEvent(this.#sessionManager, record);
+		this.#sourceRevision++;
 		this.#scheduleNotification();
 	}
 
@@ -486,6 +500,7 @@ export class ErrorInbox {
 		} catch {
 			// Persistence failure must never recursively surface as a new error.
 		}
+		this.#sourceRevision++;
 		this.#scheduleNotification();
 	}
 
@@ -505,6 +520,7 @@ export class ErrorInbox {
 		this.#errors[idx] = resolvedEvent;
 
 		appendErrorInboxEvent(this.#sessionManager, resolvedEvent);
+		this.#sourceRevision++;
 		this.#scheduleNotification();
 		return true;
 	}

@@ -1,19 +1,16 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
-import { SessionSelectorComponent } from "@oh-my-pi/pi-coding-agent/modes/components/session-selector";
+import { SelectorSurface } from "@oh-my-pi/pi-coding-agent/modes/components/selector-adapter";
 import { SelectorController } from "@oh-my-pi/pi-coding-agent/modes/controllers/selector-controller";
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
 import type { SessionInfo } from "@oh-my-pi/pi-coding-agent/session/session-listing";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { FileSessionStorage } from "@oh-my-pi/pi-coding-agent/session/session-storage";
+import { withControllerFixture } from "../../helpers/controller-fixture";
+import { Container, type TUI } from "@oh-my-pi/pi-tui";
+import { VirtualTerminal } from "../../../../tui/test/virtual-terminal";
 
-type TestContext = InteractiveModeContext & {
-	editorContainer: {
-		children: unknown[];
-		clear: () => void;
-		addChild: (child: unknown) => void;
-	};
-};
+type TestContext = InteractiveModeContext;
 
 function makeSessionInfo(path: string): SessionInfo {
 	return {
@@ -30,7 +27,7 @@ function makeSessionInfo(path: string): SessionInfo {
 	};
 }
 
-function createContext(currentSessionFile: string): {
+function createContext(tui: TUI, currentSessionFile: string): {
 	ctx: TestContext;
 	calls: string[];
 	setCurrentSessionFile: (path: string) => void;
@@ -39,17 +36,26 @@ function createContext(currentSessionFile: string): {
 } {
 	const calls: string[] = [];
 	let sessionFile = currentSessionFile;
-	const editorContainer = {
-		children: [] as unknown[],
-		clear() {
-			this.children = [];
-			calls.push("editorContainer.clear");
-		},
-		addChild(child: unknown) {
-			this.children.push(child);
-			calls.push("editorContainer.addChild");
-		},
-	};
+	const editorContainer = new Container();
+	const chatContainer = new Container();
+	const editor = new Container();
+	editorContainer.addChild(editor);
+	tui.addChild(editorContainer);
+	tui.addChild(chatContainer);
+	tui.setFocus(editor);
+	const clearEditorContainer = editorContainer.clear.bind(editorContainer);
+	vi.spyOn(editorContainer, "clear").mockImplementation(() => {
+		clearEditorContainer();
+		calls.push("editorContainer.clear");
+	});
+	const addEditorChild = editorContainer.addChild.bind(editorContainer);
+	vi.spyOn(editorContainer, "addChild").mockImplementation(child => {
+		addEditorChild(child);
+		calls.push("editorContainer.addChild");
+	});
+	vi.spyOn(tui, "requestRender").mockImplementation(() => {
+		calls.push("ui.requestRender");
+	});
 	const showHookConfirm = vi.fn(async () => true);
 	const newSession = vi.fn(async () => {
 		calls.push("session.newSession");
@@ -62,14 +68,9 @@ function createContext(currentSessionFile: string): {
 	};
 	const ctx = {
 		editorContainer,
-		editor: {},
-		ui: {
-			setFocus: vi.fn(),
-			requestRender: vi.fn(() => {
-				calls.push("ui.requestRender");
-			}),
-			terminal: { columns: 120 },
-		},
+		editor,
+		chatContainer,
+		ui: tui,
 		session,
 		get viewSession() {
 			return session;
@@ -147,8 +148,30 @@ function createContext(currentSessionFile: string): {
 	};
 }
 
-function renderText(selector: SessionSelectorComponent): string {
+function renderText(selector: SelectorSurface<unknown, unknown>): string {
 	return selector.render(120).join("\n");
+}
+
+async function waitForMountedSessionSelector(tui: TUI): Promise<SelectorSurface<unknown, unknown>> {
+	for (let attempt = 0; attempt < 80; attempt += 1) {
+		const focused = tui.getFocused();
+		if (focused instanceof SelectorSurface) return focused;
+		await Bun.sleep(1);
+	}
+	throw new Error("Expected mounted session selector renderer");
+}
+
+async function driveSessionDelete(tui: TUI, settled: () => boolean): Promise<void> {
+	const terminal = tui.terminal;
+	if (!(terminal instanceof VirtualTerminal)) throw new Error("Expected virtual terminal");
+	tui.start();
+	try {
+		terminal.sendInput("\x04");
+		terminal.sendInput("\n");
+		for (let attempt = 0; attempt < 80 && !settled(); attempt += 1) await Bun.sleep(1);
+	} finally {
+		tui.stop();
+	}
 }
 
 beforeAll(() => {
@@ -166,119 +189,115 @@ describe("SelectorController session deletion", () => {
 	});
 
 	it("detaches the active session before selector deletion removes it", async () => {
-		const activeSession = makeSessionInfo("/tmp/project/sessions/active.jsonl");
-		const { ctx, calls } = createContext(activeSession.path);
-		vi.spyOn(SessionManager, "list").mockResolvedValue([activeSession]);
-		const deleteSessionWithArtifacts = vi
-			.spyOn(FileSessionStorage.prototype, "deleteSessionWithArtifacts")
-			.mockImplementation(async sessionPath => {
-				calls.push(`delete:${sessionPath}`);
-			});
-		const controller = new SelectorController(ctx);
+		await withControllerFixture(async fixture => {
+			const activeSession = makeSessionInfo("/tmp/project/sessions/active.jsonl");
+			const { ctx, calls } = createContext(fixture.tui, activeSession.path);
+			vi.spyOn(SessionManager, "list").mockResolvedValue([activeSession]);
+			const deleteSessionWithArtifacts = vi
+				.spyOn(FileSessionStorage.prototype, "deleteSessionWithArtifacts")
+				.mockImplementation(async sessionPath => {
+					calls.push(`delete:${sessionPath}`);
+				});
+			const controller = new SelectorController(ctx, fixture.getInputLeaseManager, fixture.scope);
+			const handleResumeSession = vi.spyOn(controller, "handleResumeSession");
 
-		await controller.showSessionSelector();
-		const selector = ctx.editorContainer.children[0];
-		if (!(selector instanceof SessionSelectorComponent)) {
-			throw new Error("Expected session selector component");
-		}
+			await controller.showSessionSelector();
+			const selector = await waitForMountedSessionSelector(fixture.tui);
+			await driveSessionDelete(
+				fixture.tui,
+				() => deleteSessionWithArtifacts.mock.calls.length === 1 && !renderText(selector).includes("Active session"),
+			);
 
-		const sessionList = selector.getSessionList() as unknown as {
-			onDeleteRequest?: (session: SessionInfo) => void;
-		};
-		sessionList.onDeleteRequest?.(activeSession);
-		selector.handleInput("\n");
-		await Bun.sleep(0);
-
-		expect(deleteSessionWithArtifacts).toHaveBeenCalledWith(activeSession.path);
-		expect(calls).toEqual([
-			"editorContainer.clear",
-			"editorContainer.addChild",
-			"ui.requestRender",
-			"session.newSession",
-			"loadingAnimation.stop",
-			"statusContainer.clear",
-			"pendingMessagesContainer.clear",
-			"pendingTools.clear",
-			"statusLine.invalidate",
-			"statusLine.setSessionStartTime",
-			"updateEditorTopBorder",
-			"updateEditorBorderColor",
-			"renderInitialMessages",
-			"reloadTodos",
-			"ui.requestRender",
-			`delete:${activeSession.path}`,
-			"ui.requestRender",
-		]);
-		expect(ctx.sessionManager.getSessionFile()).toBe("/tmp/project/sessions/detached.jsonl");
+			expect(deleteSessionWithArtifacts).toHaveBeenCalledWith(activeSession.path);
+			expect(handleResumeSession).not.toHaveBeenCalled();
+			expect(renderText(selector)).not.toContain("Active session");
+			expect(calls.filter(call => call !== "ui.requestRender")).toEqual([
+				"editorContainer.clear",
+				"editorContainer.addChild",
+				"session.newSession",
+				"loadingAnimation.stop",
+				"statusContainer.clear",
+				"pendingMessagesContainer.clear",
+				"pendingTools.clear",
+				"statusLine.invalidate",
+				"statusLine.setSessionStartTime",
+				"updateEditorTopBorder",
+				"updateEditorBorderColor",
+				"renderInitialMessages",
+				"reloadTodos",
+				`delete:${activeSession.path}`,
+			]);
+			expect(ctx.sessionManager.getSessionFile()).toBe("/tmp/project/sessions/detached.jsonl");
+		});
 	});
-
 	it("shows inline selector errors when session deletion fails after detach", async () => {
-		const activeSession = makeSessionInfo("/tmp/project/sessions/active.jsonl");
-		const { ctx, newSession } = createContext(activeSession.path);
-		vi.spyOn(SessionManager, "list").mockResolvedValue([activeSession]);
-		const deleteSessionWithArtifacts = vi
-			.spyOn(FileSessionStorage.prototype, "deleteSessionWithArtifacts")
-			.mockRejectedValue(new Error("disk failed"));
-		const controller = new SelectorController(ctx);
+		await withControllerFixture(async fixture => {
+			const activeSession = makeSessionInfo("/tmp/project/sessions/active.jsonl");
+			const { ctx, newSession } = createContext(fixture.tui, activeSession.path);
+			vi.spyOn(SessionManager, "list").mockResolvedValue([activeSession]);
+			const deleteSessionWithArtifacts = vi
+				.spyOn(FileSessionStorage.prototype, "deleteSessionWithArtifacts")
+				.mockRejectedValue(new Error("disk failed"));
+			const controller = new SelectorController(ctx, fixture.getInputLeaseManager, fixture.scope);
+			const handleResumeSession = vi.spyOn(controller, "handleResumeSession");
 
-		await controller.showSessionSelector();
-		const selector = ctx.editorContainer.children[0];
-		if (!(selector instanceof SessionSelectorComponent)) {
-			throw new Error("Expected session selector component");
-		}
+			await controller.showSessionSelector();
+			const selector = await waitForMountedSessionSelector(fixture.tui);
+			await driveSessionDelete(
+				fixture.tui,
+				() => renderText(selector).includes("Failed to delete session: disk failed"),
+			);
 
-		const sessionList = selector.getSessionList() as unknown as {
-			onDeleteRequest?: (session: SessionInfo) => void;
-		};
-		sessionList.onDeleteRequest?.(activeSession);
-		selector.handleInput("\n");
-		await Bun.sleep(0);
-
-		expect(newSession).toHaveBeenCalledTimes(1);
-		expect(deleteSessionWithArtifacts).toHaveBeenCalledWith(activeSession.path);
-		expect(ctx.showError).not.toHaveBeenCalled();
-		expect(ctx.sessionManager.getSessionFile()).toBe("/tmp/project/sessions/detached.jsonl");
-		expect(renderText(selector)).toContain("Error: Failed to delete session: disk failed");
+			expect(newSession).toHaveBeenCalledTimes(1);
+			expect(deleteSessionWithArtifacts).toHaveBeenCalledWith(activeSession.path);
+			expect(handleResumeSession).not.toHaveBeenCalled();
+			expect(ctx.showError).not.toHaveBeenCalled();
+			expect(ctx.sessionManager.getSessionFile()).toBe("/tmp/project/sessions/detached.jsonl");
+			expect(renderText(selector)).toContain("Failed to delete session: disk failed");
+		});
 	});
-
 	it("creates a fresh session before deleting via slash command and then shows the selector", async () => {
-		const activeSessionPath = "/tmp/project/sessions/active.jsonl";
-		const { ctx, calls, showHookConfirm, newSession } = createContext(activeSessionPath);
-		const deleteSessionWithArtifacts = vi
-			.spyOn(FileSessionStorage.prototype, "deleteSessionWithArtifacts")
-			.mockImplementation(async sessionPath => {
-				calls.push(`delete:${sessionPath}`);
-			});
-		const exists = vi.spyOn(FileSessionStorage.prototype, "exists").mockResolvedValue(true);
-		const controller = new SelectorController(ctx);
+		await withControllerFixture(async fixture => {
+			const activeSessionPath = "/tmp/project/sessions/active.jsonl";
+			const { ctx, calls, showHookConfirm, newSession } = createContext(fixture.tui, activeSessionPath);
+			const deleteSessionWithArtifacts = vi
+				.spyOn(FileSessionStorage.prototype, "deleteSessionWithArtifacts")
+				.mockImplementation(async sessionPath => {
+					calls.push(`delete:${sessionPath}`);
+				});
+			const exists = vi.spyOn(FileSessionStorage.prototype, "exists").mockResolvedValue(true);
+			const controller = new SelectorController(ctx, fixture.getInputLeaseManager, fixture.scope);
 
-		await controller.handleSessionDeleteCommand();
+			await controller.handleSessionDeleteCommand();
+			await Bun.sleep(0);
+			await Bun.sleep(0);
 
-		expect(exists).toHaveBeenCalledWith(activeSessionPath);
-		expect(showHookConfirm).toHaveBeenCalledWith(
-			"Delete Session",
-			"This will permanently delete the current session.\nYou will be returned to the session selector.",
-		);
-		expect(newSession).toHaveBeenCalledTimes(1);
-		expect(deleteSessionWithArtifacts).toHaveBeenCalledWith(activeSessionPath);
-		expect(calls).toEqual([
-			"session.newSession",
-			"loadingAnimation.stop",
-			"statusContainer.clear",
-			"pendingMessagesContainer.clear",
-			"pendingTools.clear",
-			"statusLine.invalidate",
-			"statusLine.setSessionStartTime",
-			"updateEditorTopBorder",
-			"updateEditorBorderColor",
-			"renderInitialMessages",
-			"reloadTodos",
-			"ui.requestRender",
-			`delete:${activeSessionPath}`,
-			"showStatus:Session deleted",
-			"editorContainer.clear",
-			"editorContainer.addChild",
-			"ui.requestRender",
-		]);
+			expect(exists).toHaveBeenCalledWith(activeSessionPath);
+			expect(showHookConfirm).toHaveBeenCalledWith(
+				"Delete Session",
+				"This will permanently delete the current session.\nYou will be returned to the session selector.",
+			);
+			expect(newSession).toHaveBeenCalledTimes(1);
+			expect(deleteSessionWithArtifacts).toHaveBeenCalledWith(activeSessionPath);
+			expect(calls).toEqual([
+				"session.newSession",
+				"loadingAnimation.stop",
+				"statusContainer.clear",
+				"pendingMessagesContainer.clear",
+				"pendingTools.clear",
+				"statusLine.invalidate",
+				"statusLine.setSessionStartTime",
+				"updateEditorTopBorder",
+				"updateEditorBorderColor",
+				"renderInitialMessages",
+				"reloadTodos",
+				"ui.requestRender",
+				`delete:${activeSessionPath}`,
+				"showStatus:Session deleted",
+				"editorContainer.clear",
+				"editorContainer.addChild",
+				"ui.requestRender",
+			]);
+		});
 	});
 });

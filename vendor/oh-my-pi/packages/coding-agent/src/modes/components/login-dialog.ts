@@ -1,162 +1,55 @@
-import { getOAuthProviders } from "@oh-my-pi/pi-ai/oauth";
-import { Container, Input, Spacer, Text, type TUI } from "@oh-my-pi/pi-tui";
+import { truncateToWidth, type Component, type TUI, wrapTextWithAnsi } from "@oh-my-pi/pi-tui";
 import { theme } from "../../modes/theme/theme";
-import { matchesUiDismiss } from "../../modes/utils/keybinding-matchers";
-import { openPath } from "../../utils/open";
-import { DynamicBorder } from "./dynamic-border";
-import { keyHint, rawKeyHint } from "./keybinding-hints";
+import { keyHint } from "./keybinding-hints";
 
-/**
- * Login dialog component - replaces editor during OAuth login flow
- */
-export class LoginDialogComponent extends Container {
-	#contentContainer: Container;
-	#input: Input;
-	#tui: TUI;
-	#abortController = new AbortController();
-	#inputResolver?: (value: string) => void;
-	#inputRejecter?: (error: Error) => void;
+export type OAuthPromptStage = "starting" | "auth" | "prompt" | "waiting" | "progress";
 
-	constructor(
-		tui: TUI,
-		providerId: string,
-		private onComplete: (success: boolean, message?: string) => void,
-	) {
-		super();
-		this.#tui = tui;
+export interface OAuthPromptModel {
+	readonly stage: OAuthPromptStage;
+	readonly url: string | undefined;
+	readonly instructions: string | undefined;
+	readonly message: string | undefined;
+	readonly placeholder: string | undefined;
+	readonly draft: string;
+}
 
-		const providerInfo = getOAuthProviders().find(p => p.id === providerId);
-		const providerName = providerInfo?.name || providerId;
+export const EMPTY_OAUTH_PROMPT: OAuthPromptModel = {
+	stage: "starting",
+	url: undefined,
+	instructions: undefined,
+	message: undefined,
+	placeholder: undefined,
+	draft: "",
+};
 
-		// Top border
-		this.addChild(new DynamicBorder());
+/** Renderer-only OAuth prompt. The owning setup reducer supplies every visible field. */
+export class LoginDialogComponent implements Component {
+	#projection: OAuthPromptModel = EMPTY_OAUTH_PROMPT;
 
-		// Title
-		this.addChild(new Text(theme.fg("warning", `Login to ${providerName}`), 1, 0));
+	constructor(_tui?: TUI, _providerId?: string) {}
 
-		// Dynamic content area
-		this.#contentContainer = new Container();
-		this.addChild(this.#contentContainer);
-
-		// Input (always present, used when needed)
-		this.#input = new Input();
-		this.#input.onSubmit = () => {
-			if (this.#inputResolver) {
-				this.#inputResolver(this.#input.getValue());
-				this.#inputResolver = undefined;
-				this.#inputRejecter = undefined;
-			}
-		};
-
-		// Bottom border
-		this.addChild(new DynamicBorder());
+	apply(model: OAuthPromptModel): void {
+		this.#projection = model;
 	}
 
-	get signal(): AbortSignal {
-		return this.#abortController.signal;
-	}
-
-	#cancel(): void {
-		this.#abortController.abort();
-		if (this.#inputRejecter) {
-			this.#inputRejecter(new Error("Login cancelled"));
-			this.#inputResolver = undefined;
-			this.#inputRejecter = undefined;
+	render(width: number): readonly string[] {
+		const model = this.#projection;
+		const lines: string[] = [];
+		if (model.url !== undefined) {
+			lines.push(theme.bold("Browser login"));
+			lines.push(`\x1b]8;;${model.url}\x07${theme.fg("accent", "Open login URL")}\x1b]8;;\x07`);
+			lines.push(...wrapTextWithAnsi(theme.fg("dim", model.url), width));
 		}
-		this.onComplete(false, "Login cancelled");
-	}
-
-	/**
-	 * Called by onAuth callback - show URL and optional instructions
-	 */
-	showAuth(url: string, instructions?: string): void {
-		this.#contentContainer.clear();
-		this.#contentContainer.addChild(new Spacer(1));
-		this.#contentContainer.addChild(new Text(theme.fg("accent", url), 1, 0));
-
-		const clickHint = process.platform === "darwin" ? "Cmd+click to open" : "Ctrl+click to open";
-		const hyperlink = `\x1b]8;;${url}\x07${clickHint}\x1b]8;;\x07`;
-		this.#contentContainer.addChild(new Text(theme.fg("dim", hyperlink), 1, 0));
-
-		if (instructions) {
-			this.#contentContainer.addChild(new Spacer(1));
-			this.#contentContainer.addChild(new Text(theme.fg("warning", instructions), 1, 0));
+		if (model.instructions !== undefined) lines.push(...wrapTextWithAnsi(theme.fg("warning", model.instructions), width));
+		if (model.message !== undefined) lines.push(...wrapTextWithAnsi(model.message, width));
+		if (model.stage === "prompt") {
+			const shown = model.draft.length === 0 && model.placeholder !== undefined
+				? theme.fg("dim", model.placeholder)
+				: model.draft;
+			lines.push(truncateToWidth(`${theme.fg("accent", "> ")}${shown}`, width));
+			lines.push(theme.fg("dim", `${keyHint("tui.select.confirm", "submit")} · ${keyHint("ui.dismiss", "cancel")}`));
 		}
-
-		// Open browser (best-effort)
-		openPath(url);
-
-		this.#tui.requestRender();
-	}
-
-	/**
-	 * Show input for manual code/URL entry (for callback server providers)
-	 */
-	showManualInput(prompt: string): Promise<string> {
-		this.#contentContainer.addChild(new Spacer(1));
-		this.#contentContainer.addChild(new Text(theme.fg("dim", prompt), 1, 0));
-		if (!this.#contentContainer.children.includes(this.#input)) {
-			this.#contentContainer.addChild(this.#input);
-		}
-		this.#contentContainer.addChild(new Text(`(${keyHint("ui.dismiss", "to cancel")})`, 1, 0));
-		this.#tui.requestRender();
-
-		const { promise, resolve, reject } = Promise.withResolvers<string>();
-		this.#inputResolver = resolve;
-		this.#inputRejecter = reject;
-		return promise;
-	}
-
-	/**
-	 * Called by onPrompt callback - show prompt and wait for input
-	 * Note: Does NOT clear content, appends to existing (preserves URL from showAuth)
-	 */
-	showPrompt(message: string, placeholder?: string): Promise<string> {
-		this.#contentContainer.addChild(new Spacer(1));
-		this.#contentContainer.addChild(new Text(theme.fg("text", message), 1, 0));
-		if (placeholder) {
-			this.#contentContainer.addChild(new Text(theme.fg("dim", `e.g., ${placeholder}`), 1, 0));
-		}
-		if (!this.#contentContainer.children.includes(this.#input)) {
-			this.#contentContainer.addChild(this.#input);
-		}
-		const promptHint = [keyHint("ui.dismiss", "to cancel"), rawKeyHint("enter", "to submit")].join(", ");
-		this.#contentContainer.addChild(new Text(`(${promptHint})`, 1, 0));
-
-		this.#input.setValue("");
-		this.#tui.requestRender();
-
-		const { promise, resolve, reject } = Promise.withResolvers<string>();
-		this.#inputResolver = resolve;
-		this.#inputRejecter = reject;
-		return promise;
-	}
-
-	/**
-	 * Show waiting message (for polling flows like GitHub Copilot)
-	 */
-	showWaiting(message: string): void {
-		this.#contentContainer.addChild(new Spacer(1));
-		this.#contentContainer.addChild(new Text(theme.fg("dim", message), 1, 0));
-		this.#contentContainer.addChild(new Text(`(${keyHint("ui.dismiss", "to cancel")})`, 1, 0));
-		this.#tui.requestRender();
-	}
-
-	/**
-	 * Called by onProgress callback
-	 */
-	showProgress(message: string): void {
-		this.#contentContainer.addChild(new Text(theme.fg("dim", message), 1, 0));
-		this.#tui.requestRender();
-	}
-
-	handleInput(data: string): void {
-		if (matchesUiDismiss(data)) {
-			this.#cancel();
-			return;
-		}
-
-		// Pass to input
-		this.#input.handleInput(data);
+		if (model.stage === "starting" && lines.length === 0) lines.push(theme.fg("dim", "Starting OAuth flow…"));
+		return lines;
 	}
 }

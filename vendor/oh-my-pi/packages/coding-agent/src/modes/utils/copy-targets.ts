@@ -32,9 +32,9 @@ export interface LastCommand {
  * `children` to drill into.
  */
 export interface CopyTarget {
-	/** Stable id (e.g. "msg:1", "msg:1:code:0", "msg:1:quote:0", "msg:1:all", "cmd:1"). */
-	id: string;
-	label: string;
+	/** Stable identity derived from transcript identity, never display order. */
+	readonly id: string;
+	readonly label: string;
 	/** Dim annotation: line/block counts, language, or tool name. */
 	hint?: string;
 	/** Full text rendered in the preview pane. */
@@ -100,7 +100,6 @@ export function extractBlocks(text: string): MessageBlock[] {
 
 		const quoted = QUOTE_LINE_RE.exec(line);
 		if (quoted) {
-			// Strip the `>` marker plus one optional following space.
 			quote ??= [];
 			quote.push(quoted[1].startsWith(" ") ? quoted[1].slice(1) : quoted[1]);
 		} else {
@@ -209,53 +208,69 @@ function blockSummaryHint(text: string, codeCount: number, quoteCount: number): 
 	return parts.join(" · ");
 }
 
-/** Build the target node for one assistant message: a leaf when it has no
- * drillable blocks, otherwise a group exposing the full message plus each
- * fenced code block and `>`-quoted block (de-prefixed) as a child target. */
-function messageTarget(text: string, rank: number): CopyTarget {
-	const id = `msg:${rank}`;
+/** A compact deterministic digest for sources without persisted entry IDs. */
+function stableDigest(value: string): string {
+	let hash = 2166136261;
+	for (let index = 0; index < value.length; index++) {
+		hash ^= value.charCodeAt(index);
+		hash = Math.imul(hash, 16777619);
+	}
+	return (hash >>> 0).toString(36);
+}
+
+function stableMessageId(message: AgentMessage, text: string): string {
+	const candidate = message as AgentMessage & { id?: string; timestamp?: number };
+	if (typeof candidate.id === "string" && candidate.id.length > 0) return `msg:${candidate.id}`;
+	const timestamp = typeof candidate.timestamp === "number" ? String(candidate.timestamp) : "none";
+	return `msg:${timestamp}:${stableDigest(text)}`;
+}
+
+function stableCommandId(command: LastCommand): string {
+	return `cmd:${command.kind}:${stableDigest(command.code)}`;
+}
+
+/** Build the target node for one assistant message. */
+function messageTarget(text: string, id: string): CopyTarget {
 	const label = firstLine(text);
 	const blocks = extractBlocks(text);
-	const messageCopy = rank === 1 ? "Copied last message to clipboard" : "Copied message to clipboard";
+	const messageCopy = "Copied message to clipboard";
 
 	if (blocks.length === 0) {
 		return { id, label, hint: pluralLines(text), preview: text, content: text, copyMessage: messageCopy };
 	}
 
-	// The message node itself copies the full message; each block is a child
-	// copy target you can drill into, kept in document order.
 	const children: CopyTarget[] = [];
 	const codeBlocks: CodeBlock[] = [];
 	const quoteBlocks: QuoteBlock[] = [];
 	for (const block of blocks) {
 		if (block.kind === "code") {
-			const j = codeBlocks.length;
+			const index = codeBlocks.length;
 			codeBlocks.push(block);
 			children.push({
-				id: `${id}:code:${j}`,
-				label: `Block ${j + 1}`,
+				id: `${id}:code:${index}`,
+				label: `Block ${index + 1}`,
 				hint: blockHint(block),
 				preview: block.code,
 				language: block.lang || undefined,
 				content: block.code,
-				copyMessage: `Copied code block ${j + 1} to clipboard`,
+				copyMessage: `Copied code block ${index + 1} to clipboard`,
 			});
 		} else {
-			const j = quoteBlocks.length;
+			const index = quoteBlocks.length;
 			quoteBlocks.push(block);
 			children.push({
-				id: `${id}:quote:${j}`,
-				label: `Quote ${j + 1}`,
+				id: `${id}:quote:${index}`,
+				label: `Quote ${index + 1}`,
 				hint: pluralLines(block.text),
 				preview: block.text,
 				content: block.text,
-				copyMessage: `Copied quote block ${j + 1} to clipboard`,
+				copyMessage: `Copied quote block ${index + 1} to clipboard`,
 			});
 		}
 	}
 
 	if (codeBlocks.length > 1) {
-		const combined = codeBlocks.map(b => b.code).join("\n\n");
+		const combined = codeBlocks.map(block => block.code).join("\n\n");
 		children.push({
 			id: `${id}:all`,
 			label: `All ${codeBlocks.length} blocks`,
@@ -266,7 +281,7 @@ function messageTarget(text: string, rank: number): CopyTarget {
 		});
 	}
 	if (quoteBlocks.length > 1) {
-		const combined = quoteBlocks.map(b => b.text).join("\n\n");
+		const combined = quoteBlocks.map(block => block.text).join("\n\n");
 		children.push({
 			id: `${id}:all-quotes`,
 			label: `All ${quoteBlocks.length} quotes`,
@@ -277,18 +292,25 @@ function messageTarget(text: string, rank: number): CopyTarget {
 		});
 	}
 
-	const hint = blockSummaryHint(text, codeBlocks.length, quoteBlocks.length);
-	return { id, label, hint, preview: text, content: text, copyMessage: messageCopy, children };
+	return {
+		id,
+		label,
+		hint: blockSummaryHint(text, codeBlocks.length, quoteBlocks.length),
+		preview: text,
+		content: text,
+		copyMessage: messageCopy,
+		children,
+	};
 }
 
 function commandTitle(command: LastCommand): string {
 	return command.kind === "bash" ? "Bash command" : "Eval code";
 }
 
-function commandTarget(command: LastCommand, rank: number): CopyTarget {
+function commandTarget(command: LastCommand): CopyTarget {
 	const title = commandTitle(command);
 	return {
-		id: `cmd:${rank}`,
+		id: stableCommandId(command),
 		label: firstLine(command.code) || title,
 		hint: `${command.kind} · ${pluralLines(command.code)}`,
 		preview: command.code,
@@ -299,49 +321,44 @@ function commandTarget(command: LastCommand, rank: number): CopyTarget {
 }
 
 /**
- * Assemble the unified `/copy` target tree: recent assistant messages
- * (most recent first, each drillable into its code blocks), runnable command
- * targets interleaved after the assistant message that issued them, and a
- * fresh-handoff fallback when no assistant message exists yet.
+ * Assemble the unified `/copy` target tree. Stable target IDs are derived from
+ * persisted message identity/content, so reorder does not turn one target into
+ * another and removal clamps selection by ID in the keyed tree reducer.
  */
 export function buildCopyTargets(source: CopySource): CopyTarget[] {
 	const targets: CopyTarget[] = [];
 	const pendingCommands: LastCommand[] = [];
-	let messageRank = 0;
-	let commandRank = 0;
+	let messageCount = 0;
 
 	const appendCommands = (commands: readonly LastCommand[]) => {
-		for (const command of commands) {
-			commandRank += 1;
-			targets.push(commandTarget(command, commandRank));
-		}
+		for (const command of commands) targets.push(commandTarget(command));
 	};
 
-	for (let i = source.messages.length - 1; i >= 0 && messageRank < MAX_MESSAGES; i--) {
-		const msg = source.messages[i];
-		if (msg.role !== "assistant") continue;
+	for (let index = source.messages.length - 1; index >= 0 && messageCount < MAX_MESSAGES; index--) {
+		const message = source.messages[index];
+		if (message.role !== "assistant") continue;
 
-		const toolCalls = msg.content.filter((c): c is ToolCall => c.type === "toolCall");
+		const toolCalls = message.content.filter((content): content is ToolCall => content.type === "toolCall");
 		const commands: LastCommand[] = [];
-		for (let j = toolCalls.length - 1; j >= 0; j--) {
-			const command = commandFromToolCall(toolCalls[j]!);
+		for (let callIndex = toolCalls.length - 1; callIndex >= 0; callIndex--) {
+			const command = commandFromToolCall(toolCalls[callIndex]!);
 			if (command) commands.push(command);
 		}
 
-		const text = assistantText(msg);
+		const text = assistantText(message);
 		if (!text) {
 			pendingCommands.push(...commands);
 			continue;
 		}
 
-		messageRank += 1;
-		targets.push(messageTarget(text, messageRank));
+		messageCount += 1;
+		targets.push(messageTarget(text, stableMessageId(message, text)));
 		appendCommands(pendingCommands);
 		appendCommands(commands);
 		pendingCommands.length = 0;
 	}
 
-	if (messageRank === 0) {
+	if (messageCount === 0) {
 		const handoff = source.getLastVisibleHandoffText();
 		if (handoff) {
 			targets.unshift({

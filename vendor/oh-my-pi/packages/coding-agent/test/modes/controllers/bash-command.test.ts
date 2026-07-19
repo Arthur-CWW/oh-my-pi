@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, it, vi } from "bun:test";
 import { CommandController } from "@oh-my-pi/pi-coding-agent/modes/controllers/command-controller";
 import { getThemeByName, setThemeInstance } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
+import { withControllerFixture } from "../../helpers/controller-fixture";
 
 function createContainer() {
 	return {
@@ -20,35 +21,37 @@ describe("bash shortcut command", () => {
 	});
 
 	it("runs interactive ! commands through the configured user shell", async () => {
-		const executeBash = vi.fn().mockResolvedValue({
-			output: "ok",
-			exitCode: 0,
-			cancelled: false,
-			truncated: false,
-			totalLines: 1,
-			totalBytes: 2,
-			outputLines: 1,
-			outputBytes: 2,
-		});
-		const ctx = {
-			session: {
-				isStreaming: false,
-				executeBash,
-			},
-			chatContainer: createContainer(),
-			pendingMessagesContainer: createContainer(),
-			pendingBashComponents: [],
-			ui: { requestRender: vi.fn(), requestComponentRender: vi.fn() },
-			present: vi.fn(),
-			showError: vi.fn(),
-		} as unknown as InteractiveModeContext;
-		const controller = new CommandController(ctx);
+		await withControllerFixture(async fixture => {
+			const executeBash = vi.fn().mockResolvedValue({
+				output: "ok",
+				exitCode: 0,
+				cancelled: false,
+				truncated: false,
+				totalLines: 1,
+				totalBytes: 2,
+				outputLines: 1,
+				outputBytes: 2,
+			});
+			const ctx = {
+				session: {
+					isStreaming: false,
+					executeBash,
+				},
+				chatContainer: createContainer(),
+				pendingMessagesContainer: createContainer(),
+				pendingBashComponents: [],
+				ui: { requestRender: vi.fn(), requestComponentRender: vi.fn() },
+				present: vi.fn(),
+				showError: vi.fn(),
+			} as unknown as InteractiveModeContext;
+			const controller = new CommandController(ctx, fixture.getInputLeaseManager, fixture.scope);
 
-		await controller.handleBashCommand("echo hi");
+			await controller.handleBashCommand("echo hi");
 
-		expect(executeBash).toHaveBeenCalledWith("echo hi", expect.any(Function), {
-			excludeFromContext: false,
-			useUserShell: true,
+			expect(executeBash).toHaveBeenCalledWith("echo hi", expect.any(Function), {
+				excludeFromContext: false,
+				useUserShell: true,
+			});
 		});
 	});
 });

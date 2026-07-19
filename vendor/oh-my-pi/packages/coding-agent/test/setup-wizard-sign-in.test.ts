@@ -1,78 +1,69 @@
-import { beforeAll, describe, expect, it } from "bun:test";
-import type { AuthStorage } from "@oh-my-pi/pi-ai";
-import type { OAuthLoginCallbacks, OAuthProviderId } from "@oh-my-pi/pi-ai/oauth/types";
-import { SignInTab } from "@oh-my-pi/pi-coding-agent/modes/setup-wizard/scenes/sign-in";
-import type { SetupSceneHost } from "@oh-my-pi/pi-coding-agent/modes/setup-wizard/scenes/types";
-import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
+import { describe, expect, it } from "bun:test";
+import { Database } from "bun:sqlite";
+import { AuthStorage, SqliteAuthCredentialStore } from "@oh-my-pi/pi-ai";
+import { Key, type Keybinding, type KeyId } from "@oh-my-pi/pi-tui";
+import {
+	makeSignInAdapter,
+	makeSignInModel,
+	updateSignIn,
+} from "@oh-my-pi/pi-coding-agent/modes/setup-wizard/scenes/sign-in";
 
-beforeAll(async () => {
-	await initTheme();
+import type { MvuEnvelope } from "@oh-my-pi/pi-coding-agent/modes/mvu/input-lease";
+
+const input = <TAction extends Keybinding>(action: TAction, key: KeyId = Key.enter, text?: string): MvuEnvelope => ({
+	_tag: "MvuInput",
+	action,
+	event: text === undefined ? { _tag: "Press", key, repeat: false } : { _tag: "Press", key, text, repeat: false },
 });
 
-describe("SignInTab", () => {
-	it("keeps the OSC8 login link and manual-code prompt above clipped wizard rows", async () => {
-		const url = `https://example.com/oauth/authorize?client_id=omp&redirect_uri=http%3A%2F%2Flocalhost%3A45454%2Fcallback&state=${"a".repeat(96)}`;
-		const loginGate = Promise.withResolvers<void>();
-		const openedUrls: string[] = [];
+function authStorage(): AuthStorage {
+	return new AuthStorage(new SqliteAuthCredentialStore(new Database(":memory:")));
+}
 
-		const authStorage = {
-			has: (_providerId: string) => false,
-			hasAuth: (_providerId: string) => false,
-			getCredentialOrigin: (_providerId: string) => undefined,
-			async login(_provider: OAuthProviderId, ctrl: OAuthLoginCallbacks): Promise<void> {
-				ctrl.onAuth({ url });
-				const prompt = ctrl.onManualCodeInput?.();
-				await loginGate.promise;
-				await prompt;
+describe("setup sign-in committed model", () => {
+	it("reconstructs the OAuth prompt and draft from reducer state", () => {
+		const storage = authStorage();
+		const adapter = makeSignInAdapter(storage);
+		const initial = makeSignInModel(storage, 7);
+		const providerId = initial.selector.selectedId;
+		if (providerId === undefined) throw new Error("OAuth provider list is empty");
+		const running = { ...initial, providerId, requestGeneration: 3 };
+		const opened = updateSignIn(running, {
+			_tag: "OAuthPromptChanged",
+			generation: 7,
+			sourceRevision: 0,
+			requestGeneration: 3,
+			prompt: {
+				stage: "prompt",
+				url: "https://example.com/oauth",
+				instructions: "Sign in in the browser",
+				message: "Paste the returned code",
+				placeholder: "code",
+				draft: "",
 			},
-		} as unknown as AuthStorage;
+		}, adapter);
+		const typed = updateSignIn(opened.model, input("setup.input", "a", "a"), adapter);
+		expect(typed.model.prompt.draft).toBe("a");
+		const deleted = updateSignIn(typed.model, input("app.selector.filterDelete", Key.backspace), adapter);
+		expect(deleted.model.prompt.draft).toBe("");
+	});
 
-		const host = {
-			ctx: {
-				openInBrowser(openedUrl: string): void {
-					openedUrls.push(openedUrl);
-				},
-				session: {
-					modelRegistry: {
-						authStorage,
-						async refresh(): Promise<void> {},
-					},
-				},
-			},
-			requestRender(): void {},
-			finish(): void {},
-			setFocus(): void {},
-			restoreFocus(): void {},
-		} as unknown as SetupSceneHost;
-
-		const tab = new SignInTab(host);
-		try {
-			for (const char of "anthropic") {
-				tab.handleInput(char);
-			}
-			tab.handleInput("\n");
-
-			const rendered = tab.render(36);
-			const compact = rendered.map(line => Bun.stripANSI(line).trim()).join("");
-			expect(compact).toContain(url);
-			expect(compact).not.toContain("…");
-			expect(rendered.join("\n")).toContain(`\x1b]8;;${url}\x07Open login URL\x1b]8;;\x07`);
-			expect(openedUrls).toEqual([url]);
-
-			// On a ~24-row terminal the wizard body ends up ~8 rows; the OSC8
-			// link, a plain URL row, and the focused input must survive that clip.
-			const clippedBody = rendered.slice(0, 8).map(line => Bun.stripANSI(line).trim());
-			const plainUrlIndex = clippedBody.findIndex(line => line.startsWith("https://example.com/oauth/authorize?"));
-			const inputIndex = clippedBody.findIndex(line => line.startsWith(">"));
-			expect(clippedBody.some(line => line === "Browser login: Open login URL")).toBe(true);
-			expect(plainUrlIndex).toBeGreaterThanOrEqual(0);
-			expect(clippedBody).toContain("Paste the authorization code (or full redirect URL):");
-			expect(inputIndex).toBeGreaterThanOrEqual(0);
-			expect(plainUrlIndex).toBeLessThan(inputIndex);
-		} finally {
-			tab.dispose();
-			loginGate.resolve();
-			await loginGate.promise;
-		}
+	it("fences stale OAuth settlements after cancellation", () => {
+		const storage = authStorage();
+		const adapter = makeSignInAdapter(storage);
+		const initial = makeSignInModel(storage, 2);
+		const providerId = initial.selector.selectedId;
+		if (providerId === undefined) throw new Error("OAuth provider list is empty");
+		const running = { ...initial, providerId, requestGeneration: 4 };
+		const cancelled = updateSignIn(running, input("setup.cancel", "c"), adapter);
+		const stale = updateSignIn(cancelled.model, {
+			_tag: "OAuthSettled",
+			generation: 2,
+			sourceRevision: 0,
+			requestGeneration: 4,
+			providerId,
+			cancelled: false,
+		}, adapter);
+		expect(stale.model).toBe(cancelled.model);
 	});
 });

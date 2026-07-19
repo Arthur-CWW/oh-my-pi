@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it } from "bun:test";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
-import { TreeSelectorComponent } from "@oh-my-pi/pi-coding-agent/modes/components/tree-selector";
+import { createSessionTreeRoute, viewSessionTree } from "@oh-my-pi/pi-coding-agent/modes/components/tree-selector";
 import * as themeModule from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import type { SessionEntry, SessionTreeNode } from "@oh-my-pi/pi-coding-agent/session/session-entries";
 
@@ -37,14 +37,9 @@ function chain(parent: SessionTreeNode, ...specs: Array<["user" | "assistant", s
 }
 
 function renderStripped(tree: SessionTreeNode[], leafId: string, width = 120): string[] {
-	const selector = new TreeSelectorComponent(
-		tree,
-		leafId,
-		60,
-		() => {},
-		() => {},
-	);
-	return selector.render(width).map(line => Bun.stripANSI(line));
+	const route = createSessionTreeRoute(tree, leafId);
+	route.focusedRoot.apply(viewSessionTree(route.initialModel, { offset: 0, height: 60 }));
+	return route.focusedRoot.render(width).map(line => Bun.stripANSI(line));
 }
 
 // Issue #2325 tree shape: a parent that branches into several sub-sessions

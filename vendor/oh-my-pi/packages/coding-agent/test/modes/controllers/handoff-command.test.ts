@@ -2,6 +2,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
 import { CommandController } from "@oh-my-pi/pi-coding-agent/modes/controllers/command-controller";
 import { getThemeByName, setThemeInstance } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
+import { withControllerFixture } from "../../helpers/controller-fixture";
 
 function createContainer() {
 	return {
@@ -27,63 +28,63 @@ describe("/handoff command", () => {
 	});
 
 	it("shows a cancellable loader while handoff generation is running", async () => {
-		const handoffStarted = Promise.withResolvers<void>();
-		const handoffDone = Promise.withResolvers<{ document: string }>();
-		let isGeneratingHandoff = false;
-		const statusContainer = createContainer();
-		const chatContainer = createContainer();
-		const abortHandoff = vi.fn();
-		// InputController installs the real Esc handler; CommandController should
-		// leave it in place while showing the handoff loader.
-		const originalOnEscape = vi.fn(() => {
-			if (isGeneratingHandoff) abortHandoff();
+		await withControllerFixture(async fixture => {
+			const handoffStarted = Promise.withResolvers<void>();
+			const handoffDone = Promise.withResolvers<{ document: string }>();
+			let isGeneratingHandoff = false;
+			const statusContainer = createContainer();
+			const chatContainer = createContainer();
+			const abortHandoff = vi.fn();
+			const originalOnEscape = vi.fn(() => {
+				if (isGeneratingHandoff) abortHandoff();
+			});
+			const requestRender = vi.fn();
+			const ctx = {
+				sessionManager: {
+					getEntries: () => [{ type: "message" }, { type: "message" }],
+				},
+				session: {
+					handoff: vi.fn(async () => {
+						isGeneratingHandoff = true;
+						handoffStarted.resolve();
+						try {
+							return await handoffDone.promise;
+						} finally {
+							isGeneratingHandoff = false;
+						}
+					}),
+					abortHandoff,
+				},
+				loadingAnimation: undefined,
+				statusContainer,
+				chatContainer,
+				ui: { requestRender, requestComponentRender: vi.fn() },
+				editor: { onEscape: originalOnEscape },
+				rebuildChatFromMessages: vi.fn(),
+				statusLine: { invalidate: vi.fn() },
+				updateEditorTopBorder: vi.fn(),
+				updateEditorBorderColor: vi.fn(),
+				reloadTodos: vi.fn(async () => undefined),
+				showStatus: vi.fn(),
+				showWarning: vi.fn(),
+				showError: vi.fn(),
+			} as unknown as InteractiveModeContext;
+			const controller = new CommandController(ctx, fixture.getInputLeaseManager, fixture.scope);
+
+			const commandPromise = controller.handleHandoffCommand("focus on tests");
+			await handoffStarted.promise;
+
+			expect(statusContainer.children).toHaveLength(1);
+			expect(ctx.editor.onEscape).toBe(originalOnEscape);
+			ctx.editor.onEscape?.("escape");
+			expect(abortHandoff).toHaveBeenCalledTimes(1);
+
+			handoffDone.resolve({ document: "## Goal\nContinue" });
+			await commandPromise;
+
+			expect(statusContainer.children).toHaveLength(0);
+			expect(ctx.editor.onEscape).toBe(originalOnEscape);
+			expect(ctx.session.handoff).toHaveBeenCalledWith("focus on tests");
 		});
-		const requestRender = vi.fn();
-		const ctx = {
-			sessionManager: {
-				getEntries: () => [{ type: "message" }, { type: "message" }],
-			},
-			session: {
-				handoff: vi.fn(async () => {
-					isGeneratingHandoff = true;
-					handoffStarted.resolve();
-					try {
-						return await handoffDone.promise;
-					} finally {
-						isGeneratingHandoff = false;
-					}
-				}),
-				abortHandoff,
-			},
-			loadingAnimation: undefined,
-			statusContainer,
-			chatContainer,
-			ui: { requestRender, requestComponentRender: vi.fn() },
-			editor: { onEscape: originalOnEscape },
-			rebuildChatFromMessages: vi.fn(),
-			statusLine: { invalidate: vi.fn() },
-			updateEditorTopBorder: vi.fn(),
-			updateEditorBorderColor: vi.fn(),
-			reloadTodos: vi.fn(async () => undefined),
-			showStatus: vi.fn(),
-			showWarning: vi.fn(),
-			showError: vi.fn(),
-		} as unknown as InteractiveModeContext;
-		const controller = new CommandController(ctx);
-
-		const commandPromise = controller.handleHandoffCommand("focus on tests");
-		await handoffStarted.promise;
-
-		expect(statusContainer.children).toHaveLength(1);
-		expect(ctx.editor.onEscape).toBe(originalOnEscape);
-		ctx.editor.onEscape?.("escape");
-		expect(abortHandoff).toHaveBeenCalledTimes(1);
-
-		handoffDone.resolve({ document: "## Goal\nContinue" });
-		await commandPromise;
-
-		expect(statusContainer.children).toHaveLength(0);
-		expect(ctx.editor.onEscape).toBe(originalOnEscape);
-		expect(ctx.session.handoff).toHaveBeenCalledWith("focus on tests");
 	});
 });

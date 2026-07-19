@@ -1,3 +1,4 @@
+import { pressHub } from "./helpers/agent-hub-input";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -77,7 +78,7 @@ describe("Agent Hub sectioned projection", () => {
 		expect(initial).toContain("Parked history (1)");
 		expect(initial).toContain("■ PARK parked");
 
-		hub.handleInput(".");
+		pressHub(hub, ".");
 		const activeOnly = text(hub);
 		expect(activeOnly).toContain("Running (1)");
 		expect(activeOnly).toContain("Idle / needs attention (1)");
@@ -112,7 +113,7 @@ describe("Agent Hub sectioned projection", () => {
 		for (const n of [50, 50, 338, 1000]) {
 			const registry = registryWithParked(n);
 			const hub = hubFor(registry);
-			hub.handleInput(".");
+			pressHub(hub, ".");
 			hub.render(120);
 			const samples: number[] = [];
 			for (let iteration = 0; iteration < 100; iteration++) {

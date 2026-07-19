@@ -141,7 +141,6 @@ export class InputController {
 		this.ctx.editor.setActionKeys("app.interrupt", this.ctx.keybindings.getKeys("app.interrupt"));
 		this.ctx.editor.setActionKeys("ui.dismiss", this.ctx.keybindings.getKeys("ui.dismiss"));
 		this.#interruptController.installFocusedLeftTapListener();
-		installCommandLine(this.ctx);
 		this.ctx.editor.onInterrupt = () => {
 			// Active operations are interruptible independently of UI dismissal.
 			// Dispatch on live session state instead of swapping handlers:
@@ -199,12 +198,11 @@ export class InputController {
 			if (this.ctx.hasActiveOmfg() && this.ctx.handleOmfgEscape()) return;
 			if (this.ctx.focusedAgentId) {
 				// A composer entered from Agent Hub returns to that read-only
-				// preview first. Other focused views keep the established
-				// clear-draft / return-to-main behavior.
+				// preview first. Other focused views preserve their draft; only an
+				// empty composer returns to the main session.
 				if (this.ctx.returnToAgentHubPreview()) return;
 				if (this.ctx.editor.getText().trim()) {
-					this.ctx.editor.setText("");
-					this.ctx.ui.requestRender();
+					this.ctx.lastEscapeTime = 0;
 				} else {
 					this.#interruptController.unfocus();
 				}
@@ -216,16 +214,15 @@ export class InputController {
 				return;
 			}
 			if (this.ctx.isBashMode) {
-				this.ctx.editor.setText("");
 				this.ctx.isBashMode = false;
+				this.ctx.lastEscapeTime = 0;
 				this.ctx.updateEditorBorderColor();
 			} else if (this.ctx.isPythonMode) {
-				this.ctx.editor.setText("");
 				this.ctx.isPythonMode = false;
+				this.ctx.lastEscapeTime = 0;
 				this.ctx.updateEditorBorderColor();
 			} else if (this.ctx.editor.getText().trim()) {
-				this.ctx.editor.setText("");
-				this.ctx.ui.requestRender();
+				// A typed draft owns Escape; preserve it and keep the double-Escape gesture disarmed.
 				this.ctx.lastEscapeTime = 0;
 			} else {
 				const action = settings.get("doubleEscapeAction");
@@ -271,7 +268,7 @@ export class InputController {
 		this.ctx.editor.setActionKeys("app.model.select", this.ctx.keybindings.getKeys("app.model.select"));
 		this.ctx.editor.onSelectModel = () => this.ctx.showModelSelector();
 		this.ctx.editor.setActionKeys("app.history.search", this.ctx.keybindings.getKeys("app.history.search"));
-		this.ctx.editor.onHistorySearch = () => this.ctx.showHistorySearch();
+		this.ctx.editor.onHistorySearch = () => this.ctx.showHistorySearch(this.ctx.editor.getText());
 		this.ctx.editor.setActionKeys("app.thinking.toggle", this.ctx.keybindings.getKeys("app.thinking.toggle"));
 		this.ctx.editor.onToggleThinking = () => this.ctx.toggleThinkingBlockVisibility();
 		this.ctx.editor.setActionKeys("app.editor.external", this.ctx.keybindings.getKeys("app.editor.external"));
@@ -298,6 +295,7 @@ export class InputController {
 		this.ctx.editor.setActionKeys("app.message.dequeue", this.ctx.keybindings.getKeys("app.message.dequeue"));
 		this.ctx.editor.onDequeue = () => this.handleDequeue();
 		this.ctx.editor.clearCustomKeyHandlers();
+		installCommandLine(this.ctx);
 		for (const key of this.ctx.keybindings.getKeys("app.transcript.rawToggle")) {
 			this.ctx.editor.setCustomKeyHandler(key, () => {
 				if (this.ctx.editor.getText().trim()) return;

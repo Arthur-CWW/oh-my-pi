@@ -4,6 +4,7 @@ import { CommandController } from "@oh-my-pi/pi-coding-agent/modes/controllers/c
 import { getThemeByName, setThemeInstance, type Theme, theme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
 import { Container, Spacer } from "@oh-my-pi/pi-tui";
+import { withControllerFixture } from "./helpers/controller-fixture";
 
 /**
  * Contract under test: `CommandController.executeCompaction` must not leak
@@ -82,42 +83,38 @@ describe("executeCompaction UI lifecycle", () => {
 	});
 
 	it("leaves the transcript untouched and drains the loader when compaction is cancelled", async () => {
-		const compact = vi.fn(async () => {
-			throw new CompactionCancelledError();
+		await withControllerFixture(async fixture => {
+			const compact = vi.fn(async () => {
+				throw new CompactionCancelledError();
+			});
+			const { ctx, chatContainer, statusContainer, rebuildChatFromMessages, showError } = buildCtx(compact);
+			const childrenBefore = chatContainer.children.length;
+
+			const controller = new CommandController(ctx, fixture.getInputLeaseManager, fixture.scope);
+			const outcome = await controller.executeCompaction();
+
+			expect(outcome).toBe("cancelled");
+			expect(chatContainer.children).toHaveLength(childrenBefore);
+			expect(statusContainer.children).toHaveLength(0);
+			expect(showError).toHaveBeenCalledWith("Compaction cancelled");
+			expect(rebuildChatFromMessages).not.toHaveBeenCalled();
 		});
-		const { ctx, chatContainer, statusContainer, rebuildChatFromMessages, showError } = buildCtx(compact);
-		const childrenBefore = chatContainer.children.length;
-
-		const controller = new CommandController(ctx);
-		const outcome = await controller.executeCompaction();
-
-		expect(outcome).toBe("cancelled");
-		// No orphan Spacer leaked into the chat transcript on the cancel path.
-		expect(chatContainer.children).toHaveLength(childrenBefore);
-		// The compacting loader was removed from the status container.
-		expect(statusContainer.children).toHaveLength(0);
-		// Proof the cancel branch ran instead of the success branch.
-		expect(showError).toHaveBeenCalledWith("Compaction cancelled");
-		expect(rebuildChatFromMessages).not.toHaveBeenCalled();
 	});
 
 	it("drains the loader after a successful compaction resolves", async () => {
-		const compact = vi.fn(
-			async (): Promise<CompactionResult<unknown>> => ({ summary: "", firstKeptEntryId: "", tokensBefore: 0 }),
-		);
-		const { ctx, statusContainer, rebuildChatFromMessages, statusAtRebuild } = buildCtx(compact);
+		await withControllerFixture(async fixture => {
+			const compact = vi.fn(
+				async (): Promise<CompactionResult<unknown>> => ({ summary: "", firstKeptEntryId: "", tokensBefore: 0 }),
+			);
+			const { ctx, statusContainer, rebuildChatFromMessages, statusAtRebuild } = buildCtx(compact);
 
-		const controller = new CommandController(ctx);
-		const outcome = await controller.executeCompaction();
+			const controller = new CommandController(ctx, fixture.getInputLeaseManager, fixture.scope);
+			const outcome = await controller.executeCompaction();
 
-		expect(outcome).toBe("ok");
-		// Status container is empty once compaction resolves.
-		expect(statusContainer.children).toHaveLength(0);
-		// Proof the success branch ran (rebuild happens only on the ok path).
-		expect(rebuildChatFromMessages).toHaveBeenCalledTimes(1);
-		// The loader was drained BEFORE the transcript rebuild, not only by the
-		// finally that runs afterward: the status container was already empty at
-		// the instant rebuildChatFromMessages ran (1 leaked loader without the fix).
-		expect(statusAtRebuild()).toBe(0);
+			expect(outcome).toBe("ok");
+			expect(statusContainer.children).toHaveLength(0);
+			expect(rebuildChatFromMessages).toHaveBeenCalledTimes(1);
+			expect(statusAtRebuild()).toBe(0);
+		});
 	});
 });

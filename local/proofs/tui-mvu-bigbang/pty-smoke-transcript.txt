@@ -1,0 +1,285 @@
+HR-225 real PTY smoke: PASS
+binary=/Users/arthur/agents/vendor/oh-my-pi/packages/coding-agent/dist/omp
+pid=75991
+flows=compose/Esc, Ctrl-R, Settings j/k/back, Hub/help/close, Resume selector j/k/filter/back
+
+--- startup ---
+       │ ! to run bash                                                         │
+│         ██    ██         │ $ to run python                                                       │
+│         ██    ██         │ ───────────────────────────────────────────────────────────────────── │
+│        ▄██▄  ▄██▄        │ LSP Servers                                                           │
+│                          │ No LSP servers                                                        │
+│         Unknown          │                                                                       │
+│         Unknown          │                                                                       │
+│                          │                                                                       │
+│                          │ ───────────────────────────────────────────────────────────────────── │
+│                          │ Recent sessions                                                       │
+│                          │ No recent sessions                                                    │
+│                          │                                                                       │
+│                          │                                                                       │
+│                          │                                                                       │
+│                          │                                                                       │
+╰──────────────────────────┴───────────────────────────────────────────────────────────────────────╯
+ Tip: Try task isolation to create CoW worktrees
+
+ Warning: No models available. Use /login or set an API key environment variable. Then use /model to select a model.    
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Update Available                                                                                                       
+ New version 17.0.5 is available. Run: omp update                                                                       
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+╭── π  > ⬢ no-model i > 📁 /Users/arthur/agents > ⑂ main *1444 ?1194 > ◫ ?/0 ⟲ ▶───────────────────────────────────────╮
+╰─                                                                                                                    ─╯
+
+
+
+
+
+
+
+
+--- compose ---
+╰─ draft sentinel                                                                                                     ─╯
+
+--- ctrl-r-history ---
+                       │ # for prompt actions                                                  │
+│       ▀██████████▀       │ / for commands                                                        │
+│        ╘██    ██         │ ! to run bash                                                         │
+│         ██    ██         │ $ to run python                                                       │
+│         ██    ██         │ ───────────────────────────────────────────────────────────────────── │
+│        ▄██▄  ▄██▄        │ LSP Servers                                                           │
+│                          │ No LSP servers                                                        │
+│         Unknown          │                                                                       │
+│         Unknown          │                                                                       │
+│                          │                                                                       │
+│                          │ ───────────────────────────────────────────────────────────────────── │
+│                          │ Recent sessions                                                       │
+│                          │ No recent sessions                                                    │
+│                          │                                                                       │
+│                          │                                                                       │
+│                          │                                                                       │
+│                          │                                                                       │
+╰──────────────────────────┴───────────────────────────────────────────────────────────────────────╯
+ Tip: Try task isolation to create CoW worktrees
+
+ Warning: No models available. Use /login or set an API key environment variable. Then use /model to select a model.    
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Update Available                                                                                                       
+ New version 17.0.5 is available. Run: omp update                                                                       
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+  No matching history
+
+
+
+
+
+
+
+
+
+--- escape-restores-draft ---
+       │ ! to run bash                                                         │
+│         ██    ██         │ $ to run python                                                       │
+│         ██    ██         │ ───────────────────────────────────────────────────────────────────── │
+│        ▄██▄  ▄██▄        │ LSP Servers                                                           │
+│                          │ No LSP servers                                                        │
+│         Unknown          │                                                                       │
+│         Unknown          │                                                                       │
+│                          │                                                                       │
+│                          │ ───────────────────────────────────────────────────────────────────── │
+│                          │ Recent sessions                                                       │
+│                          │ No recent sessions                                                    │
+│                          │                                                                       │
+│                          │                                                                       │
+│                          │                                                                       │
+│                          │                                                                       │
+╰──────────────────────────┴───────────────────────────────────────────────────────────────────────╯
+ Tip: Try task isolation to create CoW worktrees
+
+ Warning: No models available. Use /login or set an API key environment variable. Then use /model to select a model.    
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Update Available                                                                                                       
+ New version 17.0.5 is available. Run: omp update                                                                       
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+╭── π  > ⬢ no-model i > 📁 /Users/arthur/agents > ⑂ main *1444 ?1194 > ◫ ?/0 ⟲ ▶───────────────────────────────────────╮
+╰─ draft sentinel                                                                                                     ─╯
+
+
+
+
+
+
+
+
+--- settings-open ---
+ming           true                                                             │
+│                      │   Show Token Usage           false                                                            │
+│                      │   Show Hardware Cursor       true                                                             │
+│                      │   Show Resolved Model Badge  false                                                            │
+│                      │   Show Token Rate Badge      true                                                             │
+│                      │   Images                                                                                      │
+│                      │   Show Inline Images         true                                                             │
+│                      │   Auto-Resize Images         true                                                             │
+│                      │   Block Images               false                                                            │
+│                      │                                                                                               │
+│                      │                                                                                               │
+│                                                                                                                      │
+│   Theme used when the terminal has a dark background                                                                 │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│ Preview:                                                                                                             │
+│  π  > ⬢ no-model i > 📁 /Users/arthur/agents > ⑂ main *1444 ?1194 > ◫ ?/0 ⟲ ▶                                        │
+├──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Enter/Space to change · Tab to jump sections · ←/→ to switch tabs · Type to search · Esc to close                    │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+--- settings-navigation ---
+ming           true                                                             │
+│                      │   Show Token Usage           false                                                            │
+│                      │   Show Hardware Cursor       true                                                             │
+│                      │   Show Resolved Model Badge  false                                                            │
+│                      │   Show Token Rate Badge      true                                                             │
+│                      │   Images                                                                                      │
+│                      │   Show Inline Images         true                                                             │
+│                      │   Auto-Resize Images         true                                                             │
+│                      │   Block Images               false                                                            │
+│                      │                                                                                               │
+│                      │                                                                                               │
+│                                                                                                                      │
+│   Theme used when the terminal has a dark background                                                                 │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│ Preview:                                                                                                             │
+│  π  > ⬢ no-model i > 📁 /Users/arthur/agents > ⑂ main *1444 ?1194 > ◫ ?/0 ⟲ ▶                                        │
+├──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Enter/Space to change · Tab to jump sections · ←/→ to switch tabs · Type to search · Esc to close                    │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+--- hub-open ---
+                                                                                
+                                                                                                                        
+                                                                                                                        
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ ●Preview transcript                                                                                                    
+ No messages yet.                                                                                                       
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ External peers                                                                                                         
+ ❯ -             ○ IDLE agents-8pp9cq external                                            /Users/arthur/agents just now 
+                                                                                                                        
+ /:search  gj:scroll one display row down  gk:scroll one display row up  J:scroll five lines down  K:scroll five lines… 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+--- hub-help ---
+                                                                                
+   Source: /var/folders/87/p8v45fj16jsfngtm_kwdch9r0000gn/T/omp-mvu-pty-qzytd2_0/sessions/2026-07-19T18-57-46-958Z_019… 
+   Model: unknown                                                                                                       
+   Version/fork: 16.0.1+fork.6d8cfd43b4ef · 65a92556d0c0                                                                
+ Help (press ? to hide)                                                                                                 
+   S subscription · A auth/paid                                                                                         
+   Move  gj scroll one display row down · gk scroll one display row up · J scroll five lines down                       
+         K scroll five lines up · Ctrl+D/d scroll half-page down · Ctrl+U/u scroll half-page up                         
+         PgDn scroll full page down · PgUp scroll full page up                                                          
+   Navigate  GG jump to the first line · Shift+G jump to the last line · j/↓ select next visible row                    
+             k/↑ select previous visible row · n next orchestrator root · p previous orchestrator root                  
+   View  za toggle fold · . toggle agent history · v rich/plain preview                                                 
+   Mode  ? show contextual help · / search                                                                              
+   Close  y yank selected child identity · Enter attach to selected agent · q close Hub                                 
+   [ / ] cycle siblings · ← / →                                                                                         
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ External peers                                                                                                         
+ ❯ -             ○ IDLE agents-8pp9cq external                                            /Users/arthur/agents just now 
+                                                                                                                        
+ /:search  gj:scroll one display row down  gk:scroll one display row up  J:scroll five lines down  K:scroll five lines… 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+--- selector-open ---
+mpt actions                                                  │
+│       ▀██████████▀       │ / for commands                                                        │
+│        ╘██    ██         │ ! to run bash                                                         │
+│         ██    ██         │ $ to run python                                                       │
+│         ██    ██         │ ───────────────────────────────────────────────────────────────────── │
+│        ▄██▄  ▄██▄        │ LSP Servers                                                           │
+│                          │ No LSP servers                                                        │
+│         Unknown          │                                                                       │
+│         Unknown          │                                                                       │
+│                          │                                                                       │
+│                          │ ───────────────────────────────────────────────────────────────────── │
+│                          │ Recent sessions                                                       │
+│                          │ No recent sessions                                                    │
+│                          │                                                                       │
+│                          │                                                                       │
+│                          │                                                                       │
+│                          │                                                                       │
+╰──────────────────────────┴───────────────────────────────────────────────────────────────────────╯
+ Tip: Try task isolation to create CoW worktrees
+
+ Warning: No models available. Use /login or set an API key environment variable. Then use /model to select a model.    
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Update Available                                                                                                       
+ New version 17.0.5 is available. Run: omp update                                                                       
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+  No sessions in current folder. Press Tab to view all.
+
+
+
+
+
+
+
+
+
+--- selector-nav-filter ---
+mpt actions                                                  │
+│       ▀██████████▀       │ / for commands                                                        │
+│        ╘██    ██         │ ! to run bash                                                         │
+│         ██    ██         │ $ to run python                                                       │
+│         ██    ██         │ ───────────────────────────────────────────────────────────────────── │
+│        ▄██▄  ▄██▄        │ LSP Servers                                                           │
+│                          │ No LSP servers                                                        │
+│         Unknown          │                                                                       │
+│         Unknown          │                                                                       │
+│                          │                                                                       │
+│                          │ ───────────────────────────────────────────────────────────────────── │
+│                          │ Recent sessions                                                       │
+│                          │ No recent sessions                                                    │
+│                          │                                                                       │
+│                          │                                                                       │
+│                          │                                                                       │
+│                          │                                                                       │
+╰──────────────────────────┴───────────────────────────────────────────────────────────────────────╯
+ Tip: Try task isolation to create CoW worktrees
+
+ Warning: No models available. Use /login or set an API key environment variable. Then use /model to select a model.    
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Update Available                                                                                                       
+ New version 17.0.5 is available. Run: omp update                                                                       
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+  No sessions in current folder. Press Tab to view all.
+
+
+
+
+
+
+
+

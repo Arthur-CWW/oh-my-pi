@@ -1,4 +1,9 @@
 import { describe, expect, test } from "bun:test";
+import { makeTerminalInputAdapter } from "../../../src/modes/mvu/input-adapter";
+import {
+	createPrimitivesInspectorRoute,
+	primitivesInspectorActionToMsg,
+} from "../../../src/modes/components/primitives-inspector";
 import {
 	beginPrimitiveFilter,
 	createPrimitiveInspectorState,
@@ -129,5 +134,20 @@ describe("primitives inspector vim state", () => {
 		expect(normal).toMatchObject({ depth: 1, filterEditing: false, filterQuery: "read" });
 		expect(cleared).toMatchObject({ depth: 1, filterQuery: "" });
 		expect(root.depth).toBe(0);
+	});
+	test("advertises filter capability and maps append/delete actions", () => {
+		const route = createPrimitivesInspectorRoute(categories);
+		expect(route.context(route.initialModel).capabilities.has("selector.filter")).toBe(true);
+		const adapter = makeTerminalInputAdapter();
+		const printable = adapter.decode("x");
+		const backspace = adapter.decode("\x7f");
+		if (printable?._tag !== "Press" || backspace?._tag !== "Press") throw new Error("Expected key presses");
+		expect(primitivesInspectorActionToMsg("app.selector.filterAppend", printable)).toEqual({
+			_tag: "FilterAppend",
+			text: "x",
+		});
+		expect(primitivesInspectorActionToMsg("app.selector.filterDelete", backspace)).toEqual({
+			_tag: "FilterDelete",
+		});
 	});
 });

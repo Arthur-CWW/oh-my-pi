@@ -5,7 +5,11 @@ import type { InteractiveModeContext, SubmittedUserInput } from "@oh-my-pi/pi-co
 import { AgentRegistry, MAIN_AGENT_ID } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import { USER_INTERRUPT_LABEL } from "@oh-my-pi/pi-coding-agent/session/messages";
 
+import { createControllerFixture, type ControllerFixture } from "./helpers/controller-fixture";
+
 type Spy = Mock<(...args: unknown[]) => unknown>;
+
+let controllerFixture!: ControllerFixture;
 type StartPendingSubmissionSpy = Mock<InteractiveModeContext["startPendingSubmission"]>;
 type FakeEditor = {
 	onEscape?: (key?: string) => void;
@@ -214,6 +218,8 @@ function createContext(): {
 		showUserMessageSelector: vi.fn(),
 		showSessionSelector: vi.fn(),
 		showHookSelector,
+		mvuInputLeaseManager: controllerFixture.getInputLeaseManager(),
+		mvuScope: controllerFixture.scope,
 		shutdown: vi.fn(async () => {}),
 		clearEditor: vi.fn(),
 	} as unknown as InteractiveModeContext;
@@ -253,9 +259,11 @@ function createContext(): {
 beforeEach(async () => {
 	AgentRegistry.resetGlobalForTests();
 	await Settings.init({ inMemory: true });
+	controllerFixture = await createControllerFixture();
 });
 
-afterEach(() => {
+afterEach(async () => {
+	await controllerFixture.close();
 	AgentRegistry.resetGlobalForTests();
 	vi.restoreAllMocks();
 	resetSettingsForTest();
@@ -458,6 +466,23 @@ describe("InputController escape behavior", () => {
 		expect(spies.abort).not.toHaveBeenCalled();
 	});
 
+	it("preserves a focused subagent draft on Esc instead of clearing or unfocusing it", () => {
+		const { ctx, editor, spies } = createContext();
+		Object.defineProperty(ctx, "focusedAgentId", { value: "Worker", configurable: true });
+		ctx.lastEscapeTime = 1_000;
+		editor.setText("focused draft");
+		const controller = new InputController(ctx);
+
+		controller.setupKeyHandlers();
+		editor.onEscape?.();
+
+		expect(editor.getText()).toBe("focused draft");
+		expect(ctx.lastEscapeTime).toBe(0);
+		expect(ctx.unfocusSession).not.toHaveBeenCalled();
+		expect(spies.requestRender).not.toHaveBeenCalled();
+		expect(spies.abort).not.toHaveBeenCalled();
+	});
+
 	it("routes a focused double-← through the global input listener like Esc", () => {
 		const now = vi.spyOn(Date, "now");
 		const { ctx, inputListeners } = createContext();
@@ -503,33 +528,74 @@ describe("InputController escape behavior", () => {
 		expect(ctx.showTreeSelector).not.toHaveBeenCalled();
 		expect(spies.resetDisplay).toHaveBeenCalledTimes(1);
 	});
-	it("clears typed editor text on Esc without opening selectors or aborting", () => {
+	it("preserves typed editor text on Esc without opening selectors or aborting", () => {
 		const { ctx, editor, spies } = createContext();
 		const controller = new InputController(ctx);
 
 		controller.setupKeyHandlers();
+		ctx.lastEscapeTime = 1_000;
 		editor.setText("draft message");
 		editor.onEscape?.();
 
-		expect(editor.getText()).toBe("");
-		expect(spies.requestRender).toHaveBeenCalledTimes(1);
+		expect(editor.getText()).toBe("draft message");
+		expect(ctx.lastEscapeTime).toBe(0);
+		expect(spies.requestRender).not.toHaveBeenCalled();
 		expect(ctx.showTreeSelector).not.toHaveBeenCalled();
 		expect(ctx.showUserMessageSelector).not.toHaveBeenCalled();
 		expect(spies.resetDisplay).not.toHaveBeenCalled();
 		expect(spies.abort).not.toHaveBeenCalled();
 	});
 
-	it("does not treat the Esc after a text-clearing Esc as a double-Esc", () => {
-		const { ctx, editor } = createContext();
+	it("exits Bash mode on Esc without erasing its non-empty draft", () => {
+		const { ctx, editor, spies } = createContext();
+		ctx.isBashMode = true;
+		ctx.lastEscapeTime = 1_000;
+		editor.setText("git status --short");
+		const controller = new InputController(ctx);
+
+		controller.setupKeyHandlers();
+		editor.onEscape?.();
+
+		expect(ctx.isBashMode).toBe(false);
+		expect(editor.getText()).toBe("git status --short");
+		expect(ctx.lastEscapeTime).toBe(0);
+		expect(ctx.updateEditorBorderColor).toHaveBeenCalledTimes(1);
+		expect(spies.requestRender).not.toHaveBeenCalled();
+	});
+
+	it("exits Python mode on Esc without erasing its non-empty draft", () => {
+		const { ctx, editor, spies } = createContext();
+		ctx.isPythonMode = true;
+		ctx.lastEscapeTime = 1_000;
+		editor.setText("sum(values)");
+		const controller = new InputController(ctx);
+
+		controller.setupKeyHandlers();
+		editor.onEscape?.();
+
+		expect(ctx.isPythonMode).toBe(false);
+		expect(editor.getText()).toBe("sum(values)");
+		expect(ctx.lastEscapeTime).toBe(0);
+		expect(ctx.updateEditorBorderColor).toHaveBeenCalledTimes(1);
+		expect(spies.requestRender).not.toHaveBeenCalled();
+	});
+
+	it("does not treat the Esc after a draft-preserving Esc as a double-Esc", () => {
+		const { ctx, editor, spies } = createContext();
 		const controller = new InputController(ctx);
 
 		controller.setupKeyHandlers();
 		editor.onEscape?.(); // empty editor: arms double-Esc timer
 		editor.setText("draft");
-		editor.onEscape?.(); // clears text, must also reset the timer
+		editor.onEscape?.(); // draft-preserving Esc: leaves text intact and disarms the timer
+		expect(editor.getText()).toBe("draft");
+		expect(ctx.lastEscapeTime).toBe(0);
+		editor.setText(""); // final Esc must exercise the empty-editor timer path
 		editor.onEscape?.(); // empty again: should only re-arm, not trigger
 
+		expect(ctx.showTreeSelector).not.toHaveBeenCalled();
 		expect(ctx.showUserMessageSelector).not.toHaveBeenCalled();
+		expect(spies.resetDisplay).not.toHaveBeenCalled();
 	});
 });
 

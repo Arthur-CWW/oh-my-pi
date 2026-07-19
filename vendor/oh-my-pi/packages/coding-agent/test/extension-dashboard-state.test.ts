@@ -1,6 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { applyDisabledExtensionsToState } from "@oh-my-pi/pi-coding-agent/modes/components/extensions/state-manager";
-import type { DashboardState, Extension } from "@oh-my-pi/pi-coding-agent/modes/components/extensions/types";
+import { EXTENSION_DASHBOARD_ROUTE, ExtensionDashboard } from "@oh-my-pi/pi-coding-agent/modes/components/extensions/extension-dashboard";
+import { ExtensionList } from "@oh-my-pi/pi-coding-agent/modes/components/extensions/extension-list";
+import {
+	reduceExtensionDashboard,
+	replaceExtensionSource,
+	type ExtensionDashboardModel,
+} from "@oh-my-pi/pi-coding-agent/modes/components/extensions/state-manager";
+import type { Extension } from "@oh-my-pi/pi-coding-agent/modes/components/extensions/types";
+import type { Component } from "@oh-my-pi/pi-tui";
 
 function extension(overrides: Partial<Extension> & Pick<Extension, "id">): Extension {
 	return {
@@ -15,63 +22,105 @@ function extension(overrides: Partial<Extension> & Pick<Extension, "id">): Exten
 	};
 }
 
-function dashboardState(extensions: Extension[], selected: Extension | null = extensions[0] ?? null): DashboardState {
+
+function dashboardModel(extensions: Extension[]): ExtensionDashboardModel {
 	return {
-		tabs: [{ id: "all", label: "ALL", enabled: true, count: extensions.length }],
-		activeTabIndex: 0,
+		sourceRevision: 3,
+		requestGeneration: 0,
+		loadState: "Idle",
+		tabs: [
+			{ id: "all", label: "ALL", enabled: true, count: extensions.length },
+			{ id: "native", label: "NATIVE", enabled: true, count: extensions.length },
+		],
+		activeTabId: "all",
 		extensions,
-		tabFiltered: extensions,
-		searchFiltered: extensions,
-		searchQuery: "",
-		listIndex: 0,
-		scrollOffset: 0,
-		selected,
+		disabledIds: [],
+		query: "",
+		selectedKey: extensions[1]?.id ?? extensions[0]?.id,
+		viewportOffset: 0,
+		viewportSize: 5,
+		mode: "Browse",
 	};
 }
 
-describe("applyDisabledExtensionsToState", () => {
-	test("immediately applies item-disabled state to every visible dashboard slice", () => {
-		const selected = extension({ id: "skill:alpha" });
-		const state = dashboardState([selected, extension({ id: "skill:beta" })], selected);
+describe("Extension dashboard MVU adapter", () => {
+	test("exports route grammar and keeps stable selection through reorder while fencing stale sources", () => {
+		expect(String(EXTENSION_DASHBOARD_ROUTE.componentId)).toBe("extension-dashboard");
+		expect(EXTENSION_DASHBOARD_ROUTE.context).toBe("selector.global");
+		const alpha = extension({ id: "skill:alpha" });
+		const beta = extension({ id: "skill:beta" });
+		const model = dashboardModel([alpha, beta]);
 
-		const next = applyDisabledExtensionsToState(state, ["skill:alpha"]);
+		const stale = replaceExtensionSource(model, [beta], [], 2);
+		expect(stale).toBe(model);
 
-		expect(next.extensions[0]).toMatchObject({
-			id: "skill:alpha",
-			state: "disabled",
-			disabledReason: "item-disabled",
-		});
-		expect(next.tabFiltered[0]).toMatchObject({
-			id: "skill:alpha",
-			state: "disabled",
-			disabledReason: "item-disabled",
-		});
-		expect(next.searchFiltered[0]).toMatchObject({
-			id: "skill:alpha",
-			state: "disabled",
-			disabledReason: "item-disabled",
-		});
-		expect(next.selected).toMatchObject({ id: "skill:alpha", state: "disabled", disabledReason: "item-disabled" });
-		expect(next.extensions[1]).toMatchObject({ id: "skill:beta", state: "active" });
+		const reordered = replaceExtensionSource(model, [beta, alpha], [], 4);
+		expect(reordered.selectedKey).toBe("skill:beta");
+		expect(reordered.extensions.map(item => item.id)).toEqual(["skill:beta", "skill:alpha"]);
 	});
 
-	test("restores a previously item-disabled shadowed extension as shadowed", () => {
-		const shadowed = extension({
-			id: "skill:shadowed",
-			state: "disabled",
-			disabledReason: "item-disabled",
-			shadowedBy: "skill:shadowing",
-		});
-		const state = dashboardState([shadowed], shadowed);
+	test("enters reversible preview focus and projects provider toggle actions", () => {
+		const alpha = extension({ id: "skill:alpha" });
+		const browse = dashboardModel([alpha]);
+		const preview = reduceExtensionDashboard(browse, { _tag: "Activate" });
+		expect(preview.model.mode).toBe("PreviewFocus");
+		expect(reduceExtensionDashboard(preview.model, { _tag: "Back" }).model.mode).toBe("Browse");
 
-		const next = applyDisabledExtensionsToState(state, []);
+		const provider = { ...browse, activeTabId: "native", selectedKey: "provider:native:master" };
+		expect(reduceExtensionDashboard(provider, { _tag: "ToggleSelected" }).commands).toEqual([
+			{ _tag: "ToggleProvider", providerId: "native", requestGeneration: 1 },
+		]);
+		const item = { ...provider, selectedKey: alpha.id };
+		expect(reduceExtensionDashboard(item, { _tag: "ToggleSelected" }).commands).toEqual([
+			{ _tag: "ToggleExtension", extensionId: alpha.id, disabled: true, requestGeneration: 1 },
+		]);
+	});
 
-		expect(next.extensions[0]).toMatchObject({
-			id: "skill:shadowed",
-			state: "shadowed",
-			disabledReason: "shadowed",
-			shadowedBy: "skill:shadowing",
+	test("requests the mounted dashboard root once for ordinary navigation", async () => {
+		const model = dashboardModel([
+			extension({ id: "skill:alpha" }),
+			extension({ id: "skill:beta" }),
+		]);
+		const dashboard = await ExtensionDashboard.fromModel(model);
+		let requestedRoot: Component | undefined;
+		dashboard.onRequestComponentRender = component => {
+			requestedRoot = component;
+		};
+		const moved = reduceExtensionDashboard(model, { _tag: "Move", delta: 1 }).model;
+		dashboard.apply(moved);
+		expect(requestedRoot).toBe(dashboard);
+		await dashboard.dispose();
+	});
+
+	test("extension list apply invalidates only its long-lived component", () => {
+		let requestedRoot: Component | undefined;
+		const list = new ExtensionList(component => {
+			requestedRoot = component;
 		});
-		expect(next.selected).toMatchObject({ id: "skill:shadowed", state: "shadowed", disabledReason: "shadowed" });
+		list.apply({
+			query: "",
+			rows: [],
+			totalRows: 0,
+			focused: true,
+		});
+		expect(requestedRoot).toBe(list);
+	});
+
+	test("stale refresh completions cannot replace the committed projection", async () => {
+		const model = dashboardModel([extension({ id: "skill:alpha" })]);
+		const pending = reduceExtensionDashboard(model, { _tag: "RefreshRequested" }).model;
+		const newer = reduceExtensionDashboard(pending, { _tag: "RefreshRequested" }).model;
+		const stale = reduceExtensionDashboard(newer, {
+			_tag: "SourceLoaded",
+			requestGeneration: pending.requestGeneration,
+			extensions: [extension({ id: "skill:stale" })],
+			disabledIds: [],
+		});
+		expect(stale.model).toBe(newer);
+		const dashboard = await ExtensionDashboard.fromModel(newer);
+		const before = dashboard.render(80);
+		await dashboard.dispose();
+		dashboard.apply({ ...newer, query: "ignored-after-dispose" });
+		expect(dashboard.render(80)).toEqual(before);
 	});
 });

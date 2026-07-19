@@ -7,9 +7,11 @@ import { renderAgentHubFooter } from "@oh-my-pi/pi-coding-agent/modes/components
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import { matchesUiDismiss } from "@oh-my-pi/pi-coding-agent/modes/utils/keybinding-matchers";
 import {
-	AgentHubViewerSequence,
+	INITIAL_AGENT_HUB_VIEWER_SEQUENCE,
 	applyAgentHubViewerSequenceAction,
+	reduceAgentHubViewerSequence,
 	type AgentHubViewerSequenceOptions,
+	type AgentHubViewerSequenceModel,
 } from "@oh-my-pi/pi-coding-agent/modes/components/agent-hub-viewer-sequence";
 import {
 	getInteractions,
@@ -25,6 +27,26 @@ beforeAll(async () => {
 afterEach(() => {
 	setKeybindings(KeybindingsManager.inMemory());
 });
+
+function viewerDriver() {
+	let model: AgentHubViewerSequenceModel = INITIAL_AGENT_HUB_VIEWER_SEQUENCE;
+	const options = (overrides: Partial<AgentHubViewerSequenceOptions> = {}): AgentHubViewerSequenceOptions => ({
+		prefix: false,
+		down: false,
+		up: false,
+		displayRows: true,
+		dismiss: false,
+		...overrides,
+	});
+	return {
+		send(key: string, overrides: Partial<AgentHubViewerSequenceOptions> = {}) {
+			const transition = reduceAgentHubViewerSequence(model, key, options(overrides));
+			model = transition.model;
+			return transition.action;
+		},
+		model: () => model,
+	};
+}
 
 describe("Agent Hub Vim key grammar", () => {
 	it("binds za to the identity selected when the fold prefix starts", () => {
@@ -71,18 +93,10 @@ describe("Agent Hub Vim key grammar", () => {
 		const displayRows = [...wrappedLine, ...wrapTextWithAnsi("next", 8)];
 		expect(wrappedLine).toHaveLength(3);
 
-		const sequence = new AgentHubViewerSequence();
-		const options = (overrides: Partial<AgentHubViewerSequenceOptions>): AgentHubViewerSequenceOptions => ({
-			prefix: false,
-			down: false,
-			up: false,
-			displayRows: true,
-			dismiss: false,
-			...overrides,
-		});
+		const sequence = viewerDriver();
 		const motion = (offset: number, key: "j" | "k"): number => {
-			expect(sequence.handle("g", options({ prefix: true }))).toEqual({ kind: "pending" });
-			const action = sequence.handle(key, options(key === "j" ? { down: true } : { up: true }));
+			expect(sequence.send("g", { prefix: true })).toEqual({ kind: "pending" });
+			const action = sequence.send(key, key === "j" ? { down: true } : { up: true });
 			return applyAgentHubViewerSequenceAction(offset, displayRows.length - 1, action);
 		};
 
@@ -98,49 +112,81 @@ describe("Agent Hub Vim key grammar", () => {
 		expect(motion(0, "k")).toBe(0);
 		expect(motion(displayRows.length - 1, "j")).toBe(displayRows.length - 1);
 
-		expect(sequence.handle("g", options({ prefix: true }))).toEqual({ kind: "pending" });
-		expect(sequence.handle("g", options({ prefix: true }))).toEqual({ kind: "first-line" });
-		expect(sequence.handle("G", options({}))).toEqual({ kind: "unhandled" });
+		expect(sequence.send("g", { prefix: true })).toEqual({ kind: "pending" });
+		expect(sequence.send("g", { prefix: true })).toEqual({ kind: "first-line" });
+		expect(sequence.send("G")).toEqual({ kind: "unhandled" });
 	});
 
 	it("waits indefinitely on g, dispatches the namespace, and cancels only on live ui.dismiss", () => {
-		const sequence = new AgentHubViewerSequence();
-		const options = (keyData: string): AgentHubViewerSequenceOptions => ({
-			prefix: false,
-			down: false,
-			up: false,
-			displayRows: true,
-			dismiss: matchesUiDismiss(keyData),
-		});
-		expect(sequence.handle("g", { ...options("g"), prefix: true })).toEqual({ kind: "pending" });
-		expect(sequence.isPending).toBe(true);
-		expect(sequence.handle("a", options("a"))).toEqual({ kind: "attach-owner" });
-		expect(sequence.handle("g", { ...options("g"), prefix: true })).toEqual({ kind: "pending" });
-		expect(sequence.handle("x", options("x"))).toEqual({ kind: "open-errors" });
+		const sequence = viewerDriver();
+		const send = (key: string) =>
+			sequence.send(key, {
+				prefix: key === "g",
+				down: key === "j",
+				up: key === "k",
+				dismiss: matchesUiDismiss(key),
+			});
+		expect(send("g")).toEqual({ kind: "pending" });
+		expect(sequence.model().pendingG).toBe(true);
+		expect(send("a")).toEqual({ kind: "attach-owner" });
+		expect(send("g")).toEqual({ kind: "pending" });
+		expect(send("x")).toEqual({ kind: "open-errors" });
 		for (const [key, kind] of [
 			["m", "open-messages"],
 			["b", "open-bookmarks"],
 			["r", "refresh"],
 			["s", "send"],
 		] as const) {
-			expect(sequence.handle("g", { ...options("g"), prefix: true })).toEqual({ kind: "pending" });
-			expect(sequence.handle(key, options(key))).toEqual({ kind });
+			expect(send("g")).toEqual({ kind: "pending" });
+			expect(send(key)).toEqual({ kind });
 		}
-		expect(sequence.handle("g", { ...options("g"), prefix: true })).toEqual({ kind: "pending" });
-		expect(sequence.handle("t", options("t"))).toEqual({ kind: "unknown", chord: "gt" });
+		expect(send("g")).toEqual({ kind: "pending" });
+		expect(send("t")).toEqual({ kind: "unknown", chord: "gt" });
 
 		setKeybindings(KeybindingsManager.inMemory({ "app.interrupt": "ctrl+q" }));
-		expect(sequence.handle("g", { ...options("g"), prefix: true })).toEqual({ kind: "pending" });
-		expect(sequence.handle("\x11", options("\x11"))).toEqual({ kind: "unknown", chord: "g\x11" });
-		expect(sequence.handle("g", { ...options("g"), prefix: true })).toEqual({ kind: "pending" });
-		expect(sequence.handle("\x1b", options("\x1b"))).toEqual({ kind: "cancelled" });
+		expect(send("g")).toEqual({ kind: "pending" });
+		expect(send("\x11")).toEqual({ kind: "unknown", chord: "g\x11" });
+		expect(send("g")).toEqual({ kind: "pending" });
+		expect(send("\x1b")).toEqual({ kind: "cancelled" });
 
 		setKeybindings(KeybindingsManager.inMemory({ "ui.dismiss": "ctrl+g" }));
-		expect(sequence.handle("g", { ...options("g"), prefix: true })).toEqual({ kind: "pending" });
-		expect(sequence.handle("\x1b", options("\x1b"))).toEqual({ kind: "unknown", chord: "g\x1b" });
-		expect(sequence.handle("g", { ...options("g"), prefix: true })).toEqual({ kind: "pending" });
-		expect(sequence.handle("\x07", options("\x07"))).toEqual({ kind: "cancelled" });
-		expect(sequence.isPending).toBe(false);
+		expect(send("g")).toEqual({ kind: "pending" });
+		expect(send("\x1b")).toEqual({ kind: "unknown", chord: "g\x1b" });
+		expect(send("g")).toEqual({ kind: "pending" });
+		expect(send("\x07")).toEqual({ kind: "cancelled" });
+		expect(sequence.model().pendingG).toBe(false);
+	});
+
+	it("stages the full attention table, commits on Enter, and backs one reversible layer", () => {
+		const target = { key: "session:s1:agent:Worker", label: "Worker" };
+		for (const [key, action] of [
+			["n", "now"],
+			["x", "next"],
+			["w", "waiting"],
+			["l", "later"],
+			["h", "hidden"],
+			["s", "snooze"],
+			["t", "tags"],
+			["b", "bookmark"],
+			["o", "note"],
+		] as const) {
+			const sequence = viewerDriver();
+			expect(sequence.send("a", { target })).toEqual({ kind: "open-triage", target });
+			expect(sequence.send(key)).toEqual({ kind: "stage-attention", target, action });
+			expect(sequence.send("\r", { enter: true })).toEqual({ kind: "commit-attention", target, action });
+			expect(sequence.model()).toEqual(INITIAL_AGENT_HUB_VIEWER_SEQUENCE);
+		}
+
+		const backed = viewerDriver();
+		backed.send("a", { target });
+		backed.send("h");
+		expect(backed.send("\x1b", { dismiss: true })).toEqual({ kind: "cancelled" });
+		expect(backed.model()).toEqual(INITIAL_AGENT_HUB_VIEWER_SEQUENCE);
+
+		const chord = viewerDriver();
+		chord.send("g", { prefix: true });
+		expect(chord.send("a", { target })).toEqual({ kind: "attach-owner" });
+		expect(chord.model().triage).toBeUndefined();
 	});
 
 	it("renders the pending continuations at the footer edge and removes them on cancel", () => {

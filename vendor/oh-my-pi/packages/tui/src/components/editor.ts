@@ -1085,6 +1085,12 @@ export class Editor implements Component, Focusable {
 			return;
 		}
 
+		// Redo
+		if (kb.matches(data, "tui.editor.redo")) {
+			this.redo();
+			return;
+		}
+
 		// Enter on a collapsed paste expands it in place instead of submitting.
 		if (kb.matches(data, "tui.editor.expandPaste") && this.expandPasteAtCursor()) {
 			return;
@@ -1544,6 +1550,20 @@ export class Editor implements Component, Focusable {
 
 	getCursor(): { line: number; col: number } {
 		return { line: this.#state.cursorLine, col: this.#state.cursorCol };
+	}
+
+	setCursorOffset(offset: number): void {
+		let remaining = Math.max(0, Math.trunc(offset));
+		for (let lineIndex = 0; lineIndex < this.#state.lines.length; lineIndex += 1) {
+			const line = this.#state.lines[lineIndex] ?? "";
+			if (remaining <= line.length || lineIndex === this.#state.lines.length - 1) {
+				this.#state.cursorLine = lineIndex;
+				this.#setCursorCol(Math.min(remaining, line.length));
+				this.#resetKillSequence();
+				return;
+			}
+			remaining -= line.length + 1;
+		}
 	}
 	beginUndoGroup(): void {
 		if (this.#undoGroupDepth === 0) {

@@ -19,6 +19,20 @@ import { YAML } from "bun";
 interface AppKeybindings {
 	"app.interrupt": true;
 	"ui.dismiss": true;
+	"app.command.open": true;
+	"app.command.input": true;
+	"app.command.backspace": true;
+	"app.command.completionNext": true;
+	"app.command.completionPrevious": true;
+	"app.command.previous": true;
+	"app.command.next": true;
+	"app.command.submit": true;
+	"app.settings.input": true;
+	"app.settings.pointer": true;
+	"app.tree.label": true;
+	"app.tree.labelAppend": true;
+	"app.tree.labelDelete": true;
+	"app.tree.labelCommit": true;
 	"app.clear": true;
 	"app.exit": true;
 	"app.suspend": true;
@@ -60,8 +74,33 @@ interface AppKeybindings {
 	"app.tree.foldOrUp": true;
 	"app.tree.unfoldOrDown": true;
 	"app.plan.toggle": true;
+	"app.plan.pointer": true;
+	"app.plan.reviewInput": true;
 	"app.history.search": true;
 	"app.stt.toggle": true;
+	"app.selector.filter": true;
+	"app.selector.filterAppend": true;
+	"app.selector.filterDelete": true;
+	"app.hook.submit": true;
+	"app.hook.sliderLeft": true;
+	"app.hook.sliderRight": true;
+	"app.errors.togglePin": true;
+	"setup.input": true;
+	"setup.cancel": true;
+	"setup.mouse": true;
+	"app.selector.preview": true;
+	"app.modal.focusNext": true;
+	"app.modal.focusPrevious": true;
+	"app.attention.open": true;
+	"app.attention.now": true;
+	"app.attention.next": true;
+	"app.attention.waiting": true;
+	"app.attention.later": true;
+	"app.attention.hidden": true;
+	"app.attention.snooze": true;
+	"app.attention.tags": true;
+	"app.attention.bookmark": true;
+	"app.attention.note": true;
 }
 
 export type AppKeybinding = keyof AppKeybindings;
@@ -89,6 +128,62 @@ export const KEYBINDINGS = {
 	"ui.dismiss": {
 		defaultKeys: "escape",
 		description: "Dismiss active UI",
+	},
+	"app.command.open": {
+		defaultKeys: [],
+		description: "Open command line",
+	},
+	"app.command.input": {
+		defaultKeys: [],
+		description: "Type into command line",
+	},
+	"app.command.backspace": {
+		defaultKeys: [],
+		description: "Delete command-line text",
+	},
+	"app.command.completionNext": {
+		defaultKeys: [],
+		description: "Select next command completion",
+	},
+	"app.command.completionPrevious": {
+		defaultKeys: [],
+		description: "Select previous command completion",
+	},
+	"app.command.previous": {
+		defaultKeys: [],
+		description: "Navigate to previous command history entry",
+	},
+	"app.command.next": {
+		defaultKeys: [],
+		description: "Navigate to next command history entry",
+	},
+	"app.command.submit": {
+		defaultKeys: [],
+		description: "Submit command",
+	},
+	"app.settings.input": {
+		defaultKeys: [],
+		description: "Type into settings",
+	},
+	"app.settings.pointer": {
+		defaultKeys: [],
+		description: "Route pointer input to settings",
+	},
+	"app.tree.label": {
+		defaultKeys: [],
+		description: "Edit tree label",
+	},
+	"app.tree.labelAppend": {
+		defaultKeys: [],
+		description: "Append tree label text",
+	},
+	"app.tree.labelDelete": {
+		defaultKeys: [],
+		description: "Delete tree label text",
+	},
+	"app.tree.labelCommit": {
+		defaultKeys: [],
+		description: "Commit tree label",
 	},
 	"app.clear": {
 		defaultKeys: "ctrl+c",
@@ -254,6 +349,14 @@ export const KEYBINDINGS = {
 		defaultKeys: "alt+shift+p",
 		description: "Toggle plan mode",
 	},
+	"app.plan.pointer": {
+		defaultKeys: [],
+		description: "Route pointer input to the active plan review",
+	},
+	"app.plan.reviewInput": {
+		defaultKeys: [],
+		description: "Route input to the active plan review",
+	},
 	"app.history.search": {
 		defaultKeys: "ctrl+r",
 		description: "Search history",
@@ -261,6 +364,98 @@ export const KEYBINDINGS = {
 	"app.stt.toggle": {
 		defaultKeys: [],
 		description: "Toggle speech-to-text (default gesture: hold Space)",
+	},
+	"app.selector.filter": {
+		defaultKeys: "/",
+		description: "Filter the active selector",
+	},
+	"app.selector.filterAppend": {
+		defaultKeys: [],
+		description: "Append printable input to the active selector filter",
+	},
+	"app.selector.filterDelete": {
+		defaultKeys: [],
+		description: "Delete the final character from the active selector filter",
+	},
+	"app.hook.submit": {
+		defaultKeys: [],
+		description: "Submit the active Hook editor",
+	},
+	"app.hook.sliderLeft": {
+		defaultKeys: [],
+		description: "Move the active Hook slider left",
+	},
+	"app.hook.sliderRight": {
+		defaultKeys: [],
+		description: "Move the active Hook slider right",
+	},
+	"app.errors.togglePin": {
+		defaultKeys: [],
+		description: "Toggle the focused errors dock pin",
+	},
+	"setup.input": {
+		defaultKeys: [],
+		description: "Type into the active setup scene",
+	},
+	"setup.cancel": {
+		defaultKeys: [],
+		description: "Cancel the active setup interaction",
+	},
+	"setup.mouse": {
+		defaultKeys: [],
+		description: "Route mouse input to the active setup scene",
+	},
+	"app.selector.preview": {
+		defaultKeys: "space",
+		description: "Focus the active selector preview",
+	},
+	"app.modal.focusNext": {
+		defaultKeys: "tab",
+		description: "Focus the next modal region",
+	},
+	"app.modal.focusPrevious": {
+		defaultKeys: "shift+tab",
+		description: "Focus the previous modal region",
+	},
+	"app.attention.open": {
+		defaultKeys: "a",
+		description: "Open attention triage",
+	},
+	"app.attention.now": {
+		defaultKeys: "n",
+		description: "Mark attention now",
+	},
+	"app.attention.next": {
+		defaultKeys: "x",
+		description: "Mark attention next",
+	},
+	"app.attention.waiting": {
+		defaultKeys: "w",
+		description: "Mark attention waiting",
+	},
+	"app.attention.later": {
+		defaultKeys: "l",
+		description: "Mark attention later",
+	},
+	"app.attention.hidden": {
+		defaultKeys: "h",
+		description: "Hide from attention",
+	},
+	"app.attention.snooze": {
+		defaultKeys: "s",
+		description: "Snooze attention",
+	},
+	"app.attention.tags": {
+		defaultKeys: "t",
+		description: "Edit attention tags",
+	},
+	"app.attention.bookmark": {
+		defaultKeys: "b",
+		description: "Bookmark attention target",
+	},
+	"app.attention.note": {
+		defaultKeys: "o",
+		description: "Add attention note",
 	},
 } as const satisfies KeybindingDefinitions;
 

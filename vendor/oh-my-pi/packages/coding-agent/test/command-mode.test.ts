@@ -3,6 +3,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
+import { Effect, Exit, Scope } from "effect";
 import {
 	applyCommandModeCompletion,
 	type CommandModeCommand,
@@ -13,6 +14,11 @@ import {
 	parseCommandLine,
 	TUI_COLON_COMMAND_NAMES,
 } from "@oh-my-pi/pi-coding-agent/modes/command-registry";
+import { KeybindingsManager } from "@oh-my-pi/pi-coding-agent/config/keybindings";
+import {
+	MVU_ACTIVE_KEYMAP_CONTEXT_MATRIX,
+	MVU_KEYMAP_TABLES,
+} from "@oh-my-pi/pi-coding-agent/config/mvu-keybindings";
 import { AssistantMessageComponent } from "@oh-my-pi/pi-coding-agent/modes/components/assistant-message";
 import {
 	CommandLineComponent,
@@ -20,6 +26,9 @@ import {
 	canEnterCommandMode,
 	installCommandLine,
 } from "@oh-my-pi/pi-coding-agent/modes/components/command-line";
+import { makeTerminalInputAdapter } from "@oh-my-pi/pi-coding-agent/modes/mvu/input-adapter";
+import { makeInputLeaseManager } from "@oh-my-pi/pi-coding-agent/modes/mvu/input-lease";
+import { compileKeymapRegistry } from "@oh-my-pi/pi-coding-agent/modes/mvu/keymap-registry";
 import { initTheme, theme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import { toggleRichTranscript } from "@oh-my-pi/pi-coding-agent/modes/transcript-commands";
 import type { TranscriptDisplayContext } from "@oh-my-pi/pi-coding-agent/modes/transcript-display";
@@ -27,7 +36,8 @@ import { HistoryStorage } from "@oh-my-pi/pi-coding-agent/session/history-storag
 import { BUILTIN_SLASH_COMMAND_DEFS } from "@oh-my-pi/pi-coding-agent/slash-commands/builtin-registry";
 import { formatLoopStats } from "@oh-my-pi/pi-coding-agent/slash-commands/loopstats";
 import { createIrcMessageCard } from "@oh-my-pi/pi-coding-agent/tools/irc";
-import { Container, CURSOR_MARKER, Input } from "@oh-my-pi/pi-tui";
+import { Container, CURSOR_MARKER, Input, TUI } from "@oh-my-pi/pi-tui";
+import { VirtualTerminal } from "../../tui/test/virtual-terminal";
 
 const commandHistoryTempDirs: string[] = [];
 
@@ -239,68 +249,100 @@ describe("colon command registry", () => {
 		expect(ctx.copied.at(-1)).toBe("019f6141-df73-7000-b792-985f12d9db5d/CardQualityAudit");
 	});
 
-	it("renders colon output in a bottom overlay without moving transcript scroll", async () => {
-		let listener: ((data: string) => { consume?: boolean } | undefined) | undefined;
-		const editor = { getText: () => "", isShowingAutocomplete: () => false, render: () => [] };
-		const viewer = { scrollOffset: 37, render: () => [] };
-		let focused: unknown = viewer;
-		let overlayHidden = false;
-		const overlays: Array<{ component: unknown; options: Record<string, unknown> }> = [];
+	it("opens globally, preserves text-input colon, and runs editing under the command lease", async () => {
+		class EditorFixture extends Container {
+			#text = "";
+
+			getText(): string {
+				return this.#text;
+			}
+
+			setText(value: string): void {
+				this.#text = value;
+			}
+
+			isShowingAutocomplete(): boolean {
+				return false;
+			}
+
+			override render(): readonly string[] {
+				return [this.#text];
+			}
+		}
+		class ViewerFixture extends Container {
+			scrollOffset = 37;
+		}
+
+		const scope = Scope.makeUnsafe("sequential");
+		const terminal = new VirtualTerminal(100, 30);
+		const ui = new TUI(terminal);
+		const editor = new EditorFixture();
 		const editorContainer = new Container();
 		editorContainer.addChild(editor);
-		const ui = {
-			addInputListener: (next: typeof listener) => {
-				listener = next;
-			},
-			getFocused: () => focused,
-			setFocus: (next: unknown) => {
-				focused = next;
-			},
-			showOverlay: (component: unknown, options: Record<string, unknown>) => {
-				overlays.push({ component, options });
-				return {
-					hide: () => {
-						overlayHidden = true;
-					},
-				};
-			},
-			requestRender: () => {},
-			loopWatchdogSnapshot: {
-				totalViolations: 1,
-				maxBlockedMs: 23,
-				violations: [],
-			},
-		};
-		const interactive = {
-			editor,
-			editorContainer,
-			ui,
-			focusedAgentId: undefined,
-		};
+		const viewer = new ViewerFixture();
+		ui.addChild(editorContainer);
+		ui.addChild(viewer);
+		ui.setFocus(viewer);
+		ui.start();
 
-		installCommandLine(interactive as never);
-		expect(listener?.(":")).toEqual({ consume: true });
-		expect(focused).toBeInstanceOf(CommandLineComponent);
-		expect(editorContainer.children).toEqual([editor]);
+		try {
+			const keybindings = KeybindingsManager.inMemory();
+			const registry = Effect.runSync(
+				compileKeymapRegistry(MVU_KEYMAP_TABLES, keybindings, MVU_ACTIVE_KEYMAP_CONTEXT_MATRIX),
+			);
+			const leaseManager = await Effect.runPromise(
+				Scope.provide(scope)(makeInputLeaseManager(ui, makeTerminalInputAdapter(), registry)),
+			);
+			const errors: string[] = [];
+			const interactive = {
+				editor,
+				editorContainer,
+				ui,
+				keybindings,
+				mvuInputLeaseManager: leaseManager,
+				mvuScope: scope,
+				focusedAgentId: undefined,
+				collabGuest: false,
+				showError: (message: string) => errors.push(message),
+			};
 
-		const commandLine = focused as CommandLineComponent;
-		commandLine.handleInput("\x1b");
-		commandLine.input.setValue("loopstats");
-		commandLine.handleInput("\r");
-		await Bun.sleep(0);
-		const output = overlays.at(-1);
-		expect(output?.component).toBeInstanceOf(CommandOutputOverlayComponent);
-		expect(output?.options).toMatchObject({
-			anchor: "bottom-center",
-			width: "100%",
-			margin: { bottom: 1 },
-		});
-		expect(Bun.stripANSI((output?.component as CommandOutputOverlayComponent).render(100).join("\n"))).toContain(
-			"Loop watchdog",
-		);
-		expect(overlayHidden).toBe(true);
-		expect(viewer.scrollOffset).toBe(37);
-		(output?.component as CommandOutputOverlayComponent).handleInput("x");
+			installCommandLine(interactive as never);
+
+			const literalInput = new Input();
+			ui.setFocus(literalInput);
+			terminal.sendInput(":");
+			expect(literalInput.getValue()).toBe(":");
+
+			ui.setFocus(viewer);
+			terminal.sendInput(":");
+			await Effect.runPromise(Effect.sleep("20 millis"));
+			const commandLine = ui.getFocused();
+			expect(commandLine).toBeInstanceOf(CommandLineComponent);
+			expect(editorContainer.children).toEqual([editor]);
+
+			terminal.sendInput("\x1b[200~loopstatx\x1b[201~");
+			await Effect.runPromise(Effect.sleep("10 millis"));
+			expect((commandLine as CommandLineComponent).input.getValue()).toBe("loopstatx");
+			terminal.sendInput("\x7f");
+			terminal.sendInput("s");
+			await Effect.runPromise(Effect.sleep("10 millis"));
+			expect((commandLine as CommandLineComponent).input.getValue()).toBe("loopstats");
+
+			terminal.sendInput("\r");
+			await Effect.runPromise(Effect.sleep("50 millis"));
+			const output = ui.getFocused();
+			expect(output).toBeInstanceOf(CommandOutputOverlayComponent);
+			expect(Bun.stripANSI((output as CommandOutputOverlayComponent).render(100).join("\n"))).toContain("Loop watchdog");
+			expect(viewer.scrollOffset).toBe(37);
+			expect(errors).toEqual([]);
+
+			terminal.sendInput("\x1b");
+			await Effect.runPromise(Effect.sleep("20 millis"));
+			expect(ui.getFocused()).toBe(viewer);
+		} finally {
+			await Effect.runPromise(Scope.close(scope, Exit.void));
+			ui.stop();
+		}
 	});
 
 	it("opens colon mode uniformly from non-insert surfaces and keeps insert-mode colon literal", () => {

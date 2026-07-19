@@ -1,153 +1,132 @@
-import { afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
-import { KeybindingsManager } from "@oh-my-pi/pi-coding-agent/config/keybindings";
-import {
-	TablePreviewComponent,
-	type TablePreviewSession,
-} from "@oh-my-pi/pi-coding-agent/modes/components/table-preview";
+import { beforeAll, describe, expect, it } from "bun:test";
+import { TablePreviewComponent, type TablePreviewPatch } from "@oh-my-pi/pi-coding-agent/modes/components/table-preview";
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
-import { setKeybindings } from "@oh-my-pi/pi-tui";
 import { Effect, Exit, Scope } from "effect";
 
 interface Row {
-	id: string;
-	label: string;
+	readonly id: string;
+	readonly label: string;
+}
+
+function makePatch(
+	rows: readonly Row[],
+	selectedKey: string | undefined,
+	preview: string,
+	dirtyKeys: ReadonlySet<string>,
+): TablePreviewPatch<Row, string, string> {
+	return {
+		visibleRows: rows.map(row => ({ key: row.id, row })),
+		selectedKey,
+		focus: "table",
+		preview: { revision: preview, value: preview },
+		dirtyKeys,
+	};
 }
 
 beforeAll(() => {
 	initTheme();
 });
 
-afterEach(() => {
-	setKeybindings(KeybindingsManager.inMemory());
-	vi.useRealTimers();
-});
-
 describe("TablePreviewComponent", () => {
-	it("keeps keyed selection through a flushed refresh, updates preview on navigation, and dismisses via ui.dismiss", async () => {
-		setKeybindings(
-			KeybindingsManager.inMemory({
-				"tui.select.down": "ctrl+n",
-				"ui.dismiss": "ctrl+g",
-			}),
-		);
-		let rows: readonly Row[] = [
-			{ id: "alpha", label: "Alpha" },
-			{ id: "beta", label: "Beta" },
-		];
-		let pendingRows: readonly Row[] | undefined;
-		let flushCount = 0;
-		let closeCount = 0;
-		const opened: string[] = [];
-		const disposed: string[] = [];
+	it("renders committed patches and refreshes keyed rows without owning selection or input", async () => {
 		const scope = Scope.makeUnsafe("sequential");
-		const component = await Effect.runPromise(
+		let requestedRoot: TablePreviewComponent<Row, string, string> | undefined;
+		let renderedRows = 0;
+		let component!: TablePreviewComponent<Row, string, string>;
+		component = await Effect.runPromise(
 			Scope.provide(scope)(
-				TablePreviewComponent.mount<Row, string>({
-					rows: () => rows,
-					keyOf: row => row.id,
-					searchText: row => row.label,
-					renderRow: row => row.label,
-					preview: {
-						open: row => {
-							opened.push(row.id);
-							return {
-								render: () => [`Preview ${row.label}`],
-								dispose: () => {
-									disposed.push(row.id);
-								},
-							};
-						},
+				TablePreviewComponent.mount<Row, string, string>({
+					renderRow: (row, context) => {
+						renderedRows += 1;
+						return `${context.selected ? ">" : " "}${row.label}`;
 					},
-					height: () => 8,
-					requestRender: () => {},
-					onClose: () => {
-						closeCount += 1;
-					},
-					flush: () => {
-						flushCount += 1;
-						if (pendingRows) {
-							rows = pendingRows;
-							pendingRows = undefined;
-						}
+					renderPreview: preview => [`Preview ${preview}`],
+					height: () => 6,
+					requestComponentRender: () => {
+						requestedRoot = component;
 					},
 					layout: "columns",
 				}),
 			),
 		);
+		const alpha = { id: "alpha", label: "Alpha" };
+		const beta = { id: "beta", label: "Beta" };
+		component.apply(makePatch([alpha, beta], "alpha", "Alpha", new Set(["alpha", "beta"])));
+		expect(requestedRoot).toBe(component);
+		let rendered = component.render(60).join("\n");
+		expect(rendered).toContain(">Alpha");
+		expect(rendered).toContain("Preview Alpha");
+		expect(renderedRows).toBe(2);
 
-		expect(component.selectedKey).toBe("alpha");
-		component.handleInput("\x0e");
-		expect(component.selectedKey).toBe("beta");
-		expect(opened).toEqual(["alpha", "beta"]);
-		expect(disposed).toEqual(["alpha"]);
-		expect(component.render(60).join("\n")).toContain("Preview Beta");
-
-		pendingRows = [
-			{ id: "beta", label: "Beta refreshed" },
-			{ id: "alpha", label: "Alpha refreshed" },
-		];
-		component.render(60);
-		expect(flushCount).toBeGreaterThan(0);
-		expect(component.selectedKey).toBe("beta");
-		expect(opened.at(-1)).toBe("beta");
-		expect(component.render(60).join("\n")).toContain("Preview Beta refreshed");
-
-		component.handleInput("x");
-		expect(component.searchQuery).toBe("x");
-		component.handleInput("\x07");
-		expect(component.searchQuery).toBe("");
-		expect(closeCount).toBe(0);
-		component.handleInput("\x07");
-		expect(closeCount).toBe(1);
+		const refreshedBeta = { id: "beta", label: "Beta refreshed" };
+		component.apply(makePatch([alpha, refreshedBeta], "beta", "Beta refreshed", new Set(["alpha", "beta"])));
+		expect(requestedRoot).toBe(component);
+		rendered = component.render(60).join("\n");
+		expect(rendered).toContain(">Beta refreshed");
+		expect(rendered).toContain("Preview Beta refreshed");
+		expect(renderedRows).toBe(4);
 
 		await Effect.runPromise(Scope.close(scope, Exit.void));
 	});
 
-	it("runs preview and provider finalizers when its mount Scope closes", async () => {
-		vi.useFakeTimers();
-		let ticks = 0;
-		let sessionDisposed = false;
-		let providerDisposed = false;
+	it("finalizes renderer resources when its mount Scope closes", async () => {
+		let disposed = false;
 		const scope = Scope.makeUnsafe("sequential");
 		const component = await Effect.runPromise(
 			Scope.provide(scope)(
-				TablePreviewComponent.mount<Row, string>({
-					rows: () => [{ id: "timer", label: "Timer" }],
-					keyOf: row => row.id,
+				TablePreviewComponent.mount<Row, string, string>({
 					renderRow: row => row.label,
-					preview: {
-						open: () => {
-							const timer = setInterval(() => {
-								ticks += 1;
-							}, 2);
-							const session: TablePreviewSession = {
-								render: () => ["timer preview"],
-								dispose: () => {
-									clearInterval(timer);
-									sessionDisposed = true;
-								},
-							};
-							return session;
-						},
-						dispose: () => {
-							providerDisposed = true;
-						},
-					},
+					renderPreview: preview => [preview],
 					height: () => 6,
-					requestRender: () => {},
-					onClose: () => {},
+					requestComponentRender: () => {},
+					dispose: () => {
+						disposed = true;
+					},
 				}),
 			),
 		);
 
-		component.render(40);
-		vi.advanceTimersByTime(12);
-		expect(ticks).toBeGreaterThan(0);
+		component.apply(makePatch([{ id: "timer", label: "Timer" }], "timer", "Timer preview", new Set(["timer"])));
+		expect(component.render(40).join("\n")).toContain("Timer preview");
+		expect(disposed).toBe(false);
 		await Effect.runPromise(Scope.close(scope, Exit.void));
-		const ticksAfterClose = ticks;
-		vi.advanceTimersByTime(12);
-		expect(ticks).toBe(ticksAfterClose);
-		expect(sessionDisposed).toBe(true);
-		expect(providerDisposed).toBe(true);
+		expect(disposed).toBe(true);
+	});
+
+
+	it("invalidates a mutable preview resource only through its immutable descriptor revision", async () => {
+		const scope = Scope.makeUnsafe("sequential");
+		const preview = { line: "first" };
+		let previewRenders = 0;
+		const component = await Effect.runPromise(
+			Scope.provide(scope)(
+				TablePreviewComponent.mount<Row, string, typeof preview>({
+					renderRow: row => row.label,
+					renderPreview: value => {
+						previewRenders += 1;
+						return [value.line];
+					},
+					height: () => 4,
+					requestComponentRender: () => {},
+				}),
+			),
+		);
+		const rows = [{ id: "row", label: "Row" }];
+		const base = {
+			visibleRows: rows.map(row => ({ key: row.id, row })),
+			selectedKey: "row",
+			focus: "table" as const,
+			dirtyKeys: new Set<string>(),
+		};
+		component.apply({ ...base, preview: { revision: 1, value: preview } });
+		expect(component.render(40).join("\n")).toContain("first");
+		preview.line = "second";
+		component.apply({ ...base, preview: { revision: 1, value: preview } });
+		expect(component.render(40).join("\n")).toContain("first");
+		expect(previewRenders).toBe(1);
+		component.apply({ ...base, preview: { revision: 2, value: preview } });
+		expect(component.render(40).join("\n")).toContain("second");
+		expect(previewRenders).toBe(2);
+		await Effect.runPromise(Scope.close(scope, Exit.void));
 	});
 });

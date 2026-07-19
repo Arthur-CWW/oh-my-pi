@@ -50,10 +50,9 @@ export class Input implements Component, Focusable {
 		return this.#value;
 	}
 
-	setValue(value: string): void {
+	setValue(value: string, cursor = value.length): void {
 		this.#value = value;
-		// Callers seed or replace the value wholesale; typing continues at the end.
-		this.#cursor = value.length;
+		this.#cursor = Math.max(0, Math.min(cursor, value.length));
 	}
 
 	setUseTerminalCursor(useTerminalCursor: boolean): void {

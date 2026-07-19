@@ -1,69 +1,51 @@
-import {
-	type Component,
-	Container,
-	Ellipsis,
-	Input,
-	matchesKey,
-	padding,
-	ScrollView,
-	Spacer,
-	Text,
-	truncateToWidth,
-	visibleWidth,
-} from "@oh-my-pi/pi-tui";
-import { theme } from "../../modes/theme/theme";
-import {
-	matchesSelectDown,
-	matchesSelectPageDown,
-	matchesSelectPageUp,
-	matchesSelectUp,
-	matchesUiDismiss,
-} from "../../modes/utils/keybinding-matchers";
+import { Container, Ellipsis, padding, truncateToWidth, type Keybinding, Spacer, Text, visibleWidth } from "@oh-my-pi/pi-tui";
+import * as Schema from "effect/Schema";
 import type { HistoryEntry, HistoryStorage } from "../../session/history-storage";
+import { makeComponentId } from "../mvu/schema";
+import { theme } from "../../modes/theme/theme";
 import { DynamicBorder } from "./dynamic-border";
 import { keyHint, rawKeyHint } from "./keybinding-hints";
+import { SelectorSurface, type SelectorSurfaceMountSpec } from "./selector-adapter";
 
-/** Visible result rows; also the jump distance for PageUp/PageDown. */
-const MAX_VISIBLE = 10;
+const MAX_RESULTS = 100;
+const HistoryEntrySchema = Schema.Struct({
+	id: Schema.Number,
+	prompt: Schema.String,
+	created_at: Schema.Number,
+	cwd: Schema.optional(Schema.String),
+	sessionId: Schema.optional(Schema.String),
+});
+const HistoryEntriesFromJsonSchema = Schema.fromJsonString(Schema.Array(HistoryEntrySchema));
 
-/** Split a query the same way `HistoryStorage` tokenizes it, so highlights align with matches. */
 function queryTokens(query: string): string[] {
-	return query
-		.toLowerCase()
-		.split(/[^\p{L}\p{N}]+/u)
-		.filter(tok => tok.length > 0);
+	return query.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(token => token.length > 0);
 }
 
-/** Wrap every case-insensitive occurrence of any token in `text` with the accent color. */
 function highlightTokens(text: string, tokens: string[]): string {
 	if (tokens.length === 0) return text;
-
 	const lower = text.toLowerCase();
 	const ranges: Array<[number, number]> = [];
-	for (const tok of tokens) {
-		let from = lower.indexOf(tok);
-		while (from !== -1) {
-			ranges.push([from, from + tok.length]);
-			from = lower.indexOf(tok, from + tok.length);
+	for (const token of tokens) {
+		let start = 0;
+		while (start < lower.length) {
+			const index = lower.indexOf(token, start);
+			if (index < 0) break;
+			ranges.push([index, index + token.length]);
+			start = index + token.length;
 		}
 	}
 	if (ranges.length === 0) return text;
-
-	ranges.sort((a, b) => a[0] - b[0]);
-	let out = "";
-	let pos = 0;
+	ranges.sort((left, right) => left[0] - right[0]);
+	let output = "";
+	let position = 0;
 	for (const [start, end] of ranges) {
-		if (end <= pos) continue; // fully covered by a previous (merged) range
-		const from = Math.max(start, pos);
-		if (from > pos) out += text.slice(pos, from);
-		out += theme.fg("accent", text.slice(from, end));
-		pos = end;
+		if (start < position) continue;
+		output += text.slice(position, start) + theme.fg("accent", text.slice(start, end));
+		position = end;
 	}
-	if (pos < text.length) out += text.slice(pos);
-	return out;
+	return output + text.slice(position);
 }
 
-/** Compact "time since" label (e.g. `now`, `5m`, `2h`, `3d`, `2w`, `6mo`, `1y`) from epoch seconds. */
 function relativeTime(epochSeconds: number): string {
 	const seconds = Math.max(0, Math.floor(Date.now() / 1000) - epochSeconds);
 	if (seconds < 60) return "now";
@@ -78,202 +60,57 @@ function relativeTime(epochSeconds: number): string {
 	return `${Math.floor(days / 365)}y`;
 }
 
-class HistoryResultsList implements Component {
-	#results: HistoryEntry[] = [];
-	#tokens: string[] = [];
-	#selectedIndex = 0;
-	#maxVisible = MAX_VISIBLE;
-
-	setResults(results: HistoryEntry[], selectedIndex: number, tokens: string[]): void {
-		this.#results = results;
-		this.#selectedIndex = selectedIndex;
-		this.#tokens = tokens;
-	}
-
-	setSelectedIndex(selectedIndex: number): void {
-		this.#selectedIndex = selectedIndex;
-	}
-
-	invalidate(): void {
-		// No cached state to invalidate currently
-	}
-
-	render(width: number): readonly string[] {
-		const lines: string[] = [];
-
-		if (this.#results.length === 0) {
-			const message = this.#tokens.length > 0 ? "No matching history" : "No history yet";
-			lines.push(theme.fg("muted", `  ${theme.status.info} ${message}`));
-			return lines;
-		}
-
-		const cursorSymbol = `${theme.nav.cursor} `;
-		const gutterWidth = visibleWidth(cursorSymbol);
-
-		const startIndex = Math.max(
-			0,
-			Math.min(this.#selectedIndex - Math.floor(this.#maxVisible / 2), this.#results.length - this.#maxVisible),
-		);
-		const endIndex = Math.min(startIndex + this.#maxVisible, this.#results.length);
-
-		const overflow = this.#results.length > this.#maxVisible;
-		const rowWidth = Math.max(0, width - (overflow ? 1 : 0));
-		const rows: string[] = [];
-
-		for (let i = startIndex; i < endIndex; i++) {
-			const entry = this.#results[i];
-			const isSelected = i === this.#selectedIndex;
-
-			const timeStr = relativeTime(entry.created_at);
-			const timeWidth = visibleWidth(timeStr);
-			const showTime = rowWidth >= gutterWidth + 12 + timeWidth;
-
-			const promptBudget = Math.max(4, rowWidth - gutterWidth - (showTime ? timeWidth + 1 : 0));
-			const normalized = entry.prompt.replace(/\s+/g, " ").trim();
-			const plain = truncateToWidth(normalized, promptBudget);
-			const highlighted = highlightTokens(plain, this.#tokens);
-
-			const cursor = isSelected ? theme.fg("accent", cursorSymbol) : padding(gutterWidth);
-			let line = cursor + (isSelected ? theme.bold(highlighted) : highlighted);
-
-			if (showTime) {
-				// Pad the prompt region so the timestamp sits flush right with a one-cell gap.
-				line = `${truncateToWidth(line, rowWidth - timeWidth - 1, Ellipsis.Unicode, true)} ${theme.fg("dim", timeStr)}`;
-			}
-
-			rows.push(
-				isSelected
-					? theme.bg("selectedBg", truncateToWidth(line, rowWidth, Ellipsis.Omit, true))
-					: truncateToWidth(line, rowWidth),
-			);
-		}
-
-		const sv = new ScrollView(rows, {
-			height: rows.length,
-			scrollbar: "auto",
-			totalRows: this.#results.length,
-			theme: { track: t => theme.fg("muted", t), thumb: t => theme.fg("accent", t) },
-		});
-		sv.setScrollOffset(startIndex);
-		lines.push(...sv.render(width));
-		return lines;
-	}
-}
-
 export class HistorySearchComponent extends Container {
-	#historyStorage: HistoryStorage;
-	#searchInput: Input;
-	#results: HistoryEntry[] = [];
-	#selectedIndex = 0;
-	#resultsList: HistoryResultsList;
-	#onSelect: (prompt: string) => void;
-	#onCancel: () => void;
-	#resultLimit = 100;
+	readonly #surface: SelectorSurface<number, HistoryEntry>;
 
-	constructor(historyStorage: HistoryStorage, onSelect: (prompt: string) => void, onCancel: () => void) {
+	constructor(
+		historyStorage: HistoryStorage,
+		onSelect: (prompt: string) => void,
+		onCancel: () => void,
+		initialQuery = "",
+	) {
 		super();
-		this.#historyStorage = historyStorage;
-		this.#onSelect = onSelect;
-		this.#onCancel = onCancel;
-
-		this.#searchInput = new Input();
-		this.#searchInput.onSubmit = () => {
-			const selected = this.#results[this.#selectedIndex];
-			if (selected) {
-				this.#onSelect(selected.prompt);
-			}
-		};
-
-		this.#resultsList = new HistoryResultsList();
-
-		const title = theme.bold(theme.fg("accent", `${theme.icon.rewind} Search History`));
-		const dot = theme.fg("dim", theme.sep.dot);
-		const hint = [rawKeyHint("↑↓", "navigate"), rawKeyHint("enter", "select"), keyHint("ui.dismiss", "cancel")].join(
-			dot,
-		);
-
+		const initialEntries = initialQuery.trim() ? historyStorage.search(initialQuery.trim(), MAX_RESULTS) : historyStorage.getRecent(MAX_RESULTS);
+		this.#surface = new SelectorSurface<number, HistoryEntry, Keybinding>({
+			componentId: makeComponentId("history-search"),
+			items: initialEntries,
+			keyOf: entry => entry.id,
+			searchText: entry => entry.prompt,
+			initialQuery: initialQuery.trim(),
+			renderRow: (entry, context, width) => {
+				const tokens = queryTokens(context.query);
+				const time = relativeTime(entry.created_at);
+				const cursor = context.selected ? theme.fg("accent", `${theme.nav.cursor} `) : "  ";
+				const rowWidth = Math.max(0, width - visibleWidth(time) - 1);
+				const prompt = truncateToWidth(entry.prompt.replace(/\s+/g, " ").trim(), Math.max(4, rowWidth - 2));
+				const line = `${cursor}${context.selected ? theme.bold(highlightTokens(prompt, tokens)) : highlightTokens(prompt, tokens)}`;
+				const content = truncateToWidth(`${line} ${theme.fg("dim", time)}`, width, Ellipsis.Omit);
+				const row = `${content}${padding(width - visibleWidth(content))}`;
+				return [context.selected ? theme.bg("selectedBg", row) : row];
+			},
+			renderEmpty: query => [theme.fg("muted", query ? "  No matching history" : "  No history yet")],
+			onSelect: entry => onSelect(entry.prompt),
+			onCancel,
+			onFilterChanged: query => query.trim() ? historyStorage.search(query.trim(), MAX_RESULTS) : historyStorage.getRecent(MAX_RESULTS),
+			encodeItems: entries => JSON.stringify(entries),
+			decodeItems: encoded => Schema.decodeSync(HistoryEntriesFromJsonSchema)(encoded, { onExcessProperty: "error" }),
+			viewportSize: 10,
+			closeOnFilterDismiss: true,
+		});
 		this.addChild(new Spacer(1));
-		this.addChild(new Text(title, 1, 0));
+		this.addChild(new Text(theme.bold(theme.fg("accent", `${theme.icon.rewind} Search History`)), 1, 0));
 		this.addChild(new Spacer(1));
 		this.addChild(new DynamicBorder());
 		this.addChild(new Spacer(1));
-		this.addChild(this.#searchInput);
+		this.addChild(this.#surface);
 		this.addChild(new Spacer(1));
-		this.addChild(this.#resultsList);
-		this.addChild(new Spacer(1));
-		this.addChild(new Text(hint, 1, 0));
+		this.addChild(new Text([rawKeyHint("↑↓", "navigate"), rawKeyHint("enter", "select"), keyHint("ui.dismiss", "cancel")].join(theme.fg("dim", theme.sep.dot)), 1, 0));
 		this.addChild(new Spacer(1));
 		this.addChild(new DynamicBorder());
-
-		this.#updateResults();
 	}
 
-	handleInput(keyData: string): void {
-		if (matchesSelectUp(keyData)) {
-			if (this.#results.length === 0) return;
-			this.#selectedIndex = Math.max(0, this.#selectedIndex - 1);
-			this.#resultsList.setSelectedIndex(this.#selectedIndex);
-			return;
-		}
-
-		if (matchesSelectDown(keyData)) {
-			if (this.#results.length === 0) return;
-			this.#selectedIndex = Math.min(this.#results.length - 1, this.#selectedIndex + 1);
-			this.#resultsList.setSelectedIndex(this.#selectedIndex);
-			return;
-		}
-
-		if (matchesSelectPageUp(keyData)) {
-			if (this.#results.length === 0) return;
-			this.#selectedIndex = Math.max(0, this.#selectedIndex - MAX_VISIBLE);
-			this.#resultsList.setSelectedIndex(this.#selectedIndex);
-			return;
-		}
-
-		if (matchesSelectPageDown(keyData)) {
-			if (this.#results.length === 0) return;
-			this.#selectedIndex = Math.min(this.#results.length - 1, this.#selectedIndex + MAX_VISIBLE);
-			this.#resultsList.setSelectedIndex(this.#selectedIndex);
-			return;
-		}
-
-		if (matchesKey(keyData, "home")) {
-			if (this.#results.length === 0) return;
-			this.#selectedIndex = 0;
-			this.#resultsList.setSelectedIndex(this.#selectedIndex);
-			return;
-		}
-
-		if (matchesKey(keyData, "end")) {
-			if (this.#results.length === 0) return;
-			this.#selectedIndex = this.#results.length - 1;
-			this.#resultsList.setSelectedIndex(this.#selectedIndex);
-			return;
-		}
-
-		if (matchesKey(keyData, "enter") || matchesKey(keyData, "return") || keyData === "\n") {
-			const selected = this.#results[this.#selectedIndex];
-			if (selected) {
-				this.#onSelect(selected.prompt);
-			}
-			return;
-		}
-
-		if (matchesUiDismiss(keyData)) {
-			this.#onCancel();
-			return;
-		}
-
-		this.#searchInput.handleInput(keyData);
-		this.#updateResults();
-	}
-
-	#updateResults(): void {
-		const query = this.#searchInput.getValue().trim();
-		this.#results = query
-			? this.#historyStorage.search(query, this.#resultLimit)
-			: this.#historyStorage.getRecent(this.#resultLimit);
-		this.#selectedIndex = 0;
-		this.#resultsList.setResults(this.#results, this.#selectedIndex, query ? queryTokens(query) : []);
+	get mountSpec(): SelectorSurfaceMountSpec<number, HistoryEntry> {
+		return this.#surface.mountSpec;
 	}
 }
+

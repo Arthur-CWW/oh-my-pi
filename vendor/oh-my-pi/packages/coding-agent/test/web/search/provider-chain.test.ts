@@ -7,6 +7,7 @@ import {
 	setPreferredSearchProvider,
 } from "@oh-my-pi/pi-coding-agent/web/search/provider";
 import { SEARCH_PROVIDER_ORDER } from "@oh-my-pi/pi-coding-agent/web/search/types";
+import { withControllerFixture } from "../../helpers/controller-fixture";
 
 const authStorage = {} as AuthStorage;
 const originalBraveApiKey = process.env.BRAVE_API_KEY;
@@ -57,16 +58,22 @@ describe("resolveProviderChain", () => {
 	});
 
 	it("applies live settings edits to the exclusion chain", async () => {
-		enableKeyBackedProviders();
-		const controller = new SelectorController({} as unknown as ConstructorParameters<typeof SelectorController>[0]);
+		await withControllerFixture(fixture => {
+			enableKeyBackedProviders();
+			const controller = new SelectorController(
+				{} as unknown as ConstructorParameters<typeof SelectorController>[0],
+				fixture.getInputLeaseManager,
+				fixture.scope,
+			);
 
-		controller.handleSettingChange(
-			"providers.webSearchExclude",
-			SEARCH_PROVIDER_ORDER.filter(id => id !== "jina"),
-		);
+			controller.handleSettingChange(
+				"providers.webSearchExclude",
+				SEARCH_PROVIDER_ORDER.filter(id => id !== "jina"),
+			);
 
-		const providers = await resolveProviderChain(authStorage, "auto");
-
-		expect(providers.map(provider => provider.id)).toEqual(["jina"]);
+			return resolveProviderChain(authStorage, "auto").then(providers => {
+				expect(providers.map(provider => provider.id)).toEqual(["jina"]);
+			});
+		});
 	});
 });

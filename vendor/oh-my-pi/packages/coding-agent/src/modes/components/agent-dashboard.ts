@@ -19,10 +19,7 @@ import * as path from "node:path";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import {
 	Container,
-	Editor,
-	fuzzyMatch,
-	Input,
-	matchesKey,
+	type Component,
 	replaceTabs,
 	Spacer,
 	Text,
@@ -43,42 +40,43 @@ import { createAgentSession } from "../../sdk";
 import { discoverAgents } from "../../task/discovery";
 import type { AgentDefinition, AgentSource } from "../../task/types";
 import { shortenPath } from "../../tools/render-utils";
-import { getEditorTheme, theme } from "../theme/theme";
-import { matchesUiDismiss } from "../utils/keybinding-matchers";
+import { theme } from "../theme/theme";
 import { keyHint } from "./keybinding-hints";
 import { DynamicBorder } from "./dynamic-border";
-import { TablePreviewComponent, type TablePreviewSession } from "./table-preview";
+import { viewSelector, type SelectorModel, type SelectorMsg, makeSelectorModel, updateSelector } from "../mvu/selector";
+import { makeComponentId } from "../mvu/schema";
+import { TablePreviewComponent } from "./table-preview";
 
-type SourceTabId = "all" | AgentSource;
-type AgentScope = "project" | "user";
+export type SourceTabId = "all" | AgentSource;
+export type AgentScope = "project" | "user";
 
-interface SourceTab {
-	id: SourceTabId;
-	label: string;
-	count: number;
+export interface SourceTab {
+	readonly id: SourceTabId;
+	readonly label: string;
+	readonly count: number;
 }
 
-interface DashboardAgent extends AgentDefinition {
-	disabled: boolean;
-	overrideModel?: string;
+export interface DashboardAgent extends AgentDefinition {
+	readonly disabled: boolean;
+	readonly overrideModel?: string;
 }
 
 interface ModelResolution {
-	resolved: string;
-	thinkingLevel?: string;
-	explicitThinkingLevel: boolean;
+	readonly resolved: string;
+	readonly thinkingLevel?: string;
+	readonly explicitThinkingLevel: boolean;
 }
 
-interface GeneratedAgentSpec {
-	identifier: string;
-	whenToUse: string;
-	systemPrompt: string;
+export interface GeneratedAgentSpec {
+	readonly identifier: string;
+	readonly whenToUse: string;
+	readonly systemPrompt: string;
 }
 
-interface AgentDashboardModelContext {
-	modelRegistry?: ModelRegistry;
-	activeModelPattern?: string;
-	defaultModelPattern?: string;
+export interface AgentDashboardModelContext {
+	readonly modelRegistry?: ModelRegistry;
+	readonly activeModelPattern?: string;
+	readonly defaultModelPattern?: string;
 }
 
 const SOURCE_ORDER: Record<AgentSource, number> = {
@@ -108,13 +106,6 @@ function formatResolution(resolution: ModelResolution): string {
 	return `${resolved} ${theme.fg("dim", `(${resolution.thinkingLevel})`)}`;
 }
 
-function matchAgent(agent: DashboardAgent, query: string): boolean {
-	const text = `${agent.name} ${agent.description} ${SOURCE_LABEL[agent.source]} ${agent.overrideModel ?? ""}`;
-	return query
-		.trim()
-		.split(/\s+/)
-		.every(token => fuzzyMatch(token, text).matches);
-}
 
 function extractAssistantText(messages: AgentMessage[]): string | null {
 	for (let i = messages.length - 1; i >= 0; i--) {
@@ -179,100 +170,591 @@ function parseGeneratedAgentSpec(raw: string): GeneratedAgentSpec {
 	return { identifier, whenToUse, systemPrompt };
 }
 
-class AgentInspectorPane implements TablePreviewSession {
-	constructor(
-		private readonly agent: DashboardAgent | null,
-		private readonly defaultPatterns: string[],
-		private readonly defaultResolution: ModelResolution | undefined,
-		private readonly effectivePatterns: string[],
-		private readonly effectiveResolution: ModelResolution | undefined,
-	) {}
-
-	render(width: number): readonly string[] {
-		if (!this.agent) {
-			return [theme.fg("muted", "Select an agent"), theme.fg("dim", "to inspect settings")];
-		}
-
-		const lines: string[] = [];
-		const state = this.agent.disabled
-			? theme.fg("dim", `${theme.status.disabled} Disabled`)
-			: theme.fg("success", `${theme.status.enabled} Enabled`);
-
-		lines.push(theme.bold(theme.fg("accent", replaceTabs(this.agent.name))));
-		lines.push("");
-		lines.push(`${theme.fg("muted", "Status:")} ${state}`);
-		lines.push(`${theme.fg("muted", "Source:")} ${SOURCE_LABEL[this.agent.source]}`);
-		lines.push("");
-
-		lines.push(`${theme.fg("muted", "Default pattern:")} ${replaceTabs(joinPatterns(this.defaultPatterns))}`);
-		lines.push(
-			`${theme.fg("muted", "Default resolves:")} ${this.defaultResolution ? this.#formatResolution(this.defaultResolution) : theme.fg("dim", "(unresolved)")}`,
-		);
-		lines.push(
-			`${theme.fg("muted", "Override:")} ${this.agent.overrideModel ? theme.fg("warning", replaceTabs(this.agent.overrideModel)) : theme.fg("dim", "(none)")}`,
-		);
-		lines.push(`${theme.fg("muted", "Effective pattern:")} ${replaceTabs(joinPatterns(this.effectivePatterns))}`);
-		lines.push(
-			`${theme.fg("muted", "Effective:")} ${this.effectiveResolution ? this.#formatResolution(this.effectiveResolution) : theme.fg("dim", "(unresolved)")}`,
-		);
-
-		const sourcePath = this.agent.filePath ?? `embedded:${this.agent.name}.md`;
-		lines.push("");
-		lines.push(theme.fg("muted", "Path:"));
-		lines.push(theme.fg("dim", `  ${replaceTabs(shortenPath(sourcePath))}`));
-
-		if (this.agent.description) {
-			lines.push("");
-			lines.push(theme.fg("muted", "Description:"));
-			for (const wrapped of wrapTextWithAnsi(replaceTabs(this.agent.description), Math.max(10, width - 2))) {
-				lines.push(truncateToWidth(wrapped, width));
-			}
-		}
-		if (this.agent.systemPrompt) {
-			lines.push("");
-			lines.push(theme.fg("muted", "Prompt:"));
-			const promptText = replaceTabs(this.agent.systemPrompt.slice(0, AGENT_PREVIEW_PROMPT_MAX_CHARS));
-			for (const wrapped of wrapTextWithAnsi(promptText, Math.max(10, width - 2))) {
-				lines.push(truncateToWidth(wrapped, width));
-			}
-		}
-
-		return lines;
-	}
-
-	#formatResolution(resolution: ModelResolution): string {
-		return formatResolution(resolution);
-	}
+interface AgentInspectorProjection {
+	readonly agent: DashboardAgent | null;
+	readonly defaultPatterns: readonly string[];
+	readonly defaultResolution?: ModelResolution;
+	readonly effectivePatterns: readonly string[];
+	readonly effectiveResolution?: ModelResolution;
 }
 
+function renderAgentInspector(
+	projection: AgentInspectorProjection | null,
+	width: number,
+	height: number,
+): readonly string[] {
+	if (!projection?.agent) return [theme.fg("muted", "Select an agent"), theme.fg("dim", "to inspect settings")];
+	const agent = projection.agent;
+	const lines: string[] = [];
+	const state = agent.disabled
+		? theme.fg("dim", `${theme.status.disabled} Disabled`)
+		: theme.fg("success", `${theme.status.enabled} Enabled`);
+	lines.push(theme.bold(theme.fg("accent", replaceTabs(agent.name))), "");
+	lines.push(`${theme.fg("muted", "Status:")} ${state}`);
+	lines.push(`${theme.fg("muted", "Source:")} ${SOURCE_LABEL[agent.source]}`, "");
+	lines.push(`${theme.fg("muted", "Default pattern:")} ${replaceTabs(joinPatterns([...projection.defaultPatterns]))}`);
+	lines.push(
+		`${theme.fg("muted", "Default resolves:")} ${
+			projection.defaultResolution ? formatResolution(projection.defaultResolution) : theme.fg("dim", "(unresolved)")
+		}`,
+	);
+	lines.push(
+		`${theme.fg("muted", "Override:")} ${
+			agent.overrideModel ? theme.fg("warning", replaceTabs(agent.overrideModel)) : theme.fg("dim", "(none)")
+		}`,
+	);
+	lines.push(`${theme.fg("muted", "Effective pattern:")} ${replaceTabs(joinPatterns([...projection.effectivePatterns]))}`);
+	lines.push(
+		`${theme.fg("muted", "Effective:")} ${
+			projection.effectiveResolution ? formatResolution(projection.effectiveResolution) : theme.fg("dim", "(unresolved)")
+		}`,
+	);
+	const sourcePath = agent.filePath ?? `embedded:${agent.name}.md`;
+	lines.push("", theme.fg("muted", "Path:"), theme.fg("dim", `  ${replaceTabs(shortenPath(sourcePath))}`));
+	if (agent.description) {
+		lines.push("", theme.fg("muted", "Description:"));
+		for (const wrapped of wrapTextWithAnsi(replaceTabs(agent.description), Math.max(10, width - 2))) {
+			lines.push(truncateToWidth(wrapped, width));
+		}
+	}
+	if (agent.systemPrompt) {
+		lines.push("", theme.fg("muted", "Prompt:"));
+		const promptText = replaceTabs(agent.systemPrompt.slice(0, AGENT_PREVIEW_PROMPT_MAX_CHARS));
+		for (const wrapped of wrapTextWithAnsi(promptText, Math.max(10, width - 2))) {
+			lines.push(truncateToWidth(wrapped, width));
+		}
+	}
+	return lines.slice(0, Math.max(1, height));
+}
+
+export type AgentDashboardScreen =
+	| { readonly _tag: "Browse" }
+	| { readonly _tag: "ModelEdit"; readonly agentName: string; readonly draft: string }
+	| {
+			readonly _tag: "CreateDraft";
+			readonly description: string;
+			readonly scope: AgentScope;
+			readonly error?: string;
+	  }
+	| {
+			readonly _tag: "CreatePending";
+			readonly description: string;
+			readonly scope: AgentScope;
+			readonly requestGeneration: number;
+			readonly sourceRevision: number;
+			readonly operation: "Generate" | "Save";
+			readonly spec?: GeneratedAgentSpec;
+	  }
+	| {
+			readonly _tag: "CreateReview";
+			readonly description: string;
+			readonly scope: AgentScope;
+			readonly spec: GeneratedAgentSpec;
+			readonly error?: string;
+	  };
+
+export interface AgentDashboardModel {
+	readonly sourceRevision: number;
+	readonly requestGeneration: number;
+	readonly loadState: "Idle" | "Loading" | "Failed";
+	readonly loadError?: string;
+	readonly notice?: string;
+	readonly allAgents: readonly DashboardAgent[];
+	readonly tabs: readonly SourceTab[];
+	readonly activeTabIndex: number;
+	readonly selector: SelectorModel<string>;
+	readonly screen: AgentDashboardScreen;
+}
+
+export type AgentDashboardMessage =
+	| SelectorMsg<string>
+	| { readonly _tag: "ToggleSelected" }
+	| { readonly _tag: "EditSelected" }
+	| { readonly _tag: "ModelDraftSet"; readonly value: string }
+	| { readonly _tag: "ModelSave" }
+	| { readonly _tag: "BeginCreate" }
+	| { readonly _tag: "CreateAppend"; readonly text: string }
+	| { readonly _tag: "CreateDelete" }
+	| { readonly _tag: "CreateSubmit" }
+	| { readonly _tag: "CreateScopeToggle" }
+	| { readonly _tag: "CreateSave" }
+	| { readonly _tag: "CreateRegenerate" }
+	| { readonly _tag: "CreateCancel" }
+	| { readonly _tag: "SwitchSource"; readonly delta: -1 | 1 }
+	| { readonly _tag: "Reload" }
+	| {
+			readonly _tag: "DiscoveryLoaded";
+			readonly requestGeneration: number;
+			readonly agents: readonly DashboardAgent[];
+	  }
+	| { readonly _tag: "DiscoveryFailed"; readonly requestGeneration: number; readonly error: string }
+	| {
+			readonly _tag: "CreateGenerated";
+			readonly requestGeneration: number;
+			readonly sourceRevision: number;
+			readonly spec: GeneratedAgentSpec;
+	  }
+	| {
+			readonly _tag: "CreateFailed";
+			readonly requestGeneration: number;
+			readonly sourceRevision: number;
+			readonly error: string;
+	  }
+	| {
+			readonly _tag: "SaveSucceeded";
+			readonly requestGeneration: number;
+			readonly agents: readonly DashboardAgent[];
+			readonly notice: string;
+	  }
+	| { readonly _tag: "SaveFailed"; readonly requestGeneration: number; readonly error: string }
+	| { readonly _tag: "ViewportChanged"; readonly offset: number; readonly height: number };
+
+export type AgentDashboardCommand =
+	| { readonly _tag: "CloseRequested" }
+	| { readonly _tag: "PersistDisabled"; readonly disabledNames: readonly string[] }
+	| { readonly _tag: "PersistOverrides"; readonly overrides: Readonly<Record<string, string>> }
+	| { readonly _tag: "Discover"; readonly requestGeneration: number }
+	| {
+			readonly _tag: "Generate";
+			readonly description: string;
+			readonly requestGeneration: number;
+			readonly sourceRevision: number;
+	  }
+	| {
+			readonly _tag: "Save";
+			readonly scope: AgentScope;
+			readonly spec: GeneratedAgentSpec;
+			readonly requestGeneration: number;
+	  };
+
+export interface AgentDashboardTransition {
+	readonly model: AgentDashboardModel;
+	readonly commands: readonly AgentDashboardCommand[];
+}
+
+function buildAgentTabs(agents: readonly DashboardAgent[]): readonly SourceTab[] {
+	const tabs: SourceTab[] = [{ id: "all", label: "All", count: agents.length }];
+	const counts: Record<AgentSource, number> = { project: 0, user: 0, bundled: 0 };
+	for (const agent of agents) counts[agent.source] += 1;
+	for (const source of ["project", "user", "bundled"] as const) {
+		if (counts[source] > 0) tabs.push({ id: source, label: SOURCE_LABEL[source], count: counts[source] });
+	}
+	return tabs;
+}
+
+function agentsForTab(model: AgentDashboardModel): readonly DashboardAgent[] {
+	const tab = model.tabs[model.activeTabIndex] ?? model.tabs[0];
+	return tab?.id === "all" ? model.allAgents : model.allAgents.filter(agent => agent.source === tab?.id);
+}
+
+function replaceAgentSelectorSource(
+	model: AgentDashboardModel,
+	allAgents: readonly DashboardAgent[],
+	activeTabId?: SourceTabId,
+): AgentDashboardModel {
+	const tabs = buildAgentTabs(allAgents);
+	const currentTabId = activeTabId ?? model.tabs[model.activeTabIndex]?.id ?? "all";
+	const activeTabIndex = Math.max(0, tabs.findIndex(tab => tab.id === currentTabId));
+	const base = { ...model, allAgents, tabs, activeTabIndex };
+	const agents = agentsForTab(base);
+	const searchTextById = new Map(agents.map(agent => [
+		agent.name,
+		`${agent.name} ${agent.description} ${SOURCE_LABEL[agent.source]} ${agent.overrideModel ?? ""}`,
+	]));
+	const selector = updateSelector(model.selector, {
+		_tag: "SourceReplaced",
+		sourceRevision: model.selector.sourceRevision + 1,
+		orderedIds: agents.map(agent => agent.name),
+		searchTextById,
+	}).model;
+	return { ...base, sourceRevision: selector.sourceRevision, selector };
+}
+
+function selectedAgent(model: AgentDashboardModel): DashboardAgent | undefined {
+	const selectedId = model.selector.selectedId;
+	return selectedId === undefined ? undefined : model.allAgents.find(agent => agent.name === selectedId);
+}
+
+function modelOverrides(agents: readonly DashboardAgent[]): Readonly<Record<string, string>> {
+	const overrides: Record<string, string> = {};
+	for (const agent of agents) {
+		const value = agent.overrideModel?.trim();
+		if (value) overrides[agent.name] = value;
+	}
+	return overrides;
+}
+
+function beginCreateGeneration(
+	model: AgentDashboardModel,
+	description: string,
+	scope: AgentScope,
+): AgentDashboardTransition {
+	const trimmed = description.trim();
+	if (!trimmed) {
+		return {
+			model: { ...model, screen: { _tag: "CreateDraft", description, scope, error: "Description is required." } },
+			commands: [],
+		};
+	}
+	const requestGeneration = model.requestGeneration + 1;
+	return {
+		model: {
+			...model,
+			requestGeneration,
+			notice: undefined,
+			screen: {
+				_tag: "CreatePending",
+				description: trimmed,
+				scope,
+				requestGeneration,
+				sourceRevision: model.sourceRevision,
+				operation: "Generate",
+			},
+		},
+		commands: [{ _tag: "Generate", description: trimmed, requestGeneration, sourceRevision: model.sourceRevision }],
+	};
+}
+
+export function reduceAgentDashboard(
+	model: AgentDashboardModel,
+	message: AgentDashboardMessage,
+): AgentDashboardTransition {
+	switch (message._tag) {
+		case "ToggleSelected": {
+			if (model.screen._tag !== "Browse") return { model, commands: [] };
+			const selected = selectedAgent(model);
+			if (selected === undefined) return { model, commands: [] };
+			const agents = model.allAgents.map(agent =>
+				agent.name === selected.name ? { ...agent, disabled: !agent.disabled } : agent,
+			);
+			const next = replaceAgentSelectorSource(model, agents);
+			return {
+				model: next,
+				commands: [{
+					_tag: "PersistDisabled",
+					disabledNames: agents.filter(agent => agent.disabled).map(agent => agent.name).sort(),
+				}],
+			};
+		}
+		case "EditSelected": {
+			if (model.screen._tag !== "Browse") return { model, commands: [] };
+			const selected = selectedAgent(model);
+			return selected === undefined
+				? { model, commands: [] }
+				: {
+						model: {
+							...model,
+							screen: { _tag: "ModelEdit", agentName: selected.name, draft: selected.overrideModel ?? "" },
+						},
+						commands: [],
+					};
+		}
+		case "ModelDraftSet":
+			return model.screen._tag === "ModelEdit"
+				? { model: { ...model, screen: { ...model.screen, draft: message.value } }, commands: [] }
+				: { model, commands: [] };
+		case "ModelSave": {
+			if (model.screen._tag !== "ModelEdit") return { model, commands: [] };
+			const value = model.screen.draft.trim();
+			const agentName = model.screen.agentName;
+			const agents = model.allAgents.map(agent =>
+				agent.name === agentName ? { ...agent, overrideModel: value || undefined } : agent,
+			);
+			const next = replaceAgentSelectorSource({ ...model, screen: { _tag: "Browse" } }, agents);
+			return {
+				model: { ...next, notice: `Updated model override for ${agentName}` },
+				commands: [{ _tag: "PersistOverrides", overrides: modelOverrides(agents) }],
+			};
+		}
+		case "BeginCreate":
+			return model.screen._tag === "Browse"
+				? {
+						model: {
+							...model,
+							notice: undefined,
+							screen: { _tag: "CreateDraft", description: "", scope: "project" },
+						},
+						commands: [],
+					}
+				: { model, commands: [] };
+		case "CreateAppend":
+			return model.screen._tag === "CreateDraft"
+				? {
+						model: {
+							...model,
+							screen: {
+								...model.screen,
+								description: `${model.screen.description}${message.text === "\r" ? "\n" : message.text}`,
+								error: undefined,
+							},
+						},
+						commands: [],
+					}
+				: { model, commands: [] };
+		case "CreateDelete":
+			return model.screen._tag === "CreateDraft"
+				? {
+						model: {
+							...model,
+							screen: { ...model.screen, description: model.screen.description.slice(0, -1), error: undefined },
+						},
+						commands: [],
+					}
+				: { model, commands: [] };
+		case "CreateSubmit":
+			return model.screen._tag === "CreateDraft"
+				? beginCreateGeneration(model, model.screen.description, model.screen.scope)
+				: { model, commands: [] };
+		case "CreateScopeToggle": {
+			const screen = model.screen;
+			if (screen._tag !== "CreateDraft" && screen._tag !== "CreateReview") return { model, commands: [] };
+			return {
+				model: { ...model, screen: { ...screen, scope: screen.scope === "project" ? "user" : "project" } },
+				commands: [],
+			};
+		}
+		case "CreateRegenerate":
+			return model.screen._tag === "CreateReview"
+				? beginCreateGeneration(model, model.screen.description, model.screen.scope)
+				: { model, commands: [] };
+		case "CreateSave": {
+			if (model.screen._tag !== "CreateReview") return { model, commands: [] };
+			const requestGeneration = model.requestGeneration + 1;
+			return {
+				model: {
+					...model,
+					requestGeneration,
+					screen: {
+						_tag: "CreatePending",
+						description: model.screen.description,
+						scope: model.screen.scope,
+						requestGeneration,
+						sourceRevision: model.sourceRevision,
+						operation: "Save",
+						spec: model.screen.spec,
+					},
+				},
+				commands: [{
+					_tag: "Save",
+					scope: model.screen.scope,
+					spec: model.screen.spec,
+					requestGeneration,
+				}],
+			};
+		}
+		case "CreateCancel":
+			return {
+				model: { ...model, requestGeneration: model.requestGeneration + 1, screen: { _tag: "Browse" } },
+				commands: [],
+			};
+		case "SwitchSource": {
+			if (model.screen._tag !== "Browse" || model.tabs.length === 0) return { model, commands: [] };
+			const activeTabIndex =
+				(model.activeTabIndex + message.delta + model.tabs.length) % model.tabs.length;
+			return {
+				model: replaceAgentSelectorSource(
+					{ ...model, activeTabIndex },
+					model.allAgents,
+					model.tabs[activeTabIndex]?.id,
+				),
+				commands: [],
+			};
+		}
+		case "Reload": {
+			const requestGeneration = model.requestGeneration + 1;
+			return {
+				model: {
+					...model,
+					requestGeneration,
+					loadState: "Loading",
+					loadError: undefined,
+				},
+				commands: [{ _tag: "Discover", requestGeneration }],
+			};
+		}
+		case "DiscoveryLoaded":
+			if (message.requestGeneration !== model.requestGeneration) return { model, commands: [] };
+			return {
+				model: {
+					...replaceAgentSelectorSource(model, message.agents),
+					loadState: "Idle",
+					loadError: undefined,
+				},
+				commands: [],
+			};
+		case "DiscoveryFailed":
+			return message.requestGeneration === model.requestGeneration
+				? { model: { ...model, loadState: "Failed", loadError: message.error }, commands: [] }
+				: { model, commands: [] };
+		case "CreateGenerated": {
+			const screen = model.screen;
+			if (
+				screen._tag !== "CreatePending" ||
+				screen.operation !== "Generate" ||
+				message.requestGeneration !== model.requestGeneration ||
+				message.requestGeneration !== screen.requestGeneration ||
+				message.sourceRevision !== screen.sourceRevision ||
+				message.sourceRevision !== model.sourceRevision
+			) return { model, commands: [] };
+			return {
+				model: {
+					...model,
+					screen: {
+						_tag: "CreateReview",
+						description: screen.description,
+						scope: screen.scope,
+						spec: message.spec,
+					},
+				},
+				commands: [],
+			};
+		}
+		case "CreateFailed": {
+			const screen = model.screen;
+			if (
+				screen._tag !== "CreatePending" ||
+				screen.operation !== "Generate" ||
+				message.requestGeneration !== model.requestGeneration ||
+				message.sourceRevision !== model.sourceRevision
+			) return { model, commands: [] };
+			return {
+				model: {
+					...model,
+					screen: {
+						_tag: "CreateDraft",
+						description: screen.description,
+						scope: screen.scope,
+						error: message.error,
+					},
+				},
+				commands: [],
+			};
+		}
+		case "SaveSucceeded": {
+			const screen = model.screen;
+			if (
+				screen._tag !== "CreatePending" ||
+				screen.operation !== "Save" ||
+				message.requestGeneration !== model.requestGeneration
+			) return { model, commands: [] };
+			const next = replaceAgentSelectorSource({ ...model, screen: { _tag: "Browse" } }, message.agents);
+			return { model: { ...next, notice: message.notice }, commands: [] };
+		}
+		case "SaveFailed": {
+			const screen = model.screen;
+			if (
+				screen._tag !== "CreatePending" ||
+				screen.operation !== "Save" ||
+				screen.spec === undefined ||
+				message.requestGeneration !== model.requestGeneration
+			) return { model, commands: [] };
+			return {
+				model: {
+					...model,
+					screen: {
+						_tag: "CreateReview",
+						description: screen.description,
+						scope: screen.scope,
+						spec: screen.spec,
+						error: message.error,
+					},
+				},
+				commands: [],
+			};
+		}
+		case "ViewportChanged": {
+			const transition = updateSelector(model.selector, {
+				_tag: "ViewportChanged",
+				offset: message.offset,
+				height: message.height,
+			});
+			return { model: { ...model, selector: transition.model }, commands: [] };
+		}
+		case "Back":
+			if (model.screen._tag !== "Browse") {
+				return {
+					model: { ...model, requestGeneration: model.requestGeneration + 1, screen: { _tag: "Browse" } },
+					commands: [],
+				};
+			}
+			break;
+	}
+	if (model.screen._tag !== "Browse") return { model, commands: [] };
+	const transition = updateSelector(model.selector, message);
+	return {
+		model: { ...model, selector: transition.model },
+		commands: transition.commands.some(command => command._tag === "CloseRequested")
+			? [{ _tag: "CloseRequested" }]
+			: [],
+	};
+}
+
+function dashboardAgents(
+	agents: readonly AgentDefinition[],
+	settings: Settings,
+): readonly DashboardAgent[] {
+	const disabled = new Set((settings.get("task.disabledAgents") as string[] | undefined) ?? []);
+	const overrides = settings.get("task.agentModelOverrides") ?? {};
+	return agents
+		.slice()
+		.sort((left, right) => {
+			const source = SOURCE_ORDER[left.source] - SOURCE_ORDER[right.source];
+			return source !== 0 ? source : left.name.localeCompare(right.name);
+		})
+		.map(agent => ({
+			...agent,
+			disabled: disabled.has(agent.name),
+			overrideModel: overrides[agent.name]?.trim() || undefined,
+		}));
+}
+
+export async function createAgentDashboardModel(
+	cwd: string,
+	settings: Settings,
+	viewportSize = 10,
+): Promise<AgentDashboardModel> {
+	const { agents } = await discoverAgents(cwd);
+	const allAgents = dashboardAgents(agents, settings);
+	const tabs = buildAgentTabs(allAgents);
+	const model: AgentDashboardModel = {
+		sourceRevision: 0,
+		requestGeneration: 0,
+		loadState: "Idle",
+		allAgents,
+		tabs,
+		activeTabIndex: 0,
+		selector: { ...makeSelectorModel<string>([]), viewportSize },
+		screen: { _tag: "Browse" },
+	};
+	return replaceAgentSelectorSource(model, allAgents, tabs[0]?.id);
+}
+
+export const AGENT_DASHBOARD_ROUTE = {
+	componentId: makeComponentId("agent-dashboard"),
+	context: "selector.global",
+	makeInitialModel: createAgentDashboardModel,
+	update: reduceAgentDashboard,
+	domainActions: {
+		"tui.select.confirm": "EditSelected",
+		"app.selector.preview": "ToggleSelected",
+		"app.agent.create": "BeginCreate",
+		"app.selector.sourcePrevious": "SwitchSource",
+		"app.selector.sourceNext": "SwitchSource",
+		"app.selector.refresh": "Reload",
+	},
+} as const;
+
 export class AgentDashboard extends Container {
-	#settingsManager: Settings | null = null;
-	#allAgents: DashboardAgent[] = [];
-	#filteredAgents: DashboardAgent[] = [];
-	#tabs: SourceTab[] = [{ id: "all", label: "All", count: 0 }];
-	#activeTabIndex = 0;
-	#tablePreview!: TablePreviewComponent<DashboardAgent, string>;
+	#model!: AgentDashboardModel;
+	#settingsManager!: Settings;
+	#tablePreview!: TablePreviewComponent<DashboardAgent, string, AgentInspectorProjection | null>;
 	readonly #viewScope = Scope.makeUnsafe("sequential");
 	#disposed = false;
-	#loading = true;
-	#loadError: string | null = null;
-	#notice: string | null = null;
 	#builtRows = -1;
 	#builtCols = -1;
+	#committedRender: readonly string[] | undefined;
 
-	#editInput: Input | null = null;
-	#editingAgentName: string | null = null;
-
-	#createInput: Editor | null = null;
-	#createDescription = "";
-	#createScope: AgentScope = "project";
-	#createGenerating = false;
-	#createSpec: GeneratedAgentSpec | null = null;
-	#createError: string | null = null;
-	#createStreamingText = "";
-
-	onClose?: () => void;
-	onRequestRender?: () => void;
+	onRequestComponentRender?: (component: Component) => void;
 
 	private constructor(
 		private readonly cwd: string,
@@ -290,23 +772,20 @@ export class AgentDashboard extends Container {
 		modelContext: AgentDashboardModelContext = {},
 	): Promise<AgentDashboard> {
 		const dashboard = new AgentDashboard(cwd, settings, terminalHeight ?? process.stdout.rows ?? 24, modelContext);
-		try {
-			await dashboard.#init();
-			return dashboard;
-		} catch (error) {
-			await dashboard.dispose();
-			throw error;
-		}
+		await dashboard.#init();
+		return dashboard;
 	}
 
 	async #init(): Promise<void> {
 		this.#settingsManager = this.settings ?? (await Settings.init());
+		this.#model = await createAgentDashboardModel(
+			this.cwd,
+			this.#settingsManager,
+			Math.max(1, this.#computeBodyHeight() - 2),
+		);
 		this.#tablePreview = await Effect.runPromise(
 			Scope.provide(this.#viewScope)(
-				TablePreviewComponent.mount<DashboardAgent, string>({
-					rows: () => this.#filteredAgents,
-					keyOf: agent => agent.name,
-					matchesRow: matchAgent,
+				TablePreviewComponent.mount<DashboardAgent, string, AgentInspectorProjection | null>({
 					renderRow: agent => {
 						const status = agent.disabled
 							? theme.fg("dim", theme.status.disabled)
@@ -316,23 +795,9 @@ export class AgentDashboard extends Container {
 						const row = ` ${status} ${replaceTabs(agent.name)} ${source}${override}`;
 						return agent.disabled ? theme.fg("dim", row) : row;
 					},
-					preview: {
-						open: agent => {
-							const defaultPatterns = this.#defaultPatternsFor(agent);
-							const effectivePatterns = this.#effectivePatternsFor(agent, agent.overrideModel);
-							return new AgentInspectorPane(
-								agent,
-								defaultPatterns,
-								this.#resolvePatterns(defaultPatterns),
-								effectivePatterns,
-								this.#resolvePatterns(effectivePatterns),
-							);
-						},
-					},
+					renderPreview: (projection, width, height) => renderAgentInspector(projection, width, height),
 					height: () => this.#computeBodyHeight(),
-					requestRender: () => this.onRequestRender?.(),
-					onClose: () => this.#close(),
-					handleKey: data => this.#handleTableKey(data),
+					requestComponentRender: () => this.onRequestComponentRender?.(this),
 					layout: "columns",
 					tableRatio: 0.5,
 					emptyMessage: "No agents found.",
@@ -340,296 +805,105 @@ export class AgentDashboard extends Container {
 				}),
 			),
 		);
-		await this.#reloadData();
+		this.#applyTableProjection();
 		this.#buildLayout();
 	}
 
-	async #reloadData(): Promise<void> {
-		this.#loading = true;
-		this.#loadError = null;
-		this.#buildLayout();
+	get initialModel(): AgentDashboardModel {
+		return this.#model;
+	}
 
+	apply(model: AgentDashboardModel): void {
+		if (this.#disposed) return;
+		this.#model = model;
+		this.#applyTableProjection();
+		this.#buildLayout();
+		this.onRequestComponentRender?.(this);
+	}
+
+	async execute(command: Extract<AgentDashboardCommand, { readonly _tag: "Discover" | "Generate" | "Save" }>): Promise<AgentDashboardMessage> {
 		try {
-			const activeTabId = this.#tabs[this.#activeTabIndex]?.id ?? "all";
+			if (command._tag === "Discover") {
+				const { agents } = await discoverAgents(this.cwd);
+				return {
+					_tag: "DiscoveryLoaded",
+					requestGeneration: command.requestGeneration,
+					agents: dashboardAgents(agents, this.#settingsManager),
+				};
+			}
+			if (command._tag === "Generate") {
+				const spec = await this.#runAgentCreationArchitect(command.description);
+				return {
+					_tag: "CreateGenerated",
+					requestGeneration: command.requestGeneration,
+					sourceRevision: command.sourceRevision,
+					spec,
+				};
+			}
+			const dirs = getConfigDirs("agents", {
+				user: command.scope === "user",
+				project: command.scope === "project",
+				cwd: this.cwd,
+			});
+			const targetDir = dirs[0]?.path;
+			if (!targetDir) throw new Error(`Cannot resolve ${command.scope} agents directory.`);
+			const filePath = path.join(targetDir, `${command.spec.identifier}.md`);
+			try {
+				await fs.stat(filePath);
+				throw new Error(`Agent file already exists: ${shortenPath(filePath)}`);
+			} catch (error) {
+				if (!isEnoent(error)) throw error;
+			}
+			const frontmatter = YAML.stringify(
+				{ name: command.spec.identifier, description: command.spec.whenToUse },
+				null,
+				2,
+			).trimEnd();
+			await Bun.write(filePath, `---\n${frontmatter}\n---\n\n${command.spec.systemPrompt.trim()}\n`);
 			const { agents } = await discoverAgents(this.cwd);
-			const disabled = new Set((this.#settingsManager?.get("task.disabledAgents") as string[] | undefined) ?? []);
-			const overrides = this.#settingsManager?.get("task.agentModelOverrides") ?? {};
-
-			this.#allAgents = agents
-				.slice()
-				.sort((a, b) => {
-					const sourceCmp = SOURCE_ORDER[a.source] - SOURCE_ORDER[b.source];
-					if (sourceCmp !== 0) return sourceCmp;
-					return a.name.localeCompare(b.name);
-				})
-				.map(agent => ({
-					...agent,
-					disabled: disabled.has(agent.name),
-					overrideModel: overrides[agent.name]?.trim() || undefined,
-				}));
-
-			this.#tabs = this.#buildTabs(this.#allAgents);
-			const nextTabIndex = this.#tabs.findIndex(tab => tab.id === activeTabId);
-			this.#activeTabIndex = nextTabIndex >= 0 ? nextTabIndex : 0;
-			this.#applyFilters();
+			return {
+				_tag: "SaveSucceeded",
+				requestGeneration: command.requestGeneration,
+				agents: dashboardAgents(agents, this.#settingsManager),
+				notice: `Created agent ${command.spec.identifier} at ${shortenPath(filePath)}`,
+			};
 		} catch (error) {
-			this.#allAgents = [];
-			this.#filteredAgents = [];
-			this.#tabs = [{ id: "all", label: "All", count: 0 }];
-			this.#activeTabIndex = 0;
-			this.#tablePreview.refresh();
-			this.#loadError = error instanceof Error ? error.message : String(error);
-		} finally {
-			this.#loading = false;
-			this.#rebuildAndRender();
-		}
-	}
-
-	#buildTabs(agents: DashboardAgent[]): SourceTab[] {
-		const tabs: SourceTab[] = [{ id: "all", label: "All", count: agents.length }];
-		const counts: Record<AgentSource, number> = { project: 0, user: 0, bundled: 0 };
-
-		for (const agent of agents) {
-			counts[agent.source] += 1;
-		}
-
-		for (const source of ["project", "user", "bundled"] as const) {
-			if (counts[source] > 0) {
-				tabs.push({ id: source, label: SOURCE_LABEL[source], count: counts[source] });
+			const message = error instanceof Error ? error.message : String(error);
+			if (command._tag === "Discover") {
+				return { _tag: "DiscoveryFailed", requestGeneration: command.requestGeneration, error: message };
 			}
-		}
-
-		return tabs;
-	}
-
-	#selectedAgent(): DashboardAgent | null {
-		return this.#tablePreview.selected ?? null;
-	}
-
-	#applyFilters(resetSelection = false, refreshPreview = false): void {
-		const activeTab = this.#tabs[this.#activeTabIndex] ?? this.#tabs[0];
-		this.#filteredAgents =
-			activeTab.id === "all" ? this.#allAgents : this.#allAgents.filter(agent => agent.source === activeTab.id);
-		this.#tablePreview.refresh({ resetSelection, refreshPreview });
-	}
-
-	/** Live terminal height so the dashboard tracks resize while open. */
-	#terminalRows(): number {
-		return process.stdout.rows || this.terminalHeight || 24;
-	}
-
-	#noticeBlockLines(): number {
-		if (!this.#notice) return 0;
-		return wrapTextWithAnsi(theme.fg("success", replaceTabs(this.#notice)), this.#uiWidth()).length + 1;
-	}
-
-	#listFooter(): string {
-		return theme.fg("dim", LIST_FOOTER_PREFIX) + keyHint("ui.dismiss", "close");
-	}
-
-	#footerLines(): number {
-		return Math.max(1, wrapTextWithAnsi(this.#listFooter(), this.#uiWidth()).length);
-	}
-
-	/** Height budget for the two-column body, sized to the live terminal. */
-	#computeBodyHeight(): number {
-		// Chrome around the body: top border + title + tab bar + spacer (4),
-		// optional notice block, then spacer + footer + bottom border.
-		const chrome = 4 + this.#noticeBlockLines() + 1 + this.#footerLines() + 1;
-		return Math.max(5, this.#terminalRows() - chrome);
-	}
-
-	override render(width: number): readonly string[] {
-		// Rebuild when terminal geometry changes so the full-screen overlay
-		// re-fits on resize.
-		if (this.#terminalRows() !== this.#builtRows || this.#uiWidth() !== this.#builtCols) {
-			this.#buildLayout();
-		}
-		const lines = super.render(width);
-		// Pad to the full viewport so every state (list, edit, create) covers the
-		// screen as a true full-screen view instead of letting the transcript peek
-		// through below it. Copy before padding — the container's render result is
-		// component-owned and must not be mutated.
-		const rows = this.#terminalRows();
-		if (lines.length >= rows) return lines;
-		const padded = lines.slice();
-		while (padded.length < rows) padded.push("");
-		return padded;
-	}
-
-	#persistDisabledAgents(): void {
-		if (!this.#settingsManager) return;
-		const disabled = this.#allAgents
-			.filter(agent => agent.disabled)
-			.map(agent => agent.name)
-			.sort((a, b) => a.localeCompare(b));
-		this.#settingsManager.set("task.disabledAgents", disabled);
-	}
-
-	#persistModelOverrides(): void {
-		if (!this.#settingsManager) return;
-		const overrides: Record<string, string> = {};
-		for (const agent of this.#allAgents) {
-			const value = agent.overrideModel?.trim();
-			if (value) {
-				overrides[agent.name] = value;
+			if (command._tag === "Generate") {
+				return {
+					_tag: "CreateFailed",
+					requestGeneration: command.requestGeneration,
+					sourceRevision: command.sourceRevision,
+					error: message,
+				};
 			}
-		}
-		this.#settingsManager.set("task.agentModelOverrides", overrides);
-	}
-
-	#toggleSelectedAgent(): void {
-		const selected = this.#selectedAgent();
-		if (!selected) return;
-		selected.disabled = !selected.disabled;
-		this.#persistDisabledAgents();
-		this.#tablePreview.refresh({ refreshPreview: true });
-		this.#buildLayout();
-	}
-
-	#beginModelEdit(): void {
-		const selected = this.#selectedAgent();
-		if (!selected) return;
-		this.#createError = null;
-		this.#editingAgentName = selected.name;
-		this.#editInput = new Input();
-		if (selected.overrideModel) {
-			this.#editInput.setValue(selected.overrideModel);
-		}
-		this.#editInput.onSubmit = value => {
-			this.#saveModelOverride(value);
-		};
-		this.#buildLayout();
-	}
-
-	#saveModelOverride(rawValue: string): void {
-		if (!this.#editingAgentName) return;
-		const selected = this.#allAgents.find(agent => agent.name === this.#editingAgentName);
-		if (!selected) return;
-		const value = rawValue.trim();
-		selected.overrideModel = value || undefined;
-		this.#persistModelOverrides();
-		this.#editingAgentName = null;
-		this.#editInput = null;
-		this.#applyFilters(false, true);
-		this.#notice = `Updated model override for ${selected.name}`;
-		this.#buildLayout();
-	}
-
-	#cancelModelEdit(): void {
-		this.#editingAgentName = null;
-		this.#editInput = null;
-		this.#buildLayout();
-	}
-
-	#beginCreateFlow(): void {
-		if (this.#createGenerating) return;
-		this.#createError = null;
-		this.#createSpec = null;
-		this.#createDescription = "";
-		const editor = new Editor(getEditorTheme());
-		editor.setBorderVisible(false);
-		editor.setPromptGutter("> ");
-		editor.setMaxHeight(Math.max(3, Math.min(8, this.#terminalRows() - 12)));
-		editor.disableSubmit = true;
-		editor.onChange = value => {
-			this.#createDescription = value;
-		};
-		this.#createInput = editor;
-		this.#buildLayout();
-	}
-
-	#clearCreateFlow(): void {
-		this.#createInput = null;
-		this.#createDescription = "";
-		this.#createGenerating = false;
-		this.#createSpec = null;
-		this.#createError = null;
-		this.#createStreamingText = "";
-	}
-
-	#toggleCreateScope(): void {
-		this.#createScope = this.#createScope === "project" ? "user" : "project";
-		this.#buildLayout();
-	}
-
-	#submitCreateDescription(): void {
-		if (!this.#createInput || this.#createGenerating) return;
-		const description = this.#createInput.getExpandedText();
-		this.#createDescription = description;
-		void this.#generateAgentFromDescription(description);
-	}
-
-	#insertCreateNewline(): void {
-		if (!this.#createInput || this.#createGenerating) return;
-		this.#createInput.handleInput("\n");
-		this.#createDescription = this.#createInput.getExpandedText();
-		this.#buildLayout();
-	}
-
-	#shouldSubmitCreateDescription(data: string): boolean {
-		if (matchesKey(data, "ctrl+enter")) return true;
-		return process.platform === "win32" && data === "\n" && this.#createDescription.trim().length > 0;
-	}
-
-	async #generateAgentFromDescription(rawDescription: string): Promise<void> {
-		const description = rawDescription.trim();
-		this.#createDescription = description;
-		if (!description) {
-			this.#createError = "Description is required.";
-			this.#buildLayout();
-			return;
-		}
-
-		this.#createGenerating = true;
-		this.#createError = null;
-		this.#createSpec = null;
-		this.#createStreamingText = "";
-		this.#buildLayout();
-
-		try {
-			const spec = await this.#runAgentCreationArchitect(description);
-			this.#createSpec = spec;
-			this.#notice = null;
-		} catch (error) {
-			this.#createError = error instanceof Error ? error.message : String(error);
-		} finally {
-			this.#createGenerating = false;
-			this.#rebuildAndRender();
+			return { _tag: "SaveFailed", requestGeneration: command.requestGeneration, error: message };
 		}
 	}
 
 	async #runAgentCreationArchitect(description: string): Promise<GeneratedAgentSpec> {
 		const modelRegistry = this.modelContext.modelRegistry;
-		if (!modelRegistry) {
-			throw new Error("Model registry unavailable in current session.");
-		}
+		if (!modelRegistry) throw new Error("Model registry unavailable in current session.");
 		await modelRegistry.refresh();
-
-		const settings = this.#settingsManager ?? undefined;
 		const modelPatterns = resolveConfiguredModelPatterns(
 			this.modelContext.activeModelPattern ??
 				this.modelContext.defaultModelPattern ??
-				settings?.getModelRole("default"),
-			settings,
+				this.#settingsManager.getModelRole("default"),
+			this.#settingsManager,
 		);
-		const { model } = resolveModelOverride(modelPatterns, modelRegistry, settings);
-		const fallbackModel = modelRegistry.getAvailable()[0];
-		const selectedModel = model ?? fallbackModel;
-		if (!selectedModel) {
-			throw new Error("No available model to generate agent specification.");
-		}
-
-		const systemPrompt = prompt.render(agentCreationArchitectPrompt, {});
-		const userPrompt = prompt.render(agentCreationUserPrompt, { request: description });
-
+		const { model } = resolveModelOverride(modelPatterns, modelRegistry, this.#settingsManager);
+		const selectedModel = model ?? modelRegistry.getAvailable()[0];
+		if (!selectedModel) throw new Error("No available model to generate agent specification.");
 		const { session } = await createAgentSession({
 			cwd: this.cwd,
 			authStorage: modelRegistry.authStorage,
 			modelRegistry,
-			settings,
+			settings: this.#settingsManager,
 			model: selectedModel,
-			systemPrompt: [systemPrompt],
+			systemPrompt: [prompt.render(agentCreationArchitectPrompt, {})],
 			hasUI: false,
 			enableLsp: false,
 			enableMCP: false,
@@ -641,93 +915,20 @@ export class AgentDashboard extends Container {
 			promptTemplates: [],
 			slashCommands: [],
 		});
-		const unsubscribe = session.subscribe(event => {
-			if (event.type === "message_update" && "assistantMessageEvent" in event) {
-				const ame = event.assistantMessageEvent;
-				if (ame.type === "text_delta") {
-					this.#createStreamingText += ame.delta;
-					this.#rebuildAndRender();
-				}
-			}
-		});
-
 		try {
-			await session.prompt(userPrompt, { expandPromptTemplates: false });
+			await session.prompt(prompt.render(agentCreationUserPrompt, { request: description }), {
+				expandPromptTemplates: false,
+			});
 			const raw = extractAssistantText(session.state.messages);
-			if (!raw) {
-				throw new Error("No response returned by agent creation architect.");
-			}
+			if (!raw) throw new Error("No response returned by agent creation architect.");
 			return parseGeneratedAgentSpec(raw);
 		} finally {
-			unsubscribe();
 			await session.dispose();
 		}
 	}
 
-	async #saveGeneratedAgent(): Promise<void> {
-		const spec = this.#createSpec;
-		if (!spec) return;
-
-		const dirs = getConfigDirs("agents", {
-			user: this.#createScope === "user",
-			project: this.#createScope === "project",
-			cwd: this.cwd,
-		});
-		const targetDir = dirs[0]?.path;
-		if (!targetDir) {
-			throw new Error(`Cannot resolve ${this.#createScope} agents directory.`);
-		}
-
-		const filePath = path.join(targetDir, `${spec.identifier}.md`);
-		try {
-			await fs.stat(filePath);
-			throw new Error(`Agent file already exists: ${shortenPath(filePath)}`);
-		} catch (error) {
-			if (!isEnoent(error)) {
-				throw error;
-			}
-		}
-
-		const frontmatter = YAML.stringify(
-			{
-				name: spec.identifier,
-				description: spec.whenToUse,
-			},
-			null,
-			2,
-		).trimEnd();
-		const content = `---\n${frontmatter}\n---\n\n${spec.systemPrompt.trim()}\n`;
-		await Bun.write(filePath, content);
-		await this.#reloadData();
-		this.#clearCreateFlow();
-		this.#notice = `Created agent ${spec.identifier} at ${shortenPath(filePath)}`;
-		this.#rebuildAndRender();
-	}
-
-	#getModelSuggestions(input: string): string[] {
-		const modelRegistry = this.modelContext.modelRegistry;
-		if (!modelRegistry) return [];
-		const query = input.trim().toLowerCase();
-		if (!query) return [];
-		const available = modelRegistry.getAvailable();
-		const seen = new Set<string>();
-		const matches: string[] = [];
-		for (const model of available) {
-			const full = `${model.provider}/${model.id}`;
-			if (seen.has(full)) continue;
-			if (!full.toLowerCase().includes(query)) continue;
-			seen.add(full);
-			matches.push(full);
-			if (matches.length >= 5) break;
-		}
-		return matches;
-	}
-
-	#switchTab(direction: 1 | -1): void {
-		if (this.#tabs.length === 0) return;
-		this.#activeTabIndex = (this.#activeTabIndex + direction + this.#tabs.length) % this.#tabs.length;
-		this.#applyFilters(true);
-		this.#buildLayout();
+	#selectedAgent(): DashboardAgent | undefined {
+		return selectedAgent(this.#model);
 	}
 
 	#defaultPatternsFor(agent: DashboardAgent): string[] {
@@ -735,7 +936,7 @@ export class AgentDashboard extends Container {
 			taskOrRoleModel: agent.model,
 			streamModel: this.modelContext.activeModelPattern,
 			globalFallbackModel: this.modelContext.defaultModelPattern,
-			settings: this.#settingsManager ?? undefined,
+			settings: this.#settingsManager,
 		});
 	}
 
@@ -745,7 +946,7 @@ export class AgentDashboard extends Container {
 			taskOrRoleModel: agent.model,
 			streamModel: this.modelContext.activeModelPattern,
 			globalFallbackModel: this.modelContext.defaultModelPattern,
-			settings: this.#settingsManager ?? undefined,
+			settings: this.#settingsManager,
 		});
 	}
 
@@ -755,108 +956,125 @@ export class AgentDashboard extends Container {
 		const { model, thinkingLevel, explicitThinkingLevel } = resolveModelOverride(
 			patterns,
 			modelRegistry,
-			this.#settingsManager ?? undefined,
+			this.#settingsManager,
 		);
-		if (!model) return undefined;
-		return {
-			resolved: formatModelString(model),
-			thinkingLevel,
-			explicitThinkingLevel,
-		};
+		return model === undefined
+			? undefined
+			: { resolved: formatModelString(model), thinkingLevel, explicitThinkingLevel };
+	}
+
+	#getModelSuggestions(input: string): readonly string[] {
+		const modelRegistry = this.modelContext.modelRegistry;
+		const query = input.trim().toLowerCase();
+		if (!modelRegistry || !query) return [];
+		const seen = new Set<string>();
+		const matches: string[] = [];
+		for (const model of modelRegistry.getAvailable()) {
+			const full = `${model.provider}/${model.id}`;
+			if (seen.has(full) || !full.toLowerCase().includes(query)) continue;
+			seen.add(full);
+			matches.push(full);
+			if (matches.length >= 5) break;
+		}
+		return matches;
+	}
+
+	#applyTableProjection(): void {
+		if (!this.#tablePreview) return;
+		const agents = agentsForTab(this.#model);
+		const source = new Map(agents.map(agent => [agent.name, agent]));
+		const selected = this.#selectedAgent();
+		const preview: AgentInspectorProjection | null = selected === undefined
+			? null
+			: {
+					agent: selected,
+					defaultPatterns: this.#defaultPatternsFor(selected),
+					defaultResolution: this.#resolvePatterns(this.#defaultPatternsFor(selected)),
+					effectivePatterns: this.#effectivePatternsFor(selected, selected.overrideModel),
+					effectiveResolution: this.#resolvePatterns(
+						this.#effectivePatternsFor(selected, selected.overrideModel),
+					),
+				};
+		const view = viewSelector(
+			this.#model.selector,
+			source,
+			{ offset: this.#model.selector.viewportOffset, height: this.#model.selector.viewportSize },
+			{ lines: () => [] },
+			preview,
+		);
+		this.#tablePreview.apply({
+			...view,
+			preview: { revision: this.#model.sourceRevision, value: preview },
+		});
+	}
+
+	#terminalRows(): number {
+		return process.stdout.rows || this.terminalHeight || 24;
+	}
+
+	#uiWidth(): number {
+		return Math.max(40, process.stdout.columns ?? 100);
+	}
+
+	#footer(): string {
+		return theme.fg("dim", LIST_FOOTER_PREFIX) + keyHint("ui.dismiss", "close");
+	}
+
+	#computeBodyHeight(): number {
+		const noticeLines = this.#model?.notice
+			? wrapTextWithAnsi(theme.fg("success", replaceTabs(this.#model.notice)), this.#uiWidth()).length + 1
+			: 0;
+		const footerLines = Math.max(1, wrapTextWithAnsi(this.#footer(), this.#uiWidth()).length);
+		return Math.max(5, this.#terminalRows() - (4 + noticeLines + 1 + footerLines + 1));
 	}
 
 	#renderTabBar(): string {
-		const parts: string[] = [" "];
-		for (let i = 0; i < this.#tabs.length; i++) {
-			const tab = this.#tabs[i];
+		return [" ", ...this.#model.tabs.map((tab, index) => {
 			const label = `${tab.label} (${tab.count})`;
-			if (i === this.#activeTabIndex) {
-				parts.push(theme.bg("selectedBg", ` ${label} `));
-			} else {
-				parts.push(theme.fg("muted", ` ${label} `));
-			}
-		}
-		return parts.join("");
+			return index === this.#model.activeTabIndex
+				? theme.bg("selectedBg", ` ${label} `)
+				: theme.fg("muted", ` ${label} `);
+		})].join("");
 	}
-	#renderCreateInput(): void {
+
+	#renderCreateDraft(screen: Extract<AgentDashboardScreen, { readonly _tag: "CreateDraft" }>): void {
 		this.addChild(new Text(theme.bold(theme.fg("accent", " Create New Agent")), 0, 0));
 		this.addChild(new Spacer(1));
 		this.addChild(new Text(theme.fg("muted", "Describe what the new agent should do:"), 0, 0));
 		this.addChild(new Spacer(1));
-		if (this.#createInput) {
-			this.#createInput.setMaxHeight(Math.max(3, Math.min(8, this.#terminalRows() - 12)));
-			this.addChild(this.#createInput);
+		const lines = screen.description.split("\n");
+		for (const [index, line] of lines.entries()) {
+			this.addChild(new Text(`${index === 0 ? "> " : "  "}${replaceTabs(line)}`, 0, 0));
 		}
 		this.addChild(new Spacer(1));
-		this.addChild(new Text(theme.fg("muted", `Scope: ${this.#createScope}`), 0, 0));
-		if (this.#createGenerating) {
-			this.addChild(new Spacer(1));
-			this.addChild(new Text(theme.fg("accent", "Generating agent specification..."), 0, 0));
-			if (this.#createStreamingText) {
-				this.addChild(new Spacer(1));
-				const maxPreview = Math.max(3, this.#terminalRows() - 18);
-				const contentWidth = Math.max(20, this.#uiWidth() - 4);
-				const wrappedLines: string[] = [];
-				for (const raw of this.#createStreamingText.split("\n")) {
-					for (const w of wrapTextWithAnsi(replaceTabs(raw), contentWidth)) {
-						wrappedLines.push(w);
-					}
-				}
-				const tail = wrappedLines.slice(-maxPreview);
-				if (wrappedLines.length > maxPreview) {
-					this.addChild(new Text(theme.fg("dim", `  ... ${wrappedLines.length - maxPreview} lines above`), 0, 0));
-				}
-				for (const line of tail) {
-					this.addChild(new Text(theme.fg("dim", `  ${line}`), 0, 0));
-				}
-			}
-		}
-		if (this.#createError) {
-			this.addChild(new Text(theme.fg("error", replaceTabs(this.#createError)), 0, 0));
-		}
+		this.addChild(new Text(theme.fg("muted", `Scope: ${screen.scope}`), 0, 0));
+		if (screen.error) this.addChild(new Text(theme.fg("error", replaceTabs(screen.error)), 0, 0));
 		this.addChild(new Spacer(1));
-		const hints = this.#createGenerating
-			? theme.fg("dim", " Generating...")
-			: theme.fg("dim", " Ctrl+Enter: generate  Enter: newline  Tab: toggle scope  ") +
-				keyHint("ui.dismiss", "cancel");
-		this.addChild(new Text(hints, 0, 0));
+		this.addChild(
+			new Text(
+				theme.fg("dim", " Ctrl+Enter: generate  Enter: newline  Tab: toggle scope  ") +
+					keyHint("ui.dismiss", "cancel"),
+				0,
+				0,
+			),
+		);
 	}
 
-	#renderCreateReview(): void {
-		const spec = this.#createSpec;
-		if (!spec) return;
-
+	#renderCreateReview(screen: Extract<AgentDashboardScreen, { readonly _tag: "CreateReview" }>): void {
 		this.addChild(new Text(theme.bold(theme.fg("accent", " Review Generated Agent")), 0, 0));
 		this.addChild(new Spacer(1));
-		this.addChild(new Text(theme.fg("muted", `Identifier: ${spec.identifier}`), 0, 0));
-		this.addChild(new Text(theme.fg("muted", `Scope: ${this.#createScope}`), 0, 0));
+		this.addChild(new Text(theme.fg("muted", `Identifier: ${screen.spec.identifier}`), 0, 0));
+		this.addChild(new Text(theme.fg("muted", `Scope: ${screen.scope}`), 0, 0));
 		this.addChild(new Spacer(1));
-		this.addChild(new Text(theme.fg("muted", "whenToUse:"), 0, 0));
-		for (const line of wrapTextWithAnsi(replaceTabs(spec.whenToUse), Math.max(20, this.#uiWidth() - 2)).slice(0, 8)) {
+		for (const line of wrapTextWithAnsi(replaceTabs(screen.spec.whenToUse), Math.max(20, this.#uiWidth() - 2)).slice(0, 8)) {
 			this.addChild(new Text(truncateToWidth(line, this.#uiWidth() - 2), 0, 0));
 		}
 		this.addChild(new Spacer(1));
-		this.addChild(new Text(theme.fg("muted", "systemPrompt preview:"), 0, 0));
-		const promptWidth = Math.max(20, this.#uiWidth() - 4);
-		const wrappedPrompt: string[] = [];
-		for (const raw of spec.systemPrompt.split("\n")) {
-			for (const w of wrapTextWithAnsi(replaceTabs(raw), promptWidth)) {
-				wrappedPrompt.push(w);
-			}
-		}
-		const promptPreview = wrappedPrompt.slice(0, 10);
-		for (const line of promptPreview) {
-			this.addChild(new Text(`  ${line}`, 0, 0));
-		}
-		if (wrappedPrompt.length > promptPreview.length) {
-			this.addChild(
-				new Text(theme.fg("dim", `  ... ${wrappedPrompt.length - promptPreview.length} more lines`), 0, 0),
-			);
-		}
-		if (this.#createError) {
-			this.addChild(new Spacer(1));
-			this.addChild(new Text(theme.fg("error", replaceTabs(this.#createError)), 0, 0));
-		}
+		const promptLines = screen.spec.systemPrompt.split("\n").flatMap(line =>
+			wrapTextWithAnsi(replaceTabs(line), Math.max(20, this.#uiWidth() - 4)),
+		);
+		for (const line of promptLines.slice(0, 10)) this.addChild(new Text(`  ${line}`, 0, 0));
+		if (screen.error) this.addChild(new Text(theme.fg("error", replaceTabs(screen.error)), 0, 0));
 		this.addChild(new Spacer(1));
 		this.addChild(
 			new Text(
@@ -867,14 +1085,32 @@ export class AgentDashboard extends Container {
 		);
 	}
 
-	#uiWidth(): number {
-		return Math.max(40, process.stdout.columns ?? 100);
-	}
-
-	/** Rebuild layout and request a TUI render pass (for use after async state changes). */
-	#rebuildAndRender(): void {
-		this.#buildLayout();
-		this.onRequestRender?.();
+	#renderModelEdit(screen: Extract<AgentDashboardScreen, { readonly _tag: "ModelEdit" }>): void {
+		const agent = this.#model.allAgents.find(item => item.name === screen.agentName);
+		const defaults = agent === undefined ? [] : this.#defaultPatternsFor(agent);
+		const preview = agent === undefined ? [] : this.#effectivePatternsFor(agent, screen.draft);
+		this.addChild(new Text(theme.bold(theme.fg("accent", `Model override: ${replaceTabs(screen.agentName)}`)), 0, 0));
+		this.addChild(new Spacer(1));
+		this.addChild(new Text(`> ${replaceTabs(screen.draft)}`, 0, 0));
+		this.addChild(new Spacer(1));
+		this.addChild(new Text(theme.fg("muted", `Default pattern: ${replaceTabs(joinPatterns(defaults))}`), 0, 0));
+		const defaultResolution = this.#resolvePatterns(defaults);
+		const previewResolution = this.#resolvePatterns(preview);
+		this.addChild(new Text(
+			`${theme.fg("muted", "Default resolves:")} ${defaultResolution ? formatResolution(defaultResolution) : theme.fg("dim", "(unresolved)")}`,
+			0,
+			0,
+		));
+		this.addChild(new Text(
+			`${theme.fg("muted", "Preview effective:")} ${previewResolution ? formatResolution(previewResolution) : theme.fg("dim", "(unresolved)")}`,
+			0,
+			0,
+		));
+		for (const suggestion of this.#getModelSuggestions(screen.draft)) {
+			this.addChild(new Text(theme.fg("dim", `  ${suggestion}`), 0, 0));
+		}
+		this.addChild(new Spacer(1));
+		this.addChild(new Text(theme.fg("dim", " Enter: save  ") + keyHint("ui.dismiss", "cancel"), 0, 0));
 	}
 
 	#buildLayout(): void {
@@ -883,188 +1119,61 @@ export class AgentDashboard extends Container {
 		this.addChild(new Text(theme.bold(theme.fg("accent", " Agent Control Center")), 0, 0));
 		this.addChild(new Text(this.#renderTabBar(), 0, 0));
 		this.addChild(new Spacer(1));
-
-		if (this.#notice) {
-			this.addChild(new Text(theme.fg("success", replaceTabs(this.#notice)), 0, 0));
+		if (this.#model.notice) {
+			this.addChild(new Text(theme.fg("success", replaceTabs(this.#model.notice)), 0, 0));
 			this.addChild(new Spacer(1));
 		}
-
-		if (this.#loading) {
+		if (this.#model.loadState === "Loading") {
 			this.addChild(new Text(theme.fg("muted", "Loading agents..."), 0, 0));
-			this.addChild(new Spacer(1));
-		} else if (this.#loadError) {
-			this.addChild(new Text(theme.fg("error", `Failed to load agents: ${replaceTabs(this.#loadError)}`), 0, 0));
-			this.addChild(new Spacer(1));
-		} else if (this.#createSpec) {
-			this.#renderCreateReview();
-		} else if (this.#createInput || this.#createGenerating) {
-			this.#renderCreateInput();
-		} else if (this.#editInput && this.#editingAgentName) {
-			const editingAgent = this.#allAgents.find(agent => agent.name === this.#editingAgentName) ?? null;
-			const draft = this.#editInput.getValue();
-			const defaultPatterns = editingAgent ? this.#defaultPatternsFor(editingAgent) : [];
-			const defaultResolution = editingAgent ? this.#resolvePatterns(defaultPatterns) : undefined;
-			const previewPatterns = editingAgent ? this.#effectivePatternsFor(editingAgent, draft) : [];
-			const previewResolution = editingAgent ? this.#resolvePatterns(previewPatterns) : undefined;
-			const suggestions = this.#getModelSuggestions(draft);
-
-			this.addChild(
-				new Text(theme.bold(theme.fg("accent", `Model override: ${replaceTabs(this.#editingAgentName)}`)), 0, 0),
-			);
-			this.addChild(new Spacer(1));
-			this.addChild(new Text(theme.fg("muted", "Enter model pattern (empty clears override)"), 0, 0));
-			this.addChild(new Spacer(1));
-			this.addChild(this.#editInput);
-			this.addChild(new Spacer(1));
-
-			this.addChild(
-				new Text(theme.fg("muted", `Default pattern: ${replaceTabs(joinPatterns(defaultPatterns))}`), 0, 0),
-			);
-			this.addChild(
-				new Text(
-					`${theme.fg("muted", "Default resolves:")} ${defaultResolution ? formatResolution(defaultResolution) : theme.fg("dim", "(unresolved)")}`,
-					0,
-					0,
-				),
-			);
-			this.addChild(
-				new Text(
-					`${theme.fg("muted", "Preview effective:")} ${previewResolution ? formatResolution(previewResolution) : theme.fg("dim", "(unresolved)")}`,
-					0,
-					0,
-				),
-			);
-
-			if (suggestions.length > 0) {
-				this.addChild(new Spacer(1));
-				this.addChild(new Text(theme.fg("muted", "Suggestions:"), 0, 0));
-				for (const suggestion of suggestions) {
-					this.addChild(new Text(theme.fg("dim", `  ${suggestion}`), 0, 0));
-				}
-			}
-
-			this.addChild(new Spacer(1));
-			this.addChild(new Text(theme.fg("dim", " Enter: save  ") + keyHint("ui.dismiss", "cancel"), 0, 0));
+		} else if (this.#model.loadState === "Failed") {
+			this.addChild(new Text(theme.fg("error", `Failed to load agents: ${replaceTabs(this.#model.loadError ?? "Unknown error")}`), 0, 0));
 		} else {
-			this.addChild(this.#tablePreview);
-			this.addChild(new Spacer(1));
-			this.addChild(new Text(this.#listFooter(), 0, 0));
+			switch (this.#model.screen._tag) {
+				case "Browse":
+					this.addChild(this.#tablePreview);
+					this.addChild(new Spacer(1));
+					this.addChild(new Text(this.#footer(), 0, 0));
+					break;
+				case "ModelEdit":
+					this.#renderModelEdit(this.#model.screen);
+					break;
+				case "CreateDraft":
+					this.#renderCreateDraft(this.#model.screen);
+					break;
+				case "CreatePending":
+					this.addChild(new Text(theme.fg("accent", this.#model.screen.operation === "Save" ? "Saving agent..." : "Generating agent specification..."), 0, 0));
+					this.addChild(new Spacer(1));
+					this.addChild(new Text(keyHint("ui.dismiss", "cancel"), 0, 0));
+					break;
+				case "CreateReview":
+					this.#renderCreateReview(this.#model.screen);
+					break;
+			}
 		}
-
 		this.addChild(new DynamicBorder());
 		this.#builtRows = this.#terminalRows();
 		this.#builtCols = this.#uiWidth();
 	}
 
-	#handleTableKey(data: string): boolean {
-		if (matchesKey(data, "ctrl+r")) {
-			void this.#reloadData();
-			return true;
+	override render(width: number): readonly string[] {
+		if (this.#disposed && this.#committedRender !== undefined) return this.#committedRender;
+		if (this.#terminalRows() !== this.#builtRows || this.#uiWidth() !== this.#builtCols) this.#buildLayout();
+		const lines = super.render(width);
+		const rows = this.#terminalRows();
+		if (lines.length >= rows) {
+			this.#committedRender = lines;
+			return lines;
 		}
-		if (matchesKey(data, "tab") || matchesKey(data, "right")) {
-			this.#switchTab(1);
-			return true;
-		}
-		if (matchesKey(data, "shift+tab") || matchesKey(data, "left")) {
-			this.#switchTab(-1);
-			return true;
-		}
-		if (data === " ") {
-			this.#toggleSelectedAgent();
-			return true;
-		}
-		if (matchesKey(data, "enter") || matchesKey(data, "return") || data === "\n") {
-			this.#beginModelEdit();
-			return true;
-		}
-		if (data.toLowerCase() === "n") {
-			this.#beginCreateFlow();
-			return true;
-		}
-		return false;
-	}
-
-	#close(): void {
-		void this.dispose();
-		this.onClose?.();
+		const padded = lines.slice();
+		while (padded.length < rows) padded.push("");
+		this.#committedRender = padded;
+		return padded;
 	}
 
 	async dispose(): Promise<void> {
 		if (this.#disposed) return;
+		this.#committedRender ??= this.render(this.#uiWidth());
 		this.#disposed = true;
 		await Effect.runPromise(Scope.close(this.#viewScope, Exit.void));
-	}
-
-	handleInput(data: string): void {
-		if (matchesKey(data, "ctrl+c")) {
-			this.#close();
-			return;
-		}
-
-		if (this.#createSpec) {
-			if (matchesUiDismiss(data)) {
-				this.#clearCreateFlow();
-				this.#buildLayout();
-				return;
-			}
-			if (matchesKey(data, "tab") || matchesKey(data, "shift+tab")) {
-				this.#toggleCreateScope();
-				return;
-			}
-			if (data.toLowerCase() === "r") {
-				void this.#generateAgentFromDescription(this.#createDescription);
-				return;
-			}
-			if (matchesKey(data, "enter") || matchesKey(data, "return") || data === "\n") {
-				void this.#saveGeneratedAgent().catch(error => {
-					this.#createError = error instanceof Error ? error.message : String(error);
-					this.#rebuildAndRender();
-				});
-				return;
-			}
-			return;
-		}
-
-		if (this.#createInput || this.#createGenerating) {
-			if (matchesUiDismiss(data)) {
-				if (!this.#createGenerating) {
-					this.#clearCreateFlow();
-					this.#buildLayout();
-				}
-				return;
-			}
-			if (!this.#createGenerating && this.#shouldSubmitCreateDescription(data)) {
-				this.#submitCreateDescription();
-				return;
-			}
-			if (!this.#createGenerating && (matchesKey(data, "enter") || matchesKey(data, "return") || data === "\n")) {
-				this.#insertCreateNewline();
-				return;
-			}
-			if (!this.#createGenerating && (matchesKey(data, "tab") || matchesKey(data, "shift+tab"))) {
-				this.#toggleCreateScope();
-				return;
-			}
-			if (!this.#createGenerating && this.#createInput) {
-				this.#createInput.handleInput(data);
-				this.#createDescription = this.#createInput.getExpandedText();
-				this.#buildLayout();
-			}
-			return;
-		}
-
-		if (this.#editInput) {
-			if (matchesUiDismiss(data)) {
-				this.#cancelModelEdit();
-				return;
-			}
-			this.#editInput.handleInput(data);
-			if (this.#editInput) {
-				this.#buildLayout();
-			}
-			return;
-		}
-
-		this.#tablePreview.handleInput(data);
 	}
 }

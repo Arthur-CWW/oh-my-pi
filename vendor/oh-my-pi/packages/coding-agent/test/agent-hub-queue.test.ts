@@ -1,4 +1,5 @@
 /** Hub preview stays read-only while still projecting host queue/admission state. */
+import { pressHub } from "./helpers/agent-hub-input";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { IrcBus } from "@oh-my-pi/pi-coding-agent/irc/bus";
@@ -85,10 +86,10 @@ describe("Agent hub queue projection", () => {
 			externalIrc: null,
 		});
 
-		hub.handleInput("\r");
-		hub.handleInput("i");
-		for (const character of "follow up message") hub.handleInput(character);
-		hub.handleInput("\x1b[13;5u");
+		pressHub(hub, "\r");
+		pressHub(hub, "i");
+		for (const character of "follow up message") pressHub(hub, character);
+		pressHub(hub, "\x1b[13;5u");
 
 		expect(sendUserMessage).not.toHaveBeenCalled();
 		const rendered = Bun.stripANSI(hub.render(120).join("\n"));

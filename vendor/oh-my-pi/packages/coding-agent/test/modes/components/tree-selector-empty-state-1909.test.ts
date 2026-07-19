@@ -1,5 +1,10 @@
 import { beforeAll, describe, expect, it } from "bun:test";
-import { TreeSelectorComponent } from "@oh-my-pi/pi-coding-agent/modes/components/tree-selector";
+import {
+	createSessionTreeRoute,
+	type SessionTreeModel,
+	updateSessionTree,
+	viewSessionTree,
+} from "@oh-my-pi/pi-coding-agent/modes/components/tree-selector";
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import type { SessionEntry, SessionTreeNode } from "@oh-my-pi/pi-coding-agent/session/session-entries";
 
@@ -45,21 +50,29 @@ function userMessageTree(): SessionTreeNode[] {
 	return [{ entry, children: [] }];
 }
 
-function renderSelector(selector: TreeSelectorComponent): string {
-	const lines = (selector as unknown as { render: (w: number) => string[] }).render(120);
+function renderSelector(selector: ReturnType<typeof createSessionTreeRoute>["focusedRoot"]): string {
+	const lines = selector.render(120);
 	return Bun.stripANSI(lines.join("\n"));
+}
+
+function makeSelector(tree: SessionTreeNode[], leafId: string | null) {
+	const route = createSessionTreeRoute(tree, leafId);
+	let model: SessionTreeModel = route.initialModel;
+	const apply = (): void => {
+		route.focusedRoot.apply(viewSessionTree(model, { offset: 0, height: 60 }));
+	};
+	const dispatch = (message: Parameters<typeof updateSessionTree>[1]): void => {
+		model = updateSessionTree(model, message).model;
+		apply();
+	};
+	apply();
+	return { component: route.focusedRoot, dispatch };
 }
 
 describe("issue #1909: tree-selector empty-state messaging", () => {
 	it("explains that the filter — not missing data — is hiding entries on a fresh session", () => {
-		const selector = new TreeSelectorComponent(
-			freshSessionTree(),
-			"e2",
-			60,
-			() => {},
-			() => {},
-		);
-		const text = renderSelector(selector);
+		const selector = makeSelector(freshSessionTree(), "e2");
+		const text = renderSelector(selector.component);
 
 		// Filter-hiding hint and recovery key must both be present so the user knows
 		// the panel isn't broken and can widen the view without leaving the screen.
@@ -72,16 +85,10 @@ describe("issue #1909: tree-selector empty-state messaging", () => {
 	});
 
 	it("explains a zero-result search as a search problem, not a filter problem", () => {
-		const selector = new TreeSelectorComponent(
-			userMessageTree(),
-			"e1",
-			60,
-			() => {},
-			() => {},
-		);
-		// Type a character that won't match anything in the tree.
-		selector.handleInput("z");
-		const text = renderSelector(selector);
+		const selector = makeSelector(userMessageTree(), "e1");
+		selector.dispatch({ _tag: "BeginFilter" });
+		selector.dispatch({ _tag: "FilterAppend", text: "z" });
+		const text = renderSelector(selector.component);
 
 		expect(text).toContain('No entries match search "z"');
 		expect(text.toLowerCase()).toContain("backspace");
@@ -90,14 +97,8 @@ describe("issue #1909: tree-selector empty-state messaging", () => {
 	});
 
 	it("falls back to the bare 'No entries found' line when the tree is genuinely empty", () => {
-		const selector = new TreeSelectorComponent(
-			[],
-			null,
-			60,
-			() => {},
-			() => {},
-		);
-		const text = renderSelector(selector);
+		const selector = makeSelector([], null);
+		const text = renderSelector(selector.component);
 
 		expect(text).toContain("No entries found");
 		expect(text).toContain("(0/0)");

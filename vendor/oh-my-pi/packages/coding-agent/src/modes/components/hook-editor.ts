@@ -1,170 +1,140 @@
 /**
- * Multi-line editor component for hooks and ask custom input.
- * Supports Ctrl+G for external editor.
+ * Renderer-only multi-line editor for the hook MVU route.
  *
- * Two modes:
- * - Default (hook): Enter inserts newline, Ctrl+Enter submits, bordered popup
- * - Prompt-style (ask): Enter submits, Shift+Enter inserts newline, legacy ask chrome
+ * The route reducer owns text editing and settlement. This component applies a
+ * committed draft to pi-tui's editor widget and never consumes terminal input.
  */
-import { Container, Editor, matchesKey, Spacer, Text, type TUI } from "@oh-my-pi/pi-tui";
+import { Container, Editor, Spacer, Text } from "@oh-my-pi/pi-tui";
 import { getEditorTheme, theme } from "../../modes/theme/theme";
-import { matchesAppExternalEditor, matchesUiDismiss } from "../../modes/utils/keybinding-matchers";
-import { getEditorCommand, openInEditor } from "../../utils/external-editor";
+import { nextTextBoundary, previousTextBoundary } from "../mvu/form-input";
 import { DynamicBorder } from "./dynamic-border";
 import { keyHint, rawKeyHint } from "./keybinding-hints";
 
-export interface HookEditorOptions {
-	/** When true, use prompt-style keybindings with the legacy ask prompt chrome. */
-	promptStyle?: boolean;
+export interface HookEditorModel {
+	readonly title: string;
+	readonly text: string;
+	readonly cursor: number;
+	readonly promptStyle: boolean;
 }
 
-function isCtrlEnterSubmit(keyData: string): boolean {
-	return matchesKey(keyData, "ctrl+enter") || (keyData.charCodeAt(0) === 10 && keyData.length > 1);
+export type HookEditorMsg =
+	| { readonly _tag: "ValueChanged"; readonly value: string; readonly cursor?: number }
+	| { readonly _tag: "InsertText"; readonly text: string }
+	| { readonly _tag: "DeleteBackward" }
+	| { readonly _tag: "MoveCursor"; readonly delta: -1 | 1 }
+	| { readonly _tag: "Submit" }
+	| { readonly _tag: "Back" }
+	| { readonly _tag: "ExternalEditor" };
+
+export type HookEditorCommand =
+	| { readonly _tag: "Resolve"; readonly value: string }
+	| { readonly _tag: "Cancel" }
+	| { readonly _tag: "ExternalEditorRequested"; readonly value: string };
+
+function clampCursor(text: string, cursor: number): number {
+	return Math.max(0, Math.min(text.length, cursor));
 }
+
+
+export function makeHookEditorModel(title: string, text = "", promptStyle = false): HookEditorModel {
+	return { title, text, cursor: text.length, promptStyle };
+}
+
+export function updateHookEditor(
+	model: HookEditorModel,
+	message: HookEditorMsg,
+): { readonly model: HookEditorModel; readonly commands: readonly HookEditorCommand[] } {
+	switch (message._tag) {
+		case "ValueChanged":
+			return {
+				model: {
+					...model,
+					text: message.value,
+					cursor: clampCursor(message.value, message.cursor ?? message.value.length),
+				},
+				commands: [],
+			};
+		case "InsertText": {
+			if (message.text.length === 0) return { model, commands: [] };
+			const cursor = clampCursor(model.text, model.cursor);
+			return {
+				model: {
+					...model,
+					text: model.text.slice(0, cursor) + message.text + model.text.slice(cursor),
+					cursor: cursor + message.text.length,
+				},
+				commands: [],
+			};
+		}
+		case "DeleteBackward": {
+			const cursor = clampCursor(model.text, model.cursor);
+			const previous = previousTextBoundary(model.text, cursor);
+			return previous === cursor
+				? { model, commands: [] }
+				: {
+						model: {
+							...model,
+							text: model.text.slice(0, previous) + model.text.slice(cursor),
+							cursor: previous,
+						},
+						commands: [],
+					};
+		}
+		case "MoveCursor": {
+			const cursor = message.delta < 0
+				? previousTextBoundary(model.text, model.cursor)
+				: nextTextBoundary(model.text, model.cursor);
+			return cursor === model.cursor ? { model, commands: [] } : { model: { ...model, cursor }, commands: [] };
+		}
+		case "Submit":
+			return { model, commands: [{ _tag: "Resolve", value: model.text }] };
+		case "Back":
+			return { model, commands: [{ _tag: "Cancel" }] };
+		case "ExternalEditor":
+			return { model, commands: [{ _tag: "ExternalEditorRequested", value: model.text }] };
+	}
+}
+
 
 export class HookEditorComponent extends Container {
-	#editor: Editor;
-	#onSubmitCallback: (value: string) => void;
-	#onCancelCallback: () => void;
-	#tui: TUI;
-	#promptStyle: boolean;
+	readonly #editor = new Editor(getEditorTheme());
+	readonly #title = new Text("", 1, 0);
+	readonly #footer = new Text("", 1, 0);
+	#model: HookEditorModel = makeHookEditorModel("");
 
-	constructor(
-		tui: TUI,
-		title: string,
-		prefill: string | undefined,
-		onSubmit: (value: string) => void,
-		onCancel: () => void,
-		options?: HookEditorOptions,
-	) {
+	constructor(model?: HookEditorModel) {
 		super();
-
-		this.#tui = tui;
-		this.#onSubmitCallback = onSubmit;
-		this.#onCancelCallback = onCancel;
-		this.#promptStyle = options?.promptStyle ?? false;
-
 		this.addChild(new DynamicBorder());
 		this.addChild(new Spacer(1));
-
-		// Title
-		this.addChild(new Text(theme.fg("accent", title), 1, 0));
+		this.addChild(this.#title);
 		this.addChild(new Spacer(1));
-
-		// Editor
-		this.#editor = new Editor(getEditorTheme());
-		if (this.#promptStyle) {
-			this.#editor.setBorderVisible(false);
-			this.#editor.setPromptGutter("> ");
-			this.#editor.disableSubmit = true;
-		}
-		if (prefill) {
-			this.#editor.setText(prefill);
-		}
 		this.addChild(this.#editor);
-
 		this.addChild(new Spacer(1));
-
-		// Hint
-		const hint = [
-			rawKeyHint(this.#promptStyle ? "enter" : "ctrl+enter", "submit"),
-			keyHint("ui.dismiss", "cancel"),
-			rawKeyHint("ctrl+g", "external editor"),
-		].join("  ");
-		this.addChild(new Text(hint, 1, 0));
-
+		this.addChild(this.#footer);
 		this.addChild(new Spacer(1));
 		this.addChild(new DynamicBorder());
+		if (model !== undefined) this.apply(model);
 	}
 
-	handleInput(keyData: string): void {
-		if (this.#promptStyle) {
-			this.#handlePromptStyleInput(keyData);
-		} else {
-			this.#handleHookStyleInput(keyData);
-		}
+	apply(model: HookEditorModel): void {
+		this.#model = model;
+		this.#title.setText(theme.fg("accent", model.title));
+		this.#editor.setBorderVisible(!model.promptStyle);
+		this.#editor.setPromptGutter(model.promptStyle ? "> " : "");
+		this.#footer.setText(
+			[
+				rawKeyHint(model.promptStyle ? "enter" : "ctrl+enter", "submit"),
+				keyHint("ui.dismiss", "cancel"),
+				rawKeyHint("ctrl+g", "external editor"),
+			].join("  "),
+		);
+		this.#editor.disableSubmit = model.promptStyle;
+		if (this.#editor.getExpandedText() !== model.text) this.#editor.setText(model.text);
+		this.#editor.setCursorOffset(model.cursor);
+		this.invalidate();
 	}
 
-	#submitCurrentText(): void {
-		this.#onSubmitCallback(this.#editor.getExpandedText());
-	}
-
-	/** Route non-bracketed paste transports (e.g. kitty's OSC 5522 enhanced clipboard)
-	 *  into the inner editor, mirroring bracketed-paste semantics. Without this hook,
-	 *  enhanced-paste routing falls back to the main prompt editor hidden behind the
-	 *  dialog (#2127 routing contract). */
-	pasteText(text: string): void {
-		this.#editor.pasteText(text);
-	}
-
-	/** Prompt-style: raw Enter submits; Editor owns newline-producing sequences. */
-	#handlePromptStyleInput(keyData: string): void {
-		// Prompt-style honors the independently configurable modal dismissal binding.
-		if (matchesUiDismiss(keyData)) {
-			this.#onCancelCallback();
-			return;
-		}
-
-		// Ctrl+G for external editor
-		if (matchesAppExternalEditor(keyData)) {
-			void this.#openExternalEditor();
-			return;
-		}
-
-		// Submit on any plain Enter encoding, including terminals that report unmodified Enter as LF.
-		if (matchesKey(keyData, "enter") || matchesKey(keyData, "return")) {
-			this.#submitCurrentText();
-			return;
-		}
-
-		// Let Editor handle modified newline-producing variants (Shift+Enter, Ctrl+Enter, Alt+Enter, etc.)
-		this.#editor.handleInput(keyData);
-	}
-
-	/** Hook-style: Enter=newline, Ctrl+Enter=submit (original behavior) */
-	#handleHookStyleInput(keyData: string): void {
-		// Ctrl+Enter to submit. Use key matching so lock-key and keypad Enter variants work.
-		if (isCtrlEnterSubmit(keyData)) {
-			this.#submitCurrentText();
-			return;
-		}
-
-		// Plain Enter inserts a new line in hook editor
-		if (matchesKey(keyData, "enter") || matchesKey(keyData, "return") || keyData === "\n") {
-			this.#editor.handleInput("\n");
-			return;
-		}
-
-		// Configured modal dismissal goes back without coupling to active-work interruption.
-		if (matchesUiDismiss(keyData)) {
-			this.#onCancelCallback();
-			return;
-		}
-
-		// Ctrl+G for external editor
-		if (matchesAppExternalEditor(keyData)) {
-			void this.#openExternalEditor();
-			return;
-		}
-
-		// Forward to editor
-		this.#editor.handleInput(keyData);
-	}
-
-	async #openExternalEditor(): Promise<void> {
-		const editorCmd = getEditorCommand();
-		if (!editorCmd) return;
-
-		const currentText = this.#editor.getExpandedText();
-		try {
-			this.#tui.stop();
-			const result = await openInEditor(editorCmd, currentText);
-			if (result !== null) {
-				this.#editor.setText(result);
-			}
-		} finally {
-			this.#tui.start();
-			this.#tui.requestRender(true);
-		}
+	get model(): HookEditorModel {
+		return this.#model;
 	}
 }

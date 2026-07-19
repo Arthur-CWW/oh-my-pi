@@ -99,6 +99,23 @@ type InputListenerResult = { consume?: boolean; data?: string } | undefined;
 type InputListener = (data: string) => InputListenerResult;
 type StartListener = () => void;
 
+export interface InputRouteTrace {
+	readonly sequenceId: number;
+	readonly leaseId: string;
+	readonly resolvedAction?: string;
+	readonly expectedConsumer: "mvu" | "legacy";
+}
+
+export type InputRouteDecision =
+	| { readonly consume: true; readonly trace: InputRouteTrace }
+	| { readonly consume: false; readonly data?: string; readonly trace: InputRouteTrace };
+
+export type InputRouter = (data: string, sequenceId: number) => InputRouteDecision | undefined;
+
+export interface InputDispatchRecord extends InputRouteTrace {
+	readonly actualConsumer: "protocol" | "router" | "listener" | "global" | "filtered" | "focused" | "none";
+}
+
 export interface RenderTimer {
 	cancel(): void;
 }
@@ -709,6 +726,10 @@ export class TUI extends Container {
 	#previousHeight = 0;
 	#focusedComponent: Component | null = null;
 	#inputListeners = new Set<InputListener>();
+	#inputRouter: InputRouter | undefined;
+	#inputDispatchObserver: ((record: InputDispatchRecord) => void) | undefined;
+	#inputDispatchValidator: ((record: InputDispatchRecord) => void) | undefined;
+	#inputSequenceId = 0;
 	#startListeners = new Set<StartListener>();
 
 	/** Global callback for debug key (Shift+Ctrl+D). Called before input is forwarded to focused component. */
@@ -792,7 +813,6 @@ export class TUI extends Container {
 	#sixelProbePendingGraphics = false;
 	#sixelProbeBuffer = "";
 	#sixelProbeTimeout?: NodeJS.Timeout;
-	#sixelProbeUnsubscribe?: () => void;
 	#showHardwareCursor = $flag("PI_HARDWARE_CURSOR");
 	#synchronizedOutputEnabled = shouldEnableSynchronizedOutputByDefault();
 	#paintBeginSequence = this.#synchronizedOutputEnabled ? PAINT_BEGIN : PAINT_BEGIN_NO_SYNC;
@@ -1405,6 +1425,18 @@ export class TUI extends Container {
 		this.#inputListeners.delete(listener);
 	}
 
+	setInputRouter(router: InputRouter | undefined): void {
+		this.#inputRouter = router;
+	}
+
+	setInputDispatchObserver(observer: ((record: InputDispatchRecord) => void) | undefined): void {
+		this.#inputDispatchObserver = observer;
+	}
+
+	setInputDispatchValidator(validator: ((record: InputDispatchRecord) => void) | undefined): void {
+		this.#inputDispatchValidator = validator;
+	}
+
 	#querySixelSupport(): void {
 		if (TERMINAL.imageProtocol) return;
 		if (process.platform !== "win32") return;
@@ -1414,7 +1446,8 @@ export class TUI extends Container {
 		this.#clearSixelProbeState();
 		this.#sixelProbePendingDa = true;
 		this.#sixelProbePendingGraphics = true;
-		this.#sixelProbeUnsubscribe = this.addInputListener(data => this.#handleSixelProbeInput(data));
+		// Probe replies are consumed on the protocol path before routing so an
+		// active MVU lease cannot decode them as terminal input.
 		this.terminal.write("\x1b[c");
 		this.terminal.write("\x1b[?2;1;0S");
 		this.#sixelProbeTimeout = setTimeout(() => {
@@ -1512,10 +1545,8 @@ export class TUI extends Container {
 			clearTimeout(this.#sixelProbeTimeout);
 			this.#sixelProbeTimeout = undefined;
 		}
-		if (this.#sixelProbeUnsubscribe) {
-			this.#sixelProbeUnsubscribe();
-			this.#sixelProbeUnsubscribe = undefined;
-		}
+		// Probe replies are handled directly in #handleInputInner before the
+		// ordinary listener chain, so they cannot be delivered twice.
 		this.#sixelProbePendingDa = false;
 		this.#sixelProbePendingGraphics = false;
 		this.#sixelProbeBuffer = "";
@@ -1976,19 +2007,63 @@ export class TUI extends Container {
 
 	#handleInput(data: string): void {
 		pushLoopPhase("ui.handle-input");
+		const sequenceId = ++this.#inputSequenceId;
 		try {
-			this.#handleInputInner(data);
+			this.#handleInputInner(data, sequenceId);
 		} finally {
 			popLoopPhase();
 		}
 	}
 
-	#handleInputInner(data: string): void {
+	#handleInputInner(data: string, sequenceId: number): void {
+		let current = data;
+		if (this.#sixelProbePendingDa || this.#sixelProbePendingGraphics) {
+			const probeResult = this.#handleSixelProbeInput(current);
+			if (probeResult?.consume) {
+				if (this.#inputDispatchObserver) {
+					this.#recordInputDispatch(
+						{ sequenceId, leaseId: "protocol", expectedConsumer: "legacy" },
+						"protocol",
+					);
+				}
+				return;
+			}
+			if (probeResult?.data !== undefined) {
+				current = probeResult.data;
+			}
+		}
+
+		// Protocol responses bypass lease resolution and ordinary listeners.
+		if (this.#consumeCellSizeResponse(current)) {
+			if (this.#inputDispatchObserver) {
+				this.#recordInputDispatch({ sequenceId, leaseId: "protocol", expectedConsumer: "legacy" }, "protocol");
+			}
+			return;
+		}
+
+		const router = this.#inputRouter;
+		let trace: InputRouteTrace | undefined = router || this.#inputDispatchObserver
+			? { sequenceId, leaseId: "legacy", expectedConsumer: "legacy" }
+			: undefined;
+		if (router) {
+			const decision = router(current, sequenceId);
+			if (decision) {
+				trace = decision.trace;
+				if (decision.consume) {
+					this.#recordInputDispatch(trace, "router");
+					return;
+				}
+				if (decision.data !== undefined) {
+					current = decision.data;
+				}
+			}
+		}
+
 		if (this.#inputListeners.size > 0) {
-			let current = data;
 			for (const listener of this.#inputListeners) {
 				const result = listener(current);
 				if (result?.consume) {
+					this.#recordInputDispatch(trace, "listener");
 					return;
 				}
 				if (result?.data !== undefined) {
@@ -1996,19 +2071,15 @@ export class TUI extends Container {
 				}
 			}
 			if (current.length === 0) {
+				this.#recordInputDispatch(trace, "filtered");
 				return;
 			}
-			data = current;
-		}
-
-		// Consume terminal cell size responses without blocking unrelated input.
-		if (this.#consumeCellSizeResponse(data)) {
-			return;
 		}
 
 		// Global debug key handler (Shift+Ctrl+D)
-		if (matchesKey(data, "shift+ctrl+d") && this.onDebug) {
+		if (matchesKey(current, "shift+ctrl+d") && this.onDebug) {
 			this.onDebug();
+			this.#recordInputDispatch(trace, "global");
 			return;
 		}
 
@@ -2031,13 +2102,24 @@ export class TUI extends Container {
 		const focused = this.#focusedComponent;
 		if (focused?.handleInput) {
 			// Filter out key release events unless component opts in
-			if (isKeyRelease(data) && !focused.wantsKeyRelease) {
+			if (isKeyRelease(current) && !focused.wantsKeyRelease) {
+				this.#recordInputDispatch(trace, "filtered");
 				return;
 			}
-			focused.handleInput(data);
+			focused.handleInput(current);
 			// Input dirties the focused subtree, not committed transcript history.
 			this.requestComponentRender(focused);
+			this.#recordInputDispatch(trace, "focused");
+			return;
 		}
+		this.#recordInputDispatch(trace, "none");
+	}
+
+	#recordInputDispatch(trace: InputRouteTrace | undefined, actualConsumer: InputDispatchRecord["actualConsumer"]): void {
+		if (!trace) return;
+		const record = { ...trace, actualConsumer };
+		this.#inputDispatchValidator?.(record);
+		this.#inputDispatchObserver?.(record);
 	}
 
 	#consumeCellSizeResponse(data: string): boolean {

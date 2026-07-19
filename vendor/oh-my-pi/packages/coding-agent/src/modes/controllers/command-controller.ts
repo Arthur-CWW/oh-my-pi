@@ -9,8 +9,9 @@ import {
 	type UsageLimit,
 	type UsageReport,
 } from "@oh-my-pi/pi-ai";
-import { Loader, Markdown, type OverlayHandle, padding, Spacer, Text, visibleWidth } from "@oh-my-pi/pi-tui";
+import { Loader, Markdown, padding, Spacer, Text, type TUI, visibleWidth } from "@oh-my-pi/pi-tui";
 import { formatDuration, Snowflake } from "@oh-my-pi/pi-utils";
+import { Effect, Scope } from "effect";
 import { shouldEnableAppendOnlyContext } from "../../config/append-only-context-mode";
 import { type LoadedCustomShare, loadCustomShare } from "../../export/custom-share";
 import { shareSession } from "../../export/share";
@@ -30,13 +31,22 @@ import { BashExecutionComponent } from "../../modes/components/bash-execution";
 import { BorderedLoader } from "../../modes/components/bordered-loader";
 import { DynamicBorder } from "../../modes/components/dynamic-border";
 import { keyHint } from "../../modes/components/keybinding-hints";
-import { CommandOutputOverlayComponent } from "../../modes/components/command-line";
-import { ToolsView } from "../../modes/components/tools-view";
-import { UsageHudComponent } from "../../modes/components/usage-hud";
+import { mountCommandOutputOverlay } from "../../modes/components/command-line";
+import { selectorActionToMsg } from "../../modes/components/selector-adapter";
+import { ToolsView, TOOLS_VIEW_ROUTE } from "../../modes/components/tools-view";
+import {
+	createUsageHudRoute,
+	type UsageHudModel,
+	updateUsageHud,
+	usageHudMsgFromInput,
+} from "../../modes/components/usage-hud";
 import { EvalExecutionComponent } from "../../modes/components/eval-execution";
 import { TranscriptBlock } from "../../modes/components/transcript-container";
 import { getMarkdownTheme, getSymbolTheme, theme } from "../../modes/theme/theme";
 import type { InteractiveModeContext } from "../../modes/types";
+import type { InputLeaseManager, MvuEnvelope, MvuInputRoute } from "../../modes/mvu/input-lease";
+import { mountMvuChild, mountMvuOverlay, type MvuRouteHandle } from "../../modes/mvu/route-host";
+import { makeSelectorModel, type SelectorModel, updateSelector } from "../../modes/mvu/selector";
 import { computeContextBreakdown, renderContextUsage } from "../../modes/utils/context-usage";
 import { buildHotkeysMarkdown } from "../../modes/utils/hotkeys-markdown";
 import type { DisplayTool } from "../../modes/utils/tools-markdown";
@@ -64,78 +74,218 @@ function showMarkdownPanel(ctx: InteractiveModeContext, title: string, markdown:
 	block.addChild(new DynamicBorder());
 	ctx.present(block);
 }
+type ToolsViewRouteCommand =
+	| {
+			readonly _tag: "RenderTools";
+			readonly model: SelectorModel<string>;
+			readonly dirtyKeys: ReadonlySet<string>;
+		}
+	| { readonly _tag: "Close" };
+
+type UsageHudRouteCommand =
+	| { readonly _tag: "RenderUsageHud"; readonly model: UsageHudModel; readonly dirtyKeys: ReadonlySet<string> }
+	| { readonly _tag: "Close" };
 
 export class CommandController {
-	#commandOutputOverlay: OverlayHandle | undefined;
-	#toolsOverlay: OverlayHandle | undefined;
-	#usageHud: UsageHudComponent | undefined;
-	#toolsView: ToolsView | undefined;
+	#commandOutputRoute: MvuRouteHandle | undefined;
+	#commandOutputTransition: Promise<void> = Promise.resolve();
+	#usageRoute: MvuRouteHandle | undefined;
+	#usageTransition: Promise<void> = Promise.resolve();
+	#toolsRoute: MvuRouteHandle | undefined;
+	#toolsTransition: Promise<void> = Promise.resolve();
+	readonly #getInputLeaseManager: () => InputLeaseManager;
+	readonly #mvuScope: Scope.Scope;
 
-	constructor(private readonly ctx: InteractiveModeContext) {}
+	constructor(
+		private readonly ctx: InteractiveModeContext,
+		getInputLeaseManager: () => InputLeaseManager,
+		mvuScope: Scope.Scope,
+	) {
+		this.#getInputLeaseManager = getInputLeaseManager;
+		this.#mvuScope = mvuScope;
+	}
 
 	#showCommandOutput(message: string): void {
-		this.#commandOutputOverlay?.hide();
-		let component: CommandOutputOverlayComponent;
-		const dismiss = (): void => {
-			this.#commandOutputOverlay?.hide();
-			this.#commandOutputOverlay = undefined;
-			this.ctx.ui.requestRender();
-		};
-		component = new CommandOutputOverlayComponent(message, dismiss);
-		this.#commandOutputOverlay = this.ctx.ui.showOverlay(component, {
-			anchor: "bottom-center",
-			width: "100%",
-			maxHeight: 14,
-			margin: { bottom: 1 },
+		this.#commandOutputTransition = this.#commandOutputTransition.then(async () => {
+			if (this.#commandOutputRoute !== undefined) {
+				await Effect.runPromise(this.#commandOutputRoute.close());
+				this.#commandOutputRoute = undefined;
+			}
+			const previousFocus = this.ctx.ui.getFocused();
+			try {
+				this.#commandOutputRoute = await mountCommandOutputOverlay(this.ctx, message, previousFocus);
+			} catch (error) {
+				this.ctx.showError(`Could not open command output: ${error instanceof Error ? error.message : String(error)}`);
+			}
 		});
-		this.ctx.ui.setFocus(component);
-		this.ctx.ui.requestRender();
 	}
+
 	#showUsageHud(message: string): void {
-		const container = this.ctx.usageContainer ?? this.ctx.statusContainer;
-		container.clear();
-		let component: UsageHudComponent;
-		const dismiss = (): void => {
-			if (this.#usageHud !== component) return;
-			this.#usageHud = undefined;
+		this.#usageTransition = this.#usageTransition.then(async () => {
+			if (this.#usageRoute !== undefined) {
+				await Effect.runPromise(this.#usageRoute.close());
+				this.#usageRoute = undefined;
+			}
+			const container = this.ctx.usageContainer ?? this.ctx.statusContainer;
 			container.clear();
+			const terminalRows = this.ctx.ui.terminal.rows ?? 24;
+			const spec = createUsageHudRoute(message, terminalRows);
+			container.addChild(spec.component);
+			spec.component.apply(spec.initialModel);
+			const route = spec.route;
+			this.#usageRoute = await Effect.runPromise(
+				Scope.provide(this.#mvuScope)(
+					mountMvuChild({
+						tui: this.ctx.ui,
+						leaseManager: this.#getInputLeaseManager(),
+						route,
+						component: spec.component,
+						runtimeConfig: {
+							componentId: spec.componentId,
+							initialModel: spec.initialModel,
+							update: (model: UsageHudModel, envelope: MvuEnvelope) => {
+								const message = usageHudMsgFromInput(envelope.action, envelope.event);
+								if (message === undefined) return { model, commands: [], dirtyKeys: new Set() };
+								const transition = updateUsageHud(model, message);
+								const commands: UsageHudRouteCommand[] = [
+									{ _tag: "RenderUsageHud", model: transition.model, dirtyKeys: transition.dirtyKeys },
+								];
+								if (transition.commands.some(command => command._tag === "CloseRequested")) {
+									commands.push({ _tag: "Close" });
+								}
+								return { model: transition.model, commands, dirtyKeys: transition.dirtyKeys };
+							},
+							interpret: (command: UsageHudRouteCommand) =>
+								Effect.sync(() => {
+									if (command._tag === "RenderUsageHud") {
+										spec.component.apply(command.model);
+										this.ctx.ui.requestComponentRender(spec.component);
+									} else {
+										this.#closeUsageHud();
+									}
+									return [];
+								}),
+							inputCapacity: 256,
+							messageCapacity: 256,
+							commandCapacity: 64,
+						},
+					}),
+				),
+			);
+			this.ctx.ui.setFocus(spec.component);
+			this.ctx.ui.requestRender();
+		});
+	}
+
+	#closeUsageHud(): void {
+		this.#usageTransition = this.#usageTransition.then(async () => {
+			const route = this.#usageRoute;
+			if (route === undefined) return;
+			this.#usageRoute = undefined;
+			await Effect.runPromise(route.close());
+			(this.ctx.usageContainer ?? this.ctx.statusContainer).clear();
 			this.ctx.ui.setFocus(this.ctx.editor);
 			this.ctx.ui.requestRender();
-		};
-		component = new UsageHudComponent(message, dismiss, () => this.ctx.ui.terminal.rows ?? 24);
-		this.#usageHud = component;
-		container.addChild(component);
-		this.ctx.ui.setFocus(component);
-		this.ctx.ui.requestRender();
+		});
 	}
 
 	#showToolsView(tools: ReadonlyArray<DisplayTool>): void {
-		this.#toolsOverlay?.hide();
-		if (this.#toolsView) void this.#toolsView.dispose();
-		let view: ToolsView;
-		const dismiss = (): void => {
-			this.#toolsOverlay?.hide();
-			this.#toolsOverlay = undefined;
-			if (this.#toolsView === view) this.#toolsView = undefined;
-			void view.dispose();
-			this.ctx.ui.setFocus(this.ctx.editor);
-			this.ctx.ui.requestRender();
+		const close = (): void => {
+			this.#toolsTransition = this.#toolsTransition.then(async () => {
+				const route = this.#toolsRoute;
+				if (route === undefined) return;
+				this.#toolsRoute = undefined;
+				await Effect.runPromise(route.close());
+				this.ctx.ui.requestRender();
+			});
 		};
-		view = new ToolsView(tools, {
+		const renderHost: Pick<TUI, "requestRender"> & Partial<Pick<TUI, "requestComponentRender">> = this.ctx.ui;
+		const view = new ToolsView(tools, {
 			height: () => this.ctx.ui.terminal.rows ?? 24,
-			requestRender: () => this.ctx.ui.requestRender(),
-			onClose: dismiss,
+			requestComponentRender: component => {
+				if (renderHost.requestComponentRender !== undefined) {
+					renderHost.requestComponentRender(component);
+				} else {
+					renderHost.requestRender();
+				}
+			},
 		});
-		this.#toolsView = view;
-		this.#toolsOverlay = this.ctx.ui.showOverlay(view, {
-			anchor: "top-left",
-			width: "100%",
-			maxHeight: "100%",
-			margin: 0,
-			fullscreen: true,
+		const rows = tools.map(tool => tool.name);
+		const initialModel = makeSelectorModel(rows);
+		view.apply({ model: initialModel, dirtyKeys: new Set(rows) });
+		const route: MvuInputRoute<SelectorModel<string>> = {
+			componentId: TOOLS_VIEW_ROUTE.componentId,
+			focusedRoot: view,
+			context: model => ({
+				contexts: [TOOLS_VIEW_ROUTE.context, "selector.filter"],
+				mode: model.mode._tag,
+				focus: model.mode._tag === "PreviewFocus" ? "preview" : "list",
+				capabilities: new Set(["selector.filter"]),
+			}),
+			actionToMsg: (action, event) => ({ _tag: "MvuInput", action, event }),
+		};
+		this.#toolsTransition = this.#toolsTransition.then(async () => {
+			if (this.#toolsRoute !== undefined) {
+				await Effect.runPromise(this.#toolsRoute.close());
+				this.#toolsRoute = undefined;
+			}
+			this.#toolsRoute = await Effect.runPromise(
+				Scope.provide(this.#mvuScope)(
+					mountMvuOverlay({
+						tui: this.ctx.ui,
+						leaseManager: this.#getInputLeaseManager(),
+						route,
+						component: view,
+						runtimeConfig: {
+							componentId: TOOLS_VIEW_ROUTE.componentId,
+							initialModel,
+							update: (model: SelectorModel<string>, envelope: MvuEnvelope) => {
+								const message = selectorActionToMsg(
+									String(envelope.action),
+									envelope.event,
+									model,
+									TOOLS_VIEW_ROUTE.componentId,
+								);
+								if (message === undefined) return { model, commands: [], dirtyKeys: new Set() };
+								const transition = updateSelector(model, message);
+								const commands: ToolsViewRouteCommand[] = [{
+									_tag: "RenderTools",
+									model: transition.model,
+									dirtyKeys: transition.dirtyKeys,
+								}];
+								if (transition.commands.some(command => command._tag === "CloseRequested")) {
+									commands.push({ _tag: "Close" });
+								}
+								return { model: transition.model, commands, dirtyKeys: transition.dirtyKeys };
+							},
+							interpret: (command: ToolsViewRouteCommand) =>
+								Effect.sync(() => {
+									if (command._tag === "RenderTools") {
+										view.apply({ model: command.model, dirtyKeys: command.dirtyKeys });
+									} else {
+										close();
+									}
+									return [];
+								}),
+							inputCapacity: 256,
+							messageCapacity: 256,
+							commandCapacity: 64,
+						},
+						overlayOptions: {
+							anchor: "top-left",
+							width: "100%",
+							maxHeight: "100%",
+							margin: 0,
+							fullscreen: true,
+						},
+						disposeRenderer: Effect.promise(() => view.dispose()),
+						restoreFocus: Effect.sync(() => this.ctx.ui.setFocus(this.ctx.editor)),
+					}),
+				),
+			);
+			this.ctx.ui.setFocus(view);
+			this.ctx.ui.requestRender();
 		});
-		this.ctx.ui.setFocus(view);
-		this.ctx.ui.requestRender();
 	}
 
 	openInBrowser(urlOrPath: string): void {

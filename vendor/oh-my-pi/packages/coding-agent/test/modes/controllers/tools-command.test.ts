@@ -5,6 +5,7 @@ import { ToolsView } from "@oh-my-pi/pi-coding-agent/modes/components/tools-view
 import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import { buildToolsMarkdown } from "@oh-my-pi/pi-coding-agent/modes/utils/tools-markdown";
+import { withControllerFixture } from "../../helpers/controller-fixture";
 
 beforeAll(() => {
 	initTheme();
@@ -61,39 +62,42 @@ describe("buildToolsMarkdown", () => {
 });
 
 describe("CommandController.handleToolsCommand", () => {
-	it("renders every registered tool through the shared output callback", () => {
-		const registry: Record<string, { name: string; description: string; origin: { kind: string; source: string } }> =
-			{
-				read: { name: "read", description: "Read files", origin: { kind: "builtin", source: "coding-agent" } },
-				inactive_extension: {
-					name: "inactive_extension",
-					description: "Only registered, not active",
-					origin: { kind: "extension", source: "/workspace/extensions/inactive.ts" },
+	it("renders every registered tool through the shared output callback", async () => {
+		await withControllerFixture(fixture => {
+			const registry: Record<string, { name: string; description: string; origin: { kind: string; source: string } }> =
+				{
+					read: { name: "read", description: "Read files", origin: { kind: "builtin", source: "coding-agent" } },
+					inactive_extension: {
+						name: "inactive_extension",
+						description: "Only registered, not active",
+						origin: { kind: "extension", source: "/workspace/extensions/inactive.ts" },
+					},
+				};
+			const getAllToolNames = vi.fn(() => ["read", "inactive_extension"]);
+			const getToolByName = vi.fn((name: string) => registry[name]);
+			const agent = {} as { state?: unknown };
+			Object.defineProperty(agent, "state", {
+				get() {
+					throw new Error("active tool state must not be read");
 				},
-			};
-		const getAllToolNames = vi.fn(() => ["read", "inactive_extension"]);
-		const getToolByName = vi.fn((name: string) => registry[name]);
-		const agent = {} as { state?: unknown };
-		Object.defineProperty(agent, "state", {
-			get() {
-				throw new Error("active tool state must not be read");
-			},
+			});
+			const showOutput = vi.fn();
+			const ctx = {
+				session: { agent, getAllToolNames, getToolByName },
+			} as unknown as InteractiveModeContext;
+
+			new CommandController(ctx, fixture.getInputLeaseManager, fixture.scope).handleToolsCommand(showOutput);
+
+			expect(getAllToolNames).toHaveBeenCalledTimes(1);
+			expect(getToolByName.mock.calls.map(([name]) => name)).toEqual(["read", "inactive_extension"]);
+			expect(showOutput).toHaveBeenCalledTimes(1);
+			expect(showOutput.mock.calls[0]?.[0]).toContain("inactive_extension");
+			expect(showOutput.mock.calls[0]?.[0]).toContain("Only registered, not active");
 		});
-		const showOutput = vi.fn();
-		const ctx = {
-			session: { agent, getAllToolNames, getToolByName },
-		} as unknown as InteractiveModeContext;
-
-		new CommandController(ctx).handleToolsCommand(showOutput);
-
-		expect(getAllToolNames).toHaveBeenCalledTimes(1);
-		expect(getToolByName.mock.calls.map(([name]) => name)).toEqual(["read", "inactive_extension"]);
-		expect(showOutput).toHaveBeenCalledTimes(1);
-		expect(showOutput.mock.calls[0]?.[0]).toContain("inactive_extension");
-		expect(showOutput.mock.calls[0]?.[0]).toContain("Only registered, not active");
 	});
 
 	it("opens the tools view without writing to the transcript or reading active tool state", async () => {
+		await withControllerFixture(async fixture => {
 		const registered = {
 			read: {
 				name: "read",
@@ -119,6 +123,7 @@ describe("CommandController.handleToolsCommand", () => {
 		const showOverlay = vi.fn((component: ToolsView) => overlay);
 		const setFocus = vi.fn();
 		const requestRender = vi.fn();
+		const requestComponentRender = vi.fn();
 		const editor = {};
 		const ctx = {
 			editor,
@@ -133,23 +138,29 @@ describe("CommandController.handleToolsCommand", () => {
 				showOverlay,
 				setFocus,
 				requestRender,
+				requestComponentRender,
 			},
 		} as unknown as InteractiveModeContext;
 
-		new CommandController(ctx).handleToolsCommand();
+		new CommandController(ctx, fixture.getInputLeaseManager, fixture.scope).handleToolsCommand();
+		await Bun.sleep(0);
+		await Bun.sleep(0);
 
 		expect(present).not.toHaveBeenCalled();
 		expect(showOverlay).toHaveBeenCalledTimes(1);
 		const view = showOverlay.mock.calls[0]![0];
 		expect(view).toBeInstanceOf(ToolsView);
 		expect(setFocus).toHaveBeenCalledWith(view);
+		expect(requestComponentRender).toHaveBeenCalledWith(view);
 		expect(view.render(160).join("\n")).toContain("inactive_extension");
 		await view.dispose();
+		});
 	});
 });
 
 describe("CommandController notification output", () => {
 	it("routes jobs information through the command output overlay instead of the transcript", async () => {
+		await withControllerFixture(async fixture => {
 		const overlay = { hide: vi.fn() };
 		const showOverlay = vi.fn((component: CommandOutputOverlayComponent) => overlay);
 		const present = vi.fn(() => {
@@ -168,10 +179,11 @@ describe("CommandController notification output", () => {
 			},
 		} as unknown as InteractiveModeContext;
 
-		await new CommandController(ctx).handleJobsCommand();
+		await new CommandController(ctx, fixture.getInputLeaseManager, fixture.scope).handleJobsCommand();
 
 		expect(present).not.toHaveBeenCalled();
 		expect(showOverlay).toHaveBeenCalledTimes(1);
 		expect(showOverlay.mock.calls[0]?.[0]).toBeInstanceOf(CommandOutputOverlayComponent);
+		});
 	});
 });

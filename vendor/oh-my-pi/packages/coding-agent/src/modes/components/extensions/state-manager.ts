@@ -23,23 +23,13 @@ import {
 	loadCapability,
 } from "../../../discovery";
 import type {
-	DashboardState,
 	Extension,
 	ExtensionKind,
 	ExtensionState,
-	FlatTreeItem,
 	ProviderTab,
-	TreeNode,
 } from "./types";
 import { makeExtensionId, sourceFromMeta } from "./types";
 
-/**
- * Settings manager interface for granular toggle persistence.
- */
-export interface ExtensionSettingsManager {
-	getDisabledExtensions(): string[];
-	setDisabledExtensions(ids: string[]): void;
-}
 
 /**
  * Load all extensions from all capabilities.
@@ -297,92 +287,6 @@ export async function loadAllExtensions(cwd?: string, disabledIds?: string[]): P
 	return extensions;
 }
 
-/**
- * Build sidebar tree from extensions.
- * Groups by provider → kind.
- */
-export function buildSidebarTree(extensions: Extension[]): TreeNode[] {
-	const providers = getAllProvidersInfo();
-	const tree: TreeNode[] = [];
-
-	// Group extensions by provider and kind
-	const byProvider = new Map<string, Map<ExtensionKind, Extension[]>>();
-
-	for (const ext of extensions) {
-		const providerId = ext.source.provider;
-		if (!byProvider.has(providerId)) {
-			byProvider.set(providerId, new Map());
-		}
-		const byKind = byProvider.get(providerId)!;
-		if (!byKind.has(ext.kind)) {
-			byKind.set(ext.kind, []);
-		}
-		byKind.get(ext.kind)!.push(ext);
-	}
-
-	// Build tree nodes for each provider (show ALL providers, even if disabled/empty)
-	for (const provider of providers) {
-		// Skip the 'native' provider as it cannot be toggled
-		if (provider.id === "native") continue;
-
-		const byKind = byProvider.get(provider.id);
-		const kindNodes: TreeNode[] = [];
-		let totalCount = 0;
-
-		if (byKind && byKind.size > 0) {
-			for (const [kind, exts] of byKind) {
-				totalCount += exts.length;
-				kindNodes.push({
-					id: `${provider.id}:${kind}`,
-					label: getKindDisplayName(kind),
-					type: "kind",
-					enabled: provider.enabled,
-					collapsed: true,
-					children: [],
-					count: exts.length,
-				});
-			}
-
-			// Sort kind nodes by count (most items first)
-			kindNodes.sort((a, b) => (b.count || 0) - (a.count || 0));
-		}
-
-		tree.push({
-			id: provider.id,
-			label: provider.displayName,
-			type: "provider",
-			enabled: provider.enabled,
-			collapsed: false,
-			children: kindNodes,
-			count: totalCount,
-		});
-	}
-
-	return tree;
-}
-
-/**
- * Flatten tree for keyboard navigation.
- */
-export function flattenTree(tree: TreeNode[]): FlatTreeItem[] {
-	const flat: FlatTreeItem[] = [];
-	let index = 0;
-
-	function walk(node: TreeNode, depth: number): void {
-		flat.push({ node, depth, index: index++ });
-		if (!node.collapsed) {
-			for (const child of node.children) {
-				walk(child, depth + 1);
-			}
-		}
-	}
-
-	for (const node of tree) {
-		walk(node, 0);
-	}
-
-	return flat;
-}
 
 /**
  * Apply fuzzy filter to extensions.
@@ -508,68 +412,6 @@ export function filterByProvider(extensions: Extension[], providerId: string): E
 	return extensions.filter(ext => ext.source.provider === providerId);
 }
 
-function isShadowedExtension(ext: Extension): boolean {
-	if (ext.shadowedBy) return true;
-	return Boolean((ext.raw as { _shadowed?: boolean } | null | undefined)?._shadowed);
-}
-
-/**
- * Apply setting-backed item disable overrides to an existing dashboard state.
- * This gives the UI immediate feedback while the full capability refresh runs.
- */
-export function applyDisabledExtensionsToState(state: DashboardState, disabledIds: string[]): DashboardState {
-	const disabled = new Set(disabledIds);
-	const updateExtension = (ext: Extension): Extension => {
-		if (disabled.has(ext.id)) {
-			if (ext.state === "disabled" && ext.disabledReason === "item-disabled") return ext;
-			return { ...ext, state: "disabled", disabledReason: "item-disabled" };
-		}
-
-		if (ext.state !== "disabled" || ext.disabledReason !== "item-disabled") return ext;
-		if (!isProviderEnabled(ext.source.provider)) {
-			return { ...ext, state: "disabled", disabledReason: "provider-disabled" };
-		}
-
-		if (isShadowedExtension(ext)) {
-			const shadowed: Extension = { ...ext, state: "shadowed", disabledReason: "shadowed" };
-			return shadowed;
-		}
-
-		const enabled: Extension = { ...ext, state: "active" };
-		delete enabled.disabledReason;
-		return enabled;
-	};
-
-	return {
-		...state,
-		extensions: state.extensions.map(updateExtension),
-		tabFiltered: state.tabFiltered.map(updateExtension),
-		searchFiltered: state.searchFiltered.map(updateExtension),
-		selected: state.selected ? updateExtension(state.selected) : null,
-	};
-}
-
-/**
- * Create initial dashboard state.
- */
-export async function createInitialState(cwd?: string, disabledIds?: string[]): Promise<DashboardState> {
-	const extensions = await loadAllExtensions(cwd, disabledIds);
-	const tabs = buildProviderTabs(extensions);
-	const tabFiltered = extensions; // "all" tab by default
-	const searchFiltered = tabFiltered;
-
-	return {
-		tabs,
-		activeTabIndex: 0,
-		extensions,
-		tabFiltered,
-		searchFiltered,
-		searchQuery: "",
-		listIndex: 0,
-		scrollOffset: 0,
-		selected: searchFiltered[0] ?? null,
-	};
-}
 
 /**
  * Toggle provider enabled state.
@@ -585,43 +427,309 @@ export function toggleProvider(providerId: string): boolean {
 }
 
 /**
- * Refresh state after toggle.
+ * MVU-owned dashboard model. Filtering and selection are derived from one
+ * source collection; renderers receive only bounded projections.
  */
-export async function refreshState(
-	state: DashboardState,
-	cwd?: string,
-	disabledIds?: string[],
-): Promise<DashboardState> {
-	const extensions = await loadAllExtensions(cwd, disabledIds);
-	const tabs = buildProviderTabs(extensions);
+export type ExtensionDashboardMode = "Browse" | "Filter" | "PreviewFocus";
 
-	// Get current provider from tabs
-	const activeTab = state.tabs[state.activeTabIndex];
-	const providerId = activeTab?.id ?? "all";
+export interface ExtensionDashboardModel {
+	readonly sourceRevision: number;
+	readonly requestGeneration: number;
+	readonly loadState: "Idle" | "Loading" | "Failed";
+	readonly loadError?: string;
+	readonly tabs: readonly ProviderTab[];
+	readonly activeTabId: string;
+	readonly extensions: readonly Extension[];
+	readonly disabledIds: readonly string[];
+	readonly query: string;
+	readonly selectedKey?: string;
+	readonly viewportOffset: number;
+	readonly viewportSize: number;
+	readonly mode: ExtensionDashboardMode;
+}
 
-	// Re-apply filters
-	const tabFiltered = filterByProvider(extensions, providerId);
-	const searchFiltered = applyFilter(tabFiltered, state.searchQuery);
+export type ExtensionDashboardMessage =
+	| { readonly _tag: "Move"; readonly delta: -1 | 1 }
+	| { readonly _tag: "BeginFilter" }
+	| { readonly _tag: "FilterAppend"; readonly text: string }
+	| { readonly _tag: "FilterDelete" }
+	| { readonly _tag: "Activate" }
+	| { readonly _tag: "ToggleSelected" }
+	| { readonly _tag: "Back" }
+	| { readonly _tag: "ProviderSelected"; readonly providerId: string }
+	| { readonly _tag: "ProviderMove"; readonly delta: -1 | 1 }
+	| { readonly _tag: "RefreshRequested" }
+	| {
+			readonly _tag: "SourceLoaded";
+			readonly requestGeneration: number;
+			readonly extensions: readonly Extension[];
+			readonly disabledIds: readonly string[];
+	  }
+	| { readonly _tag: "SourceFailed"; readonly requestGeneration: number; readonly error: string }
+	| { readonly _tag: "ViewportChanged"; readonly offset: number; readonly height: number };
 
-	// Find new index for current provider (tabs may have reordered)
-	const newActiveTabIndex = tabs.findIndex(t => t.id === providerId);
-	const activeTabIndex = newActiveTabIndex >= 0 ? newActiveTabIndex : 0;
+export type ExtensionDashboardCommand =
+	| { readonly _tag: "CloseRequested" }
+	| { readonly _tag: "RefreshSource"; readonly requestGeneration: number }
+	| { readonly _tag: "ToggleProvider"; readonly providerId: string; readonly requestGeneration: number }
+	| {
+			readonly _tag: "ToggleExtension";
+			readonly extensionId: string;
+			readonly disabled: boolean;
+			readonly requestGeneration: number;
+	  };
 
-	// Try to preserve selection
-	const selectedId = state.selected?.id;
-	let selected = selectedId ? searchFiltered.find(e => e.id === selectedId) : null;
-	if (!selected && searchFiltered.length > 0) {
-		selected = searchFiltered[Math.min(state.listIndex, searchFiltered.length - 1)];
+export interface ExtensionDashboardTransition {
+	readonly model: ExtensionDashboardModel;
+	readonly commands: readonly ExtensionDashboardCommand[];
+}
+
+export interface ExtensionProjectionRow {
+	readonly _tag: "Master" | "Kind" | "Extension";
+	readonly key: string;
+	readonly providerId?: string;
+	readonly providerName?: string;
+	readonly enabled?: boolean;
+	readonly kind?: ExtensionKind;
+	readonly label?: string;
+	readonly icon?: string;
+	readonly count?: number;
+	readonly extension?: Extension;
+}
+
+function extensionRows(model: ExtensionDashboardModel): readonly Extension[] {
+	const tabFiltered = filterByProvider([...model.extensions], model.activeTabId);
+	return applyFilter(tabFiltered, model.query);
+}
+
+function projectionKeys(model: ExtensionDashboardModel): readonly string[] {
+	const rows = extensionRows(model);
+	const keys: string[] = [];
+	if (model.activeTabId !== "all") keys.push(`provider:${model.activeTabId}:master`);
+	if (model.activeTabId === "all" && model.query.length === 0) {
+		for (const extension of rows) keys.push(extension.id);
+		return keys;
 	}
+	for (const extension of rows) keys.push(extension.id);
+	return keys;
+}
 
-	return {
-		...state,
+export function projectExtensionRows(model: ExtensionDashboardModel): readonly ExtensionProjectionRow[] {
+	const rows = extensionRows(model);
+	const result: ExtensionProjectionRow[] = [];
+	if (model.activeTabId !== "all") {
+		const tab = model.tabs.find(item => item.id === model.activeTabId);
+		result.push({
+			_tag: "Master",
+			key: `provider:${model.activeTabId}:master`,
+			providerId: model.activeTabId,
+			providerName: rows[0]?.source.providerName ?? tab?.label ?? model.activeTabId,
+			enabled: tab?.enabled ?? false,
+		});
+	}
+	if (model.activeTabId === "all" && model.query.length === 0) {
+		const seen = new Set<ExtensionKind>();
+		for (const extension of rows) {
+			if (seen.has(extension.kind)) continue;
+			seen.add(extension.kind);
+			const items = rows.filter(item => item.kind === extension.kind);
+			result.push({
+				_tag: "Kind",
+				key: `kind:${extension.kind}`,
+				kind: extension.kind,
+				label: getKindDisplayName(extension.kind),
+				icon: extensionIcon(extension.kind),
+				count: items.length,
+			});
+			for (const item of items) result.push({ _tag: "Extension", key: item.id, extension: item });
+		}
+		return result;
+	}
+	for (const extension of rows) result.push({ _tag: "Extension", key: extension.id, extension });
+	return result;
+}
+
+function extensionIcon(kind: ExtensionKind): string {
+	switch (kind) {
+		case "extension-module":
+		case "tool":
+			return "⚙";
+		case "skill":
+			return "✦";
+		case "rule":
+			return "◆";
+		case "mcp":
+			return "↔";
+		case "prompt":
+			return "¶";
+		case "instruction":
+			return "▸";
+		case "context-file":
+			return "□";
+		case "hook":
+			return "⌁";
+		case "slash-command":
+			return "/";
+	}
+}
+
+function firstSelection(model: ExtensionDashboardModel): string | undefined {
+	return projectionKeys(model)[0];
+}
+
+export async function createExtensionDashboardModel(
+	cwd?: string,
+	disabledIds: readonly string[] = [],
+): Promise<ExtensionDashboardModel> {
+	const extensions = await loadAllExtensions(cwd, [...disabledIds]);
+	const tabs = buildProviderTabs(extensions);
+	const model: ExtensionDashboardModel = {
+		sourceRevision: 0,
+		requestGeneration: 0,
+		loadState: "Idle",
 		tabs,
-		activeTabIndex,
+		activeTabId: tabs[0]?.id ?? "all",
 		extensions,
-		tabFiltered,
-		searchFiltered,
-		selected: selected ?? null,
-		listIndex: selected ? searchFiltered.indexOf(selected) : 0,
+		disabledIds: [...disabledIds],
+		query: "",
+		selectedKey: undefined,
+		viewportOffset: 0,
+		viewportSize: 10,
+		mode: "Browse",
 	};
+	return { ...model, selectedKey: firstSelection(model) };
+}
+
+export function replaceExtensionSource(
+	model: ExtensionDashboardModel,
+	extensions: readonly Extension[],
+	disabledIds: readonly string[],
+	sourceRevision = model.sourceRevision + 1,
+): ExtensionDashboardModel {
+	if (sourceRevision <= model.sourceRevision) return model;
+	const tabs = buildProviderTabs([...extensions]);
+	const activeTabId = tabs.some(tab => tab.id === model.activeTabId) ? model.activeTabId : tabs[0]?.id ?? "all";
+	const next: ExtensionDashboardModel = {
+		...model,
+		sourceRevision,
+		loadState: "Idle",
+		loadError: undefined,
+		tabs,
+		activeTabId,
+		extensions,
+		disabledIds: [...disabledIds],
+		viewportOffset: 0,
+	};
+	const keys = projectionKeys(next);
+	const selectedKey = model.selectedKey && keys.includes(model.selectedKey) ? model.selectedKey : keys[0];
+	return { ...next, selectedKey };
+}
+
+export function reduceExtensionDashboard(
+	model: ExtensionDashboardModel,
+	message: ExtensionDashboardMessage,
+): ExtensionDashboardTransition {
+	switch (message._tag) {
+		case "Move": {
+			const keys = projectionKeys(model);
+			const current = model.selectedKey === undefined ? -1 : keys.indexOf(model.selectedKey);
+			const nextIndex = Math.max(0, Math.min(keys.length - 1, (current < 0 ? 0 : current) + message.delta));
+			const nextKey = keys[nextIndex];
+			const maxOffset = Math.max(0, keys.length - model.viewportSize);
+			const nextOffset = Math.max(0, Math.min(maxOffset, nextIndex - Math.max(0, model.viewportSize - 1)));
+			return { model: { ...model, selectedKey: nextKey, viewportOffset: nextOffset, mode: model.mode === "PreviewFocus" ? "PreviewFocus" : "Browse" }, commands: [] };
+		}
+		case "BeginFilter":
+			return { model: { ...model, mode: "Filter", query: "" }, commands: [] };
+		case "FilterAppend":
+			if (model.mode !== "Filter") return { model, commands: [] };
+			return replaceAfterQuery(model, `${model.query}${message.text}`);
+		case "FilterDelete":
+			if (model.mode !== "Filter") return { model, commands: [] };
+			return replaceAfterQuery(model, model.query.slice(0, -1));
+		case "Activate": {
+			if (model.selectedKey === undefined) return { model, commands: [] };
+			if (model.mode === "Browse" || model.mode === "Filter") {
+				return { model: { ...model, mode: "PreviewFocus" }, commands: [] };
+			}
+			return beginToggle(model);
+		}
+		case "ToggleSelected":
+			return beginToggle(model);
+		case "Back":
+			if (model.mode === "PreviewFocus") return { model: { ...model, mode: model.query ? "Filter" : "Browse" }, commands: [] };
+			if (model.mode === "Filter") return { model: { ...model, mode: "Browse", query: "" }, commands: [] };
+			return { model, commands: [{ _tag: "CloseRequested" }] };
+		case "ProviderSelected": {
+			if (!model.tabs.some(tab => tab.id === message.providerId)) return { model, commands: [] };
+			const next = { ...model, activeTabId: message.providerId, mode: "Browse" as const, viewportOffset: 0 };
+			return { model: { ...next, selectedKey: firstSelection(next) }, commands: [] };
+		}
+		case "ProviderMove": {
+			const current = Math.max(0, model.tabs.findIndex(tab => tab.id === model.activeTabId));
+			const index = (current + message.delta + model.tabs.length) % model.tabs.length;
+			const activeTabId = model.tabs[index]?.id;
+			if (activeTabId === undefined) return { model, commands: [] };
+			const next = { ...model, activeTabId, mode: "Browse" as const, viewportOffset: 0 };
+			return { model: { ...next, selectedKey: firstSelection(next) }, commands: [] };
+		}
+		case "RefreshRequested":
+			return beginRefresh(model);
+		case "SourceLoaded":
+			if (message.requestGeneration !== model.requestGeneration) return { model, commands: [] };
+			return {
+				model: replaceExtensionSource(model, message.extensions, message.disabledIds),
+				commands: [],
+			};
+		case "SourceFailed":
+			if (message.requestGeneration !== model.requestGeneration) return { model, commands: [] };
+			return {
+				model: { ...model, loadState: "Failed", loadError: message.error },
+				commands: [],
+			};
+		case "ViewportChanged":
+			return {
+				model: {
+					...model,
+					viewportOffset: Math.max(0, message.offset),
+					viewportSize: Math.max(1, message.height),
+				},
+				commands: [],
+			};
+	}
+}
+
+function beginRefresh(model: ExtensionDashboardModel): ExtensionDashboardTransition {
+	const requestGeneration = model.requestGeneration + 1;
+	return {
+		model: { ...model, requestGeneration, loadState: "Loading", loadError: undefined },
+		commands: [{ _tag: "RefreshSource", requestGeneration }],
+	};
+}
+
+function beginToggle(model: ExtensionDashboardModel): ExtensionDashboardTransition {
+	const selectedKey = model.selectedKey;
+	if (selectedKey === undefined) return { model, commands: [] };
+	const requestGeneration = model.requestGeneration + 1;
+	const nextModel = { ...model, requestGeneration, loadState: "Loading" as const, loadError: undefined };
+	if (selectedKey.startsWith("provider:")) {
+		return {
+			model: nextModel,
+			commands: [{ _tag: "ToggleProvider", providerId: model.activeTabId, requestGeneration }],
+		};
+	}
+	const extension = model.extensions.find(item => item.id === selectedKey);
+	if (extension === undefined) return { model, commands: [] };
+	const disabled = extension.state !== "disabled" || extension.disabledReason !== "item-disabled";
+	return {
+		model: nextModel,
+		commands: [{ _tag: "ToggleExtension", extensionId: extension.id, disabled, requestGeneration }],
+	};
+}
+
+function replaceAfterQuery(model: ExtensionDashboardModel, query: string): ExtensionDashboardTransition {
+	const next = { ...model, query };
+	const keys = projectionKeys(next);
+	const selectedKey = model.selectedKey && keys.includes(model.selectedKey) ? model.selectedKey : keys[0];
+	return { model: { ...next, selectedKey, viewportOffset: 0 }, commands: [] };
 }
