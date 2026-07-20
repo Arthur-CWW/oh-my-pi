@@ -142,21 +142,22 @@ export async function startCpuProfile(): Promise<ProfilerSession> {
 }
 
 export interface HeapSnapshot {
-	data: string;
+	data: ArrayBuffer;
 }
 
 /**
- * Generate a heap snapshot.
- * Uses Bun's built-in generateHeapSnapshot.
+ * Generate a V8 heap snapshot as an ArrayBuffer.
+ *
+ * Uses the `"arraybuffer"` return overload so the snapshot never
+ * materialises as a JS string in the coordinator heap.
  */
 export function generateHeapSnapshotData(): HeapSnapshot {
 	// Force GC before snapshot
 	Bun.gc(true);
 
-	// Use V8 format for Chrome DevTools compatibility
-	const snapshot = Bun.generateHeapSnapshot("v8");
+	// Use V8 format for Chrome DevTools compatibility; arraybuffer overload
+	// avoids creating a retained JS string (~100 MB+ for large heaps).
+	const data = Bun.generateHeapSnapshot("v8", "arraybuffer") as ArrayBuffer;
 
-	return {
-		data: snapshot,
-	};
+	return { data };
 }

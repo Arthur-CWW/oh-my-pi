@@ -8,6 +8,7 @@ import * as path from "node:path";
 import type { WorkProfile } from "@oh-my-pi/pi-natives";
 import { APP_NAME, getLogPath, getLogsDir, getReportsDir, isEnoent } from "@oh-my-pi/pi-utils";
 import type { CpuProfile, HeapSnapshot } from "./profiler";
+import { writeStreamingTarGz, type StreamingArchiveEntry } from "./archive-writer";
 import { collectSystemInfo, sanitizeEnv } from "./system-info";
 
 /** Maximum number of log lines to load into memory at once. */
@@ -89,156 +90,120 @@ export async function createReportBundle(options: ReportBundleOptions): Promise<
 	const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
 	const outputPath = path.join(reportsDir, `omp-report-${timestamp}.tar.gz`);
 
-	const data: Record<string, string> = {};
+	const entries: StreamingArchiveEntry[] = [];
 	const files: string[] = [];
+	const addTextEntry = (archivePath: string, value: string): void => {
+		entries.push({ path: archivePath, source: { type: "text", value } });
+		files.push(archivePath);
+	};
 
-	// Collect system info
 	const systemInfo = await collectSystemInfo();
-	data["system.json"] = JSON.stringify(systemInfo, null, 2);
-	files.push("system.json");
+	addTextEntry("system.json", JSON.stringify(systemInfo, null, 2));
+	addTextEntry("env.json", JSON.stringify(sanitizeEnv(Bun.env as Record<string, string>), null, 2));
 
-	// Sanitized environment
-	data["env.json"] = JSON.stringify(sanitizeEnv(Bun.env as Record<string, string>), null, 2);
-	files.push("env.json");
+	if (options.settings) addTextEntry("config.json", JSON.stringify(options.settings, null, 2));
+	if (options.renderMetrics) addTextEntry("tui-render.json", JSON.stringify(options.renderMetrics, null, 2));
 
-	// Settings/config
-	if (options.settings) {
-		data["config.json"] = JSON.stringify(options.settings, null, 2);
-		files.push("config.json");
-	}
-	if (options.renderMetrics) {
-		data["tui-render.json"] = JSON.stringify(options.renderMetrics, null, 2);
-		files.push("tui-render.json");
-	}
+	const logs = await readLastLines(getLogPath(), 1000);
+	if (logs) addTextEntry("logs.txt", logs);
 
-	// Recent logs (last 1000 lines)
-	const logPath = getLogPath();
-	const logs = await readLastLines(logPath, 1000);
-	if (logs) {
-		data["logs.txt"] = logs;
-		files.push("logs.txt");
-	}
+	if (options.rawSseText && options.rawSseText.trim().length > 0) addTextEntry("raw-sse.txt", options.rawSseText);
 
-	// Recent raw provider SSE diagnostics
-	if (options.rawSseText && options.rawSseText.trim().length > 0) {
-		data["raw-sse.txt"] = options.rawSseText;
-		files.push("raw-sse.txt");
-	}
-
-	// Session file
 	if (options.sessionFile) {
-		try {
-			const sessionContent = await Bun.file(options.sessionFile).text();
-			data["session.jsonl"] = sessionContent;
-			files.push("session.jsonl");
-		} catch {
-			// Session file might not exist yet
-		}
-
-		// Artifacts directory (same path without .jsonl)
+		await addDiskEntry(entries, files, "session.jsonl", options.sessionFile);
 		const artifactsDir = options.sessionFile.slice(0, -6);
-		await addDirectoryToArchive(data, files, artifactsDir, "artifacts");
+		await addDirectoryToArchive(entries, files, artifactsDir, "artifacts");
 
-		// Look for subagent sessions in the same directory
 		const sessionDir = path.dirname(options.sessionFile);
 		const sessionBasename = path.basename(options.sessionFile, ".jsonl");
-		await addSubagentSessions(data, files, sessionDir, sessionBasename);
+		await addSubagentSessions(entries, files, sessionDir, sessionBasename);
 	}
 
-	// CPU profile
 	if (options.cpuProfile) {
-		data["profile.cpuprofile"] = options.cpuProfile.data;
-		files.push("profile.cpuprofile");
-		data["profile.md"] = options.cpuProfile.markdown;
-		files.push("profile.md");
+		addTextEntry("profile.cpuprofile", options.cpuProfile.data);
+		addTextEntry("profile.md", options.cpuProfile.markdown);
 	}
 
-	// Heap snapshot
 	if (options.heapSnapshot) {
-		data["heap.heapsnapshot"] = options.heapSnapshot.data;
+		entries.push({
+			path: "heap.heapsnapshot",
+			source: { type: "bytes", value: options.heapSnapshot.data },
+		});
 		files.push("heap.heapsnapshot");
 	}
 
-	// Work profile
 	if (options.workProfile) {
-		data["work.folded"] = options.workProfile.folded;
-		files.push("work.folded");
-		data["work.md"] = options.workProfile.summary;
-		files.push("work.md");
-		if (options.workProfile.svg) {
-			data["work.svg"] = options.workProfile.svg;
-			files.push("work.svg");
-		}
+		addTextEntry("work.folded", options.workProfile.folded);
+		addTextEntry("work.md", options.workProfile.summary);
+		if (options.workProfile.svg) addTextEntry("work.svg", options.workProfile.svg);
 	}
 
-	// Write archive
-	await Bun.Archive.write(outputPath, data, { compress: "gzip" });
-
+	await writeStreamingTarGz(outputPath, entries);
 	return { path: outputPath, files };
 }
 
-/** Add all files from a directory to the archive */
+/** Add a disk-backed file entry without reading its contents. */
+async function addDiskEntry(
+	entries: StreamingArchiveEntry[],
+	files: string[],
+	archivePath: string,
+	filePath: string,
+): Promise<boolean> {
+	try {
+		const sourceStat = await fs.stat(filePath);
+		if (!sourceStat.isFile()) return false;
+		const readable = await fs.open(filePath, "r");
+		await readable.close();
+		entries.push({ path: archivePath, source: { type: "file", path: filePath } });
+		files.push(archivePath);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/** Add all files from a directory to the archive. */
 async function addDirectoryToArchive(
-	data: Record<string, string>,
+	entries: StreamingArchiveEntry[],
 	files: string[],
 	dirPath: string,
 	archivePrefix: string,
 ): Promise<void> {
 	try {
-		const entries = await fs.readdir(dirPath, { withFileTypes: true });
-		for (const entry of entries) {
-			if (!entry.isFile()) continue;
-			const filePath = path.join(dirPath, entry.name);
-			const archivePath = `${archivePrefix}/${entry.name}`;
-			try {
-				const content = await Bun.file(filePath).text();
-				data[archivePath] = content;
-				files.push(archivePath);
-			} catch {
-				// Skip files we can't read
-			}
+		const directoryEntries = await fs.readdir(dirPath, { withFileTypes: true });
+		for (const directoryEntry of directoryEntries) {
+			if (!directoryEntry.isFile()) continue;
+			const filePath = path.join(dirPath, directoryEntry.name);
+			await addDiskEntry(entries, files, `${archivePrefix}/${directoryEntry.name}`, filePath);
 		}
 	} catch {
-		// Directory doesn't exist
+		// Directory doesn't exist.
 	}
 }
 
 /** Find and add subagent session files */
 async function addSubagentSessions(
-	data: Record<string, string>,
+	entries: StreamingArchiveEntry[],
 	files: string[],
 	sessionDir: string,
 	parentBasename: string,
 ): Promise<void> {
-	// Subagent sessions are named with task IDs in the same directory
-	// They follow the pattern: {timestamp}_{sessionId}.jsonl
-	// We look for any sessions created after the parent session
 	try {
-		const entries = await fs.readdir(sessionDir, { withFileTypes: true });
-		const sessionFiles = entries
-			.filter(e => e.isFile() && e.name.endsWith(".jsonl") && e.name !== `${parentBasename}.jsonl`)
-			.map(e => e.name);
+		const directoryEntries = await fs.readdir(sessionDir, { withFileTypes: true });
+		const sessionFiles = directoryEntries
+			.filter(entry => entry.isFile() && entry.name.endsWith(".jsonl") && entry.name !== `${parentBasename}.jsonl`)
+			.map(entry => entry.name);
 
-		// Limit to most recent 10 subagent sessions
-		const sortedFiles = sessionFiles.sort().slice(-10);
-
-		for (const filename of sortedFiles) {
+		for (const filename of sessionFiles.sort().slice(-10)) {
 			const filePath = path.join(sessionDir, filename);
 			const archivePath = `subagents/${filename}`;
-			try {
-				const content = await Bun.file(filePath).text();
-				data[archivePath] = content;
-				files.push(archivePath);
-
-				// Also add artifacts for this subagent session
+			if (await addDiskEntry(entries, files, archivePath, filePath)) {
 				const artifactsDir = filePath.slice(0, -6);
-				await addDirectoryToArchive(data, files, artifactsDir, `subagents/${filename.slice(0, -6)}`);
-			} catch {
-				// Skip files we can't read
+				await addDirectoryToArchive(entries, files, artifactsDir, `subagents/${filename.slice(0, -6)}`);
 			}
 		}
 	} catch {
-		// Directory doesn't exist
+		// Directory doesn't exist.
 	}
 }
 
