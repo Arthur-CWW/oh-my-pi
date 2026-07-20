@@ -15,6 +15,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { isEnoent } from "@oh-my-pi/pi-utils";
 import { AgentRegistry } from "../registry/agent-registry";
+import { formatIdPreview } from "./id-preview";
 import { applyQuery, pathToQuery } from "./json-query";
 import { listArchivedChildHistories } from "./history-protocol";
 import { artifactsDirsFromRegistry } from "./registry-helpers";
@@ -105,12 +106,10 @@ export class AgentProtocolHandler implements ProtocolHandler {
 					].join("\n"),
 				);
 			}
-			const availableStr = availableIds.size > 0 ? [...availableIds].join(", ") : "none";
 			const knownIds = [...refs.map(ref => ref.id), ...archives.map(candidate => candidate.id)];
-			const knownStr = knownIds.length > 0 ? [...new Set(knownIds)].join(", ") : "none";
 			const artifactsNote = anyDirExists ? "" : "\nNo artifacts directory is currently available.";
 			throw new Error(
-				`Not found: ${outputId}\nAvailable finalized outputs: ${availableStr}\nKnown agents: ${knownStr}${artifactsNote}`,
+				`Not found: ${outputId}\nAvailable finalized outputs: ${formatIdPreview(availableIds)}\nKnown agents: ${formatIdPreview(knownIds)}${artifactsNote}\nList all agents with history://`,
 			);
 		}
 

@@ -22,6 +22,7 @@ import {
 	latestChildLifecycleRecord,
 	type ChildLifecycleRecord,
 } from "../task/child-lifecycle";
+import { formatIdPreview } from "./id-preview";
 import type { InternalResource, InternalUrl, ProtocolHandler, ResolveContext, UrlCompletion } from "./types";
 
 /** Humanize a last-activity timestamp as `Ns/Nm/Nh/Nd ago`. */
@@ -333,8 +334,9 @@ export class HistoryProtocolHandler implements ProtocolHandler {
 			const remote = await this.#resolveFleet(url.href, agentId, undefined, context?.ircDbPath, true);
 			if (remote) return remote;
 			const known = [...refs.map(candidate => candidate.id), ...archives.map(candidate => candidate.id)];
-			const knownStr = known.length > 0 ? known.join(", ") : "none";
-			throw new Error(`Unknown agent: ${agentId}\nKnown agents: ${knownStr}\nList all with history://`);
+			throw new Error(
+				`Unknown agent: ${agentId}\nKnown agents: ${formatIdPreview(known)}\nList all with history://`,
+			);
 		}
 
 		const notes: string[] = [];
