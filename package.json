@@ -51,7 +51,7 @@
     "ios-qa:check": "cd apps/ios-qa-controller && npm run check",
     "ios-qa:smoke": "cd apps/ios-qa-controller && npm run smoke",
     "mcp:porkbun": "npx -y @porkbunllc/mcp-server",
-    "browser-use:helium": "bash scripts/browser-use-helium-background.sh",
+    "browser-use:helium": "nu --no-config-file scripts/browser-use-helium-background.nu",
     "cockpit": "bun packages/web-access/src/agent-cockpit-cli.ts",
     "twitter-archive:typecheck": "cd packages/twitter-archive && bun run typecheck",
     "twitter-archive:test": "cd packages/twitter-archive && bun run test",
