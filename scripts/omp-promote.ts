@@ -256,6 +256,7 @@ interface Config {
 	repoRoot: string;
 	binDir: string;
 	fixtureRoot: string;
+	revision: string;
 }
 
 function configFromEnvironment(): Config {
@@ -265,6 +266,7 @@ function configFromEnvironment(): Config {
 		repoRoot,
 		binDir: path.resolve(process.env.OMP_PROMOTE_BIN_DIR ?? defaultBin),
 		fixtureRoot: path.resolve(process.env.OMP_PROMOTE_FIXTURE_ROOT ?? path.join(repoRoot, "local", "canary-slice-a", "fixture")),
+		revision: process.env.OMP_PROMOTE_REVISION?.trim() || "HEAD",
 	};
 }
 
@@ -301,7 +303,7 @@ export async function promote(
 	let worktreeAdded = false;
 	let noteTemporary: string | undefined;
 	try {
-		const head = await run(["git", "rev-parse", "HEAD"], config.repoRoot);
+		const head = await run(["git", "rev-parse", config.revision], config.repoRoot);
 		const stableRevision = await readInstalledBuildRevision(stable, config.repoRoot);
 		const blessedCommit = blessedCommitFromVersion(stableRevision.version);
 		const initialDecision = decidePromotion(await vendorChanged(config.repoRoot, blessedCommit, head), "not-run");
