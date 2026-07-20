@@ -275,20 +275,20 @@ export class RawSseViewerComponent implements Component {
 	}
 
 	#frameTop(innerWidth: number): string {
-		return `${theme.boxSharp.topLeft}${theme.boxSharp.horizontal.repeat(innerWidth)}${theme.boxSharp.topRight}`;
+		return padding(innerWidth + 2);
 	}
 
 	#frameSeparator(innerWidth: number): string {
-		return `${theme.boxSharp.teeRight}${theme.boxSharp.horizontal.repeat(innerWidth)}${theme.boxSharp.teeLeft}`;
+		return padding(innerWidth + 2);
 	}
 
 	#frameBottom(innerWidth: number): string {
-		return `${theme.boxSharp.bottomLeft}${theme.boxSharp.horizontal.repeat(innerWidth)}${theme.boxSharp.bottomRight}`;
+		return padding(innerWidth + 2);
 	}
 
 	#frameLine(content: string, innerWidth: number): string {
 		const truncated = truncateToWidth(content, innerWidth);
 		const remaining = Math.max(0, innerWidth - visibleWidth(truncated));
-		return `${theme.boxSharp.vertical}${truncated}${padding(remaining)}${theme.boxSharp.vertical}`;
+		return ` ${truncated}${padding(remaining + 1)}`;
 	}
 }

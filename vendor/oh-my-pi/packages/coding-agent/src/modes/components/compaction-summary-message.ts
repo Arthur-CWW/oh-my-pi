@@ -32,31 +32,17 @@ class SummaryDividerComponent implements Component {
 			return this.#cache.lines;
 		}
 		const lines = this.#expanded
-			? ["", this.#divider(width), "", ...this.#detailBox().render(width)]
-			: ["", this.#divider(width), ""];
+			? ["", this.#divider(), "", ...this.#detailBox().render(width)]
+			: ["", this.#divider(), ""];
 		this.#cache = { width, lines };
 		return lines;
 	}
 
-	#divider(width: number): string {
-		const rule = theme.tree.horizontal;
+	#divider(): string {
 		const label = this.options.label();
 		// sep.dot ships pre-padded (" · "); trim so the hint joins with single spaces.
 		const hint = `${theme.sep.dot.trim()} ctrl+o`;
-		const plainWidth = Bun.stringWidth(`${label} ${hint}`, { countAnsiEscapeCodes: false });
-		// ` label hint ` framed by rules on both sides.
-		const remaining = width - plainWidth - 2;
-		if (remaining < 4) {
-			// Too narrow for a framed rule — emit the bare label.
-			return theme.fg("muted", label);
-		}
-		const left = Math.floor(remaining / 2);
-		const right = remaining - left;
-		return (
-			theme.fg("dim", rule.repeat(left)) +
-			` ${theme.fg("muted", label)} ${theme.fg("dim", hint)} ` +
-			theme.fg("dim", rule.repeat(right))
-		);
+		return `${theme.fg("muted", label)} ${theme.fg("dim", hint)}`;
 	}
 
 	#detailBox(): Box {

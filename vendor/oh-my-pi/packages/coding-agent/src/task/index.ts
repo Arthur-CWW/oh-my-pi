@@ -33,6 +33,7 @@ import {
 	type AgentProgress,
 	canSpawnAtDepth,
 	getTaskSchema,
+	resolveSubagentDisplayName,
 	type SingleResult,
 	type TaskItem,
 	type TaskParams,
@@ -53,7 +54,6 @@ import { generateCommitMessage } from "../utils/commit-message-generator";
 import * as git from "../utils/git";
 import { type DiscoveryResult, discoverAgents, getAgent } from "./discovery";
 import { type ExecutorOptions, runSubprocess } from "./executor";
-import { runSubagentSpawnProcess } from "./spawn-worker-client";
 import { generateTaskName } from "./name-generator";
 import { AgentOutputManager } from "./output-manager";
 import { mapWithConcurrencyLimit, REVIVE_ADMISSION_WAIT_MS, resolveSpawnConcurrency, Semaphore } from "./parallel";
@@ -71,6 +71,7 @@ import {
 	resolveTaskSpawnRoute,
 	snapshotTaskSpawnPolicy,
 } from "./spawn-route";
+import { runSubagentSpawnProcess } from "./spawn-worker-client";
 import {
 	recordFinalizedSubagentFailure,
 	recordThrownSubagentFailure,
@@ -328,7 +329,6 @@ function createSessionPausedRefusal(): AgentToolResult<TaskToolDetails> {
 		},
 	};
 }
-
 
 /**
  * Reject fields the current configuration does not accept. `schema` is never
@@ -1080,6 +1080,12 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 					routeDecision?.route?.selector,
 					routeDecision?.source,
 				);
+				// Reserve a durable `starting` identity before the nonblocking job is
+				// registered: its body may sit gated on the spawn semaphore, and until
+				// it builds a real session history/IRC would otherwise report this
+				// genuinely-queued id as unknown. The child's own registration clears
+				// the flag when it comes live; a startup failure finalizes it.
+				this.#reserveStartingChild(spawn.agentId, agentLabel, spawn.item);
 				const jobId = this.#registerSpawnJob({
 					manager,
 					toolCallId,
@@ -1099,6 +1105,10 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 				started.push({ agentId: spawn.agentId, jobId, description: spawn.item.description, modelChain });
 			} catch (error) {
 				this.#preResolvedModels.delete(spawn.agentId);
+				// The reserve (if it happened before the failure) never came live;
+				// finalize it as terminal so it stays inspectable but stops projecting
+				// as active queued work.
+				AgentRegistry.global().failStart(spawn.agentId);
 				const message = error instanceof Error ? error.message : String(error);
 				failedSchedules.push(`${spawn.agentId}: ${message}`);
 				spawn.progress.status = "failed";
@@ -1170,6 +1180,31 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 		});
 	}
 
+	/**
+	 * Reserve a durable, addressable identity for a child whose nonblocking job
+	 * has been scheduled but whose body has not yet built a live session (it may
+	 * be gated on the spawn semaphore). Registered `running` + `starting: true`
+	 * so history/IRC resolve it as genuinely-known queued work rather than
+	 * unknown. Never clobbers an already-live session: the child's own
+	 * `createAgentSession` registration overwrites this ref (dropping the flag)
+	 * the moment it comes live, and {@link AgentRegistry.failStart} finalizes it
+	 * if it never does.
+	 */
+	#reserveStartingChild(agentId: string, agentLabel: string, item: TaskItem): void {
+		const registry = AgentRegistry.global();
+		if (registry.get(agentId)?.session) return;
+		registry.register({
+			id: agentId,
+			displayName: resolveSubagentDisplayName(item.role, agentLabel),
+			kind: "sub",
+			parentId: this.session.getAgentId?.() ?? MAIN_AGENT_ID,
+			session: null,
+			sessionFile: null,
+			status: "running",
+			starting: true,
+		});
+	}
+
 	/** Register one background spawn job and feed its progress into the caller's aggregate snapshot. */
 	#registerSpawnJob(options: {
 		manager: AsyncJobManager;
@@ -1226,6 +1261,9 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 				if (runSignal.aborted) {
 					semaphore.release();
 					progress.status = "aborted";
+					// Cancelled before it ever built a session: finalize the reserved
+					// identity so it does not linger as phantom `starting` work.
+					AgentRegistry.global().failStart(agentId);
 					onSettled?.(true);
 					throw new Error("Aborted before execution");
 				}
@@ -1301,6 +1339,10 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 					throw new TaskJobError(`${message}${hint}`);
 				} finally {
 					semaphore.release();
+					// If the body never built a live session (startup failure), finalize
+					// the reserved identity as terminal. No-op once the child came live —
+					// its own registration already cleared the `starting` flag.
+					AgentRegistry.global().failStart(agentId);
 				}
 			},
 			{
@@ -1811,9 +1853,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 			};
 
 			const executeChild = (options: ExecutorOptions): Promise<SingleResult> =>
-				isolateSetup
-					? runSubagentSpawnProcess(options, this.session.settings)
-					: runSubprocess(options);
+				isolateSetup ? runSubagentSpawnProcess(options, this.session.settings) : runSubprocess(options);
 
 			const runTask = async (): Promise<SingleResult> => {
 				if (!isIsolated) {

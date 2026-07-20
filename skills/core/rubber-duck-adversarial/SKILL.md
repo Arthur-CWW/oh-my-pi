@@ -57,6 +57,16 @@ Do not:
 - over-index on safety caveats unless approval/risk is actually relevant
 - confuse Slotok product work with Symphony Lite meta-orchestration work
 
+## Teaching posture
+
+- Assume undergraduate maths/CS: do not reteach basics or infantilize.
+- When a niche foundation matters, name the precise domain idiolect and cash out each unfamiliar term in one line on first use; do not mirror typos or the user's momentary register.
+- Name the relevant competing approaches and say why the choice matters for this decision.
+- Surface laterally useful foundations when they clarify the decision, especially consequences for types and invariants.
+- Label **Foundation** for timeless principles and **Implementation choice** for contingent tools, APIs, or current architecture.
+- Teach only enough to improve the decision. No remedial overexplaining, jargon dumps, syllabus detours, or lectures that leave the recommendation unchanged.
+- If the conceptual model is unclear, push back before proposing a rewrite: establish the objects, state, boundaries, and invariants first.
+
 ## Core critique checklist
 
 Use the subset that matters:
@@ -71,6 +81,9 @@ Use the subset that matters:
 8. What proof would show this worked?
 9. What is the smallest useful next slice?
 10. Is the vibe/intent being flattened into generic language?
+11. Is a rewrite premature because the conceptual model or invariants are still unclear?
+12. Which competing approach or niche foundation materially changes this decision?
+13. Are the type/invariant implications and foundation-vs-implementation boundary explicit?
 
 ## Output format
 

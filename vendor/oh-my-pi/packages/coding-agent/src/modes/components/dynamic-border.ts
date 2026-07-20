@@ -1,21 +1,18 @@
 import type { Component } from "@oh-my-pi/pi-tui";
-import { theme } from "../../modes/theme/theme";
 
 /**
- * Dynamic border component that adjusts to viewport width.
+ * Full-width layout separator.
  *
- * Note: When used from hooks loaded via jiti, the global `theme` may be undefined
- * because jiti creates a separate module cache. Always pass an explicit color
- * function when using DynamicBorder in components exported for hook use.
+ * The visible horizontal rule was removed for the borderless contract; the
+ * component now emits a single blank line so surrounding layouts and their
+ * height math (which count it as one row) are unchanged. The optional `color`
+ * argument is retained for call-site compatibility and is intentionally unused.
  */
 export class DynamicBorder implements Component {
-	#color: (str: string) => string;
 	#cachedWidth = -1;
 	#cachedLines: string[] | undefined;
 
-	constructor(color: (str: string) => string = str => theme.fg("border", str)) {
-		this.#color = color;
-	}
+	constructor(_color?: (str: string) => string) {}
 
 	invalidate(): void {
 		this.#cachedWidth = -1;
@@ -26,7 +23,7 @@ export class DynamicBorder implements Component {
 		if (this.#cachedLines && this.#cachedWidth === width) {
 			return this.#cachedLines;
 		}
-		const lines = [this.#color(theme.boxSharp.horizontal.repeat(Math.max(1, width)))];
+		const lines = [""];
 		this.#cachedWidth = width;
 		this.#cachedLines = lines;
 		return lines;

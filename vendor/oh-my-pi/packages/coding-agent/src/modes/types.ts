@@ -313,6 +313,7 @@ export interface InteractiveModeContext {
 	handleSSHCommand(text: string): Promise<void>;
 	handleCompactCommand(customInstructions?: string): Promise<CompactionOutcome>;
 	handleHandoffCommand(customInstructions?: string): Promise<void>;
+	handleSuccessorCommand(options?: { keepSource?: boolean; sourceNote?: string }): Promise<void>;
 	handleShakeCommand(mode: ShakeMode): Promise<void>;
 	handleMoveCommand(targetPath: string): Promise<void>;
 	handleRenameCommand(title: string): Promise<void>;

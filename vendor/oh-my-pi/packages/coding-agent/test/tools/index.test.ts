@@ -31,7 +31,6 @@ function createActiveGoalState() {
 			id: "goal-1",
 			objective: "Ship the release",
 			status: "active" as const,
-			tokenBudget: 25,
 			tokensUsed: 5,
 			timeUsedSeconds: 0,
 			createdAt: 1,

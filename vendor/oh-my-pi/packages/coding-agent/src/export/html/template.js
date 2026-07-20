@@ -232,48 +232,17 @@
       }
 
       /**
-       * Build ASCII prefix string for tree node.
+       * Build the indentation-only prefix string for a tree node.
+       *
+       * Hierarchy reads from depth alone — a fixed 3-cell indent per visible
+       * level, no tree/gutter glyphs — matching the terminal tree-selector's
+       * borderless rendering so rebuilt transcripts copy cleanly. The width
+       * (displayIndent * 3) is unchanged, preserving the original layout math.
        */
       function buildTreePrefix(flatNode) {
-        const { indent, showConnector, isLast, gutters, isVirtualRootChild, multipleRoots } = flatNode;
+        const { indent, multipleRoots } = flatNode;
         const displayIndent = multipleRoots ? Math.max(0, indent - 1) : indent;
-        const connector = showConnector && !isVirtualRootChild ? (isLast ? '└─ ' : '├─ ') : '';
-        const connectorPosition = connector ? displayIndent - 1 : -1;
-        // Chain rows (no connector of their own) under a last-sibling (`└─`)
-        // branch stay anchored by a vertical drawn one level right of the
-        // suppressed gutter — below the branch head's content — never in the
-        // `└─` corner column itself (#2298, #2325). Chains under `├─` heads
-        // are already anchored by the sibling line (`show: true` gutter).
-        const nearestGutter = !connector ? gutters[gutters.length - 1] : undefined;
-        const chainAnchorLevel = nearestGutter && !nearestGutter.show ? nearestGutter.position + 1 : -1;
-
-        const totalChars = displayIndent * 3;
-        const prefixChars = [];
-        for (let i = 0; i < totalChars; i++) {
-          const level = Math.floor(i / 3);
-          const posInLevel = i % 3;
-
-          const gutter = gutters.find(g => g.position === level);
-          if (gutter) {
-            // Standard tree semantics: `│` only while more siblings continue
-            // below (`show`), space below a `└─`.
-            prefixChars.push(posInLevel === 0 && gutter.show ? '│' : ' ');
-          } else if (level === chainAnchorLevel) {
-            // Chain anchor for rows under a `└─` branch head.
-            prefixChars.push(posInLevel === 0 ? '│' : ' ');
-          } else if (connector && level === connectorPosition) {
-            if (posInLevel === 0) {
-              prefixChars.push(isLast ? '└' : '├');
-            } else if (posInLevel === 1) {
-              prefixChars.push('─');
-            } else {
-              prefixChars.push(' ');
-            }
-          } else {
-            prefixChars.push(' ');
-          }
-        }
-        return prefixChars.join('');
+        return ' '.repeat(displayIndent * 3);
       }
 
       // ============================================================

@@ -233,6 +233,89 @@ describe("AgentLifecycleManager", () => {
 		expect(stub.disposeCalls()).toBe(0);
 	});
 
+	it("isReconcilableStaleOrphan reports terminal dormant orphans and refuses live work or missing evidence", () => {
+		const terminal = makeTerminalSessionStub("Terminal", "/tmp/Terminal.jsonl");
+		registry.register({
+			id: "Terminal",
+			displayName: "t",
+			kind: "sub",
+			session: terminal.session,
+			sessionFile: "/tmp/Terminal.jsonl",
+			status: "running",
+		});
+		lifecycle.adopt("Terminal", { idleTtlMs: 0 });
+		expect(lifecycle.isReconcilableStaleOrphan("Terminal")).toBe(true);
+
+		// Live model turn => not reconcilable.
+		terminal.setStreaming(true);
+		expect(lifecycle.isReconcilableStaleOrphan("Terminal")).toBe(false);
+		terminal.setStreaming(false);
+
+		// Terminal evidence bound to a different session file => not reconcilable.
+		const mismatched = makeTerminalSessionStub("Mismatch", "/tmp/old.jsonl");
+		registry.register({
+			id: "Mismatch",
+			displayName: "m",
+			kind: "sub",
+			session: mismatched.session,
+			sessionFile: "/tmp/current.jsonl",
+			status: "running",
+		});
+		expect(lifecycle.isReconcilableStaleOrphan("Mismatch")).toBe(false);
+
+		// A still-live (idle) child is never a stale running orphan.
+		const idle = makeSessionStub();
+		registerIdleSub("Idle", idle.session);
+		expect(lifecycle.isReconcilableStaleOrphan("Idle")).toBe(false);
+
+		// Unknown id is not reconcilable.
+		expect(lifecycle.isReconcilableStaleOrphan("Ghost")).toBe(false);
+	});
+
+	it("reconcileStaleOrphans parks every terminal dormant running orphan and leaves live ones running", async () => {
+		const dead = makeTerminalSessionStub("Dead", "/tmp/Dead.jsonl", "completed");
+		const rateLimited = makeTerminalSessionStub("RateLimited", "/tmp/RateLimited.jsonl", "failed");
+		const busy = makeTerminalSessionStub("Busy", "/tmp/Busy.jsonl");
+		registry.register({
+			id: "Dead",
+			displayName: "d",
+			kind: "sub",
+			session: dead.session,
+			sessionFile: "/tmp/Dead.jsonl",
+			status: "running",
+		});
+		registry.register({
+			id: "RateLimited",
+			displayName: "r",
+			kind: "sub",
+			session: rateLimited.session,
+			sessionFile: "/tmp/RateLimited.jsonl",
+			status: "running",
+		});
+		registry.register({
+			id: "Busy",
+			displayName: "b",
+			kind: "sub",
+			session: busy.session,
+			sessionFile: "/tmp/Busy.jsonl",
+			status: "running",
+		});
+		lifecycle.adopt("Dead", { idleTtlMs: 0 });
+		lifecycle.adopt("RateLimited", { idleTtlMs: 0 });
+		lifecycle.adopt("Busy", { idleTtlMs: 0 });
+		busy.setStreaming(true);
+
+		const parked = await lifecycle.reconcileStaleOrphans();
+
+		expect(parked.sort()).toEqual(["Dead", "RateLimited"]);
+		expect(registry.get("Dead")).toEqual(expect.objectContaining({ status: "parked", session: null }));
+		expect(registry.get("RateLimited")).toEqual(expect.objectContaining({ status: "parked", session: null }));
+		expect(registry.get("Busy")).toEqual(expect.objectContaining({ status: "running", session: busy.session }));
+		expect(dead.disposeCalls()).toBe(1);
+		expect(rateLimited.disposeCalls()).toBe(1);
+		expect(busy.disposeCalls()).toBe(0);
+	});
+
 	it("rechecks owned async jobs after flushing terminal evidence", async () => {
 		const id = "WindowRecorderPod";
 		const sessionFile = "/tmp/WindowRecorderPod.jsonl";

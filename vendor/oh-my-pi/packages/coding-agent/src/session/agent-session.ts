@@ -9852,34 +9852,25 @@ export class AgentSession {
 	}
 
 	/**
-	 * Generate a handoff document with a oneshot LLM call, then start a new session with it.
-	 *
-	 * @param customInstructions Optional focus for the handoff document
-	 * @param options Handoff execution options
-	 * @returns The handoff document text, or undefined if cancelled/failed
+	 * Generate a handoff document via a oneshot LLM call, returning the text and
+	 * provenance metadata WITHOUT switching sessions. Callers that also need the
+	 * session switch (the classic `/handoff` flow) should use {@link handoff}.
 	 */
-	async handoff(customInstructions?: string, options?: SessionHandoffOptions): Promise<HandoffResult | undefined> {
-		const entries = this.sessionManager.getBranch();
-		const messageCount = entries.filter(e => e.type === "message").length;
-
-		if (messageCount < 2) {
-			throw new Error("Nothing to hand off (no messages yet)");
-		}
-
-		this.#skipPostTurnMaintenanceAssistantTimestamp = undefined;
-
+	async generateHandoffDocument(
+		customInstructions?: string,
+		signal?: AbortSignal,
+	): Promise<{ document: string; provenance: HandoffPredecessorProvenanceRecord } | undefined> {
 		this.#handoffAbortController = new AbortController();
 		const handoffAbortController = this.#handoffAbortController;
 		const handoffSignal = handoffAbortController.signal;
-		const sourceSignal = options?.signal;
 		const onSourceAbort = () => {
 			if (!handoffSignal.aborted) {
 				handoffAbortController.abort();
 			}
 		};
-		if (sourceSignal) {
-			sourceSignal.addEventListener("abort", onSourceAbort, { once: true });
-			if (sourceSignal.aborted) {
+		if (signal) {
+			signal.addEventListener("abort", onSourceAbort, { once: true });
+			if (signal.aborted) {
 				onSourceAbort();
 			}
 		}
@@ -9927,10 +9918,6 @@ export class AgentSession {
 					initiatorOverride: "agent",
 					metadata: this.agent.metadataForProvider(model.provider),
 					telemetry: resolveTelemetry(this.agent.telemetry, this.sessionId),
-					// Honor the user's /model thinking selection on the handoff
-					// path. Clamped per-model inside generateHandoff via
-					// resolveCompactionEffort so unsupported-effort models don't
-					// trip requireSupportedEffort.
 					thinkingLevel: this.thinkingLevel,
 				},
 				handoffSignal,
@@ -9966,66 +9953,94 @@ export class AgentSession {
 			};
 			const handoffText = `${renderHandoffProvenanceBlock(predecessorProvenance)}\n\n${handoffBody}`;
 
-			// Start a new session
-			const previousSessionFile = predecessorJournalPath ?? undefined;
-			const previousOwnership = this.sessionManager.getSessionOwnership();
-			await this.sessionManager.flush();
-			this.#cancelOwnAsyncJobs();
-			await this.sessionManager.newSession(previousSessionFile ? { parentSession: previousSessionFile } : undefined);
-			if (previousOwnership) await this.#adoptHandoffSessionOwnership(previousOwnership);
-			this.#rekeyExternalIrcPeerAfterHandoff();
-			this.agent.reset();
-			this.#freshProviderSessionId = undefined;
-			this.#syncAgentSessionId();
-			this.#rekeyHindsightMemoryForCurrentSessionId();
-			this.#rekeyMnemopiMemoryForCurrentSessionId();
-			this.#resetHindsightConversationTrackingIfHindsight();
-			this.#resetMnemopiConversationTrackingIfMnemopi();
-			this.#pendingNextTurnMessages = [];
-			this.#scheduledHiddenNextTurnGeneration = undefined;
-			this.#todoReminderCount = 0;
-			this.#todoReminderAwaitingProgress = false;
-
-			// Inject the handoff document as a custom message
-			this.sessionManager.appendCustomEntry(HANDOFF_PROVENANCE_CUSTOM_TYPE, predecessorProvenance);
-			const handoffContent = createHandoffContext(handoffText);
-			this.sessionManager.appendCustomMessageEntry("handoff", handoffContent, true, undefined, "agent");
-			await this.sessionManager.ensureOnDisk();
-			let savedPath: string | undefined;
-			if (options?.autoTriggered && this.settings.get("compaction.handoffSaveToDisk")) {
-				const artifactsDir = this.sessionManager.getArtifactsDir();
-				if (artifactsDir) {
-					const handoffFilePath = path.join(artifactsDir, createHandoffFileName());
-					try {
-						await Bun.write(handoffFilePath, `${handoffText}\n`);
-						savedPath = handoffFilePath;
-					} catch (error) {
-						logger.warn("Failed to save handoff document to disk", {
-							path: handoffFilePath,
-							error: error instanceof Error ? error.message : String(error),
-						});
-					}
-				} else {
-					logger.debug("Skipping handoff document save because session is not persisted");
-				}
-			}
-
-			// Rebuild agent messages from session
-			const sessionContext = this.buildDisplaySessionContext();
-			this.agent.replaceMessages(sessionContext.messages);
-			this.#restartAdvisorRuntime();
-			this.#syncTodoPhasesFromBranch();
-
-			return { document: handoffText, savedPath };
+			return { document: handoffText, provenance: predecessorProvenance };
 		} catch (error) {
 			if (handoffSignal.aborted || (error instanceof Error && error.name === "AbortError")) {
 				throw new Error("Handoff cancelled");
 			}
 			throw error;
 		} finally {
-			sourceSignal?.removeEventListener("abort", onSourceAbort);
+			signal?.removeEventListener("abort", onSourceAbort);
 			this.#handoffAbortController = undefined;
 		}
+	}
+
+	/**
+	 * Generate a handoff document with a oneshot LLM call, then start a new session with it.
+	 *
+	 * @param customInstructions Optional focus for the handoff document
+	 * @param options Handoff execution options
+	 * @returns The handoff document text, or undefined if cancelled/failed
+	 */
+	async handoff(customInstructions?: string, options?: SessionHandoffOptions): Promise<HandoffResult | undefined> {
+		const entries = this.sessionManager.getBranch();
+		const messageCount = entries.filter(e => e.type === "message").length;
+
+		if (messageCount < 2) {
+			throw new Error("Nothing to hand off (no messages yet)");
+		}
+
+		this.#skipPostTurnMaintenanceAssistantTimestamp = undefined;
+
+		const result = await this.generateHandoffDocument(customInstructions, options?.signal);
+		if (!result) {
+			return undefined;
+		}
+
+		const { document: handoffText, provenance: predecessorProvenance } = result;
+
+		// Start a new session
+		const predecessorJournalPath = predecessorProvenance.predecessorJournalPath;
+		const previousSessionFile = predecessorJournalPath ?? undefined;
+		const previousOwnership = this.sessionManager.getSessionOwnership();
+		await this.sessionManager.flush();
+		this.#cancelOwnAsyncJobs();
+		await this.sessionManager.newSession(previousSessionFile ? { parentSession: previousSessionFile } : undefined);
+		if (previousOwnership) await this.#adoptHandoffSessionOwnership(previousOwnership);
+		this.#rekeyExternalIrcPeerAfterHandoff();
+		this.agent.reset();
+		this.#freshProviderSessionId = undefined;
+		this.#syncAgentSessionId();
+		this.#rekeyHindsightMemoryForCurrentSessionId();
+		this.#rekeyMnemopiMemoryForCurrentSessionId();
+		this.#resetHindsightConversationTrackingIfHindsight();
+		this.#resetMnemopiConversationTrackingIfMnemopi();
+		this.#pendingNextTurnMessages = [];
+		this.#scheduledHiddenNextTurnGeneration = undefined;
+		this.#todoReminderCount = 0;
+		this.#todoReminderAwaitingProgress = false;
+
+		// Inject the handoff document as a custom message
+		this.sessionManager.appendCustomEntry(HANDOFF_PROVENANCE_CUSTOM_TYPE, predecessorProvenance);
+		const handoffContent = createHandoffContext(handoffText);
+		this.sessionManager.appendCustomMessageEntry("handoff", handoffContent, true, undefined, "agent");
+		await this.sessionManager.ensureOnDisk();
+		let savedPath: string | undefined;
+		if (options?.autoTriggered && this.settings.get("compaction.handoffSaveToDisk")) {
+			const artifactsDir = this.sessionManager.getArtifactsDir();
+			if (artifactsDir) {
+				const handoffFilePath = path.join(artifactsDir, createHandoffFileName());
+				try {
+					await Bun.write(handoffFilePath, `${handoffText}\n`);
+					savedPath = handoffFilePath;
+				} catch (error) {
+					logger.warn("Failed to save handoff document to disk", {
+						path: handoffFilePath,
+						error: error instanceof Error ? error.message : String(error),
+					});
+				}
+			} else {
+				logger.debug("Skipping handoff document save because session is not persisted");
+			}
+		}
+
+		// Rebuild agent messages from session
+		const sessionContext = this.buildDisplaySessionContext();
+		this.agent.replaceMessages(sessionContext.messages);
+		this.#restartAdvisorRuntime();
+		this.#syncTodoPhasesFromBranch();
+
+		return { document: handoffText, savedPath };
 	}
 
 	#estimatePendingPromptTokens(messages: AgentMessage[]): number {

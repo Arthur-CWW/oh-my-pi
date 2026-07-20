@@ -1,6 +1,7 @@
+import { listArchivedDirectChildren } from "../internal-urls/history-protocol";
+import { AgentLifecycleManager } from "../registry/agent-lifecycle";
 import type { AgentRef, AgentStatus } from "../registry/agent-registry";
 import { AgentRegistry, MAIN_AGENT_ID } from "../registry/agent-registry";
-import { listArchivedDirectChildren } from "../internal-urls/history-protocol";
 import type { AgentProgress, SubagentLifecyclePayload, SubagentProgressPayload } from "../task";
 import { TASK_SUBAGENT_LIFECYCLE_CHANNEL, TASK_SUBAGENT_PROGRESS_CHANNEL } from "../task";
 import type { EventBus } from "../utils/event-bus";
@@ -159,12 +160,11 @@ export class SessionObserverRegistry {
 				// Display rate uses output tokens only (generation speed).
 				// Fall back to total when outputTokens is absent (old child).
 				const useOutput = latest.outputTokens > 0 || start.outputTokens > 0;
-				const delta = useOutput
-					? latest.outputTokens - start.outputTokens
-					: latest.tokens - start.tokens;
-				session.tokenRate = elapsed > 0 ? Math.max(0, delta) / elapsed * 1000 : 0;
+				const delta = useOutput ? latest.outputTokens - start.outputTokens : latest.tokens - start.tokens;
+				session.tokenRate = elapsed > 0 ? (Math.max(0, delta) / elapsed) * 1000 : 0;
 			}
-			session.tokenRateStuck = session.status === "active" && session.tokenRate === 0 && now - latestTotalAdvanceAt > TOKEN_RATE_STALE_MS;
+			session.tokenRateStuck =
+				session.status === "active" && session.tokenRate === 0 && now - latestTotalAdvanceAt > TOKEN_RATE_STALE_MS;
 		}
 	}
 
@@ -375,8 +375,6 @@ export class SessionObserverRegistry {
 		if (visited.size > 0) this.#scheduleFlush();
 	}
 
-
-
 	setMainSession(sessionFile?: string): void {
 		const existing = this.#sessions.get("main");
 		this.#ensureSortOrder("main");
@@ -430,8 +428,24 @@ export class SessionObserverRegistry {
 	getActiveSubagentCount(): number {
 		this.#applyPendingUpdates();
 		let count = 0;
+		let lifecycle: AgentLifecycleManager | undefined;
 		for (const s of this.#sessions.values()) {
-			if (s.kind === "subagent" && s.status === "active") count++;
+			if (s.kind !== "subagent" || s.status !== "active") continue;
+			// A running child stranded with durable terminal evidence and no live
+			// model/job work is not really active. Reconcile it against the
+			// lifecycle authority before projecting the count: exclude it now via
+			// the authority's synchronous evidence gate and kick a durable park.
+			// Evidence-gated and idempotent, so a genuinely live peer is never
+			// touched and there is no polling.
+			if (s.registryStatus === "running") {
+				lifecycle ??= AgentLifecycleManager.global();
+				if (lifecycle.isParking(s.id)) continue;
+				if (lifecycle.isReconcilableStaleOrphan(s.id)) {
+					void lifecycle.reconcileStaleOrphan(s.id);
+					continue;
+				}
+			}
+			count++;
 		}
 		return count;
 	}

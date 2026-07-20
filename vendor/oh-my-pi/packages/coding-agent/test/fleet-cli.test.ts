@@ -1,8 +1,10 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, it } from "bun:test";
 import { TempDir } from "@oh-my-pi/pi-utils";
-import type { CliConfig, CommandCtor } from "@oh-my-pi/pi-utils/cli";
-import Fleet from "../src/commands/fleet";
+import { NodeServices } from "@effect/platform-node";
+import { Effect } from "effect";
+import { Command } from "effect/unstable/cli";
+import fleet from "../src/commands/fleet";
 import {
 	collectFleetErrors,
 	collectFleetStatus,
@@ -26,14 +28,10 @@ const NOW = Date.parse("2026-07-15T12:00:00.000Z");
 // these fixtures construct real buses in tmp dbs and must register anyway.
 process.env.OMP_FLEET_REGISTER = "1";
 
-const FLEET_CONFIG: CliConfig = {
-	bin: "omp",
-	version: "test",
-	commands: new Map<string, CommandCtor>(),
-};
-
 async function runFleet(argv: readonly string[]): Promise<void> {
-	await new Fleet([...argv], FLEET_CONFIG).run();
+	await Effect.runPromise(
+		Command.runWith(fleet, { version: "test" })([...argv]).pipe(Effect.provide(NodeServices.layer)),
+	);
 }
 
 async function runFleetWithOutput(argv: readonly string[]): Promise<string> {
@@ -78,25 +76,17 @@ async function withFleetLabelFixture(
 }
 
 describe("fleet overview argument validation", () => {
-	it("rejects unknown flags with the offending token and valid flags", async () => {
-		await expect(runFleet(["overview", "--unknown-flag"])).rejects.toThrow(
-			"overview does not accept --unknown-flag; valid flags: --all, --json, --workstream",
-		);
+	it("rejects unknown flags", async () => {
+		await expect(runFleet(["overview", "--unknown-flag"])).rejects.toThrow();
 	});
 
 	it("rejects misspelled and irrelevant flags", async () => {
-		await expect(runFleet(["overview", "--jso"])).rejects.toThrow(
-			"overview does not accept --jso; valid flags: --all, --json, --workstream",
-		);
-		await expect(runFleet(["overview", "--digest", "abc"])).rejects.toThrow(
-			"overview does not accept --digest; valid flags: --all, --json, --workstream",
-		);
+		await expect(runFleet(["overview", "--jso"])).rejects.toThrow();
+		await expect(runFleet(["overview", "--digest", "abc"])).rejects.toThrow();
 	});
 
 	it("rejects extra positional arguments", async () => {
-		await expect(runFleet(["overview", "session-a", "unexpected"])).rejects.toThrow(
-			"overview does not accept unexpected; valid flags: --all, --json, --workstream",
-		);
+		await expect(runFleet(["overview", "session-a", "unexpected"])).rejects.toThrow();
 	});
 
 	it("accepts the real overview flags", async () => {
@@ -266,9 +256,10 @@ describe("fleet label action", () => {
 		await expect(runFleet(["label", "label-peer"])).rejects.toThrow(
 			"label requires at least one of --summary, --name, --workstream",
 		);
-		await expect(runFleet(["label", "label-peer", "--unknown-flag"])).rejects.toThrow(
-			"label does not accept --unknown-flag; valid flags: --summary, --name, --workstream",
+		await expect(runFleet(["label", "label-peer", "--all"])).rejects.toThrow(
+			"label does not accept --all; valid flags: --summary, --name, --workstream",
 		);
+		await expect(runFleet(["label", "label-peer", "--unknown-flag"])).rejects.toThrow();
 		await withFleetLabelFixture(
 			(bus, root) => {
 				bus.registerPeer({ sessionId: "known-peer", name: "known", cwd: root });

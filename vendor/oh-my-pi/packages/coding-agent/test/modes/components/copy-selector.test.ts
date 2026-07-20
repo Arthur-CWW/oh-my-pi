@@ -77,18 +77,21 @@ describe("CopySelectorComponent", () => {
 		vi.restoreAllMocks();
 	});
 
-	it("renders an outlined tree with code blocks nested under their message", () => {
+	it("renders a frameless tree with code blocks nested under their message", () => {
 		const out = render(new CopySelectorComponent(makeRoots(), { onPick: vi.fn(), onCancel: vi.fn() }));
-		expect(out).toContain("┌");
-		expect(out).toContain("│");
+		// No enclosing frame corners/sides or tree-branch glyphs.
+		expect(out).not.toMatch(/[┌┐└┘╭╮╰╯├┤┬┴┼│]/);
 		expect(out).toContain("Copy to clipboard");
 		// Messages and their nested blocks are all visible (always expanded),
-		// connected with /tree-style branch glyphs.
+		// nested under their message via indentation.
 		expect(out).toContain("Newest message");
 		expect(out).toContain("Block 1");
 		expect(out).toContain("Block 2");
 		expect(out).toContain("Older message");
-		expect(out).toMatch(/[├└]/);
+		// Code blocks render indented beneath their parent message.
+		const blockLine = out.split("\n").find(line => line.includes("Block 1"));
+		expect(blockLine).toBeDefined();
+		expect(blockLine).toMatch(/^\s{3,}/);
 	});
 
 	it("copies the message node itself on Enter", () => {

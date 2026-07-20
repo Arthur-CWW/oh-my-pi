@@ -33,7 +33,7 @@ export function renderMCPCall(args: Record<string, unknown>, theme: Theme, label
 		// Show args inline preview
 		const preview = formatArgsInline(args, 70);
 		if (preview) {
-			lines.push(` ${theme.fg("dim", theme.tree.last)} ${theme.fg("dim", preview)}`);
+			lines.push(`    ${theme.fg("dim", preview)}`);
 		}
 	}
 

@@ -22,7 +22,7 @@
     "cli": "bun src/cli.ts",
     "tabs": "bun src/tabs-cli.ts",
     "dashboard": "bun src/dashboard.ts",
-    "dev": "bun run web:build && bunx portless@latest primer bun src/dashboard.ts",
+    "dev": "bun run web:build && bunx portless@latest alias primer 4177 --force && PORT=4177 PRIMER_MELTDOWN_ALIAS=0 PORTLESS_URL=https://primer.localhost exec bun src/dashboard.ts",
     "cedict:build": "bun scripts/build-cedict.ts",
     "ingest:generation": "bun scripts/ingest-generation.ts",
     "cards:promote": "bun scripts/promote-hsk-cards.ts"

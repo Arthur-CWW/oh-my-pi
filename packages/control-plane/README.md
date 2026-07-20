@@ -1,5 +1,13 @@
 # @wirebabel/control-plane
 
+> **Class:** Implementation facts — this documents the **actual current** CLI and SQLite stores of the
+> `@wirebabel/control-plane` package as they exist in `src/`. It is not an architecture spec and defines
+> no policy. The control-plane / federated-workspace **architecture authority** (data taxonomy, where each
+> store's authority sits, one accountable owner vs. run provenance) is
+> [`docs/fable/federated-control-plane.md`](../../docs/fable/federated-control-plane.md), which names this
+> package as the canonical home for the queue / attention / routing / claims ledger (§2). The stores below
+> are that home in code — not a second lifecycle, task, or wiki authority.
+
 ## Routing knowledge store
 
 The routing store is a machine-global SQLite substrate for empirical lane routing decisions. It lives in the same database as the ledger by default (`AGENT_CONTROL_PLANE_DB` or `~/.agent-control-plane/ledger.sqlite`) but has a different write contract: ledger event ingestion remains daemon/single-writer, while `routing_observations` and `lane_state` are low-rate shared-state tables that sessions may update directly.

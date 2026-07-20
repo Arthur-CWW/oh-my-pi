@@ -9,6 +9,7 @@ const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "
 
 export interface DaemonPaths {
   browserDb: string
+  browserContextDb: string
   browserContextSocket: string
   browserContextArtifacts: string
   browserContextManifests: string
@@ -20,6 +21,7 @@ export interface DaemonPaths {
   ledgerDb: string
   reviewFeed: string
   errorLog: string
+  ankiProfile: string
   cedictDb: string
   zhdictDb?: string
   hanlyDb?: string
@@ -33,6 +35,7 @@ export function resolveDaemonPaths(env: Record<string, string | undefined> = {})
   const browserContextRoot = env.PRIMER_BROWSER_CONTEXT_DIR ?? resolve(home, "state/browser-context")
   return {
     browserDb: env.PRIMER_BROWSER_DB ?? resolve(browserContextRoot, "browser_context.sqlite"),
+    browserContextDb: env.PRIMER_BROWSER_CONTEXT_DB ?? resolve(browserContextRoot, "primer-browser-context.sqlite"),
     browserContextSocket: env.PRIMER_BROWSER_CONTEXT_SOCKET ?? resolve(browserContextRoot, "browser-context.sock"),
     browserContextArtifacts: env.PRIMER_BROWSER_CONTEXT_ARTIFACTS ?? resolve(browserContextRoot, "artifacts"),
     browserContextManifests: env.PRIMER_BROWSER_CONTEXT_MANIFESTS ?? resolve(browserContextRoot, "manifests"),
@@ -49,6 +52,7 @@ export function resolveDaemonPaths(env: Record<string, string | undefined> = {})
     ledgerDb: env.PRIMER_LEDGER_DB ?? resolve(REPO_ROOT, "data/primer/daemon-ledger.sqlite"),
     reviewFeed: env.PRIMER_REVIEW_FEED ?? resolve(REPO_ROOT, "data/xanadu/feed.jsonl"),
     errorLog: env.PRIMER_ERROR_LOG ?? resolve(REPO_ROOT, "data/primer/errors.log"),
+    ankiProfile: env.PRIMER_ANKI_PROFILE ?? resolve(REPO_ROOT, "data/primer/anki-reviewed.json"),
     cedictDb: env.PRIMER_CEDICT_DB ?? resolve(REPO_ROOT, "data/primer/cedict.sqlite"),
     zhdictDb: env.PRIMER_ZHDICT_DB ?? resolve(REPO_ROOT, "data/primer/zhdict.sqlite"),
     generationStore: env.PRIMER_GENERATION_STORE ?? resolve(REPO_ROOT, "data/primer/generation-store.sqlite"),
@@ -61,6 +65,7 @@ export function resolveDaemonPaths(env: Record<string, string | undefined> = {})
 export function ensureDaemonDirectories(paths: DaemonPaths): void {
   const directories = new Set([
     dirname(paths.browserDb),
+    dirname(paths.browserContextDb),
     dirname(paths.browserContextSocket),
     paths.browserContextArtifacts,
     paths.browserContextManifests,

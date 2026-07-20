@@ -111,7 +111,7 @@ describe("renderTreeList maxCollapsedLines", () => {
 		expect(collapsed.some(l => l.includes("more"))).toBe(false);
 	});
 
-	it("uses non-last tree branch when summary line follows", () => {
+	it("prefixes items with indentation and appends a summary line when truncated", () => {
 		const items = [["a"], ["b", "c"]];
 
 		const collapsed = renderTreeList(
@@ -127,13 +127,13 @@ describe("renderTreeList maxCollapsedLines", () => {
 
 		expectWithinBudget(collapsed, 2);
 		expect(collapsed).toHaveLength(2);
-		expect(collapsed[0]).toContain("├");
-		expect(collapsed[0]).toContain("a");
-		expect(collapsed[1]).toContain("└");
+		expect(collapsed[0]).toBe("   a");
 		expect(collapsed[1]).toContain("1 more item");
+		expect(collapsed[1].startsWith("   ")).toBe(true);
+		expect(collapsed.join("\n")).not.toMatch(/[├└│]/);
 	});
 
-	it("uses last tree branch when no summary follows", () => {
+	it("prefixes a single item with indentation and no summary", () => {
 		const items = [["a"]];
 
 		const collapsed = renderTreeList(
@@ -148,7 +148,7 @@ describe("renderTreeList maxCollapsedLines", () => {
 		);
 
 		expect(collapsed.length).toBe(1);
-		expect(collapsed[0]).toContain("└");
+		expect(collapsed[0]).toBe("   a");
 		expect(collapsed.some(l => l.includes("more"))).toBe(false);
 	});
 
@@ -239,17 +239,15 @@ describe("renderTreeList maxCollapsedLines", () => {
 			stubTheme,
 		);
 
-		// With 5 items and maxCollapsed: 3, we show:
-		// 1. Summary line: ├ … 2 more todos
-		// 2. Item 'c' (index 2): ├ c
-		// 3. Item 'd' (index 3): ├ d
-		// 4. Item 'e' (index 4): └ e
+		// With 5 items and maxCollapsed: 3, we show a leading summary then the last
+		// three items, each prefixed with a fixed indent (no tree glyphs):
+		//   "   … 2 more todos", "   c", "   d", "   e"
 		expect(collapsed).toHaveLength(4);
 		expect(collapsed[0]).toContain("2 more todos");
-		expect(collapsed[0]).toContain("├");
-		expect(collapsed[1]).toBe("├ c");
-		expect(collapsed[2]).toBe("├ d");
-		expect(collapsed[3]).toBe("└ e");
+		expect(collapsed[0].startsWith("   ")).toBe(true);
+		expect(collapsed[1]).toBe("   c");
+		expect(collapsed[2]).toBe("   d");
+		expect(collapsed[3]).toBe("   e");
 	});
 
 	it("truncates from the start when maxCollapsedLines limits items", () => {
@@ -272,20 +270,15 @@ describe("renderTreeList maxCollapsedLines", () => {
 		);
 
 		// items are each 2 lines. Total budget is 5.
-		// Moving backwards:
-		// - item 3 ('d', 'd2'): fits. lines used: 2. summary lines needed (remainingBefore > 0): 1. total = 3.
-		// - item 2 ('c', 'c2'): fits. lines used: 4. summary lines needed: 1. total = 5.
-		// - item 1 ('b', 'b2'): does not fit (would be 6 + 1 = 7 > 5).
-		// So we show:
-		// 1. Summary line: ├ … 2 more todos
-		// 2. Item 'c' (2 lines: ├ c, │  c2)
-		// 3. Item 'd' (2 lines: └ d,    d2)
+		// Moving backwards: item 'd' (2) + summary (1) = 3; item 'c' (2) → 5; item 'b' would be 7 > 5.
+		// So we show a summary then items 'c' and 'd', each line prefixed with a
+		// fixed indent (no tree glyphs): "   … 2 more todos", "   c", "   c2", "   d", "   d2"
 		expectWithinBudget(collapsed, 5);
 		expect(collapsed).toHaveLength(5);
 		expect(collapsed[0]).toContain("2 more todos");
-		expect(collapsed[1]).toBe("├ c");
-		expect(collapsed[2]).toBe("│  c2");
-		expect(collapsed[3]).toBe("└ d");
+		expect(collapsed[1]).toBe("   c");
+		expect(collapsed[2]).toBe("   c2");
+		expect(collapsed[3]).toBe("   d");
 		expect(collapsed[4]).toBe("   d2");
 	});
 });

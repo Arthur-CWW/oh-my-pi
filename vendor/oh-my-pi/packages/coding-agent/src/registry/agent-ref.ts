@@ -12,8 +12,14 @@ export interface AgentRef {
 	kind: AgentKind;
 	parentId?: string;
 	status: AgentStatus;
-	/** Null exactly when parked/aborted. */
+	/** Null when parked/aborted, and while a reserved child is still `starting`. */
 	session: AgentSession | null;
+	/**
+	 * True only for a reserved child identity registered `running` before its
+	 * gated job body builds a session. History/IRC treat it as genuinely-known
+	 * queued work; it clears the moment the child comes live or fails to start.
+	 */
+	starting?: boolean;
 	createdAt: number;
 	lastActivity: number;
 	readonly spawnIndex: number;

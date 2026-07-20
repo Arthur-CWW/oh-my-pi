@@ -308,13 +308,10 @@ export function projectAgentRoster(
 	}
 	const rollups = revealIncludedPaths ? undefined : subtreeRollups(topology, visibleChildrenByParent);
 	const rows: AgentRosterRow[] = [];
-	const visit = (ref: AgentRef, depth: number, continuations: readonly boolean[]): void => {
+	const visit = (ref: AgentRef, depth: number): void => {
 		const parentId = topology.parentById.get(ref.id);
-		const siblings = visibleChildrenByParent.get(parentId) ?? [];
-		const siblingIndex = siblings.indexOf(ref);
-		let guide = "";
-		for (let index = 0; index + 1 < continuations.length; index++) guide += continuations[index] ? "│ " : "  ";
-		if (depth > 0) guide += siblingIndex + 1 < siblings.length ? "├ " : "└ ";
+		// Indentation-only guide: two columns per ancestor depth, no tree glyphs.
+		const guide = "  ".repeat(depth);
 		const children = visibleChildrenByParent.get(ref.id) ?? [];
 		const row: AgentRosterRow = {
 			ref,
@@ -329,11 +326,11 @@ export function projectAgentRoster(
 		}
 		rows.push(row);
 		if (!revealIncludedPaths && collapsedIds.has(ref.id)) return;
-		for (let index = 0; index < children.length; index++) {
-			visit(children[index]!, depth + 1, [...continuations, index + 1 < children.length]);
+		for (const child of children) {
+			visit(child, depth + 1);
 		}
 	};
-	for (const root of visibleChildrenByParent.get(undefined) ?? []) visit(root, 0, []);
+	for (const root of visibleChildrenByParent.get(undefined) ?? []) visit(root, 0);
 	return rows;
 }
 

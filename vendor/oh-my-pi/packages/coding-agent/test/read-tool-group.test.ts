@@ -83,10 +83,9 @@ describe("ReadToolGroupComponent", () => {
 		const plain = Bun.stripANSI(component.render(120).join("\n"));
 
 		expect(plain).toContain("Read (2)");
-		expect(plain).toContain(`${themeModule.theme.tree.branch} /tmp/one.ts`);
-		expect(plain).toContain(`${themeModule.theme.tree.last} /tmp/two.ts`);
-		expect(plain).not.toContain(`${themeModule.theme.tree.branch} ${themeModule.theme.status.enabled}`);
-		expect(plain).not.toContain(`${themeModule.theme.tree.last} ${themeModule.theme.status.enabled}`);
+		expect(plain).toContain("      /tmp/one.ts");
+		expect(plain).toContain("      /tmp/two.ts");
+		expect(plain).not.toContain(`      ${themeModule.theme.status.enabled}`);
 	});
 
 	it("splits a single selector-delimited read argument into child rows", () => {
@@ -97,9 +96,9 @@ describe("ReadToolGroupComponent", () => {
 		const plain = Bun.stripANSI(component.render(120).join("\n"));
 
 		expect(plain).toContain("Read (3)");
-		expect(plain).toContain(`${themeModule.theme.tree.branch} /tmp/one.ts:1-2`);
-		expect(plain).toContain(`${themeModule.theme.tree.branch} /tmp/two.ts:3-4`);
-		expect(plain).toContain(`${themeModule.theme.tree.last} /tmp/three.ts:5-6`);
+		expect(plain).toContain("      /tmp/one.ts:1-2");
+		expect(plain).toContain("      /tmp/two.ts:3-4");
+		expect(plain).toContain("      /tmp/three.ts:5-6");
 	});
 
 	it("merges multi-range selectors into one file row", () => {
@@ -144,8 +143,8 @@ describe("ReadToolGroupComponent", () => {
 		const plain = Bun.stripANSI(component.render(120).join("\n"));
 
 		expect(plain).toContain("Read (2)");
-		expect(plain).toContain(`${themeModule.theme.tree.branch} /tmp/one.ts`);
-		expect(plain).toContain(`${themeModule.theme.tree.last} /tmp/two.ts`);
+		expect(plain).toContain("      /tmp/one.ts");
+		expect(plain).toContain("      /tmp/two.ts");
 	});
 
 	it("renders warning previews with warning styling instead of success styling", () => {

@@ -4,6 +4,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import {
+	PROMOTION_STAGE_ORDER,
 	acquirePromotionLock,
 	blessedCommitFromVersion,
 	composePromotionReport,
@@ -14,6 +15,7 @@ import {
 	parsePromotionOptions,
 	promotionBuildEnvironment,
 	readInstalledBuildRevision,
+	timed,
 } from "./omp-promote";
 
 const roots: string[] = [];
@@ -162,5 +164,59 @@ describe("promotion lock", () => {
 		const recovered = await acquirePromotionLock(lockPath, 0);
 		expect(await fs.readFile(path.join(lockPath, "owner.json"), "utf8")).toContain(recovered.token);
 		await recovered.release();
+	});
+});
+
+describe("stage timing", () => {
+	it("reports elapsed time and returns the result for a successful stage", async () => {
+		const lines: string[] = [];
+		const result = await timed("test-stage", async () => {
+			await new Promise(resolve => setTimeout(resolve, 10));
+			return 42;
+		}, (line) => lines.push(line));
+		expect(result).toBe(42);
+		expect(lines).toHaveLength(1);
+		expect(lines[0]).toMatch(/^stage test-stage done \d+\.\d{2}s$/);
+	});
+
+	it("reports elapsed time and re-throws for a failed stage", async () => {
+		const lines: string[] = [];
+		await expect(
+			timed("broken", async () => { throw new Error("build broke"); }, (line) => lines.push(line)),
+		).rejects.toThrow("build broke");
+		expect(lines).toHaveLength(1);
+		expect(lines[0]).toMatch(/^stage broken failed \d+\.\d{2}s$/);
+	});
+});
+
+describe("promotion stage order", () => {
+	it("runs generation before typecheck and typecheck before native build", () => {
+		const gen = PROMOTION_STAGE_ORDER.indexOf("generate");
+		const types = PROMOTION_STAGE_ORDER.indexOf("check:types");
+		const native = PROMOTION_STAGE_ORDER.indexOf("build:native");
+		expect(gen).toBeGreaterThanOrEqual(0);
+		expect(gen).toBeLessThan(types);
+		expect(types).toBeLessThan(native);
+	});
+
+	it("completes native artifact and bundle before candidate install and readiness", () => {
+		const native = PROMOTION_STAGE_ORDER.indexOf("build:native");
+		const bundle = PROMOTION_STAGE_ORDER.indexOf("bundle");
+		const candidateInstall = PROMOTION_STAGE_ORDER.indexOf("candidate-install");
+		const readiness = PROMOTION_STAGE_ORDER.indexOf("readiness");
+		const bless = PROMOTION_STAGE_ORDER.indexOf("bless");
+		expect(native).toBeLessThan(bundle);
+		expect(bundle).toBeLessThan(candidateInstall);
+		expect(candidateInstall).toBeLessThan(readiness);
+		expect(readiness).toBeLessThan(bless);
+	});
+
+	it("places bless after readiness and rollout last", () => {
+		const readiness = PROMOTION_STAGE_ORDER.indexOf("readiness");
+		const bless = PROMOTION_STAGE_ORDER.indexOf("bless");
+		const rollout = PROMOTION_STAGE_ORDER.indexOf("rollout");
+		expect(bless).toBe(readiness + 1);
+		expect(rollout).toBe(bless + 1);
+		expect(rollout).toBe(PROMOTION_STAGE_ORDER.length - 1);
 	});
 });

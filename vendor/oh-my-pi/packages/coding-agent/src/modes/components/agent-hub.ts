@@ -3439,7 +3439,7 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 								? "(unknown lines)"
 								: `(${file.lineCount} lines)`;
 					}
-					const text = `${theme.fg("dim", `${theme.tree.last} `)}${theme.fg("muted", "Read")} ${theme.fg(
+					const text = `   ${theme.fg("muted", "Read")} ${theme.fg(
 						"accent",
 						file.path,
 					)} ${theme.fg("dim", suffix)}`;

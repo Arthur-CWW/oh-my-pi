@@ -166,9 +166,8 @@ function renderAgentProgressEvents(events: EvalStatusEvent[], theme: Theme, spin
 	const lines: string[] = [];
 	for (let i = 0; i < events.length; i++) {
 		const event = events[i];
-		const isLast = i === events.length - 1;
-		const prefix = theme.fg("dim", isLast ? theme.tree.last : theme.tree.branch);
-		const cont = isLast ? "   " : `${theme.fg("dim", theme.tree.vertical)}  `;
+		const prefix = "  ";
+		const cont = "   ";
 
 		const status = agentEventStatus(event.status);
 		const iconStatus =
@@ -211,12 +210,12 @@ function renderAgentProgressEvents(events: EvalStatusEvent[], theme: Theme, spin
 
 		if (status === "running") {
 			if (currentTool) {
-				let toolLine = `${cont}${theme.tree.hook} ${theme.fg("muted", currentTool)}`;
+				let toolLine = `${cont}  ${theme.fg("muted", currentTool)}`;
 				const detail = lastIntent ?? eventString(event.currentToolArgs);
 				if (detail) toolLine += `: ${theme.fg("dim", truncateToWidth(replaceTabs(detail), 48))}`;
 				lines.push(toolLine);
 			} else if (lastIntent) {
-				lines.push(`${cont}${theme.tree.hook} ${theme.fg("dim", truncateToWidth(replaceTabs(lastIntent), 48))}`);
+				lines.push(`${cont}  ${theme.fg("dim", truncateToWidth(replaceTabs(lastIntent), 48))}`);
 			}
 		}
 	}
@@ -426,25 +425,21 @@ function renderStatusEvents(events: EvalStatusEvent[], theme: Theme, expanded: b
 
 	const lines: string[] = [];
 	for (let i = 0; i < displayCount; i++) {
-		const isLast = i === displayCount - 1 && (expanded || events.length <= maxCollapsed);
-		const branch = isLast ? theme.tree.last : theme.tree.branch;
-
 		if (expanded) {
 			const eventLines = formatStatusEventExpanded(events[i], theme);
-			lines.push(`${theme.fg("dim", branch)} ${eventLines[0]}`);
-			const continueBranch = isLast ? "   " : `${theme.tree.vertical}  `;
+			lines.push(`   ${eventLines[0]}`);
 			for (let j = 1; j < eventLines.length; j++) {
-				lines.push(`${theme.fg("dim", continueBranch)}${eventLines[j]}`);
+				lines.push(`   ${eventLines[j]}`);
 			}
 		} else {
-			lines.push(`${theme.fg("dim", branch)} ${formatStatusEvent(events[i], theme)}`);
+			lines.push(`   ${formatStatusEvent(events[i], theme)}`);
 		}
 	}
 
 	if (!expanded && events.length > maxCollapsed) {
-		lines.push(`${theme.fg("dim", theme.tree.last)} ${theme.fg("dim", `… ${events.length - maxCollapsed} more`)}`);
+		lines.push(`   ${theme.fg("dim", `… ${events.length - maxCollapsed} more`)}`);
 	} else if (expanded && events.length > maxExpanded) {
-		lines.push(`${theme.fg("dim", theme.tree.last)} ${theme.fg("dim", `… ${events.length - maxExpanded} more`)}`);
+		lines.push(`   ${theme.fg("dim", `… ${events.length - maxExpanded} more`)}`);
 	}
 
 	return lines;

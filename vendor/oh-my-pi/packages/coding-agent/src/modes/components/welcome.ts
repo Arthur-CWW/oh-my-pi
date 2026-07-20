@@ -167,7 +167,7 @@ export class WelcomeComponent implements Component {
 		if (boxWidth < 4) {
 			return [];
 		}
-		const dualContentWidth = boxWidth - 3; // 3 = │ + │ + │
+		const dualContentWidth = boxWidth - 1; // 1 = middle │ divider
 		const preferredLeftCol = 26;
 		const minLeftCol = 12; // logo width
 		const minRightCol = 20;
@@ -184,7 +184,7 @@ export class WelcomeComponent implements Component {
 				: Math.max(1, dualContentWidth - 1);
 		const dualRightCol = Math.max(1, dualContentWidth - dualLeftCol);
 		const showRightColumn = dualLeftCol >= leftMinContentWidth && dualRightCol >= minRightCol;
-		const leftCol = showRightColumn ? dualLeftCol : boxWidth - 2;
+		const leftCol = showRightColumn ? dualLeftCol : boxWidth;
 		const rightCol = showRightColumn ? dualRightCol : 0;
 
 		// Logo: pick a frame from the intro animation if active, else the resting frame.
@@ -201,9 +201,8 @@ export class WelcomeComponent implements Component {
 			this.#centerText(theme.fg("borderMuted", this.providerName), leftCol),
 		];
 
-		// Right column separator
-		const separatorWidth = Math.max(0, rightCol - 2); // padding on each side
-		const separator = ` ${theme.fg("dim", theme.boxRound.horizontal.repeat(separatorWidth))}`;
+		// Right column section separator: a blank line (no rule chrome).
+		const separator = "";
 
 		// Recent sessions content
 		const sessionLines: string[] = [];
@@ -271,46 +270,25 @@ export class WelcomeComponent implements Component {
 			"",
 		];
 
-		// Border characters (dim)
-		const hChar = theme.boxRound.horizontal;
-		const h = theme.fg("dim", hChar);
+		// Middle divider between the two columns (the only retained chrome).
 		const v = theme.fg("dim", theme.boxRound.vertical);
-		const tl = theme.fg("dim", theme.boxRound.topLeft);
-		const tr = theme.fg("dim", theme.boxRound.topRight);
-		const bl = theme.fg("dim", theme.boxRound.bottomLeft);
-		const br = theme.fg("dim", theme.boxRound.bottomRight);
 
 		const lines: string[] = [];
 
-		// Top border with embedded title
-		const title = ` ${APP_NAME} v${this.version} `;
-		const titlePrefixRaw = hChar.repeat(3);
-		const titleStyled = theme.fg("dim", titlePrefixRaw) + theme.fg("muted", title);
-		const titleVisLen = visibleWidth(titlePrefixRaw) + visibleWidth(title);
-		const titleSpace = boxWidth - 2;
-		if (titleVisLen >= titleSpace) {
-			lines.push(tl + truncateToWidth(titleStyled, titleSpace) + tr);
-		} else {
-			const afterTitle = titleSpace - titleVisLen;
-			lines.push(tl + titleStyled + theme.fg("dim", hChar.repeat(afterTitle)) + tr);
-		}
+		// Heading carrying the app name/version (no frame chrome).
+		lines.push(theme.bold(theme.fg("accent", ` ${APP_NAME} v${this.version}`)));
 
-		// Content rows
+		// Content rows: two columns joined by the middle divider, or a single
+		// column with no chrome.
 		const maxRows = showRightColumn ? Math.max(leftLines.length, rightLines.length) : leftLines.length;
 		for (let i = 0; i < maxRows; i++) {
 			const left = this.#fitToWidth(leftLines[i] ?? "", leftCol);
 			if (showRightColumn) {
 				const right = this.#fitToWidth(rightLines[i] ?? "", rightCol);
-				lines.push(v + left + v + right + v);
+				lines.push(left + v + right);
 			} else {
-				lines.push(v + left + v);
+				lines.push(left);
 			}
-		}
-		// Bottom border
-		if (showRightColumn) {
-			lines.push(bl + h.repeat(leftCol) + theme.fg("dim", theme.boxSharp.teeUp) + h.repeat(rightCol) + br);
-		} else {
-			lines.push(bl + h.repeat(leftCol) + br);
 		}
 
 		// Randomly picked tip, rendered directly beneath the box.

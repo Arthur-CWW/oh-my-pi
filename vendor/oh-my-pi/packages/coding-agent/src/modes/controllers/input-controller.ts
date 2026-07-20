@@ -14,6 +14,7 @@ import { materializeImageReferenceLinks, shiftImageMarkers } from "../../modes/i
 import { createPromptActionAutocompleteProvider } from "../../modes/prompt-action-autocomplete";
 import type { InteractiveModeContext } from "../../modes/types";
 import manualContinuePrompt from "../../prompts/system/manual-continue.md" with { type: "text" };
+import { AgentLifecycleManager } from "../../registry/agent-lifecycle";
 import { AgentRegistry, MAIN_AGENT_ID } from "../../registry/agent-registry";
 import { SKILL_PROMPT_MESSAGE_TYPE, type SkillPromptDetails, USER_INTERRUPT_LABEL } from "../../session/messages";
 import { executeBuiltinSlashCommand } from "../../slash-commands/builtin-registry";
@@ -852,6 +853,11 @@ export class InputController {
 	async #requestInteractiveShutdown(options: { clearEditor?: boolean } = {}): Promise<void> {
 		if (this.#quitConfirmationPending || this.ctx.isShuttingDown) return;
 
+		// Reconcile any child stranded as `running` after terminal evidence (dead,
+		// rate-limited, or a stale-running record) into parked before we count
+		// live work, so a genuinely-finished peer never forces a false
+		// stop/detach prompt. Evidence-gated and idempotent; no sleep polling.
+		await AgentLifecycleManager.global().reconcileStaleOrphans();
 		const refs = AgentRegistry.global().list();
 		const ownedIds = new Set([MAIN_AGENT_ID]);
 		let previousOwnedCount = 0;

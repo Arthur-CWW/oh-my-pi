@@ -283,9 +283,9 @@ function formatHudNoteMarker(count: number): string {
 	return theme.fg("dim", chalk.italic(` \u207a${sub}`));
 }
 
-type GoalSubcommand = "set" | "show" | "pause" | "resume" | "drop" | "budget";
+type GoalSubcommand = "set" | "show" | "pause" | "resume" | "drop";
 
-const GOAL_SUBCOMMANDS = new Set<GoalSubcommand>(["set", "show", "pause", "resume", "drop", "budget"]);
+const GOAL_SUBCOMMANDS = new Set<GoalSubcommand>(["set", "show", "pause", "resume", "drop"]);
 const PLAN_KEEP_CONTEXT_OPTION_INDEX = 2;
 const PLAN_KEEP_CONTEXT_DISABLE_THRESHOLD_PERCENT = 95;
 
@@ -1582,7 +1582,6 @@ export class InteractiveMode implements InteractiveModeContext, SubmittedInputRe
 		const phases = this.todoPhases.filter(phase => phase.tasks.length > 0);
 		if (phases.length === 0) return;
 		const indent = "  ";
-		const hook = theme.tree.hook;
 		const lines = ["", indent + theme.bold(theme.fg("accent", "Todos"))];
 
 		const activeDescs = this.#getActiveSubagentDescriptions(sessions);
@@ -1598,23 +1597,23 @@ export class InteractiveMode implements InteractiveModeContext, SubmittedInputRe
 			const { visible, hiddenOpenCount } = selectStickyTodoWindow(activePhase.tasks, 5);
 
 			lines.push(
-				`${indent}${theme.fg("accent", `${hook} ${formatPhaseDisplayName(activePhase.name, activeIdx + 1)}`)}`,
+				`${indent}${theme.fg("accent", formatPhaseDisplayName(activePhase.name, activeIdx + 1))}`,
 			);
 			visible.forEach((todo, index) => {
-				const prefix = `${indent}${index === 0 ? hook : " "} `;
+				const prefix = `${indent}  `;
 				lines.push(this.#formatTodoLine(todo, prefix, isMatched(todo)));
 			});
 			if (hiddenOpenCount > 0) {
-				lines.push(theme.fg("muted", `${indent}  ${hook} +${hiddenOpenCount} more`));
+				lines.push(theme.fg("muted", `${indent}  +${hiddenOpenCount} more`));
 			}
 			this.todoContainer.addChild(new Text(lines.join("\n"), 1, 0));
 			return;
 		}
 
 		phases.forEach((phase, phaseIndex) => {
-			lines.push(`${indent}${theme.fg("accent", `${hook} ${formatPhaseDisplayName(phase.name, phaseIndex + 1)}`)}`);
+			lines.push(`${indent}${theme.fg("accent", formatPhaseDisplayName(phase.name, phaseIndex + 1))}`);
 			phase.tasks.forEach((todo, index) => {
-				const prefix = `${indent}${index === 0 ? hook : " "} `;
+				const prefix = `${indent}  `;
 				lines.push(this.#formatTodoLine(todo, prefix, isMatched(todo)));
 			});
 		});
@@ -1714,7 +1713,6 @@ export class InteractiveMode implements InteractiveModeContext, SubmittedInputRe
 			id: value.id,
 			objective: value.objective,
 			status: value.status as Goal["status"],
-			tokenBudget: typeof value.tokenBudget === "number" ? value.tokenBudget : undefined,
 			tokensUsed: value.tokensUsed,
 			timeUsedSeconds: value.timeUsedSeconds,
 			createdAt: value.createdAt,
@@ -2087,7 +2085,6 @@ export class InteractiveMode implements InteractiveModeContext, SubmittedInputRe
 			this.sessionManager.appendCustomEntry("goal-completed", {
 				objective: currentState?.goal?.objective,
 				tokensUsed: currentState?.goal?.tokensUsed,
-				tokenBudget: currentState?.goal?.tokenBudget,
 				timeUsedSeconds: currentState?.goal?.timeUsedSeconds,
 			});
 		}
@@ -2532,31 +2529,6 @@ export class InteractiveMode implements InteractiveModeContext, SubmittedInputRe
 		}
 	}
 
-	async #handleGoalBudgetCommand(rawBudget: string): Promise<void> {
-		const state = this.session.getGoalModeState();
-		if (!this.goalModeEnabled || !state?.enabled) {
-			this.showWarning("No active goal.");
-			return;
-		}
-		if (state.goal.status === "complete") {
-			this.showStatus("Goal is already complete.");
-			return;
-		}
-		const trimmed = rawBudget.trim().toLowerCase();
-		let nextBudget: number | undefined;
-		if (trimmed !== "off") {
-			const parsed = Number.parseInt(trimmed, 10);
-			if (!Number.isInteger(parsed) || parsed <= 0) {
-				this.showError("Goal budget must be a positive integer or `off`.");
-				return;
-			}
-			nextBudget = parsed;
-		}
-		await this.session.goalRuntime.onBudgetMutated(nextBudget);
-		this.#resetGoalContinuationSuppression();
-		this.#scheduleGoalContinuation();
-		this.showStatus(nextBudget === undefined ? "Goal budget cleared." : `Goal budget set to ${nextBudget}.`);
-	}
 
 	async handleGoalModeCommand(rest?: string): Promise<void> {
 		try {
@@ -2685,19 +2657,6 @@ export class InteractiveMode implements InteractiveModeContext, SubmittedInputRe
 			case "drop":
 				await this.#confirmAndDropGoal();
 				return;
-			case "budget":
-				if (!this.goalModeEnabled) {
-					this.showWarning(
-						this.#getPausedGoalState() ? "Resume the goal before adjusting the budget." : "No active goal.",
-					);
-					return;
-				}
-				if (!rest) {
-					await this.#promptGoalBudgetEdit();
-					return;
-				}
-				await this.#handleGoalBudgetCommand(rest);
-				return;
 		}
 	}
 
@@ -2708,16 +2667,13 @@ export class InteractiveMode implements InteractiveModeContext, SubmittedInputRe
 		const title = state === "active" ? `Goal: ${summary} (${goal.status})` : `Goal paused: ${summary}`;
 		const items =
 			state === "active"
-				? ["Show details", "Adjust budget…", "Pause", "Drop"]
-				: ["Resume", "Show details", "Adjust budget…", "Drop"];
+				? ["Show details", "Pause", "Drop"]
+				: ["Resume", "Show details", "Drop"];
 		const choice = await this.showHookSelector(title, items);
 		if (!choice) return;
 		switch (choice) {
 			case "Show details":
 				this.#showGoalDetails();
-				return;
-			case "Adjust budget…":
-				await this.#promptGoalBudgetEdit();
 				return;
 			case "Pause":
 				await this.#pauseGoalAction();
@@ -2739,30 +2695,15 @@ export class InteractiveMode implements InteractiveModeContext, SubmittedInputRe
 			return;
 		}
 		const used = goal.tokensUsed.toLocaleString();
-		const budgetLine =
-			goal.tokenBudget !== undefined
-				? `${used} / ${goal.tokenBudget.toLocaleString()} (${Math.max(0, goal.tokenBudget - goal.tokensUsed).toLocaleString()} left)`
-				: `${used} (no budget)`;
 		const lines = [
 			`Objective: ${goal.objective}`,
 			`Status: ${goal.status}${state?.enabled ? "" : " (paused)"}`,
-			`Tokens: ${budgetLine}`,
+			`Tokens used: ${used}`,
 			`Time spent: ${formatDuration(goal.timeUsedSeconds * 1000)}`,
 		];
 		this.showStatus(lines.join("\n"));
 	}
 
-	async #promptGoalBudgetEdit(): Promise<void> {
-		const goal = this.session.getGoalModeState()?.goal;
-		const prefill = goal?.tokenBudget !== undefined ? String(goal.tokenBudget) : "";
-		const input = (
-			await this.showHookEditor("Goal budget (number, `off`, or empty to cancel)", prefill, undefined, {
-				promptStyle: true,
-			})
-		)?.trim();
-		if (!input) return;
-		await this.#handleGoalBudgetCommand(input);
-	}
 
 	async #pauseGoalAction(): Promise<void> {
 		if (!this.goalModeEnabled) {
@@ -3760,6 +3701,10 @@ export class InteractiveMode implements InteractiveModeContext, SubmittedInputRe
 
 	handleHandoffCommand(customInstructions?: string): Promise<void> {
 		return this.#commandController.handleHandoffCommand(customInstructions);
+	}
+
+	handleSuccessorCommand(options?: { keepSource?: boolean; sourceNote?: string }): Promise<void> {
+		return this.#commandController.handleSuccessorCommand(options);
 	}
 
 	handleShakeCommand(mode: ShakeMode): Promise<void> {

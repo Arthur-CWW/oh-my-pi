@@ -51,7 +51,7 @@ const goalWorkflowCommand = (
 	commandId: string,
 	expectedSessionRevision: number,
 	transition:
-		| { kind: "enter"; action: "create"; objective: string; tokenBudget?: number; workstream?: string }
+		| { kind: "enter"; action: "create"; objective: string; workstream?: string }
 		| { kind: "enter"; action: "resume"; goalId: string }
 		| { kind: "exit"; goalId: string; disposition: "paused" | "dropped" | "completed" },
 ) => ({
@@ -481,7 +481,6 @@ describe("SessionManager state command journal", () => {
 			kind: "enter",
 			action: "create",
 			objective: "Ship the closed workflow journal",
-			tokenBudget: 1200,
 			workstream: "workflow-journal",
 		});
 		const created = await manager.commitWorkflowCommand(create, { kind: "none" }, restoreState, activeGoal);
@@ -622,15 +621,6 @@ describe("SessionManager state command journal", () => {
 					kind: "enter",
 					action: "create",
 					objective: "   ",
-				}),
-				next: { kind: "goal", phase: "active", goalId: "goal-1" } as const,
-			},
-			{
-				command: goalWorkflowCommand("invalid-budget", 0, {
-					kind: "enter",
-					action: "create",
-					objective: "Objective",
-					tokenBudget: 0,
 				}),
 				next: { kind: "goal", phase: "active", goalId: "goal-1" } as const,
 			},

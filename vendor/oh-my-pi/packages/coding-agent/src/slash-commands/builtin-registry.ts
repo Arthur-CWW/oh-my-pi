@@ -1497,6 +1497,21 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<SlashCommandSpec> = [
 		},
 	},
 	{
+		name: "successor",
+		aliases: ["succ"],
+		description: "Launch a fresh successor session in a new tab with bounded handoff",
+		inlineHint: "[--keep-source] [--source-note <text>]",
+		allowArgs: true,
+		handleTui: async (command, runtime) => {
+			const args = command.args.trim();
+			const keepSource = args.includes("--keep-source");
+			const sourceNoteMatch = args.match(/--source-note\s+(.+?)(?:\s+--|$)/);
+			const sourceNote = sourceNoteMatch?.[1]?.trim() || undefined;
+			runtime.ctx.editor.setText("");
+			await runtime.ctx.handleSuccessorCommand({ keepSource, sourceNote });
+		},
+	},
+	{
 		name: "resume",
 		description: "Resume a different session",
 		handleTui: (_command, runtime) => {

@@ -177,6 +177,7 @@ describe("InspectImageTool", () => {
 		expect(callOutput).toContain("Inspect");
 		expect(callOutput).toContain("Question:");
 		expect(callOutput).toContain("What error text is visible?");
+		expect(callOutput).not.toMatch(/[├└│]/);
 
 		const resultComponent = inspectImageToolRenderer.renderResult(
 			{

@@ -2,11 +2,26 @@
 
 Source: Arthur voice rant (VoiceInk), 2026-07-13. Papercuts extracted to `../state/harness-friction.md` Open rows dated 2026-07-13. This doc holds the durable design ideas so no future session makes Arthur repeat them.
 
+> **Authority note (2026-07-22).** Current architecture authority for the shared workspace /
+> control plane is [`federated-control-plane.md`](federated-control-plane.md) — one control-plane
+> app with stream-scoped routes and components-over-artifacts (§4), and cmux Neovim/OMP/WebView
+> surfaces as projections (§10). This file is **dated 2026-07-13 UX evidence**
+> ([epistemics](epistemics.md): weigh by date and provenance, never read as current policy). Its
+> rendering-component model, interactive-validation loop, TUI navigation grammar, and validation
+> epistemics remain **live design input**; specific **browser-shell/transport and cmux-surface
+> architecture claims are superseded** by the federated doc where they conflict and are marked
+> inline below. Arthur's earlier observations are preserved and dated, not rewritten.
+
 ## The core ontology (Arthur's words, distilled)
 
 **OMP is a shared workspace between Arthur and the agent.** The agent's view is the transcript (truth). Arthur's view is a *prettified rendering* of that same transcript — switchable, augmentable. The agent should be able to add components to its own stream that help Arthur understand the work: not decoration, instruments.
 
 This is doctrine-compatible by construction: the journal stays the API; every rendering is a bounded projection; a view never becomes a second writer. The browser layer is *not* a new architecture — collab v2 (runner snapshots/events over an encrypted transport, capability-fenced commands, `collab-web` guest client) already ships the transport. What's missing is only the **component layer** on top of the guest client.
+
+> _[2026-07-22] Superseded architecture detail: the concrete "extend the `collab-web` guest client"
+> shell choice is now the single portless control-plane app with stream-scoped routes and a unified
+> WebView viewer ([federated-control-plane.md](federated-control-plane.md) §4, §10). The
+> component-layer insight above stands; the specific transport/shell binding does not._
 
 ## The rendering-component model
 
@@ -29,6 +44,10 @@ audio waveform/player for voice work · inline GIF/animation/SVG playback · mer
 4. **Widescreen half (>160 cols):** stop double-wide transcript; right half becomes an inspector/peripheral field (current tool call detail, artifact preview, spawn packet, route provenance — the dual-lane Hub pattern generalized to the main thread).
 5. **Post-hoc forensics UX:** compare sub-agent runs and orchestrator prompt styles; work backwards from a failure. Substrate exists (session JSONL, control-plane ledger, HTML export); missing is the comparison view — a strong first browser-component consumer.
 6. **Not everything lives in OMP:** prefer coupling with the terminal/mux layer over reimplementing (cmux origin/main reportedly gained Chromium panes — verify; Zellij default keys rejected; Ghostty/libghostty stays).
+   > _[2026-07-22] Settled in [federated-control-plane.md](federated-control-plane.md) §10: the right
+   > helper pane holds the unified WebView viewer (one portless app, stream-scoped routes) — Neovim is
+   > the editor surface, OMP the agent surface, WebView the review/artifact surface. The "cmux
+   > reportedly gained Chromium panes — verify" note is superseded by that settled surface contract._
 
 ## Cross-session repetition (the "I keep repeating myself" problem)
 
@@ -37,6 +56,9 @@ Arthur runs several orchestrators in parallel cmux tabs and re-explains context.
 ## Open questions for Arthur
 
 1. Browser shell: extend `collab-web` (existing guest client) vs. new viewer app? (Recommendation: extend collab-web.)
+   > _[2026-07-22] Resolved by [federated-control-plane.md](federated-control-plane.md) §4/§10: one
+   > portless control-plane app with stream-scoped routes, with the unified WebView viewer as the
+   > review/artifact surface. Closed as settled, not answered here._
 2. Component authoring: agent-generated on the fly from day one, or registry-of-prebuilt first with generation later? (Recommendation: registry first, generation as the babble phase.)
 3. Does the inspector column (widescreen half) live in the TUI, or is widescreen the moment to open the browser view instead?
 4. Post-hoc run comparison: TUI view or first browser component? (Recommendation: browser — it wants tables, diffs, scrubbing.)

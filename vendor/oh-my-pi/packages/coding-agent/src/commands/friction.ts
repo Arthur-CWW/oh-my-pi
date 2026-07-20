@@ -1,4 +1,5 @@
-import { Args, Command, Flags } from "@oh-my-pi/pi-utils/cli";
+import { Effect, Option } from "effect";
+import { Argument, Command, Flag } from "effect/unstable/cli";
 import type { FrictionClass, FrictionRow } from "../session/friction-ledger";
 import { FRICTION_CLASSES, readFrictions } from "../session/friction-ledger";
 
@@ -11,15 +12,6 @@ const STATS_VALID_FLAGS = STATS_FLAG_NAMES.join(", ");
 
 function fail(message: string): never {
 	throw new Error(`friction: ${message}`);
-}
-
-function findInvalidFlag(argv: readonly string[], validFlags: readonly string[]): string | undefined {
-	for (const token of argv) {
-		if (token === "--" || !token.startsWith("-")) continue;
-		if (validFlags.some(flag => token === flag || token.startsWith(`${flag}=`))) continue;
-		return token;
-	}
-	return undefined;
 }
 
 function rejectAction(action: "list" | "stats", token: string): never {
@@ -82,83 +74,64 @@ function formatStats(stats: FrictionStats): string {
 	return `${lines.join("\n")}\n`;
 }
 
-export default class Friction extends Command {
-	static description = "Inspect aggregated agent friction reports";
+export default Command.make(
+	"friction",
+	{
+		action: Argument.choice("action", ACTIONS).pipe(Argument.withDescription("Friction action")),
+		value: Argument.string("value").pipe(
+			Argument.withDescription("Unexpected positional argument"),
+			Argument.variadic(),
+		),
+		class: Flag.optional(
+			Flag.choice("class", FRICTION_CLASSES).pipe(Flag.withDescription("Filter by friction class")),
+		),
+		model: Flag.optional(Flag.string("model").pipe(Flag.withDescription("Filter by model"))),
+		session: Flag.optional(Flag.string("session").pipe(Flag.withDescription("Filter by session ID"))),
+		since: Flag.optional(
+			Flag.string("since").pipe(Flag.withDescription("Filter at or after an ISO timestamp")),
+		),
+		json: Flag.boolean("json").pipe(Flag.withDescription("Output JSON"), Flag.withDefault(false)),
+		path: Flag.optional(Flag.string("path").pipe(Flag.withDescription("Friction ledger JSONL path"))),
+	},
+	config =>
+		Effect.promise(async () => {
+			const action = config.action;
+			if (config.value.length > 0) rejectAction(action, config.value[0] ?? "(unknown positional)");
 
-	static args = {
-		action: Args.string({
-			description: "Friction action",
-			required: true,
-			options: [...ACTIONS],
-		}),
-		value: Args.string({ description: "Unexpected positional argument", required: false }),
-	};
-
-	static flags = {
-		class: Flags.string({ description: "Filter by friction class", options: [...FRICTION_CLASSES] }),
-		model: Flags.string({ description: "Filter by model" }),
-		session: Flags.string({ description: "Filter by session ID" }),
-		since: Flags.string({ description: "Filter at or after an ISO timestamp" }),
-		json: Flags.boolean({ description: "Output JSON", default: false }),
-		path: Flags.string({ description: "Friction ledger JSONL path" }),
-	};
-
-	static examples = [
-		"omp friction list",
-		"omp friction list --class capability-gap --since 2026-07-01T00:00:00.000Z",
-		"omp friction stats --json",
-	];
-
-	async run(): Promise<void> {
-		const parseFriction = async () => {
-			try {
-				return await this.parse(Friction);
-			} catch (error) {
-				const action = this.argv[0];
-				if (action === "list" || action === "stats") {
-					const validFlags = action === "list" ? LIST_FLAG_NAMES : STATS_FLAG_NAMES;
-					const invalidFlag = findInvalidFlag(this.argv.slice(1), validFlags);
-					if (invalidFlag) rejectAction(action, invalidFlag);
-				}
-				throw error;
+			if (
+				action === "stats" &&
+				(Option.isSome(config.class) || Option.isSome(config.model) || Option.isSome(config.session))
+			) {
+				rejectAction(
+					action,
+					Option.isSome(config.class) ? "--class" : Option.isSome(config.model) ? "--model" : "--session",
+				);
 			}
-		};
-		const { args, flags, argv } = await parseFriction();
-		const action = args.action;
-		if (action !== "list" && action !== "stats") fail(`unknown action ${action ?? "(missing)"}`);
-		if (args.value !== undefined) rejectAction(action, args.value);
 
-		const invalidFlag = findInvalidFlag(this.argv.slice(1), action === "list" ? LIST_FLAG_NAMES : STATS_FLAG_NAMES);
-		if (invalidFlag) rejectAction(action, invalidFlag);
-		if (argv.length > 1) rejectAction(action, argv[1] ?? "(unknown positional)");
-
-		if (
-			action === "stats" &&
-			(flags.class !== undefined || flags.model !== undefined || flags.session !== undefined)
-		) {
-			rejectAction(
-				action,
-				flags.class !== undefined ? "--class" : flags.model !== undefined ? "--model" : "--session",
+			const rows: readonly FrictionRow[] = await readFrictions(
+				{
+					...(Option.isNone(config.class) ? {} : { class: config.class.value }),
+					...(Option.isNone(config.model) ? {} : { model: config.model.value }),
+					...(Option.isNone(config.session) ? {} : { sessionId: config.session.value }),
+					...(Option.isNone(config.since) ? {} : { since: config.since.value }),
+				},
+				resolveLedgerPath(Option.getOrUndefined(config.path)),
 			);
-		}
 
-		const rows: readonly FrictionRow[] = await readFrictions(
-			{
-				...(flags.class === undefined ? {} : { class: flags.class as FrictionClass }),
-				...(flags.model === undefined ? {} : { model: flags.model }),
-				...(flags.session === undefined ? {} : { sessionId: flags.session }),
-				...(flags.since === undefined ? {} : { since: flags.since }),
-			},
-			resolveLedgerPath(flags.path),
-		);
+			if (action === "list") {
+				const ordered = sortedNewestFirst(rows);
+				process.stdout.write(config.json ? `${JSON.stringify(ordered, null, 2)}\n` : formatList(ordered));
+				return;
+			}
 
-		if (action === "list") {
-			const ordered = sortedNewestFirst(rows);
-			process.stdout.write(flags.json ? `${JSON.stringify(ordered, null, 2)}\n` : formatList(ordered));
-			return;
-		}
-
-		const stats = buildStats(rows);
-		process.stdout.write(flags.json ? `${JSON.stringify(stats, null, 2)}\n` : formatStats(stats));
-	}
-}
+			const stats = buildStats(rows);
+			process.stdout.write(config.json ? `${JSON.stringify(stats, null, 2)}\n` : formatStats(stats));
+		}),
+).pipe(
+	Command.withDescription("Inspect aggregated agent friction reports"),
+	Command.withExamples([
+		{ command: "omp friction list" },
+		{ command: "omp friction list --class capability-gap --since 2026-07-01T00:00:00.000Z" },
+		{ command: "omp friction stats --json" },
+	]),
+);

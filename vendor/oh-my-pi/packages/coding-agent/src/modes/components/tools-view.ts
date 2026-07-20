@@ -8,11 +8,7 @@ import {
 } from "@oh-my-pi/pi-tui";
 import { Effect, Exit, Scope } from "effect";
 import { theme } from "../theme/theme";
-import {
-	buildToolRows,
-	type DisplayTool,
-	type ToolDisplayRow,
-} from "../utils/tools-markdown";
+import { buildToolRows, type DisplayTool, type ToolDisplayRow } from "../utils/tools-markdown";
 import { keyHint } from "./keybinding-hints";
 import { TablePreviewComponent, type TablePreviewSession } from "./table-preview";
 
@@ -47,7 +43,7 @@ function renderToolRow(row: ToolDisplayRow, width: number): string {
 		fitCell(row.source, sourceWidth),
 		fitCell(row.registeredBy ?? "—", registeredByWidth),
 		fitCell(row.description.replace(/[\r\n]+/g, " "), descriptionWidth),
-	].join(theme.fg("dim", " │ "));
+	].join("   ");
 }
 
 function appendWrapped(lines: string[], value: string, width: number): void {
@@ -89,8 +85,7 @@ export class ToolsView implements Component {
 				TablePreviewComponent.mount<ToolDisplayRow, string>({
 					rows: () => this.#rows,
 					keyOf: row => row.name,
-					searchText: row =>
-						`${row.name} ${row.kind} ${row.source} ${row.registeredBy ?? ""} ${row.description}`,
+					searchText: row => `${row.name} ${row.kind} ${row.source} ${row.registeredBy ?? ""} ${row.description}`,
 					renderRow: (row, context) => renderToolRow(row, context.width),
 					preview: { open: row => new ToolPreview(row) },
 					height: () => Math.max(5, this.options.height() - 2),
@@ -116,7 +111,10 @@ export class ToolsView implements Component {
 
 	render(width: number): readonly string[] {
 		const title = theme.bold(theme.fg("accent", "Available Tools"));
-		const footer = theme.fg("dim", ` ↑/↓: navigate  Ctrl+W: switch pane  type: filter  ${keyHint("ui.dismiss", "close")}`);
+		const footer = theme.fg(
+			"dim",
+			` ↑/↓: navigate  Ctrl+W: switch pane  type: filter  ${keyHint("ui.dismiss", "close")}`,
+		);
 		return [title, ...this.#table.render(width), truncateToWidth(footer, width)];
 	}
 

@@ -91,6 +91,15 @@ export interface Card {
   createdAt: string
 }
 
+export interface AnkiProfile {
+  snapshotAt: string | null
+  query: string | null
+  cardCount: number
+  starredCount: number
+  reviewEventCount: number
+  words: string[]
+}
+
 export interface ProgressEntry {
   id: number
   kind: string
@@ -576,6 +585,10 @@ export async function dictBest(text: string): Promise<DictResult> {
 export async function getKnownWords(): Promise<string[]> {
   const result = await fetchJson<{ words: string[] }>("/api/reader/known-words")
   return result.words
+}
+
+export async function getAnkiProfile(): Promise<AnkiProfile> {
+  return fetchJson<AnkiProfile>("/api/anki-profile")
 }
 
 export async function getQueue(status: QueueStatus | "all" = "new", limit = 100): Promise<QueueItem[]> {

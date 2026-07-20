@@ -6,13 +6,16 @@
 # primer-daemon without independent single dev commands.
 streams:
   companion:
+    review:
+      - name: Companion motion lab
+        url: https://companion.localhost/lab
     services:
       portless-proxy:
         cwd: .
-        cmd: bunx portless proxy start
+        cmd: status="$($(mise which node) $(mise which portless) service status)" && case "$status" in *"Proxy on "*":"[[:space:]]*"responding"*) exec tail -f /dev/null ;; *) exit 1 ;; esac
         shared: true
         health:
-          command: bunx portless list
+          command: status="$($(mise which node) $(mise which portless) service status)" && case "$status" in *"Proxy on "*":"[[:space:]]*"responding"*) exit 0 ;; *) exit 1 ;; esac
           timeoutSec: 20
       kokoro-tts:
         cwd: apps/ai-companion-rtc
@@ -57,36 +60,44 @@ streams:
           command: lsof -nP -iUDP:49982 | grep -q AppleMoti
           timeoutSec: 30
   primer:
+    review:
+      - name: Primer inbox
+        url: https://primer.localhost/#/inbox
+      - name: Meltdown reader
+        url: https://meltdown.localhost/
     services:
       portless-proxy:
         cwd: .
-        cmd: bunx portless proxy start
+        cmd: status="$($(mise which node) $(mise which portless) service status)" && case "$status" in *"Proxy on "*":"[[:space:]]*"responding"*) exec tail -f /dev/null ;; *) exit 1 ;; esac
         shared: true
         health:
-          command: bunx portless list
+          command: status="$($(mise which node) $(mise which portless) service status)" && case "$status" in *"Proxy on "*":"[[:space:]]*"responding"*) exit 0 ;; *) exit 1 ;; esac
           timeoutSec: 20
       primer-daemon:
         cwd: packages/primer-daemon
         cmd: bun run dev
         dependsOn: [portless-proxy]
         health:
-          url: https://primer.localhost/
+          command: curl -sk -m 3 -o /dev/null -w '%{http_code}' https://primer.localhost/ | grep -qx 200
           timeoutSec: 120
       meltdown:
         cwd: streams/primer/wrapped-commentary-reader
         cmd: bun run dev:up
         dependsOn: [portless-proxy]
         health:
-          url: https://meltdown.localhost/api/health
+          command: curl -sk -m 3 -o /dev/null -w '%{http_code}' https://meltdown.localhost/api/health | grep -qx 200
           timeoutSec: 120
   playground:
+    review:
+      - name: Scene playground
+        url: https://scene.localhost/
     services:
       portless-proxy:
         cwd: .
-        cmd: bunx portless proxy start
+        cmd: status="$($(mise which node) $(mise which portless) service status)" && case "$status" in *"Proxy on "*":"[[:space:]]*"responding"*) exec tail -f /dev/null ;; *) exit 1 ;; esac
         shared: true
         health:
-          command: bunx portless list
+          command: status="$($(mise which node) $(mise which portless) service status)" && case "$status" in *"Proxy on "*":"[[:space:]]*"responding"*) exit 0 ;; *) exit 1 ;; esac
           timeoutSec: 20
       scene:
         cwd: apps/scene-playground
@@ -96,13 +107,16 @@ streams:
           url: https://scene.localhost/healthz
           timeoutSec: 60
   anichat-motion-lab:
+    review:
+      - name: AniChat motion lab
+        url: https://anichat-motion-lab.localhost/
     services:
       portless-proxy:
         cwd: .
-        cmd: bunx portless proxy start
+        cmd: status="$($(mise which node) $(mise which portless) service status)" && case "$status" in *"Proxy on "*":"[[:space:]]*"responding"*) exec tail -f /dev/null ;; *) exit 1 ;; esac
         shared: true
         health:
-          command: bunx portless list
+          command: status="$($(mise which node) $(mise which portless) service status)" && case "$status" in *"Proxy on "*":"[[:space:]]*"responding"*) exit 0 ;; *) exit 1 ;; esac
           timeoutSec: 20
       anichat-motion-lab:
         cwd: packages/anichat-motion-lab
@@ -112,6 +126,9 @@ streams:
           url: https://anichat-motion-lab.localhost/
           timeoutSec: 60
   video-eval:
+    review:
+      - name: Video evaluation viewer
+        url: http://127.0.0.1:4933/
     services:
       video-eval:
         cwd: packages/video-eval-viewer
@@ -122,6 +139,9 @@ streams:
           url: http://127.0.0.1:4933/
           timeoutSec: 30
   harness:
+    review:
+      - name: Fleet board
+        url: https://fleet-board.localhost/
     services:
       fleet-observer:
         cwd: packages/fleet-observer

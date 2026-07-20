@@ -57,7 +57,7 @@ describe("executeJs workflow helpers", () => {
 		expect(phase?.event.title).toBe("Scan");
 	});
 
-	it("reads the turn budget from Goal Mode via the __budget__ bridge", async () => {
+	it("exposes Goal Mode usage without creating a hard budget", async () => {
 		const session = baseSession(tempDir.path(), sessionFile, {
 			getGoalModeState: () => ({
 				enabled: true,
@@ -66,7 +66,6 @@ describe("executeJs workflow helpers", () => {
 					id: "g1",
 					objective: "x",
 					status: "active",
-					tokenBudget: 100_000,
 					tokensUsed: 4_200,
 					timeUsedSeconds: 0,
 					createdAt: 0,
@@ -75,11 +74,11 @@ describe("executeJs workflow helpers", () => {
 			}),
 		});
 		const result = await executeJs(
-			"return JSON.stringify([await budget.total(), await budget.spent(), await budget.remaining()]);",
+			'return JSON.stringify([await budget.total(), await budget.spent(), String(await budget.remaining()), await budget.hard()]);',
 			{ sessionId: `js-budget-goal:${tempDir.path()}`, session, sessionFile },
 		);
 		expect(result.exitCode).toBe(0);
-		expect(result.output.trim()).toBe("[100000,4200,95800]");
+		expect(result.output.trim()).toBe('[null,4200,"Infinity",false]');
 	});
 
 	it("falls back to session output tokens with no ceiling when Goal Mode is inactive", async () => {

@@ -124,7 +124,7 @@ function toModelJson(model: Model<Api>): ModelJson {
 
 type ColumnAlign = "left" | "right";
 
-interface BoxColumn {
+interface TableColumn {
 	header: string;
 	align?: ColumnAlign;
 }
@@ -138,38 +138,41 @@ function padCell(text: string, width: number, align: ColumnAlign = "left"): stri
 }
 
 /**
- * Render `rows` as a box-drawing table. Cells must be plain text (no ANSI); the
- * header row is bolded and the borders dimmed (both no-ops on non-TTY output).
+ * Render `rows` as an aligned, unframed table: each column padded to a shared
+ * width and separated by two spaces, with a bold header row (a no-op on non-TTY
+ * output). No box-drawing borders, so rows copy cleanly out of the terminal.
  */
-function boxTable(columns: BoxColumn[], rows: string[][]): string[] {
+function alignedTable(columns: TableColumn[], rows: string[][]): string[] {
 	const widths = columns.map((column, index) =>
 		Math.max(Bun.stringWidth(column.header), ...rows.map(row => Bun.stringWidth(row[index] ?? ""))),
 	);
-	const bar = chalk.dim("│");
-	const segments = widths.map(width => "─".repeat(width + 2));
+	const lastIndex = columns.length - 1;
 	const renderRow = (cells: string[], bold: boolean): string => {
 		const padded = columns.map((column, index) => {
-			const cell = padCell(cells[index] ?? "", widths[index]!, column.align);
+			const raw = cells[index] ?? "";
+			// Skip the trailing pad on the final left-aligned column: nothing
+			// follows it, so the padding would only add invisible copy noise.
+			const cell =
+				index === lastIndex && (column.align ?? "left") === "left"
+					? raw
+					: padCell(raw, widths[index]!, column.align);
 			return bold ? chalk.bold(cell) : cell;
 		});
-		return `${bar} ${padded.join(` ${bar} `)} ${bar}`;
+		return padded.join("  ");
 	};
-	const lines = [chalk.dim(`┌${segments.join("┬")}┐`)];
-	lines.push(
+	const lines = [
 		renderRow(
 			columns.map(column => column.header),
 			true,
 		),
-	);
-	lines.push(chalk.dim(`├${segments.join("┼")}┤`));
+	];
 	for (const row of rows) {
 		lines.push(renderRow(row, false));
 	}
-	lines.push(chalk.dim(`└${segments.join("┴")}┘`));
 	return lines;
 }
 
-/** `omp models ls`/`find`: provider-grouped listing (one box table per provider). */
+/** `omp models ls`/`find`: provider-grouped listing (one aligned table per provider). */
 function renderProviderModels(
 	modelRegistry: ModelRegistry,
 	action: ModelsAction,
@@ -215,7 +218,7 @@ function renderProviderModels(
 		return;
 	}
 
-	// One section per provider: bold heading + a box table of that provider's models.
+	// One section per provider: bold heading + an aligned table of that provider's models.
 	const byProvider = new Map<string, Model<Api>[]>();
 	for (const model of filtered.slice().sort(byProviderThenId)) {
 		let group = byProvider.get(model.provider);
@@ -238,7 +241,7 @@ function renderProviderModels(
 			model.thinking ? getSupportedEfforts(model).join(",") : model.reasoning ? "yes" : "-",
 			model.input.includes("image") ? "yes" : "no",
 		]);
-		for (const line of boxTable(
+		for (const line of alignedTable(
 			[
 				{ header: "model" },
 				{ header: "context", align: "right" },
@@ -300,7 +303,7 @@ function renderCanonicalModels(modelRegistry: ModelRegistry, pattern: string | u
 			formatLimit(model.contextWindow),
 			formatLimit(model.maxTokens),
 		]);
-	for (const line of boxTable(
+	for (const line of alignedTable(
 		[
 			{ header: "canonical" },
 			{ header: "selected" },

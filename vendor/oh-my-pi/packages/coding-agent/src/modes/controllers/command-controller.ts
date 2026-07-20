@@ -1286,6 +1286,129 @@ export class CommandController {
 		}
 		this.ctx.ui.requestRender();
 	}
+
+	async handleSuccessorCommand(options?: { keepSource?: boolean; sourceNote?: string }): Promise<void> {
+		const entries = this.ctx.sessionManager.getEntries();
+		const messageCount = entries.filter(e => e.type === "message").length;
+
+		if (messageCount < 2) {
+			this.ctx.showWarning("Nothing to hand off (no messages yet)");
+			return;
+		}
+
+		if (this.ctx.loadingAnimation) {
+			this.ctx.loadingAnimation.stop();
+			this.ctx.loadingAnimation = undefined;
+		}
+		this.ctx.statusContainer.clear();
+
+		const successorLoader = new Loader(
+			this.ctx.ui,
+			spinner => theme.fg("accent", spinner),
+			text => theme.fg("muted", text),
+			`Generating successor handoff… (${keyHint("app.interrupt", "to cancel")})`,
+			getSymbolTheme().spinnerFrames,
+		);
+		this.ctx.statusContainer.addChild(successorLoader);
+		this.ctx.ui.requestRender();
+
+		try {
+			const result = await this.ctx.session.generateHandoffDocument(options?.sourceNote);
+
+			if (!result) {
+				this.ctx.showError("Successor handoff cancelled");
+				return;
+			}
+
+			// Save the handoff document to disk
+			const artifactsDir = this.ctx.sessionManager.getArtifactsDir();
+			if (!artifactsDir) {
+				this.ctx.showError("Cannot save handoff: session is not persisted");
+				return;
+			}
+			const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+			const handoffPath = path.join(artifactsDir, `handoff-successor-${timestamp}.md`);
+			await fs.mkdir(artifactsDir, { recursive: true });
+			await Bun.write(handoffPath, `${result.document}\n`);
+
+			// Resolve workstream slug
+			const workstream = this.ctx.sessionManager.getWorkstream();
+			const streamSlug = workstream?.kind === "workstream" ? workstream.id : "adhoc";
+
+			// Resolve model selector
+			const model = this.ctx.session.model;
+			const modelSelector = model ? `${model.provider}/${model.id}` : "anthropic/claude-sonnet-4-20250514";
+
+			// Resolve predecessor handle
+			const sessionId = this.ctx.sessionManager.getSessionId();
+			const predecessorHandle = `${sessionId}/Main`;
+
+			// Build spawn args
+			const args = [
+				"scripts/successor.ts",
+				"--handoff", handoffPath,
+				"--stream", streamSlug,
+				"--model", modelSelector,
+				"--predecessor", predecessorHandle,
+				"--title", streamSlug,
+			];
+			if (options?.keepSource) {
+				args.push("--keep-source");
+			}
+
+			const cwd = this.ctx.sessionManager.getCwd();
+			const proc = Bun.spawn(["bun", ...args], {
+				cwd,
+				stdout: "pipe",
+				stderr: "pipe",
+			});
+
+			const [stdout, stderr] = await Promise.all([
+				new Response(proc.stdout).text(),
+				new Response(proc.stderr).text(),
+			]);
+			const exitCode = await proc.exited;
+
+			if (exitCode !== 0) {
+				this.ctx.showError(`Successor script failed (exit ${exitCode}): ${stderr.trim() || stdout.trim()}`);
+				return;
+			}
+
+			let receipt: { ok: boolean };
+			try {
+				receipt = JSON.parse(stdout.trim());
+			} catch {
+				this.ctx.showError(`Successor script returned invalid JSON: ${stdout.trim()}`);
+				return;
+			}
+
+			if (!receipt.ok) {
+				this.ctx.showError("Successor script reported failure");
+				return;
+			}
+
+			if (!options?.keepSource) {
+				this.#showCommandOutput(`${theme.status.success} Successor launched — parking predecessor`);
+				this.ctx.ui.requestRender();
+				// Allow the render to flush before exit
+				await Bun.sleep(100);
+				process.exit(0);
+			} else {
+				this.#showCommandOutput(`${theme.status.success} Successor launched, source kept alive`);
+			}
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			if (message === "Handoff cancelled" || (error instanceof Error && error.name === "AbortError")) {
+				this.ctx.showError("Successor handoff cancelled");
+			} else {
+				this.ctx.showError(`Successor failed: ${message}`);
+			}
+		} finally {
+			successorLoader.stop();
+			this.ctx.statusContainer.clear();
+		}
+		this.ctx.ui.requestRender();
+	}
 }
 
 const BAR_WIDTH_MAX = 24;

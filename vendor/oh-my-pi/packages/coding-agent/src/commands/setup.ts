@@ -1,13 +1,12 @@
 /**
  * Run onboarding setup or install dependencies for optional features.
  */
-import { Args, Command, Flags, renderCommandHelp } from "@oh-my-pi/pi-utils/cli";
+import { Effect, Option } from "effect";
+import { Argument, Command, Flag } from "effect/unstable/cli";
 import { parseArgs } from "../cli/args";
-import { runSetupCommand, type SetupCommandArgs, type SetupComponent } from "../cli/setup-cli";
+import { printSetupHelp, runSetupCommand } from "../cli/setup-cli";
 import { runRootCommand } from "../main";
 import { initTheme } from "../modes/theme/theme";
-
-const COMPONENTS: SetupComponent[] = ["python", "speech"];
 
 export interface OnboardingSetupDependencies {
 	runRoot?: typeof runRootCommand;
@@ -28,40 +27,32 @@ export async function runOnboardingSetup(deps: OnboardingSetupDependencies = {})
 	await (deps.runRoot ?? runRootCommand)(parseArgs([]), [], { forceSetupWizard: true });
 }
 
-export default class Setup extends Command {
-	static description = "Run onboarding setup or install dependencies for optional features";
-
-	static args = {
-		component: Args.string({
-			description: "Optional component to install",
-			required: false,
-			options: COMPONENTS,
-		}),
-	};
-
-	static flags = {
-		check: Flags.boolean({ char: "c", description: "Check if dependencies are installed" }),
-		json: Flags.boolean({ description: "Output status as JSON" }),
-	};
-
-	async run(): Promise<void> {
-		const { args, flags } = await this.parse(Setup);
-		if (!args.component) {
-			if (flags.check || flags.json) {
-				renderCommandHelp("omp", "setup", Setup);
+export default Command.make(
+	"setup",
+	{
+		component: Argument.choice("component", ["python", "speech"]).pipe(
+			Argument.withDescription("Optional component to install"),
+			Argument.optional,
+		),
+		check: Flag.boolean("check").pipe(
+			Flag.withAlias("c"),
+			Flag.withDescription("Check if dependencies are installed"),
+			Flag.withDefault(false),
+		),
+		json: Flag.boolean("json").pipe(Flag.withDescription("Output status as JSON"), Flag.withDefault(false)),
+	},
+	(config) =>
+		Effect.gen(function* () {
+			const component = Option.getOrUndefined(config.component);
+			if (!component) {
+				if (config.check || config.json) {
+					yield* Effect.sync(() => printSetupHelp());
+					return;
+				}
+				yield* Effect.promise(() => runOnboardingSetup());
 				return;
 			}
-			await runOnboardingSetup();
-			return;
-		}
-		const cmd: SetupCommandArgs = {
-			component: args.component as SetupComponent,
-			flags: {
-				json: flags.json,
-				check: flags.check,
-			},
-		};
-		await initTheme();
-		await runSetupCommand(cmd);
-	}
-}
+			yield* Effect.promise(() => initTheme());
+			yield* Effect.promise(() => runSetupCommand({ component, flags: { json: config.json, check: config.check } }));
+		}),
+).pipe(Command.withDescription("Run onboarding setup or install dependencies for optional features"));

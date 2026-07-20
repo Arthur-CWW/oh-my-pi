@@ -105,7 +105,7 @@ describe("readToolRenderer hyperlinks", () => {
 });
 
 describe("read ToolExecutionComponent framing", () => {
-	it("renders framed read results inside the standard tool container padding", () => {
+	it("renders read results inside the standard tool container padding", () => {
 		const uiStub = { requestRender() {} } as unknown as TUI;
 		const component = new ToolExecutionComponent("read", { path: "src/example.ts" }, {}, undefined, uiStub);
 		component.updateResult(
@@ -121,16 +121,14 @@ describe("read ToolExecutionComponent framing", () => {
 
 		try {
 			const lines = component.render(80).map(line => Bun.stripANSI(line));
-			const topBorderIndex = lines.findIndex(
-				line => line.includes(activeTheme.boxSharp.topLeft) && line.includes("Read"),
-			);
-			const bottomBorderIndex = lines.findIndex(
-				(line, index) => index > topBorderIndex && line.includes(activeTheme.boxSharp.bottomLeft),
-			);
-
-			expect(topBorderIndex).toBeGreaterThanOrEqual(0);
-			expect(lines[topBorderIndex + 1]).toContain("export const x = 1;");
-			expect(bottomBorderIndex).toBeGreaterThan(topBorderIndex);
+			// Unframed heading: no box corners, tees, or side verticals anywhere.
+			expect(lines.join("\n")).not.toMatch(/[┌┐└┘╭╮╰╯┬┴├┤┼]/);
+			const headingIndex = lines.findIndex(line => line.includes("Read"));
+			expect(headingIndex).toBeGreaterThanOrEqual(0);
+			// The heading no longer carries a ─ cap.
+			expect(lines[headingIndex]!.startsWith(activeTheme.boxSharp.horizontal)).toBe(false);
+			const body = lines.slice(headingIndex + 1).join("\n");
+			expect(body).toContain("export const x = 1;");
 		} finally {
 			component.stopAnimation();
 		}

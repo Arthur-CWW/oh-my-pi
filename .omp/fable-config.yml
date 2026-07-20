@@ -5,13 +5,14 @@ model: openai-codex/gpt-5.6-sol:high
 
 modelRoles:
   default: openai-codex/gpt-5.6-sol:high
+  orchestrator: openai-codex/gpt-5.6-sol:high
   smol: openai-codex/gpt-5.6-luna:xhigh
   task: openai-codex/gpt-5.6-sol:high
   slow: openai-codex/gpt-5.6-sol:high
   plan: openai-codex/gpt-5.6-sol:high
   advisor: openai-codex/gpt-5.6-sol:high
   designer: anthropic/claude-opus-4-6
-  vision: google-antigravity/gemini-3.5-flash
+  vision: openai-codex/gpt-5.6-luna
 
 # Failing subagents may propose these chains; the parent must explicitly approve
 # every switch. Main/orchestrator sessions never auto-apply them.
@@ -23,12 +24,10 @@ retry:
   subagentFallbackAutoApproveUntil: "2026-07-15T03:48:04Z"
   proposableFallbackChains:
     task:
-      - kimi-code/kimi-for-coding
+      - openai-codex/gpt-5.6-luna:xhigh
     smol:
       - openai-codex/gpt-5.6-sol:high
-      - kimi-code/kimi-for-coding
     designer:
-      - kimi-code/kimi-for-coding
       - openai-codex/gpt-5.6-sol:high
 
 advisor:

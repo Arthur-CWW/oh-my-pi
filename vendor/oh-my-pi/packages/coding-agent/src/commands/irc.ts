@@ -1,47 +1,44 @@
-import { Args, Command, Flags } from "@oh-my-pi/pi-utils/cli";
+import { Effect } from "effect";
+import { Argument, Command, Flag } from "effect/unstable/cli";
 import { type IrcCliAction, runIrcCommand } from "../cli/irc-cli";
 
 const ACTIONS: IrcCliAction[] = ["list", "send", "inbox"];
 
-export default class Irc extends Command {
-	static description = "Send and receive messages on the OMP cross-session IRC bus";
-
-	static args = {
-		action: Args.string({
-			description: "IRC action",
-			required: true,
-			options: ACTIONS,
+export default Command.make(
+	"irc",
+	{
+		action: Argument.choice("action", ACTIONS).pipe(Argument.withDescription("IRC action")),
+		values: Argument.string("values").pipe(
+			Argument.withDescription("Peer name and message text"),
+			Argument.variadic(),
+		),
+		from: Flag.string("from").pipe(Flag.withDescription("Sender name for send"), Flag.withDefault("human")),
+		peek: Flag.boolean("peek").pipe(
+			Flag.withDescription("Read inbox without marking messages delivered"),
+			Flag.withDefault(false),
+		),
+	},
+	config =>
+		Effect.sync(() => {
+			const result = runIrcCommand({
+				action: config.action,
+				args: [...config.values],
+				flags: {
+					from: config.from,
+					peek: config.peek,
+				},
+			});
+			process.exitCode = result.exitCode;
 		}),
-		values: Args.string({
-			description: "Peer name and message text",
-			required: false,
-			multiple: true,
-		}),
-	};
-
-	static flags = {
-		from: Flags.string({ description: "Sender name for send", default: "human" }),
-		peek: Flags.boolean({ description: "Read inbox without marking messages delivered", default: false }),
-	};
-
-	static examples = [
-		"# List running sessions registered on the IRC bus\n  omp irc list",
-		"# Send a message from a human/script to a running session\n  omp irc send harness-abc123 'please check your inbox'",
-		"# Drain a peer inbox\n  omp irc inbox harness-abc123",
-		"# Preview a peer inbox without consuming messages\n  omp irc inbox harness-abc123 --peek",
-	];
-
-	async run(): Promise<void> {
-		const { args, flags } = await this.parse(Irc);
-		const values = Array.isArray(args.values) ? args.values : args.values ? [args.values] : [];
-		const result = runIrcCommand({
-			action: args.action as IrcCliAction,
-			args: values,
-			flags: {
-				from: flags.from ?? "human",
-				peek: flags.peek,
-			},
-		});
-		process.exitCode = result.exitCode;
-	}
-}
+).pipe(
+	Command.withDescription("Send and receive messages on the OMP cross-session IRC bus"),
+	Command.withExamples([
+		{ command: "omp irc list", description: "List running sessions registered on the IRC bus" },
+		{
+			command: "omp irc send harness-abc123 'please check your inbox'",
+			description: "Send a message from a human/script to a running session",
+		},
+		{ command: "omp irc inbox harness-abc123", description: "Drain a peer inbox" },
+		{ command: "omp irc inbox harness-abc123 --peek", description: "Preview a peer inbox without consuming messages" },
+	]),
+);

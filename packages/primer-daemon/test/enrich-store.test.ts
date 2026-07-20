@@ -99,7 +99,7 @@ describe("enrichment store", () => {
       cedict.query("INSERT INTO known_words VALUES (?)").run("喜欢")
       const doc = createReadingDoc(ledger, { title: "短文", text: "我喜欢学习。" })
       const mark = createReadingMark(ledger, { docId: doc.id, paragraphIdx: 0, start: 4, end: 6, surface: "学习", sentence: "我喜欢学习。", pinyin: "xuéxí", gloss: "to study" })
-      const input = buildEnrichmentPromptInput(ledger, { browserDb: "", twitterDb: "", readerDb: "", learningCardsDb: "", readerSite: "", ledgerDb: "", cedictDb: cedictPath, generationStore: "", shadowingDir: "" }, mark.queueItem.id)
+      const input = buildEnrichmentPromptInput(ledger, { browserDb: "", twitterDb: "", readerDb: "", learningCardsDb: "", readerSite: "", ledgerDb: "", cedictDb: cedictPath, ankiProfile: join(tmpdir(), "primer-enrich-missing-anki-profile.json"), generationStore: "", shadowingDir: "" }, mark.queueItem.id)
       const template = "### Input (filled per queue item)\n```json\n{}\n```\nworked example"
       const prompt = buildEnrichmentPrompt(input, template)
       expect(prompt).toContain('"paragraph_text": "我喜欢学习。"')

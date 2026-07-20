@@ -1,6 +1,8 @@
 #!/usr/bin/env bun
 
-import { parseArgs } from "node:util";
+import { Effect } from "effect";
+import { CliError, Command, Flag } from "effect/unstable/cli";
+import { NodeServices } from "@effect/platform-node";
 import { formatDuration, formatNumber, formatPercent } from "@oh-my-pi/pi-utils";
 import { getDashboardStats, getTotalMessageCount, syncAllSessions } from "./aggregator";
 import { closeDb } from "./db";
@@ -91,83 +93,63 @@ async function printStats(): Promise<void> {
 	console.log("");
 }
 
-/**
- * Main CLI entry point.
- */
-async function main(): Promise<void> {
-	const { values } = parseArgs({
-		options: {
-			port: { type: "string", short: "p", default: "3847" },
-			json: { type: "boolean", short: "j", default: false },
-			sync: { type: "boolean", short: "s", default: false },
-			help: { type: "boolean", short: "h", default: false },
-		},
-		allowPositionals: true,
-	});
-
-	if (values.help) {
-		console.log(`
-omp-stats - AI Usage Statistics Dashboard
-
-Usage:
-  omp-stats [options]
-
-Options:
-  -p, --port <port>  Port for the dashboard server (default: 3847)
-  -j, --json         Output stats as JSON and exit
-  -s, --sync         Sync session files and show summary
-  -h, --help         Show this help message
-
-Examples:
-  omp-stats              # Start dashboard server
-  omp-stats --json       # Print stats as JSON
-  omp-stats --port 8080  # Start on custom port
-  omp-stats --sync       # Sync and show summary
-`);
-		return;
-	}
-
-	try {
+const command = Command.make("omp-stats", {
+	port: Flag.integer("port").pipe(
+		Flag.withAlias("p"),
+		Flag.withDescription("Port for the dashboard server"),
+		Flag.withDefault(3847),
+	),
+	json: Flag.boolean("json").pipe(
+		Flag.withAlias("j"),
+		Flag.withDescription("Output stats as JSON and exit"),
+	),
+	sync: Flag.boolean("sync").pipe(
+		Flag.withAlias("s"),
+		Flag.withDescription("Sync session files and show summary"),
+	),
+}, (config) =>
+	Effect.gen(function* () {
 		// Sync first
 		const tty = process.stderr.isTTY === true;
 		process.stderr.write("Syncing session files...\n");
 		let lastWidth = 0;
 		let lastRender = 0;
-		const { processed, files } = await syncAllSessions({
-			onProgress: event => {
-				if (!tty) return;
-				const now = Date.now();
-				if (event.current < event.total && now - lastRender < 33) return;
-				lastRender = now;
-				const marker = "/sessions/";
-				const idx = event.sessionFile.indexOf(marker);
-				const short = idx >= 0 ? event.sessionFile.slice(idx + marker.length) : event.sessionFile;
-				const pct = ((event.current / event.total) * 100).toFixed(0).padStart(3, " ");
-				const line = `[${event.current}/${event.total}] ${pct}%  ${short}`;
-				const columns = process.stderr.columns ?? 120;
-				const clipped = line.length > columns - 1 ? `${line.slice(0, columns - 2)}\u2026` : line;
-				process.stderr.write(`\r${clipped.padEnd(lastWidth)}`);
-				lastWidth = clipped.length;
-			},
-		});
+		const { processed, files } = yield* Effect.promise(() =>
+			syncAllSessions({
+				onProgress: (event) => {
+					if (!tty) return;
+					const now = Date.now();
+					if (event.current < event.total && now - lastRender < 33) return;
+					lastRender = now;
+					const marker = "/sessions/";
+					const idx = event.sessionFile.indexOf(marker);
+					const short = idx >= 0 ? event.sessionFile.slice(idx + marker.length) : event.sessionFile;
+					const pct = ((event.current / event.total) * 100).toFixed(0).padStart(3, " ");
+					const line = `[${event.current}/${event.total}] ${pct}%  ${short}`;
+					const columns = process.stderr.columns ?? 120;
+					const clipped = line.length > columns - 1 ? `${line.slice(0, columns - 2)}\u2026` : line;
+					process.stderr.write(`\r${clipped.padEnd(lastWidth)}`);
+					lastWidth = clipped.length;
+				},
+			}),
+		);
 		if (tty && lastWidth > 0) process.stderr.write(`\r${" ".repeat(lastWidth)}\r`);
-		const total = await getTotalMessageCount();
+		const total = yield* Effect.promise(() => getTotalMessageCount());
 		console.log(`Synced ${processed} new entries from ${files} files (${total} total)\n`);
 
-		if (values.json) {
-			const stats = await getDashboardStats();
+		if (config.json) {
+			const stats = yield* Effect.promise(() => getDashboardStats());
 			console.log(JSON.stringify(stats, null, 2));
 			return;
 		}
 
-		if (values.sync) {
-			await printStats();
+		if (config.sync) {
+			yield* Effect.promise(() => printStats());
 			return;
 		}
 
 		// Start server
-		const port = parseInt(values.port || "3847", 10);
-		const { port: actualPort } = await startServer(port);
+		const { port: actualPort } = yield* Effect.promise(() => startServer(config.port));
 		console.log(`Dashboard available at: http://localhost:${actualPort}`);
 		console.log("Press Ctrl+C to stop\n");
 
@@ -177,14 +159,25 @@ Examples:
 			closeDb();
 			process.exit(0);
 		});
-	} catch (error) {
-		console.error("Error:", error);
-		closeDb();
-		process.exit(1);
-	}
-}
+	}),
+).pipe(
+	Command.withDescription("AI Usage Statistics Dashboard"),
+	Command.withExamples([
+		{ command: "omp-stats", description: "Start dashboard server" },
+		{ command: "omp-stats --json", description: "Print stats as JSON" },
+		{ command: "omp-stats --port 8080", description: "Start on custom port" },
+		{ command: "omp-stats --sync", description: "Sync and show summary" },
+	]),
+);
 
 // Run if executed directly
 if (import.meta.main) {
-	main();
+	const program = Command.runWith(command, { version: "16.0.1" })(process.argv.slice(2));
+	Effect.runPromise(program.pipe(Effect.provide(NodeServices.layer))).catch((error) => {
+		if (!CliError.isCliError(error)) {
+			console.error("Error:", error);
+		}
+		closeDb();
+		process.exitCode = 1;
+	});
 }

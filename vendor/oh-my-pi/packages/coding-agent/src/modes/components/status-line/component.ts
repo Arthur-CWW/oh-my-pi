@@ -5,7 +5,6 @@ import { $ } from "bun";
 import { settings } from "../../../config/settings";
 import type { AgentSession } from "../../../session/agent-session";
 import * as git from "../../../utils/git";
-import { getSessionAccentAnsi, getSessionAccentHex } from "../../../utils/session-color";
 import { sanitizeStatusText } from "../../shared";
 import { getThemeEpoch, theme } from "../../theme/theme";
 import { BorderMemo, GitBorderCache } from "./border-cache";
@@ -730,14 +729,7 @@ export class StatusLineComponent implements Component {
 		}
 
 		const gapWidth = Math.max(1, topFillWidth - leftWidth - rightWidth);
-		const sessionName =
-			effectiveSettings.sessionAccent !== false ? this.session.sessionManager?.getSessionName() : undefined;
-		const accentHex = sessionName
-			? getSessionAccentHex(sessionName, theme.getMajorThemeColorHexes(), theme.accentSurfaceLuminance)
-			: undefined;
-		const gapColor = getSessionAccentAnsi(accentHex) ?? theme.getFgAnsi("border");
-		const gapFill = `${gapColor}${theme.boxRound.horizontal.repeat(gapWidth)}\x1b[39m`;
-		return leftGroup + gapFill + rightGroup;
+		return leftGroup + " ".repeat(gapWidth) + rightGroup;
 	}
 
 	#liveBorderBucket(): number {

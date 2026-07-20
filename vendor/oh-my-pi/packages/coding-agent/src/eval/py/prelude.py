@@ -181,21 +181,19 @@ if "__omp_prelude_loaded__" not in globals():
         """Return directory tree."""
         base = Path(path)
         lines = []
-        def walk(p: Path, prefix: str, depth: int):
+        def walk(p: Path, depth: int):
             if depth > max_depth:
                 return
             items = sorted(p.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower()))
             items = [i for i in items if show_hidden or not i.name.startswith(".")]
-            for i, item in enumerate(items):
-                is_last = i == len(items) - 1
-                connector = "└── " if is_last else "├── "
+            indent = "    " * depth
+            for item in items:
                 suffix = "/" if item.is_dir() else ""
-                lines.append(f"{prefix}{connector}{item.name}{suffix}")
+                lines.append(f"{indent}{item.name}{suffix}")
                 if item.is_dir():
-                    ext = "    " if is_last else "│   "
-                    walk(item, prefix + ext, depth + 1)
+                    walk(item, depth + 1)
         lines.append(str(base) + "/")
-        walk(base, "", 1)
+        walk(base, 1)
         out = "\n".join(lines)
         _emit_status("tree", path=str(base), entries=len(lines) - 1, preview=out[:1000])
         return out

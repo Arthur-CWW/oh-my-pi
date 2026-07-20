@@ -1,7 +1,8 @@
 import { Database } from "bun:sqlite"
 import { Schema } from "effect"
 
-import { CedictNotBuiltError, lookupCedictBest, lookupCedictExact, listKnownWords } from "./dict"
+import { listPrimerKnownWords, readAnkiProfile } from "./anki-profile"
+import { CedictNotBuiltError, lookupCedictBest, lookupCedictExact } from "./dict"
 import { openLedger } from "./ledger"
 import type { DaemonPaths } from "./paths"
 import {
@@ -116,12 +117,13 @@ export async function handleReaderApi(request: Request, paths: DaemonPaths): Pro
   const pathname = url.pathname
 
   try {
+    if (request.method === "GET" && pathname === "/api/anki-profile") return jsonResponse(readAnkiProfile(paths.ankiProfile))
     if (request.method === "POST" && pathname === "/api/reader/docs") return handleCreateDoc(request, paths)
     if (request.method === "GET" && pathname === "/api/reader/docs") return handleListDocs(paths)
     if (request.method === "GET" && pathname.startsWith("/api/reader/docs/")) return handleGetDoc(pathname, paths)
     if (request.method === "POST" && pathname === "/api/reader/marks") return handleCreateMark(request, paths)
     if (request.method === "DELETE" && pathname.startsWith("/api/reader/marks/")) return handleDeleteMark(pathname, paths)
-    if (request.method === "GET" && pathname === "/api/reader/known-words") return jsonResponse(listKnownWords(paths.cedictDb))
+    if (request.method === "GET" && pathname === "/api/reader/known-words") return jsonResponse(listPrimerKnownWords(paths))
     if (request.method === "GET" && pathname === "/api/dict/best") return handleDictBest(url, paths)
     if (request.method === "GET" && pathname.startsWith("/api/dict/")) return handleDictExact(pathname, paths)
     if (request.method === "GET" && pathname === "/api/queue") return handleQueueList(url, paths)

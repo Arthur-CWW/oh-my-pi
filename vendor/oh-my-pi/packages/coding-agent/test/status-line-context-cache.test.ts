@@ -220,4 +220,27 @@ describe("StatusLineComponent context breakdown", () => {
 		const plain = comp.getTopBorder(80).content.replaceAll(/\x1b\[[0-9;]*m/g, "");
 		expect(plain).toContain("?/272K");
 	});
+
+	it("renders the provider-anchored 62.8% even when the transcript estimate would balloon past it", () => {
+		const contextWindow = 272_000;
+		const providerTokens = 170_816; // 62.8% of the window
+		const { session } = makeSession({
+			// A large transcript whose independent cl100k estimate would dwarf real usage.
+			messages: Array.from({ length: 200 }, (_, i) => userMessage(`turn ${i} `.repeat(64))),
+			usage: { tokens: providerTokens, contextWindow, percent: (providerTokens / contextWindow) * 100 },
+			contextWindow,
+		});
+		const comp = new StatusLineComponent(session);
+		comp.updateSettings({
+			preset: "custom",
+			leftSegments: ["context_pct"],
+			rightSegments: [],
+			separator: "powerline-thin",
+		});
+
+		// The status line surfaces the provider count verbatim, never the transcript estimate.
+		expect(comp.getCachedContextBreakdown().usedTokens).toBe(providerTokens);
+		const plain = comp.getTopBorder(80).content.replaceAll(/\x1b\[[0-9;]*m/g, "");
+		expect(plain).toContain("62.8%/272K");
+	});
 });

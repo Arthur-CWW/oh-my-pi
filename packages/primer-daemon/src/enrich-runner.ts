@@ -4,8 +4,9 @@ import { fileURLToPath } from "node:url"
 import type { Database } from "bun:sqlite"
 import { Schema } from "effect"
 
+import { listPrimerKnownWords } from "./anki-profile"
 import { isForbiddenModel } from "./ask-synthesis"
-import { lookupCedictExact, listKnownWords } from "./dict"
+import { lookupCedictExact } from "./dict"
 import { insertEnrichment, type EnrichmentOutput, EnrichmentOutputSchema, type EnrichmentRecord } from "./enrich-store"
 import type { DaemonPaths } from "./paths"
 import { getQueueItemById, getReadingDoc, listQueueItems } from "./reading-store"
@@ -97,7 +98,7 @@ export async function runEnrichment(db: Database, paths: DaemonPaths, queueItemI
 
 export function buildEnrichmentPromptInput(
   db: Database,
-  paths: Pick<DaemonPaths, "cedictDb"> & Partial<DaemonPaths>,
+  paths: Pick<DaemonPaths, "cedictDb" | "ankiProfile"> & Partial<DaemonPaths>,
   queueItemId: number,
 ): EnrichmentPromptInput {
   const queueItem = getQueueItemById(db, queueItemId)
@@ -110,7 +111,7 @@ export function buildEnrichmentPromptInput(
   if (paragraphText === undefined) throw new Error("queue item's reading paragraph is missing")
   const dict = lookupCedictExact(paths.cedictDb, queueItem.word)
   const firstEntry = dict.entries[0]
-  const knownWords = listKnownWords(paths.cedictDb).words
+  const knownWords = listPrimerKnownWords(paths).words
   const siblings = listQueueItems(db, "all", 100)
     .filter((item) => item.id !== queueItem.id)
     .map((item) => ({ word: item.word, pinyin: item.pinyin ?? "", gloss: item.gloss ?? "" }))

@@ -7,6 +7,33 @@ import * as path from "node:path";
 const SHA256 = /^[a-f0-9]{64}$/;
 const DEFAULT_STALE_LOCK_MS = 10 * 60 * 1000;
 
+export const PROMOTION_STAGE_ORDER = [
+	"install",
+	"generate",
+	"check:types",
+	"build:native",
+	"link-tests",
+	"bundle",
+	"candidate-install",
+	"readiness",
+	"bless",
+	"rollout",
+] as const;
+
+export type PromotionStage = (typeof PROMOTION_STAGE_ORDER)[number];
+
+export async function timed<T>(label: string, fn: () => Promise<T>, log: (line: string) => void = console.log): Promise<T> {
+	const start = performance.now();
+	try {
+		const result = await fn();
+		log(`stage ${label} done ${((performance.now() - start) / 1000).toFixed(2)}s`);
+		return result;
+	} catch (error) {
+		log(`stage ${label} failed ${((performance.now() - start) / 1000).toFixed(2)}s`);
+		throw error;
+	}
+}
+
 export interface BuildRevision {
 	buildDigest: string;
 	version: string;
@@ -317,69 +344,80 @@ export async function promote(
 		worktreeAdded = true;
 		const fork = path.join(worktree, "vendor", "oh-my-pi");
 		const linkScript = path.join(fork, "scripts", "link-omp.sh");
-		await run(["bun", "install", "--frozen-lockfile"], fork);
-		if ((await fs.lstat(path.join(fork, "node_modules"))).isSymbolicLink()) {
-			throw new Error("isolated install produced a symlinked node_modules");
-		}
-		await run(["bun", "run", "build:native"], fork, promotionBuildEnvironment(process.env));
-		await run(["bun", "--cwd=packages/coding-agent", "run", "generate"], fork);
-		await run(["bun", "--cwd=packages/coding-agent", "run", "check:types"], fork);
-		await run(["bun", "test", "scripts/link-omp.test.ts"], fork);
-		await run(["bun", "--cwd=packages/coding-agent", "run", "build"], fork);
+		await timed("install", async () => {
+			await run(["bun", "install", "--frozen-lockfile"], fork);
+			if ((await fs.lstat(path.join(fork, "node_modules"))).isSymbolicLink()) {
+				throw new Error("isolated install produced a symlinked node_modules");
+			}
+		});
+		await timed("generate", () => run(["bun", "--cwd=packages/coding-agent", "run", "generate"], fork));
+		await timed("check:types", () => run(["bun", "--cwd=packages/coding-agent", "run", "check:types"], fork));
+		await timed("build:native", () => run(["bun", "run", "build:native"], fork, promotionBuildEnvironment(process.env)));
+		await timed("link-tests", () => run(["bun", "test", "scripts/link-omp.test.ts"], fork));
+		await timed("bundle", () => run(["bun", "--cwd=packages/coding-agent", "run", "build"], fork));
 
-		const builtBinary = path.join(fork, "packages", "coding-agent", "dist", "omp");
-		const digest = await sha256(builtBinary);
-		await run(["bash", linkScript, "candidate", builtBinary], fork, { ...linkEnvironment, OMP_LINK_REPO_ROOT: fork });
-		const candidate = path.join(config.binDir, ".omp-releases", `omp-${digest}`);
-		const revision = await readCandidateBuildRevision(candidate, fork);
-		if (revision.buildDigest !== digest) throw new Error("materialized candidate identity does not match its digest");
+		const { digest, candidate, revision } = await timed("candidate-install", async () => {
+			const builtBinary = path.join(fork, "packages", "coding-agent", "dist", "omp");
+			const d = await sha256(builtBinary);
+			await run(["bash", linkScript, "candidate", builtBinary], fork, { ...linkEnvironment, OMP_LINK_REPO_ROOT: fork });
+			const c = path.join(config.binDir, ".omp-releases", `omp-${d}`);
+			const r = await readCandidateBuildRevision(c, fork);
+			if (r.buildDigest !== d) throw new Error("materialized candidate identity does not match its digest");
+			return { digest: d, candidate: c, revision: r };
+		});
 
 		const receiptDir = path.join(config.repoRoot, "vendor", "oh-my-pi", "local");
 		await fs.mkdir(receiptDir, { recursive: true });
 		const receiptPath = path.join(receiptDir, `readiness-receipt-${digest}.json`);
-		const readiness = await command([
-			"bun",
-			path.join(fork, "packages", "coding-agent", "scripts", "runner-canary-readiness.ts"),
-			"--candidate", candidate,
-			"--fixture-root", config.fixtureRoot,
-			"--output", receiptPath,
-		], fork, linkEnvironment);
-		const readinessDecision = decidePromotion(true, readiness.exitCode === 0 ? "green" : "red");
-		if (readinessDecision.kind === "refuse") {
-			const detail = readiness.stderr.trim() || readiness.stdout.trim();
-			throw new Error(`${readinessDecision.message}${detail ? `: ${detail}` : ""}`);
-		}
-		const receiptDigest = await sha256(receiptPath);
-		const receiptDisplay = path.relative(config.repoRoot, receiptPath);
-		const notePath = path.join(receiptDir, `promotion-note-${digest}.txt`);
-		noteTemporary = `${notePath}.tmp-${process.pid}-${randomUUID()}`;
-		await writePromotionNote(noteTemporary, digest, revision.version, receiptDisplay, receiptDigest, stableRevision.buildDigest);
+		await timed("readiness", async () => {
+			const readiness = await command([
+				"bun",
+				path.join(fork, "packages", "coding-agent", "scripts", "runner-canary-readiness.ts"),
+				"--candidate", candidate,
+				"--fixture-root", config.fixtureRoot,
+				"--output", receiptPath,
+			], fork, linkEnvironment);
+			const readinessDecision = decidePromotion(true, readiness.exitCode === 0 ? "green" : "red");
+			if (readinessDecision.kind === "refuse") {
+				const detail = readiness.stderr.trim() || readiness.stdout.trim();
+				throw new Error(`${readinessDecision.message}${detail ? `: ${detail}` : ""}`);
+			}
+		});
 
-		await run(["bash", linkScript, "bless", digest, receiptPath], fork, { ...linkEnvironment, OMP_LINK_REPO_ROOT: fork });
-		await fs.rename(noteTemporary, notePath);
-		noteTemporary = undefined;
-		const blessedReport = composePromotionReport(revision.version, digest, { exitCode: 0, stdout: "", stderr: "" });
-		console.log(blessedReport.blessedLine);
-		console.log(`digest ${digest}`);
-		console.log(`version ${revision.version}`);
-		console.log(`receipt ${receiptDisplay} ${receiptDigest}`);
+		await timed("bless", async () => {
+			const receiptDigest = await sha256(receiptPath);
+			const receiptDisplay = path.relative(config.repoRoot, receiptPath);
+			const notePath = path.join(receiptDir, `promotion-note-${digest}.txt`);
+			noteTemporary = `${notePath}.tmp-${process.pid}-${randomUUID()}`;
+			await writePromotionNote(noteTemporary, digest, revision.version, receiptDisplay, receiptDigest, stableRevision.buildDigest);
+			await run(["bash", linkScript, "bless", digest, receiptPath], fork, { ...linkEnvironment, OMP_LINK_REPO_ROOT: fork });
+			await fs.rename(noteTemporary, notePath);
+			noteTemporary = undefined;
+			const blessedReport = composePromotionReport(revision.version, digest, { exitCode: 0, stdout: "", stderr: "" });
+			console.log(blessedReport.blessedLine);
+			console.log(`digest ${digest}`);
+			console.log(`version ${revision.version}`);
+			console.log(`receipt ${receiptDisplay} ${receiptDigest}`);
+		});
 		if (options.noRollout) {
 			console.log("rollout: disabled");
 			return;
 		}
-		let rollout: PromotionCommandResult;
-		try {
-			rollout = await command([stable, "rollout", "--auto"], config.repoRoot);
-		} catch (error) {
-			const reason = error instanceof Error ? error.message : String(error);
-			rollout = { exitCode: 1, stdout: "", stderr: reason };
-		}
-		if (options.verbose) {
-			if (rollout.stdout) process.stdout.write(rollout.stdout);
-			if (rollout.stderr) process.stderr.write(rollout.stderr.endsWith("\n") ? rollout.stderr : `${rollout.stderr}\n`);
-		} else {
-			console.log(formatRolloutSummary(rollout.stdout));
-		}
+		await timed("rollout", async () => {
+			let rollout: PromotionCommandResult;
+			try {
+				rollout = await command([stable, "rollout", "--auto"], config.repoRoot);
+			} catch (error) {
+				const reason = error instanceof Error ? error.message : String(error);
+				rollout = { exitCode: 1, stdout: "", stderr: reason };
+			}
+			if (options.verbose) {
+				if (rollout.stdout) process.stdout.write(rollout.stdout);
+				if (rollout.stderr) process.stderr.write(rollout.stderr.endsWith("\n") ? rollout.stderr : `${rollout.stderr}\n`);
+			} else {
+				console.log(formatRolloutSummary(rollout.stdout));
+			}
+		});
 	} finally {
 		if (noteTemporary) await fs.rm(noteTemporary, { force: true });
 		if (worktreeAdded && worktree) {

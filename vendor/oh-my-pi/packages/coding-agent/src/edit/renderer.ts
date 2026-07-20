@@ -259,11 +259,6 @@ function formatEditDescription(
 	};
 }
 
-function editHeaderLabelBudget(width: number, uiTheme: Theme): number {
-	const leftGlyphs = `${uiTheme.boxSharp.topLeft}${uiTheme.boxSharp.horizontal.repeat(3)}`;
-	return Math.max(0, width - visibleWidth(leftGlyphs) - visibleWidth(uiTheme.boxSharp.topRight) - 2);
-}
-
 function renderEditHeader(
 	width: number,
 	uiTheme: Theme,
@@ -303,7 +298,7 @@ function renderEditHeader(
 		) + suffix;
 
 	const header = buildHeader(formatted.description);
-	const overflow = visibleWidth(header) - editHeaderLabelBudget(width, uiTheme);
+	const overflow = visibleWidth(header) - width;
 	if (overflow <= 0 || formatted.pathWidth <= 1) return header;
 
 	const pathCount = Math.max(1, (options.rawPath ? 1 : 0) + (options.rename ? 1 : 0));
@@ -382,7 +377,7 @@ function formatMultiFileStreamingDiff(
 	for (let index = 0; index < previews.length; index++) {
 		const preview = previews[index]!;
 		if (!preview.diff && !preview.error) continue;
-		const header = uiTheme.fg("dim", `\n\n── ${shortenPath(preview.path)} ──`);
+		const header = uiTheme.fg("dim", `\n\n${shortenPath(preview.path)}`);
 		if (preview.error) {
 			parts.push(`${header}\n${uiTheme.fg("error", replaceTabs(preview.error, preview.path))}`);
 			continue;
@@ -628,7 +623,7 @@ export const editToolRenderer = {
 				callPreviewCaches,
 			);
 			if (applyPatchSummary?.error) {
-				body += `\n${uiTheme.fg("error", truncateToWidth(replaceTabs(applyPatchSummary.error, rawPath), Math.max(1, width - 2)))}`;
+				body += `\n${uiTheme.fg("error", truncateToWidth(replaceTabs(applyPatchSummary.error, rawPath), Math.max(1, width)))}`;
 			}
 			const bodyLines = body ? body.split("\n") : [];
 			while (bodyLines.length > 0 && bodyLines[0].trim() === "") bodyLines.shift();
@@ -741,8 +736,8 @@ function renderSingleFileResult(
 
 		// Diff lines self-wrap with a continuation gutter; pre-wrap to the frame's
 		// inner width so renderOutputBlock's generic wrap is a no-op. Edit frames
-		// use a flush left border because code-frame gutters already provide padding.
-		const innerWidth = Math.max(1, width - 2);
+		// use flush padding (contentPaddingLeft: 0) because code-frame gutters already provide padding.
+		const innerWidth = Math.max(1, width);
 		const bodyLines = body.length > 0 ? body.split("\n").flatMap(line => wrapEditRendererLine(line, innerWidth)) : [];
 		while (bodyLines.length > 0 && bodyLines[0].trim() === "") bodyLines.shift();
 

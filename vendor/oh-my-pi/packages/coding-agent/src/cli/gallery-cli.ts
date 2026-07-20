@@ -49,7 +49,7 @@ export interface GalleryCommandArgs {
 	fontSize?: number;
 }
 
-/** One tool's rendered lifecycle, as ANSI lines: a leading blank, the section rule, then each state. */
+/** One tool's rendered lifecycle, as ANSI lines: a leading blank, the section heading, then each state. */
 export interface GallerySection {
 	heading: string;
 	lines: string[];
@@ -143,15 +143,13 @@ function resolveWidth(requested: number | undefined): number {
 	return Math.max(40, Math.min(200, width));
 }
 
-function sectionRule(label: string, width: number): string {
-	const prefix = `── ${label} `;
-	const fill = Math.max(0, width - prefix.length);
-	return theme.fg("accent", theme.bold(`${prefix}${"─".repeat(fill)}`));
+function sectionHeading(label: string): string {
+	return theme.fg("accent", theme.bold(label));
 }
 
 /**
  * Render each requested tool's lifecycle into ANSI section blocks. The block
- * layout (leading blank, section rule, then a blank + dim label + body per
+ * layout (leading blank, section heading, then a blank + dim label + body per
  * state) is shared by the stdout and screenshot paths so both stay identical.
  */
 async function renderGallerySections(
@@ -164,7 +162,7 @@ async function renderGallerySections(
 	for (const name of names) {
 		const fixture = resolveFixture(name);
 		const heading = fixture.label && fixture.label !== name ? `${name} — ${fixture.label}` : name;
-		const lines: string[] = ["", sectionRule(heading, width)];
+		const lines: string[] = ["", sectionHeading(heading)];
 		for (const state of states) {
 			lines.push("", theme.fg("dim", `  · ${STATE_LABELS[state]}`));
 			try {

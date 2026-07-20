@@ -15,7 +15,6 @@ try {
  * lightweight CLI runner from pi-utils.
  */
 import { parentPort } from "node:worker_threads";
-import type { CliConfig } from "@oh-my-pi/pi-utils/cli";
 import {
 	APP_NAME,
 	getActiveProfile,
@@ -43,15 +42,6 @@ process.title = APP_NAME;
 // `@oh-my-pi/pi-utils/env` eagerly loads `.env` from the agent directory at
 // import time, so it must not be imported before `setProfile` runs.
 
-async function showHelp(config: CliConfig): Promise<void> {
-	const { renderRootHelp } = await import("@oh-my-pi/pi-utils/cli");
-	const { getExtraHelpText } = await import("./cli/args");
-	renderRootHelp(config);
-	const extra = getExtraHelpText();
-	if (extra.trim().length > 0) {
-		process.stdout.write(`\n${extra}\n`);
-	}
-}
 /**
  * Smoke-test entry. Spawns bundled workers, serves the stats dashboard once,
  * pings everything, then exits.
@@ -306,19 +296,42 @@ export async function runCli(argv: string[]): Promise<void> {
 		await runSmokeTest();
 		return;
 	}
-	const [{ run }, { commands, resolveCliArgv }] = await Promise.all([
-		import("@oh-my-pi/pi-utils/cli"),
-		import("./cli-commands"),
-	]);
-	// --help and --version are handled by run() directly, don't rewrite those.
-	// Everything else that isn't a known subcommand routes to "launch".
+	// --help and --version pass through untouched; everything that is not a known
+	// subcommand routes to "launch".
+	const { commands, resolveCliArgv } = await import("./cli-commands");
 	const resolved = resolveCliArgv(resolvedArgv);
 	if ("error" in resolved) {
 		process.stderr.write(`error: ${resolved.error}\n`);
 		process.exitCode = 1;
 		return;
 	}
-	return run({ bin: APP_NAME, version: VERSION, argv: resolved.argv, commands, help: showHelp });
+	// launch/acp tolerate unknown extension flags and hand raw argv to the
+	// two-pass reparse in runRootCommand — semantics Effect's strict handler
+	// dispatch cannot express — so their execution forks here to the exported
+	// raw-argv runners. Their descriptors remain in the registry only for root
+	// help and shell completions. Everything else (root help/version, the
+	// join/setup handlers, and every other Effect descriptor) dispatches
+	// through the foundation run().
+	const [command, ...commandArgs] = resolved.argv;
+	if (command === "launch") {
+		const { runLaunch } = await import("./commands/launch");
+		return runLaunch(commandArgs);
+	}
+	if (command === "acp") {
+		const { runAcp } = await import("./commands/acp");
+		return runAcp(commandArgs);
+	}
+	const { run } = await import("@oh-my-pi/pi-utils/cli");
+	return run({
+		bin: APP_NAME,
+		version: VERSION,
+		argv: resolved.argv,
+		commands,
+		extraHelp: async () => {
+			const { getExtraHelpText } = await import("./cli/args");
+			return getExtraHelpText();
+		},
+	});
 }
 
 // Floating call instead of top-level await: TLA forces `--bytecode` (CJS

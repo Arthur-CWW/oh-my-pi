@@ -1,57 +1,47 @@
 /**
  * Manage bundled task agents.
  */
-import { Args, Command, Flags, renderCommandHelp } from "@oh-my-pi/pi-utils/cli";
+import { Effect, Option } from "effect";
+import { Argument, Command, Flag } from "effect/unstable/cli";
 import { type AgentsAction, type AgentsCommandArgs, runAgentsCommand } from "../cli/agents-cli";
 import { initTheme } from "../modes/theme/theme";
 
-const ACTIONS: AgentsAction[] = ["unpack"];
+const ACTIONS: readonly AgentsAction[] = ["unpack"];
 
-export default class Agents extends Command {
-	static description = "Manage bundled task agents";
+export default Command.make(
+	"agents",
+	{
+		action: Argument.choice("action", ACTIONS).pipe(Argument.withDescription("Agents action")),
+		force: Flag.boolean("force").pipe(Flag.withAlias("f"), Flag.withDescription("Overwrite existing agent files")),
+		json: Flag.boolean("json").pipe(Flag.withDescription("Output JSON")),
+		dir: Flag.optional(
+			Flag.string("dir").pipe(Flag.withDescription("Output directory (overrides --user/--project)")),
+		),
+		user: Flag.boolean("user").pipe(Flag.withDescription("Write to ~/.omp/agent/agents (default)")),
+		project: Flag.boolean("project").pipe(Flag.withDescription("Write to ./.omp/agents")),
+	},
+	config =>
+		Effect.promise(async () => {
+			const cmd: AgentsCommandArgs = {
+				action: config.action,
+				flags: {
+					force: config.force,
+					json: config.json,
+					dir: Option.getOrUndefined(config.dir),
+					user: config.user,
+					project: config.project,
+				},
+			};
 
-	static args = {
-		action: Args.string({
-			description: "Agents action",
-			required: false,
-			options: ACTIONS,
+			await initTheme();
+			await runAgentsCommand(cmd);
 		}),
-	};
-
-	static flags = {
-		force: Flags.boolean({ char: "f", description: "Overwrite existing agent files" }),
-		json: Flags.boolean({ description: "Output JSON" }),
-		dir: Flags.string({ description: "Output directory (overrides --user/--project)" }),
-		user: Flags.boolean({ description: "Write to ~/.omp/agent/agents (default)" }),
-		project: Flags.boolean({ description: "Write to ./.omp/agents" }),
-	};
-
-	static examples = [
-		"# Export bundled agents into user config (default)\n  omp agents unpack",
-		"# Export bundled agents into project config\n  omp agents unpack --project",
-		"# Overwrite existing local agent files\n  omp agents unpack --project --force",
-		"# Export into a custom directory\n  omp agents unpack --dir ./tmp/agents --json",
-	];
-
-	async run(): Promise<void> {
-		const { args, flags } = await this.parse(Agents);
-		if (!args.action) {
-			renderCommandHelp("omp", "agents", Agents);
-			return;
-		}
-
-		const cmd: AgentsCommandArgs = {
-			action: args.action as AgentsAction,
-			flags: {
-				force: flags.force,
-				json: flags.json,
-				dir: flags.dir,
-				user: flags.user,
-				project: flags.project,
-			},
-		};
-
-		await initTheme();
-		await runAgentsCommand(cmd);
-	}
-}
+).pipe(
+	Command.withDescription("Manage bundled task agents"),
+	Command.withExamples([
+		{ command: "omp agents unpack", description: "Export bundled agents into user config (default)" },
+		{ command: "omp agents unpack --project", description: "Export bundled agents into project config" },
+		{ command: "omp agents unpack --project --force", description: "Overwrite existing local agent files" },
+		{ command: "omp agents unpack --dir ./tmp/agents --json", description: "Export into a custom directory" },
+	]),
+);

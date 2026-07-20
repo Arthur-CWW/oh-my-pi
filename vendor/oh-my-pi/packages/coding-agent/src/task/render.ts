@@ -190,8 +190,10 @@ function extractMissingYieldWarning(output: string): { warning?: string; rest: s
 	return { warning: firstLine, rest };
 }
 
-function buildTreePrefix(ancestors: boolean[], theme: Theme): string {
-	return ancestors.map(hasNext => (hasNext ? `${theme.tree.vertical}  ` : "   ")).join("");
+// Fixed 3-space indent per nesting level (was tree-guide gutters `│  `/`   `).
+// Plain spaces keep the JSON tree copy-clean while indentation conveys depth.
+function buildTreePrefix(ancestors: boolean[]): string {
+	return "   ".repeat(ancestors.length);
 }
 
 function renderJsonTreeLines(
@@ -222,8 +224,7 @@ function renderJsonTreeLines(
 			return;
 		}
 
-		const connector = isLast ? theme.tree.last : theme.tree.branch;
-		const prefix = `${buildTreePrefix(ancestors, theme)}${theme.fg("dim", connector)} `;
+		const prefix = `${buildTreePrefix(ancestors)}   `;
 		const scalar = formatJsonScalar(val, theme);
 
 		if (scalar) {
@@ -236,21 +237,11 @@ function renderJsonTreeLines(
 			const header = key ? theme.fg("muted", key) : theme.fg("muted", "array");
 			pushLine(`${prefix}${iconArray} ${header}`);
 			if (val.length === 0) {
-				pushLine(
-					`${buildTreePrefix([...ancestors, !isLast], theme)}${theme.fg("dim", theme.tree.last)} ${theme.fg(
-						"dim",
-						"[]",
-					)}`,
-				);
+				pushLine(`${buildTreePrefix([...ancestors, !isLast])}   ${theme.fg("dim", "[]")}`);
 				return;
 			}
 			if (depth >= maxDepth) {
-				pushLine(
-					`${buildTreePrefix([...ancestors, !isLast], theme)}${theme.fg("dim", theme.tree.last)} ${theme.fg(
-						"dim",
-						"…",
-					)}`,
-				);
+				pushLine(`${buildTreePrefix([...ancestors, !isLast])}   ${theme.fg("dim", "…")}`);
 				return;
 			}
 			const nextAncestors = [...ancestors, !isLast];
@@ -269,21 +260,11 @@ function renderJsonTreeLines(
 			pushLine(`${prefix}${iconObject} ${header}`);
 			const entries = Object.entries(val as Record<string, unknown>);
 			if (entries.length === 0) {
-				pushLine(
-					`${buildTreePrefix([...ancestors, !isLast], theme)}${theme.fg("dim", theme.tree.last)} ${theme.fg(
-						"dim",
-						"{}",
-					)}`,
-				);
+				pushLine(`${buildTreePrefix([...ancestors, !isLast])}   ${theme.fg("dim", "{}")}`);
 				return;
 			}
 			if (depth >= maxDepth) {
-				pushLine(
-					`${buildTreePrefix([...ancestors, !isLast], theme)}${theme.fg("dim", theme.tree.last)} ${theme.fg(
-						"dim",
-						"…",
-					)}`,
-				);
+				pushLine(`${buildTreePrefix([...ancestors, !isLast])}   ${theme.fg("dim", "…")}`);
 				return;
 			}
 			const nextAncestors = [...ancestors, !isLast];
@@ -703,7 +684,7 @@ function renderAgentProgress(
 	// Current tool (if running) or most recent completed tool
 	if (progress.status === "running") {
 		if (progress.currentTool) {
-			let toolLine = `${continuePrefix}${theme.tree.hook} ${theme.fg("muted", progress.currentTool)}`;
+			let toolLine = `${continuePrefix}  ${theme.fg("muted", progress.currentTool)}`;
 			const toolDetail = progress.lastIntent ?? progress.currentToolArgs;
 			if (toolDetail) {
 				toolLine += `: ${theme.fg("dim", truncateToWidth(replaceTabs(toolDetail), 40))}`;
@@ -718,7 +699,7 @@ function renderAgentProgress(
 		} else if (progress.recentTools.length > 0) {
 			// Show most recent completed tool when idle between tools
 			const recent = progress.recentTools[0];
-			let toolLine = `${continuePrefix}${theme.tree.hook} ${theme.fg("dim", recent.tool)}`;
+			let toolLine = `${continuePrefix}  ${theme.fg("dim", recent.tool)}`;
 			const toolDetail = progress.lastIntent ?? recent.args;
 			if (toolDetail) {
 				toolLine += `: ${theme.fg("dim", truncateToWidth(replaceTabs(toolDetail), 40))}`;
@@ -736,12 +717,12 @@ function renderAgentProgress(
 		const summary =
 			`retrying ${progress.retryState.attempt}/${progress.retryState.maxAttempts} ${waitLabel}: ` +
 			truncateToWidth(replaceTabs(progress.retryState.errorMessage), 60);
-		lines.push(`${continuePrefix}${theme.tree.hook} ${theme.fg("warning", summary)}`);
+		lines.push(`${continuePrefix}  ${theme.fg("warning", summary)}`);
 	} else if (progress.retryFailure && progress.status !== "running") {
 		const summary = `auto-retry gave up after ${progress.retryFailure.attempt} attempt${
 			progress.retryFailure.attempt === 1 ? "" : "s"
 		}: ${truncateToWidth(replaceTabs(progress.retryFailure.errorMessage), 80)}`;
-		lines.push(`${continuePrefix}${theme.tree.hook} ${theme.fg("error", summary)}`);
+		lines.push(`${continuePrefix}  ${theme.fg("error", summary)}`);
 	}
 
 	// Render extracted tool data inline (e.g., review findings)
@@ -901,9 +882,8 @@ function renderFindings(
 
 	for (let i = 0; i < displayCount; i++) {
 		const finding = sortedFindings[i];
-		const isLastFinding = i === displayCount - 1 && (expanded || sortedFindings.length <= 3);
-		const findingPrefix = isLastFinding ? theme.tree.last : theme.tree.branch;
-		const findingContinue = isLastFinding ? "   " : `${theme.tree.vertical}  `;
+		// Fixed 3-space indent (no tree glyphs); hierarchy reads via indentation.
+		const findingIndent = "   ";
 
 		const { color } = getPriorityInfo(finding.priority);
 		const rawTitle = finding.title?.replace(/^\[P\d\]\s*/, "") ?? "Untitled";
@@ -911,7 +891,7 @@ function renderFindings(
 		const loc = `${path.basename(finding.file_path || "<unknown>")}:${finding.line_start}`;
 
 		lines.push(
-			`${continuePrefix}${findingPrefix} ${theme.fg(color, `[${finding.priority}]`)} ${titleText} ${theme.fg("dim", loc)}`,
+			`${continuePrefix}${findingIndent}${theme.fg(color, `[${finding.priority}]`)} ${titleText} ${theme.fg("dim", loc)}`,
 		);
 
 		// Show body when expanded
@@ -919,7 +899,7 @@ function renderFindings(
 			// Wrap body text
 			const bodyLines = finding.body.split("\n");
 			for (const bodyLine of bodyLines) {
-				lines.push(`${continuePrefix}${findingContinue}${theme.fg("dim", replaceTabs(bodyLine))}`);
+				lines.push(`${continuePrefix}${findingIndent}${theme.fg("dim", replaceTabs(bodyLine))}`);
 			}
 		}
 	}
@@ -1419,14 +1399,12 @@ function isTaskToolDetails(value: unknown): value is TaskToolDetails {
 	);
 }
 
-// Nested subagent snapshots sit one or more levels below the frame border, so
-// they keep tree guides to convey depth (the parent prepends its own continue
-// prefix). Only the top-level agent list drops guides (the frame is its box).
-function nestedMarkers(isLast: boolean, theme: Theme): { prefix: string; continuePrefix: string } {
-	return {
-		prefix: isLast ? theme.fg("dim", theme.tree.last) : theme.fg("dim", theme.tree.branch),
-		continuePrefix: isLast ? "   " : `${theme.fg("dim", theme.tree.vertical)}  `,
-	};
+// Nested subagent snapshots sit one or more levels below the frame border and
+// convey depth by indentation alone — no tree-guide glyphs, so the transcript
+// copies cleanly. The caller renders `prefix` as `${prefix} ` (trailing space),
+// so 2 spaces here yields a 3-column head; `continuePrefix` is the full gutter.
+function nestedMarkers(): { prefix: string; continuePrefix: string } {
+	return { prefix: "  ", continuePrefix: "   " };
 }
 
 function renderNestedTaskResults(
@@ -1452,8 +1430,8 @@ function renderNestedTaskResults(
 			continue;
 		}
 		const ordered = orderResultsForDisplay(details.results);
-		ordered.forEach((result, index) => {
-			const { prefix, continuePrefix } = nestedMarkers(index === ordered.length - 1, theme);
+		ordered.forEach(result => {
+			const { prefix, continuePrefix } = nestedMarkers();
 			lines.push(...renderAgentResult(result, prefix, continuePrefix, expanded, theme, seen, depth + 1));
 		});
 		seen.delete(details);
@@ -1489,8 +1467,8 @@ function renderNestedTaskTree(
 		const hasResults = Boolean(details.results && details.results.length > 0);
 		if (hasResults) {
 			const ordered = orderResultsForDisplay(details.results);
-			ordered.forEach((result, index) => {
-				const { prefix, continuePrefix } = nestedMarkers(index === ordered.length - 1, theme);
+			ordered.forEach(result => {
+				const { prefix, continuePrefix } = nestedMarkers();
 				lines.push(...renderAgentResult(result, prefix, continuePrefix, expanded, theme, seen, depth + 1));
 			});
 			seen.delete(details);
@@ -1499,8 +1477,8 @@ function renderNestedTaskTree(
 		const inflight = details.progress;
 		if (inflight && inflight.length > 0) {
 			const ordered = orderProgressForDisplay(inflight);
-			ordered.forEach((prog, index) => {
-				const { prefix, continuePrefix } = nestedMarkers(index === ordered.length - 1, theme);
+			ordered.forEach(prog => {
+				const { prefix, continuePrefix } = nestedMarkers();
 				lines.push(
 					...renderAgentProgress(
 						prog,

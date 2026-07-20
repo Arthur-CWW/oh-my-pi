@@ -104,7 +104,7 @@ function normalizeInputForPty(data: string, applicationCursorKeysMode: boolean):
 	}
 	return data;
 }
-class BashInteractiveOverlayComponent implements Component {
+export class BashInteractiveOverlayComponent implements Component {
 	#terminal: XtermTerminalType;
 	#state: "running" | "complete" | "timed_out" | "killed" = "running";
 	#exitCode: number | undefined;
@@ -237,9 +237,9 @@ class BashInteractiveOverlayComponent implements Component {
 	}
 	render(width: number): readonly string[] {
 		const safeWidth = Math.max(20, width);
-		const innerWidth = Math.max(1, safeWidth - 2);
+		const innerWidth = Math.max(1, safeWidth - 1);
 		const maxOverlayRows = Math.max(5, Math.floor(this.getTerminalRows() * 0.8));
-		const chromeRows = 4;
+		const chromeRows = 2; // header + footer (no frame rules)
 		const maxContentRows = Math.max(1, maxOverlayRows - chromeRows);
 		// Propagate terminal resize to PTY session
 		const currentCols = innerWidth;
@@ -275,17 +275,8 @@ class BashInteractiveOverlayComponent implements Component {
 				: truncateToWidth(this.uiTheme.fg("dim", "session finished"), innerWidth);
 		const visibleLines = this.#readViewport(innerWidth, maxContentRows);
 		const content = visibleLines.length > 0 ? visibleLines : [padding(innerWidth)];
-		const borderHorizontal = this.uiTheme.fg("border", this.uiTheme.boxSharp.horizontal.repeat(innerWidth));
-		const borderVertical = this.uiTheme.fg("border", this.uiTheme.boxSharp.vertical);
-		const boxLine = (line: string) =>
-			`${borderVertical}${line}${padding(Math.max(0, innerWidth - visibleWidth(line)))}${borderVertical}`;
-		return [
-			`${this.uiTheme.fg("border", this.uiTheme.boxSharp.topLeft)}${borderHorizontal}${this.uiTheme.fg("border", this.uiTheme.boxSharp.topRight)}`,
-			boxLine(header),
-			...content.map(boxLine),
-			boxLine(footer),
-			`${this.uiTheme.fg("border", this.uiTheme.boxSharp.bottomLeft)}${borderHorizontal}${this.uiTheme.fg("border", this.uiTheme.boxSharp.bottomRight)}`,
-		];
+		const row = (line: string) => ` ${line}${padding(Math.max(0, innerWidth - visibleWidth(line)))}`;
+		return [row(header), ...content.map(row), row(footer)];
 	}
 
 	invalidate(): void {}

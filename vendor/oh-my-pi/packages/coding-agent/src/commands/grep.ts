@@ -1,48 +1,51 @@
 /**
  * Test grep tool.
  */
+import { Effect, Option } from "effect";
 import { GrepOutputMode } from "@oh-my-pi/pi-natives";
-import { Args, Command, Flags } from "@oh-my-pi/pi-utils/cli";
+import { Argument, Command, Flag } from "effect/unstable/cli";
 import { type GrepCommandArgs, runGrepCommand } from "../cli/grep-cli";
 import { initTheme } from "../modes/theme/theme";
 
-export default class Grep extends Command {
-	static description = "Test grep tool";
+export default Command.make(
+	"grep",
+	{
+		pattern: Argument.optional(Argument.string("pattern").pipe(Argument.withDescription("Regex pattern to search for"))),
+		path: Argument.optional(Argument.string("path").pipe(Argument.withDescription("Directory or file to search"))),
+		glob: Flag.optional(
+			Flag.string("glob").pipe(Flag.withAlias("g"), Flag.withDescription("Filter files by glob pattern")),
+		),
+		limit: Flag.integer("limit").pipe(Flag.withAlias("l"), Flag.withDescription("Max matches"), Flag.withDefault(20)),
+		context: Flag.integer("context").pipe(
+			Flag.withAlias("C"),
+			Flag.withDescription("Context lines"),
+			Flag.withDefault(2),
+		),
+		files: Flag.boolean("files").pipe(Flag.withAlias("f"), Flag.withDescription("Output file names only")),
+		count: Flag.boolean("count").pipe(Flag.withAlias("c"), Flag.withDescription("Output match counts per file")),
+		"no-gitignore": Flag.boolean("no-gitignore").pipe(
+			Flag.withDescription("Include files excluded by .gitignore"),
+		),
+	},
+	config =>
+		Effect.promise(async () => {
+			const mode: GrepCommandArgs["mode"] = config.count
+				? GrepOutputMode.Count
+				: config.files
+					? GrepOutputMode.FilesWithMatches
+					: GrepOutputMode.Content;
 
-	static args = {
-		pattern: Args.string({ description: "Regex pattern to search for", required: false }),
-		path: Args.string({ description: "Directory or file to search", required: false }),
-	};
+			const cmd: GrepCommandArgs = {
+				pattern: Option.getOrUndefined(config.pattern) ?? "",
+				path: Option.getOrUndefined(config.path) ?? ".",
+				glob: Option.getOrUndefined(config.glob),
+				limit: config.limit,
+				context: config.context,
+				mode,
+				gitignore: !config["no-gitignore"],
+			};
 
-	static flags = {
-		glob: Flags.string({ char: "g", description: "Filter files by glob pattern" }),
-		limit: Flags.integer({ char: "l", description: "Max matches", default: 20 }),
-		context: Flags.integer({ char: "C", description: "Context lines", default: 2 }),
-		files: Flags.boolean({ char: "f", description: "Output file names only" }),
-		count: Flags.boolean({ char: "c", description: "Output match counts per file" }),
-		"no-gitignore": Flags.boolean({ description: "Include files excluded by .gitignore" }),
-	};
-
-	async run(): Promise<void> {
-		const { args, flags } = await this.parse(Grep);
-
-		const mode: GrepCommandArgs["mode"] = flags.count
-			? GrepOutputMode.Count
-			: flags.files
-				? GrepOutputMode.FilesWithMatches
-				: GrepOutputMode.Content;
-
-		const cmd: GrepCommandArgs = {
-			pattern: args.pattern ?? "",
-			path: args.path ?? ".",
-			glob: flags.glob,
-			limit: flags.limit,
-			context: flags.context,
-			mode,
-			gitignore: !flags["no-gitignore"],
-		};
-
-		await initTheme();
-		await runGrepCommand(cmd);
-	}
-}
+			await initTheme();
+			await runGrepCommand(cmd);
+		}),
+).pipe(Command.withDescription("Test grep tool"));

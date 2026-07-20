@@ -437,7 +437,8 @@ describe("todoToolRenderer.renderResult phase collapsing", () => {
 	}
 	function innerLines(component: ReturnType<typeof todoToolRenderer.renderResult>): string[] {
 		const lines = Bun.stripANSI(component.render(100).join("\n")).split("\n");
-		return lines.slice(1, -1).map(line => line.replace(/^│/, "").replace(/│\s*$/, "").trim());
+		// Unframed output: a heading line followed by content rows. Drop the heading.
+		return lines.slice(1).map(line => line.trim());
 	}
 	it("collapses untouched phases to a one-line summary while expanding the active phase", async () => {
 		const result = await buildThreePhaseAfterDone();

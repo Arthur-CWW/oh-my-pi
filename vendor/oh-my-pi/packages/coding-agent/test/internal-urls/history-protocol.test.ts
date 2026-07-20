@@ -13,12 +13,12 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { InternalUrlRouter } from "@oh-my-pi/pi-coding-agent/internal-urls";
+import { listArchivedDirectChildren } from "@oh-my-pi/pi-coding-agent/internal-urls/history-protocol";
 import { IrcExternalBus } from "@oh-my-pi/pi-coding-agent/irc/bus-external";
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { CURRENT_SESSION_VERSION } from "@oh-my-pi/pi-coding-agent/session/session-entries";
 import { CHILD_LIFECYCLE_CUSTOM_TYPE, type ChildLifecycleState } from "@oh-my-pi/pi-coding-agent/task/child-lifecycle";
-import { listArchivedDirectChildren } from "@oh-my-pi/pi-coding-agent/internal-urls/history-protocol";
 
 async function withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
 	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "history-protocol-"));
@@ -103,6 +103,62 @@ function sessionFixtureJsonl(withLifecycle = false): string {
 	return `${JSON.stringify(header)}\n${withLifecycle ? `${JSON.stringify(lifecycleEntry)}\n` : ""}${JSON.stringify(userEntry)}\n${JSON.stringify(assistantEntry)}\n`;
 }
 
+/**
+ * Deterministic session JSONL exceeding 4MB: a linear user/assistant chain
+ * padded with filler, with `markers.distinctive` in exactly one user turn and
+ * `markers.duplicate` in two distinct user turns for stable-id disambiguation.
+ */
+function bigSessionFixtureJsonl(markers: { distinctive: string; duplicate: string }): string {
+	const timestamp = new Date().toISOString();
+	const header = { type: "session", version: CURRENT_SESSION_VERSION, id: "big-session", timestamp, cwd: "/tmp" };
+	const filler = "lorem-ipsum-dolor-sit-amet-consectetur-adipiscing ".repeat(1000);
+	const lines = [JSON.stringify(header)];
+	const pairs = 100;
+	const distinctivePair = 50;
+	const duplicatePairA = 20;
+	const duplicatePairB = 80;
+	let seq = 0;
+	let parentId: string | null = null;
+	for (let pair = 0; pair < pairs; pair++) {
+		let userText = `filler pair ${pair} ${filler}`;
+		if (pair === distinctivePair) userText = `${filler} ${markers.distinctive} ${filler}`;
+		else if (pair === duplicatePairA || pair === duplicatePairB)
+			userText = `${filler} ${markers.duplicate} shared ${filler}`;
+		const userId = `u${seq++}`;
+		lines.push(
+			JSON.stringify({
+				type: "message",
+				id: userId,
+				parentId,
+				timestamp,
+				message: { role: "user", content: userText, timestamp: seq },
+			}),
+		);
+		parentId = userId;
+		const assistantId = `a${seq++}`;
+		lines.push(
+			JSON.stringify({
+				type: "message",
+				id: assistantId,
+				parentId,
+				timestamp,
+				message: {
+					role: "assistant",
+					content: [{ type: "text", text: `reply ${pair}` }],
+					api: "anthropic-messages",
+					provider: "anthropic",
+					model: "test-model",
+					usage: {},
+					stopReason: "stop",
+					timestamp: seq,
+				},
+			}),
+		);
+		parentId = assistantId;
+	}
+	return `${lines.join("\n")}\n`;
+}
+
 async function writeDirectChildJournal(options: {
 	file: string;
 	parentFile: string;
@@ -135,8 +191,14 @@ async function writeDirectChildJournal(options: {
 		: [];
 	await Bun.write(
 		options.file,
-		[
-			{ type: "session", version: CURRENT_SESSION_VERSION, id: options.agentId, timestamp: options.timestamp, cwd: "/tmp" },
+		`${[
+			{
+				type: "session",
+				version: CURRENT_SESSION_VERSION,
+				id: options.agentId,
+				timestamp: options.timestamp,
+				cwd: "/tmp",
+			},
 			{
 				type: "session_init",
 				id: "init",
@@ -159,7 +221,7 @@ async function writeDirectChildJournal(options: {
 			...lifecycle,
 		]
 			.map(entry => JSON.stringify(entry))
-			.join("\n") + "\n",
+			.join("\n")}\n`,
 	);
 }
 
@@ -269,8 +331,21 @@ describe("history:// protocol", () => {
 				`${sessionFixtureJsonl()}${JSON.stringify({ type: "custom", id: "lifecycle", parentId: null, timestamp, customType: CHILD_LIFECYCLE_CUSTOM_TYPE, data: { version: 1, agentId: "Terminal", childSessionFile: terminalFile, parentSessionFile: parentFile, state: "completed", updatedAt: timestamp } })}\n`,
 			);
 			await Bun.write(path.join(childrenDir, "Legacy.jsonl"), sessionFixtureJsonl());
-			AgentRegistry.global().register({ id: "Main", displayName: "main", kind: "main", session: null, sessionFile: parentFile, status: "parked" });
-			AgentRegistry.global().register({ id: "ReviveMe", displayName: "task", kind: "sub", session: fakeLiveSession([]), status: "idle" });
+			AgentRegistry.global().register({
+				id: "Main",
+				displayName: "main",
+				kind: "main",
+				session: null,
+				sessionFile: parentFile,
+				status: "parked",
+			});
+			AgentRegistry.global().register({
+				id: "ReviveMe",
+				displayName: "task",
+				kind: "sub",
+				session: fakeLiveSession([]),
+				status: "idle",
+			});
 
 			const index = await InternalUrlRouter.instance().resolve("history://");
 			expect(index.content).toContain("## Active and revivable");
@@ -389,6 +464,34 @@ describe("history:// protocol", () => {
 			);
 
 		expect(error?.message).toContain("no transcript");
+	});
+
+	it("resolves a reserved starting agent as starting rather than unknown", async () => {
+		AgentRegistry.global().register({
+			id: "Queued",
+			displayName: "task",
+			kind: "sub",
+			parentId: "Main",
+			session: null,
+			sessionFile: null,
+			status: "running",
+			starting: true,
+		});
+
+		const resource = await InternalUrlRouter.instance().resolve("history://Queued");
+
+		expect(resource.content).toContain("# Queued (starting)");
+		expect(resource.content).toContain("queued and starting up");
+		expect(resource.notes?.join("\n")).toContain("starting");
+
+		// A genuinely unknown id still fails as unknown.
+		const error = await InternalUrlRouter.instance()
+			.resolve("history://NeverReserved")
+			.then(
+				() => null,
+				err => err as Error,
+			);
+		expect(error?.message).toContain("Unknown agent: NeverReserved");
 	});
 	it("prefers a local one-segment ref over an identically named fleet session", async () => {
 		await withTempDir(async dir => {
@@ -516,4 +619,164 @@ describe("history:// protocol", () => {
 		expect(completions?.some(completion => completion.value === "CompletionAgent")).toBe(true);
 	});
 
+	it("op=search finds a distinctive phrase in a >4MB journal without returning the whole transcript", async () => {
+		await withTempDir(async dir => {
+			const sessionFile = path.join(dir, "big.jsonl");
+			const distinctive = "xyzzy-needle-42-unique-marker";
+			const jsonl = bigSessionFixtureJsonl({ distinctive, duplicate: "plugh-recurring-marker" });
+			expect(Buffer.byteLength(jsonl, "utf-8")).toBeGreaterThan(4 * 1024 * 1024);
+			await Bun.write(sessionFile, jsonl);
+			AgentRegistry.global().register({
+				id: "Big",
+				displayName: "task",
+				kind: "sub",
+				session: null,
+				sessionFile,
+				status: "parked",
+			});
+
+			const resource = await InternalUrlRouter.instance().resolve(
+				`history://Big?op=search&q=${encodeURIComponent(distinctive)}`,
+			);
+
+			expect(resource.contentType).toBe("text/markdown");
+			expect(resource.content).toContain(distinctive);
+			expect(resource.content).toContain("1 match");
+			// Bounded projection: the multi-MB transcript is never echoed back.
+			expect(resource.content.length).toBeLessThan(2000);
+		});
+	}, 20000);
+
+	it("op=search disambiguates duplicate matches by stable record id", async () => {
+		await withTempDir(async dir => {
+			const sessionFile = path.join(dir, "dup.jsonl");
+			const duplicate = "plugh-recurring-marker";
+			await Bun.write(sessionFile, bigSessionFixtureJsonl({ distinctive: "unused-distinctive-marker", duplicate }));
+			AgentRegistry.global().register({
+				id: "Dup",
+				displayName: "task",
+				kind: "sub",
+				session: null,
+				sessionFile,
+				status: "parked",
+			});
+
+			const resource = await InternalUrlRouter.instance().resolve(
+				`history://Dup?op=search&q=${encodeURIComponent(duplicate)}`,
+			);
+
+			expect(resource.content).toContain("2 matches");
+			const ids = [...resource.content.matchAll(/## #(\d+) ·/g)].map(match => match[1]);
+			expect(ids.length).toBe(2);
+			expect(new Set(ids).size).toBe(2);
+		});
+	}, 20000);
+
+	it("op=record reads the exact decoded record a search hit points to", async () => {
+		await withTempDir(async dir => {
+			const sessionFile = path.join(dir, "record.jsonl");
+			const distinctive = "xyzzy-needle-42-unique-marker";
+			await Bun.write(sessionFile, bigSessionFixtureJsonl({ distinctive, duplicate: "plugh-recurring-marker" }));
+			AgentRegistry.global().register({
+				id: "Rec",
+				displayName: "task",
+				kind: "sub",
+				session: null,
+				sessionFile,
+				status: "parked",
+			});
+
+			const search = await InternalUrlRouter.instance().resolve(
+				`history://Rec?op=search&q=${encodeURIComponent(distinctive)}`,
+			);
+			const idMatch = search.content.match(/## #(\d+) ·/);
+			expect(idMatch).not.toBeNull();
+			const id = idMatch![1];
+
+			const record = await InternalUrlRouter.instance().resolve(`history://Rec?op=record&id=${id}`);
+			expect(record.content).toContain("# Records · Rec (parked)");
+			expect(record.content).toContain(`## #${id} · user (user)`);
+			expect(record.content).toContain(distinctive);
+			expect(record.sourcePath).toBe(sessionFile);
+		});
+	}, 20000);
+
+	it("op=search over a live ref reports an explicit miss and leaves bare rendering intact", async () => {
+		AgentRegistry.global().register({
+			id: "Live",
+			displayName: "task",
+			kind: "sub",
+			session: fakeLiveSession([
+				{ role: "user", content: "find the salient beacon token here", timestamp: 1 },
+				{ role: "user", content: "unrelated chatter", timestamp: 2 },
+			]),
+			status: "idle",
+		});
+
+		const hit = await InternalUrlRouter.instance().resolve("history://Live?op=search&q=salient%20beacon");
+		expect(hit.content).toContain("1 match");
+		expect(hit.content).toContain("salient beacon");
+		expect(hit.content).toContain("· user (user)");
+
+		const miss = await InternalUrlRouter.instance().resolve("history://Live?op=search&q=absent-phrase-zzz");
+		expect(miss.content).toContain("No matches for");
+		expect(miss.content).toContain("absent-phrase-zzz");
+
+		const bare = await InternalUrlRouter.instance().resolve("history://Live");
+		expect(bare.content).toContain("# Live (idle)");
+		expect(bare.content).toContain("find the salient beacon token here");
+		expect(bare.content).not.toContain("No matches");
+	});
+
+	it("op=search runs over a fleet session and still enforces scope", async () => {
+		await withTempDir(async dir => {
+			const remoteFile = path.join(dir, "remote.jsonl");
+			await Bun.write(remoteFile, sessionFixtureJsonl());
+			registerFleetPeer("remote-search", remoteFile);
+
+			const resource = await InternalUrlRouter.instance().resolve(
+				"history://remote-search?op=search&q=parked%20hello",
+				fleetContext(),
+			);
+			expect(resource.content).toContain("parked hello");
+			expect(resource.content).toContain("1 match");
+			expect(resource.sourcePath).toBe(remoteFile);
+
+			const unknown = await InternalUrlRouter.instance()
+				.resolve("history://ghost-session?op=search&q=x", fleetContext())
+				.then(
+					() => null,
+					error => error as Error,
+				);
+			expect(unknown?.message).toContain("Unknown agent: ghost-session");
+		});
+	});
+
+	it("rejects malformed query ops and targetless queries", async () => {
+		AgentRegistry.global().register({
+			id: "Q",
+			displayName: "task",
+			kind: "sub",
+			session: fakeLiveSession([{ role: "user", content: "hi", timestamp: 1 }]),
+			status: "idle",
+		});
+
+		const cases: Array<[string, string]> = [
+			["history://Q?op=search", "requires a non-empty 'q'"],
+			["history://Q?op=bogus", "Unsupported history:// op: bogus"],
+			["history://Q?op=record", "requires 'id="],
+			["history://Q?op=record&id=-1", "non-negative"],
+			["history://?op=search&q=hi", "query ops require a target"],
+		];
+		for (const [input, fragment] of cases) {
+			const error = await InternalUrlRouter.instance()
+				.resolve(input)
+				.then(
+					() => null,
+					err => err as Error,
+				);
+			expect(error).toBeInstanceOf(Error);
+			expect(error?.message).toContain(fragment);
+		}
+	});
 });

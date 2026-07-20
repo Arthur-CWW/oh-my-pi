@@ -22,7 +22,6 @@ import { BASH_DEFAULT_PREVIEW_LINES } from "../../tools/bash";
 import { EVAL_DEFAULT_PREVIEW_LINES } from "../../tools/eval";
 import { isWaitingPollDetails } from "../../tools/job";
 import {
-	formatArgsInline,
 	JSON_TREE_MAX_DEPTH_COLLAPSED,
 	JSON_TREE_MAX_DEPTH_EXPANDED,
 	JSON_TREE_MAX_LINES_COLLAPSED,
@@ -34,19 +33,25 @@ import {
 import { formatExpandHint, replaceTabs, resolveImageOptions, truncateToWidth } from "../../tools/render-utils";
 import { toolRenderers } from "../../tools/renderers";
 import { TODO_STRIKE_TOTAL_FRAMES } from "../../tools/todo";
-import { isFramedBlockComponent, renderStatusLine } from "../../tui";
-import { sanitizeWithOptionalSixelPassthrough } from "../../utils/sixel";
-import { renderDiff } from "./diff";
-import { createToolRenderState, deriveToolDisplayMemoKey, syncToolRenderState, ToolDisplayMemo, type ToolRenderState } from "./tool-execution-render-state";
 import { getArgsWithStreamedTextInput } from "../../tools/tool-detail-render";
 import {
 	composeToolHeadline,
 	formatToolArgsLines,
 	phaseStatus,
-	ToolHeadlineMemo,
 	type ToolCallPhase,
+	ToolHeadlineMemo,
 } from "../../tools/tool-headline";
+import { isFramedBlockComponent, renderStatusLine } from "../../tui";
+import { sanitizeWithOptionalSixelPassthrough } from "../../utils/sixel";
 import { DEFAULT_TRANSCRIPT_DISPLAY_CONTEXT, type TranscriptDisplayContext } from "../transcript-display";
+import { renderDiff } from "./diff";
+import {
+	createToolRenderState,
+	deriveToolDisplayMemoKey,
+	syncToolRenderState,
+	ToolDisplayMemo,
+	type ToolRenderState,
+} from "./tool-execution-render-state";
 
 /**
  * Drop trailing removal/hunk-header lines that appear in a streaming diff
@@ -709,15 +714,16 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 	}
 
 	#rebuildDisplay(): void {
-		this.#headlinePhase = this.#sealed && !this.#result
-			? "interrupted"
-			: this.#isPartial
-				? this.#argsComplete
-					? "running"
-					: "pending"
-				: this.#result?.isError
-					? "error"
-					: "ok";
+		this.#headlinePhase =
+			this.#sealed && !this.#result
+				? "interrupted"
+				: this.#isPartial
+					? this.#argsComplete
+						? "running"
+						: "pending"
+					: this.#result?.isError
+						? "error"
+						: "ok";
 		this.#renderState.headline = this.#headlineMemo.get(
 			this.#toolName,
 			this.#args,
@@ -929,9 +935,13 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 			this.#args !== undefined &&
 			((this.#tool && (this.#tool.renderCall || this.#tool.renderResult)) || this.#toolName in toolRenderers)
 		) {
-			const argLines = formatToolArgsLines(this.#args);
+			const argLines = formatToolArgsLines(this.#args, this.#expanded ? "expanded" : "collapsed");
 			this.#contentBox.addChild(
-				new Text(["", theme.fg("dim", "Args"), ...argLines.map(line => `  ${theme.fg("dim", line)}`)].join("\n"), 0, 0),
+				new Text(
+					["", theme.fg("dim", "Args"), ...argLines.map(line => `  ${theme.fg("dim", line)}`)].join("\n"),
+					0,
+					0,
+				),
 			);
 		}
 
@@ -1101,7 +1111,7 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 		if (this.#expanded && this.#args !== undefined) {
 			lines.push("");
 			lines.push(theme.fg("dim", "Args"));
-			for (const line of formatToolArgsLines(this.#args)) {
+			for (const line of formatToolArgsLines(this.#args, this.#expanded ? "expanded" : "collapsed")) {
 				lines.push(`  ${theme.fg("dim", line)}`);
 			}
 			lines.push("");
@@ -1146,7 +1156,9 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 		for (const line of displayLines) {
 			// Expanded is an explicit user request for the full output: no width clamp
 			// (wide diagrams/tables would be silently maimed at 80 cols).
-			lines.push(theme.fg("toolOutput", this.#expanded ? replaceTabs(line) : truncateToWidth(replaceTabs(line), 80)));
+			lines.push(
+				theme.fg("toolOutput", this.#expanded ? replaceTabs(line) : truncateToWidth(replaceTabs(line), 80)),
+			);
 		}
 
 		if (outputLines.length > maxOutputLines) {

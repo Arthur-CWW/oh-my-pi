@@ -314,44 +314,8 @@ describe("InteractiveMode goal mode integration", () => {
 		expect(await toolNamesFor(harness)).toContain("goal");
 	});
 
-	it("mutates the goal token budget via /goal budget without resetting accumulated usage", async () => {
-		await harness.mode.handleGoalModeCommand("Ship the release");
-		// Seed accumulated usage by driving the runtime directly — equivalent to a turn's flush.
-		const goal = harness.session.getGoalModeState()?.goal;
-		if (!goal) throw new Error("expected active goal");
-		goal.tokensUsed = 42;
-		goal.timeUsedSeconds = 5;
-
-		await harness.mode.handleGoalModeCommand("budget 123");
-
-		const after = harness.session.getGoalModeState();
-		expect(after?.goal.tokenBudget).toBe(123);
-		// Accumulated counters are preserved across the mutation.
-		expect(after?.goal.tokensUsed).toBe(42);
-		expect(after?.goal.timeUsedSeconds).toBe(5);
-
-		await harness.mode.handleGoalModeCommand("budget off");
-		expect(harness.session.getGoalModeState()?.goal.tokenBudget).toBeUndefined();
-		expect(harness.session.getGoalModeState()?.goal.tokensUsed).toBe(42);
-	});
-
-	it("refuses /goal budget while only a paused goal exists (fix #5)", async () => {
-		await harness.mode.handleGoalModeCommand("Ship the release");
-		vi.spyOn(harness.mode, "showHookSelector").mockResolvedValue("Pause");
-		await harness.mode.handleGoalModeCommand();
-		expect(harness.mode.goalModePaused).toBe(true);
-		const showWarning = vi.spyOn(harness.mode, "showWarning");
-
-		await harness.mode.handleGoalModeCommand("budget 99");
-
-		expect(showWarning).toHaveBeenCalledWith("Resume the goal before adjusting the budget.");
-		// Mutation must not have run while the goal is paused.
-		expect(harness.session.getGoalModeState()?.goal.tokenBudget).toBeUndefined();
-	});
-
 	it("returns the completion report from the goal tool and exits goal mode before the next turn rebuild", async () => {
 		await harness.mode.handleGoalModeCommand("Ship the release");
-		await harness.mode.handleGoalModeCommand("budget 50");
 		const appendCustomEntry = vi.spyOn(harness.session.sessionManager, "appendCustomEntry");
 		const goalTool = (await createTools(harness.toolSession, harness.session.getActiveToolNames())).find(
 			tool => tool.name === "goal",
@@ -361,12 +325,8 @@ describe("InteractiveMode goal mode integration", () => {
 		}
 
 		const result = await goalTool.execute("call-1", { op: "complete" });
-		const completionText = JSON.stringify(result.content);
 
-		expect(result.details?.completionBudgetReport).toBe(
-			"Goal achieved. Report final budget usage to the user: tokens used: 0 of 50.",
-		);
-		expect(completionText).toContain("Goal achieved. Report final budget usage to the user: tokens used: 0 of 50.");
+		expect(result.details?.completionUsageReport).toBeNull();
 		expect(harness.session.getGoalModeState()?.mode).toBe("exiting");
 		// The tool remains callable in the in-flight turn; completion only clears
 		// active goal state, not the already-active tool set.
@@ -387,7 +347,6 @@ describe("InteractiveMode goal mode integration", () => {
 			"goal-completed",
 			expect.objectContaining({
 				objective: "Ship the release",
-				tokenBudget: 50,
 				tokensUsed: 0,
 			}),
 		);

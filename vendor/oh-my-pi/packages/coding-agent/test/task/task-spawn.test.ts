@@ -29,7 +29,11 @@ const taskAgent: AgentDefinition = {
 	source: "bundled",
 };
 
-function createSession(options: { manager?: AsyncJobManager; settings?: Record<string, unknown>; agentId?: string }): ToolSession {
+function createSession(options: {
+	manager?: AsyncJobManager;
+	settings?: Record<string, unknown>;
+	agentId?: string;
+}): ToolSession {
 	return {
 		cwd: "/tmp",
 		hasUI: false,
@@ -339,7 +343,6 @@ describe("task spawn routing", () => {
 		expect(job.errorText).not.toContain('op:"send", to:"TerminatedWorker"');
 	});
 
-
 	it("derives a supervised group snapshot from nested registry parentage", async () => {
 		vi.spyOn(discoveryModule, "discoverAgents").mockResolvedValue({
 			agents: [taskAgent],
@@ -408,5 +411,66 @@ describe("task spawn routing", () => {
 		expect(secondJob.status).toBe("completed");
 	});
 
-});
+	it("reserves a starting identity before the gated job body builds a session", async () => {
+		vi.spyOn(discoveryModule, "discoverAgents").mockResolvedValue({
+			agents: [taskAgent],
+			projectAgentsDir: null,
+		});
+		const gate = deferred();
+		vi.spyOn(executorModule, "runSubprocess").mockImplementation(async options => {
+			await gate.promise;
+			const id = options.id ?? "?";
+			registerRevivableParked(id);
+			return makeResult(id);
+		});
 
+		const manager = createManager();
+		const tool = await TaskTool.create(createSession({ manager, agentId: "Main" }));
+		const result = await tool.execute("tc-starting", {
+			agent: "task",
+			id: "Queued",
+			assignment: "Do the queued thing.",
+		} as TaskParams);
+
+		// The tool has returned while the job body is still gated inside the
+		// executor, so the child has not built a session yet — but its identity
+		// is reserved as durable `starting` work rather than reported unknown.
+		const ref = AgentRegistry.global().get("Queued");
+		expect(ref).toBeDefined();
+		expect(ref?.starting).toBe(true);
+		expect(ref?.session).toBeNull();
+		expect(ref?.status).toBe("running");
+		expect(AgentRegistry.global().get("NeverSpawned")).toBeUndefined();
+
+		gate.resolve();
+		await manager.getJob(result.details!.async!.jobId)!.promise;
+		// Coming live clears the reserve flag (here the executor parks it).
+		expect(AgentRegistry.global().get("Queued")?.starting).toBeFalsy();
+	});
+
+	it("finalizes a failed-startup identity as terminal, keeping it inspectable not unknown", async () => {
+		vi.spyOn(discoveryModule, "discoverAgents").mockResolvedValue({
+			agents: [taskAgent],
+			projectAgentsDir: null,
+		});
+		vi.spyOn(executorModule, "runSubprocess").mockImplementation(async () => {
+			throw new Error("provider blocked before the session was built");
+		});
+
+		const manager = createManager();
+		const tool = await TaskTool.create(createSession({ manager, agentId: "Main" }));
+		const result = await tool.execute("tc-start-fail", {
+			agent: "task",
+			id: "StartupFailer",
+			assignment: "Attempt the work.",
+		} as TaskParams);
+		await manager.getJob(result.details!.async!.jobId)!.promise;
+
+		// The reserved identity is never lost: it stays registered (known) and
+		// terminal (aborted), not a phantom `starting` row and not unknown.
+		const ref = AgentRegistry.global().get("StartupFailer");
+		expect(ref).toBeDefined();
+		expect(ref?.status).toBe("aborted");
+		expect(ref?.starting).toBeFalsy();
+	});
+});

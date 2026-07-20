@@ -40,8 +40,8 @@ export const inspectImageToolRenderer = {
 		// Call is at most a status line plus a one-line question — too small to box.
 		// The container renders a lone Text cleanly with no chrome.
 		if (!question) return new Text(header, 0, 0);
-		const tree = ` ${uiTheme.fg("dim", uiTheme.tree.last)} ${questionLine(question, uiTheme)}`;
-		return new Text(`${header}\n${tree}`, 0, 0);
+		const questionRow = `    ${questionLine(question, uiTheme)}`;
+		return new Text(`${header}\n${questionRow}`, 0, 0);
 	},
 
 	renderResult(

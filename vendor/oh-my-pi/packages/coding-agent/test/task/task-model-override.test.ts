@@ -55,7 +55,7 @@ const modelRegistry = {
 function createSession(
 	manager: AsyncJobManager,
 	options: {
-		authStorage?: { fetchUsageReports: () => Promise<unknown> };
+		authStorage?: { fetchUsageReports: (options?: { signal?: AbortSignal }) => Promise<unknown> };
 		sessionManager?: SessionManager;
 	} = {},
 ): ToolSession {
@@ -98,8 +98,22 @@ function makeResult(id: string, overrides: Partial<SingleResult> = {}): SingleRe
 	};
 }
 
+async function awaitBeforeTestDeadline<T>(pending: Promise<T>): Promise<T> {
+	const guarded = Promise.withResolvers<T>();
+	const timer = setTimeout(() => {
+		guarded.reject(new Error("Task execution did not settle within 5 seconds"));
+	}, 5_000);
+	pending.then(guarded.resolve, guarded.reject);
+	try {
+		return await guarded.promise;
+	} finally {
+		clearTimeout(timer);
+	}
+}
+
 describe("task model override receipts", () => {
 	const managers: AsyncJobManager[] = [];
+	const sessionManagers: SessionManager[] = [];
 
 	function createManager(): AsyncJobManager {
 		const manager = new AsyncJobManager({ onJobComplete: () => {} });
@@ -107,10 +121,19 @@ describe("task model override receipts", () => {
 		return manager;
 	}
 
+	function createSessionManager(path: string): SessionManager {
+		const manager = SessionManager.inMemory(path);
+		sessionManagers.push(manager);
+		return manager;
+	}
+
 	afterEach(async () => {
 		vi.restoreAllMocks();
 		for (const manager of managers.splice(0)) {
 			await manager.dispose({ timeoutMs: 1000 });
+		}
+		for (const sessionManager of sessionManagers.splice(0)) {
+			await sessionManager.close();
 		}
 		AgentLifecycleManager.resetGlobalForTests();
 		AgentRegistry.resetGlobalForTests();
@@ -194,7 +217,7 @@ describe("task model override receipts", () => {
 				if (fetchOutcome === "rejects") throw new Error("usage service unavailable");
 				return [];
 			});
-			const sessionManager = SessionManager.inMemory("/tmp/task-model-override-quota");
+			const sessionManager = createSessionManager("/tmp/task-model-override-quota");
 			const now = Date.now();
 			sessionManager.appendCustomEntry(
 				QUOTA_ADMISSION_CUSTOM_TYPE,
@@ -238,6 +261,114 @@ describe("task model override receipts", () => {
 			expect(runSpy).not.toHaveBeenCalled();
 		},
 	);
+
+	it("admits and runs a background task after a non-cooperative usage fetch reaches its deadline", async () => {
+		vi.spyOn(discoveryModule, "discoverAgents").mockResolvedValue({ agents: [taskAgent], projectAgentsDir: null });
+		let runStartedAtMs: number | undefined;
+		const runSpy = vi.spyOn(executorModule, "runSubprocess").mockImplementation(async options => {
+			runStartedAtMs = performance.now();
+			return makeResult(options.id ?? "?");
+		});
+		const usageFetch = Promise.withResolvers<never>();
+		const fetchUsageReports = vi.fn((_options?: { signal?: AbortSignal }) => usageFetch.promise);
+		const sessionManager = createSessionManager("/tmp/task-model-override-quota-deadline");
+		const now = Date.now();
+		sessionManager.appendCustomEntry(
+			QUOTA_ADMISSION_CUSTOM_TYPE,
+			createQuotaAdmissionStateRecord(
+				{
+					samples: [
+						{
+							poolId: "anthropic:healthy",
+							windowId: "five-hour",
+							modelId: "claude-sonnet-4-5",
+							observedAtMs: now,
+							remainingPercent: 80,
+							resetAtMs: now + 3_600_000,
+							emaBurnPerHour: 0,
+						},
+					],
+					decisions: [],
+				},
+				now,
+			),
+		);
+
+		const manager = createManager();
+		const tool = await TaskTool.create(createSession(manager, { authStorage: { fetchUsageReports }, sessionManager }));
+		const unhandled: unknown[] = [];
+		const onUnhandled = (reason: unknown) => unhandled.push(reason);
+		const lateUsageError = new Error("usage service rejected after admission deadline");
+		let usageFetchSettled = false;
+		const rejectUsageFetch = (): void => {
+			if (usageFetchSettled) return;
+			usageFetchSettled = true;
+			usageFetch.reject(lateUsageError);
+		};
+		process.on("unhandledRejection", onUnhandled);
+		try {
+			const startedAtMs = performance.now();
+			const result = await awaitBeforeTestDeadline(
+				tool.execute("tc-quota-fetch-deadline", {
+					agent: "task",
+					id: "QuotaDeadline",
+					model: "anthropic/claude-sonnet-4-5",
+					assignment: "Do the thing.",
+				} as TaskParams),
+			);
+
+			expect(fetchUsageReports).toHaveBeenCalledTimes(1);
+			expect(fetchUsageReports.mock.calls[0]?.[0]?.signal).toBeUndefined();
+			expect(getFirstText(result)).toContain("Spawned agent `QuotaDeadline`");
+			expect(manager.getAllJobs()).toHaveLength(1);
+
+			const jobId = result.details?.async?.jobId;
+			expect(jobId).toBeDefined();
+			if (jobId) await manager.getJob(jobId)?.promise;
+			expect(runSpy).toHaveBeenCalledTimes(1);
+			expect(runStartedAtMs).toBeGreaterThanOrEqual(startedAtMs + 1_900);
+
+			rejectUsageFetch();
+			await Bun.sleep(10);
+			expect(unhandled).toEqual([]);
+		} finally {
+			if (fetchUsageReports.mock.calls.length > 0) {
+				rejectUsageFetch();
+				await Bun.sleep(10);
+			}
+			process.off("unhandledRejection", onUnhandled);
+		}
+	});
+
+	it("does not fetch usage or start a job when the caller is already aborted", async () => {
+		vi.spyOn(discoveryModule, "discoverAgents").mockResolvedValue({ agents: [taskAgent], projectAgentsDir: null });
+		const runSpy = vi
+			.spyOn(executorModule, "runSubprocess")
+			.mockImplementation(async options => makeResult(options.id ?? "?"));
+		const fetchUsageReports = vi.fn(async () => {
+			throw new Error("usage fetch must not start for a pre-aborted caller");
+		});
+		const manager = createManager();
+		const tool = await TaskTool.create(createSession(manager, { authStorage: { fetchUsageReports } }));
+		const controller = new AbortController();
+		controller.abort();
+
+		const pending = tool.execute(
+			"tc-quota-fetch-caller-abort",
+			{
+				agent: "task",
+				id: "QuotaCallerAbort",
+				model: "anthropic/claude-sonnet-4-5",
+				assignment: "Do the thing.",
+			} as TaskParams,
+			controller.signal,
+		);
+
+		await expect(awaitBeforeTestDeadline(pending)).rejects.toMatchObject({ name: "AbortError" });
+		expect(fetchUsageReports).toHaveBeenCalledTimes(0);
+		expect(manager.getAllJobs()).toHaveLength(0);
+		expect(runSpy).not.toHaveBeenCalled();
+	});
 
 	it("fails an invalid per-spawn model override before scheduling a job", async () => {
 		vi.spyOn(discoveryModule, "discoverAgents").mockResolvedValue({ agents: [taskAgent], projectAgentsDir: null });

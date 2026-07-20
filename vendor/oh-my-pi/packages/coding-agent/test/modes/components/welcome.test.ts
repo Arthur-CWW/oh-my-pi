@@ -36,3 +36,34 @@ describe("WelcomeComponent tips", () => {
 		expect(welcomeRegular.tip).toBeDefined();
 	});
 });
+
+describe("WelcomeComponent rendering", () => {
+	beforeAll(async () => {
+		await Settings.init({ inMemory: true });
+		await initTheme(false);
+	});
+
+	it("renders the welcome panel without an enclosing box frame", () => {
+		const welcome = new WelcomeComponent("1.2.3", "test-model", "test-provider", [
+			{ name: "recent-session-name", timeAgo: "2h ago" },
+		]);
+		const plain = welcome.render(100).map(line => Bun.stripANSI(line));
+		const joined = plain.join("\n");
+
+		// No box-frame corners or tee-joins anywhere in the panel…
+		expect(joined).not.toMatch(/[┌┐└┘╭╮╰╯┬┴├┤┼]/);
+		// …and no enclosing side verticals: content rows never start or end with a
+		// vertical bar (a single middle divider between the two columns is allowed).
+		for (const line of plain) {
+			expect(line.startsWith("│")).toBe(false);
+			expect(line.endsWith("│")).toBe(false);
+		}
+
+		// Heading, both columns, and the recent-session entry are preserved.
+		expect(joined).toContain("Welcome back!");
+		expect(joined).toContain("v1.2.3");
+		expect(joined).toContain("test-model");
+		expect(joined).toContain("test-provider");
+		expect(joined).toContain("recent-session-name");
+	});
+});

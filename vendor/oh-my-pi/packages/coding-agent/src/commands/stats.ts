@@ -1,29 +1,39 @@
 /**
  * View usage statistics dashboard.
  */
-import { Command, Flags } from "@oh-my-pi/pi-utils/cli";
+import { Effect } from "effect";
+import { Command, Flag } from "effect/unstable/cli";
 import { runStatsCommand, type StatsCommandArgs } from "../cli/stats-cli";
 import { initTheme } from "../modes/theme/theme";
 
-export default class Stats extends Command {
-	static description = "View usage statistics";
+export default Command.make(
+	"stats",
+	{
+		port: Flag.integer("port").pipe(
+			Flag.withAlias("p"),
+			Flag.withDescription("Port for the dashboard server"),
+			Flag.withDefault(3847),
+		),
+		json: Flag.boolean("json").pipe(
+			Flag.withAlias("j"),
+			Flag.withDescription("Output stats as JSON"),
+			Flag.withDefault(false),
+		),
+		summary: Flag.boolean("summary").pipe(
+			Flag.withAlias("s"),
+			Flag.withDescription("Print summary to console"),
+			Flag.withDefault(false),
+		),
+	},
+	config =>
+		Effect.promise(async () => {
+			const cmd: StatsCommandArgs = {
+				port: config.port,
+				json: config.json,
+				summary: config.summary,
+			};
 
-	static flags = {
-		port: Flags.integer({ char: "p", description: "Port for the dashboard server", default: 3847 }),
-		json: Flags.boolean({ char: "j", description: "Output stats as JSON", default: false }),
-		summary: Flags.boolean({ char: "s", description: "Print summary to console", default: false }),
-	};
-
-	async run(): Promise<void> {
-		const { flags } = await this.parse(Stats);
-
-		const cmd: StatsCommandArgs = {
-			port: flags.port,
-			json: flags.json,
-			summary: flags.summary,
-		};
-
-		await initTheme();
-		await runStatsCommand(cmd);
-	}
-}
+			await initTheme();
+			await runStatsCommand(cmd);
+		}),
+).pipe(Command.withDescription("View usage statistics"));

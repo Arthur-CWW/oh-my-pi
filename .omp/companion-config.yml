@@ -7,6 +7,7 @@ serviceTier: none
 
 modelRoles:
   default: openai-codex/gpt-5.6-sol:high
+  orchestrator: openai-codex/gpt-5.6-sol:high
   smol: openai-codex/gpt-5.6-luna:xhigh
   task: openai-codex/gpt-5.6-luna:xhigh
   slow: openai-codex/gpt-5.6-sol:high
@@ -14,7 +15,7 @@ modelRoles:
   advisor: openai-codex/gpt-5.6-sol:high
   designer: anthropic/claude-opus-4-6
   # inspect_image uses this provider-qualified capability role strictly.
-  vision: google-antigravity/gemini-3.5-flash
+  vision: openai-codex/gpt-5.6-luna
 
 advisor:
   enabled: true

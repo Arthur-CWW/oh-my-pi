@@ -176,7 +176,7 @@ describe("streaming edit preview height (stable, full tail window)", () => {
 		const bigLines = bigNew.split("\n");
 		const bigPartials = bigLines.map((_v, i) => bigLines.slice(0, i + 1).join("\n"));
 
-		const uiStub = { requestRender() {} } as unknown as TUI;
+		const uiStub = { requestRender() {}, requestComponentRender() {} } as unknown as TUI;
 		const tool = { mode: "replace" } as unknown as AgentTool;
 		const component = new ToolExecutionComponent(
 			"edit",
@@ -254,6 +254,13 @@ describe("streaming edit preview height (stable, full tail window)", () => {
 			"+  return finalValue;",
 			" }",
 		].join("\n");
+		const finalBlock = [
+			"function foo() {",
+			"  const x = 1;",
+			`  const finalValue = "${finalSentinel}";`,
+			"  return finalValue;",
+			"}",
+		].join("\n");
 		const { component, term, tui, scheduler } = makeTuiComponent();
 
 		try {
@@ -278,6 +285,7 @@ describe("streaming edit preview height (stable, full tail window)", () => {
 					}
 				}),
 				() => {
+					component.updateArgs({ path: file, edits: [{ old_text: oldBlock, new_text: finalBlock }] });
 					component.setArgsComplete();
 				},
 				() => {
@@ -382,16 +390,15 @@ describe("streaming tool call preview height (bounded across renderers)", () => 
 		}
 	}
 
-	test("framed inline tool previews span the full tool width", () => {
+	test("inline tool previews render unframed across the full tool width", () => {
 		const width = 80;
-		const { lines } = renderPending("bash", { command: "echo hi" });
+		const { lines, text } = renderPending("bash", { command: "echo hi" });
 		const strippedLines = lines.map(line => Bun.stripANSI(line));
-		const topBorder = strippedLines.find(line => line.includes(activeTheme.boxSharp.topLeft));
-
-		expect(topBorder).toBeDefined();
-		expect(topBorder?.[0]).toBe(activeTheme.boxSharp.topLeft);
-		expect(topBorder?.endsWith(activeTheme.boxSharp.topRight)).toBe(true);
-		expect(visibleWidth(topBorder ?? "")).toBe(width);
+		// No frame rule caps the preview; the unframed block still spans the width.
+		expect(strippedLines.some(line => visibleWidth(line) === width)).toBe(true);
+		expect(strippedLines.every(line => visibleWidth(line) <= width)).toBe(true);
+		expect(strippedLines.some(line => line.startsWith(activeTheme.boxSharp.horizontal))).toBe(false);
+		expect(text).toContain("echo hi");
 	});
 
 	test("bash/ssh pending previews stay short even with very long multiline args", () => {

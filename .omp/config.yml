@@ -1,21 +1,22 @@
 setupVersion: 1
-modelRoles:
-  default: openai-codex/gpt-5.6-sol:medium
+modelRoles: 
+  default: openai-codex/gpt-5.6-sol:high
+  orchestrator: openai-codex/gpt-5.6-sol:high
   smol: openai-codex/gpt-5.6-luna:xhigh
   research: openai-codex/gpt-5.6-luna:xhigh
   authenticated_web: openai-codex/gpt-5.6-luna:xhigh
-  maintenance: anthropic/claude-opus-4-8:high
-  advisor: anthropic/claude-opus-4-8:high
-  plan: anthropic/claude-opus-4-8:high
-  slow: anthropic/claude-opus-4-8:high
-  designer: anthropic/claude-opus-4-8:high
+  maintenance: openai-codex/gpt-5.6-sol:high
+  advisor: openai-codex/gpt-5.6-sol:high
+  plan: openai-codex/gpt-5.6-sol:high
+  slow: openai-codex/gpt-5.6-sol:high
+  designer: anthropic/claude-opus-4-6:high
   vision: openai-codex/gpt-5.6-luna
-  implementer: anthropic/claude-opus-4-8:high
+  implementer: openai-codex/gpt-5.6-sol:high
   qa: openai-codex/gpt-5.6-luna:xhigh
-  operator: anthropic/claude-opus-4-8:high
-  synthesizer: anthropic/claude-opus-4-8:high
-  task: anthropic/claude-opus-4-8:high
-extensions:
+  operator: openai-codex/gpt-5.6-sol:high
+  synthesizer: openai-codex/gpt-5.6-sol:high
+  task: openai-codex/gpt-5.6-sol:high
+extensions: 
   - /Users/arthur/agents/packages/web-access/src/index.ts
   - /Users/arthur/.omp/agent/extensions/cmux-omp-session.ts
   - /Users/arthur/agents/packages/control-plane
@@ -26,90 +27,90 @@ extensions:
   - /Users/arthur/agents/packages/stema
   - /Users/arthur/agents/packages/device-control
   - /Users/arthur/agents/extensions/browser-automation-guard.ts
-skills:
-  ignoredSkills:
+skills: 
+  ignoredSkills: 
     - computer-use
     - gmcli
     - orca-cli
     - orchestration
-  customDirectories:
+  customDirectories: 
     - /Users/arthur/agents/skills/browser
     - /Users/arthur/agents/skills/core
     - /Users/arthur/agents/skills/fleet
     - /Users/arthur/agents/vendor/badlogic/pi-skills
     - /Users/arthur/agents/packages/stema/skills
-retry:
+retry: 
   enabled: true
   modelFallback: true
   fallbackRevertPolicy: cooldown-expiry
 serviceTier: none
-auth:
+auth: 
   codexUsageReset: manual
-codexResets:
+codexResets: 
   autoRedeem: "no"
 hideThinkingBlock: false
 doubleEscapeAction: tree
-power:
+power: 
   sleepPrevention: system
-renderMermaid:
+renderMermaid: 
   enabled: true
-inspect_image:
+inspect_image: 
   enabled: true
-task:
+task: 
   eager: always
   enableLsp: true
   maxConcurrency: 8
   maxLiveChildren: 6
-  isolation:
+  isolation: 
     mode: apfs
   softRequestBudget: 80
   showResolvedModelBadge: true
   maxRecursionDepth: 3
-  agentModelOverrides:
+  agentModelOverrides: 
     explore: openai-codex/gpt-5.6-luna:xhigh
     librarian: openai-codex/gpt-5.6-luna:xhigh
     reviewer: openai-codex/gpt-5.6-luna:xhigh
-  orchestratorOnlyModels:
+  orchestratorOnlyModels: 
     - "*fable*"
     - "*haiku*"
-  autoqa:
+  autoqa: 
     consent: granted
-  disabledAgents:
+  disabledAgents: 
     - operator
-browser:
+browser: 
   maxTabsPerSession: 2
-quotaAdmission:
+quotaAdmission: 
   enabled: false
-providers:
+providers: 
   webSearch: kagi
-github:
+github: 
   enabled: true
-vault:
+vault: 
   enabled: true
-theme:
+theme: 
   light: light-solarized
   dark: dark-gruvbox
 colorBlindMode: true
-display:
+display: 
   showTokenUsage: true
-images:
+images: 
   blockImages: false
-editor:
+editor: 
   vim: true
 steeringMode: all
-disabledProviders:
+disabledProviders: 
   - moonshot
-advisor:
+advisor: 
   enabled: false
   syncBacklog: "off"
   subagents: true
 symbolPreset: nerd
-statusLine:
+statusLine: 
   preset: compact
   separator: powerline-thin
-autolearn:
+autolearn: 
   enabled: false
-compaction:
+compaction: 
   enabled: true
   strategy: context-full
   thresholdPercent: -1
@@ -120,6 +121,18 @@ compaction:
   autoContinue: true
 interruptMode: immediate
 defaultThinkingLevel: auto
-dev:
-  autoqa:
+dev: 
+  autoqa: 
     consent: denied
+disabledExtensions: 
+  - skill:writing-without-ai-tells
+  - skill:gmcli
+  - skill:gdcli
+  - skill:gccli
+  - skill:cmux-browser-drive
+  - skill:browser-control
+  - extension-module:cmux-omp-session
+  - extension-module:orca-agent-status
+  - extension-module:orca-prefill
+  - extension-module:orca-titlebar-spinner
+  - skill:background-browser-automation

@@ -27,6 +27,7 @@ Status is epistemic, not a freshness timestamp: `live` is current guidance or an
 - `model-bench-acceptance.md` — Completed desktop MediaPipe/face-alignment/RTMPose acceptance matrix; **evidence-of-record**.
 - `motion-evidence-card.md` — Published Apple Vision body/hand evidence card and declared calibration gap; **evidence-of-record** (its “GPU processor being built” sentence is superseded by `gpu-pose-batch.md`).
 - `motion-filter-tuning.md` — Deterministic filter sweep and guarded production tuning evidence; **evidence-of-record** (pre-guard beta10 selection is superseded by the guarded beta1 addendum).
+- `multimedia-motion-learning-atlas.md` — Progressive atlas of motion geometry, clocks, retargeting, correspondence, animation, and Rust invariants, with a Primer-ready learning graph; **live**.
 - `open-realtime-models-2026-07.md` — Size/license/hardware gate for Smart Turn, Moshi, PersonaPlex, Qwen3-Omni, Covo-Audio, Step-Audio, and MiMo-Audio; **live** (Smart Turn CPU is the only first-download candidate; larger weights await a qualified Ubuntu host).
 - `overnight-program-2026-07-15.md` — Living wave ledger, defaults, blockers, and wave-3 backlog; **live** (its Wave-1 beta10 row is superseded by the Wave-2 beta1 ruling in the same doc).
 - `overnight-program-2026-07-16.md` — Living overnight-2 wave ledger for the 2026-07-16 program; **live**.
@@ -36,6 +37,7 @@ Status is epistemic, not a freshness timestamp: `live` is current guidance or an
 - `reference-avatar-pipeline.md` — Blessed resumable VRoid-topology/Perfect Sync production pipeline and gates; **live**.
 - `retarget-3d-evaluation.md` — Offline ten-clip direct-3D vs shipped 2D+depth-prior retarget evaluation; **evidence-of-record** (verdict: direct 3D stays shadow-only).
 - `rotejin-effect.md` — PuruPuru PNGTuber body reference and future hot-swap direction; **live**.
+- `rust-pose-workbench-plan.md` — Rust-first retarget core, causal pose-reviewer workbench, cutover stages, proof plan, and graphics/animation learning path; **live**.
 - `sota-pose-transfer.md` — GVHMR-first SOTA pose-transfer decision and desktop dispatch constraints; **live** (still blocked on licensed inputs).
 - `tts-stt-survey.md` — Early local TTS/streaming-STT voice-lane survey; **historical**.
 - `video-motion-pipeline.md` — Semantic video-motion pilot and deferred joint-level extraction plan; **historical**.

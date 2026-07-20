@@ -1,60 +1,53 @@
 /**
  * Manage SSH host configurations.
  */
-import { Args, Command, Flags } from "@oh-my-pi/pi-utils/cli";
+import { Effect, Option } from "effect";
+import { Argument, Command, Flag } from "effect/unstable/cli";
 import { runSSHCommand, type SSHAction, type SSHCommandArgs } from "../cli/ssh-cli";
 import { initTheme } from "../modes/theme/theme";
 
-const ACTIONS: SSHAction[] = ["add", "remove", "list"];
+const ACTIONS: readonly SSHAction[] = ["add", "remove", "list"];
 
-export default class SSH extends Command {
-	static description = "Manage SSH host configurations";
+export default Command.make(
+	"ssh",
+	{
+		action: Argument.choice("action", ACTIONS).pipe(
+			Argument.withDescription("SSH action"),
+			Argument.withDefault("list"),
+		),
+		targets: Argument.string("targets").pipe(
+			Argument.withDescription("Host name or arguments"),
+			Argument.variadic(),
+		),
+		json: Flag.boolean("json").pipe(Flag.withDescription("Output JSON")),
+		host: Flag.optional(Flag.string("host").pipe(Flag.withDescription("Host address"))),
+		user: Flag.optional(Flag.string("user").pipe(Flag.withDescription("Username"))),
+		port: Flag.optional(Flag.string("port").pipe(Flag.withDescription("Port number"))),
+		key: Flag.optional(Flag.string("key").pipe(Flag.withDescription("Identity key path"))),
+		desc: Flag.optional(Flag.string("desc").pipe(Flag.withDescription("Host description"))),
+		compat: Flag.boolean("compat").pipe(Flag.withDescription("Enable compatibility mode")),
+		scope: Flag.optional(
+			Flag.choice("scope", ["project", "user"] as const).pipe(Flag.withDescription("Config scope (project|user)")),
+		),
+	},
+	config =>
+		Effect.promise(async () => {
+			const cmd: SSHCommandArgs = {
+				action: config.action,
+				args: [...config.targets],
+				flags: {
+					json: config.json,
+					host: Option.getOrUndefined(config.host),
+					user: Option.getOrUndefined(config.user),
+					port: Option.getOrUndefined(config.port),
+					key: Option.getOrUndefined(config.key),
+					desc: Option.getOrUndefined(config.desc),
+					compat: config.compat,
+					scope: Option.getOrUndefined(config.scope),
+				},
+			};
 
-	static args = {
-		action: Args.string({
-			description: "SSH action",
-			required: false,
-			options: ACTIONS,
+			await initTheme();
+			await runSSHCommand(cmd);
 		}),
-		targets: Args.string({
-			description: "Host name or arguments",
-			required: false,
-			multiple: true,
-		}),
-	};
-
-	static flags = {
-		json: Flags.boolean({ description: "Output JSON" }),
-		host: Flags.string({ description: "Host address" }),
-		user: Flags.string({ description: "Username" }),
-		port: Flags.string({ description: "Port number" }),
-		key: Flags.string({ description: "Identity key path" }),
-		desc: Flags.string({ description: "Host description" }),
-		compat: Flags.boolean({ description: "Enable compatibility mode" }),
-		scope: Flags.string({ description: "Config scope (project|user)", options: ["project", "user"] }),
-	};
-
-	async run(): Promise<void> {
-		const { args, flags } = await this.parse(SSH);
-		const action = (args.action ?? "list") as SSHAction;
-		const targets = Array.isArray(args.targets) ? args.targets : args.targets ? [args.targets] : [];
-
-		const cmd: SSHCommandArgs = {
-			action,
-			args: targets,
-			flags: {
-				json: flags.json,
-				host: flags.host,
-				user: flags.user,
-				port: flags.port,
-				key: flags.key,
-				desc: flags.desc,
-				compat: flags.compat,
-				scope: flags.scope as "project" | "user" | undefined,
-			},
-		};
-
-		await initTheme();
-		await runSSHCommand(cmd);
-	}
-}
+).pipe(Command.withDescription("Manage SSH host configurations"));

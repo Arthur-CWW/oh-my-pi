@@ -37,18 +37,16 @@ function renderFallbackText(contentText: string, expanded: boolean, theme: Theme
 	let text = `${headerIcon} ${theme.fg("dim", "Response")}${expandHint}`;
 
 	if (displayLines.length === 0) {
-		text += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg("muted", "No response data")}`;
+		text += `\n    ${theme.fg("muted", "No response data")}`;
 		return new Text(text, 0, 0);
 	}
 
 	for (let i = 0; i < displayLines.length; i++) {
-		const isLast = i === displayLines.length - 1 && remaining === 0;
-		const branch = isLast ? theme.tree.last : theme.tree.branch;
-		text += `\n ${theme.fg("dim", branch)} ${theme.fg("dim", displayLines[i])}`;
+		text += `\n    ${theme.fg("dim", displayLines[i])}`;
 	}
 
 	if (!expanded && remaining > 0) {
-		text += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg("muted", formatMoreItems(remaining, "line"))}`;
+		text += `\n    ${theme.fg("muted", formatMoreItems(remaining, "line"))}`;
 	}
 
 	return new Text(text, 0, 0);
@@ -159,7 +157,7 @@ export function renderSearchResult(
 			const { expanded } = options;
 
 			// Answer lines: full markdown when expanded, capped markdown preview when collapsed.
-			const answerWidth = Math.max(20, width - 3);
+			const answerWidth = Math.max(20, width - 1);
 			const renderedAnswer = answerMarkdown ? answerMarkdown.render(answerWidth) : [];
 			let answerLines: readonly string[];
 			if (renderedAnswer.length === 0) {

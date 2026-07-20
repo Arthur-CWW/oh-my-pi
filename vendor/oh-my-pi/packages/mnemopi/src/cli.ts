@@ -2,12 +2,20 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
+import { Effect, Option } from "effect";
+import * as EffConsole from "effect/Console";
+import { Argument, Command, Flag } from "effect/unstable/cli";
+import * as CliErr from "effect/unstable/cli/CliError";
+import { NodeServices } from "@effect/platform-node";
+
 import { dataDir as configuredDataDir, dbPath as configuredDbPath } from "./config";
 import { BankManager, ValueError } from "./core/banks";
 import { BeamMemory } from "./core/beam";
 import type { ImportStats, RecallResult } from "./core/beam/types";
 import { runDiagnostics } from "./diagnose";
-import { main as runMcpMain } from "./mcp-server";
+import { runMcpServer } from "./mcp-server";
+
+// ── Types ────────────────────────────────────────────────────────────────────
 
 export interface CliIo {
 	write(data: string): void;
@@ -33,6 +41,12 @@ export class CliError extends Error {
 }
 
 type CommandHandler = (args: readonly string[], context?: CliContext) => number | Promise<number>;
+
+// ── Module-level context (set by runCli, read by Effect handlers) ────────────
+
+let _activeCtx: CliContext | undefined;
+
+// ── Output helpers ───────────────────────────────────────────────────────────
 
 function out(context: CliContext | undefined, text = ""): void {
 	(context?.stdout ?? Bun.stdout).write(`${text}\n`);
@@ -63,6 +77,8 @@ function parseIntArg(value: string, name: string): number {
 	return parsed;
 }
 
+// ── Data-dir / DB resolution ─────────────────────────────────────────────────
+
 function resolveDataDir(context?: CliContext): string {
 	return context?.dataDir ?? configuredDataDir();
 }
@@ -70,6 +86,8 @@ function resolveDataDir(context?: CliContext): string {
 function resolveDbPath(context?: CliContext): string {
 	return context?.dbPath ?? (context?.dataDir ? join(context.dataDir, "mnemopi.db") : configuredDbPath());
 }
+
+// ── Memory lifecycle ─────────────────────────────────────────────────────────
 
 function getMemory(context?: CliContext): { memory: BeamMemory; owned: boolean } {
 	if (context?.memory) return { memory: context.memory, owned: false };
@@ -81,15 +99,14 @@ async function withMemory<T>(context: CliContext | undefined, fn: (memory: BeamM
 	const { memory, owned } = getMemory(context);
 	try {
 		const result = await fn(memory);
-		// Drain background fact-extraction and embedding tasks before close so
-		// short-lived owners (e.g. `mnemopi store …` / `mnemopi sleep …`) don't
-		// race the SQLite handle shut from under in-flight `embed()` writes.
 		if (owned) await memory.flushExtractions();
 		return result;
 	} finally {
 		if (owned) memory.close();
 	}
 }
+
+// ── Shared utilities ─────────────────────────────────────────────────────────
 
 function asCount(value: unknown): number {
 	return typeof value === "number" && Number.isFinite(value) ? value : 0;
@@ -98,9 +115,7 @@ function asCount(value: unknown): number {
 export function memoryStats(memory: BeamMemory, dataDir?: string): Record<string, unknown> {
 	const working = memory.getWorkingStats();
 	const episodic = memory.getEpisodicStats();
-	const triples = memory.db.query("SELECT COUNT(*) AS total FROM triples").get() as {
-		total: number;
-	};
+	const triples = memory.db.query("SELECT COUNT(*) AS total FROM triples").get() as { total: number };
 	const banks = new BankManager(dataDir).listBanks();
 	return {
 		total_memories: asCount(working.total) + asCount(episodic.total),
@@ -129,6 +144,8 @@ function formatImportStats(stats: ImportStats): string {
 	].join(", ");
 }
 
+// ── Legacy command handlers (exported for direct use by tests) ───────────────
+
 export const cmdExport: CommandHandler = (args, context) => {
 	if (args.length === 0) usage("Usage: mnemopi export <file.json>");
 	const outputPath = args[0] ?? "";
@@ -140,10 +157,7 @@ export const cmdExport: CommandHandler = (args, context) => {
 		const episodic = Array.isArray(data.episodic_memory) ? data.episodic_memory.length : 0;
 		const scratchpad = Array.isArray(data.scratchpad) ? data.scratchpad.length : 0;
 		const consolidation = Array.isArray(data.consolidation_log) ? data.consolidation_log.length : 0;
-		out(
-			context,
-			`Exported ${working} working, ${episodic} episodic, ${scratchpad} scratchpad, ${consolidation} consolidation to ${outputPath}`,
-		);
+		out(context, `Exported ${working} working, ${episodic} episodic, ${scratchpad} scratchpad, ${consolidation} consolidation to ${outputPath}`);
 		return 0;
 	});
 };
@@ -166,11 +180,6 @@ export const cmdImport: CommandHandler = (args, context) => {
 		out(context, `Imported ${formatImportStats(stats)} from ${inputPath}`);
 		return 0;
 	});
-};
-
-export const cmdMcp: CommandHandler = async args => {
-	await runMcpMain(args);
-	return 0;
 };
 
 export const cmdRemember: CommandHandler = (args, context) => {
@@ -329,68 +338,219 @@ export const cmdDiagnose: CommandHandler = (_args, context) => {
 	return result.checks_failed === 0 ? 0 : 1;
 };
 
-export const COMMANDS: Readonly<Record<string, CommandHandler>> = {
-	store: cmdRemember,
-	remember: cmdRemember,
-	recall: cmdRecall,
-	search: cmdRecall,
-	update: cmdUpdate,
-	edit: cmdUpdate,
-	delete: cmdDelete,
-	forget: cmdDelete,
-	stats: cmdStats,
-	export: cmdExport,
-	import: cmdImport,
-	sleep: cmdSleep,
-	consolidate: cmdSleep,
-	scratchpad: cmdScratchpad,
-	sp: cmdScratchpad,
-	bank: cmdBank,
-	diagnose: cmdDiagnose,
-	doctor: cmdDiagnose,
-	mcp: cmdMcp,
-};
+// ── Effect CLI: handler wrapper ──────────────────────────────────────────────
 
-export function printHelp(context?: CliContext): void {
-	out(context, "Mnemopi - Local AI Memory System\n");
-	out(context, "Usage: mnemopi <command> [args]\n");
-	out(context, "Commands:");
-	out(context, "  store <content> [source] [importance]  Store a memory");
-	out(context, "  recall <query> [top_k]                 Search memories");
-	out(context, "  update <id> <content> [importance]     Update a memory");
-	out(context, "  delete <id>                            Delete a memory");
-	out(context, "  export <file.json>                     Export memories");
-	out(context, "  import <file.json>                     Import memories");
-	out(context, "  stats                                  Show statistics");
-	out(context, "  sleep                                  Run consolidation");
-	out(context, "  scratchpad read|write|clear [content]  Manage scratchpad");
-	out(context, "  diagnose                               Run diagnostics");
-	out(context, "  bank list|create|delete [name]         Manage memory banks");
-	out(context, "  mcp [args]                             Run MCP server");
+/** Wraps a legacy handler call into an Effect, lifting non-zero exit codes to CliError failures. */
+function wrapHandler(fn: () => number | void | Promise<number | void>): Effect.Effect<void, CliError> {
+	return Effect.tryPromise({
+		try: async () => {
+			const code = await fn();
+			if (typeof code === "number" && code !== 0) throw new CliError("", code);
+		},
+		catch: (e) => (e instanceof CliError ? e : new CliError(String(e), 1)),
+	});
 }
+
+// ── Effect CLI: subcommand definitions ───────────────────────────────────────
+//
+// Each user-facing command forwards its raw positional arguments to the matching
+// business handler, which owns all validation, usage text, and exit codes.  The
+// Effect command tree is responsible only for routing (command lookup, aliases,
+// help); every legacy message and exit code is reproduced verbatim by the
+// handlers, so behaviour is identical to the previous hand-rolled dispatcher.
+
+const storeCmd = Command.make("store", { args: Argument.variadic(Argument.string("args")) }, config =>
+	wrapHandler(() => cmdRemember(config.args, _activeCtx)),
+).pipe(Command.withAlias("remember"), Command.withShortDescription("Store a memory"));
+
+const recallCmd = Command.make("recall", { args: Argument.variadic(Argument.string("args")) }, config =>
+	wrapHandler(() => cmdRecall(config.args, _activeCtx)),
+).pipe(Command.withAlias("search"), Command.withShortDescription("Search memories"));
+
+const updateCmd = Command.make("update", { args: Argument.variadic(Argument.string("args")) }, config =>
+	wrapHandler(() => cmdUpdate(config.args, _activeCtx)),
+).pipe(Command.withAlias("edit"), Command.withShortDescription("Update a memory"));
+
+const deleteCmd = Command.make("delete", { args: Argument.variadic(Argument.string("args")) }, config =>
+	wrapHandler(() => cmdDelete(config.args, _activeCtx)),
+).pipe(Command.withAlias("forget"), Command.withShortDescription("Delete a memory"));
+
+const exportCmd = Command.make("export", { args: Argument.variadic(Argument.string("args")) }, config =>
+	wrapHandler(() => cmdExport(config.args, _activeCtx)),
+).pipe(Command.withShortDescription("Export memories"));
+
+const importCmd = Command.make("import", { args: Argument.variadic(Argument.string("args")) }, config =>
+	wrapHandler(() => cmdImport(config.args, _activeCtx)),
+).pipe(Command.withShortDescription("Import memories"));
+
+const statsCmd = Command.make("stats", { args: Argument.variadic(Argument.string("args")) }, config =>
+	wrapHandler(() => cmdStats(config.args, _activeCtx)),
+).pipe(Command.withShortDescription("Show statistics"));
+
+const sleepCmd = Command.make("sleep", { args: Argument.variadic(Argument.string("args")) }, config =>
+	wrapHandler(() => cmdSleep(config.args, _activeCtx)),
+).pipe(Command.withAlias("consolidate"), Command.withShortDescription("Run consolidation"));
+
+const scratchpadCmd = Command.make("scratchpad", { args: Argument.variadic(Argument.string("args")) }, config =>
+	wrapHandler(() => cmdScratchpad(config.args, _activeCtx)),
+).pipe(Command.withAlias("sp"), Command.withShortDescription("Manage scratchpad"));
+
+const bankCmd = Command.make("bank", { args: Argument.variadic(Argument.string("args")) }, config =>
+	wrapHandler(() => cmdBank(config.args, _activeCtx)),
+).pipe(Command.withShortDescription("Manage memory banks"));
+
+const diagnoseCmd = Command.make("diagnose", { args: Argument.variadic(Argument.string("args")) }, config =>
+	wrapHandler(() => cmdDiagnose(config.args, _activeCtx)),
+).pipe(Command.withAlias("doctor"), Command.withShortDescription("Run diagnostics"));
+
+// ── MCP subcommand ───────────────────────────────────────────────────────────
+
+const mcpCmd = Command.make(
+	"mcp",
+	{
+		transport: Flag.string("transport").pipe(Flag.withDefault("stdio"), Flag.withDescription("Transport protocol")),
+		port: Flag.integer("port").pipe(Flag.optional, Flag.withDescription("Server port")),
+		bank: Flag.string("bank").pipe(Flag.optional, Flag.withDescription("Memory bank")),
+		host: Flag.string("host").pipe(Flag.optional, Flag.withDescription("Server host")),
+	},
+	config =>
+		Effect.promise(() =>
+			runMcpServer(config.transport, {
+				port: Option.getOrUndefined(config.port),
+				bank: Option.getOrUndefined(config.bank),
+				host: Option.getOrUndefined(config.host),
+			}),
+		),
+).pipe(Command.withShortDescription("Run MCP server"));
+
+// ── Hidden help subcommand (backward compat: `mnemopi help`) ─────────────────
+
+const helpCmd = Command.make("help", {}, () =>
+	Effect.fail(new CliErr.ShowHelp({ commandPath: ["mnemopi"], errors: [] })),
+).pipe(Command.withHidden);
+
+// ── Root command ─────────────────────────────────────────────────────────────
+
+export const mnemopiCommand = Command.make("mnemopi", {}, () =>
+	Effect.fail(new CliErr.ShowHelp({ commandPath: ["mnemopi"], errors: [] })),
+).pipe(
+	Command.withDescription("Mnemopi - Local AI Memory System"),
+	Command.withSubcommands([
+		storeCmd,
+		recallCmd,
+		updateCmd,
+		deleteCmd,
+		exportCmd,
+		importCmd,
+		statsCmd,
+		sleepCmd,
+		scratchpadCmd,
+		bankCmd,
+		diagnoseCmd,
+		mcpCmd,
+		helpCmd,
+	]),
+);
+
+// ── Effect CLI output capture ────────────────────────────────────────────────
+
+interface CapturedOutput {
+	readonly stdout: string[];
+	readonly stderr: string[];
+}
+
+/**
+ * A Console that buffers the Effect CLI's help/error rendering instead of writing
+ * it immediately.  The runCli boundary then decides whether to replay the buffer
+ * (genuine `--help` / `--version` / help screens) or discard it in favour of the
+ * legacy message (unknown command), which keeps stdout/stderr byte-compatible.
+ */
+function makeCaptureConsole(sink: CapturedOutput): EffConsole.Console {
+	const toStdout = (...args: Array<unknown>) => {
+		sink.stdout.push(args.map(String).join(" "));
+	};
+	const toStderr = (...args: Array<unknown>) => {
+		sink.stderr.push(args.map(String).join(" "));
+	};
+	return {
+		assert: console.assert.bind(console),
+		clear: console.clear.bind(console),
+		count: console.count.bind(console),
+		countReset: console.countReset.bind(console),
+		debug: toStdout,
+		dir: console.dir.bind(console),
+		dirxml: console.dirxml.bind(console),
+		error: toStderr,
+		group: console.group.bind(console),
+		groupCollapsed: console.groupCollapsed.bind(console),
+		groupEnd: console.groupEnd.bind(console),
+		info: toStdout,
+		log: toStdout,
+		table: console.table.bind(console),
+		time: console.time.bind(console),
+		timeEnd: console.timeEnd.bind(console),
+		timeLog: console.timeLog.bind(console),
+		trace: console.trace.bind(console),
+		warn: toStderr,
+	};
+}
+
+/** Extracts the offending name from an unknown-subcommand failure, if present. */
+function unknownSubcommandName(error: unknown): string | undefined {
+	if (!CliErr.isCliError(error)) return undefined;
+	if (error._tag === "UnknownSubcommand") return error.subcommand;
+	if (error._tag === "ShowHelp") {
+		for (const inner of error.errors) {
+			if (inner._tag === "UnknownSubcommand") return inner.subcommand;
+		}
+	}
+	return undefined;
+}
+
+// ── Public runCli entry point ────────────────────────────────────────────────
 
 export async function runCli(args: readonly string[] = Bun.argv.slice(2), context?: CliContext): Promise<number> {
-	if (args.length === 0 || args[0] === "--help" || args[0] === "-h" || args[0] === "help") {
-		printHelp(context);
-		return 0;
-	}
-	const command = args[0] ?? "";
-	const handler = COMMANDS[command];
-	if (!handler) {
-		err(context, `Unknown command: ${command}`);
-		err(context, "Run 'mnemopi --help' for usage.");
-		return 2;
-	}
+	_activeCtx = context;
+	const captured: CapturedOutput = { stdout: [], stderr: [] };
+	const replay = (): void => {
+		for (const line of captured.stdout) out(context, line);
+		for (const line of captured.stderr) err(context, line);
+	};
 	try {
-		return await handler(args.slice(1), context);
-	} catch (error) {
+		const program = Command.runWith(mnemopiCommand, { version: "16.0.1" })(args).pipe(
+			Effect.provideService(EffConsole.Console, makeCaptureConsole(captured)),
+			Effect.provide(NodeServices.layer),
+		);
+		await Effect.runPromise(program);
+		// Success covers real commands plus the built-in --help/--version actions;
+		// replay any buffered help so those flags still print.
+		replay();
+		return 0;
+	} catch (error: unknown) {
 		if (error instanceof CliError) {
-			err(context, error.message);
+			if (error.message) err(context, error.message);
 			return error.exitCode;
 		}
+		const unknownCommand = unknownSubcommandName(error);
+		if (unknownCommand !== undefined) {
+			err(context, `Unknown command: ${unknownCommand}`);
+			err(context, "Run 'mnemopi --help' for usage.");
+			return 2;
+		}
+		if (CliErr.isCliError(error) && error._tag === "ShowHelp") {
+			// A bare help request (no parse errors) exits 0; a parse failure the
+			// handlers did not own exits 2.  Either way the buffered help/errors are
+			// the right thing to surface.
+			replay();
+			return error.errors.length === 0 ? 0 : 2;
+		}
 		throw error;
+	} finally {
+		_activeCtx = undefined;
 	}
 }
+
+// ── Binary entry point ───────────────────────────────────────────────────────
 
 if (import.meta.main) {
 	const code = await runCli();

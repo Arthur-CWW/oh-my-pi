@@ -322,7 +322,6 @@ export const agenticFixtures: Record<string, GalleryFixture> = {
 		args: {
 			op: "create",
 			objective: "Ship the auth hardening pass: per-account rate limits and sliding session expiry.",
-			token_budget: 500_000,
 		},
 		result: {
 			content: [
@@ -333,13 +332,11 @@ export const agenticFixtures: Record<string, GalleryFixture> = {
 			],
 			details: {
 				op: "create",
-				remainingTokens: 451_800,
-				completionBudgetReport: null,
+				completionUsageReport: null,
 				goal: {
 					id: "goal_8f2a",
 					objective: "Ship the auth hardening pass: per-account rate limits and sliding session expiry.",
 					status: "active",
-					tokenBudget: 500_000,
 					tokensUsed: 48_200,
 					timeUsedSeconds: 312,
 					createdAt: 1_749_200_000_000,

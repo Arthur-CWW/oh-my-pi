@@ -1,5 +1,4 @@
 import { prompt, Snowflake } from "@oh-my-pi/pi-utils";
-import goalBudgetLimitPrompt from "../prompts/goals/goal-budget-limit.md" with { type: "text" };
 import goalContinuationPrompt from "../prompts/goals/goal-continuation.md" with { type: "text" };
 import goalModeActivePrompt from "../prompts/goals/goal-mode-active.md" with { type: "text" };
 import {
@@ -12,7 +11,6 @@ import {
 import {
 	decodeGoalModeState,
 	type Goal,
-	type GoalBudgetSteering,
 	type GoalModeState,
 	type GoalRuntimeEvent,
 	type GoalTokenUsage,
@@ -49,10 +47,9 @@ export interface GoalWallClockSnapshot {
 export interface GoalRuntimeSnapshot {
 	turnSnapshot?: GoalTurnSnapshot;
 	wallClock: GoalWallClockSnapshot;
-	budgetReportedFor?: string;
 }
 
-export type GoalPromptKind = "active" | "continuation" | "budget-limit";
+export type GoalPromptKind = "active" | "continuation";
 
 
 function cloneGoal(goal: Goal): Goal {
@@ -63,18 +60,6 @@ function cloneState(state: GoalModeState): GoalModeState {
 	return { ...state, goal: cloneGoal(state.goal) };
 }
 
-function budgetValue(goal: Goal): string {
-	return goal.tokenBudget === undefined ? "none" : String(goal.tokenBudget);
-}
-
-function remainingValue(goal: Goal): string {
-	return goal.tokenBudget === undefined ? "unbounded" : String(Math.max(0, goal.tokenBudget - goal.tokensUsed));
-}
-
-export function remainingTokens(goal: Goal | null | undefined): number | null {
-	if (!goal || goal.tokenBudget === undefined) return null;
-	return Math.max(0, goal.tokenBudget - goal.tokensUsed);
-}
 
 export function escapeXmlText(input: string): string {
 	let firstEscapable = -1;
@@ -138,35 +123,25 @@ export function renderGoalPrompt(
 	const template =
 		kind === "active"
 			? goalModeActivePrompt
-			: kind === "continuation"
-				? goalContinuationPrompt
-				: goalBudgetLimitPrompt;
+			: goalContinuationPrompt;
 	return prompt.render(template, {
 		objective: escapeXmlText(goal.objective),
 		tokensUsed: String(goal.tokensUsed),
-		tokenBudget: budgetValue(goal),
-		remainingTokens: remainingValue(goal),
 		timeUsedSeconds: String(goal.timeUsedSeconds),
 		workstreamContext: renderWorkstreamContext(workstream),
 	});
 }
 
-export function completionBudgetReport(goal: Goal): string | null {
+export function completionUsageReport(goal: Goal): string | null {
 	const parts: string[] = [];
-	if (goal.tokenBudget !== undefined) {
-		parts.push(`tokens used: ${goal.tokensUsed} of ${goal.tokenBudget}`);
+	if (goal.tokensUsed > 0) {
+		parts.push(`tokens used: ${goal.tokensUsed}`);
 	}
 	if (goal.timeUsedSeconds > 0) {
 		parts.push(`time used: ${goal.timeUsedSeconds} seconds`);
 	}
 	if (parts.length === 0) return null;
-	return `Goal achieved. Report final budget usage to the user: ${parts.join("; ")}.`;
-}
-
-function validateTokenBudget(tokenBudget: number | undefined): void {
-	if (tokenBudget !== undefined && (!Number.isInteger(tokenBudget) || tokenBudget <= 0)) {
-		throw new Error("goal token_budget must be a positive integer when provided");
-	}
+	return `Goal achieved. Report final usage to the user: ${parts.join("; ")}.`;
 }
 const CHARTER_REFERENCE_PATTERN =
 	/(?<![A-Za-z0-9_./-])streams\/([a-z0-9]+(?:-[a-z0-9]+)*)\/GOAL\.md(?![A-Za-z0-9_./-])/g;
@@ -192,14 +167,13 @@ function sameWorkstream(left: SessionWorkstream | undefined, right: SessionWorks
 }
 
 function isAccountingStatus(goal: Goal): boolean {
-	return goal.status === "active" || goal.status === "budget-limited";
+	return goal.status === "active";
 }
 
 export class GoalRuntime {
 	readonly #host: GoalRuntimeHost;
 	#turnSnapshot: GoalTurnSnapshot | undefined;
 	#wallClock: GoalWallClockSnapshot;
-	#budgetReportedFor: string | undefined;
 	#accountingTail: Promise<void> = Promise.resolve();
 
 	constructor(host: GoalRuntimeHost) {
@@ -213,7 +187,6 @@ export class GoalRuntime {
 				? { ...this.#turnSnapshot, baselineUsage: { ...this.#turnSnapshot.baselineUsage } }
 				: undefined,
 			wallClock: { ...this.#wallClock },
-			budgetReportedFor: this.#budgetReportedFor,
 		};
 	}
 	restoreSnapshot(snapshot: GoalRuntimeSnapshot): void {
@@ -221,7 +194,6 @@ export class GoalRuntime {
 			? { ...snapshot.turnSnapshot, baselineUsage: { ...snapshot.turnSnapshot.baselineUsage } }
 			: undefined;
 		this.#wallClock = { ...snapshot.wallClock };
-		this.#budgetReportedFor = snapshot.budgetReportedFor;
 	}
 
 	#now(): number {
@@ -307,7 +279,6 @@ export class GoalRuntime {
 		if (value === undefined) {
 			this.#host.setState(undefined);
 			this.#clearActiveAccounting();
-			this.#budgetReportedFor = undefined;
 			return;
 		}
 		const state = decodeGoalModeState(value);
@@ -318,7 +289,6 @@ export class GoalRuntime {
 		} else {
 			this.#clearActiveAccounting();
 		}
-		this.#budgetReportedFor = undefined;
 	}
 
 	onTurnStart(turnId: string, baselineUsage: GoalTokenUsage): void {
@@ -335,12 +305,12 @@ export class GoalRuntime {
 	async onToolCompleted(toolName: string): Promise<void> {
 		if (toolName === "goal") return;
 		if (!this.#hasAccountingState()) return;
-		await this.flushUsage("allowed");
+		await this.flushUsage();
 	}
 
 	async onGoalToolCompleted(): Promise<void> {
 		if (!this.#hasAccountingState()) return;
-		await this.flushUsage("suppressed");
+		await this.flushUsage();
 	}
 
 	async onAgentEnd(options?: { turnCompleted?: boolean; currentUsage?: GoalTokenUsage }): Promise<void> {
@@ -348,7 +318,7 @@ export class GoalRuntime {
 			this.#turnSnapshot = undefined;
 			return;
 		}
-		await this.flushUsage("suppressed", options?.currentUsage);
+		await this.flushUsage(options?.currentUsage);
 		this.#turnSnapshot = undefined;
 	}
 
@@ -361,7 +331,7 @@ export class GoalRuntime {
 			return;
 		}
 		await this.#withAccounting(async () => {
-			await this.#flushUsageLocked("suppressed");
+			await this.#flushUsageLocked();
 			this.#turnSnapshot = undefined;
 			if (options?.reason !== "interrupted") return;
 			const cloned = this.#getStateClone();
@@ -370,7 +340,6 @@ export class GoalRuntime {
 			cloned.goal.status = "paused";
 			cloned.goal.updatedAt = this.#now();
 			this.#clearActiveAccounting();
-			this.#budgetReportedFor = undefined;
 			await this.#commitState(cloned, { persist: "goal_paused" });
 		});
 	}
@@ -383,7 +352,6 @@ export class GoalRuntime {
 			state.goal.status = "paused";
 			state.goal.updatedAt = this.#now();
 			this.#clearActiveAccounting();
-			this.#budgetReportedFor = undefined;
 			await this.#commitState(state, { persist: "goal_paused" });
 			return state;
 		}
@@ -396,36 +364,8 @@ export class GoalRuntime {
 		return state;
 	}
 
-	async onBudgetMutated(newBudget: number | undefined): Promise<GoalModeState | undefined> {
-		validateTokenBudget(newBudget);
-		return await this.#withAccounting(async () => {
-			this.#budgetReportedFor = undefined;
-			await this.#flushUsageLocked("suppressed");
-			const state = this.#getStateClone();
-			if (!state?.goal) return undefined;
-			state.goal.tokenBudget = newBudget;
-			state.goal.updatedAt = this.#now();
-			let shouldSteer = false;
-			if (newBudget !== undefined && state.goal.tokensUsed >= newBudget) {
-				if (state.goal.status === "active") {
-					state.goal.status = "budget-limited";
-					shouldSteer = true;
-				}
-			} else if (state.goal.status === "budget-limited") {
-				state.goal.status = "active";
-				state.enabled = true;
-				this.#markActiveAccounting(state.goal);
-			}
-			await this.#commitState(state, { persist: state.enabled ? "goal" : "goal_paused" });
-			if (shouldSteer) {
-				await this.#sendBudgetLimitSteer(state.goal);
-			}
-			return state;
-		});
-	}
 
 	async #flushUsageLocked(
-		steering: GoalBudgetSteering,
 		currentUsage: GoalTokenUsage = this.#host.getCurrentUsage(),
 	): Promise<void> {
 		const state = this.#getStateClone();
@@ -445,13 +385,6 @@ export class GoalRuntime {
 		state.goal.tokensUsed += tokenDelta;
 		state.goal.timeUsedSeconds += wallSeconds;
 		state.goal.updatedAt = this.#now();
-		const flippedToBudgetLimited =
-			state.goal.tokenBudget !== undefined &&
-			state.goal.tokensUsed >= state.goal.tokenBudget &&
-			state.goal.status === "active";
-		if (flippedToBudgetLimited) {
-			state.goal.status = "budget-limited";
-		}
 
 		if (this.#turnSnapshot?.activeGoalId === state.goal.id) {
 			this.#turnSnapshot.baselineUsage = { ...currentUsage };
@@ -460,33 +393,22 @@ export class GoalRuntime {
 			this.#wallClock.lastAccountedAt += wallSeconds * 1000;
 		}
 
-		// Persisting wall-clock-only accounting on every tool event bloats /goal sessions with full
-		// objective snapshots. Keep the in-memory/UI state fresh, but persist only token/budget changes.
-		const shouldPersistUsage = tokenDelta > 0 || flippedToBudgetLimited;
+		const shouldPersistUsage = tokenDelta > 0;
 		await this.#commitState(state, { persist: shouldPersistUsage ? "goal" : undefined });
-
-		if (state.goal.status !== "budget-limited") {
-			this.#budgetReportedFor = undefined;
-		}
-		if (steering === "allowed" && flippedToBudgetLimited && this.#budgetReportedFor !== state.goal.id) {
-			await this.#sendBudgetLimitSteer(state.goal);
-		}
 	}
 
 	async flushUsage(
-		steering: GoalBudgetSteering,
 		currentUsage: GoalTokenUsage = this.#host.getCurrentUsage(),
 	): Promise<void> {
-		await this.#withAccounting(() => this.#flushUsageLocked(steering, currentUsage));
+		await this.#withAccounting(() => this.#flushUsageLocked(currentUsage));
 	}
 
-	#createGoalState(objective: string, tokenBudget: number | undefined, goalId = String(Snowflake.next())): GoalModeState {
+	#createGoalState(objective: string, goalId = String(Snowflake.next())): GoalModeState {
 		const now = this.#now();
 		const goal: Goal = {
 			id: goalId,
 			objective,
 			status: "active",
-			tokenBudget,
 			tokensUsed: 0,
 			timeUsedSeconds: 0,
 			createdAt: now,
@@ -506,7 +428,6 @@ export class GoalRuntime {
 			if (goalId !== undefined && !goalId) throw new Error("goalId must be non-empty when creating a goal workflow");
 			const objective = transition.objective.trim();
 			if (!objective) throw new Error("objective is required when op=create");
-			validateTokenBudget(transition.tokenBudget);
 			if (transition.workstream !== undefined) explicitGoalWorkstream(transition.workstream);
 			if (goalId !== undefined && state?.goal.id === goalId) return;
 			if (state?.goal && state.goal.status !== "dropped" && state.goal.status !== "complete") {
@@ -540,7 +461,7 @@ export class GoalRuntime {
 		}
 		if (transition.disposition === "paused") {
 			if (!state.enabled && state.goal.status === "paused") return;
-			if (state.goal.status !== "active" && state.goal.status !== "budget-limited") {
+			if (state.goal.status !== "active") {
 				throw new Error(`cannot pause goal because existing goal is ${state.goal.status}`);
 			}
 			return;
@@ -565,8 +486,7 @@ export class GoalRuntime {
 				if (current?.goal.id === goalId) return;
 				const objective = transition.objective.trim();
 				await this.#classifyWorkstream(objective, transition.workstream);
-				const state = this.#createGoalState(objective, transition.tokenBudget, goalId);
-				this.#budgetReportedFor = undefined;
+				const state = this.#createGoalState(objective, goalId);
 				this.#markActiveAccounting(state.goal);
 				await this.#commitState(state, { persist: "goal" });
 				return;
@@ -587,7 +507,6 @@ export class GoalRuntime {
 				state.reason = undefined;
 				state.goal.status = "active";
 				state.goal.updatedAt = this.#now();
-				this.#budgetReportedFor = undefined;
 				this.#markActiveAccounting(state.goal);
 				await this.#commitState(state, { persist: "goal" });
 				return;
@@ -595,7 +514,7 @@ export class GoalRuntime {
 
 			if (transition.disposition === "paused") {
 				if (!current.enabled && current.goal.status === "paused") return;
-				await this.#flushUsageLocked("suppressed");
+				await this.#flushUsageLocked();
 				const state = this.#getStateClone();
 				if (!state || state.goal.id !== goalId) {
 					throw new Error(`goal "${goalId}" changed while pausing`);
@@ -606,27 +525,24 @@ export class GoalRuntime {
 				state.goal.status = "paused";
 				state.goal.updatedAt = this.#now();
 				this.#clearActiveAccounting();
-				this.#budgetReportedFor = undefined;
 				await this.#commitState(state, { persist: "goal_paused" });
 				return;
 			}
 
 			if (transition.disposition === "completed") {
 				this.#clearActiveAccounting();
-				this.#budgetReportedFor = undefined;
 				await this.#commitState(undefined, { persist: "none" });
 				return;
 			}
 
 			if (current.goal.status === "dropped") return;
-			await this.#flushUsageLocked("suppressed");
+			await this.#flushUsageLocked();
 			const state = this.#getStateClone();
 			if (!state || state.goal.id !== goalId) {
 				throw new Error(`goal "${goalId}" changed while dropping`);
 			}
 			const dropped = { ...state.goal, status: "dropped" as const, updatedAt: this.#now() };
 			this.#clearActiveAccounting();
-			this.#budgetReportedFor = undefined;
 			await this.#host.emit({
 				type: "goal_updated",
 				goal: dropped,
@@ -636,19 +552,17 @@ export class GoalRuntime {
 		});
 	}
 
-	async setGoal(input?: { objective?: string; tokenBudget?: number; workstream?: string }): Promise<GoalModeState> {
+	async setGoal(input?: { objective?: string; workstream?: string }): Promise<GoalModeState> {
 		const objective = input?.objective?.trim();
 		if (input?.objective !== undefined && !objective) throw new Error("objective must not be empty");
-		validateTokenBudget(input?.tokenBudget);
 		return await this.#withAccounting(async () => {
 			const existing = this.#getStateClone();
 			if (objective !== undefined) {
 				if (existing?.goal && existing.goal.status !== "complete" && existing.goal.status !== "dropped") {
-					await this.#flushUsageLocked("suppressed");
+					await this.#flushUsageLocked();
 				}
 				await this.#classifyWorkstream(objective, input?.workstream);
-				const state = this.#createGoalState(objective, input?.tokenBudget);
-				this.#budgetReportedFor = undefined;
+				const state = this.#createGoalState(objective);
 				this.#markActiveAccounting(state.goal);
 				await this.#commitState(state, { persist: "goal" });
 				return state;
@@ -664,18 +578,17 @@ export class GoalRuntime {
 			existing.reason = undefined;
 			existing.goal.status = "active";
 			existing.goal.updatedAt = this.#now();
-			this.#budgetReportedFor = undefined;
 			this.#markActiveAccounting(existing.goal);
 			await this.#commitState(existing, { persist: "goal" });
 			return existing;
 		});
 	}
 
-	async createGoal(input: { objective: string; tokenBudget?: number; workstream?: string }): Promise<GoalModeState> {
+	async createGoal(input: { objective: string; workstream?: string }): Promise<GoalModeState> {
 		return await this.setGoal(input);
 	}
 
-	async replaceGoal(input: { objective: string; tokenBudget?: number; workstream?: string }): Promise<GoalModeState> {
+	async replaceGoal(input: { objective: string; workstream?: string }): Promise<GoalModeState> {
 		return await this.setGoal(input);
 	}
 
@@ -685,18 +598,17 @@ export class GoalRuntime {
 
 	async pauseGoal(): Promise<GoalModeState | undefined> {
 		return await this.#withAccounting(async () => {
-			await this.#flushUsageLocked("suppressed");
+			await this.#flushUsageLocked();
 			const state = this.#getStateClone();
 			if (!state?.goal) return undefined;
 			state.enabled = false;
 			state.mode = "active";
 			state.reason = undefined;
-			if (state.goal.status === "active" || state.goal.status === "budget-limited") {
+			if (state.goal.status === "active") {
 				state.goal.status = "paused";
 			}
 			state.goal.updatedAt = this.#now();
 			this.#clearActiveAccounting();
-			this.#budgetReportedFor = undefined;
 			await this.#commitState(state, { persist: "goal_paused" });
 			return state;
 		});
@@ -704,12 +616,11 @@ export class GoalRuntime {
 
 	async dropGoal(): Promise<Goal | undefined> {
 		return await this.#withAccounting(async () => {
-			await this.#flushUsageLocked("suppressed");
+			await this.#flushUsageLocked();
 			const state = this.#getStateClone();
 			if (!state?.goal) return undefined;
 			const dropped = { ...state.goal, status: "dropped" as const, updatedAt: this.#now() };
 			this.#clearActiveAccounting();
-			this.#budgetReportedFor = undefined;
 			await this.#host.emit({
 				type: "goal_updated",
 				goal: dropped,
@@ -722,7 +633,7 @@ export class GoalRuntime {
 
 	async completeGoalFromTool(): Promise<Goal> {
 		return await this.#withAccounting(async () => {
-			await this.#flushUsageLocked("suppressed");
+			await this.#flushUsageLocked();
 			const state = this.#getStateClone();
 			if (!state?.goal) {
 				throw new Error("cannot complete goal because no goal is active");
@@ -739,7 +650,6 @@ export class GoalRuntime {
 			state.mode = "exiting";
 			state.reason = "completed";
 			this.#clearActiveAccounting();
-			this.#budgetReportedFor = undefined;
 			await this.#commitState(state, { persist: "goal" });
 			return state.goal;
 		});
@@ -759,13 +669,4 @@ export class GoalRuntime {
 			: undefined;
 	}
 
-	async #sendBudgetLimitSteer(goal: Goal): Promise<void> {
-		if (this.#budgetReportedFor === goal.id) return;
-		this.#budgetReportedFor = goal.id;
-		await this.#host.sendHiddenMessage({
-			customType: "goal-budget-limit",
-			content: renderGoalPrompt("budget-limit", goal, this.getWorkstreamReference()),
-			deliverAs: "steer",
-		});
-	}
 }

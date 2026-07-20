@@ -1,15 +1,9 @@
-import { afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
+import { beforeAll, describe, expect, it, vi } from "bun:test";
 import type { AssistantMessage, Usage } from "@oh-my-pi/pi-ai";
 import { BtwController } from "@oh-my-pi/pi-coding-agent/modes/controllers/btw-controller";
-import {
-	BtwPanelComponent,
-	makeBtwPanelModel,
-	type BtwPanelComponentOptions,
-} from "@oh-my-pi/pi-coding-agent/modes/components/btw-panel";
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
-import { createControllerFixture, type ControllerFixture } from "../../helpers/controller-fixture";
-import { type Component, Container } from "@oh-my-pi/pi-tui";
+import { Container, type TUI } from "@oh-my-pi/pi-tui";
 
 const usage: Usage = {
 	input: 0,
@@ -43,7 +37,6 @@ interface RunEphemeralTurnResult {
 	replyText: string;
 	assistantMessage: AssistantMessage;
 }
-const fixtures: ControllerFixture[] = [];
 
 function makeFakeSession(
 	runEphemeralTurn: (args: RunEphemeralTurnArgs) => Promise<RunEphemeralTurnResult>,
@@ -54,38 +47,18 @@ function makeFakeSession(
 	} as unknown as InteractiveModeContext["session"];
 }
 
-async function makeCtx(
-	session: InteractiveModeContext["session"],
-	btwContainer = new Container(),
-): Promise<InteractiveModeContext> {
-	const fixture = await createControllerFixture();
-	fixtures.push(fixture);
-	fixture.tui.addChild(btwContainer);
+function makeCtx(session: InteractiveModeContext["session"], btwContainer = new Container()): InteractiveModeContext {
 	return {
-		ui: fixture.tui,
+		ui: { requestRender: vi.fn(), requestComponentRender: vi.fn() } as unknown as TUI,
 		btwContainer,
 		session,
-		mvuScope: fixture.scope,
-		mvuInputLeaseManager: fixture.getInputLeaseManager(),
 		showStatus: vi.fn(),
 		showError: vi.fn(),
 	} as unknown as InteractiveModeContext;
 }
 
-async function waitFor(predicate: () => boolean): Promise<void> {
-	for (let i = 0; i < 1_000; i++) {
-		if (predicate()) return;
-		await Bun.sleep(1);
-	}
-	expect(predicate()).toBe(true);
-}
-
 beforeAll(async () => {
 	await initTheme();
-});
-
-afterEach(async () => {
-	while (fixtures.length > 0) await fixtures.pop()?.close();
 });
 
 describe("BtwController", () => {
@@ -94,14 +67,13 @@ describe("BtwController", () => {
 			replyText: "Answer",
 			assistantMessage: createAssistantMessage("Answer"),
 		}));
-		const ctx = await makeCtx(makeFakeSession(runEphemeralTurn));
+		const ctx = makeCtx(makeFakeSession(runEphemeralTurn));
 		const controller = new BtwController(ctx);
 
 		await controller.start("What changed?");
 		// Drain microtasks so the inner promise can resolve.
 		await Promise.resolve();
 		await Promise.resolve();
-		await waitFor(() => ctx.mvuInputLeaseManager.current().kind === "mvu");
 
 		expect(runEphemeralTurn).toHaveBeenCalledTimes(1);
 		const callArg = runEphemeralTurn.mock.calls[0]?.[0];
@@ -130,17 +102,11 @@ describe("BtwController", () => {
 				return { replyText: "second", assistantMessage: createAssistantMessage("second") };
 			});
 		const btwContainer = new Container();
-		const ctx = await makeCtx(makeFakeSession(runEphemeralTurn), btwContainer);
+		const ctx = makeCtx(makeFakeSession(runEphemeralTurn), btwContainer);
 		const controller = new BtwController(ctx);
 
 		await controller.start("First?");
-		await waitFor(() => ctx.mvuInputLeaseManager.current().kind === "mvu");
-		const firstLeaseGeneration = ctx.mvuInputLeaseManager.current().generation;
 		await controller.start("Second?");
-		await waitFor(() => {
-			const lease = ctx.mvuInputLeaseManager.current();
-			return lease.kind === "mvu" && lease.generation > firstLeaseGeneration;
-		});
 		// Allow the second call to settle.
 		await Promise.resolve();
 		await Promise.resolve();
@@ -156,14 +122,12 @@ describe("BtwController", () => {
 	it("clears the panel when the active request is dismissed via Escape", async () => {
 		const runEphemeralTurn = vi.fn(async () => new Promise<RunEphemeralTurnResult>(() => {}));
 		const btwContainer = new Container();
-		const ctx = await makeCtx(makeFakeSession(runEphemeralTurn), btwContainer);
+		const ctx = makeCtx(makeFakeSession(runEphemeralTurn), btwContainer);
 		const controller = new BtwController(ctx);
 
 		await controller.start("Question?");
-		await waitFor(() => ctx.mvuInputLeaseManager.current().kind === "mvu");
 		expect(btwContainer.children).toHaveLength(1);
 		expect(controller.handleEscape()).toBe(true);
-		await waitFor(() => ctx.mvuInputLeaseManager.current().kind === "legacy");
 		expect(btwContainer.children).toHaveLength(0);
 		expect(controller.hasActiveRequest()).toBe(false);
 	});
@@ -173,7 +137,7 @@ describe("BtwController", () => {
 			replyText: "n/a",
 			assistantMessage: createAssistantMessage("n/a"),
 		}));
-		const ctx = await makeCtx(makeFakeSession(runEphemeralTurn));
+		const ctx = makeCtx(makeFakeSession(runEphemeralTurn));
 		const controller = new BtwController(ctx);
 
 		await controller.start("   ");
@@ -187,25 +151,11 @@ describe("BtwController", () => {
 			assistantMessage: createAssistantMessage("n/a"),
 		}));
 		const session = { model: undefined, runEphemeralTurn } as unknown as InteractiveModeContext["session"];
-		const ctx = await makeCtx(session);
+		const ctx = makeCtx(session);
 		const controller = new BtwController(ctx);
 
 		await controller.start("Anything?");
 		expect(runEphemeralTurn).not.toHaveBeenCalled();
 		expect(ctx.showError).toHaveBeenCalled();
 	});
-
-describe("BtwPanelComponent", () => {
-	it("uses an injected component-render callback without requiring a TUI instance", () => {
-		const requested: Component[] = [];
-		const requestComponentRender: BtwPanelComponentOptions["requestComponentRender"] = component => {
-			requested.push(component);
-		};
-		const component = new BtwPanelComponent({ requestComponentRender }, makeBtwPanelModel("Why?"));
-
-		expect(requested).toEqual([component]);
-		component.apply({ question: "Why?", answer: "Because.", state: "complete" });
-		expect(requested).toEqual([component, component]);
-	});
-});
 });

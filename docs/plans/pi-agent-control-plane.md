@@ -1,5 +1,14 @@
 # Pi agent control plane / cockpit spec
 
+> **HISTORICAL — superseded as current architecture (2026-07-20).** The current
+> control-plane/federated-workspace authority is
+> [`docs/fable/federated-control-plane.md`](../fable/federated-control-plane.md); its deferred work and
+> open questions live in [`docs/fable/harness-research-register.md`](../fable/harness-research-register.md).
+> This 2026-07-04 spec is preserved intact as **historical technical evidence** — the L0–L4 layer model,
+> telemetry/`model_calls` schema, durability/ingestion contract, fork/hot-swap/steer contracts, DST rules,
+> and error taxonomy remain useful reference. Where this document and the current authority conflict, the
+> current authority wins; read the sections below as archaeology, not instruction.
+
 Status: spec v1
 Date: 2026-07-04
 Owner: Arthur + Pi/OMP/Codex harness adapters

@@ -19,8 +19,6 @@ import { DEFAULT_MAX_COLUMN, type TruncationResult, truncateHead, truncateLine }
 import {
 	Ellipsis,
 	fileHyperlink,
-	getTreeBranch,
-	getTreeContinuePrefix,
 	renderStatusLine,
 	renderTreeList,
 	truncateToWidth,
@@ -1431,9 +1429,8 @@ function renderBudgetedSearchGroups(
 	const lines: string[] = [];
 	for (let i = 0; i < visibleGroups.length; i++) {
 		const group = visibleGroups[i]!;
-		const isLast = !hasSummary && i === visibleGroups.length - 1;
-		const prefix = `${uiTheme.fg("dim", getTreeBranch(isLast, uiTheme))} `;
-		const continuePrefix = uiTheme.fg("dim", getTreeContinuePrefix(isLast, uiTheme));
+		const prefix = "   ";
+		const continuePrefix = "   ";
 		lines.push(`${prefix}${replaceTabs(group[0]!.styled)}`);
 		for (let j = 1; j < group.length; j++) {
 			lines.push(`${continuePrefix}${replaceTabs(group[j]!.styled)}`);
@@ -1442,7 +1439,7 @@ function renderBudgetedSearchGroups(
 	if (hasSummary) {
 		const hiddenLabel =
 			hiddenMatches > 0 ? formatMoreItems(hiddenMatches, "match") : formatMoreItems(hiddenLines, "line");
-		lines.push(`${uiTheme.fg("dim", uiTheme.tree.last)} ${uiTheme.fg("muted", hiddenLabel)}`);
+		lines.push(`   ${uiTheme.fg("muted", hiddenLabel)}`);
 	}
 	return lines;
 }

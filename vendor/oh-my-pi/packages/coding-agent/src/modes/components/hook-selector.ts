@@ -123,9 +123,11 @@ class OutlinedList extends Container {
 	}
 
 	render(width: number): readonly string[] {
-		const borderColor = (text: string) => theme.fg("border", text);
-		const horizontal = borderColor(theme.boxSharp.horizontal.repeat(Math.max(1, width)));
-		const innerWidth = Math.max(1, width - 2);
+		// Blank lines group the list top and bottom; the enclosing frame (sides
+		// and horizontal rules) was dropped so the list copies cleanly. Content
+		// keeps a single-column left pad and fills the width as one block.
+		const blank = padding(width);
+		const innerWidth = Math.max(1, width - 1);
 		const content: string[] = [];
 		for (const line of this.#lines) {
 			const normalized = replaceTabs(line);
@@ -134,12 +136,10 @@ class OutlinedList extends Container {
 			for (const wrappedBody of wrapped.length > 0 ? wrapped : [""]) {
 				const wrappedLine = `${indent}${wrappedBody}`;
 				const pad = Math.max(0, innerWidth - visibleWidth(wrappedLine));
-				content.push(
-					`${borderColor(theme.boxSharp.vertical)}${wrappedLine}${padding(pad)}${borderColor(theme.boxSharp.vertical)}`,
-				);
+				content.push(` ${wrappedLine}${padding(pad)}`);
 			}
 		}
-		return [horizontal, ...content, horizontal];
+		return [blank, ...content, blank];
 	}
 }
 

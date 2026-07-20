@@ -179,6 +179,7 @@ describe("formatDiagnostics", () => {
 		expect(formatted.replace(/\s+/g, " ")).toContain("too many arguments in call");
 		expect(formatted.replace(/\s+/g, " ")).toContain("unparsed diagnostic message");
 		expect(formatted.replace(/\s+/g, " ")).toContain("1 error(s)");
+		expect(formatted).not.toMatch(/[├└│]/);
 	});
 });
 

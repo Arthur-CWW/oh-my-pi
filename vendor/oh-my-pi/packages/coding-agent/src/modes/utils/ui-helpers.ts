@@ -300,7 +300,7 @@ export class UiHelpers {
 								? "(unknown lines)"
 								: `(${file.lineCount} lines)`;
 					}
-					const text = `${theme.fg("dim", `${theme.tree.last} `)}${theme.fg("muted", "Read")} ${theme.fg(
+					const text = `   ${theme.fg("muted", "Read")} ${theme.fg(
 						"accent",
 						file.path,
 					)} ${theme.fg("dim", suffix)}`;
@@ -743,7 +743,7 @@ export class UiHelpers {
 			this.ctx.pendingMessagesContainer.addChild(new TruncatedText(queuedText, 1, 0));
 		}
 		const dequeueKey = this.ctx.keybindings.getDisplayString("app.message.dequeue") || "Alt+Up";
-		const hintText = theme.fg("dim", `${theme.tree.hook} ${dequeueKey} to edit one item`);
+		const hintText = theme.fg("dim", `  ${dequeueKey} to edit one item`);
 		this.ctx.pendingMessagesContainer.addChild(new TruncatedText(hintText, 1, 0));
 	}
 

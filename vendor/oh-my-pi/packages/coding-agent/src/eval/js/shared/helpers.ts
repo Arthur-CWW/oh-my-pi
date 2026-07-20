@@ -158,24 +158,22 @@ export function createHelpers(ctx: HelperContext): HelperBundle {
 			const showHidden = options.hidden ?? false;
 			const lines: string[] = [`${root}/`];
 			let entryCount = 0;
-			const walk = async (dir: string, prefix: string, depth: number): Promise<void> => {
+			const walk = async (dir: string, depth: number): Promise<void> => {
 				if (depth > maxDepth) return;
 				const entries = (await fs.promises.readdir(dir, { withFileTypes: true }))
 					.filter(entry => showHidden || !entry.name.startsWith("."))
 					.sort((a, b) => a.name.localeCompare(b.name));
-				for (let index = 0; index < entries.length; index++) {
-					const entry = entries[index];
-					const isLast = index === entries.length - 1;
-					const connector = isLast ? "└── " : "├── ";
+				const indent = "    ".repeat(depth);
+				for (const entry of entries) {
 					const suffix = entry.isDirectory() ? "/" : "";
-					lines.push(`${prefix}${connector}${entry.name}${suffix}`);
+					lines.push(`${indent}${entry.name}${suffix}`);
 					entryCount += 1;
 					if (entry.isDirectory()) {
-						await walk(path.join(dir, entry.name), `${prefix}${isLast ? "    " : "│   "}`, depth + 1);
+						await walk(path.join(dir, entry.name), depth + 1);
 					}
 				}
 			};
-			await walk(root, "", 1);
+			await walk(root, 1);
 			const result = lines.join("\n");
 			ctx.emitStatus({ op: "tree", path: root, entries: entryCount, preview: result.slice(0, 1000) });
 			return result;

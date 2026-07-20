@@ -75,20 +75,16 @@ describe("issue #2298: chain rows under last-sibling branches keep their gutter"
 			return row;
 		};
 
-		// Branch1 is the last sibling at level 1, so its own connector is `└─`.
-		const branch1Row = findRow("user: branch1 head");
-		expect(branch1Row).toMatch(/└─\s+user: branch1 head/);
-
-		// Each chain descendant of branch1 must stay anchored by a `│` drawn
-		// below the branch head's content (one level right of the `└─`
-		// connector). Before #2298 these rows rendered as bare spaces and the
-		// chain floated unanchored; after #2325 the anchor must not sit in the
-		// `└─` corner column, which would dangle below the terminal branch.
-		for (const needle of ["assistant: chain-asst-1", "user: chain-user-2"]) {
-			const row = findRow(needle);
-			expect(row).not.toMatch(/^\s{2}│/);
-			expect(row).toMatch(/^\s{5}│\s+\S/);
-		}
+		// Hierarchy reads from indentation — no tree/branch glyphs anywhere.
+		expect(rendered.every(line => !/[│├└]/.test(line))).toBe(true);
+		const indentOf = (line: string): number => line.match(/^ */)![0].length;
+		// Chain descendants of the last-sibling branch stay indented under the
+		// branch head and aligned with each other (no leftward drift to root).
+		const branch1Indent = indentOf(findRow("user: branch1 head"));
+		const chain1Indent = indentOf(findRow("assistant: chain-asst-1"));
+		const chain2Indent = indentOf(findRow("user: chain-user-2"));
+		expect(chain1Indent).toBeGreaterThanOrEqual(branch1Indent);
+		expect(chain2Indent).toBe(chain1Indent);
 	});
 
 	// Branched grandchildren and their continuations must stay on the standard
@@ -118,34 +114,20 @@ describe("issue #2298: chain rows under last-sibling branches keep their gutter"
 
 		const rendered = renderStripped([root], fixIt.entry.id);
 
-		// The grandchildren carry their own connectors; the inherited gutter at
-		// branch1's column must stay as space so the standard `└─` semantics
-		// survive for proper tree drawings.
-		for (const needle of ["grandchild c", "grandchild d"]) {
+		// Hierarchy reads from indentation — no tree/branch glyphs anywhere.
+		expect(rendered.every(line => !/[│├└]/.test(line))).toBe(true);
+		const indentOf = (line: string): number => line.match(/^ */)![0].length;
+		const rowFor = (needle: string): string => {
 			const row = rendered.find(line => line.includes(needle));
 			if (!row) throw new Error(`row containing ${JSON.stringify(needle)} not rendered`);
-			expect(row).not.toMatch(/^\s{2}│/);
-			expect(row).toMatch(/[├└]─/);
-		}
-
-		// Linear continuations of those branched grandchildren are chain rows.
-		// c is not the last sibling, so its sibling line (`│` in c's connector
-		// column) anchors the continuation. d is the last sibling (`└─`), so its
-		// continuation is anchored one level further right instead — never in
-		// d's own corner column (#2325), and never in the suppressed branch1
-		// column. This is the nested case from the PR review.
-		{
-			const row = rendered.find(line => line.includes("c continuation"));
-			if (!row) throw new Error("row containing c continuation not rendered");
-			expect(row).not.toMatch(/^\s{2}│/);
-			expect(row).toMatch(/^\s{5}│/);
-		}
-		{
-			const row = rendered.find(line => line.includes("d continuation"));
-			if (!row) throw new Error("row containing d continuation not rendered");
-			expect(row).not.toMatch(/^\s{2}│/);
-			expect(row).not.toMatch(/^\s{5}│/);
-			expect(row).toMatch(/^\s{8}│/);
-		}
+			return row;
+		};
+		// Branched grandchildren render as aligned siblings; their linear
+		// continuations stay indented under their own parent, never drifting left.
+		const cIndent = indentOf(rowFor("grandchild c"));
+		const dIndent = indentOf(rowFor("grandchild d"));
+		expect(cIndent).toBe(dIndent);
+		expect(indentOf(rowFor("c continuation"))).toBeGreaterThanOrEqual(cIndent);
+		expect(indentOf(rowFor("d continuation"))).toBeGreaterThanOrEqual(dIndent);
 	});
 });

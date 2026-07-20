@@ -40,7 +40,6 @@ function selectedId(hub: AgentHubOverlayComponent): string | undefined {
 	return line
 		.slice(23)
 		.trim()
-		.replace(/^(?:(?:│ | {2})*(?:├|└) )/, "")
 		.split(/\s+/)[0];
 }
 
@@ -85,7 +84,7 @@ describe("Agent Hub nested roster tree", () => {
 		add(registry, "Alpha.One.Leaf", "Alpha.One");
 		const hub = makeHub(registry);
 		const rendered = text(hub);
-		const indexes = ["Alpha Alpha", "├ Alpha.One", "│ └ Alpha.One.Leaf", "└ Alpha.Two", "Beta Beta"].map(value =>
+		const indexes = ["Alpha Alpha", "  Alpha.One Alpha.One", "    Alpha.One.Leaf Alpha.One.Leaf", "  Alpha.Two Alpha.Two", "Beta Beta"].map(value =>
 			rendered.indexOf(value),
 		);
 		expect(indexes.every(index => index >= 0)).toBe(true);
@@ -173,7 +172,7 @@ describe("Agent Hub nested roster tree", () => {
 		add(registry, "Alpha");
 		add(registry, "Beta");
 		const hub = makeHub(registry);
-		expect(rosterLines(hub).every(line => !/[├└│] •/.test(line))).toBe(true);
+		expect(rosterLines(hub).every(line => !/[├└│]/.test(line))).toBe(true);
 		hub.dispose();
 	});
 });

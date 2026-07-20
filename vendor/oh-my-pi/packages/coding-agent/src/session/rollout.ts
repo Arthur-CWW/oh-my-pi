@@ -1,7 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { Command, Flags } from "@oh-my-pi/pi-utils/cli";
+import { Effect } from "effect";
+import { Command, Flag } from "effect/unstable/cli";
 import { VERSION } from "@oh-my-pi/pi-utils/dirs";
 import { IrcExternalBus, type IrcExternalPeer } from "../irc/bus-external";
 import { RolloutJournal, type RolloutPeerPhase } from "./rollout-journal";
@@ -355,17 +356,22 @@ function printSummary(summary: RolloutSummary, dryRun: boolean): void {
 		);
 }
 
-export default class RolloutCommand extends Command {
-	static description = "Safely restart live sessions into the current blessed binary";
-	static flags = {
-		auto: Flags.boolean({ description: "Run unattended after binary promotion", default: false }),
-		"dry-run": Flags.boolean({ description: "Print the rollout plan without restarting sessions", default: false }),
-	};
-
-	async run(): Promise<void> {
-		const { flags } = await this.parse(RolloutCommand);
-		const summary = await runRollout({ dryRun: flags["dry-run"] });
-		printSummary(summary, flags["dry-run"]);
-		if (summary.failed) process.exitCode = 1;
-	}
-}
+export default Command.make(
+	"rollout",
+	{
+		auto: Flag.boolean("auto").pipe(
+			Flag.withDescription("Run unattended after binary promotion"),
+			Flag.withDefault(false),
+		),
+		"dry-run": Flag.boolean("dry-run").pipe(
+			Flag.withDescription("Print the rollout plan without restarting sessions"),
+			Flag.withDefault(false),
+		),
+	},
+	config =>
+		Effect.promise(async () => {
+			const summary = await runRollout({ dryRun: config["dry-run"] });
+			printSummary(summary, config["dry-run"]);
+			if (summary.failed) process.exitCode = 1;
+		}),
+).pipe(Command.withDescription("Safely restart live sessions into the current blessed binary"));

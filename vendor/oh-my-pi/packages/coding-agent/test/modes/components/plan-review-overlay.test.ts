@@ -46,7 +46,7 @@ describe("PlanReviewOverlay", () => {
 		vi.restoreAllMocks();
 	});
 
-	it("renders the plan body, prompt, options and footer inside one outlined box", () => {
+	it("renders the plan body, prompt, options and footer without frame chrome", () => {
 		const overlay = new PlanReviewOverlay(
 			"# My Plan\n\nstep one then step two",
 			{ promptTitle: "Plan mode - next step", options: APPROVAL_OPTIONS, helpText: "esc cancel" },
@@ -59,10 +59,8 @@ describe("PlanReviewOverlay", () => {
 		expect(out).toContain("Plan mode - next step");
 		for (const option of APPROVAL_OPTIONS) expect(out).toContain(option);
 		expect(out).toContain("esc cancel");
-		// Outlined like the /copy overlay.
-		expect(out).toContain("┌");
-		expect(out).toContain("│");
-		expect(out).toContain("└");
+		// Frameless like the /copy overlay: no corners or tee-joins.
+		expect(out).not.toMatch(/[┌┐└┘╭╮╰╯┬┴├┤┼]/);
 	});
 
 	it("confirms the highlighted option on Enter", () => {
@@ -243,9 +241,10 @@ describe("PlanReviewOverlay", () => {
 			{ onPick: vi.fn(), onCancel: vi.fn() },
 		);
 		const out = render(overlay);
-		// Two-column split chrome (┬ joins the title rule over the divider) and the
-		// bare section list — no "Contents" label.
-		expect(out).toContain("┬");
+		// Two-column split: a middle │ divider between the section sidebar and the
+		// body, but no outer frame or ┬ tee. No "Contents" label.
+		expect(out).toContain("│");
+		expect(out).not.toMatch(/[┌┐└┘╭╮╰╯┬┴├┤┼]/);
 		expect(out).not.toContain("Contents");
 		expect(out).toContain("Overview");
 		// Tab into the ToC region surfaces its focus-specific help.
@@ -264,7 +263,8 @@ describe("PlanReviewOverlay", () => {
 		);
 		const sidebar = render(overlay)
 			.split("\n")
-			.map(line => line.split("│")[1] ?? "")
+			.filter(line => line.includes("│"))
+			.map(line => line.split("│")[0] ?? "")
 			.join("\n");
 		expect(sidebar).toContain("Design");
 		expect(sidebar).toContain("Rollout");

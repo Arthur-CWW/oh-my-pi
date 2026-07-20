@@ -827,7 +827,7 @@ export const askToolRenderer = {
 		const mdTheme = getMarkdownTheme();
 		const accentStyle = { color: (t: string) => uiTheme.fg("accent", t) };
 		const md = (text: string, width: number) =>
-			new Markdown(text, 1, 0, mdTheme, accentStyle).render(Math.max(1, width - 3 + 1));
+			new Markdown(text, 1, 0, mdTheme, accentStyle).render(Math.max(1, width - 1));
 
 		// Multi-part questions: one divider-labelled section per question.
 		// Call args are untrusted (partially streamed or model-mangled) and a
@@ -896,7 +896,7 @@ export const askToolRenderer = {
 		const mdTheme = getMarkdownTheme();
 		const accentStyle = { color: (t: string) => uiTheme.fg("accent", t) };
 		const md = (text: string, width: number) =>
-			new Markdown(text, 1, 0, mdTheme, accentStyle).render(Math.max(1, width - 3 + 1));
+			new Markdown(text, 1, 0, mdTheme, accentStyle).render(Math.max(1, width - 1));
 
 		if (!details) {
 			const txt = result.content[0];

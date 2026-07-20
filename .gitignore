@@ -54,6 +54,9 @@ vendor/mitsuhiko/*
 !vendor/mitsuhiko/README.md
 !vendor/mitsuhiko/agent-stuff/
 !vendor/mitsuhiko/agent-stuff/**
+!vendor/mattiamanzati/
+vendor/mattiamanzati/*
+!vendor/mattiamanzati/README.md
 !vendor/noumena/
 vendor/noumena/*
 !vendor/noumena/code/

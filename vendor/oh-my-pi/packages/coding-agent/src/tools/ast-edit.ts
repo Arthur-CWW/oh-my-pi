@@ -681,7 +681,7 @@ export const astEditToolRenderer = {
 		}
 		return framedBlock(uiTheme, width => {
 			const changeLines = buildChangeBody(changeGroups, Boolean(options.expanded), COLLAPSED_CHANGE_LIMIT, uiTheme);
-			const innerWidth = Math.max(1, width - 3);
+			const innerWidth = Math.max(1, width - 1);
 			const bodyLines = [...changeLines, ...extraLines].map(l => truncateToWidth(l, innerWidth, Ellipsis.Omit));
 			while (bodyLines.length > 0 && bodyLines[0].trim() === "") bodyLines.shift();
 			return {

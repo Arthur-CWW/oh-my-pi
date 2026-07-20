@@ -1079,7 +1079,6 @@ describe("live SessionRunner", () => {
 							kind: "enter",
 							action: "create",
 							objective: "Prove durable goal transitions",
-							tokenBudget: 500,
 						},
 					});
 
@@ -1095,7 +1094,6 @@ describe("live SessionRunner", () => {
 						goal: {
 							objective: "Prove durable goal transitions",
 							status: "active",
-							tokenBudget: 500,
 						},
 					});
 					expect(yield* terminal.transitionGoalMode(enter)).toEqual({ ...receipt, replayed: true });

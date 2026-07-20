@@ -1,42 +1,37 @@
 /**
  * Test web search providers.
  */
-import { Args, Command, Flags } from "@oh-my-pi/pi-utils/cli";
+import { Effect, Option } from "effect";
+import { Argument, Command, Flag } from "effect/unstable/cli";
 import { runSearchCommand, type SearchCommandArgs } from "../cli/web-search-cli";
 import { SEARCH_PROVIDER_ORDER } from "../web/search/provider";
 
-const PROVIDERS: Array<string> = ["auto", ...SEARCH_PROVIDER_ORDER];
+const PROVIDERS: readonly NonNullable<SearchCommandArgs["provider"]>[] = ["auto", ...SEARCH_PROVIDER_ORDER];
+const RECENCY: readonly NonNullable<SearchCommandArgs["recency"]>[] = ["day", "week", "month", "year"];
 
-const RECENCY: NonNullable<SearchCommandArgs["recency"]>[] = ["day", "week", "month", "year"];
-
-export default class Search extends Command {
-	static description = "Test web search providers";
-
-	static aliases = ["q"];
-
-	static args = {
-		query: Args.string({ description: "Search query text", required: false, multiple: true }),
-	};
-
-	static flags = {
-		provider: Flags.string({ description: "Search provider", options: PROVIDERS }),
-		recency: Flags.string({ description: "Recency filter", options: RECENCY }),
-		limit: Flags.integer({ char: "l", description: "Max results to return" }),
-		compact: Flags.boolean({ description: "Render condensed output" }),
-	};
-
-	async run(): Promise<void> {
-		const { args, flags } = await this.parse(Search);
-		const query = Array.isArray(args.query) ? args.query.join(" ") : (args.query ?? "");
-
-		const cmd: SearchCommandArgs = {
-			query,
-			provider: flags.provider as SearchCommandArgs["provider"],
-			recency: flags.recency as SearchCommandArgs["recency"],
-			limit: flags.limit,
-			expanded: !flags.compact,
-		};
-
-		await runSearchCommand(cmd);
-	}
-}
+export default Command.make(
+	"search",
+	{
+		query: Argument.string("query").pipe(
+			Argument.withDescription("Search query text"),
+			Argument.variadic(),
+		),
+		provider: Flag.optional(Flag.choice("provider", PROVIDERS).pipe(Flag.withDescription("Search provider"))),
+		recency: Flag.optional(Flag.choice("recency", RECENCY).pipe(Flag.withDescription("Recency filter"))),
+		limit: Flag.optional(
+			Flag.integer("limit").pipe(Flag.withAlias("l"), Flag.withDescription("Max results to return")),
+		),
+		compact: Flag.boolean("compact").pipe(Flag.withDescription("Render condensed output")),
+	},
+	config =>
+		Effect.promise(() => {
+			const cmd: SearchCommandArgs = {
+				query: [...config.query].join(" "),
+				provider: Option.getOrUndefined(config.provider),
+				recency: Option.getOrUndefined(config.recency),
+				limit: Option.getOrUndefined(config.limit),
+				expanded: !config.compact,
+			};
+			return runSearchCommand(cmd);
+		}),
+).pipe(Command.withDescription("Test web search providers"), Command.withAlias("q"));

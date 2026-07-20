@@ -223,21 +223,15 @@ function renderHover(
 	const langLabel = lang ? theme.fg("mdCodeBlockBorder", ` ${lang}`) : "";
 
 	if (expanded) {
-		const h = theme.boxSharp.horizontal;
-		const v = theme.boxSharp.vertical;
-		const top = `${theme.boxSharp.topLeft}${h.repeat(3)}`;
-		const bottom = `${theme.boxSharp.bottomLeft}${h.repeat(3)}`;
 		let output = `${icon}${langLabel}`;
 		if (beforeCode) {
 			for (const line of beforeCode.split("\n")) {
 				output += `\n ${theme.fg("muted", line)}`;
 			}
 		}
-		output += `\n ${theme.fg("mdCodeBlockBorder", top)}`;
 		for (const line of codeLines) {
-			output += `\n ${theme.fg("mdCodeBlockBorder", v)} ${line}`;
+			output += `\n   ${line}`;
 		}
-		output += `\n ${theme.fg("mdCodeBlockBorder", bottom)}`;
 		if (afterCode) {
 			output += `\n ${theme.fg("muted", afterCode)}`;
 		}
@@ -252,22 +246,17 @@ function renderHover(
 	let output = `${icon}${langLabel}${expandHint}`;
 	if (beforeCode) {
 		const preview = truncateToWidth(beforeCode, TRUNCATE_LENGTHS.TITLE);
-		output += `\n ${theme.fg("dim", theme.tree.branch)} ${theme.fg("muted", preview)}`;
+		output += `\n   ${theme.fg("muted", preview)}`;
 	}
-	const h = theme.boxSharp.horizontal;
-	const v = theme.boxSharp.vertical;
-	const bottom = `${theme.boxSharp.bottomLeft}${h.repeat(3)}`;
-	output += `\n ${theme.fg("mdCodeBlockBorder", v)} ${firstCodeLine}`;
+	output += `\n   ${firstCodeLine}`;
 
 	if (codeLines.length > 1) {
-		output += `\n ${theme.fg("mdCodeBlockBorder", v)} ${theme.fg("muted", `… ${codeLines.length - 1} more lines`)}`;
+		output += `\n   ${theme.fg("muted", `… ${codeLines.length - 1} more lines`)}`;
 	}
 
 	if (afterCode) {
 		const docPreview = truncateToWidth(afterCode, TRUNCATE_LENGTHS.TITLE);
-		output += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg("muted", docPreview)}`;
-	} else {
-		output += `\n ${theme.fg("mdCodeBlockBorder", bottom)}`;
+		output += `\n   ${theme.fg("muted", docPreview)}`;
 	}
 
 	return output.split("\n");
@@ -321,21 +310,18 @@ function renderDiagnostics(
 		const items: DiagnosticItem[] = parsedDiagnostics.length > 0 ? parsedDiagnostics : fallbackDiagnostics;
 		for (let i = 0; i < items.length; i++) {
 			const item = items[i];
-			const isLast = i === items.length - 1;
-			const branch = isLast ? theme.tree.last : theme.tree.branch;
-			const detailPrefix = isLast ? "   " : `${theme.tree.vertical}  `;
 			if ("raw" in item) {
-				output += `\n ${theme.fg("dim", branch)} ${theme.fg("muted", item.raw)}`;
+				output += `\n    ${theme.fg("muted", item.raw)}`;
 				continue;
 			}
 			const severityColor = severityToColor(item.severity);
 			const location = formatDiagnosticLocation(item.file, item.line, item.col, theme);
-			output += `\n ${theme.fg("dim", branch)} ${theme.fg(severityColor, location)} ${theme.fg(
+			output += `\n    ${theme.fg(severityColor, location)} ${theme.fg(
 				"dim",
 				`[${item.severity}]`,
 			)}`;
 			if (item.message) {
-				output += `\n ${theme.fg("dim", detailPrefix)}${theme.fg(
+				output += `\n    ${theme.fg(
 					"muted",
 					truncateToWidth(item.message, TRUNCATE_LENGTHS.LINE),
 				)}`;
@@ -353,10 +339,8 @@ function renderDiagnostics(
 	let output = `${icon} ${theme.fg("dim", meta.join(theme.sep.dot))}${expandHint}`;
 	for (let i = 0; i < previewItems.length; i++) {
 		const item = previewItems[i];
-		const isLast = i === previewItems.length - 1 && remaining <= 0;
-		const branch = isLast ? theme.tree.last : theme.tree.branch;
 		if ("raw" in item) {
-			output += `\n ${theme.fg("dim", branch)} ${theme.fg("muted", item.raw)}`;
+			output += `\n    ${theme.fg("muted", item.raw)}`;
 			continue;
 		}
 		const severityColor = severityToColor(item.severity);
@@ -364,10 +348,10 @@ function renderDiagnostics(
 		const message = item.message
 			? ` ${theme.fg("muted", truncateToWidth(item.message, TRUNCATE_LENGTHS.CONTENT))}`
 			: "";
-		output += `\n ${theme.fg("dim", branch)} ${theme.fg(severityColor, location)}${message}`;
+		output += `\n    ${theme.fg(severityColor, location)}${message}`;
 	}
 	if (remaining > 0) {
-		output += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg("muted", `… ${remaining} more`)}`;
+		output += `\n    ${theme.fg("muted", `… ${remaining} more`)}`;
 	}
 
 	return output.split("\n");
@@ -408,21 +392,17 @@ function renderReferences(refMatch: RegExpMatchArray, lines: string[], expanded:
 		for (let fi = 0; fi < filesToShow.length; fi++) {
 			const file = filesToShow[fi];
 			const locs = byFile.get(file)!;
-			const isLastFile = fi === filesToShow.length - 1 && files.length <= maxFiles;
-			const fileBranch = isLastFile ? theme.tree.last : theme.tree.branch;
-			const fileCont = isLastFile ? "   " : `${theme.tree.vertical}  `;
+			const fileCont = "   ";
 
 			const fileMeta = `${locs.length} reference${locs.length !== 1 ? "s" : ""}`;
-			output += `\n ${theme.fg("dim", fileBranch)} ${theme.fg("accent", file)} ${theme.fg("dim", fileMeta)}`;
+			output += `\n    ${theme.fg("accent", file)} ${theme.fg("dim", fileMeta)}`;
 
 			if (maxLocsPerFile > 0) {
 				const locsToShow = locs.slice(0, maxLocsPerFile);
 				for (let li = 0; li < locsToShow.length; li++) {
 					const [line, col] = locsToShow[li];
-					const isLastLoc = li === locsToShow.length - 1 && locs.length <= maxLocsPerFile;
-					const locBranch = isLastLoc ? theme.tree.last : theme.tree.branch;
-					const locCont = isLastLoc ? "   " : `${theme.tree.vertical}  `;
-					output += `\n ${theme.fg("dim", fileCont)}${theme.fg("dim", locBranch)} ${theme.fg(
+					const locCont = "   ";
+					output += `\n ${theme.fg("dim", fileCont)}   ${theme.fg(
 						"muted",
 						`line ${line}, col ${col}`,
 					)}`;
@@ -435,7 +415,7 @@ function renderReferences(refMatch: RegExpMatchArray, lines: string[], expanded:
 					}
 				}
 				if (locs.length > maxLocsPerFile) {
-					output += `\n ${theme.fg("dim", fileCont)}${theme.fg("dim", theme.tree.last)} ${theme.fg(
+					output += `\n ${theme.fg("dim", fileCont)}   ${theme.fg(
 						"muted",
 						`… ${locs.length - maxLocsPerFile} more`,
 					)}`;
@@ -444,7 +424,7 @@ function renderReferences(refMatch: RegExpMatchArray, lines: string[], expanded:
 		}
 
 		if (files.length > maxFiles) {
-			output += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg(
+			output += `\n    ${theme.fg(
 				"muted",
 				formatMoreItems(files.length - maxFiles, "file"),
 			)}`;
@@ -489,34 +469,13 @@ function renderSymbols(symbolsMatch: RegExpMatchArray, lines: string[], expanded
 		}
 	}
 
-	const isLastSibling = (i: number): boolean => {
-		const myIndent = symbols[i].indent;
-		for (let j = i + 1; j < symbols.length; j++) {
-			const nextIndent = symbols[j].indent;
-			if (nextIndent === myIndent) return false;
-			if (nextIndent < myIndent) return true;
-		}
-		return true;
-	};
-
 	const getPrefix = (i: number): string => {
 		const myIndent = symbols[i].indent;
 		if (myIndent === 0) return " ";
 
 		let prefix = " ";
 		for (let level = 2; level <= myIndent; level += 2) {
-			let ancestorIdx = -1;
-			for (let j = i - 1; j >= 0; j--) {
-				if (symbols[j].indent === level - 2) {
-					ancestorIdx = j;
-					break;
-				}
-			}
-			if (ancestorIdx >= 0 && isLastSibling(ancestorIdx)) {
-				prefix += "   ";
-			} else {
-				prefix += `${theme.tree.vertical}  `;
-			}
+			prefix += "   ";
 		}
 		return prefix;
 	};
@@ -529,11 +488,8 @@ function renderSymbols(symbolsMatch: RegExpMatchArray, lines: string[], expanded
 		for (let i = 0; i < symbols.length; i++) {
 			const sym = symbols[i];
 			const prefix = getPrefix(i);
-			const isLast = isLastSibling(i);
-			const branch = isLast ? theme.tree.last : theme.tree.branch;
-			const detailPrefix = isLast ? "   " : `${theme.tree.vertical}  `;
-			output += `\n${prefix}${theme.fg("dim", branch)} ${theme.fg("accent", sym.icon)} ${theme.fg("accent", sym.name)}`;
-			output += `\n${prefix}${theme.fg("dim", detailPrefix)}${theme.fg("muted", `line ${sym.line}`)}`;
+			output += `\n${prefix}   ${theme.fg("accent", sym.icon)} ${theme.fg("accent", sym.name)}`;
+			output += `\n${prefix}   ${theme.fg("muted", `line ${sym.line}`)}`;
 		}
 		return output.split("\n");
 	}
@@ -545,15 +501,13 @@ function renderSymbols(symbolsMatch: RegExpMatchArray, lines: string[], expanded
 	let output = `${icon} ${theme.fg("dim", `in ${fileName}`)}${expandHint}`;
 	for (let i = 0; i < topLevel.length; i++) {
 		const sym = topLevel[i];
-		const isLast = i === topLevel.length - 1 && topLevelCount <= 3;
-		const branch = isLast ? theme.tree.last : theme.tree.branch;
-		output += `\n ${theme.fg("dim", branch)} ${theme.fg("accent", sym.icon)} ${theme.fg("accent", sym.name)} ${theme.fg(
+		output += `\n    ${theme.fg("accent", sym.icon)} ${theme.fg("accent", sym.name)} ${theme.fg(
 			"muted",
 			`line ${sym.line}`,
 		)}`;
 	}
 	if (topLevelCount > 3) {
-		output += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg("muted", `… ${topLevelCount - 3} more`)}`;
+		output += `\n    ${theme.fg("muted", `… ${topLevelCount - 3} more`)}`;
 	}
 
 	return output.split("\n");
@@ -580,9 +534,7 @@ function renderGeneric(text: string, lines: string[], expanded: boolean, theme: 
 	if (expanded) {
 		let output = `${icon} ${theme.fg("dim", "Output")}`;
 		for (let i = 0; i < lines.length; i++) {
-			const isLast = i === lines.length - 1;
-			const branch = isLast ? theme.tree.last : theme.tree.branch;
-			output += `\n ${theme.fg("dim", branch)} ${lines[i]}`;
+			output += `\n    ${lines[i]}`;
 		}
 		return output.split("\n");
 	}
@@ -594,15 +546,13 @@ function renderGeneric(text: string, lines: string[], expanded: boolean, theme: 
 	if (lines.length > 1) {
 		const previewLines = lines.slice(1, 4);
 		for (let i = 0; i < previewLines.length; i++) {
-			const isLast = i === previewLines.length - 1 && lines.length <= 4;
-			const branch = isLast ? theme.tree.last : theme.tree.branch;
-			output += `\n ${theme.fg("dim", branch)} ${theme.fg(
+			output += `\n    ${theme.fg(
 				"dim",
 				truncateToWidth(previewLines[i].trim(), TRUNCATE_LENGTHS.CONTENT),
 			)}`;
 		}
 		if (lines.length > 4) {
-			output += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg(
+			output += `\n    ${theme.fg(
 				"muted",
 				formatMoreItems(lines.length - 4, "line"),
 			)}`;

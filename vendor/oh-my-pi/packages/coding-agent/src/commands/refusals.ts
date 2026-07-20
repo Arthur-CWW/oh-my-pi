@@ -1,49 +1,53 @@
 /** Manage the local Fable refusal corpus and replay history. */
-import { Args, Command, Flags } from "@oh-my-pi/pi-utils/cli";
+import { Effect, Option } from "effect";
+import { Argument, Command, Flag } from "effect/unstable/cli";
 import { type RefusalsAction, runRefusalsCommand } from "../cli/refusals-cli";
 
-export default class Refusals extends Command {
-	static description = "List, review, and replay Fable refusal cases";
+const ACTIONS: readonly RefusalsAction[] = ["list", "show", "stats", "mark", "replay"];
 
-	static args = {
-		action: Args.string({
-			description: "list (default), show, stats, mark, or replay",
-			required: false,
-			options: ["list", "show", "stats", "mark", "replay"],
-			default: "list",
-		}),
-		id: Args.string({ description: "Refusal case id", required: false }),
-	};
-
-	static flags = {
-		limit: Flags.integer({ char: "n", description: "Number of cases to show", default: 50 }),
-		json: Flags.boolean({ char: "j", description: "Output JSON", default: false }),
-		verdict: Flags.string({ description: "Human verdict for mark" }),
-		note: Flags.string({ description: "Remediation note for mark" }),
-		falsePositives: Flags.boolean({ description: "Replay every false-positive case", default: false }),
-	};
-
-	static examples = [
-		"omp refusals list",
-		"omp refusals show <id>",
-		"omp refusals stats --json",
-		"omp refusals mark <id> --verdict false-positive --note 'safe local request'",
-		"omp refusals replay <id>",
-		"omp refusals replay --false-positives",
-	];
-
-	async run(): Promise<void> {
-		const { args, flags } = await this.parse(Refusals);
-		await runRefusalsCommand({
-			action: args.action as RefusalsAction,
-			id: args.id,
-			flags: {
-				limit: flags.limit,
-				json: flags.json,
-				verdict: flags.verdict,
-				note: flags.note,
-				falsePositives: flags.falsePositives,
-			},
-		});
-	}
-}
+export default Command.make(
+	"refusals",
+	{
+		action: Argument.choice("action", ACTIONS).pipe(
+			Argument.withDescription("list (default), show, stats, mark, or replay"),
+			Argument.withDefault("list"),
+		),
+		id: Argument.optional(Argument.string("id").pipe(Argument.withDescription("Refusal case id"))),
+		limit: Flag.integer("limit").pipe(
+			Flag.withAlias("n"),
+			Flag.withDescription("Number of cases to show"),
+			Flag.withDefault(50),
+		),
+		json: Flag.boolean("json").pipe(Flag.withAlias("j"), Flag.withDescription("Output JSON"), Flag.withDefault(false)),
+		verdict: Flag.optional(Flag.string("verdict").pipe(Flag.withDescription("Human verdict for mark"))),
+		note: Flag.optional(Flag.string("note").pipe(Flag.withDescription("Remediation note for mark"))),
+		falsePositives: Flag.boolean("false-positives").pipe(
+			Flag.withDescription("Replay every false-positive case"),
+			Flag.withDefault(false),
+		),
+	},
+	config =>
+		Effect.promise(() =>
+			runRefusalsCommand({
+				action: config.action,
+				id: Option.getOrUndefined(config.id),
+				flags: {
+					limit: config.limit,
+					json: config.json,
+					verdict: Option.getOrUndefined(config.verdict),
+					note: Option.getOrUndefined(config.note),
+					falsePositives: config.falsePositives,
+				},
+			}),
+		),
+).pipe(
+	Command.withDescription("List, review, and replay Fable refusal cases"),
+	Command.withExamples([
+		{ command: "omp refusals list" },
+		{ command: "omp refusals show <id>" },
+		{ command: "omp refusals stats --json" },
+		{ command: "omp refusals mark <id> --verdict false-positive --note 'safe local request'" },
+		{ command: "omp refusals replay <id>" },
+		{ command: "omp refusals replay --false-positives" },
+	]),
+);

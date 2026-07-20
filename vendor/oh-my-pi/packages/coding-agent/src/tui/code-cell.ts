@@ -179,8 +179,8 @@ export function renderMarkdownCell(options: MarkdownCellOptions, theme: Theme): 
 	const state = getState(options.status);
 
 	// Markdown component manages its own wrapping at the inner content width.
-	// `renderOutputBlock` adds a `│ ` prefix + `│` suffix → 3 visible columns.
-	const innerWidth = Math.max(20, width - 3);
+	// `renderOutputBlock` adds ` ` (contentPaddingLeft) → 1 visible column.
+	const innerWidth = Math.max(20, width - 1);
 	const allLines = content.trim() ? new Markdown(content, 0, 0, getMarkdownTheme()).render(innerWidth) : [];
 	const maxContentLines = expanded ? allLines.length : Math.min(allLines.length, contentMaxLines);
 	const contentLines = allLines.slice(0, maxContentLines);

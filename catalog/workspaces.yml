@@ -1,8 +1,22 @@
 schemaVersion: 1
 updated: 2026-07-03
+revised: 2026-07-20
+currentAuthority: docs/fable/federated-control-plane.md
+# --- 2026-07-20 authority + scope note -----------------------------------------
+# Fleet topology and control-plane ARCHITECTURE are owned by currentAuthority
+# (docs/fable/federated-control-plane.md): federated per-host workspace manifests (§7),
+# derived global cross-workspace views (§6/§10), and NO shared mutable filesystem (§3).
+# This file is NOT a competing topology authority. It is a host-local (Mac cockpit)
+# AVAILABILITY catalog of that host's workspace/context roots. Cross-host reach is
+# federated over the server API + tailnet, never a shared mount; any global
+# cross-workspace view is a derived projection, not this flat registry. Where this file
+# and the federated doc conflict, the federated doc wins; superseded framing below is
+# dated-marked (2026-07-20), not silently rewritten. Original registry design: 2026-07-03.
 purpose: >-
-  Stable workspace and context-root registry for agents. Folders express ownership;
-  this catalog expresses availability, task context, and safe cross-workspace handoff.
+  Host-local (Mac cockpit) workspace and context-root availability catalog. Folders
+  express ownership; this catalog expresses availability, task context, and safe
+  cross-workspace handoff on this host. Fleet topology and control-plane architecture
+  are owned by currentAuthority; this file is not a fleet-topology authority.
 
 principles:
   - canonical_location_follows_ownership
@@ -97,18 +111,18 @@ repoRoots:
     kind: vendored-source
     rule: reference/imported source; do not auto-load unless listed explicitly
   ohMyPiFork:
-    path: /Users/arthur/agents/oh-my-pi
-    kind: first-class-fork
-    rule: keep at repo root while actively forking OMP
-  openDesign:
-    path: /Users/arthur/agents/vendor/nexu-io--open-design
-    kind: vendored-design-runtime
-    sourceRepo: https://github.com/nexu-io/open-design.git
-    sourceBranch: main
-    sourceCommit: 2f5c9bb218e5f42a5a890e07ad00b3f096ccbd49
-    syncDate: 2026-07-10
-    rule: vendored upstream source; local-first run path via root open-design:* scripts with OD_DATA_DIR under data/open-design
-    tags: [open-design, local-first, design, sqlite]
+    # 2026-07-22: relocated off the dead repo-root path /Users/arthur/agents/oh-my-pi.
+    # `~/agents` is the canonical control-plane workspace (federated-control-plane.md §7);
+    # the OMP fork is now a no-I/O `policy: pin` vendored checkout, not a first-class
+    # repo-root fork.
+    path: /Users/arthur/agents/vendor/oh-my-pi
+    kind: vendored-fork-pinned
+    rule: pinned vendored OMP fork (vendor-sync policy:pin, no auto-I/O); do not auto-load unless listed explicitly
+  # 2026-07-22: `openDesign` repoRoot removed. Its vendored source
+  # /Users/arthur/agents/vendor/nexu-io--open-design no longer exists, and its pinned
+  # sourceCommit/syncDate snapshot assumption is dead (removed alongside the NCode /
+  # Open-Design snapshots). Any local-first run data (state/open-design, OD_DATA_DIR) is
+  # runtime state under the `state` home root, not a vendored source root.
 
 adHocContextPolicy:
   default: add_absolute_path_here_or_in_project_packet_before_moving_files
@@ -131,10 +145,14 @@ contextRoots:
     kind: workspace-index-db
     tags: [ontology, lifecycle-roots]
 
-  - id: agents-control-plane-ledger
-    path: /Users/arthur/agents/data/symphony-lite
-    kind: control-plane-ledger-root
-    tags: [agents, control-plane, sqlite, task-ledger]
+  # 2026-07-22: former `agents-control-plane-ledger` path /Users/arthur/agents/data/symphony-lite
+  # is dead. Canonical queue/attention/routing/claims ledger authority is the control-plane
+  # package (federated-control-plane.md §2); editorial task intake is TASKS.md + the harness
+  # register. The symphony-lite task-ledger design (see packetPolicy.taskLedger) is historical.
+  - id: agents-control-plane
+    path: /Users/arthur/agents/packages/control-plane
+    kind: control-plane-package
+    tags: [agents, control-plane, sqlite, ledger]
   - id: pi-cockpit-ledger
     path: /Users/arthur/.local/share/pi-cockpit/cockpit.sqlite
     kind: cockpit-runtime-db
@@ -150,8 +168,8 @@ contextRoots:
 
 packetPolicy:
   rootCandidates:
-    - /Users/arthur/exploratory/packets
-    - /Users/arthur/vault/promote
+    # 2026-07-22: dead paths /Users/arthur/exploratory/packets and /Users/arthur/vault/promote
+    # removed; extant candidates only.
     - /Users/arthur/agents/docs/provider
     - /Users/arthur/agents/docs/plans
   requiredFields:
@@ -164,8 +182,13 @@ packetPolicy:
     - acceptanceChecks
     - proofLinks
   taskLedger:
+    # 2026-07-22 SUPERSEDED (historical design intent). The symphony-lite task-ledger is
+    # not the current canonical task/queue authority: per federated-control-plane.md §2,
+    # canonical queue/attention/routing/claims = the control-plane SQLite ledger
+    # (packages/control-plane) and editorial task intake = TASKS.md + the harness register.
+    # Kept only to date the original design; canonicalRuntimeRoot below is a DEAD path.
     sourceOfTruth: sqlite-after-import
-    canonicalRuntimeRoot: /Users/arthur/agents/data/symphony-lite
+    canonicalRuntimeRoot: /Users/arthur/agents/data/symphony-lite   # DEAD 2026-07-22; superseded by packages/control-plane (federated §2)
     firstImplementationTarget: /Users/arthur/agents/packages/symphony-lite-elixir
     markdownRole: policy-and-human-summary
     migrationSources:
@@ -179,6 +202,12 @@ packetPolicy:
       - packet_events
 
 sessionContinuity:
+  # 2026-07-22 SUPERSEDED framing. Durable session identity, stable URIs, and per-host
+  # workspace binding are now owned by federated-control-plane.md §6 (full internal ID +
+  # stable 12-char alias + workspace://, session://, doc://, task://, artifact:// resolvers)
+  # and §7 (host-local workspace manifests). The "future session-remap/catalog tool" below
+  # is the derived cross-client reference resolver (research-register RR-004). Retained as
+  # dated 2026-07-03 framing of the original cwd-keyed problem, not current architecture.
   problem: current agent sessions are keyed primarily by cwd path
   targetIdentity:
     - workspaceId

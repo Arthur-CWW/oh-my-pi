@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type * as React from "react"
 
-import { type Card, type CardStatus, enrollCardCandidate, getCardCandidates } from "@/api"
+import { type AnkiProfile, type Card, type CardStatus, enrollCardCandidate, getAnkiProfile, getCardCandidates } from "@/api"
 import { cn } from "@/lib/utils"
 import { EmptyHint, InlineError } from "./atoms"
 import { Button } from "./ui/button"
@@ -11,11 +11,11 @@ type CardTableStatus = CardStatus | "enrolled"
 type CardFilter = "all" | CardTableStatus
 
 const FILTERS: Array<{ value: CardFilter; label: string }> = [
-  { value: "all", label: "all" },
-  { value: "candidate", label: "candidate" },
-  { value: "approved", label: "approved" },
-  { value: "rejected", label: "rejected" },
-  { value: "enrolled", label: "enrolled" },
+  { value: "all", label: "全部" },
+  { value: "candidate", label: "候选" },
+  { value: "approved", label: "通过" },
+  { value: "rejected", label: "弃用" },
+  { value: "enrolled", label: "已入复习" },
 ]
 
 const STATUS_CLASS: Record<CardTableStatus, string> = {
@@ -25,18 +25,42 @@ const STATUS_CLASS: Record<CardTableStatus, string> = {
   enrolled: "border-sky-400/30 bg-sky-400/10 text-sky-300",
 }
 
+const STATUS_LABEL: Record<CardTableStatus, string> = {
+  candidate: "候选",
+  approved: "通过",
+  rejected: "弃用",
+  enrolled: "已入复习",
+}
+
 function cardStatus(card: Card): CardTableStatus {
   return card.enrolled === true ? "enrolled" : card.status
 }
 
-function jitterFor(id: number): { rotation: number; offset: number } {
-  let mixed = Math.imul(id ^ 0x9e3779b9, 0x45d9f3b)
-  mixed = Math.imul(mixed ^ (mixed >>> 16), 0x45d9f3b)
-  mixed ^= mixed >>> 16
-  return {
-    rotation: (mixed >>> 0) % 7 - 3,
-    offset: (mixed >>> 4) % 7 - 3,
-  }
+const HAN_RUN = /\p{Script=Han}+/u
+const CHINESE_SPAN = /[\p{Script=Han}][\p{Script=Han}\u3000 ，。！？；：、…“”‘’《》—·]*/gu
+const COUNT_FORMAT = new Intl.NumberFormat("zh-CN")
+const BRACKET_GLOSS = /\([^)]*\)|\[[^\]]*]|\{[^}]*}|（[^）]*）|【[^】]*】/g
+
+function targetFromCard(card: Card): string {
+  const sourceTokens = card.sourceRef?.split(/[\/\\._:#\-\s]+/u).filter(Boolean) ?? []
+  const sourceTarget = sourceTokens.reverse().find((token) => HAN_RUN.test(token))?.match(HAN_RUN)?.[0]
+  return sourceTarget ?? `${card.front}\n${card.back}`.match(HAN_RUN)?.[0] ?? "词"
+}
+
+function chineseContext(card: Card, target: string): string[] {
+  const text = `${card.back}\n${card.front}`.replace(BRACKET_GLOSS, "\n")
+  const spans = text.match(CHINESE_SPAN) ?? []
+  const seen = new Set<string>()
+
+  return spans
+    .map((span) => span.replace(/\s+/g, " ").trim())
+    .filter((span) => {
+      const comparison = span.replace(/[，。！？；：、…“”‘’《》—·]+$/u, "")
+      if (comparison === target || !comparison.includes(target) || seen.has(span)) return false
+      seen.add(span)
+      return true
+    })
+    .slice(0, 4)
 }
 
 function CardFace({
@@ -54,8 +78,10 @@ function CardFace({
   onFocus: () => void
   onOpen: () => void
 }): React.JSX.Element {
-  const jitter = jitterFor(card.id)
   const status = cardStatus(card)
+  const target = targetFromCard(card)
+  const contexts = chineseContext(card, target)
+  const targetSize = target.length <= 2 ? "text-4xl" : target.length <= 4 ? "text-3xl" : "text-2xl"
 
   return (
     <button
@@ -63,33 +89,26 @@ function CardFace({
       type="button"
       data-card-table-card={card.id}
       data-card-table-index={index}
-      aria-label={`Open card: ${card.front}`}
+      aria-label={`打开习得卡片：${target}`}
       onFocus={onFocus}
       onClick={onOpen}
       className={cn(
-        "group relative mb-4 flex min-h-44 w-full break-inside-avoid flex-col overflow-hidden rounded-2xl border bg-card p-5 text-left text-card-foreground shadow-sm transition duration-200 hover:-translate-y-0.5 hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        "group mb-3 w-full break-inside-avoid rounded-2xl border bg-card p-4 text-left text-card-foreground shadow-sm transition-[border-color,box-shadow,background-color] duration-150 hover:border-primer/40 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         focused ? "border-primer/60 ring-1 ring-primer/50" : "border-border/80",
       )}
-      style={{
-        transform: `rotate(${jitter.rotation / 2}deg) translateY(${jitter.offset}px)`,
-        contentVisibility: "auto",
-      }}
     >
-      <span className={cn("absolute right-3 top-3 rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide", STATUS_CLASS[status])}>
-        {status}
-      </span>
-      <span className="relative mt-5 flex min-h-28 flex-1 items-center justify-center text-center">
-        <span className="text-4xl font-semibold leading-tight tracking-tight transition-opacity duration-200 group-hover:opacity-0 group-focus-visible:opacity-0 sm:text-5xl">
-          {card.front}
-        </span>
-        <span className="absolute inset-0 flex items-center justify-center px-2 text-base leading-relaxed text-muted-foreground opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus-visible:opacity-100">
-          {card.back}
+      <span className="flex items-center justify-between gap-3">
+        <span className="text-[10px] font-medium tracking-[0.16em] text-muted-foreground/60">习得</span>
+        <span className={cn("rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide", STATUS_CLASS[status])}>
+          {STATUS_LABEL[status]}
         </span>
       </span>
-      <span className="mt-4 flex items-center justify-between gap-3 border-t border-border/60 pt-3 text-[11px] text-muted-foreground/70">
-        <span className="truncate">{card.sourceRef ?? "ledger candidate"}</span>
-        <span className="shrink-0 uppercase tracking-wide">hover to peek</span>
-      </span>
+      <span className={cn("mt-3 block font-semibold leading-tight tracking-tight", targetSize)}>{target}</span>
+      {contexts.length > 0 ? (
+        <span className="mt-3 block text-sm leading-6 text-muted-foreground">
+          {contexts.map((context) => <span key={context} className="block">{context}</span>)}
+        </span>
+      ) : null}
     </button>
   )
 }
@@ -109,6 +128,8 @@ function DetailPopover({
 }): React.JSX.Element {
   const status = cardStatus(card)
   const canEnroll = status === "approved"
+  const target = targetFromCard(card)
+  const contexts = chineseContext(card, target)
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="presentation" onMouseDown={onClose}>
@@ -117,46 +138,62 @@ function DetailPopover({
         role="dialog"
         aria-modal="true"
         aria-labelledby="card-table-detail-title"
-        className="relative w-full max-w-lg rounded-2xl border border-border bg-card p-6 text-card-foreground shadow-2xl"
+        className="relative max-h-[88vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-border bg-card p-6 text-card-foreground shadow-2xl"
         onMouseDown={(event) => event.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-4">
           <div>
-            <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground/70">card detail</p>
-            <h2 id="card-table-detail-title" className="mt-1 text-3xl font-semibold tracking-tight">{card.front}</h2>
+            <p className="text-[11px] tracking-[0.18em] text-primer/80">习得卡片</p>
+            <h2 id="card-table-detail-title" className="mt-2 text-4xl font-semibold leading-tight tracking-tight">{target}</h2>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close card detail" className="rounded-md px-2 py-1 text-lg text-muted-foreground hover:bg-accent hover:text-foreground">
+          <button type="button" onClick={onClose} aria-label="关闭卡片详情" className="rounded-md px-2 py-1 text-lg text-muted-foreground hover:bg-accent hover:text-foreground">
             ×
           </button>
         </div>
 
-        <div className="mt-6 grid gap-4 sm:grid-cols-2">
-          <div className="rounded-xl border border-border/70 bg-muted/20 p-4">
-            <p className="text-[10px] uppercase tracking-wide text-muted-foreground/70">front</p>
-            <p className="mt-2 whitespace-pre-wrap text-xl leading-relaxed">{card.front}</p>
+        {contexts.length > 0 ? (
+          <div className="mt-6 rounded-xl border border-border/70 bg-muted/20 p-4">
+            <p className="text-[10px] tracking-[0.14em] text-muted-foreground/70">语境</p>
+            <div className="mt-2 space-y-2">
+              {contexts.map((context) => <p key={context} className="text-lg leading-relaxed">{context}</p>)}
+            </div>
           </div>
-          <div className="rounded-xl border border-border/70 bg-muted/20 p-4">
-            <p className="text-[10px] uppercase tracking-wide text-muted-foreground/70">back</p>
-            <p className="mt-2 whitespace-pre-wrap text-base leading-relaxed text-muted-foreground">{card.back}</p>
-          </div>
-        </div>
+        ) : null}
 
-        <div className="mt-5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-          <span className={cn("rounded-full border px-2 py-1 font-medium", STATUS_CLASS[status])}>{status}</span>
-          {card.sourceRef ? <code className="break-all rounded bg-muted px-2 py-1">{card.sourceRef}</code> : null}
+        <p className="mt-4 rounded-xl bg-primer/5 px-4 py-3 text-sm leading-relaxed text-muted-foreground">
+          先认目标，再回到语境；需要时才展开英文辅助。
+        </p>
+
+        <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          <span className={cn("rounded-full border px-2 py-1 font-medium", STATUS_CLASS[status])}>{STATUS_LABEL[status]}</span>
+          {card.sourceRef ? <span title={card.sourceRef} className="max-w-56 truncate rounded bg-muted px-2 py-1">{card.sourceRef}</span> : null}
           {card.url ? (
             <a href={card.url} target="_blank" rel="noreferrer" className="text-primer underline-offset-2 hover:underline">
-              open provenance ↗
+              出处 ↗
             </a>
           ) : null}
         </div>
 
+        <details className="mt-5 rounded-xl border border-border/70">
+          <summary className="cursor-pointer px-4 py-3 text-sm text-muted-foreground hover:text-foreground">英文辅助</summary>
+          <div className="grid gap-3 border-t border-border/70 p-4 sm:grid-cols-2">
+            <div>
+              <p className="text-[10px] tracking-wide text-muted-foreground/60">提示</p>
+              <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed">{card.front}</p>
+            </div>
+            <div>
+              <p className="text-[10px] tracking-wide text-muted-foreground/60">解释</p>
+              <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">{card.back}</p>
+            </div>
+          </div>
+        </details>
+
         {actionError ? <div className="mt-4"><InlineError message={actionError} /></div> : null}
         <div className="mt-6 flex items-center justify-between gap-3">
-          <p className="text-xs text-muted-foreground/70">Esc closes · source opens in a new tab</p>
+          <p className="text-xs text-muted-foreground/70">Esc 关闭</p>
           {canEnroll ? (
             <Button type="button" onClick={onEnroll} disabled={actionBusy} className="h-9">
-              {actionBusy ? "Enrolling…" : "Enroll for review"}
+              {actionBusy ? "加入中…" : "加入复习"}
             </Button>
           ) : null}
         </div>
@@ -167,6 +204,7 @@ function DetailPopover({
 
 export function CardTable(): React.JSX.Element {
   const [cards, setCards] = useState<Card[] | null>(null)
+  const [ankiProfile, setAnkiProfile] = useState<AnkiProfile | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [filter, setFilter] = useState<CardFilter>("all")
   const [focusedIndex, setFocusedIndex] = useState(0)
@@ -178,9 +216,12 @@ export function CardTable(): React.JSX.Element {
   useEffect(() => {
     let alive = true
     setError(null)
-    getCardCandidates("all", 500).then(
-      (loaded) => {
-        if (alive) setCards(loaded)
+    Promise.all([getCardCandidates("all", 500), getAnkiProfile()]).then(
+      ([loadedCards, loadedProfile]) => {
+        if (alive) {
+          setCards(loadedCards)
+          setAnkiProfile(loadedProfile)
+        }
       },
       (cause: unknown) => {
         if (alive) setError(cause instanceof Error ? cause.message : "Failed to load cards")
@@ -264,11 +305,18 @@ export function CardTable(): React.JSX.Element {
     <main className="mx-auto w-full max-w-3xl px-4 py-6 min-[1200px]:max-w-6xl">
       <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
         <div>
-          <p className="text-[11px] uppercase tracking-[0.2em] text-primer/80">the deck</p>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight">Cards on the table</h1>
-          <p className="mt-1 text-sm text-muted-foreground">{filter === "all" ? `${allCards.length} cards` : `${visibleCards.length} ${filter} cards`} · j/k or arrows move · Enter opens</p>
+          <p className="text-[11px] tracking-[0.2em] text-primer/80">习得面板</p>
+          <h1 className="mt-1 text-2xl font-semibold tracking-tight">卡片桌面</h1>
+          <p className="mt-1 text-sm text-muted-foreground">{filter === "all" ? `${allCards.length} 张` : `${visibleCards.length} 张${FILTERS.find((option) => option.value === filter)?.label ?? ""}卡片`} · j/k 移动 · Enter 打开</p>
+          {ankiProfile ? (
+            <p className="mt-1 text-xs tabular-nums text-muted-foreground" aria-label="Anki 同步状态">
+              {ankiProfile.snapshotAt === null
+                ? "Anki 尚未同步"
+                : `Anki 同步于 ${ankiProfile.snapshotAt} · 已复习 ${COUNT_FORMAT.format(ankiProfile.cardCount)} 张 · 星标 ${COUNT_FORMAT.format(ankiProfile.starredCount)} 张 · 复习事件 ${COUNT_FORMAT.format(ankiProfile.reviewEventCount)} 次`}
+            </p>
+          ) : null}
         </div>
-        <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Filter cards by status">
+        <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="按状态筛选卡片">
           {FILTERS.map((option) => (
             <button
               key={option.value}
@@ -288,15 +336,15 @@ export function CardTable(): React.JSX.Element {
 
       {error ? <InlineError message={error} /> : null}
       {cards === null && error === null ? (
-        <div className="columns-1 gap-4 sm:columns-2 xl:columns-3 2xl:columns-4">
-          {Array.from({ length: 8 }, (_, index) => <Skeleton key={index} className="mb-4 h-44 break-inside-avoid rounded-2xl" />)}
+        <div className="columns-1 gap-3 sm:columns-2 xl:columns-3">
+          {Array.from({ length: 8 }, (_, index) => <Skeleton key={index} className="mb-3 h-36 break-inside-avoid rounded-2xl" />)}
         </div>
       ) : visibleCards.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-border p-8 text-center">
-          <EmptyHint>{filter === "all" ? "No card candidates yet." : `No ${filter} cards right now.`}</EmptyHint>
+          <EmptyHint>{filter === "all" ? "还没有候选卡片。" : `目前没有${FILTERS.find((option) => option.value === filter)?.label ?? ""}卡片。`}</EmptyHint>
         </div>
       ) : (
-        <div className="columns-1 gap-4 sm:columns-2 xl:columns-3 2xl:columns-4" aria-label="Card table">
+        <div className="columns-1 gap-3 sm:columns-2 xl:columns-3" aria-label="Card table">
           {visibleCards.map((card, index) => (
             <CardFace
               key={card.id}

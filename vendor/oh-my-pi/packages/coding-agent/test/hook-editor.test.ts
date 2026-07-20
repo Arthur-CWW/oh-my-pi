@@ -307,8 +307,9 @@ describe("HookEditorComponent prompt-style mode", () => {
 		const rendered = renderText(component);
 		const lines = renderLines(component);
 
-		expect(lines[0]).toMatch(/^─+$/);
-		expect(lines.at(-1)).toMatch(/^─+$/);
+		expect(lines[0]?.trim()).toBe("");
+		expect(lines.at(-1)?.trim()).toBe("");
+		expect(rendered).not.toContain("─");
 		expect(lines[4]?.startsWith("> ")).toBe(true);
 		expect(rendered).toContain(" enter submit  escape cancel");
 		expect(rendered).not.toContain("shift+enter newline");

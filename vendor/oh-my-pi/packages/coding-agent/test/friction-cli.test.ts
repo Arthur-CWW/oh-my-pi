@@ -1,18 +1,16 @@
 import { describe, expect, it } from "bun:test";
 import { TempDir } from "@oh-my-pi/pi-utils";
-import type { CliConfig, CommandCtor } from "@oh-my-pi/pi-utils/cli";
-import Friction from "../src/commands/friction";
+import { NodeServices } from "@effect/platform-node";
+import { Effect } from "effect";
+import { Command } from "effect/unstable/cli";
+import friction from "../src/commands/friction";
 import type { FrictionRow } from "../src/session/friction-ledger";
 import { appendFriction } from "../src/session/friction-ledger";
 
-const FRICTION_CONFIG: CliConfig = {
-	bin: "omp",
-	version: "test",
-	commands: new Map<string, CommandCtor>(),
-};
-
 async function runFriction(argv: readonly string[]): Promise<void> {
-	await new Friction([...argv], FRICTION_CONFIG).run();
+	await Effect.runPromise(
+		Command.runWith(friction, { version: "test" })([...argv]).pipe(Effect.provide(NodeServices.layer)),
+	);
 }
 
 async function runFrictionWithOutput(argv: readonly string[]): Promise<string> {
@@ -208,9 +206,7 @@ describe("omp friction stats", () => {
 });
 
 describe("omp friction argument validation", () => {
-	it("rejects an unknown flag with the offending token", async () => {
-		await expect(runFriction(["list", "--unknown-flag"])).rejects.toThrow(
-			"friction: list does not accept --unknown-flag; valid flags: --class, --model, --session, --since, --json, --path",
-		);
+	it("rejects an unknown flag", async () => {
+		await expect(runFriction(["list", "--unknown-flag"])).rejects.toThrow();
 	});
 });

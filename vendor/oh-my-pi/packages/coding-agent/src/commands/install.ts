@@ -20,7 +20,8 @@
 
 import { existsSync } from "node:fs";
 import * as path from "node:path";
-import { Args, Command, Flags } from "@oh-my-pi/pi-utils/cli";
+import { Effect, Option } from "effect";
+import { Argument, Command, Flag } from "effect/unstable/cli";
 import { type PluginAction, type PluginCommandArgs, runPluginCommand } from "../cli/plugin-cli";
 import { initTheme } from "../modes/theme/theme";
 
@@ -40,68 +41,71 @@ export function looksLikeLocalPath(target: string): boolean {
 	}
 }
 
-export default class Install extends Command {
-	static description = "Install or link an extension package (alias of `plugin install`/`plugin link`)";
+export default Command.make(
+	"install",
+	{
+		targets: Argument.string("targets").pipe(
+			Argument.withDescription(
+				"Local path, npm spec, or marketplace ref (e.g. ./my-ext, my-pkg@1.2.3, name@marketplace)",
+			),
+			Argument.variadic(),
+		),
+		json: Flag.boolean("json").pipe(Flag.withDescription("Output JSON")),
+		force: Flag.boolean("force").pipe(Flag.withDescription("Force install")),
+		"dry-run": Flag.boolean("dry-run").pipe(
+			Flag.withDescription("Show actions without applying changes"),
+		),
+		scope: Flag.optional(
+			Flag.choice("scope", ["user", "project"] as const).pipe(
+				Flag.withDescription('Install scope: "user" (default) or "project" (marketplace installs only)'),
+			),
+		),
+	},
+	config =>
+		Effect.promise(async () => {
+			const targets = config.targets;
 
-	static args = {
-		targets: Args.string({
-			description: "Local path, npm spec, or marketplace ref (e.g. ./my-ext, my-pkg@1.2.3, name@marketplace)",
-			required: false,
-			multiple: true,
+			if (targets.length === 0) {
+				process.stderr.write("Usage: omp install <path | npm-spec | name@marketplace> [...]\n");
+				process.exit(1);
+			}
+
+			await initTheme();
+
+			// Split into local-paths (→ link) and remote specs (→ install). Each batch
+			// preserves user-supplied order so progress output reads naturally.
+			const localPaths: string[] = [];
+			const remoteSpecs: string[] = [];
+			for (const target of targets) {
+				if (looksLikeLocalPath(target)) localPaths.push(target);
+				else remoteSpecs.push(target);
+			}
+
+			const baseFlags: PluginCommandArgs["flags"] = {
+				json: config.json,
+				force: config.force,
+				dryRun: config["dry-run"],
+				scope: Option.getOrUndefined(config.scope),
+			};
+
+			for (const localPath of localPaths) {
+				await runPluginCommand({
+					action: "link" satisfies PluginAction,
+					args: [localPath],
+					flags: baseFlags,
+				});
+			}
+
+			if (remoteSpecs.length > 0) {
+				await runPluginCommand({
+					action: "install" satisfies PluginAction,
+					args: remoteSpecs,
+					flags: baseFlags,
+				});
+			}
 		}),
-	};
-
-	static flags = {
-		json: Flags.boolean({ description: "Output JSON" }),
-		force: Flags.boolean({ description: "Force install" }),
-		"dry-run": Flags.boolean({ description: "Show actions without applying changes" }),
-		scope: Flags.string({
-			description: 'Install scope: "user" (default) or "project" (marketplace installs only)',
-			options: ["user", "project"],
-		}),
-	};
-
-	async run(): Promise<void> {
-		const { args, flags } = await this.parse(Install);
-		const targets = Array.isArray(args.targets) ? args.targets : args.targets ? [args.targets] : [];
-
-		if (targets.length === 0) {
-			process.stderr.write("Usage: omp install <path | npm-spec | name@marketplace> [...]\n");
-			process.exit(1);
-		}
-
-		await initTheme();
-
-		// Split into local-paths (→ link) and remote specs (→ install). Each batch
-		// preserves user-supplied order so progress output reads naturally.
-		const localPaths: string[] = [];
-		const remoteSpecs: string[] = [];
-		for (const target of targets) {
-			if (looksLikeLocalPath(target)) localPaths.push(target);
-			else remoteSpecs.push(target);
-		}
-
-		const baseFlags: PluginCommandArgs["flags"] = {
-			json: flags.json,
-			force: flags.force,
-			dryRun: flags["dry-run"],
-			scope: flags.scope as "user" | "project" | undefined,
-		};
-
-		for (const localPath of localPaths) {
-			await runPluginCommand({
-				action: "link" satisfies PluginAction,
-				args: [localPath],
-				flags: baseFlags,
-			});
-		}
-
-		if (remoteSpecs.length > 0) {
-			await runPluginCommand({
-				action: "install" satisfies PluginAction,
-				args: remoteSpecs,
-				flags: baseFlags,
-			});
-		}
-	}
-}
+).pipe(
+	Command.withDescription(
+		"Install or link an extension package (alias of `plugin install`/`plugin link`)",
+	),
+);

@@ -1,36 +1,28 @@
-import { Args, Command, Flags } from "@oh-my-pi/pi-utils/cli";
+import { Effect, Option } from "effect";
+import { Argument, Command, Flag } from "effect/unstable/cli";
 import { runTinyModelsCommand, type TinyModelsAction, type TinyModelsCommandArgs } from "../cli/tiny-models-cli";
 
-const ACTIONS: TinyModelsAction[] = ["download", "list"];
+const ACTIONS: readonly TinyModelsAction[] = ["download", "list"];
 
-export default class TinyModels extends Command {
-	static description = "Download tiny local models (session titles + memory)";
-
-	static args = {
-		action: Args.string({
-			description: "Action to perform",
-			required: false,
-			options: ACTIONS,
+export default Command.make(
+	"tiny-models",
+	{
+		action: Argument.choice("action", ACTIONS).pipe(
+			Argument.withDescription("Action to perform"),
+			Argument.withDefault("download"),
+		),
+		model: Argument.optional(Argument.string("model").pipe(Argument.withDescription("Model key, or all"))),
+		json: Flag.boolean("json").pipe(Flag.withDescription("Output JSON")),
+	},
+	config =>
+		Effect.promise(() => {
+			const command: TinyModelsCommandArgs = {
+				action: config.action,
+				model: Option.getOrUndefined(config.model),
+				flags: {
+					json: config.json,
+				},
+			};
+			return runTinyModelsCommand(command);
 		}),
-		model: Args.string({
-			description: "Model key, or all",
-			required: false,
-		}),
-	};
-
-	static flags = {
-		json: Flags.boolean({ description: "Output JSON" }),
-	};
-
-	async run(): Promise<void> {
-		const { args, flags } = await this.parse(TinyModels);
-		const command: TinyModelsCommandArgs = {
-			action: (args.action ?? "download") as TinyModelsAction,
-			model: args.model,
-			flags: {
-				json: flags.json,
-			},
-		};
-		await runTinyModelsCommand(command);
-	}
-}
+).pipe(Command.withDescription("Download tiny local models (session titles + memory)"));

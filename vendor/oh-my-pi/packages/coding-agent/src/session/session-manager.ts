@@ -1649,9 +1649,6 @@ export class SessionManager {
 													kind: "enter" as const,
 													action: "create" as const,
 													objective: command.transition.objective,
-													...(command.transition.tokenBudget === undefined
-														? {}
-														: { tokenBudget: command.transition.tokenBudget }),
 													...(command.transition.workstream === undefined
 														? {}
 														: { workstream: command.transition.workstream }),
@@ -1709,7 +1706,6 @@ export class SessionManager {
 								? priorTransition.action === nextTransition.action &&
 									(priorTransition.action === "create" && nextTransition.action === "create"
 										? priorTransition.objective === nextTransition.objective &&
-											priorTransition.tokenBudget === nextTransition.tokenBudget &&
 											priorTransition.workstream === nextTransition.workstream
 										: priorTransition.action === "resume" &&
 											nextTransition.action === "resume" &&

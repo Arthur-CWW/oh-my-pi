@@ -243,7 +243,6 @@ export const TransitionGoalModeCommandSchema = Schema.Struct({
 			kind: Schema.Literal("enter"),
 			action: Schema.Literal("create"),
 			objective: NonEmptyTrimmedStringSchema,
-			tokenBudget: Schema.optional(Schema.Int.pipe(Schema.check(Schema.isGreaterThan(0)))),
 			workstream: Schema.optional(NonEmptyTrimmedStringSchema),
 		}),
 		Schema.Struct({

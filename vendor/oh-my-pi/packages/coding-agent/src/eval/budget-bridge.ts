@@ -38,9 +38,9 @@ export async function runEvalBudget(_args: unknown, options: EvalBudgetBridgeOpt
 	const goal = options.session.getGoalModeState?.();
 	if (goal?.enabled && goal.goal) {
 		return {
-			total: goal.goal.tokenBudget ?? null,
+			total: null,
 			spent: goal.goal.tokensUsed ?? 0,
-			hard: goal.goal.tokenBudget != null,
+			hard: false,
 		};
 	}
 	const spent = turn?.spent ?? options.session.getUsageStatistics?.()?.output ?? 0;

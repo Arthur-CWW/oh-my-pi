@@ -27,28 +27,13 @@ export interface CopySelectorCallbacks {
 interface FlatNode {
 	target: CopyTarget;
 	depth: number;
-	/** Last among its siblings (drives └─ vs ├─). */
-	isLast: boolean;
-	/** Per-ancestor flag: does ancestor at that level have a following sibling? */
-	ancestorHasNext: boolean[];
-}
-
-/** Render one tree connector as exactly three cells (e.g. "├─ ", "└─ ", "|--"). */
-function connectorCells(symbol: string): string {
-	const chars = Array.from(symbol);
-	return (chars[0] ?? " ") + (chars[1] ?? theme.tree.horizontal) + (chars[2] ?? " ");
-}
-
-/** The 3-cell ancestor gutter: a vertical guide when the ancestor continues. */
-function gutterCells(hasNext: boolean): string {
-	return `${hasNext ? theme.tree.vertical : " "}  `;
 }
 
 /**
- * Fullscreen `/copy` picker rendered as a `/tree`-style tree inside one
- * outlined box: a title, the tree of copy targets (recent assistant messages
- * with their code blocks nested beneath), a live preview of the highlighted
- * node, and a keybinding footer. Every node copies its `content` on Enter.
+ * Fullscreen `/copy` picker rendered as a `/tree`-style tree: a heading, the
+ * tree of copy targets (recent assistant messages with their code blocks nested
+ * beneath via indentation), a live preview of the highlighted node, and a
+ * keybinding footer. Every node copies its `content` on Enter.
  */
 export class CopySelectorComponent implements Component {
 	#roots: CopyTarget[];
@@ -69,14 +54,13 @@ export class CopySelectorComponent implements Component {
 
 	#flatten(): FlatNode[] {
 		const out: FlatNode[] = [];
-		const walk = (nodes: CopyTarget[], depth: number, ancestorHasNext: boolean[]) => {
-			nodes.forEach((target, i) => {
-				const isLast = i === nodes.length - 1;
-				out.push({ target, depth, isLast, ancestorHasNext });
-				if (target.children?.length) walk(target.children, depth + 1, [...ancestorHasNext, !isLast]);
-			});
+		const walk = (nodes: CopyTarget[], depth: number) => {
+			for (const target of nodes) {
+				out.push({ target, depth });
+				if (target.children?.length) walk(target.children, depth + 1);
+			}
 		};
-		walk(this.#roots, 0, []);
+		walk(this.#roots, 0);
 		return out;
 	}
 
@@ -121,9 +105,7 @@ export class CopySelectorComponent implements Component {
 			const target = node.target;
 			const isSelected = i === cursorIdx;
 
-			let prefix = "";
-			for (let l = 0; l < node.depth - 1; l++) prefix += gutterCells(node.ancestorHasNext[l]!);
-			if (node.depth > 0) prefix += connectorCells(node.isLast ? theme.tree.last : theme.tree.branch);
+			const prefix = "   ".repeat(node.depth);
 
 			const cursor = isSelected ? "❯ " : "  ";
 			const hint = target.hint ?? "";

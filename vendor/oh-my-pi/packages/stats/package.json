@@ -37,12 +37,14 @@
 		"fmt": "biome format --write ."
 	},
 	"dependencies": {
+		"@effect/platform-node": "4.0.0-beta.92",
 		"@oh-my-pi/pi-ai": "catalog:",
 		"@oh-my-pi/pi-catalog": "catalog:",
 		"@oh-my-pi/pi-utils": "catalog:",
 		"@tailwindcss/node": "catalog:",
 		"chart.js": "catalog:",
 		"date-fns": "catalog:",
+		"effect": "4.0.0-beta.92",
 		"lucide-react": "catalog:",
 		"react": "catalog:",
 		"react-chartjs-2": "catalog:",

@@ -205,6 +205,40 @@ export class AgentLifecycleManager {
 	}
 
 	/**
+	 * Synchronous evidence check mirroring {@link reconcileStaleOrphan}'s gate:
+	 * a `running` subagent that owns a live session, carries a durable terminal
+	 * lifecycle record bound to that session, and has no live model turn or
+	 * owned async job. Lets the HUD projection drop a provably-dead peer from
+	 * the active count before the async park lands, without any polling.
+	 */
+	isReconcilableStaleOrphan(id: string): boolean {
+		if (this.#parkings.has(id) || this.#releasing.has(id)) return false;
+		const ref = this.#registry.get(id);
+		const session = ref?.session;
+		if (ref?.kind !== "sub" || ref.status !== "running" || !session || id === MAIN_AGENT_ID) return false;
+		if (this.#hasLiveWork(id, session)) return false;
+		return this.#hasDurableTerminalEvidence(id, ref, session);
+	}
+
+	/**
+	 * Reconcile every stranded `running` subagent that now has durable terminal
+	 * evidence and no live work into `parked`, before a caller reads live-work
+	 * counts (HUD active projection, shutdown stop/detach confirmation). Each
+	 * child goes through the same evidence-gated, idempotent path as
+	 * {@link reconcileStaleOrphan}; live peers are left untouched. Returns the
+	 * ids that were parked.
+	 */
+	async reconcileStaleOrphans(): Promise<string[]> {
+		const candidates = this.#registry
+			.list()
+			.filter(ref => ref.kind === "sub" && ref.status === "running" && ref.id !== MAIN_AGENT_ID);
+		const outcomes = await Promise.all(
+			candidates.map(async ref => ((await this.reconcileStaleOrphan(ref.id)).reconciled ? ref.id : undefined)),
+		);
+		return outcomes.filter((id): id is string => id !== undefined);
+	}
+
+	/**
 	 * Return the live session, reviving from the sessionFile if parked.
 	 * Throws a plain Error if the id is unknown or parked without a reviver.
 	 * Concurrent calls share one in-flight revive.
@@ -402,7 +436,7 @@ export class AgentLifecycleManager {
 		if (this.#releasing.has(id)) return { reconciled: false, reason: "changed_during_reconcile" };
 		const ref = this.#registry.get(id);
 		const session = ref?.session;
-		if (!ref || ref.kind !== "sub" || ref.status !== "running" || !session || id === MAIN_AGENT_ID) {
+		if (ref?.kind !== "sub" || ref.status !== "running" || !session || id === MAIN_AGENT_ID) {
 			return { reconciled: false, reason: "not_running_subagent" };
 		}
 		const liveWork = this.#hasLiveWork(id, session);

@@ -12,13 +12,12 @@ import type { ToolSession } from "../../tools";
 import { formatErrorDetail, TRUNCATE_LENGTHS } from "../../tools/render-utils";
 import { ToolError } from "../../tools/tool-errors";
 import { framedBlock, renderStatusLine, truncateToWidth } from "../../tui";
-import { completionBudgetReport, remainingTokens } from "../runtime";
+import { completionUsageReport } from "../runtime";
 import type { Goal, GoalStatus, GoalToolDetails, GoalWorkstreamReference } from "../state";
 
 const goalSchema = z.object({
 	op: z.enum(["create", "update", "get", "complete", "resume", "drop"]).describe("goal operation"),
 	objective: z.string().describe("goal objective").optional(),
-	token_budget: z.number().int().describe("token budget").optional(),
 	workstream: z.string().describe('workstream slug, or "adhoc"').optional(),
 });
 
@@ -27,8 +26,7 @@ export type GoalToolInput = z.infer<typeof goalSchema>;
 export interface GoalToolResponse {
 	goal: Goal | null;
 	workstream?: GoalWorkstreamReference;
-	remainingTokens: number | null;
-	completionBudgetReport: string | null;
+	completionUsageReport: string | null;
 }
 
 export function buildGoalToolResponse(
@@ -39,10 +37,9 @@ export function buildGoalToolResponse(
 	return {
 		goal: resolvedGoal,
 		...(options?.workstream ? { workstream: options.workstream } : {}),
-		remainingTokens: remainingTokens(resolvedGoal),
-		completionBudgetReport:
+		completionUsageReport:
 			options?.includeCompletionReport && resolvedGoal?.status === "complete"
-				? completionBudgetReport(resolvedGoal)
+				? completionUsageReport(resolvedGoal)
 				: null,
 	};
 }
@@ -50,14 +47,10 @@ export function buildGoalToolResponse(
 function validateWriteParams(
 	params: GoalToolInput,
 	op: "create" | "update",
-): { objective: string; tokenBudget?: number; workstream?: string } {
+): { objective: string; workstream?: string } {
 	const objective = params.objective?.trim();
 	if (!objective) {
 		throw new ToolError(`objective is required when op=${op}`);
-	}
-	const tokenBudget = params.token_budget;
-	if (tokenBudget !== undefined && (!Number.isInteger(tokenBudget) || tokenBudget <= 0)) {
-		throw new ToolError("token_budget must be a positive integer when provided");
 	}
 	const workstream = params.workstream?.trim();
 	if (params.workstream !== undefined && !workstream) {
@@ -69,7 +62,7 @@ function validateWriteParams(
 	) {
 		throw new ToolError('workstream must be "adhoc" or a lowercase kebab-case stream slug');
 	}
-	return workstream === undefined ? { objective, tokenBudget } : { objective, tokenBudget, workstream };
+	return workstream === undefined ? { objective } : { objective, workstream };
 }
 
 export class GoalTool implements AgentTool<typeof goalSchema, GoalToolDetails> {
@@ -123,20 +116,14 @@ export class GoalTool implements AgentTool<typeof goalSchema, GoalToolDetails> {
 		let text: string;
 		if (response.goal) {
 			text = `Goal: ${response.goal.objective}\nStatus: ${response.goal.status}\nTokens: ${response.goal.tokensUsed} used`;
-			if (response.goal.tokenBudget !== undefined) {
-				text += ` / ${response.goal.tokenBudget} budget`;
-			}
-			if (response.remainingTokens !== null) {
-				text += `\nRemaining tokens: ${response.remainingTokens}`;
-			}
 			if (response.workstream) {
 				text +=
 					response.workstream.kind === "adhoc"
 						? "\nWorkstream: adhoc"
 						: `\nWorkstream: ${response.workstream.id} · ${response.workstream.charterPath}`;
 			}
-			if (response.completionBudgetReport) {
-				text += `\n\n${response.completionBudgetReport}`;
+			if (response.completionUsageReport) {
+				text += `\n\n${response.completionUsageReport}`;
 			}
 		} else {
 			text = "No active goal.";
@@ -147,8 +134,7 @@ export class GoalTool implements AgentTool<typeof goalSchema, GoalToolDetails> {
 				op: params.op,
 				goal: response.goal,
 				workstream: response.workstream,
-				remainingTokens: response.remainingTokens,
-				completionBudgetReport: response.completionBudgetReport,
+				completionUsageReport: response.completionUsageReport,
 			},
 		};
 	}
@@ -177,8 +163,6 @@ function goalBadgeColor(status: GoalStatus): ThemeColor {
 	switch (status) {
 		case "complete":
 			return "success";
-		case "budget-limited":
-			return "warning";
 		case "paused":
 		case "dropped":
 			return "muted";
@@ -190,7 +174,6 @@ function goalBadgeColor(status: GoalStatus): ThemeColor {
 interface GoalRenderArgs {
 	op?: GoalToolInput["op"];
 	objective?: string;
-	token_budget?: number;
 }
 
 export const goalToolRenderer = {
@@ -201,9 +184,6 @@ export const goalToolRenderer = {
 		if ((args.op === "create" || args.op === "update") && trimmedObjective) {
 			const objective = truncateToWidth(trimmedObjective, TRUNCATE_LENGTHS.TITLE);
 			meta.push(uiTheme.italic(uiTheme.fg("muted", `"${objective}"`)));
-		}
-		if ((args.op === "create" || args.op === "update") && args.token_budget !== undefined) {
-			meta.push(`budget ${formatNumber(args.token_budget)}`);
 		}
 		return new Text(renderStatusLine({ icon: "pending", title: "Goal", description, meta }, uiTheme), 0, 0);
 	},
@@ -254,17 +234,13 @@ export const goalToolRenderer = {
 		lines.push(uiTheme.italic(uiTheme.fg("muted", `"${objectiveText}"`)));
 
 		const used = formatNumber(goal.tokensUsed);
-		const tokensLine =
-			goal.tokenBudget !== undefined
-				? `${used} / ${formatNumber(goal.tokenBudget)} tokens (${formatNumber(Math.max(0, goal.tokenBudget - goal.tokensUsed))} left)`
-				: `${used} tokens`;
-		const metaParts = [tokensLine];
+		const metaParts = [`${used} tokens`];
 		if (goal.timeUsedSeconds > 0) {
 			metaParts.push(`${formatDuration(goal.timeUsedSeconds * 1000)} elapsed`);
 		}
 		lines.push(uiTheme.fg("dim", metaParts.join(" · ")));
 
-		const report = details?.completionBudgetReport;
+		const report = details?.completionUsageReport;
 		const sections: Array<{ label?: string; lines: string[] }> = [{ lines }];
 		if (report) {
 			sections.push({ label: "Report", lines: report.split("\n").map(line => uiTheme.fg("muted", line)) });

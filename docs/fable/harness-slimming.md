@@ -100,7 +100,7 @@ Net effect today:
 
 - **Main Fable session** should have **no advisor**. Fable is a distinct model creature with its own preferences and working style, not an extension of Arthur; its advisor/Primer policy reflects that separation. Fable is the high-level advisor/orchestrator; adding another advisor layer on top is expensive and redundant.
 - **DeepSeek should be minimal.** Use it only for explicit advisor/oracle/prose/adversarial passes; prefer coding subscriptions and frontend sessions for normal work.
-- **Fable must never spawn a Fable subagent**. Fable is the scarce high-level model; mutable worker execution uses `task` packets with a specialist role, owned/excluded files, and a least-privilege tool allowlist. Role→model assignments live in `.omp/fable-config.yml` (read it; not restated here). Use `explore` for read-only local scouting and `librarian` for external or API research.
+- **Fable must never spawn a Fable subagent**. Fable is the scarce high-level model; mutable worker execution uses `task` packets with a specialist role, owned/excluded files, and a least-privilege tool allowlist (packet doctrine is [context-bearing-delegation.md](context-bearing-delegation.md), not re-explained here). Role→model assignments live in `.omp/fable-config.yml` (read it; not restated here). Use `explore` for read-only local scouting and `librarian` for external or API research.
 - **Subagents can be full agents** when the task warrants it: they may have explicit goals, bounded recursion, and an optional supported model/effort override. They are not required to be minimal one-shot workers.
 - **OMP autolearn is currently not trusted** for Fable preparation. Fable should rely on curated docs (`docs/fable/`), the session index, and the homey system instead of hoping autolearn will surface the right context.
 
@@ -185,7 +185,7 @@ This is a reversible default, not a blacklist. Skill directories are still on di
 
 ## 5. Primitive overlap matrix (2026-07-16)
 
-Doctrine: **strong composable primitives should be mostly non-overlapping; plugins are reserved for capabilities a builtin cannot reach.**
+Doctrine: **strong composable primitives should be mostly non-overlapping; plugins are reserved for capabilities a builtin cannot reach.** This matrix (recorded per HR-143) is the tool-primitive half; the delegation half is the same discipline — its durable primitives (typed task packet, searchable transcript, stable references, lint rules, escalation channel, receipts) live in [context-bearing-delegation.md](context-bearing-delegation.md) and are pointed to, not re-explained here.
 
 | Surface | Provenance | Verdict | Reason |
 |---|---|---|---|

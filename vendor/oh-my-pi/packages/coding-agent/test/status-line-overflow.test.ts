@@ -108,23 +108,18 @@ describe("status line session accent", () => {
 			getSessionAccentHex("Named session", theme.getMajorThemeColorHexes(), theme.accentSurfaceLuminance),
 		);
 
-	it("paints the gap with the session accent when enabled", () => {
-		const ansi = accentAnsi();
-		expect(ansi).toBeDefined();
+	it("fills the gap with plain spaces and no horizontal rule", () => {
 		const border = buildComponent(true).getTopBorder(80).content;
-		expect(border).toContain(`${ansi}${theme.boxRound.horizontal}`);
+		// Borderless status line: no box-drawing horizontal rule in the gap.
+		expect(border).not.toContain(theme.boxRound.horizontal);
+		// The gap itself is not accent-painted (the session-name segment may be).
+		const ansi = accentAnsi();
+		if (ansi) expect(border).not.toContain(`${ansi}${theme.boxRound.horizontal}`);
 	});
 
-	it("paints the gap with the border color and omits the session accent when disabled", () => {
-		const ansi = accentAnsi();
-		expect(ansi).toBeDefined();
+	it("keeps the gap free of box chrome when the session accent is disabled", () => {
 		const border = buildComponent(false).getTopBorder(80).content;
-		// Positive: gap is rendered with the theme border color.
-		expect(border).toContain(`${theme.getFgAnsi("border")}${theme.boxRound.horizontal}`);
-		// Negative: the gap-painting pattern (accent ANSI directly followed by a horizontal
-		// glyph) must not appear. The session_name segment may still emit the accent ANSI
-		// for its own text — we only care that the gap is not accent-painted.
-		expect(border).not.toContain(`${ansi}${theme.boxRound.horizontal}`);
+		expect(border).not.toContain(theme.boxRound.horizontal);
 	});
 });
 

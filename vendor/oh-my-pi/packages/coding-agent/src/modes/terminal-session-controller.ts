@@ -185,7 +185,6 @@ export interface TerminalTransitionGoalModeIntent {
 				readonly kind: "enter";
 				readonly action: "create";
 				readonly objective: string;
-				readonly tokenBudget?: number;
 				readonly workstream?: string;
 		  }
 		| { readonly kind: "enter"; readonly action: "resume"; readonly goalId: string }

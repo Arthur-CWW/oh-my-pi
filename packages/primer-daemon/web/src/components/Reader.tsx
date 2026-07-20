@@ -9,7 +9,6 @@ import {
   type QueueItem,
   type ReaderAlignment,
   type ReaderAlignmentChar,
-  type ReaderAlignmentSentence,
   type ReaderDoc,
   type ReaderMedia,
   createMark,
@@ -26,6 +25,7 @@ import {
 } from "@/api"
 import { navigate } from "@/hooks/useHashRoute"
 import { logEvent } from "@/hooks/useTelemetry"
+import { MediaSentenceRow } from "@/components/MediaSentenceRow"
 import { ZhDictCard } from "@/components/ZhDictCard"
 import { type Segment, classifyWord, extractSentence, isHan, parsePinyin, segmentText, toneColor } from "@/lib/segmentation"
 import { cn } from "@/lib/utils"
@@ -233,110 +233,6 @@ function ReaderParagraph({
     </p>
   )
 }
-function MediaParagraph({
-  sentence,
-  paragraphIdx,
-  knownWords,
-  queuedWords,
-  priorityWords,
-  markedSurfaces,
-  markMap,
-  focused,
-  activeCharIdx,
-  showPinyin,
-  onWordClick,
-  onCharClick,
-  onFocus,
-}: {
-  sentence: ReaderAlignmentSentence
-  paragraphIdx: number
-  knownWords: ReadonlySet<string>
-  queuedWords: ReadonlySet<string>
-  priorityWords: ReadonlySet<string>
-  markedSurfaces: ReadonlySet<string>
-  markMap: ReadonlyMap<string, number>
-  focused: boolean
-  activeCharIdx: number | null
-  showPinyin: boolean
-  onWordClick: (word: string, pIdx: number, seg: Segment, rect: DOMRect) => void
-  onCharClick: (pIdx: number, charIdx: number, char: ReaderAlignmentChar) => void
-  onFocus: () => void
-}): React.JSX.Element {
-  const segments = useMemo(() => segmentText(sentence.text), [sentence.text])
-  const units = useMemo(() => {
-    const result: Array<{ text: string; offset: number; charIdx: number | null; char: ReaderAlignmentChar | null }> = []
-    let offset = 0
-    let charIdx = 0
-    for (const text of Array.from(sentence.text)) {
-      const block = sentence.chars[charIdx]
-      const unit = { text, offset, charIdx: block?.ch === text ? charIdx : null, char: block?.ch === text ? block : null }
-      result.push(unit)
-      offset += text.length
-      if (unit.char !== null) charIdx += 1
-    }
-    return result
-  }, [sentence])
-
-  return (
-    <p
-      data-vim-panel="paragraphs"
-      data-vim-index={paragraphIdx}
-      data-media-sentence={paragraphIdx}
-      onMouseEnter={onFocus}
-      className={cn(
-        "scroll-mt-24 rounded-md px-2 py-2 transition-colors",
-        focused && "bg-accent/25 ring-1 ring-ring/15",
-      )}
-      style={{ maxWidth: "68ch" }}
-    >
-      {units.map((unit, unitIdx) => {
-        const { text, offset, charIdx, char } = unit
-        if (!char || charIdx === null) {
-          return <span key={`${unitIdx}:${text}`}>{text}</span>
-        }
-        const seg =
-          segments.find((candidate) => offset >= candidate.offset && offset < candidate.offset + candidate.text.length) ??
-          ({ text, offset, isWordLike: isHan(text) } satisfies Segment)
-        const segEnd = seg.offset + seg.text.length
-        const markId = markMap.get(`${paragraphIdx}:${seg.offset}:${segEnd}`)
-        const cls = classifyWord(seg.text, knownWords, queuedWords, markedSurfaces)
-        const isPriority = priorityWords.has(seg.text)
-        const han = isHan(text)
-        let wordStyle = ""
-        if (markId !== undefined) wordStyle = cn(MARKED_STYLE, isPriority && PRIORITY_STYLE)
-        else if (isPriority) wordStyle = PRIORITY_STYLE
-        else if (cls === "unknown") wordStyle = UNKNOWN_STYLE
-        else if (cls === "queued") wordStyle = QUEUED_STYLE
-
-        return (
-          <ruby
-            key={`${unitIdx}:${text}`}
-            data-media-char={`${paragraphIdx}:${charIdx}`}
-            data-mark-id={markId}
-            onClick={(ev) => {
-              const rect = (ev.currentTarget as HTMLElement).getBoundingClientRect()
-              if ((ev.ctrlKey || ev.altKey) && han) {
-                // Long-press fallback on touch should eventually call this same lookup path.
-                onWordClick(seg.text, paragraphIdx, seg, rect)
-                return
-              }
-              onCharClick(paragraphIdx, charIdx, char)
-            }}
-            className={cn(
-              "inline-block rounded-sm",
-              han && "cursor-pointer transition-colors hover:bg-accent/40",
-              activeCharIdx === charIdx && "bg-amber-300/35 text-amber-100",
-              wordStyle,
-            )}
-          >
-            {text}
-            {showPinyin && char.pinyin && <rt className="px-0.5 text-[10px] font-normal text-muted-foreground/65">{char.pinyin}</rt>}
-          </ruby>
-        )
-      })}
-    </p>
-  )
-}
 
 
 // ---------------------------------------------------------------------------
@@ -372,6 +268,8 @@ export function Reader({
   const mediaRef = useRef<HTMLMediaElement | null>(null)
   const frameRef = useRef<number | null>(null)
   const userScrollOverrideRef = useRef(false)
+  const transcriptRef = useRef<HTMLDivElement | null>(null)
+  const sentenceEndRef = useRef<{ sentenceIdx: number; endMs: number } | null>(null)
 
   // Derived sets
   const markedSurfaces = useMemo(
@@ -463,6 +361,7 @@ export function Reader({
     setPlaying(false)
     setActiveMediaChar(null)
     activeMediaSentenceRef.current = null
+    sentenceEndRef.current = null
     setPlaybackRate(1)
     userScrollOverrideRef.current = false
     setPriorityByWord(new Map())
@@ -705,6 +604,7 @@ export function Reader({
     (sentenceIdx: number, charIdx: number, char: ReaderAlignmentChar) => {
       const element = mediaRef.current
       if (!element) return
+      sentenceEndRef.current = null
       element.currentTime = Math.max(0, char.startMs / 1000)
       setActiveMediaChar({ sentenceIdx, charIdx })
       setFocusPara(sentenceIdx)
@@ -715,6 +615,26 @@ export function Reader({
       })
     },
     [docId],
+  )
+
+  const playSentence = useCallback(
+    (sentenceIdx: number) => {
+      const element = mediaRef.current
+      const sentence = alignment?.sentences[sentenceIdx]
+      if (!element || !sentence) return
+      sentenceEndRef.current = { sentenceIdx, endMs: sentence.endMs }
+      element.currentTime = Math.max(0, sentence.startMs / 1000)
+      setActiveMediaChar(
+        sentence.chars.length > 0 ? { sentenceIdx, charIdx: 0 } : null,
+      )
+      setFocusPara(sentenceIdx)
+      userScrollOverrideRef.current = false
+      logEvent("media_seek", { docId, ms: sentence.startMs })
+      void element.play().catch(() => {
+        sentenceEndRef.current = null
+      })
+    },
+    [alignment, docId],
   )
 
   const handleMediaPlay = useCallback(() => {
@@ -749,12 +669,20 @@ export function Reader({
 
   // A requestAnimationFrame loop keeps alignment smooth between sparse timeupdate events.
   useEffect(() => {
-    if (!playing || !alignment || mediaCharRanges.length === 0) {
+    if (!playing || !alignment) {
       if (frameRef.current !== null) cancelAnimationFrame(frameRef.current)
       frameRef.current = null
       return
     }
     const tick = () => {
+      const element = mediaRef.current
+      const sentenceEnd = sentenceEndRef.current
+      if (element && sentenceEnd && element.currentTime * 1000 >= sentenceEnd.endMs) {
+        sentenceEndRef.current = null
+        element.pause()
+        queueExposure(sentenceEnd.sentenceIdx, "media")
+        return
+      }
       updateActiveMediaChar()
       frameRef.current = requestAnimationFrame(tick)
     }
@@ -763,7 +691,7 @@ export function Reader({
       if (frameRef.current !== null) cancelAnimationFrame(frameRef.current)
       frameRef.current = null
     }
-  }, [alignment, mediaCharRanges.length, playing, updateActiveMediaChar])
+  }, [alignment, mediaCharRanges.length, playing, queueExposure, updateActiveMediaChar])
 
   useEffect(() => {
     const sentenceIdx = activeMediaChar?.sentenceIdx ?? null
@@ -778,6 +706,7 @@ export function Reader({
   }, [activeMediaChar?.sentenceIdx, alignment, playing, queueExposure])
 
   const handleMediaEnded = useCallback(() => {
+    sentenceEndRef.current = null
     const sentenceIdx = activeMediaSentenceRef.current
     if (sentenceIdx !== null) queueExposure(sentenceIdx, "media")
     setPlaying(false)
@@ -786,9 +715,12 @@ export function Reader({
 
   useEffect(() => {
     const sentenceIdx = activeMediaChar?.sentenceIdx
-    if (sentenceIdx == null || userScrollOverrideRef.current) return
-    const element = document.querySelector(`[data-media-sentence="${sentenceIdx}"]`) as HTMLElement | null
-    element?.scrollIntoView({ block: "center", behavior: "smooth" })
+    const container = transcriptRef.current
+    if (sentenceIdx == null || !container || userScrollOverrideRef.current) return
+    const element = container.querySelector<HTMLElement>(`[data-media-sentence="${sentenceIdx}"]`)
+    if (!element) return
+    const top = element.offsetTop - (container.clientHeight - element.offsetHeight) / 2
+    container.scrollTo({ top: Math.max(0, top), behavior: "smooth" })
   }, [activeMediaChar?.sentenceIdx])
 
   const closePopup = useCallback(() => setPopup(null), [])
@@ -798,6 +730,7 @@ export function Reader({
     function onKey(e: KeyboardEvent) {
       const el = document.activeElement as HTMLElement | null
       const typing = el?.tagName === "INPUT" || el?.tagName === "TEXTAREA" || el?.isContentEditable
+      const interactive = el !== null && el.closest("button, a, [role='button']") !== null
 
       if (e.key === "Escape") {
         if (typing) {
@@ -815,7 +748,7 @@ export function Reader({
         return
       }
 
-      if (typing || e.metaKey || e.ctrlKey || e.altKey) return
+      if (typing || interactive || e.metaKey || e.ctrlKey || e.altKey) return
 
       if (e.key === "?") {
         onShowHelp()
@@ -841,6 +774,11 @@ export function Reader({
           e.preventDefault()
           return
         }
+        if (e.key === "Enter" && focusPara >= 0) {
+          playSentence(focusPara)
+          e.preventDefault()
+          return
+        }
         if (e.key === "p" || e.key === "P") {
           setShowPinyin((visible) => !visible)
           e.preventDefault()
@@ -858,6 +796,12 @@ export function Reader({
         }
       }
 
+      if (
+        alignment &&
+        (e.key === "j" || e.key === "k" || e.key === "g" || e.key === "G")
+      ) {
+        userScrollOverrideRef.current = false
+      }
       const paraCount = alignment?.sentences.length ?? doc?.paragraphs.length ?? 0
       switch (e.key) {
         case "j":
@@ -884,16 +828,29 @@ export function Reader({
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [alignment, cyclePlaybackRate, doc, onPriority, onShowHelp, onUndo, popup, toggleMediaPlayback])
+  }, [alignment, cyclePlaybackRate, doc, focusPara, onPriority, onShowHelp, onUndo, playSentence, popup, toggleMediaPlayback])
 
-  // Scroll focused paragraph
+  // Keep media navigation inside the independently scrolling transcript.
   useEffect(() => {
     if (focusPara < 0) return
-    const el = document.querySelector(
-      `[data-vim-panel="paragraphs"][data-vim-index="${focusPara}"]`,
-    ) as HTMLElement | null
-    el?.scrollIntoView({ block: "nearest", behavior: "smooth" })
-  }, [focusPara])
+    const selector = `[data-vim-panel="paragraphs"][data-vim-index="${focusPara}"]`
+    if (alignment) {
+      const container = transcriptRef.current
+      const element = container?.querySelector<HTMLElement>(selector)
+      if (!container || !element || userScrollOverrideRef.current) return
+      const above = element.offsetTop < container.scrollTop
+      const below = element.offsetTop + element.offsetHeight > container.scrollTop + container.clientHeight
+      if (above || below) {
+        container.scrollTo({
+          top: Math.max(0, element.offsetTop - (container.clientHeight - element.offsetHeight) / 2),
+          behavior: "smooth",
+        })
+      }
+      return
+    }
+    const element = document.querySelector<HTMLElement>(selector)
+    element?.scrollIntoView({ block: "nearest", behavior: "smooth" })
+  }, [alignment, focusPara])
 
   // --- Render ---
 
@@ -920,39 +877,10 @@ export function Reader({
     )
   }
 
-  return (
-    <div className="mx-auto w-full max-w-2xl px-4 py-6">
-      {media && alignment && (
-        media.kind === "video" ? (
-          <video
-            ref={(node) => {
-              mediaRef.current = node
-            }}
-            src={`/api/reader/docs/${docId}/media/file`}
-            className="sticky top-16 z-30 ml-auto mb-4 block w-56 rounded-lg border border-border/60 bg-black/90 shadow-lg"
-            playsInline
-            preload="metadata"
-            onPlay={handleMediaPlay}
-            onPause={handleMediaPause}
-            onEnded={handleMediaEnded}
-            aria-label="Reader video"
-          />
-        ) : (
-          <audio
-            ref={(node) => {
-              mediaRef.current = node
-            }}
-            src={`/api/reader/docs/${docId}/media/file`}
-            preload="metadata"
-            onPlay={handleMediaPlay}
-            onPause={handleMediaPause}
-            onEnded={handleMediaEnded}
-            className="sr-only"
-            aria-hidden="true"
-          />
-        )
-      )}
+  const hasMedia = media !== null && alignment !== null
 
+  return (
+    <div className={cn("mx-auto w-full px-4 py-6", hasMedia ? "max-w-none" : "max-w-2xl")}>
       {/* breadcrumb */}
       <div className="mb-6 flex items-baseline gap-3">
         <button
@@ -972,16 +900,53 @@ export function Reader({
 
       {mediaNotice && <p className="mb-4 text-xs text-muted-foreground/55">{mediaNotice}</p>}
 
-      {/* reading surface */}
-      <div
-        className="reading-surface space-y-5"
-        onWheelCapture={() => {
-          userScrollOverrideRef.current = true
-        }}
-      >
-        {alignment && media
-          ? alignment.sentences.map((sentence, idx) => (
-              <MediaParagraph
+      {media && alignment ? (
+        <div className="grid min-w-0 gap-4 min-[720px]:grid-cols-[minmax(0,1fr)_minmax(280px,38vw)] min-[720px]:items-start">
+          <div className="min-w-0 min-[720px]:sticky min-[720px]:top-20">
+            {media.kind === "video" ? (
+              <video
+                ref={(node) => {
+                  mediaRef.current = node
+                }}
+                src={`/api/reader/docs/${docId}/media/file`}
+                className="mx-auto block aspect-video max-h-[calc(100vh-10rem)] w-full rounded-xl border border-border/60 bg-black object-contain shadow-lg"
+                controls
+                playsInline
+                preload="auto"
+                onPlay={handleMediaPlay}
+                onPause={handleMediaPause}
+                onEnded={handleMediaEnded}
+                aria-label="Reader video"
+              />
+            ) : (
+              <audio
+                ref={(node) => {
+                  mediaRef.current = node
+                }}
+                src={`/api/reader/docs/${docId}/media/file`}
+                controls
+                preload="auto"
+                onPlay={handleMediaPlay}
+                onPause={handleMediaPause}
+                onEnded={handleMediaEnded}
+                className="w-full"
+                aria-label="Reader audio"
+              />
+            )}
+          </div>
+
+          <div
+            ref={transcriptRef}
+            className="reading-surface h-[50vh] min-w-0 overflow-y-auto overscroll-contain rounded-xl border border-border/55 bg-card/20 p-2 min-[720px]:h-[calc(100vh-10rem)]"
+            onWheelCapture={() => {
+              userScrollOverrideRef.current = true
+            }}
+            onTouchMove={() => {
+              userScrollOverrideRef.current = true
+            }}
+          >
+            {alignment.sentences.map((sentence, idx) => (
+              <MediaSentenceRow
                 key={sentence.idx}
                 sentence={sentence}
                 paragraphIdx={idx}
@@ -999,23 +964,28 @@ export function Reader({
                 onCharClick={seekToMediaChar}
                 onFocus={() => setFocusPara(idx)}
               />
-            ))
-          : doc.paragraphs.map((para, idx) => (
-              <ReaderParagraph
-                key={idx}
-                text={para}
-                paragraphIdx={idx}
-                knownWords={knownWords}
-                queuedWords={queuedWords}
-                priorityWords={priorityWords}
-                markedSurfaces={markedSurfaces}
-                markMap={markMap}
-                focused={focusPara === idx}
-                onWordClick={onWordClick}
-                onFocus={() => setFocusPara(idx)}
-              />
             ))}
-      </div>
+          </div>
+        </div>
+      ) : (
+        <div className="reading-surface space-y-5">
+          {doc.paragraphs.map((para, idx) => (
+            <ReaderParagraph
+              key={idx}
+              text={para}
+              paragraphIdx={idx}
+              knownWords={knownWords}
+              queuedWords={queuedWords}
+              priorityWords={priorityWords}
+              markedSurfaces={markedSurfaces}
+              markMap={markMap}
+              focused={focusPara === idx}
+              onWordClick={onWordClick}
+              onFocus={() => setFocusPara(idx)}
+            />
+          ))}
+        </div>
+      )}
 
       {popup && <WordPopup popup={popup} onClose={closePopup} onUndo={onUndo} onPriority={onPriority} />}
 
@@ -1024,6 +994,7 @@ export function Reader({
           <>
             click a character to play from there ·{" "}
             <kbd className="rounded bg-muted px-1 font-mono text-[10px]">Space</kbd> play / pause ·{" "}
+            <kbd className="rounded bg-muted px-1 font-mono text-[10px]">Enter</kbd> play sentence ·{" "}
             <kbd className="rounded bg-muted px-1 font-mono text-[10px]">P</kbd> pinyin ·{" "}
             <kbd className="rounded bg-muted px-1 font-mono text-[10px]">[</kbd>/<kbd className="rounded bg-muted px-1 font-mono text-[10px]">]</kbd>{" "}
             rate ({playbackRate}×) · ctrl/alt-click look up

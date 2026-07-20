@@ -1098,7 +1098,7 @@ export class ModelSelectorComponent extends Container {
 		const menuWidth = contentWidth + (needsScroll ? 1 : 0);
 
 		this.#menuContainer.addChild(new Spacer(1));
-		this.#menuContainer.addChild(new Text(theme.fg("border", theme.boxSharp.horizontal.repeat(menuWidth)), 0, 0));
+		this.#menuContainer.addChild(new Text("", 0, 0));
 		if (showingThinking && this.#menuSelectedRole) {
 			this.#menuContainer.addChild(
 				new Text(
@@ -1138,7 +1138,7 @@ export class ModelSelectorComponent extends Container {
 
 		this.#menuContainer.addChild(new Spacer(1));
 		this.#menuContainer.addChild(new Text(theme.fg("dim", hintText), 0, 0));
-		this.#menuContainer.addChild(new Text(theme.fg("border", theme.boxSharp.horizontal.repeat(menuWidth)), 0, 0));
+		this.#menuContainer.addChild(new Text("", 0, 0));
 	}
 
 	#getMenuVisibleCount(optionCount: number): number {

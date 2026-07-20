@@ -45,7 +45,7 @@ export async function runAgenticCommit(args: CommitCommandArgs): Promise<void> {
 	const primaryModelPromise = resolvePrimaryModel(args.model, settings, modelRegistry);
 	const [primaryModelResult, stagedFiles] = await Promise.all([primaryModelPromise, stagedFilesPromise]);
 	const { model: primaryModel, apiKey: primaryApiKey } = primaryModelResult;
-	process.stdout.write(`  └─ ${primaryModel.name}\n`);
+	process.stdout.write(`     ${primaryModel.name}\n`);
 
 	const { model: agentModel, thinkingLevel: agentThinkingLevel } = await resolveSmolModel(
 		settings,
@@ -72,10 +72,10 @@ export async function runAgenticCommit(args: CommitCommandArgs): Promise<void> {
 	if (!args.noChangelog) {
 		if (changelogTargets.length > 0) {
 			for (const path of changelogTargets) {
-				process.stdout.write(`  └─ ${path}\n`);
+				process.stdout.write(`     ${path}\n`);
 			}
 		} else {
-			process.stdout.write("  └─ (none found)\n");
+			process.stdout.write("     (none found)\n");
 		}
 	}
 
@@ -83,10 +83,10 @@ export async function runAgenticCommit(args: CommitCommandArgs): Promise<void> {
 	const agentsMdFiles = contextFiles.filter(file => file.path.endsWith("AGENTS.md"));
 	if (agentsMdFiles.length > 0) {
 		for (const file of agentsMdFiles) {
-			process.stdout.write(`  └─ ${file.path}\n`);
+			process.stdout.write(`     ${file.path}\n`);
 		}
 	} else {
-		process.stdout.write("  └─ (none found)\n");
+		process.stdout.write("     (none found)\n");
 	}
 	const forceFallback = $env.PI_COMMIT_TEST_FALLBACK?.toLowerCase() === "true";
 	if (forceFallback) {
@@ -171,16 +171,16 @@ export async function runAgenticCommit(args: CommitCommandArgs): Promise<void> {
 			proposals: commitState.changelogProposal.entries,
 			dryRun: args.dryRun,
 			onProgress: message => {
-				process.stdout.write(`  ├─ ${message}\n`);
+				process.stdout.write(`     ${message}\n`);
 			},
 		});
 		updatedChangelogFiles = updated.map(filePath => path.relative(cwd, filePath));
 		if (updated.length > 0) {
 			for (const filePath of updated) {
-				process.stdout.write(`  └─ ${filePath}\n`);
+				process.stdout.write(`     ${filePath}\n`);
 			}
 		} else {
-			process.stdout.write("  └─ (no changes)\n");
+			process.stdout.write("     (no changes)\n");
 		}
 	}
 

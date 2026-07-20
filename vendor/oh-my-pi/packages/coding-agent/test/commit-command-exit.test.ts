@@ -1,8 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "bun:test";
+import { NodeServices } from "@effect/platform-node";
 import CommitCommand from "@oh-my-pi/pi-coding-agent/commands/commit";
 import * as commitModule from "@oh-my-pi/pi-coding-agent/commit";
 import * as themeModule from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import { postmortem } from "@oh-my-pi/pi-utils";
+import { Effect } from "effect";
+import { Command } from "effect/unstable/cli";
 
 describe("omp commit command lifecycle (issue #1041)", () => {
 	afterEach(() => {
@@ -18,13 +21,9 @@ describe("omp commit command lifecycle (issue #1041)", () => {
 		// the call happens at all.
 		const quitSpy = vi.spyOn(postmortem, "quit").mockResolvedValue(undefined);
 
-		const command = new CommitCommand([], {
-			bin: "omp",
-			version: "0.0.0-test",
-			commands: new Map(),
-		});
-
-		await command.run();
+		await Effect.runPromise(
+			Command.runWith(CommitCommand, { version: "0.0.0-test" })([]).pipe(Effect.provide(NodeServices.layer)),
+		);
 
 		expect(initThemeSpy).toHaveBeenCalledTimes(1);
 		expect(runCommitSpy).toHaveBeenCalledTimes(1);

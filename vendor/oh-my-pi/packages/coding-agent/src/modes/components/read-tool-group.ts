@@ -437,8 +437,8 @@ export class ReadToolGroupComponent extends Container implements ToolExecutionHa
 		const entriesWithoutPreview = entries.filter(entry => !this.#shouldRenderPreview(entry));
 		const summaryTargets = this.#displayTargetsForEntries(entriesWithoutPreview);
 		const rows = this.#buildSummaryRows(summaryTargets);
-		for (const [index, row] of rows.entries()) {
-			this.#appendSummaryRow(lines, row, index, rows.length);
+		for (const row of rows) {
+			this.#appendSummaryRow(lines, row);
 		}
 
 		this.#text.setText(lines.join("\n"));
@@ -513,9 +513,8 @@ export class ReadToolGroupComponent extends Container implements ToolExecutionHa
 		return rows;
 	}
 
-	#appendSummaryRow(lines: string[], row: ReadSummaryRow, index: number, total: number): void {
-		const connector = index === total - 1 ? theme.tree.last : theme.tree.branch;
-		lines.push(`   ${theme.fg("dim", connector)} ${this.#formatRow(row)}`.trimEnd());
+	#appendSummaryRow(lines: string[], row: ReadSummaryRow): void {
+		lines.push(`      ${this.#formatRow(row)}`.trimEnd());
 	}
 
 	#formatRow(row: ReadSummaryRow): string {

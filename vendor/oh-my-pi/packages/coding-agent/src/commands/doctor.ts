@@ -1,7 +1,8 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { getAgentDir } from "@oh-my-pi/pi-utils";
-import { Command, Flags } from "@oh-my-pi/pi-utils/cli";
+import { Effect } from "effect";
+import { Command, Flag } from "effect/unstable/cli";
 import { collectFleetStatus, type FleetStatusRow, pruneFleetPeers } from "../cli/fleet-cli";
 import { type FleetReleaseRegistry, readRegistry } from "../cli/fleet-target-resolution";
 import { resolveVerifiedReleaseExecutable } from "../cli/restart-session";
@@ -558,25 +559,20 @@ export function formatDoctorReport(report: DoctorReport): string {
 	return `${JSON.stringify(report, null, 2)}\n`;
 }
 
-export default class Doctor extends Command {
-	static description = "Diagnose local session and fleet damage";
-
-	static args = {};
-
-	static flags = {
-		apply: Flags.boolean({ description: "Apply only safe peer-prune, dead-lock, and orphaned-kernel repairs", default: false }),
-	};
-
-	static examples = ["omp doctor", "omp doctor --apply"];
-
-	async run(): Promise<void> {
-		const { flags } = await this.parse(Doctor);
-		if (flags.apply) {
-			const report = await runDoctor({ apply: true });
+export default Command.make(
+	"doctor",
+	{
+		apply: Flag.boolean("apply").pipe(
+			Flag.withDescription("Apply only safe peer-prune, dead-lock, and orphaned-kernel repairs"),
+			Flag.withDefault(false),
+		),
+	},
+	config =>
+		Effect.promise(async () => {
+			const report = config.apply ? await runDoctor({ apply: true }) : await runDoctor();
 			process.stdout.write(formatDoctorReport(report));
-			return;
-		}
-		const report = await runDoctor();
-		process.stdout.write(formatDoctorReport(report));
-	}
-}
+		}),
+).pipe(
+	Command.withDescription("Diagnose local session and fleet damage"),
+	Command.withExamples([{ command: "omp doctor" }, { command: "omp doctor --apply" }]),
+);

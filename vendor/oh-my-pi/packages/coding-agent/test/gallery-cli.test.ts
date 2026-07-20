@@ -56,14 +56,14 @@ describe("gallery harness", () => {
 	it("routes customRendered tools (task) through the custom-tool branch", async () => {
 		// `task` attaches its renderer on the real AgentTool, so the gallery must
 		// reproduce that path. With a result present and mergeCallAndResult, the
-		// custom branch must NOT emit a redundant tool-name line above the result box
-		// (regression guard for tool-execution's custom-branch fallback label).
+		// custom branch must NOT emit a redundant standalone tool-name line above
+		// the result (regression guard for tool-execution's fallback label).
 		const task = resolveFixture("task");
 		expect(task.customRendered).toBe(true);
 		const lines = await renderGalleryState("task", task, "error", 100);
 		const stripped = lines.map(line => Bun.stripANSI(line).trim());
-		// The framed result header carries the label inside the box border...
-		expect(stripped.some(line => line.startsWith("┌") && line.includes("Task"))).toBe(true);
+		// The borderless result heading still carries the task label and identity...
+		expect(stripped.some(line => line.includes("Task · AuthLoader · error"))).toBe(true);
 		// ...but no standalone "Task" label line precedes it.
 		expect(stripped).not.toContain("Task");
 	});

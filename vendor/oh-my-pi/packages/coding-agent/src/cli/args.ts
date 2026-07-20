@@ -1,5 +1,15 @@
 /**
- * CLI argument parsing and help display
+ * CLI argument parsing for the launch/acp flow.
+ *
+ * The user-facing launch/acp/join/setup commands are declared as Effect CLI
+ * `Command`/`Flag`/`Argument` descriptors (see `../commands/*`). `parseArgs`
+ * below is the typed dynamic bridge those descriptors delegate to for the
+ * behaviours Effect's strict parser cannot express: optional-value flags
+ * (`--resume[=id]`), `@file` arguments, the `--` terminator, unknown-flag
+ * tracking, and the extension two-pass reparse (see `./extension-flags`). It
+ * produces the `Args` record consumed by `runRootCommand`, and together with
+ * `./flag-tables` is the single source of flag-value classification shared with
+ * the profile bootstrap and restart pre-parsers.
  */
 import { type Effort, THINKING_EFFORTS } from "@oh-my-pi/pi-catalog/effort";
 import { APP_NAME, CONFIG_DIR_NAME, logger } from "@oh-my-pi/pi-utils";
@@ -346,13 +356,4 @@ ${chalk.bold("Plugin Options:")}
 ${chalk.bold("Useful Commands:")}
   omp agents unpack           - Export bundled subagents to ~/.omp/agent/agents (default)
   omp agents unpack --project - Export bundled subagents to ./.omp/agents`;
-}
-
-export function printHelp(): void {
-	process.stdout.write(
-		`${chalk.bold(APP_NAME)} - AI coding assistant\n\n` +
-			`Run ${APP_NAME} --help for full command and option details.\n` +
-			`Run ${APP_NAME} <command> --help for command-specific help.\n\n` +
-			`${getExtraHelpText()}\n`,
-	);
 }

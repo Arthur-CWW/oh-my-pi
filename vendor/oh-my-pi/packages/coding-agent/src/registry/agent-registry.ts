@@ -56,6 +56,14 @@ export interface RegisterInput {
 	session: AgentSession | null;
 	sessionFile?: string | null;
 	status?: AgentStatus;
+	/**
+	 * Reserved-but-not-yet-live marker. A nonblocking spawn registers the child
+	 * `running` + `starting: true` before its gated job body builds a real
+	 * session, so history/IRC resolve genuinely-queued work instead of reporting
+	 * a known id as unknown. Cleared when the child comes live (its own
+	 * `register` overwrites this ref without the flag).
+	 */
+	starting?: boolean;
 	recovery?: AgentRef["recovery"];
 	quota?: AgentQuotaAdmission;
 }
@@ -91,6 +99,7 @@ export class AgentRegistry {
 			session: input.session,
 			sessionFile: input.sessionFile ?? null,
 			recovery: input.recovery,
+			starting: input.starting,
 			createdAt: now,
 			lastActivity: now,
 			spawnIndex: existing?.spawnIndex ?? this.#nextSpawnIndex++,
@@ -108,6 +117,25 @@ export class AgentRegistry {
 		// Activity describes current work; it is meaningless once the agent
 		// leaves `running`, so drop it to avoid showing stale work in rosters.
 		if (status !== "running") ref.activity = undefined;
+		ref.lastActivity = Date.now();
+		this.#emit({ type: "status_changed", ref });
+	}
+
+	/**
+	 * Finalize a reserved `starting` child that never built a live session as
+	 * terminal `aborted`. No-op once the child has come live (its `register`
+	 * cleared the flag) or when the id was never reserved — so a normal spawn
+	 * and a duplicate finalizer are both safe. The identity stays registered
+	 * and inspectable via `history://`; it just no longer projects as active
+	 * work to the HUD or shutdown confirmation.
+	 */
+	failStart(id: string): void {
+		const ref = this.#refs.get(id);
+		if (ref?.starting !== true) return;
+		ref.starting = false;
+		ref.status = "aborted";
+		ref.session = null;
+		ref.activity = undefined;
 		ref.lastActivity = Date.now();
 		this.#emit({ type: "status_changed", ref });
 	}

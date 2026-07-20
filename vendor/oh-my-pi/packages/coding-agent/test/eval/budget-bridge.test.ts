@@ -30,7 +30,7 @@ describe("runEvalBudget", () => {
 	it("prefers an active +Nk turn directive over Goal Mode", async () => {
 		const session = makeSession({
 			turn: { total: 200_000, spent: 5_000, hard: true },
-			goal: goalState({ tokenBudget: 100_000, tokensUsed: 4_200 }),
+			goal: goalState({ tokensUsed: 4_200 }),
 		});
 		expect(await runEvalBudget({}, { session })).toEqual({ total: 200_000, spent: 5_000, hard: true });
 	});
@@ -43,17 +43,17 @@ describe("runEvalBudget", () => {
 	it("falls through to Goal Mode when no turn directive set a ceiling", async () => {
 		const session = makeSession({
 			turn: { total: null, spent: 7_777, hard: false },
-			goal: goalState({ tokenBudget: 100_000, tokensUsed: 4_200 }),
+			goal: goalState({ tokensUsed: 4_200 }),
 		});
-		expect(await runEvalBudget({}, { session })).toEqual({ total: 100_000, spent: 4_200, hard: true });
+		expect(await runEvalBudget({}, { session })).toEqual({ total: null, spent: 4_200, hard: false });
 	});
 
-	it("treats a Goal Mode budget as hard, and a budgetless goal as no ceiling", async () => {
-		const withBudget = makeSession({ goal: goalState({ tokenBudget: 80_000, tokensUsed: 9_000 }) });
-		expect(await runEvalBudget({}, { session: withBudget })).toEqual({ total: 80_000, spent: 9_000, hard: true });
+	it("Goal Mode never contributes a ceiling", async () => {
+		const withGoal = makeSession({ goal: goalState({ tokensUsed: 9_000 }) });
+		expect(await runEvalBudget({}, { session: withGoal })).toEqual({ total: null, spent: 9_000, hard: false });
 
-		const noBudget = makeSession({ goal: goalState({ tokenBudget: undefined, tokensUsed: 1_234 }) });
-		expect(await runEvalBudget({}, { session: noBudget })).toEqual({ total: null, spent: 1_234, hard: false });
+		const noSpend = makeSession({ goal: goalState({ tokensUsed: 1_234 }) });
+		expect(await runEvalBudget({}, { session: noSpend })).toEqual({ total: null, spent: 1_234, hard: false });
 	});
 
 	it("reports no ceiling but still surfaces spend", async () => {

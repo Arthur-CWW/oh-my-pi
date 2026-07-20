@@ -102,7 +102,7 @@ describe("read surfaces conflicts as a warning footer", () => {
 		expect(text).toContain("⚠ 1 unresolved conflict detected");
 		expect(text).toContain("- ours = HEAD");
 		expect(text).toContain("- theirs = feature/x");
-		expect(text).toContain("──── #1  L2-6 ────");
+		expect(text).toContain("Conflict #1  L2-6");
 		expect(text).toContain("<<< ours");
 		expect(text).toContain(">>> theirs");
 		expect(text).toContain("NOTICE: Inspect a block by reading `conflict://<N>`");
@@ -136,8 +136,8 @@ describe("read surfaces conflicts as a warning footer", () => {
 
 		const result = await read.execute("read-two", { path: "two-blocks.ts" });
 		const text = getText(result);
-		expect(text).toContain("──── #1  L1-5 ────");
-		expect(text).toContain("──── #2  L7-11 ────");
+		expect(text).toContain("Conflict #1  L1-5");
+		expect(text).toContain("Conflict #2  L7-11");
 		expect(session.conflictHistory?.get(1)?.oursLines).toEqual(["a-ours"]);
 		expect(session.conflictHistory?.get(2)?.oursLines).toEqual(["b-ours"]);
 	});

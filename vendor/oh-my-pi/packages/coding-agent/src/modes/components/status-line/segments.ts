@@ -114,15 +114,11 @@ const modelSegment: StatusLineSegment = {
 	},
 };
 
-function formatGoalBudget(current: number, budget?: number): string {
-	return budget === undefined ? formatNumber(current) : `${formatNumber(current)}/${formatNumber(budget)}`;
-}
-
 function renderGoalMode(ctx: SegmentContext, mode: { enabled: boolean; paused: boolean }): RenderedSegment {
 	const goal = ctx.session.getGoalModeState()?.goal;
-	const budget = goal ? ` ${formatGoalBudget(goal.tokensUsed, goal.tokenBudget)}` : "";
+	const usage = goal ? ` ${formatNumber(goal.tokensUsed)}` : "";
 	const pause = mode.paused ? (theme.icon.pause ? ` ${theme.icon.pause}` : " (paused)") : "";
-	const content = withIcon(theme.icon.goal, `Goal${budget}${pause}`);
+	const content = withIcon(theme.icon.goal, `Goal${usage}${pause}`);
 	return { content: theme.fg(mode.paused ? "warning" : "accent", content), visible: true };
 }
 

@@ -1,5 +1,5 @@
-import { getStreamedEditTargetPath } from "./tool-detail-render";
 import type { ToolUIStatus } from "./render-utils";
+import { getStreamedEditTargetPath } from "./tool-detail-render";
 
 export type ToolCallPhase = "pending" | "running" | "ok" | "error" | "interrupted";
 
@@ -31,7 +31,7 @@ function displayToolName(toolName: string): string {
 	const display = toolName
 		.replace(/^mcp__/, "")
 		.replace(/__/g, " ")
-		.replace(/[\/_-]+/g, " ")
+		.replace(/[/_-]+/g, " ")
 		.trim();
 	return display ? `${display[0]!.toUpperCase()}${display.slice(1)}` : display;
 }
@@ -73,9 +73,11 @@ function ircDetail(args: Record<string, unknown>): string | undefined {
 	const op = text(args.op);
 	const peer = text(args.to) ?? text(args.from);
 	const message = text(args.message);
-	return [op, peer ? `${args.to ? "to" : "from"} ${peer}` : undefined, message ? clip(message, 42) : undefined]
-		.filter(Boolean)
-		.join(" · ") || undefined;
+	return (
+		[op, peer ? `${args.to ? "to" : "from"} ${peer}` : undefined, message ? clip(message, 42) : undefined]
+			.filter(Boolean)
+			.join(" · ") || undefined
+	);
 }
 
 function commandDetail(args: Record<string, unknown>): string | undefined {
@@ -84,7 +86,12 @@ function commandDetail(args: Record<string, unknown>): string | undefined {
 	const tokens = command.split(/\s+/);
 	let token = tokens[0];
 	for (const candidate of tokens) {
-		if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(candidate) || candidate === "env" || candidate === "command" || candidate === "time") {
+		if (
+			/^[A-Za-z_][A-Za-z0-9_]*=/.test(candidate) ||
+			candidate === "env" ||
+			candidate === "command" ||
+			candidate === "time"
+		) {
 			continue;
 		}
 		token = candidate;
@@ -95,7 +102,9 @@ function commandDetail(args: Record<string, unknown>): string | undefined {
 }
 
 function findDetail(args: Record<string, unknown>): string | undefined {
-	const pattern = text(args.pattern) ?? (Array.isArray(args.paths) ? args.paths.filter(value => typeof value === "string").join(", ") : undefined);
+	const pattern =
+		text(args.pattern) ??
+		(Array.isArray(args.paths) ? args.paths.filter(value => typeof value === "string").join(", ") : undefined);
 	return pattern ? clip(pattern) : undefined;
 }
 
@@ -113,9 +122,21 @@ function salientDetail(toolName: string, args: Record<string, unknown>): string 
 	if (normalized.includes("fetch")) return text(args.url);
 	if (normalized === "browser") return browserDetail(args);
 	if (normalized === "irc") return ircDetail(args);
-	if (normalized === "search") return [text(args.pattern), findDetail({ paths: args.paths })].filter(Boolean).join(" · ") || undefined;
+	if (normalized === "search")
+		return [text(args.pattern), findDetail({ paths: args.paths })].filter(Boolean).join(" · ") || undefined;
 	if (normalized === "find") return findDetail(args);
 	return text(args.title) ?? text(args.path) ?? text(args.url);
+}
+
+/**
+ * Tools whose salient detail is a file path — a semantic identifier that must
+ * not be truncated width-independently. Their path is kept whole in the
+ * headline so a wide terminal renders it in full; the width-aware renderer
+ * shortens it (path-aware) only when horizontal space is tight.
+ */
+function isPathDetailTool(toolName: string): boolean {
+	const normalized = displayToolName(toolName).toLowerCase();
+	return normalized === "read" || normalized === "write" || normalized === "edit" || normalized === "apply patch";
 }
 
 function detailAlreadyVisible(detail: string, lead: string): boolean {
@@ -148,11 +169,16 @@ function numericGist(result: ToolResultSummary | undefined): string | undefined 
 
 export function phaseStatus(phase: ToolCallPhase): ToolUIStatus {
 	switch (phase) {
-		case "pending": return "pending";
-		case "running": return "running";
-		case "ok": return "success";
-		case "error": return "error";
-		case "interrupted": return "aborted";
+		case "pending":
+			return "pending";
+		case "running":
+			return "running";
+		case "ok":
+			return "success";
+		case "error":
+			return "error";
+		case "interrupted":
+			return "aborted";
 	}
 }
 
@@ -167,9 +193,18 @@ export function composeToolHeadline(
 	const detail = salientDetail(toolName, args);
 	const lead = intent ? clip(intent) : displayToolName(toolName) || "tool";
 	const parts = [lead];
-	if (detail && !detailAlreadyVisible(detail, lead)) parts.push(clip(detail));
+	if (detail && !detailAlreadyVisible(detail, lead)) {
+		// A file path is a semantic identifier, not decorative chrome: keep it
+		// whole so a wide terminal renders the full path (the width-aware
+		// output-block heading shortens it path-aware only when space is tight).
+		// Free-text details stay compact.
+		parts.push(isPathDetailTool(toolName) ? detail : clip(detail));
+	}
 	parts.push(phase);
-	const cause = phase === "error" ? text(record(result?.details)?.failureCause) ?? text(record(result?.details)?.cause) : undefined;
+	const cause =
+		phase === "error"
+			? (text(record(result?.details)?.failureCause) ?? text(record(result?.details)?.cause))
+			: undefined;
 	if (cause) parts.push(clip(cause, 40));
 	const gist = phase === "ok" || phase === "error" ? numericGist(result) : undefined;
 	if (gist) parts.push(gist);
@@ -184,7 +219,12 @@ export class ToolHeadlineMemo {
 	#value = "";
 
 	get(toolName: string, args: unknown, phase: ToolCallPhase, resultVersion: number, build: () => string): string {
-		if (this.#toolName === toolName && this.#args === args && this.#phase === phase && this.#resultVersion === resultVersion) {
+		if (
+			this.#toolName === toolName &&
+			this.#args === args &&
+			this.#phase === phase &&
+			this.#resultVersion === resultVersion
+		) {
 			return this.#value;
 		}
 		this.#toolName = toolName;
@@ -200,35 +240,58 @@ function bytes(value: string): number {
 	return Buffer.byteLength(value, "utf8");
 }
 
-function scalar(value: unknown): string {
+export type ToolArgsMode = "collapsed" | "expanded";
+
+function scalar(value: unknown, mode: ToolArgsMode = "collapsed"): string {
 	if (typeof value === "string") {
+		if (mode === "expanded") return value;
 		const count = bytes(value);
-		return count <= MAX_ARG_STRING_BYTES ? value.replace(/\r?\n/g, "\\n") : `${value.slice(0, 160).replace(/\r?\n/g, "\\n")}… <${count} bytes>`;
+		return count <= MAX_ARG_STRING_BYTES
+			? value.replace(/\r?\n/g, "\\n")
+			: `${value.slice(0, 160).replace(/\r?\n/g, "\\n")}… <${count} bytes>`;
 	}
 	if (value === null) return "null";
 	if (value === undefined) return "undefined";
 	return String(value);
 }
 
-export function formatToolArgsLines(value: unknown, indent = ""): string[] {
+/**
+ * Emit one `label: value` scalar entry. Collapsed keeps the single-line byte
+ * preview; expanded renders the complete string, breaking embedded newlines
+ * into legible indented continuation lines instead of escaping them.
+ */
+function pushScalarArg(lines: string[], indent: string, label: string, value: unknown, mode: ToolArgsMode): void {
+	if (mode === "expanded" && typeof value === "string" && /\r?\n/.test(value)) {
+		lines.push(`${indent}${label}:`);
+		for (const segment of value.split(/\r?\n/)) lines.push(`${indent}  ${segment}`);
+		return;
+	}
+	lines.push(`${indent}${label}: ${scalar(value, mode)}`);
+}
+
+export function formatToolArgsLines(value: unknown, mode: ToolArgsMode = "collapsed", indent = ""): string[] {
 	const object = record(value);
-	if (!object) return [`${indent}value: ${scalar(value)}`];
+	if (!object) {
+		const lines: string[] = [];
+		pushScalarArg(lines, indent, "value", value, mode);
+		return lines;
+	}
 	const lines: string[] = [];
 	for (const [label, item] of Object.entries(object)) {
 		const nested = record(item);
 		if (nested) {
 			lines.push(`${indent}${label}:`);
-			lines.push(...formatToolArgsLines(nested, `${indent}  `));
+			lines.push(...formatToolArgsLines(nested, mode, `${indent}  `));
 		} else if (Array.isArray(item)) {
 			lines.push(`${indent}${label}: ${item.length} item${item.length === 1 ? "" : "s"}`);
 			for (let index = 0; index < item.length; index++) {
 				const entry = record(item[index]);
 				if (entry) {
 					lines.push(`${indent}  ${index + 1}:`);
-					lines.push(...formatToolArgsLines(entry, `${indent}    `));
-				} else lines.push(`${indent}  ${index + 1}: ${scalar(item[index])}`);
+					lines.push(...formatToolArgsLines(entry, mode, `${indent}    `));
+				} else pushScalarArg(lines, `${indent}  `, `${index + 1}`, item[index], mode);
 			}
-		} else lines.push(`${indent}${label}: ${scalar(item)}`);
+		} else pushScalarArg(lines, indent, label, item, mode);
 	}
 	return lines;
 }

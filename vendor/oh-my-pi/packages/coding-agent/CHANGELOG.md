@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- `history://<target>` now supports bounded decoded transcript search and exact record retrieval without rendering the full transcript into the caller, preserving existing bare-history behavior and scope checks.
 - Generated handoffs now begin with a code-stamped predecessor provenance block, and successor journals store schema-decoded lineage records with walkable handoff-chain pointers.
 - Shared Scope-managed `TablePreviewComponent` (table + live preview + key routing + guaranteed finalizers on unmount); `/agents` dashboard is the first consumer — selection, filtering, scrolling, and preview assembly are no longer reimplemented per surface.
 - Model labels are tier-aware: dense comparative rows (HUD, Hub roster) use the fused compact form (`OX5.6solxh`) with consistent segment colors and the effort rendered on every row including the cursor row; the main/thread status line shows just the model name plus compact effort (`5fable m`) with no provider word; wide detail panes keep the spelled-out form. Variant names always spell out (5.6sol/5.6terra/opus/haiku — one-letter lane codes removed), and decorative `•` spacers are gone.
@@ -71,6 +72,11 @@
 - Eval `agent()`/`agentType` defaults, gallery fixtures, and the task tool prompt now use named responsibility templates; catch-all `task` is documented as a deprecated migration alias.
 - `Enter` on an empty prompt during streaming now aborts and delivers the next queued durable follow-up exactly once (removing it from the queue); with an empty queue it remains abort-only.
 ### Fixed
+- Child spawn now reserves an addressable starting identity before background admission, preserves failed-start records, and reconciles terminal dormant children before HUD active counts or shutdown prompts, eliminating transient Unknown-agent gaps and stale RUN rows.
+- Task-spawn quota usage refresh is bounded at two seconds before child registration, so hung provider hooks no longer pin the parent tool call, pending UI, or follow-up queue; timeouts fall back to durable quota state without cancelling shared provider work, while caller aborts still win.
+- Ctrl+O expanded tool calls now show complete textual arguments, including nested multiline prompts, while collapsed blocks retain bounded byte previews.
+- `/context` now uses the same provider-anchored used/window percentage as the statusline and collab surfaces; retained transcript/category estimates are labeled separately and no longer drive free-space reporting.
+- Tool headings preserve complete file paths whenever width permits and use deterministic middle elision at narrow widths so the basename remains visible.
 - Agent Hub exit keys now have deterministic focus precedence: Ctrl-C and `q` always leave the Hub, owned Ctrl-Q returns to the main thread, and Escape unwinds filter editing, pending chords, preview focus, inspector focus, and filtered-table state before closing without trapping input.
 - GPT-5.6 Codex models now use one vendored-upstream limit resolver across startup and discovery refresh, preserve explicit model-config overrides, and label the resolved window source in the status line and `:context`.
 - Bash commands run with `pty: true` now start from the resolved shell-session environment and restore its `PATH` after login startup files, keeping mise-managed tools available just as they are in non-PTY bash commands.

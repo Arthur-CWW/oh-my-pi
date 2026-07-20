@@ -510,61 +510,15 @@ class TreeList implements Component {
 			// If multiple roots, shift display (roots at 0, not 1)
 			const displayIndent = this.#multipleRoots ? Math.max(0, flatNode.indent - 1) : flatNode.indent;
 
-			// Build prefix with gutters at their correct positions, clamped to
-			// `maxIndentLevels` cells so the content always fits. When clamped, the
-			// leftmost cells represent the deepest visible ancestors and a `…` marker
-			// indicates older branch context has been compressed.
-			const hasConnector = flatNode.showConnector && !flatNode.isVirtualRootChild;
-			const connectorSymbol = hasConnector ? (flatNode.isLast ? theme.tree.last : theme.tree.branch) : "";
-			const connectorChars = hasConnector ? Array.from(connectorSymbol) : [];
 			const renderedIndent = Math.min(displayIndent, maxIndentLevels);
 			const scrollOffset = displayIndent - renderedIndent;
-			const connectorPositionDisplay = hasConnector ? renderedIndent - 1 : -1;
-			// Chain rows (no connector of their own) under a last-sibling (`└─`)
-			// branch stay anchored by a vertical drawn one level RIGHT of the
-			// suppressed gutter — the column where the row's own connector would
-			// sit, directly below the branch head's content. Drawing it in the
-			// `└─` column itself contradicts the corner and leaves dangling,
-			// drifting verticals once the chain branches deeper (#2298, #2325).
-			// Chains under `├─` heads need no extra anchor: the sibling line
-			// (`show: true` gutter) already ties them to their branch.
-			const nearestGutter = !hasConnector ? flatNode.gutters[flatNode.gutters.length - 1] : undefined;
-			const chainAnchorLevel = nearestGutter && !nearestGutter.show ? nearestGutter.position + 1 : -1;
 
-			// Build prefix char by char, placing gutters and connector at their positions
+			// Indentation-only prefix: a fixed 3-cell indent per visible depth
+			// level. Hierarchy reads from depth alone — no tree/gutter glyphs.
+			// `renderedIndent`/`maxIndentLevels` scroll math and column widths are
+			// unchanged, so wrapping and horizontal scrolling behave identically.
 			const totalChars = renderedIndent * 3;
-			const prefixChars: string[] = [];
-			for (let i = 0; i < totalChars; i++) {
-				const level = Math.floor(i / 3);
-				const originalLevel = level + scrollOffset;
-				const posInLevel = i % 3;
-
-				// Check if there's a gutter at this level (translated to original tree depth)
-				const gutter = flatNode.gutters.find(g => g.position === originalLevel);
-				if (gutter) {
-					// Gutters follow standard tree semantics: `│` only while more
-					// siblings continue below (`show`), space below a `└─`.
-					if (posInLevel === 0) {
-						prefixChars.push(gutter.show ? theme.tree.vertical : " ");
-					} else {
-						prefixChars.push(" ");
-					}
-				} else if (originalLevel === chainAnchorLevel) {
-					// Chain anchor for rows under a `└─` branch head.
-					prefixChars.push(posInLevel === 0 ? theme.tree.vertical : " ");
-				} else if (hasConnector && level === connectorPositionDisplay) {
-					// Connector at this level
-					if (posInLevel === 0) {
-						prefixChars.push(connectorChars[0] ?? " ");
-					} else if (posInLevel === 1) {
-						prefixChars.push(connectorChars[1] ?? theme.tree.horizontal);
-					} else {
-						prefixChars.push(connectorChars[2] ?? " ");
-					}
-				} else {
-					prefixChars.push(" ");
-				}
-			}
+			const prefixChars: string[] = new Array(totalChars).fill(" ");
 			// Mark the leftmost cell when ancestors were compressed off-screen.
 			if (scrollOffset > 0 && prefixChars.length > 0) {
 				prefixChars[0] = "…";

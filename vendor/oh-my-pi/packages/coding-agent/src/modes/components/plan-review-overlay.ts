@@ -40,13 +40,11 @@ import type { HookSelectorSlider } from "./hook-selector";
 import {
 	bottomBorder,
 	divider,
-	dividerSplit,
 	fit,
 	row,
 	splitBodyWidth,
 	splitRow,
 	topBorder,
-	topBorderSplit,
 } from "./overlay-box";
 import { joinPlanSections, parsePlanSections, sectionDeletionSpan } from "./plan-toc";
 import { renderSegmentTrack } from "./segment-track";
@@ -818,14 +816,14 @@ export class PlanReviewOverlay implements Component {
 		const out: string[] = [];
 		if (sidebarShown) {
 			const { lines: sidebar, posForRow } = this.#renderSidebarLines(regionRows, sidebarWidth);
-			out.push(topBorderSplit(width, OVERLAY_TITLE, sidebarWidth));
+			out.push(topBorder(width, OVERLAY_TITLE));
 			for (let i = 0; i < regionRows; i++) {
 				const pos = posForRow[i];
 				if (pos !== undefined) this.#tocClickRows.set(out.length, pos);
 				this.#bodyClickRows.add(out.length);
 				out.push(splitRow(sidebar[i] ?? "", body[i] ?? "", width, sidebarWidth));
 			}
-			out.push(dividerSplit(width, sidebarWidth));
+			out.push(divider(width));
 		} else {
 			out.push(topBorder(width, OVERLAY_TITLE));
 			for (const line of body) {

@@ -1,51 +1,40 @@
 /**
  * Manage configuration settings.
  */
-import { Args, Command, Flags } from "@oh-my-pi/pi-utils/cli";
+import { Effect, Option } from "effect";
+import { Argument, Command, Flag } from "effect/unstable/cli";
 import { type ConfigAction, type ConfigCommandArgs, runConfigCommand } from "../cli/config-cli";
 import { initTheme } from "../modes/theme/theme";
 
-const ACTIONS: ConfigAction[] = ["list", "get", "set", "reset", "path", "init-xdg"];
+const ACTIONS: readonly ConfigAction[] = ["list", "get", "set", "reset", "path", "init-xdg"];
 
-export default class Config extends Command {
-	static description = "Manage configuration settings";
+export default Command.make(
+	"config",
+	{
+		action: Argument.choice("action", ACTIONS).pipe(
+			Argument.withDescription("Config action"),
+			Argument.withDefault("list"),
+		),
+		key: Argument.optional(Argument.string("key").pipe(Argument.withDescription("Setting key"))),
+		value: Argument.string("value").pipe(
+			Argument.withDescription("Value (for set/reset)"),
+			Argument.variadic(),
+		),
+		json: Flag.boolean("json").pipe(Flag.withDescription("Output JSON")),
+	},
+	config =>
+		Effect.promise(async () => {
+			const value = config.value.length > 0 ? [...config.value].join(" ") : undefined;
+			const cmd: ConfigCommandArgs = {
+				action: config.action,
+				key: Option.getOrUndefined(config.key),
+				value,
+				flags: {
+					json: config.json,
+				},
+			};
 
-	static args = {
-		action: Args.string({
-			description: "Config action",
-			required: false,
-			options: ACTIONS,
+			await initTheme();
+			await runConfigCommand(cmd);
 		}),
-		key: Args.string({
-			description: "Setting key",
-			required: false,
-		}),
-		value: Args.string({
-			description: "Value (for set/reset)",
-			required: false,
-			multiple: true,
-		}),
-	};
-
-	static flags = {
-		json: Flags.boolean({ description: "Output JSON" }),
-	};
-
-	async run(): Promise<void> {
-		const { args, flags } = await this.parse(Config);
-		const action = (args.action ?? "list") as ConfigAction;
-		const value = Array.isArray(args.value) ? args.value.join(" ") : args.value;
-
-		const cmd: ConfigCommandArgs = {
-			action,
-			key: args.key,
-			value,
-			flags: {
-				json: flags.json,
-			},
-		};
-
-		await initTheme();
-		await runConfigCommand(cmd);
-	}
-}
+).pipe(Command.withDescription("Manage configuration settings"));

@@ -127,7 +127,6 @@ export interface TransitionGoalModeRequest {
 				readonly kind: "enter";
 				readonly action: "create";
 				readonly objective: string;
-				readonly tokenBudget?: number;
 				readonly workstream?: string;
 		  }
 		| { readonly kind: "enter"; readonly action: "resume"; readonly goalId: string }
@@ -270,8 +269,6 @@ function isTransitionGoalModeRequest(value: Record<string, unknown>): boolean {
 			candidate.goalId === undefined &&
 			typeof candidate.objective === "string" &&
 			candidate.objective.trim().length > 0 &&
-			(candidate.tokenBudget === undefined ||
-				(Number.isSafeInteger(candidate.tokenBudget) && (candidate.tokenBudget as number) > 0)) &&
 			(candidate.workstream === undefined ||
 				(typeof candidate.workstream === "string" &&
 					decodeSessionWorkstream({ kind: "workstream", id: candidate.workstream }) !== undefined))

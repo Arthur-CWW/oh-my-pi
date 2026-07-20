@@ -11,16 +11,16 @@
  */
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import type { AgentRef } from "../registry/agent-registry";
 import { IrcExternalBus, type IrcExternalPeer } from "../irc/bus-external";
+import type { AgentRef } from "../registry/agent-registry";
 import { AgentRegistry } from "../registry/agent-registry";
+import type { FileEntry } from "../session/session-entries";
 import { formatSessionHistoryMarkdown } from "../session/session-history-format";
 import { loadSessionMessagesReadOnly } from "../session/session-loader";
-import type { FileEntry } from "../session/session-entries";
 import {
+	type ChildLifecycleRecord,
 	isTerminalChildLifecycleState,
 	latestChildLifecycleRecord,
-	type ChildLifecycleRecord,
 } from "../task/child-lifecycle";
 import { formatIdPreview } from "./id-preview";
 import type { InternalResource, InternalUrl, ProtocolHandler, ResolveContext, UrlCompletion } from "./types";
@@ -69,7 +69,8 @@ function parseChildJournal(text: string): FileEntry[] | undefined {
 		if (!line.trim()) continue;
 		try {
 			const entry: unknown = JSON.parse(line);
-			if (typeof entry !== "object" || entry === null || !("type" in entry) || typeof entry.type !== "string") return undefined;
+			if (typeof entry !== "object" || entry === null || !("type" in entry) || typeof entry.type !== "string")
+				return undefined;
 			entries.push(entry as FileEntry);
 		} catch {
 			return undefined;
@@ -91,7 +92,9 @@ function directChildCandidate(
 		typeof metadata.parentSessionFile !== "string" ||
 		metadata.isolated !== false ||
 		(metadata.model !== undefined && typeof metadata.model !== "string") ||
-		(metadata.thinkingLevel !== undefined && metadata.thinkingLevel !== null && typeof metadata.thinkingLevel !== "string") ||
+		(metadata.thinkingLevel !== undefined &&
+			metadata.thinkingLevel !== null &&
+			typeof metadata.thinkingLevel !== "string") ||
 		!samePath(metadata.parentSessionFile, parentSessionFile) ||
 		typeof init?.timestamp !== "string"
 	)
@@ -186,13 +189,15 @@ export async function listArchivedDirectChildren(parentSessionFile: string): Pro
 	return candidates
 		.filter(candidate => candidate.descriptor && claims.get(candidate.agentId) === 1)
 		.map(candidate => candidate.descriptor!)
-		.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.agentId.localeCompare(right.agentId));
+		.sort(
+			(left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.agentId.localeCompare(right.agentId),
+		);
 }
 
 /** List non-active child journals without registering or reviving them. */
 export async function listArchivedChildHistories(refs: readonly AgentRef[]): Promise<ArchivedHistoryRef[]> {
 	const main = refs.find(ref => ref.kind === "main" && ref.sessionFile);
-	if (!main?.sessionFile || !main.sessionFile.endsWith(".jsonl")) return [];
+	if (!main?.sessionFile?.endsWith(".jsonl")) return [];
 	let names: string[];
 	try {
 		names = await fs.readdir(main.sessionFile.slice(0, -".jsonl".length));
@@ -212,12 +217,20 @@ export async function listArchivedChildHistories(refs: readonly AgentRef[]): Pro
 		} catch {
 			continue;
 		}
-		if (!entries.every(entry => typeof entry === "object" && entry !== null && typeof entry.type === "string")) continue;
+		if (!entries.every(entry => typeof entry === "object" && entry !== null && typeof entry.type === "string"))
+			continue;
 		const lifecycle = latestChildLifecycleRecord(entries);
 		const id = lifecycle?.agentId ?? path.basename(name, ".jsonl");
 		const registered = refs.some(ref => ref.id === id && ref.sessionFile === sessionFile);
 		if (registered) continue;
-		const reason = lifecycle === undefined ? "legacy" : lifecycle === null ? "invalid lifecycle" : isTerminalChildLifecycleState(lifecycle.state) ? lifecycle.state : "not revivable";
+		const reason =
+			lifecycle === undefined
+				? "legacy"
+				: lifecycle === null
+					? "invalid lifecycle"
+					: isTerminalChildLifecycleState(lifecycle.state)
+						? lifecycle.state
+						: "not revivable";
 		archived.push({ id, sessionFile, reason });
 	}
 	const counts = new Map<string, number>();
@@ -260,7 +273,10 @@ function parseHistoryPath(url: InternalUrl): string[] {
 }
 
 function findFleetPeer(peers: readonly IrcExternalPeer[], sessionId: string): IrcExternalPeer | undefined {
-	return peers.find(peer => peer.sessionId === sessionId) ?? peers.find(peer => peer.sessionId.toLowerCase() === sessionId.toLowerCase());
+	return (
+		peers.find(peer => peer.sessionId === sessionId) ??
+		peers.find(peer => peer.sessionId.toLowerCase() === sessionId.toLowerCase())
+	);
 }
 
 async function isJournalFile(file: string): Promise<boolean> {
@@ -293,6 +309,232 @@ function childJournalFile(parentSessionFile: string, childId: string): string {
 	return childFile;
 }
 
+/** Supported `history://<target>?op=...` retrieval operations. */
+const HISTORY_QUERY_OPS = ["search", "record"] as const;
+
+/** Default and ceiling for the number of search matches returned. */
+const DEFAULT_SEARCH_LIMIT = 20;
+const MAX_SEARCH_LIMIT = 100;
+/** Snippet context (characters) rendered on each side of a search hit. */
+const DEFAULT_SNIPPET_CONTEXT = 80;
+const MAX_SNIPPET_CONTEXT = 400;
+/** Ceiling on records returned by a single `op=record` request. */
+const MAX_RECORD_IDS = 10;
+
+interface HistoryRenderQuery {
+	kind: "render";
+}
+interface HistorySearchQuery {
+	kind: "search";
+	/** Raw needle; matched case-insensitively against decoded record text. */
+	q: string;
+	/** Maximum matches to include in the projection. */
+	limit: number;
+	/** Characters of context rendered on each side of the hit. */
+	context: number;
+}
+interface HistoryRecordQuery {
+	kind: "record";
+	/** Distinct, ascending record indices to read. */
+	ids: number[];
+}
+/** Parsed `history://` query string; `render` is the legacy full-transcript path. */
+type HistoryQuery = HistoryRenderQuery | HistorySearchQuery | HistoryRecordQuery;
+
+/** A single decoded transcript record projected for search/record retrieval. */
+interface HistoryRecord {
+	/** Stable 0-based position in the decoded message array. */
+	index: number;
+	/** Message role (e.g. `user`, `assistant`, `toolResult`, `bashExecution`). */
+	speaker: string;
+	/** Role, plus `:customType` for custom/hook families. */
+	type: string;
+	/** Decoded human-readable text used for matching and record display. */
+	text: string;
+}
+
+function parseBoundedInt(raw: string | null, fallback: number, min: number, max: number): number {
+	if (raw === null || raw.trim() === "") return fallback;
+	const value = Number(raw);
+	if (!Number.isInteger(value)) throw new Error(`history:// expected an integer, got '${raw}'`);
+	if (value < min || value > max) throw new Error(`history:// value ${value} is out of range ${min}-${max}`);
+	return value;
+}
+
+function parseNonNegativeInt(raw: string): number | undefined {
+	if (raw.trim() === "") return undefined;
+	const value = Number(raw);
+	return Number.isInteger(value) && value >= 0 ? value : undefined;
+}
+
+function parseRecordIds(params: URLSearchParams): number[] {
+	const ids = new Set<number>();
+	const idParam = params.get("id");
+	if (idParam !== null && idParam.trim() !== "") {
+		for (const raw of idParam.split(",")) {
+			const value = parseNonNegativeInt(raw);
+			if (value === undefined)
+				throw new Error(`history:// record 'id' must be non-negative integers: got '${raw.trim()}'`);
+			ids.add(value);
+		}
+	}
+	const fromParam = params.get("from");
+	const toParam = params.get("to");
+	if (fromParam !== null || toParam !== null) {
+		const from = parseNonNegativeInt(fromParam ?? "");
+		const to = parseNonNegativeInt(toParam ?? "");
+		if (from === undefined || to === undefined)
+			throw new Error("history:// record 'from'/'to' must be non-negative integers");
+		if (to < from) throw new Error(`history:// record range 'to' (${to}) must be >= 'from' (${from})`);
+		for (let i = from; i <= to; i++) ids.add(i);
+	}
+	if (ids.size === 0) {
+		throw new Error(
+			"history:// record requires 'id=<n>[,<n>...]' or 'from=<n>&to=<n>': history://<target>?op=record&id=12",
+		);
+	}
+	if (ids.size > MAX_RECORD_IDS) {
+		throw new Error(`history:// record is bounded to ${MAX_RECORD_IDS} records per request; requested ${ids.size}`);
+	}
+	return [...ids].sort((a, b) => a - b);
+}
+
+/** Parse the optional `?op=...` query into a typed retrieval request. */
+function parseHistoryQuery(url: InternalUrl): HistoryQuery {
+	const rawOp = url.searchParams.get("op");
+	if (rawOp === null || rawOp === "") return { kind: "render" };
+	const op = rawOp.toLowerCase();
+	if (op === "search") {
+		const q = url.searchParams.get("q");
+		if (q === null || q === "") {
+			throw new Error("history:// search requires a non-empty 'q' parameter: history://<target>?op=search&q=...");
+		}
+		return {
+			kind: "search",
+			q,
+			limit: parseBoundedInt(url.searchParams.get("limit"), DEFAULT_SEARCH_LIMIT, 1, MAX_SEARCH_LIMIT),
+			context: parseBoundedInt(url.searchParams.get("context"), DEFAULT_SNIPPET_CONTEXT, 0, MAX_SNIPPET_CONTEXT),
+		};
+	}
+	if (op === "record") {
+		return { kind: "record", ids: parseRecordIds(url.searchParams) };
+	}
+	throw new Error(
+		`Unsupported history:// op: ${rawOp}\nSupported ops: ${HISTORY_QUERY_OPS.join(", ")} (e.g. history://<target>?op=search&q=...)`,
+	);
+}
+
+/** Speaker/type metadata for a decoded message without rendering its body. */
+function recordDescriptor(message: unknown): { speaker: string; type: string } {
+	const shape = message as { role?: unknown; customType?: unknown };
+	const speaker = typeof shape.role === "string" ? shape.role : "unknown";
+	const customType = typeof shape.customType === "string" ? shape.customType : undefined;
+	return { speaker, type: customType ? `${speaker}:${customType}` : speaker };
+}
+
+/**
+ * Decoded, human-readable text for one message. Reuses the transcript
+ * serializer so search matches exactly what `history://` renders: tool bodies
+ * collapse to one-liners and thinking is elided, keeping the search surface
+ * the human/message projection rather than raw JSONL bytes. The serializer
+ * prepends a `## <role>` heading for user/assistant/developer turns; it is
+ * stripped so snippets carry only the message body.
+ */
+function recordText(message: unknown): string {
+	const block = formatSessionHistoryMarkdown([message]).trim();
+	const headed = block.match(/^#{2,6} \S+\n\n([\s\S]*)$/);
+	return headed ? headed[1] : block;
+}
+
+/** Collapse whitespace and window `text` around a hit, marking elisions. */
+function buildSnippet(text: string, matchStart: number, matchLength: number, context: number): string {
+	const from = Math.max(0, matchStart - context);
+	const to = Math.min(text.length, matchStart + matchLength + context);
+	const core = text.slice(from, to).replace(/\s+/g, " ").trim();
+	return `${from > 0 ? "…" : ""}${core}${to < text.length ? "…" : ""}`;
+}
+
+/** Render bounded search matches over the decoded transcript projection. */
+function renderSearchResults(query: HistorySearchQuery, messages: unknown[], title: string): string {
+	const needle = query.q.toLowerCase();
+	const matches: Array<{ index: number; speaker: string; type: string; snippet: string }> = [];
+	let total = 0;
+	for (let index = 0; index < messages.length; index++) {
+		const text = recordText(messages[index]);
+		if (!text) continue;
+		const hit = text.toLowerCase().indexOf(needle);
+		if (hit === -1) continue;
+		total++;
+		if (matches.length < query.limit) {
+			const { speaker, type } = recordDescriptor(messages[index]);
+			matches.push({ index, speaker, type, snippet: buildSnippet(text, hit, query.q.length, query.context) });
+		}
+	}
+	const lines = [`# Search "${query.q}" · ${title}`, ""];
+	if (total === 0) {
+		lines.push(`No matches for "${query.q}" across ${messages.length} records.`);
+		return `${lines.join("\n")}\n`;
+	}
+	lines.push(
+		total > matches.length
+			? `${total} matches across ${messages.length} records (showing first ${matches.length}).`
+			: `${total} ${total === 1 ? "match" : "matches"} across ${messages.length} records.`,
+		"Read a full record with `read history://<target>?op=record&id=<n>`.",
+		"",
+	);
+	for (const match of matches) {
+		lines.push(`## #${match.index} · ${match.speaker} (${match.type})`, "", match.snippet, "");
+	}
+	return `${lines.join("\n").trim()}\n`;
+}
+
+/** Render the exact decoded text for a bounded set of record indices. */
+function renderRecordSlice(query: HistoryRecordQuery, messages: unknown[], title: string): string {
+	const lines = [`# Records · ${title}`, ""];
+	const missing: number[] = [];
+	const found: HistoryRecord[] = [];
+	for (const id of query.ids) {
+		if (id >= messages.length) {
+			missing.push(id);
+			continue;
+		}
+		const { speaker, type } = recordDescriptor(messages[id]);
+		found.push({ index: id, speaker, type, text: recordText(messages[id]) });
+	}
+	if (missing.length > 0) {
+		const range = messages.length > 0 ? `0-${messages.length - 1}` : "none";
+		lines.push(
+			`No record at index ${missing.join(", ")} (transcript has ${messages.length} records, valid ids ${range}).`,
+			"",
+		);
+	}
+	for (const record of found) {
+		lines.push(
+			`## #${record.index} · ${record.speaker} (${record.type})`,
+			"",
+			record.text || "_(no readable text)_",
+			"",
+		);
+	}
+	return `${lines.join("\n").trim()}\n`;
+}
+
+/** Dispatch a resolved message array to the requested projection. */
+function renderHistoryContent(
+	query: HistoryQuery,
+	messages: unknown[],
+	title: string,
+): { content: string; contentType: InternalResource["contentType"] } {
+	switch (query.kind) {
+		case "search":
+			return { content: renderSearchResults(query, messages, title), contentType: "text/markdown" };
+		case "record":
+			return { content: renderRecordSlice(query, messages, title), contentType: "text/markdown" };
+		default:
+			return { content: formatSessionHistoryMarkdown(messages, { title }), contentType: "text/markdown" };
+	}
+}
+
 /**
  * Handler for history:// URLs.
  *
@@ -307,6 +549,10 @@ export class HistoryProtocolHandler implements ProtocolHandler {
 		const agentId = url.rawHost || url.hostname;
 		const pathSegments = parseHistoryPath(url);
 		if (!agentId && pathSegments.length > 0) throw malformedHistoryPath();
+		const query = parseHistoryQuery(url);
+		if (query.kind !== "render" && !agentId) {
+			throw new Error("history:// query ops require a target: history://<target>?op=search&q=...");
+		}
 		const registry = AgentRegistry.global();
 		const refs = registry.list();
 		const archives = await listArchivedChildHistories(refs);
@@ -317,7 +563,7 @@ export class HistoryProtocolHandler implements ProtocolHandler {
 		}
 
 		if (pathSegments.length > 0) {
-			const remote = await this.#resolveFleet(url.href, agentId, pathSegments[0], context?.ircDbPath, false);
+			const remote = await this.#resolveFleet(url.href, agentId, pathSegments[0], context?.ircDbPath, false, query);
 			if (!remote) throw new Error(`Unknown session: ${agentId} (missing or stale from fleet sessions index)`);
 			return remote;
 		}
@@ -329,14 +575,34 @@ export class HistoryProtocolHandler implements ProtocolHandler {
 			const lower = agentId.toLowerCase();
 			ref = refs.find(candidate => candidate.id.toLowerCase() === lower);
 		}
-		const archive = ref ? undefined : archives.find(candidate => candidate.id.toLowerCase() === agentId.toLowerCase());
+		const archive = ref
+			? undefined
+			: archives.find(candidate => candidate.id.toLowerCase() === agentId.toLowerCase());
 		if (!ref && !archive) {
-			const remote = await this.#resolveFleet(url.href, agentId, undefined, context?.ircDbPath, true);
+			const remote = await this.#resolveFleet(url.href, agentId, undefined, context?.ircDbPath, true, query);
 			if (remote) return remote;
 			const known = [...refs.map(candidate => candidate.id), ...archives.map(candidate => candidate.id)];
 			throw new Error(
 				`Unknown agent: ${agentId}\nKnown agents: ${formatIdPreview(known)}\nList all with history://`,
 			);
+		}
+
+		// A reserved-but-not-yet-live child (nonblocking spawn whose gated body has
+		// not built a session) resolves as `starting` rather than unknown: the
+		// identity is genuinely known and queued, it just has no transcript to
+		// search or render yet. Unknown ids still fall through to the throw above.
+		if (ref && !archive && ref.starting === true && !ref.session) {
+			const content =
+				`# ${ref.id} (starting)\n\n` +
+				`Agent \`${ref.id}\` is queued and starting up; no transcript has been recorded yet. ` +
+				`Re-read history://${ref.id} once it begins running.\n`;
+			return {
+				url: url.href,
+				content,
+				contentType: "text/markdown",
+				size: Buffer.byteLength(content, "utf-8"),
+				notes: ["Source: reserved lifecycle identity (starting)"],
+			};
 		}
 
 		const notes: string[] = [];
@@ -351,16 +617,18 @@ export class HistoryProtocolHandler implements ProtocolHandler {
 			messages = await loadSessionMessagesReadOnly(ref.sessionFile);
 			notes.push(`Source: session file (read-only, ${ref.status})`);
 		} else {
-			throw new Error(`Agent ${ref?.id ?? agentId} has no transcript: session is gone and no session file was retained`);
+			throw new Error(
+				`Agent ${ref?.id ?? agentId} has no transcript: session is gone and no session file was retained`,
+			);
 		}
 
 		const id = archive?.id ?? ref!.id;
 		const status = archive ? "archived" : ref!.status;
-		const content = formatSessionHistoryMarkdown(messages, { title: `${id} (${status})` });
+		const { content, contentType } = renderHistoryContent(query, messages, `${id} (${status})`);
 		return {
 			url: url.href,
 			content,
-			contentType: "text/markdown",
+			contentType,
 			size: Buffer.byteLength(content, "utf-8"),
 			sourcePath: archive?.sessionFile ?? ref!.sessionFile ?? undefined,
 			notes,
@@ -373,6 +641,7 @@ export class HistoryProtocolHandler implements ProtocolHandler {
 		agentId: string | undefined,
 		dbPath: string | undefined,
 		allowMissing: boolean,
+		query: HistoryQuery,
 	): Promise<InternalResource | undefined> {
 		let bus: IrcExternalBus;
 		try {
@@ -389,7 +658,8 @@ export class HistoryProtocolHandler implements ProtocolHandler {
 			}
 			const sessionFile = peer.sessionFile?.trim();
 			if (!sessionFile) throw new Error(`Session ${sessionId} has no session_file in fleet sessions index`);
-			if (!(await isJournalFile(sessionFile))) throw new Error(`Session ${sessionId} journal does not exist: ${sessionFile}`);
+			if (!(await isJournalFile(sessionFile)))
+				throw new Error(`Session ${sessionId} journal does not exist: ${sessionFile}`);
 
 			const isMain = agentId === undefined || agentId.toLowerCase() === "main";
 			let targetFile = sessionFile;
@@ -406,11 +676,11 @@ export class HistoryProtocolHandler implements ProtocolHandler {
 
 			const messages = await loadSessionMessagesReadOnly(targetFile);
 			const displayId = isMain ? peer.sessionId : agentId;
-			const content = formatSessionHistoryMarkdown(messages, { title: `${displayId} (remote)` });
+			const { content, contentType } = renderHistoryContent(query, messages, `${displayId} (remote)`);
 			return {
 				url,
 				content,
-				contentType: "text/markdown",
+				contentType,
 				size: Buffer.byteLength(content, "utf-8"),
 				sourcePath: targetFile,
 				notes: [`Source: remote session file (read-only, ${peer.state})`],

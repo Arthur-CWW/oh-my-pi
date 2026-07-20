@@ -9,3 +9,21 @@ Logs are appended under `local/services/<stream>/<service>.log`. `mise run logs 
 To add a stream or service, edit root `services.yml`. Give each service a repo-relative `cwd`, `cmd`, `health` (`url`, `tcpPort`, or a narrowly scoped `command`, plus `timeoutSec`), optional `env`, and `dependsOn`. Dependencies must name services in the same stream; the runner rejects cycles and waits for each dependency's health before starting its dependents.
 
 `portless-proxy` is a boot-managed shared singleton. Streams that need named routes declare it with `shared: true` and check it with `bunx portless list`. `up` reuses it; if it is unavailable, it prints the exact manual fix (`bunx portless proxy start`) and continues without creating a tmux window. `down` never stops it.
+## Remote workspace
+
+From the Mac cockpit (`~/agents`), run:
+
+```sh
+mise run remote:doctor
+mise run remote:setup <stream>
+mise run remote:up <stream>
+```
+
+Open the `desktop-*.localhost` URL printed by `remote:up`. Inspect remote errors, then stop the stream with:
+
+```sh
+nu scripts/remote-workspace.nu errors <stream>
+mise run remote:down <stream>
+```
+
+One `/home/arthur/agents` checkout serves all streams. Portless names the Mac loopback SSH forwards; remote canonical/data state is not synced. Companion services are currently blocked on Linux because their commands require Darwin/MLX.

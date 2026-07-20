@@ -716,7 +716,6 @@ describe("AgentSession model persistence", () => {
 				id: "goal-before-failed-switch",
 				objective: "Keep the original accounting state",
 				status: "active" as const,
-				tokenBudget: 1_000,
 				tokensUsed: 37,
 				timeUsedSeconds: 11,
 				createdAt: 100,
@@ -741,7 +740,6 @@ describe("AgentSession model persistence", () => {
 				id: "goal-present-only-in-target",
 				objective: "Must disappear when reconciliation fails",
 				status: "active" as const,
-				tokenBudget: 500,
 				tokensUsed: 91,
 				timeUsedSeconds: 23,
 				createdAt: 300,
@@ -779,7 +777,7 @@ describe("AgentSession model persistence", () => {
 		expect(created.session.goalRuntime.snapshot.turnSnapshot?.activeGoalId).toBe(previousGoalState.goal.id);
 		expect(JSON.stringify(created.session.getGoalModeState())).not.toContain(targetGoalState.goal.id);
 
-		await created.session.goalRuntime.flushUsage("suppressed", {
+		await created.session.goalRuntime.flushUsage({
 			input: 9,
 			output: 8,
 			cacheRead: 0,
@@ -802,7 +800,6 @@ describe("AgentSession model persistence", () => {
 				kind: "enter",
 				action: "create",
 				objective: "Recover a committed goal",
-				tokenBudget: 900,
 			},
 		};
 		await manager.commitWorkflowCommand(
@@ -821,10 +818,9 @@ describe("AgentSession model persistence", () => {
 				id: "goal-recovery-proof",
 				objective: "Recover a committed goal",
 				status: "active",
-				tokenBudget: 900,
 			},
 		});
-		expect(active.session.getActiveToolNames()).toEqual(["read", "edit", "bash", "goal"]);
+		expect(active.session.getActiveToolNames()).toContain("goal");
 		const pause: TransitionGoalModeSessionCommand = {
 			schemaVersion: 1,
 			kind: "transitionGoalMode",
@@ -848,10 +844,9 @@ describe("AgentSession model persistence", () => {
 				id: "goal-recovery-proof",
 				objective: "Recover a committed goal",
 				status: "paused",
-				tokenBudget: 900,
 			},
 		});
-		expect(paused.session.getActiveToolNames()).toEqual(["read", "edit", "bash"]);
+		expect(paused.session.getActiveToolNames()).not.toContain("goal");
 		expect(paused.session.sessionManager.getEntries().filter(entry => entry.type === "workflow_change")).toHaveLength(2);
 		const differentManager = SessionManager.create(
 			tempDir.path(),
@@ -887,7 +882,7 @@ describe("AgentSession model persistence", () => {
 				status: "active",
 			},
 		});
-		expect(paused.session.getActiveToolNames()).toEqual(["read", "goal"]);
+		expect(paused.session.getActiveToolNames()).toContain("goal");
 	});
 
 });

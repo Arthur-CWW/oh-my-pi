@@ -81,8 +81,6 @@ export class SubagentHudRenderer {
 
 		const generation = ++this.#generation;
 		const sessionsById = new Map(sessions.map(session => [session.id, session]));
-		const lastSiblingByParent = new Map<string | undefined, string>();
-		for (const session of visible) lastSiblingByParent.set(session.parentAgentId, session.id);
 		// Liveness badges (STALLED/DEAD) render regardless of the token-rate
 		// setting — showTokenRateBadge suppresses only the numeric rate; hiding
 		// a failed liveness probe would silence the only HUD failure signal.
@@ -95,12 +93,10 @@ export class SubagentHudRenderer {
 		const badgeColumnWidth = Math.max(showTokenRateBadge ? 1 : 0, ...badgeTexts.map(t => t.length));
 		const rows: HudRow[] = visible.map(session => {
 			const depth = subagentDepth(session, sessionsById);
-			const branch =
-				lastSiblingByParent.get(session.parentAgentId) === session.id ? theme.tree.last : theme.tree.branch;
 			const description = session.description?.trim() || session.progress?.description?.trim();
 			return {
 				session,
-				prefix: `  ${"  ".repeat(depth)}${branch} `,
+				prefix: `  ${"  ".repeat(depth)}   `,
 				displayId: shortAgentId(session.id),
 				description,
 				task: description ? undefined : session.progress?.task?.trim(),

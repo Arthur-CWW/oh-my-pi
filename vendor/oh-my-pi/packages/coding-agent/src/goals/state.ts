@@ -1,12 +1,11 @@
 import type { UsageStatistics } from "../session/session-entries";
 
-export type GoalStatus = "active" | "paused" | "budget-limited" | "complete" | "dropped";
+export type GoalStatus = "active" | "paused" | "complete" | "dropped";
 
 export interface Goal {
 	readonly id: string;
 	objective: string;
 	status: GoalStatus;
-	tokenBudget?: number;
 	tokensUsed: number;
 	timeUsedSeconds: number;
 	createdAt: number;
@@ -20,7 +19,7 @@ export interface GoalModeState {
 	goal: Goal;
 }
 
-const GOAL_STATUSES = new Set<GoalStatus>(["active", "paused", "budget-limited", "complete", "dropped"]);
+const GOAL_STATUSES = new Set<GoalStatus>(["active", "paused", "complete", "dropped"]);
 
 /** Decode persisted goal state at the untyped session-journal boundary. */
 export function decodeGoalModeState(value: unknown): GoalModeState | undefined {
@@ -34,15 +33,9 @@ export function decodeGoalModeState(value: unknown): GoalModeState | undefined {
 	const candidate = state.goal as Record<string, unknown>;
 	if (typeof candidate.id !== "string" || candidate.id.length === 0) return undefined;
 	if (typeof candidate.objective !== "string" || candidate.objective.length === 0) return undefined;
-	if (typeof candidate.status !== "string" || !GOAL_STATUSES.has(candidate.status as GoalStatus)) return undefined;
-	if (
-		candidate.tokenBudget !== undefined &&
-		(typeof candidate.tokenBudget !== "number" ||
-			!Number.isInteger(candidate.tokenBudget) ||
-			candidate.tokenBudget <= 0)
-	) {
-		return undefined;
-	}
+	if (typeof candidate.status !== "string") return undefined;
+	const rawStatus = candidate.status;
+	if (rawStatus !== "budget-limited" && !GOAL_STATUSES.has(rawStatus as GoalStatus)) return undefined;
 	if (!isNonNegativeFiniteNumber(candidate.tokensUsed)) return undefined;
 	if (!isNonNegativeFiniteNumber(candidate.timeUsedSeconds)) return undefined;
 	if (!isNonNegativeFiniteNumber(candidate.createdAt) || !isNonNegativeFiniteNumber(candidate.updatedAt)) return undefined;
@@ -50,8 +43,7 @@ export function decodeGoalModeState(value: unknown): GoalModeState | undefined {
 	const goal: Goal = {
 		id: candidate.id,
 		objective: candidate.objective,
-		status: candidate.status as GoalStatus,
-		...(candidate.tokenBudget === undefined ? {} : { tokenBudget: candidate.tokenBudget as number }),
+		status: rawStatus === "budget-limited" ? "active" : rawStatus as GoalStatus,
 		tokensUsed: candidate.tokensUsed,
 		timeUsedSeconds: candidate.timeUsedSeconds,
 		createdAt: candidate.createdAt,
@@ -81,8 +73,7 @@ export interface GoalToolDetails {
 	op: "create" | "update" | "get" | "complete" | "resume" | "drop";
 	goal?: Goal | null;
 	workstream?: GoalWorkstreamReference;
-	remainingTokens?: number | null;
-	completionBudgetReport?: string | null;
+	completionUsageReport?: string | null;
 }
 
 export type GoalRuntimeEvent =
@@ -91,5 +82,4 @@ export type GoalRuntimeEvent =
 
 export type GoalTokenUsage = Pick<UsageStatistics, "input" | "output" | "cacheRead" | "cacheWrite">;
 
-export type GoalBudgetSteering = "allowed" | "suppressed";
 export type GoalTerminalMetricEmission = "emit" | "suppress";

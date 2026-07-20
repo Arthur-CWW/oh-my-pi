@@ -34,6 +34,29 @@ export interface SpawnPolicyRoutingOptions {
 
 type SpawnPolicySession = Pick<ToolSession, "sessionManager">;
 
+const QUOTA_USAGE_ADMISSION_TIMEOUT_MS = 2_000;
+function raceQuotaUsageWithSignal<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+	void promise.catch(() => undefined);
+	if (signal.aborted) return Promise.reject(signal.reason);
+	return new Promise<T>((resolve, reject) => {
+		const onAbort = (): void => {
+			signal.removeEventListener("abort", onAbort);
+			reject(signal.reason);
+		};
+		signal.addEventListener("abort", onAbort, { once: true });
+		promise.then(
+			value => {
+				signal.removeEventListener("abort", onAbort);
+				resolve(value);
+			},
+			error => {
+				signal.removeEventListener("abort", onAbort);
+				reject(error);
+			},
+		);
+	});
+}
+
 let configuredPolicyDirectory: string | undefined;
 
 export function configureSpawnPolicyRouting(options: SpawnPolicyRoutingOptions = {}): void {
@@ -210,6 +233,7 @@ export async function applyQuotaAdmission(
 ): Promise<SpawnRouteDecision> {
 	const model = quotaModel(decision);
 	if (!model || !session.authStorage) return decision;
+	signal?.throwIfAborted();
 	const state = session.sessionManager ? latestQuotaAdmissionState(session.sessionManager.getEntries()) : undefined;
 	const controller = new QuotaAdmissionController(
 		{
@@ -220,15 +244,22 @@ export async function applyQuotaAdmission(
 		},
 		state,
 	);
-	const reports = await session.authStorage
-		.fetchUsageReports({
+	const usageTimeoutSignal = AbortSignal.timeout(QUOTA_USAGE_ADMISSION_TIMEOUT_MS);
+	const usageSignal = signal ? AbortSignal.any([signal, usageTimeoutSignal]) : usageTimeoutSignal;
+	const reports = await raceQuotaUsageWithSignal(
+		session.authStorage.fetchUsageReports({
 			baseUrlResolver: provider => session.modelRegistry?.getProviderBaseUrl?.(provider),
 			signal,
-		})
-		.catch(error => {
-			logger.debug("task: quota admission usage fetch failed", { error: String(error) });
-			return null;
+		}),
+		usageSignal,
+	).catch(error => {
+		signal?.throwIfAborted();
+		logger.debug("task: quota admission usage fetch failed", {
+			error: String(error),
+			abortReason: usageSignal.aborted ? String(usageSignal.reason) : undefined,
 		});
+		return null;
+	});
 	if (reports?.length) controller.observeReports(reports);
 	const constrained = quotaCandidates(session, decision, model);
 	const constrainedDecision = appendSpawnRoutePolicyExclusions(decision, constrained.exclusions);
