@@ -93,18 +93,4 @@ describe("CustomEditor space-hold push-to-talk", () => {
 		expect(editor.getText()).toBe(" ".repeat(SPACE_HOLD_THRESHOLD + 5));
 		expect(events).toEqual([]);
 	});
-	it("routes Ctrl-R to history search only when Vim is disabled", () => {
-		const { editor } = makeEditor();
-		let historySearchCalls = 0;
-		editor.onHistorySearch = () => {
-			historySearchCalls++;
-		};
-
-		editor.handleInput("\x12");
-		expect(historySearchCalls).toBe(1);
-
-		editor.setVimEnabled(true);
-		editor.handleInput("\x12");
-		expect(historySearchCalls).toBe(1);
-	});
 });

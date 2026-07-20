@@ -1002,7 +1002,7 @@ export class CustomEditor extends Editor {
 			}
 
 			// Intercept configured history search shortcut
-			if (!this.#vimEnabled && this.#matchesAction(canonical, "app.history.search") && this.onHistorySearch) {
+			if (this.#matchesAction(canonical, "app.history.search") && this.onHistorySearch) {
 				this.onHistorySearch();
 				return;
 			}

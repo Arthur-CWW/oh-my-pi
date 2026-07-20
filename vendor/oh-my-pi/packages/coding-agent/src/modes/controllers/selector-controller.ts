@@ -4,13 +4,10 @@ import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import { PASTE_CODE_LOGIN_PROVIDERS } from "@oh-my-pi/pi-ai";
 import { getOAuthProviders } from "@oh-my-pi/pi-ai/oauth";
 import type { OAuthProvider } from "@oh-my-pi/pi-ai/oauth/types";
-import type { Component, Keybinding, OverlayOptions } from "@oh-my-pi/pi-tui";
-import { Container, extractPrintableText, Input, Loader, Spacer, Text } from "@oh-my-pi/pi-tui";
+import type { Component, OverlayHandle } from "@oh-my-pi/pi-tui";
+import { Input, Loader, Spacer, Text } from "@oh-my-pi/pi-tui";
 import { getAgentDbPath, getProjectDir, normalizePathForComparison } from "@oh-my-pi/pi-utils";
-import * as Schema from "effect/Schema";
-import { Effect, Scope } from "effect";
 import { formatModelSelectorValue } from "../../config/model-resolver";
-import { KEYBINDINGS } from "../../config/keybindings";
 import { getRoleInfo } from "../../config/model-roles";
 import { settings } from "../../config/settings";
 import { disableProvider, enableProvider } from "../../discovery";
@@ -22,7 +19,6 @@ import {
 	getPluginsCacheDir,
 	MarketplaceManager,
 } from "../../extensibility/plugins/marketplace";
-import type { ExtensionUIDialogOptions, ExtensionUISelectItem } from "../../extensibility/extensions";
 import {
 	getAvailableThemes,
 	getSymbolTheme,
@@ -31,7 +27,7 @@ import {
 	setTheme,
 	theme,
 } from "../../modes/theme/theme";
-import type { InteractiveModeContext, InteractiveSelectorDialogOptions } from "../../modes/types";
+import type { InteractiveModeContext } from "../../modes/types";
 import type { ResetCreditRedeemOutcome } from "../../session/auth-storage";
 import type { SessionInfo } from "../../session/session-listing";
 import { SessionManager } from "../../session/session-manager";
@@ -53,362 +49,32 @@ import {
 } from "../../tools";
 import { shortenPath } from "../../tools/render-utils";
 import { copyToClipboard } from "../../utils/clipboard";
-import { getEditorCommand, openInEditor } from "../../utils/external-editor";
 import { setSessionTerminalTitle } from "../../utils/title-generator";
-import {
-	AGENT_DASHBOARD_ROUTE,
-	AgentDashboard,
-	reduceAgentDashboard,
-	type AgentDashboardCommand,
-	type AgentDashboardMessage,
-	type AgentDashboardModel,
-} from "../components/agent-dashboard";
+import { AgentDashboard } from "../components/agent-dashboard";
 import { createAgentHubRolloutDataSource } from "../components/agent-hub-rollout-state";
-import { AgentHubOverlayComponent, createAgentHubMvuMountSpec } from "../components/agent-hub";
-import type { InputLeaseHandle, InputLeaseManager, MvuEnvelope, MvuInputRoute } from "../mvu/input-lease";
-import {
-	KeyEventSchema,
-	RouteStampSchema,
-	type ComponentId,
-	type KeyEvent,
-	type RouteStamp,
-	type SourceEnvelope,
-	type Transition,
-} from "../mvu/schema";
-import type { MvuRuntime, MvuRuntimeBoundary } from "../mvu/runtime";
-import { mountMvuEditorReplacement, mountMvuOverlay, type MvuRouteHandle } from "../mvu/route-host";
+import { AgentHubOverlayComponent } from "../components/agent-hub";
 import { BookmarksSelectorComponent } from "../components/bookmarks-selector";
 import { AssistantMessageComponent } from "../components/assistant-message";
-import {
-	createCopySelectorRoute,
-	type CopySelectorCommand,
-	type CopySelectorModel,
-	updateCopySelector,
-	viewCopySelector,
-} from "../components/copy-selector";
-import {
-	EXTENSION_DASHBOARD_ROUTE,
-	ExtensionDashboard,
-	loadAllExtensions,
-	toggleProvider,
-	type ExtensionDashboardCommand,
-	type ExtensionDashboardMessage,
-	type ExtensionDashboardModel,
-	reduceExtensionDashboard,
-} from "../components/extensions";
+import { CopySelectorComponent } from "../components/copy-selector";
+import { ExtensionDashboard } from "../components/extensions";
 import { keyHint } from "../components/keybinding-hints";
 import { HistorySearchComponent } from "../components/history-search";
-import {
-	LogoutAccountSelectorComponent,
-	logoutAccountSelectorOutput,
-	makeLogoutAccountSelectorAdapter,
-	type LogoutAccountAction,
-	type LogoutAccountId,
-	type LogoutAccountSelectorAdapter,
-} from "../components/logout-account-selector";
+import { LogoutAccountSelectorComponent } from "../components/logout-account-selector";
 import { ModelSelectorComponent } from "../components/model-selector";
-import {
-	makeOAuthSelectorAdapter,
-	OAuthSelectorComponent,
-	oauthSelectorOutput,
-	type OAuthAction,
-	type OAuthProviderId,
-	type OAuthSelectorAdapter,
-	type OAuthSelectorModel,
-	type OAuthSelectorMsg,
-} from "../components/oauth-selector";
+import { OAuthSelectorComponent } from "../components/oauth-selector";
 import { PluginSelectorComponent } from "../components/plugin-selector";
-import {
-	makeResetUsageSelectorAdapter,
-	makeResetSpendDeduplication,
-	makeSpendResetInterpreter,
-	ResetUsageSelectorComponent,
-	resetUsageSelectorOutput,
-	resetSpendOutputToSelectorMsg,
-	type ResetUsageAction,
-	type ResetSpendCommand,
-	type ResetSpendOutput,
-	type ResetUsageAccountId,
-	type ResetUsageSelectorAdapter,
-} from "../components/reset-usage-selector";
+import { ResetUsageSelectorComponent } from "../components/reset-usage-selector";
 import { SessionSelectorComponent } from "../components/session-selector";
 import { ToolExecutionComponent } from "../components/tool-execution";
-import {
-	HookSelectorComponent,
-	makeHookModalModel,
-	type HookModalCommand,
-	type HookModalModel,
-	type HookSelectorOptionInput,
-	type HookSelectorSlider,
-	type HookSelectorSliderSegment,
-	updateHookModal,
-} from "../components/hook-selector";
-import { HookInputComponent, makeHookInputModel, type HookInputModel, updateHookInput } from "../components/hook-input";
-import { HookEditorComponent, makeHookEditorModel, type HookEditorModel, updateHookEditor } from "../components/hook-editor";
 import { TranscriptBlock } from "../components/transcript-container";
-import {
-	SETTINGS_MODAL_COMPONENT_ID,
-	type SettingsModalCommand,
-	type SettingsModalModel,
-	type SettingsModalMsg,
-	updateSettingsModal,
-} from "../components/settings-selector";
-import { selectorActionToMsg } from "../components/selector-adapter";
-import type { SelectorCommand, SelectorModel, SelectorMsg } from "../mvu/selector";
-import {
-	createSessionTreeRoute,
-	sessionTreeActionToMsg,
-	type SessionTreeCommand,
-	type SessionTreeModel,
-	type SessionTreeNavigationSettled,
-	updateSessionTree,
-	viewSessionTree,
-} from "../components/tree-selector";
+import { TreeSelectorComponent } from "../components/tree-selector";
 import { BookmarksStore, type BookmarkRecord, type BookmarkTarget } from "../../session/bookmarks";
-import { AttentionLedger } from "../../session/attention-ledger";
 import { UserMessageSelectorComponent } from "../components/user-message-selector";
 import type { SessionObserverRegistry } from "../session-observer-registry";
 import type { TranscriptDisplayContext } from "../transcript-display";
 import { computeContextBreakdown } from "../utils/context-usage";
 import { buildCopyTargets } from "../utils/copy-targets";
-import {
-	createSettingsSelector,
-	interpretSettingsModalCommand,
-	SETTINGS_SELECTOR_ROUTE,
-} from "./settings-selector-construction";
-interface MvuMountSpec<Model, Command, Msg = MvuEnvelope> {
-	readonly componentId: ComponentId;
-	readonly component: Component;
-	readonly initialModel: Model;
-	readonly route: MvuInputRoute<Model>;
-	readonly update: (model: Model, message: Msg) => Transition<Model, Command>;
-	readonly interpret: (command: Command) => Effect.Effect<readonly (Msg | SourceEnvelope<Msg>)[]>;
-	readonly boundary?: MvuRuntimeBoundary<Model, Msg, Command>;
-	readonly bindRuntime?: (runtime: MvuRuntime<Model, Msg>) => void;
-}
-
-type SettingsRouteRuntimeMessage =
-	| MvuEnvelope
-	| { readonly _tag: "Settings"; readonly message: SettingsModalMsg };
-
-const SETTINGS_ROUTE_RUNTIME_MESSAGE_SCHEMA = Schema.declare<SettingsRouteRuntimeMessage>(
-	(input): input is SettingsRouteRuntimeMessage => {
-		if (typeof input !== "object" || input === null || !("_tag" in input)) return false;
-		const tag = (input as { readonly _tag?: unknown })._tag;
-		return tag === "MvuInput" || tag === "Settings";
-	},
-);
-
-function settingsRouteStamp(model: SettingsModalModel): RouteStamp {
-	return {
-		componentId: SETTINGS_MODAL_COMPONENT_ID,
-		leaseGeneration: model.plugins.leaseGeneration,
-		sourceRevision: model.plugins.sourceRevision,
-		requestGeneration: model.plugins.requestGeneration,
-	};
-}
-
-type CopyRouteCommand =
-	| CopySelectorCommand
-	| {
-			readonly _tag: "RenderCopy";
-			readonly model: CopySelectorModel;
-			readonly dirtyKeys: ReadonlySet<string>;
-		};
-
-type SessionTreeRouteCommand =
-	| SessionTreeCommand
-	| {
-			readonly _tag: "RenderSessionTree";
-			readonly model: SessionTreeModel;
-			readonly dirtyKeys: ReadonlySet<string>;
-		};
-type SessionTreeRuntimeMessage = MvuEnvelope | SessionTreeNavigationSettled;
-type ResetRouteRuntimeMessage = MvuEnvelope | ResetSpendOutput;
-
-const KEYBINDING_SCHEMA = Schema.declare<keyof typeof KEYBINDINGS>(
-	(input): input is keyof typeof KEYBINDINGS =>
-		typeof input === "string" && Object.hasOwn(KEYBINDINGS, input),
-);
-
-const SESSION_TREE_RUNTIME_MESSAGE_SCHEMA: Schema.ConstraintDecoder<SessionTreeRuntimeMessage, never> = Schema.toType(
-	Schema.Union([
-		Schema.Struct({
-			_tag: Schema.Literal("MvuInput"),
-			action: KEYBINDING_SCHEMA,
-			event: KeyEventSchema,
-			stamp: Schema.optional(RouteStampSchema),
-		}),
-		Schema.Struct({
-			_tag: Schema.Literal("NavigationSettled"),
-			targetId: Schema.String,
-			requestGeneration: Schema.Number,
-			sourceRevision: Schema.Number,
-			leaseGeneration: Schema.optional(Schema.Number),
-			status: Schema.Literals(["success", "cancelled", "aborted", "failed"]),
-			editorText: Schema.optional(Schema.String),
-			error: Schema.optional(Schema.String),
-		}),
-	]),
-);
-
-const RESET_ROUTE_RUNTIME_MESSAGE_SCHEMA = Schema.toType(
-	Schema.Union([
-		Schema.Struct({
-			_tag: Schema.Literal("MvuInput"),
-			action: KEYBINDING_SCHEMA,
-			event: KeyEventSchema,
-			stamp: Schema.optional(RouteStampSchema),
-		}),
-		Schema.Struct({
-			_tag: Schema.Literal("ResetSpendReceipt"),
-			receiptId: Schema.String,
-			id: Schema.String,
-			action: KEYBINDING_SCHEMA,
-			sourceRevision: Schema.Number,
-			requestGeneration: Schema.Number,
-			nonce: Schema.String,
-			outcome: Schema.optional(Schema.Unknown),
-			duplicate: Schema.Boolean,
-		}),
-		Schema.Struct({
-			_tag: Schema.Literal("ResetSpendFailure"),
-			receiptId: Schema.String,
-			id: Schema.String,
-			action: KEYBINDING_SCHEMA,
-			sourceRevision: Schema.Number,
-			requestGeneration: Schema.Number,
-			nonce: Schema.String,
-			error: Schema.String,
-		}),
-	]),
-) as unknown as Schema.ConstraintDecoder<ResetRouteRuntimeMessage, never>;
-
-type AgentDashboardRuntimeMessage =
-	| MvuEnvelope
-	| { readonly _tag: "AgentDashboard"; readonly message: AgentDashboardMessage };
-
-type AgentDashboardRouteCommand =
-	| AgentDashboardCommand
-	| { readonly _tag: "RenderAgentDashboard"; readonly model: AgentDashboardModel };
-
-type ExtensionDashboardRuntimeMessage =
-	| MvuEnvelope
-	| { readonly _tag: "ExtensionDashboard"; readonly message: ExtensionDashboardMessage };
-
-type ExtensionDashboardRouteCommand =
-	| ExtensionDashboardCommand
-	| {
-			readonly _tag: "RenderExtensionDashboard";
-			readonly model: ExtensionDashboardModel;
-	  };
-
-type OAuthRouteCommand =
-	| SelectorCommand<OAuthAction, OAuthProviderId>
-	| { readonly _tag: "RenderOAuth"; readonly model: OAuthSelectorModel };
-
-type LogoutRouteCommand =
-	| SelectorCommand<LogoutAccountAction, LogoutAccountId>
-	| {
-			readonly _tag: "RenderLogout";
-			readonly model: SelectorModel<LogoutAccountId, LogoutAccountAction>;
-	  };
-
-type ResetRouteModel = SelectorModel<ResetUsageAccountId, ResetUsageAction> & {
-	readonly leaseGeneration: number;
-};
-type StampedResetSpendCommand = ResetSpendCommand & { readonly leaseGeneration: number };
-type ResetRouteCommand =
-	| Exclude<SelectorCommand<ResetUsageAction, ResetUsageAccountId>, { readonly _tag: "SpendReset" }>
-	| StampedResetSpendCommand
-	| { readonly _tag: "RenderReset"; readonly model: ResetRouteModel }
-	| { readonly _tag: "FinalizeReset"; readonly output: ResetSpendOutput };
-
-function agentDashboardMessage(
-	envelope: MvuEnvelope,
-	model: AgentDashboardModel,
-): AgentDashboardMessage | undefined {
-	if (envelope.event._tag !== "Press" && envelope.event._tag !== "Paste") return undefined;
-	const text = envelope.event._tag === "Paste" ? envelope.event.text : envelope.event.text ?? String(envelope.event.key);
-	const screen = model.screen;
-	if (screen._tag === "CreateDraft") {
-		if (
-			(envelope.action === "app.selector.filterAppend" || envelope.action === "app.selector.filter") &&
-			text.length > 0
-		) return { _tag: "CreateAppend", text };
-		if (envelope.action === "app.selector.filterDelete") return { _tag: "CreateDelete" };
-		if (envelope.action === "tui.select.confirm") return { _tag: "CreateSubmit" };
-		if (envelope.action === "ui.dismiss") return { _tag: "CreateCancel" };
-		return undefined;
-	}
-	if (screen._tag === "ModelEdit") {
-		if (
-			(envelope.action === "app.selector.filterAppend" || envelope.action === "app.selector.filter") &&
-			text.length > 0
-		) {
-			return { _tag: "ModelDraftSet", value: `${screen.draft}${text}` };
-		}
-		if (envelope.action === "app.selector.filterDelete") {
-			return { _tag: "ModelDraftSet", value: removeLastText(screen.draft) };
-		}
-		if (envelope.action === "tui.select.confirm") return { _tag: "ModelSave" };
-		if (envelope.action === "ui.dismiss") return { _tag: "Back" };
-		return undefined;
-	}
-	if (screen._tag === "CreateReview") {
-		if (envelope.action === "tui.select.confirm") return { _tag: "CreateSave" };
-		if (
-			(envelope.action === "app.selector.filterAppend" || envelope.action === "app.selector.filter") &&
-			text.toLowerCase() === "r"
-		) return { _tag: "CreateRegenerate" };
-		if (envelope.action === "ui.dismiss") return { _tag: "CreateCancel" };
-		return undefined;
-	}
-	if (screen._tag === "CreatePending") {
-		return envelope.action === "ui.dismiss" ? { _tag: "CreateCancel" } : undefined;
-	}
-	switch (envelope.action) {
-		case "app.navigation.up": return { _tag: "Move", delta: -1 };
-		case "app.navigation.down": return { _tag: "Move", delta: 1 };
-		case "tui.select.pageUp": return { _tag: "Page", delta: -1 };
-		case "tui.select.pageDown": return { _tag: "Page", delta: 1 };
-		case "tui.select.first": return { _tag: "Jump", target: "first" };
-		case "tui.select.last": return { _tag: "Jump", target: "last" };
-		case "app.selector.filter": return { _tag: "BeginFilter" };
-		case "app.selector.filterAppend":
-			return text.length > 0 ? { _tag: "FilterAppend", text } : undefined;
-		case "app.selector.filterDelete": return { _tag: "FilterDelete" };
-		case "app.selector.preview": return { _tag: "ToggleSelected" };
-		case "tui.select.confirm": return { _tag: "EditSelected" };
-		case "ui.dismiss": return { _tag: "Back" };
-		default: return undefined;
-	}
-}
-
-function extensionDashboardMessage(
-	envelope: MvuEnvelope,
-	model: ExtensionDashboardModel,
-): ExtensionDashboardMessage | undefined {
-	if (envelope.event._tag !== "Press" && envelope.event._tag !== "Paste") return undefined;
-	const text = envelope.event._tag === "Paste" ? envelope.event.text : envelope.event.text ?? String(envelope.event.key);
-	switch (envelope.action) {
-		case "app.navigation.up": return { _tag: "Move", delta: -1 };
-		case "app.navigation.down": return { _tag: "Move", delta: 1 };
-		case "app.selector.filter":
-			return model.mode === "Filter" && text.length > 0 ? { _tag: "FilterAppend", text } : { _tag: "BeginFilter" };
-		case "app.selector.filterAppend":
-			return text.length > 0 ? { _tag: "FilterAppend", text } : undefined;
-		case "app.selector.filterDelete": return { _tag: "FilterDelete" };
-		case "app.selector.preview": return { _tag: "ToggleSelected" };
-		case "tui.select.confirm": return { _tag: "Activate" };
-		case "ui.dismiss": return { _tag: "Back" };
-		default: return undefined;
-	}
-}
-
-const INPUT_CAPACITY = 256;
-const MESSAGE_CAPACITY = 256;
-const COMMAND_CAPACITY = 64;
+import { createSettingsSelector } from "./settings-selector-construction";
 
 const MANUAL_LOGIN_TIP = "Tip: You can complete pairing with /login <redirect URL>.";
 
@@ -436,696 +102,13 @@ export function getAgentHubTurnStatus(registry: AgentRegistry, agentId: string):
 	};
 }
 
-type HookSurfaceModel =
-	| { readonly _tag: "Selector"; readonly model: HookModalModel }
-	| { readonly _tag: "Input"; readonly model: HookInputModel }
-	| { readonly _tag: "Editor"; readonly model: HookEditorModel };
-
-type HookRouteModel = {
-	readonly surface: HookSurfaceModel;
-	readonly componentId: ComponentId;
-	readonly leaseGeneration: number;
-	readonly sourceRevision: number;
-	readonly requestGeneration: number;
-};
-
-type HookRouteMsg =
-	| MvuEnvelope
-	| {
-			readonly _tag: "ExternalEditorResult";
-			readonly stamp: RouteStamp;
-			readonly value: string | null;
-			readonly error?: string;
-	  };
-
-type HookRouteCommand =
-	| { readonly _tag: "Render"; readonly model: HookRouteModel; readonly stamp: RouteStamp }
-	| { readonly _tag: "Resolve"; readonly value: string; readonly stamp: RouteStamp }
-	| { readonly _tag: "Cancel"; readonly stamp: RouteStamp }
-	| { readonly _tag: "Reject"; readonly reason: string; readonly stamp: RouteStamp }
-	| { readonly _tag: "SliderChanged"; readonly index: number; readonly stamp: RouteStamp }
-	| { readonly _tag: "ExternalEditorRequested"; readonly value: string; readonly stamp: RouteStamp };
-
-const HOOK_FLOW_COMPONENT_ID = "hook-flow" as ComponentId;
-
-function hookStamp(model: HookRouteModel): RouteStamp {
-	return {
-		componentId: model.componentId,
-		leaseGeneration: model.leaseGeneration,
-		sourceRevision: model.sourceRevision,
-		requestGeneration: model.requestGeneration,
-	};
-}
-
-function hookText(event: KeyEvent): string | undefined {
-	if (event._tag === "Paste") return event.text;
-	if (event._tag !== "Press") return undefined;
-	return event.text ?? String(event.key);
-}
-
-function removeLastText(value: string): string {
-	const chars = [...value];
-	chars.pop();
-	return chars.join("");
-}
-
-function hookPrintableText(event: KeyEvent): string | undefined {
-	if (event._tag === "Paste") return event.text;
-	const text = hookText(event);
-	if (text === undefined || text === "backspace") return undefined;
-	return extractPrintableText(text);
-}
-
-function appendHookText(value: string, event: KeyEvent): string {
-	const printable = hookPrintableText(event);
-	return printable === undefined ? value : value + printable;
-}
-
-class HookFlowComponent extends Container {
-	readonly #selector = new HookSelectorComponent();
-	readonly #input = new HookInputComponent();
-	readonly #editor = new HookEditorComponent();
-
-	constructor(model: HookRouteModel) {
-		super();
-		this.apply(model);
-	}
-
-	apply(model: HookRouteModel): void {
-		this.clear();
-		switch (model.surface._tag) {
-			case "Selector":
-				this.#selector.apply(model.surface.model);
-				this.addChild(this.#selector);
-				break;
-			case "Input":
-				this.#input.apply(model.surface.model);
-				this.addChild(this.#input);
-				break;
-			case "Editor":
-				this.#editor.apply(model.surface.model);
-				this.addChild(this.#editor);
-				break;
-		}
-		this.invalidate();
-	}
-}
-
-interface HookDialogRequest<Result> {
-	readonly start: () => void;
-	readonly settled: () => boolean;
-}
-
-class HookDialogFifo<Result> {
-	#active = false;
-	#queue: HookDialogRequest<Result>[] = [];
-
-	present(
-		signal: AbortSignal | undefined,
-		mount: (
-			settle: (value: Result | undefined) => void,
-			fail: (error: Error) => void,
-		) => Promise<() => Promise<void>>,
-	): Promise<Result | undefined> {
-		const { promise, resolve, reject } = Promise.withResolvers<Result | undefined>();
-		let settled = false;
-		let started = false;
-		let hide: (() => Promise<void>) | undefined;
-		let request: HookDialogRequest<Result>;
-		const settle = (value: Result | undefined): void => {
-			if (settled) return;
-			settled = true;
-			signal?.removeEventListener("abort", onAbort);
-			if (started) {
-				void hide?.().finally(() => {
-					this.#active = false;
-					this.#advance();
-				});
-			} else {
-				const index = this.#queue.indexOf(request);
-				if (index >= 0) this.#queue.splice(index, 1);
-			}
-			resolve(value);
-		};
-		const fail = (error: Error): void => {
-			if (settled) return;
-			settled = true;
-			signal?.removeEventListener("abort", onAbort);
-			if (started) {
-				void hide?.().finally(() => {
-					this.#active = false;
-					this.#advance();
-				});
-			} else {
-				const index = this.#queue.indexOf(request);
-				if (index >= 0) this.#queue.splice(index, 1);
-			}
-			reject(error);
-		};
-		const onAbort = (): void => settle(undefined);
-		request = {
-			settled: () => settled,
-			start: () => {
-				if (settled) {
-					this.#advance();
-					return;
-				}
-				started = true;
-				this.#active = true;
-				void mount(settle, fail).then(close => {
-					hide = close;
-					if (settled) void close();
-				}).catch(error => fail(error instanceof Error ? error : new Error(String(error))));
-			},
-		};
-		if (signal?.aborted) {
-			settled = true;
-			resolve(undefined);
-			return promise;
-		}
-		signal?.addEventListener("abort", onAbort, { once: true });
-		this.#queue.push(request);
-		this.#advance();
-		return promise;
-	}
-
-	#advance(): void {
-		if (this.#active) return;
-		while (this.#queue.length > 0) {
-			const next = this.#queue.shift();
-			if (next === undefined || next.settled()) continue;
-			next.start();
-			return;
-		}
-	}
-}
-
-function hookRouteUpdate(model: HookRouteModel, message: HookRouteMsg): Transition<HookRouteModel, HookRouteCommand> {
-	if (message._tag === "ExternalEditorResult") {
-		const current = hookStamp(model);
-		if (
-			message.stamp.componentId !== current.componentId ||
-			message.stamp.leaseGeneration !== current.leaseGeneration ||
-			message.stamp.requestGeneration !== current.requestGeneration
-		) return { model, commands: [], dirtyKeys: new Set() };
-		if (model.surface._tag !== "Editor") return { model, commands: [], dirtyKeys: new Set() };
-		if (message.error !== undefined) {
-			return { model, commands: [{ _tag: "Reject", reason: message.error, stamp: current }], dirtyKeys: new Set(["editor"]) };
-		}
-		const value = message.value ?? model.surface.model.text;
-		const nextModel = {
-			...model,
-			surface: { _tag: "Editor", model: { ...model.surface.model, text: value, cursor: value.length } } as const,
-		};
-		return {
-			model: nextModel,
-			commands: [{ _tag: "Render", model: nextModel, stamp: current }],
-			dirtyKeys: new Set(["editor"]),
-		};
-	}
-	const envelope = message;
-	const event = envelope.event;
-	const stamp: RouteStamp = envelope.stamp ?? hookStamp(model);
-	const base = {
-		...model,
-		leaseGeneration: stamp.leaseGeneration,
-		sourceRevision: stamp.sourceRevision,
-		requestGeneration: stamp.requestGeneration,
-	};
-	const emit = (
-		next: HookRouteModel,
-		commands: readonly HookRouteCommand[] = [],
-	): Transition<HookRouteModel, HookRouteCommand> => ({
-		model: next,
-		commands: [{ _tag: "Render", model: next, stamp: hookStamp(next) }, ...commands],
-		dirtyKeys: new Set(["selector", "input", "editor"]),
-	});
-	const cancel = (next: HookRouteModel): Transition<HookRouteModel, HookRouteCommand> =>
-		emit(next, [{ _tag: "Cancel", stamp: hookStamp(next) }]);
-	if (base.surface._tag === "Selector") {
-		let selectorMessage: Parameters<typeof updateHookModal>[1] | undefined;
-		switch (envelope.action) {
-			case "app.navigation.up":
-			case "tui.select.up": selectorMessage = { _tag: "Move", delta: -1 }; break;
-			case "app.navigation.down":
-			case "tui.select.down": selectorMessage = { _tag: "Move", delta: 1 }; break;
-			case "app.selector.filter":
-				selectorMessage = event._tag === "Paste" && event.text.length > 0
-					? { _tag: "FilterChanged", query: event.text }
-					: { _tag: "BeginFilter" };
-				break;
-			case "app.selector.filterAppend": {
-				const text = hookText(event);
-				if (text === undefined) break;
-				selectorMessage = {
-					_tag: "FilterChanged",
-					query: base.surface.model.region === "filter"
-						? appendHookText(base.surface.model.query, event)
-						: text,
-				};
-				break;
-			}
-			case "app.selector.filterDelete":
-				selectorMessage = {
-					_tag: "FilterChanged",
-					query: removeLastText(base.surface.model.query),
-				};
-				break;
-			case "app.hook.sliderLeft": selectorMessage = { _tag: "MoveSlider", delta: -1 }; break;
-			case "app.hook.sliderRight": selectorMessage = { _tag: "MoveSlider", delta: 1 }; break;
-			case "tui.select.confirm": selectorMessage = { _tag: "Select" }; break;
-			case "ui.dismiss": selectorMessage = { _tag: "Back" }; break;
-			case "app.editor.external": selectorMessage = { _tag: "ExternalEditor" }; break;
-			case "tui.select.pageUp": selectorMessage = { _tag: "Move", delta: -1 }; break;
-			case "tui.select.pageDown": selectorMessage = { _tag: "Move", delta: 1 }; break;
-			default: break;
-		}
-		if (selectorMessage === undefined) return { model: base, commands: [], dirtyKeys: new Set() };
-		const transition = updateHookModal(base.surface.model, selectorMessage);
-		const mapped = transition.commands.flatMap((command: HookModalCommand): readonly HookRouteCommand[] => {
-			const commandStamp = hookStamp(base);
-			switch (command._tag) {
-				case "SelectionRequested": return [{ _tag: "Resolve", value: command.label, stamp: commandStamp }];
-				case "CloseRequested": return [{ _tag: "Cancel", stamp: commandStamp }];
-				case "SliderChanged": return [{ _tag: "SliderChanged", index: command.index, stamp: commandStamp }];
-				case "ExternalEditorRequested": return [{ _tag: "ExternalEditorRequested", value: "", stamp: commandStamp }];
-			}
-		});
-		return emit({ ...base, surface: { _tag: "Selector", model: transition.model } }, mapped);
-	}
-	if (base.surface._tag === "Input") {
-		const input = base.surface.model;
-		const text = hookText(event);
-		if ((envelope.action === "app.selector.filterAppend" || envelope.action === "app.selector.filter") && text !== undefined) {
-			const transition = updateHookInput(input, { _tag: "ValueChanged", value: appendHookText(input.value, event) });
-			return emit({ ...base, surface: { _tag: "Input", model: transition.model } });
-		}
-		if (envelope.action === "app.selector.filterDelete") {
-			const transition = updateHookInput(input, { _tag: "ValueChanged", value: removeLastText(input.value) });
-			return emit({ ...base, surface: { _tag: "Input", model: transition.model } });
-		}
-		if (envelope.action === "tui.select.confirm") {
-			const transition = updateHookInput(input, { _tag: "Submit" });
-			return emit(base, transition.commands.map(command =>
-				command._tag === "Resolve"
-					? { _tag: "Resolve", value: command.value, stamp: hookStamp(base) }
-					: { _tag: "Cancel", stamp: hookStamp(base) },
-			));
-		}
-		if (envelope.action === "ui.dismiss") return cancel(base);
-		return { model: base, commands: [], dirtyKeys: new Set() };
-	}
-	const editor = base.surface.model;
-	if (envelope.action === "app.selector.filterAppend" || envelope.action === "app.selector.filter") {
-		const text = hookPrintableText(event);
-		if (text !== undefined) {
-			const transition = updateHookEditor(editor, { _tag: "InsertText", text });
-			return emit({ ...base, surface: { _tag: "Editor", model: transition.model } });
-		}
-	}
-	if (envelope.action === "app.selector.filterDelete") {
-		const transition = updateHookEditor(editor, { _tag: "DeleteBackward" });
-		return emit({ ...base, surface: { _tag: "Editor", model: transition.model } });
-	}
-	if (envelope.action === "tui.editor.cursorLeft" || envelope.action === "tui.editor.cursorRight") {
-		const transition = updateHookEditor(editor, {
-			_tag: "MoveCursor",
-			delta: envelope.action === "tui.editor.cursorLeft" ? -1 : 1,
-		});
-		return emit({ ...base, surface: { _tag: "Editor", model: transition.model } });
-	}
-	if (envelope.action === "tui.select.confirm" && !editor.promptStyle) {
-		const transition = updateHookEditor(editor, { _tag: "InsertText", text: "\n" });
-		return emit({ ...base, surface: { _tag: "Editor", model: transition.model } });
-	}
-	if (envelope.action === "tui.select.confirm" || envelope.action === "app.hook.submit") {
-		const transition = updateHookEditor(editor, { _tag: "Submit" });
-		return emit(base, transition.commands.map(command => {
-			switch (command._tag) {
-				case "Resolve":
-					return { _tag: "Resolve", value: command.value, stamp: hookStamp(base) };
-				case "Cancel":
-					return { _tag: "Cancel", stamp: hookStamp(base) };
-				case "ExternalEditorRequested":
-					return { _tag: "ExternalEditorRequested", value: command.value, stamp: hookStamp(base) };
-			}
-		}));
-	}
-	if (envelope.action === "app.editor.external") {
-		const next = { ...base, requestGeneration: base.requestGeneration + 1 };
-		return emit(next, [{ _tag: "ExternalEditorRequested", value: editor.text, stamp: hookStamp(next) }]);
-	}
-	if (envelope.action === "ui.dismiss") return cancel(base);
-	return { model: base, commands: [], dirtyKeys: new Set() };
-}
-
 export class SelectorController {
 	#lastHubSelection: { kind: "agent" | "external"; id: string; viewportOffset: number } | undefined;
 	readonly #bookmarks = new BookmarksStore();
-	readonly #attention = new AttentionLedger();
 	#activeHub: AgentHubOverlayComponent | undefined;
-	#activeMvuRoute: MvuRouteHandle | undefined;
-	#routeTransition: Promise<void> = Promise.resolve();
-	readonly #getInputLeaseManager: () => InputLeaseManager;
-	readonly #mvuScope: Scope.Scope;
-	readonly #hookDialogs = new HookDialogFifo<string>();
-	readonly #resetSpendDeduplication = makeResetSpendDeduplication();
-	#resetUsageMountGeneration = 0;
+	#activeHubOverlay: OverlayHandle | undefined;
 
-	constructor(
-		private ctx: InteractiveModeContext,
-		getInputLeaseManager: () => InputLeaseManager,
-		mvuScope: Scope.Scope,
-	) {
-		this.#getInputLeaseManager = getInputLeaseManager;
-		this.#mvuScope = mvuScope;
-	}
-
-	#serializeRouteTransition<Result>(transition: () => Promise<Result>): Promise<Result> {
-		const operation = this.#routeTransition.then(transition, transition);
-		this.#routeTransition = operation.then(() => undefined, () => undefined);
-		return operation;
-	}
-
-	#scheduleRouteTransition(transition: () => Promise<void>): void {
-		void this.#serializeRouteTransition(transition).catch(error => {
-			this.ctx.showError(error instanceof Error ? error.message : String(error));
-		});
-	}
-
-	showHookSelector(
-		title: string,
-		options: ExtensionUISelectItem[],
-		dialogOptions?: InteractiveSelectorDialogOptions,
-		extra?: { readonly slider?: HookSelectorSlider },
-	): Promise<string | undefined> {
-		const rows = options.map((option, index) => {
-			const normalized = typeof option === "string" ? { label: option } : option;
-			return {
-				id: `${index}`,
-				label: normalized.label,
-				...(normalized.description === undefined ? {} : { description: normalized.description }),
-				disabled: dialogOptions?.disabledIndices?.includes(index) ?? false,
-			};
-		});
-		const slider = extra?.slider;
-		const model = makeHookModalModel(rows, dialogOptions?.initialIndex ?? 0, slider?.index ?? 0, slider?.segments.length ?? 0, {
-			title,
-			helpText: dialogOptions?.helpText,
-			outline: dialogOptions?.outline,
-			maxVisible: Math.max(4, Math.min(15, this.ctx.ui.terminal.rows - 12)),
-			selectionMarker: dialogOptions?.selectionMarker,
-			checkedIndices: dialogOptions?.checkedIndices,
-			markableCount: dialogOptions?.markableCount,
-			sliderCaption: slider?.caption,
-			sliderSegments: slider?.segments,
-		});
-		return this.#presentHookDialog(model, dialogOptions?.signal, slider?.onChange, dialogOptions?.onExternalEditor);
-	}
-
-	showHookInput(title: string, placeholder?: string, dialogOptions?: ExtensionUIDialogOptions): Promise<string | undefined> {
-		return this.#presentHookDialog(makeHookInputModel(title, placeholder), dialogOptions?.signal, undefined, undefined);
-	}
-
-	showHookEditor(
-		title: string,
-		prefill?: string,
-		dialogOptions?: ExtensionUIDialogOptions,
-		editorOptions?: { readonly promptStyle?: boolean },
-	): Promise<string | undefined> {
-		return this.#presentHookDialog(
-			makeHookEditorModel(title, prefill ?? "", editorOptions?.promptStyle ?? false),
-			dialogOptions?.signal,
-			undefined,
-			undefined,
-		);
-	}
-
-	hideHookSelector(): void {
-		this.#closeActiveMvuRoute();
-	}
-
-	hideHookInput(): void {
-		this.#closeActiveMvuRoute();
-	}
-
-	hideHookEditor(): void {
-		this.#closeActiveMvuRoute();
-	}
-
-	#presentHookDialog(
-		surfaceModel: HookModalModel | HookInputModel | HookEditorModel,
-		signal: AbortSignal | undefined,
-		onSlider: ((index: number) => void) | undefined,
-		onExternalEditor: (() => void) | undefined,
-	): Promise<string | undefined> {
-		return this.#hookDialogs.present(signal, (settle, fail) =>
-			this.#mountHookDialog(surfaceModel, settle, fail, onSlider, onExternalEditor),
-		);
-	}
-
-	#mountHookDialog(
-		surfaceModel: HookModalModel | HookInputModel | HookEditorModel,
-		settle: (value: string | undefined) => void,
-		fail: (error: Error) => void,
-		onSlider: ((index: number) => void) | undefined,
-		onExternalEditor: (() => void) | undefined,
-	): Promise<() => Promise<void>> {
-		const mount = this.#serializeRouteTransition(async () => {
-			if (this.#activeMvuRoute !== undefined) {
-				await Effect.runPromise(this.#activeMvuRoute.close());
-				this.#activeMvuRoute = undefined;
-			}
-			const initial: HookRouteModel = {
-				surface:
-					"title" in surfaceModel
-						? "options" in surfaceModel
-							? { _tag: "Selector", model: surfaceModel }
-							: "promptStyle" in surfaceModel
-								? { _tag: "Editor", model: surfaceModel }
-								: { _tag: "Input", model: surfaceModel }
-						: { _tag: "Input", model: makeHookInputModel("") },
-				componentId: HOOK_FLOW_COMPONENT_ID,
-				leaseGeneration: 0,
-				sourceRevision: 0,
-				requestGeneration: 0,
-			};
-			const component = new HookFlowComponent(initial);
-			let handle: MvuRouteHandle | undefined;
-			let closed = false;
-			const close = async (): Promise<void> => {
-				if (closed) return;
-				closed = true;
-				if (this.#activeMvuRoute === handle) this.#activeMvuRoute = undefined;
-				if (handle !== undefined) await Effect.runPromise(handle.close());
-			};
-			const route: MvuInputRoute<HookRouteModel> = {
-				componentId: HOOK_FLOW_COMPONENT_ID,
-				focusedRoot: component,
-				context: model => ({
-					contexts: ["selector.global", "selector.filter", "hook.route"],
-					mode: model.surface._tag === "Selector" && model.surface.model.region === "options" ? "Browse" : "Filter",
-					focus: "list",
-					capabilities: new Set(
-						model.surface._tag === "Selector"
-							? ["selector.filter", "hook.slider"]
-							: model.surface._tag === "Editor"
-								? ["selector.filter", "hook.editor"]
-								: ["selector.filter"],
-					),
-				}),
-				actionToMsg: (action: Keybinding, event: KeyEvent) => ({ _tag: "MvuInput", action, event }),
-				pasteToMsg: event => ({ _tag: "MvuInput", action: "app.selector.filter", event }),
-			};
-			const spec: MvuMountSpec<HookRouteModel, HookRouteCommand, HookRouteMsg> = {
-				componentId: HOOK_FLOW_COMPONENT_ID,
-				component,
-				initialModel: initial,
-				route,
-				update: hookRouteUpdate,
-				interpret: command => {
-					if (command._tag === "Render") {
-						return Effect.sync(() => {
-							component.apply(command.model);
-							this.ctx.ui.requestComponentRender(component);
-							return [];
-						});
-					}
-					if (command._tag === "SliderChanged") {
-						return Effect.sync(() => {
-							onSlider?.(command.index);
-							return [];
-						});
-					}
-					if (command._tag === "ExternalEditorRequested") {
-						return Effect.promise(async () => {
-							if (onExternalEditor !== undefined) {
-								onExternalEditor();
-								return [];
-							}
-							const editorCommand = getEditorCommand();
-							if (!editorCommand) return [];
-							this.ctx.ui.stop();
-							try {
-								const value = await openInEditor(editorCommand, command.value);
-								return [{ _tag: "ExternalEditorResult", stamp: command.stamp, value }];
-							} catch (error) {
-								return [{
-									_tag: "ExternalEditorResult",
-									stamp: command.stamp,
-									value: null,
-									error: error instanceof Error ? error.message : String(error),
-								}];
-							} finally {
-								this.ctx.ui.start();
-								this.ctx.ui.requestRender(true);
-							}
-						});
-					}
-					return Effect.promise(async () => {
-						await close();
-						if (command._tag === "Resolve") settle(command.value);
-						else if (command._tag === "Cancel") settle(undefined);
-						else fail(new Error(command.reason));
-						return [];
-					});
-				},
-			};
-			handle = await Effect.runPromise(
-				Scope.provide(this.#mvuScope)(
-					mountMvuEditorReplacement({
-						tui: this.ctx.ui,
-						leaseManager: this.#getInputLeaseManager(),
-						route,
-						component,
-						runtimeConfig: {
-							componentId: spec.componentId,
-							initialModel: spec.initialModel,
-							update: spec.update,
-							interpret: spec.interpret,
-							inputCapacity: INPUT_CAPACITY,
-							messageCapacity: MESSAGE_CAPACITY,
-							commandCapacity: COMMAND_CAPACITY,
-						},
-						hideEditor: Effect.sync(() => {
-							this.ctx.editorContainer.clear();
-							this.ctx.editorContainer.addChild(component);
-						}),
-						restoreEditor: Effect.sync(() => {
-							this.ctx.editorContainer.clear();
-							this.ctx.editorContainer.addChild(this.ctx.editor);
-						}),
-						previousFocus: this.ctx.editor,
-					}),
-				),
-			);
-			this.#activeMvuRoute = handle;
-			this.ctx.ui.requestRender();
-			return close;
-		});
-		return mount;
-	}
-
-	#closeActiveMvuRoute(afterClose?: () => void): void {
-		this.#scheduleRouteTransition(async () => {
-			const active = this.#activeMvuRoute;
-			if (active !== undefined) {
-				this.#activeMvuRoute = undefined;
-				await Effect.runPromise(active.close());
-			}
-			afterClose?.();
-			this.ctx.ui.requestRender();
-		});
-	}
-
-	#mountMvuEditor<Model, Command, Msg = MvuEnvelope>(
-		spec: MvuMountSpec<Model, Command, Msg>,
-		restoreEditor?: () => void,
-		reservation?: InputLeaseHandle,
-	): void {
-		this.#scheduleRouteTransition(async () => {
-			try {
-				if (this.#activeMvuRoute !== undefined) {
-					await Effect.runPromise(this.#activeMvuRoute.close());
-					this.#activeMvuRoute = undefined;
-				}
-				const handle = await Effect.runPromise(
-					Scope.provide(this.#mvuScope)(
-						mountMvuEditorReplacement({
-							tui: this.ctx.ui,
-							leaseManager: this.#getInputLeaseManager(),
-							route: spec.route,
-							component: spec.component,
-							bindRuntime: spec.bindRuntime,
-							runtimeConfig: {
-								componentId: spec.componentId,
-								initialModel: spec.initialModel,
-								update: spec.update,
-								interpret: spec.interpret,
-								inputCapacity: INPUT_CAPACITY,
-								messageCapacity: MESSAGE_CAPACITY,
-								commandCapacity: COMMAND_CAPACITY,
-								boundary: spec.boundary,
-							},
-							hideEditor: Effect.sync(() => {
-								this.ctx.editorContainer.clear();
-								this.ctx.editorContainer.addChild(spec.component);
-							}),
-							restoreEditor: Effect.sync(() => {
-								this.ctx.editorContainer.clear();
-								this.ctx.editorContainer.addChild(this.ctx.editor);
-								restoreEditor?.();
-							}),
-							previousFocus: this.ctx.editor,
-						}),
-					),
-				);
-				this.#activeMvuRoute = handle;
-				this.ctx.ui.requestRender();
-			} catch (error) {
-				if (reservation !== undefined) await Effect.runPromise(reservation.revoke());
-				throw error;
-			}
-		});
-	}
-
-	#mountMvuOverlay<Model, Command, Msg = MvuEnvelope>(
-		spec: MvuMountSpec<Model, Command, Msg>,
-		overlayOptions: OverlayOptions,
-		restoreFocus: () => void,
-	): void {
-		this.#scheduleRouteTransition(async () => {
-			if (this.#activeMvuRoute !== undefined) {
-				await Effect.runPromise(this.#activeMvuRoute.close());
-				this.#activeMvuRoute = undefined;
-			}
-			this.#activeMvuRoute = await Effect.runPromise(
-				Scope.provide(this.#mvuScope)(
-					mountMvuOverlay({
-						tui: this.ctx.ui,
-						leaseManager: this.#getInputLeaseManager(),
-						route: spec.route,
-						component: spec.component,
-						runtimeConfig: {
-							componentId: spec.componentId,
-							initialModel: spec.initialModel,
-							update: spec.update,
-							interpret: spec.interpret,
-							inputCapacity: INPUT_CAPACITY,
-							messageCapacity: MESSAGE_CAPACITY,
-							commandCapacity: COMMAND_CAPACITY,
-							boundary: spec.boundary,
-						},
-						bindRuntime: spec.bindRuntime,
-						overlayOptions,
-						restoreFocus: Effect.sync(restoreFocus),
-					}),
-				),
-			);
-			this.ctx.ui.setFocus(spec.component);
-			this.ctx.ui.requestRender();
-		});
-	}
+	constructor(private ctx: InteractiveModeContext) {}
 
 	async #refreshOAuthProviderAuthState(): Promise<void> {
 		const oauthProviders = getOAuthProviders();
@@ -1136,244 +119,6 @@ export class SelectorController {
 					.catch(() => undefined),
 			),
 		);
-	}
-
-	#mountOAuthRoute(mode: "login" | "logout", adapter: OAuthSelectorAdapter): void {
-		const component = new OAuthSelectorComponent(mode, adapter);
-		const mountSpec: MvuMountSpec<OAuthSelectorModel, OAuthRouteCommand> = {
-			componentId: adapter.componentId,
-			component,
-			initialModel: adapter.initialModel,
-			route: {
-				componentId: adapter.componentId,
-				focusedRoot: component,
-				context: model => ({
-					contexts: ["selector.global", "selector.filter", `selector.oauth.${mode}`],
-					mode: model.mode._tag,
-					focus: "list",
-					capabilities: adapter.selector.capabilities,
-				}),
-				actionToMsg: (action, event) => ({ _tag: "MvuInput", action, event }),
-			},
-			update: (model, envelope) => {
-				let message: OAuthSelectorMsg | undefined;
-				if (envelope.action === "tui.select.confirm" && model.mode._tag !== "Confirm" && model.selectedId !== undefined) {
-					const activation = adapter.selector.activate(model.selectedId, model);
-					message = activation._tag === "Command"
-						? { _tag: "DirectActivate", action: activation.action }
-						: undefined;
-				} else {
-					message = selectorActionToMsg(envelope.action, envelope.event, model, adapter.componentId);
-				}
-				if (message === undefined) return { model, commands: [], dirtyKeys: new Set() };
-				const transition = adapter.update(model, message);
-				return {
-					model: transition.model,
-					commands: [...transition.commands, { _tag: "RenderOAuth", model: transition.model }],
-					dirtyKeys: transition.dirtyKeys,
-				};
-			},
-			interpret: command =>
-				Effect.sync(() => {
-					if (command._tag === "RenderOAuth") {
-						component.apply(command.model);
-						this.ctx.ui.requestComponentRender(component);
-						return [];
-					}
-					const output = oauthSelectorOutput(command, adapter);
-					if (output?._tag === "OAuthSelectorClosed") {
-						this.#closeActiveMvuRoute();
-					} else if (output?._tag === "OAuthProviderSelected") {
-						this.#closeActiveMvuRoute(() => {
-							if (mode === "login") void this.#handleOAuthLogin(output.providerId);
-							else void this.#showOAuthLogoutAccountSelector(output.providerId);
-						});
-					}
-					return [];
-				}),
-		};
-		this.#mountMvuEditor(mountSpec);
-	}
-
-	#mountLogoutRoute(providerId: string, providerName: string, adapter: LogoutAccountSelectorAdapter): void {
-		const component = new LogoutAccountSelectorComponent(providerName, adapter);
-		const mountSpec: MvuMountSpec<SelectorModel<LogoutAccountId, LogoutAccountAction>, LogoutRouteCommand> = {
-			componentId: adapter.componentId,
-			component,
-			initialModel: adapter.initialModel,
-			route: {
-				componentId: adapter.componentId,
-				focusedRoot: component,
-				context: model => ({
-					contexts: ["selector.global", "selector.logout-account"],
-					mode: model.mode._tag,
-					focus: "list",
-					capabilities: adapter.selector.capabilities,
-				}),
-				actionToMsg: (action, event) => ({ _tag: "MvuInput", action, event }),
-			},
-			update: (model, envelope) => {
-				let message: SelectorMsg<LogoutAccountId, LogoutAccountAction> | undefined;
-				if (envelope.action === "tui.select.confirm" && model.selectedId !== undefined) {
-					const activation = adapter.selector.activate(model.selectedId, model);
-					message = activation._tag === "Command"
-						? { _tag: "DirectActivate", action: activation.action }
-						: undefined;
-				} else {
-					message = selectorActionToMsg(envelope.action, envelope.event, model, adapter.componentId);
-				}
-				if (message === undefined) return { model, commands: [], dirtyKeys: new Set() };
-				const transition = adapter.update(model, message);
-				return {
-					model: transition.model,
-					commands: [...transition.commands, { _tag: "RenderLogout", model: transition.model }],
-					dirtyKeys: transition.dirtyKeys,
-				};
-			},
-			interpret: command =>
-				Effect.sync(() => {
-					if (command._tag === "RenderLogout") {
-						component.apply(command.model);
-						this.ctx.ui.requestComponentRender(component);
-						return [];
-					}
-					const output = logoutAccountSelectorOutput(command, adapter);
-					if (output?._tag === "LogoutAccountSelectorClosed") {
-						this.#closeActiveMvuRoute();
-					} else if (output?._tag === "LogoutAccountSelected") {
-						const account = adapter.rows.get(output.id)?.account;
-						if (account) this.#closeActiveMvuRoute(() => void this.#handleCredentialLogout(providerId, account));
-					}
-					return [];
-				}),
-		};
-		this.#mountMvuEditor(mountSpec);
-	}
-
-	#mountResetRoute(adapter: ResetUsageSelectorAdapter): void {
-		const component = new ResetUsageSelectorComponent(adapter);
-		const spend = makeSpendResetInterpreter({
-			adapter,
-			deduplication: this.#resetSpendDeduplication,
-			redeem: target => Effect.promise(() => this.ctx.session.redeemResetCredit(target)),
-		});
-		const initialModel: ResetRouteModel = { ...adapter.initialModel, leaseGeneration: 0 };
-		const mountSpec: MvuMountSpec<ResetRouteModel, ResetRouteCommand, ResetRouteRuntimeMessage> = {
-			componentId: adapter.componentId,
-			component,
-			initialModel,
-			route: {
-				componentId: adapter.componentId,
-				focusedRoot: component,
-				context: model => ({
-					contexts: ["selector.global", "selector.confirm", "selector.reset-usage"],
-					mode: model.mode._tag,
-					focus: "list",
-					capabilities: adapter.selector.capabilities,
-				}),
-				actionToMsg: (action, event) => ({ _tag: "MvuInput", action, event }),
-			},
-			update: (model, envelope) => {
-				if (envelope._tag !== "MvuInput") {
-					const transition = adapter.update(model, resetSpendOutputToSelectorMsg(envelope));
-					if (transition.model === model) return { model, commands: [], dirtyKeys: new Set() };
-					const nextModel: ResetRouteModel = {
-						...transition.model,
-						leaseGeneration: model.leaseGeneration,
-					};
-					return {
-						model: nextModel,
-						commands: [
-							{ _tag: "RenderReset", model: nextModel },
-							{ _tag: "FinalizeReset", output: envelope },
-						],
-						dirtyKeys: transition.dirtyKeys,
-					};
-				}
-
-				let message: SelectorMsg<ResetUsageAccountId, ResetUsageAction> | undefined;
-				if (envelope.action === "tui.select.confirm" && model.mode._tag === "Confirm") {
-					const selectedId = model.selectedId;
-					message = selectedId === undefined
-						? undefined
-						: {
-								_tag: "CommitArmed",
-								id: selectedId,
-								sourceRevision: model.sourceRevision,
-								nonce: model.mode.arm.nonce,
-								redeemable: adapter.redeemable(selectedId),
-							};
-				} else if (envelope.action === "tui.select.confirm" && model.selectedId !== undefined) {
-					const activation = adapter.selector.activate(model.selectedId, model);
-					message = activation._tag === "Confirm"
-						? { _tag: "Arm", action: activation.action, nonce: activation.nonce }
-						: undefined;
-				} else {
-					message = selectorActionToMsg(envelope.action, envelope.event, model, adapter.componentId);
-				}
-				if (message === undefined) return { model, commands: [], dirtyKeys: new Set() };
-				const leaseGeneration = envelope.stamp?.leaseGeneration ?? model.leaseGeneration;
-				const transition = adapter.update(model, message);
-				const nextModel: ResetRouteModel = { ...transition.model, leaseGeneration };
-				const commands: ResetRouteCommand[] = transition.commands.map(command =>
-					command._tag === "SpendReset" ? { ...command, leaseGeneration } : command
-				);
-				commands.push({ _tag: "RenderReset", model: nextModel });
-				return {
-					model: nextModel,
-					commands,
-					dirtyKeys: transition.dirtyKeys,
-				};
-			},
-			interpret: command => {
-				if (command._tag === "RenderReset") {
-					return Effect.sync(() => {
-						component.apply(command.model);
-						this.ctx.ui.requestComponentRender(component);
-						return [];
-					});
-				}
-				if (command._tag === "CloseRequested") {
-					return Effect.sync(() => {
-						this.#closeActiveMvuRoute();
-						return [];
-					});
-				}
-				if (command._tag === "FinalizeReset") {
-					return Effect.sync(() => {
-						const account = adapter.rows.get(command.output.id)?.account;
-						const outcome = command.output._tag === "ResetSpendReceipt" ? command.output.outcome : undefined;
-						if (outcome && account) {
-							this.#closeActiveMvuRoute(() => this.#reportResetOutcome(account, outcome));
-						} else if (command.output._tag === "ResetSpendFailure") {
-							this.ctx.showError(command.output.error);
-						}
-						return [];
-					});
-				}
-				const resetCommand: ResetSpendCommand | undefined = resetUsageSelectorOutput(command, adapter);
-				return resetCommand === undefined ? Effect.succeed([]) : spend(resetCommand);
-			},
-			boundary: {
-				messageSchema: RESET_ROUTE_RUNTIME_MESSAGE_SCHEMA,
-				currentStamp: model => ({
-					componentId: adapter.componentId,
-					leaseGeneration: model.leaseGeneration,
-					sourceRevision: model.sourceRevision,
-					requestGeneration: model.actionRequestGeneration,
-				}),
-				commandStamp: command =>
-					command._tag === "SpendReset"
-						? {
-								componentId: adapter.componentId,
-								leaseGeneration: command.leaseGeneration,
-								sourceRevision: command.sourceRevision,
-								requestGeneration: command.requestGeneration,
-							}
-						: undefined,
-			},
-		};
-		this.#mountMvuEditor(mountSpec);
 	}
 	/**
 	 * Shows a selector component in place of the editor.
@@ -1393,113 +138,53 @@ export class SelectorController {
 	}
 
 	showSettingsSelector(): void {
-		void getAvailableThemes().then(availableThemes => {
-			const close = (): void => this.#closeActiveMvuRoute();
+		getAvailableThemes().then(availableThemes => {
+			// Fullscreen settings editor on the alternate screen: the overlay
+			// enables mouse tracking (click/hover/wheel) for its lifetime and
+			// the transcript stays untouched underneath.
+			let overlayHandle: OverlayHandle | undefined;
+			const done = () => {
+				overlayHandle?.hide();
+				this.ctx.ui.setFocus(this.ctx.editor);
+				this.ctx.ui.requestRender();
+			};
 			const selector = createSettingsSelector(
 				this.ctx,
 				availableThemes,
 				(id, value) => this.handleSettingChange(id, value),
-				close,
+				done,
 			);
-			const availableThinkingLevels = [...this.ctx.session.getAvailableThinkingLevels()];
-			const initialModel = SETTINGS_SELECTOR_ROUTE.makeInitialModel(availableThemes, availableThinkingLevels);
-			selector.apply(initialModel);
-			const mountSpec: MvuMountSpec<SettingsModalModel, SettingsModalCommand, SettingsRouteRuntimeMessage> = {
-				componentId: SETTINGS_SELECTOR_ROUTE.componentId,
-				component: selector,
-				initialModel,
-				route: {
-					componentId: SETTINGS_SELECTOR_ROUTE.componentId,
-					focusedRoot: selector,
-					context: () => ({
-						contexts: ["modal.family", SETTINGS_SELECTOR_ROUTE.context],
-						mode: "Browse",
-						focus: "body",
-						capabilities: new Set(),
-					}),
-					actionToMsg: (action, event) => ({ _tag: "MvuInput", action, event }),
-					pasteToMsg: event => ({ _tag: "MvuInput", action: "app.settings.input", event }),
-					mouseToMsg: event => ({ _tag: "MvuInput", action: "app.settings.pointer", event }),
-				},
-				update: (model, envelope) => {
-					const message: SettingsModalMsg =
-						envelope._tag === "Settings"
-							? envelope.message
-							: envelope.event._tag === "Mouse"
-								? selector.pointerMessage(model, envelope.event.event)
-								: { _tag: "Input", action: envelope.action, event: envelope.event };
-					const transition = updateSettingsModal(model, message);
-					return { ...transition, dirtyKeys: new Set(["modal", "settings"]) };
-				},
-				interpret: command => {
-					if (command._tag === "RenderSettings") {
-						return Effect.sync(() => {
-							selector.apply(command.model);
-							this.ctx.ui.requestComponentRender(selector);
-							return [];
-						});
-					}
-					return Effect.promise(async () => {
-						const message = await interpretSettingsModalCommand(
-							this.ctx,
-							(id, value) => this.handleSettingChange(id, value),
-							close,
-							command,
-						);
-						return message === undefined ? [] : [{ _tag: "Settings" as const, message }];
-					});
-				},
-				boundary: {
-					messageSchema: SETTINGS_ROUTE_RUNTIME_MESSAGE_SCHEMA,
-					currentStamp: settingsRouteStamp,
-					commandStamp: command => {
-						if (command._tag !== "PluginSettingsCommand") return undefined;
-						const stamp = command.command.stamp;
-						return {
-							componentId: SETTINGS_MODAL_COMPONENT_ID,
-							leaseGeneration: stamp.leaseGeneration,
-							sourceRevision: stamp.sourceRevision,
-							requestGeneration: stamp.requestGeneration,
-						};
-					},
-				},
-			};
-			this.#mountMvuOverlay(
-				mountSpec,
-				{ anchor: "bottom-center", width: "100%", maxHeight: "100%", margin: 0, fullscreen: true },
-				() => this.ctx.ui.setFocus(this.ctx.editor),
-			);
+			overlayHandle = this.ctx.ui.showOverlay(selector, {
+				anchor: "bottom-center",
+				width: "100%",
+				maxHeight: "100%",
+				margin: 0,
+				fullscreen: true,
+			});
+			this.ctx.ui.setFocus(selector);
+			this.ctx.ui.requestRender();
 		});
 	}
 
-	showHistorySearch(initialQuery = this.ctx.editor.getText()): void {
+	showHistorySearch(): void {
 		const historyStorage = this.ctx.historyStorage;
 		if (!historyStorage) return;
-		const draft = this.ctx.editor.getText();
-		let accepted = false;
-		const component = new HistorySearchComponent(
-			historyStorage,
-			prompt => {
-				accepted = true;
-				this.#closeActiveMvuRoute(() => this.ctx.editor.setText(prompt));
-			},
-			() => this.#closeActiveMvuRoute(),
-			initialQuery,
-		);
-		let reservation: InputLeaseHandle;
-		try {
-			reservation = this.#getInputLeaseManager().reserveMvu(component.mountSpec.route);
-		} catch (error) {
-			this.ctx.showError(error instanceof Error ? error.message : String(error));
-			return;
-		}
-		this.#mountMvuEditor(
-			component.mountSpec,
-			() => {
-				if (!accepted) this.ctx.editor.setText(draft);
-			},
-			reservation,
-		);
+
+		this.showSelector(done => {
+			const component = new HistorySearchComponent(
+				historyStorage,
+				prompt => {
+					done();
+					this.ctx.editor.setText(prompt);
+					this.ctx.ui.requestRender();
+				},
+				() => {
+					done();
+					this.ctx.ui.requestRender();
+				},
+			);
+			return { component, focus: component };
+		});
 	}
 
 	/**
@@ -1507,98 +192,20 @@ export class SelectorController {
 	 * Replaces /status with a unified view of all providers and extensions.
 	 */
 	async showExtensionsDashboard(): Promise<void> {
-		const cwd = getProjectDir();
-		const settings = this.ctx.settings;
-		const dashboard = await ExtensionDashboard.create(cwd, settings, this.ctx.ui.terminal.rows);
-		dashboard.onRequestComponentRender = component => this.ctx.ui.requestComponentRender(component);
-		const mountSpec: MvuMountSpec<
-			ExtensionDashboardModel,
-			ExtensionDashboardRouteCommand,
-			ExtensionDashboardRuntimeMessage
-		> = {
-			componentId: EXTENSION_DASHBOARD_ROUTE.componentId,
-			component: dashboard,
-			initialModel: dashboard.initialModel,
-			route: {
-				componentId: EXTENSION_DASHBOARD_ROUTE.componentId,
-				focusedRoot: dashboard,
-				context: model => ({
-					contexts: [EXTENSION_DASHBOARD_ROUTE.context, "selector.filter"],
-					mode: model.mode,
-					focus: model.mode === "PreviewFocus" ? "preview" : "list",
-					capabilities: new Set(),
-				}),
-				actionToMsg: (action, event) => ({ _tag: "MvuInput", action, event }),
-			},
-			update: (model, runtimeMessage) => {
-				const message = runtimeMessage._tag === "ExtensionDashboard"
-					? runtimeMessage.message
-					: extensionDashboardMessage(runtimeMessage, model);
-				if (message === undefined) return { model, commands: [], dirtyKeys: new Set() };
-				const transition = reduceExtensionDashboard(model, message);
-				return {
-					model: transition.model,
-					commands: [
-						...transition.commands,
-						{ _tag: "RenderExtensionDashboard", model: transition.model },
-					],
-					dirtyKeys: new Set(["dashboard"]),
-				};
-			},
-			interpret: command => {
-				if (command._tag === "RenderExtensionDashboard") {
-					return Effect.sync(() => {
-						dashboard.apply(command.model);
-						return [];
-					});
-				}
-				if (command._tag === "CloseRequested") {
-					return Effect.sync(() => {
-						this.#closeActiveMvuRoute();
-						return [];
-					});
-				}
-				return Effect.promise(async () => {
-					try {
-						if (command._tag === "ToggleProvider") {
-							toggleProvider(command.providerId);
-						} else if (command._tag === "ToggleExtension") {
-							const disabledIds = [
-								...((settings.get("disabledExtensions") as string[] | undefined) ?? []),
-							];
-							const index = disabledIds.indexOf(command.extensionId);
-							if (command.disabled && index < 0) disabledIds.push(command.extensionId);
-							if (!command.disabled && index >= 0) disabledIds.splice(index, 1);
-							settings.set("disabledExtensions", disabledIds);
-						}
-						const disabledIds =
-							(settings.get("disabledExtensions") as string[] | undefined) ?? [];
-						const extensions = await loadAllExtensions(cwd, disabledIds);
-						return [{
-							_tag: "ExtensionDashboard",
-							message: {
-								_tag: "SourceLoaded",
-								requestGeneration: command.requestGeneration,
-								extensions,
-								disabledIds,
-							},
-						}] as const;
-					} catch (error) {
-						return [{
-							_tag: "ExtensionDashboard",
-							message: {
-								_tag: "SourceFailed",
-								requestGeneration: command.requestGeneration,
-								error: error instanceof Error ? error.message : String(error),
-							},
-						}] as const;
-					}
-				});
-			},
+		const dashboard = await ExtensionDashboard.create(getProjectDir(), this.ctx.settings, this.ctx.ui.terminal.rows);
+		const overlay = this.ctx.ui.showOverlay(dashboard, {
+			width: "100%",
+			maxHeight: "100%",
+			anchor: "top-left",
+			margin: 0,
+		});
+		dashboard.onClose = () => {
+			overlay.hide();
+			this.ctx.ui.requestRender();
 		};
-		this.#mountMvuOverlay(mountSpec, { width: "100%", maxHeight: "100%", anchor: "top-left", margin: 0 }, () =>
-			this.ctx.ui.setFocus(this.ctx.editor),
-		);
+		dashboard.onRequestRender = () => {
+			this.ctx.ui.requestRender();
+		};
 	}
 
 	/**
@@ -1613,79 +220,19 @@ export class SelectorController {
 			activeModelPattern,
 			defaultModelPattern,
 		});
-		dashboard.onRequestComponentRender = component => this.ctx.ui.requestComponentRender(component);
-		const mountSpec: MvuMountSpec<
-			AgentDashboardModel,
-			AgentDashboardRouteCommand,
-			AgentDashboardRuntimeMessage
-		> = {
-			componentId: AGENT_DASHBOARD_ROUTE.componentId,
-			component: dashboard,
-			initialModel: dashboard.initialModel,
-			route: {
-				componentId: AGENT_DASHBOARD_ROUTE.componentId,
-				focusedRoot: dashboard,
-				context: model => {
-					const nested = model.screen._tag !== "Browse";
-					const selectorMode = model.selector.mode._tag;
-					return {
-						contexts: [AGENT_DASHBOARD_ROUTE.context, "selector.filter"],
-						mode: nested ? "Filter" : selectorMode,
-						focus: selectorMode === "PreviewFocus" ? "preview" : "list",
-						capabilities: new Set(["selector.filter"]),
-					};
-				},
-				actionToMsg: (action, event) => ({ _tag: "MvuInput", action, event }),
-			},
-			update: (model, runtimeMessage) => {
-				const message = runtimeMessage._tag === "AgentDashboard"
-					? runtimeMessage.message
-					: agentDashboardMessage(runtimeMessage, model);
-				if (message === undefined) return { model, commands: [], dirtyKeys: new Set() };
-				const transition = reduceAgentDashboard(model, message);
-				return {
-					model: transition.model,
-					commands: [
-						...transition.commands,
-						{ _tag: "RenderAgentDashboard", model: transition.model },
-					],
-					dirtyKeys: new Set(["dashboard"]),
-				};
-			},
-			interpret: command => {
-				if (command._tag === "RenderAgentDashboard") {
-					return Effect.sync(() => {
-						dashboard.apply(command.model);
-						return [];
-					});
-				}
-				if (command._tag === "CloseRequested") {
-					return Effect.sync(() => {
-						this.#closeActiveMvuRoute();
-						return [];
-					});
-				}
-				if (command._tag === "PersistDisabled") {
-					return Effect.sync(() => {
-						this.ctx.settings.set("task.disabledAgents", [...command.disabledNames]);
-						return [];
-					});
-				}
-				if (command._tag === "PersistOverrides") {
-					return Effect.sync(() => {
-						this.ctx.settings.set("task.agentModelOverrides", { ...command.overrides });
-						return [];
-					});
-				}
-				return Effect.promise(async () => [{
-					_tag: "AgentDashboard",
-					message: await dashboard.execute(command),
-				}] as const);
-			},
+		const overlay = this.ctx.ui.showOverlay(dashboard, {
+			width: "100%",
+			maxHeight: "100%",
+			anchor: "top-left",
+			margin: 0,
+		});
+		dashboard.onClose = () => {
+			overlay.hide();
+			this.ctx.ui.requestRender();
 		};
-		this.#mountMvuOverlay(mountSpec, { width: "100%", maxHeight: "100%", anchor: "top-left", margin: 0 }, () =>
-			this.ctx.ui.setFocus(this.ctx.editor),
-		);
+		dashboard.onRequestRender = () => {
+			this.ctx.ui.requestRender();
+		};
 	}
 
 	/**
@@ -1873,79 +420,98 @@ export class SelectorController {
 
 	showModelSelector(options?: { temporaryOnly?: boolean }): void {
 		const currentContextTokens = computeContextBreakdown(this.ctx.session).usedTokens;
-		const selector = new ModelSelectorComponent(
-			this.ctx.ui,
-			this.ctx.session.model,
-			this.ctx.settings,
-			this.ctx.session.modelRegistry,
-			this.ctx.session.scopedModels,
-			async (model, role, thinkingLevel, modelSelector) => {
-				// `auto` is session-global: never bake it into a per-role selector,
-				// because `model:<level>` cannot round-trip that value.
-				const isAuto = thinkingLevel === AUTO_THINKING;
-				const concreteThinking = isAuto ? undefined : thinkingLevel;
-				try {
-					if (role === null) {
-						await this.ctx.session.setModelTemporary(model, concreteThinking);
-						if (isAuto) this.ctx.session.setThinkingLevel(AUTO_THINKING, true);
-						this.ctx.statusLine.invalidate();
-						this.ctx.updateEditorBorderColor();
-						this.ctx.showStatus(`Temporary model: ${modelSelector ?? model.id}`);
-						this.#closeActiveMvuRoute();
-						return;
-					}
-
-					if (role === "default") {
-						await this.ctx.session.setModelExplicitRuntime(model, role, {
-							selector: modelSelector,
-							thinkingLevel: concreteThinking,
-						});
-						if (isAuto) this.ctx.session.setThinkingLevel(AUTO_THINKING, true);
-						this.ctx.statusLine.invalidate();
-						this.ctx.updateEditorBorderColor();
-						this.ctx.showStatus(`Default model: ${modelSelector ?? model.id}`);
-						return;
-					}
-
-					const runtimeSelector = formatModelSelectorValue(
-						modelSelector ?? `${model.provider}/${model.id}`,
-						concreteThinking,
-					);
-					const previousRole = this.ctx.settings.resolveModelRole(role);
-					const persistGlobally =
-						previousRole.winningLayer !== "config_overlay" &&
-						previousRole.winningLayer !== "project" &&
-						!previousRole.shadowedCandidates.some(
-							candidate => candidate.layer === "config_overlay" || candidate.layer === "project",
-						);
-					if (persistGlobally) this.ctx.settings.assertModelRoleWritable(role);
-
-					this.ctx.settings.setRuntimeModelRole(role, runtimeSelector);
+		this.showSelector(done => {
+			const selector = new ModelSelectorComponent(
+				this.ctx.ui,
+				this.ctx.session.model,
+				this.ctx.settings,
+				this.ctx.session.modelRegistry,
+				this.ctx.session.scopedModels,
+				async (model, role, thinkingLevel, selector) => {
+					// `auto` is session-global: never baked into a per-role model value
+					// (it can't round-trip through `model:<level>`). Apply it to the session
+					// separately and persist via `defaultThinkingLevel`.
+					const isAuto = thinkingLevel === AUTO_THINKING;
+					const concreteThinking = isAuto ? undefined : thinkingLevel;
 					try {
-						if (persistGlobally) this.ctx.settings.setModelRole(role, runtimeSelector);
-					} catch (error) {
-						if (
-							previousRole.winningLayer === "runtime_override" &&
-							previousRole.effectiveSelector !== undefined
-						) {
-							this.ctx.settings.setRuntimeModelRole(role, previousRole.effectiveSelector);
+						if (role === null) {
+							// Temporary: update agent state but don't persist the model to settings
+							await this.ctx.session.setModelTemporary(model, concreteThinking);
+							if (isAuto) {
+								this.ctx.session.setThinkingLevel(AUTO_THINKING, true);
+							}
+							this.ctx.statusLine.invalidate();
+							this.ctx.updateEditorBorderColor();
+							this.ctx.showStatus(`Temporary model: ${selector ?? model.id}`);
+							done();
+							this.ctx.ui.requestRender();
+						} else if (role === "default") {
+							// Default: update the live session and make the role authoritative at runtime.
+							await this.ctx.session.setModelExplicitRuntime(model, role, {
+								selector,
+								thinkingLevel: concreteThinking,
+							});
+							if (isAuto) {
+								this.ctx.session.setThinkingLevel(AUTO_THINKING, true);
+							}
+							this.ctx.statusLine.invalidate();
+							this.ctx.updateEditorBorderColor();
+							this.ctx.showStatus(`Default model: ${selector ?? model.id}`);
+							// Don't call done() - selector stays open for role assignment
 						} else {
-							this.ctx.settings.clearRuntimeModelRole(role);
-						}
-						throw error;
-					}
+							const runtimeSelector = formatModelSelectorValue(
+								selector ?? `${model.provider}/${model.id}`,
+								concreteThinking,
+							);
+							const previousRole = this.ctx.settings.resolveModelRole(role);
+							const persistGlobally =
+								previousRole.winningLayer !== "config_overlay" &&
+								previousRole.winningLayer !== "project" &&
+								!previousRole.shadowedCandidates.some(
+									candidate => candidate.layer === "config_overlay" || candidate.layer === "project",
+								);
 
-					if (isAuto) this.ctx.session.setThinkingLevel(AUTO_THINKING, true);
-					const roleInfo = getRoleInfo(role, this.ctx.settings);
-					this.ctx.showStatus(`${roleInfo.name} model: ${modelSelector ?? model.id}`);
-				} catch (error) {
-					this.ctx.showError(error instanceof Error ? error.message : String(error));
-				}
-			},
-			() => this.#closeActiveMvuRoute(),
-			{ ...options, currentContextTokens },
-		);
-		this.#mountMvuEditor(selector.mountSpec);
+							if (persistGlobally) {
+								this.ctx.settings.assertModelRoleWritable(role);
+							}
+
+							this.ctx.settings.setRuntimeModelRole(role, runtimeSelector);
+							try {
+								if (persistGlobally) {
+									this.ctx.settings.setModelRole(role, runtimeSelector);
+								}
+							} catch (error) {
+								if (
+									previousRole.winningLayer === "runtime_override" &&
+									previousRole.effectiveSelector !== undefined
+								) {
+									this.ctx.settings.setRuntimeModelRole(role, previousRole.effectiveSelector);
+								} else {
+									this.ctx.settings.clearRuntimeModelRole(role);
+								}
+								throw error;
+							}
+
+							if (isAuto) {
+								this.ctx.session.setThinkingLevel(AUTO_THINKING, true);
+							}
+							const roleInfo = getRoleInfo(role, settings);
+							const roleLabel = roleInfo?.name ?? role;
+							this.ctx.showStatus(`${roleLabel} model: ${selector ?? model.id}`);
+							// Don't call done() - selector stays open
+						}
+					} catch (error) {
+						this.ctx.showError(error instanceof Error ? error.message : String(error));
+					}
+				},
+				() => {
+					done();
+					this.ctx.ui.requestRender();
+				},
+				{ ...options, currentContextTokens },
+			);
+			return { component: selector, focus: selector };
+		});
 	}
 
 	async showPluginSelector(mode: "install" | "uninstall" = "install"): Promise<void> {
@@ -1974,25 +540,28 @@ export class SelectorController {
 					scope: p.scope,
 				};
 			});
-			const uninstall = async (name: string, marketplace: string, scope: "user" | "project"): Promise<void> => {
-				const pluginId = `${name}@${marketplace}`;
-				this.ctx.showStatus(`Uninstalling ${pluginId}...`);
-				try {
-					await mgr.uninstallPlugin(pluginId, scope);
-					this.ctx.showStatus(`Uninstalled ${pluginId}`);
-				} catch (err) {
-					this.ctx.showStatus(`Uninstall failed: ${err}`);
-				}
-				this.ctx.ui.requestRender();
-			};
-			const selector = new PluginSelectorComponent(marketplaces.length, items, new Set(), {
-				onSelect: (name, marketplace, scope) => {
-					if (scope === undefined) return;
-					this.#closeActiveMvuRoute(() => void uninstall(name, marketplace, scope));
-				},
-				onCancel: () => this.#closeActiveMvuRoute(),
+			this.showSelector(done => {
+				const selector = new PluginSelectorComponent(marketplaces.length, items, new Set(), {
+					onSelect: async (name, marketplace, scope) => {
+						done();
+						const pluginId = `${name}@${marketplace}`;
+						this.ctx.showStatus(`Uninstalling ${pluginId}...`);
+						this.ctx.ui.requestRender();
+						try {
+							await mgr.uninstallPlugin(pluginId, scope);
+							this.ctx.showStatus(`Uninstalled ${pluginId}`);
+						} catch (err) {
+							this.ctx.showStatus(`Uninstall failed: ${err}`);
+						}
+						this.ctx.ui.requestRender();
+					},
+					onCancel: () => {
+						done();
+						this.ctx.ui.requestRender();
+					},
+				});
+				return { component: selector, focus: selector };
 			});
-			this.#mountMvuEditor(selector.mountSpec);
 			return;
 		}
 
@@ -2008,47 +577,63 @@ export class SelectorController {
 			}
 		}
 
-		const install = async (name: string, marketplace: string): Promise<void> => {
-			this.ctx.showStatus(`Installing ${name} from ${marketplace}...`);
-			try {
-				const force = installedIds.has(`${name}@${marketplace}`);
-				await mgr.installPlugin(name, marketplace, { force });
-				this.ctx.showStatus(`Installed ${name} from ${marketplace}`);
-			} catch (err) {
-				this.ctx.showStatus(`Install failed: ${err}`);
-			}
-			this.ctx.ui.requestRender();
-		};
-		const selector = new PluginSelectorComponent(marketplaces.length, allPlugins, installedIds, {
-			onSelect: (name, marketplace) => {
-				this.#closeActiveMvuRoute(() => void install(name, marketplace));
-			},
-			onCancel: () => this.#closeActiveMvuRoute(),
+		this.showSelector(done => {
+			const selector = new PluginSelectorComponent(marketplaces.length, allPlugins, installedIds, {
+				onSelect: async (name, marketplace) => {
+					done();
+					this.ctx.showStatus(`Installing ${name} from ${marketplace}...`);
+					this.ctx.ui.requestRender();
+					try {
+						const force = installedIds.has(`${name}@${marketplace}`);
+						await mgr.installPlugin(name, marketplace, { force });
+						this.ctx.showStatus(`Installed ${name} from ${marketplace}`);
+					} catch (err) {
+						this.ctx.showStatus(`Install failed: ${err}`);
+					}
+					this.ctx.ui.requestRender();
+				},
+				onCancel: () => {
+					done();
+					this.ctx.ui.requestRender();
+				},
+			});
+			return { component: selector, focus: selector };
 		});
-		this.#mountMvuEditor(selector.mountSpec);
 	}
 
 	showUserMessageSelector(): void {
 		const userMessages = this.ctx.session.getUserMessagesForBranching();
+
 		if (userMessages.length === 0) {
 			this.ctx.showStatus("No messages to branch from");
 			return;
 		}
-		const selector = new UserMessageSelectorComponent(
-			userMessages.map(message => ({ id: message.entryId, text: message.text })),
-			async entryId => {
-				const result = await this.ctx.session.branch(entryId);
-				this.#closeActiveMvuRoute(() => {
-					if (result.cancelled) return;
+
+		this.showSelector(done => {
+			const selector = new UserMessageSelectorComponent(
+				userMessages.map(m => ({ id: m.entryId, text: m.text })),
+				async entryId => {
+					const result = await this.ctx.session.branch(entryId);
+					if (result.cancelled) {
+						// Hook cancelled the branch
+						done();
+						this.ctx.ui.requestRender();
+						return;
+					}
+
 					this.ctx.chatContainer.clear();
 					this.ctx.renderInitialMessages({ clearTerminalHistory: true });
 					this.ctx.editor.setText(result.selectedText);
+					done();
 					this.ctx.showStatus("Branched to new session");
-				});
-			},
-			() => this.#closeActiveMvuRoute(),
-		);
-		this.#mountMvuEditor(selector.mountSpec);
+				},
+				() => {
+					done();
+					this.ctx.ui.requestRender();
+				},
+			);
+			return { component: selector, focus: selector.getMessageList() };
+		});
 	}
 
 	showCopySelector(): void {
@@ -2057,190 +642,158 @@ export class SelectorController {
 			this.ctx.showStatus("Nothing to copy yet.");
 			return;
 		}
-		const spec = createCopySelectorRoute(targets);
-		const viewport = (model: CopySelectorModel) => ({
-			offset: model.tree.viewportOffset,
-			height: Math.max(1, this.ctx.ui.terminal.rows - 5),
-		});
-		spec.focusedRoot.apply(viewCopySelector(spec.initialModel, viewport(spec.initialModel)));
-		const mountSpec: MvuMountSpec<CopySelectorModel, CopyRouteCommand> = {
-			componentId: spec.componentId,
-			component: spec.focusedRoot,
-			initialModel: spec.initialModel,
-			route: {
-				componentId: spec.componentId,
-				focusedRoot: spec.focusedRoot,
-				context: spec.context,
-				actionToMsg: (action, event) =>
-					spec.actionToMsg(action, event) === undefined ? undefined : { _tag: "MvuInput", action, event },
-			},
-			update: (model, envelope) => {
-				const message = spec.actionToMsg(envelope.action, envelope.event);
-				if (message === undefined) return { model, commands: [], dirtyKeys: new Set() };
-				const transition = updateCopySelector(model, message);
-				return {
-					model: transition.model,
-					commands: [
-						...transition.commands,
-						{ _tag: "RenderCopy", model: transition.model, dirtyKeys: transition.dirtyKeys },
-					],
-					dirtyKeys: transition.dirtyKeys,
-				};
-			},
-			interpret: command =>
-				Effect.sync(() => {
-					if (command._tag === "RenderCopy") {
-						spec.focusedRoot.apply(viewCopySelector(command.model, viewport(command.model), command.dirtyKeys));
-						this.ctx.ui.requestComponentRender(spec.focusedRoot);
-					} else if (command._tag === "CopyRequested") {
-						this.#closeActiveMvuRoute(() => {
-							if (command.target.content === undefined) return;
-							void copyToClipboard(command.target.content);
-							this.ctx.showStatus(command.target.copyMessage ?? "Copied to clipboard");
-						});
-					} else if (command._tag === "CloseRequested") {
-						this.#closeActiveMvuRoute();
-					}
-					return [];
-				}),
+
+		let overlayHandle: OverlayHandle | undefined;
+		const done = () => {
+			overlayHandle?.hide();
+			this.ctx.ui.requestRender();
 		};
-		this.#mountMvuOverlay(
-			mountSpec,
-			{ anchor: "bottom-center", width: "100%", maxHeight: "100%", margin: 0 },
-			() => this.ctx.ui.setFocus(this.ctx.editor),
-		);
+		const selector = new CopySelectorComponent(targets, {
+			onPick: target => {
+				done();
+				if (target.content === undefined) return;
+				void copyToClipboard(target.content);
+				this.ctx.showStatus(target.copyMessage ?? "Copied to clipboard");
+			},
+			onCancel: done,
+		});
+
+		overlayHandle = this.ctx.ui.showOverlay(selector, {
+			anchor: "bottom-center",
+			width: "100%",
+			maxHeight: "100%",
+			margin: 0,
+		});
+		this.ctx.ui.setFocus(selector);
+		this.ctx.ui.requestRender();
 	}
 
 	showTreeSelector(): void {
 		const tree = this.ctx.sessionManager.getTree();
 		const realLeafId = this.ctx.sessionManager.getLeafId();
+
 		if (tree.length === 0) {
 			this.ctx.showStatus("No entries in session");
 			return;
 		}
-		const spec = createSessionTreeRoute(
-			tree,
-			realLeafId,
-			settings.get("treeFilterMode"),
-			0,
-			settings.get("branchSummary.enabled"),
-		);
-		const viewport = (model: SessionTreeModel) => ({
-			offset: model.tree.viewportOffset,
-			height: Math.max(1, this.ctx.ui.terminal.rows - 4),
-		});
-		spec.focusedRoot.apply(viewSessionTree(spec.initialModel, viewport(spec.initialModel)));
-		const mountSpec: MvuMountSpec<SessionTreeModel, SessionTreeRouteCommand, SessionTreeRuntimeMessage> = {
-			componentId: spec.componentId,
-			component: spec.focusedRoot,
-			initialModel: spec.initialModel,
-			route: {
-				componentId: spec.componentId,
-				focusedRoot: spec.focusedRoot,
-				context: spec.context,
-				actionToMsg: (action, event) =>
-					spec.actionToMsg(action, event) === undefined ? undefined : { _tag: "MvuInput", action, event },
-			},
-			boundary: {
-				messageSchema: SESSION_TREE_RUNTIME_MESSAGE_SCHEMA,
-				currentStamp: model => ({
-					componentId: spec.componentId,
-					leaseGeneration: model.leaseGeneration ?? 0,
-					sourceRevision: model.tree.sourceRevision,
-					requestGeneration: model.requestGeneration,
-				}),
-			},
-			update: (model, runtimeMessage) => {
-				const stampedModel =
-					runtimeMessage._tag === "MvuInput" && runtimeMessage.stamp !== undefined && model.leaseGeneration === undefined
-						? { ...model, leaseGeneration: runtimeMessage.stamp.leaseGeneration }
-						: model;
-				const mappedMessage =
-					runtimeMessage._tag === "NavigationSettled"
-						? runtimeMessage
-						: sessionTreeActionToMsg(String(runtimeMessage.action), runtimeMessage.event, stampedModel);
-				if (mappedMessage === undefined) return { model: stampedModel, commands: [], dirtyKeys: new Set() };
-				const transition = updateSessionTree(stampedModel, mappedMessage);
-				return {
-					model: transition.model,
-					commands: [
-						{ _tag: "RenderSessionTree", model: transition.model, dirtyKeys: transition.dirtyKeys },
-						...transition.commands,
-					],
-					dirtyKeys: transition.dirtyKeys,
-				};
-			},
-			interpret: command => {
-				if (command._tag === "NavigateRequested") {
-					const stamp = {
-						componentId: spec.componentId,
-						leaseGeneration: command.leaseGeneration,
-						sourceRevision: command.sourceRevision,
-						requestGeneration: command.requestGeneration,
-					};
-					return Effect.promise(async () => {
-						try {
-							const result = await this.ctx.session.navigateTree(command.targetId, {
-								summarize: command.summarize,
-								customInstructions: command.customInstructions,
-							});
-							const settled: SessionTreeNavigationSettled = {
-								_tag: "NavigationSettled",
-								targetId: command.targetId,
-								requestGeneration: command.requestGeneration,
-								sourceRevision: command.sourceRevision,
-								leaseGeneration: command.leaseGeneration,
-								status: result.aborted ? "aborted" : result.cancelled ? "cancelled" : "success",
-								...(result.editorText === undefined ? {} : { editorText: result.editorText }),
-							};
-							return [{ _tag: "MvuSource", stamp, message: settled } satisfies SourceEnvelope<SessionTreeRuntimeMessage>];
-						} catch (error) {
-							const settled: SessionTreeNavigationSettled = {
-								_tag: "NavigationSettled",
-								targetId: command.targetId,
-								requestGeneration: command.requestGeneration,
-								sourceRevision: command.sourceRevision,
-								leaseGeneration: command.leaseGeneration,
-								status: "failed",
-								error: error instanceof Error ? error.message : String(error),
-							};
-							return [{ _tag: "MvuSource", stamp, message: settled } satisfies SourceEnvelope<SessionTreeRuntimeMessage>];
-						}
-					});
-				}
-				return Effect.sync(() => {
-					if (command._tag === "RenderSessionTree") {
-						spec.focusedRoot.apply(viewSessionTree(command.model, viewport(command.model), command.dirtyKeys));
-						this.ctx.ui.requestComponentRender(spec.focusedRoot);
-					} else if (command._tag === "AbortNavigation") {
-						this.ctx.session.abortBranchSummary();
-					} else if (command._tag === "NavigationCompleted") {
-						if (command.status === "success") {
-							this.#closeActiveMvuRoute(() => {
-								this.ctx.chatContainer.clear();
-								this.ctx.renderInitialMessages({ clearTerminalHistory: true });
-								void this.ctx.reloadTodos();
-								if (command.editorText && !this.ctx.editor.getText().trim()) this.ctx.editor.setText(command.editorText);
-								this.ctx.showStatus("Navigated to selected point");
-							});
-						} else if (command.status === "aborted") {
-							this.ctx.showStatus("Branch summarization cancelled");
-						} else if (command.status === "cancelled") {
-							this.ctx.showStatus("Navigation cancelled");
-						} else if (command.error !== undefined) {
-							this.ctx.showError(command.error);
-						}
-					} else if (command._tag === "LabelCommitted") {
-						this.ctx.sessionManager.appendLabelChange(command.id, command.label);
-						this.ctx.ui.requestRender();
-					} else if (command._tag === "CloseRequested") {
-						this.#closeActiveMvuRoute();
+
+		this.showSelector(done => {
+			const selector = new TreeSelectorComponent(
+				tree,
+				realLeafId,
+				this.ctx.ui.terminal.rows,
+				async entryId => {
+					// Selecting the current leaf is a no-op (already there)
+					if (entryId === realLeafId) {
+						done();
+						this.ctx.showStatus("Already at this point");
+						return;
 					}
-					return [];
-				});
-			},
-		};
-		this.#mountMvuEditor(mountSpec);
+
+					// Ask about summarization
+					done(); // Close selector first
+
+					// Loop until user makes a complete choice or cancels to tree
+					let wantsSummary = false;
+					let customInstructions: string | undefined;
+
+					const branchSummariesEnabled = settings.get("branchSummary.enabled");
+
+					while (branchSummariesEnabled) {
+						const summaryChoice = await this.ctx.showHookSelector("Summarize branch?", [
+							"No summary",
+							"Summarize",
+							"Summarize with custom prompt",
+						]);
+
+						if (summaryChoice === undefined) {
+							// User pressed escape - re-show tree selector
+							this.showTreeSelector();
+							return;
+						}
+
+						wantsSummary = summaryChoice !== "No summary";
+
+						if (summaryChoice === "Summarize with custom prompt") {
+							customInstructions = await this.ctx.showHookEditor("Custom summarization instructions");
+							if (customInstructions === undefined) {
+								// User cancelled - loop back to summary selector
+								continue;
+							}
+						}
+
+						// User made a complete choice
+						break;
+					}
+
+					// Set up interrupt handler and loader if summarizing.
+					let summaryLoader: Loader | undefined;
+					const originalOnInterrupt = this.ctx.editor.onInterrupt;
+
+					if (wantsSummary) {
+						this.ctx.editor.onInterrupt = () => {
+							this.ctx.session.abortBranchSummary();
+						};
+						this.ctx.chatContainer.addChild(new Spacer(1));
+						summaryLoader = new Loader(
+							this.ctx.ui,
+							spinner => theme.fg("accent", spinner),
+							text => theme.fg("muted", text),
+							`Summarizing branch... (${keyHint("app.interrupt", "to cancel")})`,
+							getSymbolTheme().spinnerFrames,
+						);
+						this.ctx.statusContainer.addChild(summaryLoader);
+						this.ctx.ui.requestRender();
+					}
+
+					try {
+						const result = await this.ctx.session.navigateTree(entryId, {
+							summarize: wantsSummary,
+							customInstructions,
+						});
+
+						if (result.aborted) {
+							// Summarization aborted - re-show tree selector
+							this.ctx.showStatus("Branch summarization cancelled");
+							this.showTreeSelector();
+							return;
+						}
+						if (result.cancelled) {
+							this.ctx.showStatus("Navigation cancelled");
+							return;
+						}
+
+						// Update UI — rebuild the display transcript for the new leaf (the
+						// context from navigateTree is the LLM context, not the transcript).
+						this.ctx.chatContainer.clear();
+						this.ctx.renderInitialMessages({ clearTerminalHistory: true });
+						await this.ctx.reloadTodos();
+						if (result.editorText && !this.ctx.editor.getText().trim()) {
+							this.ctx.editor.setText(result.editorText);
+						}
+						this.ctx.showStatus("Navigated to selected point");
+					} catch (error) {
+						this.ctx.showError(error instanceof Error ? error.message : String(error));
+					} finally {
+						if (summaryLoader) {
+							summaryLoader.stop();
+							this.ctx.statusContainer.clear();
+						}
+						this.ctx.editor.onInterrupt = originalOnInterrupt;
+					}
+				},
+				() => {
+					done();
+					this.ctx.ui.requestRender();
+				},
+				(entryId, label) => {
+					this.ctx.sessionManager.appendLabelChange(entryId, label);
+					this.ctx.ui.requestRender();
+				},
+				settings.get("treeFilterMode"),
+			);
+			return { component: selector, focus: selector };
+		});
 	}
 
 	async showSessionSelector(): Promise<void> {
@@ -2258,37 +811,45 @@ export class SelectorController {
 		}
 		const historyStorage = this.ctx.historyStorage;
 		const historyMatcher = historyStorage ? (query: string) => historyStorage.matchingSessionIds(query) : undefined;
-		const selector = new SessionSelectorComponent(
-			sessions,
-			(session: SessionInfo) => {
-				this.#closeActiveMvuRoute(() => void this.handleResumeSession(session.path));
-			},
-			() => this.#closeActiveMvuRoute(),
-			() => {
-				void this.ctx.shutdown();
-			},
-			{
-				onDelete: async (session: SessionInfo) => {
-					if (!(await this.#detachActiveSessionBeforeDeletion(session.path))) return false;
-					const storage = new FileSessionStorage();
-					try {
-						await storage.deleteSessionWithArtifacts(session.path);
-						return true;
-					} catch (err) {
-						throw new Error(`Failed to delete session: ${err instanceof Error ? err.message : String(err)}`, {
-							cause: err,
-						});
-					}
+		this.showSelector(done => {
+			const selector = new SessionSelectorComponent(
+				sessions,
+				async (session: SessionInfo) => {
+					done();
+					await this.handleResumeSession(session.path);
 				},
-				historyMatcher,
-				loadAllSessions: () => SessionManager.listAll(),
-				allSessions,
-				startInAllScope,
-				getTerminalRows: () => this.ctx.ui.terminal.rows,
-			},
-		);
-		selector.setOnRequestRender(() => this.ctx.ui.requestComponentRender(selector.mountSpec.component));
-		this.#mountMvuEditor(selector.mountSpec);
+				() => {
+					done();
+					this.ctx.ui.requestRender();
+				},
+				() => {
+					void this.ctx.shutdown();
+				},
+				{
+					onDelete: async (session: SessionInfo) => {
+						if (!(await this.#detachActiveSessionBeforeDeletion(session.path))) {
+							return false;
+						}
+						const storage = new FileSessionStorage();
+						try {
+							await storage.deleteSessionWithArtifacts(session.path);
+							return true;
+						} catch (err) {
+							throw new Error(`Failed to delete session: ${err instanceof Error ? err.message : String(err)}`, {
+								cause: err,
+							});
+						}
+					},
+					historyMatcher,
+					loadAllSessions: () => SessionManager.listAll(),
+					allSessions,
+					startInAllScope,
+					getTerminalRows: () => this.ctx.ui.terminal.rows,
+				},
+			);
+			selector.setOnRequestRender(() => this.ctx.ui.requestRender());
+			return { component: selector, focus: selector };
+		});
 	}
 
 	#refreshSessionTerminalTitle(): void {
@@ -2506,11 +1067,21 @@ export class SelectorController {
 			return;
 		}
 
-		const adapter = makeLogoutAccountSelectorAdapter({
-			providerName: provider?.name ?? providerId,
-			accounts,
+		this.showSelector(done => {
+			const selector = new LogoutAccountSelectorComponent(
+				provider?.name ?? providerId,
+				accounts,
+				account => {
+					done();
+					void this.#handleCredentialLogout(providerId, account);
+				},
+				() => {
+					done();
+					this.ctx.ui.requestRender();
+				},
+			);
+			return { component: selector, focus: selector };
 		});
-		this.#mountLogoutRoute(providerId, provider?.name ?? providerId, adapter);
 	}
 
 	async showOAuthSelector(mode: "login" | "logout", providerId?: string): Promise<void> {
@@ -2535,12 +1106,40 @@ export class SelectorController {
 			}
 		}
 
-		const adapter = makeOAuthSelectorAdapter({
-			mode,
-			providers: getOAuthProviders(),
-			authStorage: this.ctx.session.modelRegistry.authStorage,
+		this.showSelector(done => {
+			let selector: OAuthSelectorComponent;
+			selector = new OAuthSelectorComponent(
+				mode,
+				this.ctx.session.modelRegistry.authStorage,
+				async (selectedProviderId: string) => {
+					selector.stopValidation();
+					done();
+					if (mode === "login") {
+						await this.#handleOAuthLogin(selectedProviderId);
+					} else {
+						await this.#showOAuthLogoutAccountSelector(selectedProviderId);
+					}
+				},
+				() => {
+					selector.stopValidation();
+					done();
+					this.ctx.ui.requestRender();
+				},
+				{
+					validateAuth: async (selectedProviderId: string) => {
+						const apiKey = await this.ctx.session.modelRegistry.getApiKeyForProvider(
+							selectedProviderId,
+							this.ctx.session.sessionId,
+						);
+						return !!apiKey;
+					},
+					requestRender: () => {
+						this.ctx.ui.requestComponentRender(selector);
+					},
+				},
+			);
+			return { component: selector, focus: selector };
 		});
-		this.#mountOAuthRoute(mode, adapter);
 	}
 
 	async showResetUsageSelector(): Promise<void> {
@@ -2566,19 +1165,37 @@ export class SelectorController {
 			);
 			return;
 		}
-		const mountGeneration = ++this.#resetUsageMountGeneration;
-		this.#mountResetRoute(makeResetUsageSelectorAdapter({
-			accounts,
-			sessionGeneration: String(session.sessionId),
-			mountGeneration,
-			sourceRevision: mountGeneration,
-		}));
+		this.showSelector(done => {
+			const selector = new ResetUsageSelectorComponent(
+				accounts,
+				account => {
+					done();
+					void this.#redeemReset(account);
+				},
+				() => {
+					done();
+					this.ctx.ui.requestRender();
+				},
+			);
+			return { component: selector, focus: selector };
+		});
 	}
 
-	#reportResetOutcome(account: ResetUsageAccount, outcome: ResetCreditRedeemOutcome): void {
+	async #redeemReset(account: ResetUsageAccount): Promise<void> {
+		this.ctx.showStatus(`Spending 1 saved reset for ${account.label}…`, { dim: true });
+		let outcome: ResetCreditRedeemOutcome;
+		try {
+			outcome = await this.ctx.session.redeemResetCredit(account.target);
+		} catch (error) {
+			this.ctx.showError(
+				`Reset failed for ${account.label}: ${error instanceof Error ? error.message : String(error)}`,
+			);
+			return;
+		}
 		const message = describeRedeemOutcome(outcome, account.label);
 		if (outcome.ok) {
 			this.ctx.showStatus(message);
+			// Refresh the status-line usage so the freshly-reset window shows.
 			this.ctx.statusLine.invalidate();
 			this.ctx.ui.requestRender();
 		} else {
@@ -2648,25 +1265,33 @@ export class SelectorController {
 	showBookmarks(): void {
 		void this.#bookmarks.list().then(
 			entries => {
-				const dismiss = () => this.#closeActiveMvuRoute();
+				let overlayHandle: OverlayHandle | undefined;
+				const dismiss = () => {
+					overlayHandle?.hide();
+					this.ctx.ui.setFocus(this.#activeHub ?? this.ctx.editor);
+					this.ctx.ui.requestRender();
+				};
 				const jump = (record: BookmarkRecord) => {
-					this.#closeActiveMvuRoute(() => {
-						if (!this.#activeHub) {
-							this.ctx.showAgentHub({
-								initialAgentId: record.target.kind === "agent" ? record.target.agentId : undefined,
-							});
-						}
-						if (!this.#activeHub?.selectBookmarkTarget(record.target)) {
-							this.ctx.showStatus(`Bookmark target unavailable: ${record.target.title}`);
-						}
-					});
+					if (!this.#activeHub) {
+						this.ctx.showAgentHub({
+							initialAgentId: record.target.kind === "agent" ? record.target.agentId : undefined,
+						});
+					}
+					if (!this.#activeHub?.selectBookmarkTarget(record.target)) {
+						this.ctx.showStatus(`Bookmark target unavailable: ${record.target.title}`);
+						return;
+					}
+					dismiss();
 				};
 				const selector = new BookmarksSelectorComponent(entries, jump, dismiss);
-				this.#mountMvuOverlay(
-					selector.mountSpec,
-					{ anchor: "bottom-center", width: "100%", maxHeight: "50%", margin: 0 },
-					() => this.ctx.ui.setFocus(this.ctx.editor),
-				);
+				overlayHandle = this.ctx.ui.showOverlay(selector, {
+					anchor: "bottom-center",
+					width: "100%",
+					maxHeight: "50%",
+					margin: 0,
+				});
+				this.ctx.ui.setFocus(selector);
+				this.ctx.ui.requestRender();
 			},
 			error =>
 				this.ctx.showError(`Could not read bookmarks: ${error instanceof Error ? error.message : String(error)}`),
@@ -2682,15 +1307,20 @@ export class SelectorController {
 			...this.ctx.keybindings.getKeys("app.session.observe"),
 		];
 		let hub: AgentHubOverlayComponent | undefined;
+		let overlayHandle: OverlayHandle | undefined;
 
 		const done = () => {
 			const selection = hub?.getSelectedSelection();
 			if (selection) this.#lastHubSelection = selection;
+			hub?.dispose();
+			overlayHandle?.hide();
 			if (this.#activeHub === hub) {
 				this.#activeHub = undefined;
+				this.#activeHubOverlay = undefined;
 			}
-			this.#closeActiveMvuRoute();
-		};
+			this.ctx.ui.setFocus(this.ctx.editor);
+			this.ctx.ui.requestRender();
+		}
 
 		const registry = AgentRegistry.global();
 		const ctx = this.ctx;
@@ -2731,7 +1361,6 @@ export class SelectorController {
 				this.showBookmarks();
 			},
 			sessionId: this.ctx.sessionManager.getSessionId(),
-			attention: this.#attention,
 			parentSessionFile: this.ctx.sessionManager.getSessionFile(),
 		});
 		// requireContent stays inert without live or revivable children; explicit
@@ -2742,11 +1371,16 @@ export class SelectorController {
 		}
 		if (options?.openPreview && options.initialAgentId) hub.openChat(options.initialAgentId);
 		this.#activeHub = hub;
-		const spec = createAgentHubMvuMountSpec(hub);
-		this.#mountMvuOverlay(
-			spec,
-			{ anchor: "bottom-center", width: "100%", maxHeight: "100%", margin: 0, fullscreen: true },
-			() => this.ctx.ui.setFocus(this.ctx.editor),
-		);
+
+		overlayHandle = this.ctx.ui.showOverlay(hub, {
+			anchor: "bottom-center",
+			width: "100%",
+			maxHeight: "100%",
+			margin: 0,
+			fullscreen: true,
+		});
+		this.#activeHubOverlay = overlayHandle;
+		this.ctx.ui.setFocus(hub);
+		this.ctx.ui.requestRender();
 	}
 }

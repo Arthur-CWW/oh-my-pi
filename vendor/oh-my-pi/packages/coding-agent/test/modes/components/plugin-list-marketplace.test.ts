@@ -1,12 +1,13 @@
-import { beforeAll, describe, expect, it } from "bun:test";
+import { beforeAll, describe, expect, it, spyOn } from "bun:test";
 import * as os from "node:os";
 import { stripVTControlCharacters } from "node:util";
-import type { InstalledPlugin } from "@oh-my-pi/pi-coding-agent/extensibility/plugins/types";
-import type { InstalledPluginSummary } from "@oh-my-pi/pi-coding-agent/extensibility/plugins/marketplace/types";
+import { PluginManager } from "@oh-my-pi/pi-coding-agent/extensibility/plugins";
 import {
-	makePluginSettingsModalModel,
-	type PluginSettingsModalModel,
-	updatePluginSettingsModal,
+	type InstalledPluginSummary,
+	MarketplaceManager,
+} from "@oh-my-pi/pi-coding-agent/extensibility/plugins/marketplace";
+import type { InstalledPlugin } from "@oh-my-pi/pi-coding-agent/extensibility/plugins/types";
+import {
 	MarketplacePluginDetailComponent,
 	PluginListComponent,
 	type PluginListEntry,
@@ -121,106 +122,130 @@ describe("PluginListComponent", () => {
 		expect(text).toContain("omp plugin install <name>@<marketplace>");
 	});
 
-	it("opens the selected marketplace entry through the plugin reducer", () => {
-		const model = loadedPluginSettingsModel([
-			{ kind: "npm", plugin: npm("filler") },
-			{ kind: "marketplace", plugin: marketplace("pick@mkt") },
-		]);
-		const selected = updatePluginSettingsModal(model, {
-			_tag: "SelectIndex",
-			index: 1,
-			activate: true,
-		});
+	it("routes enter on a marketplace entry to onMarketplaceSelect", () => {
+		const target = marketplace("pick@mkt");
+		let selected: InstalledPluginSummary | null = null;
+		const component = new PluginListComponent(
+			[
+				{ kind: "npm", plugin: npm("filler") },
+				{ kind: "marketplace", plugin: target },
+			],
+			{
+				onNpmSelect: () => {
+					throw new Error("npm callback should not fire for marketplace selection");
+				},
+				onMarketplaceSelect: plugin => {
+					selected = plugin;
+				},
+				onCancel: () => {},
+			},
+		);
 
-		expect(selected.commands).toEqual([]);
-		expect(selected.model.region).toBe("detail");
-		expect(selected.model.depth.at(-1)?.layer).toEqual({
-			_tag: "PluginDetail",
-			id: "pick@mkt",
-			kind: "marketplace",
-		});
+		// Move down to the marketplace entry, then confirm with Enter.
+		component.handleInput("\x1b[B");
+		component.handleInput("\n");
+
+		expect(selected).not.toBeNull();
+		expect(selected!.id).toBe("pick@mkt");
 	});
 });
 
-function loadedPluginSettingsModel(entries: readonly PluginListEntry[]): PluginSettingsModalModel {
-	const loading = updatePluginSettingsModal(makePluginSettingsModalModel(), { _tag: "LoadEntries" });
-	const stamp = loading.model.pendingEntries;
-	if (stamp === undefined) throw new Error("plugin entry request stamp missing");
-	return updatePluginSettingsModal(loading.model, { _tag: "EntriesLoaded", entries, ...stamp }).model;
-}
-
 describe("PluginSettingsComponent", () => {
-	it("commits a marketplace toggle through the pure model before rendering it", () => {
+	it("awaits plugin-change reload callback after toggling a marketplace plugin", async () => {
 		const plugin = marketplace("toggle@mkt");
-		let model = loadedPluginSettingsModel([{ kind: "marketplace", plugin }]);
-		model = updatePluginSettingsModal(model, { _tag: "SelectIndex", index: 0, activate: true }).model;
+		const order: string[] = [];
+		const reloaded = Promise.withResolvers<void>();
+		const npmListSpy = spyOn(PluginManager.prototype, "list").mockResolvedValue([]);
+		const listInstalledSpy = spyOn(MarketplaceManager.prototype, "listInstalledPlugins").mockResolvedValue([plugin]);
+		const setEnabledSpy = spyOn(MarketplaceManager.prototype, "setPluginEnabled").mockImplementation(
+			async (pluginId, enabled, scope) => {
+				order.push(`set:${pluginId}:${enabled}:${scope}`);
+			},
+		);
 
-		const toggled = updatePluginSettingsModal(model, { _tag: "SelectIndex", index: 0, activate: true });
-		expect(toggled.commands).toHaveLength(1);
-		expect(toggled.commands[0]).toMatchObject({
-			_tag: "PluginOperationRequested",
-			operation: "disable",
-			pluginId: "toggle@mkt",
-			kind: "marketplace",
-			scope: "user",
-		});
-		expect(toggled.model.entries[0]).toEqual({ kind: "marketplace", plugin });
+		try {
+			const component = new PluginSettingsComponent(process.cwd(), {
+				onClose: () => {},
+				onPluginChanged: async () => {
+					order.push("reload");
+					reloaded.resolve();
+				},
+			});
 
-		const stamp = toggled.model.pendingAction;
-		if (stamp === undefined) throw new Error("plugin operation stamp missing");
-		const receipt = toggled.model.receipt;
-		if (receipt._tag !== "Pending") throw new Error("pending plugin receipt missing");
-		const committed = updatePluginSettingsModal(toggled.model, {
-			_tag: "ActionSucceeded",
-			receiptId: receipt.receiptId,
-			message: "saved",
-			...stamp,
-		}).model;
-		const committedEntry = committed.entries[0];
-		expect(committedEntry?.kind).toBe("marketplace");
-		if (committedEntry?.kind !== "marketplace") throw new Error("committed marketplace entry missing");
-		expect(committedEntry.plugin.entries.every(entry => !entry.enabled)).toBe(true);
+			for (let i = 0; i < 20; i++) {
+				if (stripVTControlCharacters(component.render(120).join("\n")).includes("toggle@mkt")) break;
+				await Bun.sleep(1);
+			}
+			expect(stripVTControlCharacters(component.render(120).join("\n"))).toContain("toggle@mkt");
+			component.handleInput("\n");
+			component.handleInput(" ");
+			await reloaded.promise;
 
-		const component = new PluginSettingsComponent();
-		component.apply(committed);
-		const text = stripVTControlCharacters(component.render(120).join("\n"));
-		expect(text).toContain("toggle@mkt");
-		expect(text).toContain("Enabled");
-		expect(text).toContain("false");
+			expect(setEnabledSpy).toHaveBeenCalledWith("toggle@mkt", false, "user");
+			expect(order).toEqual(["set:toggle@mkt:false:user", "reload"]);
+		} finally {
+			npmListSpy.mockRestore();
+			listInstalledSpy.mockRestore();
+			setEnabledSpy.mockRestore();
+		}
 	});
 
-	it("closes on dismiss while the plugin list is still loading", () => {
-		const loading = updatePluginSettingsModal(makePluginSettingsModalModel(), { _tag: "LoadEntries" });
-		const component = new PluginSettingsComponent();
-		component.apply(loading.model);
-		expect(stripVTControlCharacters(component.render(120).join("\n"))).toContain("Loading plugins");
+	it("closes on Escape while the plugin list is still loading", async () => {
+		const pending = Promise.withResolvers<InstalledPlugin[]>();
+		const npmListSpy = spyOn(PluginManager.prototype, "list").mockReturnValue(pending.promise);
+		const listInstalledSpy = spyOn(MarketplaceManager.prototype, "listInstalledPlugins").mockResolvedValue([]);
 
-		const dismissed = updatePluginSettingsModal(loading.model, { _tag: "Back" });
-		expect(dismissed.commands).toEqual([{ _tag: "CloseRequested" }]);
+		try {
+			let closed = 0;
+			const component = new PluginSettingsComponent(process.cwd(), {
+				onClose: () => {
+					closed++;
+				},
+				onPluginChanged: () => {},
+			});
 
-		const ignored = updatePluginSettingsModal(loading.model, {
-			_tag: "SelectIndex",
-			index: 0,
-			activate: true,
-		});
-		expect(ignored.commands).toEqual([]);
-		expect(ignored.model).toEqual(loading.model);
+			// No child view has mounted yet — Escape must still dismiss the panel.
+			component.handleInput("\x1b");
+			expect(closed).toBe(1);
+
+			// Other keys are swallowed, not treated as close.
+			component.handleInput("\n");
+			expect(closed).toBe(1);
+		} finally {
+			pending.resolve([]);
+			npmListSpy.mockRestore();
+			listInstalledSpy.mockRestore();
+		}
 	});
 
-	it("mounts marketplace entries from a successful partial service result", () => {
-		const model = loadedPluginSettingsModel([
-			{ kind: "marketplace", plugin: marketplace("survivor@mkt") },
+	it("still mounts the list when the npm plugin listing rejects", async () => {
+		const npmListSpy = spyOn(PluginManager.prototype, "list").mockRejectedValue(new Error("corrupt registry"));
+		const listInstalledSpy = spyOn(MarketplaceManager.prototype, "listInstalledPlugins").mockResolvedValue([
+			marketplace("survivor@mkt"),
 		]);
-		expect(model.loaded).toBe(true);
-		expect(model.loading).toBe(false);
 
-		const component = new PluginSettingsComponent();
-		component.apply(model);
-		expect(stripVTControlCharacters(component.render(120).join("\n"))).toContain("survivor@mkt");
+		try {
+			let closed = 0;
+			const component = new PluginSettingsComponent(process.cwd(), {
+				onClose: () => {
+					closed++;
+				},
+				onPluginChanged: () => {},
+			});
 
-		expect(updatePluginSettingsModal(model, { _tag: "Back" }).commands).toEqual([
-			{ _tag: "CloseRequested" },
-		]);
+			for (let i = 0; i < 20; i++) {
+				if (stripVTControlCharacters(component.render(120).join("\n")).includes("survivor@mkt")) break;
+				await Bun.sleep(1);
+			}
+			expect(stripVTControlCharacters(component.render(120).join("\n"))).toContain("survivor@mkt");
+
+			// Once mounted, Escape routes through the list view's cancel path.
+			component.handleInput("\x1b");
+			expect(closed).toBe(1);
+		} finally {
+			npmListSpy.mockRestore();
+			listInstalledSpy.mockRestore();
+		}
 	});
 });
 
@@ -245,23 +270,17 @@ describe("MarketplacePluginDetailComponent", () => {
 		expect(text).toContain("/cache/marketplace/plugin@mkt");
 	});
 
-	it("requests disabling an enabled marketplace plugin through the plugin reducer", () => {
-		let model = loadedPluginSettingsModel([
-			{ kind: "marketplace", plugin: marketplace("toggle@mkt") },
-		]);
-		model = updatePluginSettingsModal(model, { _tag: "SelectIndex", index: 0, activate: true }).model;
-		const toggled = updatePluginSettingsModal(model, {
-			_tag: "SelectIndex",
-			index: 0,
-			activate: true,
+	it("invokes onEnabledChange when the enabled toggle is activated", () => {
+		const calls: boolean[] = [];
+		const component = new MarketplacePluginDetailComponent(marketplace("toggle@mkt"), {
+			onEnabledChange: enabled => calls.push(enabled),
+			onBack: () => {},
 		});
 
-		expect(toggled.commands[0]).toMatchObject({
-			_tag: "PluginOperationRequested",
-			operation: "disable",
-			pluginId: "toggle@mkt",
-			kind: "marketplace",
-		});
+		// Activate the Enabled toggle (it is the first item). Space cycles its value.
+		component.handleInput(" ");
+
+		expect(calls).toEqual([false]);
 	});
 
 	it("shortens home-relative install paths to ~ before rendering", () => {
@@ -279,59 +298,5 @@ describe("MarketplacePluginDetailComponent", () => {
 		// so the user's home directory never leaks into the rendered TUI surface.
 		expect(text).toContain("~/.omp/cache/plugins/sample@mkt");
 		expect(text).not.toContain(home);
-	});
-});
-describe("PluginSettingsModalModel", () => {
-	it("unwinds detail and nested config depth before closing", () => {
-		let model = makePluginSettingsModalModel();
-		model = updatePluginSettingsModal(model, { _tag: "SetRegion", region: "list", focusIndex: 2 }).model;
-		model = updatePluginSettingsModal(model, {
-			_tag: "Push",
-			region: "detail",
-			layer: { _tag: "PluginDetail", id: "demo", kind: "npm" },
-		}).model;
-		model = updatePluginSettingsModal(model, { _tag: "SetRegion", region: "detail", focusIndex: 3 }).model;
-		model = updatePluginSettingsModal(model, {
-			_tag: "Push",
-			region: "config",
-			layer: { _tag: "Config", pluginId: "demo", key: "token" },
-		}).model;
-
-		const detail = updatePluginSettingsModal(model, { _tag: "Back" }).model;
-		expect([detail.region, detail.focusIndex, detail.depth.length]).toEqual(["detail", 3, 1]);
-		const list = updatePluginSettingsModal(detail, { _tag: "Back" }).model;
-		expect([list.region, list.focusIndex, list.depth.length]).toEqual(["list", 2, 0]);
-		expect(updatePluginSettingsModal(list, { _tag: "Back" }).commands).toEqual([{ _tag: "CloseRequested" }]);
-	});
-
-	it("fences an async settings receipt to its route depth and request", () => {
-		const model = updatePluginSettingsModal(
-			updatePluginSettingsModal(makePluginSettingsModalModel(), {
-				_tag: "Push",
-				region: "detail",
-				layer: { _tag: "PluginDetail", id: "demo", kind: "npm" },
-			}).model,
-			{ _tag: "RunPluginOperation", operation: "enable", pluginId: "demo", receiptId: "r1" },
-		).model;
-		const stamp = model.pendingAction;
-		expect(stamp).toBeDefined();
-		if (!stamp) throw new Error("pending action stamp missing");
-
-		const changed = updatePluginSettingsModal(model, { _tag: "Back" }).model;
-		const stale = updatePluginSettingsModal(changed, {
-			_tag: "ActionSucceeded",
-			receiptId: "r1",
-			...stamp,
-		}).model;
-		expect(stale).toBe(changed);
-
-		const settled = updatePluginSettingsModal(model, {
-			_tag: "ActionSucceeded",
-			receiptId: "r1",
-			message: "enabled",
-			...stamp,
-		}).model;
-		expect(settled.pendingAction).toBeUndefined();
-		expect(settled.receipt).toMatchObject({ _tag: "Succeeded", receiptId: "r1", message: "enabled" });
 	});
 });

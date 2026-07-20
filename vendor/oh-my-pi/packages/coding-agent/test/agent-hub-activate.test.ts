@@ -3,7 +3,6 @@
  * attachable local agents allow `i` to switch to the main composer; read-only
  * rows never invoke focus.
  */
-import { pressHub } from "./helpers/agent-hub-input";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import * as fs from "node:fs/promises";
@@ -20,7 +19,6 @@ import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-sessi
 import { CURRENT_SESSION_VERSION } from "@oh-my-pi/pi-coding-agent/session/session-entries";
 import { CHILD_LIFECYCLE_CUSTOM_TYPE, type ChildLifecycleState } from "@oh-my-pi/pi-coding-agent/task/child-lifecycle";
 import { TempDir } from "@oh-my-pi/pi-utils";
-import { withControllerFixture, type ControllerFixture } from "./helpers/controller-fixture";
 const AGENT_ID = "Worker";
 
 function liveSession(): AgentSession {
@@ -44,15 +42,10 @@ type AgentHubControllerHarness = Pick<InteractiveModeContext, "hideThinkingBlock
 
 function showAgentHubForHarness(
 	harness: AgentHubControllerHarness,
-	fixture: ControllerFixture,
 	observers: SessionObserverRegistry,
 	options?: { requireContent?: boolean },
 ): void {
-	const controller = new SelectorController(
-		harness as unknown as InteractiveModeContext,
-		fixture.getInputLeaseManager,
-		fixture.scope,
-	);
+	const controller = new SelectorController(harness as unknown as InteractiveModeContext);
 	controller.showAgentHub(observers, options);
 }
 
@@ -113,8 +106,8 @@ it("c and C copy semantic Hub row units instead of characters", async () => {
 	await initTheme();
 	const copied: string[] = [];
 	const { hub } = makeHub(async () => {}, { copyIdentity: payload => copied.push(payload) });
-	pressHub(hub, "c");
-	pressHub(hub, "C");
+	hub.handleInput("c");
+	hub.handleInput("C");
 	await Bun.sleep(0);
 	expect(copied).toEqual(["Worker", "Worker · running · parent Main"]);
 	hub.dispose();
@@ -127,7 +120,7 @@ it("y yanks the selected child's session handle and history URL", async () => {
 		sessionId: "019f6141-df73-7000-b792-985f12d9db5d",
 		copyIdentity: payload => { copied.push(payload); },
 	});
-	pressHub(hub, "y");
+	hub.handleInput("y");
 	await Bun.sleep(0);
 	expect(copied).toEqual(["019f6141-df73-7000-b792-985f12d9db5d/Worker\nhistory://019f6141-df73-7000-b792-985f12d9db5d/Worker"]);
 	expect(renderedText(hub)).toContain("Yanked 019f6141-df73-7000-b792-985f12d9db5d/Worker + history://019f6141-df73-7000-b792-985f12d9db5d/Worker");
@@ -140,9 +133,9 @@ function renderedText(hub: AgentHubOverlayComponent): string {
 		.join("\n");
 }
 function revealParked(hub: AgentHubOverlayComponent, id: string): void {
-	pressHub(hub, "/");
-	for (const character of id) pressHub(hub, character);
-	pressHub(hub, "\r");
+	hub.handleInput("/");
+	for (const character of id) hub.handleInput(character);
+	hub.handleInput("\r");
 }
 
 async function waitForRenderedText(hub: AgentHubOverlayComponent, text: string): Promise<void> {
@@ -245,7 +238,7 @@ describe("Agent hub Enter activation", () => {
 			return Promise.reject(new Error(message));
 		});
 
-		pressHub(hub, "\r");
+		hub.handleInput("\r");
 		let rendered = renderedText(hub);
 		expect(rendered).toContain(`Agent Hub > ${AGENT_ID}`);
 		expect(rendered).toContain("read-only — running");
@@ -253,7 +246,7 @@ describe("Agent hub Enter activation", () => {
 		expect(focusCalls).toBe(0);
 		expect(doneCalls()).toBe(0);
 
-		pressHub(hub, "i");
+		hub.handleInput("i");
 		rendered = renderedText(hub);
 		expect(rendered).toContain("input unavailable");
 		expect(rendered).not.toContain(message);
@@ -274,7 +267,7 @@ describe("Agent hub Enter activation", () => {
 		);
 
 		revealParked(hub, AGENT_ID);
-		pressHub(hub, "\r");
+		hub.handleInput("\r");
 
 		const rendered = renderedText(hub);
 		expect(focusedIds).toEqual([]);
@@ -284,7 +277,7 @@ describe("Agent hub Enter activation", () => {
 		expect(rendered).toContain("No messages yet.");
 		expect(rendered).toContain("i:focus input");
 
-		pressHub(hub, "i");
+		hub.handleInput("i");
 		await done;
 		expect(focusedIds).toEqual([AGENT_ID]);
 		expect(doneCalls()).toBe(1);
@@ -331,8 +324,8 @@ describe("Agent hub Enter activation", () => {
 		});
 
 		revealParked(hub, AGENT_ID);
-		pressHub(hub, "\r");
-		pressHub(hub, "R");
+		hub.handleInput("\r");
+		hub.handleInput("R");
 		await revived.promise;
 
 		expect(focusCalls).toBe(0);
@@ -355,12 +348,12 @@ describe("Agent hub Enter activation", () => {
 		);
 
 		revealParked(hub, AGENT_ID);
-		pressHub(hub, "\r");
+		hub.handleInput("\r");
 		expect(renderedText(hub)).toContain("read-only — no reviver");
-		pressHub(hub, "i");
+		hub.handleInput("i");
 		expect(focusCalls).toBe(0);
 		expect(renderedText(hub)).toContain("input unavailable");
-		pressHub(hub, "\x1b");
+		hub.handleInput("\x1b");
 		expect(renderedText(hub)).not.toContain(`Agent Hub > ${AGENT_ID}`);
 		hub.dispose();
 	});
@@ -388,7 +381,7 @@ describe("Agent hub Enter activation", () => {
 			});
 
 			hub.openChat(AGENT_ID);
-			pressHub(hub, "\x1b");
+			hub.handleInput("\x1b");
 			expect(hub.getRetentionMetrics()).toMatchObject({
 				cachedTranscriptEntries: 0,
 				materializedChatComponents: 0,
@@ -472,7 +465,7 @@ describe("Agent hub Enter activation", () => {
 		});
 
 		await waitForRenderedText(hub, "Archived");
-		pressHub(hub, "\r");
+		hub.handleInput("\r");
 		await waitForRenderedText(hub, "archived transcript body");
 		const opened = renderedText(hub);
 		expect(opened).toContain("archived transcript body");
@@ -481,22 +474,22 @@ describe("Agent hub Enter activation", () => {
 		expect(opened).not.toContain("Enter:send");
 		expect(opened).not.toContain("R:revive");
 
-		pressHub(hub, "c");
-		pressHub(hub, "C");
+		hub.handleInput("c");
+		hub.handleInput("C");
 		await Bun.sleep(0);
 		expect(copied[0]?.length).toBeGreaterThan(1);
 		expect(copied[1]).toContain("archived transcript body");
 
-		pressHub(hub, "R");
-		pressHub(hub, "x");
-		pressHub(hub, "s");
-		pressHub(hub, "\r");
+		hub.handleInput("R");
+		hub.handleInput("x");
+		hub.handleInput("s");
+		hub.handleInput("\r");
 		expect(await Bun.file(childFile).text()).toBe(before);
 		expect(agents.get("Archived")).toBeUndefined();
 
-		pressHub(hub, "h");
-		pressHub(hub, "r");
-		pressHub(hub, "x");
+		hub.handleInput("h");
+		hub.handleInput("r");
+		hub.handleInput("x");
 		expect(renderedText(hub)).toContain("Completed children are read-only.");
 		expect(await Bun.file(childFile).text()).toBe(before);
 		expect(agents.list().map(ref => ref.id)).toEqual(["Main"]);
@@ -550,82 +543,85 @@ describe("Agent hub Enter activation", () => {
 		});
 
 		await waitForRenderedText(hub, "Newest");
-		pressHub(hub, "\r");
+		hub.handleInput("\r");
 		expect(renderedText(hub)).toContain("Agent Hub > Newest");
-		pressHub(hub, "]");
+		hub.handleInput("]");
 		expect(renderedText(hub)).toContain("Agent Hub > Newest");
-		pressHub(hub, "[");
+		hub.handleInput("[");
 		expect(renderedText(hub)).toContain("Agent Hub > Newest");
 
+		hub.handleInput("h");
+		hub.handleInput("\r");
+		expect(renderedText(hub)).toContain("Agent Hub > Newest");
 		hub.dispose();
 	});
+
 	it("selector controller keeps Enter in preview, then i focuses the editor", async () => {
-		await withControllerFixture(async fixture => {
-			const agents = AgentRegistry.global();
-			agents.register({
-				id: AGENT_ID,
-				displayName: AGENT_ID,
-				kind: "sub",
-				parentId: "Main",
-				session: liveSession(),
-				sessionFile: null,
-				status: "idle",
-			});
-			AgentLifecycleManager.global().adopt(AGENT_ID, { idleTtlMs: 0 });
-
-			const editor = {};
-			let capturedHub: AgentHubOverlayComponent | undefined;
-			let overlayOptions: Record<string, unknown> | undefined;
-			let hideCalls = 0;
-			const focusedIds: string[] = [];
-			const editorFocused = Promise.withResolvers<void>();
-			const focusTargets: object[] = [];
-			const ctx: AgentHubControllerHarness = {
-				keybindings: { getKeys: () => [] },
-				ui: {
-					showOverlay: (component, options) => {
-						capturedHub = component;
-						overlayOptions = options;
-						return {
-							hide: () => {
-								hideCalls++;
-							},
-						};
-					},
-					setFocus: target => {
-						focusTargets.push(target);
-						if (target === editor) editorFocused.resolve();
-					},
-					requestRender: () => {},
-				},
-				editor,
-				collabGuest: { agentRegistry: agents, hubRemote: undefined },
-				focusAgentHubInput: async id => {
-					focusedIds.push(id);
-				},
-				session: { getToolByName: () => undefined, extensionRunner: undefined },
-				sessionManager: { getCwd: () => "/tmp", getSessionFile: () => null, getSessionId: () => "session-test" },
-				hideThinkingBlock: false,
-			};
-			showAgentHubForHarness(ctx, fixture, new SessionObserverRegistry());
-			await Bun.sleep(0);
-
-			if (!capturedHub) throw new Error("Expected Agent Hub overlay");
-			const shownHub = capturedHub;
-			expect(focusTargets[0]).toBe(shownHub);
-			expect(overlayOptions).toMatchObject({ fullscreen: true });
-
-			pressHub(shownHub, "\r");
-			expect(focusedIds).toEqual([]);
-			expect(hideCalls).toBe(0);
-			pressHub(shownHub, "i");
-			await editorFocused.promise;
-
-			expect(focusedIds).toEqual([AGENT_ID]);
-			expect(hideCalls).toBe(1);
-			expect(focusTargets.at(-1)).toBe(editor);
-			shownHub.dispose();
+		const agents = AgentRegistry.global();
+		agents.register({
+			id: AGENT_ID,
+			displayName: AGENT_ID,
+			kind: "sub",
+			parentId: "Main",
+			session: liveSession(),
+			sessionFile: null,
+			status: "idle",
 		});
+		AgentLifecycleManager.global().adopt(AGENT_ID, { idleTtlMs: 0 });
+
+		const editor = {};
+		let capturedHub: AgentHubOverlayComponent | undefined;
+		let overlayOptions: Record<string, unknown> | undefined;
+		let hideCalls = 0;
+		const focusedIds: string[] = [];
+		const focusResolved = Promise.withResolvers<void>();
+		const editorFocused = Promise.withResolvers<void>();
+		const focusTargets: object[] = [];
+		const ctx: AgentHubControllerHarness = {
+			keybindings: { getKeys: () => [] },
+			ui: {
+				showOverlay: (component, options) => {
+					capturedHub = component;
+					overlayOptions = options;
+					return {
+						hide: () => {
+							hideCalls++;
+						},
+					};
+				},
+				setFocus: target => {
+					focusTargets.push(target);
+					if (target === editor) editorFocused.resolve();
+				},
+				requestRender: () => {},
+			},
+			editor,
+			collabGuest: { agentRegistry: agents, hubRemote: undefined },
+			focusAgentHubInput: async id => {
+				focusedIds.push(id);
+				focusResolved.resolve();
+			},
+			session: { getToolByName: () => undefined, extensionRunner: undefined },
+			sessionManager: { getCwd: () => "/tmp", getSessionFile: () => null, getSessionId: () => "session-test" },
+			hideThinkingBlock: false,
+		};
+		showAgentHubForHarness(ctx, new SessionObserverRegistry());
+
+		if (!capturedHub) throw new Error("Expected Agent Hub overlay");
+		const shownHub = capturedHub;
+		expect(focusTargets[0]).toBe(shownHub);
+		expect(overlayOptions).toMatchObject({ fullscreen: true });
+
+		shownHub.handleInput("\r");
+		expect(focusedIds).toEqual([]);
+		expect(hideCalls).toBe(0);
+		shownHub.handleInput("i");
+		await editorFocused.promise;
+
+		expect(focusedIds).toEqual([AGENT_ID]);
+		expect(hideCalls).toBe(1);
+		expect(focusTargets.at(-1)).toBe(editor);
+		shownHub.dispose();
 	});
 });
 
@@ -718,21 +714,21 @@ describe("Agent hub external transcript preview", () => {
 			expect(rendered).toContain("First user message");
 			expect(rendered).toContain("First external user message from session init.");
 
-			pressHub(hub, "\r");
+			hub.handleInput("\r");
 			await waitForRenderedText(hub, "peer journal line 39");
 			rendered = renderedText(hub);
 			expect(rendered).toContain("Agent Hub > Main · alpha ·");
 			expect(rendered).toContain("read-only — external session");
 			expect(rendered).not.toContain(rawHandle);
-			pressHub(hub, "u");
+			hub.handleInput("u");
 			const scrolledUp = renderedText(hub);
 			expect(scrolledUp).not.toBe(rendered);
-			pressHub(hub, "j");
+			hub.handleInput("j");
 			expect(renderedText(hub)).not.toBe(scrolledUp);
-			pressHub(hub, "d");
+			hub.handleInput("d");
 			expect(renderedText(hub)).toContain("peer journal line 39");
 
-			pressHub(hub, "i");
+			hub.handleInput("i");
 			rendered = renderedText(hub);
 			expect(rendered).toContain("input unavailable");
 			expect(focusCalls).toBe(0);
@@ -760,7 +756,7 @@ describe("Agent hub double-← gating", () => {
 		AgentRegistry.resetGlobalForTests();
 	});
 
-	function setup(agents: AgentRegistry, fixture: ControllerFixture) {
+	function setup(agents: AgentRegistry) {
 		let shown: AgentHubOverlayComponent | undefined;
 		const ctx: AgentHubControllerHarness = {
 			keybindings: { getKeys: () => [] },
@@ -781,7 +777,7 @@ describe("Agent hub double-← gating", () => {
 		};
 		const controller = {
 			showAgentHub: (observers: SessionObserverRegistry, options?: { requireContent?: boolean }) =>
-				showAgentHubForHarness(ctx, fixture, observers, options),
+				showAgentHubForHarness(ctx, observers, options),
 		};
 		return { controller, shown: () => shown };
 	}
@@ -798,50 +794,41 @@ describe("Agent hub double-← gating", () => {
 		});
 	}
 
-	it("requireContent keeps the hub closed when only Main is registered", async () => {
-		await withControllerFixture(async fixture => {
-			const agents = AgentRegistry.global();
-			agents.register({
-				id: "Main",
-				displayName: "Main",
-				kind: "main",
-				session: null,
-				sessionFile: null,
-				status: "running",
-			});
-			const { controller, shown } = setup(agents, fixture);
-
-			controller.showAgentHub(new SessionObserverRegistry(), { requireContent: true });
-			await Bun.sleep(0);
-
-			expect(shown()).toBeUndefined();
+	it("requireContent keeps the hub closed when only Main is registered", () => {
+		const agents = AgentRegistry.global();
+		agents.register({
+			id: "Main",
+			displayName: "Main",
+			kind: "main",
+			session: null,
+			sessionFile: null,
+			status: "running",
 		});
+		const { controller, shown } = setup(agents);
+
+		controller.showAgentHub(new SessionObserverRegistry(), { requireContent: true });
+
+		expect(shown()).toBeUndefined();
 	});
 
-	it("requireContent opens the hub once a subagent exists", async () => {
-		await withControllerFixture(async fixture => {
-			const agents = AgentRegistry.global();
-			registerWorker(agents);
-			const { controller, shown } = setup(agents, fixture);
+	it("requireContent opens the hub once a subagent exists", () => {
+		const agents = AgentRegistry.global();
+		registerWorker(agents);
+		const { controller, shown } = setup(agents);
 
-			controller.showAgentHub(new SessionObserverRegistry(), { requireContent: true });
-			await Bun.sleep(0);
+		controller.showAgentHub(new SessionObserverRegistry(), { requireContent: true });
 
-			expect(shown()).toBeDefined();
-			shown()!.dispose();
-		});
+		expect(shown()).toBeDefined();
+		shown()!.dispose();
 	});
 
-	it("the explicit hub key opens the empty roster even with no subagents", async () => {
-		await withControllerFixture(async fixture => {
-			const agents = AgentRegistry.global();
-			const { controller, shown } = setup(agents, fixture);
+	it("the explicit hub key opens the empty roster even with no subagents", () => {
+		const agents = AgentRegistry.global();
+		const { controller, shown } = setup(agents);
 
-			controller.showAgentHub(new SessionObserverRegistry());
-			await Bun.sleep(0);
+		controller.showAgentHub(new SessionObserverRegistry());
 
-			expect(shown()).toBeDefined();
-			shown()!.dispose();
-		});
+		expect(shown()).toBeDefined();
+		shown()!.dispose();
 	});
 });

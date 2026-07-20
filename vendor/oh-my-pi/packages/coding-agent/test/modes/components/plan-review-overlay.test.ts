@@ -2,16 +2,9 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:
 import { stripVTControlCharacters } from "node:util";
 import { KeybindingsManager } from "@oh-my-pi/pi-coding-agent/config/keybindings";
 import type { HookSelectorSlider } from "@oh-my-pi/pi-coding-agent/modes/components/hook-selector";
-import {
-	makePlanModalModel,
-	type PlanModalCommand,
-	type PlanModalInit,
-	type PlanModalMsg,
-	PlanReviewOverlay,
-	updatePlanModal,
-} from "@oh-my-pi/pi-coding-agent/modes/components/plan-review-overlay";
+import { PlanReviewOverlay } from "@oh-my-pi/pi-coding-agent/modes/components/plan-review-overlay";
 import { getThemeByName, setThemeInstance, theme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
-import { type KeyId, parseSgrMouse, setKeybindings } from "@oh-my-pi/pi-tui";
+import { setKeybindings } from "@oh-my-pi/pi-tui";
 
 const UP = "\x1b[A";
 const DOWN = "\x1b[B";
@@ -95,21 +88,10 @@ describe("PlanReviewOverlay", () => {
 		overlay.handleInput(ENTER);
 		expect(onPick).toHaveBeenCalledWith("Approve and compact context");
 
-	});
-
-	it("settles only once when confirm and cancel inputs race", () => {
-		const onPick = vi.fn();
-		const onCancel = vi.fn();
-		const overlay = new PlanReviewOverlay(
-			"plan",
-			{ promptTitle: "next", options: APPROVAL_OPTIONS },
-			{ onPick, onCancel },
-		);
+		onPick.mockClear();
+		overlay.handleInput(UP);
 		overlay.handleInput(ENTER);
-		overlay.handleInput(ENTER);
-		overlay.handleInput(ESCAPE);
-		expect(onPick).toHaveBeenCalledTimes(1);
-		expect(onCancel).not.toHaveBeenCalled();
+		expect(onPick).toHaveBeenCalledWith("Approve and execute");
 	});
 
 	it("skips disabled options and never confirms them", () => {
@@ -445,38 +427,14 @@ describe("PlanReviewOverlay", () => {
 		expect(onFeedbackChange).not.toHaveBeenCalled();
 	});
 
-	const makePointerDriver = (
-		overlay: PlanReviewOverlay,
-		init: PlanModalInit,
-		interpret: (command: PlanModalCommand) => void = () => {},
-	) => {
-		let model = makePlanModalModel(init);
-		const commit = (message: PlanModalMsg): void => {
-			const transition = updatePlanModal(model, message);
-			model = transition.model;
-			overlay.apply(model);
-			for (const command of transition.commands) interpret(command);
-		};
-		const pointer = (data: string): void => {
-			const event = parseSgrMouse(data);
-			if (event === null) throw new Error(`Invalid SGR mouse report: ${JSON.stringify(data)}`);
-			commit(overlay.pointerMessage(event));
-		};
-		const pointerRow = (button: 0 | 35, needle: string, col: number): boolean => {
-			const lines = overlay.render(80);
-			const row = lines.findIndex(line => stripVTControlCharacters(line).includes(needle));
-			if (row < 0) return false;
-			pointer(`\x1b[<${button};${col};${row + 1}M`);
-			return true;
-		};
-		overlay.apply(model);
-		return {
-			clickRow: (needle: string, col = 4): boolean => pointerRow(0, needle, col),
-			hoverRow: (needle: string, col = 6): boolean => pointerRow(35, needle, col),
-			pointer,
-			press: (key: KeyId): void =>
-				commit({ _tag: "Input", event: { _tag: "Press", key, repeat: false } }),
-		};
+	// Click a rendered row. The fullscreen overlay paints from screen row 0, so a
+	// 1-based SGR mouse row equals the rendered-line index + 1.
+	const clickRow = (overlay: PlanReviewOverlay, needle: string, col = 4): boolean => {
+		const lines = overlay.render(80);
+		const row = lines.findIndex(line => stripVTControlCharacters(line).includes(needle));
+		if (row < 0) return false;
+		overlay.handleInput(`\x1b[<0;${col};${row + 1}M`);
+		return true;
 	};
 
 	it("activates an approval option on click", () => {
@@ -486,16 +444,8 @@ describe("PlanReviewOverlay", () => {
 			{ promptTitle: "next", options: APPROVAL_OPTIONS },
 			{ onPick, onCancel: vi.fn() },
 		);
-		const pointer = makePointerDriver(
-			overlay,
-			{ planContent: SECTION_PLAN, options: APPROVAL_OPTIONS },
-			command => {
-				if (command._tag === "PickRequested") onPick(command.label);
-			},
-		);
 		render(overlay);
-		expect(pointer.clickRow("Refine plan", 10)).toBe(true);
-		expect(onPick).toHaveBeenCalledTimes(1);
+		expect(clickRow(overlay, "Refine plan", 10)).toBe(true);
 		expect(onPick).toHaveBeenCalledWith("Refine plan");
 	});
 
@@ -505,10 +455,9 @@ describe("PlanReviewOverlay", () => {
 			{ promptTitle: "next", options: APPROVAL_OPTIONS },
 			{ onPick: vi.fn(), onCancel: vi.fn() },
 		);
-		const pointer = makePointerDriver(overlay, { planContent: SECTION_PLAN, options: APPROVAL_OPTIONS });
 		render(overlay);
 		// Click the "Steps" entry in the sidebar column.
-		expect(pointer.clickRow("Steps", 4)).toBe(true);
+		expect(clickRow(overlay, "Steps", 4)).toBe(true);
 		const out = render(overlay);
 		expect(out).toContain("a annotate"); // ToC focus
 		// The body scrubbed to the clicked section.
@@ -580,6 +529,16 @@ describe("PlanReviewOverlay", () => {
 		expect(firstRow() - base).toBe(5);
 	});
 
+	// SGR button 35 = no-button motion (0x20 motion flag | 0x03 no-button): the
+	// hover report a terminal sends while the pointer moves with no button held.
+	const hoverRow = (overlay: PlanReviewOverlay, needle: string, col = 6): boolean => {
+		const lines = overlay.render(80);
+		const row = lines.findIndex(line => stripVTControlCharacters(line).includes(needle));
+		if (row < 0) return false;
+		overlay.handleInput(`\x1b[<35;${col};${row + 1}M`);
+		return true;
+	};
+
 	const optionLineRaw = (overlay: PlanReviewOverlay, needle: string): string | undefined =>
 		overlay.render(80).find(line => stripVTControlCharacters(line).includes(needle));
 
@@ -591,28 +550,20 @@ describe("PlanReviewOverlay", () => {
 			{ onPick, onCancel: vi.fn() },
 		);
 		const selectedBg = theme.getBgAnsi("selectedBg");
-		const pointer = makePointerDriver(
-			overlay,
-			{ planContent: "plan body text", options: APPROVAL_OPTIONS },
-			command => {
-				if (command._tag === "PickRequested") onPick(command.label);
-			},
-		);
 		render(overlay); // populate the click maps before hit-testing
 
 		// Hover a non-selected option (selection rests on index 0).
 		expect(optionLineRaw(overlay, "Approve and keep context")).not.toContain(selectedBg);
-		expect(pointer.hoverRow("Approve and keep context")).toBe(true);
+		expect(hoverRow(overlay, "Approve and keep context")).toBe(true);
 		expect(optionLineRaw(overlay, "Approve and keep context")).toContain(selectedBg);
 
 		// Hover is visual only: the keyboard cursor stays on index 0, so Enter still
 		// confirms the first option rather than the hovered one.
-		pointer.press("enter");
-		expect(onPick).toHaveBeenCalledTimes(1);
+		overlay.handleInput(ENTER);
 		expect(onPick).toHaveBeenCalledWith("Approve and execute");
 
 		// Pointer onto the top border (a non-option row) drops the highlight.
-		pointer.pointer("\x1b[<35;6;1M");
+		overlay.handleInput("\x1b[<35;6;1M");
 		expect(optionLineRaw(overlay, "Approve and keep context")).not.toContain(selectedBg);
 	});
 
@@ -623,13 +574,8 @@ describe("PlanReviewOverlay", () => {
 			{ onPick: vi.fn(), onCancel: vi.fn() },
 		);
 		const selectedBg = theme.getBgAnsi("selectedBg");
-		const pointer = makePointerDriver(overlay, {
-			planContent: "plan body text",
-			options: APPROVAL_OPTIONS,
-			disabledIndices: [2],
-		});
 		render(overlay);
-		expect(pointer.hoverRow("Approve and keep context")).toBe(true);
+		expect(hoverRow(overlay, "Approve and keep context")).toBe(true);
 		expect(optionLineRaw(overlay, "Approve and keep context")).not.toContain(selectedBg);
 	});
 });

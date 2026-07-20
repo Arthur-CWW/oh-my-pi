@@ -1,4 +1,3 @@
-import { pressHub } from "./helpers/agent-hub-input";
 import { beforeAll, describe, expect, it } from "bun:test";
 import { IrcBus } from "@oh-my-pi/pi-coding-agent/irc/bus";
 import { AgentHubOverlayComponent } from "@oh-my-pi/pi-coding-agent/modes/components/agent-hub";
@@ -132,18 +131,18 @@ describe("Agent Hub dual-lane inspector", () => {
 	it("cycles sections and switches lane focus with h/l", () => {
 		const { hub, observers } = fixture("Prompt body");
 		text(hub, 160);
-		pressHub(hub, "\u001b[C");
+		hub.handleInput("\u001b[C");
 		expect(text(hub, 160)).toContain("Route [ / ] section");
-		pressHub(hub, "h");
+		hub.handleInput("h");
 		expect(text(hub, 160)).toContain("●Route");
-		pressHub(hub, "j");
-		pressHub(hub, "j");
+		hub.handleInput("j");
+		hub.handleInput("j");
 		expect(text(hub, 160)).toContain("quota evidence favored");
-		pressHub(hub, "]");
+		hub.handleInput("]");
 		expect(text(hub, 160)).toContain("Comms [ / ] section");
-		pressHub(hub, "[");
+		hub.handleInput("[");
 		expect(text(hub, 160)).toContain("●Route");
-		pressHub(hub, "l");
+		hub.handleInput("l");
 		expect(text(hub, 160)).toContain("●Preview transcript");
 		hub.dispose();
 		observers.dispose();
@@ -163,7 +162,7 @@ describe("Agent Hub dual-lane inspector", () => {
 				// 9 = header/footer chrome, 6 = compact roster, 2 = fixed selected-agent rail (HR-125)
 				expect(rosterStart - previewTrackStart).toBe(rows - 9 - 6 - 2);
 			}
-			pressHub(hub, "j");
+			hub.handleInput("j");
 			expect(text(hub, 120)).toContain("Full-height preview");
 		} finally {
 			hub.dispose();
@@ -185,11 +184,11 @@ describe("Agent Hub dual-lane inspector", () => {
 			expect(transcriptStart).toBeGreaterThan(inspectorStart);
 			expect(rosterStart - inspectorStart).toBe(40 - 9 - 6 - 2);
 
-			pressHub(hub, "]");
+			hub.handleInput("]");
 			expect(text(hub, width)).toContain("Route [ / ] section");
-			pressHub(hub, "h");
+			hub.handleInput("h");
 			expect(text(hub, width)).toContain("●Route");
-			pressHub(hub, "l");
+			hub.handleInput("l");
 			expect(text(hub, width)).toContain("●Preview transcript");
 		} finally {
 			hub.dispose();
@@ -206,7 +205,7 @@ describe("Agent Hub dual-lane inspector", () => {
 			const rendered = text(hub, 120);
 			expect(rendered).toContain("Preview transcript");
 			expect(rendered).not.toContain("Prompt [ / ] section");
-			pressHub(hub, "h");
+			hub.handleInput("h");
 			expect(text(hub, 120)).not.toContain("●Prompt");
 		} finally {
 			hub.dispose();
@@ -218,8 +217,8 @@ describe("Agent Hub dual-lane inspector", () => {
 	it("bounds prompt materialization before inspector scrolling", () => {
 		const { hub, observers } = fixture(`${"x".repeat(40_000)}TAIL_BEYOND_BOUND`);
 		text(hub, 160);
-		pressHub(hub, "h");
-		pressHub(hub, "G");
+		hub.handleInput("h");
+		hub.handleInput("G");
 		expect(text(hub, 160)).not.toContain("TAIL_BEYOND_BOUND");
 		expect(hub.getRetentionMetrics().cachedTranscriptEntries).toBeLessThanOrEqual(200);
 		hub.dispose();
@@ -229,7 +228,7 @@ describe("Agent Hub dual-lane inspector", () => {
 		const { hub, observers } = fixture("Effort-visible preview");
 		try {
 			expect(text(hub, 160)).toContain("OX5.6solm");
-			pressHub(hub, "\r");
+			hub.handleInput("\r");
 			expect(text(hub, 160)).toContain("codex 5.6sol medium");
 		} finally {
 			hub.dispose();

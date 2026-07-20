@@ -51,24 +51,19 @@ export function readJournalTailChunk(
 		if (!stat.isFile()) return null;
 		if (stat.size <= fromByte) return { text: "", fromByte, newSize: stat.size };
 		const start = fromByte === 0 ? Math.max(0, stat.size - maxBytes) : fromByte;
-		const length = Math.min(maxBytes, stat.size - start);
+		const length = stat.size - start;
 		const buffer = Buffer.allocUnsafe(length);
 		const fd = fs.openSync(filePath, "r");
-		let bytesRead = 0;
 		try {
-			while (bytesRead < length) {
-				const read = fs.readSync(fd, buffer, bytesRead, length - bytesRead, start + bytesRead);
-				if (read === 0) break;
-				bytesRead += read;
-			}
+			fs.readSync(fd, buffer, 0, length, start);
 		} finally {
 			fs.closeSync(fd);
 		}
-		let text = buffer.subarray(0, bytesRead).toString("utf8");
+		let text = buffer.toString("utf8");
 		let actualStart = start;
 		if (fromByte === 0 && start > 0) {
 			const newline = text.indexOf("\n");
-			if (newline < 0) return { text: "", fromByte, newSize: stat.size };
+			if (newline < 0) return { text: "", fromByte: stat.size, newSize: stat.size };
 			actualStart += Buffer.byteLength(text.slice(0, newline + 1));
 			text = text.slice(newline + 1);
 		}
@@ -87,34 +82,34 @@ export async function readJournalTailChunkAsync(
 	maxBytes = JOURNAL_TAIL_BYTES,
 ): Promise<JournalTailChunk | null> {
 	try {
+		const stat = await fs.promises.stat(filePath);
+		if (!stat.isFile()) return null;
+		if (stat.size <= fromByte) return { text: "", fromByte, newSize: stat.size };
+		const start = fromByte === 0 ? Math.max(0, stat.size - maxBytes) : fromByte;
+		const length = stat.size - start;
 		const handle = await fs.promises.open(filePath, "r");
+		const buffer = Buffer.allocUnsafe(length);
+		let bytesRead = 0;
 		try {
-			const stat = await handle.stat();
-			if (!stat.isFile()) return null;
-			if (stat.size <= fromByte) return { text: "", fromByte, newSize: stat.size };
-			const start = fromByte === 0 ? Math.max(0, stat.size - maxBytes) : fromByte;
-			const length = Math.min(maxBytes, stat.size - start);
-			const buffer = Buffer.allocUnsafe(length);
-			let bytesRead = 0;
 			while (bytesRead < length) {
 				const read = await handle.read(buffer, bytesRead, length - bytesRead, start + bytesRead);
 				if (read.bytesRead === 0) break;
 				bytesRead += read.bytesRead;
 			}
-			let text = buffer.subarray(0, bytesRead).toString("utf8");
-			let actualStart = start;
-			if (fromByte === 0 && start > 0) {
-				const newline = text.indexOf("\n");
-				if (newline < 0) return { text: "", fromByte, newSize: stat.size };
-				actualStart += Buffer.byteLength(text.slice(0, newline + 1));
-				text = text.slice(newline + 1);
-			}
-			const finalNewline = text.lastIndexOf("\n");
-			if (finalNewline < 0) return { text: "", fromByte: actualStart, newSize: stat.size };
-			return { text: text.slice(0, finalNewline + 1), fromByte: actualStart, newSize: stat.size };
 		} finally {
 			await handle.close();
 		}
+		let text = buffer.subarray(0, bytesRead).toString("utf8");
+		let actualStart = start;
+		if (fromByte === 0 && start > 0) {
+			const newline = text.indexOf("\n");
+			if (newline < 0) return { text: "", fromByte: stat.size, newSize: stat.size };
+			actualStart += Buffer.byteLength(text.slice(0, newline + 1));
+			text = text.slice(newline + 1);
+		}
+		const finalNewline = text.lastIndexOf("\n");
+		if (finalNewline < 0) return { text: "", fromByte: actualStart, newSize: stat.size };
+		return { text: text.slice(0, finalNewline + 1), fromByte: actualStart, newSize: stat.size };
 	} catch {
 		return null;
 	}

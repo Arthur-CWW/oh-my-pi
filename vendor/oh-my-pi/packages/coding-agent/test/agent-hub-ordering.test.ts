@@ -2,7 +2,6 @@
  * Agent Hub keeps live rows in registration order, oldest first, regardless
  * of activity or heartbeat updates.
  */
-import { pressHub } from "./helpers/agent-hub-input";
 import { afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
@@ -309,12 +308,12 @@ describe("Agent hub row ordering", () => {
 
 		const hub = makeHub(agents, { externalIrc, externalSessionId: "this-session" });
 		expect(renderedExternalPeerNames(hub)).toEqual(["alpha", "beta"]);
-		pressHub(hub, "\r");
+		hub.handleInput("\r");
 		const siblingView = Bun.stripANSI(hub.render(120).join("\n"));
 		expect(siblingView).toContain("read-only");
 		expect(siblingView).toContain("cmd+p to navigate to its real TUI");
 		expect(siblingView).toContain("Sibling transcript path unavailable");
-		pressHub(hub, "\x1b");
+		hub.handleInput("\x1b");
 
 		peers = [
 			externalPeer("external:beta", "beta", lastSeen, "idle"),
@@ -426,12 +425,12 @@ describe("Agent hub row ordering", () => {
 
 		await waitForRenderedText(hub, "automation: Nightly Check");
 		expect(renderedText(hub)).toContain("automation · read-only");
-		pressHub(hub, ".");
+		hub.handleInput(".");
 		expect(renderedText(hub)).not.toContain("automation: Nightly Check");
 		expect(renderedText(hub)).toContain("1 hidden");
-		pressHub(hub, ".");
+		hub.handleInput(".");
 		await waitForRenderedText(hub, "automation: Nightly Check");
-		pressHub(hub, "\r");
+		hub.handleInput("\r");
 		await waitForRenderedText(hub, "automation transcript body");
 		expect(renderedText(hub)).toContain("automation transcript body");
 		hub.dispose();

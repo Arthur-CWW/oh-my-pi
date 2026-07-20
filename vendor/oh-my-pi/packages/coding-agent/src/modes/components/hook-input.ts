@@ -1,74 +1,90 @@
 /**
- * Renderer-only single-line input for the hook MVU route.
- *
- * Input ownership lives in the route runtime. This component only applies a
- * committed value and renders it; terminal input never reaches this widget.
+ * Simple text input component for hooks.
  */
-import { Container, Input, Markdown, Spacer, Text } from "@oh-my-pi/pi-tui";
+import { Container, Input, Markdown, matchesKey, Spacer, Text, type TUI } from "@oh-my-pi/pi-tui";
 import { getMarkdownTheme, theme } from "../../modes/theme/theme";
+import { matchesUiDismiss } from "../../modes/utils/keybinding-matchers";
+import { CountdownTimer } from "./countdown-timer";
 import { DynamicBorder } from "./dynamic-border";
 import { keyHint, rawKeyHint } from "./keybinding-hints";
 
-export interface HookInputModel {
-	readonly title: string;
-	readonly placeholder?: string;
-	readonly value: string;
-}
-
-export type HookInputMsg =
-	| { readonly _tag: "ValueChanged"; readonly value: string }
-	| { readonly _tag: "Submit" }
-	| { readonly _tag: "Back" };
-
-export type HookInputCommand =
-	| { readonly _tag: "Resolve"; readonly value: string }
-	| { readonly _tag: "Cancel" };
-
-export function makeHookInputModel(title: string, placeholder?: string): HookInputModel {
-	return { title, ...(placeholder === undefined ? {} : { placeholder }), value: "" };
-}
-
-export function updateHookInput(
-	model: HookInputModel,
-	message: HookInputMsg,
-): { readonly model: HookInputModel; readonly commands: readonly HookInputCommand[] } {
-	switch (message._tag) {
-		case "ValueChanged":
-			return { model: { ...model, value: message.value }, commands: [] };
-		case "Submit":
-			return { model, commands: [{ _tag: "Resolve", value: model.value }] };
-		case "Back":
-			return { model, commands: [{ _tag: "Cancel" }] };
-	}
+export interface HookInputOptions {
+	tui?: TUI;
+	timeout?: number;
+	onTimeout?: () => void;
 }
 
 export class HookInputComponent extends Container {
-	readonly #input = new Input();
-	readonly #titleComponent = new Markdown("", 1, 0, getMarkdownTheme(), { color: text => theme.fg("accent", text) });
-	#model: HookInputModel = makeHookInputModel("");
+	#input: Input;
+	#onSubmitCallback: (value: string) => void;
+	#onCancelCallback: () => void;
+	#titleComponent: Markdown;
+	#baseTitle: string;
+	#countdown: CountdownTimer | undefined;
 
-	constructor(model?: HookInputModel) {
+	constructor(
+		title: string,
+		_placeholder: string | undefined,
+		onSubmit: (value: string) => void,
+		onCancel: () => void,
+		opts?: HookInputOptions,
+	) {
 		super();
+
+		this.#onSubmitCallback = onSubmit;
+		this.#onCancelCallback = onCancel;
+		this.#baseTitle = title;
+
 		this.addChild(new DynamicBorder());
 		this.addChild(new Spacer(1));
+
+		this.#titleComponent = new Markdown(title, 1, 0, getMarkdownTheme(), { color: t => theme.fg("accent", t) });
 		this.addChild(this.#titleComponent);
 		this.addChild(new Spacer(1));
+
+		if (opts?.timeout && opts.timeout > 0 && opts.tui) {
+			this.#countdown = new CountdownTimer(
+				opts.timeout,
+				opts.tui,
+				s => this.#titleComponent.setText(`${this.#baseTitle} (${s}s)`),
+				() => {
+					opts.onTimeout?.();
+					this.#onCancelCallback();
+				},
+				this,
+			);
+		}
+
+		this.#input = new Input();
 		this.addChild(this.#input);
 		this.addChild(new Spacer(1));
-		this.addChild(new Text([rawKeyHint("enter", "submit"), keyHint("ui.dismiss", "cancel")].join("  "), 1, 0));
+		const hint = [rawKeyHint("enter", "submit"), keyHint("ui.dismiss", "cancel")].join("  ");
+		this.addChild(new Text(hint, 1, 0));
 		this.addChild(new Spacer(1));
 		this.addChild(new DynamicBorder());
-		if (model !== undefined) this.apply(model);
 	}
 
-	apply(model: HookInputModel): void {
-		this.#model = model;
-		this.#titleComponent.setText(theme.fg("accent", model.title));
-		if (this.#input.getValue() !== model.value) this.#input.setValue(model.value);
-		this.invalidate();
+	handleInput(keyData: string): void {
+		// Reset countdown on any interaction
+		this.#countdown?.reset();
+		if (matchesKey(keyData, "enter") || matchesKey(keyData, "return") || keyData === "\n") {
+			this.#onSubmitCallback(this.#input.getValue());
+		} else if (matchesUiDismiss(keyData)) {
+			this.#onCancelCallback();
+		} else {
+			this.#input.handleInput(keyData);
+		}
 	}
 
-	get model(): HookInputModel {
-		return this.#model;
+	/** Route non-bracketed paste transports (e.g. kitty's OSC 5522 enhanced clipboard)
+	 *  into the inner input, mirroring bracketed-paste semantics. Pasting counts as
+	 *  interaction, so the timeout countdown resets like any keystroke. */
+	pasteText(text: string): void {
+		this.#countdown?.reset();
+		this.#input.pasteText(text);
+	}
+
+	dispose(): void {
+		this.#countdown?.dispose();
 	}
 }

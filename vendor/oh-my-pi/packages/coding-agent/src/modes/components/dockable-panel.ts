@@ -68,7 +68,7 @@ class DockablePanelOverlay implements Component {
 	}
 
 	handleInput(data: string): void {
-		this.onInput(data);
+		if (!this.onInput(data)) this.content.handleInput?.(data);
 	}
 
 	invalidate(): void {
@@ -147,8 +147,8 @@ export class DockablePanelController {
 		const wasFocused = this.isFocused;
 		this.#handle = undefined;
 		this.#waitingForFocusChord = false;
-		if (wasFocused) this.options.onFocusChange?.(false);
 		handle.hide();
+		if (wasFocused) this.options.onFocusChange?.(false);
 		this.options.onOpenChange?.(false);
 	}
 
@@ -172,8 +172,8 @@ export class DockablePanelController {
 		if (!this.isOpen) return false;
 		if (this.isFocused) {
 			if (!this.#returnFocus) return false;
-			this.options.onFocusChange?.(false);
 			this.host.setFocus(this.#returnFocus);
+			this.options.onFocusChange?.(false);
 		} else {
 			this.host.setFocus(this.#overlay);
 			this.options.onFocusChange?.(true);

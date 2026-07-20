@@ -27,7 +27,6 @@ export interface Keybindings {
 	"tui.editor.yank": true;
 	"tui.editor.yankPop": true;
 	"tui.editor.undo": true;
-	"tui.editor.redo": true;
 	"tui.editor.expandPaste": true;
 	// Generic input actions
 	"tui.input.newLine": true;
@@ -126,7 +125,6 @@ export const TUI_KEYBINDINGS = {
 	"tui.editor.yank": { defaultKeys: "ctrl+y", description: "Yank" },
 	"tui.editor.yankPop": { defaultKeys: "alt+y", description: "Yank pop" },
 	"tui.editor.undo": { defaultKeys: ["ctrl+-", "ctrl+_"], description: "Undo" },
-	"tui.editor.redo": { defaultKeys: ["ctrl+shift+-", "ctrl+shift+_"], description: "Redo" },
 	"tui.editor.expandPaste": { defaultKeys: "enter", description: "Expand paste marker for editing" },
 	"tui.input.newLine": { defaultKeys: ["shift+enter", "ctrl+j"], description: "Insert newline" },
 	"tui.input.submit": { defaultKeys: "enter", description: "Submit input" },

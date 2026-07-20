@@ -10,62 +10,70 @@ import { theme } from "../../../modes/theme/theme";
 import { shortenPath } from "../../../tools/render-utils";
 import type { Extension, ExtensionState } from "./types";
 
-export interface InspectorProjection {
-	readonly extension: Extension | null;
-}
-
-/** Renderer-only inspector projection; the dashboard route owns selection. */
 export class InspectorPanel implements Component {
-	#projection: InspectorProjection = { extension: null };
+	#extension: Extension | null = null;
 
-	apply(projection: InspectorProjection): void {
-		this.#projection = projection;
+	setExtension(extension: Extension | null): void {
+		this.#extension = extension;
 	}
 
 	invalidate(): void {}
 
 	render(width: number): readonly string[] {
-		return this.renderProjection(this.#projection, width);
-	}
-
-	renderProjection(projection: InspectorProjection, width: number): readonly string[] {
-		const extension = projection.extension;
-		if (!extension) {
+		if (!this.#extension) {
 			return [theme.fg("muted", "Select an extension"), theme.fg("dim", "to view details")];
 		}
 
-		const ext = extension;
+		const ext = this.#extension;
 		const lines: string[] = [];
+
+		// Name header
 		lines.push(theme.bold(theme.fg("accent", ext.displayName)));
 		lines.push("");
+
+		// Kind badge
 		lines.push(theme.fg("muted", "Type: ") + this.#getKindBadge(ext.kind));
 		lines.push("");
+
+		// Description (wrapped)
 		const desc = ext.description;
 		const isValidDescription = typeof desc === "string" && desc.length > 0;
 		if (isValidDescription && width > 2) {
-			for (const line of wrapTextWithAnsi(desc, width - 2)) lines.push(truncateToWidth(line, width));
+			const wrapped = wrapTextWithAnsi(desc, width - 2);
+			for (const line of wrapped) {
+				lines.push(truncateToWidth(line, width));
+			}
 			lines.push("");
 		} else if (isValidDescription) {
+			// Width too small for wrapping, show truncated single line
 			lines.push(truncateToWidth(desc, width));
 			lines.push("");
 		}
+
+		// Origin
 		lines.push(theme.fg("muted", "Origin:"));
 		const levelLabel = ext.source.level === "user" ? "User" : ext.source.level === "project" ? "Project" : "Native";
 		lines.push(`  ${theme.italic(`via ${ext.source.providerName} (${levelLabel})`)}`);
 		const shortened = shortenPath(ext.path, os.homedir());
+		// If path is very long, show just the last parts
 		const displayPath =
 			shortened.length > 40 && shortened.split("/").length > 3
 				? `.../${shortened.split("/").slice(-3).join("/")}`
 				: shortened;
 		lines.push(`  ${theme.fg("dim", displayPath)}`);
 		lines.push("");
+
+		// Status badge
 		lines.push(theme.fg("muted", "Status:"));
 		lines.push(`  ${this.#getStatusBadge(ext.state, ext.disabledReason, ext.shadowedBy)}`);
 		lines.push("");
-		lines.push(...this.#renderPreview(ext, width));
+
+		// Preview section (routed based on kind)
+		const previewLines = this.#renderPreview(ext, width);
+		lines.push(...previewLines);
+
 		return lines;
 	}
-
 
 	#renderPreview(ext: Extension, width: number): string[] {
 		const lines: string[] = [];

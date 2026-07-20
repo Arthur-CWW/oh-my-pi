@@ -1,57 +1,56 @@
+/**
+ * ExtensionDashboard - Tabbed layout for the Extension Control Center.
+ *
+ * Layout:
+ * - Top: Horizontal tab bar for provider selection
+ * - Body: 2-column grid (inventory list | preview panel)
+ *
+ * Navigation:
+ * - TAB/Shift+TAB: Cycle through provider tabs
+ * - Up/Down/j/k: Navigate list
+ * - Space: Toggle selected item (or master switch)
+ * - UI dismiss: Close dashboard (clears search first if active)
+ */
 import {
-	Container,
 	type Component,
+	Container,
+	matchesKey,
+	padding,
 	Spacer,
 	Text,
+	truncateToWidth,
+	visibleWidth,
 	wrapTextWithAnsi,
 } from "@oh-my-pi/pi-tui";
-import { Effect, Exit, Scope } from "effect";
 import { Settings } from "../../../config/settings";
 import { DynamicBorder } from "../../../modes/components/dynamic-border";
 import { keyHint } from "../../../modes/components/keybinding-hints";
 import { theme } from "../../../modes/theme/theme";
-import { renderExtensionListRow, type ExtensionListRow } from "./extension-list";
-import { InspectorPanel, type InspectorProjection } from "./inspector-panel";
+import { matchesUiDismiss } from "../../../modes/utils/keybinding-matchers";
+import { ExtensionList } from "./extension-list";
+import { InspectorPanel } from "./inspector-panel";
 import {
-	createExtensionDashboardModel,
-	projectExtensionRows,
-	reduceExtensionDashboard,
-	type ExtensionDashboardModel,
-	type ExtensionProjectionRow,
+	applyDisabledExtensionsToState,
+	applyFilter,
+	createInitialState,
+	filterByProvider,
+	refreshState,
+	toggleProvider,
 } from "./state-manager";
-import { makeComponentId } from "../../mvu/schema";
-import { TablePreviewComponent } from "../table-preview";
+import type { DashboardState } from "./types";
 
-const EXT_FOOTER_PREFIX = " ↑/↓: navigate  Enter: preview  Space: toggle  ←/→: provider  ";
+const EXT_FOOTER_PREFIX = " ↑/↓: navigate  Space: toggle  ←/→: provider  ";
 
-export const EXTENSION_DASHBOARD_ROUTE = {
-	componentId: makeComponentId("extension-dashboard"),
-	context: "selector.global",
-	makeInitialModel: createExtensionDashboardModel,
-	update: reduceExtensionDashboard,
-	actions: {
-		"app.navigation.up": "Move",
-		"app.navigation.down": "Move",
-		"tui.select.confirm": "Activate",
-		"app.selector.preview": "ToggleSelected",
-		"app.selector.sourcePrevious": "ProviderMove",
-		"app.selector.sourceNext": "ProviderMove",
-		"ui.dismiss": "Back",
-	},
-} as const;
-
-/** MVU route adapter for extension inventory, provider actions, and inspector projection. */
 export class ExtensionDashboard extends Container {
-	#model!: ExtensionDashboardModel;
-	#table!: TablePreviewComponent<ExtensionListRow, string, InspectorProjection>;
-	readonly #inspectorRenderer = new InspectorPanel();
-	readonly #scope = Scope.makeUnsafe("sequential");
+	#state!: DashboardState;
+	#mainList!: ExtensionList;
+	#inspector!: InspectorPanel;
+	#refreshToken = 0;
 	#builtRows = -1;
 	#builtCols = -1;
-	#disposed = false;
-	#committedRender: readonly string[] | undefined;
 
-	onRequestComponentRender?: (component: Component) => void;
+	onClose?: () => void;
+	onRequestRender?: () => void;
 
 	private constructor(
 		private readonly cwd: string,
@@ -71,60 +70,47 @@ export class ExtensionDashboard extends Container {
 		return dashboard;
 	}
 
-	static async fromModel(
-		model: ExtensionDashboardModel,
-		settings: Settings | null = null,
-		terminalHeight = 24,
-	): Promise<ExtensionDashboard> {
-		const dashboard = new ExtensionDashboard("", settings, terminalHeight);
-		await dashboard.#mountModel(model);
-		return dashboard;
-	}
-
-
 	async #init(): Promise<void> {
-		const settings = this.settings ?? (await Settings.init());
-		const disabledIds = (settings.get("disabledExtensions") as string[] | undefined) ?? [];
-		await this.#mountModel(await createExtensionDashboardModel(this.cwd, disabledIds));
-	}
+		const sm = this.settings ?? (await Settings.init());
+		const disabledIds = sm ? ((sm.get("disabledExtensions") as string[]) ?? []) : [];
+		this.#state = await createInitialState(this.cwd, disabledIds);
 
-	async #mountModel(model: ExtensionDashboardModel): Promise<void> {
-		this.#model = model;
-		this.#table = await Effect.runPromise(
-			Scope.provide(this.#scope)(
-				TablePreviewComponent.mount<ExtensionListRow, string, InspectorProjection>({
-					renderRow: (row, context) =>
-						renderExtensionListRow(
-							row,
-							context.selected,
-							context.width,
-							this.#model.activeTabId === "all" ? undefined : this.#model.activeTabId,
-						),
-					renderPreview: (projection, width) => this.#inspectorRenderer.renderProjection(projection, width),
-					height: () => this.#computeBodyHeight(),
-					requestComponentRender: () => this.onRequestComponentRender?.(this),
-					layout: "columns",
-					tableRatio: 0.55,
-					emptyMessage: "No extensions found for this provider.",
-					previewEmptyMessage: "Select an extension to inspect it",
-				}),
-			),
+		// Calculate max visible items based on terminal height
+		// Reserve ~10 lines for header, tabs, help text, borders
+		const maxVisible = this.#maxVisibleItems();
+
+		// Create main list - always focused
+		this.#mainList = new ExtensionList(
+			this.#state.searchFiltered,
+			{
+				onSelectionChange: ext => {
+					this.#state.selected = ext;
+					this.#inspector.setExtension(ext);
+				},
+				onToggle: (extensionId, enabled) => {
+					this.#handleExtensionToggle(extensionId, enabled);
+				},
+				onMasterToggle: providerId => {
+					this.#handleProviderToggle(providerId);
+				},
+				masterSwitchProvider: this.#getActiveProviderId(),
+			},
+			maxVisible,
 		);
-		this.#applyProjection();
+		this.#mainList.setFocused(true);
+
+		// Create inspector
+		this.#inspector = new InspectorPanel();
+		if (this.#state.selected) {
+			this.#inspector.setExtension(this.#state.selected);
+		}
+
 		this.#buildLayout();
 	}
 
-	get initialModel(): ExtensionDashboardModel {
-		return this.#model;
-	}
-
-	/** Applies one model committed by the route runtime. */
-	apply(model: ExtensionDashboardModel): void {
-		if (this.#disposed) return;
-		this.#model = model;
-		this.#applyProjection();
-		this.#buildLayout();
-		this.onRequestComponentRender?.(this);
+	#getActiveProviderId(): string | null {
+		const tab = this.#state.tabs[this.#state.activeTabIndex];
+		return tab && tab.id !== "all" ? tab.id : null;
 	}
 
 	/** Live terminal height so the dashboard tracks resize while open. */
@@ -144,115 +130,275 @@ export class ExtensionDashboard extends Container {
 		return Math.max(1, wrapTextWithAnsi(this.#footer(), this.#uiWidth()).length);
 	}
 
+	/** Height budget for the two-column body, sized to the live terminal. */
 	#computeBodyHeight(): number {
+		// Chrome: top border + title + tab bar + spacer (4), then spacer + footer + bottom border.
 		const chrome = 4 + 1 + this.#footerLines() + 1;
 		return Math.max(5, this.#terminalRows() - chrome);
 	}
 
 	#maxVisibleItems(): number {
+		// List chrome inside the body: search line, blank line, scroll indicator.
 		return Math.max(3, this.#computeBodyHeight() - 3);
 	}
 
 	override render(width: number): readonly string[] {
-		if (this.#disposed && this.#committedRender !== undefined) return this.#committedRender;
-		if (this.#terminalRows() !== this.#builtRows || this.#uiWidth() !== this.#builtCols) this.#buildLayout();
-		const lines = super.render(width);
-		const rows = this.#terminalRows();
-		if (lines.length >= rows) {
-			this.#committedRender = lines;
-			return lines;
+		// Rebuild when terminal geometry changes so the full-screen overlay
+		// re-fits on resize.
+		if (this.#terminalRows() !== this.#builtRows || this.#uiWidth() !== this.#builtCols) {
+			this.#buildLayout();
 		}
+		const lines = super.render(width);
+		// Pad to the full viewport so the dashboard covers the screen instead of
+		// letting the transcript peek through below it. Copy before padding — the
+		// container's render result is component-owned and must not be mutated.
+		const rows = this.#terminalRows();
+		if (lines.length >= rows) return lines;
 		const padded = lines.slice();
 		while (padded.length < rows) padded.push("");
-		this.#committedRender = padded;
 		return padded;
 	}
 
 	#buildLayout(): void {
 		this.clear();
+
+		// Top border
 		this.addChild(new DynamicBorder());
+
+		// Title
 		this.addChild(new Text(theme.bold(theme.fg("accent", " Extension Control Center")), 0, 0));
+
+		// Tab bar
 		this.addChild(new Text(this.#renderTabBar(), 0, 0));
 		this.addChild(new Spacer(1));
-		if (this.#model.loadState === "Failed") {
-			this.addChild(new Text(theme.fg("error", `Refresh failed: ${this.#model.loadError ?? "Unknown error"}`), 0, 0));
-		} else {
-			this.addChild(this.#table);
-		}
+
+		// 2-column body sized to fill the live terminal viewport.
+		const bodyMaxHeight = this.#computeBodyHeight();
+		this.#mainList.setMaxVisible(this.#maxVisibleItems());
+		this.addChild(new TwoColumnBody(this.#mainList, this.#inspector, bodyMaxHeight));
+
 		this.addChild(new Spacer(1));
 		this.addChild(new Text(this.#footer(), 0, 0));
+
+		// Bottom border
 		this.addChild(new DynamicBorder());
 		this.#builtRows = this.#terminalRows();
 		this.#builtCols = this.#uiWidth();
 	}
 
 	#renderTabBar(): string {
-		return [" ", ...this.#model.tabs.map((tab, index) => {
-			const active = tab.id === this.#model.activeTabId;
-			const label = `${tab.label}${tab.count > 0 ? ` (${tab.count})` : ""}`;
-			const display = !tab.enabled && tab.id !== "all" ? `${theme.status.disabled} ${label}` : label;
-			if (active) return theme.bg("selectedBg", ` ${display} `);
-			if (!tab.enabled || (tab.count === 0 && tab.id !== "all")) return theme.fg("dim", ` ${display} `);
-			return theme.fg("muted", ` ${label} `);
-		})].join("");
-	}
+		const parts: string[] = [" "];
 
-	#applyProjection(): void {
-		if (!this.#table) return;
-		const allRows = projectExtensionRows(this.#model);
-		const maxVisible = this.#maxVisibleItems();
-		const start = Math.max(0, Math.min(this.#model.viewportOffset, allRows.length));
-		const visibleRows = allRows.slice(start, start + maxVisible).map(row => {
-			const rendered = this.#toListRow(row);
-			return { key: rendered.key, row: rendered };
-		});
-		const selected = this.#model.selectedKey?.startsWith("provider:")
-			? null
-			: this.#model.extensions.find(extension => extension.id === this.#model.selectedKey) ?? null;
-		this.#table.apply({
-			visibleRows,
-			selectedKey: this.#model.selectedKey,
-			focus: this.#model.mode === "PreviewFocus" ? "preview" : "table",
-			query: this.#model.query,
-			preview: {
-				revision: this.#model.sourceRevision,
-				value: { extension: selected },
-			},
-			dirtyKeys: new Set(visibleRows.map(row => row.key)),
-		});
-	}
+		for (let i = 0; i < this.#state.tabs.length; i++) {
+			const tab = this.#state.tabs[i];
+			const isActive = i === this.#state.activeTabIndex;
+			const isEmpty = tab.count === 0 && tab.id !== "all";
+			const isDisabled = !tab.enabled && tab.id !== "all";
 
-	#toListRow(row: ExtensionProjectionRow): ExtensionListRow {
-		switch (row._tag) {
-			case "Master":
-				return {
-					_tag: "Master",
-					key: row.key,
-					providerId: row.providerId ?? this.#model.activeTabId,
-					providerName: row.providerName ?? this.#model.activeTabId,
-					enabled: row.enabled ?? false,
-				};
-			case "Kind":
-				return {
-					_tag: "Kind",
-					key: row.key,
-					kind: row.kind!,
-					label: row.label ?? row.kind!,
-					icon: row.icon ?? "•",
-					count: row.count ?? 0,
-				};
-			case "Extension":
-				return { _tag: "Extension", key: row.key, extension: row.extension! };
+			// Build label with count
+			let label = tab.label;
+			if (tab.count > 0) {
+				label += ` (${tab.count})`;
+			}
+
+			const displayLabel = isDisabled ? `${theme.status.disabled} ${label}` : label;
+
+			if (isActive) {
+				// Active tab: background highlight
+				parts.push(theme.bg("selectedBg", ` ${displayLabel} `));
+			} else if (isDisabled) {
+				// Disabled provider: dim
+				parts.push(theme.fg("dim", ` ${displayLabel} `));
+			} else if (isEmpty) {
+				// Empty enabled provider: very dim, unselectable
+				parts.push(theme.fg("dim", ` ${label} `));
+			} else {
+				// Normal enabled provider
+				parts.push(theme.fg("muted", ` ${label} `));
+			}
 		}
+
+		return parts.join("");
 	}
 
+	#handleProviderToggle(providerId: string): void {
+		toggleProvider(providerId);
+		void this.#refreshFromState();
+	}
 
+	#handleExtensionToggle(extensionId: string, enabled: boolean): void {
+		const sm = this.settings ?? Settings.instance;
+		if (!sm) return;
 
-	async dispose(): Promise<void> {
-		if (this.#disposed) return;
-		this.#committedRender ??= this.render(this.#uiWidth());
-		this.#disposed = true;
-		await Effect.runPromise(Scope.close(this.#scope, Exit.void));
+		const disabled = ((sm.get("disabledExtensions") as string[]) ?? []).slice();
+		if (enabled) {
+			const index = disabled.indexOf(extensionId);
+			if (index !== -1) {
+				disabled.splice(index, 1);
+				sm.set("disabledExtensions", disabled);
+			}
+		} else {
+			if (!disabled.includes(extensionId)) {
+				disabled.push(extensionId);
+				sm.set("disabledExtensions", disabled);
+			}
+		}
+
+		this.#applyDisabledExtensions(disabled);
+		void this.#refreshFromState();
+	}
+
+	async #refreshFromState(): Promise<void> {
+		const refreshToken = ++this.#refreshToken;
+		// Remember current tab ID before refresh
+		const currentTabId = this.#state.tabs[this.#state.activeTabIndex]?.id;
+
+		const sm = this.settings ?? Settings.instance;
+		const disabledIds = sm ? ((sm.get("disabledExtensions") as string[]) ?? []) : [];
+		const nextState = await refreshState(this.#state, this.cwd, disabledIds);
+		if (refreshToken !== this.#refreshToken) return;
+		this.#state = nextState;
+
+		// Find the same tab in the new (re-sorted) list
+		if (currentTabId) {
+			const newIndex = this.#state.tabs.findIndex(t => t.id === currentTabId);
+			if (newIndex >= 0) {
+				this.#state.activeTabIndex = newIndex;
+			}
+		}
+
+		this.#mainList.setExtensions(this.#state.searchFiltered);
+		this.#mainList.setMasterSwitchProvider(this.#getActiveProviderId());
+
+		if (this.#state.selected) {
+			this.#inspector.setExtension(this.#state.selected);
+		}
+
+		this.#buildLayout();
+		this.onRequestRender?.();
+	}
+
+	#applyDisabledExtensions(disabledIds: string[]): void {
+		this.#state = applyDisabledExtensionsToState(this.#state, disabledIds);
+		this.#mainList.setExtensions(this.#state.searchFiltered);
+		if (this.#state.selected) {
+			this.#inspector.setExtension(this.#state.selected);
+		}
+		this.#buildLayout();
+		this.onRequestRender?.();
+	}
+
+	#switchTab(direction: 1 | -1): void {
+		const numTabs = this.#state.tabs.length;
+		if (numTabs === 0) return;
+
+		// Find next selectable tab (skip empty+enabled providers)
+		let nextIndex = this.#state.activeTabIndex;
+		for (let i = 0; i < numTabs; i++) {
+			nextIndex = (nextIndex + direction + numTabs) % numTabs;
+			const tab = this.#state.tabs[nextIndex];
+			const isEmptyEnabled = tab.count === 0 && tab.enabled && tab.id !== "all";
+			if (!isEmptyEnabled) break;
+		}
+		this.#state.activeTabIndex = nextIndex;
+
+		// Re-filter for new tab
+		const tab = this.#state.tabs[this.#state.activeTabIndex];
+		this.#state.tabFiltered = filterByProvider(this.#state.extensions, tab.id);
+		this.#state.searchFiltered = applyFilter(this.#state.tabFiltered, this.#state.searchQuery);
+		this.#state.listIndex = 0;
+		this.#state.scrollOffset = 0;
+		this.#state.selected = this.#state.searchFiltered[0] ?? null;
+
+		// Update list
+		this.#mainList.setExtensions(this.#state.searchFiltered);
+		this.#mainList.setMasterSwitchProvider(this.#getActiveProviderId());
+		this.#mainList.resetSelection();
+
+		if (this.#state.selected) {
+			this.#inspector.setExtension(this.#state.selected);
+		}
+
+		this.#buildLayout();
+	}
+
+	handleInput(data: string): void {
+		// Ctrl+C - close immediately
+		if (matchesKey(data, "ctrl+c")) {
+			this.onClose?.();
+			return;
+		}
+
+		// Dismiss clears search first, then closes
+		if (matchesUiDismiss(data)) {
+			if (this.#state.searchQuery.length > 0) {
+				this.#state.searchQuery = "";
+				this.#state.searchFiltered = this.#state.tabFiltered;
+				this.#mainList.setExtensions(this.#state.searchFiltered);
+				this.#mainList.clearSearch();
+				this.#buildLayout();
+				return;
+			}
+			this.onClose?.();
+			return;
+		}
+
+		// Tab/Shift+Tab or Left/Right: Cycle through tabs
+		if (matchesKey(data, "tab") || matchesKey(data, "right")) {
+			this.#switchTab(1);
+			return;
+		}
+		if (matchesKey(data, "shift+tab") || matchesKey(data, "left")) {
+			this.#switchTab(-1);
+			return;
+		}
+
+		// All other input goes to the list
+		this.#mainList.handleInput(data);
+
+		// Sync search query back to state
+		const query = this.#mainList.getSearchQuery();
+		if (query !== this.#state.searchQuery) {
+			this.#state.searchQuery = query;
+			this.#state.searchFiltered = applyFilter(this.#state.tabFiltered, query);
+		}
 	}
 }
 
+/**
+ * Two-column body component for side-by-side rendering.
+ */
+class TwoColumnBody implements Component {
+	constructor(
+		private readonly leftPane: ExtensionList,
+		private readonly rightPane: InspectorPanel,
+		private readonly maxHeight: number,
+	) {}
+
+	render(width: number): readonly string[] {
+		const leftWidth = Math.floor(width * 0.5);
+		const rightWidth = Math.max(0, width - leftWidth - 3);
+
+		const leftLines = this.leftPane.render(leftWidth);
+		const rightLines = this.rightPane.render(rightWidth);
+
+		// Fill the full body height so the dashboard reads as a full-screen view.
+		const numLines = this.maxHeight;
+		const combined: string[] = [];
+		const separator = theme.fg("dim", ` ${theme.boxSharp.vertical} `);
+
+		for (let i = 0; i < numLines; i++) {
+			const left = truncateToWidth(leftLines[i] ?? "", leftWidth);
+			const leftPadded = left + padding(Math.max(0, leftWidth - visibleWidth(left)));
+			const right = truncateToWidth(rightLines[i] ?? "", rightWidth);
+			combined.push(leftPadded + separator + right);
+		}
+
+		return combined;
+	}
+
+	invalidate(): void {
+		this.leftPane.invalidate?.();
+		this.rightPane.invalidate?.();
+	}
+}

@@ -1,42 +1,32 @@
-import * as Effect from "effect/Effect";
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
-import { MVU_KEYMAP_TABLES } from "@oh-my-pi/pi-coding-agent/config/mvu-keybindings";
-import { KeybindingsManager } from "@oh-my-pi/pi-coding-agent/config/keybindings";
-import { compileKeymapRegistry } from "@oh-my-pi/pi-coding-agent/modes/mvu/keymap-registry";
-import { makeTerminalInputAdapter } from "@oh-my-pi/pi-coding-agent/modes/mvu/input-adapter";
+import { beforeAll, describe, expect, it } from "bun:test";
 import { HistorySearchComponent } from "@oh-my-pi/pi-coding-agent/modes/components/history-search";
 import { initTheme, theme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
-import { HistoryStorage } from "@oh-my-pi/pi-coding-agent/session/history-storage";
-import * as fs from "node:fs/promises";
-import * as os from "node:os";
-import * as path from "node:path";
+import type { HistoryEntry, HistoryStorage } from "@oh-my-pi/pi-coding-agent/session/history-storage";
 
-beforeAll(() => {
-	initTheme();
+beforeAll(async () => {
+	await initTheme();
 });
 
-const tempDirs: string[] = [];
+const NOW_SECONDS = Math.floor(Date.now() / 1000);
 
-beforeEach(() => {
-	HistoryStorage.resetInstance();
-	vi.useFakeTimers();
-});
+function makeEntry(id: number, prompt: string, ageSeconds = 0): HistoryEntry {
+	return { id, prompt, created_at: NOW_SECONDS - ageSeconds };
+}
 
-afterEach(async () => {
-	HistoryStorage.resetInstance();
-	vi.useRealTimers();
-	await Promise.all(tempDirs.splice(0).map(dir => fs.rm(dir, { recursive: true, force: true })));
-});
-
-async function makeStorage(prompts: string[]): Promise<HistoryStorage> {
-	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-history-selector-"));
-	tempDirs.push(dir);
-	HistoryStorage.resetInstance();
-	const storage = HistoryStorage.open(path.join(dir, "history.db"));
-	const writes = prompts.map(prompt => storage.add(prompt));
-	vi.advanceTimersByTime(100);
-	await Promise.all(writes);
-	return storage;
+/** Minimal in-memory stand-in matching the two methods the component touches. */
+function fakeStorage(entries: HistoryEntry[]): HistoryStorage {
+	const tokenize = (q: string) =>
+		q
+			.toLowerCase()
+			.split(/[^\p{L}\p{N}]+/u)
+			.filter(Boolean);
+	return {
+		getRecent: (limit: number) => entries.slice(0, limit),
+		search: (query: string, limit: number) => {
+			const tokens = tokenize(query);
+			return entries.filter(e => tokens.every(t => e.prompt.toLowerCase().includes(t))).slice(0, limit);
+		},
+	} as unknown as HistoryStorage;
 }
 
 function render(component: HistorySearchComponent, width = 80): { raw: string; plain: string } {
@@ -45,40 +35,14 @@ function render(component: HistorySearchComponent, width = 80): { raw: string; p
 	return { raw, plain: Bun.stripANSI(raw) };
 }
 
-function driveRoute(component: HistorySearchComponent): (sequence: string) => void {
-	const spec = component.mountSpec;
-	const adapter = makeTerminalInputAdapter();
-	const registry = Effect.runSync(compileKeymapRegistry(MVU_KEYMAP_TABLES, KeybindingsManager.inMemory()));
-	let model = spec.initialModel;
-	return sequence => {
-		const event = adapter.decode(sequence);
-		if (event === undefined || (event._tag !== "Press" && event._tag !== "Release")) {
-			throw new Error(`Expected a decoded key event for ${JSON.stringify(sequence)}`);
-		}
-		const action = registry.resolve(spec.route.context(model), event.key);
-		if (action === undefined) throw new Error(`Unmapped history key ${JSON.stringify(sequence)}`);
-		const envelope = spec.route.actionToMsg(action, event);
-		if (envelope === undefined) throw new Error(`Unmapped history action ${String(action)}`);
-		const pending = [envelope];
-		while (pending.length > 0) {
-			const message = pending.shift()!;
-			const transition = spec.update(model, message);
-			model = transition.model;
-			for (const command of transition.commands) pending.push(...Effect.runSync(spec.interpret(command)));
-		}
-	};
-}
-
-function filter(component: HistorySearchComponent, query: string): void {
-	const dispatch = driveRoute(component);
-	dispatch("/");
-	for (const character of query) dispatch(character);
+function type(component: HistorySearchComponent, text: string): void {
+	for (const char of text) component.handleInput(char);
 }
 
 describe("HistorySearchComponent", () => {
-	it("paints the selected row with the selectedBg highlight bar and a relative timestamp", async () => {
+	it("paints the selected row with the selectedBg highlight bar and a relative timestamp", () => {
 		const component = new HistorySearchComponent(
-			await makeStorage(["older prompt", "deploy the release"]),
+			fakeStorage([makeEntry(1, "deploy the release"), makeEntry(2, "older prompt", 7200)]),
 			() => {},
 			() => {},
 		);
@@ -86,33 +50,43 @@ describe("HistorySearchComponent", () => {
 		const { raw, plain } = render(component);
 
 		expect(plain).toContain("deploy the release");
+		// First (default-selected) row carries the selection background.
 		const selectedRow = raw.split("\n").find(line => line.includes("deploy the release"));
-		expect(selectedRow).toBeDefined();
 		expect(selectedRow).toContain(theme.getBgAnsi("selectedBg"));
+		// Fresh entry renders the compact "now" age marker.
 		expect(plain).toContain("now");
 	});
 
-	it("highlights the matched query tokens within results", async () => {
+	it("highlights the matched query tokens within results", () => {
 		const component = new HistorySearchComponent(
-			await makeStorage(["deploy the needle rollback", "routine status update"]),
+			fakeStorage([makeEntry(1, "deploy the needle rollback"), makeEntry(2, "routine status update")]),
 			() => {},
 			() => {},
 		);
 
-		filter(component, "needle");
+		type(component, "needle");
 
 		const { raw, plain } = render(component);
 		expect(plain).toContain("deploy the needle rollback");
 		expect(plain).not.toContain("routine status update");
+		// The matched substring is wrapped in the accent color.
 		expect(raw).toContain(theme.fg("accent", "needle"));
 	});
 
-	it("distinguishes an empty query from an unmatched query", async () => {
-		const empty = new HistorySearchComponent(await makeStorage([]), () => {}, () => {});
+	it("distinguishes an empty query from an unmatched query", () => {
+		const empty = new HistorySearchComponent(
+			fakeStorage([]),
+			() => {},
+			() => {},
+		);
 		expect(render(empty).plain).toContain("No history yet");
 
-		const unmatched = new HistorySearchComponent(await makeStorage(["deploy the release"]), () => {}, () => {});
-		filter(unmatched, "zzzz");
+		const unmatched = new HistorySearchComponent(
+			fakeStorage([makeEntry(1, "deploy the release")]),
+			() => {},
+			() => {},
+		);
+		type(unmatched, "zzzz");
 		expect(render(unmatched).plain).toContain("No matching history");
 	});
 });

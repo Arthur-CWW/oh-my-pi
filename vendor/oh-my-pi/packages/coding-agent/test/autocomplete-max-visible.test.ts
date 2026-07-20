@@ -7,7 +7,6 @@ import { SelectorController } from "@oh-my-pi/pi-coding-agent/modes/controllers/
 import { getProjectAgentDir, Snowflake } from "@oh-my-pi/pi-utils";
 import { YAML } from "bun";
 import { beginSettingsTest, restoreSettingsTestState, type SettingsTestState } from "./helpers/settings-test-state";
-import { withControllerFixture } from "./helpers/controller-fixture";
 
 describe("autocompleteMaxVisible setting", () => {
 	let settingsState: SettingsTestState | undefined;
@@ -62,21 +61,15 @@ describe("autocompleteMaxVisible setting", () => {
 		expect(settings.get("autocompleteMaxVisible")).toBe(20);
 	});
 
-	it("should coerce submenu string values for live editor updates", async () => {
-		await withControllerFixture(fixture => {
-			const setAutocompleteMaxVisible = vi.fn();
-			const controller = new SelectorController(
-				{
-					editor: { setAutocompleteMaxVisible },
-				} as unknown as ConstructorParameters<typeof SelectorController>[0],
-				fixture.getInputLeaseManager,
-				fixture.scope,
-			);
+	it("should coerce submenu string values for live editor updates", () => {
+		const setAutocompleteMaxVisible = vi.fn();
+		const controller = new SelectorController({
+			editor: { setAutocompleteMaxVisible },
+		} as unknown as ConstructorParameters<typeof SelectorController>[0]);
 
-			controller.handleSettingChange("autocompleteMaxVisible", "10");
+		controller.handleSettingChange("autocompleteMaxVisible", "10");
 
-			expect(setAutocompleteMaxVisible).toHaveBeenCalledWith(10);
-		});
+		expect(setAutocompleteMaxVisible).toHaveBeenCalledWith(10);
 	});
 
 	it("should work with isolated instances", () => {

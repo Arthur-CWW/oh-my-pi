@@ -1,7 +1,6 @@
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { pressHub } from "./helpers/agent-hub-input";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { IrcBus } from "@oh-my-pi/pi-coding-agent/irc/bus";
@@ -113,8 +112,8 @@ async function fixture(
 		onDone,
 		requestRender: () => {},
 	});
-	pressHub(hub, "n");
-	pressHub(hub, "p");
+	hub.handleInput("n");
+	hub.handleInput("p");
 	return {
 		hub,
 		registry,
@@ -268,8 +267,8 @@ describe("Agent Hub live token rate preview", () => {
 	it("keeps the cockpit preview read-only when i or printable text is pressed", async () => {
 		const view = await fixture();
 		try {
-			pressHub(view.hub, "i");
-			for (const character of "EDITOR_SENTINEL") pressHub(view.hub, character);
+			view.hub.handleInput("i");
+			for (const character of "EDITOR_SENTINEL") view.hub.handleInput(character);
 			const preview = renderText(view.hub, 160);
 			expect(preview).not.toContain("INPUT");
 			expect(preview).not.toContain("EDITOR_SENTINEL");
@@ -291,16 +290,16 @@ describe("Agent Hub live token rate preview", () => {
 	it("exits empty roster search with Backspace or Esc", async () => {
 		const view = await fixture();
 		try {
-			pressHub(view.hub, "/");
-			for (const character of "Rate") pressHub(view.hub, character);
-			for (let index = 0; index < 4; index++) pressHub(view.hub, "\x7f");
+			view.hub.handleInput("/");
+			for (const character of "Rate") view.hub.handleInput(character);
+			for (let index = 0; index < 4; index++) view.hub.handleInput("\x7f");
 			expect(renderText(view.hub)).toContain("/▏");
-			pressHub(view.hub, "\x7f");
+			view.hub.handleInput("\x7f");
 			expect(renderText(view.hub)).not.toContain("/▏");
 
-			pressHub(view.hub, "/");
-			pressHub(view.hub, "x");
-			pressHub(view.hub, "\u001b");
+			view.hub.handleInput("/");
+			view.hub.handleInput("x");
+			view.hub.handleInput("\u001b");
 			expect(renderText(view.hub)).not.toContain("/x");
 			expect(view.onDone).not.toHaveBeenCalled();
 		} finally {
@@ -311,18 +310,18 @@ describe("Agent Hub live token rate preview", () => {
 	it("opens agent pages read-only and Esc exits one level", async () => {
 		const view = await fixture();
 		try {
-			pressHub(view.hub, "\r");
+			view.hub.handleInput("\r");
 			const opened = renderText(view.hub);
 			expect(opened).not.toContain("i:input");
 			expect(opened).not.toContain("Ctrl+Enter");
-			pressHub(view.hub, "i");
-			pressHub(view.hub, "x");
+			view.hub.handleInput("i");
+			view.hub.handleInput("x");
 			expect(renderText(view.hub)).not.toContain("DRAFT_IN_INPUT");
 
-			pressHub(view.hub, "\u001b");
+			view.hub.handleInput("\u001b");
 			expect(renderText(view.hub)).toContain("Agent Hub · tree");
 			expect(view.onDone).not.toHaveBeenCalled();
-			pressHub(view.hub, "\u001b");
+			view.hub.handleInput("\u001b");
 			expect(view.onDone).toHaveBeenCalledTimes(1);
 		} finally {
 			await view.dispose();
@@ -332,7 +331,7 @@ describe("Agent Hub live token rate preview", () => {
 	it("lists read-only scrolling, search, cycling, and rich/plain bindings in the keymap overlay", async () => {
 		const view = await fixture();
 		try {
-			pressHub(view.hub, "?");
+			view.hub.handleInput("?");
 			const legend = renderText(view.hub);
 			expect(legend).toContain("/ search");
 			expect(legend).toContain("J scroll five lines down");

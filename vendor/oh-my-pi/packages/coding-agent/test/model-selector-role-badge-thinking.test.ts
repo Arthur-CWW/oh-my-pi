@@ -1,18 +1,12 @@
-import { afterEach, beforeAll, describe, expect, test, vi } from "bun:test";
+import { beforeAll, describe, expect, test, vi } from "bun:test";
 import { stripVTControlCharacters } from "node:util";
-import { Effect, Exit, Scope, SubscriptionRef } from "effect";
 import type { Model } from "@oh-my-pi/pi-ai";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
-import { KeybindingsManager } from "@oh-my-pi/pi-coding-agent/config/keybindings";
-import { MVU_KEYMAP_TABLES } from "@oh-my-pi/pi-coding-agent/config/mvu-keybindings";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { classifyModelSelectorItem } from "@oh-my-pi/pi-coding-agent/modes/components/model-selector-availability";
 import { ModelSelectorComponent } from "@oh-my-pi/pi-coding-agent/modes/components/model-selector";
-import { makeTerminalInputAdapter } from "@oh-my-pi/pi-coding-agent/modes/mvu/input-adapter";
-import { compileKeymapRegistry } from "@oh-my-pi/pi-coding-agent/modes/mvu/keymap-registry";
-import { mountMvuRuntime } from "@oh-my-pi/pi-coding-agent/modes/mvu/runtime";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { getThemeByName, setThemeInstance } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import type { TUI } from "@oh-my-pi/pi-tui";
@@ -114,85 +108,6 @@ function installTestTheme(): void {
 	setThemeInstance(testTheme);
 }
 
-type ModelSelectorDriver = {
-	readonly press: (sequence: string) => Promise<void>;
-	readonly close: () => Promise<void>;
-};
-
-const modelSelectorDrivers = new WeakMap<ModelSelectorComponent, ModelSelectorDriver>();
-const activeModelSelectorDrivers = new Set<ModelSelectorDriver>();
-
-const runIn = <A, E>(scope: Scope.Scope, effect: Effect.Effect<A, E, Scope.Scope>): Promise<A> =>
-	Effect.runPromise(Scope.provide(scope)(effect));
-
-async function makeModelSelectorDriver(
-	selector: ModelSelectorComponent,
-	keybindings: KeybindingsManager,
-): Promise<ModelSelectorDriver> {
-	const spec = selector.mountSpec;
-	const adapter = makeTerminalInputAdapter();
-	const keymap = Effect.runSync(compileKeymapRegistry(MVU_KEYMAP_TABLES, keybindings));
-	const scope = Scope.makeUnsafe("sequential");
-	const runtime = await runIn(
-		scope,
-		mountMvuRuntime({
-			componentId: spec.componentId,
-			initialModel: spec.initialModel,
-			update: spec.update,
-			interpret: spec.interpret,
-			boundary: spec.boundary,
-			inputCapacity: 16,
-			messageCapacity: 16,
-			commandCapacity: 16,
-		}),
-	);
-	let closed = false;
-	const driver: ModelSelectorDriver = {
-		press: async sequence => {
-			const event = adapter.decode(sequence);
-			if (event === undefined || (event._tag !== "Press" && event._tag !== "Release")) {
-				throw new Error(`Expected a decoded key event for ${JSON.stringify(sequence)}`);
-			}
-			const model = await runIn(scope, SubscriptionRef.get(runtime.model));
-			const action = keymap.resolve(spec.route.context(model), event.key);
-			if (action === undefined) throw new Error(`Unmapped model selector key ${JSON.stringify(sequence)}`);
-			const envelope = spec.route.actionToMsg(action, event);
-			if (envelope === undefined) throw new Error(`Unmapped model selector action ${String(action)}`);
-			await runIn(scope, runtime.dispatch(envelope));
-			await runIn(scope, Effect.sleep("10 millis"));
-		},
-		close: async () => {
-			if (closed) return;
-			closed = true;
-			await Effect.runPromise(Scope.close(scope, Exit.void));
-		},
-	};
-	activeModelSelectorDrivers.add(driver);
-	return driver;
-}
-
-async function dispatchModelSelector(
-	selector: ModelSelectorComponent,
-	sequence: string,
-	keybindings = KeybindingsManager.inMemory(),
-): Promise<void> {
-	let driver = modelSelectorDrivers.get(selector);
-	if (driver === undefined) {
-		driver = await makeModelSelectorDriver(selector, keybindings);
-		modelSelectorDrivers.set(selector, driver);
-	}
-	await driver.press(sequence);
-}
-
-async function closeModelSelectorDrivers(): Promise<void> {
-	const drivers = [...activeModelSelectorDrivers];
-	activeModelSelectorDrivers.clear();
-	await Promise.all(drivers.map(driver => driver.close()));
-}
-
-afterEach(closeModelSelectorDrivers);
-
-
 describe("ModelSelector role badge thinking display", () => {
 	beforeAll(async () => {
 		testTheme = await getThemeByName("dark");
@@ -250,12 +165,11 @@ describe("ModelSelector role badge thinking display", () => {
 		expect(rendered).toContain("custom-fast (low)");
 		expect(rendered).toContain("SMOL (inherit)");
 
-		await dispatchModelSelector(selector, "\n");
+		selector.handleInput("\n");
 		installTestTheme();
 		const menuRendered = normalizeRenderedText(selector.render(220).join("\n"));
 		expect(menuRendered).toContain("Set as custom-fast");
 		expect(menuRendered).toContain("Set as SMOL (Quick)");
-		expect(menuRendered).toContain("Set as SLOW (Thinking)");
 	});
 
 	test("shows compact auto badges for unconfigured role defaults", async () => {
@@ -292,7 +206,7 @@ describe("ModelSelector role badge thinking display", () => {
 		expect(rendered).toContain("a-small");
 		expect(rendered).toContain("⚠ context 6k > 4.1k — will compact on switch");
 
-		await dispatchModelSelector(selector, "\n");
+		selector.handleInput("\n");
 		expect(selected).toEqual(["a-small"]);
 	});
 
@@ -312,29 +226,26 @@ describe("ModelSelector role badge thinking display", () => {
 
 		try {
 			for (const id of ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]) {
-				const registryModel = modelRegistry.find("openai-codex", id);
-				if (!registryModel || registryModel.contextWindow === null) throw new Error(`Expected authoritative registry model context openai-codex/${id}`);
-				const currentContextTokens = registryModel.contextWindow + 1;
 				const selected: string[] = [];
 				const selector = createScopedSelector([], Settings.isolated({}), model => selected.push(model.id), {
 					modelRegistry,
 					temporaryOnly: true,
 					initialSearchInput: id,
-					currentContextTokens,
+					currentContextTokens: 1_050_001,
 				});
 				await Bun.sleep(0);
 				installTestTheme();
 
 				const rendered = normalizeRenderedText(selector.render(220).join("\n"));
 				const expectedWarning = classifyModelSelectorItem({
-					currentContextTokens,
-					contextWindow: registryModel.contextWindow,
+					currentContextTokens: 1_050_001,
+					contextWindow: 1_050_000,
 				}).contextWarning;
 				expect(expectedWarning).toBeDefined();
 				expect(expectedWarning).toContain(" > ");
 				expect(rendered).toContain(id);
 				expect(rendered).toContain(expectedWarning!);
-				await dispatchModelSelector(selector, "\n");
+				selector.handleInput("\n");
 				expect(selected).toEqual([id]);
 			}
 		} finally {
@@ -357,13 +268,13 @@ describe("ModelSelector role badge thinking display", () => {
 		expect(rendered).toContain("only-small");
 		expect(rendered).toContain("context 6k > 4.1k — will compact on switch");
 
-		await dispatchModelSelector(selector, "\n");
+		selector.handleInput("\n");
 		const afterEnter = normalizeRenderedText(selector.render(220).join("\n"));
 		expect(afterEnter).toContain("Action for");
 		expect(onSelect).not.toHaveBeenCalled();
 	});
 
-	test("uses cached models for Enter while offline refresh is still pending", async () => {
+	test("uses cached models for Enter while offline refresh is still pending", () => {
 		installTestTheme();
 		const settings = Settings.isolated({});
 		const cachedModel = createContextTestModel("cached-fast", 128_000);
@@ -401,7 +312,7 @@ describe("ModelSelector role badge thinking display", () => {
 			{ temporaryOnly: true },
 		);
 
-		await dispatchModelSelector(selector, "\n");
+		selector.handleInput("\n");
 		expect(onSelect).toHaveBeenCalledWith("cached-fast");
 		expect(modelRegistry.refresh).toHaveBeenCalledTimes(1);
 		refreshGate.resolve();
@@ -450,12 +361,12 @@ describe("ModelSelector role badge thinking display", () => {
 
 		// Highlight the second entry, then let the pending refresh land a model
 		// that sorts ahead of it and shifts every index.
-		await dispatchModelSelector(selector, "\x1b[B");
+		selector.handleInput("\x1b[B");
 		availableModels = [modelAa, modelBb, modelCc];
 		refreshGate.resolve();
 		await Bun.sleep(0);
 
-		await dispatchModelSelector(selector, "\n");
+		selector.handleInput("\n");
 		expect(onSelect).toHaveBeenCalledWith("cc-model");
 	});
 
@@ -512,8 +423,8 @@ describe("ModelSelector role badge thinking display", () => {
 		const initialRendered = normalizeRenderedText(selector.render(220).join("\n"));
 		expect(initialRendered).toContain("OLLAMA CLOUD");
 
-		await dispatchModelSelector(selector, "\t");
-		await dispatchModelSelector(selector, "\t");
+		selector.handleInput("\t");
+		selector.handleInput("\t");
 		await Bun.sleep(125);
 		installTestTheme();
 
@@ -579,8 +490,8 @@ describe("ModelSelector role badge thinking display", () => {
 		await Bun.sleep(0);
 		installTestTheme();
 
-		await dispatchModelSelector(selector, "\t");
-		await dispatchModelSelector(selector, "\t");
+		selector.handleInput("\t");
+		selector.handleInput("\t");
 
 		// Core regression: tab switch must not synchronously enter provider refresh.
 		expect(refreshProvider).not.toHaveBeenCalled();

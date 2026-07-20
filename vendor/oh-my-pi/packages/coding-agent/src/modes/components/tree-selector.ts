@@ -1,884 +1,997 @@
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
-import { type Component, type Keybinding, truncateToWidth } from "@oh-my-pi/pi-tui";
-import { makeComponentId, type ActiveKeymapContext, type ComponentId, type KeyEvent } from "../mvu/schema";
-import { makeTreeModel, type TreeCommand, type TreeModel, type TreeMsg, updateTree, viewTree } from "../mvu/tree";
-import type { Viewport } from "../mvu/keyed-view";
+import {
+	type Component,
+	Container,
+	extractPrintableText,
+	fuzzyMatch,
+	Input,
+	matchesKey,
+	ScrollView,
+	Spacer,
+	Text,
+	TruncatedText,
+	truncateToWidth,
+} from "@oh-my-pi/pi-tui";
 import type { TreeFilterMode } from "../../config/settings-schema";
+import { theme } from "../../modes/theme/theme";
+import { matchesSelectDown, matchesSelectUp, matchesUiDismiss } from "../../modes/utils/keybinding-matchers";
 import type { SessionTreeNode } from "../../session/session-entries";
 import { shortenPath } from "../../tools/render-utils";
 import { toPathList } from "../../tools/search";
 import { canonicalizeMessage } from "../../utils/thinking-display";
-import { theme } from "../theme/theme";
+import { DynamicBorder } from "./dynamic-border";
+import { editorKey } from "./keybinding-hints";
 
-export type FilterMode = TreeFilterMode;
-
-export interface SessionTreeRow {
-	readonly id: string;
-	readonly node: SessionTreeNode;
-	readonly depth: number;
-	readonly prefix: string;
-	readonly active: boolean;
-	readonly searchText: string;
+/** Gutter info: position (displayIndent where connector was) and whether to show │ */
+interface GutterInfo {
+	position: number; // displayIndent level where the connector was shown
+	show: boolean; // true = show │, false = show spaces
 }
 
-interface SessionTreeGutter {
-	readonly position: number;
-	readonly show: boolean;
+/** Flattened tree node for navigation */
+interface FlatNode {
+	node: SessionTreeNode;
+	/** Indentation level (each level = 3 chars) */
+	indent: number;
+	/** Whether to show connector (├─ or └─) - true if parent has multiple children */
+	showConnector: boolean;
+	/** If showConnector, true = last sibling (└─), false = not last (├─) */
+	isLast: boolean;
+	/** Gutter info for each ancestor branch point */
+	gutters: GutterInfo[];
+	/** True if this node is a root under a virtual branching root (multiple roots) */
+	isVirtualRootChild: boolean;
 }
 
+/** Filter mode for tree display */
+type FilterMode = TreeFilterMode;
 
-export interface SessionTreeNavigationSettled {
-	readonly _tag: "NavigationSettled";
-	readonly targetId: string;
-	readonly requestGeneration: number;
-	readonly sourceRevision: number;
-	readonly leaseGeneration?: number;
-	readonly status: "success" | "cancelled" | "aborted" | "failed";
-	readonly editorText?: string;
-	readonly error?: string;
+/**
+ * Tree list component with selection and ASCII art visualization
+ */
+/** Tool call info for lookup */
+interface ToolCallInfo {
+	name: string;
+	arguments: Record<string, unknown>;
 }
 
-export type SessionTreeMsg = TreeMsg<string, Keybinding> | {
-	readonly _tag: "SourceReplaced";
-	readonly sourceRevision: number;
-	readonly tree: readonly SessionTreeNode[];
-	readonly currentLeafId?: string;
-} | {
-	readonly _tag: "LabelReceipt";
-	readonly entryId: string;
-	readonly label?: string;
-	readonly sourceRevision: number;
-} | SessionTreeNavigationSettled | {
-	readonly _tag: "CancelNavigation";
-};
+class TreeList implements Component {
+	#flatNodes: FlatNode[] = [];
+	#filteredNodes: FlatNode[] = [];
+	#selectedIndex = 0;
+	#filterMode: FilterMode;
+	#searchQuery = "";
+	#toolCallMap: Map<string, ToolCallInfo> = new Map();
+	#multipleRoots = false;
+	#activePathIds: Set<string> = new Set();
+	#lastSelectedId: string | null = null;
 
-export interface SessionTreeSummaryDepth {
-	readonly _tag: "SummaryChoice";
-	readonly targetId: string;
-	readonly tree: TreeModel<string>;
-}
+	onSelect?: (entryId: string) => void;
+	onCancel?: () => void;
+	onLabelEdit?: (entryId: string, currentLabel: string | undefined) => void;
 
-export interface SessionTreeCustomPromptDepth {
-	readonly _tag: "CustomPrompt";
-	readonly targetId: string;
-	readonly tree: TreeModel<string>;
-}
+	constructor(
+		tree: SessionTreeNode[],
+		private readonly currentLeafId: string | null,
+		private readonly maxVisibleLines: number,
+		initialFilterMode: FilterMode = "default",
+		initialSelectedId?: string,
+	) {
+		this.#filterMode = initialFilterMode;
+		this.#multipleRoots = tree.length > 1;
+		this.#flatNodes = this.#flattenTree(tree);
+		this.#buildActivePath();
+		this.#applyFilter();
 
-export type SessionTreeDepth = SessionTreeSummaryDepth | SessionTreeCustomPromptDepth;
-
-export type SessionTreeCommand =
-	| TreeCommand<Keybinding, string>
-	| {
-			readonly _tag: "NavigateRequested";
-			readonly targetId: string;
-			readonly summarize: boolean;
-			readonly customInstructions?: string;
-			readonly sourceRevision: number;
-			readonly requestGeneration: number;
-			readonly leaseGeneration: number;
-	  }
-	| {
-			readonly _tag: "AbortNavigation";
-			readonly requestGeneration: number;
-			readonly sourceRevision: number;
-			readonly leaseGeneration: number;
-	  }
-	| {
-			readonly _tag: "NavigationCompleted";
-			readonly targetId: string;
-			readonly status: SessionTreeNavigationSettled["status"];
-			readonly editorText?: string;
-			readonly error?: string;
-	  }
-	| { readonly _tag: "AlreadyAtPoint" };
-
-export interface SessionTreeDepthRow {
-	readonly key: string;
-	readonly label: string;
-	readonly selected: boolean;
-}
-
-export interface SessionTreePatch {
-	readonly visibleRows: readonly { readonly key: string; readonly row: SessionTreeRow }[];
-	readonly selectedKey?: string;
-	readonly query?: string;
-	readonly mode: "TreeBrowse" | "TreeFilter" | "TreePreview" | "TreeLabelEdit" | "TreeConfirm";
-	readonly labelDraft?: string;
-	readonly preview: string;
-	readonly dirtyKeys: ReadonlySet<string>;
-	readonly depth: number;
-	readonly depthRows?: readonly SessionTreeDepthRow[];
-	readonly depthQuery?: string;
-	readonly pendingNavigation?: boolean;
-	readonly totalCount: number;
-	readonly filteredCount: number;
-	readonly filterLabel: string;
-}
-
-type SessionTreeActiveModel = TreeModel<string>;
-export interface SessionTreeModel {
-	readonly tree: TreeModel<string>;
-	readonly rowsById: ReadonlyMap<string, SessionTreeRow>;
-	readonly labelsById: ReadonlyMap<string, string | undefined>;
-	readonly filterMode: FilterMode;
-	readonly branchSummaryEnabled: boolean;
-	readonly depth: readonly SessionTreeDepth[];
-	readonly requestGeneration: number;
-	readonly leaseGeneration?: number;
-	readonly currentLeafId: string | null;
-	readonly pendingNavigation?: {
-		readonly targetId: string;
-		readonly summarize: boolean;
-		readonly customInstructions?: string;
-		readonly sourceRevision: number;
-		readonly requestGeneration: number;
-		readonly leaseGeneration: number;
-	};
-}
-
-
-type SessionTreeContentBlock = {
-	readonly type: string;
-	readonly text?: string;
-};
-
-function extractContent(content: string | readonly SessionTreeContentBlock[] | undefined): string {
-	if (typeof content === "string") return content;
-	if (content === undefined) return "";
-	let result = "";
-	for (const block of content) {
-		if (block.type === "text" && block.text !== undefined) result += block.text;
+		// Start with initialSelectedId if provided, otherwise current leaf
+		const targetId = initialSelectedId ?? currentLeafId;
+		this.#selectedIndex = this.#findNearestVisibleIndex(targetId);
+		this.#lastSelectedId = this.#filteredNodes[this.#selectedIndex]?.node.entry.id ?? null;
 	}
-	return result;
-}
 
-function searchText(node: SessionTreeNode): string {
-	const entry = node.entry;
-	const parts = [node.label ?? ""];
-	switch (entry.type) {
-		case "message": {
-			const message = entry.message;
-			parts.push(message.role);
-			if ("content" in message) parts.push(extractContent(message.content));
-			if (message.role === "bashExecution" && "command" in message) parts.push(String(message.command));
-			break;
+	/** Build the set of entry IDs on the path from root to current leaf */
+	#buildActivePath(): void {
+		this.#activePathIds.clear();
+		if (!this.currentLeafId) return;
+
+		// Build a map of id -> entry for parent lookup
+		const entryMap = new Map<string, FlatNode>();
+		for (const flatNode of this.#flatNodes) {
+			entryMap.set(flatNode.node.entry.id, flatNode);
 		}
-		case "custom_message":
-			parts.push(entry.customType, extractContent(entry.content));
-			break;
-		case "compaction": parts.push("compaction"); break;
-		case "branch_summary": parts.push("branch summary", entry.summary); break;
-		case "model_change": parts.push("model", entry.model); break;
-		case "thinking_level_change": parts.push("thinking", entry.thinkingLevel ?? ThinkingLevel.Off); break;
-		case "custom": parts.push("custom", entry.customType); break;
-		case "label": parts.push("label", entry.label ?? ""); break;
-	}
-	return parts.join(" ");
-}
 
-function displayText(node: SessionTreeNode): string {
-	const entry = node.entry;
-	const normalize = (value: string) => value.replace(/[\n\t]/g, " ").trim();
-	switch (entry.type) {
-		case "message": {
-			const message = entry.message;
-			const content = "content" in message ? normalize(extractContent(message.content)) : "";
-			if (message.role === "user") return `${theme.fg("accent", "user: ")}${content}`;
-			if (message.role === "developer") return `${theme.fg("warning", "developer: ")}${content}`;
-			if (message.role === "assistant") return `${theme.fg("success", "assistant: ")}${content || theme.fg("muted", "(no content)")}`;
-			if (message.role === "toolResult") return theme.fg("muted", `[${message.toolName}]`);
-			if (message.role === "bashExecution" && "command" in message) return theme.fg("dim", `[bash]: ${normalize(String(message.command))}`);
-			return theme.fg("dim", `[${message.role}]`);
-		}
-		case "custom_message": return `${theme.fg("customMessageLabel", `[${entry.customType}]: `)}${normalize(extractContent(entry.content))}`;
-		case "compaction": return theme.fg("borderAccent", `[compaction: ${Math.round(entry.tokensBefore / 1000)}k tokens]`);
-		case "branch_summary": return `${theme.fg("warning", "[branch summary]: ")}${normalize(entry.summary)}`;
-		case "model_change": return theme.fg("dim", `[model: ${entry.model}]`);
-		case "thinking_level_change": return theme.fg("dim", `[thinking: ${entry.thinkingLevel ?? ThinkingLevel.Off}]`);
-		case "custom": return theme.fg("dim", `[custom: ${entry.customType}]`);
-		case "label": return theme.fg("dim", `[label: ${entry.label ?? "(cleared)"}]`);
-		default: return "";
-	}
-}
-
-function activeIds(roots: readonly SessionTreeNode[], currentLeafId: string | null | undefined): ReadonlySet<string> {
-	const parentById = new Map<string, string | undefined>();
-	const visit = (nodes: readonly SessionTreeNode[], parentId?: string) => {
-		for (const node of nodes) {
-			parentById.set(node.entry.id, parentId);
-			visit(node.children, node.entry.id);
-		}
-	};
-	visit(roots);
-	const active = new Set<string>();
-	let id = currentLeafId;
-	while (id !== undefined && id !== null) {
-		active.add(id);
-		id = parentById.get(id);
-	}
-	return active;
-}
-
-function sourceMaps(
-	roots: readonly SessionTreeNode[],
-	currentLeafId: string | null | undefined,
-	filterMode: FilterMode,
-): {
-	readonly rootIds: readonly string[];
-	readonly childrenById: ReadonlyMap<string, readonly string[]>;
-	readonly labels: ReadonlyMap<string, string>;
-	readonly rowsById: ReadonlyMap<string, SessionTreeRow>;
-	readonly labelsById: ReadonlyMap<string, string | undefined>;
-} {
-	const labels = new Map<string, string>();
-	const labelsById = new Map<string, string | undefined>();
-	const rowsById = new Map<string, SessionTreeRow>();
-	const orderedChildrenById = new Map<string, readonly string[]>();
-	const active = activeIds(roots, currentLeafId);
-	const containsActive = new Map<SessionTreeNode, boolean>();
-	const allNodes: SessionTreeNode[] = [];
-	const traversal = [...roots];
-	while (traversal.length > 0) {
-		const node = traversal.pop();
-		if (node === undefined) break;
-		allNodes.push(node);
-		for (let index = node.children.length - 1; index >= 0; index -= 1) {
-			const child = node.children[index];
-			if (child !== undefined) traversal.push(child);
-		}
-	}
-	for (let index = allNodes.length - 1; index >= 0; index -= 1) {
-		const node = allNodes[index];
-		if (node === undefined) continue;
-		let contains = node.entry.id === currentLeafId;
-		for (const child of node.children) contains ||= containsActive.get(child) === true;
-		containsActive.set(node, contains);
-	}
-
-	const treeBranch = theme?.symbol("tree.branch") ?? "├─";
-	const treeLast = theme?.symbol("tree.last") ?? "└─";
-	const treeVertical = theme?.symbol("tree.vertical") ?? "│";
-	const ordered = (nodes: readonly SessionTreeNode[]): readonly SessionTreeNode[] => {
-		const prioritized: SessionTreeNode[] = [];
-		const rest: SessionTreeNode[] = [];
-		for (const node of nodes) (containsActive.get(node) ? prioritized : rest).push(node);
-		return [...prioritized, ...rest];
-	};
-	const multipleRoots = roots.length > 1;
-	type StackItem = readonly [
-		node: SessionTreeNode,
-		indent: number,
-		semanticDepth: number,
-		justBranched: boolean,
-		showConnector: boolean,
-		isLast: boolean,
-		gutters: readonly SessionTreeGutter[],
-		virtualRootChild: boolean,
-	];
-	const stack: StackItem[] = [];
-	const orderedRoots = ordered(roots);
-	for (let index = orderedRoots.length - 1; index >= 0; index -= 1) {
-		const node = orderedRoots[index];
-		if (node !== undefined) {
-			stack.push([node, multipleRoots ? 1 : 0, 0, multipleRoots, multipleRoots, index === orderedRoots.length - 1, [], multipleRoots]);
+		// Walk from leaf to root
+		let currentId: string | null = this.currentLeafId;
+		while (currentId) {
+			this.#activePathIds.add(currentId);
+			const node = entryMap.get(currentId);
+			if (!node) break;
+			currentId = node.node.entry.parentId ?? null;
 		}
 	}
 
-	while (stack.length > 0) {
-		const item = stack.pop();
-		if (item === undefined) break;
-		const [node, indent, semanticDepth, justBranched, showConnector, isLast, gutters, virtualRootChild] = item;
-		const displayIndent = multipleRoots ? Math.max(0, indent - 1) : indent;
-		const hasConnector = showConnector && !virtualRootChild;
-		const connectorPosition = hasConnector ? displayIndent - 1 : -1;
-		const nearestGutter = hasConnector ? undefined : gutters.at(-1);
-		const chainAnchor = nearestGutter !== undefined && !nearestGutter.show ? nearestGutter.position + 1 : -1;
-		const gutterByPosition = new Map(gutters.map(gutter => [gutter.position, gutter.show]));
-		let prefix = "";
-		for (let level = 0; level < displayIndent; level += 1) {
-			const gutter = gutterByPosition.get(level);
-			if (gutter !== undefined) prefix += gutter ? `${treeVertical}  ` : "   ";
-			else if (level === chainAnchor) prefix += `${treeVertical}  `;
-			else if (level === connectorPosition) prefix += `${isLast ? treeLast : treeBranch} `;
-			else prefix += "   ";
+	/**
+	 * Find the index of the nearest visible entry, walking up the parent chain if needed.
+	 * Returns the index in filteredNodes, or the last index as fallback.
+	 */
+	#findNearestVisibleIndex(entryId: string | null): number {
+		if (this.#filteredNodes.length === 0) return 0;
+
+		// Build a map for parent lookup
+		const entryMap = new Map<string, FlatNode>();
+		for (const flatNode of this.#flatNodes) {
+			entryMap.set(flatNode.node.entry.id, flatNode);
 		}
 
-		const id = node.entry.id;
-		const text = searchText(node);
-		labels.set(id, text);
-		labelsById.set(id, node.label);
-		rowsById.set(id, { id, node, depth: semanticDepth, prefix, active: active.has(id), searchText: text });
+		// Build a map of visible entry IDs to their indices in filteredNodes
+		const visibleIdToIndex = new Map<string, number>(this.#filteredNodes.map((node, i) => [node.node.entry.id, i]));
 
-		const children = ordered(node.children);
-		orderedChildrenById.set(id, children.map(child => child.entry.id));
-		const multipleChildren = children.length > 1;
-		const childIndent = multipleChildren ? indent + 1 : justBranched && indent > 0 ? indent + 1 : indent;
-		const currentConnectorPosition = Math.max(0, displayIndent - 1);
-		const childGutters = hasConnector
-			? [...gutters, { position: currentConnectorPosition, show: !isLast }]
-			: gutters;
-		for (let index = children.length - 1; index >= 0; index -= 1) {
-			const child = children[index];
-			if (child !== undefined) {
-				stack.push([child, childIndent, semanticDepth + 1, multipleChildren, multipleChildren, index === children.length - 1, childGutters, false]);
-			}
+		// Walk from entryId up to root, looking for a visible entry
+		let currentId = entryId;
+		while (currentId !== null) {
+			const index = visibleIdToIndex.get(currentId);
+			if (index !== undefined) return index;
+			const node = entryMap.get(currentId);
+			if (!node) break;
+			currentId = node.node.entry.parentId ?? null;
 		}
+
+		// Fallback: last visible entry
+		return this.#filteredNodes.length - 1;
 	}
 
-	const isVisible = (row: SessionTreeRow): boolean => {
-		const entry = row.node.entry;
-		if (entry.type === "message" && entry.message.role === "assistant" && entry.id !== currentLeafId) {
-			const stopReason = entry.message.stopReason;
-			if (extractContent(entry.message.content).trim().length === 0 && (stopReason === undefined || stopReason === "stop" || stopReason === "toolUse")) {
-				return false;
-			}
-		}
-		const settingsEntry =
-			entry.type === "label" ||
-			entry.type === "custom" ||
-			entry.type === "model_change" ||
-			entry.type === "thinking_level_change";
-		switch (filterMode) {
-			case "user-only": return entry.type === "message" && entry.message.role === "user";
-			case "no-tools": return !settingsEntry && !(entry.type === "message" && entry.message.role === "toolResult");
-			case "labeled-only": return row.node.label !== undefined;
-			case "all": return true;
-			default: return !settingsEntry;
-		}
-	};
-	const visible = new Set<string>();
-	for (const [id, row] of rowsById) if (isVisible(row)) visible.add(id);
-	const rootIds: string[] = [];
-	const childrenById = new Map<string, string[]>();
-	const projectionStack: Array<readonly [string, string | undefined]> = [];
-	for (let index = orderedRoots.length - 1; index >= 0; index -= 1) {
-		const root = orderedRoots[index];
-		if (root !== undefined) projectionStack.push([root.entry.id, undefined]);
-	}
-	while (projectionStack.length > 0) {
-		const item = projectionStack.pop();
-		if (item === undefined) break;
-		const [id, visibleParent] = item;
-		const nextParent = visible.has(id) ? id : visibleParent;
-		if (visible.has(id)) {
-			if (visibleParent === undefined) rootIds.push(id);
-			else {
-				const siblings = childrenById.get(visibleParent) ?? [];
-				siblings.push(id);
-				childrenById.set(visibleParent, siblings);
-			}
-			childrenById.set(id, []);
-		}
-		const children = orderedChildrenById.get(id) ?? [];
-		for (let index = children.length - 1; index >= 0; index -= 1) {
-			const child = children[index];
-			if (child !== undefined) projectionStack.push([child, nextParent]);
-		}
-	}
-	const visibleLabels = new Map<string, string>();
-	for (const id of visible) visibleLabels.set(id, labels.get(id) ?? id);
-	return { rootIds, childrenById, labels: visibleLabels, rowsById, labelsById };
-}
+	#flattenTree(roots: SessionTreeNode[]): FlatNode[] {
+		const result: FlatNode[] = [];
+		this.#toolCallMap.clear();
 
-function withSelectedId(tree: TreeModel<string>, selectedId: string | undefined): TreeModel<string> {
-	return {
-		...tree,
-		selectedId,
-		selectedPosition: selectedId === undefined ? -1 : tree.indexById.get(selectedId) ?? -1,
-	};
-}
+		// Indentation rules:
+		// - At indent 0: stay at 0 unless parent has >1 children (then +1)
+		// - At indent 1: children always go to indent 2 (visual grouping of subtree)
+		// - At indent 2+: stay flat for single-child chains, +1 only if parent branches
 
-const SUMMARY_NONE_ID = "session-tree.summary.none";
-const SUMMARY_DEFAULT_ID = "session-tree.summary.default";
-const SUMMARY_CUSTOM_ID = "session-tree.summary.custom";
-const SUMMARY_PROMPT_ID = "session-tree.summary.prompt";
+		// Stack items: [node, indent, justBranched, showConnector, isLast, gutters, isVirtualRootChild]
+		type StackItem = [SessionTreeNode, number, boolean, boolean, boolean, GutterInfo[], boolean];
+		const stack: StackItem[] = [];
 
-function summaryDepth(targetId: string): SessionTreeDepth {
-	const labels = new Map<string, string>([
-		[SUMMARY_NONE_ID, "No summary"],
-		[SUMMARY_DEFAULT_ID, "Summarize"],
-		[SUMMARY_CUSTOM_ID, "Summarize with custom prompt"],
-	]);
-	const tree = makeTreeModel(
-		[SUMMARY_NONE_ID, SUMMARY_DEFAULT_ID, SUMMARY_CUSTOM_ID],
-		new Map([
-			[SUMMARY_NONE_ID, []],
-			[SUMMARY_DEFAULT_ID, []],
-			[SUMMARY_CUSTOM_ID, []],
-		]),
-		labels,
-		0,
-		new Set([SUMMARY_NONE_ID, SUMMARY_DEFAULT_ID, SUMMARY_CUSTOM_ID]),
-	);
-	return { _tag: "SummaryChoice", targetId, tree };
-}
-
-function customPromptDepth(targetId: string): SessionTreeDepth {
-	let tree = makeTreeModel(
-		[SUMMARY_PROMPT_ID],
-		new Map([[SUMMARY_PROMPT_ID, []]]),
-		new Map([[SUMMARY_PROMPT_ID, "Custom summarization instructions"]]),
-		0,
-		new Set([SUMMARY_PROMPT_ID]),
-	);
-	tree = updateTree(tree, { _tag: "BeginFilter" }).model;
-	return { _tag: "CustomPrompt", targetId, tree };
-}
-
-function activeDepth(model: SessionTreeModel): SessionTreeDepth | undefined {
-	return model.depth.at(-1);
-}
-
-function activeTree(model: SessionTreeModel): SessionTreeActiveModel {
-	return activeDepth(model)?.tree ?? model.tree;
-}
-
-function replaceActiveTree(model: SessionTreeModel, tree: SessionTreeActiveModel): SessionTreeModel {
-	const depth = activeDepth(model);
-	if (depth === undefined) return { ...model, tree };
-	return { ...model, depth: [...model.depth.slice(0, -1), { ...depth, tree }] };
-}
-
-function beginNavigation(
-	model: SessionTreeModel,
-	targetId: string,
-	summarize: boolean,
-	customInstructions?: string,
-): { readonly model: SessionTreeModel; readonly commands: readonly SessionTreeCommand[]; readonly dirtyKeys: ReadonlySet<string> } {
-	const requestGeneration = model.requestGeneration + 1;
-	const leaseGeneration = model.leaseGeneration ?? 0;
-	const pendingNavigation = {
-		targetId,
-		summarize,
-		...(customInstructions === undefined ? {} : { customInstructions }),
-		sourceRevision: model.tree.sourceRevision,
-		requestGeneration,
-		leaseGeneration,
-	};
-	return {
-		model: { ...model, depth: [], requestGeneration, pendingNavigation },
-		commands: [{
-			_tag: "NavigateRequested",
-			targetId,
-			summarize,
-			...(customInstructions === undefined ? {} : { customInstructions }),
-			sourceRevision: model.tree.sourceRevision,
-			requestGeneration,
-			leaseGeneration,
-		}],
-		dirtyKeys: new Set(["focus", "navigation"]),
-	};
-}
-
-function emptyTransition(model: SessionTreeModel): {
-	readonly model: SessionTreeModel;
-	readonly commands: readonly SessionTreeCommand[];
-	readonly dirtyKeys: ReadonlySet<string>;
-} {
-	return { model, commands: [], dirtyKeys: new Set() };
-}
-
-export function createSessionTreeModel(
-	roots: readonly SessionTreeNode[],
-	currentLeafId: string | null = null,
-	filterMode: FilterMode = "default",
-	sourceRevision = 0,
-	branchSummaryEnabled = false,
-): SessionTreeModel {
-	const maps = sourceMaps(roots, currentLeafId, filterMode);
-	let selectedId = currentLeafId ?? undefined;
-	while (selectedId !== undefined && !maps.labels.has(selectedId)) {
-		const parentId = maps.rowsById.get(selectedId)?.node.entry.parentId;
-		selectedId = parentId ?? undefined;
-	}
-	const activeLeafId = currentLeafId !== null && maps.rowsById.has(currentLeafId) ? currentLeafId : null;
-	const expanded = new Set(maps.childrenById.keys());
-	const tree = makeTreeModel(maps.rootIds, maps.childrenById, maps.labels, sourceRevision, expanded);
-	selectedId ??= maps.rootIds[0];
-	return {
-		tree: withSelectedId(tree, selectedId),
-		rowsById: maps.rowsById,
-		labelsById: maps.labelsById,
-		filterMode,
-		branchSummaryEnabled,
-		depth: [],
-		requestGeneration: 0,
-		currentLeafId: activeLeafId,
-	};
-}
-
-export function updateSessionTree(
-	model: SessionTreeModel,
-	message: SessionTreeMsg,
-): { readonly model: SessionTreeModel; readonly commands: readonly SessionTreeCommand[]; readonly dirtyKeys: ReadonlySet<string> } {
-	if (message._tag === "NavigationSettled") {
-		const pending = model.pendingNavigation;
-		if (
-			pending === undefined ||
-			pending.targetId !== message.targetId ||
-			pending.requestGeneration !== message.requestGeneration ||
-			pending.sourceRevision !== message.sourceRevision ||
-			pending.leaseGeneration !== message.leaseGeneration
-		) {
-			return emptyTransition(model);
-		}
-		const tree = { ...model.tree, mode: "TreeBrowse" as const, labelEdit: undefined };
-		const next = { ...model, tree, depth: [], pendingNavigation: undefined };
-		return {
-			model: next,
-			commands: [{
-				_tag: "NavigationCompleted",
-				targetId: message.targetId,
-				status: message.status,
-				...(message.editorText === undefined ? {} : { editorText: message.editorText }),
-				...(message.error === undefined ? {} : { error: message.error }),
-			}],
-			dirtyKeys: new Set(["focus", "navigation"]),
-		};
-	}
-	if (message._tag === "SourceReplaced") {
-		if (message.sourceRevision < model.tree.sourceRevision) return emptyTransition(model);
-		if ("tree" in message) {
-			const next = createSessionTreeModel(
-				message.tree,
-				message.currentLeafId ?? model.currentLeafId,
-				model.filterMode,
-				message.sourceRevision,
-				model.branchSummaryEnabled,
-			);
-			const source = updateTree(model.tree, {
-				_tag: "SourceReplaced",
-				sourceRevision: message.sourceRevision,
-				rootIds: next.tree.rootIds,
-				childrenById: next.tree.childrenById,
-				labels: next.tree.labels,
-			});
-			const selectedId = message.currentLeafId !== undefined && next.rowsById.has(message.currentLeafId)
-				? message.currentLeafId
-				: source.model.selectedId !== undefined && next.rowsById.has(source.model.selectedId)
-					? source.model.selectedId
-					: next.tree.selectedId;
-			const dirtyKeys = new Set(source.dirtyKeys);
-			if (selectedId !== source.model.selectedId) {
-				if (source.model.selectedId !== undefined) dirtyKeys.add(source.model.selectedId);
-				if (selectedId !== undefined) dirtyKeys.add(selectedId);
-			}
-			return {
-				model: {
-					...next,
-					requestGeneration: model.requestGeneration + 1,
-					tree: withSelectedId(source.model, selectedId),
-				},
-				commands: [],
-				dirtyKeys,
-			};
-		}
-		const source = updateTree(model.tree, message);
-		return {
-			model: { ...model, tree: source.model, requestGeneration: model.requestGeneration + 1, pendingNavigation: undefined, depth: [] },
-			commands: source.commands,
-			dirtyKeys: source.dirtyKeys,
-		};
-	}
-	if (message._tag === "LabelReceipt") {
-		if (message.sourceRevision < model.tree.sourceRevision) return emptyTransition(model);
-		const labelsById = new Map(model.labelsById);
-		labelsById.set(message.entryId, message.label);
-		const row = model.rowsById.get(message.entryId);
-		const rowsById = new Map(model.rowsById);
-		const labels = new Map(model.tree.labels);
-		if (row !== undefined) {
-			const node = { ...row.node, label: message.label };
-			const nextSearchText = searchText(node);
-			rowsById.set(message.entryId, { ...row, node, searchText: nextSearchText });
-			labels.set(message.entryId, nextSearchText);
-		}
-		const source = updateTree(model.tree, {
-			_tag: "SourceReplaced",
-			sourceRevision: message.sourceRevision,
-			rootIds: model.tree.rootIds,
-			childrenById: model.tree.childrenById,
-			labels,
-		});
-		return {
-			model: { ...model, rowsById, labelsById, tree: source.model },
-			commands: source.commands,
-			dirtyKeys: new Set([...source.dirtyKeys, message.entryId]),
-		};
-	}
-	if (message._tag === "CancelNavigation") {
-		const pending = model.pendingNavigation;
-		return pending === undefined
-			? emptyTransition(model)
-			: {
-					model,
-					commands: [{
-						_tag: "AbortNavigation",
-						requestGeneration: pending.requestGeneration,
-						sourceRevision: pending.sourceRevision,
-						leaseGeneration: pending.leaseGeneration,
-					}],
-					dirtyKeys: new Set(["navigation"]),
-				};
-	}
-
-	const nested = activeDepth(model);
-	if (nested?._tag === "CustomPrompt" && message._tag === "Activate") {
-		return beginNavigation(model, nested.targetId, true, nested.tree.filterQuery);
-	}
-	if (nested !== undefined) {
-		const transition = updateTree(nested.tree, message as TreeMsg<string, Keybinding>);
-		let next = replaceActiveTree(model, transition.model);
-		const treeCommands: SessionTreeCommand[] = [];
-		let depthChanged = false;
-		for (const command of transition.commands) {
-			if (command._tag === "CloseRequested") {
-				next = { ...next, depth: next.depth.slice(0, -1) };
-				depthChanged = true;
-				continue;
-			}
-			if (command._tag !== "Activate") {
-				treeCommands.push(command);
-				continue;
-			}
-			if (nested._tag === "SummaryChoice") {
-				switch (command.id) {
-					case SUMMARY_NONE_ID: return beginNavigation(model, nested.targetId, false);
-					case SUMMARY_DEFAULT_ID: return beginNavigation(model, nested.targetId, true);
-					case SUMMARY_CUSTOM_ID:
-						return {
-							model: { ...model, depth: [...model.depth, customPromptDepth(nested.targetId)] },
-							commands: [],
-							dirtyKeys: new Set(["focus", "navigation"]),
-						};
+		// Determine which subtrees contain the active leaf (to sort current branch first)
+		// Use iterative post-order traversal to avoid stack overflow
+		const containsActive = new Map<SessionTreeNode, boolean>();
+		const leafId = this.currentLeafId;
+		{
+			// Build list in pre-order, then process in reverse for post-order effect
+			const allNodes: SessionTreeNode[] = [];
+			const preOrderStack: SessionTreeNode[] = [...roots];
+			while (preOrderStack.length > 0) {
+				const node = preOrderStack.pop()!;
+				allNodes.push(node);
+				// Push children in reverse so they're processed left-to-right
+				for (let i = node.children.length - 1; i >= 0; i--) {
+					preOrderStack.push(node.children[i]);
 				}
+			}
+			// Process in reverse (post-order): children before parents
+			for (let i = allNodes.length - 1; i >= 0; i--) {
+				const node = allNodes[i];
+				let has = leafId !== null && node.entry.id === leafId;
+				for (const child of node.children) {
+					if (containsActive.get(child)) {
+						has = true;
+					}
+				}
+				containsActive.set(node, has);
+			}
+		}
+
+		// Add roots in reverse order, prioritizing the one containing the active leaf
+		// If multiple roots, treat them as children of a virtual root that branches
+		const multipleRoots = roots.length > 1;
+		const orderedRoots = [...roots].sort((a, b) => Number(containsActive.get(b)) - Number(containsActive.get(a)));
+		for (let i = orderedRoots.length - 1; i >= 0; i--) {
+			const isLast = i === orderedRoots.length - 1;
+			stack.push([orderedRoots[i], multipleRoots ? 1 : 0, multipleRoots, multipleRoots, isLast, [], multipleRoots]);
+		}
+
+		while (stack.length > 0) {
+			const [node, indent, justBranched, showConnector, isLast, gutters, isVirtualRootChild] = stack.pop()!;
+
+			// Extract tool calls from assistant messages for later lookup
+			const entry = node.entry;
+			if (entry.type === "message" && entry.message.role === "assistant") {
+				const content = (entry.message as { content?: unknown }).content;
+				if (Array.isArray(content)) {
+					for (const block of content) {
+						if (typeof block === "object" && block !== null && "type" in block && block.type === "toolCall") {
+							const tc = block as { id: string; name: string; arguments: Record<string, unknown> };
+							this.#toolCallMap.set(tc.id, { name: tc.name, arguments: tc.arguments });
+						}
+					}
+				}
+			}
+
+			result.push({ node, indent, showConnector, isLast, gutters, isVirtualRootChild });
+
+			const children = node.children;
+			const multipleChildren = children.length > 1;
+
+			// Order children so the branch containing the active leaf comes first
+			const orderedChildren = (() => {
+				const prioritized: SessionTreeNode[] = [];
+				const rest: SessionTreeNode[] = [];
+				for (const child of children) {
+					if (containsActive.get(child)) {
+						prioritized.push(child);
+					} else {
+						rest.push(child);
+					}
+				}
+				return [...prioritized, ...rest];
+			})();
+
+			// Calculate child indent
+			let childIndent: number;
+			if (multipleChildren) {
+				// Parent branches: children get +1
+				childIndent = indent + 1;
+			} else if (justBranched && indent > 0) {
+				// First generation after a branch: +1 for visual grouping
+				childIndent = indent + 1;
 			} else {
-				return beginNavigation(model, nested.targetId, true, nested.tree.filterQuery);
+				// Single-child chain: stay flat
+				childIndent = indent;
+			}
+
+			// Build gutters for children
+			// If this node showed a connector, add a gutter entry for descendants
+			// Only add gutter if connector is actually displayed (not suppressed for virtual root children)
+			const connectorDisplayed = showConnector && !isVirtualRootChild;
+			// When connector is displayed, add a gutter entry at the connector's position
+			// Connector is at position (displayIndent - 1), so gutter should be there too
+			const currentDisplayIndent = this.#multipleRoots ? Math.max(0, indent - 1) : indent;
+			const connectorPosition = Math.max(0, currentDisplayIndent - 1);
+			const childGutters: GutterInfo[] = connectorDisplayed
+				? [...gutters, { position: connectorPosition, show: !isLast }]
+				: gutters;
+
+			// Add children in reverse order
+			for (let i = orderedChildren.length - 1; i >= 0; i--) {
+				const childIsLast = i === orderedChildren.length - 1;
+				stack.push([
+					orderedChildren[i],
+					childIndent,
+					multipleChildren,
+					multipleChildren,
+					childIsLast,
+					childGutters,
+					false,
+				]);
 			}
 		}
-		const dirtyKeys = new Set(transition.dirtyKeys);
-		if (depthChanged) {
-			dirtyKeys.add("focus");
-			dirtyKeys.add("navigation");
-		}
-		return { model: next, commands: treeCommands, dirtyKeys };
+
+		return result;
 	}
 
-	if (message._tag === "BeginLabelEdit") {
-		const id = model.tree.selectedId;
-		const transition = updateTree(model.tree, {
-			...message,
-			draft: id === undefined ? "" : model.labelsById.get(id) ?? "",
-		});
-		return { model: { ...model, tree: transition.model }, commands: transition.commands, dirtyKeys: transition.dirtyKeys };
-	}
-	const transition = updateTree(model.tree, message as TreeMsg<string, Keybinding>);
-	const activate = transition.commands.find(command => command._tag === "Activate");
-	if (activate?._tag === "Activate") {
-		return model.branchSummaryEnabled
-			? {
-					model: { ...model, tree: transition.model, depth: [summaryDepth(activate.id)] },
-					commands: [],
-					dirtyKeys: new Set([...transition.dirtyKeys, "focus", "navigation"]),
+	#applyFilter(): void {
+		// Update lastSelectedId only when we have a valid selection (non-empty list)
+		// This preserves the selection when switching through empty filter results
+		if (this.#filteredNodes.length > 0) {
+			this.#lastSelectedId = this.#filteredNodes[this.#selectedIndex]?.node.entry.id ?? this.#lastSelectedId;
+		}
+
+		const searchTokens = this.#searchQuery.toLowerCase().split(/\s+/).filter(Boolean);
+
+		this.#filteredNodes = this.#flatNodes.filter(flatNode => {
+			const entry = flatNode.node.entry;
+			const isCurrentLeaf = entry.id === this.currentLeafId;
+
+			// Skip assistant messages with only tool calls (no text) unless error/aborted
+			// Always show current leaf so active position is visible
+			if (entry.type === "message" && entry.message.role === "assistant" && !isCurrentLeaf) {
+				const msg = entry.message as { stopReason?: string; content?: unknown };
+				const hasText = this.#hasTextContent(msg.content);
+				const isErrorOrAborted = msg.stopReason && msg.stopReason !== "stop" && msg.stopReason !== "toolUse";
+				// Only hide if no text AND not an error/aborted message
+				if (!hasText && !isErrorOrAborted) {
+					return false;
 				}
-			: beginNavigation(model, activate.id, false);
-	}
-	return { model: { ...model, tree: transition.model }, commands: transition.commands, dirtyKeys: transition.dirtyKeys };
-}
+			}
 
-export function viewSessionTree(model: SessionTreeModel, viewport: Viewport, dirtyKeys: ReadonlySet<string> = new Set()): SessionTreePatch {
-	const depth = activeDepth(model);
-	const tree = activeTree(model);
-	const view = depth === undefined ? viewTree(model.tree, model.rowsById, viewport) : { visibleRows: [], selectedKey: undefined };
-	const selected = model.tree.selectedId === undefined ? undefined : model.rowsById.get(model.tree.selectedId);
-	const depthRows = depth === undefined
-		? undefined
-		: depth.tree.visibleIds.map(id => ({
-				key: id,
-				label: depth.tree.labels.get(id) ?? id,
-				selected: id === depth.tree.selectedId,
-			}));
-	return {
-		visibleRows: view.visibleRows,
-		selectedKey: view.selectedKey,
-		query: tree.mode === "TreeFilter" ? tree.filterQuery : undefined,
-		mode: tree.mode,
-		labelDraft: tree.mode === "TreeLabelEdit" ? tree.labelEdit?.value : undefined,
-		preview: depth === undefined && selected !== undefined ? displayText(selected.node) : "",
-		dirtyKeys,
-		depth: model.depth.length,
-		depthRows,
-		depthQuery: depth?._tag === "CustomPrompt" ? depth.tree.filterQuery : undefined,
-		pendingNavigation: model.pendingNavigation !== undefined,
-		totalCount: model.rowsById.size,
-		filteredCount: model.tree.flattenedIds.length,
-		filterLabel: model.filterMode === "default"
-			? "[default]"
-			: model.filterMode === "no-tools"
-				? "[no-tools]"
-				: model.filterMode === "user-only"
-					? "[user]"
-					: model.filterMode === "labeled-only"
-						? "[labeled]"
-						: "[all]",
-	};
-}
+			// Apply filter mode
+			let passesFilter = true;
+			// Entry types hidden in default view (settings/bookkeeping)
+			const isSettingsEntry =
+				entry.type === "label" ||
+				entry.type === "custom" ||
+				entry.type === "model_change" ||
+				entry.type === "thinking_level_change";
 
-export function sessionTreeActionToMsg(
-	action: string,
-	event: KeyEvent,
-	model?: SessionTreeModel,
-): SessionTreeMsg | undefined {
-	if (event._tag !== "Press" && event._tag !== "Paste") return undefined;
-	const active = model === undefined ? undefined : activeTree(model);
-	const text = event._tag === "Paste" ? event.text : event.text ?? String(event.key);
-	switch (action) {
-		case "app.navigation.up":
-		case "tui.select.up": return { _tag: "Move", delta: -1 };
-		case "app.navigation.down":
-		case "tui.select.down": return { _tag: "Move", delta: 1 };
-		case "tui.select.pageUp": return { _tag: "Page", delta: -1 };
-		case "tui.select.pageDown": return { _tag: "Page", delta: 1 };
-		case "tui.select.first": return { _tag: "Jump", target: "first" };
-		case "tui.select.last": return { _tag: "Jump", target: "last" };
-		case "app.selector.filter": return { _tag: "BeginFilter" };
-		case "app.selector.filterAppend":
-			return text.length > 0 ? { _tag: "FilterAppend", text } : undefined;
-		case "app.selector.filterDelete": return { _tag: "FilterDelete" };
-		case "ui.dismiss": return { _tag: "Back" };
-		case "app.interrupt": return { _tag: "CancelNavigation" };
-		case "tui.select.confirm": return { _tag: "Activate" };
-		case "app.tree.label": return { _tag: "BeginLabelEdit" };
-		case "app.tree.labelAppend":
-			return text.length > 0 ? { _tag: "LabelAppend", text } : undefined;
-		case "app.tree.labelDelete": return { _tag: "LabelDelete" };
-		case "app.tree.labelCommit": return { _tag: "CommitLabel" };
-		default: return undefined;
-	}
-}
+			switch (this.#filterMode) {
+				case "user-only":
+					// Just user messages
+					passesFilter = entry.type === "message" && entry.message.role === "user";
+					break;
+				case "no-tools":
+					// Default minus tool results
+					passesFilter = !isSettingsEntry && !(entry.type === "message" && entry.message.role === "toolResult");
+					break;
+				case "labeled-only":
+					// Just labeled entries
+					passesFilter = flatNode.node.label !== undefined;
+					break;
+				case "all":
+					// Show everything
+					passesFilter = true;
+					break;
+				default:
+					// Default mode: hide settings/bookkeeping entries
+					passesFilter = !isSettingsEntry;
+					break;
+			}
 
-interface CachedSessionTreeRow {
-	readonly row: SessionTreeRow;
-	readonly selected: boolean;
-	readonly width: number;
-	readonly line: string;
-}
+			if (!passesFilter) return false;
 
-/** Renderer-only session tree. Labels are patched from receipts; no node is mutated by rendering. */
-export class TreeSelectorComponent implements Component {
-	#patch: SessionTreePatch | undefined;
-	#cached: { readonly width: number; readonly patch: SessionTreePatch; readonly lines: readonly string[] } | undefined;
-	#rowCache = new Map<string, CachedSessionTreeRow>();
-	apply(patch: SessionTreePatch): void {
-		if (this.#patch === patch) return;
-		this.#patch = patch;
-		const visibleKeys = new Set(patch.visibleRows.map(row => row.key));
-		for (const key of this.#rowCache.keys()) {
-			if (!visibleKeys.has(key)) this.#rowCache.delete(key);
+			// Apply fuzzy search filter
+			if (searchTokens.length > 0) {
+				const nodeText = this.#getSearchableText(flatNode.node);
+				return searchTokens.every(token => fuzzyMatch(token, nodeText).matches);
+			}
+
+			return true;
+		});
+
+		// Try to preserve cursor on the same node, or find nearest visible ancestor
+		if (this.#lastSelectedId) {
+			this.#selectedIndex = this.#findNearestVisibleIndex(this.#lastSelectedId);
+		} else if (this.#selectedIndex >= this.#filteredNodes.length) {
+			// Clamp index if out of bounds
+			this.#selectedIndex = Math.max(0, this.#filteredNodes.length - 1);
 		}
-		this.#cached = undefined;
+
+		// Update lastSelectedId to the actual selection (may have changed due to parent walk)
+		if (this.#filteredNodes.length > 0) {
+			this.#lastSelectedId = this.#filteredNodes[this.#selectedIndex]?.node.entry.id ?? this.#lastSelectedId;
+		}
 	}
 
-	invalidate(): void {
-		this.#cached = undefined;
-		this.#rowCache.clear();
+	/** Get searchable text content from a node */
+	#getSearchableText(node: SessionTreeNode): string {
+		const entry = node.entry;
+		const parts: string[] = [];
+
+		if (node.label) {
+			parts.push(node.label);
+		}
+
+		switch (entry.type) {
+			case "message": {
+				const msg = entry.message;
+				parts.push(msg.role);
+				if ("content" in msg && msg.content) {
+					parts.push(this.#extractContent(msg.content));
+				}
+				if (msg.role === "bashExecution") {
+					const bashMsg = msg as { command?: string };
+					if (bashMsg.command) parts.push(bashMsg.command);
+				}
+				break;
+			}
+			case "custom_message": {
+				parts.push(entry.customType);
+				if (typeof entry.content === "string") {
+					parts.push(entry.content);
+				} else {
+					parts.push(this.#extractContent(entry.content));
+				}
+				break;
+			}
+			case "compaction":
+				parts.push("compaction");
+				break;
+			case "branch_summary":
+				parts.push("branch summary", entry.summary);
+				break;
+			case "model_change":
+				parts.push("model", entry.model);
+				break;
+			case "thinking_level_change":
+				parts.push("thinking", entry.thinkingLevel ?? ThinkingLevel.Off);
+				break;
+			case "custom":
+				parts.push("custom", entry.customType);
+				break;
+			case "label":
+				parts.push("label", entry.label ?? "");
+				break;
+		}
+
+		return parts.join(" ");
 	}
 
-	#isDirty(key: string, dirtyKeys: ReadonlySet<string>): boolean {
-		for (const dirtyKey of dirtyKeys) {
-			if (Object.is(dirtyKey, key)) return true;
+	invalidate(): void {}
+
+	getSearchQuery(): string {
+		return this.#searchQuery;
+	}
+
+	getSelectedNode(): SessionTreeNode | undefined {
+		return this.#filteredNodes[this.#selectedIndex]?.node;
+	}
+
+	updateNodeLabel(entryId: string, label: string | undefined): void {
+		for (const flatNode of this.#flatNodes) {
+			if (flatNode.node.entry.id === entryId) {
+				flatNode.node.label = label;
+				break;
+			}
+		}
+	}
+
+	#getFilterLabel(): string {
+		switch (this.#filterMode) {
+			case "no-tools":
+				return " [no-tools]";
+			case "user-only":
+				return " [user]";
+			case "labeled-only":
+				return " [labeled]";
+			case "all":
+				return " [all]";
+			default:
+				return "";
+		}
+	}
+
+	render(width: number): readonly string[] {
+		const lines: string[] = [];
+
+		if (this.#filteredNodes.length === 0) {
+			// Three empty-state shapes:
+			//  - flatNodes empty               → no entries at all (truly fresh session).
+			//  - search query rejects everything → tell the user the search is the cause.
+			//  - filter mode rejects everything  → tell the user the filter is the cause and
+			//    how to widen it. Otherwise fresh sessions whose only persisted entries are
+			//    `model_change` + `thinking_level_change` (both hidden by the default filter)
+			//    read as "broken /tree" — see #1909.
+			if (this.#flatNodes.length === 0) {
+				lines.push(truncateToWidth(theme.fg("muted", "  No entries found"), width));
+				lines.push(truncateToWidth(theme.fg("muted", `  (0/0)${this.#getFilterLabel()}`), width));
+			} else if (this.#searchQuery.length > 0) {
+				lines.push(truncateToWidth(theme.fg("muted", `  No entries match search "${this.#searchQuery}"`), width));
+				lines.push(truncateToWidth(theme.fg("muted", "  Press Backspace to clear the search"), width));
+				lines.push(
+					truncateToWidth(theme.fg("muted", `  (0/${this.#flatNodes.length})${this.#getFilterLabel()}`), width),
+				);
+			} else {
+				const filterLabel = this.#getFilterLabel().trim() || "[default]";
+				lines.push(
+					truncateToWidth(
+						theme.fg("muted", `  ${this.#flatNodes.length} entries hidden by the current filter ${filterLabel}`),
+						width,
+					),
+				);
+				lines.push(truncateToWidth(theme.fg("muted", "  Press Alt+A to show all, Alt+D for default"), width));
+				lines.push(
+					truncateToWidth(theme.fg("muted", `  (0/${this.#flatNodes.length})${this.#getFilterLabel()}`), width),
+				);
+			}
+			return lines;
+		}
+
+		const startIndex = Math.max(
+			0,
+			Math.min(
+				this.#selectedIndex - Math.floor(this.maxVisibleLines / 2),
+				this.#filteredNodes.length - this.maxVisibleLines,
+			),
+		);
+		const endIndex = Math.min(startIndex + this.maxVisibleLines, this.#filteredNodes.length);
+
+		// Cap the per-row gutter prefix so a content budget is always preserved.
+		// Each indent level renders as 3 cells; deep branching would otherwise eat the
+		// entire viewport (issue #1144). Reserve at least MIN_CONTENT_COLS for entry
+		// text — or half the viewport, whichever is larger — and compress older gutter
+		// levels off-screen behind a leading ellipsis when the row would exceed budget.
+		const MIN_CONTENT_COLS = 24;
+		const OVERHEAD_COLS = 4; // cursor (2) + a touch of breathing room
+		const contentReserve = Math.max(MIN_CONTENT_COLS, Math.floor(width / 2));
+		const maxIndentLevels = Math.max(1, Math.floor((width - contentReserve - OVERHEAD_COLS) / 3));
+
+		const overflow = this.#filteredNodes.length > this.maxVisibleLines;
+		const rowWidth = Math.max(0, width - (overflow ? 1 : 0));
+		const rows: string[] = [];
+
+		for (let i = startIndex; i < endIndex; i++) {
+			const flatNode = this.#filteredNodes[i];
+			const entry = flatNode.node.entry;
+			const isSelected = i === this.#selectedIndex;
+
+			// Build line: cursor + prefix + path marker + label + content
+			const cursor = isSelected ? theme.fg("accent", "› ") : "  ";
+
+			// If multiple roots, shift display (roots at 0, not 1)
+			const displayIndent = this.#multipleRoots ? Math.max(0, flatNode.indent - 1) : flatNode.indent;
+
+			// Build prefix with gutters at their correct positions, clamped to
+			// `maxIndentLevels` cells so the content always fits. When clamped, the
+			// leftmost cells represent the deepest visible ancestors and a `…` marker
+			// indicates older branch context has been compressed.
+			const hasConnector = flatNode.showConnector && !flatNode.isVirtualRootChild;
+			const connectorSymbol = hasConnector ? (flatNode.isLast ? theme.tree.last : theme.tree.branch) : "";
+			const connectorChars = hasConnector ? Array.from(connectorSymbol) : [];
+			const renderedIndent = Math.min(displayIndent, maxIndentLevels);
+			const scrollOffset = displayIndent - renderedIndent;
+			const connectorPositionDisplay = hasConnector ? renderedIndent - 1 : -1;
+			// Chain rows (no connector of their own) under a last-sibling (`└─`)
+			// branch stay anchored by a vertical drawn one level RIGHT of the
+			// suppressed gutter — the column where the row's own connector would
+			// sit, directly below the branch head's content. Drawing it in the
+			// `└─` column itself contradicts the corner and leaves dangling,
+			// drifting verticals once the chain branches deeper (#2298, #2325).
+			// Chains under `├─` heads need no extra anchor: the sibling line
+			// (`show: true` gutter) already ties them to their branch.
+			const nearestGutter = !hasConnector ? flatNode.gutters[flatNode.gutters.length - 1] : undefined;
+			const chainAnchorLevel = nearestGutter && !nearestGutter.show ? nearestGutter.position + 1 : -1;
+
+			// Build prefix char by char, placing gutters and connector at their positions
+			const totalChars = renderedIndent * 3;
+			const prefixChars: string[] = [];
+			for (let i = 0; i < totalChars; i++) {
+				const level = Math.floor(i / 3);
+				const originalLevel = level + scrollOffset;
+				const posInLevel = i % 3;
+
+				// Check if there's a gutter at this level (translated to original tree depth)
+				const gutter = flatNode.gutters.find(g => g.position === originalLevel);
+				if (gutter) {
+					// Gutters follow standard tree semantics: `│` only while more
+					// siblings continue below (`show`), space below a `└─`.
+					if (posInLevel === 0) {
+						prefixChars.push(gutter.show ? theme.tree.vertical : " ");
+					} else {
+						prefixChars.push(" ");
+					}
+				} else if (originalLevel === chainAnchorLevel) {
+					// Chain anchor for rows under a `└─` branch head.
+					prefixChars.push(posInLevel === 0 ? theme.tree.vertical : " ");
+				} else if (hasConnector && level === connectorPositionDisplay) {
+					// Connector at this level
+					if (posInLevel === 0) {
+						prefixChars.push(connectorChars[0] ?? " ");
+					} else if (posInLevel === 1) {
+						prefixChars.push(connectorChars[1] ?? theme.tree.horizontal);
+					} else {
+						prefixChars.push(connectorChars[2] ?? " ");
+					}
+				} else {
+					prefixChars.push(" ");
+				}
+			}
+			// Mark the leftmost cell when ancestors were compressed off-screen.
+			if (scrollOffset > 0 && prefixChars.length > 0) {
+				prefixChars[0] = "…";
+			}
+			const prefix = prefixChars.join("");
+
+			// Active path marker - shown right before the entry text
+			const isOnActivePath = this.#activePathIds.has(entry.id);
+			const pathMarker = isOnActivePath ? theme.fg("accent", `${theme.md.bullet} `) : "";
+
+			const label = flatNode.node.label ? theme.fg("warning", `[${flatNode.node.label}] `) : "";
+			const content = this.#getEntryDisplayText(flatNode.node, isSelected);
+
+			let line = cursor + theme.fg("dim", prefix) + pathMarker + label + content;
+			if (isSelected) {
+				line = theme.bg("selectedBg", line);
+			}
+			rows.push(truncateToWidth(line, rowWidth));
+		}
+
+		const sv = new ScrollView(rows, {
+			height: rows.length,
+			scrollbar: "auto",
+			totalRows: this.#filteredNodes.length,
+			theme: { track: t => theme.fg("muted", t), thumb: t => theme.fg("accent", t) },
+		});
+		sv.setScrollOffset(startIndex);
+		lines.push(...sv.render(width));
+
+		const filterLabel = this.#getFilterLabel();
+		if (filterLabel) {
+			lines.push(truncateToWidth(theme.fg("muted", `  ${filterLabel.trim()}`), width));
+		}
+
+		return lines;
+	}
+
+	#getEntryDisplayText(node: SessionTreeNode, isSelected: boolean): string {
+		const entry = node.entry;
+		let result: string;
+
+		const normalize = (s: string) => s.replace(/[\n\t]/g, " ").trim();
+
+		switch (entry.type) {
+			case "message": {
+				const msg = entry.message;
+				const role = msg.role;
+				if (role === "user") {
+					const msgWithContent = msg as { content?: unknown };
+					const content = normalize(this.#extractContent(msgWithContent.content));
+					result = theme.fg("accent", "user: ") + content;
+				} else if (role === "developer") {
+					const msgWithContent = msg as { content?: unknown };
+					const content = normalize(this.#extractContent(msgWithContent.content));
+					result = theme.fg("dim", "developer: ") + theme.fg("muted", content);
+				} else if (role === "assistant") {
+					const msgWithContent = msg as { content?: unknown; stopReason?: string; errorMessage?: string };
+					const textContent = normalize(this.#extractContent(msgWithContent.content));
+					if (textContent) {
+						result = theme.fg("success", "assistant: ") + textContent;
+					} else if (msgWithContent.stopReason === "aborted") {
+						result = theme.fg("success", "assistant: ") + theme.fg("muted", "(aborted)");
+					} else if (msgWithContent.errorMessage) {
+						const errMsg = normalize(msgWithContent.errorMessage).slice(0, 80);
+						result = theme.fg("success", "assistant: ") + theme.fg("error", errMsg);
+					} else {
+						result = theme.fg("success", "assistant: ") + theme.fg("muted", "(no content)");
+					}
+				} else if (role === "toolResult") {
+					const toolMsg = msg as { toolCallId?: string; toolName?: string };
+					const toolCall = toolMsg.toolCallId ? this.#toolCallMap.get(toolMsg.toolCallId) : undefined;
+					if (toolCall) {
+						result = theme.fg("muted", this.#formatToolCall(toolCall.name, toolCall.arguments));
+					} else {
+						result = theme.fg("muted", `[${toolMsg.toolName ?? "tool"}]`);
+					}
+				} else if (role === "bashExecution") {
+					const bashMsg = msg as { command?: string };
+					result = theme.fg("dim", `[bash]: ${normalize(bashMsg.command ?? "")}`);
+				} else {
+					result = theme.fg("dim", `[${role}]`);
+				}
+				break;
+			}
+			case "custom_message": {
+				const content =
+					typeof entry.content === "string"
+						? entry.content
+						: entry.content
+								.filter((c): c is { type: "text"; text: string } => c.type === "text")
+								.map(c => c.text)
+								.join("");
+				result = theme.fg("customMessageLabel", `[${entry.customType}]: `) + normalize(content);
+				break;
+			}
+			case "compaction": {
+				const tokens = Math.round(entry.tokensBefore / 1000);
+				result = theme.fg("borderAccent", `[compaction: ${tokens}k tokens]`);
+				break;
+			}
+			case "branch_summary":
+				result = theme.fg("warning", `[branch summary]: `) + normalize(entry.summary);
+				break;
+			case "model_change":
+				result = theme.fg("dim", `[model: ${entry.model}]`);
+				break;
+			case "thinking_level_change":
+				result = theme.fg("dim", `[thinking: ${entry.thinkingLevel ?? ThinkingLevel.Off}]`);
+				break;
+			case "custom":
+				result = theme.fg("dim", `[custom: ${entry.customType}]`);
+				break;
+			case "label":
+				result = theme.fg("dim", `[label: ${entry.label ?? "(cleared)"}]`);
+				break;
+			default:
+				result = "";
+		}
+
+		return isSelected ? theme.bold(result) : result;
+	}
+
+	#extractContent(content: unknown): string {
+		const maxLen = 200;
+		if (typeof content === "string") return content.slice(0, maxLen);
+		if (Array.isArray(content)) {
+			let result = "";
+			for (const c of content) {
+				if (typeof c === "object" && c !== null && "type" in c && c.type === "text") {
+					result += (c as { text: string }).text;
+					if (result.length >= maxLen) return result.slice(0, maxLen);
+				}
+			}
+			return result;
+		}
+		return "";
+	}
+
+	#hasTextContent(content: unknown): boolean {
+		if (typeof content === "string") return Boolean(canonicalizeMessage(content));
+		if (Array.isArray(content)) {
+			for (const c of content) {
+				if (typeof c === "object" && c !== null && "type" in c && c.type === "text") {
+					const text = (c as { text?: string }).text;
+					if (text && canonicalizeMessage(text)) return true;
+				}
+			}
 		}
 		return false;
 	}
 
-	#renderRow(key: string, row: SessionTreeRow, selected: boolean, width: number, dirtyKeys: ReadonlySet<string>): string {
-		const cached = this.#rowCache.get(key);
-		if (
-			cached !== undefined &&
-			!this.#isDirty(key, dirtyKeys) &&
-			Object.is(cached.row, row) &&
-			cached.selected === selected &&
-			cached.width === width
-		) {
-			return cached.line;
-		}
-		const active = row.active ? theme.fg("accent", `${theme.md.bullet} `) : "";
-		const label = row.node.label ? theme.fg("warning", `[${row.node.label}] `) : "";
-		const content = selected ? theme.bold(displayText(row.node)) : displayText(row.node);
-		const prefixBudget = Math.max(0, Math.min(24, width - 16));
-		const prefix = truncateToWidth(theme.fg("dim", row.prefix), prefixBudget);
-		const line = truncateToWidth(`${selected ? theme.fg("accent", "› ") : "  "}${prefix}${active}${label}${content}`, width);
-		this.#rowCache.set(key, { row, selected, width, line });
-		return line;
-	}
-
-	render(width: number): readonly string[] {
-		const patch = this.#patch;
-		if (patch === undefined) return [];
-		if (this.#cached?.width === width && this.#cached.patch === patch) return this.#cached.lines;
-		const lines: string[] = [
-			theme.bold(patch.depth > 0 ? "  Session Tree · Navigation" : "  Session Tree"),
-			patch.depth > 0 && patch.depthQuery === undefined ? theme.fg("muted", "  Choose how to continue") : theme.fg("muted", `  Search: ${patch.depthQuery ?? patch.query ?? ""}`),
-		];
-		if (patch.pendingNavigation) lines.push(theme.fg("warning", "  Navigation in progress…"));
-		if (patch.mode === "TreeLabelEdit") lines.push(theme.fg("warning", `  Label: ${patch.labelDraft ?? ""}`));
-		if (patch.visibleRows.length === 0 && patch.depthRows === undefined) {
-			if (patch.totalCount === 0) {
-				lines.push(theme.fg("muted", "  No entries found"));
-				lines.push(theme.fg("muted", `  (0/0)${patch.filterLabel === "[default]" ? "" : ` ${patch.filterLabel}`}`));
-			} else if (patch.query !== undefined && patch.query.length > 0) {
-				lines.push(theme.fg("muted", `  No entries match search "${patch.query}"`));
-				lines.push(theme.fg("muted", "  Press Backspace to clear the search"));
-				lines.push(theme.fg("muted", `  (0/${patch.totalCount})${patch.filterLabel === "[default]" ? "" : ` ${patch.filterLabel}`}`));
-			} else if (patch.filteredCount === 0) {
-				lines.push(theme.fg("muted", `  ${patch.totalCount} entries hidden by the current filter ${patch.filterLabel}`));
-				lines.push(theme.fg("muted", "  Press Alt+A to show all, Alt+D for default"));
-				lines.push(theme.fg("muted", `  (0/${patch.totalCount})${patch.filterLabel === "[default]" ? "" : ` ${patch.filterLabel}`}`));
+	#formatToolCall(name: string, args: Record<string, unknown>): string {
+		switch (name) {
+			case "read": {
+				const path = shortenPath(String(args.path || args.file_path || ""));
+				const offset = args.offset as number | undefined;
+				const limit = args.limit as number | undefined;
+				let display = path;
+				if (offset !== undefined || limit !== undefined) {
+					const start = offset ?? 1;
+					const end = limit !== undefined ? start + limit - 1 : "";
+					display += `:${start}${end ? `-${end}` : ""}`;
+				}
+				return `[read: ${display}]`;
+			}
+			case "write": {
+				const path = shortenPath(String(args.path || args.file_path || ""));
+				return `[write: ${path}]`;
+			}
+			case "edit": {
+				const path = shortenPath(String(args.path || args.file_path || ""));
+				return `[edit: ${path}]`;
+			}
+			case "bash": {
+				const rawCmd = String(args.command || "");
+				const cmd = rawCmd
+					.replace(/[\n\t]/g, " ")
+					.trim()
+					.slice(0, 50);
+				return `[bash: ${cmd}${rawCmd.length > 50 ? "..." : ""}]`;
+			}
+			case "search": {
+				const pattern = String(args.pattern || "");
+				const searchPathsInput =
+					typeof args.paths === "string" || Array.isArray(args.paths)
+						? args.paths
+						: typeof args.path === "string"
+							? args.path
+							: undefined;
+				const paths = toPathList(searchPathsInput);
+				const scope = paths.length > 0 ? paths.join(", ") : ".";
+				return `[search: /${pattern}/ in ${shortenPath(scope)}]`;
+			}
+			case "find": {
+				const paths = Array.isArray(args.paths) ? args.paths.join(", ") : String(args.pattern || ".");
+				return `[find: ${shortenPath(paths)}]`;
+			}
+			case "ls": {
+				const path = shortenPath(String(args.path || "."));
+				return `[ls: ${path}]`;
+			}
+			default: {
+				// Custom tool - show name and truncated JSON args
+				const argsStr = JSON.stringify(args).slice(0, 40);
+				return `[${name}: ${argsStr}${JSON.stringify(args).length > 40 ? "..." : ""}]`;
 			}
 		}
-		for (const entry of patch.depthRows ?? []) {
-			lines.push(truncateToWidth(`${entry.selected ? theme.fg("accent", "› ") : "  "}${entry.label}`, width));
+	}
+
+	handleInput(keyData: string): void {
+		if (matchesSelectUp(keyData)) {
+			this.#selectedIndex = this.#selectedIndex === 0 ? this.#filteredNodes.length - 1 : this.#selectedIndex - 1;
+		} else if (matchesSelectDown(keyData)) {
+			this.#selectedIndex = this.#selectedIndex === this.#filteredNodes.length - 1 ? 0 : this.#selectedIndex + 1;
+		} else if (matchesKey(keyData, "left")) {
+			// Page up
+			this.#selectedIndex = Math.max(0, this.#selectedIndex - this.maxVisibleLines);
+		} else if (matchesKey(keyData, "right")) {
+			// Page down
+			this.#selectedIndex = Math.min(this.#filteredNodes.length - 1, this.#selectedIndex + this.maxVisibleLines);
+		} else if (matchesKey(keyData, "enter") || matchesKey(keyData, "return") || keyData === "\n") {
+			const selected = this.#filteredNodes[this.#selectedIndex];
+			if (selected && this.onSelect) {
+				this.onSelect(selected.node.entry.id);
+			}
+		} else if (matchesUiDismiss(keyData)) {
+			if (this.#searchQuery) {
+				this.#searchQuery = "";
+				this.#applyFilter();
+			} else {
+				this.onCancel?.();
+			}
+		} else if (matchesKey(keyData, "ctrl+c")) {
+			this.onCancel?.();
+		} else if (matchesKey(keyData, "shift+ctrl+o") || matchesKey(keyData, "ctrl+shift+o")) {
+			// Cycle filter backwards
+			const modes: FilterMode[] = ["default", "no-tools", "user-only", "labeled-only", "all"];
+			const currentIndex = modes.indexOf(this.#filterMode);
+			this.#filterMode = modes[(currentIndex - 1 + modes.length) % modes.length];
+			this.#applyFilter();
+		} else if (matchesKey(keyData, "ctrl+o")) {
+			// Cycle filter forwards: default → no-tools → user-only → labeled-only → all → default
+			const modes: FilterMode[] = ["default", "no-tools", "user-only", "labeled-only", "all"];
+			const currentIndex = modes.indexOf(this.#filterMode);
+			this.#filterMode = modes[(currentIndex + 1) % modes.length];
+			this.#applyFilter();
+		} else if (matchesKey(keyData, "alt+d")) {
+			this.#filterMode = "default";
+			this.#applyFilter();
+		} else if (matchesKey(keyData, "alt+t")) {
+			this.#filterMode = "no-tools";
+			this.#applyFilter();
+		} else if (matchesKey(keyData, "alt+u")) {
+			this.#filterMode = "user-only";
+			this.#applyFilter();
+		} else if (matchesKey(keyData, "alt+l")) {
+			this.#filterMode = "labeled-only";
+			this.#applyFilter();
+		} else if (matchesKey(keyData, "alt+a")) {
+			this.#filterMode = "all";
+			this.#applyFilter();
+		} else if (matchesKey(keyData, "backspace")) {
+			if (this.#searchQuery.length > 0) {
+				this.#searchQuery = this.#searchQuery.slice(0, -1);
+				this.#applyFilter();
+			}
+		} else if (matchesKey(keyData, "shift+l") && !this.#searchQuery) {
+			const selected = this.#filteredNodes[this.#selectedIndex];
+			if (selected && this.onLabelEdit) {
+				this.onLabelEdit(selected.node.entry.id, selected.node.label);
+			}
+		} else {
+			const printableText = extractPrintableText(keyData);
+			if (printableText) {
+				this.#searchQuery += printableText;
+				this.#applyFilter();
+			}
 		}
-		for (const entry of patch.visibleRows) {
-			lines.push(this.#renderRow(entry.key, entry.row, entry.key === patch.selectedKey, width, patch.dirtyKeys));
-		}
-		if (patch.preview) lines.push(truncateToWidth(`  ${theme.fg("dim", "Preview: ")}${patch.preview}`, width));
-		lines.push(theme.fg("muted", patch.depth > 0 ? "  j/k move · Enter select · Esc back" : "  j/k move · / filter · Enter open · Shift+L label · Esc back"));
-		this.#cached = { width, patch, lines };
-		return lines;
 	}
 }
-export interface SessionTreeRouteSpec {
-	readonly componentId: ComponentId;
-	readonly focusedRoot: TreeSelectorComponent;
-	readonly initialModel: SessionTreeModel;
-	readonly context: (model: SessionTreeModel) => ActiveKeymapContext;
-	readonly actionToMsg: (action: Keybinding, event: KeyEvent) => SessionTreeMsg | undefined;
+
+/** Component that displays the current search query */
+class SearchLine implements Component {
+	constructor(private treeList: TreeList) {}
+
+	invalidate(): void {}
+
+	render(width: number): readonly string[] {
+		const query = this.treeList.getSearchQuery();
+		if (query) {
+			return [truncateToWidth(`  ${theme.fg("muted", "Search:")} ${theme.fg("accent", query)}`, width)];
+		}
+		return [truncateToWidth(`  ${theme.fg("muted", "Search:")}`, width)];
+	}
+
+	handleInput(_keyData: string): void {}
 }
 
-export function createSessionTreeRoute(
-	roots: readonly SessionTreeNode[],
-	currentLeafId: string | null = null,
-	filterMode: FilterMode = "default",
-	sourceRevision = 0,
-	branchSummaryEnabled = false,
-): SessionTreeRouteSpec {
-	const componentId = makeComponentId("session-tree");
-	return {
-		componentId,
-		focusedRoot: new TreeSelectorComponent(),
-		initialModel: createSessionTreeModel(roots, currentLeafId, filterMode, sourceRevision, branchSummaryEnabled),
-		context: model => {
-			const tree = activeTree(model);
-			return {
-				contexts: ["selector.global", "selector.filter"],
-				mode: tree.mode,
-				focus: tree.mode === "TreePreview" || tree.mode === "TreeLabelEdit" ? "preview" : "list",
-				capabilities: new Set(["selector.filter"]),
-			};
-		},
-		actionToMsg: (action, event) => sessionTreeActionToMsg(String(action), event),
-	};
+/** Label input component shown when editing a label */
+class LabelInput implements Component {
+	#input: Input;
+	onSubmit?: (entryId: string, label: string | undefined) => void;
+	onCancel?: () => void;
+
+	constructor(
+		private readonly entryId: string,
+		currentLabel: string | undefined,
+	) {
+		this.#input = new Input();
+		if (currentLabel) {
+			this.#input.setValue(currentLabel);
+		}
+	}
+
+	invalidate(): void {}
+
+	render(width: number): readonly string[] {
+		const lines: string[] = [];
+		const indent = "  ";
+		const availableWidth = width - indent.length;
+		lines.push(truncateToWidth(`${indent}${theme.fg("muted", "Label (empty to remove):")}`, width));
+		lines.push(...this.#input.render(availableWidth).map(line => truncateToWidth(`${indent}${line}`, width)));
+		lines.push(
+			truncateToWidth(`${indent}${theme.fg("dim", `enter: save  ${editorKey("ui.dismiss")}: cancel`)}`, width),
+		);
+		return lines;
+	}
+
+	handleInput(keyData: string): void {
+		if (matchesKey(keyData, "enter") || matchesKey(keyData, "return") || keyData === "\n") {
+			const value = this.#input.getValue().trim();
+			this.onSubmit?.(this.entryId, value || undefined);
+		} else if (matchesUiDismiss(keyData)) {
+			this.onCancel?.();
+		} else {
+			this.#input.handleInput(keyData);
+		}
+	}
 }
 
-export { canonicalizeMessage, shortenPath, toPathList };
+/**
+ * Component that renders a session tree selector for navigation
+ */
+export class TreeSelectorComponent extends Container {
+	#treeList: TreeList;
+	#labelInput: LabelInput | null = null;
+	#labelInputContainer: Container;
+	#treeContainer: Container;
+
+	constructor(
+		tree: SessionTreeNode[],
+		currentLeafId: string | null,
+		terminalHeight: number,
+		onSelect: (entryId: string) => void,
+		onCancel: () => void,
+		private readonly onLabelChangeCallback?: (entryId: string, label: string | undefined) => void,
+		initialFilterMode: FilterMode = "default",
+	) {
+		super();
+		const maxVisibleLines = Math.max(5, Math.floor(terminalHeight / 2));
+
+		this.#treeList = new TreeList(tree, currentLeafId, maxVisibleLines, initialFilterMode);
+		this.#treeList.onSelect = onSelect;
+		this.#treeList.onCancel = onCancel;
+		this.#treeList.onLabelEdit = (entryId, currentLabel) => this.#showLabelInput(entryId, currentLabel);
+
+		this.#treeContainer = new Container();
+		this.#treeContainer.addChild(this.#treeList);
+
+		this.#labelInputContainer = new Container();
+
+		this.addChild(new Spacer(1));
+		this.addChild(new DynamicBorder());
+		this.addChild(new Text(theme.bold("  Session Tree"), 1, 0));
+		this.addChild(
+			new TruncatedText(
+				theme.fg(
+					"muted",
+					"Up/Down: move. Left/Right: page. Shift+L: label. Ctrl+O/Shift+Ctrl+O: filter. Alt+D/T/U/L/A: filter. Type to search",
+				),
+				0,
+				0,
+			),
+		);
+		this.addChild(new SearchLine(this.#treeList));
+		this.addChild(new DynamicBorder());
+		this.addChild(new Spacer(1));
+		this.addChild(this.#treeContainer);
+		this.addChild(this.#labelInputContainer);
+		this.addChild(new Spacer(1));
+		this.addChild(new DynamicBorder());
+
+		if (tree.length === 0) {
+			setTimeout(() => onCancel(), 100);
+		}
+	}
+
+	#showLabelInput(entryId: string, currentLabel: string | undefined): void {
+		this.#labelInput = new LabelInput(entryId, currentLabel);
+		this.#labelInput.onSubmit = (id, label) => {
+			this.#treeList.updateNodeLabel(id, label);
+			this.onLabelChangeCallback?.(id, label);
+			this.#hideLabelInput();
+		};
+		this.#labelInput.onCancel = () => this.#hideLabelInput();
+
+		this.#treeContainer.clear();
+		this.#labelInputContainer.clear();
+		this.#labelInputContainer.addChild(this.#labelInput);
+	}
+
+	#hideLabelInput(): void {
+		this.#labelInput = null;
+		this.#labelInputContainer.clear();
+		this.#treeContainer.clear();
+		this.#treeContainer.addChild(this.#treeList);
+	}
+
+	handleInput(keyData: string): void {
+		if (this.#labelInput) {
+			this.#labelInput.handleInput(keyData);
+		} else {
+			this.#treeList.handleInput(keyData);
+		}
+	}
+
+	getTreeList(): TreeList {
+		return this.#treeList;
+	}
+}

@@ -1,243 +1,311 @@
-import { beforeAll, describe, expect, it } from "bun:test";
-import { DialogFifo } from "@oh-my-pi/pi-coding-agent/modes/controllers/extension-ui-controller";
-import {
-	HookEditorComponent,
-	makeHookEditorModel,
-	type HookEditorModel,
-	type HookEditorMsg,
-	updateHookEditor,
-} from "@oh-my-pi/pi-coding-agent/modes/components/hook-editor";
-import { getThemeByName, setThemeInstance } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
+import { afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
 import { KeybindingsManager } from "@oh-my-pi/pi-coding-agent/config/keybindings";
-import { setKeybindings } from "@oh-my-pi/pi-tui";
+import { HookEditorComponent } from "@oh-my-pi/pi-coding-agent/modes/components/hook-editor";
+import { ExtensionUiController } from "@oh-my-pi/pi-coding-agent/modes/controllers/extension-ui-controller";
+import { getThemeByName, setThemeInstance } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
+import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
+import { setKeybindings, type TUI } from "@oh-my-pi/pi-tui";
 
 beforeAll(async () => {
-	const loadedTheme = await getThemeByName("dark");
-	if (!loadedTheme) throw new Error("Failed to load dark theme for tests");
-	setThemeInstance(loadedTheme);
+	const theme = await getThemeByName("dark");
+	if (!theme) {
+		throw new Error("Failed to load dark theme for tests");
+	}
+	setThemeInstance(theme);
 });
+
+afterEach(() => {
+	setKeybindings(KeybindingsManager.inMemory());
+	vi.restoreAllMocks();
+});
+
+function createTui(): TUI {
+	return {
+		requestRender: vi.fn(),
+		setFocus: vi.fn(),
+		start: vi.fn(),
+		stop: vi.fn(),
+		terminal: { columns: 120 },
+	} as unknown as TUI;
+}
 
 function renderText(component: HookEditorComponent, width = 120): string {
 	return Bun.stripANSI(component.render(width).join("\n"));
 }
 
 function renderLines(component: HookEditorComponent, width = 120): string[] {
-	return renderText(component, width).split("\n");
+	return Bun.stripANSI(component.render(width).join("\n")).split("\n");
 }
 
 function largePasteText(): string {
 	return Array.from({ length: 11 }, (_, index) => `pasted line ${index + 1}`).join("\n");
 }
 
-interface EditorRouteHarness {
-	model: HookEditorModel;
-	readonly component: HookEditorComponent;
-	readonly submitted: string[];
-	cancelled: number;
-	dispatch(message: HookEditorMsg): void;
-	append(text: string): void;
-	submit(): void;
-	cancel(): void;
+type TestContext = InteractiveModeContext & {
+	editorContainer: {
+		children: unknown[];
+		clear: () => void;
+		addChild: (child: unknown) => void;
+	};
+};
+
+function createControllerContext() {
+	const editor = { id: "core-editor" };
+	const editorContainer = {
+		children: [] as unknown[],
+		clear() {
+			this.children = [];
+		},
+		addChild(child: unknown) {
+			this.children.push(child);
+		},
+	};
+	const ui = {
+		requestRender: vi.fn(),
+		setFocus: vi.fn(),
+		start: vi.fn(),
+		stop: vi.fn(),
+		terminal: { columns: 120 },
+	} as unknown as TestContext["ui"] & {
+		setFocus: ReturnType<typeof vi.fn>;
+		requestRender: ReturnType<typeof vi.fn>;
+	};
+	const ctx = {
+		editor,
+		editorContainer,
+		ui,
+		hookEditor: undefined,
+	} as unknown as TestContext;
+
+	return { ctx, editor, editorContainer, ui };
 }
 
-function createEditorRoute(title: string, text = "", promptStyle = false): EditorRouteHarness {
-	let model = makeHookEditorModel(title, text, promptStyle);
-	const component = new HookEditorComponent(model);
-	const submitted: string[] = [];
-	let cancelled = 0;
-	const dispatch = (message: HookEditorMsg): void => {
-		const transition = updateHookEditor(model, message);
-		model = transition.model;
-		component.apply(model);
-		for (const command of transition.commands) {
-			switch (command._tag) {
-				case "Resolve":
-					submitted.push(command.value);
-					break;
-				case "Cancel":
-					cancelled++;
-					break;
-				case "ExternalEditorRequested":
-					break;
-			}
-		}
-	};
-	return {
-		get model() {
-			return model;
-		},
-		component,
-		submitted,
-		get cancelled() {
-			return cancelled;
-		},
-		dispatch,
-		append: text => dispatch({ _tag: "ValueChanged", value: model.text + text }),
-		submit: () => dispatch({ _tag: "Submit" }),
-		cancel: () => dispatch({ _tag: "Back" }),
-	};
-}
-
-describe("Hook editor route", () => {
+describe("HookEditorComponent default (hook) mode", () => {
 	it("inserts a newline on Enter instead of submitting immediately", () => {
-		const route = createEditorRoute("Prompt");
+		const onSubmit = vi.fn();
+		const onCancel = vi.fn();
+		const component = new HookEditorComponent(createTui(), "Prompt", undefined, onSubmit, onCancel);
 
-		route.append("a");
-		route.append("b");
-		route.append("\n");
+		component.handleInput("a");
+		component.handleInput("b");
+		component.handleInput("\n");
 
-		expect(route.submitted).toEqual([]);
-		expect(route.cancelled).toBe(0);
+		expect(onSubmit).not.toHaveBeenCalled();
+		expect(onCancel).not.toHaveBeenCalled();
 
-		route.append("c");
-		route.append("d");
-	route.submit();
+		component.handleInput("c");
+		component.handleInput("d");
+		component.handleInput("\x1b[13;5u");
 
-		expect(route.submitted).toEqual(["ab\ncd"]);
-		expect(route.cancelled).toBe(0);
+		expect(onSubmit).toHaveBeenCalledTimes(1);
+		expect(onSubmit).toHaveBeenCalledWith("ab\ncd");
+		expect(onCancel).not.toHaveBeenCalled();
 	});
 
 	it("submits the current text on Ctrl+Enter", () => {
-		const route = createEditorRoute("Prompt", "line 1\nline 2");
+		const onSubmit = vi.fn();
+		const onCancel = vi.fn();
+		const component = new HookEditorComponent(createTui(), "Prompt", "line 1\nline 2", onSubmit, onCancel);
 
-		route.submit();
+		component.handleInput("\x1b[13;5u");
 
-		expect(route.submitted).toEqual(["line 1\nline 2"]);
-		expect(route.cancelled).toBe(0);
+		expect(onSubmit).toHaveBeenCalledTimes(1);
+		expect(onSubmit).toHaveBeenCalledWith("line 1\nline 2");
+		expect(onCancel).not.toHaveBeenCalled();
 	});
 
 	it("submits Ctrl+Enter variants with NumLock or keypad Enter metadata", () => {
 		const variants = ["\x1b[13;133u", "\x1b[57414;5u", "\x1b[57414;133u"];
 
 		for (const variant of variants) {
-			const route = createEditorRoute("Prompt", "draft");
-			route.submit();
+			const onSubmit = vi.fn();
+			const onCancel = vi.fn();
+			const component = new HookEditorComponent(createTui(), "Prompt", "draft", onSubmit, onCancel);
 
-			expect(variant.length).toBeGreaterThan(0);
-			expect(route.submitted).toEqual(["draft"]);
-			expect(route.cancelled).toBe(0);
+			component.handleInput(variant);
+
+			expect(onSubmit).toHaveBeenCalledTimes(1);
+			expect(onSubmit).toHaveBeenCalledWith("draft");
+			expect(onCancel).not.toHaveBeenCalled();
 		}
 	});
 
 	it("submits LF-prefixed modified Enter sequences", () => {
-		const route = createEditorRoute("Prompt", "draft");
+		const onSubmit = vi.fn();
+		const onCancel = vi.fn();
+		const component = new HookEditorComponent(createTui(), "Prompt", "draft", onSubmit, onCancel);
 
-		route.submit();
+		component.handleInput("\n\x1b[13;5u");
 
-		expect(route.submitted).toEqual(["draft"]);
-		expect(route.cancelled).toBe(0);
+		expect(onSubmit).toHaveBeenCalledTimes(1);
+		expect(onSubmit).toHaveBeenCalledWith("draft");
+		expect(onCancel).not.toHaveBeenCalled();
 	});
 
 	it("expands large paste markers when submitting on Ctrl+Enter", () => {
-		const route = createEditorRoute("Prompt");
+		const onSubmit = vi.fn();
+		const onCancel = vi.fn();
+		const component = new HookEditorComponent(createTui(), "Prompt", undefined, onSubmit, onCancel);
 		const pasted = largePasteText();
 
-		route.append(pasted);
+		component.handleInput(`\x1b[200~${pasted}\x1b[201~`);
 
-		expect(renderText(route.component)).toContain("pasted line 1");
-		expect(renderText(route.component)).toContain("pasted line 11");
+		expect(renderText(component)).toContain("[Paste #1, +11 lines]");
 
-		route.submit();
+		component.handleInput("\x1b[13;5u");
 
-		expect(route.submitted).toEqual([pasted]);
-		expect(route.cancelled).toBe(0);
+		expect(onSubmit).toHaveBeenCalledTimes(1);
+		expect(onSubmit).toHaveBeenCalledWith(pasted);
+		expect(onCancel).not.toHaveBeenCalled();
 	});
 
 	it("cancels on Escape", () => {
-		const route = createEditorRoute("Prompt", "draft");
+		const onSubmit = vi.fn();
+		const onCancel = vi.fn();
+		const component = new HookEditorComponent(createTui(), "Prompt", "draft", onSubmit, onCancel);
 
-		route.cancel();
+		component.handleInput("\x1b");
 
-		expect(route.cancelled).toBe(1);
-		expect(route.submitted).toEqual([]);
+		expect(onCancel).toHaveBeenCalledTimes(1);
+		expect(onSubmit).not.toHaveBeenCalled();
 	});
 });
 
-describe("Hook editor route prompt-style mode", () => {
+describe("HookEditorComponent prompt-style mode", () => {
 	it("submits on plain Enter", () => {
-		const route = createEditorRoute("Prompt", "", true);
-		route.append("a");
-		route.append("b");
-		route.submit();
+		const onSubmit = vi.fn();
+		const onCancel = vi.fn();
+		const component = new HookEditorComponent(createTui(), "Prompt", undefined, onSubmit, onCancel, {
+			promptStyle: true,
+		});
 
-		expect(route.submitted).toEqual(["ab"]);
-		expect(route.cancelled).toBe(0);
+		component.handleInput("a");
+		component.handleInput("b");
+		component.handleInput("\r");
+
+		expect(onSubmit).toHaveBeenCalledTimes(1);
+		expect(onSubmit).toHaveBeenCalledWith("ab");
+		expect(onCancel).not.toHaveBeenCalled();
 	});
 
 	it("submits on alternate Enter encodings recognized by the key matcher", () => {
-		const route = createEditorRoute("Prompt", "a", true);
-		route.submit();
+		const onSubmit = vi.fn();
+		const onCancel = vi.fn();
+		const component = new HookEditorComponent(createTui(), "Prompt", undefined, onSubmit, onCancel, {
+			promptStyle: true,
+		});
 
-		expect(route.submitted).toEqual(["a"]);
-		expect(route.cancelled).toBe(0);
+		component.handleInput("a");
+		component.handleInput("\x1bOM");
+
+		expect(onSubmit).toHaveBeenCalledTimes(1);
+		expect(onSubmit).toHaveBeenCalledWith("a");
+		expect(onCancel).not.toHaveBeenCalled();
 	});
 
 	it("submits when a terminal reports plain Enter as LF", () => {
-		const route = createEditorRoute("Prompt", "a", true);
-		route.submit();
+		const onSubmit = vi.fn();
+		const onCancel = vi.fn();
+		const component = new HookEditorComponent(createTui(), "Prompt", undefined, onSubmit, onCancel, {
+			promptStyle: true,
+		});
 
-		expect(route.submitted).toEqual(["a"]);
-		expect(route.cancelled).toBe(0);
+		component.handleInput("a");
+		component.handleInput("\n");
+
+		expect(onSubmit).toHaveBeenCalledTimes(1);
+		expect(onSubmit).toHaveBeenCalledWith("a");
+		expect(onCancel).not.toHaveBeenCalled();
 	});
 
-	it("absorbs enhanced-paste payloads delivered through the hook paste route", () => {
-		const route = createEditorRoute("Prompt", "", true);
+	it("absorbs enhanced-paste payloads delivered via pasteText (kitty OSC 5522 routing)", () => {
+		// Regression: pasting into the ask tool's "Other" editor on OSC 5522
+		// terminals routed the payload to the hidden main prompt, because the
+		// enhanced-paste focus routing only targets components exposing a
+		// `pasteText` hook and the dialog wrapper had none (#2127 contract).
+		const onSubmit = vi.fn();
+		const onCancel = vi.fn();
+		const component = new HookEditorComponent(createTui(), "Prompt", undefined, onSubmit, onCancel, {
+			promptStyle: true,
+		});
 		const pasted = largePasteText();
 
-		route.append(pasted);
+		component.pasteText(pasted);
 
-		expect(renderText(route.component)).toContain("pasted line 11");
+		expect(renderText(component)).toContain("[Paste #1, +11 lines]");
 
-		route.submit();
+		component.handleInput("\r");
 
-		expect(route.submitted).toEqual([pasted]);
-		expect(route.cancelled).toBe(0);
+		expect(onSubmit).toHaveBeenCalledTimes(1);
+		expect(onSubmit).toHaveBeenCalledWith(pasted);
+		expect(onCancel).not.toHaveBeenCalled();
 	});
 
 	it("expands large paste markers when submitting on Enter", () => {
-		const route = createEditorRoute("Prompt", "", true);
+		const onSubmit = vi.fn();
+		const onCancel = vi.fn();
+		const component = new HookEditorComponent(createTui(), "Prompt", undefined, onSubmit, onCancel, {
+			promptStyle: true,
+		});
 		const pasted = largePasteText();
 
-		route.append(pasted);
-		expect(renderText(route.component)).toContain("pasted line 11");
+		component.handleInput(`\x1b[200~${pasted}\x1b[201~`);
 
-		route.submit();
+		expect(renderText(component)).toContain("[Paste #1, +11 lines]");
 
-		expect(route.submitted).toEqual([pasted]);
-		expect(route.cancelled).toBe(0);
+		component.handleInput("\r");
+
+		expect(onSubmit).toHaveBeenCalledTimes(1);
+		expect(onSubmit).toHaveBeenCalledWith(pasted);
+		expect(onCancel).not.toHaveBeenCalled();
 	});
 
 	it("inserts newline on Shift+Enter instead of submitting", () => {
-		const route = createEditorRoute("Prompt", "", true);
-		route.append("a");
-		route.append("\n");
+		const onSubmit = vi.fn();
+		const onCancel = vi.fn();
+		const component = new HookEditorComponent(createTui(), "Prompt", undefined, onSubmit, onCancel, {
+			promptStyle: true,
+		});
 
-		expect(route.submitted).toEqual([]);
-		expect(route.cancelled).toBe(0);
+		component.handleInput("a");
+		component.handleInput("\x1b[13;2~");
 
-		route.append("b");
-		route.submit();
+		expect(onSubmit).not.toHaveBeenCalled();
+		expect(onCancel).not.toHaveBeenCalled();
 
-		expect(route.submitted).toEqual(["a\nb"]);
+		component.handleInput("b");
+		component.handleInput("\r");
+
+		expect(onSubmit).toHaveBeenCalledTimes(1);
+		expect(onSubmit).toHaveBeenCalledWith("a\nb");
 	});
 
 	it("treats Ctrl+Enter as newline in prompt-style mode", () => {
-		const route = createEditorRoute("Prompt", "", true);
-		route.append("x");
-		route.append("\n");
+		const onSubmit = vi.fn();
+		const onCancel = vi.fn();
+		const component = new HookEditorComponent(createTui(), "Prompt", undefined, onSubmit, onCancel, {
+			promptStyle: true,
+		});
 
-		expect(route.submitted).toEqual([]);
+		component.handleInput("x");
+		component.handleInput("\x1b[13;5u");
 
-		route.append("y");
-	route.submit();
+		expect(onSubmit).not.toHaveBeenCalled();
 
-		expect(route.submitted).toEqual(["x\ny"]);
+		component.handleInput("y");
+		component.handleInput("\r");
+
+		expect(onSubmit).toHaveBeenCalledTimes(1);
+		expect(onSubmit).toHaveBeenCalledWith("x\ny");
 	});
 
 	it("renders prompt-style editor with legacy ask chrome", () => {
-		const route = createEditorRoute("Prompt", "", true);
-		const rendered = renderText(route.component);
-		const lines = renderLines(route.component);
+		const component = new HookEditorComponent(createTui(), "Prompt", undefined, vi.fn(), vi.fn(), {
+			promptStyle: true,
+		});
+
+		const rendered = renderText(component);
+		const lines = renderLines(component);
 
 		expect(lines[0]).toMatch(/^─+$/);
 		expect(lines.at(-1)).toMatch(/^─+$/);
@@ -248,119 +316,200 @@ describe("Hook editor route prompt-style mode", () => {
 	});
 
 	it("keeps the prompt gutter visible after typing in prompt-style mode", () => {
-		const route = createEditorRoute("Prompt", "", true);
-		for (const char of "hello") route.append(char);
+		const component = new HookEditorComponent(createTui(), "Prompt", undefined, vi.fn(), vi.fn(), {
+			promptStyle: true,
+		});
 
-		const lines = renderLines(route.component);
+		for (const char of "hello") {
+			component.handleInput(char);
+		}
+
+		const lines = renderLines(component);
 		expect(lines[4]?.startsWith("> hello")).toBe(true);
 		expect(lines[4]?.startsWith("hello")).toBe(false);
 	});
 
 	it("aligns wrapped prompt-style continuation rows under the text column", () => {
-		const route = createEditorRoute("Prompt", "abcdefghijklm", true);
+		const component = new HookEditorComponent(createTui(), "Prompt", "abcdefghijklm", vi.fn(), vi.fn(), {
+			promptStyle: true,
+		});
 
-		const lines = renderLines(route.component, 12);
+		const lines = renderLines(component, 12);
 		expect(lines[4]).toBe("> abcdefghij");
 		expect(lines[5]?.startsWith("  klm")).toBe(true);
 		expect(lines[5]?.startsWith(">")).toBe(false);
 	});
 
 	it("cancels on Escape", () => {
-		const route = createEditorRoute("Prompt", "draft", true);
-		route.cancel();
+		const onSubmit = vi.fn();
+		const onCancel = vi.fn();
+		const component = new HookEditorComponent(createTui(), "Prompt", "draft", onSubmit, onCancel, {
+			promptStyle: true,
+		});
 
-		expect(route.cancelled).toBe(1);
-		expect(route.submitted).toEqual([]);
+		component.handleInput("\x1b");
+
+		expect(onCancel).toHaveBeenCalledTimes(1);
+		expect(onSubmit).not.toHaveBeenCalled();
 	});
 
 	it("cancels on ui.dismiss in prompt-style mode when remapped", () => {
-		setKeybindings(KeybindingsManager.inMemory({ "ui.dismiss": "ctrl+c" }));
-		const route = createEditorRoute("Prompt", "draft", true);
+		setKeybindings(
+			KeybindingsManager.inMemory({
+				"ui.dismiss": "ctrl+c",
+			}),
+		);
+		const onSubmit = vi.fn();
+		const onCancel = vi.fn();
+		const component = new HookEditorComponent(createTui(), "Prompt", "draft", onSubmit, onCancel, {
+			promptStyle: true,
+		});
 
-		expect(renderText(route.component)).toContain("ctrl+c cancel");
-		expect(renderText(route.component)).toContain("ctrl+g external editor");
+		expect(renderText(component)).toContain("ctrl+c cancel");
+		expect(renderText(component)).toContain("ctrl+g external editor");
 
-		route.cancel();
-		expect(route.cancelled).toBe(1);
-		expect(route.submitted).toEqual([]);
+		component.handleInput("\x1b");
+		expect(onCancel).not.toHaveBeenCalled();
+
+		component.handleInput("\x03");
+
+		expect(onCancel).toHaveBeenCalledTimes(1);
+		expect(onSubmit).not.toHaveBeenCalled();
 	});
 });
 
-describe("Hook dialog FIFO", () => {
+describe("ExtensionUiController hook editor abort", () => {
 	it("hides the hook editor and resolves undefined when the caller aborts", async () => {
-		const fifo = new DialogFifo<string>();
+		const { ctx, editor, editorContainer, ui } = createControllerContext();
+		const controller = new ExtensionUiController(ctx);
 		const abortController = new AbortController();
-		const mounted: string[] = [];
-		const promise = fifo.present(abortController.signal, settle => {
-			mounted.push("editor");
-			return () => {
-				mounted.pop();
-				settle(undefined);
-			};
-		});
+		const controllerWithAbort = controller as unknown as {
+			showHookEditor: (
+				title: string,
+				prefill?: string,
+				dialogOptions?: { signal?: AbortSignal },
+				editorOptions?: { promptStyle?: boolean },
+			) => Promise<string | undefined>;
+		};
 
-		expect(mounted).toEqual(["editor"]);
+		const promise = controllerWithAbort.showHookEditor("Prompt", "draft", { signal: abortController.signal });
+
+		expect(editorContainer.children).toHaveLength(1);
+		expect(ctx.hookEditor).toBeDefined();
+
 		abortController.abort();
+		await Bun.sleep(0);
 
-		expect(await promise).toBeUndefined();
-		expect(mounted).toEqual([]);
+		expect(editorContainer.children).toEqual([editor]);
+		expect(ctx.hookEditor).toBeUndefined();
+		expect(ui.setFocus).toHaveBeenLastCalledWith(editor);
+
+		const pending = Symbol("pending");
+		const result = await Promise.race([promise, Bun.sleep(20).then(() => pending)]);
+		expect(result).toBeUndefined();
 	});
 
-	it("queues a second selector instead of clobbering the open one", async () => {
-		const fifo = new DialogFifo<string>();
-		const mounted: string[] = [];
-		let settleA: ((value: string | undefined) => void) | undefined;
-		let settleB: ((value: string | undefined) => void) | undefined;
-		const promiseA = fifo.present(undefined, settle => {
-			settleA = settle;
-			mounted.push("A");
-			return () => {
-				mounted.splice(0, 1);
-			};
-		});
-		const promiseB = fifo.present(undefined, settle => {
-			settleB = settle;
-			mounted.push("B");
-			return () => {
-				mounted.splice(0, 1);
-			};
+	it("forwards editorOptions to HookEditorComponent", async () => {
+		const { ctx, editorContainer } = createControllerContext();
+		const controller = new ExtensionUiController(ctx);
+		const controllerWithOptions = controller as unknown as {
+			showHookEditor: (
+				title: string,
+				prefill?: string,
+				dialogOptions?: { signal?: AbortSignal },
+				editorOptions?: { promptStyle?: boolean },
+			) => Promise<string | undefined>;
+		};
+
+		// Start the editor with promptStyle
+		const promise = controllerWithOptions.showHookEditor("Ask prompt", undefined, undefined, {
+			promptStyle: true,
 		});
 
-		expect(mounted).toEqual(["A"]);
-		settleA?.(undefined);
+		expect(editorContainer.children).toHaveLength(1);
+		expect(ctx.hookEditor).toBeDefined();
+
+		// The component should be a HookEditorComponent in prompt-style mode.
+		// Verify by sending Enter — it should submit, not insert newline.
+		const hookEditor = ctx.hookEditor!;
+		hookEditor.handleInput("test-text".split("").join(""));
+		hookEditor.handleInput("\r");
+
+		// The promise should resolve since Enter submits in prompt-style mode.
+		const result = await promise;
+		// Result depends on what the editor captured. The key thing is it resolved.
+		expect(result).toBeDefined();
+	});
+});
+
+describe("ExtensionUiController dialog serialization", () => {
+	type SelectorController = {
+		showHookSelector: (
+			title: string,
+			options: string[],
+			dialogOptions?: { signal?: AbortSignal },
+		) => Promise<string | undefined>;
+	};
+
+	it("queues a second selector instead of clobbering the open one", async () => {
+		const { ctx, editor, editorContainer } = createControllerContext();
+		const controller = new ExtensionUiController(ctx) as unknown as SelectorController;
+
+		const abortA = new AbortController();
+		const abortB = new AbortController();
+
+		const promiseA = controller.showHookSelector("A", ["a1", "a2"], { signal: abortA.signal });
+		// First dialog is presented synchronously on the shared surface.
+		const componentA = ctx.hookSelector;
+		expect(componentA).toBeDefined();
+		expect(editorContainer.children).toEqual([componentA]);
+
+		const promiseB = controller.showHookSelector("B", ["b1", "b2"], { signal: abortB.signal });
+		// The second request must NOT swap itself into the surface while A is open —
+		// that orphaning is exactly the hang this serialization fixes.
+		expect(ctx.hookSelector).toBe(componentA);
+		expect(editorContainer.children).toEqual([componentA]);
+
+		// Resolving A hands the surface to the queued B.
+		abortA.abort();
+		await Bun.sleep(0);
 		expect(await promiseA).toBeUndefined();
-		expect(mounted).toEqual(["B"]);
-		settleB?.(undefined);
+		const componentB = ctx.hookSelector;
+		expect(componentB).toBeDefined();
+		expect(componentB).not.toBe(componentA);
+		expect(editorContainer.children).toEqual([componentB]);
+
+		// Resolving B restores the core editor.
+		abortB.abort();
+		await Bun.sleep(0);
 		expect(await promiseB).toBeUndefined();
-		expect(mounted).toEqual([]);
+		expect(ctx.hookSelector).toBeUndefined();
+		expect(editorContainer.children).toEqual([editor]);
 	});
 
 	it("never presents a queued selector whose signal aborts before its turn", async () => {
-		const fifo = new DialogFifo<string>();
-		const mounted: string[] = [];
-		let settleA: ((value: string | undefined) => void) | undefined;
-		const abortB = new AbortController();
-		const promiseA = fifo.present(undefined, settle => {
-			settleA = settle;
-			mounted.push("A");
-			return () => {
-				mounted.pop();
-			};
-		});
-		const promiseB = fifo.present(abortB.signal, settle => {
-			mounted.push("B");
-			return () => {
-				settle(undefined);
-				mounted.pop();
-			};
-		});
+		const { ctx, editor, editorContainer } = createControllerContext();
+		const controller = new ExtensionUiController(ctx) as unknown as SelectorController;
 
+		const abortA = new AbortController();
+		const abortB = new AbortController();
+
+		const promiseA = controller.showHookSelector("A", ["a1"], { signal: abortA.signal });
+		const componentA = ctx.hookSelector;
+		const promiseB = controller.showHookSelector("B", ["b1"], { signal: abortB.signal });
+
+		// Abort the queued B before A releases the surface.
 		abortB.abort();
 		expect(await promiseB).toBeUndefined();
-		expect(mounted).toEqual(["A"]);
+		// A is untouched and still owns the surface.
+		expect(ctx.hookSelector).toBe(componentA);
+		expect(editorContainer.children).toEqual([componentA]);
 
-		settleA?.(undefined);
+		// When A resolves, the skipped B must not be shown — surface returns to editor.
+		abortA.abort();
+		await Bun.sleep(0);
 		expect(await promiseA).toBeUndefined();
-		expect(mounted).toEqual([]);
+		expect(ctx.hookSelector).toBeUndefined();
+		expect(editorContainer.children).toEqual([editor]);
 	});
 });

@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it } from "bun:test";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
-import { createSessionTreeRoute, viewSessionTree } from "@oh-my-pi/pi-coding-agent/modes/components/tree-selector";
+import { TreeSelectorComponent } from "@oh-my-pi/pi-coding-agent/modes/components/tree-selector";
 import * as themeModule from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import type { SessionEntry, SessionTreeNode } from "@oh-my-pi/pi-coding-agent/session/session-entries";
 
@@ -32,9 +32,14 @@ function buildBranchyTree(branchDepth: number): { root: SessionTreeNode; leaf: S
 }
 
 function renderSelector(tree: SessionTreeNode, leafId: string, width: number): string[] {
-	const route = createSessionTreeRoute([tree], leafId);
-	route.focusedRoot.apply(viewSessionTree(route.initialModel, { offset: 0, height: 200 }));
-	return route.focusedRoot.render(width).map(line => Bun.stripANSI(line));
+	const selector = new TreeSelectorComponent(
+		[tree],
+		leafId,
+		200,
+		() => {},
+		() => {},
+	);
+	return selector.render(width).map(line => Bun.stripANSI(line));
 }
 
 describe("TreeSelectorComponent deep branching overflow", () => {

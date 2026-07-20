@@ -19,100 +19,25 @@ import type {
 import { NEVER_ABORT_SIGNAL } from "../../extensibility/extensions";
 import { getSessionSlashCommands } from "../../extensibility/extensions/get-commands-handler";
 import { createExtensionModelQuery } from "../../extensibility/extensions/model-api";
-import type { HookSelectorSlider } from "../../modes/components/hook-selector";
+import { HookEditorComponent } from "../../modes/components/hook-editor";
+import { HookInputComponent } from "../../modes/components/hook-input";
+import { HookSelectorComponent, type HookSelectorSlider } from "../../modes/components/hook-selector";
 import { getAvailableThemesWithPaths, getThemeByName, setTheme, type Theme, theme } from "../../modes/theme/theme";
 import type { InteractiveModeContext, InteractiveSelectorDialogOptions } from "../../modes/types";
 import { USER_INTERRUPT_LABEL } from "../../session/messages";
 import { setSessionTerminalTitle, setTerminalTitle } from "../../utils/title-generator";
 
 const MAX_WIDGET_LINES = 10;
-interface DialogFifoRequest<Result> {
-	start(): void;
-	readonly isSettled: () => boolean;
-}
-
-/** FIFO settlement boundary shared by hook dialogs; each request settles at most once. */
-export class DialogFifo<Result> {
-	#active = false;
-	#queue: DialogFifoRequest<Result>[] = [];
-
-	present(
-		signal: AbortSignal | undefined,
-		mount: (settle: (value: Result | undefined) => void) => () => void,
-	): Promise<Result | undefined> {
-		const { promise, resolve, reject } = Promise.withResolvers<Result | undefined>();
-		let settled = false;
-		let started = false;
-		let hide: (() => void) | undefined;
-		let request: DialogFifoRequest<Result>;
-
-		const onAbort = (): void => settle(undefined);
-		const settle = (value: Result | undefined): void => {
-			if (settled) return;
-			settled = true;
-			signal?.removeEventListener("abort", onAbort);
-			if (started) {
-				hide?.();
-				this.#active = false;
-				this.#advance();
-			} else {
-				const index = this.#queue.indexOf(request);
-				if (index >= 0) this.#queue.splice(index, 1);
-			}
-			resolve(value);
-		};
-
-		request = {
-			isSettled: () => settled,
-			start: () => {
-				if (settled) {
-					this.#advance();
-					return;
-				}
-				started = true;
-				this.#active = true;
-				try {
-					hide = mount(settle);
-				} catch (error) {
-					settled = true;
-					signal?.removeEventListener("abort", onAbort);
-					this.#active = false;
-					reject(error);
-					this.#advance();
-				}
-			},
-		};
-
-		if (signal?.aborted) {
-			settled = true;
-			resolve(undefined);
-			return promise;
-		}
-		signal?.addEventListener("abort", onAbort, { once: true });
-		this.#queue.push(request);
-		this.#advance();
-		return promise;
-	}
-
-	#advance(): void {
-		if (this.#active) return;
-		while (this.#queue.length > 0) {
-			const request = this.#queue.shift()!;
-			if (request.isSettled()) continue;
-			request.start();
-			return;
-		}
-	}
-}
-
 
 export class ExtensionUiController {
 	#extensionTerminalInputUnsubscribers = new Set<() => void>();
 	#hookWidgetsAbove = new Map<string, ExtensionUiComponent>();
 	#hookWidgetsBelow = new Map<string, ExtensionUiComponent>();
-	// The editor replacement surface is exclusive; hook dialogs settle through
-	// one FIFO so aborts cannot orphan a previous Promise or steal its focus.
-	#dialogFifo = new DialogFifo<string>();
+	// Single-file dialog surface (`editorContainer` + focus) is shared by the
+	// selector / input / editor modals, so only one may be presented at a time;
+	// the rest queue. See `#presentDialog`.
+	#dialogActive = false;
+	#dialogQueue: Array<() => void> = [];
 	constructor(private ctx: InteractiveModeContext) {}
 
 	/**
@@ -622,36 +547,143 @@ export class ExtensionUiController {
 		dialogOptions?: InteractiveSelectorDialogOptions,
 		extra?: { slider?: HookSelectorSlider },
 	): Promise<string | undefined> {
-		return this.ctx.showHookSelector(title, options, dialogOptions);
+		return this.#presentDialog(dialogOptions?.signal, settle => {
+			const maxVisible = Math.max(4, Math.min(15, this.ctx.ui.terminal.rows - 12));
+			this.ctx.hookSelector = new HookSelectorComponent(
+				title,
+				options,
+				option => settle(option),
+				() => settle(undefined),
+				{
+					onLeft: dialogOptions?.onLeft
+						? () => {
+								dialogOptions.onLeft?.();
+								settle(undefined);
+							}
+						: undefined,
+					onRight: dialogOptions?.onRight
+						? () => {
+								dialogOptions.onRight?.();
+								settle(undefined);
+							}
+						: undefined,
+					onExternalEditor: dialogOptions?.onExternalEditor,
+					helpText: dialogOptions?.helpText,
+					initialIndex: dialogOptions?.initialIndex,
+					timeout: dialogOptions?.timeout,
+					onTimeout: dialogOptions?.onTimeout,
+					tui: this.ctx.ui,
+					outline: dialogOptions?.outline,
+					disabledIndices: dialogOptions?.disabledIndices,
+					selectionMarker: dialogOptions?.selectionMarker,
+					checkedIndices: dialogOptions?.checkedIndices,
+					markableCount: dialogOptions?.markableCount,
+					maxVisible,
+					slider: extra?.slider,
+				},
+			);
+			this.ctx.editorContainer.clear();
+			this.ctx.editorContainer.addChild(this.ctx.hookSelector);
+			this.ctx.ui.setFocus(this.ctx.hookSelector);
+			this.ctx.ui.requestRender();
+			return () => this.hideHookSelector();
+		});
 	}
-
+	/**
+	 * Hide the hook selector.
+	 */
 	hideHookSelector(): void {
-		this.ctx.hideHookSelector();
+		this.ctx.hookSelector?.dispose();
+		this.ctx.editorContainer.clear();
+		this.ctx.editorContainer.addChild(this.ctx.editor);
+		this.ctx.hookSelector = undefined;
+		this.ctx.ui.setFocus(this.ctx.editor);
+		this.ctx.ui.requestRender();
 	}
 
+	/**
+	 * Show a confirmation dialog for hooks.
+	 */
 	async showHookConfirm(title: string, message: string): Promise<boolean> {
-		return (await this.ctx.showHookSelector(`${title}\n${message}`, ["Yes", "No"])) === "Yes";
+		const result = await this.showHookSelector(`${title}\n${message}`, ["Yes", "No"]);
+		return result === "Yes";
 	}
 
-	showHookInput(title: string, placeholder?: string, dialogOptions?: ExtensionUIDialogOptions): Promise<string | undefined> {
-		return this.ctx.showHookInput(title, placeholder, dialogOptions);
+	/**
+	 * Show a text input for hooks.
+	 */
+	showHookInput(
+		title: string,
+		placeholder?: string,
+		dialogOptions?: ExtensionUIDialogOptions,
+	): Promise<string | undefined> {
+		return this.#presentDialog(dialogOptions?.signal, settle => {
+			this.ctx.hookInput = new HookInputComponent(
+				title,
+				placeholder,
+				value => settle(value),
+				() => settle(undefined),
+				{
+					timeout: dialogOptions?.timeout,
+					onTimeout: dialogOptions?.onTimeout,
+					tui: this.ctx.ui,
+				},
+			);
+			this.ctx.editorContainer.clear();
+			this.ctx.editorContainer.addChild(this.ctx.hookInput);
+			this.ctx.ui.setFocus(this.ctx.hookInput);
+			this.ctx.ui.requestRender();
+			return () => this.hideHookInput();
+		});
 	}
 
+	/**
+	 * Hide the hook input.
+	 */
 	hideHookInput(): void {
-		this.ctx.hideHookInput();
+		this.ctx.hookInput?.dispose();
+		this.ctx.editorContainer.clear();
+		this.ctx.editorContainer.addChild(this.ctx.editor);
+		this.ctx.hookInput = undefined;
+		this.ctx.ui.setFocus(this.ctx.editor);
+		this.ctx.ui.requestRender();
 	}
 
+	/**
+	 * Show a multi-line editor for hooks (with Ctrl+G support).
+	 */
 	showHookEditor(
 		title: string,
 		prefill?: string,
 		dialogOptions?: ExtensionUIDialogOptions,
 		editorOptions?: { promptStyle?: boolean },
 	): Promise<string | undefined> {
-		return this.ctx.showHookEditor(title, prefill, dialogOptions, editorOptions);
+		return this.#presentDialog(dialogOptions?.signal, settle => {
+			this.ctx.hookEditor = new HookEditorComponent(
+				this.ctx.ui,
+				title,
+				prefill,
+				value => settle(value),
+				() => settle(undefined),
+				editorOptions,
+			);
+			this.ctx.editorContainer.clear();
+			this.ctx.editorContainer.addChild(this.ctx.hookEditor);
+			this.ctx.ui.setFocus(this.ctx.hookEditor);
+			this.ctx.ui.requestRender();
+			return () => this.hideHookEditor();
+		});
 	}
 
+	/**
+	 * Hide the hook editor.
+	 */
 	hideHookEditor(): void {
-		this.ctx.hideHookEditor();
+		this.ctx.editorContainer.clear();
+		this.ctx.editorContainer.addChild(this.ctx.editor);
+		this.ctx.hookEditor = undefined;
+		this.ctx.ui.setFocus(this.ctx.editor);
+		this.ctx.ui.requestRender();
 	}
 
 	/**
@@ -808,7 +840,61 @@ export class ExtensionUiController {
 		signal: AbortSignal | undefined,
 		present: (settle: (value: string | undefined) => void) => () => void,
 	): Promise<string | undefined> {
-		return this.#dialogFifo.present(signal, present);
+		const { promise, resolve, reject } = Promise.withResolvers<string | undefined>();
+		let settled = false;
+		let started = false;
+		let hide: (() => void) | undefined;
+
+		function onAbort(): void {
+			settle(undefined);
+		}
+
+		const settle = (value: string | undefined): void => {
+			if (settled) return;
+			settled = true;
+			signal?.removeEventListener("abort", onAbort);
+			if (started) {
+				hide?.();
+				this.#dialogActive = false;
+				this.#advanceDialogQueue();
+			}
+			resolve(value);
+		};
+
+		const startPresentation = (): void => {
+			if (settled) {
+				// Aborted before its turn arrived — never present, hand off the surface.
+				this.#advanceDialogQueue();
+				return;
+			}
+			started = true;
+			this.#dialogActive = true;
+			try {
+				hide = present(settle);
+			} catch (error) {
+				settled = true;
+				signal?.removeEventListener("abort", onAbort);
+				this.#dialogActive = false;
+				reject(error);
+				this.#advanceDialogQueue();
+			}
+		};
+
+		if (signal?.aborted) {
+			resolve(undefined);
+			return promise;
+		}
+		signal?.addEventListener("abort", onAbort, { once: true });
+
+		if (this.#dialogActive) {
+			this.#dialogQueue.push(startPresentation);
+		} else {
+			startPresentation();
+		}
+		return promise;
 	}
 
+	#advanceDialogQueue(): void {
+		this.#dialogQueue.shift()?.();
+	}
 }

@@ -37,25 +37,11 @@ import { AUTO_THINKING, type ConfiguredThinkingLevel } from "../../thinking";
 import { getTabBarTheme } from "../shared";
 import { matchesSelectCancel, matchesUiDismiss } from "../utils/keybinding-matchers";
 import { bottomBorder, divider, row, topBorder } from "./overlay-box";
-import {
-	handleInputOrDismiss,
-	makePluginSettingsModalModel,
-	makeSurfaceModalModel,
-	PluginSettingsComponent,
-	type PluginSettingsModalModel,
-	type PluginSettingsModalMsg,
-	type PluginSettingsServiceCommand,
-	type SurfaceModalCommand,
-	type SurfaceModalModel,
-	type SurfaceModalMsg,
-	updatePluginSettingsModal,
-	updateSurfaceModal,
-} from "./plugin-settings";
+import { handleInputOrDismiss, PluginSettingsComponent } from "./plugin-settings";
 import { keyHint } from "./keybinding-hints";
-import { getAllSettingDefs, getSettingDef, getSettingsForTab, type SettingDef } from "./settings-defs";
+import { getSettingDef, getSettingsForTab, type SettingDef } from "./settings-defs";
 import { SnapcompactShapePreview } from "./snapcompact-shape-preview";
 import { getPreset } from "./status-line/presets";
-import { makeComponentId, type KeyEvent } from "../mvu/schema";
 
 /**
  * A submenu component for selecting from a list of options.
@@ -175,7 +161,7 @@ class SelectSubmenu extends Container {
 
 		// Hint
 		this.addChild(new Spacer(1));
-		this.addChild(new Text("  Enter to select · Esc to go back", 0, 0));
+		this.addChild(new Text(`  Enter to select · ${keyHint("ui.dismiss", "go back")}`, 0, 0));
 
 		// Footer (e.g. the snapcompact shape preview) below the interactive rows,
 		// so the list never shifts while browsing.
@@ -277,6 +263,8 @@ export interface SettingsRuntimeContext {
 	thinkingLevel: ThinkingLevel | undefined;
 	/** Available themes */
 	availableThemes: string[];
+	/** Working directory for plugins tab */
+	cwd: string;
 	/** Active model (api + id); resolves what the snapcompact `auto` shape maps to. */
 	model?: ShapeTarget;
 	/** Shared TUI image budget (graphics ids + transmit-once) for image previews. */
@@ -295,532 +283,6 @@ export interface StatusLinePreviewSettings {
 	transparent?: boolean;
 }
 
-export const SETTINGS_MODAL_COMPONENT_ID = makeComponentId("settings-selector");
-
-export type SettingsModalRegion = "settings" | "search" | "plugins" | "submenu";
-export type SettingsModalLayer =
-	| { readonly _tag: "Search" }
-	| { readonly _tag: "Plugins" }
-	| { readonly _tag: "Setting"; readonly path: SettingPath };
-
-export interface SettingsRuntimeOptions {
-	readonly values?: Readonly<Partial<Record<SettingPath, readonly string[]>>>;
-}
-
-export interface SettingsSubmenuState {
-	readonly path: SettingPath;
-	readonly kind: "select" | "text";
-	readonly selectedIndex: number;
-	readonly draft: string;
-	readonly cursor: number;
-	readonly originalValue: unknown;
-}
-
-export interface SettingsModalModel extends SurfaceModalModel<SettingsModalRegion, SettingsModalLayer> {
-	readonly originalTheme: string;
-	readonly previewTheme: string;
-	readonly activeTabId: SettingTab | "plugins";
-	readonly preSearchTabId: SettingTab | "plugins";
-	readonly searchQuery: string;
-	readonly searchCursor: number;
-	readonly sectionFocused: boolean;
-	readonly submenu?: SettingsSubmenuState;
-	readonly plugins: PluginSettingsModalModel;
-	readonly values: Readonly<Record<string, unknown>>;
-	readonly runtimeOptions: Readonly<Partial<Record<SettingPath, readonly string[]>>>;
-}
-
-export type SettingsModalMsg =
-	| SurfaceModalMsg<SettingsModalRegion, SettingsModalLayer>
-	| { readonly _tag: "Input"; readonly action: string; readonly event: KeyEvent }
-	| { readonly _tag: "PluginSettings"; readonly message: PluginSettingsModalMsg }
-	| { readonly _tag: "MoveSelection"; readonly delta: -1 | 1 }
-	| { readonly _tag: "SelectTab"; readonly tabId: SettingTab | "plugins" }
-	| { readonly _tag: "SelectPath"; readonly path: SettingPath; readonly activate: boolean }
-	| { readonly _tag: "PointerObserved" }
-	| { readonly _tag: "PreviewTheme"; readonly theme: string }
-	| { readonly _tag: "PersistSetting"; readonly path: SettingPath; readonly value: unknown };
-
-export type SettingsModalCommand =
-	| SurfaceModalCommand
-	| { readonly _tag: "RenderSettings"; readonly model: SettingsModalModel }
-	| { readonly _tag: "ThemePreviewRequested"; readonly theme: string }
-	| { readonly _tag: "ThemeRollbackRequested"; readonly theme: string }
-	| { readonly _tag: "PersistSettingRequested"; readonly path: SettingPath; readonly value: unknown }
-	| { readonly _tag: "PluginSettingsCommand"; readonly command: PluginSettingsServiceCommand };
-
-const settingsTabs = (): readonly (SettingTab | "plugins")[] => [...SETTING_TABS, "plugins"];
-
-function settingsValueSnapshot(): Readonly<Record<string, unknown>> {
-	const values: Record<string, unknown> = {};
-	for (const def of getAllSettingDefs()) values[def.path] = settings.get(def.path);
-	return values;
-}
-
-export function makeSettingsModalModel(
-	originalTheme: string,
-	runtimeOptions: SettingsRuntimeOptions = {},
-): SettingsModalModel {
-	return {
-		...makeSurfaceModalModel<SettingsModalRegion, SettingsModalLayer>("settings"),
-		originalTheme,
-		previewTheme: originalTheme,
-		activeTabId: "appearance",
-		preSearchTabId: "appearance",
-		searchQuery: "",
-		searchCursor: 0,
-		sectionFocused: false,
-		plugins: makePluginSettingsModalModel(),
-		values: settingsValueSnapshot(),
-		runtimeOptions: runtimeOptions.values ?? {},
-	};
-}
-
-function settingVisible(model: SettingsModalModel, def: SettingDef): boolean {
-	if (!def.condition) return true;
-	const backend = model.values["memory.backend"];
-	if (def.path.startsWith("hindsight.")) return backend === "hindsight";
-	if (def.path.startsWith("mnemopi.")) return backend === "mnemopi";
-	if (def.path.startsWith("autolearn.") && def.path !== "autolearn.enabled") {
-		return model.values["autolearn.enabled"] === true;
-	}
-	if (def.path.startsWith("plan.") && def.path !== "plan.enabled") {
-		return model.values["plan.enabled"] === true;
-	}
-	if (def.path === "providers.autoThinkingModel") return model.values.defaultThinkingLevel === AUTO_THINKING;
-	return def.condition();
-}
-
-function visibleDefs(model: SettingsModalModel, tab = model.activeTabId): readonly SettingDef[] {
-	if (tab === "plugins") return [];
-	return getSettingsForTab(tab).filter(def => settingVisible(model, def));
-}
-
-function displayValue(model: SettingsModalModel, path: SettingPath): string {
-	const value = model.values[path];
-	return Array.isArray(value) ? value.join(", ") : String(value ?? "");
-}
-
-function searchPaths(model: SettingsModalModel): readonly SettingPath[] {
-	if (model.searchQuery.length === 0) return [];
-	const rankedTabs: { readonly tab: SettingTab; readonly score: number; readonly paths: readonly SettingPath[] }[] = [];
-	for (const tab of SETTING_TABS) {
-		const defs = visibleDefs(model, tab);
-		const items = defs.map(def => ({
-			id: def.path,
-			label: def.label,
-			description: def.description,
-			currentValue: displayValue(model, def.path),
-			...(def.type === "enum" ? { values: [...def.values] } : {}),
-		} satisfies SettingItem));
-		const ranked = fuzzyRank(items, model.searchQuery, getSettingItemFilterText);
-		if (ranked.length === 0) continue;
-		rankedTabs.push({
-			tab,
-			score: ranked[0]?.score ?? 0,
-			paths: ranked.map(result => result.item.id as SettingPath),
-		});
-	}
-	rankedTabs.sort((left, right) => left.score - right.score || SETTING_TABS.indexOf(left.tab) - SETTING_TABS.indexOf(right.tab));
-	return rankedTabs.flatMap(result => result.paths);
-}
-
-function activePaths(model: SettingsModalModel): readonly SettingPath[] {
-	return model.region === "search" ? searchPaths(model) : visibleDefs(model).map(def => def.path);
-}
-
-function selectedPath(model: SettingsModalModel): SettingPath | undefined {
-	const paths = activePaths(model);
-	return paths[Math.max(0, Math.min(model.focusIndex, paths.length - 1))];
-}
-
-function moveSelection(model: SettingsModalModel, delta: -1 | 1): SettingsModalModel {
-	const paths = activePaths(model);
-	if (paths.length === 0) return model;
-	const focusIndex = (model.focusIndex + delta + paths.length) % paths.length;
-	return { ...model, focusIndex, sectionFocused: false };
-}
-
-function jumpSection(model: SettingsModalModel, delta: -1 | 1): SettingsModalModel {
-	if (model.region === "search") {
-		const paths = searchPaths(model);
-		if (paths.length === 0) return model;
-		return { ...model, focusIndex: Math.max(0, Math.min(paths.length - 1, model.focusIndex + delta * 10)) };
-	}
-	const defs = visibleDefs(model);
-	if (defs.length === 0) return model;
-	const groups = defs.reduce<{ readonly name: string; readonly index: number }[]>((result, def, index) => {
-		const name = def.group ?? "";
-		if (result.at(-1)?.name !== name) result.push({ name, index });
-		return result;
-	}, []);
-	if (groups.length < 2) return moveSelection(model, delta);
-	let groupIndex = groups.findLastIndex(group => group.index <= model.focusIndex);
-	if (groupIndex < 0) groupIndex = 0;
-	groupIndex = (groupIndex + delta + groups.length) % groups.length;
-	return { ...model, focusIndex: groups[groupIndex]?.index ?? 0 };
-}
-
-function submenuOptions(model: SettingsModalModel, def: Extract<SettingDef, { readonly type: "submenu" }>) {
-	const runtime = model.runtimeOptions[def.path];
-	return runtime === undefined
-		? def.options
-		: runtime.map(value => ({ value, label: value }));
-}
-
-function convertedSettingValue(model: SettingsModalModel, path: SettingPath, value: string): unknown {
-	const currentValue = model.values[path];
-	if ((path === "compaction.thresholdPercent" || path === "compaction.thresholdTokens") && value === "default") return -1;
-	if (typeof currentValue === "number") return Number(value);
-	if (typeof currentValue === "boolean") return value === "true";
-	return value;
-}
-
-function rendered(
-	model: SettingsModalModel,
-	commands: readonly SettingsModalCommand[] = [],
-): { readonly model: SettingsModalModel; readonly commands: readonly SettingsModalCommand[] } {
-	return { model, commands: [...commands, { _tag: "RenderSettings", model }] };
-}
-
-function reducePluginSettings(
-	model: SettingsModalModel,
-	message: PluginSettingsModalMsg,
-): { readonly model: SettingsModalModel; readonly commands: readonly SettingsModalCommand[] } {
-	const transition = updatePluginSettingsModal(model.plugins, message);
-	const next = { ...model, plugins: transition.model };
-	if (transition.commands.some(command => command._tag === "CloseRequested")) return backSettings(next);
-	const commands: SettingsModalCommand[] = [];
-	for (const command of transition.commands) {
-		if (command._tag !== "CloseRequested") commands.push({ _tag: "PluginSettingsCommand", command });
-	}
-	return rendered(next, commands);
-}
-
-function selectSettingsTab(
-	model: SettingsModalModel,
-	activeTabId: SettingTab | "plugins",
-): { readonly model: SettingsModalModel; readonly commands: readonly SettingsModalCommand[] } {
-	const next: SettingsModalModel = {
-		...model,
-		activeTabId,
-		region: activeTabId === "plugins" ? "plugins" : "settings",
-		focusIndex: 0,
-		sectionFocused: false,
-	};
-	return activeTabId === "plugins"
-		? reducePluginSettings(next, { _tag: "LoadEntries" })
-		: rendered(next);
-}
-
-function persistAndRender(
-	model: SettingsModalModel,
-	path: SettingPath,
-	value: unknown,
-): { readonly model: SettingsModalModel; readonly commands: readonly SettingsModalCommand[] } {
-	const values = { ...model.values, [path]: value };
-	const committedTheme = path === "theme.dark" || path === "theme.light" ? String(value) : undefined;
-	const next = {
-		...model,
-		values,
-		...(committedTheme === undefined
-			? {}
-			: { originalTheme: committedTheme, previewTheme: committedTheme }),
-	};
-	return rendered(next, [{ _tag: "PersistSettingRequested", path, value }]);
-}
-
-function openSelected(model: SettingsModalModel) {
-	const path = selectedPath(model);
-	if (path === undefined) return rendered(model);
-	const def = getSettingDef(path);
-	if (def === undefined) return rendered(model);
-	if (def.type === "boolean") {
-		return persistAndRender(model, path, model.values[path] !== true);
-	}
-	if (def.type === "enum") {
-		const current = String(model.values[path] ?? "");
-		const index = def.values.indexOf(current);
-		const value = def.values[(index + 1) % Math.max(1, def.values.length)];
-		return value === undefined ? rendered(model) : persistAndRender(model, path, value);
-	}
-	const pushed = updateSurfaceModal(model, {
-		_tag: "Push",
-		region: "submenu",
-		layer: { _tag: "Setting", path },
-	}).model;
-	if (def.type === "text") {
-		const draft = String(model.values[path] ?? "");
-		return rendered({
-			...model,
-			...pushed,
-			submenu: {
-				path,
-				kind: "text",
-				selectedIndex: 0,
-				draft,
-				cursor: draft.length,
-				originalValue: model.values[path],
-			},
-		});
-	}
-	const options = submenuOptions(model, def);
-	const selectedIndex = Math.max(0, options.findIndex(option => option.value === String(model.values[path] ?? "")));
-	return rendered({
-		...model,
-		...pushed,
-		submenu: {
-			path,
-			kind: "select",
-			selectedIndex,
-			draft: "",
-			cursor: 0,
-			originalValue: model.values[path],
-		},
-	});
-}
-
-function backSettings(model: SettingsModalModel) {
-	if (model.sectionFocused && model.depth.length === 0) {
-		return rendered({ ...model, sectionFocused: false });
-	}
-	const leaving = model.region;
-	const submenu = model.submenu;
-	const transition = updateSurfaceModal(model, { _tag: "Back" });
-	if (transition.commands.some(command => command._tag === "CloseRequested")) {
-		const commands: SettingsModalCommand[] = [];
-		if (model.previewTheme !== model.originalTheme) {
-			commands.push({ _tag: "ThemeRollbackRequested", theme: model.originalTheme });
-		}
-		commands.push(...transition.commands);
-		return { model, commands };
-	}
-	let next: SettingsModalModel = { ...model, ...transition.model };
-	const commands: SettingsModalCommand[] = [];
-	if (leaving === "submenu") {
-		next = { ...next, submenu: undefined };
-		if (
-			submenu !== undefined &&
-			(submenu.path === "theme.dark" || submenu.path === "theme.light") &&
-			model.previewTheme !== String(submenu.originalValue ?? "")
-		) {
-			const themeName = String(submenu.originalValue ?? model.originalTheme);
-			next = { ...next, previewTheme: themeName };
-			commands.push({ _tag: "ThemePreviewRequested", theme: themeName });
-		}
-	}
-	if (leaving === "search") {
-		next = {
-			...next,
-			activeTabId: model.preSearchTabId,
-			searchQuery: "",
-			searchCursor: 0,
-			sectionFocused: false,
-		};
-	}
-	return rendered(next, commands);
-}
-
-function editDraft(value: string, cursor: number, key: string, text: string | undefined) {
-	if (text !== undefined && text.length > 0) {
-		return { value: `${value.slice(0, cursor)}${text}${value.slice(cursor)}`, cursor: cursor + text.length };
-	}
-	switch (key) {
-		case "left": return { value, cursor: Math.max(0, cursor - 1) };
-		case "right": return { value, cursor: Math.min(value.length, cursor + 1) };
-		case "home":
-		case "ctrl+a": return { value, cursor: 0 };
-		case "end":
-		case "ctrl+e": return { value, cursor: value.length };
-		case "backspace":
-			return cursor === 0
-				? { value, cursor }
-				: { value: `${value.slice(0, cursor - 1)}${value.slice(cursor)}`, cursor: cursor - 1 };
-		case "delete":
-			return { value: `${value.slice(0, cursor)}${value.slice(cursor + 1)}`, cursor };
-		case "ctrl+u":
-			return { value: value.slice(cursor), cursor: 0 };
-		case "alt+backspace":
-		case "ctrl+w": {
-			let start = cursor;
-			while (start > 0 && /\s/.test(value[start - 1] ?? "")) start -= 1;
-			while (start > 0 && !/\s/.test(value[start - 1] ?? "")) start -= 1;
-			return { value: `${value.slice(0, start)}${value.slice(cursor)}`, cursor: start };
-		}
-		default:
-			return { value, cursor };
-	}
-}
-
-function updateSettingsInput(model: SettingsModalModel, action: string, event: KeyEvent) {
-	if (action === "ui.dismiss") return backSettings(model);
-	if (event._tag === "Release" || event._tag === "Resize" || event._tag === "Mouse") return rendered(model);
-	const key = event._tag === "Press" ? String(event.key) : "";
-	const text = event._tag === "Paste" ? event.text : event.text;
-
-	if (model.submenu !== undefined) {
-		const submenu = model.submenu;
-		if (submenu.kind === "text") {
-			if (key === "enter") {
-				const popped = updateSurfaceModal(model, { _tag: "Back" }).model;
-				const value = convertedSettingValue(model, submenu.path, submenu.draft);
-				return persistAndRender({ ...model, ...popped, submenu: undefined }, submenu.path, value);
-			}
-			const edited = editDraft(submenu.draft, submenu.cursor, key, text);
-			return rendered({ ...model, submenu: { ...submenu, draft: edited.value, cursor: edited.cursor } });
-		}
-		const def = getSettingDef(submenu.path);
-		if (def?.type !== "submenu") return backSettings(model);
-		const options = submenuOptions(model, def);
-		if (options.length === 0) return rendered(model);
-		let selectedIndex = submenu.selectedIndex;
-		if (key === "up") selectedIndex = (selectedIndex - 1 + options.length) % options.length;
-		else if (key === "down") selectedIndex = (selectedIndex + 1) % options.length;
-		else if (key === "pageUp") selectedIndex = Math.max(0, selectedIndex - 10);
-		else if (key === "pageDown") selectedIndex = Math.min(options.length - 1, selectedIndex + 10);
-		else if (key === "home") selectedIndex = 0;
-		else if (key === "end") selectedIndex = options.length - 1;
-		else if (key === "enter") {
-			const option = options[selectedIndex];
-			if (option === undefined) return rendered(model);
-			const popped = updateSurfaceModal(model, { _tag: "Back" }).model;
-			const value = convertedSettingValue(model, submenu.path, option.value);
-			return persistAndRender({ ...model, ...popped, submenu: undefined }, submenu.path, value);
-		}
-		const next = { ...model, submenu: { ...submenu, selectedIndex } };
-		const option = options[selectedIndex];
-		if (
-			option !== undefined &&
-			(submenu.path === "theme.dark" || submenu.path === "theme.light") &&
-			option.value !== model.previewTheme
-		) {
-			const previewed = { ...next, previewTheme: option.value };
-			return rendered(previewed, [{ _tag: "ThemePreviewRequested", theme: option.value }]);
-		}
-		return rendered(next);
-	}
-
-	if (model.region === "search") {
-		if (key === "up") return rendered(moveSelection(model, -1));
-		if (key === "down") return rendered(moveSelection(model, 1));
-		if (key === "pageUp") return rendered(jumpSection(model, -1));
-		if (key === "pageDown") return rendered(jumpSection(model, 1));
-		if (key === "enter") return openSelected(model);
-		if (key === "tab" || key === "shift+tab") {
-			const paths = searchPaths(model);
-			if (paths.length === 0) return rendered(model);
-			const current = selectedPath(model);
-			const currentTab = current === undefined ? undefined : getSettingDef(current)?.tab;
-			const matchingTabs = SETTING_TABS.filter(tab => paths.some(path => getSettingDef(path)?.tab === tab));
-			const tabIndex = Math.max(0, matchingTabs.indexOf(currentTab ?? matchingTabs[0]!));
-			const delta = key === "shift+tab" ? -1 : 1;
-			const nextTab = matchingTabs[(tabIndex + delta + matchingTabs.length) % matchingTabs.length];
-			const focusIndex = paths.findIndex(path => getSettingDef(path)?.tab === nextTab);
-			return rendered({ ...model, focusIndex: Math.max(0, focusIndex) });
-		}
-		const edited = editDraft(model.searchQuery, model.searchCursor, key, text);
-		if (edited.value.length === 0) return backSettings(model);
-		return rendered({ ...model, searchQuery: edited.value, searchCursor: edited.cursor, focusIndex: 0 });
-	}
-
-	if (
-		model.activeTabId === "plugins" &&
-		(model.plugins.region !== "list" || (key !== "left" && key !== "right" && key !== "tab" && key !== "shift+tab"))
-	) {
-		return reducePluginSettings(model, { _tag: "Input", action, event });
-	}
-
-	if (key === "tab" || key === "shift+tab") {
-		const groups = visibleDefs(model).reduce<string[]>((result, def) => {
-			const group = def.group ?? "";
-			if (result.at(-1) !== group) result.push(group);
-			return result;
-		}, []);
-		if (groups.length >= 2) return rendered({ ...model, sectionFocused: !model.sectionFocused });
-	}
-	if (key === "left" || key === "right" || key === "tab" || key === "shift+tab") {
-		const tabs = settingsTabs();
-		const delta = key === "left" || key === "shift+tab" ? -1 : 1;
-		const index = tabs.indexOf(model.activeTabId);
-		const activeTabId = tabs[(index + delta + tabs.length) % tabs.length] ?? "appearance";
-		return selectSettingsTab(model, activeTabId);
-	}
-	if (key === "up") return rendered(model.sectionFocused ? jumpSection(model, -1) : moveSelection(model, -1));
-	if (key === "down") return rendered(model.sectionFocused ? jumpSection(model, 1) : moveSelection(model, 1));
-	if (key === "pageUp") return rendered(jumpSection(model, -1));
-	if (key === "pageDown") return rendered(jumpSection(model, 1));
-	if (key === "home") return rendered({ ...model, focusIndex: 0, sectionFocused: false });
-	if (key === "end") return rendered({ ...model, focusIndex: Math.max(0, activePaths(model).length - 1), sectionFocused: false });
-	if (key === "enter" || key === "space") return openSelected(model);
-	if (model.activeTabId !== "plugins" && text !== undefined && text.trim().length > 0) {
-		const pushed = updateSurfaceModal(model, { _tag: "Push", region: "search", layer: { _tag: "Search" } }).model;
-		return rendered({
-			...model,
-			...pushed,
-			preSearchTabId: model.activeTabId,
-			searchQuery: text,
-			searchCursor: text.length,
-			focusIndex: 0,
-			sectionFocused: false,
-		});
-	}
-	return rendered(model);
-}
-
-export function updateSettingsModal(
-	model: SettingsModalModel,
-	msg: SettingsModalMsg,
-): { readonly model: SettingsModalModel; readonly commands: readonly SettingsModalCommand[] } {
-	switch (msg._tag) {
-		case "Input":
-			return updateSettingsInput(model, msg.action, msg.event);
-		case "PluginSettings":
-			return reducePluginSettings(model, msg.message);
-		case "MoveSelection": {
-			const submenu = model.submenu;
-			if (submenu?.kind !== "select") return rendered(moveSelection(model, msg.delta));
-			const def = getSettingDef(submenu.path);
-			if (def?.type !== "submenu") return rendered(model);
-			const options = submenuOptions(model, def);
-			if (options.length === 0) return rendered(model);
-			const selectedIndex = (submenu.selectedIndex + msg.delta + options.length) % options.length;
-			return rendered({ ...model, submenu: { ...submenu, selectedIndex } });
-		}
-		case "SelectTab":
-			return selectSettingsTab(model, msg.tabId);
-		case "SelectPath": {
-			const paths = activePaths(model);
-			const focusIndex = paths.indexOf(msg.path);
-			if (focusIndex < 0) return rendered(model);
-			const selected = { ...model, focusIndex, sectionFocused: false };
-			return msg.activate ? openSelected(selected) : rendered(selected);
-		}
-		case "PointerObserved":
-			return rendered(model);
-		case "PreviewTheme":
-			return {
-				model: { ...model, previewTheme: msg.theme },
-				commands: [{ _tag: "ThemePreviewRequested", theme: msg.theme }],
-			};
-		case "PersistSetting":
-			return persistAndRender(model, msg.path, msg.value);
-		default: {
-			const transition = updateSurfaceModal(model, msg);
-			const closing = transition.commands.some(command => command._tag === "CloseRequested");
-			return {
-				model: { ...model, ...transition.model },
-				commands:
-					closing && model.previewTheme !== model.originalTheme
-						? [
-								{ _tag: "ThemeRollbackRequested", theme: model.originalTheme },
-								...transition.commands,
-							]
-						: transition.commands,
-			};
-		}
-	}
-}
-
 export interface SettingsCallbacks {
 	/** Called when any setting value changes */
 	onChange: (path: SettingPath, newValue: unknown) => void;
@@ -830,6 +292,8 @@ export interface SettingsCallbacks {
 	onStatusLinePreview?: (settings: StatusLinePreviewSettings) => void;
 	/** Get current rendered status line for inline preview */
 	getStatusLinePreview?: () => string;
+	/** Called when plugins change */
+	onPluginsChanged?: () => void | Promise<void>;
 	/** Called when settings panel is closed */
 	onCancel: () => void;
 }
@@ -842,9 +306,7 @@ export class SettingsSelectorComponent implements Component {
 	#tabBar: TabBar;
 	#currentList: SettingsList | null = null;
 	#searchList: SettingsList | null = null;
-	readonly #pluginComponent = new PluginSettingsComponent();
-	#projectedSubmenu: Component | null = null;
-	#projection: SettingsModalModel;
+	#pluginComponent: PluginSettingsComponent | null = null;
 	#currentTabId: SettingTab | "plugins" = "appearance";
 	#preSearchTabId: SettingTab | "plugins" = "appearance";
 	#searchQuery = "";
@@ -870,78 +332,33 @@ export class SettingsSelectorComponent implements Component {
 		// "(tab to cycle)" hint (folded into the footer hint line).
 		this.#tabBar = new TabBar("", getSettingsTabs(), getTabBarTheme());
 		this.#tabBar.showHint = false;
-		this.#projection = makeSettingsModalModel(
-			getCurrentThemeName() ?? settings.get("theme.dark") ?? "titanium",
-			{
-				values: {
-					defaultThinkingLevel: [AUTO_THINKING, ...context.availableThinkingLevels],
-					"theme.dark": context.availableThemes,
-					"theme.light": context.availableThemes,
-				},
-			},
-		);
-		this.apply(this.#projection);
-	}
-	/** Apply one committed route model. Terminal input never mutates this renderer. */
-	apply(model: SettingsModalModel): void {
-		this.#projection = model;
-		this.#pluginComponent.apply(model.plugins);
-		this.#projectedSubmenu = null;
-		this.#tabBar.setTabs(getSettingsTabs(), model.activeTabId);
-		this.#tabBar.setActiveById(model.activeTabId);
-
-		if (model.region === "search") {
-			this.#currentTabId = model.activeTabId;
-			this.#startSearch(model.searchQuery);
-			const path = selectedPath(model);
-			if (path !== undefined) this.#searchList?.selectItem(path);
-			for (let count = model.searchQuery.length - model.searchCursor; count > 0; count -= 1) {
-				this.#searchInput.handleInput("\x1b[D");
+		this.#tabBar.onTabChange = () => {
+			const tabId = this.#tabBar.getActiveTab().id as SettingTab | "plugins";
+			if (this.#searchList) {
+				// While searching, tabs act as jump targets into the result list.
+				const firstId = this.#searchFirstMatch.get(tabId);
+				if (firstId) this.#searchList.selectItem(firstId);
+				return;
 			}
-		} else {
-			this.#switchToTab(model.activeTabId);
-			const path = selectedPath(model);
-			if (path !== undefined) this.#currentList?.selectItem(path);
-			if (model.sectionFocused && this.#currentList?.hasSectionFocusTargets()) {
-				this.#currentList.toggleSectionFocus();
-			}
-		}
+			this.#switchToTab(tabId);
+		};
 
-		const submenu = model.submenu;
-		const def = submenu === undefined ? undefined : getSettingDef(submenu.path);
-		if (submenu !== undefined && def?.type === "text") {
-			this.#projectedSubmenu = new TextInputSubmenu(
-				def.label,
-				def.description,
-				submenu.draft,
-				() => {},
-				() => {},
-			);
-		} else if (submenu !== undefined && def?.type === "submenu") {
-			const options = submenuOptions(model, def);
-			const currentValue = options[submenu.selectedIndex]?.value ?? String(submenu.originalValue ?? "");
-			this.#projectedSubmenu = new SelectSubmenu(
-				def.label,
-				def.description,
-				options,
-				currentValue,
-				() => {},
-				() => {},
-			);
-		}
+		// Initialize with first tab
+		this.#switchToTab("appearance");
 	}
 
 	invalidate(): void {
 		this.#tabBar.invalidate();
 		this.#currentList?.invalidate();
 		this.#searchList?.invalidate();
-		this.#pluginComponent.invalidate();
+		this.#pluginComponent?.invalidate();
 	}
 
 	/** Swap the active content (per-tab list, search list, or plugins). */
 	#setContent(build: () => void): void {
 		this.#currentList = null;
 		this.#searchList = null;
+		this.#pluginComponent = null;
 		build();
 	}
 
@@ -949,7 +366,7 @@ export class SettingsSelectorComponent implements Component {
 		this.#currentTabId = tabId;
 		this.#setContent(() => {
 			if (tabId === "plugins") {
-				this.#hasSectionJump = false;
+				this.#showPluginsTab();
 			} else {
 				this.#showSettingsTab(tabId);
 			}
@@ -957,21 +374,17 @@ export class SettingsSelectorComponent implements Component {
 	}
 
 	#footerHintText(): string {
-		if (this.#projectedSubmenu) {
-			return `Enter to save · ${keyHint("ui.dismiss", "back")}`;
-		}
 		if (this.#searchList) {
 			return `Enter to change · Tab to jump tabs · ${keyHint("ui.dismiss", "exit search")}`;
 		}
 		if (this.#currentTabId === "plugins") {
-			const action = this.#projection.plugins.region === "list" ? "configure" : "edit";
-			return `Enter to ${action} · ↑/↓ to navigate · ←/→ to switch tabs at plugin list · ${keyHint("ui.dismiss", "back")}`;
+			return `Tab to switch tabs · ${keyHint("ui.dismiss", "close")}`;
 		}
-		if (this.#projection.sectionFocused) {
+		if (this.#currentList?.sectionFocused) {
 			return `↑/↓ to jump sections · Tab/Enter to settings · ←/→ to switch tabs · ${keyHint("ui.dismiss", "close")}`;
 		}
 		const nav = this.#hasSectionJump ? "Tab to jump sections · ←/→ to switch tabs" : "Tab to switch tabs";
-		return `Enter/Space to change · ${nav} · Type to search · Esc to close`;
+		return `Enter/Space to change · ${nav} · Type to search · ${keyHint("ui.dismiss", "close")}`;
 	}
 
 	/** Single-line search banner: accent icon, editable query with live cursor, right-aligned match count. */
@@ -998,7 +411,7 @@ export class SettingsSelectorComponent implements Component {
 
 		const tabLines = this.#tabBar.render(innerWidth);
 		const searching = this.#searchList !== null;
-		const showPreview = !searching && this.#projectedSubmenu === null && this.#currentTabId === "appearance";
+		const showPreview = !searching && this.#currentTabId === "appearance";
 		const previewLines = showPreview ? ["", theme.fg("muted", "Preview:"), this.#getStatusPreviewString()] : [];
 
 		// Fixed chrome: top border, tabs, divider, [search row], divider, hint, bottom border.
@@ -1007,13 +420,11 @@ export class SettingsSelectorComponent implements Component {
 
 		const list = this.#searchList ?? this.#currentList;
 		let contentLines: readonly string[];
-		if (this.#projectedSubmenu) {
-			contentLines = this.#projectedSubmenu.render(innerWidth);
-		} else if (list) {
+		if (list) {
 			// SettingsList pads itself to viewport + blank + 3 description rows.
 			list.setMaxVisible(contentRows - 4);
 			contentLines = list.render(innerWidth);
-		} else if (this.#currentTabId === "plugins") {
+		} else if (this.#pluginComponent) {
 			contentLines = this.#pluginComponent.render(innerWidth);
 		} else {
 			contentLines = [];
@@ -1045,38 +456,62 @@ export class SettingsSelectorComponent implements Component {
 	}
 
 	/**
-	 * Resolve a pointer against the last rendered geometry without mutating the
-	 * projection. The returned semantic message is committed by the route reducer.
+	 * Route an SGR mouse report against the frame geometry of the last render.
+	 * Wheel scrolls the focused list, motion drives the hover highlights (tabs
+	 * and rows), and a left click activates: tabs switch (or jump, while
+	 * searching), a row click selects, and a click on the already-selected row
+	 * activates it (toggle / open submenu).
 	 */
-	pointerMessage(model: SettingsModalModel, event: SgrMouseEvent): SettingsModalMsg {
+	#handleMouse(data: string): boolean {
+		const event = parseSgrMouse(data);
+		if (!event) return false;
+
 		const list = this.#searchList ?? this.#currentList;
+		// row() insets content by two columns (border + space).
 		const innerCol = event.col - 2;
 		const contentLine = event.row - this.#contentRowStart;
+
+		// An open submenu owns the pointer: wheel, hover, and clicks route into
+		// it (text-input submenus ignore routed events).
+		if (list?.hasOpenSubmenu()) {
+			list.routeSubmenuMouse(event, contentLine, innerCol);
+			return true;
+		}
+
+		if (event.wheel !== null) {
+			list?.handleWheel(event.wheel);
+			return true;
+		}
+
 		const tabLine = event.row - this.#tabRowStart;
 		const overTabs = tabLine >= 0 && tabLine < this.#tabRowCount;
 		const overContent = contentLine >= 0 && contentLine < this.#contentRowCount;
-		if (event.leftClick && overTabs) {
+
+		if (event.motion) {
+			const hovered = overTabs ? this.#tabBar.tabAt(tabLine, innerCol) : undefined;
+			this.#tabBar.setHoverTab(hovered && !hovered.muted ? hovered.id : null);
+			// hoverTest: never light up pane rows while the pointer is on the
+			// sidebar — only rows the pointer is actually on.
+			list?.setHoverItem(overContent ? (list.hoverTest(contentLine, innerCol) ?? null) : null);
+			return true;
+		}
+		if (!event.leftClick) return true;
+
+		if (overTabs) {
 			const tab = this.#tabBar.tabAt(tabLine, innerCol);
-			if (tab && !tab.muted) return { _tag: "SelectTab", tabId: tab.id as SettingTab | "plugins" };
+			if (tab) this.#tabBar.selectTab(tab.id);
+			return true;
 		}
-		if (model.activeTabId === "plugins" && overContent) {
-			return {
-				_tag: "PluginSettings",
-				message: this.#pluginComponent.pointerMessage(model.plugins, {
-					...event,
-					row: contentLine,
-					col: innerCol,
-				}),
-			};
-		}
-		if (event.wheel !== null) return { _tag: "MoveSelection", delta: event.wheel };
-		if (event.leftClick && overContent && list && this.#projectedSubmenu === null) {
-			const id = list.hitTest(contentLine, innerCol) as SettingPath | undefined;
+		if (overContent && list) {
+			const id = list.hitTest(contentLine, innerCol);
 			if (id !== undefined) {
-				return { _tag: "SelectPath", path: id, activate: selectedPath(model) === id };
+				const wasSelected = list.getSelectedItem()?.id === id;
+				list.selectItem(id);
+				// Click-again activates: toggle booleans, open submenus.
+				if (wasSelected) list.handleInput("\n");
 			}
 		}
-		return { _tag: "PointerObserved" };
+		return true;
 	}
 
 	// ═══════════════════════════════════════════════════════════════════════
@@ -1247,7 +682,10 @@ export class SettingsSelectorComponent implements Component {
 	 * Convert a setting definition to a SettingItem for the UI.
 	 */
 	#defToItem(def: SettingDef): SettingItem | null {
-		if (!settingVisible(this.#projection, def)) return null;
+		// Check condition: applies to every variant — booleans, enums, submenus, text inputs.
+		if (def.condition && !def.condition()) {
+			return null;
+		}
 
 		const currentValue = this.#getCurrentValue(def);
 		const changed = this.#isChanged(def, currentValue);
@@ -1299,7 +737,7 @@ export class SettingsSelectorComponent implements Component {
 	 * Get the current value for a setting.
 	 */
 	#getCurrentValue(def: SettingDef): unknown {
-		return this.#projection.values[def.path];
+		return settings.get(def.path);
 	}
 
 	#isChanged(def: SettingDef, currentValue: unknown): boolean {
@@ -1480,8 +918,32 @@ export class SettingsSelectorComponent implements Component {
 			items,
 			10,
 			getSettingsListTheme(),
-			() => {},
-			() => {},
+			(id, newValue) => {
+				const def = defs.find(d => d.path === id);
+				if (!def) return;
+
+				const path = def.path;
+
+				if (def.type === "boolean") {
+					const boolValue = newValue === "true";
+					settings.set(path, boolValue as never);
+					this.callbacks.onChange(path, boolValue);
+
+					if (tabId === "appearance") {
+						this.#triggerStatusLinePreview();
+					}
+				} else if (def.type === "enum") {
+					settings.set(path, newValue as never);
+					this.callbacks.onChange(path, newValue);
+				}
+				// Submenu/text types already persisted the value inside their own
+				// done callbacks before SettingsList re-dispatches here. Re-run the
+				// definition-to-item mapping so condition-gated settings (e.g. the
+				// Hindsight cluster guarded by memory.backend) appear/disappear
+				// immediately instead of waiting for the next tab switch.
+				this.#refreshCurrentTabItems(defs);
+			},
+			() => this.callbacks.onCancel(),
 			// The selector owns type-to-search and the footer hint; pin the
 			// split sidebar width so the divider never jumps between tabs.
 			{ typeToSearch: false, hint: "", sidebarWidth: settingsSidebarWidth() },
@@ -1539,5 +1001,111 @@ export class SettingsSelectorComponent implements Component {
 		this.callbacks.onStatusLinePreview?.(statusLineSettings);
 	}
 
+	#showPluginsTab(): void {
+		this.#pluginComponent = new PluginSettingsComponent(this.context.cwd, {
+			onClose: () => this.callbacks.onCancel(),
+			onPluginChanged: () => this.callbacks.onPluginsChanged?.(),
+		});
+	}
 
+	handleInput(data: string): void {
+		// SGR mouse reports (the fullscreen overlay enables tracking).
+		if (data.startsWith("\x1b[<")) {
+			this.#handleMouse(data);
+			return;
+		}
+
+		const activeList = this.#searchList ?? this.#currentList;
+		if (matchesUiDismiss(data)) {
+			if (activeList?.hasOpenSubmenu()) {
+				activeList.handleInput(data);
+			} else if (this.#searchList) {
+				this.#endSearch(true);
+			} else if (this.#currentList?.sectionFocused) {
+				this.#currentList.toggleSectionFocus();
+			} else if (this.#pluginComponent) {
+				this.#pluginComponent.handleInput(data);
+			} else {
+				this.callbacks.onCancel();
+			}
+			return;
+		}
+		// Generic selector cancellation must not bypass a disabled/remapped ui.dismiss.
+		if (matchesSelectCancel(data)) return;
+
+		// Text-input submenus take every byte: arrow keys must reach the
+		// cursor and Tab must not switch tabs.
+		if (this.#textInputActive) {
+			(this.#searchList ?? this.#currentList)?.handleInput(data);
+			return;
+		}
+
+		// An open submenu owns input entirely — Tab/arrows/typing belong to it.
+		if (activeList?.hasOpenSubmenu()) {
+			activeList.handleInput(data);
+			return;
+		}
+
+		if (this.#searchList) {
+			this.#handleSearchModeInput(data, this.#searchList);
+			return;
+		}
+
+		// Tab toggles keyboard focus between section headings and setting rows
+		// (fast section hopping); tabs without sections keep Tab switching tabs.
+		if (matchesKey(data, "tab") || matchesKey(data, "shift+tab")) {
+			if (this.#currentList?.hasSectionFocusTargets()) {
+				this.#currentList.toggleSectionFocus();
+				return;
+			}
+			this.#tabBar.handleInput(data);
+			return;
+		}
+		if (matchesKey(data, "left") || matchesKey(data, "right")) {
+			this.#tabBar.handleInput(data);
+			return;
+		}
+
+		// Printable characters start a search across every settings tab. The
+		// plugins tab keeps its own local filtering instead.
+		if (this.#currentTabId !== "plugins") {
+			const printable = extractPrintableText(data);
+			if (printable !== undefined && printable.trim().length > 0) {
+				this.#startSearch(printable);
+				return;
+			}
+		}
+
+		if (this.#currentList) {
+			this.#currentList.handleInput(data);
+		} else if (this.#pluginComponent) {
+			this.#pluginComponent.handleInput(data);
+		}
+	}
+
+	#handleSearchModeInput(data: string, list: SettingsList): void {
+		const kb = getKeybindings();
+		if (matchesKey(data, "tab") || matchesKey(data, "shift+tab")) {
+			// Jump between tabs that have matches (muted tabs are skipped).
+			this.#tabBar.handleInput(data);
+			return;
+		}
+		// Selection, paging, and activation stay with the result list.
+		if (
+			kb.matches(data, "tui.select.up") ||
+			kb.matches(data, "tui.select.down") ||
+			kb.matches(data, "tui.select.pageUp") ||
+			kb.matches(data, "tui.select.pageDown") ||
+			kb.matches(data, "tui.select.confirm") ||
+			data === "\n"
+		) {
+			list.handleInput(data);
+			return;
+		}
+		// Everything else edits the query like a regular single-line editor:
+		// cursor movement, word ops, kill ring, undo, paste.
+		this.#searchInput.handleInput(data);
+		const value = this.#searchInput.getValue();
+		if (value !== this.#searchQuery) this.#setSearchQuery(value);
+	}
 }

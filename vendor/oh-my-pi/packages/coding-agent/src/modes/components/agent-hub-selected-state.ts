@@ -132,8 +132,7 @@ export function reduceAgentHubSelectedLiveState(
 		};
 	}
 	if (event.type === "auto_retry_end") {
-		if (event.success)
-			return state.error?.source === "retry" ? EMPTY_AGENT_HUB_SELECTED_LIVE_STATE : { error: state.error };
+		if (event.success) return state.error?.source === "retry" ? EMPTY_AGENT_HUB_SELECTED_LIVE_STATE : { error: state.error };
 		return {
 			error: {
 				text: sanitizeText(event.finalError ?? `Retry ${event.attempt} failed`, DETAIL_TEXT_LIMIT),
@@ -310,7 +309,6 @@ export function renderAgentHubSelectedState(items: readonly AgentHubSelectedStat
 			case "activity":
 				return theme.fg("dim", line);
 		}
-		return line;
 	});
 }
 
@@ -329,10 +327,7 @@ export function formatAgentHubTurnStatus(status: AgentHubTurnStatus, width: numb
 		status.limitWindowId ? `window:${sanitizeText(status.limitWindowId, 16)}` : undefined,
 		status.canCancel ? "cancellable" : undefined,
 	].filter((detail): detail is string => detail !== undefined);
-	const line = truncateToWidth(
-		`${status.state}${details.length ? ` · ${details.join(" · ")}` : ""}`,
-		Math.max(1, width),
-	);
+	const line = truncateToWidth(`${status.state}${details.length ? ` · ${details.join(" · ")}` : ""}`, Math.max(1, width));
 	const color = status.state === "failed-rate-limit" ? "error" : status.state === "cancelled" ? "warning" : "accent";
 	return theme.fg(color, line);
 }

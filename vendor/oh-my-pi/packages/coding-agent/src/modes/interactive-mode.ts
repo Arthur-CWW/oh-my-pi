@@ -17,7 +17,6 @@ import { modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
 import type {
 	Component,
 	EditorTheme,
-	Keybinding,
 	LoaderMessageColorFn,
 	NativeScrollbackLiveRegion,
 	OverlayHandle,
@@ -49,12 +48,10 @@ import {
 	setProjectDir,
 } from "@oh-my-pi/pi-utils";
 import chalk from "chalk";
-import { Effect, Exit, Scope } from "effect";
 import { reset as resetCapabilities } from "../capability";
 import type { CollabGuestLink } from "../collab/guest";
 import type { CollabHost } from "../collab/host";
 import { KeybindingsManager } from "../config/keybindings";
-import { MVU_ACTIVE_KEYMAP_CONTEXT_MATRIX, MVU_KEYMAP_TABLES } from "../config/mvu-keybindings";
 import { isSettingsInitialized, onStatusLineSessionAccentChanged, Settings, settings } from "../config/settings";
 import { clearClaudePluginRootsCache } from "../discovery/helpers";
 import type {
@@ -125,15 +122,7 @@ import type { EvalExecutionComponent } from "./components/eval-execution";
 import type { HookEditorComponent } from "./components/hook-editor";
 import type { HookInputComponent } from "./components/hook-input";
 import type { HookSelectorComponent, HookSelectorSlider } from "./components/hook-selector";
-import {
-	createPlanReviewSettlement,
-	PLAN_REVIEW_ROUTE,
-	PlanReviewOverlay,
-	type PlanModalCommand,
-	type PlanModalModel,
-	type PlanModalMsg,
-	updatePlanModal,
-} from "./components/plan-review-overlay";
+import { PlanReviewOverlay } from "./components/plan-review-overlay";
 import { type PrimitiveCategoryId, showPrimitivesInspectorOverlay } from "./components/primitives-inspector";
 import { RawSemanticTranscriptComponent } from "./components/raw-semantic-transcript";
 import { StatusLineComponent } from "./components/status-line";
@@ -163,10 +152,6 @@ import {
 	type LoopLimitRuntime,
 	parseLoopLimitArgs,
 } from "./loop-limit";
-import { makeTerminalInputAdapter } from "./mvu/input-adapter";
-import { makeInputLeaseManager, type InputLeaseManager, type MvuEnvelope } from "./mvu/input-lease";
-import { compileKeymapRegistry } from "./mvu/keymap-registry";
-import { mountMvuOverlay, type MvuRouteHandle } from "./mvu/route-host";
 import { OAuthManualInputManager } from "./oauth-manual-input";
 import { SessionObserverRegistry } from "./session-observer-registry";
 import { runProviderSetupWizard } from "./setup-wizard/lazy";
@@ -461,9 +446,8 @@ export class InteractiveMode implements InteractiveModeContext, SubmittedInputRe
 	#planModePreviousModelState: { model: Model; thinkingLevel?: ThinkingLevel } | undefined;
 	#pendingModelSwitch: { model: Model; thinkingLevel?: ThinkingLevel } | undefined;
 	#planModeHasEntered = false;
-	#planReviewRoute: MvuRouteHandle | undefined;
-	#planReviewSettle: ((choice: string | undefined) => boolean) | undefined;
-	#planReviewClosePromise: Promise<void> = Promise.resolve();
+	#planReviewOverlay: PlanReviewOverlay | undefined;
+	#planReviewOverlayHandle: OverlayHandle | undefined;
 	readonly lspServers: LspStartupServerInfo[] | undefined = undefined;
 	mcpManager?: MCPManager;
 	readonly #toolUiContextSetter: (uiContext: ExtensionUIContext, hasUI: boolean) => void;
@@ -483,16 +467,6 @@ export class InteractiveMode implements InteractiveModeContext, SubmittedInputRe
 	readonly #extensionUiController: ExtensionUiController;
 	readonly #inputController: InputController;
 	readonly #selectorController: SelectorController;
-	readonly #mvuScope = Scope.makeUnsafe("sequential");
-	#inputLeaseManager: InputLeaseManager | undefined;
-	#mvuClosePromise: Promise<void> | undefined;
-	get mvuInputLeaseManager(): InputLeaseManager {
-		if (this.#inputLeaseManager === undefined) throw new Error("MVU input lease manager is not initialized");
-		return this.#inputLeaseManager;
-	}
-	get mvuScope(): Scope.Scope {
-		return this.#mvuScope;
-	}
 	readonly #focusController: SessionFocusController;
 	#agentHubPreviewReturnId: string | undefined;
 	get viewSession(): AgentSession {
@@ -665,8 +639,6 @@ export class InteractiveMode implements InteractiveModeContext, SubmittedInputRe
 			this.errorInbox,
 			this.editor,
 			pinned => this.showStatus(`Errors panel ${pinned ? "pinned" : "unpinned"}.`),
-			() => this.mvuInputLeaseManager,
-			this.#mvuScope,
 		));
 
 		this.hideThinkingBlock = settings.get("hideThinkingBlock");
@@ -704,13 +676,9 @@ export class InteractiveMode implements InteractiveModeContext, SubmittedInputRe
 		this.#omfgController = new OmfgController(this);
 		this.#extensionUiController = new ExtensionUiController(this);
 		this.#eventController = new EventController(this);
-		const getInputLeaseManager = (): InputLeaseManager => {
-			if (this.#inputLeaseManager === undefined) throw new Error("MVU input lease manager is not initialized");
-			return this.#inputLeaseManager;
-		};
-		this.#commandController = new CommandController(this, getInputLeaseManager, this.#mvuScope);
+		this.#commandController = new CommandController(this);
 		this.#todoCommandController = new TodoCommandController(this);
-		this.#selectorController = new SelectorController(this, getInputLeaseManager, this.#mvuScope);
+		this.#selectorController = new SelectorController(this);
 		this.#rawSemanticTranscript = new RawSemanticTranscriptComponent(() => {
 			const viewSession = this.viewSession;
 			return {
@@ -735,12 +703,6 @@ export class InteractiveMode implements InteractiveModeContext, SubmittedInputRe
 		if (this.isInitialized) return;
 
 		this.keybindings = logger.time("InteractiveMode.init:keybindings", () => KeybindingsManager.create());
-		const registry = await Effect.runPromise(
-			compileKeymapRegistry(MVU_KEYMAP_TABLES, this.keybindings, MVU_ACTIVE_KEYMAP_CONTEXT_MATRIX),
-		);
-		this.#inputLeaseManager = await Effect.runPromise(
-			Scope.provide(this.#mvuScope)(makeInputLeaseManager(this.ui, makeTerminalInputAdapter(), registry)),
-		);
 
 		// Register session manager flush for signal handlers (SIGINT, SIGTERM, SIGHUP)
 		this.#cleanupUnsubscribe = postmortem.register("session-manager-flush", () => this.sessionManager.flush());
@@ -2190,14 +2152,14 @@ export class InteractiveMode implements InteractiveModeContext, SubmittedInputRe
 		}
 	}
 
-	async showPlanReview(
+	showPlanReview(
 		planContent: string,
 		title: string,
 		options: string[],
 		dialogOptions?: {
 			helpText?: string;
 			disabledIndices?: number[];
-			onExternalEditor?: () => void | Promise<string | null>;
+			onExternalEditor?: () => void;
 			onPlanEdited?: (content: string) => void;
 			onFeedbackChange?: (feedback: string) => void;
 			initialIndex?: number;
@@ -2205,239 +2167,52 @@ export class InteractiveMode implements InteractiveModeContext, SubmittedInputRe
 		extra?: { slider?: HookSelectorSlider },
 	): Promise<string | undefined> {
 		this.#hidePlanReview();
-		await this.#planReviewClosePromise;
 		const { promise, resolve } = Promise.withResolvers<string | undefined>();
-		const previousFocus = this.ui.getFocused();
-		const initialModel = PLAN_REVIEW_ROUTE.makeInitialModel({
-			planContent,
-			options,
-			disabledIndices: dialogOptions?.disabledIndices,
-			initialIndex: dialogOptions?.initialIndex,
-			sliderIndex: extra?.slider?.index,
-			sliderSegmentCount: extra?.slider?.segments.length,
-		});
-		const overlayOptions = {
-			promptTitle: title,
-			options,
-			disabledIndices: dialogOptions?.disabledIndices,
-			helpText: dialogOptions?.helpText,
-			initialIndex: dialogOptions?.initialIndex,
-			slider: extra?.slider,
-			externalEditorLabel: this.keybindings.getDisplayString("app.editor.external") || undefined,
-		};
-		const overlay = new PlanReviewOverlay(planContent, overlayOptions, {
-			onPick: () => {},
-			onCancel: () => {},
-		});
-		overlay.apply(initialModel);
-		type PlanRuntimeMessage = MvuEnvelope | { readonly _tag: "PlanMessage"; readonly message: PlanModalMsg };
-		type PlanRuntimeCommand =
-			| PlanModalCommand
-			| {
-					readonly _tag: "RenderPlan";
-					readonly model: PlanModalModel;
-					readonly dirtyKeys: ReadonlySet<string>;
-			  };
-		const finish = createPlanReviewSettlement<string>(choice => {
-			this.#planReviewSettle = undefined;
-			const route = this.#planReviewRoute;
-			this.#planReviewRoute = undefined;
-			this.#planReviewClosePromise =
-				route === undefined ? Promise.resolve() : Effect.runPromise(route.close());
-			void this.#planReviewClosePromise.then(() => {
-				this.ui.requestRender();
-				resolve(choice);
-			});
-		});
-		this.#planReviewSettle = finish;
-		const close = (): void => {
-			finish(undefined);
-		};
-		try {
-			const handle = await Effect.runPromise(
-				Scope.provide(this.#mvuScope)(
-					mountMvuOverlay({
-						tui: this.ui,
-						leaseManager: this.mvuInputLeaseManager,
-						route: {
-							componentId: PLAN_REVIEW_ROUTE.componentId,
-							focusedRoot: overlay,
-							context: () => ({
-								contexts: ["modal.family", PLAN_REVIEW_ROUTE.context],
-								mode: "Browse" as const,
-								focus: "body" as const,
-								capabilities: new Set<string>(),
-							}),
-							actionToMsg: (action: Keybinding, event: MvuEnvelope["event"]) => ({
-								_tag: "MvuInput" as const,
-								action,
-								event,
-							}),
-							pasteToMsg: event => ({
-								_tag: "MvuInput" as const,
-								action: "app.plan.reviewInput" as Keybinding,
-								event,
-							}),
-							mouseToMsg: event => ({
-								_tag: "MvuInput" as const,
-								action: "app.plan.pointer",
-								event,
-							}),
-						},
-						component: overlay,
-						runtimeConfig: {
-							componentId: PLAN_REVIEW_ROUTE.componentId,
-							initialModel,
-							update: (model: PlanModalModel, runtimeMessage: PlanRuntimeMessage) => {
-								let message: PlanModalMsg | undefined;
-								let stampedModel = model;
-								if (runtimeMessage._tag === "PlanMessage") {
-									message = runtimeMessage.message;
-								} else {
-									switch (runtimeMessage.action) {
-										case "ui.dismiss":
-											message = { _tag: "Back" };
-											break;
-										case "app.editor.external":
-											message = { _tag: "ExternalEditor" };
-											break;
-										case "app.plan.reviewInput":
-											message = { _tag: "Input", event: runtimeMessage.event };
-											break;
-										case "app.plan.pointer":
-											if (runtimeMessage.event._tag === "Mouse") {
-												message = overlay.pointerMessage(runtimeMessage.event.event);
-											}
-											break;
-									}
-									stampedModel = {
-										...model,
-										leaseGeneration: runtimeMessage.stamp?.leaseGeneration,
-									};
-								}
-								if (message === undefined) {
-									return { model: stampedModel, commands: [], dirtyKeys: new Set<string>() };
-								}
-								const transition = updatePlanModal(stampedModel, message);
-								const nextModel = { ...transition.model, revision: transition.model.revision + 1 };
-								const stamp = runtimeMessage._tag === "MvuInput" ? runtimeMessage.stamp : undefined;
-								const commands: PlanRuntimeCommand[] = transition.commands.map(command => ({
-									...command,
-									...(stamp === undefined ? {} : { stamp }),
-								}));
-								commands.push({ _tag: "RenderPlan", model: nextModel, dirtyKeys: new Set(["plan"]) });
-								return { model: nextModel, commands, dirtyKeys: new Set<string>(["plan"]) };
-							},
-							interpret: (command: PlanRuntimeCommand): Effect.Effect<readonly PlanRuntimeMessage[]> => {
-								switch (command._tag) {
-									case "RenderPlan":
-										return Effect.sync(() => {
-											overlay.apply(command.model);
-											this.ui.requestComponentRender(overlay);
-											return [];
-										});
-									case "CloseRequested":
-										return Effect.sync(() => {
-											close();
-											return [];
-										});
-									case "PickRequested":
-										return Effect.sync(() => {
-											finish(command.label);
-											return [];
-										});
-									case "PlanEdited":
-										return Effect.sync(() => {
-											dialogOptions?.onPlanEdited?.(command.content);
-											return [];
-										});
-									case "FeedbackChanged":
-										return Effect.sync(() => {
-											dialogOptions?.onFeedbackChange?.(command.feedback ?? "");
-											return [];
-										});
-									case "SliderChanged":
-										return Effect.sync(() => {
-											extra?.slider?.onChange?.(command.index);
-											return [];
-										});
-									case "ExternalEditorRequested":
-										const annotationDraft = command.annotationDraft;
-										if (annotationDraft !== undefined) {
-											return Effect.callback<readonly PlanRuntimeMessage[]>(resume => {
-												const edit = (text: string | null): void => {
-													resume(
-														Effect.succeed(
-															text === null
-																? []
-																: [
-																		{
-																			_tag: "PlanMessage",
-																			message: { _tag: "EditAnnotation", value: text },
-																		},
-																		{ _tag: "PlanMessage", message: { _tag: "CommitAnnotation" } },
-																	],
-														),
-													);
-												};
-												void this.#openPlanAnnotationInExternalEditor(annotationDraft, edit).catch(() => edit(null));
-											});
-										}
-										return Effect.suspend(() => {
-											const result = dialogOptions?.onExternalEditor?.();
-											if (!(result instanceof Promise)) return Effect.succeed([]);
-											return Effect.promise(() => result).pipe(
-												Effect.map(content =>
-													content === null
-														? []
-														: [
-																{
-																	_tag: "PlanMessage" as const,
-																	message: { _tag: "ReplacePlan" as const, content },
-																},
-															],
-												),
-											);
-										});
-								}
-							},
-							inputCapacity: 256,
-							messageCapacity: 256,
-							commandCapacity: 64,
-						},
-						overlayOptions: {
-							anchor: "bottom-center",
-							width: "100%",
-							maxHeight: "100%",
-							margin: 0,
-							fullscreen: true,
-						},
-						restoreFocus: Effect.sync(() => {
-							this.ui.setFocus(previousFocus);
-							this.ui.requestRender();
-						}),
-					}),
-				),
-			);
-			if (this.#planReviewSettle !== finish) {
-				await Effect.runPromise(handle.close());
-				return promise;
-			}
-			this.#planReviewRoute = handle;
-			this.ui.setFocus(overlay);
+		let settled = false;
+		const finish = (choice: string | undefined): void => {
+			if (settled) return;
+			settled = true;
+			this.#hidePlanReview();
 			this.ui.requestRender();
-		} catch (error) {
-			this.showError(`Could not open plan review: ${error instanceof Error ? error.message : String(error)}`);
-			finish(undefined);
-		}
+			resolve(choice);
+		};
+		const overlay = new PlanReviewOverlay(
+			planContent,
+			{
+				promptTitle: title,
+				options,
+				disabledIndices: dialogOptions?.disabledIndices,
+				helpText: dialogOptions?.helpText,
+				initialIndex: dialogOptions?.initialIndex,
+				slider: extra?.slider,
+				externalEditorLabel: this.keybindings.getDisplayString("app.editor.external") || undefined,
+			},
+			{
+				onPick: choice => finish(choice),
+				onCancel: () => finish(undefined),
+				onExternalEditor: dialogOptions?.onExternalEditor,
+				onAnnotationExternalEditor: (draft, commit) => void this.#openPlanAnnotationInExternalEditor(draft, commit),
+				onPlanEdited: dialogOptions?.onPlanEdited,
+				onFeedbackChange: dialogOptions?.onFeedbackChange,
+			},
+		);
+		this.#planReviewOverlay = overlay;
+		this.#planReviewOverlayHandle = this.ui.showOverlay(overlay, {
+			anchor: "bottom-center",
+			width: "100%",
+			maxHeight: "100%",
+			margin: 0,
+			fullscreen: true,
+		});
+		this.ui.setFocus(overlay);
+		this.ui.requestRender();
 		return promise;
 	}
 
 	#hidePlanReview(): void {
-		if (this.#planReviewSettle?.(undefined)) return;
-		const route = this.#planReviewRoute;
-		this.#planReviewRoute = undefined;
-		if (route !== undefined) this.#planReviewClosePromise = Effect.runPromise(route.close());
+		this.#planReviewOverlayHandle?.hide();
+		this.#planReviewOverlayHandle = undefined;
+		this.#planReviewOverlay = undefined;
 	}
 
 	#getEditorTerminalPath(): string | null {
@@ -2481,11 +2256,11 @@ export class InteractiveMode implements InteractiveModeContext, SubmittedInputRe
 		return contextUsage?.percent != null && contextUsage.percent > PLAN_KEEP_CONTEXT_DISABLE_THRESHOLD_PERCENT;
 	}
 
-	async #openPlanInExternalEditor(planFilePath: string): Promise<string | null> {
+	async #openPlanInExternalEditor(planFilePath: string): Promise<void> {
 		const editorCmd = getEditorCommand();
 		if (!editorCmd) {
 			this.showWarning("No editor configured. Set $VISUAL or $EDITOR environment variable.");
-			return null;
+			return;
 		}
 
 		const resolvedPath = this.#resolvePlanFilePath(planFilePath);
@@ -2495,14 +2270,13 @@ export class InteractiveMode implements InteractiveModeContext, SubmittedInputRe
 		} catch (error) {
 			if (isEnoent(error)) {
 				this.showError(`Plan file not found at ${planFilePath}`);
-				return null;
+				return;
 			}
 			this.showWarning(`Failed to open external editor: ${error instanceof Error ? error.message : String(error)}`);
-			return null;
+			return;
 		}
 
 		let ttyHandle: fs.FileHandle | null = null;
-		let editedContent: string | null = null;
 		try {
 			ttyHandle = await this.#openEditorTerminalHandle();
 			this.ui.stop();
@@ -2511,13 +2285,14 @@ export class InteractiveMode implements InteractiveModeContext, SubmittedInputRe
 				? [ttyHandle.fd, ttyHandle.fd, ttyHandle.fd]
 				: ["inherit", "inherit", "inherit"];
 
-			editedContent = await openInEditor(editorCmd, currentText, {
+			const result = await openInEditor(editorCmd, currentText, {
 				extension: path.extname(resolvedPath) || ".md",
 				stdio,
 				trimTrailingNewline: false,
 			});
-			if (editedContent !== null) {
-				await Bun.write(resolvedPath, editedContent);
+			if (result !== null) {
+				await Bun.write(resolvedPath, result);
+				this.#planReviewOverlay?.setPlanContent(result);
 				this.showStatus("Plan updated in external editor.");
 			}
 		} catch (error) {
@@ -2529,19 +2304,16 @@ export class InteractiveMode implements InteractiveModeContext, SubmittedInputRe
 			this.ui.start();
 			this.ui.requestRender(true);
 		}
-		return editedContent;
 	}
 
 	async #openPlanAnnotationInExternalEditor(draft: string, commit: (text: string | null) => void): Promise<void> {
 		const editorCmd = getEditorCommand();
 		if (!editorCmd) {
 			this.showWarning("No editor configured. Set $VISUAL or $EDITOR environment variable.");
-			commit(null);
 			return;
 		}
 
 		let ttyHandle: fs.FileHandle | null = null;
-		let edited: string | null = null;
 		try {
 			ttyHandle = await this.#openEditorTerminalHandle();
 			this.ui.stop();
@@ -2550,7 +2322,10 @@ export class InteractiveMode implements InteractiveModeContext, SubmittedInputRe
 				? [ttyHandle.fd, ttyHandle.fd, ttyHandle.fd]
 				: ["inherit", "inherit", "inherit"];
 
-			edited = await openInEditor(editorCmd, draft, { extension: ".md", stdio });
+			const result = await openInEditor(editorCmd, draft, { extension: ".md", stdio });
+			if (result !== null) {
+				commit(result);
+			}
 		} catch (error) {
 			this.showWarning(`Failed to open external editor: ${error instanceof Error ? error.message : String(error)}`);
 		} finally {
@@ -2560,7 +2335,6 @@ export class InteractiveMode implements InteractiveModeContext, SubmittedInputRe
 			this.ui.start();
 			this.ui.requestRender(true);
 		}
-		commit(edited);
 	}
 
 	async #applyPlanExecutionModel(entry: ResolvedRoleModel | undefined): Promise<void> {
@@ -3194,7 +2968,7 @@ export class InteractiveMode implements InteractiveModeContext, SubmittedInputRe
 			["Approve and execute", "Approve and compact context", keepContextLabel, "Refine plan"],
 			{
 				helpText,
-				onExternalEditor: () => this.#openPlanInExternalEditor(planFilePath),
+				onExternalEditor: () => void this.#openPlanInExternalEditor(planFilePath),
 				onPlanEdited: content => {
 					editedContent = content;
 					void Bun.write(this.#resolvePlanFilePath(planFilePath), content);
@@ -3312,11 +3086,6 @@ export class InteractiveMode implements InteractiveModeContext, SubmittedInputRe
 		return choice === "Yes";
 	}
 
-	#closeMvuRoutes(): Promise<void> {
-		this.#mvuClosePromise ??= Effect.runPromise(Scope.close(this.#mvuScope, Exit.void));
-		return this.#mvuClosePromise;
-	}
-
 	stop(): void {
 		if (this.loadingAnimation) {
 			this.#stopLoadingAnimation(false);
@@ -3356,7 +3125,6 @@ export class InteractiveMode implements InteractiveModeContext, SubmittedInputRe
 		// Clear the process-global consent handler so it doesn't outlive this
 		// InteractiveMode instance (e.g. test harnesses, headless re-init).
 		setAutoQaConsentHandler(null, null);
-		void this.#closeMvuRoutes();
 		if (this.isInitialized) {
 			this.ui.stop();
 			this.isInitialized = false;
@@ -3386,7 +3154,6 @@ export class InteractiveMode implements InteractiveModeContext, SubmittedInputRe
 		this.#btwController.dispose();
 		this.#omfgController.dispose();
 		this.#focusController.dispose();
-		await this.#closeMvuRoutes();
 
 		if (this.collabHost) {
 			await this.collabHost.stop();
@@ -4075,7 +3842,7 @@ export class InteractiveMode implements InteractiveModeContext, SubmittedInputRe
 	}
 
 	showHookConfirm(title: string, message: string): Promise<boolean> {
-		return this.#selectorController.showHookSelector(`${title}\n${message}`, ["Yes", "No"]).then(result => result === "Yes");
+		return this.#extensionUiController.showHookConfirm(title, message);
 	}
 
 	// Input handling
@@ -4208,19 +3975,19 @@ export class InteractiveMode implements InteractiveModeContext, SubmittedInputRe
 		dialogOptions?: InteractiveSelectorDialogOptions,
 		extra?: { slider?: HookSelectorSlider },
 	): Promise<string | undefined> {
-		return this.#selectorController.showHookSelector(title, options, dialogOptions, extra);
+		return this.#extensionUiController.showHookSelector(title, options, dialogOptions, extra);
 	}
 
 	hideHookSelector(): void {
-		this.#selectorController.hideHookSelector();
+		this.#extensionUiController.hideHookSelector();
 	}
 
-	showHookInput(title: string, placeholder?: string, dialogOptions?: ExtensionUIDialogOptions): Promise<string | undefined> {
-		return this.#selectorController.showHookInput(title, placeholder, dialogOptions);
+	showHookInput(title: string, placeholder?: string): Promise<string | undefined> {
+		return this.#extensionUiController.showHookInput(title, placeholder);
 	}
 
 	hideHookInput(): void {
-		this.#selectorController.hideHookInput();
+		this.#extensionUiController.hideHookInput();
 	}
 
 	showHookEditor(
@@ -4229,11 +3996,11 @@ export class InteractiveMode implements InteractiveModeContext, SubmittedInputRe
 		dialogOptions?: ExtensionUIDialogOptions,
 		editorOptions?: { promptStyle?: boolean },
 	): Promise<string | undefined> {
-		return this.#selectorController.showHookEditor(title, prefill, dialogOptions, editorOptions);
+		return this.#extensionUiController.showHookEditor(title, prefill, dialogOptions, editorOptions);
 	}
 
 	hideHookEditor(): void {
-		this.#selectorController.hideHookEditor();
+		this.#extensionUiController.hideHookEditor();
 	}
 
 	showHookNotify(message: string, type?: "info" | "warning" | "error"): void {

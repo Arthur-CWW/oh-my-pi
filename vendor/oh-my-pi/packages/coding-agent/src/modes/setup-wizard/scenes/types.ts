@@ -1,6 +1,5 @@
-import type { Component, Keybinding, SgrMouseEvent } from "@oh-my-pi/pi-tui";
+import type { Component, SgrMouseEvent } from "@oh-my-pi/pi-tui";
 import type { InteractiveModeContext } from "../../types";
-import type { KeyEvent } from "../../mvu/schema";
 
 export type SetupSceneResult = "done" | "skipped";
 
@@ -18,13 +17,6 @@ export interface SetupSceneController extends Component {
 	onMount?(): void | Promise<void>;
 	onUnmount?(): void;
 	dispose?(): void;
-	/** Typed keyboard fallback used only after an MVU-routed wheel report. */
-	dispatchMvuInput?(event: KeyEvent, action?: Keybinding): void;
-	/**
-	 * Handle semantic setup cancellation inside a nested interaction.
-	 * Return "handled" to keep the scene mounted; otherwise the wizard enters its outro.
-	 */
-	routeCancel?(): "handled" | "outro";
 	/**
 	 * Route an SGR mouse report (tracking is on while the wizard holds the
 	 * alternate screen). `line`/`col` are 0-based within this controller's
@@ -47,7 +39,7 @@ export interface SetupTab {
 	 */
 	readonly modal: boolean;
 	render(width: number): readonly string[];
-	dispatchMvuInput(event: KeyEvent, action?: Keybinding): void;
+	handleInput(data: string): void;
 	invalidate(): void;
 	/** Called when the tab becomes active (including initial mount). */
 	onActivate?(): void;

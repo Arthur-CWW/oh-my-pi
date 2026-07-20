@@ -1,9 +1,9 @@
-import { Container, truncateToWidth, type Keybinding, Spacer, Text } from "@oh-my-pi/pi-tui";
+import { Container, type SelectItem, SelectList, Spacer, Text } from "@oh-my-pi/pi-tui";
 import type { BookmarkRecord } from "../../session/bookmarks";
-import { makeComponentId } from "../mvu/schema";
-import { theme } from "../theme/theme";
+import { getSelectListTheme, theme } from "../theme/theme";
+import { matchesUiDismiss } from "../utils/keybinding-matchers";
 import { DynamicBorder } from "./dynamic-border";
-import { SelectorSurface, type SelectorSurfaceMountSpec } from "./selector-adapter";
+import { keyHint } from "./keybinding-hints";
 
 export interface BookmarksSelectorOptions {
 	readonly now?: () => number;
@@ -28,7 +28,8 @@ export function formatBookmarkDescription(record: BookmarkRecord): string {
 }
 
 export class BookmarksSelectorComponent extends Container {
-	readonly #surface: SelectorSurface<string, BookmarkRecord>;
+	readonly #selectList: SelectList;
+	readonly #onDismiss: () => void;
 
 	constructor(
 		entries: ReadonlyArray<BookmarkRecord>,
@@ -37,35 +38,41 @@ export class BookmarksSelectorComponent extends Container {
 		options: BookmarksSelectorOptions = {},
 	) {
 		super();
+		this.#onDismiss = onDismiss;
+		const byId = new Map(entries.map(record => [record.id, record]));
 		const now = options.now?.() ?? Date.now();
-		this.#surface = new SelectorSurface<string, BookmarkRecord, Keybinding>({
-			componentId: makeComponentId("bookmarks-selector"),
-			items: entries,
-			keyOf: record => record.id,
-			searchText: record => `${record.target.title} ${record.target.sessionId} ${record.tag ?? ""} ${record.note ?? ""}`,
-			renderRow: (record, context, width) => {
-				const cursor = context.selected ? theme.fg("accent", `${theme.nav.cursor} `) : "  ";
-				const label = formatBookmarkLabel(record, now);
-				const description = theme.fg("dim", formatBookmarkDescription(record));
-				return [
-					truncateToWidth(cursor + (context.selected ? theme.bold(label) : label), width),
-					truncateToWidth(`  ${description}`, width),
-				];
-			},
-			renderEmpty: () => [theme.fg("muted", "  No bookmarks")],
-			onSelect: onJump,
-			onCancel: onDismiss,
-			viewportSize: 12,
-		});
+		const items: SelectItem[] = entries.map(record => ({
+			value: record.id,
+			label: formatBookmarkLabel(record, now),
+			description: formatBookmarkDescription(record),
+		}));
+		if (items.length === 0) items.push({ value: "none", label: "No bookmarks" });
+
+		this.#selectList = new SelectList(items, Math.min(items.length, 12), getSelectListTheme());
+		this.#selectList.onSelect = item => {
+			const record = byId.get(item.value);
+			if (record) onJump(record);
+		};
+
 		this.addChild(new Spacer(1));
 		this.addChild(new DynamicBorder(str => theme.fg("dim", str)));
-		this.addChild(new Text(theme.bold("Bookmarks"), 1, 0));
-		this.addChild(this.#surface);
+		this.addChild(
+			new Text(theme.bold("Bookmarks") + theme.fg("dim", "  Enter jump · ") + keyHint("ui.dismiss", "close"), 1, 0),
+		);
+		this.addChild(this.#selectList);
 		this.addChild(new DynamicBorder(str => theme.fg("dim", str)));
 		this.addChild(new Spacer(1));
 	}
-	get mountSpec(): SelectorSurfaceMountSpec<string, BookmarkRecord> {
-		return this.#surface.mountSpec;
+
+	handleInput(data: string): void {
+		if (matchesUiDismiss(data)) {
+			this.#onDismiss();
+			return;
+		}
+		this.#selectList.handleInput(data);
+	}
+
+	getSelectList(): SelectList {
+		return this.#selectList;
 	}
 }
-

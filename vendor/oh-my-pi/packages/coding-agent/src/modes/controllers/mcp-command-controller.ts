@@ -6,7 +6,6 @@
 import * as path from "node:path";
 import { type Component, replaceTabs, Spacer, Text } from "@oh-my-pi/pi-tui";
 import { getMCPConfigPath, getProjectDir } from "@oh-my-pi/pi-utils";
-import { Effect, Scope } from "effect";
 import type { SourceMeta } from "../../capability/types";
 import { expandEnvVarsDeep } from "../../discovery/helpers";
 import { analyzeAuthError, discoverOAuthEndpoints, MCPManager } from "../../mcp";
@@ -47,21 +46,8 @@ import { urlHyperlinkAlways } from "../../tui";
 import { openPath } from "../../utils/open";
 import { ChatBlock } from "../components/chat-block";
 import { editorKey, keyHint } from "../components/keybinding-hints";
-import {
-	isMCPAddWizardInputStep,
-	makeMCPAddWizardModel,
-	MCPAddWizard,
-	type MCPAddWizardCommand,
-	type MCPAddWizardModel,
-	type MCPAddWizardMsg,
-	MCPAddWizardMsgSchema,
-	mcpAddWizardStamp,
-	updateMCPAddWizard,
-} from "../components/mcp-add-wizard";
+import { MCPAddWizard } from "../components/mcp-add-wizard";
 import { TranscriptBlock } from "../components/transcript-container";
-import type { MvuInputRoute } from "../mvu/input-lease";
-import { type MvuRouteHandle, mountMvuEditorReplacement } from "../mvu/route-host";
-import type { MvuRuntimeConfig } from "../mvu/runtime";
 import { parseCommandArgs } from "../shared";
 import { theme } from "../theme/theme";
 import type { InteractiveModeContext } from "../types";
@@ -161,7 +147,6 @@ type MCPAddParsed = {
 	hasAuthToken?: boolean;
 	error?: string;
 };
-
 
 type MCPSearchParsed = {
 	keyword: string;
@@ -547,188 +532,39 @@ export class MCPCommandController {
 			return;
 		}
 
-		const initialModel = makeMCPAddWizardModel(parsed.initialName);
-		const componentId = initialModel.componentId;
-		let wizardRoute: MvuRouteHandle | undefined;
-		let closed = false;
-		const closeWizard = async (): Promise<void> => {
-			if (closed) return;
-			closed = true;
-			const route = wizardRoute;
-			wizardRoute = undefined;
-			if (route !== undefined) await Effect.runPromise(route.close());
+		// Save current editor state
+		const done = () => {
+			this.ctx.editorContainer.clear();
+			this.ctx.editorContainer.addChild(this.ctx.editor);
+			this.ctx.ui.setFocus(this.ctx.editor);
 		};
 
-		const wizard = new MCPAddWizard(initialModel);
-		const route: MvuInputRoute<MCPAddWizardModel> = {
-			componentId,
-			focusedRoot: wizard,
-			context: model => ({
-				contexts: ["setup.glyph", "selector.global"],
-				mode: "Browse",
-				focus: isMCPAddWizardInputStep(model.currentStep) ? "input" : "list",
-				capabilities: new Set(),
-			}),
-			actionToMsg: (action, event) => ({ _tag: "MvuInput", action, event }),
-			pasteToMsg: event => ({ _tag: "MvuInput", action: "setup.input", event }),
-		};
-		const runtimeConfig: MvuRuntimeConfig<MCPAddWizardModel, MCPAddWizardMsg, MCPAddWizardCommand, never> = {
-			componentId,
-			initialModel,
-			update: updateMCPAddWizard,
-			interpret: command => {
-				switch (command._tag) {
-					case "Render":
-						return Effect.sync(() => {
-							wizard.apply(command.model);
-							this.ctx.ui.requestComponentRender(wizard);
-							return [];
-						});
-					case "TestConnection":
-						return Effect.promise(async () => {
-							const remoteConfig =
-								command.config.type === "http" || command.config.type === "sse" ? command.config : undefined;
-							try {
-								await this.#handleTestConnection(command.config);
-								return [{ _tag: "ConnectionSettled", stamp: command.stamp, outcome: { _tag: "Connected" } }] as const;
-							} catch (error) {
-								const url = remoteConfig?.url ?? "";
-								const authResult = analyzeAuthError(error as Error, url);
-								if (!authResult.requiresAuth) {
-									return [{
-										_tag: "ConnectionSettled",
-										stamp: command.stamp,
-										outcome: {
-											_tag: "Failed",
-											error: error instanceof Error ? error.message : String(error),
-										},
-									}] as const;
-								}
-								let oauth = authResult.authType === "oauth" ? (authResult.oauth ?? null) : null;
-								if (!oauth && remoteConfig !== undefined && remoteConfig.url) {
-									try {
-										oauth = await discoverOAuthEndpoints(
-											remoteConfig.url,
-											authResult.authServerUrl,
-											authResult.resourceMetadataUrl,
-										);
-									} catch {
-										// Discovery failure falls through to manual authentication.
-									}
-								}
-								return [{
-									_tag: "ConnectionSettled",
-									stamp: command.stamp,
-									outcome: {
-										_tag: "AuthenticationRequired",
-										...(oauth === null ? {} : {
-											oauth: {
-												authorizationUrl: oauth.authorizationUrl,
-												tokenUrl: oauth.tokenUrl,
-												...(oauth.clientId === undefined ? {} : { clientId: oauth.clientId }),
-												...(oauth.scopes === undefined ? {} : { scopes: oauth.scopes }),
-												...(oauth.resource === undefined ? {} : { resource: oauth.resource }),
-											},
-										}),
-									},
-								}] as const;
-							}
-						});
-					case "RunOAuth":
-						return Effect.promise(async () => {
-							try {
-								const result = await this.#handleOAuthFlow(
-									command.authUrl,
-									command.tokenUrl,
-									command.clientId,
-									command.clientSecret,
-									command.scopes,
-									command.options,
-								);
-								const healthConfig = command.healthConfig;
-								const resource = result.resource ?? command.options.resource;
-								const clientId = result.clientId ?? command.clientId;
-								const auth: MCPAuthConfig = {
-									type: "oauth",
-									credentialId: result.credentialId,
-									...(command.tokenUrl ? { tokenUrl: command.tokenUrl } : {}),
-									...(resource === undefined ? {} : { resource }),
-									...(clientId ? { clientId } : {}),
-									...(command.clientSecret ? { clientSecret: command.clientSecret } : {}),
-								};
-								let healthError: string | undefined;
-								try {
-									await this.#handleTestConnection({ ...healthConfig, auth } as MCPServerConfig);
-								} catch (error) {
-									healthError = error instanceof Error ? error.message : String(error);
-								}
-								return [{
-									_tag: "OAuthSettled",
-									stamp: command.stamp,
-									result: {
-										_tag: "Succeeded",
-										credentialId: result.credentialId,
-										...(result.clientId === undefined ? {} : { clientId: result.clientId }),
-										...(result.resource === undefined ? {} : { resource: result.resource }),
-										...(healthError === undefined ? {} : { healthError }),
-									},
-								}] as const;
-							} catch (error) {
-								return [{
-									_tag: "OAuthSettled",
-									stamp: command.stamp,
-									result: {
-										_tag: "Failed",
-										error: error instanceof Error ? error.message : String(error),
-									},
-								}] as const;
-							}
-						});
-					case "Complete":
-						return Effect.promise(async () => {
-							await closeWizard();
-							await this.#handleWizardComplete(command.name, command.config, command.scope);
-							return [];
-						});
-					case "Cancel":
-						return Effect.promise(async () => {
-							await closeWizard();
-							this.#handleWizardCancel();
-							return [];
-						});
-				}
+		// Create wizard with OAuth handler and connection test
+		const wizard = new MCPAddWizard(
+			async (name: string, config: MCPServerConfig, scope: "user" | "project") => {
+				done();
+				await this.#handleWizardComplete(name, config, scope);
 			},
-			boundary: {
-				messageSchema: MCPAddWizardMsgSchema,
-				currentStamp: mcpAddWizardStamp,
-				commandStamp: command => command.stamp,
+			() => {
+				done();
+				this.#handleWizardCancel();
 			},
-			inputCapacity: 256,
-			messageCapacity: 256,
-			commandCapacity: 64,
-		};
-
-		wizardRoute = await Effect.runPromise(
-			Scope.provide(this.ctx.mvuScope)(
-				mountMvuEditorReplacement({
-					tui: this.ctx.ui,
-					leaseManager: this.ctx.mvuInputLeaseManager,
-					route,
-					component: wizard,
-					runtimeConfig,
-					hideEditor: Effect.sync(() => {
-						this.ctx.editorContainer.clear();
-						this.ctx.editorContainer.addChild(wizard);
-					}),
-					restoreEditor: Effect.sync(() => {
-						this.ctx.editorContainer.clear();
-						this.ctx.editorContainer.addChild(this.ctx.editor);
-						this.ctx.ui.setFocus(this.ctx.editor);
-					}),
-					previousFocus: this.ctx.editor,
-				}),
-			),
+			async (authUrl: string, tokenUrl: string, clientId: string, clientSecret: string, scopes: string, options) => {
+				return await this.#handleOAuthFlow(authUrl, tokenUrl, clientId, clientSecret, scopes, options);
+			},
+			async (config: MCPServerConfig) => {
+				return await this.#handleTestConnection(config);
+			},
+			() => {
+				this.ctx.ui.requestComponentRender(wizard);
+			},
+			parsed.initialName,
 		);
+
+		// Replace editor with wizard
+		this.ctx.editorContainer.clear();
+		this.ctx.editorContainer.addChild(wizard);
+		this.ctx.ui.setFocus(wizard);
 		this.ctx.ui.requestRender();
 	}
 

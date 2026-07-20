@@ -52,13 +52,6 @@ describe("KeybindingsManager", () => {
 		expect(newLineKeys).toContain("shift+enter");
 	});
 
-	it("ships Ctrl+Shift-minus and Ctrl+Shift-underscore as default redo keys", () => {
-		const keybindings = new KeybindingsManager(TUI_KEYBINDINGS);
-
-		expect(keybindings.getKeys("tui.editor.redo")).toEqual(["ctrl+shift+-", "ctrl+shift+_"]);
-		expect(keybindings.getKeys("tui.editor.undo")).toEqual(["ctrl+-", "ctrl+_"]);
-	});
-
 	it("ships Ghostty macOS Option-arrow aliases for word navigation", () => {
 		const keybindings = new KeybindingsManager(TUI_KEYBINDINGS);
 

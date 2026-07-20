@@ -3,7 +3,6 @@ import { CommandController } from "@oh-my-pi/pi-coding-agent/modes/controllers/c
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
 import { Container } from "@oh-my-pi/pi-tui";
-import { withControllerFixture } from "./helpers/controller-fixture";
 
 beforeAll(() => {
 	initTheme();
@@ -46,85 +45,80 @@ function buildCtx(compact: InteractiveModeContext["session"]["compact"]) {
 
 describe("issue #825: compaction input ownership", () => {
 	test("completion leaves AgentSession-captured input untouched without a UI dispatch", async () => {
-		await withControllerFixture(async fixture => {
-			const compact: InteractiveModeContext["session"]["compact"] = async () => ({
-				summary: "",
-				firstKeptEntryId: "",
-				tokensBefore: 0,
-			});
-			const { ctx, capturedInputs, capturedInput, dispatched } = buildCtx(compact);
-
-			const outcome = await new CommandController(ctx, fixture.getInputLeaseManager, fixture.scope).executeCompaction();
-
-			expect(outcome).toBe("ok");
-			expect(dispatched).toEqual([]);
-			expect(capturedInputs).toEqual([{ text: "address review feedback", delivery: "steer", images: ["review.png"] }]);
-			expect(capturedInputs).toHaveLength(1);
-			expect(capturedInputs[0]).toBe(capturedInput);
+		const compact: InteractiveModeContext["session"]["compact"] = async () => ({
+			summary: "",
+			firstKeptEntryId: "",
+			tokensBefore: 0,
 		});
+		const { ctx, capturedInputs, capturedInput, dispatched } = buildCtx(compact);
+
+		const outcome = await new CommandController(ctx).executeCompaction();
+
+		expect(outcome).toBe("ok");
+		expect(dispatched).toEqual([]);
+		expect(capturedInputs).toEqual([{ text: "address review feedback", delivery: "steer", images: ["review.png"] }]);
+		expect(capturedInputs).toHaveLength(1);
+		expect(capturedInputs[0]).toBe(capturedInput);
 	});
+
 	test("runs admission callbacks before releasing admission and returning", async () => {
-		await withControllerFixture(async fixture => {
-			const events: string[] = [];
-			const compact: InteractiveModeContext["session"]["compact"] = async (_instructions, options) => {
-				events.push("compact");
-				await options?.beforeAdmission?.({
-					outcome: "ok",
-					result: { summary: "", firstKeptEntryId: "", tokensBefore: 0 },
-				});
-				events.push("admission released");
-				return { summary: "", firstKeptEntryId: "", tokensBefore: 0 };
-			};
-			const { ctx } = buildCtx(compact);
-			const controller = new CommandController(ctx, fixture.getInputLeaseManager, fixture.scope);
+		const events: string[] = [];
+		const compact: InteractiveModeContext["session"]["compact"] = async (_instructions, options) => {
+			events.push("compact");
+			await options?.beforeAdmission?.({
+				outcome: "ok",
+				result: { summary: "", firstKeptEntryId: "", tokensBefore: 0 },
+			});
+			events.push("admission released");
+			return { summary: "", firstKeptEntryId: "", tokensBefore: 0 };
+		};
+		const { ctx } = buildCtx(compact);
+		const controller = new CommandController(ctx);
 
-			const outcome = await controller.executeCompaction(
-				{
-					beforeAdmission: () => {
-						events.push("session before admission");
-					},
+		const outcome = await controller.executeCompaction(
+			{
+				beforeAdmission: () => {
+					events.push("session before admission");
 				},
-				false,
-				() => {
-					events.push("controller completion");
-				},
-			);
-			events.push("returned");
+			},
+			false,
+			() => {
+				events.push("controller completion");
+			},
+		);
+		events.push("returned");
 
-			expect(outcome).toBe("ok");
-			expect(events).toEqual([
-				"compact",
-				"session before admission",
-				"controller completion",
-				"admission released",
-				"returned",
-			]);
-		});
+		expect(outcome).toBe("ok");
+		expect(events).toEqual([
+			"compact",
+			"session before admission",
+			"controller completion",
+			"admission released",
+			"returned",
+		]);
 	});
 
 	test("does not reclassify successful compaction when admission callback throws", async () => {
-		await withControllerFixture(async fixture => {
-			const outcomes: string[] = [];
-			const compact: InteractiveModeContext["session"]["compact"] = async (_instructions, options) => {
-				const result = { summary: "", firstKeptEntryId: "", tokensBefore: 0 };
-				try {
-					await options?.beforeAdmission?.({ outcome: "ok", result });
-				} catch {
-					// AgentSession isolates callback failures after committing compaction.
-				}
-				return result;
-			};
-			const { ctx } = buildCtx(compact);
+		const outcomes: string[] = [];
+		const compact: InteractiveModeContext["session"]["compact"] = async (_instructions, options) => {
+			const result = { summary: "", firstKeptEntryId: "", tokensBefore: 0 };
+			try {
+				await options?.beforeAdmission?.({ outcome: "ok", result });
+			} catch {
+				// AgentSession isolates callback failures after committing compaction.
+			}
+			return result;
+		};
+		const { ctx } = buildCtx(compact);
 
-			const outcome = await new CommandController(ctx, fixture.getInputLeaseManager, fixture.scope).executeCompaction({
-				beforeAdmission: ({ outcome }) => {
-					outcomes.push(outcome);
-					throw new Error("admission callback failed");
-				},
-			});
-
-			expect(outcome).toBe("ok");
-			expect(outcomes).toEqual(["ok"]);
+		const outcome = await new CommandController(ctx).executeCompaction({
+			beforeAdmission: ({ outcome }) => {
+				outcomes.push(outcome);
+				throw new Error("admission callback failed");
+			},
 		});
+
+		expect(outcome).toBe("ok");
+		expect(outcomes).toEqual(["ok"]);
 	});
 });

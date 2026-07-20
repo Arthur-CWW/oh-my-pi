@@ -1,36 +1,16 @@
-import { beforeAll, describe, expect, test } from "bun:test";
-import { Effect, Exit, Scope } from "effect";
+import { beforeAll, describe, expect, mock, test } from "bun:test";
 import { stripVTControlCharacters } from "node:util";
 import {
 	ErrorSelectorComponent,
 	formatDiagnosticDetail,
 	formatDiagnosticLabel,
 } from "../../../src/modes/components/error-selector";
-import { mountMvuRuntime } from "../../../src/modes/mvu/runtime";
 import { initTheme } from "../../../src/modes/theme/theme";
 import type { DiagnosticEvent } from "../../../src/modes/utils/error-inbox";
 import type { FocusCmuxOwnerResult } from "../../../src/modes/utils/cmux-owner-navigation";
 
 function renderText(component: { render(width: number): readonly string[] }, width = 80): string {
 	return stripVTControlCharacters(component.render(width).join("\n"));
-}
-async function mountSelectorRuntime(selector: ErrorSelectorComponent): Promise<Scope.Scope> {
-	const scope = Scope.makeUnsafe("sequential");
-	const spec = selector.getRouteSpec();
-	const runtime = await Effect.runPromise(Scope.provide(scope)(mountMvuRuntime({
-		componentId: spec.componentId,
-		initialModel: spec.initialModel,
-		update: spec.update,
-		interpret: spec.interpret,
-		boundary: spec.boundary,
-		inputCapacity: 32,
-		messageCapacity: 64,
-		commandCapacity: 32,
-	})));
-	selector.bindRuntime(message => {
-		Effect.runFork(runtime.dispatch(message));
-	});
-	return scope;
 }
 
 describe("ErrorSelectorComponent", () => {
@@ -78,7 +58,7 @@ describe("ErrorSelectorComponent", () => {
 
 	test("keeps a long build digest on one detail line at 140 columns", () => {
 		const digest = `sha256:${"a".repeat(64)}`;
-		const selector = new ErrorSelectorComponent([{ ...dummyEvent, buildDigest: digest }], () => {});
+		const selector = new ErrorSelectorComponent([{ ...dummyEvent, buildDigest: digest }], mock());
 
 		expect(renderText(selector, 140)).toContain(`Build digest: ${digest}`);
 	});
@@ -88,7 +68,7 @@ describe("ErrorSelectorComponent", () => {
 			...dummyEvent,
 			id: `err-${index}`,
 		}));
-		const selector = new ErrorSelectorComponent(errors, () => {});
+		const selector = new ErrorSelectorComponent(errors, mock());
 		const lines = selector.render(140).map(line => stripVTControlCharacters(line));
 		const detailStart = lines.findIndex(line => line.includes("Occurrences:"));
 
@@ -116,7 +96,7 @@ describe("ErrorSelectorComponent", () => {
 	test("resolved and unread rows are labeled in the list", () => {
 		const resolved: DiagnosticEvent = { ...dummyEvent, id: "resolved-1", unread: false, resolved: true };
 		const read: DiagnosticEvent = { ...dummyEvent, id: "read-1", unread: false, resolved: false };
-		const selector = new ErrorSelectorComponent([dummyEvent, resolved, read], () => {});
+		const selector = new ErrorSelectorComponent([dummyEvent, resolved, read], mock());
 		const text = renderText(selector);
 		expect(text).toContain("[unread]");
 		expect(text).toContain("[resolved]");
@@ -143,13 +123,13 @@ describe("ErrorSelectorComponent", () => {
 		expect(formatDiagnosticLabel(closedIncident)).not.toContain("[incident open]");
 		expect(formatDiagnosticLabel(dummyEvent)).toStartWith("[unread] ");
 
-		const text = renderText(new ErrorSelectorComponent([openIncident, closedIncident], () => {}));
+		const text = renderText(new ErrorSelectorComponent([openIncident, closedIncident], mock()));
 		expect(text).toContain("[unread] [incident open]");
 		expect(text).toContain("[resolved]");
 	});
 
 	test("empty state displays 'No recent errors' in list", () => {
-		const selector = new ErrorSelectorComponent([], () => {});
+		const selector = new ErrorSelectorComponent([], mock());
 		const text = renderText(selector);
 		expect(text).toContain("No recent errors");
 	});
@@ -160,7 +140,7 @@ describe("ErrorSelectorComponent", () => {
 			id: `err-${index}`,
 			message: `Error ${index}`,
 		}));
-		const selector = new ErrorSelectorComponent(errors, () => {});
+		const selector = new ErrorSelectorComponent(errors, mock());
 		const hints = renderText(selector);
 		expect(hints).toContain("j down");
 		expect(hints).toContain("shift+g last");
@@ -181,7 +161,7 @@ describe("ErrorSelectorComponent", () => {
 		expect(selectList.getSelectedItem()?.value).toBe("err-0");
 	});
 
-	test("selection change updates the detail pane", async () => {
+	test("selection change updates the detail pane", () => {
 		const second: DiagnosticEvent = {
 			id: "err-2",
 			firstTimestamp: 3000,
@@ -192,22 +172,16 @@ describe("ErrorSelectorComponent", () => {
 			unread: true,
 			resolved: false,
 		};
-		let dismissals = 0;
-		const onDismiss = () => {
-			dismissals++;
-		};
+		const onDismiss = mock();
 		const selector = new ErrorSelectorComponent([dummyEvent, second], onDismiss);
-		const scope = await mountSelectorRuntime(selector);
 		const selectList = selector.getSelectList();
 
 		selectList.clickItem(1);
-		await Bun.sleep(20);
 
-		expect(dismissals).toBe(1);
+		expect(onDismiss).toHaveBeenCalledTimes(1);
 		const text = renderText(selector);
 		expect(text).toContain("Second error detail");
 		expect(text).toContain("anthropic");
-		await Effect.runPromise(Scope.close(scope, Exit.void));
 	});
 	test("ownership action invokes once and keeps the selector open on failure", async () => {
 		const actionEvent: DiagnosticEvent = {
@@ -234,25 +208,21 @@ describe("ErrorSelectorComponent", () => {
 				},
 			},
 		);
-		const scope = await mountSelectorRuntime(selector);
 
 		expect(renderText(selector)).toContain("Focus active cmux session: Enter");
 		selector.getSelectList().clickItem(0);
 		selector.getSelectList().clickItem(0);
-		await Bun.sleep(20);
 		expect(invocations).toBe(1);
 		result.resolve({ kind: "unavailable" });
 		await result.promise;
 		await Bun.sleep(0);
-		await Bun.sleep(20);
 
 		expect(dismissals).toBe(0);
 		expect(renderText(selector)).toContain(
 			"The active cmux session is no longer available. This view remains read-only.",
 		);
-		await Effect.runPromise(Scope.close(scope, Exit.void));
 	});
-	test("stale ownership completion is ignored after a newer receipt replaces it", async () => {
+	test("ownership actions remain isolated when selection changes while requests are pending", async () => {
 		const first: DiagnosticEvent = {
 			...dummyEvent,
 			message: "First ownership error",
@@ -277,44 +247,37 @@ describe("ErrorSelectorComponent", () => {
 		const firstResult = Promise.withResolvers<FocusCmuxOwnerResult>();
 		const secondResult = Promise.withResolvers<FocusCmuxOwnerResult>();
 		const invocations: string[] = [];
-		const selector = new ErrorSelectorComponent([first, second], () => {}, {
+		const selector = new ErrorSelectorComponent([first, second], mock(), {
 			onAction: async action => {
 				invocations.push(action.sessionId);
 				return await (action.sessionId === "session-1" ? firstResult.promise : secondResult.promise);
 			},
 		});
-		const scope = await mountSelectorRuntime(selector);
 		const selectList = selector.getSelectList();
 
 		selectList.clickItem(0);
-		await Bun.sleep(20);
-		expect(invocations).toEqual(["session-1"]);
+		selectList.clickItem(0);
 		selectList.clickItem(1);
-		await Bun.sleep(20);
 		expect(invocations).toEqual(["session-1", "session-2"]);
 		expect(renderText(selector)).toContain("Second ownership error");
 
 		firstResult.resolve({ kind: "unavailable" });
 		await firstResult.promise;
 		await Bun.sleep(0);
-		await Bun.sleep(20);
-		expect(invocations).toEqual(["session-1", "session-2"]);
 		expect(renderText(selector)).toContain("Second ownership error");
 		expect(renderText(selector)).not.toContain("The active cmux session is no longer available");
 
 		secondResult.resolve({ kind: "failed", reason: "second focus failed" });
 		await secondResult.promise;
-		await Bun.sleep(20);
+		await Bun.sleep(0);
 		expect(renderText(selector)).toContain("Second ownership error");
 		expect(renderText(selector)).toContain("second focus failed");
 		expect(renderText(selector)).not.toContain("The active cmux session is no longer available");
 
-		selector.getSelectList().handleWheel(-1);
-		await Bun.sleep(20);
+		selectList.handleWheel(-1);
 		expect(renderText(selector)).toContain("First ownership error");
-		expect(renderText(selector)).not.toContain("The active cmux session is no longer available");
+		expect(renderText(selector)).toContain("The active cmux session is no longer available");
 		expect(renderText(selector)).not.toContain("second focus failed");
-		await Effect.runPromise(Scope.close(scope, Exit.void));
 	});
 
 

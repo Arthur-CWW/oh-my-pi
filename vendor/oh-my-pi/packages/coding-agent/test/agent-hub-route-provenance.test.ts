@@ -2,7 +2,6 @@
  * Agent Hub derives displayed route provenance from the newest structured
  * subagent progress snapshot, including the final resolved model.
  */
-import { pressHub } from "./helpers/agent-hub-input";
 import { beforeAll, describe, expect, it } from "bun:test";
 import { IrcBus } from "@oh-my-pi/pi-coding-agent/irc/bus";
 import { AgentHubOverlayComponent } from "@oh-my-pi/pi-coding-agent/modes/components/agent-hub";
@@ -178,7 +177,7 @@ describe("Agent Hub route provenance", () => {
 		);
 		await Bun.sleep(20);
 		renderedText(hub);
-		pressHub(hub, "]");
+		hub.handleInput("]");
 		const routePane = renderedText(hub);
 		expect(routePane).toContain("ROUTE");
 		expect(routePane).toContain(`model: ${INITIAL_MODEL}`);
@@ -187,7 +186,7 @@ describe("Agent Hub route provenance", () => {
 		expect(routePane).toContain("transaction=11111111-1111-4111-8111-111111111111");
 		expect(routePane).toContain("consulted: 3 layers; shadowed candidates=2");
 
-		pressHub(hub, "\r");
+		hub.openChat(AGENT_ID);
 		expect(renderedText(hub)).toContain(INITIAL_MODEL);
 		expect(renderedText(hub)).toContain("[spawn_explicit]");
 
@@ -199,9 +198,9 @@ describe("Agent Hub route provenance", () => {
 		expect(rerendered).not.toContain(INITIAL_MODEL);
 		expect(rerendered).not.toContain("[spawn_explicit]");
 
-		pressHub(hub, "\x1b");
-		pressHub(hub, "/");
-		for (const character of "automatic_reroute") pressHub(hub, character);
+		hub.handleInput("\x1b");
+		hub.handleInput("/");
+		for (const character of "automatic_reroute") hub.handleInput(character);
 		const filtered = renderedText(hub);
 		expect(filtered).toContain(AGENT_ID);
 		expect(filtered).toContain("1/1");

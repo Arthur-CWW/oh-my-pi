@@ -1,15 +1,13 @@
 /**
  * Interactive marketplace plugin selector.
  *
- * Rows are keyed by the plugin and marketplace identity. Selection and filter
- * state live in the shared selector model; this component only projects rows
- * and forwards the installation command.
+ * Shows available plugins from all configured marketplaces in a SelectList.
+ * Selecting a plugin triggers installation. The configured UI dismiss action cancels.
  */
-import { Container, truncateToWidth, type Keybinding } from "@oh-my-pi/pi-tui";
-import { makeComponentId } from "../mvu/schema";
-import { theme } from "../theme/theme";
+import { Container, type SelectItem, SelectList } from "@oh-my-pi/pi-tui";
+import { getSelectListTheme } from "../theme/theme";
+import { matchesUiDismiss } from "../utils/keybinding-matchers";
 import { DynamicBorder } from "./dynamic-border";
-import { SelectorSurface, type SelectorSurfaceMountSpec } from "./selector-adapter";
 
 export interface PluginSelectorCallbacks {
 	onSelect: (pluginName: string, marketplace: string, scope?: "user" | "project") => void;
@@ -23,12 +21,9 @@ export interface PluginItem {
 	scope?: "user" | "project";
 }
 
-function pluginKey(item: PluginItem): string {
-	return `${item.plugin.name}@${item.marketplace}${item.scope ? `#${item.scope}` : ""}`;
-}
-
 export class PluginSelectorComponent extends Container {
-	readonly #surface: SelectorSurface<string, PluginItem>;
+	#selectList: SelectList;
+	readonly #onCancel: () => void;
 
 	constructor(
 		marketplaceCount: number,
@@ -37,39 +32,71 @@ export class PluginSelectorComponent extends Container {
 		callbacks: PluginSelectorCallbacks,
 	) {
 		super();
-		this.#surface = new SelectorSurface<string, PluginItem, Keybinding>({
-			componentId: makeComponentId("plugin-selector"),
-			items: plugins,
-			keyOf: pluginKey,
-			searchText: item => `${item.plugin.name} ${item.plugin.description ?? ""} ${item.marketplace} ${item.scope ?? ""}`,
-			renderRow: (item, context, width) => {
-				const installed = installedIds.has(`${item.plugin.name}@${item.marketplace}`);
-				const version = item.plugin.version ? `@${item.plugin.version}` : "";
-				const status = installed ? " [installed]" : "";
-				const scope = item.scope ? ` [${item.scope}]` : "";
-				const label = `${item.plugin.name}${version}${status}${scope}`;
-				const cursor = context.selected ? theme.fg("accent", `${theme.nav.cursor} `) : "  ";
-				const description = item.plugin.description ? theme.fg("dim", `  ${item.plugin.description}`) : "";
-				return [
-					truncateToWidth(cursor + (context.selected ? theme.bold(label) : label), width),
-					truncateToWidth(`  ${theme.fg("dim", item.marketplace)}`, width),
-					...(description ? [truncateToWidth(description, width)] : []),
-				];
-			},
-			renderEmpty: () => [
-				theme.fg("muted", "  No plugins available"),
-				theme.fg("dim", marketplaceCount === 0 ? "  Add a marketplace first: /marketplace add <source>" : "  Configured marketplaces have no plugins"),
-			],
-			onSelect: item => callbacks.onSelect(item.plugin.name, item.marketplace, item.scope),
-			onCancel: callbacks.onCancel,
-			viewportSize: 20,
+		this.#onCancel = callbacks.onCancel;
+
+		const items: SelectItem[] = plugins.map(({ plugin, marketplace, scope }) => {
+			// Encode scope into the value so onSelect can recover it without a parallel Map.
+			// Format: "name@marketplace" or "name@marketplace#scope"
+			const id = scope ? `${plugin.name}@${marketplace}#${scope}` : `${plugin.name}@${marketplace}`;
+			const installed = installedIds.has(`${plugin.name}@${marketplace}`);
+			const version = plugin.version ? `@${plugin.version}` : "";
+			const status = installed ? " [installed]" : "";
+			const scopeTag = scope ? ` [${scope}]` : "";
+
+			return {
+				value: id,
+				label: `${plugin.name}${version}${status}${scopeTag}`,
+				description: plugin.description,
+				hint: marketplace,
+			};
 		});
+
+		if (items.length === 0) {
+			items.push({
+				value: "__empty__",
+				label: "No plugins available",
+				description:
+					marketplaceCount === 0
+						? "Add a marketplace first: /marketplace add <source>"
+						: "Configured marketplaces have no plugins",
+			});
+		}
+
 		this.addChild(new DynamicBorder());
-		this.addChild(this.#surface);
+
+		this.#selectList = new SelectList(items, Math.min(items.length, 20), getSelectListTheme());
+
+		this.#selectList.onSelect = item => {
+			if (item.value === "__empty__") return;
+			const [name, marketplace, scope] = splitPluginId(item.value);
+			if (name && marketplace) {
+				callbacks.onSelect(name, marketplace, scope);
+			}
+		};
+
+		this.addChild(this.#selectList);
 		this.addChild(new DynamicBorder());
-	}
-	get mountSpec(): SelectorSurfaceMountSpec<string, PluginItem> {
-		return this.#surface.mountSpec;
 	}
 
+	handleInput(data: string): void {
+		if (matchesUiDismiss(data)) {
+			this.#onCancel();
+			return;
+		}
+		this.#selectList.handleInput(data);
+	}
+
+	getSelectList(): SelectList {
+		return this.#selectList;
+	}
+}
+
+function splitPluginId(id: string): [string, string, "user" | "project" | undefined] | [null, null, null] {
+	// value format: "name@marketplace" or "name@marketplace#scope"
+	const hashIdx = id.indexOf("#");
+	const base = hashIdx >= 0 ? id.slice(0, hashIdx) : id;
+	const scope = hashIdx >= 0 ? (id.slice(hashIdx + 1) as "user" | "project") : undefined;
+	const atIdx = base.lastIndexOf("@");
+	if (atIdx <= 0) return [null, null, null];
+	return [base.slice(0, atIdx), base.slice(atIdx + 1), scope];
 }

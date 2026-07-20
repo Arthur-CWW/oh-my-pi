@@ -1,12 +1,6 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { resetSettingsForTest, Settings, settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import {
-	makeSettingsModalModel,
-	type SettingsModalModel,
-	SettingsSelectorComponent,
-	updateSettingsModal,
-} from "@oh-my-pi/pi-coding-agent/modes/components/settings-selector";
-import { makeTerminalInputAdapter } from "@oh-my-pi/pi-coding-agent/modes/mvu/input-adapter";
+import { SettingsSelectorComponent } from "@oh-my-pi/pi-coding-agent/modes/components/settings-selector";
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 
 beforeAll(async () => {
@@ -22,57 +16,25 @@ afterEach(() => {
 	resetSettingsForTest();
 });
 
-const models = new WeakMap<SettingsSelectorComponent, SettingsModalModel>();
-const cancelCallbacks = new WeakMap<SettingsSelectorComponent, () => void>();
-const inputAdapter = makeTerminalInputAdapter();
-
-function send(comp: SettingsSelectorComponent, data: string): void {
-	const model = models.get(comp);
-	if (model === undefined) throw new Error("settings model not mounted");
-	const event = inputAdapter.decode(data);
-	if (event === undefined) throw new Error(`undecodable settings input: ${JSON.stringify(data)}`);
-	const transition = updateSettingsModal(model, {
-		_tag: "Input",
-		action: event._tag === "Press" && event.key === "escape" ? "ui.dismiss" : "app.settings.input",
-		event,
-	});
-	models.set(comp, transition.model);
-	for (const command of transition.commands) {
-		if (command._tag === "RenderSettings") comp.apply(command.model);
-		else if (command._tag === "PersistSettingRequested") settings.set(command.path, command.value as never);
-		else if (command._tag === "CloseRequested") cancelCallbacks.get(comp)?.();
-	}
-}
-
 function createSelector(onCancel: () => void = () => {}): SettingsSelectorComponent {
-	const comp = new SettingsSelectorComponent(
+	return new SettingsSelectorComponent(
 		{
 			availableThinkingLevels: [],
 			thinkingLevel: undefined,
 			availableThemes: ["dark"],
+			cwd: process.cwd(),
 		},
 		{
 			onChange: () => {},
 			onCancel,
 		},
 	);
-	const model = makeSettingsModalModel("dark", {
-		values: {
-			defaultThinkingLevel: ["auto"],
-			"theme.dark": ["dark"],
-			"theme.light": ["dark"],
-		},
-	});
-	models.set(comp, model);
-	cancelCallbacks.set(comp, onCancel);
-	comp.apply(model);
-	return comp;
 }
 
 /** Switch the selector to the memory tab. SETTING_TABS puts memory at index 4 (after appearance/model/interaction/context). */
 function focusMemoryTab(comp: SettingsSelectorComponent): void {
 	for (let i = 0; i < 4; i++) {
-		send(comp, "\x1b[C");
+		comp.handleInput("\x1b[C");
 	}
 }
 
@@ -89,10 +51,10 @@ describe("SettingsSelectorComponent memory tab", () => {
 
 		// Memory Backend is the only visible row, so it's already selected at index 0.
 		// Enter opens the SelectSubmenu pre-positioned on "off"; navigate to "hindsight" (index 2) and confirm.
-		send(comp, "\n");
-		send(comp, "\x1b[B");
-		send(comp, "\x1b[B");
-		send(comp, "\n");
+		comp.handleInput("\n");
+		comp.handleInput("\x1b[B");
+		comp.handleInput("\x1b[B");
+		comp.handleInput("\n");
 
 		expect(settings.get("memory.backend")).toBe("hindsight");
 		const after = comp.render(70).join("\n");
@@ -110,10 +72,10 @@ describe("SettingsSelectorComponent memory tab", () => {
 
 		// Open Memory Backend → SelectSubmenu pre-selects the current value
 		// ("hindsight" at index 2) → step up twice to reach "off" → Enter confirms.
-		send(comp, "\n");
-		send(comp, "\x1b[A");
-		send(comp, "\x1b[A");
-		send(comp, "\n");
+		comp.handleInput("\n");
+		comp.handleInput("\x1b[A");
+		comp.handleInput("\x1b[A");
+		comp.handleInput("\n");
 
 		expect(settings.get("memory.backend")).toBe("off");
 		const after = comp.render(70).join("\n");
@@ -129,7 +91,7 @@ describe("SettingsSelectorComponent memory tab", () => {
 		});
 
 		// Typing starts the cross-tab search: banner shows the query and matches.
-		send(comp, "b");
+		comp.handleInput("b");
 		const strip = (line: string): string => line.replace(/\x1b\[[0-9;]*m/g, "");
 		const searching = comp.render(120).map(strip).join("\n");
 		const banner =
@@ -141,17 +103,17 @@ describe("SettingsSelectorComponent memory tab", () => {
 		expect(searching).toMatch(/\d+ match/);
 
 		// First Escape exits search mode without closing the panel.
-		send(comp, "\x1b");
+		comp.handleInput("\x1b");
 		expect(cancelCount).toBe(0);
 		expect(comp.render(120).join("\n")).not.toContain("matches");
 
-		send(comp, "\x1b");
+		comp.handleInput("\x1b");
 		expect(cancelCount).toBe(1);
 	});
 
 	it("puts the exact global settings search hit before incidental matches", () => {
 		const comp = createSelector();
-		for (const ch of "image provider") send(comp, ch);
+		for (const ch of "image provider") comp.handleInput(ch);
 
 		const strip = (line: string): string => line.replace(/\x1b\[[0-9;]*m/g, "");
 		const rendered = comp.render(120).map(strip).join("\n");
@@ -177,16 +139,16 @@ describe("SettingsSelectorComponent memory tab", () => {
 				.find(line => /\d+ match/.test(line)) ?? "";
 
 		// alt+backspace deletes the trailing word from the query.
-		for (const ch of "image provider") send(comp, ch);
-		send(comp, "\x1b\x7f");
+		for (const ch of "image provider") comp.handleInput(ch);
+		comp.handleInput("\x1b\x7f");
 		expect(banner()).toContain("image");
 		expect(banner()).not.toContain("provider");
 
 		// Arrow keys move the cursor; typing inserts mid-query instead of appending.
-		send(comp, "\x15"); // ctrl+u clears the rest of the query
-		for (const ch of "model") send(comp, ch);
-		for (let i = 0; i < 5; i++) send(comp, "\x1b[D");
-		send(comp, "x");
+		comp.handleInput("\x15"); // ctrl+u clears the rest of the query
+		for (const ch of "model") comp.handleInput(ch);
+		for (let i = 0; i < 5; i++) comp.handleInput("\x1b[D");
+		comp.handleInput("x");
 		expect(banner()).toContain("xmodel");
 	});
 
@@ -198,17 +160,17 @@ describe("SettingsSelectorComponent memory tab", () => {
 		});
 		focusMemoryTab(comp);
 
-		send(comp, "\n");
+		comp.handleInput("\n");
 		expect(comp.render(120).join("\n")).toContain("Esc to go back");
 
-		send(comp, "\x1b");
+		comp.handleInput("\x1b");
 		const afterBack = comp.render(120).join("\n");
 		expect(cancelCount).toBe(0);
 		expect(afterBack).toContain("Memory Backend");
 		expect(afterBack).toContain("Esc to close");
 		expect(afterBack).not.toContain("Esc to go back");
 
-		send(comp, "\x1b");
+		comp.handleInput("\x1b");
 		expect(cancelCount).toBe(1);
 	});
 });

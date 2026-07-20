@@ -1,12 +1,10 @@
 import * as path from "node:path";
 import { isZodSchema, zodToWireSchema } from "@oh-my-pi/pi-ai/utils/schema";
-import type { Component, Keybinding } from "@oh-my-pi/pi-tui";
+import { Container, matchesKey, type OverlayHandle } from "@oh-my-pi/pi-tui";
 import { isEnoent, parseFrontmatter } from "@oh-my-pi/pi-utils";
 import { YAML } from "bun";
-import { Effect, Schema, Scope } from "effect";
-import { makeComponentId, type ActiveKeymapContext, type ComponentId, type KeyEvent } from "../mvu/schema";
-import type { MvuEnvelope } from "../mvu/input-lease";
-import { mountMvuOverlay, type MvuRouteHandle } from "../mvu/route-host";
+import { Schema } from "effect";
+import type { KeyId } from "../../config/keybindings";
 import { SETTINGS_SCHEMA, type SettingPath } from "../../config/settings";
 import { buildFeedsListViewModel, renderFeedResource, resolveFeedSurfacePaths } from "../../feeds";
 import { resolveMemoryBackend } from "../../memory-backend";
@@ -15,20 +13,24 @@ import { replaceTabs, truncateToWidth } from "../../tools/render-utils";
 import { theme } from "../theme/theme";
 import type { InteractiveModeContext } from "../types";
 import { computeContextBreakdown } from "../utils/context-usage";
+import { matchesUiDismiss } from "../utils/keybinding-matchers";
 import { DynamicBorder } from "./dynamic-border";
+import { keyHint } from "./keybinding-hints";
 import {
+	beginPrimitiveFilter,
 	createPrimitiveInspectorState,
+	drillIntoPrimitive,
+	movePrimitiveSelection,
 	type PrimitiveCategoryId,
 	type PrimitiveInspectorCategory,
 	type PrimitiveInspectorItem,
-	type PrimitiveInspectorMsg,
 	type PrimitiveInspectorState,
-	type PrimitiveInspectorCommand,
 	selectedPrimitiveCategory,
 	selectedPrimitiveItem,
+	unwindPrimitiveInspector,
+	updatePrimitiveFilter,
 	visiblePrimitiveCategories,
 	visiblePrimitiveItems,
-	updatePrimitiveInspector,
 } from "./primitives-inspector-state";
 
 export type { PrimitiveCategoryId } from "./primitives-inspector-state";
@@ -44,6 +46,12 @@ const CatalogStoreSchema = Schema.Struct({
 });
 const DataStoreCatalogSchema = Schema.Struct({ stores: Schema.Array(CatalogStoreSchema) });
 
+interface InspectorDeps {
+	readonly categories: readonly PrimitiveInspectorCategory[];
+	readonly inspectKeys: readonly KeyId[];
+	readonly onDone: () => void;
+	readonly requestRender: () => void;
+}
 
 function firstLine(value: string): string {
 	return value.replace(/\s+/g, " ").trim().split(". ", 1)[0] ?? "";
@@ -355,172 +363,161 @@ function plainLine(value: string, width: number): string {
 	return truncateToWidth(replaceTabs(value), Math.max(1, width));
 }
 
-export interface PrimitiveInspectorPatch {
-	readonly categories: readonly PrimitiveInspectorCategory[];
-	readonly state: PrimitiveInspectorState;
-	readonly dirtyKeys: ReadonlySet<string>;
-}
+export class PrimitivesInspectorOverlayComponent extends Container {
+	readonly #categories: readonly PrimitiveInspectorCategory[];
+	readonly #inspectKeys: readonly KeyId[];
+	readonly #onDone: () => void;
+	readonly #requestRender: () => void;
+	#state: PrimitiveInspectorState;
+	#showHelp = false;
 
-export function viewPrimitivesInspector(
-	categories: readonly PrimitiveInspectorCategory[],
-	state: PrimitiveInspectorState,
-	dirtyKeys: ReadonlySet<string> = new Set(),
-): PrimitiveInspectorPatch {
-	return { categories, state, dirtyKeys };
-}
-
-function primitiveMode(state: PrimitiveInspectorState): "TreeBrowse" | "TreeFilter" | "TreePreview" | "TreeLabelEdit" | "TreeConfirm" {
-	if (state.filterEditing || state.filterQuery.length > 0) return "TreeFilter";
-	if (state.depth === 2) return "TreePreview";
-	return "TreeBrowse";
-}
-
-export function primitivesInspectorActionToMsg(action: string, event: KeyEvent): PrimitiveInspectorMsg | undefined {
-	if (event._tag !== "Press" && event._tag !== "Paste") return undefined;
-	const text = event._tag === "Paste" ? event.text : event.text ?? String(event.key);
-	switch (action) {
-		case "app.navigation.up": return { _tag: "Move", delta: -1 };
-		case "app.navigation.down": return { _tag: "Move", delta: 1 };
-		case "tui.select.pageUp": return { _tag: "Page", delta: -1 };
-		case "tui.select.pageDown": return { _tag: "Page", delta: 1 };
-		case "app.selector.filter": return { _tag: "BeginFilter" };
-		case "app.selector.filterAppend":
-			return text.length > 0 ? { _tag: "FilterAppend", text } : undefined;
-		case "app.selector.filterDelete": return { _tag: "FilterDelete" };
-		case "ui.dismiss": return { _tag: "Back" };
-		case "tui.select.confirm": return { _tag: "Activate" };
-		case "app.primitives.help": return { _tag: "ToggleHelp" };
-		default: return undefined;
-	}
-}
-
-/** Renderer-only read-only primitives inspector. */
-export class PrimitivesInspectorOverlayComponent implements Component {
-	#patch: PrimitiveInspectorPatch | undefined;
-	#cached: { readonly width: number; readonly patch: PrimitiveInspectorPatch; readonly lines: readonly string[] } | undefined;
-
-	constructor(categories: readonly PrimitiveInspectorCategory[], initialCategory?: PrimitiveCategoryId) {
-		this.#patch = viewPrimitivesInspector(categories, createPrimitiveInspectorState(categories, initialCategory));
+	constructor(deps: InspectorDeps, initialCategory?: PrimitiveCategoryId) {
+		super();
+		this.#categories = deps.categories;
+		this.#inspectKeys = deps.inspectKeys;
+		this.#onDone = deps.onDone;
+		this.#requestRender = deps.requestRender;
+		this.#state = createPrimitiveInspectorState(this.#categories, initialCategory);
 	}
 
-	apply(patch: PrimitiveInspectorPatch): void {
-		if (this.#patch === patch) return;
-		this.#patch = patch;
-		this.#cached = undefined;
+	handleInput(keyData: string): void {
+		if (this.#showHelp) {
+			this.#showHelp = false;
+			this.#requestRender();
+			return;
+		}
+		for (const key of this.#inspectKeys) {
+			if (matchesKey(keyData, key)) {
+				this.#onDone();
+				return;
+			}
+		}
+		if (this.#state.filterEditing) {
+			if (matchesKey(keyData, "enter") || keyData === "\r" || keyData === "\n") {
+				this.#state = { ...this.#state, filterEditing: false };
+			} else if (matchesUiDismiss(keyData)) {
+				this.#state = { ...this.#state, filterEditing: false, filterQuery: "" };
+			} else if (matchesKey(keyData, "backspace")) {
+				this.#state = updatePrimitiveFilter(this.#state, this.#state.filterQuery.slice(0, -1));
+			} else if (keyData.length === 1 && keyData >= " ") {
+				this.#state = updatePrimitiveFilter(this.#state, this.#state.filterQuery + keyData);
+			}
+			this.#requestRender();
+			return;
+		}
+		if (matchesUiDismiss(keyData)) {
+			const next = unwindPrimitiveInspector(this.#state);
+			if (!next) this.#onDone();
+			else {
+				this.#state = next;
+				this.#requestRender();
+			}
+			return;
+		}
+		if (keyData === "?") this.#showHelp = true;
+		else if (keyData === "/") this.#state = beginPrimitiveFilter(this.#state);
+		else if (keyData === "j" || matchesKey(keyData, "down")) {
+			this.#state = movePrimitiveSelection(this.#categories, this.#state, 1);
+		} else if (keyData === "k" || matchesKey(keyData, "up")) {
+			this.#state = movePrimitiveSelection(this.#categories, this.#state, -1);
+		} else if (keyData === "l" || matchesKey(keyData, "right") || matchesKey(keyData, "enter")) {
+			this.#state = drillIntoPrimitive(this.#categories, this.#state);
+		} else if (keyData === "h" || matchesKey(keyData, "left")) {
+			const next = unwindPrimitiveInspector({ ...this.#state, filterQuery: "", filterEditing: false });
+			if (next) this.#state = next;
+			else this.#onDone();
+		}
+		this.#requestRender();
 	}
 
-	invalidate(): void {
-		this.#cached = undefined;
-	}
-
-	render(width: number): readonly string[] {
-		const patch = this.#patch;
-		if (patch === undefined) return [];
-		if (this.#cached?.width === width && this.#cached.patch === patch) return this.#cached.lines;
+	override render(width: number): readonly string[] {
 		const safeWidth = Math.max(40, width);
 		const innerWidth = safeWidth - 2;
 		const leftWidth = Math.min(40, Math.max(24, Math.floor(innerWidth * 0.28)));
 		const rightWidth = Math.max(12, innerWidth - leftWidth - 3);
 		const height = Math.max(12, (process.stdout.rows || 40) - 5);
-		const state = patch.state;
 		const lines: string[] = [...new DynamicBorder().render(safeWidth)];
-		const filter = state.filterQuery || state.filterEditing ? ` /${state.filterQuery}` : "";
-		lines.push(` ${theme.fg("accent", "Primitives Inspector")}${theme.fg("dim", " · read-only")}${theme.fg("accent", filter)}${state.filterEditing ? theme.fg("dim", "▏") : ""}`);
+		const filter = this.#state.filterQuery || this.#state.filterEditing ? ` /${this.#state.filterQuery}` : "";
+		lines.push(
+			` ${theme.fg("accent", "Primitives Inspector")}${theme.fg("dim", " · read-only")}${theme.fg("accent", filter)}${this.#state.filterEditing ? theme.fg("dim", "▏") : ""}`,
+		);
 		lines.push(...new DynamicBorder().render(safeWidth));
-		if (state.helpVisible) {
-			for (const line of [
+		if (this.#showHelp) {
+			const help = [
 				"Normal mode (default)",
 				"j/k or ↓/↑   navigate",
 				"l/Enter/→    drill in",
 				"h/←          back",
 				"/            filter current level",
-				"Esc          unwind one reversible layer",
+				keyHint("ui.dismiss", "clear filter, unwind one level, then close"),
+				"alt+i        toggle inspector (also :inspect)",
 				"?            close this help",
 				"",
-				"Read-only: this surface never mutates primitive domains.",
-			]) lines.push(` ${plainLine(line, innerWidth)}`);
+				"Read-only v0: this surface never mutates tools, skills, feeds, memories, stores, or settings.",
+			];
+			for (const line of help) lines.push(` ${plainLine(line, innerWidth)}`);
 			while (lines.length < height) lines.push("");
 			lines.push(...new DynamicBorder().render(safeWidth));
-			this.#cached = { width, patch, lines };
 			return lines;
 		}
-
-		const activeCategory = selectedPrimitiveCategory(patch.categories, state);
-		const activeItem = selectedPrimitiveItem(patch.categories, state);
-		const visibleCategories = visiblePrimitiveCategories(patch.categories, state);
+		const visibleCategories = visiblePrimitiveCategories(this.#categories, this.#state);
+		const activeCategory = selectedPrimitiveCategory(this.#categories, this.#state);
+		const activeItem = selectedPrimitiveItem(this.#categories, this.#state);
 		const left: string[] = [theme.fg("dim", "CATEGORIES")];
-		for (const category of visibleCategories) {
+		for (let index = 0; index < visibleCategories.length; index++) {
+			const category = visibleCategories[index]!;
 			const selected = category.id === activeCategory?.id;
+			const marker = selected ? theme.fg("accent", ">") : " ";
 			const availability = category.available ? `${category.items.length}` : theme.fg("dim", "off");
-			left.push(`${selected ? theme.fg("accent", ">") : " "} ${category.available ? category.label : theme.fg("dim", category.label)} ${theme.fg("dim", availability)}`);
+			const label = category.available ? category.label : theme.fg("dim", category.label);
+			left.push(`${marker} ${label} ${theme.fg("dim", availability)}`);
 		}
-
 		const right: string[] = [];
 		if (!activeCategory) {
 			right.push(theme.fg("dim", "No matching categories."));
-		} else if (state.depth === 0) {
-			right.push(theme.fg("accent", activeCategory.label), theme.fg("dim", activeCategory.source), "");
-			right.push(activeCategory.available
-				? `${activeCategory.items.length} item${activeCategory.items.length === 1 ? "" : "s"}. Press Enter to inspect.`
-				: theme.fg("dim", activeCategory.unavailableDetail ?? "Unavailable."));
-		} else if (state.depth === 1) {
-			right.push(theme.fg("accent", activeCategory.label), theme.fg("dim", activeCategory.source), "");
-			const items = visiblePrimitiveItems(patch.categories, state);
+		} else if (this.#state.depth === 0) {
+			right.push(theme.fg("accent", activeCategory.label));
+			right.push(theme.fg("dim", activeCategory.source));
+			right.push("");
+			right.push(
+				activeCategory.available
+					? `${activeCategory.items.length} item${activeCategory.items.length === 1 ? "" : "s"}. Press l or Enter to inspect.`
+					: theme.fg("dim", activeCategory.unavailableDetail ?? "Unavailable."),
+			);
+		} else if (this.#state.depth === 1) {
+			right.push(theme.fg("accent", activeCategory.label));
+			right.push(theme.fg("dim", activeCategory.source));
+			right.push("");
+			const items = visiblePrimitiveItems(this.#categories, this.#state);
 			if (items.length === 0) right.push(theme.fg("dim", activeCategory.unavailableDetail ?? "No matching items."));
-			for (const item of items) {
-				const enabled = item.enabled === undefined ? "" : item.enabled ? theme.fg("success", " on") : theme.fg("dim", " off");
-				right.push(`${item.id === activeItem?.id ? theme.fg("accent", ">") : " "} ${item.label}${enabled}`, `    ${theme.fg("dim", item.summary)}`);
+			for (let index = 0; index < items.length; index++) {
+				const item = items[index]!;
+				const marker = item.id === activeItem?.id ? theme.fg("accent", ">") : " ";
+				const enabled =
+					item.enabled === undefined ? "" : item.enabled ? theme.fg("success", " on") : theme.fg("dim", " off");
+				right.push(`${marker} ${item.label}${enabled}`);
+				right.push(`    ${theme.fg("dim", item.summary)}`);
 			}
 		} else {
-			right.push(theme.fg("accent", activeItem?.label ?? activeCategory.label), theme.fg("dim", activeItem?.summary ?? activeCategory.source), "");
+			right.push(theme.fg("accent", activeItem?.label ?? activeCategory.label));
+			right.push(theme.fg("dim", activeItem?.summary ?? activeCategory.source));
+			right.push("");
 			right.push(...(activeItem?.detail ?? activeCategory.unavailableDetail ?? "No detail available.").split("\n"));
 		}
-
 		const bodyHeight = Math.max(6, height - lines.length - 2);
-		const rightStart = state.depth === 2 ? state.detailOffset : 0;
-		for (let rowIndex = 0; rowIndex < bodyHeight; rowIndex++) {
-			lines.push(` ${plainLine(left[rowIndex] ?? "", leftWidth).padEnd(leftWidth)} ${theme.fg("dim", "│")} ${plainLine(right[rightStart + rowIndex] ?? "", rightWidth)}`);
+		const rightStart = this.#state.depth === 2 ? this.#state.detailOffset : 0;
+		for (let row = 0; row < bodyHeight; row++) {
+			const leftCell = plainLine(left[row] ?? "", leftWidth).padEnd(leftWidth);
+			const rightCell = plainLine(right[rightStart + row] ?? "", rightWidth);
+			lines.push(` ${leftCell} ${theme.fg("dim", "│")} ${rightCell}`);
 		}
-		lines.push(theme.fg("dim", " j/k navigate · Enter drill · / filter · Esc back · ? help"));
+		lines.push(
+			` ${theme.fg("dim", "j/k navigate · l/Enter drill · h back · / filter · ")}${keyHint("ui.dismiss", "unwind")}${theme.fg("dim", " · ? help · :inspect or alt+i toggle")}`,
+		);
 		lines.push(...new DynamicBorder().render(safeWidth));
-		this.#cached = { width, patch, lines };
 		return lines;
 	}
 }
-
-export interface PrimitivesInspectorRouteSpec {
-	readonly componentId: ComponentId;
-	readonly focusedRoot: PrimitivesInspectorOverlayComponent;
-	readonly categories: readonly PrimitiveInspectorCategory[];
-	readonly initialModel: PrimitiveInspectorState;
-	readonly context: (model: PrimitiveInspectorState) => ActiveKeymapContext;
-	readonly actionToMsg: (action: Keybinding, event: KeyEvent) => PrimitiveInspectorMsg | undefined;
-}
-
-export function createPrimitivesInspectorRoute(
-	categories: readonly PrimitiveInspectorCategory[],
-	initialCategory?: PrimitiveCategoryId,
-): PrimitivesInspectorRouteSpec {
-	const componentId = makeComponentId("primitives-inspector");
-	return {
-		componentId,
-		focusedRoot: new PrimitivesInspectorOverlayComponent(categories, initialCategory),
-		categories,
-		initialModel: createPrimitiveInspectorState(categories, initialCategory),
-		context: model => ({ contexts: ["selector.global", "selector.filter"], mode: primitiveMode(model), focus: model.depth === 2 ? "preview" : "list", capabilities: new Set(["selector.filter"]) }),
-		actionToMsg: (action, event) => primitivesInspectorActionToMsg(String(action), event),
-	};
-}
-
-type PrimitivesRouteCommand =
-	| PrimitiveInspectorCommand
-	| {
-			readonly _tag: "RenderPrimitives";
-			readonly model: PrimitiveInspectorState;
-			readonly dirtyKeys: ReadonlySet<string>;
-	  };
-
-const activePrimitivesRoutes = new WeakMap<InteractiveModeContext, MvuRouteHandle>();
 
 export async function showPrimitivesInspectorOverlay(
 	ctx: InteractiveModeContext,
@@ -533,70 +530,27 @@ export async function showPrimitivesInspectorOverlay(
 		ctx.showError(`Failed to open primitives inspector: ${error instanceof Error ? error.message : String(error)}`);
 		return;
 	}
-	const previous = activePrimitivesRoutes.get(ctx);
-	if (previous !== undefined) {
-		activePrimitivesRoutes.delete(ctx);
-		await Effect.runPromise(previous.close());
-	}
-	const spec = createPrimitivesInspectorRoute(categories, initialCategory);
-	spec.focusedRoot.apply(viewPrimitivesInspector(spec.categories, spec.initialModel));
-	const close = (): void => {
-		const handle = activePrimitivesRoutes.get(ctx);
-		if (handle === undefined) return;
-		activePrimitivesRoutes.delete(ctx);
-		void Effect.runPromise(handle.close());
+	let overlayHandle: OverlayHandle | undefined;
+	const done = () => {
+		overlayHandle?.hide();
+		ctx.ui.setFocus(ctx.editor);
+		ctx.ui.requestRender();
 	};
-	const handle = await Effect.runPromise(
-		Scope.provide(ctx.mvuScope)(
-			mountMvuOverlay({
-				tui: ctx.ui,
-				leaseManager: ctx.mvuInputLeaseManager,
-				route: {
-					componentId: spec.componentId,
-					focusedRoot: spec.focusedRoot,
-					context: spec.context,
-					actionToMsg: (action, event) =>
-						spec.actionToMsg(action, event) === undefined ? undefined : { _tag: "MvuInput", action, event },
-				},
-				component: spec.focusedRoot,
-				runtimeConfig: {
-					componentId: spec.componentId,
-					initialModel: spec.initialModel,
-					update: (model: PrimitiveInspectorState, envelope: MvuEnvelope) => {
-						const message = spec.actionToMsg(envelope.action, envelope.event);
-						if (message === undefined) return { model, commands: [], dirtyKeys: new Set<string>() };
-						const transition = updatePrimitiveInspector(spec.categories, model, message);
-						return {
-							model: transition.model,
-							commands: [
-								...transition.commands,
-								{ _tag: "RenderPrimitives", model: transition.model, dirtyKeys: transition.dirtyKeys } as const,
-							],
-							dirtyKeys: transition.dirtyKeys,
-						};
-					},
-					interpret: (command: PrimitivesRouteCommand) =>
-						Effect.sync(() => {
-							if (command._tag === "CloseRequested") close();
-							else {
-								spec.focusedRoot.apply(viewPrimitivesInspector(spec.categories, command.model, command.dirtyKeys));
-								ctx.ui.requestComponentRender(spec.focusedRoot);
-							}
-							return [];
-						}),
-					inputCapacity: 256,
-					messageCapacity: 256,
-					commandCapacity: 64,
-				},
-				overlayOptions: { anchor: "bottom-center", width: "100%", maxHeight: "100%", margin: 0 },
-				restoreFocus: Effect.sync(() => {
-					ctx.ui.setFocus(ctx.editor);
-					ctx.ui.requestRender();
-				}),
-			}),
-		),
+	const inspector = new PrimitivesInspectorOverlayComponent(
+		{
+			categories,
+			inspectKeys: ctx.keybindings.getKeys("app.primitives.inspect"),
+			onDone: done,
+			requestRender: () => ctx.ui.requestRender(),
+		},
+		initialCategory,
 	);
-	activePrimitivesRoutes.set(ctx, handle);
-	ctx.ui.setFocus(spec.focusedRoot);
+	overlayHandle = ctx.ui.showOverlay(inspector, {
+		anchor: "bottom-center",
+		width: "100%",
+		maxHeight: "100%",
+		margin: 0,
+	});
+	ctx.ui.setFocus(inspector);
 	ctx.ui.requestRender();
 }

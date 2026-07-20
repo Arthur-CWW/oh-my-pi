@@ -1,41 +1,34 @@
 /**
- * MCP Add Wizard
+ * MCP Add Wizard Component
  *
- * The route model below is the sole authority for wizard state. The component
- * is a committed projection: it never handles input or performs effects.
+ * Interactive multi-step wizard for adding MCP servers.
  */
-import type { Component, Keybinding } from "@oh-my-pi/pi-tui";
-import { Container, replaceTabs, Spacer, Text, TruncatedText, truncateToWidth } from "@oh-my-pi/pi-tui";
+import {
+	Container,
+	Input,
+	matchesKey,
+	replaceTabs,
+	Spacer,
+	Text,
+	TruncatedText,
+	truncateToWidth,
+} from "@oh-my-pi/pi-tui";
 import { getMCPConfigPath, getProjectDir } from "@oh-my-pi/pi-utils";
-import * as Schema from "effect/Schema";
 import { validateServerName } from "../../mcp/config-writer";
+import { analyzeAuthError, discoverOAuthEndpoints } from "../../mcp/oauth-discovery";
 import type { MCPHttpServerConfig, MCPServerConfig, MCPSseServerConfig, MCPStdioServerConfig } from "../../mcp/types";
 import { shortenPath } from "../../tools/render-utils";
-import {
-	makeTextDraftMap,
-	type TextDraftMap,
-	type TextDraftModel,
-	textDraftMsgFromEvent,
-	updateTextDraftAt,
-} from "../mvu/form-input";
-import type { MvuEnvelope } from "../mvu/input-lease";
-import {
-	type ComponentId,
-	KeyEventSchema,
-	makeComponentId,
-	type RouteStamp,
-	RouteStampSchema,
-	type Transition,
-} from "../mvu/schema";
 import { theme } from "../theme/theme";
+import { matchesSelectDown, matchesSelectUp, matchesUiDismiss } from "../utils/keybinding-matchers";
 import { DynamicBorder } from "./dynamic-border";
 import { keyHint } from "./keybinding-hints";
 
-export type MCPAddTransport = "stdio" | "http" | "sse";
-export type MCPAddAuthMethod = "none" | "oauth" | "manual";
-export type MCPAddAuthLocation = "env" | "header";
-export type MCPAddScope = "user" | "project";
-export type MCPAddWizardStep =
+type TransportType = "stdio" | "http" | "sse";
+type AuthMethod = "none" | "oauth" | "manual";
+type AuthLocation = "env" | "header";
+type Scope = "user" | "project";
+
+type WizardStep =
 	| "name"
 	| "transport"
 	| "command"
@@ -55,838 +48,1306 @@ export type MCPAddWizardStep =
 	| "scope"
 	| "confirm";
 
-export type MCPAddWizardInputStep = Extract<
-	MCPAddWizardStep,
-	| "name"
-	| "command"
-	| "args"
-	| "url"
-	| "oauth-auth-url"
-	| "oauth-token-url"
-	| "oauth-client-id"
-	| "oauth-client-secret"
-	| "oauth-scopes"
-	| "apikey"
-	| "env-var-name"
-	| "header-name"
->;
-
-const INPUT_STEPS = [
-	"name",
-	"command",
-	"args",
-	"url",
-	"oauth-auth-url",
-	"oauth-token-url",
-	"oauth-client-id",
-	"oauth-client-secret",
-	"oauth-scopes",
-	"apikey",
-	"env-var-name",
-	"header-name",
-] as const satisfies readonly MCPAddWizardInputStep[];
-
-export const MCP_ADD_COMPONENT_ID = makeComponentId("mcp.add");
-
+/**
+ * Result of the wizard's OAuth callback. `credentialId` is mandatory;
+ * `clientId` is populated when the OAuth provider performed dynamic client
+ * registration (or when the caller pre-supplied it) so the wizard can fold it
+ * into the final `mcp.json` entry. Refresh material (including any DCR client
+ * secret) is embedded in the stored credential, never written to config files.
+ */
 export interface MCPAddWizardOAuthResult {
 	credentialId: string;
 	clientId?: string;
 	resource?: string;
 }
 
-export interface MCPAddWizardOAuthOptions {
+interface MCPAddWizardOAuthOptions {
 	serverUrl?: string;
 	resource?: string;
 }
 
-export type MCPAddWizardOperation = "connection-test" | "oauth" | "complete" | "cancel";
-
-export type MCPAddWizardReceipt =
-	| { readonly _tag: "Idle" }
-	| {
-			readonly _tag: "Pending";
-			readonly operation: MCPAddWizardOperation;
-			readonly requestGeneration: number;
-			readonly stamp: RouteStamp;
-	  }
-	| {
-			readonly _tag: "Succeeded";
-			readonly operation: MCPAddWizardOperation;
-			readonly requestGeneration: number;
-			readonly stamp: RouteStamp;
-	  }
-	| {
-			readonly _tag: "Failed";
-			readonly operation: MCPAddWizardOperation;
-			readonly requestGeneration: number;
-			readonly stamp: RouteStamp;
-			readonly error: string;
-	  };
-
-export type MCPAddWizardOutcome =
-	| { readonly _tag: "ConnectionReady"; readonly message: string }
-	| { readonly _tag: "AuthenticationRequired"; readonly message: string }
-	| { readonly _tag: "ConnectionFailed"; readonly message: string }
-	| { readonly _tag: "OAuthReady"; readonly message: string; readonly healthError?: string }
-	| { readonly _tag: "OAuthFailed"; readonly message: string };
-
-export interface MCPAddWizardModel {
-	readonly componentId: ComponentId;
-	readonly leaseGeneration: number;
-	readonly sourceRevision: number;
-	readonly requestGeneration: number;
-	readonly currentStep: MCPAddWizardStep;
-	readonly drafts: TextDraftMap<MCPAddWizardInputStep>;
-	readonly transport: MCPAddTransport | null;
-	readonly authMethod: MCPAddAuthMethod;
-	readonly oauthResource: string;
-	readonly oauthCredentialId: string | null;
-	readonly authLocation: MCPAddAuthLocation | null;
-	readonly scope: MCPAddScope | null;
-	readonly selection: number;
-	readonly validation: string | null;
-	readonly receipt: MCPAddWizardReceipt;
-	readonly outcome: MCPAddWizardOutcome | null;
+interface WizardState {
+	name: string;
+	transport: TransportType | null;
+	command: string;
+	args: string;
+	url: string;
+	authMethod: AuthMethod;
+	oauthAuthUrl: string;
+	oauthTokenUrl: string;
+	oauthClientId: string;
+	oauthClientSecret: string;
+	oauthScopes: string;
+	oauthResource: string;
+	oauthCredentialId: string | null;
+	apiKey: string;
+	authLocation: AuthLocation | null;
+	envVarName: string;
+	headerName: string;
+	scope: Scope | null;
 }
 
-export type MCPAddConnectionOutcome =
-	| { readonly _tag: "Connected" }
-	| {
-			readonly _tag: "AuthenticationRequired";
-			readonly oauth?: {
-				readonly authorizationUrl: string;
-				readonly tokenUrl: string;
-				readonly clientId?: string;
-				readonly scopes?: string;
-				readonly resource?: string;
-			};
-	  }
-	| { readonly _tag: "Failed"; readonly error: string };
-
-export type MCPAddWizardMsg =
-	| MvuEnvelope
-	| {
-			readonly _tag: "ConnectionSettled";
-			readonly stamp: RouteStamp;
-			readonly outcome: MCPAddConnectionOutcome;
-	  }
-	| {
-			readonly _tag: "OAuthSettled";
-			readonly stamp: RouteStamp;
-			readonly result:
-				| {
-						readonly _tag: "Succeeded";
-						readonly credentialId: string;
-						readonly clientId?: string;
-						readonly resource?: string;
-						readonly healthError?: string;
-				  }
-				| { readonly _tag: "Failed"; readonly error: string };
-	  };
-
-export type MCPAddWizardCommand =
-	| { readonly _tag: "Render"; readonly model: MCPAddWizardModel; readonly stamp: RouteStamp }
-	| { readonly _tag: "TestConnection"; readonly config: MCPServerConfig; readonly stamp: RouteStamp }
-	| {
-			readonly _tag: "RunOAuth";
-			readonly authUrl: string;
-			readonly tokenUrl: string;
-			readonly clientId: string;
-			readonly clientSecret: string;
-			readonly scopes: string;
-			readonly options: MCPAddWizardOAuthOptions;
-			readonly healthConfig: MCPServerConfig;
-			readonly stamp: RouteStamp;
-	  }
-	| {
-			readonly _tag: "Complete";
-			readonly name: string;
-			readonly config: MCPServerConfig;
-			readonly scope: MCPAddScope;
-			readonly stamp: RouteStamp;
-	  }
-	| { readonly _tag: "Cancel"; readonly stamp: RouteStamp };
-
-const ConnectionOutcomeSchema = Schema.Union([
-	Schema.Struct({ _tag: Schema.Literal("Connected") }),
-	Schema.Struct({
-		_tag: Schema.Literal("AuthenticationRequired"),
-		oauth: Schema.optional(Schema.Struct({
-			authorizationUrl: Schema.String,
-			tokenUrl: Schema.String,
-			clientId: Schema.optional(Schema.String),
-			scopes: Schema.optional(Schema.String),
-			resource: Schema.optional(Schema.String),
-		})),
-	}),
-	Schema.Struct({ _tag: Schema.Literal("Failed"), error: Schema.String }),
-]);
-
-export const MCPAddWizardMsgSchema: Schema.ConstraintDecoder<MCPAddWizardMsg, never> = Schema.toType(
-	Schema.Union([
-		Schema.Struct({
-			_tag: Schema.Literal("MvuInput"),
-			action: Schema.String as Schema.Schema<Keybinding>,
-			event: KeyEventSchema,
-			stamp: Schema.optional(RouteStampSchema),
-		}),
-		Schema.Struct({
-			_tag: Schema.Literal("ConnectionSettled"),
-			stamp: RouteStampSchema,
-			outcome: ConnectionOutcomeSchema,
-		}),
-		Schema.Struct({
-			_tag: Schema.Literal("OAuthSettled"),
-			stamp: RouteStampSchema,
-			result: Schema.Union([
-				Schema.Struct({
-					_tag: Schema.Literal("Succeeded"),
-					credentialId: Schema.String,
-					clientId: Schema.optional(Schema.String),
-					resource: Schema.optional(Schema.String),
-					healthError: Schema.optional(Schema.String),
-				}),
-				Schema.Struct({ _tag: Schema.Literal("Failed"), error: Schema.String }),
-			]),
-		}),
-	]),
-);
-
-
-export function makeMCPAddWizardModel(initialName?: string): MCPAddWizardModel {
-	const normalizedName = initialName?.trim() ?? "";
-	return {
-		componentId: MCP_ADD_COMPONENT_ID,
-		leaseGeneration: 0,
-		sourceRevision: 0,
-		requestGeneration: 0,
-		currentStep: normalizedName.length > 0 ? "transport" : "name",
-		drafts: makeTextDraftMap<MCPAddWizardInputStep>(INPUT_STEPS, {
-			name: normalizedName,
-			"env-var-name": "API_KEY",
-			"header-name": "Authorization",
-		}),
-		transport: null,
-		authMethod: "none",
-		oauthResource: "",
-		oauthCredentialId: null,
-		authLocation: null,
-		scope: null,
-		selection: 0,
-		validation: null,
-		receipt: { _tag: "Idle" },
-		outcome: null,
-	};
-}
-
-export function mcpAddWizardStamp(model: MCPAddWizardModel): RouteStamp {
-	return {
-		componentId: model.componentId,
-		leaseGeneration: model.leaseGeneration,
-		sourceRevision: model.sourceRevision,
-		requestGeneration: model.requestGeneration,
-	};
-}
-
-function sameStamp(model: MCPAddWizardModel, stamp: RouteStamp): boolean {
-	const current = mcpAddWizardStamp(model);
-	return stamp.componentId === current.componentId &&
-		stamp.leaseGeneration === current.leaseGeneration &&
-		stamp.sourceRevision === current.sourceRevision &&
-		stamp.requestGeneration === current.requestGeneration;
-}
-
-export function isMCPAddWizardInputStep(step: MCPAddWizardStep): step is MCPAddWizardInputStep {
-	return (INPUT_STEPS as readonly MCPAddWizardStep[]).includes(step);
-}
-
-function draft(model: MCPAddWizardModel, step: MCPAddWizardInputStep): string {
-	return model.drafts[step].value.trim();
-}
-
-export function buildMCPAddWizardConfig(
-	model: MCPAddWizardModel,
-	options: { readonly includeAuth?: boolean; readonly connectionTest?: boolean } = {},
-): MCPServerConfig {
-	const includeAuth = options.includeAuth ?? true;
-	const timeout = options.connectionTest ? 5000 : undefined;
-	const transport = model.transport ?? "stdio";
-	if (transport === "stdio") {
-		const config: MCPStdioServerConfig = {
-			type: "stdio",
-			command: draft(model, "command"),
-			...(timeout === undefined ? {} : { timeout }),
-		};
-		const args = draft(model, "args");
-		if (args) config.args = args.split(/\s+/).filter(Boolean);
-		if (includeAuth && model.authMethod === "oauth" && model.oauthCredentialId) {
-			const tokenUrl = draft(model, "oauth-token-url");
-			const clientId = draft(model, "oauth-client-id");
-			const clientSecret = draft(model, "oauth-client-secret");
-			config.auth = {
-				type: "oauth",
-				credentialId: model.oauthCredentialId,
-				...(tokenUrl ? { tokenUrl } : {}),
-				...(model.oauthResource ? { resource: model.oauthResource } : {}),
-				...(clientId ? { clientId } : {}),
-				...(clientSecret ? { clientSecret } : {}),
-			};
-		}
-		if (includeAuth && model.authMethod === "manual" && draft(model, "apikey")) {
-			config.env = { [draft(model, "env-var-name") || "API_KEY"]: draft(model, "apikey") };
-		}
-		return config;
-	}
-	const config: MCPHttpServerConfig | MCPSseServerConfig = {
-		type: transport,
-		url: draft(model, "url"),
-		...(timeout === undefined ? {} : { timeout }),
-	};
-	if (includeAuth && model.authMethod === "oauth" && model.oauthCredentialId) {
-		const tokenUrl = draft(model, "oauth-token-url");
-		const clientId = draft(model, "oauth-client-id");
-		const clientSecret = draft(model, "oauth-client-secret");
-		config.auth = {
-			type: "oauth",
-			credentialId: model.oauthCredentialId,
-			...(tokenUrl ? { tokenUrl } : {}),
-			...(model.oauthResource ? { resource: model.oauthResource } : {}),
-			...(clientId ? { clientId } : {}),
-			...(clientSecret ? { clientSecret } : {}),
-		};
-	}
-	if (includeAuth && model.authMethod === "manual" && draft(model, "apikey")) {
-		config.headers = { [draft(model, "header-name") || "Authorization"]: draft(model, "apikey") };
-	}
-	return config;
-}
-
-function maxSelection(step: MCPAddWizardStep): number {
-	switch (step) {
-		case "transport": return 2;
-		case "auth-method":
-		case "oauth-error":
-		case "auth-location":
-		case "scope":
-		case "confirm": return 1;
-		default: return 0;
-	}
-}
-
-function renderTransition(
-	previous: MCPAddWizardModel,
-	patch: Partial<MCPAddWizardModel>,
-): Transition<MCPAddWizardModel, MCPAddWizardCommand> {
-	const model: MCPAddWizardModel = {
-		...previous,
-		...patch,
-		sourceRevision: previous.sourceRevision + 1,
-	};
-	const stamp = mcpAddWizardStamp(model);
-	return {
-		model,
-		commands: [{ _tag: "Render", model, stamp }],
-		dirtyKeys: new Set(["mcp.add"]),
-	};
-}
-
-function noTransition(model: MCPAddWizardModel): Transition<MCPAddWizardModel, MCPAddWizardCommand> {
-	return { model, commands: [], dirtyKeys: new Set() };
-}
-
-function beginOperation(
-	model: MCPAddWizardModel,
-	operation: MCPAddWizardOperation,
-	command: (model: MCPAddWizardModel, stamp: RouteStamp) => MCPAddWizardCommand,
-): Transition<MCPAddWizardModel, MCPAddWizardCommand> {
-	const requestGeneration = model.requestGeneration + 1;
-	const sourceRevision = model.sourceRevision + 1;
-	const stamp: RouteStamp = {
-		componentId: model.componentId,
-		leaseGeneration: model.leaseGeneration,
-		sourceRevision,
-		requestGeneration,
-	};
-	const next: MCPAddWizardModel = {
-		...model,
-		sourceRevision,
-		requestGeneration,
-		validation: null,
-		outcome: null,
-		receipt: { _tag: "Pending", operation, requestGeneration, stamp },
-	};
-	return {
-		model: next,
-		commands: [{ _tag: "Render", model: next, stamp }, command(next, stamp)],
-		dirtyKeys: new Set(["mcp.add"]),
-	};
-}
-
-
-function beginConnectionTest(model: MCPAddWizardModel): Transition<MCPAddWizardModel, MCPAddWizardCommand> {
-	return beginOperation(model, "connection-test", (next, stamp) => ({
-		_tag: "TestConnection",
-		config: buildMCPAddWizardConfig(next, { includeAuth: false, connectionTest: true }),
-		stamp,
-	}));
-}
-
-function beginOAuth(model: MCPAddWizardModel): Transition<MCPAddWizardModel, MCPAddWizardCommand> {
-	const authUrl = draft(model, "oauth-auth-url");
-	const tokenUrl = draft(model, "oauth-token-url");
-	if (!authUrl || !tokenUrl) {
-		return renderTransition(model, { validation: "Authorization and Token URLs are required." });
-	}
-	return beginOperation(model, "oauth", (next, stamp) => {
-		const resource = next.oauthResource || (next.transport === "stdio" ? "" : draft(next, "url"));
-		const serverUrl = draft(next, "url");
-		return {
-			_tag: "RunOAuth",
-			authUrl,
-			tokenUrl,
-			clientId: draft(next, "oauth-client-id"),
-			clientSecret: draft(next, "oauth-client-secret"),
-			scopes: draft(next, "oauth-scopes"),
-			options: {
-				...(serverUrl ? { serverUrl } : {}),
-				...(resource ? { resource } : {}),
-			},
-			healthConfig: buildMCPAddWizardConfig(next, { includeAuth: true, connectionTest: true }),
-			stamp,
-		};
-	});
-}
-
-
-function beginComplete(model: MCPAddWizardModel): Transition<MCPAddWizardModel, MCPAddWizardCommand> {
-	if (model.scope === null) return noTransition(model);
-	return beginOperation(model, "complete", (next, stamp) => ({
-		_tag: "Complete",
-		name: draft(next, "name"),
-		config: buildMCPAddWizardConfig(next),
-		scope: next.scope!,
-		stamp,
-	}));
-}
-
-function goBack(model: MCPAddWizardModel): Transition<MCPAddWizardModel, MCPAddWizardCommand> {
-	let currentStep: MCPAddWizardStep;
-	let selection = model.selection;
-	switch (model.currentStep) {
-		case "name": return beginOperation(model, "cancel", (_next, stamp) => ({ _tag: "Cancel", stamp }));
-		case "transport": currentStep = "name"; break;
-		case "command":
-		case "url":
-			currentStep = "transport";
-			selection = model.transport === "stdio" ? 0 : model.transport === "http" ? 1 : 2;
-			break;
-		case "args": currentStep = "command"; break;
-		case "auth-method": currentStep = model.transport === "stdio" ? "args" : "url"; break;
-		case "oauth-auth-url":
-		case "apikey": currentStep = model.transport === "stdio" ? "args" : "url"; break;
-		case "auth-location": currentStep = "apikey"; break;
-		case "env-var-name":
-		case "header-name":
-			currentStep = model.transport === "stdio" ? "apikey" : "auth-location";
-			selection = model.authLocation === "env" ? 0 : 1;
-			break;
-		case "oauth-token-url": currentStep = "oauth-auth-url"; break;
-		case "oauth-client-id": currentStep = "oauth-token-url"; break;
-		case "oauth-client-secret": currentStep = "oauth-client-id"; break;
-		case "oauth-scopes": currentStep = "oauth-client-secret"; break;
-		case "scope":
-			currentStep = model.authMethod === "oauth"
-				? "oauth-scopes"
-				: model.authMethod === "manual"
-					? model.authLocation === "env" ? "env-var-name" : "header-name"
-					: model.transport === "stdio" ? "args" : "url";
-			break;
-		case "oauth-error": currentStep = "oauth-auth-url"; break;
-		case "confirm":
-			currentStep = "scope";
-			selection = model.scope === "user" ? 0 : 1;
-			break;
-	}
-	return renderTransition(model, {
-		currentStep,
-		selection,
-		validation: null,
-		receipt: { _tag: "Idle" },
-		outcome: null,
-	});
-}
-
-function submitInput(model: MCPAddWizardModel): Transition<MCPAddWizardModel, MCPAddWizardCommand> {
-	if (!isMCPAddWizardInputStep(model.currentStep)) return noTransition(model);
-	const value = draft(model, model.currentStep);
-	const drafts = updateTextDraftAt(model.drafts, model.currentStep, { _tag: "Replace", value });
-	switch (model.currentStep) {
-		case "name": {
-			const validation = validateServerName(value);
-			return validation
-				? renderTransition(model, { drafts, validation })
-				: renderTransition(model, { drafts, currentStep: "transport", selection: 0, validation: null });
-		}
-		case "command":
-			return value
-				? renderTransition(model, { drafts, currentStep: "args", validation: null })
-				: renderTransition(model, { drafts, validation: "Command is required" });
-		case "args": return beginConnectionTest({ ...model, drafts });
-		case "url": {
-			if (!value) return renderTransition(model, { drafts, validation: "URL is required" });
-			let parsed: URL;
-			try {
-				parsed = new URL(value);
-			} catch {
-				return renderTransition(model, { drafts, validation: "Invalid URL format (must start with http:// or https://)" });
-			}
-			if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-				return renderTransition(model, { drafts, validation: "URL must use http:// or https:// scheme" });
-			}
-			return beginConnectionTest({ ...model, drafts, validation: null });
-		}
-		case "oauth-auth-url":
-			return value ? renderTransition(model, { drafts, currentStep: "oauth-token-url", validation: null }) : noTransition(model);
-		case "oauth-token-url":
-			return value ? renderTransition(model, { drafts, currentStep: "oauth-client-id", validation: null }) : noTransition(model);
-		case "oauth-client-id":
-			return value ? renderTransition(model, { drafts, currentStep: "oauth-client-secret", validation: null }) : noTransition(model);
-		case "oauth-client-secret": return renderTransition(model, { drafts, currentStep: "oauth-scopes", validation: null });
-		case "oauth-scopes": return beginOAuth({ ...model, drafts, validation: null });
-		case "apikey":
-			if (!value) return renderTransition(model, { drafts, validation: "API key is required" });
-			return renderTransition(model, {
-				drafts,
-				authMethod: "manual",
-				currentStep: model.transport === "stdio" ? "env-var-name" : "auth-location",
-				selection: 0,
-				validation: null,
-			});
-		case "env-var-name":
-			return value
-				? renderTransition(model, { drafts, authLocation: "env", currentStep: "scope", selection: 0, validation: null })
-				: renderTransition(model, { drafts, validation: "Environment variable name is required" });
-		case "header-name":
-			return value
-				? renderTransition(model, { drafts, authLocation: "header", currentStep: "scope", selection: 0, validation: null })
-				: renderTransition(model, { drafts, validation: "Header name is required" });
-	}
-}
-
-function selectCurrent(model: MCPAddWizardModel): Transition<MCPAddWizardModel, MCPAddWizardCommand> {
-	switch (model.currentStep) {
-		case "transport": {
-			const transport = (["stdio", "http", "sse"] as const)[model.selection] ?? "stdio";
-			return renderTransition(model, { transport, currentStep: transport === "stdio" ? "command" : "url", validation: null });
-		}
-		case "auth-method": {
-			const authMethod = (["oauth", "manual"] as const)[model.selection] ?? "oauth";
-			return renderTransition(model, { authMethod, currentStep: authMethod === "oauth" ? "oauth-auth-url" : "apikey" });
-		}
-		case "oauth-error": return model.selection === 0 ? beginOAuth(model) : renderTransition(model, { currentStep: "oauth-auth-url", validation: null });
-		case "auth-location": {
-			const authLocation = (["env", "header"] as const)[model.selection] ?? "env";
-			return renderTransition(model, { authLocation, currentStep: authLocation === "env" ? "env-var-name" : "header-name" });
-		}
-		case "scope": {
-			const scope = (["user", "project"] as const)[model.selection] ?? "user";
-			return renderTransition(model, { scope, currentStep: "confirm", selection: 0 });
-		}
-		case "confirm": return model.selection === 0 ? beginComplete(model) : renderTransition(model, { currentStep: "scope", selection: model.scope === "user" ? 0 : 1 });
-		default: return noTransition(model);
-	}
-}
-
-function settleConnection(
-	model: MCPAddWizardModel,
-	message: Extract<MCPAddWizardMsg, { readonly _tag: "ConnectionSettled" }>,
-): Transition<MCPAddWizardModel, MCPAddWizardCommand> {
-	if (!sameStamp(model, message.stamp) || model.receipt._tag !== "Pending" || model.receipt.operation !== "connection-test") {
-		return noTransition(model);
-	}
-	if (message.outcome._tag === "Connected") {
-		return renderTransition(model, {
-			authMethod: "none",
-			currentStep: "scope",
-			selection: 0,
-			receipt: { _tag: "Succeeded", operation: "connection-test", requestGeneration: model.requestGeneration, stamp: message.stamp },
-			outcome: { _tag: "ConnectionReady", message: "Connection successful; no authentication required." },
-		});
-	}
-	if (message.outcome._tag === "Failed") {
-		return renderTransition(model, {
-			authMethod: "none",
-			currentStep: "scope",
-			selection: 0,
-			receipt: { _tag: "Failed", operation: "connection-test", requestGeneration: model.requestGeneration, stamp: message.stamp, error: message.outcome.error },
-			outcome: { _tag: "ConnectionFailed", message: `Connection failed; the server can still be saved: ${message.outcome.error}` },
-		});
-	}
-	const oauth = message.outcome.oauth;
-	if (oauth === undefined) {
-		return renderTransition(model, {
-			authMethod: "manual",
-			currentStep: "apikey",
-			receipt: { _tag: "Succeeded", operation: "connection-test", requestGeneration: model.requestGeneration, stamp: message.stamp },
-			outcome: { _tag: "AuthenticationRequired", message: "Authentication is required; provide an API key or token." },
-		});
-	}
-	let drafts = updateTextDraftAt<MCPAddWizardInputStep>(model.drafts, "oauth-auth-url", { _tag: "Replace", value: oauth.authorizationUrl });
-	drafts = updateTextDraftAt<MCPAddWizardInputStep>(drafts, "oauth-token-url", { _tag: "Replace", value: oauth.tokenUrl });
-	drafts = updateTextDraftAt<MCPAddWizardInputStep>(drafts, "oauth-client-id", { _tag: "Replace", value: oauth.clientId ?? "" });
-	drafts = updateTextDraftAt<MCPAddWizardInputStep>(drafts, "oauth-scopes", { _tag: "Replace", value: oauth.scopes ?? "" });
-	return beginOAuth({
-		...model,
-		drafts,
-		authMethod: "oauth",
-		oauthResource: oauth.resource ?? (model.transport === "stdio" ? "" : draft(model, "url")),
-		receipt: { _tag: "Succeeded", operation: "connection-test", requestGeneration: model.requestGeneration, stamp: message.stamp },
-		outcome: { _tag: "AuthenticationRequired", message: "OAuth detected; launching authorization." },
-	});
-}
-
-function settleOAuth(
-	model: MCPAddWizardModel,
-	message: Extract<MCPAddWizardMsg, { readonly _tag: "OAuthSettled" }>,
-): Transition<MCPAddWizardModel, MCPAddWizardCommand> {
-	if (!sameStamp(model, message.stamp) || model.receipt._tag !== "Pending" || model.receipt.operation !== "oauth") {
-		return noTransition(model);
-	}
-	if (message.result._tag === "Failed") {
-		return renderTransition(model, {
-			currentStep: "oauth-error",
-			selection: 0,
-			validation: message.result.error,
-			receipt: { _tag: "Failed", operation: "oauth", requestGeneration: model.requestGeneration, stamp: message.stamp, error: message.result.error },
-			outcome: { _tag: "OAuthFailed", message: message.result.error },
-		});
-	}
-	const drafts = message.result.clientId === undefined
-		? model.drafts
-		: updateTextDraftAt<MCPAddWizardInputStep>(model.drafts, "oauth-client-id", { _tag: "Replace", value: message.result.clientId });
-	return renderTransition(model, {
-		drafts,
-		oauthCredentialId: message.result.credentialId,
-		oauthResource: message.result.resource ?? model.oauthResource,
-		currentStep: "scope",
-		selection: 0,
-		validation: null,
-		receipt: { _tag: "Succeeded", operation: "oauth", requestGeneration: model.requestGeneration, stamp: message.stamp },
-		outcome: {
-			_tag: "OAuthReady",
-			message: message.result.healthError === undefined
-				? "Authentication and connection health check succeeded."
-				: "Authentication succeeded; the health check failed, but the server can still be saved.",
-			...(message.result.healthError === undefined ? {} : { healthError: message.result.healthError }),
-		},
-	});
-}
-
-export function updateMCPAddWizard(
-	model: MCPAddWizardModel,
-	message: MCPAddWizardMsg,
-): Transition<MCPAddWizardModel, MCPAddWizardCommand> {
-	if (message._tag === "ConnectionSettled") return settleConnection(model, message);
-	if (message._tag === "OAuthSettled") return settleOAuth(model, message);
-	const stamp = message.stamp;
-	const base = stamp === undefined
-		? model
-		: { ...model, leaseGeneration: stamp.leaseGeneration };
-	if (message.action === "app.interrupt") return beginOperation(base, "cancel", (_next, current) => ({ _tag: "Cancel", stamp: current }));
-	if (message.action === "ui.dismiss") return goBack(base);
-	if (base.receipt._tag === "Pending") return noTransition(base);
-	if (isMCPAddWizardInputStep(base.currentStep)) {
-		const draftMessage = textDraftMsgFromEvent(message.event);
-		if (draftMessage === undefined) return noTransition(base);
-		if (draftMessage._tag === "Submit") return submitInput(base);
-		if (draftMessage._tag === "Cancel") return goBack(base);
-		const drafts = updateTextDraftAt(base.drafts, base.currentStep, draftMessage);
-		return drafts === base.drafts ? noTransition(base) : renderTransition(base, { drafts, validation: null, outcome: null });
-	}
-	const key = message.event._tag === "Press" ? String(message.event.key) : "";
-	if (message.action === "tui.select.confirm" || key === "enter" || key === "return") return selectCurrent(base);
-	if (message.action === "tui.select.up" || key === "up") {
-		const count = maxSelection(base.currentStep) + 1;
-		return renderTransition(base, { selection: (base.selection - 1 + count) % count, outcome: null });
-	}
-	if (message.action === "tui.select.down" || key === "down") {
-		const count = maxSelection(base.currentStep) + 1;
-		return renderTransition(base, { selection: (base.selection + 1) % count, outcome: null });
-	}
-	return noTransition(base);
-}
-
+/** Max display width for sanitized error/URL text in wizard TUI */
 const MAX_DISPLAY_WIDTH = 120;
 
+/** Sanitize a string for TUI display: replace tabs and truncate */
 function sanitize(text: string): string {
 	return truncateToWidth(replaceTabs(text), MAX_DISPLAY_WIDTH);
 }
 
+/** Render wizard chrome with the live, independently remappable dismissal binding. */
 function wizardHint(prefix: string, dismissDescription: string): string {
 	const lead = prefix ? `[${prefix}, ` : "[";
 	return theme.fg("muted", lead) + keyHint("ui.dismiss", dismissDescription) + theme.fg("muted", "]");
 }
 
-class CommittedInputRenderer implements Component {
-	constructor(readonly model: TextDraftModel) {}
-
-	render(_width: number): readonly string[] {
-		const before = replaceTabs(this.model.value.slice(0, this.model.cursor));
-		const after = replaceTabs(this.model.value.slice(this.model.cursor));
-		return [`> ${before}\u001b[7m${after[0] ?? " "}\u001b[27m${after.slice(after.length > 0 ? 1 : 0)}`];
-	}
-
-	invalidate(): void {}
-}
-
 export class MCPAddWizard extends Container {
-	#model: MCPAddWizardModel;
-	readonly #contentContainer = new Container();
+	#currentStep: WizardStep = "name";
+	#state: WizardState = {
+		name: "",
+		transport: null,
+		command: "",
+		args: "",
+		url: "",
+		authMethod: "none",
+		oauthAuthUrl: "",
+		oauthTokenUrl: "",
+		oauthClientId: "",
+		oauthClientSecret: "",
+		oauthScopes: "",
+		oauthResource: "",
+		oauthCredentialId: null,
+		apiKey: "",
+		authLocation: null,
+		envVarName: "API_KEY",
+		headerName: "Authorization",
+		scope: null,
+	};
 
-	constructor(model: MCPAddWizardModel) {
+	#contentContainer: Container;
+	#inputField: Input | null = null;
+	#selectedIndex = 0;
+	#validationError: string | null = null;
+	#onCompleteCallback: (name: string, config: MCPServerConfig, scope: Scope) => void;
+	#onCancelCallback: () => void;
+	#onOAuthCallback:
+		| ((
+				authUrl: string,
+				tokenUrl: string,
+				clientId: string,
+				clientSecret: string,
+				scopes: string,
+				options?: MCPAddWizardOAuthOptions,
+		  ) => Promise<MCPAddWizardOAuthResult>)
+		| null = null;
+	#onTestConnectionCallback: ((config: MCPServerConfig) => Promise<void>) | null = null;
+	#onRenderCallback: (() => void) | null = null;
+
+	constructor(
+		onComplete: (name: string, config: MCPServerConfig, scope: Scope) => void,
+		onCancel: () => void,
+		onOAuth?: (
+			authUrl: string,
+			tokenUrl: string,
+			clientId: string,
+			clientSecret: string,
+			scopes: string,
+			options?: MCPAddWizardOAuthOptions,
+		) => Promise<MCPAddWizardOAuthResult>,
+		onTestConnection?: (config: MCPServerConfig) => Promise<void>,
+		onRender?: () => void,
+		initialName?: string,
+	) {
 		super();
-		this.#model = model;
+		this.#onCompleteCallback = onComplete;
+		this.#onCancelCallback = onCancel;
+		this.#onOAuthCallback = onOAuth ?? null;
+		this.#onTestConnectionCallback = onTestConnection ?? null;
+		this.#onRenderCallback = onRender ?? null;
+		if (initialName && initialName.trim().length > 0) {
+			this.#state.name = initialName.trim();
+			this.#currentStep = "transport";
+		}
+
+		// Add border
 		this.addChild(new DynamicBorder());
 		this.addChild(new Spacer(1));
+
+		// Add title
 		this.addChild(new TruncatedText(theme.bold("Add MCP Server")));
 		this.addChild(new Spacer(1));
+
+		// Content container for step-specific content
+		this.#contentContainer = new Container();
 		this.addChild(this.#contentContainer);
+
 		this.addChild(new Spacer(1));
+
+		// Add bottom border
 		this.addChild(new DynamicBorder());
+
+		// Render first step
 		this.#renderStep();
 	}
 
-	apply(model: MCPAddWizardModel): void {
-		if (model === this.#model) return;
-		this.#model = model;
-		this.#renderStep();
-		this.invalidate();
-	}
-
-	#addInput(step: MCPAddWizardInputStep): void {
-		this.#contentContainer.addChild(new CommittedInputRenderer(this.#model.drafts[step]));
-	}
-
-	#renderOutcome(): void {
-		const outcome = this.#model.outcome;
-		if (outcome === null) return;
-		const color = outcome._tag === "ConnectionFailed" || outcome._tag === "OAuthFailed" ? "warning" : "success";
-		this.#contentContainer.addChild(new Text(theme.fg(color, sanitize(outcome.message)), 0, 0));
-		if (outcome._tag === "OAuthReady" && outcome.healthError !== undefined) {
-			this.#contentContainer.addChild(new Text(theme.fg("muted", sanitize(outcome.healthError)), 0, 0));
-		}
-		this.#contentContainer.addChild(new Spacer(1));
-	}
-
-	#renderPending(): boolean {
-		if (this.#model.receipt._tag !== "Pending") return false;
-		const labels: Record<MCPAddWizardOperation, string> = {
-			"connection-test": "Testing connection...",
-			oauth: "Running OAuth authorization and health check...",
-			complete: "Saving MCP server configuration...",
-			cancel: "Closing MCP server wizard...",
-		};
-		this.#contentContainer.addChild(new Text(theme.fg("accent", labels[this.#model.receipt.operation]), 0, 0));
-		this.#contentContainer.addChild(new Spacer(1));
-		this.#contentContainer.addChild(new Text(wizardHint("", "go back"), 0, 0));
-		return true;
+	#requestRender(): void {
+		this.#onRenderCallback?.();
 	}
 
 	#renderStep(): void {
 		this.#contentContainer.clear();
-		if (this.#renderPending()) return;
-		this.#renderOutcome();
-		switch (this.#model.currentStep) {
-			case "name": this.#renderInput("Step 1: Server Name", "Enter a unique name for this server:", "name", "cancel", "[Only letters, numbers, dash, underscore, dot, colon]"); break;
-			case "transport": this.#renderOptions("Step 2: Transport Type", "Select the transport type:", ["stdio (Local process)", "http (HTTP server)", "sse (Server-Sent Events)"], "cancel"); break;
-			case "command": this.#renderInput("Step 3: Command", "Enter the command to run:", "command", "go back"); break;
-			case "args": this.#renderInput("Step 4: Arguments (Optional)", "Enter command arguments (space-separated):", "args", "go back", "[Press Enter to skip or continue]"); break;
-			case "url": this.#renderInput("Step 3: Server URL", "Enter the server URL:", "url", "go back", "[Must start with http:// or https://]"); break;
-			case "auth-method": this.#renderOptions("Step: Authentication Method", "Choose an authentication method:", ["OAuth flow (web-based)", "Manual API key/token"], "go back"); break;
-			case "oauth-error": this.#renderOptions("OAuth authentication failed", this.#model.validation ?? "Choose next action:", ["Retry OAuth authentication", "Edit OAuth settings"], "go back", true); break;
-			case "oauth-auth-url": this.#renderInput("OAuth: Authorization URL", "Enter the OAuth authorization endpoint:", "oauth-auth-url", "go back", "e.g., https://auth.example.com/oauth/authorize"); break;
-			case "oauth-token-url": this.#renderInput("OAuth: Token URL", "Enter the OAuth token endpoint:", "oauth-token-url", "go back", "e.g., https://auth.example.com/oauth/token"); break;
-			case "oauth-client-id": this.#renderInput("OAuth: Client ID", "Enter your OAuth client ID:", "oauth-client-id", "go back"); break;
-			case "oauth-client-secret": this.#renderInput("OAuth: Client Secret (Optional)", "Enter your OAuth client secret:", "oauth-client-secret", "go back", "(Leave empty for PKCE-only flows)"); break;
-			case "oauth-scopes": this.#renderInput("OAuth: Scopes (Optional)", "Enter OAuth scopes (space-separated):", "oauth-scopes", "go back", "e.g., read write"); break;
-			case "apikey": this.#renderInput("API Key Required", "Enter your API key or token:", "apikey", "go back", "(Supports !command for password manager)"); break;
-			case "auth-location": this.#renderOptions("Step: How to provide the key?", "", ["Environment variable", "HTTP header"], "go back"); break;
-			case "env-var-name": this.#renderInput("Step: Environment Variable Name", "Enter the environment variable name:", "env-var-name", "go back"); break;
-			case "header-name": this.#renderInput("Step: HTTP Header Name", "Enter the HTTP header name:", "header-name", "go back"); break;
-			case "scope": this.#renderScope(); break;
-			case "confirm": this.#renderConfirm(); break;
+		this.#inputField = null; // Reset input field
+
+		switch (this.#currentStep) {
+			case "name":
+				this.#renderNameStep();
+				break;
+			case "transport":
+				this.#renderTransportStep();
+				break;
+			case "command":
+				this.#renderCommandStep();
+				break;
+			case "args":
+				this.#renderArgsStep();
+				break;
+			case "url":
+				this.#renderUrlStep();
+				break;
+			case "auth-method":
+				this.#renderAuthMethodStep();
+				break;
+			case "oauth-error":
+				this.#renderOAuthErrorStep();
+				break;
+			case "oauth-auth-url":
+				this.#renderOAuthAuthUrlStep();
+				break;
+			case "oauth-token-url":
+				this.#renderOAuthTokenUrlStep();
+				break;
+			case "oauth-client-id":
+				this.#renderOAuthClientIdStep();
+				break;
+			case "oauth-client-secret":
+				this.#renderOAuthClientSecretStep();
+				break;
+			case "oauth-scopes":
+				this.#renderOAuthScopesStep();
+				break;
+			case "apikey":
+				this.#renderApiKeyStep();
+				break;
+			case "auth-location":
+				this.#renderAuthLocationStep();
+				break;
+			case "env-var-name":
+				this.#renderEnvVarNameStep();
+				break;
+			case "header-name":
+				this.#renderHeaderNameStep();
+				break;
+			case "scope":
+				this.#renderScopeStep();
+				break;
+			case "confirm":
+				this.#renderConfirmStep();
+				break;
 		}
 	}
 
-	#renderInput(title: string, prompt: string, step: MCPAddWizardInputStep, dismiss: string, hint?: string): void {
-		this.#contentContainer.addChild(new Text(theme.fg("accent", title), 0, 0));
+	#renderNameStep(): void {
+		this.#contentContainer.addChild(new Text(theme.fg("accent", "Step 1: Server Name")));
 		this.#contentContainer.addChild(new Spacer(1));
-		this.#contentContainer.addChild(new Text(prompt, 0, 0));
+		this.#contentContainer.addChild(new Text("Enter a unique name for this server:", 0, 0));
 		this.#contentContainer.addChild(new Spacer(1));
-		this.#addInput(step);
+
+		this.#inputField = new Input();
+		this.#inputField.setValue(this.#state.name);
+		this.#contentContainer.addChild(this.#inputField);
 		this.#contentContainer.addChild(new Spacer(1));
-		if (this.#model.validation !== null) {
-			this.#contentContainer.addChild(new Text(theme.fg("error", `✗ ${sanitize(this.#model.validation)}`), 0, 0));
+
+		// Show validation error if any
+		if (this.#validationError) {
+			this.#contentContainer.addChild(new Text(theme.fg("error", `✗ ${sanitize(this.#validationError)}`), 0, 0));
 			this.#contentContainer.addChild(new Spacer(1));
 		}
-		if (hint !== undefined) this.#contentContainer.addChild(new Text(theme.fg("muted", hint), 0, 0));
-		this.#contentContainer.addChild(new Text(wizardHint("Enter to continue", dismiss), 0, 0));
-	}
 
-	#renderOptions(title: string, prompt: string, options: readonly string[], dismiss: string, error = false): void {
-		this.#contentContainer.addChild(new Text(theme.fg(error ? "error" : "accent", title), 0, 0));
-		this.#contentContainer.addChild(new Spacer(1));
-		if (prompt) {
-			this.#contentContainer.addChild(new Text(sanitize(prompt), 0, 0));
-			this.#contentContainer.addChild(new Spacer(1));
-		}
-		for (let index = 0; index < options.length; index++) {
-			const selected = index === this.#model.selection;
-			const prefix = selected ? theme.fg("accent", `${theme.nav.cursor} `) : "  ";
-			this.#contentContainer.addChild(new Text(prefix + (selected ? theme.fg("accent", options[index]!) : options[index]!), 0, 0));
-		}
-		this.#contentContainer.addChild(new Spacer(1));
-		this.#contentContainer.addChild(new Text(wizardHint("↑↓ to navigate, Enter to select", dismiss), 0, 0));
-	}
-
-	#renderScope(): void {
-		const cwd = getProjectDir();
-		this.#renderOptions(
-			"Step: Configuration Scope",
-			"",
-			[
-				`User level (${shortenPath(getMCPConfigPath("user", cwd))})`,
-				`Project level (${shortenPath(getMCPConfigPath("project", cwd))})`,
-			],
-			"go back",
+		this.#contentContainer.addChild(
+			new Text(theme.fg("muted", "[Only letters, numbers, dash, underscore, dot, colon]"), 0, 0),
 		);
+		this.#contentContainer.addChild(new Text(wizardHint("Enter to continue", "cancel"), 0, 0));
 	}
 
-	#renderConfirm(): void {
-		this.#contentContainer.addChild(new Text(theme.fg("accent", "Review Configuration"), 0, 0));
+	#renderTransportStep(): void {
+		this.#contentContainer.addChild(new Text(theme.fg("accent", "Step 2: Transport Type")));
 		this.#contentContainer.addChild(new Spacer(1));
-		this.#contentContainer.addChild(new Text(`Name: ${theme.fg("accent", draft(this.#model, "name"))}`, 0, 0));
-		this.#contentContainer.addChild(new Text(`Type: ${this.#model.transport}`, 0, 0));
-		if (this.#model.transport === "stdio") {
-			this.#contentContainer.addChild(new Text(`Command: ${draft(this.#model, "command")}`, 0, 0));
-			if (draft(this.#model, "args")) this.#contentContainer.addChild(new Text(`Args: ${draft(this.#model, "args")}`, 0, 0));
-		} else {
-			this.#contentContainer.addChild(new Text(`URL: ${sanitize(draft(this.#model, "url"))}`, 0, 0));
+		this.#contentContainer.addChild(new Text("Select the transport type:", 0, 0));
+		this.#contentContainer.addChild(new Spacer(1));
+
+		const options = [
+			{ value: "stdio" as const, label: "stdio (Local process)" },
+			{ value: "http" as const, label: "http (HTTP server)" },
+			{ value: "sse" as const, label: "sse (Server-Sent Events)" },
+		];
+
+		for (let i = 0; i < options.length; i++) {
+			const option = options[i];
+			const isSelected = i === this.#selectedIndex;
+			const prefix = isSelected ? theme.fg("accent", `${theme.nav.cursor} `) : "  ";
+			const text = isSelected ? theme.fg("accent", option.label) : option.label;
+			this.#contentContainer.addChild(new Text(prefix + text, 0, 0));
 		}
-		if (this.#model.authMethod === "none") this.#contentContainer.addChild(new Text("Auth: None", 0, 0));
-		else if (this.#model.authMethod === "oauth") this.#contentContainer.addChild(new Text("Auth: OAuth (authenticated)", 0, 0));
-		else if (this.#model.authLocation === "env") this.#contentContainer.addChild(new Text(`Auth: API key via env (${draft(this.#model, "env-var-name")})`, 0, 0));
-		else this.#contentContainer.addChild(new Text(`Auth: API key via header (${draft(this.#model, "header-name")})`, 0, 0));
-		this.#contentContainer.addChild(new Text(`Scope: ${this.#model.scope === "user" ? "User level" : "Project level"}`, 0, 0));
+
+		this.#contentContainer.addChild(new Spacer(1));
+		this.#contentContainer.addChild(new Text(wizardHint("↑↓ to navigate, Enter to select", "cancel"), 0, 0));
+	}
+
+	#renderCommandStep(): void {
+		this.#contentContainer.addChild(new Text(theme.fg("accent", "Step 3: Command")));
+		this.#contentContainer.addChild(new Spacer(1));
+		this.#contentContainer.addChild(new Text("Enter the command to run:", 0, 0));
+		this.#contentContainer.addChild(new Spacer(1));
+
+		this.#inputField = new Input();
+		this.#inputField.setValue(this.#state.command);
+		this.#contentContainer.addChild(this.#inputField);
+		this.#contentContainer.addChild(new Spacer(1));
+		this.#contentContainer.addChild(new Text(wizardHint("Enter to continue", "go back"), 0, 0));
+	}
+
+	#renderArgsStep(): void {
+		this.#contentContainer.addChild(new Text(theme.fg("accent", "Step 4: Arguments (Optional)")));
+		this.#contentContainer.addChild(new Spacer(1));
+		this.#contentContainer.addChild(new Text("Enter command arguments (space-separated):", 0, 0));
+		this.#contentContainer.addChild(new Spacer(1));
+
+		this.#inputField = new Input();
+		this.#inputField.setValue(this.#state.args);
+		this.#contentContainer.addChild(this.#inputField);
+		this.#contentContainer.addChild(new Spacer(1));
+		this.#contentContainer.addChild(new Text(theme.fg("muted", "[Press Enter to skip or continue]"), 0, 0));
+	}
+
+	#renderUrlStep(): void {
+		this.#contentContainer.addChild(new Text(theme.fg("accent", "Step 3: Server URL")));
+		this.#contentContainer.addChild(new Spacer(1));
+		this.#contentContainer.addChild(new Text("Enter the server URL:", 0, 0));
+		this.#contentContainer.addChild(new Spacer(1));
+
+		this.#inputField = new Input();
+		this.#inputField.setValue(this.#state.url);
+		this.#contentContainer.addChild(this.#inputField);
+		this.#contentContainer.addChild(new Spacer(1));
+
+		// Show validation error if any
+		if (this.#validationError) {
+			this.#contentContainer.addChild(new Text(theme.fg("error", `✗ ${sanitize(this.#validationError)}`), 0, 0));
+			this.#contentContainer.addChild(new Spacer(1));
+		}
+
+		this.#contentContainer.addChild(new Text(theme.fg("muted", "[Must start with http:// or https://]"), 0, 0));
+		this.#contentContainer.addChild(new Text(wizardHint("Enter to continue", "go back"), 0, 0));
+	}
+
+	#renderAuthLocationStep(): void {
+		this.#contentContainer.addChild(new Text(theme.fg("accent", "Step: How to provide the key?")));
+		this.#contentContainer.addChild(new Spacer(1));
+
+		const options = [
+			{ value: "env" as const, label: "Environment variable" },
+			{ value: "header" as const, label: "HTTP header" },
+		];
+
+		for (let i = 0; i < options.length; i++) {
+			const option = options[i];
+			const isSelected = i === this.#selectedIndex;
+			const prefix = isSelected ? theme.fg("accent", `${theme.nav.cursor} `) : "  ";
+			const text = isSelected ? theme.fg("accent", option.label) : option.label;
+			this.#contentContainer.addChild(new Text(prefix + text, 0, 0));
+		}
+
+		this.#contentContainer.addChild(new Spacer(1));
+		this.#contentContainer.addChild(new Text(wizardHint("↑↓ to navigate, Enter to select", "go back"), 0, 0));
+	}
+
+	#renderEnvVarNameStep(): void {
+		this.#contentContainer.addChild(new Text(theme.fg("accent", "Step: Environment Variable Name")));
+		this.#contentContainer.addChild(new Spacer(1));
+		this.#contentContainer.addChild(new Text("Enter the environment variable name:", 0, 0));
+		this.#contentContainer.addChild(new Spacer(1));
+
+		this.#inputField = new Input();
+		this.#inputField.setValue(this.#state.envVarName);
+		this.#contentContainer.addChild(this.#inputField);
+		this.#contentContainer.addChild(new Spacer(1));
+		this.#contentContainer.addChild(new Text(wizardHint("Enter to continue", "go back"), 0, 0));
+	}
+
+	#renderHeaderNameStep(): void {
+		this.#contentContainer.addChild(new Text(theme.fg("accent", "Step: HTTP Header Name")));
+		this.#contentContainer.addChild(new Spacer(1));
+		this.#contentContainer.addChild(new Text("Enter the HTTP header name:", 0, 0));
+		this.#contentContainer.addChild(new Spacer(1));
+
+		this.#inputField = new Input();
+		this.#inputField.setValue(this.#state.headerName);
+		this.#contentContainer.addChild(this.#inputField);
+		this.#contentContainer.addChild(new Spacer(1));
+		this.#contentContainer.addChild(new Text(wizardHint("Enter to continue", "go back"), 0, 0));
+	}
+
+	#renderScopeStep(): void {
+		this.#contentContainer.addChild(new Text(theme.fg("accent", "Step: Configuration Scope")));
+		this.#contentContainer.addChild(new Spacer(1));
+
+		const cwd = getProjectDir();
+
+		const userPathLabel = shortenPath(getMCPConfigPath("user", cwd));
+		const projectPathLabel = shortenPath(getMCPConfigPath("project", cwd));
+		const options = [
+			{ value: "user" as const, label: `User level (${userPathLabel})` },
+			{ value: "project" as const, label: `Project level (${projectPathLabel})` },
+		];
+
+		for (let i = 0; i < options.length; i++) {
+			const option = options[i];
+			const isSelected = i === this.#selectedIndex;
+			const prefix = isSelected ? theme.fg("accent", `${theme.nav.cursor} `) : "  ";
+			const text = isSelected ? theme.fg("accent", option.label) : option.label;
+			this.#contentContainer.addChild(new Text(prefix + text, 0, 0));
+		}
+
+		this.#contentContainer.addChild(new Spacer(1));
+		this.#contentContainer.addChild(new Text(wizardHint("↑↓ to navigate, Enter to select", "go back"), 0, 0));
+	}
+
+	#renderConfirmStep(): void {
+		this.#contentContainer.addChild(new Text(theme.fg("accent", "Review Configuration")));
+		this.#contentContainer.addChild(new Spacer(1));
+
+		// Show summary
+		this.#contentContainer.addChild(new Text(`Name: ${theme.fg("accent", this.#state.name)}`, 0, 0));
+		this.#contentContainer.addChild(new Text(`Type: ${this.#state.transport}`, 0, 0));
+
+		if (this.#state.transport === "stdio") {
+			this.#contentContainer.addChild(new Text(`Command: ${this.#state.command}`, 0, 0));
+			if (this.#state.args) {
+				this.#contentContainer.addChild(new Text(`Args: ${this.#state.args}`, 0, 0));
+			}
+		} else {
+			this.#contentContainer.addChild(new Text(`URL: ${sanitize(this.#state.url)}`, 0, 0));
+		}
+
+		// Auth info
+		if (this.#state.authMethod === "none") {
+			this.#contentContainer.addChild(new Text("Auth: None", 0, 0));
+		} else if (this.#state.authMethod === "oauth") {
+			this.#contentContainer.addChild(new Text("Auth: OAuth (authenticated)", 0, 0));
+		} else if (this.#state.authMethod === "manual") {
+			if (this.#state.authLocation === "env") {
+				this.#contentContainer.addChild(new Text(`Auth: API key via env (${this.#state.envVarName})`, 0, 0));
+			} else {
+				this.#contentContainer.addChild(new Text(`Auth: API key via header (${this.#state.headerName})`, 0, 0));
+			}
+		}
+
+		const scopeLabel = this.#state.scope === "user" ? "User level" : "Project level";
+		this.#contentContainer.addChild(new Text(`Scope: ${scopeLabel}`, 0, 0));
+
 		this.#contentContainer.addChild(new Spacer(1));
 		this.#contentContainer.addChild(new Text("Save this configuration?", 0, 0));
 		this.#contentContainer.addChild(new Spacer(1));
-		for (let index = 0; index < 2; index++) {
-			const label = index === 0 ? "Yes" : "No";
-			const selected = index === this.#model.selection;
-			this.#contentContainer.addChild(new Text((selected ? theme.fg("accent", `${theme.nav.cursor} ${label}`) : `  ${label}`), 0, 0));
+
+		const options = ["Yes", "No"];
+		for (let i = 0; i < options.length; i++) {
+			const isSelected = i === this.#selectedIndex;
+			const prefix = isSelected ? theme.fg("accent", `${theme.nav.cursor} `) : "  ";
+			const text = isSelected ? theme.fg("accent", options[i]) : options[i];
+			this.#contentContainer.addChild(new Text(prefix + text, 0, 0));
 		}
+
 		this.#contentContainer.addChild(new Spacer(1));
 		this.#contentContainer.addChild(new Text(wizardHint("↑↓ to navigate, Enter to select", "go back"), 0, 0));
+	}
+
+	handleInput(keyData: string): void {
+		// Handle Ctrl+C to cancel wizard immediately
+		if (keyData === "\x03") {
+			// Ctrl+C pressed - cancel wizard
+			this.#onCancelCallback();
+			return;
+		}
+
+		// The wizard owns modal dismissal independently of active-work interruption.
+		if (matchesUiDismiss(keyData)) {
+			if (this.#currentStep === "name") {
+				// Cancel wizard
+				this.#onCancelCallback();
+				return;
+			}
+			// Go back to previous step
+			this.#goBack();
+			return;
+		}
+
+		// If we have an input field, let it handle the input
+		if (this.#inputField) {
+			// Handle Enter to proceed
+			if (matchesKey(keyData, "enter") || matchesKey(keyData, "return") || keyData === "\n") {
+				this.#saveInputAndProceed();
+				return;
+			}
+			// Pass all other keys to the input field
+			this.#inputField.handleInput(keyData);
+			return;
+		}
+
+		// Selector steps - handle Enter
+		if (matchesKey(keyData, "enter") || matchesKey(keyData, "return") || keyData === "\n") {
+			this.#selectCurrentOption();
+			return;
+		}
+
+		// Handle up/down arrows for selectors
+		if (matchesSelectUp(keyData)) {
+			this.#moveSelection(-1);
+			return;
+		}
+		if (matchesSelectDown(keyData)) {
+			this.#moveSelection(1);
+			return;
+		}
+	}
+
+	#saveInputAndProceed(): void {
+		if (!this.#inputField) return;
+
+		const value = this.#inputField.getValue().trim();
+
+		switch (this.#currentStep) {
+			case "name": {
+				// Validate server name
+				const nameError = validateServerName(value);
+				if (nameError) {
+					this.#validationError = nameError;
+					this.#renderStep();
+					return;
+				}
+				this.#validationError = null;
+				this.#state.name = value;
+				this.#currentStep = "transport";
+				this.#selectedIndex = 0;
+				break;
+			}
+			case "command":
+				if (!value) {
+					// Command is required
+					return;
+				}
+				this.#state.command = value;
+				this.#currentStep = "args";
+				break;
+			case "args":
+				this.#state.args = value; // Optional
+				void this.#testConnectionAndDetectAuth();
+				return;
+			case "url": {
+				// Validate URL
+				if (!value) {
+					this.#validationError = "URL is required";
+					this.#renderStep();
+					return;
+				}
+				let parsedUrl: URL;
+				try {
+					parsedUrl = new URL(value);
+				} catch {
+					this.#validationError = "Invalid URL format (must start with http:// or https://)";
+					this.#renderStep();
+					return;
+				}
+				if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
+					this.#validationError = "URL must use http:// or https:// scheme";
+					this.#renderStep();
+					return;
+				}
+				this.#validationError = null;
+				this.#state.url = value;
+				void this.#testConnectionAndDetectAuth();
+				return;
+			}
+			case "oauth-auth-url":
+				if (!value) return;
+				this.#state.oauthAuthUrl = value;
+				this.#currentStep = "oauth-token-url";
+				break;
+			case "oauth-token-url":
+				if (!value) return;
+				this.#state.oauthTokenUrl = value;
+				this.#currentStep = "oauth-client-id";
+				break;
+			case "oauth-client-id":
+				if (!value) return;
+				this.#state.oauthClientId = value;
+				this.#currentStep = "oauth-client-secret";
+				break;
+			case "oauth-client-secret":
+				this.#state.oauthClientSecret = value; // Optional
+				this.#currentStep = "oauth-scopes";
+				break;
+			case "oauth-scopes":
+				this.#state.oauthScopes = value; // Optional
+				// Launch OAuth flow
+				void this.#launchOAuthFlow();
+				return;
+			case "apikey":
+				if (!value) {
+					// API key is required
+					return;
+				}
+				this.#state.apiKey = value;
+				// Determine auth location based on transport
+				if (this.#state.transport === "stdio") {
+					this.#currentStep = "env-var-name";
+				} else {
+					this.#currentStep = "auth-location";
+					this.#selectedIndex = 0;
+				}
+				break;
+			case "env-var-name":
+				if (!value) {
+					return;
+				}
+				this.#state.envVarName = value;
+				this.#state.authLocation = "env";
+				this.#currentStep = "scope";
+				this.#selectedIndex = 0;
+				break;
+			case "header-name":
+				if (!value) {
+					return;
+				}
+				this.#state.headerName = value;
+				this.#state.authLocation = "header";
+				this.#currentStep = "scope";
+				this.#selectedIndex = 0;
+				break;
+		}
+
+		this.#inputField = null;
+		this.#renderStep();
+	}
+
+	#selectCurrentOption(): void {
+		switch (this.#currentStep) {
+			case "transport": {
+				const transports: TransportType[] = ["stdio", "http", "sse"];
+				this.#state.transport = transports[this.#selectedIndex];
+				this.#currentStep = this.#state.transport === "stdio" ? "command" : "url";
+				break;
+			}
+			case "auth-method": {
+				const authMethods: Array<"oauth" | "manual"> = ["oauth", "manual"];
+				this.#state.authMethod = authMethods[this.#selectedIndex];
+				if (this.#state.authMethod === "oauth") {
+					this.#currentStep = "oauth-auth-url";
+				} else {
+					// manual
+					this.#currentStep = "apikey";
+				}
+				break;
+			}
+			case "oauth-error":
+				if (this.#selectedIndex === 0) {
+					void this.#launchOAuthFlow();
+				} else {
+					this.#currentStep = "oauth-auth-url";
+				}
+				return;
+			case "auth-location": {
+				const authLocations: Array<"env" | "header"> = ["env", "header"];
+				this.#state.authLocation = authLocations[this.#selectedIndex];
+				if (this.#state.authLocation === "env") {
+					this.#currentStep = "env-var-name";
+				} else {
+					this.#currentStep = "header-name";
+				}
+				break;
+			}
+			case "scope": {
+				const scopes: Scope[] = ["user", "project"];
+				this.#state.scope = scopes[this.#selectedIndex];
+				this.#currentStep = "confirm";
+				this.#selectedIndex = 0;
+				break;
+			}
+			case "confirm": {
+				if (this.#selectedIndex === 0) {
+					this.#complete();
+					return;
+				}
+				this.#currentStep = "scope";
+				this.#selectedIndex = this.#state.scope === "user" ? 0 : 1;
+				break;
+			}
+		}
+
+		this.#renderStep();
+	}
+
+	#moveSelection(delta: number): void {
+		const maxIndex = this.#getMaxIndexForCurrentStep();
+		this.#selectedIndex = (this.#selectedIndex + delta + maxIndex + 1) % (maxIndex + 1);
+		this.#renderStep();
+		this.#requestRender();
+	}
+
+	#getMaxIndexForCurrentStep(): number {
+		switch (this.#currentStep) {
+			case "transport":
+				return 2; // 3 options
+			case "auth-method":
+				return 1; // 2 options
+			case "oauth-error":
+				return 1; // 2 options
+			case "auth-location":
+				return 1; // 2 options
+			case "scope":
+				return 1; // 2 options
+			case "confirm":
+				return 1; // 2 options
+			default:
+				return 0;
+		}
+	}
+
+	#goBack(): void {
+		// Navigate to previous step
+		switch (this.#currentStep) {
+			case "transport":
+				this.#currentStep = "name";
+				break;
+			case "command":
+			case "url":
+				this.#currentStep = "transport";
+				this.#selectedIndex = this.#state.transport === "stdio" ? 0 : this.#state.transport === "http" ? 1 : 2;
+				break;
+			case "args":
+				this.#currentStep = "command";
+				break;
+			case "auth-method":
+				// Go back to url or args depending on transport
+				if (this.#state.transport === "stdio") {
+					this.#currentStep = "args";
+				} else {
+					this.#currentStep = "url";
+				}
+				break;
+			case "oauth-auth-url":
+			case "apikey":
+				// Go back to transport-specific connection step
+				if (this.#state.transport === "stdio") {
+					this.#currentStep = "args";
+				} else {
+					this.#currentStep = "url";
+				}
+				break;
+			case "auth-location":
+				// Go back to API key input
+				this.#currentStep = "apikey";
+				break;
+			case "env-var-name":
+			case "header-name":
+				// Go back to auth location selection (for HTTP) or directly to apikey (for stdio)
+				if (this.#state.transport === "stdio") {
+					this.#currentStep = "apikey";
+				} else {
+					this.#currentStep = "auth-location";
+					this.#selectedIndex = this.#state.authLocation === "env" ? 0 : 1;
+				}
+				break;
+			case "oauth-token-url":
+			case "oauth-client-id":
+			case "oauth-client-secret":
+			case "oauth-scopes":
+				// Go back through OAuth flow
+				if (this.#currentStep === "oauth-token-url") {
+					this.#currentStep = "oauth-auth-url";
+				} else if (this.#currentStep === "oauth-client-id") {
+					this.#currentStep = "oauth-token-url";
+				} else if (this.#currentStep === "oauth-client-secret") {
+					this.#currentStep = "oauth-client-id";
+				} else if (this.#currentStep === "oauth-scopes") {
+					this.#currentStep = "oauth-client-secret";
+				}
+				break;
+			case "scope":
+				// Go back to last authentication step
+				if (this.#state.authMethod === "oauth") {
+					this.#currentStep = "oauth-scopes";
+				} else {
+					// manual - go back to env var name or header name
+					if (this.#state.authLocation === "env") {
+						this.#currentStep = "env-var-name";
+					} else {
+						this.#currentStep = "header-name";
+					}
+				}
+				break;
+			case "oauth-error":
+				this.#currentStep = "oauth-auth-url";
+				break;
+			case "confirm":
+				this.#currentStep = "scope";
+				this.#selectedIndex = this.#state.scope === "user" ? 0 : 1;
+				break;
+		}
+
+		this.#renderStep();
+	}
+
+	#renderAuthMethodStep(): void {
+		this.#contentContainer.addChild(new Text(theme.fg("accent", "Step: Authentication Method")));
+		this.#contentContainer.addChild(new Spacer(1));
+
+		const options = [
+			{ value: "oauth" as const, label: "OAuth flow (web-based)", desc: "(opens browser)" },
+			{ value: "manual" as const, label: "Manual API key/token", desc: "(paste or use shell command)" },
+		];
+
+		for (let i = 0; i < options.length; i++) {
+			const option = options[i];
+			const isSelected = i === this.#selectedIndex;
+			const prefix = isSelected ? theme.fg("accent", `${theme.nav.cursor} `) : "  ";
+			const text = isSelected ? theme.fg("accent", option.label) : option.label;
+			this.#contentContainer.addChild(new Text(prefix + text, 0, 0));
+			if (!isSelected) {
+				this.#contentContainer.addChild(new Text(`    ${theme.fg("dim", option.desc)}`, 0, 0));
+			}
+		}
+
+		this.#contentContainer.addChild(new Spacer(1));
+		this.#contentContainer.addChild(new Text(wizardHint("↑↓ to navigate, Enter to select", "go back"), 0, 0));
+	}
+
+	#renderOAuthAuthUrlStep(): void {
+		this.#contentContainer.addChild(new Text(theme.fg("accent", "OAuth: Authorization URL")));
+		this.#contentContainer.addChild(new Spacer(1));
+		this.#contentContainer.addChild(new Text("Enter the OAuth authorization endpoint:", 0, 0));
+		this.#contentContainer.addChild(new Spacer(1));
+
+		this.#inputField = new Input();
+		this.#inputField.setValue(this.#state.oauthAuthUrl);
+		this.#contentContainer.addChild(this.#inputField);
+		this.#contentContainer.addChild(new Spacer(1));
+		this.#contentContainer.addChild(
+			new Text(theme.fg("muted", "e.g., https://auth.example.com/oauth/authorize"), 0, 0),
+		);
+		this.#contentContainer.addChild(new Spacer(1));
+		this.#contentContainer.addChild(new Text(wizardHint("Enter to continue", "go back"), 0, 0));
+	}
+
+	#renderOAuthTokenUrlStep(): void {
+		this.#contentContainer.addChild(new Text(theme.fg("accent", "OAuth: Token URL")));
+		this.#contentContainer.addChild(new Spacer(1));
+		this.#contentContainer.addChild(new Text("Enter the OAuth token endpoint:", 0, 0));
+		this.#contentContainer.addChild(new Spacer(1));
+
+		this.#inputField = new Input();
+		this.#inputField.setValue(this.#state.oauthTokenUrl);
+		this.#contentContainer.addChild(this.#inputField);
+		this.#contentContainer.addChild(new Spacer(1));
+		this.#contentContainer.addChild(new Text(theme.fg("muted", "e.g., https://auth.example.com/oauth/token"), 0, 0));
+		this.#contentContainer.addChild(new Spacer(1));
+		this.#contentContainer.addChild(new Text(wizardHint("Enter to continue", "go back"), 0, 0));
+	}
+
+	#renderOAuthClientIdStep(): void {
+		this.#contentContainer.addChild(new Text(theme.fg("accent", "OAuth: Client ID")));
+		this.#contentContainer.addChild(new Spacer(1));
+		this.#contentContainer.addChild(new Text("Enter your OAuth client ID:", 0, 0));
+		this.#contentContainer.addChild(new Spacer(1));
+
+		this.#inputField = new Input();
+		this.#inputField.setValue(this.#state.oauthClientId);
+		this.#contentContainer.addChild(this.#inputField);
+		this.#contentContainer.addChild(new Spacer(1));
+		this.#contentContainer.addChild(new Text(wizardHint("Enter to continue", "go back"), 0, 0));
+	}
+
+	#renderOAuthClientSecretStep(): void {
+		this.#contentContainer.addChild(new Text(theme.fg("accent", "OAuth: Client Secret (Optional)")));
+		this.#contentContainer.addChild(new Spacer(1));
+		this.#contentContainer.addChild(new Text("Enter your OAuth client secret:", 0, 0));
+		this.#contentContainer.addChild(new Text(theme.fg("muted", "(Leave empty for PKCE-only flows)"), 0, 0));
+		this.#contentContainer.addChild(new Spacer(1));
+
+		this.#inputField = new Input();
+		this.#inputField.setValue(this.#state.oauthClientSecret);
+		this.#contentContainer.addChild(this.#inputField);
+		this.#contentContainer.addChild(new Spacer(1));
+		this.#contentContainer.addChild(new Text(wizardHint("Enter to continue", "go back"), 0, 0));
+	}
+
+	#renderOAuthScopesStep(): void {
+		this.#contentContainer.addChild(new Text(theme.fg("accent", "OAuth: Scopes (Optional)")));
+		this.#contentContainer.addChild(new Spacer(1));
+		this.#contentContainer.addChild(new Text("Enter OAuth scopes (space-separated):", 0, 0));
+		this.#contentContainer.addChild(new Spacer(1));
+
+		this.#inputField = new Input();
+		this.#inputField.setValue(this.#state.oauthScopes);
+		this.#contentContainer.addChild(this.#inputField);
+		this.#contentContainer.addChild(new Spacer(1));
+		this.#contentContainer.addChild(new Text(theme.fg("muted", "e.g., read write"), 0, 0));
+		this.#contentContainer.addChild(new Spacer(1));
+		this.#contentContainer.addChild(new Text(wizardHint("Enter to continue", "go back"), 0, 0));
+	}
+
+	#renderOAuthErrorStep(): void {
+		this.#contentContainer.addChild(new Text(theme.fg("error", "OAuth authentication failed"), 0, 0));
+		this.#contentContainer.addChild(new Spacer(1));
+		this.#contentContainer.addChild(new Text("Choose next action:", 0, 0));
+		this.#contentContainer.addChild(new Spacer(1));
+
+		const options = ["Retry OAuth authentication", "Edit OAuth settings"];
+		for (let i = 0; i < options.length; i++) {
+			const isSelected = i === this.#selectedIndex;
+			const prefix = isSelected ? theme.fg("accent", `${theme.nav.cursor} `) : "  ";
+			const text = isSelected ? theme.fg("accent", options[i]) : options[i];
+			this.#contentContainer.addChild(new Text(prefix + text, 0, 0));
+		}
+
+		this.#contentContainer.addChild(new Spacer(1));
+		this.#contentContainer.addChild(new Text(wizardHint("↑↓ to navigate, Enter to select", "go back"), 0, 0));
+	}
+
+	#renderApiKeyStep(): void {
+		this.#contentContainer.addChild(new Text(theme.fg("accent", "API Key Required")));
+		this.#contentContainer.addChild(new Spacer(1));
+		this.#contentContainer.addChild(new Text("Enter your API key or token:", 0, 0));
+		this.#contentContainer.addChild(new Text(theme.fg("muted", "(Supports !command for password manager)"), 0, 0));
+		this.#contentContainer.addChild(new Spacer(1));
+
+		this.#inputField = new Input();
+		this.#inputField.setValue(this.#state.apiKey);
+		this.#contentContainer.addChild(this.#inputField);
+		this.#contentContainer.addChild(new Spacer(1));
+		this.#contentContainer.addChild(new Text(wizardHint("Enter to continue", "go back"), 0, 0));
+	}
+
+	/**
+	 * Test connection and automatically detect if auth is needed.
+	 */
+	async #testConnectionAndDetectAuth(): Promise<void> {
+		const testConfig = this.#buildServerConfig();
+
+		if (!this.#onTestConnectionCallback) {
+			// Skip test, go to scope
+			this.#currentStep = "scope";
+			this.#selectedIndex = 0;
+			this.#renderStep();
+			return;
+		}
+
+		try {
+			// Try to connect - timeout is handled by the transport layer (5 seconds)
+			await this.#onTestConnectionCallback(testConfig);
+
+			// Success! No auth required
+			this.#contentContainer.clear();
+			this.#contentContainer.addChild(new Text(theme.fg("success", "✓ Connection successful!"), 0, 0));
+			this.#contentContainer.addChild(new Spacer(1));
+			this.#contentContainer.addChild(new Text("No authentication required", 0, 0));
+			this.#contentContainer.addChild(new Spacer(1));
+
+			setTimeout(() => {
+				this.#state.authMethod = "none";
+				this.#currentStep = "scope";
+				this.#selectedIndex = 0;
+				this.#renderStep();
+			}, 1000);
+		} catch (error) {
+			// Connection failed - check if it's an auth error
+			const authResult = analyzeAuthError(error as Error, this.#state.url);
+
+			if (authResult.requiresAuth) {
+				// Prefer OAuth first: use error metadata, then well-known discovery fallback.
+				let oauth = authResult.authType === "oauth" ? (authResult.oauth ?? null) : null;
+				if (!oauth && this.#state.transport !== "stdio" && this.#state.url) {
+					try {
+						oauth = await discoverOAuthEndpoints(
+							this.#state.url,
+							authResult.authServerUrl,
+							authResult.resourceMetadataUrl,
+						);
+					} catch {
+						// Ignore discovery failures and fallback to manual auth.
+					}
+				}
+
+				if (oauth) {
+					this.#state.oauthAuthUrl = oauth.authorizationUrl;
+					this.#state.oauthTokenUrl = oauth.tokenUrl;
+					this.#state.oauthClientId = oauth.clientId || "";
+					this.#state.oauthScopes = oauth.scopes || "";
+					this.#state.oauthResource = oauth.resource || (this.#state.transport === "stdio" ? "" : this.#state.url);
+					this.#state.authMethod = "oauth";
+
+					this.#contentContainer.clear();
+					this.#contentContainer.addChild(new Text(theme.fg("success", "✓ OAuth detected"), 0, 0));
+					this.#contentContainer.addChild(new Spacer(1));
+					this.#contentContainer.addChild(new Text("Launching browser for authorization...", 0, 0));
+					this.#contentContainer.addChild(new Spacer(1));
+
+					void this.#launchOAuthFlow();
+					return;
+				}
+
+				// OAuth metadata unavailable: fallback to manual API key.
+				this.#contentContainer.clear();
+				this.#contentContainer.addChild(new Text(theme.fg("warning", "⚠ Authentication required"), 0, 0));
+				this.#contentContainer.addChild(new Spacer(1));
+				this.#contentContainer.addChild(new Text("OAuth parameters could not be discovered.", 0, 0));
+				this.#contentContainer.addChild(new Text("Provide API key/token manually.", 0, 0));
+				this.#contentContainer.addChild(new Spacer(1));
+				this.#currentStep = "apikey";
+				this.#renderStep();
+			} else {
+				// Not an auth error - just a connection failure
+				const errorMsg = sanitize(error instanceof Error ? error.message : String(error));
+				this.#contentContainer.clear();
+				this.#contentContainer.addChild(new Text(theme.fg("error", "✗ Connection failed"), 0, 0));
+				this.#contentContainer.addChild(new Spacer(1));
+				this.#contentContainer.addChild(new Text(errorMsg, 0, 0));
+				this.#contentContainer.addChild(new Spacer(1));
+				this.#contentContainer.addChild(new Text(theme.fg("muted", "Adding server anyway..."), 0, 0));
+
+				setTimeout(() => {
+					this.#state.authMethod = "none";
+					this.#currentStep = "scope";
+					this.#selectedIndex = 0;
+					this.#renderStep();
+				}, 2000);
+			}
+		}
+	}
+
+	/**
+	 * Build a server config from current wizard state for connection testing (no auth).
+	 */
+	#buildServerConfig(): MCPServerConfig {
+		return this.#buildServerConfigWithAuth(false);
+	}
+
+	#buildServerConfigWithAuth(includeAuth: boolean): MCPServerConfig {
+		const transport = this.#state.transport ?? "stdio";
+
+		if (transport === "stdio") {
+			const config: MCPStdioServerConfig = {
+				type: "stdio",
+				command: this.#state.command,
+				timeout: 5000,
+			};
+
+			if (this.#state.args) {
+				config.args = this.#state.args.split(/\s+/).filter(Boolean);
+			}
+
+			if (includeAuth && this.#state.authMethod === "oauth" && this.#state.oauthCredentialId) {
+				config.auth = {
+					type: "oauth",
+					credentialId: this.#state.oauthCredentialId,
+					tokenUrl: this.#state.oauthTokenUrl || undefined,
+					resource: this.#state.oauthResource || undefined,
+					clientId: this.#state.oauthClientId || undefined,
+					clientSecret: this.#state.oauthClientSecret || undefined,
+				};
+			}
+
+			if (includeAuth && this.#state.authMethod === "manual" && this.#state.apiKey) {
+				config.env = {
+					...(config.env ?? {}),
+					[this.#state.envVarName || "API_KEY"]: this.#state.apiKey,
+				};
+			}
+
+			return config;
+		}
+
+		// http or sse
+		const config: MCPHttpServerConfig | MCPSseServerConfig = {
+			type: transport,
+			url: this.#state.url,
+			timeout: 5000,
+		};
+
+		if (includeAuth && this.#state.authMethod === "oauth" && this.#state.oauthCredentialId) {
+			config.auth = {
+				type: "oauth",
+				credentialId: this.#state.oauthCredentialId,
+				tokenUrl: this.#state.oauthTokenUrl || undefined,
+				resource: this.#state.oauthResource || undefined,
+				clientId: this.#state.oauthClientId || undefined,
+				clientSecret: this.#state.oauthClientSecret || undefined,
+			};
+		}
+
+		if (includeAuth && this.#state.authMethod === "manual" && this.#state.apiKey) {
+			if (this.#state.authLocation === "env") {
+				// For HTTP with env location, store in headers using the env var name as-is
+				config.headers = {
+					...(config.headers ?? {}),
+					[this.#state.headerName || "Authorization"]: this.#state.apiKey,
+				};
+			} else {
+				const headerName = this.#state.headerName || "Authorization";
+				config.headers = {
+					...(config.headers ?? {}),
+					[headerName]: this.#state.apiKey,
+				};
+			}
+		}
+
+		return config;
+	}
+
+	async #launchOAuthFlow(): Promise<void> {
+		if (!this.#onOAuthCallback) {
+			this.#contentContainer.clear();
+			this.#contentContainer.addChild(new Text(theme.fg("error", "OAuth flow not available"), 0, 0));
+			this.#renderStep();
+			this.#requestRender();
+			return;
+		}
+
+		// Validate OAuth configuration
+		if (!this.#state.oauthAuthUrl || !this.#state.oauthTokenUrl) {
+			this.#contentContainer.clear();
+			this.#contentContainer.addChild(new Text(theme.fg("error", "OAuth configuration incomplete"), 0, 0));
+			this.#contentContainer.addChild(new Spacer(1));
+			this.#contentContainer.addChild(new Text("Authorization and Token URLs are required.", 0, 0));
+			this.#contentContainer.addChild(new Spacer(1));
+			this.#contentContainer.addChild(new Text(wizardHint("", "go back"), 0, 0));
+			this.#requestRender();
+			return;
+		}
+
+		// Show "Authenticating..." message
+		this.#contentContainer.clear();
+		this.#contentContainer.addChild(new Text(theme.fg("accent", "OAuth Authentication"), 0, 0));
+		this.#contentContainer.addChild(new Spacer(1));
+		this.#contentContainer.addChild(new Text("Launching OAuth flow...", 0, 0));
+		this.#contentContainer.addChild(new Text(theme.fg("muted", "Browser will open automatically."), 0, 0));
+		this.#contentContainer.addChild(new Spacer(1));
+		this.#contentContainer.addChild(
+			new Text(theme.fg("warning", "If browser doesn't open, copy the URL from chat."), 0, 0),
+		);
+		this.#contentContainer.addChild(new Spacer(1));
+		this.#contentContainer.addChild(new Text(wizardHint("", "cancel"), 0, 0));
+		this.#requestRender();
+
+		try {
+			// Call OAuth handler
+			const oauthResource = this.#state.oauthResource || (this.#state.transport === "stdio" ? "" : this.#state.url);
+			const oauthResult = await this.#onOAuthCallback(
+				this.#state.oauthAuthUrl,
+				this.#state.oauthTokenUrl,
+				this.#state.oauthClientId,
+				this.#state.oauthClientSecret,
+				this.#state.oauthScopes,
+				{
+					serverUrl: this.#state.url || undefined,
+					resource: oauthResource || undefined,
+				},
+			);
+
+			// Store credential ID + any dynamically-registered client id. DCR client
+			// secrets stay embedded in the stored credential, never in mcp.json.
+			this.#state.oauthCredentialId = oauthResult.credentialId;
+			if (oauthResult.clientId) this.#state.oauthClientId = oauthResult.clientId;
+			this.#state.oauthResource = oauthResult.resource ?? oauthResource;
+
+			// Show success message
+			this.#contentContainer.clear();
+			this.#contentContainer.addChild(new Text(theme.fg("success", "✓ Authentication successful!"), 0, 0));
+			this.#contentContainer.addChild(new Spacer(1));
+			this.#contentContainer.addChild(new Text(theme.fg("muted", "Running connection health check..."), 0, 0));
+			const spinnerFrames = theme.spinnerFrames;
+			const initialFrame = spinnerFrames[0] ?? "|";
+			const healthText = new Text(theme.fg("muted", `${initialFrame} Checking server connection...`), 0, 0);
+			this.#contentContainer.addChild(healthText);
+
+			let spinnerIndex = 0;
+			const spinner = setInterval(() => {
+				healthText.setText(
+					theme.fg("muted", `${spinnerFrames[spinnerIndex % spinnerFrames.length]} Checking server connection...`),
+				);
+				spinnerIndex++;
+				this.#requestRender();
+			}, 80);
+
+			let healthPassed = true;
+			let healthError = "";
+			if (this.#onTestConnectionCallback) {
+				try {
+					const { promise: timeoutPromise, reject: timeoutReject } = Promise.withResolvers<never>();
+					const timer = setTimeout(
+						() => timeoutReject(new Error("Health check timed out after 10 seconds")),
+						10_000,
+					);
+					try {
+						await Promise.race([
+							this.#onTestConnectionCallback(this.#buildServerConfigWithAuth(true)),
+							timeoutPromise,
+						]);
+					} finally {
+						clearTimeout(timer);
+					}
+				} catch (error) {
+					healthPassed = false;
+					healthError = sanitize(error instanceof Error ? error.message : String(error));
+				}
+			}
+
+			clearInterval(spinner);
+			if (healthPassed) {
+				healthText.setText(theme.fg("success", "✓ Health check passed"));
+			} else {
+				healthText.setText(theme.fg("warning", "⚠ Health check failed (will still save config)"));
+				this.#contentContainer.addChild(new Spacer(1));
+				this.#contentContainer.addChild(new Text(theme.fg("muted", healthError), 0, 0));
+			}
+			this.#requestRender();
+
+			// Move to scope selection after short delay
+			setTimeout(
+				() => {
+					this.#currentStep = "scope";
+					this.#selectedIndex = 0;
+					this.#renderStep();
+					this.#requestRender();
+				},
+				healthPassed ? 1000 : 2000,
+			);
+		} catch (error) {
+			// Show error with options to retry or go back
+			const errorMsg = sanitize(error instanceof Error ? error.message : String(error));
+			this.#contentContainer.clear();
+			this.#contentContainer.addChild(new Text(theme.fg("error", "✗ OAuth authentication failed"), 0, 0));
+			this.#contentContainer.addChild(new Spacer(1));
+			this.#contentContainer.addChild(new Text(errorMsg, 0, 0));
+			this.#contentContainer.addChild(new Spacer(1));
+
+			// Provide helpful tips based on error type
+			if (errorMsg.includes("timeout") || errorMsg.includes("timed out")) {
+				this.#contentContainer.addChild(
+					new Text(theme.fg("muted", "Tip: Complete authorization faster next time"), 0, 0),
+				);
+			} else if (errorMsg.includes("Invalid OAuth URLs")) {
+				this.#contentContainer.addChild(
+					new Text(theme.fg("muted", "Tip: Check that the OAuth URLs are correct"), 0, 0),
+				);
+			} else if (errorMsg.includes("ECONNREFUSED")) {
+				this.#contentContainer.addChild(
+					new Text(theme.fg("muted", "Tip: Verify the OAuth server is accessible"), 0, 0),
+				);
+			}
+
+			this.#contentContainer.addChild(new Spacer(1));
+			this.#contentContainer.addChild(new Text(`${theme.fg("accent", "→ ")}Retry`, 0, 0));
+			this.#contentContainer.addChild(new Text("  Edit OAuth settings", 0, 0));
+			this.#contentContainer.addChild(new Spacer(1));
+			this.#contentContainer.addChild(new Text(wizardHint("↑↓ to navigate, Enter to select", "go back"), 0, 0));
+			this.#requestRender();
+
+			// Set up as a selector step
+			this.#selectedIndex = 0;
+			this.#currentStep = "oauth-error";
+		}
+	}
+
+	#complete(): void {
+		if (!this.#state.scope) return;
+
+		// Build the config
+		const config: MCPServerConfig = this.#buildConfig();
+
+		// Call completion callback
+		this.#onCompleteCallback(this.#state.name, config, this.#state.scope);
+	}
+
+	#buildConfig(): MCPServerConfig {
+		if (this.#state.transport === "stdio") {
+			const config: MCPStdioServerConfig = {
+				type: "stdio",
+				command: this.#state.command,
+			};
+
+			if (this.#state.args) {
+				config.args = this.#state.args.split(/\s+/).filter(Boolean);
+			}
+
+			// Add OAuth auth if configured
+			if (this.#state.authMethod === "oauth" && this.#state.oauthCredentialId) {
+				config.auth = {
+					type: "oauth",
+					credentialId: this.#state.oauthCredentialId,
+					tokenUrl: this.#state.oauthTokenUrl || undefined,
+					resource: this.#state.oauthResource || undefined,
+					clientId: this.#state.oauthClientId || undefined,
+					clientSecret: this.#state.oauthClientSecret || undefined,
+				};
+			}
+
+			// Add API key to env if manual auth — use user-chosen env var name
+			if (this.#state.authMethod === "manual" && this.#state.apiKey) {
+				const envKey = this.#state.envVarName || "API_KEY";
+				config.env = {
+					[envKey]: this.#state.apiKey,
+				};
+			}
+
+			return config;
+		}
+
+		// HTTP or SSE — use concrete type
+		const config: MCPHttpServerConfig | MCPSseServerConfig = {
+			type: this.#state.transport!,
+			url: this.#state.url,
+		};
+
+		// Add OAuth auth if configured
+		if (this.#state.authMethod === "oauth" && this.#state.oauthCredentialId) {
+			config.auth = {
+				type: "oauth",
+				credentialId: this.#state.oauthCredentialId,
+				tokenUrl: this.#state.oauthTokenUrl || undefined,
+				resource: this.#state.oauthResource || undefined,
+				clientId: this.#state.oauthClientId || undefined,
+				clientSecret: this.#state.oauthClientSecret || undefined,
+			};
+		}
+
+		// Add API key using user-chosen header name and auth location
+		if (this.#state.authMethod === "manual" && this.#state.apiKey) {
+			if (this.#state.authLocation === "env") {
+				// Env-based auth for HTTP: store the key in env on the config
+				// HTTP/SSE configs don't have an env field, so use headers as carrier
+				const headerName = this.#state.headerName || "Authorization";
+				config.headers = {
+					[headerName]: this.#state.apiKey,
+				};
+			} else {
+				// Header-based auth: use the user's chosen header name
+				const headerName = this.#state.headerName || "Authorization";
+				config.headers = {
+					[headerName]: this.#state.apiKey,
+				};
+			}
+		}
+
+		return config;
 	}
 }

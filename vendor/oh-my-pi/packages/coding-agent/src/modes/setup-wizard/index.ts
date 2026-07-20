@@ -9,31 +9,6 @@ import { SetupWizardComponent } from "./wizard-overlay";
 
 export type { SetupScene, SetupSceneController, SetupSceneHost, SetupSceneResult } from "./scenes/types";
 
-export {
-	type GlyphSceneCommand,
-	GlyphSceneController,
-	type GlyphSceneMessage,
-	type GlyphSceneModel,
-	makeGlyphSceneModel,
-	updateGlyphScene,
-} from "./scenes/glyph";
-export {
-	type ThemeSceneCommand,
-	ThemeSceneController,
-	type ThemeSceneMessage,
-	type ThemeSceneModel,
-	makeThemeSceneModel,
-	updateThemeScene,
-} from "./scenes/theme";
-export {
-	type ProvidersSceneCommand,
-	ProvidersSceneController,
-	type ProvidersSceneMessage,
-	type ProvidersSceneModel,
-	makeProvidersSceneModel,
-	updateProvidersScene,
-} from "./scenes/providers";
-
 export { CURRENT_SETUP_VERSION };
 
 export const ALL_SCENES = [
@@ -62,7 +37,8 @@ export async function selectSetupScenes(
 	ctx?: InteractiveModeContext,
 	options: SetupSceneSelectionOptions = {},
 ): Promise<SetupScene[]> {
-	if (options.isTTY === false) return [];
+	const isTTY = options.isTTY ?? (process.stdin.isTTY && process.stdout.isTTY);
+	if (!isTTY) return [];
 	if (!options.force) {
 		if (options.resuming) return [];
 		if (setupSkipEnvEnabled(options.skipEnv ?? Bun.env.OMP_SKIP_SETUP)) return [];
@@ -101,13 +77,22 @@ export async function runSetupWizard(
 ): Promise<void> {
 	if (scenes.length === 0) return;
 	const component = new SetupWizardComponent(ctx, scenes);
+	const overlay = ctx.ui.showOverlay(component, {
+		width: "100%",
+		maxHeight: "100%",
+		anchor: "top-left",
+		margin: 0,
+		fullscreen: true,
+	});
 	try {
 		await component.run();
 		if (options.markComplete !== false) {
 			await markSetupWizardComplete(ctx.settings);
 		}
 	} finally {
-		await component.disposeAsync();
+		component.dispose();
+		ctx.ui.setFocus(component);
+		overlay.hide();
 	}
 	if (options.playWelcomeIntro !== false) {
 		ctx.playWelcomeIntro();

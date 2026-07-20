@@ -1,140 +1,107 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
-import {
-	HookInputComponent,
-	makeHookInputModel,
-	type HookInputModel,
-	type HookInputMsg,
-	updateHookInput,
-} from "@oh-my-pi/pi-coding-agent/modes/components/hook-input";
+
+import { HookInputComponent } from "@oh-my-pi/pi-coding-agent/modes/components/hook-input";
 import { getThemeByName, setThemeInstance } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
+import type { TUI } from "@oh-my-pi/pi-tui";
 
 beforeAll(async () => {
-	const loadedTheme = await getThemeByName("dark");
-	if (!loadedTheme) throw new Error("Failed to load dark theme for tests");
-	setThemeInstance(loadedTheme);
+	const theme = await getThemeByName("dark");
+	if (!theme) {
+		throw new Error("Failed to load dark theme for tests");
+	}
+	setThemeInstance(theme);
 });
+describe("HookInputComponent timeout", () => {
+	afterEach(() => {
+		vi.useRealTimers();
+	});
 
-afterEach(() => {
-	vi.useRealTimers();
-});
-
-interface InputTimeoutRoute {
-	model: HookInputModel;
-	readonly component: HookInputComponent;
-	readonly submitted: string[];
-	cancelled: number;
-	readonly timedOut: number;
-	dispatch(message: HookInputMsg): void;
-	append(value: string): void;
-	submit(): void;
-}
-
-function createInputTimeoutRoute(timeout: number): InputTimeoutRoute {
-	let model = makeHookInputModel("Prompt");
-	const component = new HookInputComponent(model);
-	const submitted: string[] = [];
-	let cancelled = 0;
-	let timedOut = 0;
-	let timer: ReturnType<typeof setTimeout> | undefined;
-	const armTimeout = (): void => {
-		if (timer !== undefined) clearTimeout(timer);
-		timer = setTimeout(() => {
-			timer = undefined;
-			timedOut++;
-			const transition = updateHookInput(model, { _tag: "Back" });
-			model = transition.model;
-			component.apply(model);
-			for (const command of transition.commands) {
-				if (command._tag === "Cancel") cancelled++;
-			}
-		}, timeout);
-	};
-	const dispatch = (message: HookInputMsg): void => {
-		const transition = updateHookInput(model, message);
-		model = transition.model;
-		component.apply(model);
-		if (message._tag === "ValueChanged") armTimeout();
-		for (const command of transition.commands) {
-			switch (command._tag) {
-				case "Resolve":
-					submitted.push(command.value);
-					if (timer !== undefined) clearTimeout(timer);
-					timer = undefined;
-					break;
-				case "Cancel":
-					cancelled++;
-					if (timer !== undefined) clearTimeout(timer);
-					timer = undefined;
-					break;
-			}
-		}
-	};
-	armTimeout();
-	return {
-		get model() {
-			return model;
-		},
-		component,
-		submitted,
-		get cancelled() {
-			return cancelled;
-		},
-		get timedOut() {
-			return timedOut;
-		},
-		dispatch,
-		append: value => dispatch({ _tag: "ValueChanged", value: model.value + value }),
-		submit: () => dispatch({ _tag: "Submit" }),
-	};
-}
-
-describe("Hook input route timeout", () => {
 	it("resets timeout on user activity and still expires when idle", () => {
 		vi.useFakeTimers();
-		const route = createInputTimeoutRoute(1_000);
+
+		const onSubmit = vi.fn();
+		const onCancel = vi.fn();
+		const onTimeout = vi.fn();
+		const tui = { requestRender: vi.fn() } as unknown as TUI;
+
+		const component = new HookInputComponent("Prompt", undefined, onSubmit, onCancel, {
+			timeout: 1_000,
+			tui,
+			onTimeout,
+		});
 
 		vi.advanceTimersByTime(900);
-		route.append("a");
+		component.handleInput("a");
 
 		vi.advanceTimersByTime(900);
-		route.append("");
+		component.handleInput("\x7f");
 
 		vi.advanceTimersByTime(900);
-		expect(route.timedOut).toBe(0);
-		expect(route.cancelled).toBe(0);
+		expect(onTimeout).not.toHaveBeenCalled();
+		expect(onCancel).not.toHaveBeenCalled();
 
 		vi.advanceTimersByTime(200);
-		expect(route.timedOut).toBe(1);
-		expect(route.cancelled).toBe(1);
+		expect(onTimeout).toHaveBeenCalledTimes(1);
+		expect(onCancel).toHaveBeenCalledTimes(1);
+
+		component.dispose();
 	});
 
 	it("preserves submit behavior", () => {
 		vi.useFakeTimers();
-		const route = createInputTimeoutRoute(1_000);
 
-		route.append("h");
-		route.append("i");
-		route.submit();
+		const onSubmit = vi.fn();
+		const onCancel = vi.fn();
+		const onTimeout = vi.fn();
+		const tui = { requestRender: vi.fn() } as unknown as TUI;
 
-		expect(route.submitted).toEqual(["hi"]);
-		expect(route.cancelled).toBe(0);
-		expect(route.timedOut).toBe(0);
+		const component = new HookInputComponent("Prompt", undefined, onSubmit, onCancel, {
+			timeout: 1_000,
+			tui,
+			onTimeout,
+		});
+
+		component.handleInput("h");
+		component.handleInput("i");
+		component.handleInput("\n");
+
+		expect(onSubmit).toHaveBeenCalledTimes(1);
+		expect(onSubmit).toHaveBeenCalledWith("hi");
+		expect(onCancel).not.toHaveBeenCalled();
+		expect(onTimeout).not.toHaveBeenCalled();
+
+		component.dispose();
 	});
 
-	it("absorbs enhanced-paste payloads through the hook paste route and resets the timeout", () => {
+	it("absorbs enhanced-paste payloads via pasteText and resets the timeout", () => {
+		// Regression: enhanced-paste (kitty OSC 5522) focus routing only targets
+		// components exposing a `pasteText` hook; without one the payload landed
+		// in the hidden main prompt behind the dialog (#2127 contract).
 		vi.useFakeTimers();
-		const route = createInputTimeoutRoute(1_000);
+
+		const onSubmit = vi.fn();
+		const onCancel = vi.fn();
+		const onTimeout = vi.fn();
+		const tui = { requestRender: vi.fn() } as unknown as TUI;
+
+		const component = new HookInputComponent("Prompt", undefined, onSubmit, onCancel, {
+			timeout: 1_000,
+			tui,
+			onTimeout,
+		});
 
 		vi.advanceTimersByTime(900);
-		route.append("sk-line1sk-line2");
+		component.pasteText("sk-line1\nsk-line2");
 
 		vi.advanceTimersByTime(900);
-		expect(route.timedOut).toBe(0);
-		expect(route.cancelled).toBe(0);
+		expect(onTimeout).not.toHaveBeenCalled();
+		expect(onCancel).not.toHaveBeenCalled();
 
-		route.submit();
+		component.handleInput("\n");
 
-		expect(route.submitted).toEqual(["sk-line1sk-line2"]);
-		expect(route.cancelled).toBe(0);
+		expect(onSubmit).toHaveBeenCalledTimes(1);
+		expect(onSubmit).toHaveBeenCalledWith("sk-line1sk-line2");
+
+		component.dispose();
 	});
 });

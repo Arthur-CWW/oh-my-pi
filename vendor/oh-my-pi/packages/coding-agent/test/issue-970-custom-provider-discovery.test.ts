@@ -6,19 +6,13 @@ import { stripVTControlCharacters } from "node:util";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { writeModelCache } from "@oh-my-pi/pi-catalog/model-cache";
 import type { ProviderDiscoveryState } from "@oh-my-pi/pi-coding-agent/config/model-availability";
-import { KeybindingsManager } from "@oh-my-pi/pi-coding-agent/config/keybindings";
 import type { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { ModelRegistry as ModelRegistryImpl } from "@oh-my-pi/pi-coding-agent/config/model-registry";
-import { MVU_KEYMAP_TABLES } from "@oh-my-pi/pi-coding-agent/config/mvu-keybindings";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { ModelSelectorComponent } from "@oh-my-pi/pi-coding-agent/modes/components/model-selector";
-import { makeTerminalInputAdapter } from "@oh-my-pi/pi-coding-agent/modes/mvu/input-adapter";
-import { compileKeymapRegistry } from "@oh-my-pi/pi-coding-agent/modes/mvu/keymap-registry";
-import { mountMvuRuntime } from "@oh-my-pi/pi-coding-agent/modes/mvu/runtime";
 import { getThemeByName, setThemeInstance } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import type { TUI } from "@oh-my-pi/pi-tui";
-import { Effect, Exit, Scope, SubscriptionRef } from "effect";
 import { Snowflake } from "@oh-my-pi/pi-utils";
 
 function normalizeRenderedText(text: string): string {
@@ -33,83 +27,6 @@ function installTestTheme(): void {
 	}
 	setThemeInstance(testTheme);
 }
-
-type SelectorDriver = {
-	readonly press: (sequence: string) => Promise<void>;
-	readonly close: () => Promise<void>;
-};
-
-const selectorDrivers = new WeakMap<ModelSelectorComponent, SelectorDriver>();
-const activeSelectorDrivers = new Set<SelectorDriver>();
-
-const runIn = <A, E>(scope: Scope.Scope, effect: Effect.Effect<A, E, Scope.Scope>): Promise<A> =>
-	Effect.runPromise(Scope.provide(scope)(effect));
-
-async function makeSelectorDriver(
-	selector: ModelSelectorComponent,
-	keybindings: KeybindingsManager,
-): Promise<SelectorDriver> {
-	const spec = selector.mountSpec;
-	const adapter = makeTerminalInputAdapter();
-	const keymap = Effect.runSync(compileKeymapRegistry(MVU_KEYMAP_TABLES, keybindings));
-	const scope = Scope.makeUnsafe("sequential");
-	const runtime = await runIn(
-		scope,
-		mountMvuRuntime({
-			componentId: spec.componentId,
-			initialModel: spec.initialModel,
-			update: spec.update,
-			interpret: spec.interpret,
-			boundary: spec.boundary,
-			inputCapacity: 16,
-			messageCapacity: 16,
-			commandCapacity: 16,
-		}),
-	);
-	let closed = false;
-	const driver: SelectorDriver = {
-		press: async sequence => {
-			const event = adapter.decode(sequence);
-			if (event === undefined || (event._tag !== "Press" && event._tag !== "Release")) {
-				throw new Error(`Expected a decoded key event for ${JSON.stringify(sequence)}`);
-			}
-			const model = await runIn(scope, SubscriptionRef.get(runtime.model));
-			const action = keymap.resolve(spec.route.context(model), event.key);
-			if (action === undefined) throw new Error(`Unmapped model selector key ${JSON.stringify(sequence)}`);
-			const envelope = spec.route.actionToMsg(action, event);
-			if (envelope === undefined) throw new Error(`Unmapped model selector action ${String(action)}`);
-			await runIn(scope, runtime.dispatch(envelope));
-			await runIn(scope, Effect.sleep("10 millis"));
-		},
-		close: async () => {
-			if (closed) return;
-			closed = true;
-			await Effect.runPromise(Scope.close(scope, Exit.void));
-		},
-	};
-	activeSelectorDrivers.add(driver);
-	return driver;
-}
-
-async function dispatchSelector(
-	selector: ModelSelectorComponent,
-	sequence: string,
-	keybindings = KeybindingsManager.inMemory(),
-): Promise<void> {
-	let driver = selectorDrivers.get(selector);
-	if (driver === undefined) {
-		driver = await makeSelectorDriver(selector, keybindings);
-		selectorDrivers.set(selector, driver);
-	}
-	await driver.press(sequence);
-}
-
-async function closeSelectorDrivers(): Promise<void> {
-	const drivers = [...activeSelectorDrivers];
-	activeSelectorDrivers.clear();
-	await Promise.all(drivers.map(driver => driver.close()));
-}
-
 
 async function createSelector(state: ProviderDiscoveryState): Promise<ModelSelectorComponent> {
 	const modelRegistry = {
@@ -139,8 +56,10 @@ async function createSelector(state: ProviderDiscoveryState): Promise<ModelSelec
 		() => {},
 		() => {},
 	);
-	await dispatchSelector(selector, "\x1b[C");
-	await dispatchSelector(selector, "\x1b[C");
+	await Bun.sleep(0);
+	installTestTheme();
+	selector.handleInput("\x1b[C");
+	selector.handleInput("\x1b[C");
 	await Bun.sleep(0);
 	return selector;
 }
@@ -164,9 +83,8 @@ describe("issue #970 custom provider discovery", () => {
 		authStorage = await AuthStorage.create(path.join(tempDir, "auth.db"));
 	});
 
-	afterEach(async () => {
-		await closeSelectorDrivers();
-		await authStorage.close();
+	afterEach(() => {
+		authStorage.close();
 		if (tempDir && fs.existsSync(tempDir)) {
 			fs.rmSync(tempDir, { recursive: true });
 		}

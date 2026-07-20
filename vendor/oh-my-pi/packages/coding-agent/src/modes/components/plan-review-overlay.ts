@@ -23,7 +23,7 @@ import {
 	Markdown,
 	type MarkdownTheme,
 	matchesKey,
-	type SgrMouseEvent,
+	parseSgrMouse,
 	ScrollView,
 	truncateToWidth,
 	visibleWidth,
@@ -36,14 +36,7 @@ import {
 	matchesSelectUp,
 } from "../utils/keybinding-matchers";
 import { editorKey } from "./keybinding-hints";
-import { makeComponentId, type KeyEvent, type RouteStamp } from "../mvu/schema";
 import type { HookSelectorSlider } from "./hook-selector";
-import {
-	makeSurfaceModalModel,
-	type SurfaceModalModel,
-	type SurfaceModalMsg,
-	updateSurfaceModal,
-} from "./plugin-settings";
 import {
 	bottomBorder,
 	divider,
@@ -91,7 +84,7 @@ export interface PlanReviewOverlayCallbacks {
 	/** Invoked on UI dismiss / cancel. */
 	onCancel: () => void;
 	/** Invoked when the external-editor key is pressed (overlay stays open). */
-	onExternalEditor?: () => void | Promise<string | null>;
+	onExternalEditor?: () => void;
 	/** Invoked when the external-editor key edits the active annotation draft. */
 	onAnnotationExternalEditor?: (draft: string, commit: (text: string | null) => void) => void;
 	/** Invoked with the new full plan text after an in-overlay delete/undo. */
@@ -116,554 +109,10 @@ export interface PlanReviewOverlayOptions {
 	externalEditorLabel?: string;
 }
 
-export interface PlanModalInit {
-	readonly planContent?: string;
-	readonly options?: readonly string[];
-	readonly disabledIndices?: readonly number[];
-	readonly initialIndex?: number;
-	readonly sliderIndex?: number;
-	readonly sliderSegmentCount?: number;
-}
-
-export const PLAN_REVIEW_ROUTE = {
-	componentId: makeComponentId("plan-review"),
-	context: "modal.plan-review",
-	makeInitialModel: (init: PlanModalInit = {}) => makePlanModalModel(init),
-	update: updatePlanModal,
-} as const;
-
-export type PlanModalRegion = "toc" | "body" | "actions" | "annotation";
-export type PlanModalLayer = { readonly _tag: "Annotation"; readonly sectionId: string };
-export interface PlanModalModel extends SurfaceModalModel<PlanModalRegion, PlanModalLayer> {
-	readonly sectionId?: string;
-	readonly annotationDraft: string;
-	readonly annotations: Readonly<Record<string, readonly string[]>>;
-	readonly planContent: string;
-	readonly options: readonly string[];
-	readonly disabledIndices: readonly number[];
-	readonly sliderSegmentCount: number;
-	readonly selectedIndex: number;
-	readonly tocCursor: number;
-	readonly scrollOffset: number;
-	readonly sliderIndex: number;
-	readonly hoveredOption?: number;
-	readonly annotating: boolean;
-	readonly deleted: readonly string[];
-	readonly undo: readonly UndoEntry[];
-	readonly pendingScrollToToc: boolean;
-	readonly feedback: string;
-	readonly settled: boolean;
-	readonly revision: number;
-	readonly sourceRevision: number;
-	readonly requestGeneration: number;
-	readonly leaseGeneration?: number;
-}
-export type PlanReviewHit =
-	| { readonly _tag: "Option"; readonly index: number }
-	| { readonly _tag: "Toc"; readonly position: number; readonly scrollOffset: number }
-	| { readonly _tag: "Body" }
-	| { readonly _tag: "None" };
-export type PlanPointerMsg =
-	| { readonly _tag: "PointerScroll"; readonly delta: -3 | 3 }
-	| { readonly _tag: "PointerClick"; readonly hit: PlanReviewHit }
-	| { readonly _tag: "PointerHover"; readonly optionIndex?: number }
-	| { readonly _tag: "PointerObserved" };
-export type PlanModalMsg =
-	| SurfaceModalMsg<PlanModalRegion, PlanModalLayer>
-	| { readonly _tag: "Input"; readonly event: KeyEvent }
-	| { readonly _tag: "BeginAnnotation"; readonly sectionId: string }
-	| { readonly _tag: "EditAnnotation"; readonly value: string }
-	| { readonly _tag: "CommitAnnotation" }
-	| { readonly _tag: "Pick"; readonly label: string }
-	| { readonly _tag: "ExternalEditor" }
-	| { readonly _tag: "ReplacePlan"; readonly content: string }
-	| PlanPointerMsg;
-export type PlanModalCommand =
-	| { readonly _tag: "CloseRequested"; readonly stamp?: RouteStamp }
-	| { readonly _tag: "PickRequested"; readonly label: string; readonly stamp?: RouteStamp }
-	| {
-			readonly _tag: "FeedbackChanged";
-			readonly sectionId: string;
-			readonly annotations: readonly string[];
-			readonly feedback?: string;
-			readonly stamp?: RouteStamp;
-	  }
-	| { readonly _tag: "PlanEdited"; readonly content: string; readonly stamp?: RouteStamp }
-	| { readonly _tag: "SliderChanged"; readonly index: number; readonly stamp?: RouteStamp }
-	| { readonly _tag: "ExternalEditorRequested"; readonly annotationDraft?: string; readonly stamp?: RouteStamp };
-
-const planToc = (content: string): number[] => {
-	const sections = parsePlanSections(content);
-	const headings: number[] = [];
-	for (let index = 0; index < sections.length; index++) {
-		if (sections[index]!.level >= 1) headings.push(index);
-	}
-	if (headings.length === 0) return headings;
-	let minimum = Number.POSITIVE_INFINITY;
-	for (const index of headings) minimum = Math.min(minimum, sections[index]!.level);
-	const topLevel = headings.filter(index => sections[index]!.level === minimum);
-	const titleIndex = topLevel.length === 1 && headings[0] === topLevel[0] ? topLevel[0] : -1;
-	return headings.filter(index => index !== titleIndex);
-};
-
-const coercePlanIndex = (
-	options: readonly string[],
-	disabledIndices: readonly number[],
-	index: number,
-): number => {
-	if (options.length === 0) return -1;
-	const disabled = new Set(disabledIndices);
-	const clamped = Math.max(0, Math.min(index, options.length - 1));
-	if (!disabled.has(clamped)) return clamped;
-	for (let next = clamped + 1; next < options.length; next++) if (!disabled.has(next)) return next;
-	for (let next = clamped - 1; next >= 0; next--) if (!disabled.has(next)) return next;
-	return clamped;
-};
-
-const movePlanIndex = (model: PlanModalModel, delta: -1 | 1): number => {
-	const disabled = new Set(model.disabledIndices);
-	let index = model.selectedIndex;
-	while (index >= 0) {
-		const next = Math.max(0, Math.min(index + delta, model.options.length - 1));
-		if (next === index) return index;
-		index = next;
-		if (!disabled.has(index)) return index;
-	}
-	return index;
-};
-
-const markdownFenceFor = (text: string): string => {
-	let fence = "```";
-	while (text.includes(fence)) fence += "`";
-	return fence;
-};
-
-const planFeedback = (
-	content: string,
-	annotations: Readonly<Record<string, readonly string[]>>,
-	deleted: readonly string[],
-): string => {
-	const sections = parsePlanSections(content);
-	if (deleted.length === 0 && Object.values(annotations).every(notes => notes.length === 0)) return "";
-	let feedback = "Refinement feedback on the plan:\n";
-	if (deleted.length > 0) {
-		feedback += "\nRemove these sections:\n";
-		for (const title of deleted) feedback += `- ${title}\n`;
-	}
-	for (let index = 0; index < sections.length; index++) {
-		const section = sections[index]!;
-		const notes = annotations[String(index)] ?? [];
-		if (section.level < 1 || notes.length === 0) continue;
-		feedback += `\n## ${section.title}\n`;
-		for (const note of notes) {
-			if (!note.includes("\n")) feedback += `- ${note}\n`;
-			else {
-				const fence = markdownFenceFor(note);
-				feedback += `${fence}md\n${note}\n${fence}\n`;
-			}
-		}
-	}
-	return feedback;
-};
-
-const defaultPlanModalProjection = {
-	planContent: "",
-	options: [] as readonly string[],
-	disabledIndices: [] as readonly number[],
-	sliderSegmentCount: 0,
-	selectedIndex: -1,
-	tocCursor: 0,
-	scrollOffset: 0,
-	sliderIndex: 0,
-	annotating: false,
-	deleted: [] as readonly string[],
-	undo: [] as readonly UndoEntry[],
-	pendingScrollToToc: false,
-	feedback: "",
-	settled: false,
-	revision: 0,
-	sourceRevision: 0,
-	requestGeneration: 0,
-} as const;
-
-export const makePlanModalModel = (init: PlanModalInit = {}): PlanModalModel => {
-	const options = init.options ?? defaultPlanModalProjection.options;
-	const disabledIndices = (init.disabledIndices ?? []).filter(
-		index => Number.isInteger(index) && index >= 0 && index < options.length,
-	);
-	const sliderSegmentCount = Math.max(0, init.sliderSegmentCount ?? 0);
-	return {
-		...makeSurfaceModalModel<PlanModalRegion, PlanModalLayer>("actions"),
-		annotationDraft: "",
-		annotations: {},
-		...defaultPlanModalProjection,
-		planContent: init.planContent ?? "",
-		options,
-		disabledIndices,
-		sliderSegmentCount,
-		selectedIndex: coercePlanIndex(options, disabledIndices, init.initialIndex ?? 0),
-		sliderIndex:
-			sliderSegmentCount === 0 ? 0 : Math.max(0, Math.min(init.sliderIndex ?? 0, sliderSegmentCount - 1)),
-	};
-};
-
-const inputText = (event: KeyEvent): string | undefined =>
-	event._tag === "Paste" ? event.text : event._tag === "Press" ? event.text : undefined;
-
-const cyclePlanRegion = (model: PlanModalModel, delta: -1 | 1): PlanModalModel => {
-	const regions: readonly PlanModalRegion[] =
-		planToc(model.planContent).length > 0 ? ["toc", "body", "actions"] : ["body", "actions"];
-	const current = regions.indexOf(model.region);
-	const base = current < 0 ? regions.length - 1 : current;
-	return { ...model, region: regions[(base + delta + regions.length) % regions.length]!, focusIndex: 0 };
-};
-
-function updatePlanInput(
-	model: PlanModalModel,
-	event: KeyEvent,
-): { readonly model: PlanModalModel; readonly commands: readonly PlanModalCommand[] } {
-	if (event._tag === "Resize" || event._tag === "Release") return { model, commands: [] };
-	const key = event._tag === "Press" ? String(event.key) : "";
-	const text = inputText(event);
-	if (model.region === "annotation") {
-		if (key === "enter" || key === "return") return updatePlanModal(model, { _tag: "CommitAnnotation" });
-		if (key === "backspace") {
-			return updatePlanModal(model, { _tag: "EditAnnotation", value: model.annotationDraft.slice(0, -1) });
-		}
-		if (text !== undefined && text.length > 0) {
-			return updatePlanModal(model, { _tag: "EditAnnotation", value: model.annotationDraft + text });
-		}
-		return { model, commands: [] };
-	}
-	if (key === "tab") return { model: cyclePlanRegion(model, 1), commands: [] };
-	if (key === "shift+tab") return { model: cyclePlanRegion(model, -1), commands: [] };
-	if (model.region === "actions") {
-		if (key === "left" || text === "h") {
-			const sliderIndex = Math.max(0, model.sliderIndex - 1);
-			return sliderIndex === model.sliderIndex
-				? { model, commands: [] }
-				: { model: { ...model, sliderIndex }, commands: [{ _tag: "SliderChanged", index: sliderIndex }] };
-		}
-		if (key === "right" || text === "l") {
-			const sliderIndex = Math.min(Math.max(0, model.sliderSegmentCount - 1), model.sliderIndex + 1);
-			return sliderIndex === model.sliderIndex
-				? { model, commands: [] }
-				: { model: { ...model, sliderIndex }, commands: [{ _tag: "SliderChanged", index: sliderIndex }] };
-		}
-		if (key === "up" || text === "k") {
-			const selectedIndex = movePlanIndex(model, -1);
-			return {
-				model:
-					selectedIndex === model.selectedIndex && planToc(model.planContent).length > 0
-						? { ...model, region: "body" }
-						: { ...model, selectedIndex },
-				commands: [],
-			};
-		}
-		if (key === "down" || text === "j") {
-			return { model: { ...model, selectedIndex: movePlanIndex(model, 1) }, commands: [] };
-		}
-		if (key === "enter" || key === "return") {
-			const label = model.options[model.selectedIndex];
-			return label === undefined || model.disabledIndices.includes(model.selectedIndex)
-				? { model, commands: [] }
-				: updatePlanModal(model, { _tag: "Pick", label });
-		}
-	}
-	if (model.region === "body") {
-		if (key === "left" || text === "h") {
-			return planToc(model.planContent).length === 0 ? { model, commands: [] } : { model: { ...model, region: "toc" }, commands: [] };
-		}
-		if (key === "right" || key === "enter" || key === "return" || text === "l") {
-			return { model: { ...model, region: "actions" }, commands: [] };
-		}
-		if (key === "up" || text === "k") {
-			return { model: { ...model, scrollOffset: Math.max(0, model.scrollOffset - 1) }, commands: [] };
-		}
-		if (key === "down" || text === "j") {
-			return { model: { ...model, scrollOffset: model.scrollOffset + 1 }, commands: [] };
-		}
-	}
-	if (model.region === "toc") {
-		const toc = planToc(model.planContent);
-		if (key === "up" || text === "k") {
-			return { model: { ...model, tocCursor: Math.max(0, model.tocCursor - 1), pendingScrollToToc: true }, commands: [] };
-		}
-		if (key === "down" || text === "j") {
-			return model.tocCursor >= toc.length - 1
-				? { model: { ...model, region: "actions" }, commands: [] }
-				: { model: { ...model, tocCursor: model.tocCursor + 1, pendingScrollToToc: true }, commands: [] };
-		}
-		if (key === "right" || key === "enter" || key === "return" || text === "l") {
-			return { model: { ...model, region: "body" }, commands: [] };
-		}
-		if (text === "a") {
-			const sectionIndex = toc[model.tocCursor];
-			return sectionIndex === undefined
-				? { model, commands: [] }
-				: updatePlanModal(model, { _tag: "BeginAnnotation", sectionId: String(sectionIndex) });
-		}
-		if (text === "d" || key === "delete") {
-			const sectionIndex = toc[model.tocCursor];
-			if (sectionIndex === undefined) return { model, commands: [] };
-			const sections = parsePlanSections(model.planContent);
-			const span = sectionDeletionSpan(sections, sectionIndex);
-			if (span.length === 0) return { model, commands: [] };
-			const removed = new Set(span);
-			const undo: UndoEntry = {
-				text: model.planContent,
-				annotations: sections.map((_, index) => [...(model.annotations[String(index)] ?? [])]),
-				deleted: [...model.deleted],
-			};
-			const annotations: Record<string, readonly string[]> = {};
-			let nextIndex = 0;
-			for (let index = 0; index < sections.length; index++) {
-				if (removed.has(index)) continue;
-				const notes = model.annotations[String(index)];
-				if (notes !== undefined) annotations[String(nextIndex)] = notes;
-				nextIndex++;
-			}
-			const deleted = [
-				...model.deleted,
-				...span.map(index => sections[index]!).filter(section => section.level >= 1 && section.title).map(section => section.title),
-			];
-			const content = joinPlanSections(sections.filter((_, index) => !removed.has(index)));
-			const feedback = planFeedback(content, annotations, deleted);
-			const next = {
-				...model,
-				planContent: content,
-				annotations,
-				deleted,
-				undo: [...model.undo, undo],
-				tocCursor: Math.min(model.tocCursor, Math.max(0, planToc(content).length - 1)),
-				pendingScrollToToc: true,
-				feedback,
-			};
-			return {
-				model: next,
-				commands: [
-					{ _tag: "PlanEdited", content },
-					{ _tag: "FeedbackChanged", sectionId: "", annotations: [], feedback },
-				],
-			};
-		}
-		if (text === "u") {
-			const undo = model.undo.at(-1);
-			if (undo === undefined) return { model, commands: [] };
-			const annotations: Record<string, readonly string[]> = {};
-			for (let index = 0; index < undo.annotations.length; index++) {
-				const notes = undo.annotations[index];
-				if (notes !== undefined && notes.length > 0) annotations[String(index)] = notes;
-			}
-			const feedback = planFeedback(undo.text, annotations, undo.deleted);
-			return {
-				model: {
-					...model,
-					planContent: undo.text,
-					annotations,
-					deleted: undo.deleted,
-					undo: model.undo.slice(0, -1),
-					tocCursor: Math.min(model.tocCursor, Math.max(0, planToc(undo.text).length - 1)),
-					pendingScrollToToc: true,
-					feedback,
-				},
-				commands: [
-					{ _tag: "PlanEdited", content: undo.text },
-					{ _tag: "FeedbackChanged", sectionId: "", annotations: [], feedback },
-				],
-			};
-		}
-	}
-	if (key === "pageUp") return { model: { ...model, scrollOffset: Math.max(0, model.scrollOffset - 10) }, commands: [] };
-	if (key === "pageDown") return { model: { ...model, scrollOffset: model.scrollOffset + 10 }, commands: [] };
-	if (key === "home" || text === "g") return { model: { ...model, scrollOffset: 0 }, commands: [] };
-	if (key === "end" || text === "G") return { model: { ...model, scrollOffset: Number.MAX_SAFE_INTEGER }, commands: [] };
-	return { model, commands: [] };
-}
-
-export function updatePlanModal(
-	model: PlanModalModel,
-	msg: PlanModalMsg,
-): { readonly model: PlanModalModel; readonly commands: readonly PlanModalCommand[] } {
-	switch (msg._tag) {
-		case "PointerScroll":
-			return {
-				model: { ...model, scrollOffset: Math.max(0, model.scrollOffset + msg.delta) },
-				commands: [],
-			};
-		case "PointerHover": {
-			const hoveredOption =
-				msg.optionIndex !== undefined &&
-				msg.optionIndex >= 0 &&
-				msg.optionIndex < model.options.length &&
-				!model.disabledIndices.includes(msg.optionIndex)
-					? msg.optionIndex
-					: undefined;
-			return {
-				model: hoveredOption === model.hoveredOption ? model : { ...model, hoveredOption },
-				commands: [],
-			};
-		}
-		case "PointerClick":
-			switch (msg.hit._tag) {
-				case "Option": {
-					const index = msg.hit.index;
-					const label = model.options[index];
-					if (label === undefined || model.disabledIndices.includes(index) || model.settled) {
-						return { model, commands: [] };
-					}
-					return updatePlanModal(
-						{ ...model, region: "actions", focusIndex: 0, selectedIndex: index },
-						{ _tag: "Pick", label },
-					);
-				}
-				case "Toc":
-					if (msg.hit.position < 0 || msg.hit.position >= planToc(model.planContent).length) {
-						return { model, commands: [] };
-					}
-					return {
-						model: {
-							...model,
-							region: "toc",
-							focusIndex: 0,
-							tocCursor: msg.hit.position,
-							scrollOffset: Math.max(0, msg.hit.scrollOffset),
-							pendingScrollToToc: false,
-						},
-						commands: [],
-					};
-				case "Body":
-					return { model: { ...model, region: "body", focusIndex: 0 }, commands: [] };
-				case "None":
-					return { model, commands: [] };
-			}
-		case "PointerObserved":
-			return { model, commands: [] };
-		case "Input":
-			return updatePlanInput(model, msg.event);
-		case "ReplacePlan":
-			return {
-				model: {
-					...model,
-					planContent: msg.content,
-					annotations: {},
-					deleted: [],
-					undo: [],
-					tocCursor: 0,
-					scrollOffset: 0,
-					pendingScrollToToc: false,
-					feedback: "",
-					sourceRevision: model.sourceRevision + 1,
-				},
-				commands: [{ _tag: "FeedbackChanged", sectionId: "", annotations: [], feedback: "" }],
-			};
-		case "BeginAnnotation":
-			return {
-				model: {
-					...model,
-					sectionId: msg.sectionId,
-					annotationDraft: "",
-					annotating: true,
-					region: "annotation",
-					focusIndex: 0,
-					depth: [
-						...model.depth,
-						{
-							layer: { _tag: "Annotation", sectionId: msg.sectionId },
-							returnRegion: model.region,
-							returnFocusIndex: model.focusIndex,
-						},
-					],
-				},
-				commands: [],
-			};
-		case "EditAnnotation":
-			return { model: { ...model, annotationDraft: msg.value }, commands: [] };
-		case "CommitAnnotation": {
-			if (!model.sectionId) return { model, commands: [] };
-			const sectionId = model.sectionId;
-			const value = model.annotationDraft.trim();
-			const annotations =
-				value.length === 0
-					? model.annotations[sectionId] ?? []
-					: [...(model.annotations[sectionId] ?? []), value];
-			const nextAnnotations = { ...model.annotations, [sectionId]: annotations };
-			const backed = updateSurfaceModal(model, { _tag: "Back" });
-			const feedback = planFeedback(model.planContent, nextAnnotations, model.deleted);
-			return {
-				model: {
-					...model,
-					...backed.model,
-					sectionId: undefined,
-					annotationDraft: "",
-					annotating: false,
-					annotations: nextAnnotations,
-					feedback,
-				},
-				commands: [{ _tag: "FeedbackChanged", sectionId, annotations, feedback }],
-			};
-		}
-		case "Pick":
-			if (model.settled) return { model, commands: [] };
-			return {
-				model: { ...model, settled: true, requestGeneration: model.requestGeneration + 1 },
-				commands: [{ _tag: "PickRequested", label: msg.label }],
-			};
-		case "ExternalEditor":
-			return {
-				model: { ...model, requestGeneration: model.requestGeneration + 1 },
-				commands: [
-					model.region === "annotation"
-						? { _tag: "ExternalEditorRequested", annotationDraft: model.annotationDraft }
-						: { _tag: "ExternalEditorRequested" },
-				],
-			};
-		case "Back": {
-			if (model.region === "annotation") {
-				const transition = updateSurfaceModal(model, msg);
-				return {
-					model: {
-						...model,
-						...transition.model,
-						sectionId: undefined,
-						annotationDraft: "",
-						annotating: false,
-					},
-					commands: [],
-				};
-			}
-			if (model.settled) return { model, commands: [] };
-			const transition = updateSurfaceModal(model, msg);
-			return {
-				model: { ...model, ...transition.model, settled: transition.commands.length > 0 },
-				commands: transition.commands,
-			};
-		}
-		default: {
-			const transition = updateSurfaceModal(model, msg);
-			return { model: { ...model, ...transition.model }, commands: transition.commands };
-		}
-	}
-}
-
-/** Idempotent adapter for the Promise/callback boundary owned by the parent controller. */
-export function createPlanReviewSettlement<Result>(
-	onSettle: (result: Result | undefined) => void,
-): (result: Result | undefined) => boolean {
-	let settled = false;
-	return result => {
-		if (settled) return false;
-		settled = true;
-		onSettle(result);
-		return true;
-	};
-}
-
 export class PlanReviewOverlay implements Component {
 	#mdTheme: MarkdownTheme;
 	#scrollView: ScrollView;
 	#sections: OverlaySection[] = [];
-	#planContent = "";
 	#toc: number[] = [];
 	/** Shallowest level among ToC entries, used to flatten indentation. */
 	#tocBaseLevel = 1;
@@ -698,9 +147,7 @@ export class PlanReviewOverlay implements Component {
 	#hoveredOption: number | undefined;
 
 	#annotating = false;
-	#feedback = "";
 	#input: Input;
-	#settled = false;
 
 	constructor(
 		planContent: string,
@@ -734,34 +181,6 @@ export class PlanReviewOverlay implements Component {
 		this.#setSections(planContent);
 	}
 
-	/** Apply one committed runtime model. Rendering never owns or advances modal state. */
-	apply(model: PlanModalModel): void {
-		if (this.#planContent !== model.planContent) this.#setSections(model.planContent);
-		this.#options = [...model.options];
-		this.#disabled = new Set(model.disabledIndices);
-		this.#selectedIndex = model.selectedIndex;
-		this.#sliderIndex = model.sliderIndex;
-		this.#tocCursor = Math.min(model.tocCursor, Math.max(0, this.#toc.length - 1));
-		this.#focus = model.region === "annotation" ? "toc" : model.region;
-		this.#annotating = model.region === "annotation";
-		this.#input.setValue(model.annotationDraft);
-		this.#deleted = [...model.deleted];
-		this.#undo = model.undo.map(entry => ({
-			text: entry.text,
-			annotations: entry.annotations.map(notes => [...notes]),
-			deleted: [...entry.deleted],
-		}));
-		this.#feedback = model.feedback;
-		this.#settled = model.settled;
-		this.#hoveredOption = model.hoveredOption;
-		for (let index = 0; index < this.#sections.length; index++) {
-			this.#sections[index]!.annotations = [...(model.annotations[String(index)] ?? [])];
-		}
-		this.#scrollView.setScrollOffset(model.scrollOffset);
-		this.#pendingScrollToToc = model.pendingScrollToToc;
-		this.invalidate();
-	}
-
 	invalidate(): void {
 		for (const section of this.#sections) section.md.invalidate();
 	}
@@ -780,7 +199,6 @@ export class PlanReviewOverlay implements Component {
 	}
 
 	#setSections(planContent: string): void {
-		this.#planContent = planContent;
 		this.#sections = parsePlanSections(planContent).map(section => ({
 			level: section.level,
 			title: section.title,
@@ -855,15 +273,14 @@ export class PlanReviewOverlay implements Component {
 	}
 
 	#confirmSelection(): void {
-		if (this.#settled) return;
 		const index = this.#selectedIndex;
 		if (index >= 0 && index < this.#options.length && !this.#disabled.has(index)) {
-			this.#settled = true;
 			this.callbacks.onPick(this.#options[index]!);
 		}
 	}
 
 	handleInput(keyData: string): void {
+		if (keyData.startsWith("\x1b[<") && this.#handleMouse(keyData)) return;
 		if (this.#annotating) {
 			if (matchesUiDismiss(keyData)) {
 				this.#exitAnnotate();
@@ -879,10 +296,7 @@ export class PlanReviewOverlay implements Component {
 			return;
 		}
 		if (matchesUiDismiss(keyData)) {
-			if (!this.#settled) {
-				this.#settled = true;
-				this.callbacks.onCancel();
-			}
+			this.callbacks.onCancel();
 			return;
 		}
 		if (this.callbacks.onExternalEditor && matchesAppExternalEditor(keyData)) {
@@ -911,39 +325,57 @@ export class PlanReviewOverlay implements Component {
 	}
 
 	/**
-	 * Project pointer geometry from the last render into a semantic message.
-	 * This projection never mutates interactive state; the route reducer owns
-	 * scrolling, focus, selection, hover, and settlement.
+	 * Hit-test an SGR mouse report (`\x1b[<b;x;yM/m`) against the click maps the
+	 * last render recorded. Returns true when consumed. The fullscreen overlay
+	 * paints from screen row 0, so a 1-based mouse row maps directly to the
+	 * rendered-line index. Wheel scrolls the body; pointer motion lights up the
+	 * hovered option row; a left click on an option activates it (select +
+	 * confirm), on a ToC row jumps to that section, and on the body column focuses
+	 * the body.
 	 */
-	pointerMessage(event: SgrMouseEvent): PlanPointerMsg {
+	#handleMouse(data: string): boolean {
+		const event = parseSgrMouse(data);
+		if (!event) return false;
 		if (event.wheel !== null) {
-			return { _tag: "PointerScroll", delta: event.wheel === -1 ? -3 : 3 };
+			// Scroll wheel: three rows per notch.
+			this.#scrollView.scroll(event.wheel * 3);
+			return true;
 		}
-		if (event.release) return { _tag: "PointerObserved" };
+		if (event.release) return true;
 		if (event.motion) {
-			return { _tag: "PointerHover", optionIndex: this.#optionClickRows.get(event.row) };
+			// Motion (hover or drag): light up the option row under the pointer so a
+			// mouse user gets the same affordance the keyboard cursor gives. Any
+			// non-option row clears the highlight.
+			this.#setHoveredOption(this.#optionClickRows.get(event.row));
+			return true;
 		}
-		if (!event.leftClick) return { _tag: "PointerObserved" };
+		if (!event.leftClick) return true;
 		const optionIndex = this.#optionClickRows.get(event.row);
 		if (optionIndex !== undefined) {
-			return { _tag: "PointerClick", hit: { _tag: "Option", index: optionIndex } };
+			if (!this.#disabled.has(optionIndex)) {
+				this.#focus = "actions";
+				this.#selectedIndex = optionIndex;
+				this.#confirmSelection();
+			}
+			return true;
 		}
-		const tocPosition = this.#tocClickRows.get(event.row);
-		if (tocPosition !== undefined && event.col < this.#sidebarClickMaxCol) {
-			const sectionIndex = this.#toc[tocPosition];
-			return {
-				_tag: "PointerClick",
-				hit: {
-					_tag: "Toc",
-					position: tocPosition,
-					scrollOffset: sectionIndex === undefined ? 0 : (this.#sectionOffsets[sectionIndex] ?? 0),
-				},
-			};
+		const tocPos = this.#tocClickRows.get(event.row);
+		if (tocPos !== undefined && event.col < this.#sidebarClickMaxCol) {
+			this.#focus = "toc";
+			this.#tocCursor = tocPos;
+			this.#scrubBodyToToc();
+			return true;
 		}
 		if (this.#bodyClickRows.has(event.row)) {
-			return { _tag: "PointerClick", hit: { _tag: "Body" } };
+			this.#setFocus("body");
 		}
-		return { _tag: "PointerClick", hit: { _tag: "None" } };
+		return true;
+	}
+
+	/** Set the hovered option from a hit-tested row, ignoring disabled rows and
+	 *  non-option rows (both clear the highlight). */
+	#setHoveredOption(index: number | undefined): void {
+		this.#hoveredOption = index !== undefined && !this.#disabled.has(index) ? index : undefined;
 	}
 
 	#cycleRegion(direction: number): void {
@@ -1199,7 +631,7 @@ export class PlanReviewOverlay implements Component {
 		const slider = this.#slider;
 		if (!slider) return [];
 		const active = this.#sliderIndex;
-		const track = renderSegmentTrack([...slider.segments], active);
+		const track = renderSegmentTrack(slider.segments, active);
 		const leftArrow = theme.fg(active > 0 ? "accent" : "dim", "◂");
 		const rightArrow = theme.fg(active < slider.segments.length - 1 ? "accent" : "dim", "▸");
 		const caption = slider.caption ? `${theme.fg("dim", slider.caption)}  ` : "";
@@ -1375,6 +807,7 @@ export class PlanReviewOverlay implements Component {
 			this.#pendingScrollToToc = false;
 			this.#scrubBodyToToc();
 		}
+		if (this.#focus !== "toc") this.#tocCursor = this.#deriveTocCursorFromScroll();
 		const body = this.#scrollView.render(bodyContentWidth);
 
 		this.#optionClickRows.clear();

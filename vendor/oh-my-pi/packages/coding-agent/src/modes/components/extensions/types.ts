@@ -63,6 +63,44 @@ export interface Extension {
 	raw: unknown;
 }
 
+/**
+ * Tree node types for sidebar hierarchy.
+ */
+export type TreeNodeType = "provider" | "kind" | "item";
+
+/**
+ * Sidebar tree node.
+ */
+export interface TreeNode {
+	/** Unique ID */
+	id: string;
+	/** Display label */
+	label: string;
+	/** Node type (provider can be toggled, kind groups items) */
+	type: TreeNodeType;
+	/** Whether this node/provider is enabled */
+	enabled: boolean;
+	/** Whether collapsed */
+	collapsed: boolean;
+	/** Child nodes */
+	children: TreeNode[];
+	/** Extension count (for display) */
+	count?: number;
+}
+
+/**
+ * Flattened tree item for navigation.
+ */
+export interface FlatTreeItem {
+	node: TreeNode;
+	depth: number;
+	index: number;
+}
+
+/**
+ * Focus region in the tabbed dashboard.
+ */
+export type FocusRegion = "tabs" | "list";
 
 /**
  * Provider tab representation.
@@ -78,6 +116,44 @@ export interface ProviderTab {
 	count: number;
 }
 
+/**
+ * Tabbed dashboard state.
+ */
+export interface DashboardState {
+	/** Provider tabs */
+	tabs: ProviderTab[];
+	/** Active tab index */
+	activeTabIndex: number;
+
+	/** All extensions (unfiltered) */
+	extensions: Extension[];
+	/** Extensions filtered by active tab */
+	tabFiltered: Extension[];
+	/** Extensions filtered by search (applied after tab filter) */
+	searchFiltered: Extension[];
+	/** Current search query */
+	searchQuery: string;
+
+	/** Selected index in main list */
+	listIndex: number;
+	/** Scroll offset for main list */
+	scrollOffset: number;
+
+	/** Currently selected extension for inspector */
+	selected: Extension | null;
+}
+
+/**
+ * Callbacks from dashboard to parent.
+ */
+export interface DashboardCallbacks {
+	/** Called when provider is toggled */
+	onProviderToggle: (providerId: string, enabled: boolean) => void;
+	/** Called when extension item is toggled */
+	onExtensionToggle: (extensionId: string, enabled: boolean) => void;
+	/** Called when dashboard is closed */
+	onClose: () => void;
+}
 
 /**
  * Create extension ID from kind and name.

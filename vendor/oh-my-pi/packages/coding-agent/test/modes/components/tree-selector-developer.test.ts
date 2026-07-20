@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it } from "bun:test";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
-import { createSessionTreeRoute, viewSessionTree } from "@oh-my-pi/pi-coding-agent/modes/components/tree-selector";
+import { TreeSelectorComponent } from "@oh-my-pi/pi-coding-agent/modes/components/tree-selector";
 import * as themeModule from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import type { SessionEntry, SessionTreeNode } from "@oh-my-pi/pi-coding-agent/session/session-entries";
 
@@ -18,9 +18,14 @@ function makeMessageNode(message: AgentMessage, parentId: string | null = null, 
 }
 
 function render(tree: SessionTreeNode[], width = 120): string {
-	const route = createSessionTreeRoute(tree, tree[tree.length - 1]?.entry.id ?? null);
-	route.focusedRoot.apply(viewSessionTree(route.initialModel, { offset: 0, height: 60 }));
-	return Bun.stripANSI(route.focusedRoot.render(width).join("\n"));
+	const selector = new TreeSelectorComponent(
+		tree,
+		tree[tree.length - 1]?.entry.id ?? null,
+		60,
+		() => {},
+		() => {},
+	);
+	return Bun.stripANSI(selector.render(width).join("\n"));
 }
 
 describe("TreeSelectorComponent developer message rendering", () => {

@@ -2,7 +2,6 @@ import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { CompactionOutcome } from "@oh-my-pi/pi-agent-core/compaction";
 import type { AssistantMessage, ImageContent, MediaContent, Message, UsageReport } from "@oh-my-pi/pi-ai";
 import type { Component, Container, EditorTheme, Loader, Spacer, Text, TUI } from "@oh-my-pi/pi-tui";
-import type { Scope } from "effect";
 import type { CollabGuestLink } from "../collab/guest";
 import type { CollabHost } from "../collab/host";
 import type { KeybindingsManager } from "../config/keybindings";
@@ -25,7 +24,6 @@ import type { ShakeMode } from "../session/shake-types";
 import type { TuiHostCapabilities } from "../slash-commands/reload-tui";
 import type { LspStartupServerInfo } from "../tools";
 import type { EventBus } from "../utils/event-bus";
-import type { InputLeaseManager } from "./mvu/input-lease";
 import type { AssistantMessageComponent } from "./components/assistant-message";
 import type { BashExecutionComponent } from "./components/bash-execution";
 import type { CustomEditor } from "./components/custom-editor";
@@ -113,9 +111,6 @@ export interface InteractiveModeContext {
 	hookWidgetContainerAbove: Container;
 	hookWidgetContainerBelow: Container;
 	statusLine: StatusLineComponent;
-	/** Shared production MVU owner; setup routes must never construct a second manager or root scope. */
-	readonly mvuInputLeaseManager: InputLeaseManager;
-	readonly mvuScope: Scope.Scope;
 
 	// Session access
 	errorInbox: ErrorInbox;
@@ -333,7 +328,7 @@ export interface InteractiveModeContext {
 
 	// Selector handling
 	showSettingsSelector(): void;
-	showHistorySearch(initialQuery?: string): void;
+	showHistorySearch(): void;
 	showExtensionsDashboard(): void;
 	showAgentsDashboard(): void;
 	showModelSelector(options?: { temporaryOnly?: boolean }): void;
@@ -399,7 +394,7 @@ export interface InteractiveModeContext {
 		dialogOptions?: InteractiveSelectorDialogOptions,
 	): Promise<string | undefined>;
 	hideHookSelector(): void;
-	showHookInput(title: string, placeholder?: string, dialogOptions?: ExtensionUIDialogOptions): Promise<string | undefined>;
+	showHookInput(title: string, placeholder?: string): Promise<string | undefined>;
 	hideHookInput(): void;
 	showHookEditor(
 		title: string,

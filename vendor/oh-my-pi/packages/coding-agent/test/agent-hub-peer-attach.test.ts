@@ -1,4 +1,3 @@
-import { pressHub } from "./helpers/agent-hub-input";
 import { afterEach, beforeAll, describe, expect, it } from "bun:test";
 import { IrcBus } from "@oh-my-pi/pi-coding-agent/irc/bus";
 import {
@@ -69,8 +68,8 @@ function makeHub(options: {
 }
 
 function startAttach(hub: AgentHubOverlayComponent): void {
-	pressHub(hub, "g");
-	pressHub(hub, "a");
+	hub.handleInput("g");
+	hub.handleInput("a");
 }
 
 describe("Agent Hub external peer attach", () => {
