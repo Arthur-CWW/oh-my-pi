@@ -1490,11 +1490,17 @@ export async function runRootCommand(
 					restartHandoff.predecessorOwnerEpoch,
 				);
 			}
-			if (adoption.adopted.length > 0) {
-				const revivableIds = adoption.adopted.map(child => child.id).join(", ");
+			const interruptedIds = adoption.adopted
+				.filter(child => child.lifecycleState === "interrupted")
+				.map(child => child.id);
+			if (interruptedIds.length > 0 || restartedTurn) {
+				const interruptedNotice =
+					interruptedIds.length > 0
+						? `Interrupted children: ${interruptedIds.join(", ")}. Send a child one \`irc\` message by id to resume it in place.`
+						: "";
 				notifs.push({
 					kind: "info",
-					message: `${restartedTurn ? "Interrupted subagent turn resumed. " : ""}Revivable children: ${revivableIds}. Send a child one \`irc\` message by id to resume it in place.`,
+					message: `${restartedTurn ? "Interrupted subagent turn resumed. " : ""}${interruptedNotice}`.trim(),
 				});
 			}
 		}

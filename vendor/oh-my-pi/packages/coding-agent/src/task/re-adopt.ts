@@ -13,6 +13,7 @@ import {
 	latestChildLifecycleRecord,
 	latestChildRestartRecord,
 	type ChildLifecycleRecord,
+	type ChildLifecycleState,
 	type ChildRestartRecord,
 } from "./child-lifecycle";
 
@@ -49,6 +50,7 @@ export interface ReAdoptedChild {
 	hotswapModel?: string;
 	taskDepth: number;
 	parentTaskPrefix: string;
+	lifecycleState: ChildLifecycleState;
 	turnState: "interrupted_by_restart";
 }
 
@@ -349,6 +351,7 @@ export async function reAdoptDirectChildren(options: ReAdoptionOptions): Promise
 			model: candidate.lifecycle.modelId ?? candidate.metadata.model,
 			thinkingLevel: candidate.lifecycle.thinkingLevel ?? candidate.metadata.thinkingLevel,
 			hotswapModel: candidate.hotswapModel,
+			lifecycleState: candidate.lifecycle.state,
 			turnState: "interrupted_by_restart",
 		};
 		let revive: AgentReviver;

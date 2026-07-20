@@ -212,6 +212,7 @@ function child(id: string): ReAdoptedChild {
 		sessionFile: `/fixture/${id}.jsonl`,
 		taskDepth: 1,
 		parentTaskPrefix: id,
+		lifecycleState: "interrupted",
 		turnState: "interrupted_by_restart",
 	};
 }

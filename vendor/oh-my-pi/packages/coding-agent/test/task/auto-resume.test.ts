@@ -42,6 +42,7 @@ function child(id: string): ReAdoptedChild {
 		sessionFile: `/tmp/${id}.jsonl`,
 		taskDepth: 1,
 		parentTaskPrefix: id,
+		lifecycleState: "interrupted",
 		turnState: "interrupted_by_restart",
 	};
 }
