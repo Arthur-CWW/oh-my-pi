@@ -1,5 +1,8 @@
 import { describe, expect, it } from "bun:test";
-import { buildRuntimeMemoryReport } from "@oh-my-pi/pi-coding-agent/slash-commands/runtime-memory";
+import {
+	buildRuntimeMemoryReport,
+	collectRuntimeGarbage,
+} from "@oh-my-pi/pi-coding-agent/slash-commands/runtime-memory";
 
 describe("/runtime-memory", () => {
 	it("reports bounded RSS and JavaScriptCore retention categories", () => {
@@ -11,5 +14,10 @@ describe("/runtime-memory", () => {
 		expect(report).toContain("Objects:");
 		expect(report).toContain("Top object types:");
 		expect(report).toContain("/debug → Memory Report");
+	});
+
+	it("reports explicit forced collection without promising a decrease", async () => {
+		const report = await collectRuntimeGarbage();
+		expect(report).toMatch(/^Forced GC RSS: .* → .* \(.* (reclaimed|higher)\)$/);
 	});
 });

@@ -24,16 +24,31 @@ export function buildRuntimeMemoryReport(): string {
 		`External / array buffers: ${gibibytes(usage.external)} / ${gibibytes(usage.arrayBuffers)}`,
 		`Objects: ${heap.objectCount.toLocaleString("en-US")} (${heap.protectedObjectCount.toLocaleString("en-US")} protected)`,
 		`Top object types: ${topTypes || "none"}`,
-		"Reclaim: /restart checkpoints and replaces this coordinator; /debug → Memory Report captures a forced-GC heap snapshot.",
+		"Reclaim: /runtime-memory gc forces two full collections; /restart replaces this coordinator; /debug → Memory Report captures a heap snapshot.",
 	].join("\n");
+}
+export async function collectRuntimeGarbage(): Promise<string> {
+	const before = process.memoryUsage().rss;
+	Bun.gc(true);
+	await Bun.sleep(0);
+	Bun.gc(true);
+	await Bun.sleep(0);
+	const after = process.memoryUsage().rss;
+	return `Forced GC RSS: ${gibibytes(before)} → ${gibibytes(after)} (${gibibytes(Math.abs(after - before))} ${
+		after <= before ? "reclaimed" : "higher"
+	})`;
 }
 
 export const RUNTIME_MEMORY_COMMAND_SPEC: SlashCommandSpec = {
 	name: "runtime-memory",
-	description: "Explain coordinator RSS and JavaScriptCore heap retention",
-	allowArgs: false,
+	description: "Explain or explicitly collect coordinator runtime memory",
+	allowArgs: true,
 	focusedViewSafe: true,
-	handle: async (_command, runtime) => {
-		await runtime.output(buildRuntimeMemoryReport());
+	subcommands: [{ name: "gc", description: "Force two full JSC collections and report RSS change" }],
+	handle: async (command, runtime) => {
+		const action = command.args.trim();
+		if (action === "gc") await runtime.output(`${await collectRuntimeGarbage()}\n${buildRuntimeMemoryReport()}`);
+		else if (action.length === 0) await runtime.output(buildRuntimeMemoryReport());
+		else await runtime.output("Usage: /runtime-memory [gc]");
 	},
 };
