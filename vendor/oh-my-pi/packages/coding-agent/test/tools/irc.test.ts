@@ -642,7 +642,7 @@ describe("IRC", () => {
 			expect(IrcTool.createIf(session)).toBeNull();
 		});
 
-		it("op=list includes parked peers, unread counts, and parent ids", async () => {
+		it("op=list omits parked history by default and exposes it on request", async () => {
 			const sub = makeFakeSession();
 			registry.register({
 				id: "0-AuthLoader",
@@ -658,14 +658,21 @@ describe("IRC", () => {
 			await bus.send({ from: "0-Main", to: "0-AuthLoader", body: "unread one" });
 
 			const tool = new IrcTool(makeToolSession(registry, "0-Main"), null);
-			const result = await tool.execute("call-1", { op: "list" });
-			expect(result.details?.op).toBe("list");
-			expect(result.details?.peers).toMatchObject([
+			const defaultResult = await tool.execute("call-1", { op: "list" });
+			expect(defaultResult.details?.peers).toMatchObject([
+				{ id: "0-AuthLoader", status: "running", parentId: "0-Main", unread: 1 },
+			]);
+			const defaultText = defaultResult.content[0]?.type === "text" ? defaultResult.content[0].text : "";
+			expect(defaultText).toContain("1 parked historical child omitted");
+			expect(defaultText).not.toContain("[task · sub · parked]");
+
+			const fullResult = await tool.execute("call-2", { op: "list", includeParked: true });
+			expect(fullResult.details?.peers).toMatchObject([
 				{ id: "0-AuthLoader", status: "running", parentId: "0-Main", unread: 1 },
 				{ id: "0-Parked", status: "parked", unread: 0 },
 			]);
-			const text = result.content[0]?.type === "text" ? result.content[0].text : "";
-			expect(text).toContain("Parked agents are revived automatically");
+			const fullText = fullResult.content[0]?.type === "text" ? fullResult.content[0].text : "";
+			expect(fullText).toContain("Parked agents are revived automatically");
 		});
 
 		it("op=send returns receipts immediately without waiting for a reply", async () => {

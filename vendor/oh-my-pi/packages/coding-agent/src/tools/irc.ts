@@ -62,6 +62,7 @@ const ircSchema = z.object({
 	from: z.string().optional().describe("wait: only accept a message from this agent id"),
 	timeoutMs: z.number().optional().describe("wait: timeout in milliseconds (0 waits indefinitely)"),
 	peek: z.boolean().optional().describe("inbox: list messages without consuming them"),
+	includeParked: z.boolean().optional().describe("list: include parked historical children (default false)"),
 });
 
 type IrcParams = z.infer<typeof ircSchema>;
@@ -178,7 +179,7 @@ export class IrcTool implements AgentTool<typeof ircSchema, IrcDetails> {
 
 		switch (params.op) {
 			case "list":
-				return this.#executeList(registry, senderId);
+				return this.#executeList(registry, senderId, params.includeParked ?? false);
 			case "send":
 				return this.#executeSend(registry, senderId, params, signal);
 			case "wait":
@@ -190,7 +191,7 @@ export class IrcTool implements AgentTool<typeof ircSchema, IrcDetails> {
 		}
 	}
 
-	#executeList(registry: AgentRegistry, senderId: string): AgentToolResult<IrcDetails> {
+	#executeList(registry: AgentRegistry, senderId: string, includeParked: boolean): AgentToolResult<IrcDetails> {
 		const bus = IrcBus.global();
 		const localPeers: IrcPeerInfo[] = registry
 			.list()
@@ -222,7 +223,17 @@ export class IrcTool implements AgentTool<typeof ircSchema, IrcDetails> {
 					lastDelivery: external.bus.recentDeliveries({ peerId: peer.name, limit: 1 })[0],
 				}))
 			: [];
-		const peers = [...localPeers, ...externalPeers];
+		const omittedParked = includeParked ? 0 : localPeers.filter(peer => peer.status === "parked").length;
+		const visibleLocalPeers = includeParked
+			? localPeers
+			: localPeers.filter(
+					peer =>
+						peer.status !== "parked" ||
+						peer.unread > 0 ||
+						(peer.pendingDeliveries ?? 0) > 0 ||
+						(peer.undeliveredDeliveries ?? 0) > 0,
+				);
+		const peers = [...visibleLocalPeers, ...externalPeers];
 		const lines: string[] = [];
 		if (peers.length === 0) {
 			lines.push("No other agents.");
@@ -248,6 +259,11 @@ export class IrcTool implements AgentTool<typeof ircSchema, IrcDetails> {
 					`active ${formatDuration(Date.now() - peer.lastActivity)} ago`,
 				].filter(Boolean);
 				lines.push(`- ${peer.id} [${peer.displayName} · ${peer.kind} · ${peer.status}] — ${extras.join(", ")}`);
+			}
+			if (omittedParked > 0) {
+				lines.push(
+					`- ${omittedParked} parked historical child${omittedParked === 1 ? "" : "ren"} omitted; use includeParked:true or an exact history://<id>.`,
+				);
 			}
 			if (peers.some(peer => peer.status === "parked")) {
 				lines.push("");
@@ -291,15 +307,8 @@ export class IrcTool implements AgentTool<typeof ircSchema, IrcDetails> {
 			return errorResult("Cannot send an IRC message to yourself.", { op: "send", from: senderId, to });
 		}
 		const localTarget = !isBroadcast ? registry.get(to) : undefined;
-		if (process.env.OMP_SUBPROCESS_WORKER === "1" && (!localTarget || localTarget.session === null)) {
-			const error = "subprocess-worker-peer-unavailable";
-			return errorResult(
-				`IRC unavailable in subprocess worker: ${to} is not a live in-process peer; coordinator IPC is required. External IRC fallback is disabled.`,
-				{ op: "send", from: senderId, to, receipts: [{ to, outcome: "failed", error }] },
-			);
-		}
 		const externalTarget =
-			!isBroadcast && !localTarget && external
+			!isBroadcast && (!localTarget || localTarget.session === null) && external
 				? external.bus.findPeerByName(to, { excludeSessionId: external.sessionId })
 				: undefined;
 		if (external && externalTarget) {
@@ -472,17 +481,25 @@ export class IrcTool implements AgentTool<typeof ircSchema, IrcDetails> {
 	}
 
 	#registerExternalPeer(): { bus: IrcExternalBus; sessionId: string; name: string } | null {
-		if (this.externalBus === null || process.env.OMP_SUBPROCESS_WORKER === "1") return null;
+		if (this.externalBus === null) return null;
+		const senderId = this.session.getAgentId?.() ?? undefined;
 		const ownership = this.session.sessionManager?.getSessionOwnership();
-		const sessionId = ownership?.sessionId ?? this.session.getSessionId?.() ?? `${this.session.cwd}:${process.pid}`;
+		const isSubprocessWorker = process.env.OMP_SUBPROCESS_WORKER === "1" && senderId !== undefined;
+		const sessionId =
+			isSubprocessWorker
+				? senderId
+				: (ownership?.sessionId ?? this.session.getSessionId?.() ?? `${this.session.cwd}:${process.pid}`);
 		const bus = this.externalBus ?? IrcExternalBus.global();
-		const name = resolveIrcExternalPeerName({
-			configuredName: this.session.settings.get("irc.peerName"),
-			cwd: this.session.cwd,
-			sessionId,
-		});
+		const name = isSubprocessWorker
+			? senderId
+			: resolveIrcExternalPeerName({
+					configuredName: this.session.settings.get("irc.peerName"),
+					cwd: this.session.cwd,
+					sessionId,
+				});
 		bus.registerPeer({
 			sessionId,
+			agentId: senderId,
 			name,
 			cwd: this.session.cwd,
 			pid: process.pid,
