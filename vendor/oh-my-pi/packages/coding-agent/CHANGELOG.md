@@ -78,7 +78,6 @@
 - Eval `agent()`/`agentType` defaults, gallery fixtures, and the task tool prompt now use named responsibility templates; catch-all `task` is documented as a deprecated migration alias.
 - `Enter` on an empty prompt during streaming now aborts and delivers the next queued durable follow-up exactly once (removing it from the queue); with an empty queue it remains abort-only.
 ### Fixed
-- Restored Vim-normal `:` command entry and Tab completion after the MVU cutover; `/resume` again uses a top-anchored fullscreen selector with `/` filtering, layered Escape dismissal, and Ctrl-C exit in populated and empty states.
 - Setup scenes now receive Ctrl-C and SGR mouse input through their active MVU lease: Ctrl-C exits through the outro (or cancels an in-progress OAuth sign-in), while clicks, hover, and wheel reports are decoded once and routed with scene-local coordinates.
 - Agent Hub exit keys now have deterministic focus precedence: Ctrl-C and `q` always leave the Hub, owned Ctrl-Q returns to the main thread, and Escape unwinds filter editing, pending chords, preview focus, inspector focus, and filtered-table state before closing without trapping input.
 - Normal main-composer Escape now preserves nonblank drafts and disarms the double-Escape timer instead of clearing input.

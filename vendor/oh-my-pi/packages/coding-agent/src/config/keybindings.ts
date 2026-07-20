@@ -130,7 +130,7 @@ export const KEYBINDINGS = {
 		description: "Dismiss active UI",
 	},
 	"app.command.open": {
-		defaultKeys: ":",
+		defaultKeys: [],
 		description: "Open command line",
 	},
 	"app.command.input": {

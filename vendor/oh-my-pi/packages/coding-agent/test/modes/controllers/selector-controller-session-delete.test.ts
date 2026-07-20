@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
-import { SessionSelectorComponent } from "@oh-my-pi/pi-coding-agent/modes/components/session-selector";
+import { SelectorSurface } from "@oh-my-pi/pi-coding-agent/modes/components/selector-adapter";
 import { SelectorController } from "@oh-my-pi/pi-coding-agent/modes/controllers/selector-controller";
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
@@ -43,6 +43,16 @@ function createContext(tui: TUI, currentSessionFile: string): {
 	tui.addChild(editorContainer);
 	tui.addChild(chatContainer);
 	tui.setFocus(editor);
+	const clearEditorContainer = editorContainer.clear.bind(editorContainer);
+	vi.spyOn(editorContainer, "clear").mockImplementation(() => {
+		clearEditorContainer();
+		calls.push("editorContainer.clear");
+	});
+	const addEditorChild = editorContainer.addChild.bind(editorContainer);
+	vi.spyOn(editorContainer, "addChild").mockImplementation(child => {
+		addEditorChild(child);
+		calls.push("editorContainer.addChild");
+	});
 	vi.spyOn(tui, "requestRender").mockImplementation(() => {
 		calls.push("ui.requestRender");
 	});
@@ -138,14 +148,14 @@ function createContext(tui: TUI, currentSessionFile: string): {
 	};
 }
 
-function renderText(selector: SessionSelectorComponent): string {
+function renderText(selector: SelectorSurface<unknown, unknown>): string {
 	return selector.render(120).join("\n");
 }
 
-async function waitForMountedSessionSelector(tui: TUI): Promise<SessionSelectorComponent> {
+async function waitForMountedSessionSelector(tui: TUI): Promise<SelectorSurface<unknown, unknown>> {
 	for (let attempt = 0; attempt < 80; attempt += 1) {
 		const focused = tui.getFocused();
-		if (focused instanceof SessionSelectorComponent) return focused;
+		if (focused instanceof SelectorSurface) return focused;
 		await Bun.sleep(1);
 	}
 	throw new Error("Expected mounted session selector renderer");
@@ -202,6 +212,8 @@ describe("SelectorController session deletion", () => {
 			expect(handleResumeSession).not.toHaveBeenCalled();
 			expect(renderText(selector)).not.toContain("Active session");
 			expect(calls.filter(call => call !== "ui.requestRender")).toEqual([
+				"editorContainer.clear",
+				"editorContainer.addChild",
 				"session.newSession",
 				"loadingAnimation.stop",
 				"statusContainer.clear",
@@ -282,7 +294,8 @@ describe("SelectorController session deletion", () => {
 				"ui.requestRender",
 				`delete:${activeSessionPath}`,
 				"showStatus:Session deleted",
-				"ui.requestRender",
+				"editorContainer.clear",
+				"editorContainer.addChild",
 				"ui.requestRender",
 			]);
 		});
