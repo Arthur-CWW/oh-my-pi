@@ -14,7 +14,7 @@ Panic process snapshot:
 - OMP processes: 6.76 GiB and 5.56 GiB for the two largest sessions, plus several smaller sessions.
 - Multiple Difftastic processes: roughly 4.0–4.6 GiB each while jjui previewed the inherited whole-repo dirty diff.
 
-The current resumed coordinator later reached 17.85 GiB RSS with descendants totaling only about 0.27 GiB. `vmmap -summary` attributed 11.0 GiB resident to WebKit Malloc and 6.9 GiB to JS VM Gigacage. This means the dominant cost is retained/coarsely reclaimed coordinator/Bun JavaScript memory, not live child processes. GC cannot free referenced transcript/tool/cache state, and the allocator may retain freed pages; `/restart` is currently the reliable reclamation boundary.
+The resumed coordinator later reached 17.85 GiB RSS with descendants totaling only about 0.27 GiB. `vmmap` was explicitly incomplete because macOS could not inspect Bun's allocator zone, so its category totals are not additive ground truth; it reported an 8.3 GiB physical footprint and 12.9 GiB peak. Two forced-GC heap snapshots sharpened the diagnosis: before report bundling, reachable JavaScript self-size was only 220.9 MiB despite 14–18 GiB RSS, strongly implicating native/JSC allocator retention in addition to application references. The second report grew reachable self-size to 692.2 MiB because it retained the first 165.4 MiB snapshot string, a 53.3 MiB Difftastic output string, and several whole session JSONL strings through the in-memory `Record<string,string>` report archive path. `/restart` remains the reliable reclamation boundary.
 
 Immediate guardrails already applied:
 
@@ -23,6 +23,7 @@ Immediate guardrails already applied:
 - `browser.maxTabsPerSession: 2`.
 - New OMP version `16.0.1+fork.0bc2a7bf8184` only injects interrupted children on restart; full child discovery remains tool-driven.
 - Heavy non-Mac work is recorded as desktop-first in `docs/state/agent-tooling-preferences.md`.
+- `cmux memory --all --groups 15` already supplies bounded process-group attribution; the OMP report should complement it with in-process JSC/native categories rather than duplicate process-tree accounting.
 
 ## Required changes
 
@@ -63,6 +64,13 @@ Use the existing dedicated Ubuntu Chrome contract, not profile copying:
 - Gmail/X login is completed manually by Arthur in the visible Ubuntu session; never inspect/export cookies, passwords, tokens, or browser userdata.
 
 Live preflight on 2026-07-20 failed safely: `setup-remote-chrome.sh check` reported `DISPLAY does not identify a local X11 graphical session`. Recovery must use the dotfiles setup script's documented graphical-login workflow; do not improvise or weaken the keyring/display boundary.
+Human login/setup sequence:
+
+1. Arthur enters the desktop's visible local/VNC graphical session and opens a terminal there; a plain SSH shell is insufficient because `DISPLAY`, D-Bus, Secret Service, and the unlocked GNOME Keyring must belong to that login.
+2. In that graphical terminal, inspect `~/dotfiles/server/ubuntu-remote/setup-remote-chrome.sh --help`, then run `install-user --dry-run`; if correct, Arthur runs `install-user`, `start --dry-run`, and `start`. Automation never runs these mutating verbs.
+3. Arthur signs into Gmail and X manually in the visible dedicated Chrome profile, completing account selection, CAPTCHA, 2FA, passkeys, consent, and optional Chrome Sync himself. The profile persists remotely; no cookie/profile transfer is required.
+4. From the Mac, rerun `check` and `status`. Only then may OMP establish a fresh owner-only loopback tunnel and create background targets. Any login boundary stops automation and returns control to Arthur.
+
 
 ## Execution notes
 
