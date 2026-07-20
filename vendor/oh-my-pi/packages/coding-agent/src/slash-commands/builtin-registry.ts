@@ -51,6 +51,7 @@ import { buildUsageReportText } from "./helpers/usage-report";
 import { LOOPSTATS_COMMAND_SPEC } from "./loopstats";
 import { parseMarketplaceInstallArgs, parsePluginScopeArgs } from "./marketplace-install-parser";
 import { handleReloadTuiCommand, RELOAD_TUI_COMMAND, RELOAD_TUI_DESCRIPTION } from "./reload-tui";
+import { RUNTIME_MEMORY_COMMAND_SPEC } from "./runtime-memory";
 import type {
 	BuiltinSlashCommand,
 	ParsedSlashCommand,
@@ -1083,6 +1084,7 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<SlashCommandSpec> = [
 	FEEDS_COMMAND_SPEC,
 	VIM_COMMAND_SPEC,
 	VERSION_COMMAND_SPEC,
+	RUNTIME_MEMORY_COMMAND_SPEC,
 	LOOPSTATS_COMMAND_SPEC,
 	{
 		name: "usage",
