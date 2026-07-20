@@ -4,6 +4,7 @@ import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import type { CanonicalModelVariant } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import {
 	filterAvailableModelsByEnabledPatterns,
+	findSmolModel,
 	parseModelPattern,
 	parseModelString,
 	resolveCliModel,
@@ -239,6 +240,48 @@ const canonicalRegistry = {
 } as unknown as Parameters<typeof resolveCliModel>[0]["modelRegistry"];
 
 const allModels = [...mockModels, ...mockOpenRouterModels, ...mockProviderOverlapModels, ...mockCodexOverlapModels];
+
+function createSmolPriorityModel(provider: string, id: string): Model<"anthropic-messages"> {
+	return buildModel({
+		id,
+		name: id,
+		api: "anthropic-messages",
+		provider,
+		baseUrl: "https://models.example.com",
+		reasoning: false,
+		input: ["text"],
+		cost: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 },
+		contextWindow: 128000,
+		maxTokens: 4096,
+	});
+}
+
+describe("findSmolModel", () => {
+	test("prefers Luna over Sonnet 5 and Haiku when all are available", async () => {
+		const models = [
+			createSmolPriorityModel("anthropic", "claude-haiku-4-5"),
+			createSmolPriorityModel("anthropic", "claude-sonnet-5"),
+			createSmolPriorityModel("openai-codex", "gpt-5.6-luna"),
+		];
+
+		const model = await findSmolModel({ getAvailable: () => models });
+
+		expect(model?.provider).toBe("openai-codex");
+		expect(model?.id).toBe("gpt-5.6-luna");
+	});
+
+	test("prefers Sonnet 5 over Haiku when Luna is unavailable", async () => {
+		const models = [
+			createSmolPriorityModel("anthropic", "claude-haiku-4-5"),
+			createSmolPriorityModel("anthropic", "claude-sonnet-5"),
+		];
+
+		const model = await findSmolModel({ getAvailable: () => models });
+
+		expect(model?.provider).toBe("anthropic");
+		expect(model?.id).toBe("claude-sonnet-5");
+	});
+});
 
 describe("parseModelPattern", () => {
 	describe("simple patterns without colons", () => {
@@ -948,6 +991,51 @@ describe("resolveModelOverrideWithAuthFallback", () => {
 		expect(result.blocked).toBe(false);
 	});
 
+	test("blocks direct Haiku subagent selection via the haiku orchestrator-only pattern", async () => {
+		const haiku = buildModel({
+			id: "claude-haiku-4-5",
+			name: "Claude Haiku 4.5",
+			api: "anthropic-messages",
+			provider: "anthropic",
+			baseUrl: "https://api.anthropic.com",
+			reasoning: false,
+			input: ["text"],
+			cost: { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1 },
+			contextWindow: 200000,
+			maxTokens: 8192,
+		});
+		const worker = buildModel({
+			id: "moonshotai/kimi-k2",
+			name: "Kimi K2",
+			api: "anthropic-messages",
+			provider: "openrouter",
+			baseUrl: "https://openrouter.ai/api/v1",
+			reasoning: false,
+			input: ["text"],
+			cost: { input: 0.15, output: 0.6, cacheRead: 0.015, cacheWrite: 0.15 },
+			contextWindow: 128000,
+			maxTokens: 4096,
+		});
+		const settings = Settings.isolated();
+		settings.set("task.orchestratorOnlyModels", ["*fable*", "*haiku*"]);
+		settings.setModelRole("implementer", "openrouter/moonshotai/kimi-k2");
+		const registry = {
+			getAvailable: () => [haiku, worker],
+			getApiKey: async () => "test-key",
+		} as Parameters<typeof resolveModelOverrideWithAuthFallback>[2];
+
+		const result = await resolveModelOverrideWithAuthFallback(
+			["anthropic/claude-haiku-4-5"],
+			undefined,
+			registry,
+			settings,
+		);
+
+		expect(result.model?.id).toBe("moonshotai/kimi-k2");
+		expect(result.authFallbackUsed).toBe(true);
+		expect(result.blocked).toBe(false);
+	});
+
 	test("non-fable model blocked via setting with empty patterns inherits fallback", async () => {
 		const ultra = buildModel({
 			id: "gpt-5.6-ultra",
@@ -1339,13 +1427,13 @@ describe("expandRoleAlias", () => {
 	test("falls back to the role priority list for a direct alias cycle", () => {
 		const settings = Settings.isolated({ modelRoles: { smol: "pi/smol" } });
 
-		expect(expandRoleAlias("pi/smol", settings)).toBe("cerebras/zai-glm-4.7");
+		expect(expandRoleAlias("pi/smol", settings)).toBe("gpt-5.6-luna");
 	});
 
 	test("falls back to the originating role priority list for a cross-role alias cycle", () => {
 		const settings = Settings.isolated({ modelRoles: { smol: "pi/slow", slow: "pi/smol" } });
 
-		expect(expandRoleAlias("pi/smol", settings)).toBe("cerebras/zai-glm-4.7");
+		expect(expandRoleAlias("pi/smol", settings)).toBe("gpt-5.6-luna");
 	});
 
 	test("keeps literal model selectors containing role-like names unchanged", () => {

@@ -23,10 +23,12 @@ audio waveform/player for voice work · inline GIF/animation/SVG playback · mer
 
 ## TUI-side decisions extracted
 
-1. **`:` command mode (vim-style)** for TUI-manipulation commands (view switches, layout, settings) — keybindings stay for the hot path; the long tail goes behind `:` with completion. Distinct from messages-to-agent.
-2. **Widescreen half (>160 cols):** stop double-wide transcript; right half becomes an inspector column (current tool call detail, artifact preview, spawn packet, route provenance — the dual-lane Hub pattern generalized to the main thread).
-3. **Post-hoc forensics UX:** compare sub-agent runs and orchestrator prompt styles; work backwards from a failure. Substrate exists (session JSONL, control-plane ledger, HTML export); missing is the comparison view — a strong first browser-component consumer.
-4. **Not everything lives in OMP:** prefer coupling with the terminal/mux layer over reimplementing (cmux origin/main reportedly gained Chromium panes — verify; Zellij default keys rejected; Ghostty/libghostty stays).
+1. **Colon is the TUI/view-local namespace** for projection commands and shortcuts: `:commands`, `:wrap`, `:rich`, `:version`, and future view-only actions use the registry-backed popup. It is distinct from messages-to-agent.
+2. **Slash is the durable/mixed namespace** for session, runtime, model, queue, and other actions that may persist, mutate, or enter the transcript. Its rendering class must be explicit.
+3. **The command popup is a projection, not a second authority:** completion/help metadata comes from one interaction registry; the journal remains truth.
+4. **Widescreen half (>160 cols):** stop double-wide transcript; right half becomes an inspector/peripheral field (current tool call detail, artifact preview, spawn packet, route provenance — the dual-lane Hub pattern generalized to the main thread).
+5. **Post-hoc forensics UX:** compare sub-agent runs and orchestrator prompt styles; work backwards from a failure. Substrate exists (session JSONL, control-plane ledger, HTML export); missing is the comparison view — a strong first browser-component consumer.
+6. **Not everything lives in OMP:** prefer coupling with the terminal/mux layer over reimplementing (cmux origin/main reportedly gained Chromium panes — verify; Zellij default keys rejected; Ghostty/libghostty stays).
 
 ## Cross-session repetition (the "I keep repeating myself" problem)
 
@@ -44,23 +46,29 @@ Arthur runs several orchestrators in parallel cmux tabs and re-explains context.
 ### Subagent navigation grammar ("tmux for OMP subagents")
 
 - Keep `[` / `]` sibling cycling — Arthur confirms useful.
-- **Normal-mode-first everywhere:** every agent page opens in normal mode (nav keys live); typing inserts ONLY after `i` (or focusing the input). No nested modal stacks — one global vim grammar: normal is the default on every surface, `i` enters insert, `Esc` exits exactly one level, `?` teaches, `:` commands.
-- `:gd <agent>` goto-agent by name (with completion), complementing click.
-- **Agent mentions are links:** any `subagent → subagent` coms line in a transcript renders as an OSC8 hyperlink; Ctrl+click (or `gd` on cursor) jumps to that agent's page.
+- **Normal-mode-first on viewer surfaces:** agent pages open in normal mode. Writable full-TUI/editor surfaces use `i` for insert; `Esc` exits exactly one layer; `j`/`k` move one line, `J`/`K` move five lines, `g`/`G` jump to ends, `za` folds, `/` searches, `?` teaches, and `:` opens the local command popup.
+- **Strict read-only Hub preview:** the preview accepts no message input or follow-up—no `i`, `Ctrl-Enter`, or queued follow-up. `j`/`k` move one line; `J`/`K` move five lines; `u`/`d` and `Ctrl-U`/`Ctrl-D` move half a page; `PgUp`/`PgDn` move a full page. `Enter` attaches the selected session in the full TUI.
+- **Hub surface exceptions are explicit:** `n`/`p` select roster rows; `h`/`l` switch lanes; `H`/`L` switch root groups; `.` toggles historical rows; `v` toggles rich/plain; `[`/`]` cycle siblings; `R` revives; `x` aborts. These are viewer-local projections; message input belongs to the attached full TUI.
+- **Agent mentions are links:** any `subagent → subagent` comms line in a transcript renders as an OSC8 hyperlink; Ctrl+click (or `gd` on cursor) jumps to that agent's page.
 - Glanceable per-agent stats (most important only): status glyph, lane, live tok/s, ctx %, cost, current tool, unread IRC, last-activity age.
 - **Subagent groups** (wave/batch): aggregate row showing n running/idle/done/failed, summed tok/s (is the wave alive?), cost burn, median duration, newest error one-liner, shared-file collision count. 3–5 numbers max; expand for detail.
-- **Nested spawn tree (Arthur, 2026-07-13, fourth rant):** subagents that spawn subagents nest under their parent in the roster, file-browser style — indent + expand/collapse, `└ •` guides; collapse hides the subtree but the parent's aggregate row still reflects it (counts/tok-s roll up). Parent linkage already exists in the registry/journal; this is a roster-projection change, not a data change. Queued behind the current agent-hub.ts owner to avoid same-file collision.
-- Widescreen (>80/160 col): the right half is a **peripheral field**, not an inspector (Arthur, third rant, pointing at Matuschak). Grammar source: `streams/primer/research/inquiry-world/ATLAS-LIVING-FIELD.md` + `sources/andy-matuschak-*.md` — peripheral text stays legible without focus; relations bloom around the current focus; attention shifts emphasis without re-layout; movement leaves faint residue.
+- **Nested spawn tree:** subagents that spawn subagents nest under their parent in the roster, file-browser style — indent + expand/collapse, `└ •` guides; collapse hides the subtree but the parent's aggregate row still reflects it (counts/tok-s roll up). Parent linkage comes from the registry/journal; this is a roster projection, not a data change.
+- Widescreen (>80/160 col): the right half is a **peripheral field**, not an inspector (Arthur, third rant, pointing at Matuschak). Peripheral text stays legible without focus; relations bloom around the current focus; attention shifts emphasis without re-layout; movement leaves faint residue.
   - **Handles, not detail:** thought-sized objects (short title + glyph + one stat), position-stable, no scrolling, no paragraphs. Every handle is inspectable (`Enter`/`gd` jumps focus to it); detail always renders in the focus pane.
   - **Focus-following bloom:** contents derive from what the main pane focuses — a tool call blooms its target files/artifacts; a subagent blooms parent/siblings/packet/route; an error blooms prior occurrences and related friction rows.
   - **Preattentive change:** state changes register as brightness/color pulses, not text churn; a wave's summed tok/s reads as an ambient pulse (alive vs stalled) before any number is read.
   - **Residue trail:** last N focused things linger as dimmed handles for jump-back.
   - **"What wants me" field:** pending `ask` calls, children blocked on input, review-ready proofs — the attention-request class gets a stable region.
   - Candidate steady instruments: queue depth, memory watermark, cost burn, group health. Exact composition deliberately open — babble several layouts and let Arthur prune.
+- **`za` pill folding:** in normal mode, toggles the `[Paste #N]` pill under cursor between collapsed and expanded-editable; expansion is re-collapsible and preserves edits.
+- **`:commands` and command popup:** `:commands` autocompletes from the shared interaction registry; descriptions, selection, focus restoration, and unknown-command feedback come from that one registry. `:wrap` now soft-wraps IRC communication and tool-result bodies while preserving bounded receipt/error/metadata/roster rows; `:rich` switches rich/plain rendering across assistant, user, IRC, and tool-result bodies.
+- **Hub preview state:** the selected child's in-flight assistant tail streams as a byte-bounded projection, with selected turn status and rollout phases journaled separately from the transcript authority.
+- **Vendor auto-sync:** automation may update only explicit `policy: track` entries after exact upstream/remote/branch checks and clean fast-forward proof; `policy: pin` entries, especially `vendor/oh-my-pi`, remain no-I/O. The current manifest has 21 entries (NCode removed), and typed daily `--apply` is active: the latest live apply updated codex, plugins, cua, chrome-devtools, and whisper, left cmux blocked by a dirty tree, and left pins untouched. Unit Git fixtures remain blocked by Bun-test EBADF.
+- **Native video:** roles, providers, models, and APIs stay distinct; inline video is accepted only on the Antigravity native lane (`google-antigravity/gemini-3.5-flash`) under strict `<100MB` validation, with oversized/unsupported input failing explicitly.
 
 ### Slash-command rendering taxonomy
 
-Three classes, each visually distinct and consistent: (1) ephemeral TUI-only (never persisted, dimmed overlay), (2) session-visible non-model annotations, (3) queued model input (rendered like input, with queue position). Friction row filed 2026-07-13; `/usage` cited as ambiguous today.
+Slash actions remain visually distinct by effect: (1) ephemeral TUI-only projections (never persisted, dimmed overlay), (2) session-visible non-model annotations, and (3) queued model input (rendered like input, with queue position). Colon commands are not a fourth persistence channel; they are view-local projection controls. The journal remains the durable truth.
 
 ### Validating nondeterministic / high-dim / intuitive behavior
 

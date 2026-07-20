@@ -1,3 +1,4 @@
+import { randomBytes, timingSafeEqual } from "node:crypto"
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
 import { extname, normalize, resolve, sep } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -7,6 +8,7 @@ import { Schema } from "effect"
 import { resolveAskSynthesisConfig, streamSynthesis, synthesizeAnswer } from "./ask-synthesis"
 import { extractTerms } from "./cli"
 import { askEvidence } from "./evidence"
+import { appendAppError, appendBackendError, decodeBrowserErrorPayload } from "./error-log"
 import {
   addProgress,
   listCards,
@@ -40,7 +42,20 @@ import { handleReaderApi } from "./reader-api"
 import { handleZhDictApi } from "./zhdict-api"
 import { handleShadowingApi } from "./shadowing-api"
 import { CardCandidateNotApprovedError, CardCandidateNotFoundError, enrollCardCandidate } from "./review-store"
-import { resolveDaemonPaths, type DaemonPaths } from "./paths"
+import {
+  appendReviewFeedAnswer,
+  readReviewFeed,
+  ReviewFeedAnswerSchema,
+  ReviewFeedAnswerValidationError,
+  ReviewFeedTargetAnsweredError,
+  ReviewFeedTargetNotFoundError,
+  ReviewFeedTargetNotPendingError,
+  ReviewFeedTargetNotPrimerError,
+} from "./review-feed"
+import { startBrowserContextRuntime } from "./browser-context/runtime"
+import type { BrowserContextClient } from "./browser-context/types"
+import { handleTabsApi, type TabsApiAuthentication } from "./tabs-api"
+import { readDaemonOwnerSecret, resolveDaemonPaths, type DaemonPaths } from "./paths"
 
 export interface DashboardOptions {
   port: number
@@ -48,7 +63,9 @@ export interface DashboardOptions {
   env?: Record<string, string | undefined>
 }
 
-export type DashboardServer = Bun.Server<undefined>
+export type DashboardServer = Omit<Bun.Server<undefined>, "stop"> & {
+  stop(closeActiveConnections?: boolean): Promise<void>
+}
 
 interface CountRow {
   count: number
@@ -82,6 +99,8 @@ const DEFAULT_PROOF_DIR = resolve(PACKAGE_DIR, "../../docs/qa")
 const DEFAULT_WEB_DIST = resolve(PACKAGE_DIR, "web/dist")
 const WEB_BUILD_ERROR = "web ui not built — run bun run web:build"
 const MAX_ANSWER_ERROR_LENGTH = 500
+const TABS_BOOTSTRAP_PARAMETER = "tabs-session"
+const TABS_SESSION_COOKIE = "primer_tabs_session"
 const PositiveInteger = Schema.Number.check(Schema.isFinite(), Schema.isInt(), Schema.isGreaterThanOrEqualTo(1))
 
 const AskRequestSchema = Schema.Struct({
@@ -115,21 +134,52 @@ type ProgressRequest = Schema.Schema.Type<typeof ProgressRequestSchema>
 
 export function startDashboard(options: DashboardOptions): DashboardServer {
   const env = options.env ?? process.env
-  return Bun.serve({
+  const tabsAuthentication: TabsApiAuthentication = {
+    ownerSecret: readDaemonOwnerSecret(options.paths),
+    sessionSecret: randomBytes(32).toString("base64url"),
+  }
+  let runtime!: ReturnType<typeof startBrowserContextRuntime>
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
     port: options.port,
     async fetch(request) {
       try {
-        return await handleRequest(request, options.paths, env)
+        const browserContext = await runtime
+        return await handleRequest(request, options.paths, env, browserContext.client, tabsAuthentication)
       } catch (error) {
+        appendBackendError(options.paths.errorLog, error, `${request.method} ${new URL(request.url).pathname}`)
         return jsonError(error instanceof Error ? error.message : "internal server error", 500)
       }
     },
   })
+  runtime = startBrowserContextRuntime({ paths: options.paths })
+  return new Proxy(server, {
+    get(target, property) {
+      if (property === "stop") {
+        return async (closeActiveConnections?: boolean): Promise<void> => {
+          target.stop(closeActiveConnections)
+          const browserContext = await runtime
+          await browserContext.close()
+        }
+      }
+      const value: unknown = Reflect.get(target, property, target)
+      return typeof value === "function" ? value.bind(target) : value
+    },
+  }) as DashboardServer
 }
 
-async function handleRequest(request: Request, paths: DaemonPaths, env: Record<string, string | undefined>): Promise<Response> {
+async function handleRequest(
+  request: Request,
+  paths: DaemonPaths,
+  env: Record<string, string | undefined>,
+  browserContextClient: BrowserContextClient,
+  tabsAuthentication: TabsApiAuthentication,
+): Promise<Response> {
   const url = new URL(request.url)
   const pathname = url.pathname
+  if (request.method === "GET" && pathname === "/" && url.searchParams.has(TABS_BOOTSTRAP_PARAMETER)) {
+    return handleTabsSessionBootstrap(url, tabsAuthentication)
+  }
   const readerMediaApiResponse = await handleReaderMediaApi(request, paths)
   if (readerMediaApiResponse !== null) return readerMediaApiResponse
   const readerApiResponse = await handleReaderApi(request, paths)
@@ -149,6 +199,13 @@ async function handleRequest(request: Request, paths: DaemonPaths, env: Record<s
   if (exposureApiResponse !== null) return exposureApiResponse
   const feedbackApiResponse = await handleFeedbackApi(request, paths)
   if (feedbackApiResponse !== null) return feedbackApiResponse
+  const reviewFeedApiResponse = await handleReviewFeedApi(request, pathname, paths)
+  if (reviewFeedApiResponse !== null) return reviewFeedApiResponse
+  const tabsApiResponse = await handleTabsApi(request, browserContextClient, tabsAuthentication)
+  if (tabsApiResponse !== null) return tabsApiResponse
+  if (request.method === "POST" && pathname === "/api/errors/browser") {
+    return handleBrowserError(request, paths)
+  }
   if (isReaderHost(request)) return handleReaderSite(request, pathname, paths)
 
   if (request.method === "GET" && pathname === "/") return handleWebIndex(env)
@@ -171,6 +228,43 @@ async function handleRequest(request: Request, paths: DaemonPaths, env: Record<s
 
 
   return jsonError("unknown route", 404)
+}
+
+function handleTabsSessionBootstrap(url: URL, authentication: TabsApiAuthentication): Response {
+  const supplied = url.searchParams.get(TABS_BOOTSTRAP_PARAMETER)
+  if (
+    supplied === null
+    || url.searchParams.size !== 1
+    || !secretEquals(supplied, authentication.ownerSecret)
+  ) {
+    return jsonError("invalid dashboard owner credential", 403)
+  }
+  return new Response(null, {
+    status: 303,
+    headers: {
+      "cache-control": "no-store",
+      location: "/",
+      "referrer-policy": "no-referrer",
+      "set-cookie": `${TABS_SESSION_COOKIE}=${authentication.sessionSecret}; HttpOnly; SameSite=Strict; Path=/`,
+      "x-frame-options": "DENY",
+    },
+  })
+}
+
+function secretEquals(left: string, right: string): boolean {
+  const leftBytes = Buffer.from(left, "utf8")
+  const rightBytes = Buffer.from(right, "utf8")
+  return leftBytes.length === rightBytes.length && timingSafeEqual(leftBytes, rightBytes)
+}
+
+async function handleBrowserError(request: Request, paths: DaemonPaths): Promise<Response> {
+  try {
+    const payload = decodeBrowserErrorPayload(await request.json())
+    appendAppError(paths.errorLog, { source: "browser", ...payload })
+  } catch {
+    // The browser cannot safely report a failure from its own error reporter.
+  }
+  return new Response(null, { status: 204 })
 }
 
 function isReaderHost(request: Request): boolean {
@@ -286,6 +380,7 @@ async function handleAsk(request: Request, paths: DaemonPaths, env: Record<strin
     try {
       answer = await synthesizeAnswer(body.question, evidence.hits, config)
     } catch (error) {
+      appendBackendError(paths.errorLog, error, "POST /api/ask synthesis")
       answerError = answerFailure(error)
     }
   }
@@ -354,7 +449,10 @@ async function handleAskStream(request: Request, paths: DaemonPaths, env: Record
           })
           send("done", { elapsedMs })
         } catch (error) {
-          if (!closed && !request.signal.aborted) send("error", { message: answerFailure(error) })
+          if (!closed && !request.signal.aborted) {
+            appendBackendError(paths.errorLog, error, "POST /api/ask/stream synthesis")
+            send("error", { message: answerFailure(error) })
+          }
         }
       } finally {
         request.signal.removeEventListener("abort", abort)
@@ -506,6 +604,34 @@ function handleProof(pathname: string, env: Record<string, string | undefined>):
   return jsonResponse({ name: proof.name, markdown: readFileSync(proof.path, "utf8") })
 }
 
+async function handleReviewFeedApi(request: Request, pathname: string, paths: DaemonPaths): Promise<Response | null> {
+  if (request.method === "GET" && pathname === "/api/review-feed") {
+    return jsonResponse(readReviewFeed(paths.reviewFeed))
+  }
+
+  if (request.method !== "POST") return null
+  const match = /^\/api\/review-feed\/([^/]+)\/answer$/u.exec(pathname)
+  if (match === null) return null
+  const targetId = decodePathSegment(match[1] ?? "")
+  if (targetId === null || targetId.length === 0) return jsonError("unknown review feed target", 404)
+
+  const body = await decodeJson(request, ReviewFeedAnswerSchema)
+  if (body instanceof Response) return body
+  if (body.summary.trim().length === 0) return jsonError("summary must not be blank", 400)
+
+  try {
+    return jsonResponse(appendReviewFeedAnswer(paths.reviewFeed, targetId, body.summary))
+  } catch (error) {
+    if (error instanceof ReviewFeedTargetNotFoundError) return jsonError(error.message, 404)
+    if (error instanceof ReviewFeedTargetNotPrimerError) return jsonError(error.message, 400)
+    if (error instanceof ReviewFeedTargetAnsweredError) return jsonError(error.message, 409)
+    if (error instanceof ReviewFeedTargetNotPendingError || error instanceof ReviewFeedAnswerValidationError) {
+      return jsonError(error.message, 400)
+    }
+    throw error
+  }
+}
+
 async function decodeJson<S extends Schema.ConstraintDecoder<unknown>>(request: Request, schema: S): Promise<S["Type"] | Response> {
   let body: unknown
   try {
@@ -641,12 +767,14 @@ function registerPortlessAlias(port: number, env: Record<string, string | undefi
 }
 
 if (import.meta.main) {
+  const paths = resolveDaemonPaths(process.env)
   const server = startDashboard({
     port: Number(process.env.PORT ?? 4177),
-    paths: resolveDaemonPaths(process.env),
+    paths,
     env: process.env,
   })
   const actualPort = server.port ?? Number(process.env.PORT ?? 4177)
-  console.log(`Primer dashboard listening on http://localhost:${actualPort}`)
+  const ownerSecret = readDaemonOwnerSecret(paths)
+  console.log(`Primer dashboard listening on http://localhost:${actualPort}/?${TABS_BOOTSTRAP_PARAMETER}=${encodeURIComponent(ownerSecret)}`)
   registerPortlessAlias(actualPort, process.env)
 }

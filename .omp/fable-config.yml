@@ -64,5 +64,8 @@ autolearn:
 
 
 skills:
+  ignoredSkills:
+    - gmcli
   customDirectories:
     - ./streams/harness/skills
+    - ./skills/fleet

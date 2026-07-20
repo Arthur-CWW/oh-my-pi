@@ -236,3 +236,12 @@ Scheduling math is `ts-fsrs`, never hand-rolled. Priority is an admission-order 
 Dependency gating (Skycak primitives) is designed as a **fail-open admission filter** over the NEW branch only — an unvalidated or absent graph edge has no gating effect, so a sparse graph degrades to today's shipped behavior (`experiments/scheduler-dependency-gating/design-brief-v0.md`). Alternative rejected: encoding prerequisites inside FSRS parameters or hiding overdue reviews behind gates.
 
 Companion experiment: enrichment prompt v0 (`experiments/queue-enrichment/`) treats enrichment output as CARD-PROMOTION stage 2–4 material — sense disambiguation against the quoted source sentence, constrained examples through the hsk-deck 85%-rule, targeting judgment without construction or approval. First 10 enrichments require Arthur per-field labels before any batch run.
+
+## 2026-07-19 — Stretch-don't-mirror tutoring posture; prerequisite-DAG direction
+
+**Status:** decision (posture) + hypothesis (knowledge graphs)
+**Scope:** product-wide
+**Relationships:** `implements_slice_of` → [`INTENT.md`](INTENT.md) tutoring posture; `evidence_for` → generators ledger rows 41/44/45/53 (`docs/fable/generators.md`)
+**Evidence:** Arthur, live exocortex session 2026-07-19: "I'd like to learn new words, concepts, ideas and not be reduced to caricature of myself by reflecting my register"; same session resolved the earlier garbled intake reference to Justin Skycak's knowledge-graph/mastery-learning writing and asked for it as curriculum inspiration.
+
+Tutor prose holds register half a step beyond Arthur's (ZPD) and never mirrors his idiolect back; every stretched term carries a one-line cash-out. Curriculum direction for hard domains (stats/probability first): a prerequisite DAG determines what is currently learnable; practice and review sequence against graph edges rather than topic lists. Falsifier for the posture: stretched register measurably increases abandonment or friction without retention gains. Knowledge-graph implementation stays deferred pending the one-chapter calibration lineage.

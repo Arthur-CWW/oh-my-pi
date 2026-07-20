@@ -332,3 +332,21 @@ The current uncommitted behavior wave structurally implements acceptance 140–1
 The evidence ledger is [`qa-full-duplex-behavior.md`](../../apps/ai-companion-rtc/docs/qa-full-duplex-behavior.md). Its limits are binding: it does not measure the <300 ms face condition, exercise a live Ubuntu/provider disconnect or a live deep provider, or prove semantic-filler content in a live conversation.
 
 Foundation order: benchmark harness **done** → live digest proof **done** → Effect turn-pipeline migration **done**. Next: choose the F5 whisper-voice, PuruPuru, or Live2D product branch through the dashboard taste question.
+
+## 2026-07-19 continuation — momentum interruption, silent thought, and model gate
+
+Arthur's settled taste defaults: anime-legible expression first with a restrained A/B preset; silent nonverbal thinking by default; a first interruption after speech gains momentum may finish only the current short phrase; early or repeated interruption yields immediately; mostly visual backchannels with rare audio.
+
+Implemented:
+
+- `src/interruption-policy.ts`: pure, rig-independent early/repeated/phrase-boundary decision using monotonic clocks and actual-played offsets.
+- `src/server-assistant.ts`: typed synthesized-sentence playback ranges.
+- `src/server.ts`: epoch-safe deferred phrase finish, 900ms hard deadline, monotonic ACK cursor, immediate manual/repeated cancellation, deep-delegate fencing, and semantic `retreat` fluster cue.
+- `src/reactor.ts`: one-shot `glance-away` + `breath` on each transition into thinking; no vocal filler.
+- `scripts/proof-full-duplex.ts`: isolated real Kokoro/STT proof harness with persistent WebSocket event capture and cleanup.
+
+Proof: [`docs/qa-momentum-interruption.md`](../../apps/ai-companion-rtc/docs/qa-momentum-interruption.md) and `local/proofs/ai-companion-rtc/full-duplex-PASS-2026-07-19T13-43-27-498Z.json`. Focused behavior tests pass 69/69. The clean real-service proof observed the two thinking primitives exactly once, no backchannel, no synchronous mature-interruption cancel, and bounded fade/cancel at 965ms.
+
+Architecture is now synchronized in [`docs/duplex-embodiment-architecture.md`](../../apps/ai-companion-rtc/docs/duplex-embodiment-architecture.md). Model candidates and exact published artifact sizes are tracked in [`notes/open-realtime-models-2026-07.md`](notes/open-realtime-models-2026-07.md). Smart Turn v3.2 CPU (8,679,182-byte ONNX) is the first qualified challenger. Do not download Moshi/PersonaPlex/Qwen3-Omni onto the Mac: only 2.0 GiB was free, while verified bundles begin at 5.19 GB. Ubuntu experiments remain blocked on a confirmed host alias, current free space/runtime, and an explicit bounded run contract.
+
+Package cleanup added the package-owned `bun run check` gate. It currently stops on unrelated concurrent rigging/provider-track type errors; do not claim the package-wide typecheck is green until that session fixes them. The exact behavior slice and real-service proof are green.

@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs"
 import {
   appendFeedEntry,
   decodeFeedEntry,
@@ -130,6 +131,12 @@ function parseArgs(argv: readonly string[]): ParsedArgs {
         summary = readFlagValue(argv, index, arg)
         index += 1
         break
+      case "--summary-file": {
+        const file = readFlagValue(argv, index, arg)
+        summary = readFileSync(file, "utf8").trim()
+        index += 1
+        break
+      }
       case "--artifact":
         artifacts.push(parseArtifact(readFlagValue(argv, index, arg)))
         index += 1

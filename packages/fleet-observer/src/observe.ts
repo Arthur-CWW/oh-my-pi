@@ -5,6 +5,7 @@ import { tmpdir } from "node:os"
 export interface FleetOverviewRow {
   readonly sessionId: string
   readonly name: string
+  readonly label?: string
   readonly state: string
   readonly workstream: string
   readonly cwd: string
@@ -29,10 +30,23 @@ export interface ObserverPaths {
   readonly indexPath: string
 }
 
+export interface StateDocLayers {
+  readonly whatWhy?: string
+  readonly approach?: string
+  readonly recent?: string
+  readonly next?: string
+  readonly decision?: string
+  readonly deferredWhy?: string
+  readonly blocker?: string
+  readonly revivalTrigger?: string
+  readonly artifacts?: readonly string[]
+}
+
 export interface SummaryOutput {
   readonly summary: string
   readonly name: string
   readonly workstream?: string
+  readonly layers?: StateDocLayers
 }
 
 export interface CommandResult {
@@ -51,6 +65,7 @@ export interface StateDocInput {
   readonly state: string
   readonly workstream: string
   readonly summary: string
+  readonly layers?: StateDocLayers
   readonly journalPath: string
   readonly stamp: string
 }
@@ -185,6 +200,16 @@ function stateDocPath(paths: ObserverPaths, sessionId: string): string {
   return join(paths.stateDocsDir, `${sessionId}.md`)
 }
 
+function liveIdentity(peer: Pick<FleetOverviewRow, "label" | "name" | "spawnName" | "workstream" | "sessionId">): {
+  readonly name: string
+  readonly workstream: string
+} {
+  return {
+    name: boundedName(peer.label || peer.name || peer.spawnName) || peer.sessionId,
+    workstream: oneLine(peer.workstream) || "uncategorized",
+  }
+}
+
 export function defaultObserverPaths(repoRoot = process.env.OBSERVER_REPO_ROOT ?? resolve(import.meta.dir, "../../..")): ObserverPaths {
   const dataDir = process.env.OBSERVER_DATA_DIR ?? join(repoRoot, "data", "fleet-observer")
   const stateDocsDir = process.env.OBSERVER_STATE_DOCS_DIR ?? join(repoRoot, "local", "state-docs")
@@ -242,10 +267,19 @@ export function buildSummaryCommand(
 ): readonly string[] {
   const prompt = [
     "Summarize this OMP agent journal excerpt for a fleet overview.",
-    "Return exactly three lines and no markdown:",
-    "SUMMARY: one terse line, at most 280 characters",
-    "NAME: a useful display name of at most four words",
-    "WORKSTREAM: an optional lowercase slug, or blank",
+    "Return exactly twelve labelled lines and no markdown. Keep every line grounded in the excerpt; leave a field blank when the excerpt has no evidence.",
+    "SUMMARY: one terse fallback line, at most 280 characters",
+    "NAME: ignored; identity comes from the live fleet row",
+    "WORKSTREAM: ignored; identity comes from the live fleet row",
+    "WHAT_WHY: the distinct objective and reason for the work",
+    "APPROACH: the distinct current method or plan",
+    "RECENT: the distinct latest completed or observed result",
+    "NEXT: the distinct next action or open task",
+    "DECISION: the last meaningful decision",
+    "DEFERRED_WHY: why a decision or work was deferred",
+    "BLOCKER: the current blocker",
+    "REVIVAL_TRIGGER: what should trigger resuming this work",
+    "ARTIFACTS: comma-separated paths or URLs produced by the work",
     "Do not include tool payloads, credentials, or long code.",
     "",
     excerpt,
@@ -264,9 +298,11 @@ export function parseOverviewJson(stdout: string): readonly FleetOverviewRow[] {
     if (!record) continue
     const sessionId = stringField(record, "session_id", "sessionId")
     if (!sessionId) continue
+    const label = stringField(record, "label")
     rows.push({
       sessionId,
       name: stringField(record, "name"),
+      ...(label ? { label } : {}),
       state: stringField(record, "state", "display_state"),
       workstream: stringField(record, "workstream"),
       cwd: stringField(record, "cwd"),
@@ -338,10 +374,46 @@ function textFromContent(value: unknown): string {
   return parts.join(" ")
 }
 
+function toolCallEvidence(content: unknown): string {
+  if (!Array.isArray(content)) return ""
+  const parts: string[] = []
+  for (const item of content) {
+    const block = recordOf(item)
+    if (!block || block.type !== "toolCall") continue
+    const name = stringField(block, "name")
+    const args = recordOf(block.arguments)
+    if (name === "goal" && args) {
+      const objective = stringField(args, "objective")
+      const workstream = stringField(args, "workstream")
+      if (objective) parts.push(`goal objective: ${oneLine(objective)}`)
+      if (workstream) parts.push(`goal workstream: ${oneLine(workstream)}`)
+      continue
+    }
+    if (name === "todo" && args) {
+      const ops = Array.isArray(args.ops) ? args.ops : []
+      const tasks: string[] = []
+      for (const opValue of ops) {
+        const op = recordOf(opValue)
+        if (!op) continue
+        const task = stringField(op, "task", "content")
+        if (task) tasks.push(oneLine(task))
+        const items = Array.isArray(op.items) ? op.items : []
+        for (const itemValue of items) {
+          if (typeof itemValue === "string" && itemValue.trim()) tasks.push(oneLine(itemValue))
+        }
+      }
+      if (tasks.length > 0) parts.push(`todo: ${tasks.join("; ")}`)
+    }
+  }
+  return parts.join(" ")
+}
+
 function messageText(record: Record<string, unknown>): string {
   const message = recordOf(record.message) ?? record
   const content = message.content ?? message.text ?? message.summary
-  return textFromContent(content)
+  const text = textFromContent(content)
+  const toolEvidence = toolCallEvidence(content)
+  return [text, toolEvidence].filter(Boolean).join(" ")
 }
 
 export function compressExcerpt(lines: readonly string[], maxChars = DEFAULT_EXCERPT_CHARS): string {
@@ -369,18 +441,49 @@ export function compressExcerpt(lines: readonly string[], maxChars = DEFAULT_EXC
     } else if (type === "compaction" || type === "branch_summary") {
       role = type
       text = stringField(record, "summary", "shortSummary")
+    } else if (type === "mode_change") {
+      role = "goal"
+      const data = recordOf(record.data)
+      const goal = recordOf(data?.goal)
+      const goalDetails = recordOf(goal?.goal)
+      const objective = stringField(goalDetails ?? {}, "objective")
+      const status = stringField(goalDetails ?? {}, "status")
+      text = [objective && `objective: ${oneLine(objective)}`, status && `status: ${oneLine(status)}`].filter(Boolean).join("; ")
     }
     if (!text.trim()) continue
     const lineText = `${role || "entry"}: ${truncate(oneLine(text), 360)}`
     compressed.push(lineText)
   }
-  return truncate(compressed.join("\n"), maxChars)
+  if (maxChars <= 0 || compressed.length === 0) return ""
+  let start = compressed.length
+  let used = 0
+  while (start > 0) {
+    const lineLength = compressed[start - 1].length + (start < compressed.length ? 1 : 0)
+    if (used + lineLength > maxChars) break
+    used += lineLength
+    start--
+  }
+  if (start === compressed.length) return truncate(compressed[compressed.length - 1], maxChars)
+  return compressed.slice(start).join("\n")
 }
-
 function labelledLine(lines: readonly string[], label: string): string | undefined {
   const prefix = `${label}:`
   const line = lines.find(candidate => candidate.toLowerCase().startsWith(prefix.toLowerCase()))
   return line === undefined ? undefined : line.slice(prefix.length).trim()
+}
+
+function optionalLayer(value: string | undefined): string | undefined {
+  const result = boundedSummary(value ?? "")
+  return result || undefined
+}
+
+function parseArtifacts(value: string | undefined): readonly string[] | undefined {
+  const artifacts = (value ?? "")
+    .split(/[;,]/)
+    .map(item => oneLine(item).replace(/^[-*]\s+/, ""))
+    .filter(item => item.length > 0 && item !== "— none" && item !== "— none yet")
+    .map(item => truncate(item, MAX_SUMMARY_CHARS))
+  return artifacts.length > 0 ? [...new Set(artifacts)] : undefined
 }
 
 export function parseSummaryOutput(output: string): SummaryOutput | null {
@@ -394,26 +497,78 @@ export function parseSummaryOutput(output: string): SummaryOutput | null {
   const labelledWorkstream = labelledLine(lines, "WORKSTREAM")
   const summary = boundedSummary(labelledSummary ?? lines[0] ?? "")
   const name = boundedName(labelledName ?? lines[1] ?? "")
-  if (!summary || !name) return null
+  if (!summary) return null
   const workstreamValue = labelledWorkstream ?? (labelledSummary === undefined && lines.length >= 3 ? lines[2] : undefined)
   const workstream = workstreamValue ? normaliseWorkstream(workstreamValue) : undefined
-  return workstream === undefined ? { summary, name } : { summary, name, workstream }
+  const layers: StateDocLayers = {
+    whatWhy: optionalLayer(labelledLine(lines, "WHAT_WHY")),
+    approach: optionalLayer(labelledLine(lines, "APPROACH")),
+    recent: optionalLayer(labelledLine(lines, "RECENT")),
+    next: optionalLayer(labelledLine(lines, "NEXT")),
+    decision: optionalLayer(labelledLine(lines, "DECISION")),
+    deferredWhy: optionalLayer(labelledLine(lines, "DEFERRED_WHY")),
+    blocker: optionalLayer(labelledLine(lines, "BLOCKER")),
+    revivalTrigger: optionalLayer(labelledLine(lines, "REVIVAL_TRIGGER")),
+    artifacts: parseArtifacts(labelledLine(lines, "ARTIFACTS")),
+  }
+  const hasLayers = Object.values(layers).some(value => value !== undefined && (!Array.isArray(value) || value.length > 0))
+  return {
+    summary,
+    name,
+    ...(workstream === undefined ? {} : { workstream }),
+    ...(hasLayers ? { layers } : {}),
+  }
+}
+
+function evidenceKey(value: string): string {
+  return value
 }
 
 export function renderStateDoc(input: StateDocInput): string {
   const name = oneLine(input.name) || input.sessionId
   const summary = boundedSummary(input.summary)
   const workstream = oneLine(input.workstream)
+  const layers = input.layers ?? {}
+  const used = new Set<string>()
+  const uniqueLayer = (value: string | undefined, empty: string): string => {
+    const candidate = boundedSummary(value ?? "")
+    const key = evidenceKey(candidate)
+    if (!candidate || !key || used.has(key)) return empty
+    used.add(key)
+    return candidate
+  }
+  const whatWhy = uniqueLayer(layers.whatWhy ?? summary, "— none yet")
+  const approach = uniqueLayer(layers.approach, "— none yet")
+  const recent = uniqueLayer(layers.recent, "— none yet")
+  const next = uniqueLayer(layers.next, "— none yet")
+  const decision = uniqueLayer(layers.decision, "— none")
+  const deferredWhy = uniqueLayer(layers.deferredWhy, "— none")
+  const blocker = uniqueLayer(layers.blocker, "— none")
+  const revivalTrigger = uniqueLayer(layers.revivalTrigger, "— none")
+  const artifacts = (layers.artifacts ?? [])
+    .map(artifact => uniqueLayer(artifact, ""))
+    .filter(Boolean)
   return [
     `# ${name}`,
+    `Workstream: ${workstream || "uncategorized"}`,
     "## L0",
-    `What/why: ${summary}`,
+    `What/why: ${whatWhy}`,
     `Status: ${oneLine(input.state) || "unknown"} · Fresh: ${input.stamp}`,
     "",
     "## L1 Overview",
-    `Current approach: ${summary}`,
-    `Recent: ${summary}`,
-    `Next: Continue the current work${workstream ? ` in ${workstream}` : ""}.`,
+    `Current approach: ${approach}`,
+    `Recent: ${recent}`,
+    `Next: ${next}`,
+    "",
+    "## L2 Decisions",
+    `- Last meaningful decision: ${decision}`,
+    `- Deferred because: ${deferredWhy}`,
+    `- Blocker: ${blocker}`,
+    `- Revival trigger: ${revivalTrigger}`,
+    "",
+    "## L3 Artifacts",
+    "- Paths/URLs produced:",
+    ...(artifacts.length > 0 ? artifacts.map(artifact => `  - ${artifact}`) : ["  - — none"]),
     "",
     "## L5 Depth",
     `- Journal: ${input.journalPath}`,
@@ -475,6 +630,52 @@ async function writeStateFiles(paths: ObserverPaths, input: StateDocInput): Prom
     stamp: input.stamp,
   })
   await Bun.write(paths.indexPath, renderIndex([...bySession.values()]))
+}
+
+async function refreshIdentity(
+  paths: ObserverPaths,
+  peer: Pick<FleetOverviewRow, "label" | "sessionId" | "name" | "spawnName" | "workstream" | "state">,
+  stamp: string,
+): Promise<boolean> {
+  const docPath = stateDocPath(paths, peer.sessionId)
+  let content: string
+  try {
+    content = await readFile(docPath, "utf8")
+  } catch {
+    return false
+  }
+  const hasLiveName = Boolean(peer.label?.trim() || peer.name.trim() || peer.spawnName.trim())
+  const hasLiveWorkstream = Boolean(peer.workstream.trim())
+  if (!hasLiveName && !hasLiveWorkstream) return false
+  const identity = liveIdentity(peer)
+  const lines = content.split(/\r?\n/)
+  if (hasLiveName && lines[0]?.startsWith("# ")) lines[0] = `# ${identity.name}`
+  const statusIndex = lines.findIndex(line => line.startsWith("Status: "))
+  if (statusIndex >= 0) lines[statusIndex] = `Status: ${oneLine(peer.state) || "unknown"} · Fresh: ${stamp}`
+  if (hasLiveWorkstream) {
+    const nextIndex = lines.findIndex(line => line.startsWith("Next: Continue the current work"))
+    if (nextIndex >= 0) lines[nextIndex] = `Next: Continue the current work in ${identity.workstream}.`
+    const headerIndex = lines.findIndex(line => line.startsWith("Workstream: "))
+    const depthIndex = lines.findIndex(line => line.startsWith("- Workstream: "))
+    if (headerIndex >= 0) lines[headerIndex] = `Workstream: ${identity.workstream}`
+    else {
+      if (depthIndex >= 0) lines.splice(depthIndex, 1)
+      lines.splice(1, 0, `Workstream: ${identity.workstream}`)
+    }
+  }
+  const refreshed = lines.join("\n")
+  if (refreshed === content) return false
+  await Bun.write(docPath, refreshed)
+  const existing = await readIndexRecords(paths.indexPath)
+  const bySession = new Map(existing.map(record => [record.sessionId, record]))
+  bySession.set(peer.sessionId, {
+    sessionId: peer.sessionId,
+    name: hasLiveName ? identity.name : bySession.get(peer.sessionId)?.name ?? peer.sessionId,
+    workstream: hasLiveWorkstream ? identity.workstream : bySession.get(peer.sessionId)?.workstream ?? "uncategorized",
+    stamp,
+  })
+  await Bun.write(paths.indexPath, renderIndex([...bySession.values()]))
+  return true
 }
 
 async function regenerateIndex(
@@ -623,6 +824,7 @@ export async function runObserverPass(options: ObserverOptions = {}): Promise<Ob
 
     try {
       if (!shouldObserve(peer, cursors[peer.sessionId], current, threshold)) {
+        await refreshIdentity(paths, peer, stamp)
         nextCursors[peer.sessionId] = current
         incrementReason(skippedReasons, "below-threshold")
         skipped++
@@ -637,17 +839,25 @@ export async function runObserverPass(options: ObserverOptions = {}): Promise<Ob
       const summaryResult = await runner(summaryCommand)
       if (summaryResult.exitCode !== 0) throw commandFailure(summaryCommand, summaryResult)
       const summary = parseSummaryOutput(summaryResult.stdout)
-      if (!summary) throw new Error("observer model returned no summary and name")
-      const labelCommand = buildLabelCommand(peer.sessionId, summary, binary)
+      if (!summary) throw new Error("observer model returned no summary")
+      const identity = liveIdentity(peer)
+      const liveName = identity.name
+      const liveWorkstream = identity.workstream
+      const labelOutput: SummaryOutput = {
+        ...summary,
+        name: liveName,
+        workstream: peer.workstream ? oneLine(peer.workstream) : undefined,
+      }
+      const labelCommand = buildLabelCommand(peer.sessionId, labelOutput, binary)
       const labelResult = await runner(labelCommand)
       if (labelResult.exitCode !== 0) throw commandFailure(labelCommand, labelResult)
-      const workstream = summary.workstream ?? peer.workstream
       await writeStateFiles(paths, {
         sessionId: peer.sessionId,
-        name: summary.name,
+        name: liveName,
         state: peer.state,
-        workstream,
+        workstream: liveWorkstream,
         summary: summary.summary,
+        layers: summary.layers,
         journalPath: peer.sessionJournal,
         stamp,
       })

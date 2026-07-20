@@ -102,8 +102,11 @@ const observationMs = 10_000
 const probeTimeoutMs = 500
 
 export async function canonicalSessionIdentity(sessionFile: string, sessionId: string): Promise<SessionIdentity> {
-  const target = await stat(sessionFile)
-  if (!target.isFile()) throw new Error(`resume target is not a regular file: ${sessionFile}`)
+  const target = await stat(sessionFile).catch((error: unknown) => {
+    if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") return null
+    throw error
+  })
+  if (target !== null && !target.isFile()) throw new Error(`session target is not a regular file: ${sessionFile}`)
   const parent = await realpath(dirname(sessionFile))
   return { sessionFile: join(parent, basename(sessionFile)), sessionId }
 }
@@ -123,13 +126,14 @@ export async function acquireSessionLease(input: {
   readonly controllerProcess: ProcessIdentity
   readonly daemonProcess: ProcessIdentity | null
   readonly cmux?: CmuxOwnerEnvironment
+  readonly ownerEpoch?: string
   readonly dependencies?: OwnershipDependencies
 }): Promise<OwnershipHandle | OwnerRefusal> {
   const dependencies = input.dependencies ?? {}
   const paths = leasePathsFor(input.identity, dependencies.root ?? muxRootDir())
   const clock = dependencies.clock ?? systemClock
   const processes = dependencies.processes ?? systemProcesses
-  const epoch = randomUUID()
+  const epoch = input.ownerEpoch ?? randomUUID()
   await mkdir(dirname(paths.claim), { recursive: true })
 
   for (let attempt = 0; attempt < 4; attempt += 1) {

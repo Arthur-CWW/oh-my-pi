@@ -1,37 +1,24 @@
 # Primer stream session overlay.
 # Use with: omp --config ./.omp/primer-config.yml
-# Orchestration defaults to Fable MEDIUM (Arthur, 2026-07-03) — never default
-# above :medium; pass --model ...:high explicitly only when truly needed.
-# Starts from ./.omp/fable-config.yml and adds primer-local skills.
+# Adds primer-local skills.
 
-model: anthropic/claude-fable-5:medium
+model: openai-codex/gpt-5.6-sol:high
+serviceTier: none
 
 modelRoles:
-  # INTERIM ROUTING (Arthur, 2026-07-09): OpenAI account down (Pro degraded to
-  # free, case 11129100 escalated) — all GPT-5.5 worker lanes moved to Opus,
-  # mostly 4.8, as the hands. Revert to GPT-5.5 when the account recovers.
-  # Kimi stays only for refusal-basin feedstock retrieval (books/resources)
-  # via research/authenticated_web.
-  smol: anthropic/claude-opus-4-8:low
-  task: anthropic/claude-opus-4-8:medium
-  implementer: anthropic/claude-opus-4-8:high
-  maintenance: anthropic/claude-opus-4-8:low
-  research: kimi-code/kimi-for-coding
-  authenticated_web: kimi-code/kimi-for-coding
-  complex: anthropic/claude-opus-4-8:high
-  plan: anthropic/claude-opus-4-8:high
-  slow: anthropic/claude-opus-4-8:high
+  default: openai-codex/gpt-5.6-sol:high
+  smol: openai-codex/gpt-5.6-luna:xhigh
+  task: openai-codex/gpt-5.6-luna:xhigh
+  slow: openai-codex/gpt-5.6-sol:high
+  plan: openai-codex/gpt-5.6-sol:high
+  advisor: openai-codex/gpt-5.6-sol:high
   designer: anthropic/claude-opus-4-8
-  # Cheap vision for inspect_image (Arthur, 2026-07-03): image inspection was
-  # silently routed to the session model (Fable) — pi/vision wins the
-  # resolution order, so pin it to the Antigravity Gemini flash lane.
-  vision: google-antigravity/gemini-3.5-flash-low
+  # inspect_image uses this provider-qualified capability role strictly.
+  vision: google-antigravity/gemini-3.5-flash
 
 advisor:
   enabled: true
-  scope: subagents
-  model: deepseek/deepseek-reasoner-v4
-
+  subagents: true
 auth:
   codexRefresh: manual
 
@@ -50,6 +37,9 @@ autolearn:
   enabled: false
 
 skills:
+  ignoredSkills:
+    - gmcli
   customDirectories:
     - ./streams/harness/skills
+    - ./skills/fleet
     - ./streams/primer/skills

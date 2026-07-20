@@ -6,7 +6,7 @@ Boot doc for the next orchestrator session on this stream. Predecessor: Fable-or
 
 1. Read `streams/harness/GOAL.md`, then `docs/plans/pi-agent-control-plane.md` (**spec v1 — the load-bearing artifact**; open questions 1–2 now settled, new binding sections: "Testing strategy: scaled-down DST" and "Durability and ingestion contract"), then `docs/plans/control-plane-m1.md` (COMPLETE — the M1 implementation contract, still the schema/wire reference), then `docs/state/harness-friction.md` and `docs/state/side-quests.md`.
 2. Check `irc list` and `cmux list-workspaces` — sibling sessions may be live; do not disturb their streams.
-3. You orchestrate at `:medium`. All implementation → GPT-5.5 lanes. Design/UI → designer. Research/retrieval → kimi lanes. You write code only for trivial inline fixes.
+3. You orchestrate on Sol at high effort for plans and escalations. Delegate mutable implementation packets with `task`, naming a specialist role and stating owned and excluded files plus the least-privilege tool allowlist; Terra at medium is the normal worker lane, with an optional supported model/effort override only when a packet specifically requires it. Keep deliberate design/UI work with `designer`. Use `explore` for read-only local scouting and `librarian` for external or API research. Write code only for trivial inline fixes.
 
 ## State (what is done)
 

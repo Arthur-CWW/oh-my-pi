@@ -16,13 +16,25 @@ import {
   type ModelCallInput,
   type OperationalEventInput,
   type ProviderCallInput,
-  type SessionInput,
-  type TurnInput,
-  type TimelineInput,
   type RouteResolutionInput,
+  type SessionInput,
+  type TimelineInput,
+  type TurnInput,
 } from "./ledger"
-import { type JsonValue, JsonValueSchema, type KnownOutboxKind, OutboxEnvelopeSchema, type OutboxEnvelope } from "./outbox"
-import { AgentTimelinePayloadV1Schema, type AgentTimelinePayloadV1, DiagnosticOccurrencePayloadV1Schema, DiagnosticProjectionPayloadV1Schema, type DiagnosticOccurrencePayloadV1, type DiagnosticProjectionPayloadV1, type JsonObject, RouteResolutionPayloadV1Schema, type RouteResolutionPayloadV1, RunnerEventPayloadV1Schema, type RunnerEventPayloadV1 } from "./omp-events"
+import { type JsonValue, JsonValueSchema, type KnownOutboxKind, OutboxEnvelopeSchema, type OutboxEnvelope, RelayLifecyclePayloadV1Schema, WorkLeasePayloadV1Schema } from "./outbox"
+import {
+  AgentTimelinePayloadV1Schema,
+  type AgentTimelinePayloadV1,
+  DiagnosticOccurrencePayloadV1Schema,
+  DiagnosticProjectionPayloadV1Schema,
+  type DiagnosticOccurrencePayloadV1,
+  type DiagnosticProjectionPayloadV1,
+  type JsonObject,
+  RouteResolutionPayloadV1Schema,
+  type RouteResolutionPayloadV1,
+  RunnerEventPayloadV1Schema,
+  type RunnerEventPayloadV1,
+} from "./omp-events"
 
 const DEFAULT_BATCH_SIZE = 500
 
@@ -370,6 +382,18 @@ function mapKnownEnvelopeRow(envelope: OutboxEnvelope, kind: KnownOutboxKind, ra
       } catch (cause) {
         return payloadErrorEvent(envelope, rawLine, errorMessage(cause))
       }
+    }
+    case "relayLifecycle": {
+      const payload = Schema.decodeUnknownOption(RelayLifecyclePayloadV1Schema)(envelope.payload)
+      return payload._tag === "Some"
+        ? { row: genericEvent(envelope, rawLine), malformed: false }
+        : payloadErrorEvent(envelope, rawLine, "relay lifecycle payload schema mismatch")
+    }
+    case "workLease": {
+      const payload = Schema.decodeUnknownOption(WorkLeasePayloadV1Schema)(envelope.payload)
+      return payload._tag === "Some"
+        ? { row: genericEvent(envelope, rawLine), malformed: false }
+        : payloadErrorEvent(envelope, rawLine, "work lease payload schema mismatch")
     }
   }
 }
@@ -884,7 +908,7 @@ function malformedEvent(filePath: string, lineNumber: number, rawLine: string, m
 }
 
 function isKnownOutboxKind(kind: string): kind is KnownOutboxKind {
-  return kind === "session" || kind === "branch" || kind === "turn" || kind === "event" || kind === "modelCall" || kind === "providerCall" || kind === "artifact" || kind === "agentTimeline" || kind === "routeResolution" || kind === "runnerEvent" || kind === "diagnosticOccurrence" || kind === "diagnosticProjection"
+  return kind === "session" || kind === "branch" || kind === "turn" || kind === "event" || kind === "modelCall" || kind === "providerCall" || kind === "artifact" || kind === "agentTimeline" || kind === "routeResolution" || kind === "relayLifecycle" || kind === "workLease" || kind === "runnerEvent" || kind === "diagnosticOccurrence" || kind === "diagnosticProjection"
 }
 
 function rowId(envelope: OutboxEnvelope): string {

@@ -13,6 +13,10 @@ The archive (Twitter/X, browser history, transcripts, SRS, library) is the **sub
 - Local-first, provenance-preserving (Nelson-style: everything linked to its source).
 - Respectful capture: low concurrency, dedupe, no private/locked content (existing twitter-archive rules).
 
+## Browser-context boundary
+
+The separately worked [`browser-context` substream](browser-context/GOAL.md) organizes the daemon's local browser substrate without creating another owner: Primer remains authoritative for browser history, Tree Style Tab trees, attention events, and the daemon substrate. Its charter links the capture adapters, history, readable extraction, Twitter archive, and Intake boundaries; do not duplicate their schemas here. Companion/primary work remains unrelated.
+
 ## Settled (2026-07-06, Arthur)
 
 - **Own the SRS surface** — reverses the earlier "feed mochi/anki" leaning. Anki's ceiling (no popup dictionary, dead shortcuts, atomic-only, no context tie-back) was the real constraint on the HSK deck. Deck material linked under `decks/` (hsk-deck, mochi exports, yomitan); we design on our own reader/queue/review loop.

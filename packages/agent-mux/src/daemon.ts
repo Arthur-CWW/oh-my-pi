@@ -2,9 +2,10 @@
 
 import { realpathSync } from "node:fs"
 import { Buffer } from "node:buffer"
-import { appendFile, chmod, mkdir, readdir, stat, unlink } from "node:fs/promises"
+import { randomUUID } from "node:crypto"
+import { appendFile, chmod, mkdir, readFile, readdir, rm, stat, unlink } from "node:fs/promises"
 import { homedir, tmpdir } from "node:os"
-import { isAbsolute, join, relative, resolve } from "node:path"
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path"
 
 import { Clock, Effect } from "effect"
 
@@ -26,8 +27,9 @@ interface DaemonArgs {
   readonly cwd: string
   readonly cols: number
   readonly rows: number
-  readonly sessionFile: string
-  readonly sessionId: string
+  readonly sessionFile: string | null
+  readonly sessionId: string | null
+  readonly reservationEpoch: string | null
   readonly command: readonly string[]
 }
 
@@ -93,12 +95,23 @@ export async function runDaemon(options: RunDaemonOptions): Promise<void> {
   const sleepMs = options.sleepMs ?? (async (ms: number) => await Bun.sleep(ms))
   const cwd = resolve(options.cwd)
   const sockPath = socketPathFor(options.name, env)
-  const identity = await canonicalSessionIdentity(options.sessionFile, options.sessionId)
+  await mkdir(dirname(sockPath), { recursive: true })
+  if (options.reservationEpoch !== null) {
+    const reservationFile = join(muxDirFor(options.name, env), "startup-reservation", "epoch")
+    const reservationText = await Bun.file(reservationFile).text().catch(() => null)
+    const reservation = reservationText === null ? null : parseReservationEpoch(reservationText)
+    if (reservation !== options.reservationEpoch) throw new Error("mux startup reservation lost")
+  }
   const daemonProcess = await processIdentityFor(process.pid)
   const cmux = { workspaceId: env["CMUX_WORKSPACE_ID"], surfaceId: env["CMUX_SURFACE_ID"], socketPath: env["CMUX_SOCKET_PATH"] }
-  const acquired = await acquireSessionLease({ identity, ownerKind: "agent-mux", muxName: options.name, socketPath: sockPath, controllerProcess: daemonProcess, daemonProcess, cmux, dependencies: { root: env["AGENT_MUX_DIR"] } })
-  if (!("epoch" in acquired)) throw new Error(`session ownership refused: ${acquired.classification}`)
-  const ownership = acquired
+  let ownership: OwnershipHandle | null = null
+  const reservedEpoch = randomUUID()
+  if (options.sessionFile !== null && options.sessionId !== null) {
+    const identity = await canonicalSessionIdentity(options.sessionFile, options.sessionId)
+    const acquired = await acquireSessionLease({ identity, ownerKind: "agent-mux", muxName: options.name, socketPath: sockPath, controllerProcess: daemonProcess, daemonProcess, cmux, dependencies: { root: env["AGENT_MUX_DIR"] } })
+    if (!("epoch" in acquired)) throw new Error(`session ownership refused: ${acquired.classification}`)
+    ownership = acquired
+  }
   await mkdir(muxDirFor(options.name, env), { recursive: true })
   const ring = new ScrollbackRing()
   const observers = new Set<Bun.Socket<ClientData>>()
@@ -109,7 +122,9 @@ export async function runDaemon(options: RunDaemonOptions): Promise<void> {
   let stateWrite = Promise.resolve()
   let heartbeatTimer: ReturnType<typeof setInterval> | null = null
   const createdAt = await nowMs()
-  let state: MuxState = { name: options.name, status: "starting", daemonPid: process.pid, childPid: 0, cwd, command: [...options.command], ompSessionFile: identity.sessionFile, ompSessionId: identity.sessionId, ownerEpoch: ownership.epoch, heartbeatSeq: 0, heartbeatAtUnixMs: createdAt, exitCode: null, createdAt, lastAttachAt: null }
+  const controlToken = randomUUID()
+  const instanceEpoch = randomUUID()
+  let state: MuxState = { name: options.name, status: "starting", daemonPid: process.pid, childPid: 0, cwd, command: [...options.command], ompSessionFile: ownership?.identity.sessionFile ?? null, ompSessionId: ownership?.identity.sessionId ?? null, ownerEpoch: ownership?.epoch ?? null, instanceEpoch, daemonStartFingerprint: daemonProcess.startFingerprint, controlToken, heartbeatSeq: 0, heartbeatAtUnixMs: createdAt, exitCode: null, createdAt, lastAttachAt: null }
   const persist = (patch: Partial<MuxState>): Promise<void> => {
     if ((state.status === "exited" || state.status === "failed") && (patch.status === "running-attached" || patch.status === "running-detached" || patch.status === "starting")) return stateWrite
     state = { ...state, ...patch }
@@ -117,36 +132,130 @@ export async function runDaemon(options: RunDaemonOptions): Promise<void> {
     stateWrite = stateWrite.then(() => writeMuxState(snapshot, env), () => writeMuxState(snapshot, env))
     return stateWrite
   }
-  const child = Bun.spawn([...options.command], {
-    cwd,
-    env: { ...process.env, ...env, TERM: "xterm-256color", OMP_SESSION_OWNER_EPOCH: ownership.epoch, OMP_SESSION_OWNER_SOCKET: sockPath },
-    onExit(_process, exitCode, signalCode, error) { void childExit(exitCode, signalCode === null ? null : String(signalCode), error) },
-    terminal: { cols: options.cols, rows: options.rows, data(_terminal, bytes) { ring.push(bytes); const packet = encodeMuxMessage({ t: "output", data: bytesToBase64(bytes) }); activeClient?.socket.write(packet); for (const observer of observers) observer.write(packet) } },
-  })
-  const markedRunning = await ownership.markRunning(await processIdentityFor(child.pid), daemonProcess)
-  if (!markedRunning && !childExited) { child.kill("SIGTERM"); throw new Error("ownership lost before child startup") }
-  if (childExited) { await stateWrite; return }
-  await persist({ childPid: child.pid, status: "running-detached" })
-  await heartbeat()
-  await appendLifecycle("muxSessionStart", null, null)
-  server = Bun.listen<ClientData>({
-    unix: sockPath,
-    socket: {
-      open(socket) { socket.data = { buffer: "", mode: null, clientId: null } },
-      data(socket, bytes) { socket.data.buffer += new TextDecoder().decode(bytes); const lines = socket.data.buffer.split("\n"); socket.data.buffer = lines.pop() ?? ""; for (const line of lines) if (line.length > 0) void handle(socket, line) },
-      close(socket) { observers.delete(socket); if (socket.data.mode === "control" && activeClient?.socket === socket && !stopping) void detach(socket.data.clientId) },
-      error() {},
-    },
-  })
+  try {
+    await persist({})
+  } catch (error) {
+    if (ownership !== null) await ownership.release().catch(() => {})
+    await unlink(sockPath).catch(() => {})
+    await releaseStartupReservation()
+    throw error
+  }
+  let child: ReturnType<typeof Bun.spawn>
+  try {
+    child = Bun.spawn([...options.command], {
+      cwd,
+      env: { ...process.env, ...env, TERM: "xterm-256color", ...(ownership === null ? { OMP_SESSION_OWNER_EPOCH: reservedEpoch, OMP_SESSION_OWNER_SOCKET: sockPath, OMP_SESSION_OWNER_RESERVATION: "1" } : { OMP_SESSION_OWNER_EPOCH: ownership.epoch, OMP_SESSION_OWNER_SOCKET: sockPath }) },
+      onExit(_process, exitCode, signalCode, error) { void childExit(exitCode, signalCode === null ? null : String(signalCode), error) },
+      terminal: { cols: options.cols, rows: options.rows, data(_terminal, bytes) { ring.push(bytes); const packet = encodeMuxMessage({ t: "output", data: bytesToBase64(bytes) }); activeClient?.socket.write(packet); for (const observer of observers) observer.write(packet) } },
+    })
+  } catch (error) {
+    await persist({ status: "failed" }).catch(() => {})
+    if (ownership !== null) await ownership.release().catch(() => {})
+    await unlink(sockPath).catch(() => {})
+    await releaseStartupReservation()
+    throw error
+  }
+  try {
+    if (ownership !== null) {
+      const markedRunning = await ownership.markRunning(await processIdentityFor(child.pid), daemonProcess)
+      if (!markedRunning && !childExited) throw new Error("ownership lost before child startup")
+    }
+    if (childExited) { await stateWrite; return }
+    await persist({ childPid: child.pid, status: "running-detached" })
+    if (ownership !== null) await heartbeat()
+    await appendLifecycle("muxSessionStart", null, null)
+  } catch (error) {
+    stopping = true
+    if (!childExited) {
+      child.kill("SIGTERM")
+      await Promise.race([child.exited, sleepMs(SIGKILL_GRACE_MS)])
+      if (!childExited && isPidAlive(child.pid)) child.kill("SIGKILL")
+    }
+    await persist({ status: "failed" }).catch(() => {})
+    if (ownership !== null) await ownership.release().catch(() => {})
+    await unlink(sockPath).catch(() => {})
+    await releaseStartupReservation()
+    throw error
+  }
+  if (ownership === null) void bindDiscoveredIdentity().catch((error) => logLine(daemonLogPathFor(options.name, env), `session discovery failed: ${errorMessage(error)}`))
+  try {
+    server = Bun.listen<ClientData>({
+      unix: sockPath,
+      socket: {
+        open(socket) { socket.data = { buffer: "", mode: null, clientId: null } },
+        data(socket, bytes) { socket.data.buffer += new TextDecoder().decode(bytes); const lines = socket.data.buffer.split("\n"); socket.data.buffer = lines.pop() ?? ""; for (const line of lines) if (line.length > 0) void handle(socket, line) },
+        close(socket) { observers.delete(socket); if (socket.data.mode === "control" && activeClient?.socket === socket && !stopping) void detach(socket.data.clientId) },
+        error() {},
+      },
+    })
+  } catch (error) {
+    stopping = true
+    if (!childExited) {
+      child.kill("SIGTERM")
+      await Promise.race([child.exited, sleepMs(SIGKILL_GRACE_MS)])
+      if (!childExited && isPidAlive(child.pid)) child.kill("SIGKILL")
+    }
+    await persist({ status: "failed" }).catch(() => {})
+    if (ownership !== null) await ownership.release().catch(() => {})
+    await unlink(sockPath).catch(() => {})
+    await releaseStartupReservation()
+    throw error
+  }
   await chmod(sockPath, 0o600).catch(() => {})
+  await releaseStartupReservation()
   heartbeatTimer = setInterval(() => void heartbeat(), 2_000)
   process.on("SIGTERM", () => void kill(null))
   process.on("SIGINT", () => void kill(null))
-  async function heartbeat(): Promise<void> { if (childExited || !await ownership.heartbeat()) { if (!childExited) await kill(null); return }; const lease = await ownership.lease(); if (lease !== null) await persist({ heartbeatSeq: lease.heartbeatSeq, heartbeatAtUnixMs: lease.heartbeatAtUnixMs }) }
+  async function releaseStartupReservation(): Promise<void> {
+    if (options.reservationEpoch === null) return
+    const reservation = join(muxDirFor(options.name, env), "startup-reservation")
+    const text = await readFile(join(reservation, "epoch"), "utf8").catch(() => null)
+    if (text !== null && parseReservationEpoch(text) === options.reservationEpoch) await rm(reservation, { recursive: true, force: true })
+  }
+  async function heartbeat(): Promise<void> {
+    if (childExited || ownership === null) return
+    if (!await ownership.heartbeat()) { await kill(null); return }
+    const lease = await ownership.lease()
+    if (lease !== null) await persist({ heartbeatSeq: lease.heartbeatSeq, heartbeatAtUnixMs: lease.heartbeatAtUnixMs })
+  }
+  async function bindDiscoveredIdentity(): Promise<void> {
+    const sessionFile = await discoverOmpSessionFile({ cwd, sessionsRoot: options.sessionsRoot ?? env["AGENT_MUX_OMP_SESSIONS_ROOT"], afterMs: createdAt, nowMs, sleepMs })
+    if (sessionFile === null || childExited || ownership !== null) return
+    const sessionId = basename(sessionFile, ".jsonl")
+    const identity = await canonicalSessionIdentity(sessionFile, sessionId)
+    const acquired = await acquireSessionLease({ identity, ownerKind: "agent-mux", muxName: options.name, socketPath: sockPath, controllerProcess: daemonProcess, daemonProcess, cmux, ownerEpoch: reservedEpoch!, dependencies: { root: env["AGENT_MUX_DIR"] } })
+    if (!("epoch" in acquired)) { await logLine(daemonLogPathFor(options.name, env), `session ownership refused: ${acquired.classification}`); await kill(null); return }
+    if (!await acquired.markRunning(await processIdentityFor(child.pid), daemonProcess)) { await acquired.release(); await kill(null); return }
+    ownership = acquired
+    await persist({ ompSessionFile: identity.sessionFile, ompSessionId: identity.sessionId, ownerEpoch: acquired.epoch })
+    await heartbeat()
+  }
   async function handle(socket: Bun.Socket<ClientData>, line: string): Promise<void> {
     let message: MuxMessage
     try { message = decodeMuxMessage(line) } catch { socket.write(encodeMuxMessage({ t: "deny", reason: "malformed message" })); return }
-    if (message.t === "ownerProbe") { const lease = await ownership.lease(); const proof = lease === null ? null : ownerProofFor(lease, message); socket.write(encodeMuxMessage(proof === null ? { t: "deny", reason: "owner proof denied" } : { t: "ownerProof", ...proof })); return }
+    if (message.t === "bindReservation") {
+      if (ownership !== null || message.epoch !== reservedEpoch) {
+        socket.write(encodeMuxMessage({ t: "deny", reason: "reservation authorization denied" }))
+        return
+      }
+      try {
+        const identity = await canonicalSessionIdentity(message.sessionFile, message.sessionId)
+        const acquired = await acquireSessionLease({ identity, ownerKind: "agent-mux", muxName: options.name, socketPath: sockPath, controllerProcess: daemonProcess, daemonProcess, cmux, ownerEpoch: reservedEpoch, dependencies: { root: env["AGENT_MUX_DIR"] } })
+        if (!("epoch" in acquired) || !await acquired.markRunning(await processIdentityFor(child.pid), daemonProcess)) {
+          if ("epoch" in acquired) await acquired.release()
+          socket.write(encodeMuxMessage({ t: "deny", reason: "reservation ownership refused" }))
+          return
+        }
+        ownership = acquired
+        await persist({ ompSessionFile: identity.sessionFile, ompSessionId: identity.sessionId, ownerEpoch: acquired.epoch })
+        await heartbeat()
+        socket.write(encodeMuxMessage({ t: "ack", operation: "bindReservation" }))
+      } catch (error) {
+        socket.write(encodeMuxMessage({ t: "deny", reason: errorMessage(error) }))
+      }
+      return
+    }
+    if (message.t === "ownerProbe") { const lease = ownership === null ? null : await ownership.lease(); const proof = lease === null ? null : ownerProofFor(lease, message); socket.write(encodeMuxMessage(proof === null ? { t: "deny", reason: "owner proof denied" } : { t: "ownerProof", ...proof })); return }
     if (message.t === "status") { socket.write(encodeMuxMessage({ t: "status", state })); return }
     if (message.t === "attach") {
       if (message.mode === "control" && activeClient !== null && activeClient.socket !== socket) { socket.write(encodeMuxMessage({ t: "deny", reason: "session already has a control client" })); return }
@@ -158,7 +267,11 @@ export async function runDaemon(options: RunDaemonOptions): Promise<void> {
     const controls = socket.data.mode === "control" && activeClient?.socket === socket
     if (message.t === "input") { if (!controls) socket.write(encodeMuxMessage({ t: "deny", reason: "observer cannot send input" })); else child.terminal?.write(base64ToBytes(message.data)); return }
     if (message.t === "resize") { if (!controls) socket.write(encodeMuxMessage({ t: "deny", reason: "observer cannot resize" })); else child.terminal?.resize(message.cols, message.rows); return }
-    if (message.t === "kill") { if (!controls) socket.write(encodeMuxMessage({ t: "deny", reason: "observer cannot kill" })); else await kill(socket.data.clientId); return }
+    if (message.t === "kill") {
+      if (!controls || message.token !== controlToken) socket.write(encodeMuxMessage({ t: "deny", reason: "kill authorization denied" }))
+      else { socket.write(encodeMuxMessage({ t: "ack", operation: "kill" })); await kill(socket.data.clientId) }
+      return
+    }
     if (message.t === "detach") { if (controls) await detach(socket.data.clientId); socket.end(); return }
   }
   async function detach(clientId: string | null): Promise<void> { activeClient = null; await persist({ status: "running-detached" }); await appendLifecycle("muxDetach", clientId, null) }
@@ -166,9 +279,8 @@ export async function runDaemon(options: RunDaemonOptions): Promise<void> {
   async function childExit(exitCode: number | null, signal: string | null, error: unknown): Promise<void> {
     if (childExited) return; childExited = true; stopping = true; if (heartbeatTimer !== null) clearInterval(heartbeatTimer)
     if (error !== undefined && error !== null) await appendFile(daemonLogPathFor(options.name, env), `${errorMessage(error)}\n`, "utf8")
-    await persist({ status: "exited", exitCode }); await appendLifecycle("muxChildExit", null, exitCode)
-    const packet = encodeMuxMessage({ t: "exit", code: exitCode, signal }); activeClient?.socket.write(packet); for (const observer of observers) observer.write(packet)
-    server?.stop(true); await unlink(sockPath).catch(() => {}); await stateWrite; await ownership.release(); process.exit(0)
+    await persist({ status: error === undefined || error === null ? "exited" : "failed", exitCode }); await appendLifecycle("muxChildExit", null, exitCode)
+    server?.stop(true); await unlink(sockPath).catch(() => {}); await stateWrite; if (ownership !== null) await ownership.release(); process.exit(0)
   }
   async function appendLifecycle(kind: MuxLifecycleEventKind, clientId: string | null, exitCode: number | null): Promise<void> { appendMuxLifecycleEvent({ kind, muxName: options.name, cwd, pid: child.pid, nowMs: await nowMs(), ompSessionFile: state.ompSessionFile, clientId, exitCode }) }
 }
@@ -184,11 +296,12 @@ export async function runDaemonFromArgv(argv: readonly string[] = Bun.argv.slice
 
 export function parseDaemonArgs(argv: readonly string[]): DaemonArgs | Error {
   let name: string | undefined
+  let reservationEpoch: string | null = null
   let cwd: string | undefined
   let cols = DEFAULT_COLS
   let rows = DEFAULT_ROWS
-  let sessionFile: string | undefined
-  let sessionId: string | undefined
+  let sessionFile: string | null = null
+  let sessionId: string | null = null
   let commandStart = -1
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -217,6 +330,9 @@ export function parseDaemonArgs(argv: readonly string[]): DaemonArgs | Error {
       index += 1
     } else if (arg?.startsWith("--rows=")) {
       rows = Number(arg.slice("--rows=".length))
+    } else if (arg === "--reservation-epoch") {
+      reservationEpoch = argv[index + 1]
+      index += 1
     } else if (arg === "--session-file") {
       sessionFile = argv[index + 1]
       index += 1
@@ -231,14 +347,54 @@ export function parseDaemonArgs(argv: readonly string[]): DaemonArgs | Error {
   const command = commandStart >= 0 ? argv.slice(commandStart) : []
   if (name === undefined || name.length === 0) return new Error("missing --name")
   if (cwd === undefined || cwd.length === 0) return new Error("missing --cwd")
-  if (sessionFile === undefined || sessionFile.length === 0) return new Error("missing --session-file")
-  if (sessionId === undefined || sessionId.length === 0) return new Error("missing --session-id")
+  if ((sessionFile === null) !== (sessionId === null)) return new Error("--session-file and --session-id must be provided together")
   if (!Number.isInteger(cols) || cols <= 0) return new Error("--cols must be a positive integer")
   if (!Number.isInteger(rows) || rows <= 0) return new Error("--rows must be a positive integer")
   if (command.length === 0) return new Error("missing command after --")
-  return { name, cwd, cols, rows, sessionFile, sessionId, command }
+  return { name, cwd, cols, rows, sessionFile, sessionId, reservationEpoch, command }
 }
 
+export async function resolveResumeSessionIdentity(input: {
+  readonly command: readonly string[]
+  readonly cwd: string
+  readonly sessionsRoot?: string
+}): Promise<{ readonly sessionFile: string; readonly sessionId: string } | null> {
+  const selector = resumeSelector(input.command)
+  if (selector === null) return null
+  if (selector === true) throw new Error("interactive --resume without a session cannot be multiplexed deterministically")
+  const direct = resolve(input.cwd, selector)
+  if (selector.endsWith(".jsonl") && await isRegularFile(direct)) {
+    return { sessionFile: canonicalPath(direct), sessionId: basename(direct, ".jsonl") }
+  }
+  const sessionDir = join(input.sessionsRoot ?? join(homedir(), ".omp", "agent", "sessions"), defaultSessionDirName(input.cwd))
+  const entries = (await readdir(sessionDir).catch((error) => {
+    if (isNodeErrno(error, "ENOENT")) return [] as string[]
+    throw error
+  })).filter((entry) => entry.endsWith(".jsonl")).sort()
+  const exact = entries.find((entry) => basename(entry, ".jsonl") === selector)
+  const prefixMatches = entries.filter((entry) => basename(entry, ".jsonl").startsWith(selector))
+  const selected = exact ?? (prefixMatches.length === 1 ? prefixMatches[0] : null)
+  if (selected === null) throw new Error(`resume session identity is ${prefixMatches.length > 1 ? "ambiguous" : "unknown"}: ${selector}`)
+  const selectedEntry = selected!
+  const sessionFile = join(sessionDir, selectedEntry)
+  return { sessionFile: canonicalPath(sessionFile), sessionId: basename(selectedEntry, ".jsonl") }
+}
+
+function resumeSelector(command: readonly string[]): string | true | null {
+  for (let index = 1; index < command.length; index += 1) {
+    const arg = command[index]
+    if (arg === "--resume" || arg === "-r" || arg === "--session") {
+      const value = command[index + 1]
+      return value === undefined || value.startsWith("-") ? true : value
+    }
+    if (arg?.startsWith("--resume=") || arg?.startsWith("--session=")) return arg.slice(arg.indexOf("=") + 1)
+  }
+  return null
+}
+
+async function isRegularFile(path: string): Promise<boolean> {
+  try { return (await stat(path)).isFile() } catch (error) { if (isNodeErrno(error, "ENOENT")) return false; throw error }
+}
 export async function discoverOmpSessionFile(input: {
   readonly cwd: string
   readonly sessionsRoot?: string
@@ -320,6 +476,15 @@ async function defaultNowMs(): Promise<number> {
 
 async function logLine(path: string, line: string): Promise<void> {
   await appendFile(path, `${line}\n`, "utf8").catch(() => {})
+}
+
+function parseReservationEpoch(text: string): string | null {
+  try {
+    const value = JSON.parse(text)
+    return typeof value?.epoch === "string" ? value.epoch : null
+  } catch {
+    return text.trim() || null
+  }
 }
 
 function isNodeErrno(error: unknown, code: string): boolean {

@@ -133,6 +133,10 @@ Harness facts preserved from v0:
 
 L1 publishes normalized lifecycle events and artifacts. L1 does not decide packet state, review state, provenance, or fallback policy.
 
+#### L1/L3 restart-recovery contract
+
+On controller replacement, L1 discovers durable child spawn/session records and validates parent/session lineage. L3 re-registers each eligible non-isolated child as `parked` under the same stable agent id, restoring task, display, session-file, model, thinking, and hotswap metadata; it creates a reviver that reopens the JSONL under current auth/policy. The existing IRC route to that id is the sole wake/steer path. Write adoption and later revive audit events. An unfinished turn is `interrupted_by_restart`, never `running` or resumed; its durable control handle survives, but old in-memory job/poll ownership does not. ID collision, missing/corrupt transcript, unavailable model/auth, already-live external owner, and stale parent are explicit failure states. Isolated or non-revivable children are history-only.
+
 ### L2: substrate
 
 L2 ships as a library and CLI with the same surface:
@@ -417,6 +421,10 @@ Packet rows keep high-churn coordination fields:
 - append-only status events
 
 Agents query the ledger for eligible work, claim atomically, read owner/excluded paths, and write proof/status events. They do not infer packet availability from prose when the ledger exists.
+
+### Feature-pod verification contract
+
+Decompose work into the smallest independently verifiable vertical slices, not by file count. Parallelize independent pods, never layers of one evolving contract. The implementation owner runs focused tests and typecheck selected for the changed behavior; an independent reviewer reruns those focused checks and adversarial cases; the coordinator runs one final package gate. Current blocker: task-worker policy/sandbox centralizes gates and SQLite/tmp may fail with `EPERM`; worker-local checks require an executable isolated environment, not suppressed checks.
 
 ### Onboarding interview
 

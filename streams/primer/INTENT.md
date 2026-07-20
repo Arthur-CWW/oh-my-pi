@@ -67,6 +67,12 @@ Human edits are not cleanup after generation. They are evidence about targeting,
 
 A later session can inherit doctrine, source artifacts, decisions, deltas, and correction edges. It does not inherit consciousness or a mystical memory. Runtime session identity and intellectual lineage are different ontologies; see [`LINEAGE.md`](LINEAGE.md).
 
+### Tutoring posture: stretch, don't mirror (ZPD)
+
+**Explicit (2026-07-19):** Arthur asked not to be "reduced to caricature of myself by reflecting my register" — he wants new words, concepts, and ideas, with the tutor's dialect held deliberately half a step beyond his own and every stretched term carrying a one-line cash-out. This is the zone-of-proximal-development posture (Vygotsky: the band just beyond current unaided ability, where learning happens with support; scaffolding gets dismantled as competence arrives), and it is a product requirement, not only a conversational preference — the Primer of the namesake novel is a ZPD machine. Mirroring the learner's register is a failure mode: interpersonal mode collapse, converging on a flattering compression of the learner and teaching them only their own modes back. Sourced correction chain: `docs/fable/generators.md` rows 41, 44, 45, 53.
+
+**Explicit direction, implementation deferred (2026-07-19):** for difficult domains (stats/probability first), organize curriculum as a prerequisite knowledge graph — Justin Skycak's mastery-learning / Math Academy lineage is the named reference. The learner's position on an explicit prerequisite DAG determines what is inside the ZPD at any moment; practice and review sequence against graph edges, not topic lists. This names the direction only; knowledge-graph implementation remains a separate decision (see the calibration experiment below).
+
 ## Current product hypothesis, not universal doctrine
 
 **Dated experiment — 2026-07-11:** calibrate one *Meltdown* chapter through a static prompt and explicit OMP interaction before bulk generation. The immediate workbench tests whether a structured selection plus local context produces a useful intervention and whether Arthur’s feedback can shape the next prompt.

@@ -1,14 +1,13 @@
 # Harness hot reload
 
-OMP session state lives in the session JSONL; the CLI process is disposable. `/restart` saves and flushes the current session, clears the draft, spawns a replacement process, and shuts the old one down. The replacement process reuses the same executable prefix, cwd, environment, stdio, config flags, and model flags, then appends `--resume <live-session-id>` so it reattaches to the same JSONL.
+Status: CURRENT operator note; lifecycle authority and target behavior are defined by the [canonical harness runtime contract](../fable/harness-runtime-contract.md).
 
-Use `/reload-config` when only config changed and the running process can reread it. Use rebuild plus `/restart` when TypeScript/runtime code changed: rebuild the fork, then restart the pane process so the new executable code is loaded while the session resumes from JSONL.
+`/reload-config` rereads supported settings in the running process. Runtime overrides may still shadow disk, and existing sessions are not reconstructed; route provenance must be inspected rather than assuming the disk edit became active.
 
-cmux keeps the pane alive while OMP replaces itself. In the normal path the pane remains attached because the child inherits stdin/stdout/stderr and the old process exits after spawning it. If the pane ends up dead or detached, use cmux's respawn-pane as the fallback and resume the same session manually.
+`/restart` is process replacement, not hot reload and not a view reattachment. It flushes the current JSONL, clears the editor draft, spawns a detached replacement with inherited executable prefix, cwd, environment, stdio, config/model flags, and `--resume <session-id>`, then shuts down the old process. JSONL and artifacts persist. JS heap objects, child/job registries, in-flight subagents, MCP runtime, queued swaps, editor buffers, and other process-local state do not.
 
-What is lost across `/restart` is anything held only in the old process. `spawnRestartProcess` starts a detached `Bun.spawn` with inherited stdio, env, and cwd, then `unref()`s it; it does not transfer JS heap objects, child-process handles, job registries, MCP client/server instances, or editor buffers. Practically, this loses:
+**BROKEN/GAP:** the current sequence spawns the replacement before shutdown releases the existing session ownership lease. The replacement can observe a live external owner and fail to resume while the old process then exits. Inherited stdio and a surviving cmux pane do not provide a release/acquire/readiness handshake and must not be described as reliable continuity.
 
-- background bash jobs and any outputs that had not already been persisted to the session transcript;
-- in-flight task subagents and tool jobs owned by the old process;
-- MCP server/client runtime state held by the old process;
-- unsaved TUI input, because `/restart` clears the editor and saves an empty draft before spawning.
+Use rebuild plus `/restart` only with that limitation understood. If replacement fails, respawn the pane and resume the same session manually after the old owner is gone. A second resume targets the same identity; it must acquire the lease or attach as an observer, never silently fork.
+
+**TARGET:** ordinary UI reload is detach/reattach to a long-lived `SessionRunner`; view disposal never disposes the session. Process replacement remains separate and is **DEFERRED** until it has an explicit old-owner release, new-owner acquire, readiness acknowledgement, and failure rollback. Continuing an in-flight provider turn across replacement is also **DEFERRED**.

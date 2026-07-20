@@ -79,7 +79,7 @@ repoRoots:
       - /Users/arthur/agents/packages/web-access/src/index.ts
       - /Users/arthur/agents/packages/mermaid-preview/src/index.ts
       - /Users/arthur/agents/packages/browser-use/index.ts
-      - /Users/arthur/agents/packages/borges-library/src/index.ts
+      - /Users/arthur/agents/packages/stema/src/index.ts
   workflows:
     path: /Users/arthur/agents/workflows
     kind: workflow-definitions
@@ -103,6 +103,10 @@ repoRoots:
   openDesign:
     path: /Users/arthur/agents/vendor/nexu-io--open-design
     kind: vendored-design-runtime
+    sourceRepo: https://github.com/nexu-io/open-design.git
+    sourceBranch: main
+    sourceCommit: 2f5c9bb218e5f42a5a890e07ad00b3f096ccbd49
+    syncDate: 2026-07-10
     rule: vendored upstream source; local-first run path via root open-design:* scripts with OD_DATA_DIR under data/open-design
     tags: [open-design, local-first, design, sqlite]
 

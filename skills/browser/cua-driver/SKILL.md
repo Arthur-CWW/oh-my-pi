@@ -7,7 +7,6 @@ compatibility: macOS with cua-driver installed and Accessibility + Screen Record
 # CuaDriver
 
 Use this skill when a task needs real native macOS GUI interaction while the human keeps using the desktop.
-Codex/GPT lanes: use the Codex `codex-plugin-computer-use` plugin instead; CuaDriver remains the default for non-Codex lanes.
 
 CuaDriver is the boundary for private macOS/SkyLight behavior. Do not reimplement or vendor those private API calls in this repo; call the maintained `cua-driver` interface instead.
 
@@ -15,9 +14,8 @@ CuaDriver's value is **background control**: capture a target app/window, inspec
 
 ## Tool choice
 
-- **Default:** `computer_use` — the safe high-level API backed by CuaDriver. It enforces policy checks and the inspect-act-verify loop. Always start here.
-- **Low-level/debug only:** `cua_driver` — raw CLI access for status, permissions, or when `computer_use` cannot expose the needed knob.
-- **Browser/DOM/network/cookies only:** the OMP/browser CDP tool, when the task specifically needs DOM JavaScript, network capture, cookies, or a provider adapter. Not for general native UI control.
+- **Default:** the installed `cua-driver` CLI. It is available at `command -v cua-driver` and implements the inspect-act-verify workflow below.
+- **Browser/DOM/network/cookies only:** the OMP `browser` tool or explicit CDP, when the task specifically needs DOM JavaScript, network capture, cookies, or a provider adapter. Not for general native UI control.
 
 ## Hard no-foreground rules
 
@@ -35,37 +33,17 @@ Narrow exception: starting the CuaDriver daemon itself is allowed via:
 open -n -g -a CuaDriver --args serve
 ```
 
-## Preferred `computer_use` workflow
+## CLI preflight
 
-Use the **inspect-act-verify** loop. Capture before every element-indexed action, because element indices are snapshot-local.
-
-```ts
-// 1. Inspect: get the current window state and element indices
-computer_use({ action: "capture", args: { appName: "Safari" } })
-
-// 2. Act: click by the element index from the latest capture
-computer_use({ action: "click", args: { elementIndex: 5 } })
-
-// 3. Verify: re-capture to confirm the new state
-computer_use({ action: "capture", args: { appName: "Safari" } })
-```
-
-## Raw `cua_driver` status and permissions
-
-Use raw `cua_driver` only for setup/debug:
-
-```ts
-cua_driver({ action: "status" })
-cua_driver({ action: "permissions" })
-```
-
-When the Pi tool is unavailable, the CLI equivalent is:
+Resolve the maintained CLI, then check status and permissions before interacting:
 
 ```bash
 CUA_DRIVER="${CUA_DRIVER:-$(command -v cua-driver || printf /Applications/CuaDriver.app/Contents/MacOS/cua-driver)}"
 "$CUA_DRIVER" status || open -n -g -a CuaDriver --args serve
 "$CUA_DRIVER" permissions status --json || "$CUA_DRIVER" check_permissions '{"prompt":false}' || true
 ```
+
+Use the **inspect-act-verify** loop below. Capture before every element-indexed action, because element indices are snapshot-local.
 
 If permissions are missing, stop and ask the user to grant Accessibility and Screen Recording to CuaDriver / the terminal context.
 

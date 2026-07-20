@@ -16,7 +16,7 @@ mail data.
 ## Quick Reference
 
 ```bash
-TOOL=~/Development/agent-stuff/skills/apple-mail/apple-mail.sh
+TOOL=~/agents/skills/fleet/apple-mail/apple-mail.sh
 
 # Search emails
 $TOOL search --from "peter@" --subject "dinner" --limit 5

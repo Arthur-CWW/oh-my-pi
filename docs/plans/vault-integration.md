@@ -1,3 +1,5 @@
+> **Superseded 2026-07-19:** [`streams/gardener/GOAL.md`](../../streams/gardener/GOAL.md) is the canonical vault-tending doctrine. This file remains intact as historical evidence.
+
 # Vault integration
 
 Date: 2026-07-03

@@ -44,6 +44,8 @@ Invariants. Most are also static lints — push every lesson down the guardrail 
 - **Streams own paths.** `streams/<x>/GOAL.md` declares owner and excluded paths. Stay inside yours; cross-stream reusables graduate to `packages/`.
 - **TASKS.md** tracks multi-step work. Update when status changes.
 - **Subagent packets**: owner paths, excluded paths, model lane, acceptance criteria, non-goals. Workers skip formatters/linters — the coordinator gates.
+- **Landing-first workers** (earned 2026-07-19, ~5 landings lost to wall-timeouts): a worker writes its ledger/receipt updates BEFORE final verification passes, so a timeout never orphans finished work. Coordinators pass predecessor transcripts (`history://<id>`) into successor assignments instead of letting them re-scout, and size implementation lanes ≥25min (`timeoutSec`).
+- **Changeset-first workers** (Arthur, 2026-07-20). In a colocated jj repository, every writable worker owns one described behavioral change and returns its change ID; it NEVER moves shared bookmarks. Keep the existing stream/path ownership convention and avoid a permanent workspace per stream. The coordinator provisions a dedicated workspace only when concurrent filesystem isolation is actually required; otherwise isolated workers return patches that the coordinator imports into named sibling/stacked changes. The coordinator rebases/integrates changes, runs union gates, then advances a Git-visible bookmark.
 - **Proof artifacts** for substantial work: screenshots, logs, fixtures, rerun commands (`proof-of-work-qa` skill).
 
 ## Review surfaces (Arthur, 2026-07-03 — repeatable patterns)
@@ -59,7 +61,7 @@ Invariants. Most are also static lints — push every lesson down the guardrail 
 ## Hard rules
 
 - **No `sudo`** without Arthur's explicit approval via `ask` (exact command, cwd, why, reversibility).
-- **Model routing.** Never spawn Fable subagents (orchestrator-only; hard-guarded in the model resolver). **Never route to Terra** (Arthur, 2026-07-15, about gpt-5.6-terra: "not pareto-efficient at anything") — bounded workloads go Luna xhigh+, synthesis/taste/architecture/final integration go Sol medium+. Luna never owns synthesis, taste decisions, architecture, or final integration. Lane assignments are NOT cached here — resolve live roles from the session's `.omp/*.yml` overlay and the doctrine in `docs/fable/routing-doctrine.md`; posture history in `docs/fable/agent-stack-consolidation.md`.
+- **Model routing.** Never spawn Fable subagents (orchestrator-only; hard-guarded in the model resolver). **Never route to Terra** (Arthur, 2026-07-15: "not pareto-efficient at anything"). Lane assignments are NOT cached here: resolve each responsibility from live config and `docs/fable/routing-doctrine.md`; posture history lives in `docs/fable/agent-stack-consolidation.md`. Until the resolver stops treating the parent session's explicit `/model` as a child override, every `task` spawn MUST pass the responsibility's resolved selector explicitly; omission silently inherits the orchestrator lane. Sol escalation requires a packet-local reason rather than task size.
 - **No secrets in commits.** No `.env`, tokens, credentials, session files.
 - **Provider spend gates.** Jimeng/Dreamina: dry-run default, live spend only inside a named cap with approval; concurrency 1; stop on rate-limit errors.
 - **Respectful external access.** Low concurrency, jitter/backoff, disk cache, entity dedupe. No private/locked content.

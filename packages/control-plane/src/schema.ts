@@ -1,3 +1,4 @@
+import { Schema } from "effect"
 import { sql } from "drizzle-orm"
 import { index, integer, primaryKey, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core"
 
@@ -152,6 +153,13 @@ export const packets = sqliteTable("packets", {
   reviewerSessionId: text("reviewerSessionId"),
   branchId: text("branchId"),
   proofLinks: text("proofLinks"),
+  relayEnvelopeId: text("relay_envelope_id"),
+  relayOriginNodeId: text("relay_origin_node_id"),
+  relayDestinationNodeId: text("relay_destination_node_id"),
+  relayPayloadVersion: integer("relay_payload_version"),
+  relayPayload: text("relay_payload"),
+  relayIdempotency: text("relay_idempotency"),
+  relayExpiresAt: integer("relay_expires_at"),
   createdAt: integer("createdAt").notNull(),
   updatedAt: integer("updatedAt").notNull(),
   claimedAt: integer("claimedAt"),
@@ -201,6 +209,53 @@ export const laneState = sqliteTable("lane_state", {
   notes: text("notes"),
 })
 
+export const PapercutKindSchema = Schema.Literals(["tool", "repo", "docs", "test", "workflow", "config", "agent"])
+export type PapercutKind = Schema.Schema.Type<typeof PapercutKindSchema>
+
+export const PapercutSeveritySchema = Schema.Literals(["low", "medium", "high"])
+export type PapercutSeverity = Schema.Schema.Type<typeof PapercutSeveritySchema>
+
+export const PapercutStatusSchema = Schema.Literals(["new", "recurring", "fixed", "wontfix"])
+export type PapercutStatus = Schema.Schema.Type<typeof PapercutStatusSchema>
+
+export const PapercutInputSchema = Schema.Struct({
+  kind: PapercutKindSchema,
+  severity: PapercutSeveritySchema,
+  message: Schema.String,
+  commandOrTool: Schema.optionalKey(Schema.String),
+  cwdOrPackage: Schema.optionalKey(Schema.String),
+  evidenceArtifactId: Schema.optionalKey(Schema.String),
+  suggestedFix: Schema.optionalKey(Schema.String),
+})
+export type PapercutInput = Schema.Schema.Type<typeof PapercutInputSchema>
+
+export const papercuts = sqliteTable(
+  "papercuts",
+  {
+    fingerprint: text("fingerprint").primaryKey(),
+    timestamp: integer("timestamp").notNull(),
+    agentId: text("agentId"),
+    modelId: text("modelId"),
+    sessionId: text("sessionId"),
+    package: text("package"),
+    kind: text("kind").notNull(),
+    severity: text("severity").notNull(),
+    commandOrTool: text("commandOrTool"),
+    message: text("message").notNull(),
+    evidence: text("evidence"),
+    suggestedFix: text("suggestedFix"),
+    status: text("status").notNull(),
+    occurrences: integer("occurrences").notNull(),
+    firstSeenAt: integer("firstSeenAt").notNull(),
+    lastSeenAt: integer("lastSeenAt").notNull(),
+  },
+  (table) => [
+    index("papercuts_timestamp_idx").on(table.timestamp),
+    index("papercuts_severity_status_timestamp_idx").on(table.severity, table.status, table.timestamp),
+    index("papercuts_status_occurrences_timestamp_idx").on(table.status, table.occurrences, table.timestamp),
+  ],
+)
+
 export const agentTimelineEvents = sqliteTable(
   "agent_timeline_events",
   {
@@ -222,7 +277,6 @@ export const routeCandidates = sqliteTable("route_candidates", { routeResolution
 export const routeAdvisors = sqliteTable("route_advisors", { routeResolutionId: text("routeResolutionId").notNull(), ordinal: integer("ordinal").notNull(), advisorAgentId: text("advisorAgentId"), purpose: text("purpose").notNull(), lane: text("lane").notNull(), provider: text("provider").notNull(), model: text("model").notNull(), accountKind: text("accountKind").notNull(), accountRef: text("accountRef"), accountProvenance: text("accountProvenance").notNull(), effort: text("effort").notNull(), winningLayer: text("winningLayer").notNull(), independenceRequired: integer("independenceRequired", { mode: "boolean" }).notNull(), rawAdviceArtifactId: text("rawAdviceArtifactId") }, (table) => [primaryKey({ columns: [table.routeResolutionId, table.ordinal] }), index("route_advisors_agent_idx").on(table.advisorAgentId), index("route_advisors_lane_idx").on(table.provider, table.model, table.accountRef, table.effort)])
 
 export const routeEventArtifacts = sqliteTable("route_event_artifacts", { ownerKind: text("ownerKind").notNull(), ownerId: text("ownerId").notNull(), ordinal: integer("ordinal").notNull(), role: text("role").notNull(), artifactId: text("artifactId").notNull() }, (table) => [primaryKey({ columns: [table.ownerKind, table.ownerId, table.ordinal] }), index("route_event_artifacts_artifact_idx").on(table.artifactId), index("route_event_artifacts_owner_role_idx").on(table.ownerKind, table.ownerId, table.role)])
-
 
 export const operationalEvents = sqliteTable(
   "operational_events",
@@ -280,6 +334,37 @@ export const operationalEvents = sqliteTable(
     index("operational_events_canary_idx").on(table.canaryRunId, table.occurredAt),
     index("operational_events_promotion_idx").on(table.promotionId, table.occurredAt),
     index("operational_events_observed_lag_idx").on(table.observedAt, table.occurredAt),
+  ],
+)
+
+export const refusalRecords = sqliteTable(
+  "refusal_records",
+  {
+    refusalId: text("refusalId").primaryKey(),
+    timestamp: integer("timestamp").notNull(),
+    provider: text("provider").notNull(),
+    model: text("model").notNull(),
+    role: text("role").notNull(),
+    category: text("category").notNull(),
+    tool: text("tool"),
+    action: text("action"),
+    sessionId: text("sessionId"),
+    turnId: text("turnId"),
+    correlationId: text("correlationId"),
+    promptFingerprint: text("promptFingerprint").notNull(),
+    promptExcerpt: text("promptExcerpt").notNull(),
+    providerCode: text("providerCode"),
+    providerMessage: text("providerMessage"),
+    retryOutcome: text("retryOutcome"),
+    rerouteOutcome: text("rerouteOutcome"),
+    contextSources: text("contextSources").notNull(),
+    redactionPolicyId: text("redactionPolicyId").notNull(),
+  },
+  (table) => [
+    index("refusal_records_timestamp_idx").on(table.timestamp),
+    index("refusal_records_model_timestamp_idx").on(table.model, table.timestamp),
+    index("refusal_records_category_timestamp_idx").on(table.category, table.timestamp),
+    index("refusal_records_tool_action_timestamp_idx").on(table.tool, table.action, table.timestamp),
   ],
 )
 
@@ -638,6 +723,16 @@ export const benchmarkSaturationAssessments = sqliteTable(
     index("benchmark_saturation_assessments_status_assessedAt_idx").on(table.status, table.assessedAt),
   ],
 )
+export const relayNodes = sqliteTable("relay_nodes", { nodeId: text("node_id").primaryKey(), displayName: text("display_name").notNull(), protocolVersions: text("protocol_versions").notNull(), firstSeenAt: integer("first_seen_at").notNull(), lastSeenAt: integer("last_seen_at").notNull(), lastHostEpoch: text("last_host_epoch").notNull() })
+export const relayPeerRoutes = sqliteTable("relay_peer_routes", { nodeId: text("node_id").notNull(), peerId: text("peer_id").notNull(), alias: text("alias"), endpoint: text("endpoint").notNull(), enabled: integer("enabled", { mode: "boolean" }).notNull(), updatedAt: integer("updated_at").notNull() }, (table) => [primaryKey({ columns: [table.nodeId, table.peerId] })])
+export const relayOutbox = sqliteTable("relay_outbox", { envelopeId: text("envelope_id").primaryKey(), originNodeId: text("origin_node_id").notNull(), streamId: text("stream_id").notNull(), sequence: integer("sequence").notNull(), destinationNodeId: text("destination_node_id").notNull(), destinationPeerId: text("destination_peer_id").notNull(), kind: text("kind").notNull(), body: text("body").notNull(), bodySha256: text("body_sha256").notNull(), state: text("state").notNull(), attemptCount: integer("attempt_count").notNull(), nextAttemptAt: integer("next_attempt_at").notNull(), acceptedAt: integer("accepted_at"), createdAt: integer("created_at").notNull() }, (table) => [uniqueIndex("relay_outbox_origin_stream_sequence_unique_idx").on(table.originNodeId, table.streamId, table.sequence), index("relay_outbox_pending_destination_idx").on(table.state, table.destinationNodeId, table.nextAttemptAt)])
+export const relayInbox = sqliteTable("relay_inbox", { envelopeId: text("envelope_id").primaryKey(), originNodeId: text("origin_node_id").notNull(), streamId: text("stream_id").notNull(), sequence: integer("sequence").notNull(), destinationNodeId: text("destination_node_id").notNull(), destinationPeerId: text("destination_peer_id").notNull(), kind: text("kind").notNull(), body: text("body").notNull(), bodySha256: text("body_sha256").notNull(), receivedAt: integer("received_at").notNull(), adapterState: text("adapter_state").notNull(), adapterMessageId: text("adapter_message_id") }, (table) => [uniqueIndex("relay_inbox_origin_stream_sequence_unique_idx").on(table.originNodeId, table.streamId, table.sequence), index("relay_inbox_receiver_cursor_idx").on(table.destinationNodeId, table.originNodeId, table.streamId, table.sequence)])
+export const relayCursors = sqliteTable("relay_cursors", { receiverNodeId: text("receiver_node_id").notNull(), originNodeId: text("origin_node_id").notNull(), streamId: text("stream_id").notNull(), highestContiguousSequence: integer("highest_contiguous_sequence").notNull(), holesJson: text("holes_json").notNull(), updatedAt: integer("updated_at").notNull() }, (table) => [primaryKey({ columns: [table.receiverNodeId, table.originNodeId, table.streamId] })])
+export const relayReceipts = sqliteTable("relay_receipts", { envelopeId: text("envelope_id").notNull(), destinationNodeId: text("destination_node_id").notNull(), disposition: text("disposition").notNull(), receivedAt: integer("received_at").notNull(), cursorJson: text("cursor_json").notNull() }, (table) => [primaryKey({ columns: [table.envelopeId, table.destinationNodeId] })])
+export const relayPeerHealth = sqliteTable("relay_peer_health", { observerNodeId: text("observer_node_id").notNull(), peerNodeId: text("peer_node_id").notNull(), state: text("state").notNull(), lastSuccessAt: integer("last_success_at"), lastFailureAt: integer("last_failure_at"), consecutiveFailures: integer("consecutive_failures").notNull(), queueDepth: integer("queue_depth").notNull(), oldestUnackedMs: integer("oldest_unacked_ms"), detail: text("detail") }, (table) => [primaryKey({ columns: [table.observerNodeId, table.peerNodeId] }), index("relay_peer_health_freshness_idx").on(table.observerNodeId, table.state, table.lastSuccessAt)])
+export const packetLeases = sqliteTable("packet_leases", { packetId: text("packet_id").primaryKey(), epoch: text("epoch").notNull(), ownerNodeId: text("owner_node_id").notNull(), ownerSessionId: text("owner_session_id").notNull(), ownerAgentId: text("owner_agent_id").notNull(), attempt: integer("attempt").notNull(), acquiredAt: integer("acquired_at").notNull(), renewBy: integer("renew_by").notNull(), state: text("state").notNull(), idempotency: text("idempotency").notNull() }, (table) => [index("packet_leases_renewal_idx").on(table.state, table.renewBy)])
+export const packetLeaseEvents = sqliteTable("packet_lease_events", { id: text("id").primaryKey(), packetId: text("packet_id").notNull(), epoch: text("epoch"), eventKind: text("event_kind").notNull(), actorNodeId: text("actor_node_id"), ts: integer("ts").notNull(), detail: text("detail").notNull() })
+
 export const ledgerTables = {
   sessions,
   branches,
@@ -650,6 +745,7 @@ export const ledgerTables = {
   commits,
   routingObservations,
   laneState,
+  papercuts,
   agentTimelineEvents,
   routeResolutions,
   routeCandidates,
@@ -657,6 +753,7 @@ export const ledgerTables = {
   routeEventArtifacts,
   operationalEvents,
   operationalSources,
+  refusalRecords,
   diagnosticOccurrences,
   diagnosticArtifacts,
   diagnosticProjectionEvents,
@@ -671,6 +768,15 @@ export const ledgerTables = {
   evaluationRuns,
   evaluationRunParticipants,
   evaluationMeasurements,
+  relayNodes,
+  relayPeerRoutes,
+  relayOutbox,
+  relayInbox,
+  relayCursors,
+  relayReceipts,
+  relayPeerHealth,
+  packetLeases,
+  packetLeaseEvents,
 } as const
 
 export type SessionRow = typeof sessions.$inferSelect
@@ -684,6 +790,7 @@ export type PacketRow = typeof packets.$inferSelect
 export type CommitRow = typeof commits.$inferSelect
 export type RoutingObservationRow = typeof routingObservations.$inferSelect
 export type LaneStateRow = typeof laneState.$inferSelect
+export type PapercutRow = typeof papercuts.$inferSelect
 export type EvidenceSourceRow = typeof evidenceSources.$inferSelect
 export type MetricDefinitionRow = typeof metricDefinitions.$inferSelect
 export type CommercialFactRow = typeof commercialFacts.$inferSelect
@@ -699,9 +806,19 @@ export type RouteAdvisorRow = typeof routeAdvisors.$inferSelect
 export type RouteEventArtifactRow = typeof routeEventArtifacts.$inferSelect
 export type OperationalEventRow = typeof operationalEvents.$inferSelect
 export type OperationalSourceRow = typeof operationalSources.$inferSelect
+export type RefusalRecordRow = typeof refusalRecords.$inferSelect
 export type DiagnosticOccurrenceRow = typeof diagnosticOccurrences.$inferSelect
 export type DiagnosticArtifactRow = typeof diagnosticArtifacts.$inferSelect
 export type DiagnosticProjectionEventRow = typeof diagnosticProjectionEvents.$inferSelect
 export type CanaryRunRow = typeof canaryRuns.$inferSelect
 export type ReleaseTransactionRow = typeof releaseTransactions.$inferSelect
 export type ReleaseRegistryObservationRow = typeof releaseRegistryObservations.$inferSelect
+export type RelayNodeRow = typeof relayNodes.$inferSelect
+export type RelayOutboxRow = typeof relayOutbox.$inferSelect
+export type RelayInboxRow = typeof relayInbox.$inferSelect
+export type RelayCursorRow = typeof relayCursors.$inferSelect
+export type PacketLeaseRow = typeof packetLeases.$inferSelect
+export type RelayPeerRouteRow = typeof relayPeerRoutes.$inferSelect
+export type RelayReceiptRow = typeof relayReceipts.$inferSelect
+export type RelayPeerHealthRow = typeof relayPeerHealth.$inferSelect
+export type PacketLeaseEventRow = typeof packetLeaseEvents.$inferSelect

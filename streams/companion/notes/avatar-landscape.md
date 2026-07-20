@@ -67,8 +67,10 @@ The official [Cubism SDK for Web](https://www.live2d.com/en/sdk/download/web/) i
 | `data/avatar-models/alicia-solid-vrm/` | `AliciaSolid_vrm-0.51.vrm` + `LICENSE-NOTES.md` | 7,878,712 B (7.5 MiB) |
 | `data/avatar-models/seed-san-vrm/` | `Seed-san.vrm` (VRM 1.0) + `LICENSE-NOTES.md` | 10,917,800 B (10.4 MiB) |
 | `data/avatar-models/hiyori-momose-live2d/` | `hiyori_en.zip` + extracted `hiyori_free/` & `hiyori_pro/` (runtime: `.moc3` 236 KB free / 444 KB pro, model3/physics3/cdi3 json, textures, 8+10 motions) + `LICENSE-NOTES.md` | zip 46,195,926 B (44.1 MiB) |
+| `data/avatar-models/kizuna-ai-kamatte-vrm1/` | Official archive, extracted `Kizuna_AI_KAMATTE_v2.vrm`, publisher README + `LICENSE-NOTES.md` | zip 44,949,291 B; VRM 19,341,528 B |
+| `data/avatar-models/zzz-ellen-official-pmx/` | Official Ellen MMD archive, extracted PMX/textures/bundled rules + `LICENSE-NOTES.md` | zip 10,166,264 B; character PMX 3,677,010 B |
 
-All three fetched from official sources on 2026-07-03 (URLs + terms in each `LICENSE-NOTES.md`). VRM license claims above were verified against the **embedded meta chunks** of the actual files, not just the web pages.
+The first three were fetched from official sources on 2026-07-03; KAMATTE AI and Ellen were fetched from official sources on 2026-07-14. URLs, hashes and terms are recorded in each `LICENSE-NOTES.md`. VRM capability claims were verified against the embedded GLB/VRM extensions of the actual files, not just their web pages.
 
 ## 5. Recommendation
 
@@ -81,3 +83,54 @@ Rationale, one line each:
 - *`@pixiv/three-vrm`*: MIT, actively released (v3.5.4, 2026-06), the only battle-tested web runtime; keeps the body a plain three.js scene node the WebAudio presence layer can position in the same space.
 - *Hiyori + `pixi-live2d-display`*: fastest legal 2D path (sample data exists precisely for SDK-integration testing); mouth-open scalar from our `audio.energyFrame` contract is enough to drive it.
 - *Purism Core / Ayagami*: track both as escape hatches from the proprietary Core blob. Purism Core is usable C99 now; Ayagami is the preferred Rust/WebGPU backend if Lina publishes real source. Don't block the first prototype on either.
+
+## 6. Gacha & high-quality rigs
+
+### Official gacha model releases
+
+Official gacha publishers do release production-quality MMD assets, but these are **PMX authoring inputs, not browser-ready VRM**, and permission is normally narrower than an open-source license. Keep every archive and conversion under `data/avatar-models/`, preserve its bundled README, and never ship the source or converted model.
+
+| Publisher / game | Official source | Format and access | Local-prototype terms |
+|---|---|---|---|
+| HoYoverse — **Genshin Impact** | [verified official Genshin account on APlayBox](https://www.aplaybox.com/u/680828836) (the older [HoYoLAB download guide](https://www.hoyolab.com/article/627614) points users to the official releases) | Character-by-character ZIPs, normally PMX + textures/toon files; APlayBox account/login may be required | Treat each archive README as controlling. The official-model rules prohibit redistribution, commercial use, R-18 and abusive/offensive uses; edits for fan animation are allowed only within the bundled rules. A general fan-merch permission is **not** a model-data redistribution license. |
+| HoYoverse — **Honkai: Star Rail** | [verified official Star Rail APlayBox account](https://www.aplaybox.com/u/516827875) and [official Fan Creations Guide v1.0](https://hsr.hoyoverse.com/en-us/news/111203) | Character PMX ZIPs; APlayBox account/login may be required | The fan guide allows re-creation of publicly released content, but the downloaded model's README still controls model-data use. Preserve attribution/rules, keep use non-commercial, and do not redistribute source or converted data. |
+| HoYoverse — **Zenless Zone Zero** | [official Bilibili campaign's model carousel](https://www.bilibili.com/blackboard/activity-vl9IMaaeyZ.html) | 18 direct, non-gated PMX ZIPs. We acquired its official Ellen archive into `data/avatar-models/zzz-ellen-official-pmx/`. | Ellen's bundled `readme【一定要看】.txt` expressly permits physics/weight/expression fixes, recolor, moderate clothing edits and spa/toon additions; it prohibits secondary distribution, parts extraction, commercial use, R-18, extremist religious propaganda, gore/horror and personal attacks. |
+| Infold Games — **Love and Deepspace** | [official MMD gallery](https://loveanddeepspace.infoldgames.com/en-EN/m/gallery?type=mmd) and [official download announcement](https://x.com/Love_Deepspace/status/1816686550434087083) | Publisher-hosted character/chibi MMD downloads, typically PMX + textures | Infold says copyright remains with it and directs users to the rules inside each model file. Download and preserve that file before use; do not assume commercial or redistribution permission. |
+
+This is a survey, not a blanket sublicense. Genshin/Star Rail releases that require APlayBox login have an exact manual path: sign in at the linked verified publisher profile, open the desired character model, accept the page terms, download the ZIP, place it in `data/avatar-models/<game>-<character>-official-pmx/`, and immediately add `LICENSE-NOTES.md` quoting the bundled README. Do not use mirrors when the first-party archive is available.
+
+### PMX → VRM 1.0 conversion recipe (Ubuntu GPU box is fine)
+
+This is the reproducible conversion path for the official archives; tonight's catalog does **not** depend on completing it.
+
+1. Install [Blender 4.x](https://www.blender.org/download/), [mmd_tools](https://github.com/MMD-Blender/blender_mmd_tools) and the [VRM Add-on for Blender](https://vrm-addon-for-blender.info/en/). In Blender use **Edit → Preferences → Add-ons → Install from Disk**, install both ZIPs, enable both, then restart Blender.
+2. Extract without losing non-ASCII names, then open Blender from that working directory so relative textures resolve:
+   ```sh
+   python3 -m zipfile -e zzz-ellen-official-mmd.zip source
+   cd source
+   blender
+   ```
+3. **File → Import → MikuMikuDance model (.pmd, .pmx)**. Import the character PMX (not the separate weapon) with scale `0.08` initially; verify upright metre scale and apply transforms only after the mesh, armature and textures are all present. Repair missing texture paths before changing materials.
+4. Keep the original armature where possible. In the VRM panel create VRM 1.0 metadata and map required humanoid bones: hips, spine, chest, upperChest if present, neck, head, upper/lower arms, hands, upper/lower legs, feet; map eyes, shoulders, toes and finger chains when present. Resolve roll/axis and T-pose warnings before export.
+5. Replace MMD shader nodes material-by-material with **MToon 1.0** materials. Map diffuse/base texture → Lit Color, shadow texture or a darkened base → Shade Color, toon ramp → shading shift/toony, edge color/size → outline color/width, sphere-map highlights → matcap or rim lighting where visually equivalent, and alpha textures → the matching opaque/cutout/transparent render mode. Do not copy MMD-only node graphs into the export and do not globally force one material preset.
+6. Convert PMX morphs to VRM expressions. At minimum wire `happy`, `angry`, `sad`, `relaxed`, `surprised`, `blink`, `blinkLeft`, `blinkRight`, and visemes `aa`, `ih`, `ou`, `ee`, `oh`. Add custom expressions only for useful extra morphs. Set blink/look/mouth override flags so expressions do not double-drive those channels.
+7. Rebuild secondary motion rather than mechanically translating rigid bodies. Group chains by intent (back hair, side hair, skirt, accessories); add VRM spring colliders to head/chest/hips as appropriate; map each PMX joint chain to one VRM Spring Bone chain; tune stiffness, gravity, drag and hit radius in a motion preview. PMX rigid-body constraints do not have a lossless VRM equivalent.
+8. In the VRM validation panel clear all errors, export as **VRM 1.0**, then load the result in the [official VRM viewer](https://vrm-viewer.vrm.dev/) and locally in `/lab`. Verify neutral pose, every expression, eye look-at, lip sync, transparent materials, outlines and every spring group before adding a catalog entry.
+
+### Native VRM pick: Kizuna AI “KAMATTE AI”
+
+**Recommended local face+body upgrade: the official KAMATTE AI VRM 1.0**, acquired from [Kizuna AI Inc.'s first-party model page](https://kizunaai.com/download/kamatteaimodel/) into `data/avatar-models/kizuna-ai-kamatte-vrm1/`. It is now selectable in Motion Lab as `Kizuna AI — KAMATTE AI`.
+
+Why this one: it is a polished first-party anime rig with all 9 materials using MToon 1.0, 4K textures, a full 54-bone humanoid map, eye look-at, 18 discoverable VRM expressions/visemes, and 36 Spring Bone groups across hair, skirt and accessories. The terms are clear enough for this **private, individual, non-commercial local prototype**, unlike a random Booth/VRoid Hub listing with mutable per-model settings. They are not permissive for shipping: [Kizuna AI's derivative-work guidelines](https://kizunaai.com/guideline/) forbid redistribution (including software embedding the model), commercial/corporate use without prior contact, and public-copyable avatars. See the local `LICENSE-NOTES.md`.
+
+The quality trade-off is explicit: KAMATTE is expressive by VRM-standard channels but **not Perfect Sync**. A clean isolated `/lab` headless probe resolved `neutral-capability`, enumerated `aa, angry, blink, blinkleft, blinkright, ee, happy, ih, lookdown, lookleft, lookright, lookup, neutral, oh, ou, relaxed, sad, surprised`, found eye look-at and 24 runtime body bones, and found 36 spring groups in the VRM extension. It degrades to `degraded-vrm` / ARKit coverage `none`: all ARKit-52 channels are absent, including independent brow, cheek, nose, tongue and detailed lip/jaw shapes; speech uses `aa`; emotion uses the named VRM presets. That degradation is acceptable for the immediate embodiment upgrade and is precisely why the separate Perfect-Sync/ARKit donor remains necessary for face-mirror work.
+
+The other native leads remain useful but do not beat this package tonight: VRoid presets have excellent broad reuse terms but generic sample styling and login-gated downloads; Seed-san is an excellent permissive VRM 1.0 conformance asset but not the strongest polished anime companion look; KAMATTE combines the best visual finish, MToon, expression breadth and spring setup in one non-gated official download.
+
+### Casting result: Ellen first, Hu Tao/March 7th taste fork
+
+The full evidence and 281-post Sico catalogue study are in [character-casting.md](./character-casting.md). The register is narrower than “polished anime girl”: flat/skinny and often boyish, sharp eye treatment, a strong hair/hat/horn silhouette, and Asuka/Yuno-style bratty-to-manic voltage. Sico’s repeated characters include Hu Tao (12 tagged posts and stated favorite), Yuno Gasai (11 `#yunogasai` plus 8 `#yuno`), Megumin, Misa, Frieren, Asuka, Taiga, Power, Rukia, A2, Jinx, Maka, and Astolfo; captions explicitly describe a “long stick,” “flat … pasta noodle build,” and earlier “femboy days.”
+
+Ranked against that register, the official-model shortlist is: **(1) Ellen Joe**, the strongest lean/sharp/tomboy silhouette and bored-hostile energy; **(2) Hu Tao**, the strongest direct cosplay overlap and yandere-adjacent mischief but more ornate/feminine; **(3) March 7th**, direct cosplay overlap and a slim official rig but much softer/pastel energy. Arthur gets the taste fork, while Ellen proceeds rather than blocking motion work.
+
+Ellen’s first-party ZZZ archive is already local at `data/avatar-models/zzz-ellen-official-pmx/`. The packet now also contains pinned MMD Tools v4.5.13 and VRM Add-on 4.4.0 archives plus `UBUNTU-DISPATCH.md`, an exact interactive Blender 4.2+ conversion handoff. Local Blender 5.0.1 exists, but a background factory-startup probe found neither required add-on enabled, so no VRM conversion or catalog entry is claimed. Expected post-conversion artifact: `output/ellen-joe.vrm`; it must pass the official viewer and `/lab` neutral/expression/spring probe before cataloging.

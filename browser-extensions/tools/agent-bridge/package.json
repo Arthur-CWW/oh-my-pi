@@ -3,8 +3,21 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Placeholder for local agent bridge daemon that receives browser captures and exposes them to LLM agents.",
+  "description": "Bounded Native Messaging to Unix-socket browser context forwarder.",
   "scripts": {
-    "check": "node -e \"console.log('agent-bridge placeholder ok')\""
+    "host": "bun src/cli.ts",
+    "install:chrome": "./scripts/install-native-host.sh chrome",
+    "install:firefox": "./scripts/install-native-host.sh firefox",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "check": "pnpm typecheck && pnpm test"
+  },
+  "dependencies": {
+    "@browser-extensions/browser-context-protocol": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.1",
+    "vitest": "^3.0.0",
+    "typescript": "^7.0.2"
   }
 }

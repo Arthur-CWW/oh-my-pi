@@ -1,17 +1,38 @@
-import { readFileSync, rmSync } from "node:fs"
+import { existsSync, readFileSync, rmSync } from "node:fs"
 import { join } from "node:path"
 
 import { expect, test } from "bun:test"
-import { Schema } from "effect"
+import { Effect, Schema } from "effect"
 
-import type { ExtensionContextLike, PiLike } from "../src/omp-events"
+import type { ExtensionContextLike, OmpToolDefinitionLike, PapercutToolParamsLike, PiLike } from "../src/omp-events"
 import createOmpPublisher from "../src/omp-publisher"
 import { OutboxEnvelopeSchema, outboxPathFor, type JsonValue } from "../src/outbox"
+import { LedgerStore, openLedger } from "../src"
 
 const tmpDir = join(import.meta.dir, ".tmp", "omp-publisher")
 
 class FakePi {
   private readonly handlers: Record<string, Array<(event: never, ctx: ExtensionContextLike) => unknown>> = {}
+  private papercutTool: OmpToolDefinitionLike | undefined
+
+  readonly typebox = {
+    Type: {
+      Object: (_properties: Readonly<Record<string, object>>): object => ({}),
+      Literal: (_value: string): object => ({}),
+      Union: (_schemas: readonly object[]): object => ({}),
+      String: (_options?: { readonly description?: string }): object => ({}),
+      Optional: (schema: object): object => schema,
+    },
+  }
+
+  registerTool(tool: OmpToolDefinitionLike): void {
+    if (tool.name === "papercut") this.papercutTool = tool
+  }
+
+  async reportPapercut(params: PapercutToolParamsLike, ctx: ExtensionContextLike): Promise<{ readonly content: readonly { readonly type: "text"; readonly text: string }[]; readonly details?: object }> {
+    if (this.papercutTool === undefined) throw new Error("papercut tool was not registered")
+    return await this.papercutTool.execute("papercut-test", params, undefined, undefined, ctx)
+  }
 
   on(event: string, handler: (event: never, ctx: ExtensionContextLike) => unknown): void {
     this.handlers[event] = [...(this.handlers[event] ?? []), handler]
@@ -142,6 +163,70 @@ test("OMP publisher writes schema-valid monotonic outbox envelopes with captured
     rawRequestArtifact: "",
     rawResponseArtifact: "",
   })
+})
+
+test("OMP papercut tool schema-decodes input and aggregates through the ledger", async () => {
+  rmSync(tmpDir, { recursive: true, force: true })
+  const invalidDbPath = join(tmpDir, "invalid-papercut.sqlite")
+  const dbPath = join(tmpDir, "papercut.sqlite")
+  const previousDbPath = process.env["AGENT_CONTROL_PLANE_DB"]
+  const ctx = {
+    cwd: "/repo/papercut",
+    model: { id: "openai-codex/gpt-5.6-terra" },
+    sessionManager: {
+      getSessionId: () => "session-papercut",
+      getSessionFile: () => join(tmpDir, "sessions", "papercut.jsonl"),
+    },
+  } satisfies ExtensionContextLike
+
+  try {
+    const pi = new FakePi()
+    createOmpPublisher(pi as PiLike)
+
+    process.env["AGENT_CONTROL_PLANE_DB"] = invalidDbPath
+    const malformed = await pi.reportPapercut({ kind: "invalid", severity: "high", message: "bad" }, ctx)
+    expect(malformed.content[0]?.text).toContain("invalid")
+    expect(existsSync(invalidDbPath)).toBe(false)
+
+    process.env["AGENT_CONTROL_PLANE_DB"] = dbPath
+    const minimal = await pi.reportPapercut({ kind: "tool", severity: "low", message: "A concise confirmed tool papercut." }, ctx)
+    expect(minimal.content[0]?.text).toContain("status: new")
+    const input = {
+      kind: "workflow",
+      severity: "medium",
+      message: "Verification command requires a manual recovery step.",
+      commandOrTool: "bun test",
+      evidenceArtifactId: "artifact://papercut-proof",
+      suggestedFix: "Make the recovery step explicit.",
+    } satisfies PapercutToolParamsLike
+    const first = await pi.reportPapercut(input, ctx)
+    const second = await pi.reportPapercut(input, ctx)
+
+    expect(first.content[0]?.text).toContain("status: new")
+    expect(second.content[0]?.text).toContain("status: recurring")
+
+    const stored = await Effect.runPromise(Effect.gen(function* () {
+      const store = yield* LedgerStore
+      return {
+        papercuts: yield* store.listPapercuts({}),
+        events: yield* store.listEvents({}),
+      }
+    }).pipe(Effect.provide(openLedger(dbPath))))
+    const workflowPapercut = stored.papercuts.find((papercut) => papercut.kind === "workflow")
+    expect(stored.papercuts).toHaveLength(2)
+    expect(workflowPapercut?.agentId).toBeUndefined()
+    expect(workflowPapercut).toMatchObject({
+      modelId: "openai-codex/gpt-5.6-terra",
+      sessionId: "session-papercut",
+      package: "/repo/papercut",
+      status: "recurring",
+      occurrences: 2,
+    })
+    expect(stored.events).toEqual([])
+  } finally {
+    if (previousDbPath === undefined) delete process.env["AGENT_CONTROL_PLANE_DB"]
+    else process.env["AGENT_CONTROL_PLANE_DB"] = previousDbPath
+  }
 })
 
 function jsonRecord(value: JsonValue): Record<string, JsonValue> {

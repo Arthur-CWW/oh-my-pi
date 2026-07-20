@@ -7,53 +7,90 @@ status: done
 
 # Sonic photoreal portrait evaluation
 
-This report evaluates the performance of the Sonic lip-sync model on a photoreal portrait (Barack Obama) using the 10-second `what-lab` narration and seed 72589, and compares it directly to the stylized figurine run (Claude) under identical parameters.
+## Result
 
-## Source Portrait
+Sonic completed the same 10-second inference used for the stylized figurine, with `--crop` and seed `72589`. Unlike the figurine, the photoreal face shows clear open, closed, rounded, and dental mouth shapes while retaining a stable, recognizable identity.
 
-- Asset: Barack Obama official portrait (2012), 2,687 × 3,356 px
+**LANE DECISION: (a) Sonic is viable for photoreal talking heads. Keep it for the persona lane when driven by real-face plates; do not use it for the stylized figurine lane.**
+
+This is a lane-level go, not final production approval: the sampled visual evidence establishes articulation and identity stability, but this run did not establish frame-accurate audio/viseme timing. A production candidate still needs a real-time playback review against the audio.
+
+## Source portrait and license
+
+- Asset: Barack Obama official portrait (2012), 2,687 × 3,356 px.
 - Source page: https://commons.wikimedia.org/wiki/File:President_Barack_Obama.jpg
-- Bounding box: `[651, 18, 1990, 1357]` cropped and resized to 512 × 512 px.
+- Original file: https://upload.wikimedia.org/wikipedia/commons/8/8d/President_Barack_Obama.jpg
+- Author: Official White House Photo by Pete Souza.
+- License: **Public domain (`PD-USGov-POTUS`)**. Wikimedia states that it was made by an Executive Office of the President employee as part of official duties and is therefore a work of the U.S. federal government.
+- Suitability: front-facing, evenly lit official portrait. OpenCV's frontal-face detector measured an 821 × 821 px face box (`x=922, y=243, w=821, h=821`), satisfying the ≥768 px face requirement.
+- Local source asset: [`portrait-obama-pd.jpg`](portrait-obama-pd.jpg).
 
-## Temporal Evidence Summary
+## Comparable run
 
-### 1. Lip-Audio Synchronization
-- **Video 1 (Obama photoreal):** The correlation between the audio amplitude envelope and frame-to-frame mouth pixel change is **0.413**, showing that mouth movement is dynamically driven by the voice. The teeth pixel count (intensity >170) is high in the original portrait (346 pixels) but falls to near-zero in many speech frames, showing the model actively attempts to shape and close the mouth.
-- **Video 2 (Claude stylized):** The correlation is **0.346**, but the mouth is entirely static (retaining the printed-line toy graphic). The measured correlation is a false positive caused by whole-head translation and spiky hair warping, not lip-sync.
+Immediately before launch, `nvidia-smi` reported no compute process, 1 MiB / 24,576 MiB used, and 0% GPU utilization, so no GPU handoff was required.
 
-### 2. Phoneme-Scale Mouth Articulation
-- **Video 1 (Obama):** The model struggles to override the strong smiling prior of the source portrait. Specifically, at bilabial plosives which require complete lip closure (like the "b" in "bullshit" at 2.0s/frame 50 and the first "p" in "people" at 8.0s/frame 200), the teeth pixel counts remain high (**185** and **96** pixels respectively), resulting in incomplete mouth closure and anatomically incorrect speech representation.
-- **Video 2 (Claude):** No phoneme-scale articulation is present.
+The portrait was copied to desktop `~/sonic-lab/portrait-obama-pd.jpg`. Inference ran in the dedicated `sonic-photoreal` tmux session at `~/sonic-lab/Sonic`:
 
-### 3. Temporal Identity Preservation & Drift
-- **Video 1 (Obama):** Severe identity and pose drift occur over the 10-second duration. The L1 difference vs. the cropped reference portrait is **5.997** at 2s and **5.813** at 5s, but spikes to **13.071** at 8s. Even after optimal alignment (shifting 2 px vertically and -2 px horizontally), the aligned difference at 8s remains high at **14.056** (compared to 6.090 at 2s and 5.744 at 5s), confirming structural facial warping.
-- **Video 2 (Claude):** The figurine suffers from gradual drift; the L1 difference of the 8s still against the 2s still is **7.132** (aligned **8.072**), showing visible pose and hair geometry warping.
+```bash
+/usr/bin/time -v .venv/bin/python demo.py \
+  ~/sonic-lab/portrait-obama-pd.jpg \
+  ~/sonic-lab/what-lab-10s.wav \
+  ~/sonic-lab/sonic-obama-10s.mp4 \
+  --crop --seed 72589
+```
 
-### 4. Facial and Video Artifacts
-- **Video 1 (Obama):** The video contains **13 jump transitions** (L1 frame-to-frame difference >4.5) at frames 2, 3, 22, 23, 62, 63, 109, 132, 133, 212, 213, 246, 247. It also contains **14 frozen frame transitions** (L1 frame-to-frame difference <0.5) where the video stops moving, notably at 2.08s–2.20s and 4.80s–5.00s. These discontinuities coincide with sharp brightness jumps in the eye regions (up to **11.56** mean L1 difference in the left eye), producing visible eye jitter and head warp.
-- **Video 2 (Claude):** The video is static and lacks jump transitions, but has **66 frozen frame transitions** (<0.5), which underscores its lack of dynamic mouth and head motion.
+The Sonic log reports one detected face, crop box `[651, 18, 1990, 1357]`, 5:33.91 wall time, and exit status 0. Full log: [`sonic-obama-inference.log`](sonic-obama-inference.log).
 
-### 5. Regional Pixel Variance (Obama)
-Comparing stills at 2s, 5s, and 8s against the cropped original portrait:
+## Artifacts and ffprobe evidence
 
-| Region | crop box (Y, X) | 2s Still Diff | 5s Still Diff | 8s Still Diff |
-| :--- | :--- | :--- | :--- | :--- |
-| Forehead | (50..120, 200..320) | 9.937 | 9.283 | **19.507** |
-| Left Eye | (180..230, 180..240) | 16.090 | 10.765 | **47.575** |
-| Right Eye | (180..230, 270..330) | 12.367 | 8.508 | **39.976** |
-| Nose | (240..300, 230..290) | 6.672 | 4.616 | **26.092** |
-| Mouth | (330..410, 200..320) | 7.557 | 6.348 | **25.722** |
-| Chin/Jaw | (410..470, 200..320) | 7.142 | 6.232 | **21.864** |
+- [`sonic-obama-10s.mp4`](sonic-obama-10s.mp4) — 867,427 bytes; SHA-256 `c94ac40f4ee956767bde625bc23b2eb000cf7dd5dd8c688405f0039b4282a49a`.
+- [`still-02s.png`](still-02s.png), [`still-05s.png`](still-05s.png), [`still-08s.png`](still-08s.png).
+- Side-by-side pairs (figurine left, photoreal right): [`comparison-02s.png`](comparison-02s.png), [`comparison-05s.png`](comparison-05s.png), [`comparison-08s.png`](comparison-08s.png).
+- Dense temporal comparison: [`contact-sheet-photoreal-2fps.png`](contact-sheet-photoreal-2fps.png) and [`contact-sheet-figurine-2fps.png`](contact-sheet-figurine-2fps.png).
+- Close transition review: [`transition-sheet.png`](transition-sheet.png).
 
-All regions, including non-moving areas like the forehead and nose, more than double their deviation at 8 seconds, indicating that the face degrades structurally over time rather than simply translating.
+Local `ffprobe`:
 
-## Production Lane Recommendation
+```json
+{
+  "streams": [
+    {"index": 0, "codec_name": "h264", "codec_type": "video", "width": 512, "height": 512, "duration": "9.960000"},
+    {"index": 1, "codec_name": "aac", "codec_type": "audio", "sample_rate": "16000", "channels": 1, "duration": "9.920000"}
+  ],
+  "format": {"duration": "9.960000", "size": "867427"}
+}
+```
 
-**DEAD / PARK** for photoreal talking heads.
+## Side-by-side evidence
 
-### Limitations and Issues:
-1. **Temporal Discontinuities:** The chunk-based frame generation creates severe jump cuts and frozen frames every few seconds, making the video visually jarring and unprofessional.
-2. **Identity & Facial Warping:** The model fails to preserve facial geometry and identity over a 10-second period. By 8 seconds, the eyes and forehead warp and distort significantly.
-3. **Incomplete Articulation:** The model fails to resolve bilabial plosives ("b", "p"), leaving the mouth open and teeth visible when they should be closed, which breaks the illusion of speech.
-4. **No Stylized Figurine Support:** As confirmed by the Claude run, the model lacks a stylized face/mouth prior, resulting in no mouth articulation whatsoever on non-human assets.
+At each time below, the prior figurine run is on the left and this photoreal run is on the right.
 
+### 2 seconds
+
+![Figurine and photoreal at 2 seconds](comparison-02s.png)
+
+### 5 seconds
+
+![Figurine and photoreal at 5 seconds](comparison-05s.png)
+
+### 8 seconds
+
+![Figurine and photoreal at 8 seconds](comparison-08s.png)
+
+## Quality verdict
+
+### Mouth articulation versus figurine
+
+The three requested photoreal stills alone show a wide dental/open mouth at 2 and 5 seconds and a narrower, more closed mouth at 8 seconds. The denser 2 fps contact sheet is decisive: across 20 chronological samples it contains open-vowel, rounded/puckered, dental, narrow, and closed-mouth states. A review of consecutive-frame groups also found plausible transitions from smile to open jaw, smile to rounded lips, and closed lips to speech onset.
+
+The figurine comparison sheet retains the same tiny curved graphic mouth throughout. Sonic therefore failed to articulate the stylized mouth but did drive phoneme-like mouth-shape diversity on the photoreal face.
+
+### Identity preservation
+
+Across 2, 5, and 8 seconds, the subject remains immediately recognizable. Hairline, ears, eye spacing, nose, head outline, suit, and background geometry remain stable. Compared with the sharp source, generated frames soften fine skin texture and tooth boundaries; the 8-second narrow-mouth state also has mild local lip smudging. Those are local texture losses, not identity collapse.
+
+A targeted six-consecutive-frame review around four high-difference regions (frames 19–24, 59–64, 129–134, and 209–214) found no perceptually severe jump cut, head warp, or eye jitter. One sequence holds a smile for six frames (0.24 seconds), but the 10-second contact sheet as a whole is actively articulated rather than frozen.
+
+### Limitation
+
+Two subscription vision attempts to ingest the full MP4 timed out. The verdict is therefore grounded in the requested stills, 20 evenly spaced samples, and 24 consecutive transition frames. These establish visual articulation and spatial/temporal stability at the sampled points, but cannot prove fine-grained audio synchronization. That limitation is why the recommendation is to keep the photoreal lane, with full-speed A/V review as its next production gate, rather than declaring the model production-final.

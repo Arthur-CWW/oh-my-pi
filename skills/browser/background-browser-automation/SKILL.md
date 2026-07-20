@@ -1,6 +1,6 @@
 ---
 name: background-browser-automation
-description: Background-safe browser automation guidance with CuaDriver first, plus Playwright/Puppeteer/CDP patterns for DOM, scraping, API reveng, and network request inspection. Use when automating browsers or debugging web apps without stealing focus.
+description: Browser-control submode for non-focus-stealing automation: static fetch first, then headless/background Playwright, Puppeteer, or CDP; use the constrained computer-use bridge only for required native GUI interaction. Not the chooser for cmux WebViews.
 ---
 
 # Background Browser Automation
@@ -9,16 +9,15 @@ Use this skill when browser work must not disturb the human's current desktop.
 
 ## Decision tree
 
-1. If the page can be fetched statically, prefer `web_search` or `fetch_content`.
+1. If the page can be fetched statically, prefer `read` on the URL or `web_search`.
 2. If a visible browser is not required, use headless Playwright/Puppeteer.
-3. If a logged-in or headed browser must be controlled on Arthur's Mac, prefer CuaDriver via the `cua-driver` skill and the `computer_use` tool so the target window can be inspected and acted on without raising or stealing focus.
-4. Use CDP/Playwright/Puppeteer or the OMP browser tool when the task specifically needs DOM execution, CDP network capture, cookies, protocol-level API reversing, frontend provider adapters such as `llm_frontend_browser`, Electron remote-debugging protocol truth, or replay debugging against an existing logged-in browser profile. The repo's Helium/CDP browser-use profile in `packages/browser-use` is one such CDP option.
+3. If a logged-in or headed browser needs native GUI interaction on Arthur's Mac, load `skill://cua-driver` and use the installed `cua-driver` CLI.
+4. Use CDP/Playwright/Puppeteer or the OMP browser tool when the task needs DOM execution, CDP network capture, cookies, protocol-level API reversing, frontend provider adapters such as `llm_frontend_browser`, Electron remote-debugging protocol truth, or replay debugging against an existing logged-in browser profile. The repo's Helium/CDP browser-use profile in `packages/browser-use` is one such CDP option.
 5. If true isolation is required, use a separate user session, remote Linux browser worker, or VM. Do not rely on same-session macOS focus prevention.
 
 ## Local default
 
-For visual/GUI browser automation, use CuaDriver through the `cua-driver` skill and the `computer_use` tool. CuaDriver owns the private macOS/SkyLight behavior; do not reimplement that in this repo.
-Do not treat browser-use/Helium as the default for visual GUI control; reach for it only when the task is protocol-level work.
+For native visual/GUI work, use the installed `cua-driver` CLI under the `cua-driver` skill's inspect-act-verify and focus-safety rules. Do not reimplement its host integration in this repo.
 
 For protocol-level DOM/network/cookies/Electron remote-debugging work, use CDP/Playwright/Puppeteer or the OMP browser tool. The clean-room browser-use package in `packages/browser-use` is the local CDP option; it defaults to Helium on macOS, launches via `open -g -na`, and creates new tabs through CDP background targets.
 Start or reuse the profile:
@@ -36,7 +35,7 @@ bun run browser-use:helium -- https://example.com/
 Then use the `browser_*` Pi tools from `packages/browser-use/index.ts` when available. For raw Puppeteer/CDP scripts, follow the background target pattern below.
 ## Electron app note
 
-For Electron apps, prefer CuaDriver (`cua-driver` / `computer_use`) when the task involves native menus, settings dialogs, or any UI that is not rendered as a web page. Attach via CDP only after the app has been launched with remote debugging enabled and only when you need DOM, network, cookie, or protocol-level truth.
+For Electron apps, use `cua-driver` for native menus, settings dialogs, or UI that is not rendered as a web page. Attach via CDP only after the app has been launched with remote debugging enabled and only when you need DOM, network, cookie, or protocol-level truth.
 
 ## Hard rules
 
@@ -183,15 +182,15 @@ Applies to Helium, Chrome, and Firefox-profile-based work. The browser choice ma
 
 ### 3. Split tools by job
 
-- Use CuaDriver when you need background visual/GUI/AX inspection: confirm that the right account is logged in, the right workspace is selected, a modal/banner/risk prompt is present, or the page has visibly finished settling.
+- Use `cua-driver` when native visual/GUI interaction is required: confirming the right account/workspace, a modal or risk prompt, or a settled page state.
 - Use headed CDP when you need DOM execution, cookie/session inspection, request bodies, response bodies, initiators, and timing/network truth.
-- Do not force one tool to do the other's job. CuaDriver answers “what state is the real UI in?”; headed CDP answers “what exactly was sent and returned?”.
+- Do not force one tool to do the other's job. CuaDriver handles native app interaction; headed CDP establishes exactly what the browser sent and received.
 
 ### 4. Capture the exact successful request
 
 1. Attach CDP to the already-running background browser/profile.
 2. Enable passive network capture before the action that matters.
-3. Use CuaDriver if needed to verify hidden/background UI state before the submit step.
+3. Use `cua-driver` only if native GUI state must be verified before the submit step.
 4. Trigger the real workflow once in the authenticated browser.
 5. Save the exact request that succeeds, including:
    - method and URL
@@ -208,7 +207,7 @@ Save enough evidence that another worker can continue without reopening the brow
 - raw network log or equivalent CDP event dump
 - one normalized request/response summary for the winning request
 - cookie/storage notes only when they are required for replay reasoning
-- screenshot or CuaDriver-observed note for any visible blocker or settled UI state that matters
+- screenshot or GUI-bridge observation for any visible blocker or settled UI state that matters
 - the exact browser/profile used: Helium profile path, Chrome profile name/path, or Firefox profile name/path
 - replay attempt notes that distinguish “captured browser request” from “hand-built variant”
 

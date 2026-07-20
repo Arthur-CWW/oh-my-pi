@@ -1,5 +1,43 @@
+import { Option, Schema } from "effect"
+
+import { PapercutInputSchema as InternalPapercutInputSchema, type PapercutInput } from "./schema"
+
+/** Decodes and normalizes untrusted papercut reports before opening storage. */
+export function decodePapercutInput(value: unknown): PapercutInput | undefined {
+  const decoded = Schema.decodeUnknownOption(InternalPapercutInputSchema)(withoutUndefinedFields(value))
+  if (Option.isNone(decoded)) return undefined
+
+  const input = decoded.value
+  const message = input.message.trim()
+  if (message.length === 0 || message.length > 4_000) return undefined
+  if (!isValidPapercutText(input.commandOrTool, 2_048)) return undefined
+  if (!isValidPapercutText(input.cwdOrPackage, 2_048)) return undefined
+  if (!isValidPapercutText(input.evidenceArtifactId, 2_048)) return undefined
+  if (!isValidPapercutText(input.suggestedFix, 4_000)) return undefined
+
+  return {
+    kind: input.kind,
+    severity: input.severity,
+    message,
+    ...(input.commandOrTool === undefined ? {} : { commandOrTool: input.commandOrTool.trim() }),
+    ...(input.cwdOrPackage === undefined ? {} : { cwdOrPackage: input.cwdOrPackage.trim() }),
+    ...(input.evidenceArtifactId === undefined ? {} : { evidenceArtifactId: input.evidenceArtifactId.trim() }),
+    ...(input.suggestedFix === undefined ? {} : { suggestedFix: input.suggestedFix.trim() }),
+  }
+}
+
+function isValidPapercutText(value: string | undefined, maxLength: number): boolean {
+  return value === undefined || (value.trim().length > 0 && value.trim().length <= maxLength)
+}
+
+
+function withoutUndefinedFields(value: unknown): unknown {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return value
+  return Object.fromEntries(Object.entries(value).filter(([, field]) => field !== undefined))
+}
+
 export { ArtifactError, StorageError } from "./errors"
-export { LEDGER_SCHEMA_VERSION, migrateLedger, migration0001Sql, migration0002Sql, migration0003Sql, migration0004Sql, migration0005Sql, migration0006Sql, migration0010Sql, setDurabilityPragmas } from "./migrate"
+export { LEDGER_SCHEMA_VERSION, migrateLedger, migration0001Sql, migration0002Sql, migration0003Sql, migration0004Sql, migration0005Sql, migration0006Sql, migration0007Sql, migration0008Sql, migration0009Sql, migration0010Sql, migration0011Sql, setDurabilityPragmas } from "./migrate"
 export {
   LedgerStore,
   defaultLedgerPath,
@@ -18,9 +56,15 @@ export {
   type ModelCallFilters,
   type ModelCallInput,
   type ProviderCallInput,
+  papercutFingerprint,
   type PutArtifactResult,
   type SessionInput,
   type StatusSummary,
+  type TimelineSourceCursor,
+  type PapercutFilters,
+  type PapercutRecord,
+  type PapercutReportInput,
+  type PapercutReportResult,
   type TurnInput,
 } from "./ledger"
 export {
@@ -85,6 +129,7 @@ export {
   metricDefinitions,
   modelCalls,
   packets,
+  papercuts,
   providerCalls,
   routingObservations,
   sessions,
@@ -102,12 +147,21 @@ export {
   type EventRow,
   type LaneStateRow,
   type MetricDefinitionRow,
+  type PapercutKind,
+  type PapercutInput,
+  type PapercutRow,
+  type PapercutSeverity,
+  type PapercutStatus,
   type ModelCallRow,
   type PacketRow,
   type ProviderCallRow,
   type RoutingObservationRow,
   type SessionRow,
   type TurnRow,
+  PapercutInputSchema,
+  PapercutKindSchema,
+  PapercutSeveritySchema,
+  PapercutStatusSchema,
 } from "./schema"
 export {
   queryUsageByAgent,
@@ -216,7 +270,104 @@ export {
   exportFrontierSvg,
   type FrontierSvgProjection,
 } from "./evidence-export"
-
+export {
+  ControlPlaneApi,
+  makeControlPlaneApi,
+  makeControlPlaneApiService,
+  type ControlPlaneApiOptions,
+  type ControlPlaneApiShape,
+} from "./http-api"
+export {
+  startControlPlaneServer,
+  type ControlPlaneServer,
+  type ControlPlaneServerOptions,
+} from "./server"
+export {
+  RELAY_MAX_BODY_BYTES,
+  RELAY_MAX_JSON_ARRAY_ITEMS,
+  RELAY_MAX_JSON_DEPTH,
+  RELAY_MAX_JSON_OBJECT_KEYS,
+  RELAY_MAX_JSON_STRING_LENGTH,
+  RelayAckV1Schema,
+  RelayCursorV1Schema,
+  RelayEnvelopeV1Schema,
+  RelayHealthV1Schema,
+  RelayJsonSchema,
+  NodeIdentityV1Schema,
+  PeerRouteV1Schema,
+  WorkEventV1Schema,
+  WorkLeaseV1Schema,
+  WorkPacketV1Schema,
+  decodeNodeIdentityV1,
+  decodePeerRouteV1,
+  decodeRelayAckV1,
+  decodeRelayCursorV1,
+  decodeRelayEnvelopeV1,
+  decodeRelayHealthV1,
+  decodeWorkEventV1,
+  decodeWorkLeaseV1,
+  decodeWorkPacketV1,
+  makeNodeIdentityV1,
+  makePeerRouteV1,
+  makeRelayAckV1,
+  makeRelayCursorV1,
+  makeRelayEnvelopeV1,
+  makeRelayHealthV1,
+  makeWorkEventV1,
+  makeWorkLeaseV1,
+  makeWorkPacketV1,
+  type NodeIdentityV1,
+  type PeerRouteV1,
+  type RelayAckV1,
+  type RelayCursorV1,
+  type RelayEnvelopeV1,
+  type RelayHealthV1,
+  type RelayJson,
+  type WorkEventV1,
+  type WorkLeaseV1,
+  type WorkPacketV1,
+} from "./relay-schema"
+export {
+  RelayAuthV1Schema,
+  RelayNonceSchema,
+  canonicalRelayBody,
+  canonicalRelayRequestV1,
+  decodeRelayAuthV1,
+  decodeRelayNonce,
+  redactRelayAuth,
+  relayBodyHash,
+  signRelayRequestV1,
+  makeRelayNonce,
+  verifyRelayRequestV1,
+  type RelayAuthV1,
+  type RelayNonce,
+  type RelaySigningRequestV1,
+  type RelayVerificationRequestV1,
+} from "./relay-auth"
+export {
+  NodeConfigV1Schema,
+  decodeNodeConfigV1,
+  defaultNodeConfigPath,
+  initNodeConfig,
+  loadNodeConfig,
+  redactNodeConfig,
+  writeNodeConfig,
+  type InitNodeConfigOptions,
+  type NodeConfigV1,
+} from "./relay-config"
+export {
+  decodeCanaryReceiptV1Json,
+  decodeReleaseRegistryV1Json,
+  decodeReleaseTransactionArtifactV1Json,
+  ingestReleaseEvidence,
+  type CanaryReceiptProofV1,
+  type CanaryReceiptV1,
+  type ReleaseEvidenceIds,
+  type ReleaseEvidenceIngestResult,
+  type ReleaseEvidencePaths,
+  type ReleaseRegistryV1,
+  type ReleaseTransactionArtifactV1,
+} from "./release-evidence"
 export {
   queryOperationalCanaries,
   queryOperationalDiagnostics,
@@ -230,6 +381,21 @@ export {
   type OperationalRouteDto,
   type OperationalSessionDto,
 } from "./operational-query"
+export {
+  REFUSAL_PROMPT_EXCERPT_MAX,
+  REFUSAL_PROVIDER_MESSAGE_MAX,
+  REFUSAL_REDACTION_POLICY,
+  insertRefusalRecord,
+  normalizeRefusalRecord,
+  queryRecentRefusals,
+  queryRefusalCounts,
+  redactRefusalText,
+  type RecentRefusalOptions,
+  type RefusalCount,
+  type RefusalCountDimension,
+  type RefusalRecord,
+  type RefusalRecordInput,
+} from "./refusal-evidence"
 export { openQueueStore, QueueStore, type QueueFilters, type QueueInsertResult, type QueueItemInput, type QueueStoreShape } from "./life-queue"
 export { lifeQueueItems, QueueItemSchema, QueuePrioritySchema, QueueSourceSchema, QueueStatusSchema, type QueueItem, type QueuePriority, type QueueSource, type QueueStatus } from "./life-queue-schema"
 export { scanAbandonedSessions, type SessionScanOptions, type SessionScanResult } from "./life-queue-scanner"

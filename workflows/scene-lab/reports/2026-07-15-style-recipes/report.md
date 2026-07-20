@@ -46,20 +46,41 @@ Two cross-cutting gaps narrowly miss the top five: no reusable style-preset/opin
 
 # Exact rerun / verification commands
 
-From the repository root:
+Updated after the 2026-07-16 full-catalog refresh. From the repository root:
 
 ```sh
 python3 - <<'PY'
+import json
 import re
 from pathlib import Path
+
 recipes = Path('docs/research/style-recipes.md').read_text()
+catalog = Path('docs/research/pleometric-reference-catalog.md').read_text()
 plan = Path('docs/plans/scene-lab.md').read_text()
-heads = re.findall(r'^## Recipe \d+ — ', recipes, re.M)
-blocks = re.split(r'^## Recipe \d+ — ', recipes, flags=re.M)[1:]
-assert len(heads) == 10, len(heads)
-assert all(len(set(re.findall(r'`(\d+-\d+)`', b))) >= 2 for b in blocks)
-assert all('**`scene.v1` implementability.**' in b for b in blocks)
+heads = re.findall(r'^## Recipe (\d+) — (.+)$', recipes, re.M)
+blocks = re.split(r'^## Recipe \d+ — .+$', recipes, flags=re.M)[1:]
+catalog_ids = re.findall(r'^\| \*\*(\d+-1)\*\* \|', catalog, re.M)
+original_56 = set(catalog_ids[:56])
+all_catalog_ids = set(catalog_ids)
+exemplars = [set(re.findall(r'`(\d+-1)`', block)) for block in blocks]
+id_to_handle = {}
+for handle in ('pleometric', 'SkyeSharkie', 'voooooogel', 'poetengineer__', 'abelian_soup'):
+    manifest = json.loads(Path(f'data/inspiration/{handle}/manifest.json').read_text())
+    for item in manifest['items']:
+        if item.get('mediaType') == 'video':
+            id_to_handle[Path(item['file']).stem] = handle
+
+assert len(catalog_ids) == 307, len(catalog_ids)
+assert len(heads) == len(blocks) == 12, (len(heads), len(blocks))
+assert all(len(ids) >= 4 and ids <= all_catalog_ids for ids in exemplars)
+assert all(ids - original_56 for ids in exemplars)
+assert all('**`scene.v1` implementability.**' in block for block in blocks)
+for ids in exemplars[10:]:
+    assert len({id_to_handle[i] for i in ids if i in id_to_handle}) >= 2
 assert plan.count('## Style vocabulary v1') == 1
-print('PASS: 10 recipes; >=2 unique exemplars and implementability per recipe; vocabulary appended once (coverage consumed: 56 catalog entries)')
+assert all(f'| **{name}** |' in plan for _, name in heads)
+print(f'PASS: {len(catalog_ids)} catalog entries; {len(heads)} recipes; every recipe has >=4 catalog exemplars and post-56 evidence; recipes 11-12 span >=2 handles; vocabulary index matches')
+print('coverage:', ', '.join(f'R{i+1}={len(ids)}' for i, ids in enumerate(exemplars)))
+print('revision tags:', recipes.count('(rev. 2026-07-16)'))
 PY
 ```

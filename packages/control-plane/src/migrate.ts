@@ -11,7 +11,7 @@ interface UserVersionRow {
   user_version: number
 }
 
-export const LEDGER_SCHEMA_VERSION = 10
+export const LEDGER_SCHEMA_VERSION = 11
 
 export const migration0001Sql = `
 CREATE TABLE IF NOT EXISTS sessions (
@@ -563,6 +563,64 @@ CREATE INDEX model_calls_route_resolution_idx ON model_calls (routeResolutionId)
 PRAGMA user_version = 7;
 `
 
+export const migration0008Sql = `
+CREATE TABLE papercuts (
+  fingerprint TEXT PRIMARY KEY,
+  timestamp INTEGER NOT NULL,
+  agentId TEXT,
+  modelId TEXT,
+  sessionId TEXT,
+  package TEXT,
+  kind TEXT NOT NULL,
+  severity TEXT NOT NULL,
+  commandOrTool TEXT,
+  message TEXT NOT NULL,
+  evidence TEXT,
+  suggestedFix TEXT,
+  status TEXT NOT NULL,
+  occurrences INTEGER NOT NULL,
+  firstSeenAt INTEGER NOT NULL,
+  lastSeenAt INTEGER NOT NULL
+);
+CREATE INDEX papercuts_timestamp_idx ON papercuts (timestamp);
+CREATE INDEX papercuts_severity_status_timestamp_idx ON papercuts (severity, status, timestamp);
+CREATE INDEX papercuts_status_occurrences_timestamp_idx ON papercuts (status, occurrences, timestamp);
+PRAGMA user_version = 8;
+`
+
+
+const migration0009Statements = [
+  "ALTER TABLE packets ADD COLUMN relay_envelope_id TEXT",
+  "ALTER TABLE packets ADD COLUMN relay_origin_node_id TEXT",
+  "ALTER TABLE packets ADD COLUMN relay_destination_node_id TEXT",
+  "ALTER TABLE packets ADD COLUMN relay_payload_version INTEGER",
+  "ALTER TABLE packets ADD COLUMN relay_payload TEXT",
+  "ALTER TABLE packets ADD COLUMN relay_idempotency TEXT",
+  "ALTER TABLE packets ADD COLUMN relay_expires_at INTEGER",
+  "CREATE TABLE relay_nodes (node_id TEXT PRIMARY KEY, display_name TEXT NOT NULL, protocol_versions TEXT NOT NULL, first_seen_at INTEGER NOT NULL, last_seen_at INTEGER NOT NULL, last_host_epoch TEXT NOT NULL)",
+  "CREATE TABLE relay_peer_routes (node_id TEXT NOT NULL, peer_id TEXT NOT NULL, alias TEXT, endpoint TEXT NOT NULL, enabled INTEGER NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY (node_id, peer_id))",
+  "CREATE TABLE relay_outbox (envelope_id TEXT PRIMARY KEY, origin_node_id TEXT NOT NULL, stream_id TEXT NOT NULL, sequence INTEGER NOT NULL, destination_node_id TEXT NOT NULL, destination_peer_id TEXT NOT NULL, kind TEXT NOT NULL, body TEXT NOT NULL, body_sha256 TEXT NOT NULL, state TEXT NOT NULL, attempt_count INTEGER NOT NULL, next_attempt_at INTEGER NOT NULL, accepted_at INTEGER, created_at INTEGER NOT NULL)",
+  "CREATE TABLE relay_inbox (envelope_id TEXT PRIMARY KEY, origin_node_id TEXT NOT NULL, stream_id TEXT NOT NULL, sequence INTEGER NOT NULL, destination_node_id TEXT NOT NULL, destination_peer_id TEXT NOT NULL, kind TEXT NOT NULL, body TEXT NOT NULL, body_sha256 TEXT NOT NULL, received_at INTEGER NOT NULL, adapter_state TEXT NOT NULL, adapter_message_id TEXT)",
+  "CREATE TABLE relay_cursors (receiver_node_id TEXT NOT NULL, origin_node_id TEXT NOT NULL, stream_id TEXT NOT NULL, highest_contiguous_sequence INTEGER NOT NULL, holes_json TEXT NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY (receiver_node_id, origin_node_id, stream_id))",
+  "CREATE TABLE relay_receipts (envelope_id TEXT NOT NULL, destination_node_id TEXT NOT NULL, disposition TEXT NOT NULL, received_at INTEGER NOT NULL, cursor_json TEXT NOT NULL, PRIMARY KEY (envelope_id, destination_node_id))",
+  "CREATE TABLE relay_peer_health (observer_node_id TEXT NOT NULL, peer_node_id TEXT NOT NULL, state TEXT NOT NULL, last_success_at INTEGER, last_failure_at INTEGER, consecutive_failures INTEGER NOT NULL, queue_depth INTEGER NOT NULL, oldest_unacked_ms INTEGER, detail TEXT, PRIMARY KEY (observer_node_id, peer_node_id))",
+  "CREATE TABLE packet_leases (packet_id TEXT PRIMARY KEY, epoch TEXT NOT NULL, owner_node_id TEXT NOT NULL, owner_session_id TEXT NOT NULL, owner_agent_id TEXT NOT NULL, attempt INTEGER NOT NULL, acquired_at INTEGER NOT NULL, renew_by INTEGER NOT NULL, state TEXT NOT NULL, idempotency TEXT NOT NULL)",
+  "CREATE TABLE packet_lease_events (id TEXT PRIMARY KEY, packet_id TEXT NOT NULL, epoch TEXT, event_kind TEXT NOT NULL, actor_node_id TEXT, ts INTEGER NOT NULL, detail TEXT NOT NULL)",
+  "CREATE UNIQUE INDEX relay_outbox_origin_stream_sequence_unique_idx ON relay_outbox (origin_node_id, stream_id, sequence)",
+  "CREATE UNIQUE INDEX relay_inbox_origin_stream_sequence_unique_idx ON relay_inbox (origin_node_id, stream_id, sequence)",
+  "CREATE INDEX relay_outbox_pending_destination_idx ON relay_outbox (state, destination_node_id, next_attempt_at)",
+  "CREATE INDEX relay_inbox_receiver_cursor_idx ON relay_inbox (destination_node_id, origin_node_id, stream_id, sequence)",
+  "CREATE INDEX packet_leases_renewal_idx ON packet_leases (state, renew_by)",
+  "CREATE INDEX relay_peer_health_freshness_idx ON relay_peer_health (observer_node_id, state, last_success_at)",
+  "PRAGMA user_version = 9",
+] as const
+
+export const migration0009Sql = `
+BEGIN IMMEDIATE;
+${migration0009Statements.map((statement) => `${statement};`).join("\n")}
+COMMIT;
+`
+
 const migration0010Statements = [
   "CREATE TABLE operational_events (eventId TEXT PRIMARY KEY, eventKind TEXT NOT NULL, occurredAt INTEGER NOT NULL, observedAt INTEGER NOT NULL, producer TEXT NOT NULL, payloadVersion INTEGER NOT NULL, sourceKind TEXT NOT NULL, sourceId TEXT NOT NULL, sourceSequence INTEGER, sourceDigest TEXT NOT NULL, buildDigest TEXT, runnerInstanceId TEXT, sessionId TEXT, branchId TEXT, turnId TEXT, entryId TEXT, agentId TEXT, parentAgentId TEXT, taskId TEXT, packetId TEXT, viewId TEXT, controllerEpoch INTEGER, ownerEpoch TEXT, revision INTEGER, sequence INTEGER, sessionRevision INTEGER, durableSequence INTEGER, commandId TEXT, correlationId TEXT, causationId TEXT, inputId TEXT, attemptId TEXT, routeResolutionId TEXT, quotaDecisionId TEXT, toolCallId TEXT, diagnosticId TEXT, canaryRunId TEXT, promotionId TEXT, regressionId TEXT, redactionPolicyId TEXT, payload TEXT NOT NULL)",
   "CREATE UNIQUE INDEX operational_events_source_unique_idx ON operational_events (sourceKind, sourceId, sourceSequence) WHERE sourceSequence IS NOT NULL",
@@ -591,7 +649,20 @@ ${migration0010Statements.map((statement) => `${statement};`).join("\n")}
 COMMIT;
 `
 
+const migration0011Statements = [
+  "CREATE TABLE refusal_records (refusalId TEXT PRIMARY KEY, timestamp INTEGER NOT NULL, provider TEXT NOT NULL, model TEXT NOT NULL, role TEXT NOT NULL, category TEXT NOT NULL, tool TEXT, action TEXT, sessionId TEXT, turnId TEXT, correlationId TEXT, promptFingerprint TEXT NOT NULL, promptExcerpt TEXT NOT NULL, providerCode TEXT, providerMessage TEXT, retryOutcome TEXT, rerouteOutcome TEXT, contextSources TEXT NOT NULL, redactionPolicyId TEXT NOT NULL)",
+  "CREATE INDEX refusal_records_timestamp_idx ON refusal_records (timestamp DESC)",
+  "CREATE INDEX refusal_records_model_timestamp_idx ON refusal_records (model, timestamp DESC)",
+  "CREATE INDEX refusal_records_category_timestamp_idx ON refusal_records (category, timestamp DESC)",
+  "CREATE INDEX refusal_records_tool_action_timestamp_idx ON refusal_records (tool, action, timestamp DESC)",
+  "PRAGMA user_version = 11",
+] as const
 
+export const migration0011Sql = `
+BEGIN IMMEDIATE;
+${migration0011Statements.map((statement) => `${statement};`).join("\n")}
+COMMIT;
+`
 
 export function setDurabilityPragmas(sqlite: LedgerSqliteConnection): void {
   sqlite.exec("PRAGMA journal_mode = WAL")
@@ -623,10 +694,33 @@ export function migrateLedger(sqlite: LedgerSqliteConnection): void {
   if (currentVersion < 7) {
     sqlite.exec(migration0007Sql)
   }
+  if (currentVersion < 8) {
+    sqlite.exec(migration0008Sql)
+  }
+  if (currentVersion < 9) {
+    try {
+      sqlite.exec("BEGIN IMMEDIATE")
+      for (const statement of migration0009Statements) sqlite.exec(statement)
+      sqlite.exec("COMMIT")
+    } catch (cause) {
+      try { sqlite.exec("ROLLBACK") } catch { /* no active transaction */ }
+      throw cause
+    }
+  }
   if (currentVersion < 10) {
     try {
       sqlite.exec("BEGIN IMMEDIATE")
       for (const statement of migration0010Statements) sqlite.exec(statement)
+      sqlite.exec("COMMIT")
+    } catch (cause) {
+      try { sqlite.exec("ROLLBACK") } catch { /* no active transaction */ }
+      throw cause
+    }
+  }
+  if (currentVersion < 11) {
+    try {
+      sqlite.exec("BEGIN IMMEDIATE")
+      for (const statement of migration0011Statements) sqlite.exec(statement)
       sqlite.exec("COMMIT")
     } catch (cause) {
       try { sqlite.exec("ROLLBACK") } catch { /* no active transaction */ }

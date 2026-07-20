@@ -1,11 +1,14 @@
-import { mkdirSync, rmSync } from "node:fs"
+import { mkdirSync, readFileSync, rmSync } from "node:fs"
 import { join } from "node:path"
 
 import { Database } from "bun:sqlite"
 import { afterAll, beforeAll, expect, test } from "bun:test"
-import { Context, Effect } from "effect"
+import { Context, Effect, Schema } from "effect"
 
-import { LedgerStore, openLedger } from "../src/ledger"
+import { LedgerStore, openLedger, papercutFingerprint } from "../src/ledger"
+import { makeControlPlaneApi } from "../src/http-api"
+import { migrateLedger } from "../src/migrate"
+import { PapercutInputSchema } from "../src/schema"
 
 const tmpDir = join(import.meta.dir, ".tmp")
 const dbPath = join(tmpDir, "ledger-fixture.sqlite")
@@ -196,11 +199,67 @@ test("ledger migration and fixture rows cover every row family", async () => {
     sqlite.exec("INSERT OR IGNORE INTO packets (id, title, lane, status, ownerPaths, excludedPaths, createdAt, updatedAt) VALUES ('packet-1', 'Packet', 'impl', 'done', '[]', '[]', 1000, 2000)")
     sqlite.exec("INSERT OR IGNORE INTO commits (sha, sessionId, agentId, packetId, ts) VALUES ('abc123', 'session-1', 'agent-1', 'packet-1', 2100)")
     const tableNames = sqlite.query<{ name: string }, []>("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((row) => row.name).sort()
-    expect(tableNames).toEqual(["agent_timeline_events", "artifacts", "benchmark_catalog", "benchmark_saturation_assessments", "branches", "canary_runs", "commercial_facts", "commits", "diagnostic_artifacts", "diagnostic_occurrences", "diagnostic_projection_events", "evaluation_measurements", "evaluation_run_participants", "evaluation_runs", "events", "evidence_sources", "lane_state", "metric_definitions", "model_calls", "operational_events", "operational_sources", "packets", "provider_calls", "release_registry_observations", "release_transactions", "route_advisors", "route_candidates", "route_event_artifacts", "route_resolutions", "routing_observations", "sessions", "turns"])
     expect(sqlite.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM packets").get()?.count).toBe(1)
+    expect(tableNames).toEqual(["agent_timeline_events", "artifacts", "benchmark_catalog", "benchmark_saturation_assessments", "branches", "canary_runs", "commercial_facts", "commits", "diagnostic_artifacts", "diagnostic_occurrences", "diagnostic_projection_events", "evaluation_measurements", "evaluation_run_participants", "evaluation_runs", "events", "evidence_sources", "lane_state", "metric_definitions", "model_calls", "operational_events", "operational_sources", "packet_lease_events", "packet_leases", "packets", "papercuts", "provider_calls", "refusal_records", "relay_cursors", "relay_inbox", "relay_nodes", "relay_outbox", "relay_peer_health", "relay_peer_routes", "relay_receipts", "release_registry_observations", "release_transactions", "route_advisors", "route_candidates", "route_event_artifacts", "route_resolutions", "routing_observations", "sessions", "turns"])
     expect(sqlite.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM commits").get()?.count).toBe(1)
   } finally {
     sqlite.close()
+  }
+})
+
+test("papercuts decode, append, aggregate, and preserve task verification state", async () => {
+  const papercutDbPath = join(tmpDir, "papercut-fixture.sqlite")
+  const sqlite = new Database(papercutDbPath)
+  try {
+    migrateLedger(sqlite)
+    sqlite.exec("INSERT INTO packets (id, title, lane, status, ownerPaths, excludedPaths, createdAt, updatedAt) VALUES ('packet-papercut', 'Verify unchanged', 'task', 'review', '[]', '[]', 1, 1)")
+  } finally {
+    sqlite.close()
+  }
+
+  const first = {
+    kind: "tool" as const,
+    severity: "medium" as const,
+    message: "Terminal command failed with exit 41",
+    commandOrTool: "bash",
+    cwdOrPackage: "packages/control-plane",
+    evidenceArtifactId: "artifact-a",
+    suggestedFix: "Expose the failing command output.",
+  }
+  const second = { ...first, severity: "high" as const, message: "Terminal command failed with exit 99", evidenceArtifactId: "artifact-b" }
+  expect(papercutFingerprint(first)).toBe(papercutFingerprint(second))
+
+  const schemaResult = Schema.decodeUnknownOption(PapercutInputSchema)({ ...first, kind: "invalid" })
+  expect(schemaResult._tag).toBe("None")
+  const program = Effect.gen(function* () {
+    const store = yield* LedgerStore
+    const before = yield* store.statusSummary()
+    const firstResult = yield* store.reportPapercut({ ...first, timestamp: 1_000, agentId: "agent-a", modelId: "model-a", sessionId: "session-a" })
+    const secondResult = yield* store.reportPapercut({ ...second, timestamp: 2_000, agentId: "agent-b", modelId: "model-b", sessionId: "session-b" })
+    const minimalResult = yield* store.reportPapercut({ kind: "repo", severity: "low", message: "Missing setup instruction", timestamp: 3_000 })
+    expect(firstResult.record.status).toBe("new")
+    expect(secondResult.record).toMatchObject({ severity: "high", status: "recurring", occurrences: 2, firstSeenAt: 1_000, lastSeenAt: 2_000 })
+    expect(minimalResult.record).toMatchObject({ kind: "repo", status: "new", occurrences: 1 })
+    expect((yield* store.listPapercuts({ severity: "high", status: "recurring" }))).toEqual([secondResult.record])
+    const api = makeControlPlaneApi({ ledger: store, clientErrorLogPath: join(tmpDir, "papercut-client-errors.log") })
+    const recurring = yield* Effect.promise(() => api.fetch(new Request("http://localhost/api/papercuts/recurring?severity=high")))
+    expect(recurring.status).toBe(200)
+    expect(yield* Effect.promise(() => recurring.text())).toContain('"status":"recurring"')
+    expect((yield* store.statusSummary())).toEqual(before)
+  })
+
+  await Effect.runPromise(program.pipe(Effect.provide(openLedger(papercutDbPath))))
+
+  const appended = readFileSync(join(tmpDir, "papercuts.jsonl"), "utf8").trim().split("\n")
+  expect(appended).toHaveLength(3)
+  const projection = new Database(papercutDbPath)
+  try {
+    expect(projection.query<{ status: string; occurrences: number; severity: string }, []>("SELECT status, occurrences, severity FROM papercuts WHERE occurrences = 2").get()).toEqual({ status: "recurring", occurrences: 2, severity: "high" })
+    expect(projection.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM events").get()?.count).toBe(0)
+    expect(projection.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM packets WHERE status = 'done'").get()?.count).toBe(0)
+    expect(projection.query<{ status: string }, []>("SELECT status FROM packets WHERE id = 'packet-papercut'").get()?.status).toBe("review")
+  } finally {
+    projection.close()
   }
 })
 

@@ -26,15 +26,15 @@ It is not a generic harsh critic. It is a sharp friend mode: say the useful unco
 If the task is substantial, also read the source prompt library entry:
 
 ```txt
-../../../../docs/review-agents/rubber-duck-adversarial.md
+/Users/arthur/agents/docs/review-agents/rubber-duck-adversarial.md
 ```
 
 If the review involves durable video/agent-harness direction, also consider:
 
 ```txt
-../../../../docs/state/video-creative-direction.md
-../../../../docs/state/symphony-lite-direction.md
-../../../../docs/plans/symphony-lite.md
+/Users/arthur/agents/docs/state/video-creative-direction.md
+/Users/arthur/agents/docs/state/symphony-lite-direction.md
+/Users/arthur/agents/docs/plans/symphony-lite.md
 ```
 
 ## Behavior
@@ -67,7 +67,7 @@ Use the subset that matters:
 4. What can be resumed, rerun, inspected, or diffed?
 5. What is the one blessed path? Are there too many overlapping tools?
 6. What tools should an agent **not** have for this task?
-7. Does this need Arthur input via `ask_arthur` instead of guessing?
+7. Does this need Arthur's input instead of guessing?
 8. What proof would show this worked?
 9. What is the smallest useful next slice?
 10. Is the vibe/intent being flattened into generic language?

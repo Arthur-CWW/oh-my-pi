@@ -3,7 +3,7 @@
 Status: living tracker
 Date: 2026-07-07 (created; update in place, reconcile don't append)
 Owner: harness stream
-Reads with: `docs/plans/pi-agent-control-plane.md` (spec v1 — the L2/L3 contracts these primitives feed), `docs/state/harness-friction.md` (papercut ledger), `docs/fable/harness-brief.md` (iteration queue).
+Reads with: `docs/plans/pi-agent-control-plane.md` (spec v1 — the L2/L3 contracts these primitives feed), `docs/state/harness-friction.md` (papercut ledger), `docs/fable/harness-brief.md` (iteration queue), `docs/fable/routing-doctrine.md` (durable routing policy), `docs/fable/agent-system-overview.md` (current-system map and staged control-plane direction).
 
 ## North star
 
@@ -18,14 +18,17 @@ What the orchestrator needs → status:
 |---|---|
 | Vary model/thinking/persona/context per spawn | EXISTS (`task` model selector+arrays, role, context, `local://`) |
 | Vary skills/tools/config per spawn ("test different harnesses") | MISSING — per-spawn config/tool-exposure overlay; absorbs the config-hot-swap and tool-flexibility asks |
-| Same packet across N lanes, results comparable | EXISTS blind (eval-bridge `parallel`+`agent()`); no cost/latency/outcome per run until publisher wired |
-| Query cost×outcome telemetry (Pareto frontier) | LEDGER SHIPPED (M1), publisher NOT live-wired — wire + smoke = next slice; then `model_calls` answers model×work-type×cost empirically |
-| Global routing-knowledge store (lane strengths/failure modes/quota, evidence-linked, dated) | IN FLIGHT 2026-07-07 (`RoutingStore` packet): `routing_observations` + `lane_state` in the control-plane SQLite, CLI `routing observe/lanes/brief/log`, seeded from charter temperaments as `[hypothesis, pre-empirical]` rows |
-| Subscription-quota failover (usage exhausted → next lane; chains) | IN FLIGHT — `FailoverScout` mapping retry-fallback/error-class seams; composes with `hotswapAgentModel` for live workers |
+| Same packet across N lanes, results comparable | PARTIAL — eval bridge and default-on/live publisher telemetry exist, and the doctrine defines the rubric; persisted comparable outcome assessments and resolved decisions do not |
+| Query cost×outcome telemetry (Pareto frontier) | PARTIAL — **external release evidence V1 shipped 2026-07-10**: typed benchmark catalog/readiness/saturation, sources, versioned metrics, participant compositions, explicit multi-axis complete-case Pareto queries, and deterministic JSON/CSV/SVG exports in `packages/control-plane`; first GPT-5.6 bundle has 69 runs / 179 measurements. Local `model_calls` throughput remains operational telemetry, not a derived behavioral-quality verdict; API cost/task is not subscription quota. |
+| Global routing-knowledge store (lane strengths/failure modes/quota, evidence-linked, dated) | SHIPPED — routing store and observations support the doctrine's dated evidence model |
+| Routing safety | PARTIAL — routing guard, model picker, and tool-output pieces are shipped; silent runtime override shadowing and resolved provenance remain missing |
+| Spawn-time route visibility | PARTIAL — generic tool output exists, but a spawn receipt does not yet expose the selected route and its provenance |
+| Routing decision layer | MISSING — next meta slice: apply doctrine precedence and constraints to choose eligible lanes, exploit versus experiment, and a recorded resolved decision |
+| Subscription-quota failover (usage exhausted → next lane; chains) | PARTIAL — lane facts and runtime fallback chains are shipped, but doctrine-driven route selection, re-resolution, and handoff remain missing |
 | Fork a subagent across model variants (compare failure modes) | QUEUED — cold fork v1: spawn N variants from one transcript/`leaf_change` tree point (spec M4 contract `{fromTranscript, atTurn}`); post-MVP |
 | Onboarding interview (spawned agent asks back before starting) | EXISTS mechanically (irc `await`); make it standard spawn practice, not a fixed template |
 
-Contract for lane knowledge: observations are dated, evidence-linked, confidence-scored rows — the charter's lane-temperament prose becomes seed hypotheses to be confirmed/retired by data, never doctrine.
+Contract for lane knowledge: observations are dated, evidence-linked, confidence-scored rows; the routing doctrine owns durable policy, while lane temperament remains evidence to confirm or retire.
 
 ## Primitives
 
@@ -38,6 +41,7 @@ Contract for lane knowledge: observations are dated, evidence-linked, confidence
 | Interrupt another session | QUEUED | irc steer messages only | Same command-envelope design as cross-session swap; one mechanism for both |
 | Resume session (`--resume`/`--continue`) | **SHIPPED** 2026-07-07 (`ca51962d`) | root causes fixed: persisted `leaf_change` metadata (wrong-branch-on-resume), `--continue` same-cwd breadcrumb fallback + provenance notice, discovery skip diagnostics; forensics `docs/qa/resume-robustness-20260707.md` | Rebuild caveat; capture repro if anything still misbehaves on the new binary |
 | Resume/revive subagent | WORKS | park→revive (`AgentLifecycleManager`), keep-alive after timeout (`timeoutSec` fix 2026-07-04), hotswap survives revive | — |
+| Re-adopt children after controller restart | MISSING | Distinct from same-process park→revive: replacement startup must discover durable child spawn/session records, validate parent/session lineage, and re-register eligible non-isolated children as `parked` under the same stable ids with task/display/session-file/model/thinking/hotswap metadata. Each gets a reviver that reopens JSONL under current auth/policy; existing IRC send to that id is the only wake/steer path. Unfinished turns become `interrupted_by_restart`, never resumed/running; durable control handles remain usable, but former in-memory job/poll ownership does not. Audit adoption/revival. | Explicitly report ID collision, missing/corrupt transcript, unavailable model/auth, already-live external owner, and stale parent; isolated/non-revivable children stay history-only. |
 | Session fork / tree view | FIXED with resume (`ca51962d`) — wrong branch selection was the memory-only leaf; tree view follows the restored leaf now | stale-overlay candidate remains (tree captured before user interaction, no refresh hook) | Capture concrete repro next occurrence if overlay staleness persists |
 | Fresh results from woken agents | **SHIPPED** 2026-07-07 (`f5c07cdb`) | `refreshResultText` on post-completion `agent_end`; poll reflects latest yield with `[refreshed after follow-up turn]` marker | Rebuild caveat |
 | Transcript provenance (which agent wrote what) | PARTIAL — inventoried 2026-07-07 (`ControlSeamScout`) | EXISTS in JSONL: per-entry `id/parentId/timestamp` tree, `parentSession` header (fork lineage), message `attribution` (user/agent), assistant turn-level model/thinking/advisor provenance, `custom_message.attribution` + irc from-ids, `model_change` roles (incl. `hotswap`), `session_init` task records. MISSING: stable `agentId` on ordinary messages, authenticated external `fromPeer` (SQLite body metadata only), parent-side pointer from job → later yields (being fixed this batch), commit provenance (M3) | Don't build ad-hoc: M2 viewer exposes ledger rows; M3 adds commit trailers + `commits` table. Candidate M2 input: add writer `agentId` to ordinary message entries |
@@ -87,7 +91,7 @@ From `docs/state/harness-friction.md` Open, 2026-07-07 pass:
 - Root `package.json` collision point → migrate to workspace-filtered scripts after per-package gate audit; coordinate cross-stream, not a solo harness change.
 - Borges local catalog → primer stream backlog, not harness.
 
-**High-level queue (unchanged, lives in `docs/fable/harness-brief.md`):** per-agent skill/tool exposure; orchestrator UI = control-plane M2 (status/query API + HTML viewer + SSE); packet template as first-class dispatch; dreaming loop (gated). M2 is the next big slice after this control-primitives batch.
+**High-level queue (lives in `docs/fable/harness-brief.md`):** the routing decision layer is the next meta slice; it applies the doctrine to shipped store, stats, guard, picker, publisher, and resolved-route output. Per-agent skill/tool exposure, the orchestrator UI, packet template, and dreaming loop follow from that decision layer.
 
 ## Commit plan (this batch)
 

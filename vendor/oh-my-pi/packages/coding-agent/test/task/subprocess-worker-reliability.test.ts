@@ -133,6 +133,18 @@ async function writeTerminalWorkerExtension(
 	);
 }
 
+async function waitForFile(filePath: string): Promise<void> {
+	for (let attempt = 0; attempt < 100; attempt++) {
+		try {
+			await fs.access(filePath);
+			return;
+		} catch {
+			await Bun.sleep(20);
+		}
+	}
+	throw new Error(`Timed out waiting for ${filePath}`);
+}
+
 describe("subprocess worker reliability", () => {
 	it("[I2/I4] recovers a journaled yield when the child is killed before pipe flush", async () => {
 		const sessionFile = path.join(tmpDir, "child-killed.jsonl");
@@ -379,30 +391,137 @@ describe("subprocess worker reliability", () => {
 		expect(result.allocatedBytes).toBe(1024);
 	});
 
-	it("[D4][regression] returns a typed local-peer refusal instead of external IRC loopback", async () => {
+	it("[HR-228] routes real subprocess IRC through the external bus", async () => {
+		const bus = new IrcExternalBus(path.join(tmpDir, ".omp", "agent", "irc-bus.sqlite"));
+		try {
+			bus.registerPeer({
+				sessionId: "coordinator-session",
+				agentId: "Main",
+				name: "coordinator",
+				cwd: tmpDir,
+				pid: process.pid,
+			});
+			const registry = AgentRegistry.global();
+			registry.register({
+				id: "child-1",
+				displayName: "worker",
+				kind: "sub",
+				parentId: "Main",
+				status: "running",
+				session: null,
+			});
+
+			const sessionFile = path.join(tmpDir, "irc-child.jsonl");
+			const toolFile = path.join(tmpDir, "irc-probe.ts");
+			const readyFile = path.join(tmpDir, "irc-ready");
+			const receivedFile = path.join(tmpDir, "irc-received.json");
+			await Bun.write(
+				toolFile,
+				[
+					`import { AgentRegistry } from ${JSON.stringify(path.resolve("src/registry/agent-registry.ts"))};`,
+					`import { IrcExternalBus } from ${JSON.stringify(path.resolve("src/irc/bus-external.ts"))};`,
+					`import { Settings } from ${JSON.stringify(path.resolve("src/config/settings.ts"))};`,
+					`import { IrcTool } from ${JSON.stringify(path.resolve("src/tools/irc.ts"))};`,
+					`const READY = ${JSON.stringify(readyFile)};`,
+					`const RECEIVED = ${JSON.stringify(receivedFile)};`,
+					"export default async function(pi) {",
+					"  const registry = AgentRegistry.global();",
+					'  const session = { cwd: process.cwd(), hasUI: false, settings: Settings.instance, getSessionFile: () => null, getSessionSpawns: () => "*", agentRegistry: registry, getAgentId: () => "child-1" };',
+					'  const result = await new IrcTool(session).execute("probe", { op: "send", to: "Main", message: "worker-to-main" });',
+					"  await Bun.write(READY, JSON.stringify({ isError: result.isError, details: result.details }));",
+					"  await Bun.sleep(1000);",
+					'  const bus = new IrcExternalBus();',
+					'  await Bun.write(RECEIVED, JSON.stringify(bus.drainMessages("child-1")));',
+					"  bus.close();",
+					'  return { name: "irc_probe", label: "IRC probe", description: "IRC probe", parameters: pi.typebox.Type.Object({}), execute: async () => ({ content: [{ type: "text", text: "probe" }] }) };',
+					"}",
+				].join("\n"),
+			);
+
+			const pending = runSubagentSpawnProcess(
+				{
+					...requestFor(sessionFile).options,
+					preloadedCustomToolPaths: [{ path: toolFile }],
+					maxRuntimeMs: 5_000,
+				},
+				Settings.isolated({ "task.maxRuntimeMs": 5_000 }),
+			);
+			await Promise.race([
+				waitForFile(readyFile),
+				pending.then(
+					() => {
+						throw new Error("subprocess ended before the IRC probe became ready");
+					},
+					error => {
+						throw error;
+					},
+				),
+			]);
+			expect(bus.findPeerByName("child-1")).toMatchObject({ agentId: "child-1", name: "child-1" });
+
+			const coordinatorSession: ToolSession = {
+				cwd: tmpDir,
+				hasUI: false,
+				settings: Settings.isolated(),
+				getSessionFile: () => null,
+				getSessionSpawns: () => "*",
+				agentRegistry: registry,
+				getAgentId: () => "Main",
+			};
+			const coordinatorResult = await new IrcTool(coordinatorSession, bus).execute("coordinator", {
+				op: "send",
+				to: "child-1",
+				message: "main-to-worker",
+			});
+			expect(coordinatorResult.isError).toBeFalsy();
+			expect(coordinatorResult.details?.receipts?.[0]?.outcome).toBe("injected");
+
+			await pending;
+			const outbound = bus.pollMessages("coordinator");
+			expect(outbound).toHaveLength(1);
+			expect(outbound[0]).toMatchObject({ fromPeer: "child-1", body: "worker-to-main" });
+			await waitForFile(receivedFile);
+			expect(JSON.parse(await fs.readFile(receivedFile, "utf8"))).toEqual(
+				expect.arrayContaining([expect.objectContaining({ body: "main-to-worker", toPeer: "child-1" })]),
+			);
+			expect(bus.findPeerByName("child-1")).toBeUndefined();
+		} finally {
+			bus.close();
+		}
+	});
+
+	it("[D4][regression] routes subprocess worker sends through the external IRC bus", async () => {
 		const registry = AgentRegistry.global();
 		registry.register({ id: "Main", displayName: "main", kind: "main", status: "running", session: null });
-		process.env.OMP_SUBPROCESS_WORKER = "1";
-		const toolSession: ToolSession = {
+		const bus = new IrcExternalBus(path.join(tmpDir, "irc.sqlite"));
+		bus.registerPeer({
+			sessionId: "main-session",
+			agentId: "Main",
+			name: "main-peer",
 			cwd: tmpDir,
-			hasUI: false,
-			settings: Settings.isolated(),
-			getSessionFile: () => null,
-			getSessionSpawns: () => "*",
-			agentRegistry: registry,
-			getAgentId: () => "child-1",
-		};
-		const result = await new IrcTool(toolSession, new IrcExternalBus(path.join(tmpDir, "irc.sqlite"))).execute("irc", {
-			op: "send",
-			to: "Main",
-			message: "hello",
+			pid: process.pid,
 		});
-		expect(result.isError).toBe(true);
-		expect(result.content[0]?.type === "text" ? result.content[0].text : "").toContain("coordinator IPC");
-		expect(result.details?.receipts?.[0]).toMatchObject({
-			to: "Main",
-			outcome: "failed",
-			error: "subprocess-worker-peer-unavailable",
-		});
+		process.env.OMP_SUBPROCESS_WORKER = "1";
+		try {
+			const toolSession: ToolSession = {
+				cwd: tmpDir,
+				hasUI: false,
+				settings: Settings.isolated(),
+				getSessionFile: () => null,
+				getSessionSpawns: () => "*",
+				agentRegistry: registry,
+				getAgentId: () => "child-1",
+			};
+			const result = await new IrcTool(toolSession, bus).execute("irc", {
+				op: "send",
+				to: "Main",
+				message: "hello",
+			});
+			expect(result.isError).toBeFalsy();
+			expect(result.details?.receipts?.[0]?.outcome).toBe("injected");
+			expect(bus.pollMessages("main-peer")[0]).toMatchObject({ body: "hello", fromPeer: "child-1" });
+		} finally {
+			bus.close();
+		}
 	});
 });

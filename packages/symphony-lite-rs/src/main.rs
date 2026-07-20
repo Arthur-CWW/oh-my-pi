@@ -26,6 +26,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+mod otp_http;
+
 
 const SCHEMA_VERSION: i64 = 1;
 static ID_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -63,6 +65,7 @@ enum Commands {
     Events(EventsCommand),
     Search(SearchArgs),
     Ask(AskCommand),
+    Otp(otp_http::OtpCommand),
     Open(OpenArgs),
     Restart(RestartArgs),
 }
@@ -126,14 +129,17 @@ struct RunArgs {
     #[arg(long, default_value_t = 900)]
     timeout_seconds: u64,
 }
-
-#[derive(Args, Debug)]
+#[derive(Args, Debug, Clone)]
 struct WatchArgs {
     workflow_id: Option<String>,
     #[arg(long, default_value_t = 2)]
     interval: u64,
     #[arg(long, default_value_t = 20)]
     limit: i64,
+    #[arg(long, env = "OTP_GROUP_ID")]
+    otp_group: Option<String>,
+    #[arg(long, env = "SYMPHONY_DAEMON_URL", default_value = "http://127.0.0.1:4000")]
+    base_url: String,
 }
 
 #[derive(Subcommand, Debug)]
@@ -603,6 +609,7 @@ fn run_main() -> Result<()> {
                 )?;
             }
         },
+        Commands::Otp(args) => otp_http::run_otp(args)?,
         Commands::Open(args) => {
             ensure_dirs(&paths)?;
             let conn = open_db(&paths)?;
@@ -1125,6 +1132,12 @@ struct TuiState {
     selected_event: usize,
     status: Option<StatusOutput>,
     events: Vec<EventRecord>,
+    otp_group_id: Option<String>,
+    otp_base_url: String,
+    otp_snapshot: Option<otp_http::GroupSnapshotDto>,
+    otp_events: Vec<otp_http::GroupEventDto>,
+    otp_error: Option<String>,
+    otp_poll: Option<std::sync::mpsc::Receiver<Result<(otp_http::GroupSnapshotDto, Vec<otp_http::GroupEventDto>)>>>,
     last_refresh: String,
     status_message: String,
 }
@@ -1141,6 +1154,12 @@ impl TuiState {
             selected_event: 0,
             status: None,
             events: Vec::new(),
+            otp_group_id: args.otp_group.clone(),
+            otp_base_url: args.base_url.clone(),
+            otp_snapshot: None,
+            otp_events: Vec::new(),
+            otp_error: None,
+            otp_poll: None,
             last_refresh: String::new(),
             status_message: String::new(),
         }
@@ -1149,6 +1168,36 @@ impl TuiState {
     fn refresh(&mut self, paths: &Paths, conn: &Connection) -> Result<()> {
         self.status = Some(status_output(paths, conn)?);
         self.events = recent_events(conn, self.workflow_filter.as_deref(), self.limit)?;
+        let poll_result = self.otp_poll.as_ref().map(|receiver| receiver.try_recv());
+        if let Some(result) = poll_result {
+            match result {
+                Ok(Ok((snapshot, events))) => {
+                    self.otp_snapshot = Some(snapshot);
+                    self.otp_events = events;
+                    self.otp_error = None;
+                    self.otp_poll = None;
+                }
+                Ok(Err(error)) => {
+                    self.otp_error = Some(error.to_string());
+                    self.otp_poll = None;
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.otp_error = Some("OTP polling worker disconnected".to_string());
+                    self.otp_poll = None;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+            }
+        }
+        if self.otp_poll.is_none() {
+            if let Some(group_id) = self.otp_group_id.clone() {
+                let base_url = self.otp_base_url.clone();
+                let (sender, receiver) = std::sync::mpsc::channel();
+                std::thread::spawn(move || {
+                    let _ = sender.send(otp_http::fetch_otp_state(&base_url, &group_id));
+                });
+                self.otp_poll = Some(receiver);
+            }
+        }
         self.last_refresh = now_iso();
         self.clamp_selection();
         Ok(())
@@ -1628,9 +1677,14 @@ fn render_tui_list(frame: &mut Frame<'_>, area: ratatui::layout::Rect, state: &T
 }
 
 fn render_tui_detail(frame: &mut Frame<'_>, area: ratatui::layout::Rect, state: &TuiState) {
-    let text = selected_detail_text(state);
+    let detail = selected_detail_text(state);
+    let text = match otp_status_text(state) {
+        Some(otp) => format!("{otp}\n\n{detail}"),
+        None => detail,
+    };
+    let title = if state.otp_group_id.is_some() { " OTP / Detail " } else { " Detail " };
     let paragraph = Paragraph::new(text)
-        .block(Block::default().borders(Borders::ALL).title(" Detail "))
+        .block(Block::default().borders(Borders::ALL).title(title))
         .wrap(Wrap { trim: false });
     frame.render_widget(paragraph, area);
 }
@@ -1735,7 +1789,32 @@ fn render_tui_footer(frame: &mut Frame<'_>, area: ratatui::layout::Rect, state: 
     frame.render_widget(Paragraph::new(text), area);
 }
 
+fn otp_status_text(state: &TuiState) -> Option<String> {
+    let group_id = state.otp_group_id.as_deref()?;
+    if let Some(error) = &state.otp_error {
+        return Some(format!("OTP group {group_id}\nerror: {error}"));
+    }
+    let snapshot = match &state.otp_snapshot {
+        Some(snapshot) => snapshot,
+        None => return Some(format!("OTP group {group_id}\nloading")),
+    };
+    let workers = snapshot
+        .workers
+        .iter()
+        .map(|(worker_id, status)| format!("{worker_id}={}", format!("{status:?}").to_ascii_lowercase()))
+        .collect::<Vec<_>>()
+        .join(" ");
+    Some(format!(
+        "OTP group {} ({})\nworkers: {}\nevents: {}",
+        snapshot.group_id,
+        format!("{:?}", snapshot.policy).to_ascii_lowercase(),
+        workers,
+        state.otp_events.len()
+    ))
+}
+
 fn selected_detail_text(state: &TuiState) -> String {
+
     match (state.view, &state.status) {
         (TuiView::Workflows, Some(status)) => status
             .workflows
@@ -4392,5 +4471,56 @@ mod tests {
             )
             .unwrap();
         assert_eq!(restarted_count, 1);
+    }
+    #[test]
+    fn otp_panel_consumes_decoded_live_status() {
+        let args = WatchArgs {
+            workflow_id: None,
+            interval: 2,
+            limit: 20,
+            otp_group: Some("group-123".to_string()),
+            base_url: "http://127.0.0.1:4000".to_string(),
+        };
+        let mut state = TuiState::new(&args);
+        state.otp_snapshot = Some(
+            serde_json::from_str(include_str!("../../orchestration-contract/fixtures/group_snapshot.json"))
+                .unwrap(),
+        );
+        state.otp_events = serde_json::from_str::<otp_http::GroupEventsResponseDto>(
+            include_str!("../../orchestration-contract/fixtures/group_events.json"),
+        )
+        .unwrap()
+        .events;
+
+        let panel = otp_status_text(&state).unwrap();
+        assert!(panel.contains("OTP group group-123 (supervised)"));
+        assert!(panel.contains("w1=running"));
+        assert!(panel.contains("events: 3"));
+    }
+    #[test]
+    fn tui_refresh_does_not_block_on_otp_network_io() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            let (_stream, _) = listener.accept().unwrap();
+            std::thread::sleep(Duration::from_secs(1));
+        });
+        let dir = tempdir().unwrap();
+        let paths = Paths::new(dir.path().join("symx"), None).unwrap();
+        ensure_dirs(&paths).unwrap();
+        let conn = open_db(&paths).unwrap();
+        init_schema(&conn).unwrap();
+        let args = WatchArgs {
+            workflow_id: None,
+            interval: 2,
+            limit: 20,
+            otp_group: Some("group-123".to_string()),
+            base_url: format!("http://{address}"),
+        };
+        let mut state = TuiState::new(&args);
+        let started = Instant::now();
+        state.refresh(&paths, &conn).unwrap();
+        assert!(started.elapsed() < Duration::from_millis(250));
+        assert!(state.otp_poll.is_some());
     }
 }

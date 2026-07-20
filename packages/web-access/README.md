@@ -125,41 +125,6 @@ Inspect live, idle, or parked subagent transcripts without reviving the agent. T
 ```
 
 
-### computer_use
-
-A higher-level, background-safe macOS GUI automation extension backed by CuaDriver. This is the **preferred tool** for safe inspected GUI flows. It enforces policy constraints (blocking destructive commands, hotkeys, and dangerous apps like Terminal) and validates schema before execution.
-
-Always follow the **inspect-act-verify** loop when using `computer_use`:
-1. **Inspect**: Call `capture` or `get_app_state` to snapshot the target window layout and obtain element indices.
-2. **Act**: Perform mutations such as `click`, `type`, or `key` using the returned `element_index`. Indexed actions require a fresh capture beforehand.
-3. **Verify**: Run `capture` again to verify the action succeeded and update the layout state.
-
-Example usage:
-```typescript
-// 1. Inspect: Get a fresh layout capture
-computer_use({ action: "capture", args: { appName: "Safari" } })
-
-// 2. Act: Click on element 42 using its index from the capture
-computer_use({ action: "click", args: { elementIndex: 42 } })
-
-// 3. Verify: Snapshot again to verify the state
-computer_use({ action: "capture", args: { appName: "Safari" } })
-```
-
-*Note: For safe automation, OMP users must prefer `computer_use`. Use the raw `cua_driver` tool only for low-level debugging or when bypass/uninspected flows are explicitly required.*
-### cua_driver
-
-Control local macOS apps and browser windows through installed CuaDriver without raising the target app. Use this tool only for low-level debugging; prefer `computer_use` for general safe inspected GUI flows. Use CDP/Playwright only when the task specifically needs browser protocol access.
-
-```typescript
-cua_driver({ action: "status" })
-cua_driver({ action: "permissions" })
-cua_driver({ action: "list_windows", args: { on_screen_only: true } })
-cua_driver({ action: "capture", args: { pid: 12345, window_id: 67890 } })
-cua_driver({ action: "click", args: { pid: 12345, window_id: 67890, element_index: 7 } })
-```
-
-The tool intentionally does not expose CuaDriver foreground/destructive helpers such as `bring_to_front` or `kill_app`.
 
 ### llm_frontend_browser
 
@@ -221,8 +186,6 @@ fetch_content → HTTP + Readability → Jina Reader → background Chrome captu
 youtube_transcript → yt-dlp (metadata + auto-generated captions)
 chrome_cookies → macOS Keychain (Chrome SQLite) → Chrome DevTools CDP
 chatgpt_handoff → pbcopy → open ChatGPT in Firefox for manual submission
-computer_use → policy check & layout freshness validation → CuaDriver execution
-cua_driver → CuaDriver CLI/MCP tools → background macOS window capture/actions
 codex_session / /codex-resume → ~/.codex/sessions JSONL → hidden Pi context + resume prompt
 /agent-history → history:// registry protocol → read-only live/parked subagent transcript
 llm_frontend_browser → open -g Helium → Chrome DevTools Protocol profile/tab reuse → frontend prompt automation → local SQLite sessions → collect/wait recovery

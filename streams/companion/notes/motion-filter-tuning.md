@@ -83,3 +83,19 @@ These rows compare the prior production constants (`before`) with the chosen poi
 | 7642719452148157710 | 401.12 | 161.82 | 141.30 | 59.66% | 64.77% | 6.18% | 8.57% | 16.7 ms | 16.7 ms |
 
 The tuning harness does not change production defaults by itself; rerunning the command reproduces selection, metrics, frontier, and chosen point. 
+
+## Supersession addendum: guarded rig output
+
+The corpus sweep above measured pre-guard retarget streams. The shipping acceptance gate instead replays the two named real GPU tracks at 60 Hz through the production `ProviderReplayPipeline`, including interpolation, hysteresis, retargeting, pre-guard One-Euro filtering, and the frozen `PoseGuard`. That post-guard stream is what reaches the rig, and guard clamps/holds materially change the tuning result.
+
+For this end-to-end basis, minCutoff **0.45 Hz**, beta **1**, and hip damping **1.5** supersede the pre-guard beta-10 selection:
+
+| Guarded-output metric | Raw | Filtered | Delta |
+|---|---:|---:|---:|
+| Aggregate mean angular jerk | 105.9 rad/s³ | 77.5 rad/s³ | **-26.8%** |
+| Clip 7640921695418617101 peak angular velocity | 146.1 rad/s | 144.0 rad/s | **-1.5%** |
+| Clip 7642719452148157710 peak angular velocity | 132.0 rad/s | 142.9 rad/s | **+8.2%** |
+| Clip 7640921695418617101 hip jitter | 25.52 | 1.03 | **-96.0%** |
+| Clip 7642719452148157710 hip jitter | 56.99 | 2.17 | **-96.2%** |
+
+The causal filter still buffers no frames (0 ms added scheduling latency). `test/track-motion-filter.test.ts` asserts the aggregate ≥25% guarded-output jerk reduction and per-clip expressiveness direction. The pre-guard corpus study remains useful diagnostic evidence, but post-guard rig output is authoritative for production constants.

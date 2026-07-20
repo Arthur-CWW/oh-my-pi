@@ -1,6 +1,6 @@
 ---
 name: browser-control
-description: Choose the right browser/Electron/native UI control tool for a task. Use when the user asks to automate, drive, or inspect a web page, Electron app, or native Mac app.
+description: Canonical chooser for browser, Electron, cmux WebView, and native Mac control. Load this first for any interactive surface, then dispatch to cmux-browser-drive for cmux, background-browser-automation for non-focus-stealing CDP/Playwright work, or the native computer-use bridge.
 ---
 
 # Browser / Electron / Native UI Control
@@ -14,7 +14,7 @@ Use this skill to pick the right control layer.
    - Example: `cmux browser open https://example.com`, `cmux browser surface:N snapshot --interactive`.
 
 2. **Target is a web page in Chrome/Chromium outside cmux**
-   - Use: Vercel `agent-browser` or CDP-based tools (`packages/browser-use`, Playwright, Puppeteer).
+   - Use the OMP `browser` tool or CDP-based tools (`packages/browser-use`, Playwright, Puppeteer).
    - Prefer visible/non-headless mode.
 
 3. **Target is an Electron app that supports `--remote-debugging-port`**
@@ -23,8 +23,8 @@ Use this skill to pick the right control layer.
    - Works for Discord, Slack, VS Code, or any other Electron app you can relaunch with the flag.
 
 4. **Target is an Electron/native app with no CDP port**
-   - Use: CuaDriver.
-   - Example: desktop Discord, Slack, native macOS apps.
+   - Use the installed `cua-driver` CLI and load `skill://cua-driver`.
+   - Keep the inspect-act-verify loop and the skill's background/focus boundaries.
 
 ## CDP with an Electron app
 
@@ -36,13 +36,9 @@ If the Electron binary supports `--remote-debugging-port=PORT`:
 
 Then connect via CDP:
 
-```bash
-agent-browser connect 9222
-agent-browser get url
-agent-browser snapshot -i
-```
+Attach with the OMP `browser` tool using the app's explicit CDP URL, or use the local browser-use entry point below.
 
-Or with local browser-use:
+Local browser-use:
 
 ```bash
 PI_BROWSER_USE_PORT=9222 bun packages/browser-use/index.ts
@@ -50,13 +46,15 @@ PI_BROWSER_USE_PORT=9222 bun packages/browser-use/index.ts
 
 If the app is already running, close it normally first; the flag only takes effect at launch.
 
-## Fidelity order
+## Control-layer order
 
-For legitimate UI testing, prefer input paths closer to real user interaction:
+Use the least invasive layer that supplies the required truth:
 
-1. Native/OS input (CuaDriver CGEvent/Accessibility)
-2. Browser/CDP input (agent-browser, Playwright, Puppeteer)
-3. DOM mutation (`page.evaluate` clicks) — only when other paths are unavailable
+1. Protocol/browser work: OMP `browser`, Playwright, Puppeteer, or explicit CDP for DOM, cookies, network, console, and Electron DevTools work.
+2. Native GUI work: the installed `cua-driver` CLI under the `cua-driver` skill's policy.
+3. DOM mutation (`page.evaluate` clicks) only when browser input APIs are unavailable.
+
+Do not use a native GUI boundary for browser protocol work, and do not use CDP to control native menus or inspect macOS Accessibility state.
 
 ## Headless rule
 

@@ -48,12 +48,12 @@ afterAll(() => {
   rmSync(tmpDir, { recursive: true, force: true })
 })
 
-test("migration version is 10", () => {
-  expect(LEDGER_SCHEMA_VERSION).toBe(10)
+test("migration version is 11", () => {
+  expect(LEDGER_SCHEMA_VERSION).toBe(11)
   const sqlite = new Database(dbPath)
   try {
     const version = sqlite.query<{ user_version: number }, []>("PRAGMA user_version").get()?.user_version ?? -1
-    expect(version).toBe(10)
+    expect(version).toBe(11)
   } finally {
     sqlite.close()
   }
@@ -192,7 +192,7 @@ test("--since filter excludes earlier data", async () => {
   expect(sessionRows[0]!.session).toBe("s2")
 })
 
-test("v4 ledger upgrades throughput columns through v10 in place", () => {
+test("v4 ledger upgrades throughput columns through v8 in place", () => {
   const upgradePath = join(tmpDir, "upgrade-v4.sqlite")
   const sqlite = new Database(upgradePath)
   try {
@@ -217,7 +217,7 @@ test("v4 ledger upgrades throughput columns through v10 in place", () => {
 
     migrateLedger(sqlite)
 
-    expect(sqlite.query<{ user_version: number }, []>("PRAGMA user_version").get()?.user_version).toBe(10)
+    expect(sqlite.query<{ user_version: number }, []>("PRAGMA user_version").get()?.user_version).toBe(11)
     const row = sqlite.query<{ ttftMs: number | null; reasoningTokens: number | null }, []>("SELECT ttftMs, reasoningTokens FROM model_calls WHERE id = 'old-call'").get()
     expect(row).toEqual({ ttftMs: null, reasoningTokens: null })
 

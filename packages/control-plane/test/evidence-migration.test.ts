@@ -13,6 +13,9 @@ import {
   migration0004Sql,
   migration0005Sql,
   migration0006Sql,
+  migration0007Sql,
+  migration0008Sql,
+  migration0009Sql,
 } from "../src/migrate"
 
 interface NameRow {
@@ -39,6 +42,23 @@ interface UsageRow {
 interface MasterRow {
   readonly name: string
   readonly sql: string
+}
+
+interface RouteResolutionRow {
+  readonly id: string
+  readonly sourceSessionId: string
+  readonly sourceSeq: number
+  readonly provider: string
+  readonly model: string
+  readonly effort: string
+}
+
+interface RouteCandidateRow {
+  readonly routeResolutionId: string
+  readonly ordinal: number
+  readonly provider: string
+  readonly model: string
+  readonly disposition: string
 }
 
 const tmpDir = join(import.meta.dir, ".tmp", "evidence-migration")
@@ -123,13 +143,13 @@ afterAll(() => {
   rmSync(tmpDir, { recursive: true, force: true })
 })
 
-test("fresh ledger reaches v10 with additive evidence and operational schemas", () => {
+test("fresh ledger reaches v11 with additive evidence and operational schemas", () => {
   const sqlite = new Database(freshPath)
   try {
     migrateLedger(sqlite)
 
-    expect(LEDGER_SCHEMA_VERSION).toBe(10)
-    expect(sqlite.query<VersionRow, []>("PRAGMA user_version").get()?.user_version).toBe(10)
+    expect(LEDGER_SCHEMA_VERSION).toBe(11)
+    expect(sqlite.query<VersionRow, []>("PRAGMA user_version").get()?.user_version).toBe(11)
 
     const freshTableNames = sqlite.query<NameRow, []>("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all().map((row) => row.name)
     const freshIndexNames = sqlite.query<NameRow, []>("SELECT name FROM sqlite_master WHERE type = 'index' ORDER BY name").all().map((row) => row.name)
@@ -138,6 +158,11 @@ test("fresh ledger reaches v10 with additive evidence and operational schemas", 
       expect(columnNames(sqlite, table)).toEqual(columns)
     }
     for (const index of evidenceIndexes) {
+      expect(freshIndexNames).toContain(index)
+    }
+    expect(freshTableNames).toContain("papercuts")
+    expect(columnNames(sqlite, "papercuts")).toEqual(["fingerprint", "timestamp", "agentId", "modelId", "sessionId", "package", "kind", "severity", "commandOrTool", "message", "evidence", "suggestedFix", "status", "occurrences", "firstSeenAt", "lastSeenAt"])
+    for (const index of ["papercuts_timestamp_idx", "papercuts_severity_status_timestamp_idx", "papercuts_status_occurrences_timestamp_idx"]) {
       expect(freshIndexNames).toContain(index)
     }
     sqlite.exec(`
@@ -201,13 +226,17 @@ test("v5 ledger preserves legacy rows and views through the v10 operational migr
 
     migrateLedger(sqlite)
 
-    expect(sqlite.query<VersionRow, []>("PRAGMA user_version").get()?.user_version).toBe(10)
+    expect(sqlite.query<VersionRow, []>("PRAGMA user_version").get()?.user_version).toBe(11)
 
     const upgradeIndexNames = sqlite.query<NameRow, []>("SELECT name FROM sqlite_master WHERE type = 'index' ORDER BY name").all().map((row) => row.name)
     for (const [table, columns] of Object.entries(evidenceTableColumns)) {
       expect(columnNames(sqlite, table)).toEqual(columns)
     }
     for (const index of evidenceIndexes) {
+      expect(upgradeIndexNames).toContain(index)
+    }
+    expect(columnNames(sqlite, "papercuts")).toEqual(["fingerprint", "timestamp", "agentId", "modelId", "sessionId", "package", "kind", "severity", "commandOrTool", "message", "evidence", "suggestedFix", "status", "occurrences", "firstSeenAt", "lastSeenAt"])
+    for (const index of ["papercuts_timestamp_idx", "papercuts_severity_status_timestamp_idx", "papercuts_status_occurrences_timestamp_idx"]) {
       expect(upgradeIndexNames).toContain(index)
     }
   } finally {

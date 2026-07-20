@@ -9,6 +9,7 @@ defmodule SymphonyLiteElixir.Ledger do
 
   @sqlite "/usr/bin/sqlite3"
   @paths_preview_limit 5
+  @otp_event_limit 50
 
   @schema ~S"""
   CREATE TABLE IF NOT EXISTS workflows (
@@ -79,6 +80,14 @@ defmodule SymphonyLiteElixir.Ledger do
     created_at TEXT NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS checkpoints (
+    group_id TEXT NOT NULL,
+    worker_id TEXT NOT NULL,
+    state TEXT NOT NULL,
+    restart_count INTEGER NOT NULL,
+    PRIMARY KEY (group_id, worker_id)
+  );
+
   CREATE INDEX IF NOT EXISTS idx_agents_workflow ON agents(workflow_id);
   CREATE INDEX IF NOT EXISTS idx_events_workflow ON events(workflow_id);
   CREATE INDEX IF NOT EXISTS idx_events_agent ON events(agent_id);
@@ -93,6 +102,69 @@ defmodule SymphonyLiteElixir.Ledger do
   def init_db(root) do
     File.mkdir_p!(root)
     exec_script(root, @schema)
+  end
+
+  @doc "Persist an OTP worker checkpoint."
+  def put_checkpoint(root, group_id, worker_id, state, restart_count) do
+    init_db(root)
+    state_json = encode_payload(state)
+
+    exec(
+      root,
+      "INSERT INTO checkpoints (group_id, worker_id, state, restart_count) VALUES " <>
+        "('#{sql_str(group_id)}', '#{sql_str(worker_id)}', '#{sql_str(state_json)}', " <>
+        "#{Integer.to_string(restart_count)}) " <>
+        "ON CONFLICT(group_id, worker_id) DO UPDATE SET state = excluded.state, " <>
+        "restart_count = excluded.restart_count;"
+    )
+  end
+
+  @doc "Return an OTP worker checkpoint, or nil when absent."
+  def get_checkpoint(root, group_id, worker_id) do
+    init_db(root)
+
+    case query(
+           root,
+           "SELECT state, restart_count FROM checkpoints WHERE group_id = '#{sql_str(group_id)}' " <>
+             "AND worker_id = '#{sql_str(worker_id)}' LIMIT 1;"
+         ) do
+      [%{"state" => state, "restart_count" => restart_count}] ->
+        %{"state" => :json.decode(state), "restart_count" => restart_count}
+
+      [] ->
+        nil
+    end
+  end
+
+  @doc "Return bounded OTP events for a group in newest-first order."
+  def latest_events(root, group_id, limit \\ @otp_event_limit) when is_integer(limit) and limit > 0 do
+    init_db(root)
+    bounded_limit = min(limit, @otp_event_limit)
+
+    query(
+      root,
+      "SELECT workflow_id, agent_id, kind, payload, created_at FROM events " <>
+        "WHERE workflow_id = '#{sql_str(group_id)}' ORDER BY id DESC LIMIT #{bounded_limit};"
+    )
+    |> Enum.map(fn row ->
+      envelope = decode_payload(row["payload"])
+
+      %{
+        "event" => row["kind"],
+        "group_id" => row["workflow_id"],
+        "worker_id" => row["agent_id"],
+        "payload" => event_payload(envelope),
+        "timestamp" => parse_timestamp(row["created_at"])
+      }
+    end)
+  end
+
+  defp parse_timestamp(nil), do: System.system_time(:millisecond)
+  defp parse_timestamp(iso8601) do
+    case DateTime.from_iso8601(iso8601) do
+      {:ok, dt, _} -> DateTime.to_unix(dt, :millisecond)
+      _ -> System.system_time(:millisecond)
+    end
   end
 
   @doc "Insert a workflow row."
@@ -449,6 +521,12 @@ defmodule SymphonyLiteElixir.Ledger do
 
   defp encode_payload(nil), do: nil
   defp encode_payload(value), do: :json.encode(value) |> IO.iodata_to_binary()
+
+  defp decode_payload(nil), do: nil
+  defp decode_payload(payload), do: :json.decode(payload)
+
+  defp event_payload(%{"payload" => payload}), do: payload
+  defp event_payload(payload), do: payload
 
   defp decode_json(""), do: []
   defp decode_json(binary) when is_binary(binary), do: normalize_rows(:json.decode(binary))

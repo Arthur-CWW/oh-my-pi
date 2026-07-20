@@ -2,6 +2,7 @@ import { appendFileSync, mkdirSync } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
 import { Schema } from "effect"
+import { RelayHealthV1Schema, WorkEventV1Schema } from "./relay-schema"
 
 export type JsonValue = null | boolean | number | string | readonly JsonValue[] | { readonly [key: string]: JsonValue }
 
@@ -26,6 +27,8 @@ export const KnownOutboxKindSchema = Schema.Union([
   Schema.Literal("artifact"),
   Schema.Literal("agentTimeline"),
   Schema.Literal("routeResolution"),
+  Schema.Literal("relayLifecycle"),
+  Schema.Literal("workLease"),
   Schema.Literal("runnerEvent"),
   Schema.Literal("diagnosticOccurrence"),
   Schema.Literal("diagnosticProjection"),
@@ -41,6 +44,10 @@ export const OutboxEnvelopeSchema = Schema.Struct({
   payload: JsonValueSchema,
 })
 export type OutboxEnvelope = Schema.Schema.Type<typeof OutboxEnvelopeSchema>
+export const RelayLifecyclePayloadV1Schema = RelayHealthV1Schema
+export type RelayLifecyclePayloadV1 = Schema.Schema.Type<typeof RelayLifecyclePayloadV1Schema>
+export const WorkLeasePayloadV1Schema = WorkEventV1Schema
+export type WorkLeasePayloadV1 = Schema.Schema.Type<typeof WorkLeasePayloadV1Schema>
 
 export function appendOutboxLine(filePath: string, envelope: OutboxEnvelope): void {
   mkdirSync(dirname(filePath), { recursive: true })

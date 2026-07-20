@@ -4,6 +4,7 @@ import { VRMHumanBoneName, VRMRequiredHumanBoneName, type VRMHumanoid } from '@p
 import { Euler, Matrix4, Object3D, Quaternion, Vector3 } from 'three';
 import { GLTFLoader, type GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import type { GateResult } from './manifest.ts';
+import { compareVrmBodyRig, compareVrmBodyRigBuffers, type VrmBodyRigDifferentialOptions, type VrmBodyRigDifferentialResult } from './vrm-body-differential.ts';
 import { parseGlbJsonChunk, readManifest } from './manifest.ts';
 
 const REQUIRED_BONES = Object.values(VRMRequiredHumanBoneName);
@@ -330,4 +331,18 @@ export async function probeManifestVrm(manifestPath: string): Promise<RuntimePro
   const vrm = manifest.stages['identity-bake']?.outputs.find(output => output.path.endsWith('.vrm'));
   if (!vrm) throw new Error(`No staged output VRM recorded in ${manifestPath}`);
   return probeVrm(vrm.path);
+}
+export { compareVrmBodyRig, compareVrmBodyRigBuffers };
+export type { VrmBodyRigDifferentialOptions, VrmBodyRigDifferentialResult };
+
+if (import.meta.main) {
+  const args = process.argv.slice(2);
+  if (args[0] !== '--compare' || args.length !== 3) {
+    console.error('Usage: bun scripts/avatar-pipeline/vrm-probe.ts --compare <base.vrm> <claimed-face-only.vrm>');
+    process.exitCode = 2;
+  } else {
+    const result = await compareVrmBodyRig(args[1]!, args[2]!);
+    process.stdout.write(`${JSON.stringify(result)}\n`);
+    process.exitCode = result.passed ? 0 : 1;
+  }
 }

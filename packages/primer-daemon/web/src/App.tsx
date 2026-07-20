@@ -10,9 +10,11 @@ import { KeymapOverlay } from "./components/KeymapOverlay"
 import { PipelineMap } from "./components/PipelineMap"
 import { ReadLibrary } from "./components/ReadLibrary"
 import { Reader } from "./components/Reader"
+import { ReviewInbox } from "./components/ReviewInbox"
 import { ReviewView } from "./components/ReviewView"
 import { SchedulerXray } from "./components/SchedulerXray"
 import { ShadowView } from "./components/ShadowView"
+import { TabsReview } from "./components/TabsReview"
 import { useHashRoute } from "./hooks/useHashRoute"
 import { logEvent, useTelemetry } from "./hooks/useTelemetry"
 // ---------------------------------------------------------------------------
@@ -52,6 +54,14 @@ const REVIEW_KEYS: Array<{ keys: string[]; label: string }> = [
   { keys: ["Space"], label: "reveal answer (session)" },
   { keys: ["1", "2", "3", "4"], label: "grade again / hard / good / easy (session)" },
   { keys: ["Esc"], label: "clear focus · hide answer" },
+  { keys: ["?"], label: "toggle this help" },
+]
+
+const INBOX_KEYS: Array<{ keys: string[]; label: string }> = [
+  { keys: ["j", "k"], label: "focus review card down / up" },
+  { keys: ["Enter"], label: "respond to focused card · send from input" },
+  { keys: ["Shift", "Enter"], label: "newline in response" },
+  { keys: ["Esc"], label: "exit response input" },
   { keys: ["?"], label: "toggle this help" },
 ]
 
@@ -99,6 +109,24 @@ const CARDS_KEYS: Array<{ keys: string[]; label: string }> = [
   { keys: ["?"], label: "toggle this help" },
 ]
 
+const TABS_KEYS: Array<{ keys: string[]; label: string }> = [
+  { keys: ["j", "k"], label: "focus tab down / up" },
+  { keys: ["g", "G"], label: "first / last tab" },
+  { keys: ["/"], label: "search tabs" },
+  { keys: ["x"], label: "toggle select (review batch)" },
+  { keys: ["A"], label: "select all visible" },
+  { keys: ["Enter", "o"], label: "load tab content" },
+  { keys: ["s"], label: "keep" },
+  { keys: ["l"], label: "read later" },
+  { keys: ["a"], label: "archive" },
+  { keys: ["d"], label: "close duplicate" },
+  { keys: ["e"], label: "exclude domain" },
+  { keys: ["v"], label: "snapshot now" },
+  { keys: ["Enter", "y"], label: "confirm · Esc cancel (in dialog)" },
+  { keys: ["Esc"], label: "clear selection · focus" },
+  { keys: ["?"], label: "toggle this help" },
+]
+
 // ---------------------------------------------------------------------------
 // App — thin router shell
 // ---------------------------------------------------------------------------
@@ -118,10 +146,12 @@ export default function App(): React.JSX.Element {
     route.view === "reader" || route.view === "library" ? "read"
     : route.view === "review" ? "review"
     : route.view === "shadow" ? "shadow"
+    : route.view === "inbox" ? "inbox"
     : route.view === "enrich" ? "enrich"
     : route.view === "scheduler" ? "scheduler"
     : route.view === "pipeline" ? "pipeline"
     : route.view === "cards" ? "cards"
+    : route.view === "tabs" ? "tabs"
     : ""
 
   const keymapKeys =
@@ -131,9 +161,11 @@ export default function App(): React.JSX.Element {
         ? LIBRARY_KEYS
         : route.view === "review"
           ? REVIEW_KEYS
-          : route.view === "shadow"
-            ? SHADOW_KEYS
-            : route.view === "enrich"
+          : route.view === "inbox"
+            ? INBOX_KEYS
+            : route.view === "shadow"
+              ? SHADOW_KEYS
+              : route.view === "enrich"
               ? ENRICH_KEYS
               : route.view === "scheduler"
                 ? SCHEDULER_KEYS
@@ -141,7 +173,9 @@ export default function App(): React.JSX.Element {
                   ? PIPELINE_KEYS
                   : route.view === "cards"
                     ? CARDS_KEYS
-                    : undefined
+                    : route.view === "tabs"
+                      ? TABS_KEYS
+                      : undefined
 
   let content: React.JSX.Element
   switch (route.view) {
@@ -153,6 +187,9 @@ export default function App(): React.JSX.Element {
       break
     case "review":
       content = <ReviewView onShowHelp={toggleHelp} />
+      break
+    case "inbox":
+      content = <ReviewInbox />
       break
     case "cards":
       content = <CardTable />
@@ -168,6 +205,9 @@ export default function App(): React.JSX.Element {
       break
     case "pipeline":
       content = <PipelineMap />
+      break
+    case "tabs":
+      content = <TabsReview onShowHelp={toggleHelp} />
       break
     default:
       return (

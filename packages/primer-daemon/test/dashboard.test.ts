@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { mkdirSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { Database } from "bun:sqlite"
 
@@ -89,14 +89,67 @@ interface ErrorResponse {
   error: string
 }
 
+type ReviewFeedKind = "proof" | "demo" | "note" | "decision" | "question" | "progress"
+type ReviewFeedArtifactMedia = "audio" | "video" | "image" | "markdown" | "text" | "json" | "embed"
+
+interface ReviewFeedArtifactResponse {
+  label: string
+  path?: string
+  url?: string
+  media: ReviewFeedArtifactMedia
+}
+
+interface ReviewFeedActionResponse {
+  label: string
+  cwd?: string
+  command: string
+  argv?: string[]
+}
+
+interface ReviewFeedLinkResponse {
+  label: string
+  href: string
+}
+
+interface ReviewFeedEntryResponse {
+  schema: "xanadu-feed.v1"
+  id: string
+  ts: string
+  stream: string
+  kind: ReviewFeedKind
+  title: string
+  summary: string
+  artifacts: ReviewFeedArtifactResponse[]
+  actions: ReviewFeedActionResponse[]
+  links: ReviewFeedLinkResponse[]
+  needsInput: boolean
+  tags: string[]
+  parentId?: string
+}
+
+interface ReviewFeedResponse {
+  entries: ReviewFeedEntryResponse[]
+  pendingCount: number
+}
+
+interface AppErrorRecord {
+  timestamp: string
+  source: "backend" | "browser"
+  message: string
+  stack?: string
+  context?: string
+}
+
 function makeDashboardPaths(name: string, env: Record<string, string | undefined> = {}): DaemonPaths {
   mkdirSync(TEST_TMP_ROOT, { recursive: true })
   const browserDb = join(TEST_TMP_ROOT, `${name}.browser.sqlite`)
   const twitterDb = join(TEST_TMP_ROOT, `${name}.twitter.sqlite`)
   const readerDb = join(TEST_TMP_ROOT, `${name}.reader.sqlite`)
   const ledgerDb = join(TEST_TMP_ROOT, `${name}.ledger.sqlite`)
+  const reviewFeed = join(TEST_TMP_ROOT, `${name}.feed.jsonl`)
+  const errorLog = join(TEST_TMP_ROOT, `${name}.errors.log`)
 
-  for (const path of [browserDb, twitterDb, readerDb, ledgerDb]) {
+  for (const path of [browserDb, twitterDb, readerDb, ledgerDb, reviewFeed, errorLog]) {
     rmSync(path, { force: true })
   }
 
@@ -109,6 +162,8 @@ function makeDashboardPaths(name: string, env: Record<string, string | undefined
     PRIMER_TWITTER_DB: twitterDb,
     PRIMER_READER_DB: readerDb,
     PRIMER_LEDGER_DB: ledgerDb,
+    PRIMER_REVIEW_FEED: reviewFeed,
+    PRIMER_ERROR_LOG: errorLog,
     PRIMER_READER_SITE: env.PRIMER_READER_SITE,
   })
 }
@@ -559,4 +614,192 @@ describe("dashboard", () => {
       expect(typeof body.error).toBe("string")
     })
   })
+  test("appends canonical review answers and rejects invalid or duplicate answers", async () => {
+    await withDashboard(async ({ baseUrl, paths }) => {
+      const timestamp = "2026-07-19T00:00:00.000Z"
+      const seedEntries = [
+        {
+          schema: "xanadu-feed.v1",
+          id: "primer-question",
+          ts: timestamp,
+          stream: "primer",
+          kind: "question",
+          title: "Which title?",
+          summary: "Choose the final title.",
+          tags: ["review"],
+        },
+        {
+          schema: "xanadu-feed.v1",
+          id: "primer-input",
+          ts: timestamp,
+          stream: "primer",
+          kind: "note",
+          title: "Which source?",
+          summary: "Choose the primary source.",
+          needsInput: true,
+        },
+        {
+          schema: "xanadu-feed.v1",
+          id: "other-question",
+          ts: timestamp,
+          stream: "companion",
+          kind: "question",
+          title: "Unrelated question",
+          summary: "This belongs to another stream.",
+        },
+      ]
+      writeFileSync(paths.reviewFeed, seedEntries.map((entry) => JSON.stringify(entry)).join("\n"), "utf8")
+
+      const created = await requestJson<ReviewFeedEntryResponse>(baseUrl, "/api/review-feed/primer-question/answer", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ summary: "  Use the concise title.  " }),
+      })
+
+      expect(created.response.status).toBe(200)
+      expect(created.body).toMatchObject({
+        schema: "xanadu-feed.v1",
+        stream: "primer",
+        kind: "note",
+        title: "Re: Which title?",
+        summary: "Use the concise title.",
+        artifacts: [],
+        actions: [],
+        links: [],
+        needsInput: false,
+        tags: ["review"],
+        parentId: "primer-question",
+      })
+      expect(created.body.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u)
+      expect(Number.isNaN(Date.parse(created.body.ts))).toBe(false)
+
+      const contentsAfterAnswer = readFileSync(paths.reviewFeed, "utf8")
+      const persistedEntries = contentsAfterAnswer
+        .trimEnd()
+        .split("\n")
+        .map((line) => JSON.parse(line) as unknown)
+      expect(persistedEntries.slice(0, -1)).toEqual(seedEntries)
+      expect(persistedEntries.at(-1)).toEqual(created.body)
+      expect(contentsAfterAnswer.endsWith("\n")).toBe(true)
+
+      const listed = await requestJson<ReviewFeedResponse>(baseUrl, "/api/review-feed")
+      expect(listed.response.status).toBe(200)
+      expect(listed.body.entries.map((entry) => entry.id)).toEqual(["primer-question", "primer-input", created.body.id])
+      expect(listed.body.pendingCount).toBe(1)
+      expect(listed.body.entries[0]).toEqual({
+        schema: "xanadu-feed.v1",
+        id: "primer-question",
+        ts: timestamp,
+        stream: "primer",
+        kind: "question",
+        title: "Which title?",
+        summary: "Choose the final title.",
+        artifacts: [],
+        actions: [],
+        links: [],
+        needsInput: false,
+        tags: ["review"],
+      })
+
+      const duplicate = await requestJson<ErrorResponse>(baseUrl, "/api/review-feed/primer-question/answer", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ summary: "A second answer" }),
+      })
+      const blank = await requestJson<ErrorResponse>(baseUrl, "/api/review-feed/primer-input/answer", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ summary: " \n\t " }),
+      })
+      const missing = await requestJson<ErrorResponse>(baseUrl, "/api/review-feed/missing-question/answer", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ summary: "Nothing to answer" }),
+      })
+      const wrongStream = await requestJson<ErrorResponse>(baseUrl, "/api/review-feed/other-question/answer", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ summary: "Do not append this" }),
+      })
+
+      expect(duplicate.response.status).toBe(409)
+      expect(duplicate.body).toEqual({ error: "review feed target has already been answered" })
+      expect(blank.response.status).toBe(400)
+      expect(blank.body).toEqual({ error: "summary must not be blank" })
+      expect(missing.response.status).toBe(404)
+      expect(missing.body).toEqual({ error: "review feed target not found" })
+      expect(wrongStream.response.status).toBe(400)
+      expect(wrongStream.body).toEqual({ error: "review feed target is not in the primer stream" })
+      expect(readFileSync(paths.reviewFeed, "utf8")).toBe(contentsAfterAnswer)
+    })
+  })
+
+  test("logs backend and bounded browser errors as valid JSONL without changing responses", async () => {
+    await withDashboard(async ({ baseUrl, paths }) => {
+      writeFileSync(
+        paths.reviewFeed,
+        `${JSON.stringify({
+          schema: "xanadu-feed.v1",
+          id: "valid",
+          stream: "primer",
+          ts: "2026-07-19T00:00:00.000Z",
+          kind: "note",
+          title: "Valid",
+          summary: "Valid",
+        })}\n{malformed}\n`,
+        "utf8",
+      )
+
+      const backendFailure = await requestJson<ErrorResponse>(baseUrl, "/api/review-feed")
+      expect(backendFailure.response.status).toBe(500)
+      expect(backendFailure.response.headers.get("content-type") ?? "").toContain("application/json")
+      expect(backendFailure.body.error).toContain("invalid review feed line 2")
+
+      const browserFailure = await fetch(`${baseUrl}/api/errors/browser`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          message: `bad\u0000${"m".repeat(2_100)}`,
+          stack: "s".repeat(16_100),
+          context: "c".repeat(4_100),
+        }),
+      })
+      const invalidBrowserFailure = await fetch(`${baseUrl}/api/errors/browser`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{not-json}",
+      })
+
+      expect(browserFailure.status).toBe(204)
+      expect(await browserFailure.text()).toBe("")
+      expect(invalidBrowserFailure.status).toBe(204)
+      expect(await invalidBrowserFailure.text()).toBe("")
+
+      const logContents = readFileSync(paths.errorLog, "utf8")
+      const records = logContents
+        .trimEnd()
+        .split("\n")
+        .map((line) => JSON.parse(line) as AppErrorRecord)
+      expect(records).toHaveLength(2)
+      expect(logContents.endsWith("\n")).toBe(true)
+
+      const backendRecord = records[0]
+      expect(backendRecord).toMatchObject({
+        source: "backend",
+        context: "GET /api/review-feed",
+      })
+      expect(backendRecord?.message).toContain("invalid review feed line 2")
+      expect(Number.isNaN(Date.parse(backendRecord?.timestamp ?? ""))).toBe(false)
+
+      const browserRecord = records[1]
+      expect(browserRecord?.source).toBe("browser")
+      expect(browserRecord?.message).toHaveLength(2_000)
+      expect(browserRecord?.stack).toHaveLength(16_000)
+      expect(browserRecord?.context).toHaveLength(4_000)
+      expect(browserRecord?.message).toContain("bad�")
+      expect(browserRecord?.message).not.toMatch(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u)
+      expect(Number.isNaN(Date.parse(browserRecord?.timestamp ?? ""))).toBe(false)
+    })
+  })
+
 })

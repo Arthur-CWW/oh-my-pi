@@ -1,6 +1,7 @@
 # Changelog
 
 ## 0.2.0
+- Added durable public-account queue commands with normalized public X profile targets, explicit reset/status behavior tests, and operator documentation.
 
 - Added tiered corpus/news account policy, durable day-spread scheduling, shared per-mirror token buckets, and idempotent `sync:tick`/`sync:daemon` entry points against the canonical archive SQLite.
 - Consolidated availability feed storage so watcher SQLite retains only cursors/classification/delivery claims while tweet content remains in the canonical archive.

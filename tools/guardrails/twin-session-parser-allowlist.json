@@ -1,7 +1,10 @@
 {
   "version": 1,
-  "description": "Known session-entry JSON.parse implementations outside journal/ and session/session-entries.ts. New twin parsers are forbidden.",
-  "offenders": [
-    "vendor/oh-my-pi/packages/coding-agent/src/session/session-manager.ts"
+  "description": "Exact known session-entry JSON.parse sites outside journal/ and session/session-entries.ts. New twin parsers are forbidden.",
+  "findings": [
+    {
+      "file": "vendor/oh-my-pi/packages/coding-agent/src/session/session-manager.ts",
+      "source": "JSON.parse(line)"
+    }
   ]
 }

@@ -20,6 +20,9 @@
     "test": "bun test",
     "check": "bun run typecheck && bun run test",
     "cli": "bun run src/cli.ts",
+    "daemon": "bun run src/daemon.ts",
+    "dev": "bun --watch src/daemon.ts",
+    "dev:up": "./scripts/dev-up.sh",
     "evidence": "bun run src/evidence-cli.ts",
     "evidence:curate:gpt56": "bun run scripts/curate-gpt56-release.ts",
     "build:extension": "bun build src/omp-publisher.ts --bundle --target=bun --outfile=dist/omp-publisher.extension.js"

@@ -324,10 +324,8 @@ async function runS2(
   const baseVrm = resolve(s1OutputDir, s1VrmName);
 
   const outputDir = resolve(pipelineDir, 'stages/identity-bake');
-  const evidenceDir = resolve(pipelineDir, 'evidence');
   const publicModel = resolve(pipelineDir, `output/${opts.assetId}.vrm`);
   await mkdir(outputDir, { recursive: true });
-  await mkdir(evidenceDir, { recursive: true });
   await mkdir(resolve(pipelineDir, 'output'), { recursive: true });
 
   const proportionsPath = resolve(ROOT, opts.proportions);
@@ -341,9 +339,7 @@ async function runS2(
       '--base', baseVrm,
       '--proportions', proportionsPath,
       '--output-dir', outputDir,
-      '--evidence-dir', evidenceDir,
       '--public-model', publicModel,
-      '--blender', opts.blender,
     ],
     { cwd: ROOT, stdout: 'pipe', stderr: 'pipe' },
   );
@@ -398,12 +394,6 @@ async function runS2(
     stage.outputs.push(await hashFile(variantReportPath));
   }
 
-  // Blender manifest
-  const blenderManifestPath = resolve(outputDir, 'variants/manifest.json');
-  try {
-    await stat(blenderManifestPath);
-    stage.blenderManifestPath = blenderManifestPath;
-  } catch { /* no manifest */ }
 
   if (!coverageOk) throw new Error(`Identity bake coverage ${receipt.coverage} !== 52/52`);
   await log(`identity bake complete: coverage=${receipt.coverage}, selected strength=${receipt.selectedStrength}`);
@@ -452,29 +442,29 @@ async function runS3(
   if (variantReportOutput) {
     stage.inputs.push({ ...variantReportOutput });
     const reportRaw: Record<string, unknown> = JSON.parse(await readFile(variantReportOutput.path, 'utf8'));
-    type VariantEntry = { strength: number; inventoryAfterReimport: { shapeKeys: number; expressionsWithMorphBind: number } };
+    type VariantEntry = { strength: number; inventoryAfterMutation: { shapeKeys: number; expressionsWithMorphBind: number } };
     const variants: VariantEntry[] = Array.isArray(reportRaw['variants'])
       ? (reportRaw['variants'] as Record<string, unknown>[]).map(v => ({
           strength: typeof v['strength'] === 'number' ? v['strength'] : 0,
-          inventoryAfterReimport: {
-            shapeKeys: typeof (v['inventoryAfterReimport'] as Record<string, unknown> | undefined)?.['shapeKeys'] === 'number'
-              ? (v['inventoryAfterReimport'] as Record<string, unknown>)['shapeKeys'] as number : 0,
-            expressionsWithMorphBind: typeof (v['inventoryAfterReimport'] as Record<string, unknown> | undefined)?.['expressionsWithMorphBind'] === 'number'
-              ? (v['inventoryAfterReimport'] as Record<string, unknown>)['expressionsWithMorphBind'] as number : 0,
+          inventoryAfterMutation: {
+            shapeKeys: typeof (v['inventoryAfterMutation'] as Record<string, unknown> | undefined)?.['shapeKeys'] === 'number'
+              ? (v['inventoryAfterMutation'] as Record<string, unknown>)['shapeKeys'] as number : 0,
+            expressionsWithMorphBind: typeof (v['inventoryAfterMutation'] as Record<string, unknown> | undefined)?.['expressionsWithMorphBind'] === 'number'
+              ? (v['inventoryAfterMutation'] as Record<string, unknown>)['expressionsWithMorphBind'] as number : 0,
           },
         }))
       : [];
     const allPreserved = variants.every(v =>
-      v.inventoryAfterReimport.shapeKeys === 52 && v.inventoryAfterReimport.expressionsWithMorphBind === 52,
+      v.inventoryAfterMutation.shapeKeys === 52 && v.inventoryAfterMutation.expressionsWithMorphBind === 52,
     );
     stage.gates.push({
       name: 'expression-invariant-52',
       status: allPreserved ? 'passed' : 'failed',
-      threshold: 'all variants preserve 52/52 after reimport',
+      threshold: 'all variants preserve exact 52/52 expression discovery',
       observed: variants.map(v =>
-        `strength ${v.strength}: ${v.inventoryAfterReimport.shapeKeys}/${v.inventoryAfterReimport.expressionsWithMorphBind}`,
+        `strength ${v.strength}: ${v.inventoryAfterMutation.shapeKeys}/${v.inventoryAfterMutation.expressionsWithMorphBind}`,
       ).join('; '),
-      detail: allPreserved ? 'ok' : 'One or more variants lost expressions after reimport',
+      detail: allPreserved ? 'ok' : 'One or more variants lost canonical expressions during direct GLB mutation',
     });
   }
 

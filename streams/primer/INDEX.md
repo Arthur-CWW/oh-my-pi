@@ -7,14 +7,15 @@ Successor sessions should read these in order. Status matters: durable doctrine,
 1. [`INTENT.md`](INTENT.md) — durable, revisable theory of Arthur’s aims and the product’s boundaries.
 2. [`LINEAGE.md`](LINEAGE.md) — predecessor evidence, correction/delta ontology, and explicit recovery gaps.
 3. [`GOAL.md`](GOAL.md) — stream charter, ownership, and settled constraints.
-4. [`VISION.md`](VISION.md) — living design space and dated decisions; broader than the current experiment.
-5. [`CARD-PROMOTION.md`](CARD-PROMOTION.md) — durable lifecycle contract separating source-local help, targeting, construction, global candidacy, approval, export, and scheduling.
-6. The **highest-dated** `HANDOFF-LIVE-*.md` — current shipped/staged state. All lower-dated live handoffs are history (superseded, whether or not banner-marked); never boot from them. [`HANDOFF.md`](HANDOFF.md) is canonical boot/ownership context only, not status.
-7. [`research/learning-sources/system-synthesis.md`](research/learning-sources/system-synthesis.md) — source-grounded synthesis for the current one-chapter workbench, explicitly not universal pedagogy.
-8. [`DESIGN-LOG.md`](DESIGN-LOG.md) — append-oriented dated decisions, hypotheses, alternatives, and deferred debt.
-9. [`docs/plans/primer-intuitions.md`](../../docs/plans/primer-intuitions.md) — earlier direct-quote dossier and exact predecessor-session inventory; use as evidence, not a rigid specification.
+4. [`browser-context/GOAL.md`](browser-context/GOAL.md) — Primer-owned browser-context substream charter; implementation is deferred and its ownership boundaries are canonical here.
+5. [`VISION.md`](VISION.md) — living design space and dated decisions; broader than the current experiment.
+6. [`CARD-PROMOTION.md`](CARD-PROMOTION.md) — durable lifecycle contract separating source-local help, targeting, construction, global candidacy, approval, export, and scheduling.
+7. The **highest-dated** `HANDOFF-LIVE-*.md` — current shipped/staged state. All lower-dated live handoffs are history (superseded, whether or not banner-marked); never boot from them. [`HANDOFF.md`](HANDOFF.md) is canonical boot/ownership context only, not status.
+8. [`research/learning-sources/system-synthesis.md`](research/learning-sources/system-synthesis.md) — source-grounded synthesis for the current one-chapter workbench, explicitly not universal pedagogy.
+9. [`DESIGN-LOG.md`](DESIGN-LOG.md) — append-oriented dated decisions, hypotheses, alternatives, and deferred debt.
+10. [`docs/plans/primer-intuitions.md`](../../docs/plans/primer-intuitions.md) — earlier direct-quote dossier and exact predecessor-session inventory; use as evidence, not a rigid specification.
 
-For the current task, the handoff wins on implementation status. For durable product interpretation, start with INTENT and preserve corrections through LINEAGE and the design log.
+For the current task, the handoff wins on implementation status. For durable product interpretation, start with INTENT and preserve corrections through LINEAGE and the design log. For browser-context work, [`browser-context/GOAL.md`](browser-context/GOAL.md) is the boundary index for Primer's local browser substrate and its handoffs to adapters, history, readable extraction, Twitter archive, and Intake.
 
 ## Symlinked repos
 
@@ -53,7 +54,7 @@ For the current task, the handoff wins on implementation status. For durable pro
 | Name | Original absolute path | Action | Description |
 | --- | --- | --- | --- |
 | packages/twitter-archive | /Users/arthur/agents/packages/twitter-archive | in-repo | Twitter archive package for archive parsing/reader workflows. |
-| packages/borges-library | /Users/arthur/agents/packages/borges-library | in-repo | Borges library package for book/source retrieval workflows. |
+| packages/stema | /Users/arthur/agents/packages/stema | in-repo | Stema book corpus acquisition, durable processing, and Primer publication. |
 | browser-extensions/extensions/twitter-archive-firefox | /Users/arthur/agents/browser-extensions/extensions/twitter-archive-firefox | in-repo | Firefox extension for Twitter archive workflows. |
 | data/twitter-archive | /Users/arthur/agents/data/twitter-archive | in-repo | 130M Twitter archive data. |
 | streams/primer/INTENT.md | /Users/arthur/agents/streams/primer/INTENT.md | in-repo | Durable, revisable project intent and Arthur-prior boundaries. |

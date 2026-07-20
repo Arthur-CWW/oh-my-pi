@@ -20,6 +20,7 @@
 | `skills/` | `/Users/arthur/agents/skills` | in-repo | Grouped first-party skills. |
 | `docs/fable/` | `/Users/arthur/agents/docs/fable` | in-repo | Fable charter, atlas, briefs, and handoff docs. |
 | `data/fable-prep` | `/Users/arthur/agents/data/fable-prep` | in-repo | Session corpus and records. |
+| `attention-control-plane.md` | `/Users/arthur/agents/streams/harness/attention-control-plane.md` | in-repo | High-level attention-control-plane, Agent Hub, lifecycle-command, and browser-context boundary brief; implementation deferred. |
 
 ## Missing
 

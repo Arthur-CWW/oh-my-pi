@@ -27,11 +27,36 @@ export const NITTER_BACKFILL_WORKER_DEFAULT_DELAY_MS = 1_500
 export const NITTER_BACKFILL_WORKER_DEFAULT_JITTER_MS = 500
 export const NITTER_BACKFILL_WORKER_DEFAULT_MEDIA_CONCURRENCY = 1
 export const NITTER_BACKFILL_WORKER_DEFAULT_MEDIA_MAX_ITEMS = Math.min(10, MEDIA_DOWNLOAD_DEFAULT_MAX_ITEMS)
+const NITTER_BACKFILL_TARGET_LEASE_MS = 5 * 60 * 1_000
+
+const RESERVED_X_PROFILE_SURFACES: Record<string, true> = {
+  about: true,
+  account: true,
+  bookmarks: true,
+  compose: true,
+  communities: true,
+  explore: true,
+  home: true,
+  i: true,
+  intent: true,
+  jobs: true,
+  lists: true,
+  login: true,
+  logout: true,
+  messages: true,
+  notifications: true,
+  privacy: true,
+  search: true,
+  settings: true,
+  signup: true,
+  tos: true,
+}
 
 export type NitterBackfillWorkerTargetStatus = "pending" | "running" | "completed" | "stopped" | "failed"
 export type NitterBackfillWorkerStopReason =
   | NitterStopReason
   | "already-completed"
+  | "already-running"
   | "error"
   | "run-once"
   | "safety-max-runtime"
@@ -105,6 +130,35 @@ export interface NitterBackfillWorkerRunSummary {
   readonly targets: readonly NitterBackfillWorkerTargetSummary[]
 }
 
+export interface EnqueueNitterBackfillTargetOptions {
+  readonly dbPath: string
+  readonly handle: string
+  readonly baseUrl: string
+  readonly reset?: boolean
+  readonly runId?: string
+  readonly now?: () => string
+}
+
+export interface NitterBackfillTargetQueueResult {
+  readonly handleKey: string
+  readonly handle: string
+  readonly baseUrl: string
+  readonly status: NitterBackfillWorkerTargetStatus
+  readonly cursor: string | null
+  readonly stopReason: string | null
+  readonly pagesFetched: number
+  readonly batchesCompleted: number
+  readonly rawPagesCached: number
+  readonly usersUpserted: number
+  readonly tweetsUpserted: number
+  readonly mediaUpserted: number
+  readonly lastRunId: string | null
+  readonly lastError: string | null
+  readonly createdAt: string
+  readonly updatedAt: string
+  readonly completedAt: string | null
+}
+
 interface NitterBackfillTargetRow {
   handle_key: string
   handle: string
@@ -123,7 +177,15 @@ interface NitterBackfillTargetRow {
   created_at: string
   updated_at: string
   completed_at: string | null
+  lease_token: string | null
+  lease_generation: number
+  lease_expires_at: string | null
 }
+interface TargetLease {
+  readonly token: string
+  readonly generation: number
+}
+
 
 interface TargetProgressDelta {
   readonly pagesFetched?: number
@@ -497,17 +559,30 @@ async function runBackfillForTarget(options: {
     return { summary: summarizeTarget(row, options.store.getCounts(), "already-completed"), pagesFetchedThisRun: 0 }
   }
 
-  options.store.startJob(job.id, { stage: "nitter-backfill" })
-  row = setTargetState(options.store, {
+  const claim = claimTargetLease(options.store, {
     handleKey,
     baseUrl: options.baseUrl,
-    status: "running",
-    cursor: row.cursor,
-    stopReason: row.stop_reason,
     runId: options.runId,
     now: options.now(),
-    clearError: true,
   })
+  if (!claim) {
+    row = readTargetRow(options.store, handleKey, options.baseUrl) ?? row
+    const stopReason: NitterBackfillWorkerStopReason =
+      row.status === "completed" ? "already-completed" : "already-running"
+    await appendTwitterArchiveJsonlLog(options.logPath, {
+      component: "nitter-backfill-worker",
+      level: "info",
+      event: "target.skipped",
+      runId: options.runId,
+      jobId: job.id,
+      details: targetLogDetails(row, options.store.getCounts(), stopReason),
+    })
+    return { summary: summarizeTarget(row, options.store.getCounts(), stopReason), pagesFetchedThisRun: 0 }
+  }
+  row = claim.row
+  const lease = claim.lease
+  const runStartPagesFetched = row.pages_fetched
+  options.store.startJob(job.id, { stage: "nitter-backfill" })
 
   await appendTwitterArchiveJsonlLog(options.logPath, {
     component: "nitter-backfill-worker",
@@ -535,6 +610,7 @@ async function runBackfillForTarget(options: {
           stopReason: safetyStopReason,
           runId: options.runId,
           now: options.now(),
+          lease,
         })
         break
       }
@@ -551,6 +627,7 @@ async function runBackfillForTarget(options: {
           stopReason: finalStopReason,
           runId: options.runId,
           now: options.now(),
+          lease,
         })
         break
       }
@@ -570,6 +647,7 @@ async function runBackfillForTarget(options: {
         fetchFn: options.fetchFn,
         signal: options.signal,
         now: options.now,
+        lease,
       })
       pagesFetchedThisRun += batch.pagesFetched
       cursor = batch.nextCursor
@@ -596,6 +674,7 @@ async function runBackfillForTarget(options: {
         stopReason: batch.stopReason ?? row.stop_reason,
         runId: options.runId,
         now: options.now(),
+        lease,
         delta: { batchesCompleted: 1 },
       })
 
@@ -633,6 +712,7 @@ async function runBackfillForTarget(options: {
           stopReason: finalStopReason,
           runId: options.runId,
           now: options.now(),
+          lease,
         })
         break
       }
@@ -645,6 +725,7 @@ async function runBackfillForTarget(options: {
       options.store.completeJob(job.id, { stage: `nitter-backfill:${completeStage}` })
     }
 
+    releaseTargetLease(options.store, handleKey, options.baseUrl, lease)
     row = readTargetRow(options.store, handleKey, options.baseUrl) ?? row
     await appendTwitterArchiveJsonlLog(options.logPath, {
       component: "nitter-backfill-worker",
@@ -657,16 +738,26 @@ async function runBackfillForTarget(options: {
     return { summary: summarizeTarget(row, options.store.getCounts(), finalStopReason), pagesFetchedThisRun }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    row = setTargetState(options.store, {
-      handleKey,
-      baseUrl: options.baseUrl,
-      status: "failed",
-      cursor,
-      stopReason: "error",
-      runId: options.runId,
-      now: options.now(),
-      error: message,
-    })
+    const durableRow = readTargetRow(options.store, handleKey, options.baseUrl)
+    if (durableRow) {
+      pagesFetchedThisRun = Math.max(pagesFetchedThisRun, durableRow.pages_fetched - runStartPagesFetched)
+      cursor = durableRow.cursor
+      row = durableRow
+    }
+    if (row.lease_token === lease.token && row.lease_generation === lease.generation) {
+      row = setTargetState(options.store, {
+        handleKey,
+        baseUrl: options.baseUrl,
+        status: "failed",
+        cursor,
+        stopReason: "error",
+        runId: options.runId,
+        now: options.now(),
+        error: message,
+        lease,
+      })
+      releaseTargetLease(options.store, handleKey, options.baseUrl, lease)
+    }
     options.store.failJob(job.id, message, { stage: "nitter-backfill:failed" })
     await appendTwitterArchiveJsonlLog(options.logPath, {
       component: "nitter-backfill-worker",
@@ -695,6 +786,7 @@ async function captureTargetBatch(options: {
   readonly fetchFn: NitterFetchFunction
   readonly signal: AbortSignal | undefined
   readonly now: () => string
+  readonly lease: TargetLease
 }): Promise<BatchOutcome> {
   let cursor = options.startCursor
   let pagesFetched = 0
@@ -717,6 +809,7 @@ async function captureTargetBatch(options: {
       fetchFn: options.fetchFn,
       signal: options.signal,
       now: options.now,
+      lease: options.lease,
     })
     pagesFetched += 1
     rawPagesCached += page.rawPagesCached
@@ -758,7 +851,9 @@ async function captureTargetPage(options: {
   readonly fetchFn: NitterFetchFunction
   readonly signal: AbortSignal | undefined
   readonly now: () => string
+  readonly lease: TargetLease
 }): Promise<CapturedPageOutcome> {
+  renewTargetLease(options.store, options.handleKey, options.baseUrl, options.lease, options.now())
   const url = buildNitterTimelineUrl(options.baseUrl, options.username, options.cursor ?? undefined)
   const response = await options.fetchFn(url, {
     headers: {
@@ -767,6 +862,7 @@ async function captureTargetPage(options: {
     signal: options.signal,
   })
   const body = await response.text()
+  renewTargetLease(options.store, options.handleKey, options.baseUrl, options.lease, options.now())
   const contentType = response.headers?.get("content-type") ?? undefined
   const cachedPage = options.store.cacheRawPage({
     source: "nitter",
@@ -790,6 +886,7 @@ async function captureTargetPage(options: {
       stopReason,
       runId: options.runId,
       now: options.now(),
+      lease: options.lease,
       delta: { pagesFetched: 1, rawPagesCached: 1 },
     })
     const counts = options.store.getCounts()
@@ -841,6 +938,7 @@ async function captureTargetPage(options: {
     stopReason: stopReason ?? null,
     runId: options.runId,
     now: options.now(),
+    lease: options.lease,
     delta: {
       pagesFetched: 1,
       rawPagesCached: 1,
@@ -935,9 +1033,72 @@ export function ensureNitterBackfillTargetsTable(store: TwitterArchiveSqliteStor
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       completed_at TEXT,
+      lease_token TEXT,
+      lease_generation INTEGER NOT NULL DEFAULT 0,
+      lease_expires_at TEXT,
       PRIMARY KEY (handle_key, base_url)
     )
   `)
+  const columns = store.sqlite.query("PRAGMA table_info(nitter_backfill_targets)").all() as readonly {
+    readonly name: string
+  }[]
+  const columnNames = new Set(columns.map((column) => column.name))
+  if (!columnNames.has("lease_token")) {
+    store.sqlite.exec("ALTER TABLE nitter_backfill_targets ADD COLUMN lease_token TEXT")
+  }
+  if (!columnNames.has("lease_generation")) {
+    store.sqlite.exec(
+      "ALTER TABLE nitter_backfill_targets ADD COLUMN lease_generation INTEGER NOT NULL DEFAULT 0",
+    )
+  }
+  if (!columnNames.has("lease_expires_at")) {
+    store.sqlite.exec("ALTER TABLE nitter_backfill_targets ADD COLUMN lease_expires_at TEXT")
+  }
+}
+
+export function enqueueNitterBackfillTarget(
+  options: EnqueueNitterBackfillTargetOptions,
+): NitterBackfillTargetQueueResult {
+  const handle = normalizePublicNitterTargetHandle(options.handle)
+  const baseUrl = normalizeQueueBaseUrl(options.baseUrl)
+  const now = options.now ?? (() => new Date().toISOString())
+  const runId = options.runId ?? `nitter-backfill-queue-${Date.now()}`
+  const store = initTwitterArchiveSqliteStore(options.dbPath)
+
+  try {
+    ensureNitterBackfillTargetsTable(store)
+    const existing = readTargetRow(store, handle.toLowerCase(), baseUrl)
+    let row = existing
+    if (!row) {
+      row = ensureTargetRow(store, handle, baseUrl, runId, now())
+    } else if (options.reset === true) {
+      row = resetTargetState(store, row, runId, now())
+    }
+    return targetQueueResult(row)
+  } finally {
+    store.close()
+  }
+}
+
+export interface ReadNitterBackfillTargetOptions {
+  readonly dbPath: string
+  readonly handle: string
+  readonly baseUrl: string
+}
+
+export function readNitterBackfillTarget(
+  options: ReadNitterBackfillTargetOptions,
+): NitterBackfillTargetQueueResult | undefined {
+  const handle = normalizePublicNitterTargetHandle(options.handle)
+  const baseUrl = normalizeQueueBaseUrl(options.baseUrl)
+  const store = initTwitterArchiveSqliteStore(options.dbPath)
+  try {
+    ensureNitterBackfillTargetsTable(store)
+    const row = readTargetRow(store, handle.toLowerCase(), baseUrl)
+    return row ? targetQueueResult(row) : undefined
+  } finally {
+    store.close()
+  }
 }
 
 function ensureTargetRow(
@@ -953,10 +1114,7 @@ function ensureTargetRow(
       `INSERT INTO nitter_backfill_targets (
         handle_key, handle, base_url, status, cursor, stop_reason, last_run_id, created_at, updated_at
       ) VALUES (?, ?, ?, 'pending', NULL, NULL, ?, ?, ?)
-      ON CONFLICT(handle_key, base_url) DO UPDATE SET
-        handle = excluded.handle,
-        last_run_id = excluded.last_run_id,
-        updated_at = excluded.updated_at`,
+      ON CONFLICT(handle_key, base_url) DO NOTHING`,
     )
     .run(handleKey, username, baseUrl, runId, now, now)
   const row = readTargetRow(store, handleKey, baseUrl)
@@ -978,6 +1136,201 @@ function readTargetRow(
   ) ?? undefined
 }
 
+function normalizeQueueBaseUrl(baseUrl: string): string {
+  const normalized = normalizeBaseUrl(baseUrl.trim())
+  if (!normalized) {
+    throw new Error("Nitter base URL must not be empty")
+  }
+  return normalized
+}
+
+function normalizePublicNitterTargetHandle(target: string): string {
+  const input = target.trim()
+  if (!input) {
+    throw new Error("Nitter backfill target must not be empty")
+  }
+
+  const lowerInput = input.toLowerCase()
+  const isBareXProfileUrl = lowerInput.startsWith("x.com/") || lowerInput.startsWith("www.x.com/")
+  const isUrl = input.includes("://") || input.startsWith("//") || isBareXProfileUrl
+  if (isUrl) {
+    let url: URL
+    try {
+      const urlInput = input.startsWith("//")
+        ? `https:${input}`
+        : isBareXProfileUrl
+          ? `https://${input}`
+          : input
+      url = new URL(urlInput)
+    } catch {
+      throw new Error(`Invalid X profile URL: ${target}`)
+    }
+    if (url.protocol !== "https:" || !["x.com", "www.x.com"].includes(url.hostname.toLowerCase())) {
+      throw new Error(`Target must be a public x.com profile URL: ${target}`)
+    }
+    const segments = url.pathname.split("/").filter(Boolean)
+    if (segments.length !== 1) {
+      throw new Error(`Target must be an X profile URL, not a timeline surface: ${target}`)
+    }
+    let segment: string
+    try {
+      segment = decodeURIComponent(segments[0] ?? "")
+    } catch {
+      throw new Error(`Invalid X profile URL: ${target}`)
+    }
+    return validatePublicNitterHandle(normalizeNitterUsername(segment), target)
+  }
+
+  if (/[/?#\s]/.test(input)) {
+    throw new Error(`Invalid Nitter handle: ${target}`)
+  }
+  return validatePublicNitterHandle(normalizeNitterUsername(input), target)
+}
+
+function validatePublicNitterHandle(handle: string, original: string): string {
+  if (!/^[A-Za-z0-9_]{1,15}$/.test(handle)) {
+    throw new Error(`Invalid public X handle: ${original}`)
+  }
+  if (RESERVED_X_PROFILE_SURFACES[handle.toLowerCase()] === true) {
+    throw new Error(`Target is not a public X profile: ${original}`)
+  }
+  return handle
+}
+
+function targetQueueResult(row: NitterBackfillTargetRow): NitterBackfillTargetQueueResult {
+  return {
+    handleKey: row.handle_key,
+    handle: row.handle,
+    baseUrl: row.base_url,
+    status: row.status,
+    cursor: row.cursor,
+    stopReason: row.stop_reason,
+    pagesFetched: row.pages_fetched,
+    batchesCompleted: row.batches_completed,
+    rawPagesCached: row.raw_pages_cached,
+    usersUpserted: row.users_upserted,
+    tweetsUpserted: row.tweets_upserted,
+    mediaUpserted: row.media_upserted,
+    lastRunId: row.last_run_id,
+    lastError: row.last_error,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    completedAt: row.completed_at,
+  }
+}
+
+function claimTargetLease(
+  store: TwitterArchiveSqliteStore,
+  input: { readonly handleKey: string; readonly baseUrl: string; readonly runId: string; readonly now: string },
+): { readonly row: NitterBackfillTargetRow; readonly lease: TargetLease } | undefined {
+  const token = `${input.runId}:${crypto.randomUUID()}`
+  const result = store.sqlite
+    .query(
+      `UPDATE nitter_backfill_targets SET
+        status = 'running',
+        last_run_id = ?,
+        last_error = NULL,
+        updated_at = ?,
+        lease_token = ?,
+        lease_generation = lease_generation + 1,
+        lease_expires_at = ?
+      WHERE handle_key = ? AND base_url = ? AND status != 'completed'
+        AND (lease_token IS NULL OR lease_expires_at IS NULL OR lease_expires_at <= ?)`,
+    )
+    .run(
+      input.runId,
+      input.now,
+      token,
+      targetLeaseExpiry(input.now),
+      input.handleKey,
+      input.baseUrl,
+      input.now,
+    )
+  if (result.changes !== 1) {
+    return undefined
+  }
+  const row = readTargetRow(store, input.handleKey, input.baseUrl)
+  if (!row || row.lease_token !== token) {
+    throw new Error(`Backfill target claim was lost: ${input.handleKey}`)
+  }
+  return { row, lease: { token, generation: row.lease_generation } }
+}
+
+function renewTargetLease(
+  store: TwitterArchiveSqliteStore,
+  handleKey: string,
+  baseUrl: string,
+  lease: TargetLease,
+  now: string,
+): void {
+  const result = store.sqlite
+    .query(
+      `UPDATE nitter_backfill_targets SET lease_expires_at = ?
+       WHERE handle_key = ? AND base_url = ? AND lease_token = ? AND lease_generation = ?`,
+    )
+    .run(targetLeaseExpiry(now), handleKey, baseUrl, lease.token, lease.generation)
+  if (result.changes !== 1) {
+    throw new Error(`Backfill target lease lost: ${handleKey}`)
+  }
+}
+
+function releaseTargetLease(
+  store: TwitterArchiveSqliteStore,
+  handleKey: string,
+  baseUrl: string,
+  lease: TargetLease,
+): void {
+  const result = store.sqlite
+    .query(
+      `UPDATE nitter_backfill_targets SET lease_token = NULL, lease_expires_at = NULL
+       WHERE handle_key = ? AND base_url = ? AND lease_token = ? AND lease_generation = ?`,
+    )
+    .run(handleKey, baseUrl, lease.token, lease.generation)
+  if (result.changes !== 1) {
+    throw new Error(`Backfill target lease lost: ${handleKey}`)
+  }
+}
+
+function resetTargetState(
+  store: TwitterArchiveSqliteStore,
+  row: NitterBackfillTargetRow,
+  runId: string,
+  now: string,
+): NitterBackfillTargetRow {
+  const result = store.sqlite
+    .query(
+      `UPDATE nitter_backfill_targets SET
+        status = 'pending',
+        cursor = NULL,
+        stop_reason = NULL,
+        last_run_id = ?,
+        last_error = NULL,
+        updated_at = ?,
+        completed_at = NULL,
+        lease_token = NULL,
+        lease_expires_at = NULL
+      WHERE handle_key = ? AND base_url = ?
+        AND (lease_token IS NULL OR lease_expires_at IS NULL OR lease_expires_at <= ?)`,
+    )
+    .run(runId, now, row.handle_key, row.base_url, now)
+  if (result.changes !== 1) {
+    throw new Error(`Cannot reset actively leased backfill target: ${row.handle}`)
+  }
+  const resetRow = readTargetRow(store, row.handle_key, row.base_url)
+  if (!resetRow) {
+    throw new Error(`Backfill target row missing: ${row.handle_key}`)
+  }
+  return resetRow
+}
+
+function targetLeaseExpiry(now: string): string {
+  const nowMs = Date.parse(now)
+  if (!Number.isFinite(nowMs)) {
+    throw new Error(`Invalid backfill worker timestamp: ${now}`)
+  }
+  return new Date(nowMs + NITTER_BACKFILL_TARGET_LEASE_MS).toISOString()
+}
+
 function setTargetState(
   store: TwitterArchiveSqliteStore,
   input: {
@@ -991,10 +1344,11 @@ function setTargetState(
     readonly delta?: TargetProgressDelta
     readonly error?: string
     readonly clearError?: boolean
+    readonly lease: TargetLease
   },
 ): NitterBackfillTargetRow {
   const delta = input.delta ?? {}
-  store.sqlite
+  const result = store.sqlite
     .query(
       `UPDATE nitter_backfill_targets SET
         status = ?,
@@ -1009,8 +1363,9 @@ function setTargetState(
         last_run_id = ?,
         last_error = ?,
         updated_at = ?,
-        completed_at = ?
-      WHERE handle_key = ? AND base_url = ?`,
+        completed_at = ?,
+        lease_expires_at = ?
+      WHERE handle_key = ? AND base_url = ? AND lease_token = ? AND lease_generation = ?`,
     )
     .run(
       input.status,
@@ -1026,9 +1381,15 @@ function setTargetState(
       input.clearError ? null : input.error ?? null,
       input.now,
       input.status === "completed" ? input.now : null,
+      targetLeaseExpiry(input.now),
       input.handleKey,
       input.baseUrl,
+      input.lease.token,
+      input.lease.generation,
     )
+  if (result.changes !== 1) {
+    throw new Error(`Backfill target lease lost: ${input.handleKey}`)
+  }
   const row = readTargetRow(store, input.handleKey, input.baseUrl)
   if (!row) {
     throw new Error(`Backfill target row missing: ${input.handleKey}`)

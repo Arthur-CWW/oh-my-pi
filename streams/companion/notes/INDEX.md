@@ -27,6 +27,7 @@ Status is epistemic, not a freshness timestamp: `live` is current guidance or an
 - `model-bench-acceptance.md` — Completed desktop MediaPipe/face-alignment/RTMPose acceptance matrix; **evidence-of-record**.
 - `motion-evidence-card.md` — Published Apple Vision body/hand evidence card and declared calibration gap; **evidence-of-record** (its “GPU processor being built” sentence is superseded by `gpu-pose-batch.md`).
 - `motion-filter-tuning.md` — Deterministic filter sweep and guarded production tuning evidence; **evidence-of-record** (pre-guard beta10 selection is superseded by the guarded beta1 addendum).
+- `open-realtime-models-2026-07.md` — Size/license/hardware gate for Smart Turn, Moshi, PersonaPlex, Qwen3-Omni, Covo-Audio, Step-Audio, and MiMo-Audio; **live** (Smart Turn CPU is the only first-download candidate; larger weights await a qualified Ubuntu host).
 - `overnight-program-2026-07-15.md` — Living wave ledger, defaults, blockers, and wave-3 backlog; **live** (its Wave-1 beta10 row is superseded by the Wave-2 beta1 ruling in the same doc).
 - `overnight-program-2026-07-16.md` — Living overnight-2 wave ledger for the 2026-07-16 program; **live**.
 - `perfect-sync-models.md` — Licensed Perfect Sync donor-model survey and local verification; **evidence-of-record**.

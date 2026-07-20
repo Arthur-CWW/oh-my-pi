@@ -6,9 +6,15 @@ import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage, Usage } from "@oh-my-pi/pi-ai";
 import type { Rule } from "@oh-my-pi/pi-coding-agent/capability/rule";
 import { OmfgController } from "@oh-my-pi/pi-coding-agent/modes/controllers/omfg-controller";
+import {
+	makeOmfgPanelModel,
+	OmfgPanelComponent,
+	type OmfgPanelComponentOptions,
+} from "@oh-my-pi/pi-coding-agent/modes/components/omfg-panel";
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
-import { Container, type TUI } from "@oh-my-pi/pi-tui";
+import { createControllerFixture, type ControllerFixture } from "../../helpers/controller-fixture";
+import { type Component, Container } from "@oh-my-pi/pi-tui";
 
 const PROJECT_OPTION = "This project (.omp/rules)";
 const GLOBAL_OPTION = "Global — all projects (~/.omp/agent/rules)";
@@ -63,6 +69,7 @@ interface Harness {
 }
 
 const tempRoots: string[] = [];
+const fixtures: ControllerFixture[] = [];
 
 function createAssistantMessage(content: AssistantMessage["content"]): AssistantMessage {
 	return {
@@ -133,10 +140,15 @@ async function createHarness(options: HarnessOptions): Promise<Harness> {
 		ttsrManager: { addRule: ttsrAddRule },
 	} as unknown as InteractiveModeContext["session"];
 	const container = new Container();
+	const fixture = await createControllerFixture();
+	fixtures.push(fixture);
+	fixture.tui.addChild(container);
 	const ctx = {
-		ui: { requestRender: vi.fn() } as unknown as TUI,
+		ui: fixture.tui,
 		omfgContainer: container,
 		session,
+		mvuScope: fixture.scope,
+		mvuInputLeaseManager: fixture.getInputLeaseManager(),
 		sessionManager: { getCwd: () => projectDir } as unknown as InteractiveModeContext["sessionManager"],
 		settings: { getAgentDir: () => agentDir } as unknown as InteractiveModeContext["settings"],
 		showStatus: vi.fn(),
@@ -162,6 +174,7 @@ beforeAll(async () => {
 
 afterEach(async () => {
 	vi.restoreAllMocks();
+	while (fixtures.length > 0) await fixtures.pop()?.close();
 	while (tempRoots.length > 0) {
 		const root = tempRoots.pop();
 		if (root) {
@@ -280,6 +293,30 @@ describe("OmfgController", () => {
 		);
 	});
 
+	it("aborts and revokes a previous request before the replacement route acquires input", async () => {
+		const signals: AbortSignal[] = [];
+		const runEphemeralTurn = vi.fn<RunEphemeralTurn>(async args => {
+			signals.push(args.signal as AbortSignal);
+			return Promise.withResolvers<RunEphemeralTurnResult>().promise;
+		});
+		const harness = await createHarness({ runEphemeralTurn, messages: createMatchingMessages() });
+		const controller = new OmfgController(harness.ctx);
+
+		await controller.start("first complaint");
+		await waitFor(() => harness.ctx.mvuInputLeaseManager.current().kind === "mvu");
+		const firstLeaseGeneration = harness.ctx.mvuInputLeaseManager.current().generation;
+		await controller.start("replacement complaint");
+		await waitFor(() => {
+			const lease = harness.ctx.mvuInputLeaseManager.current();
+			return lease.kind === "mvu" && lease.generation > firstLeaseGeneration;
+		});
+
+		expect(runEphemeralTurn).toHaveBeenCalledTimes(2);
+		expect(signals[0]?.aborted).toBe(true);
+		expect(signals[1]?.aborted).toBe(false);
+		expect(harness.container.children).toHaveLength(1);
+	});
+
 	it("guards empty complaints and missing models before model calls", async () => {
 		const runEphemeralTurn = vi.fn<RunEphemeralTurn>(async () => ({
 			replyText: "n/a",
@@ -306,12 +343,28 @@ describe("OmfgController", () => {
 		const controller = new OmfgController(harness.ctx);
 
 		await controller.start("stop this");
+		await waitFor(() => harness.ctx.mvuInputLeaseManager.current().kind === "mvu");
 
 		expect(harness.container.children).toHaveLength(1);
 		expect(controller.handleEscape()).toBe(true);
+		await waitFor(() => harness.ctx.mvuInputLeaseManager.current().kind === "legacy");
 		expect(harness.container.children).toHaveLength(0);
 		expect(signal?.aborted).toBe(true);
 		expect(controller.hasActiveRequest()).toBe(false);
 		expect(await Bun.file(path.join(harness.projectDir, ".omp", "rules", "ts-no-any.md")).exists()).toBe(false);
+	});
+});
+
+describe("OmfgPanelComponent", () => {
+	it("uses an injected component-render callback without requiring a TUI instance", () => {
+		const requested: Component[] = [];
+		const requestComponentRender: OmfgPanelComponentOptions["requestComponentRender"] = component => {
+			requested.push(component);
+		};
+		const component = new OmfgPanelComponent({ requestComponentRender }, makeOmfgPanelModel("Stop that"));
+
+		expect(requested).toEqual([component]);
+		component.apply({ complaint: "Stop that", state: "saved", status: "Saved", preview: "Rule" });
+		expect(requested).toEqual([component, component]);
 	});
 });

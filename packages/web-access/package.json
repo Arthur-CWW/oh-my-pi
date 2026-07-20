@@ -55,7 +55,7 @@
   },
   "piManifestNote": "The repo root Pi manifest loads this extension entrypoint directly; repo-level skills are declared from root ./skills/* and vendor paths, not from this package.",
   "packageBoundary": {
-    "current": "Transitional extension host: web search, fetch, cookies, YouTube transcripts, frontend LLM browser automation, native computer-use tools, editor helpers, cockpit, and agent-server registrations.",
+    "current": "Transitional extension host: web search, fetch, cookies, YouTube transcripts, frontend LLM browser automation, editor helpers, cockpit, and agent-server registrations.",
     "target": "Keep @wirebabel/pi-web-access focused on search/fetch/cookies/YouTube after T-2026-06-09-005 package-split moves land.",
     "splitPolicy": "No-move cleanup slices may update manifests, scripts, and docs only; file moves require a dedicated package migration."
   },

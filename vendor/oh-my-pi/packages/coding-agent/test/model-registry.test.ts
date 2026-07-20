@@ -497,6 +497,20 @@ describe("ModelRegistry", () => {
 		});
 	});
 
+	describe("bundled direct Anthropic routes", () => {
+		test("includes Claude Sonnet 5 with the generated direct Anthropic contract", () => {
+			const model = sharedBuiltin.find("anthropic", "claude-sonnet-5");
+
+			expect(model).toMatchObject({
+				provider: "anthropic",
+				id: "claude-sonnet-5",
+				api: "anthropic-messages",
+				contextWindow: 1_000_000,
+				maxTokens: 128_000,
+			});
+		});
+	});
+
 	describe("baseUrl override (no custom models)", () => {
 		// Identical fixtures collapse to one registry; distinct override shapes get
 		// their own. All read-only — built in beforeAll, queried from bodies.

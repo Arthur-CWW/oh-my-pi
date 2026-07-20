@@ -149,15 +149,13 @@ stores:
       Read individual queue `.sqlite` files with `sqlite3` if needed; root DB is locked.
     updated: 2026-06-16
   # --- books-reference ---
-  - path: ~/.borges-library/downloads/
+  - path: ~/.stema/
     kind: dir
     domain: books-reference
     contents: >-
-      1 file: `[Lord_of_the_Rings_01-03]_Tolkien..._Omn.epub` (3.7 MB)
+      Stema state root: `library.sqlite`, content-addressed objects, derivatives, temporary files, and Primer exports. Set `STEMA_HOME` to use another root.
     query: >-
-      ls .borges-library/downloads
-    size: 3.7MB
-    updated: 2026-06-30
+      ls .stema
   - path: ~/Calibre Library/metadata.db
     kind: sqlite
     domain: books-reference
@@ -731,16 +729,6 @@ stores:
     updated: 2026-07-07
     note: >-
       14.6 GB sync log (27 lines) from `bun src/corpus/cli.ts sync`. Likely a sync artifact, not a normal queryable store.
-  - path: ~/agents/packages/borges-library/test-downloads/
-    kind: dir
-    domain: uncertain
-    contents: >-
-      Directory exists but appears empty or unused.
-    query: >-
-      ls packages/borges-library/test-downloads
-    updated: 2026-06-21
-    note: >-
-      Directory exists but appears empty or unused. Actual downloads are in `.borges-library/downloads/`.
   - path: ~/agents/packages/shadowing-pipeline/examples/
     kind: dir
     domain: uncertain

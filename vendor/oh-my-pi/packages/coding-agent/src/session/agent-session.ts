@@ -13379,17 +13379,24 @@ export class AgentSession {
 	#registerExternalIrcPeer(predecessorSessionId?: string): { bus: IrcExternalBus; sessionId: string; name: string } {
 		const cwd = this.sessionManager.getCwd();
 		const ownership = this.sessionManager.getSessionOwnership();
-		const sessionId = this.#ircExternalSessionId ?? ownership?.sessionId ?? `${cwd}:${process.pid}`;
+		const agentId = this.#agentId;
+		const isSubprocessWorker = process.env.OMP_SUBPROCESS_WORKER === "1" && agentId !== undefined;
+		const sessionId =
+			this.#ircExternalSessionId ??
+			(isSubprocessWorker ? agentId : ownership?.sessionId ?? `${cwd}:${process.pid}`);
 		const name =
 			this.#ircExternalPeerName ??
-			resolveIrcExternalPeerName({
-				configuredName: this.settings.get("irc.peerName"),
-				cwd,
-				sessionId,
-			});
+			(isSubprocessWorker
+				? agentId
+				: resolveIrcExternalPeerName({
+						configuredName: this.settings.get("irc.peerName"),
+						cwd,
+						sessionId,
+					}));
 		const bus = this.#externalIrcBus ?? IrcExternalBus.global();
 		const register = {
 			sessionId,
+			agentId,
 			name,
 			cwd,
 			pid: process.pid,

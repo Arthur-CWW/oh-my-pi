@@ -16,6 +16,8 @@
     "worker:nitter": "bun src/backfill-worker.ts",
     "worker:nitter:queued": "bun src/queued-backfill-worker.ts --daemon",
     "worker:nitter:queued:once": "bun src/queued-backfill-worker.ts --once",
+    "queue:account": "bun src/backfill-queue-cli.ts add",
+    "queue:status": "bun src/backfill-queue-cli.ts status",
     "sync:tick": "bun src/sync-cli.ts tick",
     "sync:daemon": "bun src/sync-cli.ts daemon",
     "corpus:sync": "bun src/corpus/cli.ts sync",

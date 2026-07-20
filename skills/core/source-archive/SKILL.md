@@ -10,8 +10,8 @@ Prefer canonical sources over third-party summaries or AI-generated transcripts.
 ## What to do
 
 1. **Start from the original URL**
-   - Articles/docs: use `fetch_content` on the publisher URL.
-   - YouTube: use `youtube_transcript` on the actual video URL.
+   - Articles/docs: use `read` on the publisher URL.
+   - YouTube: load `skill://youtube-transcript` and run its installed `transcript.js` on the actual video URL.
    - Only keep third-party transcript dumps under `raw/` for comparison, never as the primary source.
 
 2. **Store cleaned sources under `docs/research/`**

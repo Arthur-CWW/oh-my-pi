@@ -1,7 +1,8 @@
 import { existsSync, readFileSync } from "node:fs"
-import { Schema } from "effect"
+import { Effect, Schema } from "effect"
 
 import { appendOutboxLine, OutboxEnvelopeSchema, outboxPathFor, type JsonValue, type KnownOutboxKind } from "./outbox"
+import { decodePapercutInput, defaultLedgerPath, LedgerStore, openLedger } from "./index"
 import type {
   AgentTimelinePayloadV1,
   AssistantMessage,
@@ -17,6 +18,8 @@ import type {
   SessionStartPayload,
   SessionSwitchPayload,
   TurnPayload,
+  SessionEntryLike,
+  PapercutToolParamsLike,
 } from "./omp-events"
 import { AgentTimelinePayloadV1Schema, RouteResolutionPayloadV1Schema } from "./omp-events"
 
@@ -28,6 +31,7 @@ interface SessionState {
   latestProviderRequest?: CapturedProviderRequest
   readonly turnStarts: Map<number, TurnStartSnapshot>
   activeRouteResolutionId?: string
+  readonly publishedRouteEntryIds: Set<string>
   readonly pendingAttributions: Map<string, PendingAttribution>
 }
 
@@ -75,6 +79,7 @@ export function createOmpPublisherHooks(): OmpPublisherHooks {
 
 export default function createOmpPublisher(pi: PiLike): OmpPublisherHooks {
   const publisher = new OmpOutboxPublisher()
+  registerPapercutTool(pi)
   pi.on("session_start", publisher.guard((event, ctx) => publisher.onSessionStart(event, ctx)))
   pi.on("turn_start", publisher.guard((event, ctx) => publisher.onTurn("start", event, ctx)))
   pi.on("before_provider_request", publisher.guard((event, ctx) => publisher.onBeforeProviderRequest(event, ctx)))
@@ -84,7 +89,63 @@ export default function createOmpPublisher(pi: PiLike): OmpPublisherHooks {
   pi.on("session_switch", publisher.guard((event, ctx) => publisher.onSessionSwitch(event, ctx)))
   pi.on("session_branch", publisher.guard((event, ctx) => publisher.onSessionBranch(event, ctx)))
   pi.on("session_shutdown", publisher.guard((event, ctx) => publisher.onSessionShutdown(event, ctx)))
+  pi.on("session_entry", publisher.guard((entry, ctx) => publisher.onSessionEntry(entry, ctx)))
   return publisher
+}
+
+function registerPapercutTool(pi: PiLike): void {
+  const Type = pi.typebox?.Type
+  if (Type === undefined || pi.registerTool === undefined) return
+  pi.registerTool({
+    name: "papercut",
+    label: "Papercut",
+    description: "Record confirmed workflow or repository friction after completing and verifying the assigned work. This report never changes task completion or verification outcomes.",
+    approval: "write",
+    parameters: Type.Object({
+      kind: Type.Union(["tool", "repo", "docs", "test", "workflow", "config", "agent"].map((kind) => Type.Literal(kind))),
+      severity: Type.Union(["low", "medium", "high"].map((severity) => Type.Literal(severity))),
+      message: Type.String({ description: "Confirmed friction and the observed impact." }),
+      commandOrTool: Type.Optional(Type.String({ description: "Command or tool that exposed the friction." })),
+      cwdOrPackage: Type.Optional(Type.String({ description: "Affected package or working directory." })),
+      evidenceArtifactId: Type.Optional(Type.String({ description: "Artifact containing supporting evidence." })),
+      suggestedFix: Type.Optional(Type.String({ description: "Concrete improvement suggestion." })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      return await reportPapercut(params, ctx)
+    },
+  })
+}
+
+async function reportPapercut(params: PapercutToolParamsLike, ctx: ExtensionContextLike): Promise<{ readonly content: readonly { readonly type: "text"; readonly text: string }[]; readonly details?: object }> {
+  const input = decodePapercutInput(params)
+  if (input === undefined) return papercutFailure("Papercut input is invalid; no report was recorded.")
+
+  try {
+    const program = Effect.gen(function* () {
+      const store = yield* LedgerStore
+      return yield* store.reportPapercut({
+        ...input,
+        cwdOrPackage: input.cwdOrPackage ?? ctx.cwd,
+        timestamp: Date.now(),
+        modelId: ctx.model?.id,
+        sessionId: ctx.sessionManager.getSessionId(),
+      })
+    }).pipe(Effect.provide(openLedger(defaultLedgerPath())))
+    const result = await Effect.runPromise(program)
+    return {
+      content: [{
+        type: "text",
+        text: `Papercut recorded\nfingerprint: ${result.record.fingerprint}\nstatus: ${result.record.status}\noccurrences: ${result.record.occurrences}`,
+      }],
+      details: result,
+    }
+  } catch (error) {
+    return papercutFailure(error instanceof Error ? error.message : String(error))
+  }
+}
+
+function papercutFailure(text: string): { readonly content: readonly { readonly type: "text"; readonly text: string }[] } {
+  return { content: [{ type: "text", text }] }
 }
 class OmpOutboxPublisher implements OmpPublisherHooks {
   publishAgentTimeline(payload: AgentTimelinePayloadV1, ctx: ExtensionContextLike): void {
@@ -100,12 +161,32 @@ class OmpOutboxPublisher implements OmpPublisherHooks {
     state.activeRouteResolutionId = resolution.resolutionId
   }
 
+  onSessionEntry(entry: SessionEntryLike, ctx: ExtensionContextLike): void {
+    if (entry.type !== "custom" || entry.data === undefined) return
+    const state = this.stateForContext(ctx)
+    if (state.publishedRouteEntryIds.has(entry.id)) return
+    if (entry.customType === "omp:agent-timeline:v1") {
+      state.publishedRouteEntryIds.add(entry.id)
+      this.publishAgentTimeline(Schema.decodeUnknownSync(AgentTimelinePayloadV1Schema)(entry.data), ctx)
+    } else if (entry.customType === "omp:route-resolution:v1") {
+      state.publishedRouteEntryIds.add(entry.id)
+      this.publishRouteResolution(Schema.decodeUnknownSync(RouteResolutionPayloadV1Schema)(entry.data), ctx)
+    }
+  }
+
+  syncRouteJournal(ctx: ExtensionContextLike): void {
+    const entries = ctx.sessionManager.getEntries?.()
+    if (entries === undefined) return
+    for (const entry of entries) this.onSessionEntry(entry, ctx)
+  }
+
   private readonly sessions = new Map<string, SessionState>()
   private currentSessionId: string | undefined
 
   guard<E>(handler: (event: E, ctx: ExtensionContextLike) => void): (event: E, ctx: ExtensionContextLike) => void {
     return (event, ctx) => {
       try {
+        this.syncRouteJournal(ctx)
         handler(event, ctx)
       } catch (cause) {
         try {
@@ -353,6 +434,7 @@ class OmpOutboxPublisher implements OmpPublisherHooks {
       outboxPath,
       nextSeq: countExistingOutboxLines(outboxPath),
       activeRouteResolutionId: activeRouteResolutionIdFor(outboxPath),
+      publishedRouteEntryIds: new Set(),
       turnStarts: new Map(),
       pendingAttributions: new Map(),
     }

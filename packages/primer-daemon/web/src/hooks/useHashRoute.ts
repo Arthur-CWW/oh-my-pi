@@ -9,11 +9,13 @@ export type Route =
   | { view: "library" }
   | { view: "reader"; docId: number; markId: number | null }
   | { view: "review" }
+  | { view: "inbox" }
   | { view: "shadow" }
   | { view: "enrich" }
   | { view: "scheduler" }
   | { view: "pipeline" }
   | { view: "cards" }
+  | { view: "tabs" }
 
 // ---------------------------------------------------------------------------
 // Parse / navigate
@@ -32,12 +34,14 @@ function parseHash(hash: string): Route {
   }
 
   if (h === "/review" || h === "/review/") return { view: "review" }
+  if (h === "/inbox" || h === "/inbox/") return { view: "inbox" }
   if (h === "/shadow" || h === "/shadow/") return { view: "shadow" }
 
   if (h === "/enrich" || h === "/enrich/") return { view: "enrich" }
   if (h === "/scheduler" || h === "/scheduler/") return { view: "scheduler" }
   if (h === "/pipeline" || h === "/pipeline/") return { view: "pipeline" }
   if (h === "/cards" || h === "/cards/") return { view: "cards" }
+  if (h === "/tabs" || h === "/tabs/") return { view: "tabs" }
 
   return { view: "dashboard" }
 }

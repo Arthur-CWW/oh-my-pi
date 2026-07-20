@@ -14,7 +14,7 @@ Pure locator: where things live. No policy (that's [`charter.md`](charter.md)). 
 |---|---|---|
 | Companion | `apps/ai-companion-rtc/`, `apps/xanadu/` (feed/review surface), `packages/{spatial-audio-renderer,anichat-motion-lab}/`, `scripts/avatar-pipeline/` | `apps/ai-companion-rtc/docs/goal.md`, `streams/companion/HANDOFF-BEHAVIOR.md` (canonical continuation) |
 | Playground | `apps/slotok-workbench/`, `apps/scene-playground/`, `packages/{hyperframes-renderer,remotion-renderer,jimeng-client,ugc-cli}/`, `workflows/tiktok-recreate/` | `docs/state/video-creative-direction.md`, `docs/state/ugc-studio-style-direction.md`, `docs/state/creative-framing.md` |
-| Primer | `packages/{twitter-archive,borges-library,primer-daemon}/`, `browser-extensions/extensions/twitter-archive-firefox/`; external: `~/apps/mochi-lite`, `~/apps/hsk-deck`, `~/apps/japanese-vocab`, `~/vault`, `~/github/hashcards` | `docs/twitter-archive-plan.md`, `docs/plans/twitter-archive-goal.md`, newest `streams/primer/HANDOFF-LIVE-*.md` |
+| Primer | `packages/{twitter-archive,stema,primer-daemon}/`, `browser-extensions/extensions/twitter-archive-firefox/`; external: `~/apps/mochi-lite`, `~/apps/hsk-deck`, `~/apps/japanese-vocab`, `~/vault`, `~/github/hashcards` | `docs/twitter-archive-plan.md`, `docs/plans/twitter-archive-goal.md`, newest `streams/primer/HANDOFF-LIVE-*.md` |
 | Harness | `vendor/oh-my-pi/`, `packages/{web-access,dynamic-workflows,omp-perf-explorer,control-plane,agent-mux}/`, `.omp/`, `skills/` | [`harness-brief.md`](harness-brief.md), [`harness-slimming.md`](harness-slimming.md) |
 
 This table rots by omission — when a new app/package graduates to active use, adding it here is part of that work, not a separate chore.
@@ -79,7 +79,7 @@ Full inventory with sizes: [`external-inventory.md`](external-inventory.md). Not
 |---|---|---|
 | Companion | `streams/companion/GOAL.md` | `apps/ai-companion-rtc`, `packages/spatial-audio-renderer`, `data/{asmr-companion,youtube-liked-asmr-refs}` |
 | Playground | `streams/playground/GOAL.md` | `apps/slotok-workbench`, `packages/{hyperframes,remotion}-renderer`, `packages/{jimeng-client,ugc-cli}`, `workflows/tiktok-recreate`, UGC `data/` buckets |
-| Primer | `streams/primer/GOAL.md` | `packages/{twitter-archive,borges-library}`, `browser-extensions/…/twitter-archive-firefox`, `data/twitter-archive`, primer docs |
+| Primer | `streams/primer/GOAL.md` | `packages/{twitter-archive,stema}`, `browser-extensions/…/twitter-archive-firefox`, `data/twitter-archive`, primer docs |
 | Harness | `streams/harness/GOAL.md` | `oh-my-pi`, `packages/{web-access,dynamic-workflows}`, `.omp`, `skills`, `docs/fable`, `catalog/workspaces.yml` |
 
 ## Cleanup ledgers (historical)

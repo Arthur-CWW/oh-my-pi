@@ -3,6 +3,7 @@ defmodule SymphonyLiteElixir.CLI do
   JSON-first CLI for the Symphony Lite Elixir/OTP spike.
 
   Commands:
+    daemon     --port <port> --host <host> --root <dir>
     spike      --root <dir> --task-list <path> --json
     import     --root <dir> --task-list <path> --json
     next       --root <dir> --json
@@ -26,7 +27,9 @@ defmodule SymphonyLiteElixir.CLI do
         prompt: :string,
         packet: :string,
         owner: :string,
-        path: :string
+        path: :string,
+        host: :string,
+        port: :integer
       ],
       aliases: [r: :root, t: :task_list, k: :kind, p: :prompt]
     )
@@ -35,6 +38,9 @@ defmodule SymphonyLiteElixir.CLI do
 
   defp dispatch({opts, ["proof", "add" | _], []}) do
     run_proof_add(opts)
+  end
+  defp dispatch({opts, ["daemon"], []}) do
+    run_daemon(opts)
   end
 
   defp dispatch({opts, [command | _], []}) do
@@ -56,8 +62,21 @@ defmodule SymphonyLiteElixir.CLI do
 
   defp dispatch(_) do
     error(
-      "usage: symphony_lite_elixir <spike|import|next|claim|paths|proof add|status|runner> ..."
+      "usage: symphony_lite_elixir <daemon|spike|import|next|claim|paths|proof add|status|runner> ..."
     )
+  end
+
+  defp run_daemon(opts) do
+    port = Keyword.get(opts, :port, 0)
+    host = Keyword.get(opts, :host, "127.0.0.1")
+    root = Keyword.get(opts, :root, System.tmp_dir!())
+
+    {:ok, pid} = SymphonyLiteElixir.Http.Supervisor.start_link(port: port, host: host, root: root)
+
+    ref = Process.monitor(pid)
+    receive do
+      {:DOWN, ^ref, _, _, _} -> :ok
+    end
   end
 
   defp run_spike(opts) do

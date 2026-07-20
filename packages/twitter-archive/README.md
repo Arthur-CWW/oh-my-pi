@@ -30,3 +30,26 @@ bun run sync:daemon
 ```
 
 The design preserves decisions mined from Arthur's prior sessions and `docs/state/twitter-source-and-lists.md`: public-only capture; RSS/Nitter/public endpoint fallback; `(handle, id)` entity dedupe; low concurrency with jitter, disk cache, mirror cooldown, and resumable cursors; exhaustive sync only for cared-about accounts; and no authenticated list/follow/post mutations without explicit approval. The 2026-07-13 completion session further fixed full-sync lane order as timeline → yearly search windows → Wayback → capped media, with completed reruns performing no network work.
+
+## Queueing a public account backfill
+
+Run these commands from `packages/twitter-archive`:
+
+```bash
+# Validate and enqueue a public X profile; this does not fetch anything.
+bun run queue:account -- --handle Lina_Hoshino
+
+# Read the durable queue state and capture counters.
+bun run queue:status -- --handle Lina_Hoshino
+
+# Drain pending accounts with the existing queued Nitter daemon.
+bun run worker:nitter:queued
+```
+
+Queue targets are public X profiles only: a bare handle, `@handle`, or a public `x.com/<handle>` profile URL. Enqueueing only normalizes the target and writes its SQLite row; it performs no network fetch. The daemon uses the existing low-concurrency capture path with disk cache and backoff/jitter safeguards, and status reports the durable cursor and progress counters.
+
+Repeated enqueue is idempotent and preserves an existing cursor, progress, status, and error state. To explicitly start the account over, pass `--reset`; reset requeues the existing row and clears its cursor and last error without creating a duplicate:
+
+```bash
+bun run queue:account -- --handle Lina_Hoshino --reset
+```

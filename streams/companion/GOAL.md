@@ -6,6 +6,8 @@ The dæmon-with-a-voice stream. Owned by one Fable session at a time; read with 
 
 Explore AI-companion **form factors**, not one app. Realtime voice-to-avatar (Annie/Grok as one behavioral reference), VTuber/VR and Live2D avatars as **hot-swappable bodies** over one presence layer, Pygmalion dynamics designed for, not apologized for. The underexplored core is **ASMR/audio**: spatial 3D sound, object-interaction foley, mic-caressing, environmental closeness — presence through the ear first.
 
+**Current implementation status:** [`HANDOFF-BEHAVIOR.md`](HANDOFF-BEHAVIOR.md) is the canonical continuation record for the committed Wave 6 baseline, the uncommitted behavior wave and its proof limits, and the completed benchmark/live-digest/Effect-turn foundation sequence. The next work is a dashboard-mediated product/taste fork; this charter's durable backlog remains below.
+
 ## Non-functional requirements
 
 - Local-first where possible; the *data* (memory, persona) is always local.

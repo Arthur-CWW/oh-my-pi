@@ -1,6 +1,7 @@
 import * as path from "node:path";
 import { createInterface } from "node:readline/promises";
 import { $env, getProjectDir, isEnoent, prompt } from "@oh-my-pi/pi-utils";
+import { appendCommitTrailers, resolveCommitAttribution } from "../../commit/attribution";
 import { applyChangelogProposals } from "../../commit/changelog";
 import { detectChangelogBoundaries } from "../../commit/changelog/detect";
 import { parseUnreleasedSection } from "../../commit/changelog/parse";
@@ -211,7 +212,7 @@ async function runSingleCommit(proposal: CommitProposal, ctx: CommitExecutionCon
 		process.stdout.write(`${commitMessage}\n`);
 		return;
 	}
-	await git.commit(ctx.cwd, commitMessage);
+	await git.commit(ctx.cwd, appendCommitTrailers(commitMessage, await resolveCommitAttribution(ctx.cwd)));
 	process.stdout.write("Commit created.\n");
 	if (ctx.push) {
 		await git.push(ctx.cwd);
@@ -278,7 +279,7 @@ async function runSplitCommit(
 			issueRefs: commit.issueRefs,
 		};
 		const message = formatCommitMessage(analysis, commit.summary);
-		await git.commit(ctx.cwd, message);
+		await git.commit(ctx.cwd, appendCommitTrailers(message, await resolveCommitAttribution(ctx.cwd)));
 		await git.stage.reset(ctx.cwd);
 	}
 	process.stdout.write("Split commits created.\n");

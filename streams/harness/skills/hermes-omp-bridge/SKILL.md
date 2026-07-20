@@ -1,11 +1,11 @@
 ---
 name: hermes-omp-bridge
-description: Port useful Hermes skills into OMP workflows, use the Obsidian vault headlessly, and choose the right OMP agent/persona for recurring tasks.
+description: Port useful Hermes skills into OMP workflows, use the Obsidian vault headlessly, and choose the right bundled OMP role for recurring tasks.
 ---
 
 # Hermes → OMP Bridge
 
-Use this skill when the user mentions Hermes skills, asks to port a Hermes workflow into OMP, asks how to access `~/vault` from OMP/headless mode, or wants to turn repeated local workflows into OMP skills, agents, or automations.
+Use this skill when the user mentions Hermes skills, asks to port a Hermes workflow into OMP, asks how to access `~/vault` from OMP/headless mode, or wants to turn repeated local workflows into OMP skills, bundled-role task packets, or automations.
 
 ## Local Hermes layout on this machine
 
@@ -123,7 +123,7 @@ Use when the user wants a compounding markdown knowledge base. Good OMP adaptati
 - query outputs under `~/vault/queries/`
 - index/log under `~/vault/indexes/` or a dedicated wiki root
 
-Use `kimi-researcher` for ingestion/retrieval and `maintenance-kimi` for periodic linting, index repair, stale source detection, and duplicate cleanup.
+Use `librarian` or `explore` for ingestion/retrieval and source distillation. Route mutable index repair, stale-source detection, and duplicate cleanup to `task` with a maintenance specialist role.
 
 ### blogwatcher
 
@@ -138,7 +138,7 @@ Use for recurring RSS/blog monitoring. Best OMP form is an automation plus a sma
 - Install/use `blogwatcher-cli`.
 - Store DB under `~/state/blogwatcher/blogwatcher-cli.db`.
 - Export useful unread items into `~/vault/inbox/captures/` or `~/vault/sources/clippings/YYYY/MM/`.
-- Let `maintenance-kimi` triage unread/new captures into wiki/source folders.
+Route mutable capture triage into wiki/source folders to `task` with a vault-triage specialist role.
 
 ### obsidian
 
@@ -151,7 +151,7 @@ Map to OMP native tools:
 - `github` tool for PR/issues/actions.
 - `lsp` for symbol-aware refs/renames/actions.
 - `search/find/read` for scoped code inspection.
-- `reviewer` or `gpt-implementer` for complex review.
+- `reviewer` for complex review; route any resulting mutable fix to `task` with an implementation specialist role.
 
 ### systematic-debugging / python-debugpy / node-inspect-debugger
 
@@ -159,51 +159,78 @@ Map to OMP `debug` tool when stepping, stack inspection, breakpoints, variables,
 
 ### plan / spike / test-driven-development
 
-Map to OMP agents:
+Map to bundled OMP roles:
 
 - `plan` for architecture decisions.
-- `kimi-implementer` for bounded implementation slices.
-- `gpt-implementer` for shared abstractions, migrations, and complex architecture.
-- `maintenance-kimi` for cleanup after the change works.
+- `task` with a bounded implementation specialist role for code changes.
+- `reviewer` for review after the implementation is available.
+- `designer` for UI/UX decisions and interface implementation.
+- `quick_task` only for strictly mechanical, low-reasoning updates.
 
 ### arxiv / research-paper-writing / youtube-content / polymarket
 
-Map to `kimi-researcher` for retrieval and source distillation. Save sources into `~/vault/sources/` and syntheses into `~/vault/wiki/` or `~/vault/queries/`.
+Map to `librarian` or `explore` for retrieval and source distillation. Save sources into `~/vault/sources/` and syntheses into `~/vault/wiki/` or `~/vault/queries/`.
 
-### autonomous-ai-agents: codex, claude-code, opencode, hermes-agent
+### autonomous agent workflows
 
-Use when comparing agent outputs or delegating to external CLIs. In OMP, prefer native `task` subagents first. Use external CLIs only when their auth/model/tooling materially differs.
+Use when comparing agent outputs or delegating bounded work. In OMP, use bundled roles and task packets rather than branded-agent routes.
 
 ## Recurring Arthur workflows and recommended form
 
-| Workflow | Best OMP form | Default agent/model |
+| Workflow | Best OMP form | Bounded route |
 |---|---|---|
-| Repo/git garbage collection | Custom subagent | `maintenance-kimi` |
-| Vault inbox/clippings triage | Custom subagent or automation | `maintenance-kimi` |
-| Research and source distillation | Custom subagent | `kimi-researcher` |
-| Authenticated browser extraction | Custom subagent | `authenticated-web-kimi` |
-| Reverse engineering apps/providers | Custom subagent + tooling skill | `reveng-scout-kimi` |
-| Bounded code edits from plan | Custom subagent | `kimi-implementer` |
-| Complex architecture/migrations | Custom subagent | `gpt-implementer` |
-| RSS/blog monitoring | Automation | `blogwatcher-cli` + `maintenance-kimi` |
-| Trading bot planning | Plan + research | `kimi-researcher`, then `gpt-implementer` |
+| Repo/git garbage collection | Bounded mutable task | `task`: repository-maintenance specialist; own only named repo paths; exclude unrelated worktrees; `read`, `bash` |
+| Vault inbox/clippings triage | Bounded mutable task or automation | `task`: vault-triage specialist; own named inbox/source paths; exclude wiki/indexes; `read`, `find`, `edit`, `write` |
+| Research and source distillation | Read-only investigation | `librarian` or `explore` |
+| Authenticated browser extraction | Bounded mutable task | `task`: authenticated-browser extraction specialist; own named output paths; exclude credentials and unrelated accounts; `browser`, `read`, `write` |
+| Reverse engineering apps/providers | Read-only investigation or bounded mutation | `explore` or `librarian` for analysis; `task`: reverse-engineering specialist for approved changes, with owned paths, exclusions, and `read`, `search`, `debug`, `edit` only as needed |
+| Bounded code edits from plan | Bounded mutable task | `task`: implementation specialist; own named files; exclude non-target modules; `read`, `lsp`, `edit`, `bash` |
+| Complex architecture/migrations | Architecture, then mutable task | `plan`, then `task`: migration specialist; own migration paths; exclude unrelated data/code; `read`, `lsp`, `edit`, `bash` |
+| Prose maintenance | Bounded mutable task | `task`: prose-maintenance specialist; own named documents; exclude source evidence and unrelated documents; `read`, `edit` |
+| RSS/blog monitoring | Automation | `blogwatcher-cli`; route mutable triage to `task` with named vault paths and `read`, `find`, `edit`, `write` |
+| Trading bot planning | Plan + research | `librarian` or `explore`, then `plan` |
 
 ## Choosing skill vs subagent vs automation
 
 Create a skill when the value is a reusable playbook or source-aware procedure.
 
-Create a custom subagent when the value is a bounded role with a stable contract and repeatable delegation target.
+Create a bounded `task` packet when the value is mutable work with a stable contract and repeatable delegation target.
 
 Create an automation when the workflow runs on a schedule or watches for new inputs: RSS, inbox cleanup, stale branch reports, vault lint, download folder reports.
 
 Skip packaging when the task is one-off, lacks stable inputs, or has no clear stopping condition.
 
+## Mutable task packet
+
+For mutable work, dispatch `task` with a concrete assignment packet. State the specialist role, a bounded task, owned and excluded paths, the least-privilege tool allowlist, and completion criteria. When the configured task route supports it, include an optional requested model selection (model override) for mutable `task`, `designer`, or `oracle` work when the default is unsuitable; the parent applies it through the supported task configuration.
+
+```yaml
+agent: task
+role: vault-triage specialist
+task: Move reviewed captures into their correct vault folders.
+owns:
+  - ~/vault/inbox/captures/
+  - ~/vault/sources/clippings/
+excludes:
+  - ~/vault/wiki/
+  - ~/vault/queries/
+  - ~/vault/indexes/
+tools:
+  - read
+  - find
+  - bash
+done: Every reviewed capture is filed or explicitly left in place with its reason.
+# requested model selection (optional model override); parent applies it only through supported task configuration
+```
+
+Use `quick_task` only for a strictly mechanical slice. Use `plan`, `reviewer`, and `designer` for their normal architecture, review, and UI/UX duties; use `librarian` or read-only `explore` for source investigation rather than edits.
+
 ## Practical packaging procedure
 
-1. Inspect recent evidence: OMP/Pi/Codex sessions, Hermes sessions, vault tasks, repo trackers.
+1. Inspect recent evidence: OMP sessions, Hermes sessions, vault tasks, repo trackers.
 2. Identify workflows that happened at least twice or are clearly recurring and costly.
-3. Check existing assets first: `~/.omp/agent/skills`, `~/.omp/agent/agents`, `~/.hermes/skills`, `~/automations`.
-4. Choose the smallest form: skill, subagent, automation, extend existing, or skip.
+3. Check existing assets first: `~/.omp/agent/skills`, `~/.hermes/skills`, `~/automations`.
+4. Choose the smallest form: skill, bounded task packet, automation, extend existing, or skip.
 5. Write the asset narrowly.
 6. Test with one real task.
 7. Keep an audit trail in `~/vault/queries/` or the relevant repo tracker when useful.
@@ -212,4 +239,4 @@ Skip packaging when the task is one-off, lacks stable inputs, or has no clear st
 
 Do not paste or export raw cookies, tokens, session headers, OAuth credentials, API keys, or private account settings. Treat auth as ambient access through the browser/profile/tooling. Save outputs and provenance, not secrets.
 
-For refusal-prone but legitimate browser/retrieval work, route to Kimi-backed personas (`kimi-researcher`, `authenticated-web-kimi`) instead of trying to alter another model's safety behavior.
+For legitimate browser or retrieval work that needs a different route, use the bounded `task` assignment packet: name the retrieval or authenticated-browser specialist role, owned output paths, excluded credential/account areas, and only the required `browser`, `read`, or `write` tools. When supported by the configured task route, include an optional requested model selection (model override) for the parent to apply; preserve safety constraints rather than routing around them.

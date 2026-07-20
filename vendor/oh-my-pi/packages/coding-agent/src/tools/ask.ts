@@ -27,6 +27,7 @@ import askDescription from "../prompts/tools/ask.md" with { type: "text" };
 import { vocalizer } from "../tts/vocalizer";
 import { framedBlock, renderStatusLine } from "../tui";
 import type { ToolSession } from ".";
+import { notifyCmuxAsk } from "./cmux-ask-bridge";
 import { formatErrorMessage, formatMeta, formatTitle } from "./render-utils";
 import { ToolAbortError } from "./tool-errors";
 
@@ -479,8 +480,8 @@ export class AskTool implements AgentTool<typeof askSchema, AskToolDetails> {
 		return session.hasUI ? new AskTool(session) : null;
 	}
 
-	/** Send terminal notification when ask tool is waiting for input */
-	#sendAskNotification(): void {
+	/** Send terminal and cmux notifications when ask tool is waiting for input */
+	async #sendAskNotification(question: string): Promise<void> {
 		const method = this.session.settings.get("ask.notify");
 		if (method === "off") return;
 		TERMINAL.sendNotification({
@@ -490,6 +491,7 @@ export class AskTool implements AgentTool<typeof askSchema, AskToolDetails> {
 			urgency: "normal",
 			actions: "focus",
 		});
+		await notifyCmuxAsk(question);
 	}
 
 	async execute(
@@ -520,7 +522,7 @@ export class AskTool implements AgentTool<typeof askSchema, AskToolDetails> {
 		const timeout = planModeEnabled ? null : settingsTimeout;
 
 		// Send notification if waiting and not suppressed
-		this.#sendAskNotification();
+		await this.#sendAskNotification(params.questions.map((question) => question.question).join("\n"));
 
 		if (params.questions.length === 0) {
 			return {

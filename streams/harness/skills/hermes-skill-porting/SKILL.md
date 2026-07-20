@@ -59,117 +59,165 @@ When `vault://` times out, fall back to filesystem paths. The same data is there
 
 ## Mapping Hermes skills to OMP
 
-Not every Hermes skill needs a dedicated OMP persona. Most map to an agent + tools combination.
+Not every Hermes skill needs a dedicated OMP route. Most map to a bundled agent plus a narrowly scoped tool set.
 
 ### Direct agent equivalents
 
 | Hermes skill | OMP approach |
 |---|---|
-| `claude-code`, `codex`, `opencode` | OMP's bundled `task` agent or custom `kimi-implementer` |
-| `plan` | OMP's bundled `plan` agent |
-| `systematic-debugging` | `gpt-implementer` with LSP, debug tools |
-| `test-driven-development` | `kimi-implementer` — follow the plan, run only targeted checks |
-| `requesting-code-review` | OMP's bundled `reviewer` agent |
-| `simplify-code` | `kimi-implementer` — the system prompt already prefers minimal/boring |
-| `spike` | `kimi-researcher` — research + report, no edits |
-| `hermes-agent-skill-authoring` | This skill — port workflows, not the authoring meta-skill |
+| `claude-code`, `codex`, `opencode` | `task` with an implementation specialist role and a bounded task packet |
+| `plan` | `plan` for architecture and sequencing |
+| `systematic-debugging` | `task` with a debugging specialist role and LSP/debug tools |
+| `test-driven-development` | `task` with a testing specialist role and targeted checks |
+| `requesting-code-review` | `reviewer` for code review |
+| `simplify-code` | `task` with a maintenance specialist role and the affected files only |
+| `spike` | `explore` for a read-only source survey, or `librarian` for source distillation |
+| `hermes-agent-skill-authoring` | This skill — port workflows into bundled routes |
 
-### Tools, not personas
+### Tools, not custom routes
 
 | Hermes skill | OMP equivalent |
 |---|---|
-| `github-auth` | `omp token github` or `gh auth status` |
-| `github-code-review` | `reviewer` agent + `github` tool `op: pr_create` |
+| `github-auth` | `task` with an authentication specialist role and a bounded task packet; allow only the required `github` or `bash` auth commands |
+| `github-code-review` | `reviewer` for review; `task` with a release specialist role for any state-changing `github` action |
 | `github-issues` | `issue://` URIs, `github` tool `op: search_issues` |
-| `github-pr-workflow` | `github` tool `op: pr_create`, `op: pr_checkout` |
-| `github-repo-management` | `github` tool `op: repo_view`, `bash` for git commands |
-| `obsidian` | Filesystem paths to `~/vault/` |
-| `apple-notes`, `apple-reminders` | `bash` with AppleScript/Shortcuts |
-| `blogwatcher` | Install `blogwatcher-cli`, run via `bash`. See its `SKILL.md`. |
+| `github-pr-workflow` | `task` with a release specialist role and only `github` actions `op: pr_create`, `op: pr_checkout` |
+| `github-repo-management` | `task` with a repository-maintenance specialist role, `github` tool `op: repo_view`, and only needed `bash` git commands |
+| `obsidian` | Filesystem paths to `~/vault/`; use a bounded `task` packet for writes |
+| `apple-notes`, `apple-reminders` | `task` with an Apple automation specialist role and `bash` limited to the required AppleScript or Shortcut |
+| `blogwatcher` | `task` with a feed-maintenance specialist role, `bash`, and the exact feed paths it may change |
 | `jupyter-live-kernel` | `eval` tool with `language: "py"` |
-| `youtube-content` | `read` the URL, `browser` for JS-heavy pages |
-| `nano-pdf`, `ocr-and-documents` | `read` handles PDFs natively |
-| `excalidraw`, `design-md` | `write` + preview, or skip and use Mermaid via `render_mermaid` |
-| `songwriting-and-ai-music` | `bash` with audiocraft, or skip |
+| `youtube-content` | `librarian` or `explore` for read-only source distillation; allow `read` for the URL and `browser` only for JS-heavy pages |
+| `nano-pdf`, `ocr-and-documents` | `librarian` or `explore` for read-only source distillation; allow `read`, which handles PDFs natively |
+| `excalidraw`, `design-md` | `task` with a design-maintenance specialist role using `write` and preview, or `render_mermaid` |
+| `songwriting-and-ai-music` | `task` with a media-tool integration specialist role and `bash` limited to the required audiocraft commands |
 
-### Research personas
+### Research and source distillation
 
-| Hermes skill | OMP agent + assignment |
+| Hermes skill | OMP route |
 |---|---|
-| `llm-wiki` | `kimi-researcher`: "Build a Karpathy-style wiki at ~/wiki using SCHEMA.md conventions. Ingest these sources..." |
-| `arxiv` | `kimi-researcher` + `web_search` + `read` on PDF URLs |
-| `research-paper-writing` | `gpt-implementer` for LaTeX, `kimi-researcher` for literature |
-| `polymarket` | `kimi-researcher` + `web_search` + `browser` |
-| `huggingface-hub` | `kimi-researcher` + `web_search` |
+| `llm-wiki` | `librarian` to distill the supplied sources; `task` writes the resulting vault pages when needed |
+| `arxiv` | `librarian` with `web_search` and `read` on PDF URLs |
+| `research-paper-writing` | `librarian` for literature; `task` with a writing specialist role for mutable manuscript work |
+| `polymarket` | `librarian` with `web_search` and `browser` |
+| `huggingface-hub` | `librarian` with `web_search` |
+
+### Bounded prose replacement
+
+| Hermes skill | OMP route |
+|---|---|
+| `humanizer` | `task` with a prose-maintenance specialist role for bounded editing; name owned and excluded documents, allow only `read` and `edit`, and request a configured model selection (optional model override) only when needed |
 
 ### Not porting
 
 | Hermes skill | Reason |
 |---|---|
-| `godmode` | Model jailbreak — not applicable as OMP workflow |
-| `humanizer` | Text paraphrasing — use the session model directly |
+| `godmode` | Model jailbreak — not applicable as an OMP workflow |
 | `songsee`, `heartmula` | Media/music skills — domain-specific, keep in Hermes |
-| `comfyui`, `touchdesigner-mcp` | Creative tools — keep in Hermes, not OMP coding workflow |
+| `comfyui`, `touchdesigner-mcp` | Creative tools — keep in Hermes, not the OMP coding workflow |
 
 ## Workflow: porting a Hermes skill to OMP
 
 1. **Read the Hermes SKILL.md:** `read ~/.hermes/skills/<category>/<name>/SKILL.md`
 2. **Identify the core workflow:** What does the skill actually do? What tools does it need?
-3. **Map to OMP primitives:** Agent persona + tools + assignment template
-4. **If it's a tool:** Install the CLI, use via `bash`
-5. **If it's knowledge:** Write it as an AGENTS.md rule or a one-shot prompt
-6. **If it's an agent:** Create a persona file in `~/.omp/agent/agents/` or assign the task to an existing persona
-7. **If it's an ongoing workflow:** Document the assignment template here so it's repeatable
+3. **Map to OMP primitives:** Choose a bundled agent, a least-privilege tool allowlist, and an assignment template.
+4. **If it's a tool:** Read-only CLI use may be tool-based; installation, configuration, or other state changes go through the bounded `task` packet.
+5. **If it's knowledge or source analysis:** Route read-only distillation to `librarian` or a code survey to `explore`.
+6. **If it changes files or external state:** Route it to `task` with a specialist role, owned files, excluded files, a least-privilege tool allowlist, and an optional requested model selection (model override) that the parent applies through supported task configuration.
+7. **If it's an ongoing workflow:** Document the bounded task packet here so it is repeatable.
+
+### Bounded mutable task packet
+
+```
+Agent: task
+Role: <specialist discipline>
+Owned files: <exact paths this task may change>
+Excluded files: <paths or areas this task must not change>
+Tools: <least-privilege allowlist, for example read, edit, lsp, bash>
+Requested model selection (optional model override): <approved selector; parent applies through supported task configuration>
+Assignment: <concrete outcome, constraints, and acceptance criteria>
+```
 
 ## Concrete ported workflows
 
-### llm-wiki → kimi-researcher assignment
+### llm-wiki → librarian distillation and task write
 
 ```
-Agent: kimi-researcher
+Agent: librarian
 Assignment:
-  Build a Karpathy-style wiki at ~/wiki covering <domain>.
+  Distill the supplied sources for a Karpathy-style wiki at ~/wiki covering <domain>.
   Read the schema conventions from skill://hermes-skill-porting/references/llm-wiki-conventions.md.
-  Ingest these sources: <list URLs or paths>.
-  Create SCHEMA.md, index.md, log.md, and entity/concept pages.
+  Return the source-backed page outline and facts for SCHEMA.md, index.md, log.md,
+  and entity/concept pages.
+
+Agent: task
+Role: vault knowledge-base maintainer
+Owned files: ~/wiki/SCHEMA.md, ~/wiki/index.md, ~/wiki/log.md, ~/wiki/<entity-and-concept-pages>
+Excluded files: all paths outside ~/wiki
+Tools: read, edit, write
+Requested model selection (optional model override): <approved selector; parent applies through supported task configuration>
+Assignment:
+  Materialize the approved distilled outline and facts in the owned wiki files.
 ```
 
-### blogwatcher → bash tool
-
-```bash
-# Install (macOS Apple Silicon)
-curl -sL https://github.com/JulienTant/blogwatcher-cli/releases/latest/download/blogwatcher-cli_darwin_arm64.tar.gz | tar xz -C /usr/local/bin blogwatcher-cli
-
-# Add feeds
-blogwatcher-cli add "Blog Name" https://example.com
-
-# Scan and read
-blogwatcher-cli scan
-blogwatcher-cli articles
-```
-
-### codebase-inspection → reveng-scout-kimi or explore
+### blogwatcher → task feed-maintenance packet
 
 ```
-Agent: reveng-scout-kimi (for binary/packet analysis)
-       explore (for source code survey)
+Agent: task
+Role: feed-maintenance specialist
+Owned files: /usr/local/bin/blogwatcher-cli, <blogwatcher configuration and feed-state paths>
+Excluded files: all other paths
+Tools: bash
+Requested model selection (optional model override): <approved selector; parent applies through supported task configuration>
+Assignment:
+  Install and operate blogwatcher-cli only for the owned feed configuration.
+  Use these commands as needed:
 
+  # Install (macOS Apple Silicon)
+  curl -sL https://github.com/JulienTant/blogwatcher-cli/releases/latest/download/blogwatcher-cli_darwin_arm64.tar.gz | tar xz -C /usr/local/bin blogwatcher-cli
+
+  # Add feeds
+  blogwatcher-cli add "Blog Name" https://example.com
+
+  # Scan and read
+  blogwatcher-cli scan
+  blogwatcher-cli articles
+```
+
+### codebase-inspection → explore or task
+
+```
+Agent: explore (for a read-only source code survey)
 Assignment:
   Inspect <target>.
   Report: architecture, key modules, dependencies, anti-patterns, technical debt.
   Do not edit files.
+
+Agent: task (for debugging, reverse engineering, authentication, migration, or prose maintenance that changes files)
+Role: <debugging, reverse-engineering, authentication, migration, or prose-maintenance specialist>
+Owned files: <exact target paths>
+Excluded files: <all non-target paths>
+Tools: <least-privilege allowlist, for example read, search, lsp, debug, edit>
+Requested model selection (optional model override): <approved selector; parent applies through supported task configuration>
+Assignment:
+  Complete <concrete mutable outcome> only within the owned files.
 ```
 
-### Systematic debugging → gpt-implementer
+### Systematic debugging → task
 
 ```
-Agent: gpt-implementer
+Agent: task
+Role: debugging specialist
+Owned files: <exact files needed for the minimal fix>
+Excluded files: <all unrelated files>
+Tools: read, search, lsp, debug, edit, bash
+Requested model selection (optional model override): <approved selector; parent applies through supported task configuration>
 Assignment:
   Bug: <description with reproduction steps>
   1. Reproduce via the steps provided.
   2. Instrument the likely code path with targeted logging.
   3. Identify root cause.
-  4. Apply minimal fix.
+  4. Apply minimal fix only in the owned files.
   5. Recommend parent validation commands.
 ```
 
@@ -186,5 +234,4 @@ Assignment:
 - Hermes help: `hermes --help`, `hermes <command> --help`
 - OMP docs: `omp://`
 - Vault root: `~/vault/`
-- OMP personas: `~/.omp/agent/agents/*.md`
 - OMP config: `~/.omp/agent/config.yml`

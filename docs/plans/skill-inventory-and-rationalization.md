@@ -1,6 +1,6 @@
 # Skill Inventory and Rationalization
 
-Date: 2026-06-09
+Date: 2026-07-10 (refreshed; original inventory 2026-06-09)
 
 ## Why this exists
 
@@ -23,12 +23,54 @@ Columns below:
 - Changed root `package.json` and `packages/web-access/package.json` so the web-access package only auto-loads the curated core skills:
   - `background-browser-automation`
   - `librarian`
-  - `llm-frontend-browser`
+  - ~~`llm-frontend-browser`~~ — disabled from the global active surface on 2026-07-10 because the symlink target is archived/missing.
   - `cua-driver`
   - `rubber-duck-adversarial`
   - `source-archive`
 
 This stops ignored local checkouts such as `chrome-devtools-mcp/` and symlinked `pi-skills/` from being accidentally pulled into the project skill list through the broad `./skills` directory entry.
+
+## 2026-07-10 global active refresh
+
+Scope read for this refresh:
+
+- `/Users/arthur/.omp/agent/skills` — 18 global active entries before cleanup; most entries are symlinks into this repo or `vendor/badlogic/pi-skills`.
+- `/Users/arthur/.claude/skills` — present and empty.
+- current session skill inventory — includes the current browser/research/proof/personal-tool skill surface already loaded for this session; no session-file datamining was done.
+- `skills-attic` — `disabled-20260708/` contains `oracle` and `llm-frontend-browser`; `disabled-20260710/` contains archived `impeccable` variants.
+
+### Current canonical / opt-in / archive table
+
+| Bucket | Skills | Status / reason |
+|---|---|---|
+| Canonical active core | `omp-irc`, `proof-of-work-qa`, `rubber-duck-adversarial`, `source-archive`, `librarian` | Keep active. These are current harness/research/proof/coordination skills and are protected from this cleanup. |
+| Canonical active browser/control | `background-browser-automation`, `browser-control`, `cmux-browser-drive`, `cua-driver` | Keep active. `browser-control` is the chooser/router; `background-browser-automation` owns CDP/Playwright safety; `cmux-browser-drive` owns cmux WKWebView surfaces; `cua-driver` owns native/background macOS UI. |
+| Active project skill | `borges-library` | Keep active. Symlink target is `packages/borges-library/skills/borges-library`; it is a live project skill, not a duplicate browser/design/router surface. |
+| Protected active personal tools | `gmcli`, `gdcli`, `gccli` | Keep active by current instruction. Long-term recommendation remains personal-data opt-in grouping, but they were not archived in this pass. |
+| Active opt-in media/source tools | `youtube-transcript`, `transcribe` | Keep active. Both point to `vendor/badlogic/pi-skills`; no concrete replacement/failure evidence was found in this pass. |
+| Archived/disabled 2026-07-10 | `browser-tools`, `llm-frontend-browser`, `oracle` | Disabled by moving only the global symlink entries into `/Users/arthur/.omp/agent/skills/.disabled-skills/20260710/`; targets were left untouched. |
+| Already archived 2026-07-10 | `impeccable` | Already archived under `skills-attic/disabled-20260710/impeccable/{pi,github}`. Arthur judged it slop; do not make it part of the default active surface. |
+| Already disabled older | `brave-search` | Already in `/Users/arthur/.omp/agent/skills/.disabled-skills/brave-search.20260625140939`; keep disabled unless a current research workflow explicitly needs it. |
+
+### Duplicate / broken-surface findings
+
+| Family | Finding | Decision |
+|---|---|---|
+| Browser | `browser-tools` was a global symlink to `vendor/badlogic/pi-skills/browser-tools`, an older visible/active-tab Chrome DevTools workflow. Its target still exists, but the active canonical browser stack now covers its routing and safety surface through `browser-control`, `background-browser-automation`, `cmux-browser-drive`, and `cua-driver`. | Moved the global symlink to `.disabled-skills/20260710/browser-tools`. This is reversible; the vendor target remains intact. |
+| Browser / LLM frontend | `llm-frontend-browser` was a dangling global symlink to missing target `skills/browser/llm-frontend-browser`. The actual skill content had already been moved to `skills-attic/disabled-20260708/llm-frontend-browser` while the OpenAI Pro account was broken. | Moved the dangling global symlink to `.disabled-skills/20260710/llm-frontend-browser`; restore only by restoring the target from attic and moving the symlink back. |
+| Design | `impeccable` is present only in `skills-attic/disabled-20260710/impeccable/pi` and `skills-attic/disabled-20260710/impeccable/github`; no active global symlink was found. The current session may still list it because the session was loaded before this cleanup. | Mark archived; do not re-enable as default. |
+| Oracle | `oracle` was a dangling global symlink to missing target `skills/core/oracle`. The actual skill content had already been moved to `skills-attic/disabled-20260708/oracle`. | Moved the dangling global symlink to `.disabled-skills/20260710/oracle`; restore only by restoring the target from attic and moving the symlink back. |
+| Router | `browser-control` is the canonical active browser-control router. `find-skills` appears in the current session skill inventory but is not an active global directory under `/Users/arthur/.omp/agent/skills`. No Codex plugin router skills were active in the global skill directory. | No archive action. |
+
+### Moves applied in this pass
+
+| Source | Destination | Symlink target | Reason |
+|---|---|---|---|
+| `/Users/arthur/.omp/agent/skills/browser-tools` | `/Users/arthur/.omp/agent/skills/.disabled-skills/20260710/browser-tools` | `/Users/arthur/agents/vendor/badlogic/pi-skills/browser-tools` | Duplicate/deprecated global browser CDP skill; replaced in the active surface by the repo browser-control stack. |
+| `/Users/arthur/.omp/agent/skills/llm-frontend-browser` | `/Users/arthur/.omp/agent/skills/.disabled-skills/20260710/llm-frontend-browser` | `/Users/arthur/agents/skills/browser/llm-frontend-browser` (missing) | Dangling symlink; target already archived in `skills-attic/disabled-20260708/llm-frontend-browser`. |
+| `/Users/arthur/.omp/agent/skills/oracle` | `/Users/arthur/.omp/agent/skills/.disabled-skills/20260710/oracle` | `/Users/arthur/agents/skills/core/oracle` (missing) | Dangling symlink; target already archived in `skills-attic/disabled-20260708/oracle`. |
+
+After cleanup, `/Users/arthur/.omp/agent/skills` has 15 active entries and no dangling active symlink entries among the surveyed globals.
 
 ## High-level recommendation
 
@@ -37,11 +79,15 @@ This stops ignored local checkouts such as `chrome-devtools-mcp/` and symlinked 
 These are directly tied to current repo tools/workflows and have enough reuse:
 
 - `librarian` — source-backed open-source/library research.
-- `llm-frontend-browser` — ChatGPT/AI Studio/Grok frontend sessions.
 - `background-browser-automation` — background CDP/Playwright safety rules.
+- `browser-control` — browser/Electron/native-control chooser and router.
+- `cmux-browser-drive` — cmux WKWebView surface driver.
 - `cua-driver` — CuaDriver background macOS UI loops (use the `computer_use` tool; raw `cua_driver` only for low-level/debug).
 - `source-archive` — archive source material into repo-local research docs.
 - `rubber-duck-adversarial` — critique/sanity-check mode.
+- `proof-of-work-qa` — proof-artifact planning and reviewer-saving QA evidence.
+
+Temporarily archived: `llm-frontend-browser` remains useful in concept, but its repo target was moved to `skills-attic/disabled-20260708/` while the OpenAI Pro account was broken; do not keep a dangling global symlink active.
 
 ### Keep globally, but ideally in a small personal core-skills package
 
@@ -74,7 +120,7 @@ Useful, but noisy if global:
 
 ### Consolidate overlapping skill families
 
-1. **Browser family**: `background-browser-automation`, `browser-tools`, `web-browser`, `chrome-devtools`, `a11y-debugging`, `debug-optimize-lcp` should become one stronger `browser-automation` skill with modes:
+1. **Browser family**: `background-browser-automation`, `browser-control`, `cmux-browser-drive`, and `cua-driver` are the current canonical active browser/control surface. Older overlap such as `browser-tools` (disabled globally 2026-07-10), `web-browser`, `chrome-devtools`, `a11y-debugging`, and `debug-optimize-lcp` should remain opt-in references or be folded into one stronger `browser-automation` skill with modes:
    - static fetch/search first
    - background CDP target
    - headed visible browser only when explicitly allowed
@@ -169,7 +215,7 @@ Those personas are review lenses, not default blockers; the coordinator picks th
 | `apple-mail` | Search/read local Apple Mail and attachments. | global `agent-stuff` | 0 | 0 | Sensitive personal-data opt-in; not global. |
 | `background-browser-automation` | Background-safe Playwright/Puppeteer/CDP rules. | repo skill | 13 | 1 | Keep as canonical browser safety skill. |
 | `brave-search` | Brave Search CLI/API workflow. | symlinked `pi-skills` | 6 | 0 | Replace with repo `web_search`/research skill; do not auto-load. |
-| `browser-tools` | Visible/interactive browser automation via CDP. | symlinked `pi-skills` | 9 | 2 | Fold into browser skill; visible browser only opt-in. |
+| `browser-tools` | Visible/interactive browser automation via CDP. | symlinked `pi-skills` | 9 | 2 | Disabled from global active surface on 2026-07-10; vendor target remains as reversible opt-in fallback behind `browser-control` / `background-browser-automation`. |
 | `chrome-devtools` | Chrome DevTools MCP debugging/automation. | ignored local `chrome-devtools-mcp` checkout | 4 | 0 | Keep as explicit MCP reference, not default skill. |
 | `codex-plugin-build-ios-apps` | OpenAI Codex iOS app build/debug workflows. | vendored OpenAI router skill | 0 | 0 | Enable via Codex plugin manager only in iOS projects. |
 | `codex-plugin-build-macos-apps` | OpenAI Codex macOS app build/debug workflows. | vendored OpenAI router skill | 1 | 0 | Useful for VoiceInk/macOS projects; plugin-manager opt-in. |
@@ -187,7 +233,7 @@ Those personas are review lenses, not default blockers; the coordinator picks th
 | `gmcli` | Gmail CLI. | symlinked `pi-skills` | 1 | 0 | Merge into opt-in personal Google Workspace skill. |
 | `google-workspace` | Direct Google Workspace APIs helper. | global `agent-stuff` | 1 | 0 | Prefer this over separate gc/gd/gm skills; opt-in due personal data. |
 | `librarian` | Evidence-backed OSS/library research with permalinks. | repo skill | 26 | 0 | Keep auto-loaded. High signal. |
-| `llm-frontend-browser` | ChatGPT/AI Studio/frontend LLM browser automation. | repo skill | 14 | 1 | Keep, but improve async/non-blocking API. |
+| `llm-frontend-browser` | ChatGPT/AI Studio/frontend LLM browser automation. | repo skill; target archived 2026-07-08 | 14 | 1 | Keep archived until the OpenAI Pro/browser-front-end target is restored; dangling global symlink moved to `.disabled-skills/20260710/`. |
 | `cua-driver` | CuaDriver background native macOS GUI automation. | repo skill | 1 | 0 | Keep for VoiceInk/macOS UI validation. |
 | `mermaid` | Mermaid chart authoring/validation. | global `agent-stuff` | 2 | 0 | Keep global core or move to docs/diagram package. |
 | `native-web-search` | Native web search trigger. | global `agent-stuff` | 9 | 0 | Consolidate with research skill; avoid duplicate search skills. |
@@ -219,7 +265,7 @@ packages/
  skills/                               # repo-level global skill convention
   background-browser-automation/      # keep
   librarian/                          # keep
-  llm-frontend-browser/               # keep
+  llm-frontend-browser/               # archived until target is restored; do not leave dangling global symlink active
   cua-driver/                         # keep
   rubber-duck-adversarial/            # keep
   source-archive/                     # keep

@@ -2,7 +2,46 @@ import { Schema } from "effect"
 
 import { JsonValueSchema, type JsonValue } from "./outbox"
 
+export interface PapercutToolParamsLike {
+  readonly kind: string
+  readonly severity: string
+  readonly message: string
+  readonly commandOrTool?: string
+  readonly cwdOrPackage?: string
+  readonly evidenceArtifactId?: string
+  readonly suggestedFix?: string
+}
+
+export interface OmpToolDefinitionLike {
+  readonly name: string
+  readonly label: string
+  readonly description: string
+  readonly approval: "write"
+  readonly parameters: object
+  execute(
+    toolCallId: string,
+    params: PapercutToolParamsLike,
+    signal: AbortSignal | undefined,
+    onUpdate: undefined,
+    ctx: ExtensionContextLike,
+  ): Promise<{ readonly content: readonly { readonly type: "text"; readonly text: string }[]; readonly details?: object }>
+}
+
+export interface TypeBoxBuilderLike {
+  Object(properties: Readonly<Record<string, object>>): object
+  Literal(value: string): object
+  Union(schemas: readonly object[]): object
+  String(options?: { readonly description?: string }): object
+  Optional(schema: object): object
+}
+
+export interface TypeBoxLike {
+  readonly Type: TypeBoxBuilderLike
+}
+
 export interface PiLike {
+  readonly typebox?: TypeBoxLike
+  registerTool?(tool: OmpToolDefinitionLike): void
   on(event: "session_start", handler: ExtensionHandler<SessionStartPayload>): void
   on(event: "turn_start", handler: ExtensionHandler<TurnPayload>): void
   on(event: "turn_end", handler: ExtensionHandler<TurnPayload>): void
@@ -12,6 +51,7 @@ export interface PiLike {
   on(event: "session_branch", handler: ExtensionHandler<SessionBranchPayload>): void
   on(event: "session_shutdown", handler: ExtensionHandler<SessionShutdownPayload>): void
   on(event: "before_provider_request", handler: ExtensionHandler<BeforeProviderRequestPayload>): void
+  on(event: "session_entry", handler: ExtensionHandler<SessionEntryLike>): void
   on(event: string, handler: ExtensionHandler<never>): void
 }
 
@@ -27,7 +67,10 @@ export interface SessionEntryLike {
     readonly timestamp?: number
   }
   readonly model?: string
+  readonly customType?: string
+  readonly data?: JsonValue
 }
+
 
 export interface SessionManagerLike {
   getSessionId(): string
@@ -37,6 +80,7 @@ export interface SessionManagerLike {
 
 export interface ExtensionContextLike {
   readonly cwd?: string
+  readonly model?: { readonly id?: string }
   readonly sessionManager: SessionManagerLike
 }
 

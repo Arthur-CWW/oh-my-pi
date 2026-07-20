@@ -7,7 +7,7 @@ import { Effect } from "effect"
 
 import { ArtifactError, StorageError } from "./errors"
 import { ingestOutbox } from "./ingest"
-import { LedgerStore, defaultLedgerPath, openLedger, type EventFilters, type ModelCallFilters, type StatusSummary } from "./ledger"
+import { decodePapercutInput, LedgerStore, defaultLedgerPath, openLedger, type EventFilters, type ModelCallFilters, type PapercutReportResult, type StatusSummary } from "./index"
 import {
   RoutingStore,
   openRoutingStore,
@@ -22,7 +22,7 @@ import { queryOperationalCanaries, queryOperationalDiagnostics, queryOperational
 import { queryUsageByAgent, queryUsageByLaneHour, queryUsageBySession, type UsageByAgentRow, type UsageByLaneHourRow, type UsageBySessionRow } from "./stats"
 import { runQueueCli } from "./queue-cli"
 
-type Command = StatusCommand | ModelCallsCommand | EventsCommand | IngestCommand | RoutingCommand | StatsCommand | OpsCommand
+type Command = StatusCommand | ModelCallsCommand | EventsCommand | IngestCommand | PapercutCommand | RoutingCommand | StatsCommand | OpsCommand
 
 type RoutingCommand = RoutingObserveCommand | RoutingLanesCommand | RoutingBriefCommand | RoutingLogCommand | RoutingSeedCommand
 
@@ -52,6 +52,19 @@ interface EventsCommand extends BaseCommand {
 interface IngestCommand extends BaseCommand {
   readonly name: "ingest"
   readonly from: string
+}
+
+interface PapercutCommand extends BaseCommand {
+  readonly name: "papercut"
+  readonly input: {
+    readonly kind: "tool" | "repo" | "docs" | "test" | "workflow" | "config" | "agent"
+    readonly severity: "low" | "medium" | "high"
+    readonly message: string
+    readonly commandOrTool?: string
+    readonly cwdOrPackage?: string
+    readonly evidenceArtifactId?: string
+    readonly suggestedFix?: string
+  }
 }
 
 interface RoutingObserveCommand extends BaseCommand {
@@ -152,16 +165,8 @@ export async function runCli(argv: readonly string[] = Bun.argv.slice(2)): Promi
       return runEvents(parsed)
     case "ingest":
       return runIngest(parsed)
-    case "ops-sessions":
-      return runOpsSessions(parsed)
-    case "ops-routes":
-      return runOpsRoutes(parsed)
-    case "ops-diagnostics":
-      return runOpsDiagnostics(parsed)
-    case "ops-canaries":
-      return runOpsCanaries(parsed)
-    case "ops-releases":
-      return runOpsReleases(parsed)
+    case "papercut":
+      return runPapercut(parsed)
     case "routing-observe":
       return runRoutingObserve(parsed)
     case "routing-lanes":
@@ -178,6 +183,16 @@ export async function runCli(argv: readonly string[] = Bun.argv.slice(2)): Promi
       return runStatsAgents(parsed)
     case "stats-sessions":
       return runStatsSessions(parsed)
+    case "ops-sessions":
+      return runOpsSessions(parsed)
+    case "ops-routes":
+      return runOpsRoutes(parsed)
+    case "ops-diagnostics":
+      return runOpsDiagnostics(parsed)
+    case "ops-canaries":
+      return runOpsCanaries(parsed)
+    case "ops-releases":
+      return runOpsReleases(parsed)
   }
 }
 
@@ -211,6 +226,19 @@ function runEvents(command: EventsCommand): Promise<number> {
 function runIngest(command: IngestCommand): Promise<number> {
   const program = ingestOutbox(command.from).pipe(Effect.provide(openLedger(command.dbPath)))
   return runStorageProgram(program, command.json, renderIngestTable)
+}
+
+function runPapercut(command: PapercutCommand): Promise<number> {
+  const program = Effect.gen(function* () {
+    const store = yield* LedgerStore
+    return yield* store.reportPapercut({
+      ...command.input,
+      cwdOrPackage: command.input.cwdOrPackage ?? process.cwd(),
+      timestamp: Date.now(),
+    })
+  }).pipe(Effect.provide(openLedger(command.dbPath)))
+
+  return runStorageProgram(program, command.json, renderPapercutTable)
 }
 
 function runRoutingObserve(command: RoutingObserveCommand): Promise<number> {
@@ -323,6 +351,8 @@ function parseCommand(argv: readonly string[]): Command | CliUsageError {
       return parseEvents(argv.slice(1), base)
     case "ingest":
       return parseIngest(argv.slice(1), base)
+    case "papercut":
+      return parsePapercut(argv.slice(1), base)
     case "routing":
       return parseRouting(argv.slice(1), base)
     case "stats":
@@ -525,6 +555,87 @@ function parseIngest(argv: readonly string[], base: BaseCommand): IngestCommand 
 
   if (from === undefined || from.length === 0) return usage("ingest requires --from <outbox.jsonl>")
   return { name: "ingest", dbPath, json, from }
+}
+
+function parsePapercut(argv: readonly string[], base: BaseCommand): PapercutCommand | CliUsageError {
+  let dbPath = base.dbPath
+  let json = base.json
+  let kind: string | undefined
+  let severity: string | undefined
+  let message: string | undefined
+  let commandOrTool: string | undefined
+  let cwdOrPackage: string | undefined
+  let evidenceArtifactId: string | undefined
+  let suggestedFix: string | undefined
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index]
+    if (arg === "--json") {
+      json = true
+    } else if (arg === "--db") {
+      const value = requiredValue(argv, index, "--db")
+      if (value instanceof CliUsageError) return value
+      dbPath = value
+      index += 1
+    } else if (arg?.startsWith("--db=")) {
+      dbPath = arg.slice("--db=".length)
+    } else if (arg === "--kind") {
+      const value = requiredValue(argv, index, "--kind")
+      if (value instanceof CliUsageError) return value
+      kind = value
+      index += 1
+    } else if (arg?.startsWith("--kind=")) {
+      kind = arg.slice("--kind=".length)
+    } else if (arg === "--severity") {
+      const value = requiredValue(argv, index, "--severity")
+      if (value instanceof CliUsageError) return value
+      severity = value
+      index += 1
+    } else if (arg?.startsWith("--severity=")) {
+      severity = arg.slice("--severity=".length)
+    } else if (arg === "--message") {
+      const value = requiredValue(argv, index, "--message")
+      if (value instanceof CliUsageError) return value
+      message = value
+      index += 1
+    } else if (arg?.startsWith("--message=")) {
+      message = arg.slice("--message=".length)
+    } else if (arg === "--command-or-tool") {
+      const value = requiredValue(argv, index, "--command-or-tool")
+      if (value instanceof CliUsageError) return value
+      commandOrTool = value
+      index += 1
+    } else if (arg?.startsWith("--command-or-tool=")) {
+      commandOrTool = arg.slice("--command-or-tool=".length)
+    } else if (arg === "--cwd-or-package") {
+      const value = requiredValue(argv, index, "--cwd-or-package")
+      if (value instanceof CliUsageError) return value
+      cwdOrPackage = value
+      index += 1
+    } else if (arg?.startsWith("--cwd-or-package=")) {
+      cwdOrPackage = arg.slice("--cwd-or-package=".length)
+    } else if (arg === "--evidence-artifact-id") {
+      const value = requiredValue(argv, index, "--evidence-artifact-id")
+      if (value instanceof CliUsageError) return value
+      evidenceArtifactId = value
+      index += 1
+    } else if (arg?.startsWith("--evidence-artifact-id=")) {
+      evidenceArtifactId = arg.slice("--evidence-artifact-id=".length)
+    } else if (arg === "--suggested-fix") {
+      const value = requiredValue(argv, index, "--suggested-fix")
+      if (value instanceof CliUsageError) return value
+      suggestedFix = value
+      index += 1
+    } else if (arg?.startsWith("--suggested-fix=")) {
+      suggestedFix = arg.slice("--suggested-fix=".length)
+    } else {
+      return usage(`unknown papercut option: ${arg}`)
+    }
+  }
+
+  const input = decodePapercutInput({ kind, severity, message, commandOrTool, cwdOrPackage, evidenceArtifactId, suggestedFix })
+  if (input === undefined) return usage("papercut requires valid --kind, --severity, and --message values")
+  return { name: "papercut", dbPath, json, input }
 }
 
 function parseRouting(argv: readonly string[], base: BaseCommand): RoutingCommand | CliUsageError {
@@ -990,6 +1101,13 @@ function renderIngestTable(result: { readonly inserted: number; readonly ignored
   return renderTable(["inserted", "ignored", "malformed"], [[result.inserted, result.ignored, result.malformed]])
 }
 
+function renderPapercutTable(result: PapercutReportResult): string {
+  return renderTable(
+    ["fingerprint", "status", "occurrences"],
+    [[result.record.fingerprint, result.record.status, result.record.occurrences]],
+  )
+}
+
 function renderRoutingObserveTable(result: RoutingObserveResult): string {
   return renderTable(["id", "inserted"], [[result.id, result.inserted ? "true" : "false"]])
 }
@@ -1120,8 +1238,6 @@ function renderOperationalReleasesTable(rows: readonly OperationalReleaseDto[]):
     row.mismatches.join(","),
   ]))
 }
-
-
 function renderStatsLanesTable(rows: readonly UsageByLaneHourRow[]): string {
   return renderTable(
     ["lane", "hourBucket", "calls", "tokensIn", "tokensOut", "cacheRead", "cost", "avgLatencyMs", "tokensPerMinute", "tokensPerSecond", "avgTtftMs", "reasoningTokens"],
@@ -1206,7 +1322,7 @@ function writeJsonError(error: CliFailure): void {
 }
 
 function usage(message: string): CliUsageError {
-  return new CliUsageError(`${message}. usage: control-plane <status|model-calls|events|ingest|routing|stats|ops|queue> [--db <path>] [--json]`)
+  return new CliUsageError(`${message}. usage: control-plane <status|model-calls|events|ingest|papercut|routing|stats|ops|queue> [--db <path>] [--json]`)
 }
 
 if (import.meta.main) {

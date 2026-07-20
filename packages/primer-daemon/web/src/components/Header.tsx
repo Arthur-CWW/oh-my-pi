@@ -1,6 +1,7 @@
+import { useEffect } from "react"
 import type * as React from "react"
 
-import { type EvidenceSource, getStatus } from "@/api"
+import { type EvidenceSource, getReviewFeed, getStatus } from "@/api"
 import { usePolled } from "@/hooks/usePolled"
 import { ageMs, relativeShort } from "@/lib/relative-time"
 import { cn } from "@/lib/utils"
@@ -43,16 +44,18 @@ const NAV_LINKS: Array<{ href: string; label: string; segment: string }> = [
   { href: "#/", label: "Dashboard", segment: "" },
   { href: "#/read", label: "Read", segment: "read" },
   { href: "#/review", label: "Review", segment: "review" },
+  { href: "#/inbox", label: "Inbox", segment: "inbox" },
   { href: "#/shadow", label: "Shadow", segment: "shadow" },
   { href: "#/enrich", label: "Enrich", segment: "enrich" },
   { href: "#/scheduler", label: "Scheduler", segment: "scheduler" },
   { href: "#/pipeline", label: "Pipeline", segment: "pipeline" },
   { href: "#/cards", label: "Cards", segment: "cards" },
+  { href: "#/tabs", label: "Tabs", segment: "tabs" },
 ]
 
-function Nav({ segment }: { segment: string }): React.JSX.Element {
+function Nav({ segment, pendingCount }: { segment: string; pendingCount: number | null }): React.JSX.Element {
   return (
-    <nav className="flex items-center gap-0.5">
+    <nav className="flex min-w-0 items-center gap-0.5 overflow-x-auto">
       {NAV_LINKS.map((link) => (
         <a
           key={link.href}
@@ -65,6 +68,11 @@ function Nav({ segment }: { segment: string }): React.JSX.Element {
           )}
         >
           {link.label}
+          {link.segment === "inbox" ? (
+            <span className="ml-1 rounded-full bg-muted px-1.5 py-0.5 font-mono text-[10px] tabular-nums text-foreground/80">
+              {pendingCount ?? "—"}
+            </span>
+          ) : null}
         </a>
       ))}
     </nav>
@@ -77,17 +85,24 @@ function Nav({ segment }: { segment: string }): React.JSX.Element {
 
 export function Header({ routeSegment = "" }: { routeSegment?: string }): React.JSX.Element {
   const { data, error } = usePolled(getStatus, 30_000)
+  const reviewFeed = usePolled(getReviewFeed, 30_000)
+
+  useEffect(() => {
+    const refresh = () => reviewFeed.refetch()
+    window.addEventListener("review-feed-updated", refresh)
+    return () => window.removeEventListener("review-feed-updated", refresh)
+  }, [reviewFeed.refetch])
 
   return (
     <header className="sticky top-0 z-40 border-b border-border/70 bg-background/85 backdrop-blur supports-[backdrop-filter]:bg-background/70">
       <div className="mx-auto w-full max-w-3xl px-4 py-3 min-[1200px]:max-w-6xl">
         <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-4">
+          <div className="flex min-w-0 items-center gap-4">
             <div className="flex items-baseline gap-2">
               <h1 className="text-base font-semibold tracking-tight">Primer</h1>
               <span className="text-xs text-muted-foreground">dæmon</span>
             </div>
-            <Nav segment={routeSegment} />
+            <Nav segment={routeSegment} pendingCount={reviewFeed.data?.pendingCount ?? null} />
           </div>
         </div>
 

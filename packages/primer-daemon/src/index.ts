@@ -1,4 +1,7 @@
 export * from "./paths"
+export * from "./browser-context"
+export * from "./tabs-api"
+export * from "./tabs-cli"
 export * from "./schema"
 export * from "./rank"
 export * from "./ledger"

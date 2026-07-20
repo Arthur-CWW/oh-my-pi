@@ -1,16 +1,17 @@
 import { createHash } from "node:crypto"
-import { mkdirSync, readFileSync } from "node:fs"
+import { appendFileSync, mkdirSync, readFileSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 import { homedir } from "node:os"
 
 import { Database } from "bun:sqlite"
-import { Context, Effect, Layer } from "effect"
+import { Context, Effect, Layer, Schema } from "effect"
 import { and, desc, eq, gte, isNull } from "drizzle-orm"
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite"
 
 import { ArtifactError, StorageError } from "./errors"
 import { migrateLedger, setDurabilityPragmas } from "./migrate"
-import { agentTimelineEvents, artifacts, branches, events, modelCalls, providerCalls, routeAdvisors, routeCandidates, routeEventArtifacts, routeResolutions, sessions, turns, type AgentTimelineEventRow, type ArtifactRow, type EventRow, type ModelCallRow, type RouteAdvisorRow, type RouteCandidateRow, type RouteEventArtifactRow, type RouteResolutionRow } from "./schema"
+import { agentTimelineEvents, artifacts, branches, events, modelCalls, papercuts, providerCalls, routeAdvisors, routeCandidates, routeEventArtifacts, routeResolutions, sessions, turns, PapercutInputSchema, PapercutSeveritySchema, PapercutStatusSchema, type AgentTimelineEventRow, type ArtifactRow, type EventRow, type ModelCallRow, type PapercutInput, type PapercutKind, type PapercutRow, type PapercutSeverity, type PapercutStatus, type RouteAdvisorRow, type RouteCandidateRow, type RouteEventArtifactRow, type RouteResolutionRow } from "./schema"
+import { decodeRelayCursorV1, decodeRelayEnvelopeV1, type NodeIdentityV1, type PeerRouteV1, type RelayAckV1, type RelayEnvelopeV1, type RelayHealthV1, type RelayJson, type WorkLeaseV1, type WorkPacketV1 } from "./relay-schema"
 
 export interface InsertResult {
   readonly inserted: boolean
@@ -294,6 +295,43 @@ export interface EventFilters {
   readonly limit?: number
 }
 
+
+export interface PapercutReportInput extends PapercutInput {
+  readonly timestamp: number
+  readonly agentId?: string
+  readonly modelId?: string
+  readonly sessionId?: string
+}
+
+export interface PapercutFilters {
+  readonly severity?: PapercutSeverity
+  readonly status?: PapercutStatus
+  readonly limit?: number
+}
+
+export interface PapercutRecord {
+  readonly fingerprint: string
+  readonly timestamp: number
+  readonly agentId?: string
+  readonly modelId?: string
+  readonly sessionId?: string
+  readonly package?: string
+  readonly kind: PapercutKind
+  readonly severity: PapercutSeverity
+  readonly commandOrTool?: string
+  readonly message: string
+  readonly evidence?: string
+  readonly suggestedFix?: string
+  readonly status: PapercutStatus
+  readonly occurrences: number
+  readonly firstSeenAt: number
+  readonly lastSeenAt: number
+}
+
+export interface PapercutReportResult {
+  readonly record: PapercutRecord
+  readonly appendedTo: string
+}
 export interface TimelineSourceCursor {
   readonly sourceSessionId: string
   readonly sourceSeq: number
@@ -317,6 +355,24 @@ export interface BatchResult {
   readonly inserted: number
   readonly ignored: number
 }
+export interface RelayReceiveInput { readonly receiverNodeId: string; readonly envelope: RelayEnvelopeV1; readonly receivedAt: number }
+export interface RelayReceiveResult { readonly disposition: "accepted" | "duplicate"; readonly receipt: RelayAckV1; readonly cursor?: RelayAckV1["destinationCursor"] }
+export interface RelayRetryInput { readonly envelopeId: string; readonly nextAttemptAt: number }
+export interface LeaseClaimInput { readonly packet: WorkPacketV1; readonly ownerNodeId: string; readonly ownerSessionId: string; readonly ownerAgentId: string; readonly acquiredAt: number; readonly renewBy: number }
+export interface RelayOutboxAcceptance { readonly envelopeId: string; readonly acceptedAt: number }
+export interface LeaseMutationInput { readonly packetId: string; readonly leaseEpoch: string; readonly ownerNodeId: string; readonly at: number; readonly state?: "completed" | "failed" | "cancelled" }
+export interface LeaseRenewalInput extends LeaseMutationInput { readonly renewBy: number }
+export interface LeaseMutationResult { readonly fenced: boolean; readonly lease?: WorkLeaseV1 }
+export interface LeaseExpiry { readonly packetId: string; readonly state: "queued" | "orphaned" }
+export interface RelayOutboxItem { readonly envelope: RelayEnvelopeV1; readonly attemptCount: number; readonly nextAttemptAt: number }
+export interface RelayAdapterDelivery { readonly envelopeId: string; readonly messageId: string }
+export interface RelayNodeInput { readonly identity: NodeIdentityV1 }
+export interface RelayHealthInput { readonly observerNodeId: string; readonly health: RelayHealthV1; readonly consecutiveFailures: number; readonly lastFailureAt?: number }
+export interface RelayNodeRecord { readonly nodeId: string; readonly displayName: string; readonly protocolVersions: readonly number[]; readonly firstSeenAt: number; readonly lastSeenAt: number; readonly lastHostEpoch: string }
+export interface RelayRouteRecord { readonly nodeId: string; readonly peerId: string; readonly alias?: string; readonly endpoint: string; readonly enabled: boolean; readonly updatedAt: number }
+export interface RelayHealthRecord { readonly observerNodeId: string; readonly peerNodeId: string; readonly state: "healthy" | "degraded" | "offline"; readonly lastSuccessAt?: number; readonly lastFailureAt?: number; readonly consecutiveFailures: number; readonly queueDepth: number; readonly oldestUnackedMs?: number; readonly detail?: string }
+export interface RelayQueueState { readonly pendingOutbox: number; readonly pendingInbox: number; readonly oldestPendingOutboxAt?: number }
+
 
 export interface LedgerStoreShape {
   readonly dbPath: string
@@ -332,7 +388,27 @@ export interface LedgerStoreShape {
   readonly statusSummary: () => Effect.Effect<StatusSummary, StorageError>
   readonly listModelCalls: (filters: ModelCallFilters) => Effect.Effect<ModelCallRow[], StorageError>
   readonly listEvents: (filters: EventFilters) => Effect.Effect<EventRow[], StorageError>
-  readonly getArtifact: (id: string) => Effect.Effect<ArtifactRecord & { readonly content: string }, StorageError | ArtifactError>
+  readonly reportPapercut: (input: PapercutReportInput) => Effect.Effect<PapercutReportResult, StorageError>
+  readonly listPapercuts: (filters: PapercutFilters) => Effect.Effect<PapercutRecord[], StorageError>
+  readonly enqueueRelayEnvelope: (envelope: RelayEnvelopeV1) => Effect.Effect<InsertResult, StorageError>
+  readonly scheduleRelayRetry: (input: RelayRetryInput) => Effect.Effect<InsertResult, StorageError>
+  readonly listPendingRelayOutbox: (now: number, limit?: number) => Effect.Effect<readonly RelayOutboxItem[], StorageError>
+  readonly acceptRelayOutbox: (input: RelayOutboxAcceptance) => Effect.Effect<InsertResult, StorageError>
+  readonly receiveRelayEnvelope: (input: RelayReceiveInput) => Effect.Effect<RelayReceiveResult, StorageError>
+  readonly recordRelayAdapterDelivery: (input: RelayAdapterDelivery) => Effect.Effect<InsertResult, StorageError>
+  readonly upsertRelayNode: (input: RelayNodeInput) => Effect.Effect<InsertResult, StorageError>
+  readonly upsertRelayRoute: (route: PeerRouteV1, alias: string | undefined, enabled: boolean, updatedAt: number) => Effect.Effect<InsertResult, StorageError>
+  readonly recordRelayHealth: (input: RelayHealthInput) => Effect.Effect<InsertResult, StorageError>
+  readonly listRelayNodes: () => Effect.Effect<readonly RelayNodeRecord[], StorageError>
+  readonly listRelayRoutes: (nodeId?: string) => Effect.Effect<readonly RelayRouteRecord[], StorageError>
+  readonly listRelayHealth: (observerNodeId?: string) => Effect.Effect<readonly RelayHealthRecord[], StorageError>
+  readonly relayQueueState: () => Effect.Effect<RelayQueueState, StorageError>
+  readonly claimWorkLease: (input: LeaseClaimInput) => Effect.Effect<LeaseMutationResult, StorageError>
+  readonly renewWorkLease: (input: LeaseRenewalInput) => Effect.Effect<LeaseMutationResult, StorageError>
+  readonly finishWorkLease: (input: LeaseMutationInput) => Effect.Effect<LeaseMutationResult, StorageError>
+  readonly expireWorkLeases: (now: number) => Effect.Effect<readonly LeaseExpiry[], StorageError>
+  readonly fenceWorkLease: (input: LeaseMutationInput) => Effect.Effect<LeaseMutationResult, StorageError>
+  readonly getArtifact: (id: string) => Effect.Effect<ArtifactRecord & { readonly content: string }, ArtifactError>
   readonly close: () => void
   readonly listAgentTimelineRows: (agentId: string, afterAgentSeq?: number, limit?: number) => Effect.Effect<AgentTimelineEventRow[], StorageError>
   readonly listTimelineRowsAfterSource: (cursor: TimelineSourceCursor | undefined, limit: number) => Effect.Effect<AgentTimelineEventRow[], StorageError>
@@ -377,6 +453,7 @@ function makeLedgerStore(dbPath: string): LedgerStoreShape {
   setDurabilityPragmas(sqlite)
   migrateLedger(sqlite)
   const db = drizzle(sqlite)
+  const papercutLogPath = defaultPapercutLogPath(dbPath)
 
   return {
     dbPath,
@@ -428,6 +505,30 @@ function makeLedgerStore(dbPath: string): LedgerStoreShape {
     ),
     listEvents: Effect.fn("LedgerStore.listEvents")((filters: EventFilters) =>
       storageEffect("listEvents", () => listEventRows(db, filters)),
+    ),
+    reportPapercut: Effect.fn("LedgerStore.reportPapercut")((input: PapercutReportInput) =>
+      storageEffect("reportPapercut", () => reportPapercut(db, papercutLogPath, input)),
+    ),
+    enqueueRelayEnvelope: Effect.fn("LedgerStore.enqueueRelayEnvelope")((envelope: RelayEnvelopeV1) => storageEffect("enqueueRelayEnvelope", () => enqueueRelayEnvelope(sqlite, envelope))),
+    scheduleRelayRetry: Effect.fn("LedgerStore.scheduleRelayRetry")((input: RelayRetryInput) => storageEffect("scheduleRelayRetry", () => scheduleRelayRetry(sqlite, input))),
+    acceptRelayOutbox: Effect.fn("LedgerStore.acceptRelayOutbox")((input: RelayOutboxAcceptance) => storageEffect("acceptRelayOutbox", () => acceptRelayOutbox(sqlite, input))),
+    listPendingRelayOutbox: Effect.fn("LedgerStore.listPendingRelayOutbox")((now: number, limit?: number) => storageEffect("listPendingRelayOutbox", () => listPendingRelayOutbox(sqlite, now, limit))),
+    receiveRelayEnvelope: Effect.fn("LedgerStore.receiveRelayEnvelope")((input: RelayReceiveInput) => storageEffect("receiveRelayEnvelope", () => receiveRelayEnvelope(sqlite, input))),
+    recordRelayAdapterDelivery: Effect.fn("LedgerStore.recordRelayAdapterDelivery")((input: RelayAdapterDelivery) => storageEffect("recordRelayAdapterDelivery", () => recordRelayAdapterDelivery(sqlite, input))),
+    upsertRelayNode: Effect.fn("LedgerStore.upsertRelayNode")((input: RelayNodeInput) => storageEffect("upsertRelayNode", () => upsertRelayNode(sqlite, input))),
+    upsertRelayRoute: Effect.fn("LedgerStore.upsertRelayRoute")((route: PeerRouteV1, alias: string | undefined, enabled: boolean, updatedAt: number) => storageEffect("upsertRelayRoute", () => upsertRelayRoute(sqlite, route, alias, enabled, updatedAt))),
+    recordRelayHealth: Effect.fn("LedgerStore.recordRelayHealth")((input: RelayHealthInput) => storageEffect("recordRelayHealth", () => recordRelayHealth(sqlite, input))),
+    listRelayNodes: Effect.fn("LedgerStore.listRelayNodes")(() => storageEffect("listRelayNodes", () => listRelayNodes(sqlite))),
+    listRelayRoutes: Effect.fn("LedgerStore.listRelayRoutes")((nodeId?: string) => storageEffect("listRelayRoutes", () => listRelayRoutes(sqlite, nodeId))),
+    listRelayHealth: Effect.fn("LedgerStore.listRelayHealth")((observerNodeId?: string) => storageEffect("listRelayHealth", () => listRelayHealth(sqlite, observerNodeId))),
+    relayQueueState: Effect.fn("LedgerStore.relayQueueState")(() => storageEffect("relayQueueState", () => relayQueueState(sqlite))),
+    claimWorkLease: Effect.fn("LedgerStore.claimWorkLease")((input: LeaseClaimInput) => storageEffect("claimWorkLease", () => claimWorkLease(sqlite, input))),
+    renewWorkLease: Effect.fn("LedgerStore.renewWorkLease")((input: LeaseRenewalInput) => storageEffect("renewWorkLease", () => renewWorkLease(sqlite, input))),
+    finishWorkLease: Effect.fn("LedgerStore.finishWorkLease")((input: LeaseMutationInput) => storageEffect("finishWorkLease", () => finishWorkLease(sqlite, input))),
+    fenceWorkLease: Effect.fn("LedgerStore.fenceWorkLease")((input: LeaseMutationInput) => storageEffect("fenceWorkLease", () => fenceWorkLease(sqlite, input))),
+    expireWorkLeases: Effect.fn("LedgerStore.expireWorkLeases")((now: number) => storageEffect("expireWorkLeases", () => expireWorkLeases(sqlite, now))),
+    listPapercuts: Effect.fn("LedgerStore.listPapercuts")((filters: PapercutFilters) =>
+      storageEffect("listPapercuts", () => listPapercutRows(db, filters)),
     ),
     listAgentTimelineRows: Effect.fn("LedgerStore.listAgentTimelineRows")((agentId: string, afterAgentSeq?: number, limit?: number) => storageEffect("listAgentTimelineRows", () => listAgentTimelineRows(db, agentId, afterAgentSeq, limit))),
     listTimelineRowsAfterSource: Effect.fn("LedgerStore.listTimelineRowsAfterSource")((cursor: TimelineSourceCursor | undefined, limit: number) => storageEffect("listTimelineRowsAfterSource", () => listTimelineRowsAfterSource(sqlite, cursor, limit))),
@@ -589,50 +690,6 @@ function insertRouteResolution(db: LedgerDb, input: RouteResolutionInput): Inser
   if (input.advisors.length > 0) db.insert(routeAdvisors).values(input.advisors.map((advisor) => ({ ...advisor, routeResolutionId: input.id, advisorAgentId: advisor.advisorAgentId ?? null, accountRef: advisor.accountRef ?? null, rawAdviceArtifactId: advisor.rawAdviceArtifactId ?? null }))).run()
   if (input.artifacts.length > 0) db.insert(routeEventArtifacts).values(input.artifacts.map((artifact) => ({ ...artifact, ownerKind: "routeResolution", ownerId: input.id }))).run()
   return { inserted: true }
-}
-
-function timelineValues(input: TimelineInput) {
-  const { artifacts: timelineArtifacts, ...row } = input
-  return { ...row, agentSessionId: input.agentSessionId ?? null, parentSessionId: input.parentSessionId ?? null, parentAgentId: input.parentAgentId ?? null, taskId: input.taskId ?? null, packetId: input.packetId ?? null, branchId: input.branchId ?? null, turnId: input.turnId ?? null, fromState: input.fromState ?? null, toState: input.toState ?? null, routeResolutionId: input.routeResolutionId ?? null, reason: input.reason ?? null, errorClass: input.errorClass ?? null }
-}
-
-function routeValues(input: RouteResolutionInput) {
-  const { candidates, advisors, artifacts: routeArtifacts, timeline, ...row } = input
-  return { ...row, agentSessionId: input.agentSessionId ?? null, parentSessionId: input.parentSessionId ?? null, parentAgentId: input.parentAgentId ?? null, taskId: input.taskId ?? null, packetId: input.packetId ?? null, branchId: input.branchId ?? null, turnId: input.turnId ?? null, reason: input.reason ?? null, upstreamProvider: input.upstreamProvider ?? null, accountRef: input.accountRef ?? null, fallbackFromResolutionId: input.fallbackFromResolutionId ?? null, revertedFromResolutionId: input.revertedFromResolutionId ?? null, rawDecisionArtifactId: input.rawDecisionArtifactId ?? null }
-}
-
-function timelineMatches(db: LedgerDb, row: AgentTimelineEventRow, input: TimelineInput): boolean {
-  const expected = timelineValues(input)
-  const artifacts = db.select().from(routeEventArtifacts).where(and(eq(routeEventArtifacts.ownerKind, "agentEvent"), eq(routeEventArtifacts.ownerId, input.id))).orderBy(routeEventArtifacts.ordinal).all()
-  return row.id === expected.id && row.ts === expected.ts && row.sourceSessionId === expected.sourceSessionId && row.sourceSeq === expected.sourceSeq && row.agentId === expected.agentId && row.agentSeq === expected.agentSeq && row.agentSessionId === expected.agentSessionId && row.parentSessionId === expected.parentSessionId && row.parentAgentId === expected.parentAgentId && row.taskId === expected.taskId && row.packetId === expected.packetId && row.branchId === expected.branchId && row.turnId === expected.turnId && row.kind === expected.kind && row.fromState === expected.fromState && row.toState === expected.toState && row.routeResolutionId === expected.routeResolutionId && row.reason === expected.reason && row.errorClass === expected.errorClass && row.detail === expected.detail && row.payloadVersion === expected.payloadVersion && JSON.stringify(artifacts.map((artifact) => [artifact.ordinal, artifact.role, artifact.artifactId])) === JSON.stringify(input.artifacts.map((artifact) => [artifact.ordinal, artifact.role, artifact.artifactId]))
-}
-
-function routeMatches(db: LedgerDb, row: RouteResolutionRow, input: RouteResolutionInput): boolean {
-  const expected = routeValues(input)
-  const candidates = db.select().from(routeCandidates).where(eq(routeCandidates.routeResolutionId, input.id)).orderBy(routeCandidates.ordinal).all()
-  const advisors = db.select().from(routeAdvisors).where(eq(routeAdvisors.routeResolutionId, input.id)).orderBy(routeAdvisors.ordinal).all()
-  const artifacts = db.select().from(routeEventArtifacts).where(and(eq(routeEventArtifacts.ownerKind, "routeResolution"), eq(routeEventArtifacts.ownerId, input.id))).orderBy(routeEventArtifacts.ordinal).all()
-  return row.id === expected.id && row.ts === expected.ts && row.sourceSessionId === expected.sourceSessionId && row.sourceSeq === expected.sourceSeq && row.agentId === expected.agentId && row.agentSeq === expected.agentSeq && row.agentSessionId === expected.agentSessionId && row.parentSessionId === expected.parentSessionId && row.parentAgentId === expected.parentAgentId && row.taskId === expected.taskId && row.packetId === expected.packetId && row.branchId === expected.branchId && row.turnId === expected.turnId && row.changeKind === expected.changeKind && row.reason === expected.reason && row.lane === expected.lane && row.provider === expected.provider && row.upstreamProvider === expected.upstreamProvider && row.model === expected.model && row.accountKind === expected.accountKind && row.accountRef === expected.accountRef && row.accountProvenance === expected.accountProvenance && row.effort === expected.effort && row.winningLayer === expected.winningLayer && row.constraints === expected.constraints && row.consultedSources === expected.consultedSources && row.overriddenValues === expected.overriddenValues && row.fallbackFromResolutionId === expected.fallbackFromResolutionId && row.revertedFromResolutionId === expected.revertedFromResolutionId && row.advisorMode === expected.advisorMode && row.rawDecisionArtifactId === expected.rawDecisionArtifactId && row.payloadVersion === expected.payloadVersion && JSON.stringify(candidates.map((candidate) => [candidate.ordinal, candidate.lane, candidate.provider, candidate.model, candidate.accountKind, candidate.accountRef, candidate.effort, candidate.disposition, candidate.fallbackOrdinal, candidate.rejectionCode, candidate.rejectionReason, candidate.failedConstraintIds])) === JSON.stringify(input.candidates.map((candidate) => [candidate.ordinal, candidate.lane, candidate.provider, candidate.model, candidate.accountKind, candidate.accountRef ?? null, candidate.effort, candidate.disposition, candidate.fallbackOrdinal ?? null, candidate.rejectionCode ?? null, candidate.rejectionReason ?? null, candidate.failedConstraintIds])) && JSON.stringify(advisors.map((advisor) => [advisor.ordinal, advisor.advisorAgentId, advisor.purpose, advisor.lane, advisor.provider, advisor.model, advisor.accountKind, advisor.accountRef, advisor.accountProvenance, advisor.effort, advisor.winningLayer, advisor.independenceRequired, advisor.rawAdviceArtifactId])) === JSON.stringify(input.advisors.map((advisor) => [advisor.ordinal, advisor.advisorAgentId ?? null, advisor.purpose, advisor.lane, advisor.provider, advisor.model, advisor.accountKind, advisor.accountRef ?? null, advisor.accountProvenance, advisor.effort, advisor.winningLayer, advisor.independenceRequired, advisor.rawAdviceArtifactId ?? null])) && JSON.stringify(artifacts.map((artifact) => [artifact.ordinal, artifact.role, artifact.artifactId])) === JSON.stringify(input.artifacts.map((artifact) => [artifact.ordinal, artifact.role, artifact.artifactId]))
-}
-
-function insertProviderCall(db: LedgerDb, input: ProviderCallInput): InsertResult {
-  const result = db.insert(providerCalls).values({
-    id: input.id,
-    ts: input.ts,
-    sessionId: input.sessionId,
-    branchId: input.branchId ?? null,
-    packetId: input.packetId ?? null,
-    provider: input.provider,
-    operation: input.operation,
-    inputHash: input.inputHash,
-    rawRequestArtifact: input.rawRequestArtifact ?? null,
-    latencyMs: input.latencyMs,
-    outcome: input.outcome,
-    errorClass: input.errorClass ?? null,
-    cost: input.cost ?? null,
-    usage: input.usage ?? null,
-  }).onConflictDoNothing().returning({ id: providerCalls.id }).all()
-  return { inserted: result.length > 0 }
 }
 
 interface OperationalEventStoredRow {
@@ -930,6 +987,50 @@ function updateOperationalSource(db: LedgerDb, input: OperationalEventInput): vo
   )
 }
 
+function timelineValues(input: TimelineInput) {
+  const { artifacts: timelineArtifacts, ...row } = input
+  return { ...row, agentSessionId: input.agentSessionId ?? null, parentSessionId: input.parentSessionId ?? null, parentAgentId: input.parentAgentId ?? null, taskId: input.taskId ?? null, packetId: input.packetId ?? null, branchId: input.branchId ?? null, turnId: input.turnId ?? null, fromState: input.fromState ?? null, toState: input.toState ?? null, routeResolutionId: input.routeResolutionId ?? null, reason: input.reason ?? null, errorClass: input.errorClass ?? null }
+}
+
+function routeValues(input: RouteResolutionInput) {
+  const { candidates, advisors, artifacts: routeArtifacts, timeline, ...row } = input
+  return { ...row, agentSessionId: input.agentSessionId ?? null, parentSessionId: input.parentSessionId ?? null, parentAgentId: input.parentAgentId ?? null, taskId: input.taskId ?? null, packetId: input.packetId ?? null, branchId: input.branchId ?? null, turnId: input.turnId ?? null, reason: input.reason ?? null, upstreamProvider: input.upstreamProvider ?? null, accountRef: input.accountRef ?? null, fallbackFromResolutionId: input.fallbackFromResolutionId ?? null, revertedFromResolutionId: input.revertedFromResolutionId ?? null, rawDecisionArtifactId: input.rawDecisionArtifactId ?? null }
+}
+
+function timelineMatches(db: LedgerDb, row: AgentTimelineEventRow, input: TimelineInput): boolean {
+  const expected = timelineValues(input)
+  const artifacts = db.select().from(routeEventArtifacts).where(and(eq(routeEventArtifacts.ownerKind, "agentEvent"), eq(routeEventArtifacts.ownerId, input.id))).orderBy(routeEventArtifacts.ordinal).all()
+  return row.id === expected.id && row.ts === expected.ts && row.sourceSessionId === expected.sourceSessionId && row.sourceSeq === expected.sourceSeq && row.agentId === expected.agentId && row.agentSeq === expected.agentSeq && row.agentSessionId === expected.agentSessionId && row.parentSessionId === expected.parentSessionId && row.parentAgentId === expected.parentAgentId && row.taskId === expected.taskId && row.packetId === expected.packetId && row.branchId === expected.branchId && row.turnId === expected.turnId && row.kind === expected.kind && row.fromState === expected.fromState && row.toState === expected.toState && row.routeResolutionId === expected.routeResolutionId && row.reason === expected.reason && row.errorClass === expected.errorClass && row.detail === expected.detail && row.payloadVersion === expected.payloadVersion && JSON.stringify(artifacts.map((artifact) => [artifact.ordinal, artifact.role, artifact.artifactId])) === JSON.stringify(input.artifacts.map((artifact) => [artifact.ordinal, artifact.role, artifact.artifactId]))
+}
+
+function routeMatches(db: LedgerDb, row: RouteResolutionRow, input: RouteResolutionInput): boolean {
+  const expected = routeValues(input)
+  const candidates = db.select().from(routeCandidates).where(eq(routeCandidates.routeResolutionId, input.id)).orderBy(routeCandidates.ordinal).all()
+  const advisors = db.select().from(routeAdvisors).where(eq(routeAdvisors.routeResolutionId, input.id)).orderBy(routeAdvisors.ordinal).all()
+  const artifacts = db.select().from(routeEventArtifacts).where(and(eq(routeEventArtifacts.ownerKind, "routeResolution"), eq(routeEventArtifacts.ownerId, input.id))).orderBy(routeEventArtifacts.ordinal).all()
+  return row.id === expected.id && row.ts === expected.ts && row.sourceSessionId === expected.sourceSessionId && row.sourceSeq === expected.sourceSeq && row.agentId === expected.agentId && row.agentSeq === expected.agentSeq && row.agentSessionId === expected.agentSessionId && row.parentSessionId === expected.parentSessionId && row.parentAgentId === expected.parentAgentId && row.taskId === expected.taskId && row.packetId === expected.packetId && row.branchId === expected.branchId && row.turnId === expected.turnId && row.changeKind === expected.changeKind && row.reason === expected.reason && row.lane === expected.lane && row.provider === expected.provider && row.upstreamProvider === expected.upstreamProvider && row.model === expected.model && row.accountKind === expected.accountKind && row.accountRef === expected.accountRef && row.accountProvenance === expected.accountProvenance && row.effort === expected.effort && row.winningLayer === expected.winningLayer && row.constraints === expected.constraints && row.consultedSources === expected.consultedSources && row.overriddenValues === expected.overriddenValues && row.fallbackFromResolutionId === expected.fallbackFromResolutionId && row.revertedFromResolutionId === expected.revertedFromResolutionId && row.advisorMode === expected.advisorMode && row.rawDecisionArtifactId === expected.rawDecisionArtifactId && row.payloadVersion === expected.payloadVersion && JSON.stringify(candidates.map((candidate) => [candidate.ordinal, candidate.lane, candidate.provider, candidate.model, candidate.accountKind, candidate.accountRef, candidate.effort, candidate.disposition, candidate.fallbackOrdinal, candidate.rejectionCode, candidate.rejectionReason, candidate.failedConstraintIds])) === JSON.stringify(input.candidates.map((candidate) => [candidate.ordinal, candidate.lane, candidate.provider, candidate.model, candidate.accountKind, candidate.accountRef ?? null, candidate.effort, candidate.disposition, candidate.fallbackOrdinal ?? null, candidate.rejectionCode ?? null, candidate.rejectionReason ?? null, candidate.failedConstraintIds])) && JSON.stringify(advisors.map((advisor) => [advisor.ordinal, advisor.advisorAgentId, advisor.purpose, advisor.lane, advisor.provider, advisor.model, advisor.accountKind, advisor.accountRef, advisor.accountProvenance, advisor.effort, advisor.winningLayer, advisor.independenceRequired, advisor.rawAdviceArtifactId])) === JSON.stringify(input.advisors.map((advisor) => [advisor.ordinal, advisor.advisorAgentId ?? null, advisor.purpose, advisor.lane, advisor.provider, advisor.model, advisor.accountKind, advisor.accountRef ?? null, advisor.accountProvenance, advisor.effort, advisor.winningLayer, advisor.independenceRequired, advisor.rawAdviceArtifactId ?? null])) && JSON.stringify(artifacts.map((artifact) => [artifact.ordinal, artifact.role, artifact.artifactId])) === JSON.stringify(input.artifacts.map((artifact) => [artifact.ordinal, artifact.role, artifact.artifactId]))
+}
+
+function insertProviderCall(db: LedgerDb, input: ProviderCallInput): InsertResult {
+  const result = db.insert(providerCalls).values({
+    id: input.id,
+    ts: input.ts,
+    sessionId: input.sessionId,
+    branchId: input.branchId ?? null,
+    packetId: input.packetId ?? null,
+    provider: input.provider,
+    operation: input.operation,
+    inputHash: input.inputHash,
+    rawRequestArtifact: input.rawRequestArtifact ?? null,
+    latencyMs: input.latencyMs,
+    outcome: input.outcome,
+    errorClass: input.errorClass ?? null,
+    cost: input.cost ?? null,
+    usage: input.usage ?? null,
+  }).onConflictDoNothing().returning({ id: providerCalls.id }).all()
+  return { inserted: result.length > 0 }
+}
+
 function insertArtifact(db: LedgerDb, content: ArtifactContent, meta: ArtifactMeta): PutArtifactResult {
   const material = artifactMaterial(content)
   const sha256 = createHash("sha256").update(material.bytes).digest("hex")
@@ -959,6 +1060,259 @@ function artifactMaterial(content: ArtifactContent): { readonly bytes: Uint8Arra
   return { bytes: content.content, inline: Buffer.from(content.content).toString("utf8"), path: null }
 }
 
+function envelopeBody(envelope: RelayEnvelopeV1): string {
+  const value: RelayJson = {
+    v: envelope.v,
+    envelopeId: envelope.envelopeId,
+    origin: {
+      nodeId: envelope.origin.nodeId,
+      hostEpoch: envelope.origin.hostEpoch,
+      sessionId: envelope.origin.sessionId,
+      ...(envelope.origin.agentId === undefined ? {} : { agentId: envelope.origin.agentId }),
+      streamId: envelope.origin.streamId,
+      sequence: envelope.origin.sequence,
+    },
+    destination: { nodeId: envelope.destination.nodeId, peerId: envelope.destination.peerId },
+    kind: envelope.kind,
+    createdAt: envelope.createdAt,
+    ...(envelope.expiresAt === undefined ? {} : { expiresAt: envelope.expiresAt }),
+    payloadVersion: envelope.payloadVersion,
+    payloadHash: envelope.payloadHash,
+    payload: envelope.payload,
+  }
+  return canonicalRelayJson(value)
+}
+
+function canonicalRelayJson(value: RelayJson): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value)
+  if (Array.isArray(value)) return `[${value.map(canonicalRelayJson).join(",")}]`
+  const objectValue = value as { readonly [key: string]: RelayJson }
+  return `{${Object.keys(objectValue).sort().map((key) => `${JSON.stringify(key)}:${canonicalRelayJson(objectValue[key]!)}`).join(",")}}`
+}
+
+function relayEventId(): string {
+  return crypto.randomUUID()
+}
+
+function enqueueRelayEnvelope(sqlite: Database, envelope: RelayEnvelopeV1): InsertResult {
+  const body = envelopeBody(envelope)
+  const result = sqlite.query<{ envelope_id: string }, [string, string, string, number, string, string, string, string, string, number, number]>(
+    "INSERT INTO relay_outbox (envelope_id, origin_node_id, stream_id, sequence, destination_node_id, destination_peer_id, kind, body, body_sha256, state, attempt_count, next_attempt_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?) ON CONFLICT(envelope_id) DO NOTHING RETURNING envelope_id",
+  ).all(envelope.envelopeId, envelope.origin.nodeId, envelope.origin.streamId, envelope.origin.sequence, envelope.destination.nodeId, envelope.destination.peerId, envelope.kind, body, envelope.payloadHash, envelope.createdAt, envelope.createdAt)
+  if (result.length === 0) {
+    const existing = sqlite.query<{ body: string }, [string]>("SELECT body FROM relay_outbox WHERE envelope_id = ?").get(envelope.envelopeId)
+    if (existing == null || existing.body !== body) throw new Error("Relay envelope idempotency conflict")
+  }
+  return { inserted: result.length > 0 }
+}
+
+function scheduleRelayRetry(sqlite: Database, input: RelayRetryInput): InsertResult {
+  const result = sqlite.query<{ envelope_id: string }, [number, string]>("UPDATE relay_outbox SET attempt_count = attempt_count + 1, next_attempt_at = ? WHERE envelope_id = ? AND state = 'pending' RETURNING envelope_id").all(input.nextAttemptAt, input.envelopeId)
+  return { inserted: result.length > 0 }
+}
+
+function acceptRelayOutbox(sqlite: Database, input: RelayOutboxAcceptance): InsertResult {
+  const result = sqlite.query<{ envelope_id: string }, [number, string]>("UPDATE relay_outbox SET state = 'accepted', accepted_at = ? WHERE envelope_id = ? AND state = 'pending' RETURNING envelope_id").all(input.acceptedAt, input.envelopeId)
+  return { inserted: result.length > 0 }
+}
+
+function receiveRelayEnvelope(sqlite: Database, input: RelayReceiveInput): RelayReceiveResult {
+  if (input.receiverNodeId !== input.envelope.destination.nodeId) throw new Error("Relay destination mismatch")
+  const committed = sqlite.transaction(() => {
+    const body = envelopeBody(input.envelope)
+    const prior = sqlite.query<{ body: string }, [string]>("SELECT body FROM relay_inbox WHERE envelope_id = ?").get(input.envelope.envelopeId)
+    if (prior != null) {
+      if (prior.body !== body) throw new Error("Relay envelope idempotency conflict")
+      const receipt = sqlite.query<{ received_at: number; cursor_json: string }, [string, string]>("SELECT received_at, cursor_json FROM relay_receipts WHERE envelope_id = ? AND destination_node_id = ?").get(input.envelope.envelopeId, input.receiverNodeId)
+      if (receipt == null) throw new Error("Relay receipt missing")
+      return { disposition: "duplicate" as const, receivedAt: receipt.received_at, cursorJson: receipt.cursor_json }
+    }
+    const conflictingSequence = sqlite.query<{ envelope_id: string }, [string, string, string, number]>("SELECT envelope_id FROM relay_inbox WHERE destination_node_id = ? AND origin_node_id = ? AND stream_id = ? AND sequence = ?").get(input.receiverNodeId, input.envelope.origin.nodeId, input.envelope.origin.streamId, input.envelope.origin.sequence)
+    if (conflictingSequence != null) throw new Error("Contradictory relay stream sequence")
+    sqlite.query("INSERT INTO relay_inbox (envelope_id, origin_node_id, stream_id, sequence, destination_node_id, destination_peer_id, kind, body, body_sha256, received_at, adapter_state) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')").run(input.envelope.envelopeId, input.envelope.origin.nodeId, input.envelope.origin.streamId, input.envelope.origin.sequence, input.envelope.destination.nodeId, input.envelope.destination.peerId, input.envelope.kind, body, input.envelope.payloadHash, input.receivedAt)
+    const cursor = advanceCursor(sqlite, input.receiverNodeId, input.envelope.origin.nodeId, input.envelope.origin.streamId, input.receivedAt)
+    const cursorJson = JSON.stringify(cursor) ?? "null"
+    sqlite.query("INSERT INTO relay_receipts (envelope_id, destination_node_id, disposition, received_at, cursor_json) VALUES (?, ?, 'accepted', ?, ?)").run(input.envelope.envelopeId, input.receiverNodeId, input.receivedAt, cursorJson)
+    return { disposition: "accepted" as const, receivedAt: input.receivedAt, cursorJson }
+  })()
+  const cursor = committed.cursorJson === "null" ? undefined : decodeRelayCursorV1(JSON.parse(committed.cursorJson))
+  const receipt = makeReceipt(input.receiverNodeId, input.envelope.envelopeId, committed.receivedAt, cursor)
+  return { disposition: committed.disposition, receipt, cursor }
+}
+
+function makeReceipt(destinationNodeId: string, envelopeId: string, acceptedAt: number, cursor: RelayAckV1["destinationCursor"]): RelayAckV1 {
+  return cursor === undefined
+    ? { v: 1, destinationNodeId, envelopeId, acceptedAt, disposition: "accepted" }
+    : { v: 1, destinationNodeId, envelopeId, acceptedAt, disposition: "accepted", destinationCursor: cursor }
+}
+
+function advanceCursor(sqlite: Database, receiver: string, origin: string, stream: string, now: number): RelayAckV1["destinationCursor"] {
+  const current = sqlite.query<{ highest_contiguous_sequence: number }, [string, string, string]>("SELECT highest_contiguous_sequence FROM relay_cursors WHERE receiver_node_id = ? AND origin_node_id = ? AND stream_id = ?").get(receiver, origin, stream)
+  let highest = current?.highest_contiguous_sequence ?? -1
+  while (sqlite.query<{ envelope_id: string }, [string, string, string, number]>("SELECT envelope_id FROM relay_inbox WHERE destination_node_id = ? AND origin_node_id = ? AND stream_id = ? AND sequence = ?").get(receiver, origin, stream, highest + 1) != null) highest += 1
+  const received = sqlite.query<{ sequence: number }, [string, string, string, number]>("SELECT sequence FROM relay_inbox WHERE destination_node_id = ? AND origin_node_id = ? AND stream_id = ? AND sequence > ? ORDER BY sequence").all(receiver, origin, stream, highest).map((row) => row.sequence)
+  const maxSequence = received.at(-1) ?? highest
+  const receivedSet = new Set(received)
+  const holes: number[] = []
+  for (let sequence = highest + 1; sequence < maxSequence; sequence += 1) if (!receivedSet.has(sequence)) holes.push(sequence)
+  sqlite.query("INSERT INTO relay_cursors (receiver_node_id, origin_node_id, stream_id, highest_contiguous_sequence, holes_json, updated_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(receiver_node_id, origin_node_id, stream_id) DO UPDATE SET highest_contiguous_sequence = excluded.highest_contiguous_sequence, holes_json = excluded.holes_json, updated_at = excluded.updated_at").run(receiver, origin, stream, highest, JSON.stringify(holes), now)
+  return highest < 0 ? undefined : { v: 1, originNodeId: origin, streamId: stream, sequence: highest }
+}
+
+function listPendingRelayOutbox(sqlite: Database, now: number, limit = 100): readonly RelayOutboxItem[] {
+  return sqlite.query<{ body: string; attempt_count: number; next_attempt_at: number }, [number, number]>("SELECT body, attempt_count, next_attempt_at FROM relay_outbox WHERE state = 'pending' AND next_attempt_at <= ? ORDER BY next_attempt_at, envelope_id LIMIT ?").all(now, Math.max(1, Math.min(limit, 1_000))).map((row) => ({ envelope: decodeRelayEnvelopeV1(JSON.parse(row.body)), attemptCount: row.attempt_count, nextAttemptAt: row.next_attempt_at }))
+}
+
+function recordRelayAdapterDelivery(sqlite: Database, input: RelayAdapterDelivery): InsertResult {
+  return sqlite.transaction(() => {
+    const row = sqlite.query<{ adapter_state: string; adapter_message_id: string | null }, [string]>("SELECT adapter_state, adapter_message_id FROM relay_inbox WHERE envelope_id = ?").get(input.envelopeId)
+    if (row == null) return { inserted: false }
+    if (row.adapter_state === "delivered_to_local_bus") {
+      if (row.adapter_message_id !== input.messageId) throw new Error("Relay adapter delivery conflict")
+      return { inserted: false }
+    }
+    const updated = sqlite.query<{ envelope_id: string }, [string, string]>("UPDATE relay_inbox SET adapter_state = 'delivered_to_local_bus', adapter_message_id = ? WHERE envelope_id = ? AND adapter_state = 'pending' RETURNING envelope_id").all(input.messageId, input.envelopeId)
+    return { inserted: updated.length > 0 }
+  })()
+}
+
+function upsertRelayNode(sqlite: Database, input: RelayNodeInput): InsertResult {
+  const node = input.identity
+  sqlite.query("INSERT INTO relay_nodes (node_id, display_name, protocol_versions, first_seen_at, last_seen_at, last_host_epoch) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(node_id) DO UPDATE SET display_name = excluded.display_name, protocol_versions = excluded.protocol_versions, last_seen_at = excluded.last_seen_at, last_host_epoch = excluded.last_host_epoch").run(node.nodeId, node.displayName, JSON.stringify(node.protocolVersions), node.observedAt, node.observedAt, node.hostEpoch)
+  return { inserted: true }
+}
+
+function upsertRelayRoute(sqlite: Database, route: PeerRouteV1, alias: string | undefined, enabled: boolean, updatedAt: number): InsertResult {
+  sqlite.query("INSERT INTO relay_peer_routes (node_id, peer_id, alias, endpoint, enabled, updated_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(node_id, peer_id) DO UPDATE SET alias = excluded.alias, endpoint = excluded.endpoint, enabled = excluded.enabled, updated_at = excluded.updated_at").run(route.nodeId, route.peerId, alias ?? null, route.endpoint, enabled ? 1 : 0, updatedAt)
+  return { inserted: true }
+}
+
+function recordRelayHealth(sqlite: Database, input: RelayHealthInput): InsertResult {
+  const health = input.health
+  sqlite.query("INSERT INTO relay_peer_health (observer_node_id, peer_node_id, state, last_success_at, last_failure_at, consecutive_failures, queue_depth, oldest_unacked_ms, detail) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(observer_node_id, peer_node_id) DO UPDATE SET state = excluded.state, last_success_at = excluded.last_success_at, last_failure_at = excluded.last_failure_at, consecutive_failures = excluded.consecutive_failures, queue_depth = excluded.queue_depth, oldest_unacked_ms = excluded.oldest_unacked_ms, detail = excluded.detail").run(input.observerNodeId, health.nodeId, health.status, health.lastAcceptedAt ?? null, input.lastFailureAt ?? null, input.consecutiveFailures, health.pendingEnvelopes, health.oldestPendingAt === undefined ? null : health.observedAt - health.oldestPendingAt, health.detail ?? null)
+  return { inserted: true }
+}
+function listRelayNodes(sqlite: Database): readonly RelayNodeRecord[] {
+  return sqlite.query<{ node_id: string; display_name: string; protocol_versions: string; first_seen_at: number; last_seen_at: number; last_host_epoch: string }, []>("SELECT node_id, display_name, protocol_versions, first_seen_at, last_seen_at, last_host_epoch FROM relay_nodes ORDER BY node_id").all().map((row) => ({
+    nodeId: row.node_id,
+    displayName: row.display_name,
+    protocolVersions: parseProtocolVersions(row.protocol_versions),
+    firstSeenAt: row.first_seen_at,
+    lastSeenAt: row.last_seen_at,
+    lastHostEpoch: row.last_host_epoch,
+  }))
+}
+
+function listRelayRoutes(sqlite: Database, nodeId: string | undefined): readonly RelayRouteRecord[] {
+  const rows = nodeId === undefined
+    ? sqlite.query<{ node_id: string; peer_id: string; alias: string | null; endpoint: string; enabled: number; updated_at: number }, []>("SELECT node_id, peer_id, alias, endpoint, enabled, updated_at FROM relay_peer_routes ORDER BY node_id, peer_id").all()
+    : sqlite.query<{ node_id: string; peer_id: string; alias: string | null; endpoint: string; enabled: number; updated_at: number }, [string]>("SELECT node_id, peer_id, alias, endpoint, enabled, updated_at FROM relay_peer_routes WHERE node_id = ? ORDER BY peer_id").all(nodeId)
+  return rows.map((row) => ({ nodeId: row.node_id, peerId: row.peer_id, ...(row.alias === null ? {} : { alias: row.alias }), endpoint: row.endpoint, enabled: row.enabled === 1, updatedAt: row.updated_at }))
+}
+
+function listRelayHealth(sqlite: Database, observerNodeId: string | undefined): readonly RelayHealthRecord[] {
+  const rows = observerNodeId === undefined
+    ? sqlite.query<{ observer_node_id: string; peer_node_id: string; state: string; last_success_at: number | null; last_failure_at: number | null; consecutive_failures: number; queue_depth: number; oldest_unacked_ms: number | null; detail: string | null }, []>("SELECT observer_node_id, peer_node_id, state, last_success_at, last_failure_at, consecutive_failures, queue_depth, oldest_unacked_ms, detail FROM relay_peer_health ORDER BY observer_node_id, peer_node_id").all()
+    : sqlite.query<{ observer_node_id: string; peer_node_id: string; state: string; last_success_at: number | null; last_failure_at: number | null; consecutive_failures: number; queue_depth: number; oldest_unacked_ms: number | null; detail: string | null }, [string]>("SELECT observer_node_id, peer_node_id, state, last_success_at, last_failure_at, consecutive_failures, queue_depth, oldest_unacked_ms, detail FROM relay_peer_health WHERE observer_node_id = ? ORDER BY peer_node_id").all(observerNodeId)
+  return rows.map((row) => ({
+    observerNodeId: row.observer_node_id,
+    peerNodeId: row.peer_node_id,
+    state: relayHealthState(row.state),
+    ...(row.last_success_at === null ? {} : { lastSuccessAt: row.last_success_at }),
+    ...(row.last_failure_at === null ? {} : { lastFailureAt: row.last_failure_at }),
+    consecutiveFailures: row.consecutive_failures,
+    queueDepth: row.queue_depth,
+    ...(row.oldest_unacked_ms === null ? {} : { oldestUnackedMs: row.oldest_unacked_ms }),
+    ...(row.detail === null ? {} : { detail: row.detail }),
+  }))
+}
+
+function relayQueueState(sqlite: Database): RelayQueueState {
+  const outbox = sqlite.query<{ count: number; oldest: number | null }, []>("SELECT COUNT(*) AS count, MIN(created_at) AS oldest FROM relay_outbox WHERE state = 'pending'").get()
+  const inbox = sqlite.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM relay_inbox WHERE adapter_state = 'pending'").get()
+  return { pendingOutbox: outbox?.count ?? 0, pendingInbox: inbox?.count ?? 0, ...(outbox?.oldest === null || outbox?.oldest === undefined ? {} : { oldestPendingOutboxAt: outbox.oldest }) }
+}
+
+function parseProtocolVersions(value: string): readonly number[] {
+  const parsed = JSON.parse(value)
+  if (!Array.isArray(parsed) || parsed.some((version) => !Number.isSafeInteger(version) || version < 1)) throw new Error("Invalid persisted relay protocol versions")
+  return parsed
+}
+
+function relayHealthState(value: string): RelayHealthRecord["state"] {
+  if (value === "healthy" || value === "degraded" || value === "offline") return value
+  throw new Error("Invalid persisted relay health state")
+}
+
+function workLease(input: LeaseClaimInput, epoch: string, attempt: number): WorkLeaseV1 {
+  return { v: 1, packetId: input.packet.packetId, leaseEpoch: epoch, ownerNodeId: input.ownerNodeId, ownerSessionId: input.ownerSessionId, ownerAgentId: input.ownerAgentId, acquiredAt: input.acquiredAt, renewBy: input.renewBy, attempt }
+}
+
+function appendLeaseEvent(sqlite: Database, packetId: string, epoch: string | null, eventKind: string, actorNodeId: string | null, at: number): void {
+  sqlite.query("INSERT INTO packet_lease_events (id, packet_id, epoch, event_kind, actor_node_id, ts, detail) VALUES (?, ?, ?, ?, ?, ?, '{}')").run(relayEventId(), packetId, epoch, eventKind, actorNodeId, at)
+}
+
+function assertPacketIdentity(sqlite: Database, packet: WorkPacketV1): void {
+  const existing = sqlite.query<{ relay_envelope_id: string | null; relay_origin_node_id: string | null; relay_destination_node_id: string | null; relay_payload_version: number | null; relay_payload: string | null; relay_idempotency: string | null; relay_expires_at: number | null }, [string]>("SELECT relay_envelope_id, relay_origin_node_id, relay_destination_node_id, relay_payload_version, relay_payload, relay_idempotency, relay_expires_at FROM packets WHERE id = ?").get(packet.packetId)
+  if (existing == null) return
+  if (existing.relay_envelope_id !== packet.envelopeId || existing.relay_origin_node_id !== packet.originNodeId || existing.relay_destination_node_id !== packet.destinationNodeId || existing.relay_payload_version !== packet.payloadVersion || existing.relay_payload !== canonicalRelayJson(packet.payload) || existing.relay_idempotency !== packet.idempotency || existing.relay_expires_at !== (packet.expiresAt ?? null)) throw new Error("Work packet idempotency conflict")
+}
+
+function claimWorkLease(sqlite: Database, input: LeaseClaimInput): LeaseMutationResult {
+  return sqlite.transaction(() => {
+    assertPacketIdentity(sqlite, input.packet)
+    const existing = sqlite.query<{ attempt: number; renew_by: number; state: string; idempotency: string }, [string]>("SELECT attempt, renew_by, state, idempotency FROM packet_leases WHERE packet_id = ?").get(input.packet.packetId)
+    if (existing != null && (existing.state === "orphaned" || existing.state === "completed" || existing.state === "failed" || existing.state === "cancelled" || existing.state === "fenced" || (existing.state === "leased" && (existing.renew_by >= input.acquiredAt || existing.idempotency === "unsafe")))) return { fenced: true }
+    const attempt = (existing?.attempt ?? 0) + 1
+    const lease = workLease(input, crypto.randomUUID(), attempt)
+    const payloadJson = canonicalRelayJson(input.packet.payload)
+    sqlite.query("INSERT INTO packets (id, title, lane, status, summary, ownerPaths, excludedPaths, relay_envelope_id, relay_origin_node_id, relay_destination_node_id, relay_payload_version, relay_payload, relay_idempotency, relay_expires_at, createdAt, updatedAt, claimedAt) VALUES (?, 'Remote work', 'relay', 'leased', ?, '[]', '[]', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET status = 'leased', updatedAt = excluded.updatedAt, claimedAt = excluded.claimedAt").run(input.packet.packetId, payloadJson, input.packet.envelopeId, input.packet.originNodeId, input.packet.destinationNodeId, input.packet.payloadVersion, payloadJson, input.packet.idempotency, input.packet.expiresAt ?? null, input.acquiredAt, input.acquiredAt, input.acquiredAt)
+    sqlite.query("INSERT INTO packet_leases (packet_id, epoch, owner_node_id, owner_session_id, owner_agent_id, attempt, acquired_at, renew_by, state, idempotency) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'leased', ?) ON CONFLICT(packet_id) DO UPDATE SET epoch = excluded.epoch, owner_node_id = excluded.owner_node_id, owner_session_id = excluded.owner_session_id, owner_agent_id = excluded.owner_agent_id, attempt = excluded.attempt, acquired_at = excluded.acquired_at, renew_by = excluded.renew_by, state = 'leased', idempotency = excluded.idempotency").run(lease.packetId, lease.leaseEpoch, lease.ownerNodeId, lease.ownerSessionId, lease.ownerAgentId, lease.attempt, lease.acquiredAt, lease.renewBy, input.packet.idempotency)
+    appendLeaseEvent(sqlite, lease.packetId, lease.leaseEpoch, "leased", lease.ownerNodeId, input.acquiredAt)
+    return { fenced: false, lease }
+  })()
+}
+
+function renewWorkLease(sqlite: Database, input: LeaseRenewalInput): LeaseMutationResult {
+  return sqlite.transaction(() => {
+    const row = sqlite.query<{ packet_id: string; attempt: number; owner_session_id: string; owner_agent_id: string; acquired_at: number }, [number, string, string, string]>("UPDATE packet_leases SET renew_by = ? WHERE packet_id = ? AND epoch = ? AND owner_node_id = ? AND state = 'leased' RETURNING packet_id, attempt, owner_session_id, owner_agent_id, acquired_at").get(input.renewBy, input.packetId, input.leaseEpoch, input.ownerNodeId)
+    if (row == null) return { fenced: true }
+    appendLeaseEvent(sqlite, input.packetId, input.leaseEpoch, "renewed", input.ownerNodeId, input.at)
+    return { fenced: false, lease: { v: 1 as const, packetId: row.packet_id, leaseEpoch: input.leaseEpoch, ownerNodeId: input.ownerNodeId, ownerSessionId: row.owner_session_id, ownerAgentId: row.owner_agent_id, acquiredAt: row.acquired_at, renewBy: input.renewBy, attempt: row.attempt } }
+  })()
+}
+
+function finishWorkLease(sqlite: Database, input: LeaseMutationInput): LeaseMutationResult {
+  return sqlite.transaction(() => {
+    const state = input.state ?? "completed"
+    const row = sqlite.query<{ packet_id: string }, [string, number, string, string, string]>("UPDATE packet_leases SET state = ?, renew_by = ? WHERE packet_id = ? AND epoch = ? AND owner_node_id = ? AND state = 'leased' RETURNING packet_id").get(state, input.at, input.packetId, input.leaseEpoch, input.ownerNodeId)
+    if (row == null) return { fenced: true }
+    sqlite.query("UPDATE packets SET status = ?, updatedAt = ?, doneAt = ? WHERE id = ?").run(state, input.at, state === "completed" ? input.at : null, input.packetId)
+    appendLeaseEvent(sqlite, input.packetId, input.leaseEpoch, state, input.ownerNodeId, input.at)
+    return { fenced: false }
+  })()
+}
+
+function fenceWorkLease(sqlite: Database, input: LeaseMutationInput): LeaseMutationResult {
+  return sqlite.transaction(() => {
+    const row = sqlite.query<{ packet_id: string }, [number, string, string, string]>("UPDATE packet_leases SET state = 'fenced', renew_by = ? WHERE packet_id = ? AND epoch = ? AND owner_node_id = ? AND state = 'leased' RETURNING packet_id").get(input.at, input.packetId, input.leaseEpoch, input.ownerNodeId)
+    if (row == null) return { fenced: true }
+    sqlite.query("UPDATE packets SET status = 'fenced', updatedAt = ?, staleAt = ? WHERE id = ?").run(input.at, input.at, input.packetId)
+    appendLeaseEvent(sqlite, input.packetId, input.leaseEpoch, "fenced", input.ownerNodeId, input.at)
+    return { fenced: false }
+  })()
+}
+
+function expireWorkLeases(sqlite: Database, now: number): readonly LeaseExpiry[] {
+  return sqlite.transaction(() => sqlite.query<{ packet_id: string; idempotency: string; epoch: string }, [number]>("SELECT packet_id, idempotency, epoch FROM packet_leases WHERE state = 'leased' AND renew_by < ?").all(now).map((row) => {
+    const state = row.idempotency === "safe" ? "queued" as const : "orphaned" as const
+    sqlite.query("UPDATE packet_leases SET state = ?, renew_by = ? WHERE packet_id = ? AND epoch = ? AND state = 'leased'").run(state, now, row.packet_id, row.epoch)
+    sqlite.query("UPDATE packets SET status = ?, updatedAt = ?, staleAt = ? WHERE id = ?").run(state, now, now, row.packet_id)
+    appendLeaseEvent(sqlite, row.packet_id, row.epoch, state === "queued" ? "expired_requeued" : "expired_orphaned", null, now)
+    return { packetId: row.packet_id, state }
+  }))()
+}
+
 function readStatusSummary(sqlite: Database): StatusSummary {
   return {
     sessionsByStatus: sqlite.query<{ status: string; count: number }, []>(
@@ -983,6 +1337,181 @@ function readStatusSummary(sqlite: Database): StatusSummary {
 
 function countTable(sqlite: Database, table: string): number {
   return sqlite.query<{ count: number }, []>(`SELECT COUNT(*) AS count FROM ${table}`).get()?.count ?? 0
+}
+
+export function papercutFingerprint(input: PapercutInput): string {
+  const shape = [input.kind, input.cwdOrPackage, input.commandOrTool, input.message]
+    .map((value) => normalizePapercutShape(value ?? ""))
+    .join("\u001f")
+  return createHash("sha256").update(shape).digest("hex")
+}
+
+function reportPapercut(db: LedgerDb, logPath: string, input: PapercutReportInput): PapercutReportResult {
+  const report = validatePapercutReport(input)
+  const fingerprint = papercutFingerprint(report)
+  mkdirSync(dirname(logPath), { recursive: true })
+  appendFileSync(logPath, `${JSON.stringify({ version: 1, fingerprint, ...report })}\n`, "utf8")
+  const row = db.transaction((tx) => upsertPapercut(tx, fingerprint, report))
+  return { record: papercutRecord(row), appendedTo: logPath }
+}
+
+function upsertPapercut(db: LedgerDb, fingerprint: string, input: PapercutReportInput): PapercutRow {
+  const existing = db.select().from(papercuts).where(eq(papercuts.fingerprint, fingerprint)).get()
+  if (existing === undefined) {
+    const values = papercutValues(fingerprint, input)
+    db.insert(papercuts).values(values).run()
+    return values
+  }
+  const updated = {
+    timestamp: Math.max(existing.timestamp, input.timestamp),
+    agentId: stableOptional(existing.agentId, input.agentId),
+    modelId: stableOptional(existing.modelId, input.modelId),
+    sessionId: stableOptional(existing.sessionId, input.sessionId),
+    package: stableOptional(existing.package, input.cwdOrPackage),
+    severity: higherSeverity(existing.severity, input.severity),
+    commandOrTool: stableOptional(existing.commandOrTool, input.commandOrTool),
+    message: stableRequired(existing.message, input.message),
+    evidence: stableOptional(existing.evidence, input.evidenceArtifactId),
+    suggestedFix: stableOptional(existing.suggestedFix, input.suggestedFix),
+    status: "recurring" as const,
+    occurrences: existing.occurrences + 1,
+    firstSeenAt: Math.min(existing.firstSeenAt, input.timestamp),
+    lastSeenAt: Math.max(existing.lastSeenAt, input.timestamp),
+  }
+  db.update(papercuts).set(updated).where(eq(papercuts.fingerprint, fingerprint)).run()
+  return { ...existing, ...updated }
+}
+
+function papercutValues(fingerprint: string, input: PapercutReportInput): PapercutRow {
+  return {
+    fingerprint,
+    timestamp: input.timestamp,
+    agentId: input.agentId ?? null,
+    modelId: input.modelId ?? null,
+    sessionId: input.sessionId ?? null,
+    package: input.cwdOrPackage ?? null,
+    kind: input.kind,
+    severity: input.severity,
+    commandOrTool: input.commandOrTool ?? null,
+    message: input.message,
+    evidence: input.evidenceArtifactId ?? null,
+    suggestedFix: input.suggestedFix ?? null,
+    status: "new",
+    occurrences: 1,
+    firstSeenAt: input.timestamp,
+    lastSeenAt: input.timestamp,
+  }
+}
+
+function listPapercutRows(db: LedgerDb, filters: PapercutFilters): PapercutRecord[] {
+  const clauses = [
+    filters.severity === undefined ? undefined : eq(papercuts.severity, filters.severity),
+    filters.status === undefined ? undefined : eq(papercuts.status, filters.status),
+  ].filter((clause) => clause !== undefined)
+  return db.select().from(papercuts).where(clauses.length === 0 ? undefined : and(...clauses)).orderBy(desc(papercuts.timestamp), desc(papercuts.occurrences), papercuts.fingerprint).limit(limitOrDefault(filters.limit)).all().map(papercutRecord)
+}
+
+function papercutRecord(row: PapercutRow): PapercutRecord {
+  const decoded = Schema.decodeUnknownSync(PapercutInputSchema)(papercutSchemaInput({ kind: row.kind, severity: row.severity, message: row.message, commandOrTool: row.commandOrTool ?? undefined, cwdOrPackage: row.package ?? undefined, evidenceArtifactId: row.evidence ?? undefined, suggestedFix: row.suggestedFix ?? undefined }))
+  return {
+    fingerprint: row.fingerprint,
+    timestamp: row.timestamp,
+    agentId: row.agentId ?? undefined,
+    modelId: row.modelId ?? undefined,
+    sessionId: row.sessionId ?? undefined,
+    package: decoded.cwdOrPackage,
+    kind: decoded.kind,
+    severity: decoded.severity,
+    commandOrTool: decoded.commandOrTool,
+    message: decoded.message,
+    evidence: decoded.evidenceArtifactId,
+    suggestedFix: decoded.suggestedFix,
+    status: Schema.decodeUnknownSync(PapercutStatusSchema)(row.status),
+    occurrences: row.occurrences,
+    firstSeenAt: row.firstSeenAt,
+    lastSeenAt: row.lastSeenAt,
+  }
+}
+
+function validatePapercutReport(input: PapercutReportInput): PapercutReportInput {
+  if (!Number.isSafeInteger(input.timestamp) || input.timestamp < 0) throw new Error("Papercut timestamp must be a non-negative safe integer")
+  const decoded = Schema.decodeUnknownSync(PapercutInputSchema)(papercutSchemaInput(input))
+  const message = requiredPapercutText("message", decoded.message, 4_000)
+  return {
+    ...decoded,
+    message,
+    commandOrTool: optionalPapercutText("commandOrTool", decoded.commandOrTool, 2_048),
+    cwdOrPackage: optionalPapercutText("cwdOrPackage", decoded.cwdOrPackage, 2_048),
+    evidenceArtifactId: optionalPapercutText("evidenceArtifactId", decoded.evidenceArtifactId, 2_048),
+    suggestedFix: optionalPapercutText("suggestedFix", decoded.suggestedFix, 4_000),
+    timestamp: input.timestamp,
+    agentId: optionalPapercutText("agentId", input.agentId, 256),
+    modelId: optionalPapercutText("modelId", input.modelId, 256),
+    sessionId: optionalPapercutText("sessionId", input.sessionId, 256),
+  }
+}
+
+interface PapercutSchemaInput {
+  readonly kind: string
+  readonly severity: string
+  readonly message: string
+  readonly commandOrTool?: string
+  readonly cwdOrPackage?: string
+  readonly evidenceArtifactId?: string
+  readonly suggestedFix?: string
+}
+
+function papercutSchemaInput(input: PapercutSchemaInput): PapercutSchemaInput {
+  const values: {
+    kind: string
+    severity: string
+    message: string
+    commandOrTool?: string
+    cwdOrPackage?: string
+    evidenceArtifactId?: string
+    suggestedFix?: string
+  } = { kind: input.kind, severity: input.severity, message: input.message }
+  if (input.commandOrTool !== undefined) values.commandOrTool = input.commandOrTool
+  if (input.cwdOrPackage !== undefined) values.cwdOrPackage = input.cwdOrPackage
+  if (input.evidenceArtifactId !== undefined) values.evidenceArtifactId = input.evidenceArtifactId
+  if (input.suggestedFix !== undefined) values.suggestedFix = input.suggestedFix
+  return values
+}
+
+function requiredPapercutText(field: string, value: string, maxLength: number): string {
+  const normalized = value.trim()
+  if (normalized.length === 0 || normalized.length > maxLength) throw new Error(`Papercut ${field} must be between 1 and ${maxLength} characters`)
+  return normalized
+}
+
+function optionalPapercutText(field: string, value: string | undefined, maxLength: number): string | undefined {
+  if (value === undefined) return undefined
+  return requiredPapercutText(field, value, maxLength)
+}
+
+function normalizePapercutShape(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, " ").replace(/\b(?:0x)?[a-f0-9]{8,}\b|\b\d+\b/g, "#")
+}
+
+function stableOptional(left: string | null, right: string | undefined): string | null {
+  if (left === null) return right ?? null
+  if (right === undefined) return left
+  return left.localeCompare(right) <= 0 ? left : right
+}
+
+function stableRequired(left: string, right: string): string {
+  return left.localeCompare(right) <= 0 ? left : right
+}
+
+function higherSeverity(left: string, right: PapercutSeverity): PapercutSeverity {
+  const rank = { low: 0, medium: 1, high: 2 } as const
+  const decoded = Schema.decodeUnknownSync(PapercutSeveritySchema)(left)
+  return rank[decoded] >= rank[right] ? decoded : right
+}
+
+function defaultPapercutLogPath(dbPath: string): string {
+  const basePath = dbPath === ":memory:" ? join(homedir(), ".agent-control-plane", "ledger.sqlite") : dbPath
+  return join(dirname(resolve(basePath)), "papercuts.jsonl")
 }
 
 function listModelCallRows(db: LedgerDb, filters: ModelCallFilters): ModelCallRow[] {

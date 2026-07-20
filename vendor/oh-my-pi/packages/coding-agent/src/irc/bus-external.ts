@@ -41,6 +41,8 @@ export type IrcExternalPeerLabelPatch = {
 
 export interface IrcExternalPeer {
 	sessionId: string;
+	/** Stable in-process agent id used to address subprocess workers across the bus. */
+	agentId?: string;
 	name: string;
 	cwd: string;
 	pid: number;
@@ -68,6 +70,7 @@ export interface IrcExternalMessage {
 
 interface PeerRow {
 	session_id: string;
+	agent_id: string | null;
 	name: string;
 	cwd: string;
 	pid: number;
@@ -99,6 +102,8 @@ interface TableInfoRow {
 
 export interface IrcExternalRegistration {
 	sessionId: string;
+	/** Stable in-process agent id used for cross-process IRC addressing. */
+	agentId?: string;
 	name: string;
 	cwd: string;
 	pid?: number;
@@ -287,6 +292,7 @@ export function resolveIrcExternalPeerName(args: {
 function toPeer(row: PeerRow): IrcExternalPeer {
 	return {
 		sessionId: row.session_id,
+		agentId: row.agent_id ?? undefined,
 		name: row.name,
 		cwd: row.cwd,
 		pid: row.pid,
@@ -305,6 +311,7 @@ function toPeer(row: PeerRow): IrcExternalPeer {
 function toUnregisteredPeer(peer: IrcExternalRegistration, pid: number): IrcExternalPeer {
 	return {
 		sessionId: peer.sessionId,
+		agentId: peer.agentId,
 		name: peer.name,
 		cwd: peer.cwd,
 		pid,
@@ -352,6 +359,8 @@ export class IrcExternalBus {
 	/** Registration is evaluated once per bus so print-mode fences cannot leak after construction. */
 	readonly #registrationEnabled: boolean;
 
+	#agentIdSelect = "agent_id";
+	#agentIdWhere = "agent_id = $name";
 	#fleetCapabilitySelect = "fleet_capability_json";
 	#labelSelect = "label_json";
 
@@ -389,6 +398,9 @@ export class IrcExternalBus {
 		if (!columns.has("label_json")) {
 			this.#db.run("ALTER TABLE peers ADD COLUMN label_json TEXT");
 		}
+		if (!columns.has("agent_id")) {
+			this.#db.run("ALTER TABLE peers ADD COLUMN agent_id TEXT");
+		}
 	}
 	#ensureMessageOriginColumn(): void {
 		const columns = new Set(
@@ -405,7 +417,7 @@ export class IrcExternalBus {
 	#getPeerBySessionId(sessionId: string): IrcExternalPeer | undefined {
 		const row = this.#db
 			.query<PeerRow, { $sessionId: string }>(
-				`SELECT session_id, name, cwd, pid, last_seen, state, state_ts, explicit_name, session_file, owner_epoch, build_digest, version, ${this.#fleetCapabilitySelect}, ${this.#labelSelect} FROM peers WHERE session_id = $sessionId`,
+				`SELECT session_id, agent_id, name, cwd, pid, last_seen, state, state_ts, explicit_name, session_file, owner_epoch, build_digest, version, ${this.#fleetCapabilitySelect}, ${this.#labelSelect} FROM peers WHERE session_id = $sessionId`,
 			)
 			.get({ $sessionId: sessionId });
 		return row ? toPeer(row) : undefined;
@@ -418,6 +430,10 @@ export class IrcExternalBus {
 		this.#db.run("PRAGMA busy_timeout = 3000");
 		if (options.readonly) {
 			const columns = this.#db.query<TableInfoRow, []>("PRAGMA table_info(peers)").all();
+			if (!columns.some(column => column.name === "agent_id")) {
+				this.#agentIdSelect = "NULL AS agent_id";
+				this.#agentIdWhere = "0";
+			}
 			if (!columns.some(column => column.name === "fleet_capability_json")) {
 				this.#fleetCapabilitySelect = "NULL AS fleet_capability_json";
 			}
@@ -430,6 +446,7 @@ export class IrcExternalBus {
 		this.#db.run(`
 			CREATE TABLE IF NOT EXISTS peers (
 				session_id TEXT PRIMARY KEY,
+				agent_id TEXT,
 				name TEXT,
 				cwd TEXT,
 				pid INTEGER,
@@ -472,9 +489,10 @@ export class IrcExternalBus {
 		const labels = normalizePeerLabels(peer.labels);
 		this.#db
 			.query(
-				`INSERT INTO peers (session_id, name, cwd, pid, last_seen, explicit_name, session_file, owner_epoch, build_digest, version, fleet_capability_json, label_json)
-				 VALUES ($sessionId, $name, $cwd, $pid, $lastSeen, $explicitName, $sessionFile, $ownerEpoch, $buildDigest, $version, $fleetCapabilityJson, $labelJson)
+				`INSERT INTO peers (session_id, agent_id, name, cwd, pid, last_seen, explicit_name, session_file, owner_epoch, build_digest, version, fleet_capability_json, label_json)
+				 VALUES ($sessionId, $agentId, $name, $cwd, $pid, $lastSeen, $explicitName, $sessionFile, $ownerEpoch, $buildDigest, $version, $fleetCapabilityJson, $labelJson)
 				 ON CONFLICT(session_id) DO UPDATE SET
+					agent_id = excluded.agent_id,
 					name = CASE WHEN peers.explicit_name = 1 THEN peers.name ELSE excluded.name END,
 					cwd = excluded.cwd,
 					pid = excluded.pid,
@@ -489,6 +507,7 @@ export class IrcExternalBus {
 			)
 			.run({
 				$sessionId: peer.sessionId,
+				$agentId: peer.agentId ?? null,
 				$name: peer.name,
 				$cwd: peer.cwd,
 				$pid: pid,
@@ -504,6 +523,7 @@ export class IrcExternalBus {
 		return (
 			this.#getPeerBySessionId(peer.sessionId) ?? {
 				sessionId: peer.sessionId,
+				agentId: peer.agentId,
 				name: peer.name,
 				cwd: peer.cwd,
 				pid,
@@ -519,6 +539,13 @@ export class IrcExternalBus {
 				labels,
 			}
 		);
+	}
+	unregisterPeer(sessionId: string, pid = process.pid): boolean {
+		if (!this.#registrationEnabled) return false;
+		const result = this.#db
+			.query("DELETE FROM peers WHERE session_id = $sessionId AND pid = $pid")
+			.run({ $sessionId: sessionId, $pid: pid });
+		return result.changes > 0;
 	}
 
 	handoffPeer(predecessorSessionId: string, successor: IrcExternalRegistration): IrcExternalPeer {
@@ -613,7 +640,7 @@ export class IrcExternalBus {
 		const staleMs = options.staleMs ?? IRC_EXTERNAL_STALE_MS;
 		return this.#db
 			.query<PeerRow, []>(
-				`SELECT session_id, name, cwd, pid, last_seen, state, state_ts, explicit_name, session_file, owner_epoch, build_digest, version, ${this.#fleetCapabilitySelect}, ${this.#labelSelect} FROM peers ORDER BY last_seen DESC`,
+				`SELECT session_id, ${this.#agentIdSelect}, name, cwd, pid, last_seen, state, state_ts, explicit_name, session_file, owner_epoch, build_digest, version, ${this.#fleetCapabilitySelect}, ${this.#labelSelect} FROM peers ORDER BY last_seen DESC`,
 			)
 			.all()
 			.filter(
@@ -660,7 +687,7 @@ export class IrcExternalBus {
 	findPeerByName(name: string, options: { excludeSessionId?: string } = {}): IrcExternalPeer | undefined {
 		const rows = this.#db
 			.query<PeerRow, { $name: string }>(
-				`SELECT session_id, name, cwd, pid, last_seen, state, state_ts, explicit_name, session_file, owner_epoch, build_digest, version, ${this.#fleetCapabilitySelect}, ${this.#labelSelect} FROM peers WHERE name = $name ORDER BY last_seen DESC`,
+				`SELECT session_id, ${this.#agentIdSelect}, name, cwd, pid, last_seen, state, state_ts, explicit_name, session_file, owner_epoch, build_digest, version, ${this.#fleetCapabilitySelect}, ${this.#labelSelect} FROM peers WHERE name = $name OR ${this.#agentIdWhere} ORDER BY last_seen DESC`,
 			)
 			.all({ $name: name });
 		const row = rows.find(

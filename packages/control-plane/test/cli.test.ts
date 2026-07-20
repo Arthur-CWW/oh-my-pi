@@ -1,10 +1,10 @@
-import { mkdirSync, rmSync } from "node:fs"
+import { existsSync, mkdirSync, rmSync } from "node:fs"
 import { join } from "node:path"
 
 import { afterAll, beforeAll, expect, test } from "bun:test"
 import { Effect } from "effect"
 
-import { LedgerStore, openLedger } from "../src/ledger"
+import { LedgerStore, openLedger } from "../src"
 
 const packageDir = join(import.meta.dir, "..")
 const tmpDir = join(import.meta.dir, ".tmp")
@@ -51,6 +51,15 @@ interface StatsLaneJson {
   readonly tokensPerSecond: number | null
   readonly avgTtftMs: number | null
   readonly reasoningTokens: number
+}
+
+interface PapercutJson {
+  readonly record: {
+    readonly fingerprint: string
+    readonly package?: string
+    readonly status: "new" | "recurring" | "fixed" | "wontfix"
+    readonly occurrences: number
+  }
 }
 
 beforeAll(() => {
@@ -158,6 +167,65 @@ test("cli stats output includes throughput columns", async () => {
   expect(tableStdout).toContain("avgTtftMs")
   expect(tableStdout).toContain("reasoningTokens")
   expect(tableStdout).toContain("1321.74")
+})
+
+test("cli schema-decodes papercuts before storage and aggregates through the ledger", async () => {
+  const invalidDbPath = join(tmpDir, "cli-papercut-invalid.sqlite")
+  const dbPath = join(tmpDir, "cli-papercut.sqlite")
+  const minimalDbPath = join(tmpDir, "cli-papercut-minimal.sqlite")
+  const malformed = Bun.spawnSync([
+    "bun", "src/cli.ts", "papercut", "--json", "--db", invalidDbPath,
+    "--kind", "invalid", "--severity", "high", "--message", "bad",
+  ], { cwd: packageDir, stdout: "pipe", stderr: "pipe" })
+  expect(malformed.exitCode).toBe(1)
+  expect(existsSync(invalidDbPath)).toBe(false)
+
+  const minimal = Bun.spawnSync([
+    "bun", "src/cli.ts", "papercut", "--json", "--db", minimalDbPath,
+    "--kind", "tool", "--severity", "low", "--message", "A concise confirmed tool papercut.",
+  ], { cwd: packageDir, stdout: "pipe", stderr: "pipe" })
+  expect(minimal.exitCode).toBe(0)
+  expect((JSON.parse(new TextDecoder().decode(minimal.stdout)) as PapercutJson).record).toMatchObject({
+    package: packageDir,
+    status: "new",
+    occurrences: 1,
+  })
+
+  const args = [
+    "bun", "src/cli.ts", "papercut", "--json", "--db", dbPath,
+    "--kind", "workflow", "--severity", "medium",
+    "--message", "Verification command requires a manual recovery step.",
+    "--command-or-tool", "bun test",
+    "--evidence-artifact-id", "artifact://cli-papercut-proof",
+    "--suggested-fix", "Make the recovery step explicit.",
+  ]
+  const first = Bun.spawnSync(args, { cwd: packageDir, stdout: "pipe", stderr: "pipe" })
+  const second = Bun.spawnSync(args, { cwd: packageDir, stdout: "pipe", stderr: "pipe" })
+  expect(first.exitCode).toBe(0)
+  expect(second.exitCode).toBe(0)
+
+  const firstResult = JSON.parse(new TextDecoder().decode(first.stdout)) as PapercutJson
+  const secondResult = JSON.parse(new TextDecoder().decode(second.stdout)) as PapercutJson
+  expect(firstResult.record.status).toBe("new")
+  expect(secondResult.record).toMatchObject({
+    fingerprint: firstResult.record.fingerprint,
+    package: packageDir,
+    status: "recurring",
+    occurrences: 2,
+  })
+
+  const stored = await Effect.runPromise(Effect.gen(function* () {
+    const store = yield* LedgerStore
+    return {
+      papercuts: yield* store.listPapercuts({}),
+      events: yield* store.listEvents({}),
+    }
+  }).pipe(Effect.provide(openLedger(dbPath))))
+  expect(stored.papercuts).toHaveLength(1)
+  expect(stored.papercuts[0]?.agentId).toBeUndefined()
+  expect(stored.papercuts[0]?.modelId).toBeUndefined()
+  expect(stored.papercuts[0]?.sessionId).toBeUndefined()
+  expect(stored.events).toEqual([])
 })
 
 async function writeFixture(path: string): Promise<void> {

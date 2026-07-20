@@ -1,4 +1,5 @@
 import { AgentRegistry, type AgentRef } from "../registry/agent-registry";
+import { IrcExternalBus } from "../irc/bus-external";
 import { Settings } from "../config/settings";
 import { EventBus } from "../utils/event-bus";
 import {
@@ -137,6 +138,8 @@ export async function initializeSpawnWorkerSettings(
 export async function startSpawnWorker(): Promise<void> {
 	const writer = new BoundedJsonlWriter();
 	let requestId = "unparsed";
+	let workerIrcBus: IrcExternalBus | undefined;
+	let workerIrcSessionId: string | undefined;
 	try {
 		const request = await readRequest();
 		requestId = request.requestId;
@@ -145,6 +148,16 @@ export async function startSpawnWorker(): Promise<void> {
 		// Edit's auto-generated-file guard reads the process-global proxy.
 		if (request.type === "run") {
 			await initializeSpawnWorkerSettings(request);
+			workerIrcBus = IrcExternalBus.global();
+			workerIrcSessionId = request.options.id;
+			workerIrcBus.registerPeer({
+				sessionId: workerIrcSessionId,
+				agentId: workerIrcSessionId,
+				name: workerIrcSessionId,
+				cwd: request.options.worktree ?? request.options.cwd,
+				pid: process.pid,
+				sessionFile: request.options.sessionFile ?? undefined,
+			});
 		}
 		writer.enqueue({ ...recordBase(requestId), type: "ready", pid: process.pid });
 		writer.enqueue({ ...recordBase(requestId), type: "phase", phase: "decode", at: Date.now() });
@@ -185,6 +198,11 @@ export async function startSpawnWorker(): Promise<void> {
 	} catch (error) {
 		const message = error instanceof Error ? error.stack || error.message : String(error);
 		writer.enqueue({ ...recordBase(requestId), type: "error", code: "protocol", message });
+	} finally {
+		if (workerIrcBus && workerIrcSessionId) {
+			workerIrcBus.unregisterPeer(workerIrcSessionId, process.pid);
+			workerIrcBus.close();
+		}
 	}
 	await writer.flush();
 }
