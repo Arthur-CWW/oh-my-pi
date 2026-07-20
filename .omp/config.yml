@@ -4,17 +4,17 @@ modelRoles:
   smol: openai-codex/gpt-5.6-luna:xhigh
   research: openai-codex/gpt-5.6-luna:xhigh
   authenticated_web: openai-codex/gpt-5.6-luna:xhigh
-  maintenance: anthropic/claude-opus-4-6:high
-  advisor: anthropic/claude-opus-4-6:high
-  plan: anthropic/claude-opus-4-6:high
-  slow: anthropic/claude-opus-4-6:high
-  designer: anthropic/claude-opus-4-6:high
+  maintenance: anthropic/claude-opus-4-8:high
+  advisor: anthropic/claude-opus-4-8:high
+  plan: anthropic/claude-opus-4-8:high
+  slow: anthropic/claude-opus-4-8:high
+  designer: anthropic/claude-opus-4-8:high
   vision: openai-codex/gpt-5.6-luna
-  implementer: anthropic/claude-opus-4-6:high
+  implementer: anthropic/claude-opus-4-8:high
   qa: openai-codex/gpt-5.6-luna:xhigh
-  operator: anthropic/claude-opus-4-6:high
-  synthesizer: anthropic/claude-opus-4-6:high
-  task: anthropic/claude-opus-4-6:high
+  operator: anthropic/claude-opus-4-8:high
+  synthesizer: anthropic/claude-opus-4-8:high
+  task: anthropic/claude-opus-4-8:high
 extensions:
   - /Users/arthur/agents/packages/web-access/src/index.ts
   - /Users/arthur/.omp/agent/extensions/cmux-omp-session.ts
