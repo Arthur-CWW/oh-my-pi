@@ -1,40 +1,125 @@
+setupVersion: 1
+modelRoles:
+  default: openai-codex/gpt-5.6-sol:medium
+  smol: openai-codex/gpt-5.6-luna:xhigh
+  research: openai-codex/gpt-5.6-luna:xhigh
+  authenticated_web: openai-codex/gpt-5.6-luna:xhigh
+  maintenance: anthropic/claude-opus-4-6:high
+  advisor: anthropic/claude-opus-4-6:high
+  plan: anthropic/claude-opus-4-6:high
+  slow: anthropic/claude-opus-4-6:high
+  designer: anthropic/claude-opus-4-6:high
+  vision: openai-codex/gpt-5.6-luna
+  implementer: anthropic/claude-opus-4-6:high
+  qa: openai-codex/gpt-5.6-luna:xhigh
+  operator: anthropic/claude-opus-4-6:high
+  synthesizer: anthropic/claude-opus-4-6:high
+  task: anthropic/claude-opus-4-6:high
+extensions:
+  - /Users/arthur/agents/packages/web-access/src/index.ts
+  - /Users/arthur/.omp/agent/extensions/cmux-omp-session.ts
+  - /Users/arthur/agents/packages/control-plane
+  - /Users/arthur/agents/packages/computer-use-bridge
+  - /Users/arthur/agents/packages/ast-grep-guard
+  - /Users/arthur/agents/packages/mermaid-preview
+  - /Users/arthur/agents/packages/browser-use
+  - /Users/arthur/agents/packages/stema
+  - /Users/arthur/agents/packages/device-control
+  - /Users/arthur/agents/extensions/browser-automation-guard.ts
+skills:
+  ignoredSkills:
+    - computer-use
+    - gmcli
+    - orca-cli
+    - orchestration
+  customDirectories:
+    - /Users/arthur/agents/skills/browser
+    - /Users/arthur/agents/skills/core
+    - /Users/arthur/agents/skills/fleet
+    - /Users/arthur/agents/vendor/badlogic/pi-skills
+    - /Users/arthur/agents/packages/stema/skills
+retry:
+  enabled: true
+  modelFallback: true
+  fallbackRevertPolicy: cooldown-expiry
+serviceTier: none
+auth:
+  codexUsageReset: manual
+codexResets:
+  autoRedeem: "no"
+hideThinkingBlock: false
+doubleEscapeAction: tree
+power:
+  sleepPrevention: system
+renderMermaid:
+  enabled: true
+inspect_image:
+  enabled: true
 task:
+  eager: always
+  enableLsp: true
+  maxConcurrency: 8
+  maxLiveChildren: 6
   isolation:
     mode: apfs
   softRequestBudget: 80
-# 2026-07-17 (Arthur directive, remove after 2026-07-18 eve): quota-admission
-# projections model zero resets until the weekly boundary while Codex resets
-# near-daily (docs/state/model-availability.md 07-13/07-17 rows) — admission was
-# refusing 5.6 spawns during the explicit burn-the-reset window. Real fix is
-# HR-183 (reset-aware projection); re-enable when it lands.
+  showResolvedModelBadge: true
+  maxRecursionDepth: 3
+  agentModelOverrides:
+    explore: openai-codex/gpt-5.6-luna:xhigh
+    librarian: openai-codex/gpt-5.6-luna:xhigh
+    reviewer: openai-codex/gpt-5.6-luna:xhigh
+  orchestratorOnlyModels:
+    - "*fable*"
+    - "*haiku*"
+  autoqa:
+    consent: granted
+  disabledAgents:
+    - operator
+browser:
+  maxTabsPerSession: 2
 quotaAdmission:
   enabled: false
-# Base worker routing keeps bounded work on Terra medium and orchestration on
-# Sol high, including when this project config overlays the global settings.
-modelRoles: {}
-serviceTier: none
 providers:
   webSearch: kagi
-# Control-plane telemetry publisher (2026-07-07): every ~/agents session appends
-# model-call/turn/event rows to ~/.agent-control-plane/outbox/ (JSONL, durable-
-# source-first); ingest via `cd packages/control-plane && bun run cli ingest`.
-# Bundled dist entry — rebuild with `bun run build:extension` after src changes.
-extensions:
-  # Project arrays replace global arrays, so retain web-access explicitly here.
-  - ./packages/web-access/src/index.ts
-  - ./packages/control-plane
-  - ./packages/computer-use-bridge
-  - ./packages/ast-grep-guard
-  - ./packages/mermaid-preview
-  - ./packages/browser-use
-  - ./packages/stema
-  - ./extensions/browser-automation-guard.ts
-skills:
-  ignoredSkills:
-    - gmcli
-  customDirectories:
-    - ./skills/browser
-    - ./skills/core
-    - ./skills/fleet
-    - ./vendor/badlogic/pi-skills
-    - ./packages/stema/skills
+github:
+  enabled: true
+vault:
+  enabled: true
+theme:
+  light: light-solarized
+  dark: dark-gruvbox
+colorBlindMode: true
+display:
+  showTokenUsage: true
+images:
+  blockImages: false
+editor:
+  vim: true
+steeringMode: all
+disabledProviders:
+  - moonshot
+advisor:
+  enabled: false
+  syncBacklog: "off"
+  subagents: true
+symbolPreset: nerd
+statusLine:
+  preset: compact
+  separator: powerline-thin
+autolearn:
+  enabled: false
+compaction:
+  enabled: true
+  strategy: context-full
+  thresholdPercent: -1
+  thresholdTokens: -1
+  remoteEnabled: true
+  keepRecentTokens: 20000
+  reserveTokens: 16384
+  autoContinue: true
+interruptMode: immediate
+defaultThinkingLevel: auto
+dev:
+  autoqa:
+    consent: denied

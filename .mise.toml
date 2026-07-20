@@ -1,6 +1,8 @@
 [tools]
 erlang = "28.5"
 elixir = "1.20.1-otp-28"
+"cargo:jj-cli" = "0.43.0"
+"cargo:jj-starship" = "0.6.0"
 
 [tasks.dev-proxy]
 description = "Run the checked-in Portless dev-domain proxy in the foreground"
@@ -28,6 +30,7 @@ run = '''
 set -euo pipefail
 repo_root="${MISE_PROJECT_ROOT:-$(pwd)}"
 mkdir -p "${HOME}/.local/bin" "${HOME}/.omp/agent/bin" "${HOME}/.omp/agent/patches"
+ln -sfn "${repo_root}/.omp/config.yml" "${HOME}/.omp/agent/config.yml"
 ln -sfn "${repo_root}/.omp/bin/omp" "${HOME}/.local/bin/omp"
 ln -sfn "${repo_root}/.omp/bin/omp-post-update" "${HOME}/.local/bin/omp-post-update"
 ln -sfn "${repo_root}/.omp/agent/bin/omp-self-heal" "${HOME}/.omp/agent/bin/omp-self-heal"
@@ -154,6 +157,7 @@ repo_root = Path(sys.argv[1]).resolve()
 checks = {
     "~/.local/bin/omp": (Path.home() / ".local/bin/omp", repo_root / ".omp/bin/omp"),
     "~/.local/bin/omp-post-update": (Path.home() / ".local/bin/omp-post-update", repo_root / ".omp/bin/omp-post-update"),
+    "~/.omp/agent/config.yml": (Path.home() / ".omp/agent/config.yml", repo_root / ".omp/config.yml"),
     "~/.omp/agent/bin/omp-self-heal": (Path.home() / ".omp/agent/bin/omp-self-heal", repo_root / ".omp/agent/bin/omp-self-heal"),
 }
 
