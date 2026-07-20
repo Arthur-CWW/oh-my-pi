@@ -291,6 +291,17 @@ export class SessionSelectorComponent extends Container {
 			renderEmpty: (_query, _width, sourceTag) => [
 				theme.fg("muted", sourceTag === "all" ? "  No sessions found" : "  No sessions in current folder. Press Tab to view all."),
 			],
+			renderStatus: (model, width) => {
+				const lines: string[] = [];
+				if (model.mode._tag === "Filter") {
+					const query = model.mode.query.trim();
+					lines.push(theme.fg("muted", query ? `  Search: ${model.mode.query}` : "  Type to search"));
+				}
+				if (model.receipt._tag === "Failed") {
+					lines.push(truncateToWidth(`  Error: ${model.receipt.error.replace(/\s+/g, " ")}`, width));
+				}
+				return lines;
+			},
 			renderConfirm: (session, width) => [
 				truncateToWidth(theme.bold(`Delete session? ${session.title || session.firstMessage.slice(0, 40) || session.id}`), width),
 				theme.fg("muted", "  Enter confirm · Esc back"),
@@ -356,6 +367,11 @@ export class SessionSelectorComponent extends Container {
 	}
 
 	get mountSpec(): SelectorSurfaceMountSpec<string, SessionInfo> {
-		return this.#surface.mountSpec;
+		const spec = this.#surface.mountSpec;
+		return {
+			...spec,
+			component: this,
+			route: { ...spec.route, focusedRoot: this },
+		};
 	}
 }

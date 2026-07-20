@@ -9,6 +9,13 @@ PASS  real dist/omp PTY smoke; transcript: local/proofs/tui-mvu-bigbang/pty-smok
 PASS  disposable PTY continuity: PID/session continuity and exact termios restoration
 PASS  isolated interactive-mode-loop suite: 3/3
 PASS  Biome check scoped to touched error-selector/selected-state files
+PASS  candidate → readiness → bless with rollout disabled
+PASS  installed stable identity: 16.0.1+fork.2e8701b95e6f
+PASS  build digest: fef0775cabac8954e1ba85cf6649d5bce75a9078ab4a0fd946cf53be43707d64
+PASS  readiness receipt: vendor/oh-my-pi/local/readiness-receipt-fef0775cabac8954e1ba85cf6649d5bce75a9078ab4a0fd946cf53be43707d64.json
+PASS  cmux notification delivered; no live session restarted
+PASS  post-cutover UX regression suite: command mode + Resume selector, 31 pass/0 fail/181 expect
+PASS  real dist/omp Resume smoke: fullscreen top anchor and empty-state Escape exit
 
 INVALID / NO VERDICT  Full `bun run test`
 Bun aborted the package-wide run with a SIGTRAP worker crash after the output had reached 1,620 pass and 757 aborted/fail labels. This is not recorded as a passing full-suite gate, and the aborted/fail labels are not reinterpreted here as test assertions. The isolated interactive-mode-loop rerun subsequently passed 3/3.

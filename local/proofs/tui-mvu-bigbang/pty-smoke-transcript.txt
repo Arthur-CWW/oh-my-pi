@@ -1,10 +1,10 @@
 HR-225 real PTY smoke: PASS
 binary=/Users/arthur/agents/vendor/oh-my-pi/packages/coding-agent/dist/omp
-pid=75991
+pid=28768
 flows=compose/Esc, Ctrl-R, Settings j/k/back, Hub/help/close, Resume selector j/k/filter/back
 
 --- startup ---
-       │ ! to run bash                                                         │
+o run bash                                                         │
 │         ██    ██         │ $ to run python                                                       │
 │         ██    ██         │ ───────────────────────────────────────────────────────────────────── │
 │        ▄██▄  ▄██▄        │ LSP Servers                                                           │
@@ -20,7 +20,7 @@ flows=compose/Esc, Ctrl-R, Settings j/k/back, Hub/help/close, Resume selector j/
 │                          │                                                                       │
 │                          │                                                                       │
 ╰──────────────────────────┴───────────────────────────────────────────────────────────────────────╯
- Tip: Try task isolation to create CoW worktrees
+ Tip: Ctrl+D can be used to exit, but with your draft saved!
 
  Warning: No models available. Use /login or set an API key environment variable. Then use /model to select a model.    
 
@@ -29,7 +29,7 @@ flows=compose/Esc, Ctrl-R, Settings j/k/back, Hub/help/close, Resume selector j/
  New version 17.0.5 is available. Run: omp update                                                                       
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-╭── π  > ⬢ no-model i > 📁 /Users/arthur/agents > ⑂ main *1444 ?1194 > ◫ ?/0 ⟲ ▶───────────────────────────────────────╮
+╭── π  > ⬢ no-model i > 📁 /Users/arthur/agents > ⑂ main *1321 ?1166 > ◫ ?/0 ⟲ ▶───────────────────────────────────────╮
 ╰─                                                                                                                    ─╯
 
 
@@ -43,7 +43,7 @@ flows=compose/Esc, Ctrl-R, Settings j/k/back, Hub/help/close, Resume selector j/
 ╰─ draft sentinel                                                                                                     ─╯
 
 --- ctrl-r-history ---
-                       │ # for prompt actions                                                  │
+           │ # for prompt actions                                                  │
 │       ▀██████████▀       │ / for commands                                                        │
 │        ╘██    ██         │ ! to run bash                                                         │
 │         ██    ██         │ $ to run python                                                       │
@@ -61,7 +61,7 @@ flows=compose/Esc, Ctrl-R, Settings j/k/back, Hub/help/close, Resume selector j/
 │                          │                                                                       │
 │                          │                                                                       │
 ╰──────────────────────────┴───────────────────────────────────────────────────────────────────────╯
- Tip: Try task isolation to create CoW worktrees
+ Tip: Ctrl+D can be used to exit, but with your draft saved!
 
  Warning: No models available. Use /login or set an API key environment variable. Then use /model to select a model.    
 
@@ -81,7 +81,7 @@ flows=compose/Esc, Ctrl-R, Settings j/k/back, Hub/help/close, Resume selector j/
 
 
 --- escape-restores-draft ---
-       │ ! to run bash                                                         │
+o run bash                                                         │
 │         ██    ██         │ $ to run python                                                       │
 │         ██    ██         │ ───────────────────────────────────────────────────────────────────── │
 │        ▄██▄  ▄██▄        │ LSP Servers                                                           │
@@ -97,7 +97,7 @@ flows=compose/Esc, Ctrl-R, Settings j/k/back, Hub/help/close, Resume selector j/
 │                          │                                                                       │
 │                          │                                                                       │
 ╰──────────────────────────┴───────────────────────────────────────────────────────────────────────╯
- Tip: Try task isolation to create CoW worktrees
+ Tip: Ctrl+D can be used to exit, but with your draft saved!
 
  Warning: No models available. Use /login or set an API key environment variable. Then use /model to select a model.    
 
@@ -106,7 +106,7 @@ flows=compose/Esc, Ctrl-R, Settings j/k/back, Hub/help/close, Resume selector j/
  New version 17.0.5 is available. Run: omp update                                                                       
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-╭── π  > ⬢ no-model i > 📁 /Users/arthur/agents > ⑂ main *1444 ?1194 > ◫ ?/0 ⟲ ▶───────────────────────────────────────╮
+╭── π  > ⬢ no-model i > 📁 /Users/arthur/agents > ⑂ main *1321 ?1166 > ◫ ?/0 ⟲ ▶───────────────────────────────────────╮
 ╰─ draft sentinel                                                                                                     ─╯
 
 
@@ -134,7 +134,7 @@ ming           true                                                             
 │                                                                                                                      │
 │                                                                                                                      │
 │ Preview:                                                                                                             │
-│  π  > ⬢ no-model i > 📁 /Users/arthur/agents > ⑂ main *1444 ?1194 > ◫ ?/0 ⟲ ▶                                        │
+│  π  > ⬢ no-model i > 📁 /Users/arthur/agents > ⑂ main *1321 ?1166 > ◫ ?/0 ⟲ ▶                                        │
 ├──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
 │ Enter/Space to change · Tab to jump sections · ←/→ to switch tabs · Type to search · Esc to close                    │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
@@ -157,7 +157,7 @@ ming           true                                                             
 │                                                                                                                      │
 │                                                                                                                      │
 │ Preview:                                                                                                             │
-│  π  > ⬢ no-model i > 📁 /Users/arthur/agents > ⑂ main *1444 ?1194 > ◫ ?/0 ⟲ ▶                                        │
+│  π  > ⬢ no-model i > 📁 /Users/arthur/agents > ⑂ main *1321 ?1166 > ◫ ?/0 ⟲ ▶                                        │
 ├──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
 │ Enter/Space to change · Tab to jump sections · ←/→ to switch tabs · Type to search · Esc to close                    │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
@@ -180,16 +180,16 @@ ming           true                                                             
                                                                                                                         
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
  External peers                                                                                                         
- ❯ -             ○ IDLE agents-8pp9cq external                                            /Users/arthur/agents just now 
+ ❯ -             ○ IDLE agents-zg6bh3 external                                            /Users/arthur/agents just now 
                                                                                                                         
  /:search  gj:scroll one display row down  gk:scroll one display row up  J:scroll five lines down  K:scroll five lines… 
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 --- hub-help ---
                                                                                 
-   Source: /var/folders/87/p8v45fj16jsfngtm_kwdch9r0000gn/T/omp-mvu-pty-qzytd2_0/sessions/2026-07-19T18-57-46-958Z_019… 
+   Source: /var/folders/87/p8v45fj16jsfngtm_kwdch9r0000gn/T/omp-mvu-pty-uexqajil/sessions/2026-07-20T00-55-32-563Z_019… 
    Model: unknown                                                                                                       
-   Version/fork: 16.0.1+fork.6d8cfd43b4ef · 65a92556d0c0                                                                
+   Version/fork: 16.0.1+fork.2e8701b95e6f · b2fe088a84c3                                                                
  Help (press ? to hide)                                                                                                 
    S subscription · A auth/paid                                                                                         
    Move  gj scroll one display row down · gk scroll one display row up · J scroll five lines down                       
@@ -203,78 +203,54 @@ ming           true                                                             
    [ / ] cycle siblings · ← / →                                                                                         
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
  External peers                                                                                                         
- ❯ -             ○ IDLE agents-8pp9cq external                                            /Users/arthur/agents just now 
+ ❯ -             ○ IDLE agents-zg6bh3 external                                            /Users/arthur/agents just now 
                                                                                                                         
  /:search  gj:scroll one display row down  gk:scroll one display row up  J:scroll five lines down  K:scroll five lines… 
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 --- selector-open ---
-mpt actions                                                  │
-│       ▀██████████▀       │ / for commands                                                        │
-│        ╘██    ██         │ ! to run bash                                                         │
-│         ██    ██         │ $ to run python                                                       │
-│         ██    ██         │ ───────────────────────────────────────────────────────────────────── │
-│        ▄██▄  ▄██▄        │ LSP Servers                                                           │
-│                          │ No LSP servers                                                        │
-│         Unknown          │                                                                       │
-│         Unknown          │                                                                       │
-│                          │                                                                       │
-│                          │ ───────────────────────────────────────────────────────────────────── │
-│                          │ Recent sessions                                                       │
-│                          │ No recent sessions                                                    │
-│                          │                                                                       │
-│                          │                                                                       │
-│                          │                                                                       │
-│                          │                                                                       │
-╰──────────────────────────┴───────────────────────────────────────────────────────────────────────╯
- Tip: Try task isolation to create CoW worktrees
+delete · Enter select · Tab switch scope · escape cancel]                                                      
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
- Warning: No models available. Use /login or set an API key environment variable. Then use /model to select a model.    
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                                                                                                        
+ Resume Session (current folder)                                                                                        
+                                                                                                                        
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
- Update Available                                                                                                       
- New version 17.0.5 is available. Run: omp update                                                                       
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-
-  No sessions in current folder. Press Tab to view all.
-
-
-
-
-
-
-
-
-
---- selector-nav-filter ---
-mpt actions                                                  │
-│       ▀██████████▀       │ / for commands                                                        │
-│        ╘██    ██         │ ! to run bash                                                         │
-│         ██    ██         │ $ to run python                                                       │
-│         ██    ██         │ ───────────────────────────────────────────────────────────────────── │
-│        ▄██▄  ▄██▄        │ LSP Servers                                                           │
-│                          │ No LSP servers                                                        │
-│         Unknown          │                                                                       │
-│         Unknown          │                                                                       │
-│                          │                                                                       │
-│                          │ ───────────────────────────────────────────────────────────────────── │
-│                          │ Recent sessions                                                       │
-│                          │ No recent sessions                                                    │
-│                          │                                                                       │
-│                          │                                                                       │
-│                          │                                                                       │
-│                          │                                                                       │
-╰──────────────────────────┴───────────────────────────────────────────────────────────────────────╯
- Tip: Try task isolation to create CoW worktrees
-
- Warning: No models available. Use /login or set an API key environment variable. Then use /model to select a model.    
-
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
- Update Available                                                                                                       
- New version 17.0.5 is available. Run: omp update                                                                       
+                                                                                                                        
+  No sessions in current folder. Press Tab to view all.                                                                 
+                                                                                                                        
+   [Del delete · Enter select · Tab switch scope · escape cancel]                                                       
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-  No sessions in current folder. Press Tab to view all.
 
 
 
@@ -282,4 +258,68 @@ mpt actions                                                  │
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                                                                                                        
+ Resume Session (current folder)                                                                                        
+                                                                                                                        
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+                                                                                                                        
+  No sessions in current folder. Press Tab to view all.                                                                 
+                                                                                                                        
+   [Del delete · Enter select · Tab switch scope · escape cancel]                                                       
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+--- selector-empty-dismiss ---
 

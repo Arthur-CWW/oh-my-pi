@@ -21,7 +21,7 @@ const SESSION_PICKER_KEYMAP: KeymapTable = {
 	bindings: [
 		{ key: "delete" as KeyId, action: "app.session.delete" as Keybinding, when: { mode: "Browse", focus: "list" } },
 		{ key: "tab" as KeyId, action: "app.session.togglePath" as Keybinding, when: { mode: "Browse", focus: "list" } },
-		{ key: "ctrl+c" as KeyId, action: "app.exit" as Keybinding, when: { mode: "Browse", focus: "list" } },
+		{ key: "ctrl+c" as KeyId, action: "app.interrupt" as Keybinding, when: { mode: "Browse", focus: "list" } },
 	],
 };
 
@@ -99,6 +99,7 @@ export async function selectSession(
 					leaseManager,
 					route: spec.route,
 					component: selector,
+					overlayOptions: { anchor: "top-left", width: "100%", maxHeight: "100%", margin: 0, fullscreen: true },
 					runtimeConfig: {
 						componentId: spec.componentId,
 						initialModel: spec.initialModel,

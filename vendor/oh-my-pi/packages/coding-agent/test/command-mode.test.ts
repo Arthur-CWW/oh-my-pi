@@ -20,8 +20,10 @@ import {
 	MVU_KEYMAP_TABLES,
 } from "@oh-my-pi/pi-coding-agent/config/mvu-keybindings";
 import { AssistantMessageComponent } from "@oh-my-pi/pi-coding-agent/modes/components/assistant-message";
+import { CustomEditor } from "@oh-my-pi/pi-coding-agent/modes/components/custom-editor";
 import {
 	CommandLineComponent,
+	COMMAND_LINE_ROUTE,
 	CommandOutputOverlayComponent,
 	canEnterCommandMode,
 	installCommandLine,
@@ -29,7 +31,7 @@ import {
 import { makeTerminalInputAdapter } from "@oh-my-pi/pi-coding-agent/modes/mvu/input-adapter";
 import { makeInputLeaseManager } from "@oh-my-pi/pi-coding-agent/modes/mvu/input-lease";
 import { compileKeymapRegistry } from "@oh-my-pi/pi-coding-agent/modes/mvu/keymap-registry";
-import { initTheme, theme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
+import { getEditorTheme, initTheme, theme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import { toggleRichTranscript } from "@oh-my-pi/pi-coding-agent/modes/transcript-commands";
 import type { TranscriptDisplayContext } from "@oh-my-pi/pi-coding-agent/modes/transcript-display";
 import { HistoryStorage } from "@oh-my-pi/pi-coding-agent/session/history-storage";
@@ -221,7 +223,7 @@ describe("colon command registry", () => {
 		const ctx = new CommandFixture();
 		ctx.identity = { ...ctx.identity, agentId: "CardQualityAudit", journalPath: "/tmp/CardQualityAudit.jsonl" };
 		const childCommands = commandModeCommandsForView(true);
-		const editor = { getText: () => "", isShowingAutocomplete: () => false };
+		const editor = { getText: () => "", isShowingAutocomplete: () => false, getVimMode: () => null };
 		const interactive = {
 			focusedAgentId: "CardQualityAudit",
 			editor,
@@ -249,26 +251,7 @@ describe("colon command registry", () => {
 		expect(ctx.copied.at(-1)).toBe("019f6141-df73-7000-b792-985f12d9db5d/CardQualityAudit");
 	});
 
-	it("opens globally, preserves text-input colon, and runs editing under the command lease", async () => {
-		class EditorFixture extends Container {
-			#text = "";
-
-			getText(): string {
-				return this.#text;
-			}
-
-			setText(value: string): void {
-				this.#text = value;
-			}
-
-			isShowingAutocomplete(): boolean {
-				return false;
-			}
-
-			override render(): readonly string[] {
-				return [this.#text];
-			}
-		}
+	it("opens from Vim normal mode, reserves the command lease synchronously, and completes commands", async () => {
 		class ViewerFixture extends Container {
 			scrollOffset = 37;
 		}
@@ -276,7 +259,7 @@ describe("colon command registry", () => {
 		const scope = Scope.makeUnsafe("sequential");
 		const terminal = new VirtualTerminal(100, 30);
 		const ui = new TUI(terminal);
-		const editor = new EditorFixture();
+		const editor = new CustomEditor(getEditorTheme());
 		const editorContainer = new Container();
 		editorContainer.addChild(editor);
 		const viewer = new ViewerFixture();
@@ -339,6 +322,30 @@ describe("colon command registry", () => {
 			terminal.sendInput("\x1b");
 			await Effect.runPromise(Effect.sleep("20 millis"));
 			expect(ui.getFocused()).toBe(viewer);
+
+			ui.setFocus(editor);
+			editor.setVimEnabled(true);
+			terminal.sendInput(":");
+			expect(editor.getVimMode()).toBe("insert");
+			expect(editor.getText()).toBe(":");
+			expect(leaseManager.current().kind).toBe("legacy");
+
+			editor.setText("");
+			terminal.sendInput("\x1b");
+			expect(editor.getVimMode()).toBe("normal");
+			terminal.sendInput(":");
+			expect(leaseManager.current()).toMatchObject({
+				kind: "mvu",
+				componentId: COMMAND_LINE_ROUTE.componentId,
+			});
+
+			await Effect.runPromise(Effect.sleep("20 millis"));
+			const vimCommandLine = ui.getFocused();
+			expect(vimCommandLine).toBeInstanceOf(CommandLineComponent);
+			for (const key of "comm") terminal.sendInput(key);
+			terminal.sendInput("\t");
+			await Effect.runPromise(Effect.sleep("20 millis"));
+			expect((vimCommandLine as CommandLineComponent).input.getValue()).toBe("commands");
 		} finally {
 			await Effect.runPromise(Scope.close(scope, Exit.void));
 			ui.stop();
@@ -347,16 +354,22 @@ describe("colon command registry", () => {
 
 	it("opens colon mode uniformly from non-insert surfaces and keeps insert-mode colon literal", () => {
 		let editorText = "";
+		let vimMode: "insert" | "normal" | null = null;
 		const editor = {
 			getText: () => editorText,
 			setText: (text: string) => {
 				editorText = text;
 			},
 			isShowingAutocomplete: () => false,
+			getVimMode: () => vimMode,
 		};
 		let focused: unknown = editor;
 		const interactive = { editor, ui: { getFocused: () => focused } };
 
+		expect(canEnterCommandMode(interactive as never)).toBe(true);
+		vimMode = "insert";
+		expect(canEnterCommandMode(interactive as never)).toBe(false);
+		vimMode = "normal";
 		expect(canEnterCommandMode(interactive as never)).toBe(true);
 		editor.setText("draft");
 		expect(canEnterCommandMode(interactive as never)).toBe(false);

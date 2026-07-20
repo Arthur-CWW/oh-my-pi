@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import * as Schema from "effect/Schema";
-import { Container, type Keybinding, truncateToWidth } from "@oh-my-pi/pi-tui";
+import { type Component, Container, type Keybinding, truncateToWidth } from "@oh-my-pi/pi-tui";
 import type { MvuEnvelope, MvuInputRoute } from "../mvu/input-lease";
 import type { MvuRuntimeBoundary } from "../mvu/runtime";
 import {
@@ -159,7 +159,7 @@ type SelectorSurfaceCommand<Id, Item, Action extends Keybinding> =
 
 export interface SelectorSurfaceMountSpec<Id, Item, Action extends Keybinding = Keybinding> {
 	readonly componentId: ComponentId;
-	readonly component: SelectorSurface<Id, Item, Action>;
+	readonly component: Component;
 	readonly initialModel: SelectorSurfaceModel<Id, Item, Action>;
 	readonly route: MvuInputRoute<SelectorSurfaceModel<Id, Item, Action>>;
 	readonly boundary: MvuRuntimeBoundary<
@@ -523,7 +523,7 @@ export class SelectorSurface<Id, Item, Action extends Keybinding = Keybinding> e
 					? { ...current, leaseGeneration: envelope.stamp.leaseGeneration }
 					: current;
 				const action = String(envelope.action);
-				if (action === "app.exit") return { model, commands: [{ _tag: "Exit" }], dirtyKeys: new Set() };
+				if (action === "app.exit" || action === "app.interrupt") return { model, commands: [{ _tag: "Exit" }], dirtyKeys: new Set() };
 				if (action === "app.session.toggleScope" || action === "app.session.togglePath" || action === "app.selector.toggleScope") {
 					if (this.#options.onToggleSource === undefined || this.#options.encodeItems === undefined || this.#options.decodeItems === undefined) {
 						return { model, commands: [], dirtyKeys: new Set() };
@@ -583,7 +583,7 @@ export class SelectorSurface<Id, Item, Action extends Keybinding = Keybinding> e
 						_tag: "ResolveSource",
 						purpose: "filter",
 						query: nextQuery,
-						snapshot: { items: next.items, sources: next.sources, sourceTag: next.sourceTag },
+						snapshot: { items: next.filterBaseItems, sources: next.sources, sourceTag: next.sourceTag },
 						stamp: { ...stamp, sourceRevision: next.selector.sourceRevision, requestGeneration },
 					});
 				}

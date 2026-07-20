@@ -2288,7 +2288,11 @@ export class SelectorController {
 			},
 		);
 		selector.setOnRequestRender(() => this.ctx.ui.requestComponentRender(selector.mountSpec.component));
-		this.#mountMvuEditor(selector.mountSpec);
+		this.#mountMvuOverlay(
+			selector.mountSpec,
+			{ anchor: "top-left", width: "100%", maxHeight: "100%", margin: 0, fullscreen: true },
+			() => this.ctx.ui.setFocus(this.ctx.editor),
+		);
 	}
 
 	#refreshSessionTerminalTitle(): void {

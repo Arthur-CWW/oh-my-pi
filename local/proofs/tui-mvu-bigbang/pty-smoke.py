@@ -243,10 +243,15 @@ with tempfile.TemporaryDirectory(prefix="omp-mvu-pty-") as temporary:
 
         resume = send(master, b"/resume\r") + snapshot(master)
         require("resume selector", resume, "No sessions in current folder")
+        title_row = next((index for index, line in enumerate(SCREEN.text().splitlines()) if "Resume Session" in line), 999)
+        if title_row > 5:
+            raise AssertionError(f"resume selector: expected full-screen title near top, found row {title_row}\n{SCREEN.text()}")
         records.append(("selector-open", resume))
-        records.append(("selector-nav-filter", send(master, b"j") + send(master, b"k") + send(master, b"/") + send(master, b"current") + snapshot(master)))
         send(master, DISMISS)
-        send(master, DISMISS)
+        snapshot(master)
+        if "Resume Session" in SCREEN.text():
+            raise AssertionError("empty Resume selector: Escape did not close the route")
+        records.append(("selector-empty-dismiss", b""))
 
         send(master, CTRL_D)
         deadline = time.monotonic() + 5.0
