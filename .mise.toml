@@ -25,7 +25,7 @@ description = "Run SymphonyX Rust tests"
 run = "cargo test --manifest-path packages/symphony-lite-rs/Cargo.toml"
 
 [tasks.omp-link]
-description = "Symlink repo-owned OMP wrapper, post-update maintenance, legacy self-heal assets, patches, and skill discovery support"
+description = "Link the repo-owned OMP fork launcher and isolated omp-old upstream launcher"
 run = '''
 set -euo pipefail
 repo_root="${MISE_PROJECT_ROOT:-$(pwd)}"
@@ -33,6 +33,7 @@ mkdir -p "${HOME}/.local/bin" "${HOME}/.omp/agent/bin" "${HOME}/.omp/agent/patch
 ln -sfn "${repo_root}/.omp/config.yml" "${HOME}/.omp/agent/config.yml"
 ln -sfn "${repo_root}/.omp/bin/omp" "${HOME}/.local/bin/omp"
 ln -sfn "${repo_root}/.omp/bin/omp-post-update" "${HOME}/.local/bin/omp-post-update"
+ln -sfn "${repo_root}/.omp/bin/omp-old" "${HOME}/.local/bin/omp-old"
 ln -sfn "${repo_root}/.omp/agent/bin/omp-self-heal" "${HOME}/.omp/agent/bin/omp-self-heal"
 ln -sfn "${repo_root}/.omp/agent/patches/beautiful-mermaid@1.1.3.patch" "${HOME}/.omp/agent/patches/beautiful-mermaid@1.1.3.patch"
 ln -sfn "${repo_root}/.omp/agent/patches/README.md" "${HOME}/.omp/agent/patches/README.md"
@@ -114,14 +115,12 @@ echo "omp-build-fork: installed fork build to ${target}"
 description = "Build and install OMP from the local oh-my-pi fork"
 run = "mise run omp-build-fork"
 
-[tasks.omp-install-upstream-legacy]
-description = "LEGACY: install upstream OMP with bun, link repo-owned files, then apply retired local patches"
+[tasks.omp-install-upstream]
+description = "Install upstream OMP as the isolated omp-old command"
 run = '''
 set -euo pipefail
-bun add -g @oh-my-pi/pi-coding-agent@latest
 mise run omp-link
-"${HOME}/.omp/agent/bin/omp-self-heal"
-"${HOME}/.local/bin/omp" --version
+"${HOME}/.local/bin/omp-old" --version
 '''
 
 [tasks.omp-update]

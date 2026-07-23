@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+version="${OMP_UPSTREAM_VERSION:-17.0.8}"
+exec bunx --package "@oh-my-pi/pi-coding-agent@${version}" omp "$@"
