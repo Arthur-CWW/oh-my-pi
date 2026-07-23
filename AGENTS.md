@@ -42,6 +42,7 @@ Invariants. Most are also static lints — push every lesson down the guardrail 
 ## Coordination
 
 - **Streams own paths.** `streams/<x>/GOAL.md` declares owner and excluded paths. Stay inside yours; cross-stream reusables graduate to `packages/`.
+- **`local/` is disposable.** It is only for machine-local caches, proof artifacts, imported archives, and throwaway workspaces. It is NEVER a source of truth, maintained implementation, runtime service definition, skill, or handoff authority. Anything reused by a second task or installed at runtime MUST be promoted immediately to its owning `packages/`, `streams/`, `skills/`, or canonical external repository; otherwise delete it.
 - **TASKS.md** tracks multi-step work. Update when status changes.
 - **Subagent packets**: owner paths, excluded paths, model lane, acceptance criteria, non-goals. Workers skip formatters/linters — the coordinator gates.
 - **Landing-first workers** (earned 2026-07-19, ~5 landings lost to wall-timeouts): a worker writes its ledger/receipt updates BEFORE final verification passes, so a timeout never orphans finished work. Coordinators pass predecessor transcripts (`history://<id>`) into successor assignments instead of letting them re-scout, and size implementation lanes ≥25min (`timeoutSec`).
