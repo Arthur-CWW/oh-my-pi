@@ -1586,6 +1586,14 @@ public enum PolicyLoader {
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
         return LoadedPolicy(document: document, digest: digest, canonicalData: try encoder.encode(document))
     }
+
+    public static func reviewed(document: BrokerPolicy) throws -> LoadedPolicy {
+        var reviewed = document
+        reviewed.policyDigestState = .reviewed
+        reviewed.policyDigest = BrokerPolicy.inactiveDigestPlaceholder
+        reviewed.policyDigest = ProtocolCrypto.sha256Hex(try reviewed.digestMaterial())
+        return try load(document: reviewed)
+    }
 }
 
 extension BiometricPolicy {

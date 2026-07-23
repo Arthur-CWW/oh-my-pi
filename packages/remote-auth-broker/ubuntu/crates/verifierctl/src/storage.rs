@@ -1,8 +1,9 @@
 use std::ffi::CString;
 use std::fs::File;
-use std::io::{Read, Write};
+use std::io::{ErrorKind, Read, Write};
 use std::os::fd::{AsRawFd, FromRawFd, RawFd};
 use std::os::unix::fs::MetadataExt;
+use std::os::unix::fs::OpenOptionsExt;
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 
@@ -17,6 +18,8 @@ pub(crate) const SUDO_REGISTRY_FILE: &str = "sudo-registry.json";
 pub(crate) const GDM_CONFIG_FILE: &str = "gdm.json";
 const KEYS_DIRECTORY: &str = "keys";
 const MAX_JSON_BYTES: usize = 1_048_576;
+pub(crate) const ACTIVATION_BUNDLE_PATH: &str =
+    "/home/arthur/.local/state/remote-auth-broker-gdm/activation/gdm-activation-bundle.json";
 
 pub(crate) struct Storage {
     root: SecureDirectory,
@@ -89,6 +92,37 @@ impl Storage {
 
     pub(crate) fn write_manifest(&self, bytes: &[u8], replace: bool) -> Result<()> {
         self.root.write_atomic(MANIFEST_FILE, bytes, replace)
+    }
+
+    pub(crate) fn read_activation_bundle(&self, owner_uid: u32) -> Result<Option<Vec<u8>>> {
+        let mut file = match std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+            .open(ACTIVATION_BUNDLE_PATH)
+        {
+            Ok(file) => file,
+            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
+            Err(_) => return Err(Error::Io),
+        };
+        let metadata = file.metadata().map_err(|_| Error::Io)?;
+        if !metadata.file_type().is_file()
+            || metadata.uid() != owner_uid
+            || metadata.gid() != owner_uid
+            || metadata.mode() & 0o7777 != 0o600
+            || metadata.nlink() != 1
+            || metadata.len() == 0
+            || metadata.len() > MAX_JSON_BYTES as u64
+        {
+            return Err(Error::Permission);
+        }
+        let mut bytes = Vec::with_capacity(metadata.len() as usize);
+        file.take(MAX_JSON_BYTES as u64 + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|_| Error::Io)?;
+        if bytes.len() as u64 != metadata.len() {
+            return Err(Error::InvalidData);
+        }
+        Ok(Some(bytes))
     }
 }
 

@@ -1,0 +1,67 @@
+{
+  "publicKeys": {
+    "validCommentFree": {
+      "raw": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAABAgMEBQYHCAkKCwwNDg8QERITFBUWFxgZGhscHR4f\n",
+      "normalized": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAABAgMEBQYHCAkKCwwNDg8QERITFBUWFxgZGhscHR4f\n"
+    },
+    "fishLikeComment": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAABAgMEBQYHCAkKCwwNDg8QERITFBUWFxgZGhscHR4f fish; echo $status $(touch /tmp/not-run)\n",
+    "malformedComment": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAABAgMEBQYHCAkKCwwNDg8QERITFBUWFxgZGhscHR4f comment\twith-tab\n",
+    "malformedWireKey": "ssh-ed25519 AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n",
+    "malformedKeyLength": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAHwABAgMEBQYHCAkKCwwNDg8QERITFBUWFxgZGhscHR4f\n"
+  },
+  "stage": {
+    "valid": "component=gdm-broker\nstaged_release_sha256=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\nstaging=ready\n",
+    "duplicate": "component=gdm-broker\ncomponent=gdm-broker\nstaging=ready\n",
+    "missing": "component=gdm-broker\nstaged_release_sha256=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n",
+    "uppercaseDigest": "component=gdm-broker\nstaged_release_sha256=0123456789ABCDEF0123456789abcdef0123456789abcdef0123456789abcdef\nstaging=ready\n"
+  },
+  "preflight": {
+    "staleCleanup": "{\"component\":\"gdm-broker\",\"staging_root\":\"/home/arthur/.local/state/remote-auth-broker-gdm\",\"cleanup\":\"stale-source-removed\",\"source_ready\":true}",
+    "unexpectedField": "{\"component\":\"gdm-broker\",\"staging_root\":\"/home/arthur/.local/state/remote-auth-broker-gdm\",\"cleanup\":\"none\",\"source_ready\":true,\"command\":\"rm -rf /\"}"
+  },
+  "transfer": {
+    "verified": "{\"component\":\"gdm-broker\",\"transfer\":\"verified\",\"files\":27,\"directories\":14,\"violations\":[]}",
+    "rsyncModeDrift": "{\"component\":\"gdm-broker\",\"transfer\":\"rejected\",\"files\":27,\"directories\":14,\"violations\":[\"file-mode:scripts/deploy-gdm-release-ubuntu.sh:700\"]}"
+  },
+  "sha": {
+    "path": "/Users/arthur/agents/packages/remote-auth-broker/ubuntu/Cargo.lock",
+    "valid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  /Users/arthur/agents/packages/remote-auth-broker/ubuntu/Cargo.lock\n",
+    "wrongPath": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  /tmp/Cargo.lock\n",
+    "malformed": "SHA256 (/Users/arthur/agents/packages/remote-auth-broker/ubuntu/Cargo.lock) = aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
+  },
+  "readiness": {
+    "retryThenReady": [
+      {"stdout": "", "stderr": "connection not ready", "exit_code": 255},
+      {"stdout": "{\"component\":\"gdm-broker\"}", "stderr": "", "exit_code": 0}
+    ],
+    "continuedAfterSuccess": [
+      {"stdout": "ready", "stderr": "", "exit_code": 0},
+      {"stdout": "", "stderr": "late failure", "exit_code": 1}
+    ]
+  },
+  "leafContract": {
+    "valid": {
+      "transferred_script_mode": "0600",
+      "user_staging_executable": false,
+      "root_snapshot_mode": "0700",
+      "execution_origin": "authenticated-root-owned-snapshot"
+    },
+    "noexecViolated": {
+      "transferred_script_mode": "0700",
+      "user_staging_executable": true,
+      "root_snapshot_mode": "0700",
+      "execution_origin": "user-owned-staging"
+    }
+  },
+  "ubuntuExport": {
+    "valid": "{\"schemaVersion\":1,\"generationId\":\"generation-test\",\"ubuntuReleaseDigest\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\",\"sshHostKeyDigest\":\"abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789\",\"recipientKeyId\":\"gdm-x25519\",\"recipientPublicKey\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"subjectUsername\":\"arthur\",\"subjectUid\":1000,\"gdmIngestUid\":2000,\"gdmIngestGid\":2001}",
+    "extra": "{\"schemaVersion\":1,\"generationId\":\"generation-test\",\"ubuntuReleaseDigest\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\",\"sshHostKeyDigest\":\"abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789\",\"recipientKeyId\":\"gdm-x25519\",\"recipientPublicKey\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"subjectUsername\":\"arthur\",\"subjectUid\":1000,\"gdmIngestUid\":2000,\"gdmIngestGid\":2001,\"fish\":true}"
+  },
+  "bootstrap": {
+    "prepared": "{\"operation\":\"gdm-bootstrap-cloud\",\"status\":\"prepared\",\"policyDigest\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\",\"bundleDigest\":\"abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789\",\"ubuntuReleaseDigest\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\",\"macReleaseDigest\":\"abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789\",\"gdmSigningKeyId\":\"gdm-ed25519\",\"preparedPolicyPath\":\"/Users/arthur/Library/Application Support/RemoteAuthBroker/config/gdm-prepared-policy.json\",\"activationBundlePath\":\"/Users/arthur/Library/Application Support/RemoteAuthBroker/config/gdm-activation-bundle.json\",\"deviceId\":\"device-test\"}"
+  },
+  "status": {
+    "active": "{\"schemaVersion\":1,\"state\":\"active\",\"policyDigest\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\",\"bundleDigest\":\"abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789\",\"ubuntuReleaseDigest\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\",\"macReleaseDigest\":\"abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789\",\"gdmSigningKeyId\":\"gdm-ed25519\"}"
+  },
+  "deployStatus": "component=gdm-broker\nrelease_sha256=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\ndeployment=installed\npolicy=active\npam=confirmed\ndaemon=active\nssh_ingest=ready\ningest_socket=ready\nclaim_socket=ready\n"
+}

@@ -208,7 +208,7 @@ restore_journal() {
   if [[ -f "$journal/previous-current.present" ]]; then
     local previous_current
     previous_current="$(<"$journal/previous-current")"
-    if ! { /bin/ln -s "$previous_current" "$support_root/.current.restore.$$" && /bin/mv -f -- "$support_root/.current.restore.$$" "$current_link"; }; then
+    if ! { /bin/ln -s "$previous_current" "$support_root/.current.restore.$$" && /bin/mv -fh -- "$support_root/.current.restore.$$" "$current_link"; }; then
       rollback_failed=1
     fi
   elif ! /bin/rm -f -- "$current_link"; then
@@ -236,7 +236,7 @@ restore_journal() {
   fi
 
   if [[ -f "$journal/previous-journal.present" ]]; then
-    if ! { /bin/ln -s "$(<"$journal/previous-journal")" "$rollback_root/.current.restore.$$" && /bin/mv -f -- "$rollback_root/.current.restore.$$" "$rollback_root/current"; }; then
+    if ! { /bin/ln -s "$(<"$journal/previous-journal")" "$rollback_root/.current.restore.$$" && /bin/mv -fh -- "$rollback_root/.current.restore.$$" "$rollback_root/current"; }; then
       rollback_failed=1
     fi
   elif ! /bin/rm -f -- "$rollback_root/current"; then
@@ -382,7 +382,7 @@ printf 'DESIGN/INACTIVE\n' > "$journal/installed-status"
 /usr/bin/touch "$journal/armed"
 
 /bin/ln -s "journals/$journal_id" "$rollback_root/.current.tmp.$$"
-/bin/mv -f -- "$rollback_root/.current.tmp.$$" "$rollback_root/current"
+/bin/mv -fh -- "$rollback_root/.current.tmp.$$" "$rollback_root/current"
 rollback_armed=1
 
 readonly installed_version="$versions_root/$release_name"
@@ -431,7 +431,7 @@ readonly rendered_plist="$journal/rendered-plist"
 atomic_copy "$policy_source" "$installed_policy" 0600
 atomic_copy "$rendered_plist" "$installed_plist" 0600
 /bin/ln -s "versions/$release_name" "$support_root/.current.tmp.$$"
-/bin/mv -f -- "$support_root/.current.tmp.$$" "$current_link"
+/bin/mv -fh -- "$support_root/.current.tmp.$$" "$current_link"
 
 [[ "$(/usr/bin/readlink "$current_link")" == "versions/$release_name" ]] || fail "current version pointer verification failed"
 verify_signed_binary "$current_link/bin/remote-authd" "$current_link/requirements/remote-authd.designated-requirement"

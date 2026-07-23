@@ -9,6 +9,7 @@ public enum BiometricOperation: String, Codable, CaseIterable, Sendable {
     case grantExpansion = "grant-expansion"
     case reEnable = "re-enable"
     case destructiveOneShot = "destructive-one-shot"
+    case bitwardenSessionAccess = "bitwarden-session-access"
 }
 
 public enum BiometricAuthorityError: Error, Equatable, Sendable {
@@ -126,7 +127,6 @@ public final class BiometricAuthority: BiometricAuthorizing, @unchecked Sendable
             evaluatedAtUptime: evaluatedAtUptime
         )
     }
-
     private static func localizedReason(for operation: BiometricOperation) -> String {
         switch operation {
         case .credentialEnrollment:
@@ -141,6 +141,8 @@ public final class BiometricAuthority: BiometricAuthorizing, @unchecked Sendable
             return "Re-enable remote authentication."
         case .destructiveOneShot:
             return "Authorize a destructive one-time remote authentication action."
+        case .bitwardenSessionAccess:
+            return "Use Touch ID to access the Bitwarden CLI session."
         }
     }
 

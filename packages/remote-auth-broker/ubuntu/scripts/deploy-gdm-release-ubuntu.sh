@@ -37,11 +37,17 @@ readonly USER_STAGE_ROOT=/home/arthur/.local/state/remote-auth-broker-gdm/staged
 readonly RELEASES=${RAB_ROOT}/releases
 readonly DEPLOY_STATE=${RAB_STATE}/gdm-release-current
 readonly DEPLOY_STATIC=${RAB_ROOT}/remote-auth-gdm-deploy
+readonly ACTIVATE_STATIC=${RAB_ROOT}/remote-auth-gdm-activate
+readonly DEACTIVATE_STATIC=${RAB_ROOT}/remote-auth-gdm-deactivate
+readonly STATUS_STATIC=${RAB_ROOT}/remote-auth-gdm-status
 readonly CONFIRM_STATIC=${RAB_ROOT}/remote-auth-gdm-confirm
 readonly COMMON_STATIC=${RAB_ROOT}/ubuntu-common.sh
 readonly GDM_USER=remote-auth-gdm-ingest
 readonly GDM_GROUP=remote-auth-gdm-ingest
 readonly GDM_CONFIG=${RAB_ETC}/gdm.json
+readonly VERIFIER_MANIFEST=${RAB_ETC}/key-manifest.json
+readonly SUDO_REGISTRY=${RAB_ETC}/sudo-registry.json
+readonly VERIFIER_KEYS=${RAB_ETC}/keys
 readonly GDM_KEYS=${RAB_ETC}/gdm-ingest.authorized_keys
 readonly GDM_UNIT=/etc/systemd/system/remote-auth-gdmd.service
 readonly PAM_ROLLBACK_UNIT=/etc/systemd/system/remote-auth-pam-rollback.service
@@ -49,6 +55,7 @@ readonly PAM_ROLLBACK_TIMER=/etc/systemd/system/remote-auth-pam-rollback.timer
 readonly TMPFILES_CONFIG=/etc/tmpfiles.d/remote-auth-gdm.conf
 readonly SSHD_CONFIG=/etc/ssh/sshd_config.d/71-remote-auth-gdm-ingest.conf
 readonly MODULE_TARGET=/usr/lib/x86_64-linux-gnu/security/pam_gdm_broker.so
+readonly ACTIVATION_BUNDLE=${DEPLOY_HOME}/.local/state/remote-auth-broker-gdm/activation/gdm-activation-bundle.json
 
 case ${1:-} in
   install)
@@ -79,7 +86,10 @@ esac
 rab_require_root
 rab_require_tools
 rab_require_target
-for tool in /usr/bin/flock /usr/bin/getent /usr/bin/systemd-tmpfiles /usr/sbin/groupdel /usr/sbin/userdel; do
+for tool in \
+  /usr/bin/flock /usr/bin/getent /usr/bin/mount /usr/bin/readlink \
+  /usr/bin/systemd-tmpfiles /usr/bin/unshare \
+  /usr/sbin/groupdel /usr/sbin/userdel; do
   [[ -x ${tool} ]] || rab_die 'a required fixed deployment tool is unavailable'
 done
 /bin/mkdir -p -m 0700 -- "${RAB_RUN}"
@@ -97,37 +107,68 @@ require_deploy_state() {
   release_dir=${RELEASES}/${release_id}
   [[ -d ${release_dir} && ! -L ${release_dir} ]] || rab_die 'installed release directory is unavailable'
   [[ $(/usr/bin/stat -c '%u:%g:%a' -- "${release_dir}") == 0:0:755 ]] || rab_die 'installed release directory metadata is invalid'
+  [[ $(rab_sha256 "${release_dir}/manifest.sha256") == "${release_id}" ]] ||
+    rab_die 'installed release directory is not bound to its deployment digest'
 }
 
 verify_release_manifest() {
-  local root=$1 expected_owner=$2 directory_mode=$3 executable_mode=$4 data_mode=$5
-  /usr/bin/python3 -I -S - "${root}" "${expected_owner}" "${directory_mode}" "${executable_mode}" "${data_mode}" <<'PY'
+  local root=$1 expected_owner=$2 directory_mode=$3 executable_mode=$4 data_mode=$5 layout=${6:-current}
+  /usr/bin/python3 -I -S - "${root}" "${expected_owner}" "${directory_mode}" "${executable_mode}" "${data_mode}" "${layout}" <<'PY'
 import hashlib, os, pathlib, stat, sys
 root = pathlib.Path(sys.argv[1])
 owner = int(sys.argv[2])
 dir_mode = int(sys.argv[3], 8)
 exec_mode = int(sys.argv[4], 8)
 data_mode = int(sys.argv[5], 8)
-expected = [
-    "assets/71-remote-auth-gdm-ingest.conf",
-    "assets/gdm-password.ubuntu-24.04.baseline",
-    "assets/gdm.inactive.template.json",
-    "assets/remote-auth-gdm.authorized-key-options",
-    "assets/remote-auth-gdm.tmpfiles.conf",
-    "assets/remote-auth-gdmd.service",
-    "assets/remote-auth-pam-rollback.service",
-    "assets/remote-auth-pam-rollback.timer",
-    "bin/remote-auth-gdm-ingest",
-    "bin/remote-auth-gdmd",
-    "identity/remote-auth-gdm-ingest.pub",
-    "lib/pam_gdm_broker.so",
-    "scripts/confirm-gdm-release-ubuntu.sh",
-    "scripts/confirm-pam-ubuntu.sh",
-    "scripts/deploy-gdm-release-ubuntu.sh",
-    "scripts/install-pam-ubuntu.sh",
-    "scripts/rollback-pam-ubuntu.sh",
-    "scripts/ubuntu-common.sh",
-]
+layout = sys.argv[6]
+if layout == "legacy":
+    expected = [
+        "assets/71-remote-auth-gdm-ingest.conf",
+        "assets/gdm-password.ubuntu-24.04.baseline",
+        "assets/gdm.inactive.template.json",
+        "assets/remote-auth-gdm.authorized-key-options",
+        "assets/remote-auth-gdm.tmpfiles.conf",
+        "assets/remote-auth-gdmd.service",
+        "assets/remote-auth-pam-rollback.service",
+        "assets/remote-auth-pam-rollback.timer",
+        "bin/remote-auth-gdm-ingest",
+        "bin/remote-auth-gdmd",
+        "identity/remote-auth-gdm-ingest.pub",
+        "lib/pam_gdm_broker.so",
+        "scripts/confirm-gdm-release-ubuntu.sh",
+        "scripts/confirm-pam-ubuntu.sh",
+        "scripts/deploy-gdm-release-ubuntu.sh",
+        "scripts/install-pam-ubuntu.sh",
+        "scripts/rollback-pam-ubuntu.sh",
+        "scripts/ubuntu-common.sh",
+    ]
+elif layout == "current":
+    expected = [
+        "assets/71-remote-auth-gdm-ingest.conf",
+        "assets/gdm-password.ubuntu-24.04.baseline",
+        "assets/gdm.inactive.template.json",
+        "assets/remote-auth-gdm.authorized-key-options",
+        "assets/remote-auth-gdm.tmpfiles.conf",
+        "assets/remote-auth-gdmd.service",
+        "assets/remote-auth-pam-rollback.service",
+        "assets/remote-auth-pam-rollback.timer",
+        "bin/remote-auth-gdm-ingest",
+        "bin/remote-auth-gdmd",
+        "bin/remote-auth-verifierctl",
+        "identity/remote-auth-gdm-ingest.pub",
+        "lib/pam_gdm_broker.so",
+        "scripts/activate-gdm-ubuntu.sh",
+        "scripts/confirm-gdm-release-ubuntu.sh",
+        "scripts/confirm-pam-ubuntu.sh",
+        "scripts/deploy-gdm-release-ubuntu.sh",
+        "scripts/deactivate-gdm-ubuntu.sh",
+        "scripts/install-pam-ubuntu.sh",
+        "scripts/rollback-pam-ubuntu.sh",
+        "scripts/status-gdm-ubuntu.sh",
+        "scripts/ubuntu-common.sh",
+    ]
+else:
+    raise SystemExit(1)
 expected_dirs = {"assets", "bin", "identity", "lib", "scripts"}
 root_stat = os.lstat(root)
 if not stat.S_ISDIR(root_stat.st_mode) or root_stat.st_uid != owner or stat.S_IMODE(root_stat.st_mode) != dir_mode:
@@ -151,7 +192,9 @@ for base, dirs, files in os.walk(root, topdown=True, followlinks=False):
         if not stat.S_ISREG(st.st_mode) or st.st_uid != owner or stat.S_IMODE(st.st_mode) != mode or st.st_nlink != 1:
             raise SystemExit(1)
         actual_files.add(rel)
-generated_files = {"generated/gdm.json", "generated/gdm-ingest.authorized_keys"}
+generated_files = {"generated/gdm-ingest.authorized_keys"}
+if layout == "legacy":
+    generated_files.add("generated/gdm.json")
 plain_dirs = expected_dirs
 plain_files = set(expected) | {"manifest.sha256"}
 generated_dirs = expected_dirs | {"generated"}
@@ -218,13 +261,17 @@ ordered_files = [
     "assets/remote-auth-pam-rollback.timer",
     "bin/remote-auth-gdm-ingest",
     "bin/remote-auth-gdmd",
+    "bin/remote-auth-verifierctl",
     "identity/remote-auth-gdm-ingest.pub",
     "lib/pam_gdm_broker.so",
+    "scripts/activate-gdm-ubuntu.sh",
     "scripts/confirm-gdm-release-ubuntu.sh",
     "scripts/confirm-pam-ubuntu.sh",
     "scripts/deploy-gdm-release-ubuntu.sh",
+    "scripts/deactivate-gdm-ubuntu.sh",
     "scripts/install-pam-ubuntu.sh",
     "scripts/rollback-pam-ubuntu.sh",
+    "scripts/status-gdm-ubuntu.sh",
     "scripts/ubuntu-common.sh",
 ]
 expected_dirs = ("assets", "bin", "identity", "lib", "scripts")
@@ -429,7 +476,7 @@ PY
   stage_release=${stage_release%% *}
   [[ ${stage_release} == "${expected_stage_release}" ]] ||
     rab_die 'the root-owned GDM snapshot release digest changed'
-  for artifact in bin/remote-auth-gdmd bin/remote-auth-gdm-ingest lib/pam_gdm_broker.so; do
+  for artifact in bin/remote-auth-gdmd bin/remote-auth-gdm-ingest bin/remote-auth-verifierctl lib/pam_gdm_broker.so; do
     LC_ALL=C /usr/bin/readelf -h -- "${STAGE_ROOT}/${artifact}" | /usr/bin/awk '
       $1 == "Class:" { class_count++; class_ok = ($2 == "ELF64" && NF == 2) }
       $1 == "Machine:" { machine_count++; machine = $0; sub(/^[^:]*:[[:space:]]*/, "", machine); machine_ok = (machine == "Advanced Micro Devices X86-64") }
@@ -481,7 +528,8 @@ print_status() {
   require_deploy_state
   verify_release_manifest "${release_dir}" 0 0755 0755 0644 || rab_die 'installed release bytes do not match the reviewed manifest'
   [[ -L ${RAB_CURRENT} && $(/usr/bin/realpath -e -- "${RAB_CURRENT}") == "${release_dir}" ]] || rab_die 'the installed release is not current'
-  require_installed_identical "${GDM_CONFIG}" "${release_dir}/generated/gdm.json" 600
+  "${release_dir}/bin/remote-auth-verifierctl" validate ||
+    rab_die 'installed verifier state is invalid or drifted'
   require_installed_identical "${GDM_KEYS}" "${release_dir}/generated/gdm-ingest.authorized_keys" 600
   require_installed_identical "${GDM_UNIT}" "${release_dir}/assets/remote-auth-gdmd.service" 644
   require_installed_identical "${PAM_ROLLBACK_UNIT}" "${release_dir}/assets/remote-auth-pam-rollback.service" 644
@@ -489,10 +537,12 @@ print_status() {
   require_installed_identical "${TMPFILES_CONFIG}" "${release_dir}/assets/remote-auth-gdm.tmpfiles.conf" 644
   require_installed_identical "${SSHD_CONFIG}" "${release_dir}/assets/71-remote-auth-gdm-ingest.conf" 644
   require_installed_identical "${DEPLOY_STATIC}" "${release_dir}/scripts/deploy-gdm-release-ubuntu.sh" 700
+  require_installed_identical "${ACTIVATE_STATIC}" "${release_dir}/scripts/activate-gdm-ubuntu.sh" 700
+  require_installed_identical "${DEACTIVATE_STATIC}" "${release_dir}/scripts/deactivate-gdm-ubuntu.sh" 700
+  require_installed_identical "${STATUS_STATIC}" "${release_dir}/scripts/status-gdm-ubuntu.sh" 700
   require_installed_identical "${CONFIRM_STATIC}" "${release_dir}/scripts/confirm-gdm-release-ubuntu.sh" 700
   require_installed_identical "${COMMON_STATIC}" "${release_dir}/scripts/ubuntu-common.sh" 700
   require_installed_identical "${MODULE_TARGET}" "${release_dir}/lib/pam_gdm_broker.so" 644
-  rab_json_must_be_inactive "${GDM_CONFIG}"
   verify_pam_layout || rab_die 'the installed PAM layout is invalid'
   /usr/bin/systemctl is-active --quiet remote-auth-gdmd.service || rab_die 'the GDM verifier service is not active'
   /usr/bin/systemctl is-active --quiet ssh.service || rab_die 'the SSH service is not active'
@@ -569,23 +619,6 @@ write_deploy_state() {
 
 render_generated_assets() {
   /bin/mkdir -m 0755 -- "${release_dir}/generated"
-  /usr/bin/python3 -I -S - "${release_dir}/assets/gdm.inactive.template.json" "${release_dir}/generated/gdm.json" "${ingest_uid}" "${ingest_gid}" <<'PY'
-import json, os, pathlib, sys
-template, output, uid, gid = sys.argv[1:]
-raw = pathlib.Path(template).read_text(encoding="ascii")
-if raw.count("@INGEST_UID@") != 1 or raw.count("@INGEST_GID@") != 1:
-    raise SystemExit(1)
-raw = raw.replace("@INGEST_UID@", uid).replace("@INGEST_GID@", gid)
-doc = json.loads(raw)
-if type(doc) is not dict or doc.get("active") is not False or doc.get("ingestUid") != int(uid) or doc.get("ingestGid") != int(gid):
-    raise SystemExit(1)
-fd = os.open(output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-with os.fdopen(fd, "w", encoding="ascii") as stream:
-    json.dump(doc, stream, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
-    stream.write("\n")
-    stream.flush()
-    os.fsync(stream.fileno())
-PY
   /usr/bin/python3 -I -S - "${release_dir}/assets/remote-auth-gdm.authorized-key-options" "${release_dir}/identity/remote-auth-gdm-ingest.pub" "${release_dir}/generated/gdm-ingest.authorized_keys" <<'PY'
 import os, pathlib, sys
 options = pathlib.Path(sys.argv[1]).read_bytes()
@@ -600,7 +633,7 @@ with os.fdopen(fd, "wb", buffering=0) as stream:
 PY
   /usr/bin/chown -R root:root "${release_dir}/generated"
   /usr/bin/chmod 0755 "${release_dir}/generated"
-  /usr/bin/chmod 0600 "${release_dir}/generated/gdm.json" "${release_dir}/generated/gdm-ingest.authorized_keys"
+  /usr/bin/chmod 0600 "${release_dir}/generated/gdm-ingest.authorized_keys"
 }
 
 remove_if_identical() {
@@ -631,10 +664,486 @@ require_clean_managed_targets() {
     "${GDM_CONFIG}" "${GDM_KEYS}" "${GDM_UNIT}" \
     "${PAM_ROLLBACK_UNIT}" "${PAM_ROLLBACK_TIMER}" \
     "${TMPFILES_CONFIG}" "${SSHD_CONFIG}" \
-    "${DEPLOY_STATIC}" "${CONFIRM_STATIC}" "${COMMON_STATIC}"; do
+    "${DEPLOY_STATIC}" "${ACTIVATE_STATIC}" "${DEACTIVATE_STATIC}" "${STATUS_STATIC}" \
+    "${CONFIRM_STATIC}" "${COMMON_STATIC}"; do
     [[ ! -e ${target} && ! -L ${target} ]] ||
       rab_die "an untracked artifact already occupies a fixed GDM deployment path: ${target}"
   done
+}
+
+verify_inactive_verifier_status() {
+  local control=$1 expected_release=$2 output
+  output=$("${control}" status) || return 1
+  verify_inactive_verifier_status_output "${output}" "${expected_release}"
+}
+
+verify_confirmed_deploy_state_record() {
+  /usr/bin/python3 -I -S - "${DEPLOY_STATE}" "${release_id}" <<'PY'
+import pathlib, re, sys
+path, expected = sys.argv[1:]
+raw = pathlib.Path(path).read_bytes()
+if not raw.endswith(b"\n") or raw.count(b"\n") != 4 or b"\0" in raw:
+    raise SystemExit(1)
+lines = raw.decode("ascii", "strict").splitlines()
+if lines[0] != f"release={expected}":
+    raise SystemExit(1)
+if [line.split("=", 1)[0] for line in lines[1:]] != [
+    "created_user", "created_group", "module_preexisted"
+]:
+    raise SystemExit(1)
+if any(not re.fullmatch(r"[01]", line.split("=", 1)[1]) for line in lines[1:]):
+    raise SystemExit(1)
+PY
+}
+
+verify_legacy_confirmed_inactive_current() {
+  verify_release_manifest "${release_dir}" 0 0755 0755 0644 legacy ||
+    rab_die 'the confirmed legacy release bytes do not match its reviewed manifest'
+  [[ -L ${RAB_CURRENT} && $(/usr/bin/realpath -e -- "${RAB_CURRENT}") == "${release_dir}" ]] ||
+    rab_die 'the confirmed legacy release is not current'
+  require_installed_identical "${GDM_CONFIG}" "${release_dir}/generated/gdm.json" 600
+  require_installed_identical "${GDM_KEYS}" "${release_dir}/generated/gdm-ingest.authorized_keys" 600
+  require_installed_identical "${GDM_UNIT}" "${release_dir}/assets/remote-auth-gdmd.service" 644
+  require_installed_identical "${PAM_ROLLBACK_UNIT}" "${release_dir}/assets/remote-auth-pam-rollback.service" 644
+  require_installed_identical "${PAM_ROLLBACK_TIMER}" "${release_dir}/assets/remote-auth-pam-rollback.timer" 644
+  require_installed_identical "${TMPFILES_CONFIG}" "${release_dir}/assets/remote-auth-gdm.tmpfiles.conf" 644
+  require_installed_identical "${SSHD_CONFIG}" "${release_dir}/assets/71-remote-auth-gdm-ingest.conf" 644
+  require_installed_identical "${DEPLOY_STATIC}" "${release_dir}/scripts/deploy-gdm-release-ubuntu.sh" 700
+  require_installed_identical "${CONFIRM_STATIC}" "${release_dir}/scripts/confirm-gdm-release-ubuntu.sh" 700
+  require_installed_identical "${COMMON_STATIC}" "${release_dir}/scripts/ubuntu-common.sh" 700
+  require_installed_identical "${MODULE_TARGET}" "${release_dir}/lib/pam_gdm_broker.so" 644
+  local path
+  for path in \
+    "${VERIFIER_MANIFEST}" "${SUDO_REGISTRY}" "${VERIFIER_KEYS}" \
+    "${ACTIVATE_STATIC}" "${DEACTIVATE_STATIC}" "${STATUS_STATIC}"; do
+    [[ ! -e ${path} && ! -L ${path} ]] ||
+      rab_die 'the confirmed legacy deployment contains untracked verifier state'
+  done
+  rab_json_must_be_inactive "${GDM_CONFIG}"
+  verify_pam_layout || rab_die 'the confirmed legacy PAM layout is invalid'
+  /usr/bin/systemctl is-active --quiet remote-auth-gdmd.service ||
+    rab_die 'the confirmed legacy GDM verifier service is not active'
+  /usr/bin/systemctl is-active --quiet ssh.service ||
+    rab_die 'the SSH service is not active'
+  ingest_gid=$(/usr/bin/id -g "${GDM_USER}")
+  verify_socket "${RAB_RUN}/gdm/ingest.sock" "${ingest_gid}" 660 ||
+    rab_die 'the confirmed legacy GDM ingestion socket is not ready'
+  verify_socket "${RAB_RUN}/gdm/gdm-claim.sock" 0 600 ||
+    rab_die 'the confirmed legacy GDM claim socket is not ready'
+  verify_ssh_policy || rab_die 'the confirmed legacy forced SSH policy is not effective'
+}
+
+verify_confirmed_inactive_current() {
+  verify_confirmed_deploy_state_record ||
+    rab_die 'the confirmed deployment state record has drifted'
+  if [[ -f ${release_dir}/bin/remote-auth-verifierctl && ! -L ${release_dir}/bin/remote-auth-verifierctl ]]; then
+    upgrade_old_layout=current
+    print_status >/dev/null
+    rab_json_must_be_inactive "${GDM_CONFIG}"
+    verify_inactive_verifier_status "${release_dir}/bin/remote-auth-verifierctl" "${release_id}" ||
+      rab_die 'the current GDM verifier policy is active, prepared, or drifted'
+  else
+    upgrade_old_layout=legacy
+    verify_legacy_confirmed_inactive_current
+  fi
+  [[ ! -e ${PAM_CURRENT} && ! -L ${PAM_CURRENT} ]] ||
+    rab_die 'the current GDM release does not have fully confirmed PAM state'
+  ! /usr/bin/systemctl is-active --quiet remote-auth-pam-rollback.timer ||
+    rab_die 'the PAM rollback timer is active'
+  ! /usr/bin/systemctl is-enabled --quiet remote-auth-pam-rollback.timer ||
+    rab_die 'the PAM rollback timer is enabled'
+  /usr/bin/systemctl is-enabled --quiet remote-auth-gdmd.service ||
+    rab_die 'the GDM verifier service is not enabled'
+  [[ ! -e ${ACTIVATION_BUNDLE} && ! -L ${ACTIVATION_BUNDLE} ]] ||
+    rab_die 'a GDM activation bundle is present while policy must be inactive'
+  rab_require_owner_mode "${PAM_FILE}" 0 0 644
+  [[ $(/usr/bin/stat -c '%h' -- "${PAM_FILE}") == 1 &&
+     $(/usr/bin/stat -c '%h' -- "${MODULE_TARGET}") == 1 ]] ||
+    rab_die 'confirmed PAM or module metadata has drifted'
+}
+
+snapshot_upgrade_file() {
+  local source=$1 name=$2 mode=$3
+  rab_require_owner_mode "${source}" 0 0 "${mode}"
+  /usr/bin/install -o root -g root -m "${mode}" -- "${source}" "${upgrade_snapshot_root}/old/${name}"
+  /usr/bin/cmp -s -- "${source}" "${upgrade_snapshot_root}/old/${name}" ||
+    rab_die 'an installed GDM artifact changed during upgrade snapshot'
+}
+
+snapshot_confirmed_upgrade() {
+  upgrade_snapshot_root=${RAB_RUN}/gdm-upgrade.$(rab_transaction_id)
+  /bin/mkdir -m 0700 -- "${upgrade_snapshot_root}"
+  /bin/mkdir -m 0700 -- "${upgrade_snapshot_root}/old" "${upgrade_snapshot_root}/new-etc"
+  upgrade_old_release_id=${release_id}
+  upgrade_old_release_dir=${release_dir}
+  upgrade_old_current_target=$(/usr/bin/readlink -- "${RAB_CURRENT}")
+  [[ ${upgrade_old_current_target} == "${upgrade_old_release_dir}" ]] ||
+    rab_die 'the current release link target is not the exact confirmed release path'
+  upgrade_gdmd_enabled=$(/usr/bin/systemctl is-enabled remote-auth-gdmd.service || true)
+  upgrade_gdmd_active=$(/usr/bin/systemctl is-active remote-auth-gdmd.service || true)
+  upgrade_ssh_active=$(/usr/bin/systemctl is-active ssh.service || true)
+  [[ ${upgrade_gdmd_enabled} == enabled && ${upgrade_gdmd_active} == active && ${upgrade_ssh_active} == active ]] ||
+    rab_die 'the confirmed GDM or SSH service state has drifted'
+
+  snapshot_upgrade_file "${DEPLOY_STATE}" deploy-state 600
+  snapshot_upgrade_file "${GDM_CONFIG}" gdm.json 600
+  if [[ ${upgrade_old_layout} == current ]]; then
+    snapshot_upgrade_file "${VERIFIER_MANIFEST}" key-manifest.json 600
+    snapshot_upgrade_file "${SUDO_REGISTRY}" sudo-registry.json 600
+    snapshot_upgrade_file "${VERIFIER_KEYS}/sudo-signing-private.key" sudo-signing-private.key 600
+    snapshot_upgrade_file "${VERIFIER_KEYS}/gdm-signing-private.key" gdm-signing-private.key 600
+    snapshot_upgrade_file "${VERIFIER_KEYS}/gdm-hpke-private.key" gdm-hpke-private.key 600
+  fi
+  snapshot_upgrade_file "${GDM_KEYS}" gdm-ingest.authorized_keys 600
+  snapshot_upgrade_file "${GDM_UNIT}" remote-auth-gdmd.service 644
+  snapshot_upgrade_file "${PAM_ROLLBACK_UNIT}" remote-auth-pam-rollback.service 644
+  snapshot_upgrade_file "${PAM_ROLLBACK_TIMER}" remote-auth-pam-rollback.timer 644
+  snapshot_upgrade_file "${TMPFILES_CONFIG}" remote-auth-gdm.conf 644
+  snapshot_upgrade_file "${SSHD_CONFIG}" 71-remote-auth-gdm-ingest.conf 644
+  snapshot_upgrade_file "${DEPLOY_STATIC}" remote-auth-gdm-deploy 700
+  if [[ ${upgrade_old_layout} == current ]]; then
+    snapshot_upgrade_file "${ACTIVATE_STATIC}" remote-auth-gdm-activate 700
+    snapshot_upgrade_file "${DEACTIVATE_STATIC}" remote-auth-gdm-deactivate 700
+    snapshot_upgrade_file "${STATUS_STATIC}" remote-auth-gdm-status 700
+  fi
+  snapshot_upgrade_file "${CONFIRM_STATIC}" remote-auth-gdm-confirm 700
+  snapshot_upgrade_file "${COMMON_STATIC}" ubuntu-common.sh 700
+  upgrade_pam_digest=$(rab_sha256 "${PAM_FILE}")
+  upgrade_module_digest=$(rab_sha256 "${MODULE_TARGET}")
+  /bin/sync -f "${upgrade_snapshot_root}/old"
+  /bin/sync -f "${upgrade_snapshot_root}"
+}
+
+write_upgrade_candidate_state() {
+  local state=${upgrade_snapshot_root}/new-deploy-state
+  printf 'release=%s\ncreated_user=%s\ncreated_group=%s\nmodule_preexisted=%s\n' \
+    "${stage_release}" "${created_user}" "${created_group}" "${module_preexisted}" >"${state}"
+  /usr/bin/chown root:root "${state}"
+  /usr/bin/chmod 0600 "${state}"
+  /bin/sync -f "${state}"
+}
+
+verify_isolated_verifier_tree() {
+  /usr/bin/python3 -I -S - "${upgrade_snapshot_root}/new-etc" <<'PY'
+import os, pathlib, stat, sys
+root = pathlib.Path(sys.argv[1])
+expected_files = {
+    "gdm.json", "key-manifest.json", "sudo-registry.json",
+    "keys/sudo-signing-private.key", "keys/gdm-signing-private.key",
+    "keys/gdm-hpke-private.key",
+}
+expected_dirs = {"keys"}
+files, dirs = set(), set()
+for base, names, entries in os.walk(root, topdown=True, followlinks=False):
+    base_path = pathlib.Path(base)
+    for name in names:
+        path = base_path / name
+        rel = path.relative_to(root).as_posix()
+        value = os.lstat(path)
+        if not stat.S_ISDIR(value.st_mode) or value.st_uid != 0 or value.st_gid != 0 or stat.S_IMODE(value.st_mode) != 0o700:
+            raise SystemExit(1)
+        dirs.add(rel)
+    for name in entries:
+        path = base_path / name
+        rel = path.relative_to(root).as_posix()
+        value = os.lstat(path)
+        if not stat.S_ISREG(value.st_mode) or value.st_uid != 0 or value.st_gid != 0 or stat.S_IMODE(value.st_mode) != 0o600 or value.st_nlink != 1:
+            raise SystemExit(1)
+        files.add(rel)
+if dirs != expected_dirs or files != expected_files:
+    raise SystemExit(1)
+PY
+}
+
+create_isolated_verifier_generation() {
+  local output
+  write_upgrade_candidate_state
+  output=$(
+    /usr/bin/unshare --mount --propagation private /bin/bash -Eeuo pipefail -c '
+      /usr/bin/mount --bind "$1" /etc/remote-auth-broker
+      /usr/bin/mount --bind "$2" /var/lib/remote-auth-broker/gdm-release-current
+      "$3" init-inactive
+      "$3" validate
+      "$3" status
+    ' upgrade-verifier \
+      "${upgrade_snapshot_root}/new-etc" \
+      "${upgrade_snapshot_root}/new-deploy-state" \
+      "${release_dir}/bin/remote-auth-verifierctl"
+  ) || rab_die 'isolated verifier generation failed'
+  verify_inactive_verifier_status_output "${output}" "${stage_release}" ||
+    rab_die 'isolated verifier status was not exactly inactive'
+  verify_isolated_verifier_tree || rab_die 'isolated verifier generation metadata is invalid'
+  /bin/sync -f "${upgrade_snapshot_root}/new-etc/keys"
+  /bin/sync -f "${upgrade_snapshot_root}/new-etc"
+  /bin/sync -f "${upgrade_snapshot_root}"
+}
+
+verify_inactive_verifier_status_output() {
+  local output=$1 expected_release=$2
+  /usr/bin/python3 -I -S - "${expected_release}" "${output}" <<'PY'
+import json, sys
+expected, raw = sys.argv[1:]
+value = json.loads(raw)
+if type(value) is not dict or set(value) != {
+    "schemaVersion", "state", "ubuntuReleaseDigest", "policyDigest",
+    "bundleDigest", "macReleaseDigest", "gdmSigningKeyId",
+}:
+    raise SystemExit(1)
+if (
+    value["schemaVersion"] != 1
+    or value["state"] != "installed"
+    or value["ubuntuReleaseDigest"] != expected
+    or any(value[name] is not None for name in (
+        "policyDigest", "bundleDigest", "macReleaseDigest", "gdmSigningKeyId"
+    ))
+):
+    raise SystemExit(1)
+PY
+}
+
+probe_candidate_verifier_status() {
+  local output
+  output=$(
+    /usr/bin/unshare --mount --propagation private /bin/bash -Eeuo pipefail -c '
+      /usr/bin/mount --bind "$1" /var/lib/remote-auth-broker/gdm-release-current
+      "$2" validate
+      "$2" status
+    ' probe-verifier \
+      "${upgrade_snapshot_root}/new-deploy-state" \
+      "${release_dir}/bin/remote-auth-verifierctl"
+  ) || rab_die 'candidate verifier validation failed before deployment commit'
+  verify_inactive_verifier_status_output "${output}" "${stage_release}" ||
+    rab_die 'candidate verifier status was not exactly inactive before deployment commit'
+}
+
+install_candidate_verifier_state() {
+  ensure_root_directory "${VERIFIER_KEYS}" 700
+  rab_atomic_install "${upgrade_snapshot_root}/new-etc/gdm.json" "${GDM_CONFIG}" 0600
+  rab_atomic_install "${upgrade_snapshot_root}/new-etc/key-manifest.json" "${VERIFIER_MANIFEST}" 0600
+  rab_atomic_install "${upgrade_snapshot_root}/new-etc/sudo-registry.json" "${SUDO_REGISTRY}" 0600
+  rab_atomic_install "${upgrade_snapshot_root}/new-etc/keys/sudo-signing-private.key" "${VERIFIER_KEYS}/sudo-signing-private.key" 0600
+  rab_atomic_install "${upgrade_snapshot_root}/new-etc/keys/gdm-signing-private.key" "${VERIFIER_KEYS}/gdm-signing-private.key" 0600
+  rab_atomic_install "${upgrade_snapshot_root}/new-etc/keys/gdm-hpke-private.key" "${VERIFIER_KEYS}/gdm-hpke-private.key" 0600
+}
+
+install_candidate_managed_files() {
+  rab_atomic_install "${release_dir}/generated/gdm-ingest.authorized_keys" "${GDM_KEYS}" 0600
+  rab_atomic_install "${release_dir}/assets/remote-auth-gdmd.service" "${GDM_UNIT}" 0644
+  rab_atomic_install "${release_dir}/assets/remote-auth-pam-rollback.service" "${PAM_ROLLBACK_UNIT}" 0644
+  rab_atomic_install "${release_dir}/assets/remote-auth-pam-rollback.timer" "${PAM_ROLLBACK_TIMER}" 0644
+  rab_atomic_install "${release_dir}/assets/remote-auth-gdm.tmpfiles.conf" "${TMPFILES_CONFIG}" 0644
+  rab_atomic_install "${release_dir}/assets/71-remote-auth-gdm-ingest.conf" "${SSHD_CONFIG}" 0644
+  rab_atomic_install "${release_dir}/scripts/deploy-gdm-release-ubuntu.sh" "${DEPLOY_STATIC}" 0700
+  rab_atomic_install "${release_dir}/scripts/activate-gdm-ubuntu.sh" "${ACTIVATE_STATIC}" 0700
+  rab_atomic_install "${release_dir}/scripts/deactivate-gdm-ubuntu.sh" "${DEACTIVATE_STATIC}" 0700
+  rab_atomic_install "${release_dir}/scripts/status-gdm-ubuntu.sh" "${STATUS_STATIC}" 0700
+  rab_atomic_install "${release_dir}/scripts/confirm-gdm-release-ubuntu.sh" "${CONFIRM_STATIC}" 0700
+  rab_atomic_install "${release_dir}/scripts/ubuntu-common.sh" "${COMMON_STATIC}" 0700
+}
+
+switch_current_release() {
+  local temporary=${RAB_ROOT}/.current-${stage_release}
+  [[ ! -e ${temporary} && ! -L ${temporary} ]] || rab_die 'a stale current-release switch link exists'
+  /usr/bin/ln -s -- "${release_dir}" "${temporary}"
+  /usr/bin/mv -Tf -- "${temporary}" "${RAB_CURRENT}"
+  /bin/sync -f "${RAB_ROOT}"
+}
+
+restore_upgrade_file() {
+  local name=$1 target=$2 mode=$3
+  rab_atomic_install "${upgrade_snapshot_root}/old/${name}" "${target}" "${mode}"
+}
+
+verify_upgrade_snapshot_restored() {
+  local name target path
+  while IFS='|' read -r name target; do
+    /usr/bin/cmp -s -- "${upgrade_snapshot_root}/old/${name}" "${target}" || return 1
+  done <<EOF
+deploy-state|${DEPLOY_STATE}
+gdm.json|${GDM_CONFIG}
+gdm-ingest.authorized_keys|${GDM_KEYS}
+remote-auth-gdmd.service|${GDM_UNIT}
+remote-auth-pam-rollback.service|${PAM_ROLLBACK_UNIT}
+remote-auth-pam-rollback.timer|${PAM_ROLLBACK_TIMER}
+remote-auth-gdm.conf|${TMPFILES_CONFIG}
+71-remote-auth-gdm-ingest.conf|${SSHD_CONFIG}
+remote-auth-gdm-deploy|${DEPLOY_STATIC}
+remote-auth-gdm-confirm|${CONFIRM_STATIC}
+ubuntu-common.sh|${COMMON_STATIC}
+EOF
+  if [[ ${upgrade_old_layout} == current ]]; then
+    while IFS='|' read -r name target; do
+      /usr/bin/cmp -s -- "${upgrade_snapshot_root}/old/${name}" "${target}" || return 1
+    done <<EOF
+key-manifest.json|${VERIFIER_MANIFEST}
+sudo-registry.json|${SUDO_REGISTRY}
+sudo-signing-private.key|${VERIFIER_KEYS}/sudo-signing-private.key
+gdm-signing-private.key|${VERIFIER_KEYS}/gdm-signing-private.key
+gdm-hpke-private.key|${VERIFIER_KEYS}/gdm-hpke-private.key
+remote-auth-gdm-activate|${ACTIVATE_STATIC}
+remote-auth-gdm-deactivate|${DEACTIVATE_STATIC}
+remote-auth-gdm-status|${STATUS_STATIC}
+EOF
+  else
+    for path in \
+      "${VERIFIER_MANIFEST}" "${SUDO_REGISTRY}" "${VERIFIER_KEYS}" \
+      "${ACTIVATE_STATIC}" "${DEACTIVATE_STATIC}" "${STATUS_STATIC}"; do
+      [[ ! -e ${path} && ! -L ${path} ]] || return 1
+    done
+  fi
+  [[ $(/usr/bin/readlink -- "${RAB_CURRENT}") == "${upgrade_old_current_target}" ]] || return 1
+  [[ $(rab_sha256 "${PAM_FILE}") == "${upgrade_pam_digest}" ]] || return 1
+  [[ $(rab_sha256 "${MODULE_TARGET}") == "${upgrade_module_digest}" ]] || return 1
+}
+
+restore_confirmed_upgrade() {
+  /usr/bin/systemctl stop remote-auth-gdmd.service >/dev/null
+  /usr/bin/install -o root -g root -m 0644 -- "${upgrade_old_release_dir}/lib/pam_gdm_broker.so" "${MODULE_TARGET}"
+  restore_upgrade_file gdm.json "${GDM_CONFIG}" 0600
+  if [[ ${upgrade_old_layout} == current ]]; then
+    restore_upgrade_file key-manifest.json "${VERIFIER_MANIFEST}" 0600
+    restore_upgrade_file sudo-registry.json "${SUDO_REGISTRY}" 0600
+    restore_upgrade_file sudo-signing-private.key "${VERIFIER_KEYS}/sudo-signing-private.key" 0600
+    restore_upgrade_file gdm-signing-private.key "${VERIFIER_KEYS}/gdm-signing-private.key" 0600
+    restore_upgrade_file gdm-hpke-private.key "${VERIFIER_KEYS}/gdm-hpke-private.key" 0600
+  else
+    /bin/rm -f -- \
+      "${VERIFIER_MANIFEST}" "${SUDO_REGISTRY}" \
+      "${VERIFIER_KEYS}/sudo-signing-private.key" \
+      "${VERIFIER_KEYS}/gdm-signing-private.key" \
+      "${VERIFIER_KEYS}/gdm-hpke-private.key"
+    if [[ -e ${VERIFIER_KEYS} || -L ${VERIFIER_KEYS} ]]; then
+      [[ -d ${VERIFIER_KEYS} && ! -L ${VERIFIER_KEYS} ]] ||
+        return 1
+      /bin/rmdir -- "${VERIFIER_KEYS}"
+    fi
+  fi
+  restore_upgrade_file gdm-ingest.authorized_keys "${GDM_KEYS}" 0600
+  restore_upgrade_file remote-auth-gdmd.service "${GDM_UNIT}" 0644
+  restore_upgrade_file remote-auth-pam-rollback.service "${PAM_ROLLBACK_UNIT}" 0644
+  restore_upgrade_file remote-auth-pam-rollback.timer "${PAM_ROLLBACK_TIMER}" 0644
+  restore_upgrade_file remote-auth-gdm.conf "${TMPFILES_CONFIG}" 0644
+  restore_upgrade_file 71-remote-auth-gdm-ingest.conf "${SSHD_CONFIG}" 0644
+  restore_upgrade_file remote-auth-gdm-deploy "${DEPLOY_STATIC}" 0700
+  if [[ ${upgrade_old_layout} == current ]]; then
+    restore_upgrade_file remote-auth-gdm-activate "${ACTIVATE_STATIC}" 0700
+    restore_upgrade_file remote-auth-gdm-deactivate "${DEACTIVATE_STATIC}" 0700
+    restore_upgrade_file remote-auth-gdm-status "${STATUS_STATIC}" 0700
+  else
+    /bin/rm -f -- "${ACTIVATE_STATIC}" "${DEACTIVATE_STATIC}" "${STATUS_STATIC}"
+  fi
+  restore_upgrade_file remote-auth-gdm-confirm "${CONFIRM_STATIC}" 0700
+  restore_upgrade_file ubuntu-common.sh "${COMMON_STATIC}" 0700
+  local current_temporary=${RAB_ROOT}/.current-rollback-${upgrade_old_release_id}
+  /bin/rm -f -- "${current_temporary}"
+  /usr/bin/ln -s -- "${upgrade_old_current_target}" "${current_temporary}"
+  /usr/bin/mv -Tf -- "${current_temporary}" "${RAB_CURRENT}"
+  /bin/sync -f "${RAB_ROOT}"
+  restore_upgrade_file deploy-state "${DEPLOY_STATE}" 0600
+  /usr/bin/systemctl daemon-reload >/dev/null
+  /usr/bin/systemd-tmpfiles --create "${TMPFILES_CONFIG}" >/dev/null
+  [[ ${upgrade_gdmd_enabled} == enabled ]] &&
+    /usr/bin/systemctl enable remote-auth-gdmd.service >/dev/null
+  [[ ${upgrade_gdmd_active} == active ]] &&
+    /usr/bin/systemctl restart remote-auth-gdmd.service >/dev/null
+  [[ ${upgrade_ssh_active} == active ]] &&
+    /usr/bin/systemctl reload ssh.service >/dev/null
+  release_id=${upgrade_old_release_id}
+  release_dir=${upgrade_old_release_dir}
+  verify_upgrade_snapshot_restored
+  verify_confirmed_inactive_current
+  [[ -z ${release_incoming:-} ]] || /bin/rm -rf -- "${release_incoming}"
+  [[ ! -e ${RELEASES}/${stage_release} && ! -L ${RELEASES}/${stage_release} ]] ||
+    /bin/rm -rf -- "${RELEASES}/${stage_release}"
+  /bin/sync -f "${RELEASES}"
+}
+
+rollback_failed_upgrade() {
+  trap - EXIT ERR INT TERM HUP
+  if ! (
+    set -Eeuo pipefail
+    restore_confirmed_upgrade
+  ); then
+    printf 'remote-auth-broker: confirmed inactive GDM upgrade failed and exact rollback failed\n' >&2
+    trap cleanup_authenticated_inputs EXIT
+    exit 1
+  fi
+  printf 'remote-auth-broker: confirmed inactive GDM upgrade failed; exact rollback completed\n' >&2
+  trap cleanup_authenticated_inputs EXIT
+  exit 1
+}
+
+verify_upgrade_pam_state() {
+  [[ $(rab_sha256 "${PAM_FILE}") == "${upgrade_pam_digest}" ]] || return 1
+  require_installed_identical "${MODULE_TARGET}" "${release_dir}/lib/pam_gdm_broker.so" 644 || return 1
+  [[ ! -e ${PAM_CURRENT} && ! -L ${PAM_CURRENT} ]] || return 1
+  ! /usr/bin/systemctl is-active --quiet remote-auth-pam-rollback.timer || return 1
+  ! /usr/bin/systemctl is-enabled --quiet remote-auth-pam-rollback.timer
+}
+
+perform_confirmed_upgrade() {
+  snapshot_confirmed_upgrade
+  created_user=$(deploy_state_value created_user)
+  created_group=$(deploy_state_value created_group)
+  module_preexisted=$(deploy_state_value module_preexisted)
+  [[ ${created_user} =~ ^[01]$ && ${created_group} =~ ^[01]$ && ${module_preexisted} =~ ^[01]$ ]] ||
+    rab_die 'confirmed deployment metadata is invalid'
+  [[ ! -e ${RELEASES}/${stage_release} && ! -L ${RELEASES}/${stage_release} ]] ||
+    rab_die 'an untracked release already occupies the staged upgrade digest'
+  [[ ! -e ${RELEASES}/.incoming-${stage_release} && ! -L ${RELEASES}/.incoming-${stage_release} ]] ||
+    rab_die 'an untracked incoming release already occupies the staged upgrade digest'
+  release_dir=''
+  release_incoming=''
+  trap rollback_failed_upgrade EXIT ERR INT TERM HUP
+  install_release_copy
+  render_generated_assets
+  /usr/bin/install -o root -g root -m 0644 -- "${release_dir}/lib/pam_gdm_broker.so" "${MODULE_TARGET}"
+  create_isolated_verifier_generation
+  install_candidate_verifier_state
+  install_candidate_managed_files
+  switch_current_release
+  /usr/bin/systemd-analyze verify "${GDM_UNIT}" "${PAM_ROLLBACK_UNIT}" "${PAM_ROLLBACK_TIMER}" >/dev/null 2>&1 ||
+    rab_die 'upgraded systemd units failed verification'
+  verify_ssh_policy || rab_die 'upgraded forced SSH policy failed preflight'
+  /usr/bin/systemctl daemon-reload >/dev/null
+  /usr/bin/systemd-tmpfiles --create "${TMPFILES_CONFIG}" >/dev/null
+  /usr/bin/systemctl restart remote-auth-gdmd.service >/dev/null
+  /usr/bin/systemctl reload ssh.service >/dev/null
+  local ready=0
+  for _ in {1..50}; do
+    if /usr/bin/systemctl is-active --quiet remote-auth-gdmd.service &&
+       verify_socket "${RAB_RUN}/gdm/ingest.sock" "${ingest_gid}" 660 &&
+       verify_socket "${RAB_RUN}/gdm/gdm-claim.sock" 0 600; then
+      ready=1
+      break
+    fi
+    /usr/bin/sleep 0.1
+  done
+  ((ready == 1)) || rab_die 'upgraded GDM verifier sockets did not become ready'
+  /usr/bin/systemctl is-active --quiet ssh.service || rab_die 'SSH service is not active after upgrade'
+  verify_ssh_policy || rab_die 'upgraded forced SSH policy is not effective'
+  probe_candidate_verifier_status
+  verify_upgrade_pam_state ||
+    rab_die 'PAM layout, module generation, or confirmed rollback state changed during upgrade'
+  write_deploy_state
+  "${release_dir}/bin/remote-auth-verifierctl" validate ||
+    rab_die 'committed verifier state is invalid'
+  verify_inactive_verifier_status "${release_dir}/bin/remote-auth-verifierctl" "${stage_release}" ||
+    rab_die 'committed verifier status is not exactly inactive'
+  /bin/sync -f "${RAB_ETC}"
+  /bin/sync -f "${RAB_ROOT}"
+  /bin/sync -f "${RAB_STATE}"
+  /bin/sync -f /etc/systemd/system
+  /bin/sync -f /etc/tmpfiles.d
+  /bin/sync -f /etc/ssh/sshd_config.d
+  verify_upgrade_pam_state ||
+    rab_die 'PAM layout, module generation, or confirmed rollback state changed before durability commit'
+  trap - ERR INT TERM HUP
+  trap cleanup_authenticated_inputs EXIT
+  /bin/rm -rf -- "${upgrade_old_release_dir}"
+  /bin/sync -f "${RELEASES}"
+  release_id=${stage_release}
+  printf 'component=gdm-broker\nrelease_sha256=%s\ndeployment=upgraded\npam=confirmed\npolicy=inactive\ndaemon=active\nssh_ingest=ready\ningest_socket=ready\nclaim_socket=ready\n' "${stage_release}"
 }
 
 
@@ -659,7 +1168,6 @@ perform_rollback() {
   fi
   [[ ${current_target} == "${release_dir}" || ${strict} -eq 0 ]] || rab_die 'a different release is current; refusing rollback'
   if [[ ${strict} -eq 1 ]]; then
-    require_identical_if_present "${GDM_CONFIG}" "${release_dir}/generated/gdm.json"
     require_identical_if_present "${GDM_KEYS}" "${release_dir}/generated/gdm-ingest.authorized_keys"
     require_identical_if_present "${GDM_UNIT}" "${release_dir}/assets/remote-auth-gdmd.service"
     require_identical_if_present "${PAM_ROLLBACK_UNIT}" "${release_dir}/assets/remote-auth-pam-rollback.service"
@@ -667,6 +1175,9 @@ perform_rollback() {
     require_identical_if_present "${TMPFILES_CONFIG}" "${release_dir}/assets/remote-auth-gdm.tmpfiles.conf"
     require_identical_if_present "${SSHD_CONFIG}" "${release_dir}/assets/71-remote-auth-gdm-ingest.conf"
     require_identical_if_present "${DEPLOY_STATIC}" "${release_dir}/scripts/deploy-gdm-release-ubuntu.sh"
+    require_identical_if_present "${ACTIVATE_STATIC}" "${release_dir}/scripts/activate-gdm-ubuntu.sh"
+    require_identical_if_present "${DEACTIVATE_STATIC}" "${release_dir}/scripts/deactivate-gdm-ubuntu.sh"
+    require_identical_if_present "${STATUS_STATIC}" "${release_dir}/scripts/status-gdm-ubuntu.sh"
     require_identical_if_present "${CONFIRM_STATIC}" "${release_dir}/scripts/confirm-gdm-release-ubuntu.sh"
     require_identical_if_present "${COMMON_STATIC}" "${release_dir}/scripts/ubuntu-common.sh"
     if [[ ${module_preexisted_local} -eq 0 ]]; then
@@ -685,7 +1196,19 @@ perform_rollback() {
   if [[ ${current_target} == "${release_dir}" ]]; then
     /bin/rm -f -- "${RAB_CURRENT}"
   fi
-  remove_if_identical "${GDM_CONFIG}" "${release_dir}/generated/gdm.json" "${strict}"
+  for verifier_file in \
+    "${GDM_CONFIG}" "${VERIFIER_MANIFEST}" "${SUDO_REGISTRY}" \
+    "${VERIFIER_KEYS}/sudo-signing-private.key" \
+    "${VERIFIER_KEYS}/gdm-signing-private.key" \
+    "${VERIFIER_KEYS}/gdm-hpke-private.key"; do
+    if [[ -e ${verifier_file} || -L ${verifier_file} ]]; then
+      rab_require_owner_mode "${verifier_file}" 0 0 600
+      /bin/rm -f -- "${verifier_file}"
+    fi
+  done
+  if [[ -d ${VERIFIER_KEYS} && ! -L ${VERIFIER_KEYS} ]]; then
+    /bin/rmdir -- "${VERIFIER_KEYS}" || rab_die 'verifier key directory contains unmanaged state'
+  fi
   remove_if_identical "${GDM_KEYS}" "${release_dir}/generated/gdm-ingest.authorized_keys" "${strict}"
   remove_if_identical "${GDM_UNIT}" "${release_dir}/assets/remote-auth-gdmd.service" "${strict}"
   remove_if_identical "${PAM_ROLLBACK_UNIT}" "${release_dir}/assets/remote-auth-pam-rollback.service" "${strict}"
@@ -693,6 +1216,9 @@ perform_rollback() {
   remove_if_identical "${TMPFILES_CONFIG}" "${release_dir}/assets/remote-auth-gdm.tmpfiles.conf" "${strict}"
   remove_if_identical "${SSHD_CONFIG}" "${release_dir}/assets/71-remote-auth-gdm-ingest.conf" "${strict}"
   remove_if_identical "${CONFIRM_STATIC}" "${release_dir}/scripts/confirm-gdm-release-ubuntu.sh" "${strict}"
+  remove_if_identical "${ACTIVATE_STATIC}" "${release_dir}/scripts/activate-gdm-ubuntu.sh" "${strict}"
+  remove_if_identical "${DEACTIVATE_STATIC}" "${release_dir}/scripts/deactivate-gdm-ubuntu.sh" "${strict}"
+  remove_if_identical "${STATUS_STATIC}" "${release_dir}/scripts/status-gdm-ubuntu.sh" "${strict}"
   remove_if_identical "${COMMON_STATIC}" "${release_dir}/scripts/ubuntu-common.sh" "${strict}"
   remove_if_identical "${DEPLOY_STATIC}" "${release_dir}/scripts/deploy-gdm-release-ubuntu.sh" "${strict}"
   if [[ ${module_preexisted_local} -eq 0 ]]; then
@@ -735,6 +1261,7 @@ if [[ ${action} == rollback ]]; then
 fi
 
 snapshot_root=''
+upgrade_snapshot_root=''
 readonly bootstrap_root=${SCRIPT_DIR}
 cleanup_authenticated_inputs() {
   local cleanup_status=$?
@@ -742,6 +1269,9 @@ cleanup_authenticated_inputs() {
   set +e
   if [[ -n ${snapshot_root} && ${snapshot_root} =~ ^/run/remote-auth-gdm-snapshot\.[A-Za-z0-9]{8}$ ]]; then
     /bin/rm -rf -- "${snapshot_root}"
+  fi
+  if [[ -n ${upgrade_snapshot_root} && ${upgrade_snapshot_root} =~ ^/run/remote-auth-broker/gdm-upgrade\.[0-9a-f-]{36}$ ]]; then
+    /bin/rm -rf -- "${upgrade_snapshot_root}"
   fi
   if [[ ${bootstrap_root} =~ ^/run/remote-auth-gdm-bootstrap\.[A-Za-z0-9]{8}$ ]]; then
     /bin/rm -rf -- "${bootstrap_root}"
@@ -765,8 +1295,15 @@ if [[ -e ${DEPLOY_STATE} || -L ${DEPLOY_STATE} ]]; then
   fi
   if [[ -e ${DEPLOY_STATE} || -L ${DEPLOY_STATE} ]]; then
     require_deploy_state
-    [[ ${release_id} == "${stage_release}" ]] || rab_die 'a different GDM release is already installed'
-    print_status
+    if [[ ${release_id} == "${stage_release}" ]]; then
+      print_status
+      exit 0
+    fi
+    verify_confirmed_inactive_current
+    ingest_gid=$(/usr/bin/id -g "${GDM_USER}")
+    [[ ${ingest_gid} =~ ^[0-9]+$ && ${ingest_gid} -ne 0 ]] ||
+      rab_die 'the fixed GDM group is invalid'
+    perform_confirmed_upgrade
     exit 0
   fi
 fi
@@ -846,7 +1383,8 @@ ensure_root_directory "${PAM_BACKUPS}" 700
 write_deploy_state
 trap rollback_failed_install ERR INT TERM HUP
 
-rab_atomic_install "${release_dir}/generated/gdm.json" "${GDM_CONFIG}" 0600
+"${release_dir}/bin/remote-auth-verifierctl" init-inactive ||
+  rab_die 'root-owned inactive verifier state initialization failed'
 rab_atomic_install "${release_dir}/generated/gdm-ingest.authorized_keys" "${GDM_KEYS}" 0600
 rab_atomic_install "${release_dir}/assets/remote-auth-gdmd.service" "${GDM_UNIT}" 0644
 rab_atomic_install "${release_dir}/assets/remote-auth-pam-rollback.service" "${PAM_ROLLBACK_UNIT}" 0644
@@ -854,6 +1392,9 @@ rab_atomic_install "${release_dir}/assets/remote-auth-pam-rollback.timer" "${PAM
 rab_atomic_install "${release_dir}/assets/remote-auth-gdm.tmpfiles.conf" "${TMPFILES_CONFIG}" 0644
 rab_atomic_install "${release_dir}/assets/71-remote-auth-gdm-ingest.conf" "${SSHD_CONFIG}" 0644
 rab_atomic_install "${release_dir}/scripts/deploy-gdm-release-ubuntu.sh" "${DEPLOY_STATIC}" 0700
+rab_atomic_install "${release_dir}/scripts/activate-gdm-ubuntu.sh" "${ACTIVATE_STATIC}" 0700
+rab_atomic_install "${release_dir}/scripts/deactivate-gdm-ubuntu.sh" "${DEACTIVATE_STATIC}" 0700
+rab_atomic_install "${release_dir}/scripts/status-gdm-ubuntu.sh" "${STATUS_STATIC}" 0700
 rab_atomic_install "${release_dir}/scripts/confirm-gdm-release-ubuntu.sh" "${CONFIRM_STATIC}" 0700
 rab_atomic_install "${release_dir}/scripts/ubuntu-common.sh" "${COMMON_STATIC}" 0700
 current_tmp=${RAB_ROOT}/.current-${stage_release}

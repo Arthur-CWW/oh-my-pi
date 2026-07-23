@@ -15,6 +15,7 @@ final class RuntimeBootstrapTests: XCTestCase {
         XCTAssertEqual(paths.knownHostsURL.path, root + "/config/known_hosts")
         XCTAssertEqual(paths.browserConfigurationURL.path, root + "/config/browser-controller.json")
         XCTAssertEqual(paths.browserRuntimeDirectoryURL.path, root + "/run/browser")
+        XCTAssertEqual(paths.sourceBuildDigestURL.path, root + "/current/source-build-digest")
     }
 
     func testStrictPolicyLoadRequiresOwnerOnlyFileMode() throws {
@@ -133,12 +134,36 @@ final class RuntimeBootstrapTests: XCTestCase {
             .finalizeCredentialCutover
         )
         XCTAssertEqual(
-            try RemoteAuthCLI.parseLocalAdministration(["activate", "--policy", "/tmp/reviewed.json"]),
-            .activate(policyPath: "/tmp/reviewed.json")
+            try RemoteAuthCLI.parseLocalAdministration(["gdm", "prepare", "--file", "/tmp/reviewed.json"]),
+            .gdmPrepare(inputPath: "/tmp/reviewed.json")
         )
-        XCTAssertEqual(try RemoteAuthCLI.parseLocalAdministration(["deactivate"]), .deactivate)
+        XCTAssertEqual(
+            try RemoteAuthCLI.parseLocalAdministration([
+                "gdm", "bootstrap-cloud",
+                "--ubuntu-export", "/tmp/ubuntu-export.json",
+                "--endpoint", "ssh://arthur@example.test",
+                "--approve-observed-attestation"
+            ]),
+            .gdmBootstrapCloud(
+                ubuntuExportPath: "/tmp/ubuntu-export.json",
+                endpoint: "ssh://arthur@example.test",
+                approveObservedAttestation: true
+            )
+        )
+        XCTAssertEqual(try RemoteAuthCLI.parseLocalAdministration(["gdm", "status"]), .gdmStatus)
+        XCTAssertEqual(try RemoteAuthCLI.parseLocalAdministration(["gdm", "activate"]), .gdmActivate)
+        XCTAssertEqual(try RemoteAuthCLI.parseLocalAdministration(["gdm", "deactivate"]), .gdmDeactivate)
         XCTAssertNil(try RemoteAuthCLI.parseLocalAdministration(["status"]))
-        XCTAssertThrowsError(try RemoteAuthCLI.parseLocalAdministration(["activate"]))
+        XCTAssertThrowsError(try RemoteAuthCLI.parseLocalAdministration(["gdm", "prepare"]))
+        XCTAssertThrowsError(
+            try RemoteAuthCLI.parseLocalAdministration([
+                "gdm", "bootstrap-cloud",
+                "--ubuntu-export", "/tmp/ubuntu-export.json",
+                "--endpoint", "ssh://arthur@example.test",
+                "--mac-release-digest", String(repeating: "a", count: 64),
+                "--accept-observed-attestation"
+            ])
+        )
         XCTAssertThrowsError(
             try RemoteAuthCLI.parseLocalAdministration(["credential", "migrate-legacy", "extra"])
         )
@@ -147,8 +172,11 @@ final class RuntimeBootstrapTests: XCTestCase {
             "credential migrate-legacy",
             "credential migration-status",
             "credential finalize-cutover",
-            "activate --policy <owner-only-json>",
-            "deactivate",
+            "gdm prepare --file <owner-only-json>",
+            "gdm bootstrap-cloud --ubuntu-export <json> --endpoint <endpoint> --approve-observed-attestation",
+            "gdm status",
+            "gdm activate",
+            "gdm deactivate",
         ] {
             XCTAssertTrue(RemoteAuthCLI.help.contains(command), "missing help command: \(command)")
         }

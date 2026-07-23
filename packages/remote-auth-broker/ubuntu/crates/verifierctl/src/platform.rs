@@ -11,8 +11,8 @@ use crate::model::{hex_sha256, Identities};
 
 const SSH_HOST_KEY: &str = "/etc/ssh/ssh_host_ed25519_key.pub";
 const MAX_HOST_KEY_BYTES: u64 = 16_384;
-const SUBJECT_USER: &str = "nobody";
-const SUDO_BRIDGE_USER: &str = "remote-auth-sudo-ingest";
+const RELEASE_STATE: &str = "/var/lib/remote-auth-broker/gdm-release-current";
+const SUBJECT_USER: &str = "arthur";
 const GDM_INGEST_USER: &str = "remote-auth-gdm-ingest";
 
 pub(crate) fn require_root() -> Result<()> {
@@ -24,27 +24,66 @@ pub(crate) fn require_root() -> Result<()> {
 
 pub(crate) fn identities() -> Result<Identities> {
     let subject = user(SUBJECT_USER)?;
-    let bridge = user(SUDO_BRIDGE_USER)?;
     let gdm = user(GDM_INGEST_USER)?;
     if subject.uid == 0
-        || bridge.uid == 0
-        || bridge.gid == 0
         || gdm.uid == 0
         || gdm.gid == 0
-        || subject.uid == bridge.uid
         || subject.uid == gdm.uid
-        || bridge.uid == gdm.uid
     {
         return Err(Error::Identity);
     }
     Ok(Identities {
         subject_username: SUBJECT_USER.to_owned(),
         subject_uid: subject.uid,
-        bridge_uid: bridge.uid,
-        bridge_gid: bridge.gid,
+        bridge_uid: gdm.uid,
+        bridge_gid: gdm.gid,
         gdm_ingest_uid: gdm.uid,
         gdm_ingest_gid: gdm.gid,
     })
+}
+
+pub(crate) fn release_digest() -> Result<String> {
+    let file = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+        .open(Path::new(RELEASE_STATE))
+        .map_err(|_| Error::Identity)?;
+    let metadata = file.metadata().map_err(|_| Error::Identity)?;
+    if !metadata.file_type().is_file()
+        || metadata.uid() != 0
+        || metadata.gid() != 0
+        || metadata.mode() & 0o7777 != 0o600
+        || metadata.nlink() != 1
+        || metadata.len() == 0
+        || metadata.len() > 4096
+    {
+        return Err(Error::Identity);
+    }
+    let mut bytes = Vec::with_capacity(metadata.len() as usize);
+    file.take(4097)
+        .read_to_end(&mut bytes)
+        .map_err(|_| Error::Identity)?;
+    if bytes.len() as u64 != metadata.len() || bytes.iter().any(|byte| *byte == 0) {
+        return Err(Error::Identity);
+    }
+    let text = std::str::from_utf8(&bytes).map_err(|_| Error::Identity)?;
+    let mut release = None;
+    for line in text.lines() {
+        if let Some(value) = line.strip_prefix("release=") {
+            if release.replace(value).is_some() {
+                return Err(Error::Identity);
+            }
+        }
+    }
+    let release = release.ok_or(Error::Identity)?;
+    if release.len() != 64
+        || !release
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Err(Error::Identity);
+    }
+    Ok(release.to_owned())
 }
 
 pub(crate) fn ssh_host_key_digest() -> Result<String> {

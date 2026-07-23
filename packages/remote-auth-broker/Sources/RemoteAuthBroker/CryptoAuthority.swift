@@ -461,7 +461,7 @@ public final class CryptoAuthority {
             authenticatedData: hpkeAAD
         )
 
-        return try keychainAuthority.withSigningKey(domain: .desktopBrowser) { signingKeyID, privateKey in
+        return try keychainAuthority.withSigningKey(domain: .gdm) { signingKeyID, privateKey in
             let signatureTranscript = try ProtocolTranscript.gdmEnvelopeSignature(
                 try GDMEnvelopeSignatureInput(
                     hpkeAadTranscript: hpkeAAD,

@@ -9,6 +9,13 @@ enum TLSCertificateAttestation {
         certificateChainBase64: [String],
         expectedSPKISHA256: String
     ) throws {
+        let actual = try observedSPKISHA256(certificateChainBase64: certificateChainBase64)
+        guard constantTimeEqual(actual, expectedSPKISHA256) else {
+            throw JetKVMCloudError.tlsIdentityRejected
+        }
+    }
+
+    static func observedSPKISHA256(certificateChainBase64: [String]) throws -> String {
         guard (1...maximumChainLength).contains(certificateChainBase64.count),
               let encodedLeaf = certificateChainBase64.first,
               !encodedLeaf.isEmpty,
@@ -20,10 +27,7 @@ enum TLSCertificateAttestation {
         else {
             throw JetKVMCloudError.tlsIdentityRejected
         }
-        let actual = try spkiSHA256Hex(certificateDER: leaf)
-        guard constantTimeEqual(actual, expectedSPKISHA256) else {
-            throw JetKVMCloudError.tlsIdentityRejected
-        }
+        return try spkiSHA256Hex(certificateDER: leaf)
     }
 
     static func spkiSHA256Hex(certificateDER: Data) throws -> String {

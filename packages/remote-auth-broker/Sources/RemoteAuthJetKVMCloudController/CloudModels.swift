@@ -1,6 +1,7 @@
 import Foundation
 
 public enum JetKVMCloudContract {
+
     public static let vendoredFrontendCommit = "fe77acd5f00300a4ab9acd5da57d7bb0916351d9"
     public static let vendoredFrontendDigest = "0ad51887f89bd16da9cec1931e9f3a982091881abdb7648e8de944f8306258d7"
 
@@ -66,7 +67,6 @@ public struct JetKVMCloudConfiguration: Codable, Equatable, Sendable {
     public let maximumQueuedEventBytes: Int
 
     public var deviceURL: URL {
-        // Validation restricts deviceId to a path-segment-safe ASCII alphabet.
         URL(string: "https://app.jetkvm.com/devices/\(deviceId)")!
     }
 

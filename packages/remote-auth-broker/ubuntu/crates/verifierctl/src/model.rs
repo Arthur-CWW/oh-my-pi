@@ -91,14 +91,48 @@ pub(crate) struct GdmAllowedUser {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub(crate) struct PublicExport {
-    pub(crate) version: u32,
+    pub(crate) schema_version: u32,
     pub(crate) generation_id: String,
-    pub(crate) sudo_signing_key_id: String,
-    pub(crate) sudo_signing_public_key: String,
+    pub(crate) ubuntu_release_digest: String,
+    pub(crate) ssh_host_key_digest: String,
+    pub(crate) recipient_key_id: String,
+    pub(crate) recipient_public_key: String,
+    pub(crate) subject_username: String,
+    pub(crate) subject_uid: u32,
+    pub(crate) gdm_ingest_uid: u32,
+    pub(crate) gdm_ingest_gid: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub(crate) struct GdmActivationBundle {
+    pub(crate) schema_version: u32,
+    pub(crate) bundle_digest: String,
+    pub(crate) policy_digest: String,
+    pub(crate) ubuntu_release_digest: String,
+    pub(crate) ubuntu_generation_id: String,
+    pub(crate) ssh_host_key_digest: String,
+    pub(crate) recipient_key_id: String,
+    pub(crate) recipient_public_key: String,
+    pub(crate) mac_release_digest: String,
     pub(crate) gdm_signing_key_id: String,
     pub(crate) gdm_signing_public_key: String,
-    pub(crate) gdm_recipient_key_id: String,
-    pub(crate) gdm_recipient_public_key: String,
+    pub(crate) subject_username: String,
+    pub(crate) subject_uid: u32,
+    pub(crate) gdm_ingest_uid: u32,
+    pub(crate) gdm_ingest_gid: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ActivationStatus {
+    pub(crate) schema_version: u32,
+    pub(crate) state: String,
+    pub(crate) ubuntu_release_digest: String,
+    pub(crate) policy_digest: Option<String>,
+    pub(crate) bundle_digest: Option<String>,
+    pub(crate) mac_release_digest: Option<String>,
+    pub(crate) gdm_signing_key_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -160,30 +194,89 @@ impl KeyBundle {
         validate_x25519(&self.gdm_recipient, "gdm-x25519")
     }
 
-    pub(crate) fn public_export(&self) -> PublicExport {
+    pub(crate) fn public_export(
+        &self,
+        identities: &Identities,
+        host_digest: &str,
+        release_digest: &str,
+    ) -> PublicExport {
         PublicExport {
-            version: VERSION,
+            schema_version: VERSION,
             generation_id: self.generation_id.clone(),
-            sudo_signing_key_id: self.sudo_signing.key_id.clone(),
-            sudo_signing_public_key: self.sudo_signing.public_key.clone(),
-            gdm_signing_key_id: self.gdm_signing.key_id.clone(),
-            gdm_signing_public_key: self.gdm_signing.public_key.clone(),
-            gdm_recipient_key_id: self.gdm_recipient.key_id.clone(),
-            gdm_recipient_public_key: self.gdm_recipient.public_key.clone(),
+            ubuntu_release_digest: release_digest.to_owned(),
+            ssh_host_key_digest: host_digest.to_owned(),
+            recipient_key_id: self.gdm_recipient.key_id.clone(),
+            recipient_public_key: self.gdm_recipient.public_key.clone(),
+            subject_username: identities.subject_username.clone(),
+            subject_uid: identities.subject_uid,
+            gdm_ingest_uid: identities.gdm_ingest_uid,
+            gdm_ingest_gid: identities.gdm_ingest_gid,
         }
     }
 }
 
 impl PublicExport {
     pub(crate) fn validate(&self) -> Result<()> {
-        if self.version != VERSION
+        if self.schema_version != VERSION
             || !is_identifier(&self.generation_id)
-            || !is_base64url_id(&self.sudo_signing_key_id)
-            || decode_32(&self.sudo_signing_public_key).is_err()
+            || !is_digest(&self.ubuntu_release_digest)
+            || !is_digest(&self.ssh_host_key_digest)
+            || !is_base64url_id(&self.recipient_key_id)
+            || decode_32(&self.recipient_public_key).is_err()
+            || self.subject_username != "arthur"
+            || self.subject_uid == 0
+            || self.gdm_ingest_uid == 0
+            || self.gdm_ingest_gid == 0
+        {
+            return Err(Error::InvalidData);
+        }
+        Ok(())
+    }
+}
+
+impl GdmActivationBundle {
+    pub(crate) fn computed_digest(&self) -> String {
+        let material = format!(
+            "remote-auth-gdm-activation-v1\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
+            self.policy_digest,
+            self.ubuntu_release_digest,
+            self.ubuntu_generation_id,
+            self.ssh_host_key_digest,
+            self.recipient_key_id,
+            self.recipient_public_key,
+            self.mac_release_digest,
+            self.gdm_signing_key_id,
+            self.gdm_signing_public_key,
+            self.subject_username,
+            self.subject_uid,
+            self.gdm_ingest_uid,
+            self.gdm_ingest_gid,
+            self.schema_version,
+        );
+        hex_sha256(material.as_bytes())
+    }
+
+    pub(crate) fn validate(
+        &self,
+        public: &PublicExport,
+    ) -> Result<()> {
+        if self.schema_version != VERSION
+            || !is_digest(&self.bundle_digest)
+            || !is_digest(&self.policy_digest)
+            || self.policy_digest == "0".repeat(64)
+            || !is_digest(&self.mac_release_digest)
             || !is_base64url_id(&self.gdm_signing_key_id)
             || decode_32(&self.gdm_signing_public_key).is_err()
-            || !is_base64url_id(&self.gdm_recipient_key_id)
-            || decode_32(&self.gdm_recipient_public_key).is_err()
+            || self.bundle_digest != self.computed_digest()
+            || self.ubuntu_release_digest != public.ubuntu_release_digest
+            || self.ubuntu_generation_id != public.generation_id
+            || self.ssh_host_key_digest != public.ssh_host_key_digest
+            || self.recipient_key_id != public.recipient_key_id
+            || self.recipient_public_key != public.recipient_public_key
+            || self.subject_username != public.subject_username
+            || self.subject_uid != public.subject_uid
+            || self.gdm_ingest_uid != public.gdm_ingest_uid
+            || self.gdm_ingest_gid != public.gdm_ingest_gid
         {
             return Err(Error::InvalidData);
         }
@@ -306,6 +399,55 @@ impl GdmConfig {
             && self.ingest_uid == identities.gdm_ingest_uid
             && self.ingest_gid == identities.gdm_ingest_gid
             && self.ssh_host_key_digest == host_digest
+    }
+
+    pub(crate) fn active_from(
+        inactive: &Self,
+        bundle: &GdmActivationBundle,
+    ) -> Result<Self> {
+        inactive.validate_inactive()?;
+        let mut active = inactive.clone();
+        active.active = true;
+        active.policy_digest = bundle.policy_digest.clone();
+        active.signing_keys = vec![GdmSigningKey {
+            key_id: bundle.gdm_signing_key_id.clone(),
+            public_key: bundle.gdm_signing_public_key.clone(),
+        }];
+        active.allowed_users = vec![GdmAllowedUser {
+            username: bundle.subject_username.clone(),
+            uid: bundle.subject_uid,
+        }];
+        active.validate_active(bundle)?;
+        Ok(active)
+    }
+
+    pub(crate) fn validate_active(&self, bundle: &GdmActivationBundle) -> Result<()> {
+        if !self.active
+            || self.schema_version != VERSION
+            || self.policy_digest != bundle.policy_digest
+            || self.ssh_host_key_digest != bundle.ssh_host_key_digest
+            || self.recipient_key_id != bundle.recipient_key_id
+            || self.ingest_uid != bundle.gdm_ingest_uid
+            || self.ingest_gid != bundle.gdm_ingest_gid
+            || self.signing_keys
+                != vec![GdmSigningKey {
+                    key_id: bundle.gdm_signing_key_id.clone(),
+                    public_key: bundle.gdm_signing_public_key.clone(),
+                }]
+            || self.allowed_users
+                != vec![GdmAllowedUser {
+                    username: bundle.subject_username.clone(),
+                    uid: bundle.subject_uid,
+                }]
+        {
+            return Err(Error::InvalidData);
+        }
+        let mut inactive = self.clone();
+        inactive.active = false;
+        inactive.policy_digest = "0".repeat(64);
+        inactive.signing_keys.clear();
+        inactive.allowed_users.clear();
+        inactive.validate_inactive()
     }
 }
 
@@ -444,10 +586,10 @@ mod tests {
 
     fn identities() -> Identities {
         Identities {
-            subject_username: "nobody".to_owned(),
-            subject_uid: 65_534,
-            bridge_uid: 991,
-            bridge_gid: 991,
+            subject_username: "arthur".to_owned(),
+            subject_uid: 1000,
+            bridge_uid: 992,
+            bridge_gid: 992,
             gdm_ingest_uid: 992,
             gdm_ingest_gid: 992,
         }
@@ -468,24 +610,39 @@ mod tests {
 
     #[test]
     fn strict_json_rejects_unknown_duplicate_and_trailing_data() {
-        assert!(decode_strict::<PublicExport>(br#"{"version":1,"generationId":"g","sudoSigningKeyId":"s","sudoSigningPublicKey":"p","gdmSigningKeyId":"gs","gdmSigningPublicKey":"gp","gdmRecipientKeyId":"r","gdmRecipientPublicKey":"rp","extra":0}"#).is_err());
-        assert!(decode_strict::<PublicExport>(br#"{"version":1,"version":1,"generationId":"g","sudoSigningKeyId":"s","sudoSigningPublicKey":"p","gdmSigningKeyId":"gs","gdmSigningPublicKey":"gp","gdmRecipientKeyId":"r","gdmRecipientPublicKey":"rp"}"#).is_err());
-        assert!(decode_strict::<PublicExport>(br#"{"version":1,"generationId":"g","sudoSigningKeyId":"s","sudoSigningPublicKey":"p","gdmSigningKeyId":"gs","gdmSigningPublicKey":"gp","gdmRecipientKeyId":"r","gdmRecipientPublicKey":"rp"} true"#).is_err());
+        let export = fixed_bundle().public_export(
+            &identities(),
+            &"1".repeat(64),
+            &"2".repeat(64),
+        );
+        let mut value = serde_json::to_value(&export).unwrap();
+        value.as_object_mut().unwrap().insert("extra".to_owned(), 0.into());
+        assert!(decode_strict::<PublicExport>(&serde_json::to_vec(&value).unwrap()).is_err());
+        let valid = serde_json::to_vec(&export).unwrap();
+        let duplicate = String::from_utf8(valid.clone())
+            .unwrap()
+            .replacen("{", r#"{"schemaVersion":1,"#, 1);
+        assert!(decode_strict::<PublicExport>(duplicate.as_bytes()).is_err());
+        let mut trailing = valid;
+        trailing.extend_from_slice(b" true");
+        assert!(decode_strict::<PublicExport>(&trailing).is_err());
         assert!(decode_32("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=").is_err());
-        assert!(decode_32("+++++++++++++++++++++++++++++++++++++++++++" ).is_err());
+        assert!(decode_32("+++++++++++++++++++++++++++++++++++++++++++").is_err());
     }
 
     #[test]
-    fn public_export_contains_only_derived_public_material() {
+    fn public_export_contains_only_required_public_material() {
         let keys = fixed_bundle();
         keys.validate().unwrap();
-        let exported = serde_json::to_value(keys.public_export()).unwrap();
-        let object = exported.as_object().unwrap();
-        assert_eq!(object.len(), 8);
+        let exported = keys.public_export(&identities(), &"1".repeat(64), &"2".repeat(64));
+        exported.validate().unwrap();
+        let value = serde_json::to_value(exported).unwrap();
+        let object = value.as_object().unwrap();
+        assert_eq!(object.len(), 10);
         assert!(object.keys().all(|name| !name.to_ascii_lowercase().contains("private")));
-        assert_eq!(object["sudoSigningPublicKey"], keys.sudo_signing.public_key);
-        assert_eq!(object["gdmRecipientPublicKey"], keys.gdm_recipient.public_key);
-        assert_ne!(keys.sudo_signing.private_key, keys.sudo_signing.public_key);
+        assert_eq!(object["recipientPublicKey"], keys.gdm_recipient.public_key);
         assert_ne!(keys.gdm_recipient.private_key, keys.gdm_recipient.public_key);
+        assert!(object.get("sudoSigningPublicKey").is_none());
+        assert!(object.get("gdmSigningPublicKey").is_none());
     }
 }

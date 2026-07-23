@@ -297,9 +297,6 @@ struct FrontendSnapshot: Codable, Equatable, Sendable {
         if loginHeadingCount > 1 || takeoverHeadingCount > 1 {
             return .rejected
         }
-        if loginHeadingCount == 1, takeoverHeadingCount == 0 {
-            return .loginRequired
-        }
         if takeoverHeadingCount == 1, loginHeadingCount == 0 {
             return .takeoverRequired
         }
@@ -309,14 +306,14 @@ struct FrontendSnapshot: Codable, Equatable, Sendable {
         else {
             return .rejected
         }
-        guard focusTrapCount <= 1, devicesLinkCount <= 1,
-              connectedTextCount <= 1, videoCount <= 1
+        guard focusTrapCount <= 1,
+              devicesLinkCount <= 1,
+              connectedTextCount <= 1,
+              videoCount <= 1
         else {
             return .rejected
         }
         guard focusTrapCount == 1,
-              devicesLinkCount == 1,
-              connectedTextCount == 1,
               videoCount == 1,
               videoReadyState >= 2,
               !videoPaused,
@@ -325,6 +322,9 @@ struct FrontendSnapshot: Codable, Equatable, Sendable {
               hasLiveVideoTrack,
               focusOnTrap
         else {
+            return .waiting
+        }
+        guard devicesLinkCount == 1, connectedTextCount == 1 else {
             return .waiting
         }
         return .ready

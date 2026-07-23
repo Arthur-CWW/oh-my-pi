@@ -57,7 +57,7 @@ if [[ "$(/usr/bin/uname -s)" != "Darwin" ]]; then
 fi
 readonly signing_identity="$1"
 
-if ! /usr/bin/security find-identity -v -p codesigning | /usr/bin/awk -v identity="$signing_identity" '
+if [[ "$signing_identity" != "-" ]] && ! /usr/bin/security find-identity -v -p codesigning | /usr/bin/awk -v identity="$signing_identity" '
   index($0, "\"" identity "\"") { found = 1 }
   END { exit(found ? 0 : 1) }
 '; then
@@ -122,15 +122,20 @@ readonly payload="$stage/payload"
 
 for product in remote-authd remote-authctl; do
   binary="$payload/bin/$product"
-  /usr/bin/codesign --force --sign "$signing_identity" --options runtime --timestamp "$binary"
+  if [[ "$signing_identity" == "-" ]]; then
+    /usr/bin/codesign --force --sign - --identifier "dev.arthur.remote-auth-broker.${product}" "$binary"
+  else
+    /usr/bin/codesign --force --sign "$signing_identity" --options runtime --timestamp "$binary"
+  fi
   /usr/bin/codesign --verify --strict --verbose=2 "$binary"
 
   requirement_output="$stage/$product.requirements-output"
-  /usr/bin/codesign --display --requirements - "$binary" > "$requirement_output"
+  /usr/bin/codesign --display --requirements - "$binary" &> "$requirement_output"
   requirement=""
   while IFS= read -r line; do
     case "$line" in
       'designated => '*) requirement="${line#designated => }" ;;
+      '# designated => '*) requirement="${line#\# designated => }" ;;
     esac
   done < "$requirement_output"
   if [[ -z "$requirement" || "$requirement" == *$'\n'* || "$requirement" == *$'\r'* ]]; then

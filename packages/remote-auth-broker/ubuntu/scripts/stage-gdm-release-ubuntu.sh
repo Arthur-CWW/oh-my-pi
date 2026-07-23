@@ -59,11 +59,12 @@ if len(key) != 51 or key[:4] != b"\x00\x00\x00\x0b" or key[4:15] != b"ssh-ed2551
 /usr/bin/ssh-keygen -l -f "${IDENTITY_SOURCE}" >/dev/null || die 'the GDM ingestion public identity is invalid'
 
 if ! "${CARGO}" build --quiet --locked --release --manifest-path "${UBUNTU_ROOT}/Cargo.toml" \
-  -p remote-auth-gdmd -p remote-auth-gdm-ingest -p pam-gdm-broker >/dev/null 2>&1; then
+  -p remote-auth-gdmd -p remote-auth-gdm-ingest -p pam-gdm-broker \
+  -p remote-auth-broker-verifierctl >/dev/null 2>&1; then
   die 'the locked GDM release build failed'
 fi
 readonly BUILD_ROOT=${UBUNTU_ROOT}/target/release
-for artifact in remote-auth-gdmd remote-auth-gdm-ingest libpam_gdm_broker.so; do
+for artifact in remote-auth-gdmd remote-auth-gdm-ingest remote-auth-verifierctl libpam_gdm_broker.so; do
   [[ -f ${BUILD_ROOT}/${artifact} && ! -L ${BUILD_ROOT}/${artifact} ]] || die 'a required GDM build artifact is missing'
   /usr/bin/readelf -h -- "${BUILD_ROOT}/${artifact}" | /usr/bin/awk '
     $1 == "Class:" { class_count++; class_ok = ($2 == "ELF64" && NF == 2) }
@@ -80,6 +81,7 @@ candidate=${STATE_ROOT}/.staged-candidate
 /bin/mkdir -m 0700 -- "${candidate}/assets" "${candidate}/bin" "${candidate}/identity" "${candidate}/lib" "${candidate}/scripts"
 /usr/bin/install -m 0700 -- "${BUILD_ROOT}/remote-auth-gdmd" "${candidate}/bin/remote-auth-gdmd"
 /usr/bin/install -m 0700 -- "${BUILD_ROOT}/remote-auth-gdm-ingest" "${candidate}/bin/remote-auth-gdm-ingest"
+/usr/bin/install -m 0700 -- "${BUILD_ROOT}/remote-auth-verifierctl" "${candidate}/bin/remote-auth-verifierctl"
 /usr/bin/install -m 0600 -- "${BUILD_ROOT}/libpam_gdm_broker.so" "${candidate}/lib/pam_gdm_broker.so"
 
 assets=(
@@ -93,11 +95,14 @@ assets=(
   remote-auth-pam-rollback.timer
 )
 scripts=(
+  activate-gdm-ubuntu.sh
   confirm-gdm-release-ubuntu.sh
   confirm-pam-ubuntu.sh
   deploy-gdm-release-ubuntu.sh
+  deactivate-gdm-ubuntu.sh
   install-pam-ubuntu.sh
   rollback-pam-ubuntu.sh
+  status-gdm-ubuntu.sh
   ubuntu-common.sh
 )
 for asset in "${assets[@]}"; do
@@ -121,13 +126,17 @@ expected=(
   assets/remote-auth-pam-rollback.timer
   bin/remote-auth-gdm-ingest
   bin/remote-auth-gdmd
+  bin/remote-auth-verifierctl
   identity/remote-auth-gdm-ingest.pub
   lib/pam_gdm_broker.so
+  scripts/activate-gdm-ubuntu.sh
   scripts/confirm-gdm-release-ubuntu.sh
   scripts/confirm-pam-ubuntu.sh
   scripts/deploy-gdm-release-ubuntu.sh
+  scripts/deactivate-gdm-ubuntu.sh
   scripts/install-pam-ubuntu.sh
   scripts/rollback-pam-ubuntu.sh
+  scripts/status-gdm-ubuntu.sh
   scripts/ubuntu-common.sh
 )
 (

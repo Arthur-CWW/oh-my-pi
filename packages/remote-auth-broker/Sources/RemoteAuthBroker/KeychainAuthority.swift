@@ -6,6 +6,7 @@ import Security
 
 public enum KeychainSigningDomain: String, CaseIterable, Sendable, Equatable {
     case desktopBrowser = "desktop-browser"
+    case gdm
     case sudo
 }
 
@@ -22,6 +23,12 @@ public enum KeychainCredentialKind: String, CaseIterable, Sendable, Equatable {
             self = .jetKVM
         }
     }
+}
+
+public enum BitwardenSessionStatus: Sendable, Equatable {
+    case absent
+    case present
+    case invalid
 }
 
 public enum KeychainCredentialStatus: Sendable, Equatable {
@@ -152,6 +159,7 @@ extension KeychainAuthorityError: LocalizedError {
     }
 }
 
+
 public final class KeychainAuthority: @unchecked Sendable {
     public static let maximumCredentialByteCount = 4_096
 
@@ -163,6 +171,11 @@ public final class KeychainAuthority: @unchecked Sendable {
     private static let migrationStateAccount = "legacy-gdm:dotfiles.remote-sudo:arthur@desktop"
     private static let legacyService = "dotfiles.remote-sudo"
     private static let legacyAccount = "arthur@desktop"
+    // The Bitwarden session token is never the master password. Touch ID gates the
+    // package-owned item directly; the evaluated LAContext is reused for one batch.
+    private static let bitwardenSessionServiceV3 = "dev.arthur.remote-auth-broker.bitwarden-session.v4"
+    private static let bitwardenLegacySessionService = "dotfiles.bitwarden-touchid.BW_SESSION"
+
 
     private static let credentialMetadataMagic = Data("RABCRED1".utf8)
     private static let signingMetadataMagic = Data("RABSIGN1".utf8)
@@ -170,6 +183,80 @@ public final class KeychainAuthority: @unchecked Sendable {
     private static let metadataTokenByteCount = 32
 
     private let lock = NSLock()
+
+    public func bitwardenSessionStatus(account: String) throws -> BitwardenSessionStatus {
+        try validateCredentialID(account)
+        if try copyMetadata(bitwardenSessionReference(account: account)) != nil {
+            return .present
+        }
+
+        do {
+            guard var legacy = try copySecret(
+                legacyBitwardenSessionReference(account: account),
+                context: nil
+            ) else {
+                return .absent
+            }
+            defer { Self.zero(&legacy.secret) }
+            guard let token = Self.normalizedBitwardenSession(legacy.secret),
+                  !token.isEmpty,
+                  token.utf8.count <= Self.maximumCredentialByteCount
+            else {
+                return .invalid
+            }
+            return .present
+        } catch let error as KeychainAuthorityError {
+            guard case .keychainFailure(_, let status) = error,
+                  status == errSecInteractionNotAllowed || status == errSecAuthFailed
+            else {
+                throw error
+            }
+            return .present
+        }
+    }
+
+    public func storeBitwardenSession(
+        account: String,
+        session: inout [UInt8],
+        evidence: BiometricEvidence
+    ) throws {
+        defer { Self.zero(&session) }
+        try validateCredentialID(account)
+        try validateCredential(session)
+        let context = try authenticatedContext(evidence, allowing: [.bitwardenSessionAccess])
+        defer { context.invalidate() }
+
+        let token = try Self.normalizedBitwardenSession(session)
+        guard !token.isEmpty, token.utf8.count <= Self.maximumCredentialByteCount else {
+            throw KeychainAuthorityError.invalidStoredCredential
+        }
+        try synchronized {
+            var secret = Data(token.utf8)
+            defer { Self.zero(&secret) }
+            try upsertBitwardenSession(
+                account: account,
+                secret: secret,
+                context: context
+            )
+            _ = try delete(legacyBitwardenSessionReference(account: account))
+        }
+    }
+
+    public func withBitwardenSession<T>(
+        account: String,
+        evidence: BiometricEvidence,
+        _ body: (inout [UInt8]) throws -> T
+    ) throws -> T {
+        try validateCredentialID(account)
+        let context = try authenticatedContext(evidence, allowing: [.bitwardenSessionAccess])
+        defer { context.invalidate() }
+
+        var session = try synchronized {
+            try loadBitwardenSession(account: account, context: context)
+        }
+        defer { Self.zero(&session) }
+        return try body(&session)
+    }
 
     public init() {}
 
@@ -664,6 +751,14 @@ public final class KeychainAuthority: @unchecked Sendable {
     private func credentialReference(account: String) -> ItemReference {
         ItemReference(service: Self.credentialService, account: account)
     }
+    private func bitwardenSessionReference(account: String) -> ItemReference {
+        ItemReference(service: Self.bitwardenSessionServiceV3, account: account)
+    }
+
+    private func legacyBitwardenSessionReference(account: String) -> ItemReference {
+        ItemReference(service: Self.bitwardenLegacySessionService, account: account)
+    }
+
 
     private func migratedGDMCredentialReference() -> ItemReference {
         ItemReference(
@@ -742,6 +837,74 @@ public final class KeychainAuthority: @unchecked Sendable {
         return SecretItem(secret: secret, metadata: Self.itemMetadata(dictionary))
     }
 
+    private func loadBitwardenSession(
+        account: String,
+        context: LAContext
+    ) throws -> [UInt8] {
+        if var v3 = try copySecret(
+            bitwardenSessionReference(account: account),
+            context: nil
+        ) {
+            defer { Self.zero(&v3.secret) }
+            if let token = Self.normalizedBitwardenSession(v3.secret),
+               !token.isEmpty,
+               token.utf8.count <= Self.maximumCredentialByteCount {
+                _ = try delete(legacyBitwardenSessionReference(account: account))
+                return Array(token.utf8)
+            }
+        }
+
+        if var legacy = try copySecret(
+            legacyBitwardenSessionReference(account: account),
+            context: context
+        ) {
+            defer { Self.zero(&legacy.secret) }
+            guard let token = Self.normalizedBitwardenSession(legacy.secret),
+                  !token.isEmpty,
+                  token.utf8.count <= Self.maximumCredentialByteCount
+            else {
+                throw KeychainAuthorityError.invalidStoredCredential
+            }
+            var secret = Data(token.utf8)
+            defer { Self.zero(&secret) }
+            try upsertBitwardenSession(account: account, secret: secret, context: context)
+            _ = try delete(legacyBitwardenSessionReference(account: account))
+            return Array(token.utf8)
+        }
+
+        if try bitwardenSessionStatus(account: account) == .invalid {
+            throw KeychainAuthorityError.invalidStoredCredential
+        }
+        throw KeychainAuthorityError.credentialNotFound
+    }
+
+    private func upsertBitwardenSession(
+        account: String,
+        secret: Data,
+        context: LAContext
+    ) throws {
+        let accessControl = try Self.makeBitwardenAccessControl()
+        var query = baseQuery(bitwardenSessionReference(account: account))
+        query[kSecUseAuthenticationContext as String] = context
+        query[kSecUseAuthenticationUI as String] = kSecUseAuthenticationUIFail
+        let attributes: [String: Any] = [
+            kSecValueData as String: secret,
+            kSecAttrAccessControl as String: accessControl,
+        ]
+        let updateStatus = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+        if updateStatus == errSecSuccess { return }
+        guard updateStatus == errSecItemNotFound else {
+            throw KeychainAuthorityError.keychainFailure(operation: .storeSecret, status: updateStatus)
+        }
+
+        query[kSecValueData as String] = secret
+        query[kSecAttrAccessControl as String] = accessControl
+        let addStatus = SecItemAdd(query as CFDictionary, nil)
+        guard addStatus == errSecSuccess else {
+            throw KeychainAuthorityError.keychainFailure(operation: .storeSecret, status: addStatus)
+        }
+    }
+
     private func upsert(
         _ reference: ItemReference,
         secret: Data,
@@ -815,6 +978,20 @@ public final class KeychainAuthority: @unchecked Sendable {
             generic: dictionary[kSecAttrGeneric as String] as? Data,
             accessible: dictionary[kSecAttrAccessible as String] as? String
         )
+    }
+
+    private static func makeBitwardenAccessControl() throws -> SecAccessControl {
+        var unmanagedError: Unmanaged<CFError>?
+        guard let accessControl = SecAccessControlCreateWithFlags(
+            kCFAllocatorDefault,
+            kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
+            .biometryCurrentSet,
+            &unmanagedError
+        ) else {
+            let error = unmanagedError?.takeRetainedValue()
+            throw KeychainAuthorityError.accessControlCreationFailed(error.map(CFErrorGetCode) ?? -1)
+        }
+        return accessControl
     }
 
     private static func makeAccessControl() throws -> SecAccessControl {
@@ -961,6 +1138,20 @@ public final class KeychainAuthority: @unchecked Sendable {
                 return difference == 0
             }
         }
+    }
+
+    private static func normalizedBitwardenSession(_ data: Data) -> String? {
+        guard let token = String(data: data, encoding: .utf8) else {
+            return nil
+        }
+        return token.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func normalizedBitwardenSession(_ bytes: [UInt8]) throws -> String {
+        guard let token = String(bytes: bytes, encoding: .utf8) else {
+            throw KeychainAuthorityError.invalidStoredCredential
+        }
+        return token.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private static func zero(_ data: inout Data) {

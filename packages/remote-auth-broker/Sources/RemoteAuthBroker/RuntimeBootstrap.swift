@@ -30,6 +30,10 @@ public struct BrokerRuntimePaths: Equatable, Sendable {
     public let knownHostsURL: URL
     public let browserConfigurationURL: URL
     public let browserRuntimeDirectoryURL: URL
+    public let sourceBuildDigestURL: URL
+    public let gdmPreparedPolicyURL: URL
+    public let gdmActivationBundleURL: URL
+    public let gdmPreparationStateURL: URL
 
     public init(supportRootURL: URL = BrokerRuntimePaths.installedSupportRoot) {
         self.supportRootURL = supportRootURL
@@ -41,6 +45,22 @@ public struct BrokerRuntimePaths: Equatable, Sendable {
             isDirectory: false
         )
         browserRuntimeDirectoryURL = supportRootURL.appendingPathComponent("run/browser", isDirectory: true)
+        sourceBuildDigestURL = supportRootURL.appendingPathComponent(
+            "current/source-build-digest",
+            isDirectory: false
+        )
+        gdmPreparedPolicyURL = supportRootURL.appendingPathComponent(
+            "config/gdm-prepared-policy.json",
+            isDirectory: false
+        )
+        gdmActivationBundleURL = supportRootURL.appendingPathComponent(
+            "config/gdm-activation-bundle.json",
+            isDirectory: false
+        )
+        gdmPreparationStateURL = supportRootURL.appendingPathComponent(
+            "state/gdm-preparation.json",
+            isDirectory: false
+        )
     }
 }
 
@@ -188,6 +208,11 @@ public final class PolicyConfigurationStore: @unchecked Sendable {
             throw RuntimeBootstrapError.ioFailure
         }
         committed = true
+    }
+
+    func restorePolicy(_ sourceData: Data) throws {
+        let candidate = try PolicyLoader.load(sourceData)
+        try replacePolicy(with: candidate.canonicalData)
     }
 }
 
@@ -571,11 +596,12 @@ private final class RuntimeAsyncResult<Value: Sendable>: @unchecked Sendable {
     }
 }
 
-private enum OwnerOnlyRuntimeFile {
+enum OwnerOnlyRuntimeFile {
     static func readPolicy(at url: URL) throws -> Data {
         guard url.isFileURL,
               url.path.hasPrefix("/"),
-              url.lastPathComponent == "policy.json" || url.lastPathComponent == "browser-controller.json"
+              ["policy.json", "browser-controller.json", "gdm-prepared-policy.json",
+               "gdm-activation-bundle.json", "gdm-preparation.json"].contains(url.lastPathComponent)
         else {
             throw RuntimeBootstrapError.unsafePath
         }
@@ -648,6 +674,45 @@ private enum OwnerOnlyRuntimeFile {
                 throw RuntimeBootstrapError.ioFailure
             }
         }
+    }
+
+    static func replace(_ data: Data, at url: URL) throws {
+        guard !data.isEmpty,
+              data.count <= PolicyLoader.maximumPolicyBytes,
+              url.isFileURL,
+              ["gdm-prepared-policy.json", "gdm-activation-bundle.json",
+               "gdm-preparation.json"].contains(url.lastPathComponent)
+        else {
+            throw RuntimeBootstrapError.unsafePath
+        }
+        let directory = try openOwnerOnlyDirectory(at: url.deletingLastPathComponent())
+        defer { Darwin.close(directory) }
+        let temporaryName = ".gdm.\(getpid()).\(UUID().uuidString).tmp"
+        let descriptor = Darwin.openat(
+            directory,
+            temporaryName,
+            O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC,
+            0o600
+        )
+        guard descriptor >= 0 else { throw RuntimeBootstrapError.ioFailure }
+        var committed = false
+        defer {
+            Darwin.close(descriptor)
+            if !committed {
+                _ = Darwin.unlinkat(directory, temporaryName, 0)
+            }
+        }
+        guard Darwin.fchmod(descriptor, 0o600) == 0 else {
+            throw RuntimeBootstrapError.ioFailure
+        }
+        try writeAll(data, to: descriptor)
+        guard Darwin.fsync(descriptor) == 0,
+              Darwin.renameat(directory, temporaryName, directory, url.lastPathComponent) == 0,
+              Darwin.fsync(directory) == 0
+        else {
+            throw RuntimeBootstrapError.ioFailure
+        }
+        committed = true
     }
 
     private static func readExactly(_ count: Int, from descriptor: Int32) throws -> Data {
