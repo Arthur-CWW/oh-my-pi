@@ -144,6 +144,14 @@ contextRoots:
     path: /Users/arthur/workspace.sqlite
     kind: workspace-index-db
     tags: [ontology, lifecycle-roots]
+  - id: voiceink-product-source
+    path: /Users/arthur/products/VoiceInk
+    kind: product-source
+    tags: [products, voiceink, source]
+  - id: voiceink-runtime-state
+    path: /Users/arthur/state/voiceink
+    kind: runtime-state
+    tags: [state, voiceink, runtime, recovery, backups]
 
   # 2026-07-22: former `agents-control-plane-ledger` path /Users/arthur/agents/data/symphony-lite
   # is dead. Canonical queue/attention/routing/claims ledger authority is the control-plane

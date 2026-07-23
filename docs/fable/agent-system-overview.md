@@ -59,7 +59,7 @@ A one-time cleanup regresses in a week. Every cleanup must land with the guardra
 2. Delete root `fix.js` (recommended: yes, after confirming its three edits exist in fork history)?
 3. Personal screenshots at `local/` root → private store?
 4. TASKS.md stays authoritative vs control-plane ledger?
-5. `local/voiceink-store-backup-20260713` (8.3GB — 85% of the repo's disk problem): keep, move to external archive, or delete after verifying VoiceInk health?
+5. ~~Resolve `local/voiceink-store-backup-20260713` (8.3GB — 85% of the repo's disk problem)~~ — resolved at `/Users/arthur/state/voiceink/backups/2026-07-13`.
 6. Re-verify or reject the uncommitted cmux nine-finding slice?
 7. ~~Agent Hub tok/s slice timing~~ — done and live-proven 2026-07-13 (36.8/21.4 tok/s captures, editor-free preview).
 8. Checkpoint/commit posture for today's union-gated slices (9 fork slices + hygiene, all in-tree uncommitted on the dirty tree): staged-snapshot checkpoints now, or after your review?

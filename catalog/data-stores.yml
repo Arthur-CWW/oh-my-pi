@@ -197,7 +197,7 @@ stores:
       Source library manifest.
     query: >-
       jq . streams/primer/wrapped-commentary-reader/dist/library/source-library.json
-    size: >1MB
+    size: ">1MB"
     updated: 2026-07-06
   # --- transcripts-media ---
   - path: ~/agents/data/asmr-companion/
@@ -596,13 +596,13 @@ stores:
     size: 256KB
     updated: 2026-07-10
   # --- other ---
-  - path: ~/agents/VoiceInk-recovery-artifacts/
+  - path: /Users/arthur/state/voiceink/recovery/2026-07-06/
     kind: dir
     domain: other
     contents: >-
       Build artifacts (Swift `.swiftdeps`, `.o`, `.dia`, `.stringsdata`, logs). Not a structured corpus.
     query: >-
-      find VoiceInk-recovery-artifacts -type f
+      find /Users/arthur/state/voiceink/recovery/2026-07-06 -type f
     updated: 2026-07-06
   - path: ~/agents/data/fable-prep/session-records.json
     kind: json
