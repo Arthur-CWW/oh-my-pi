@@ -104,6 +104,11 @@ vendors:
     policy: track
     lastSync: 2026-02-27
     reason: clean nested git repository tracking origin/main
+  - path: vendor/jetkvm/kvm
+    upstream: https://github.com/jetkvm/kvm
+    policy: track
+    lastSync: 2026-07-23
+    reason: clean nested git repository tracking origin/main
   - path: whisper.cpp
     upstream: https://github.com/ggml-org/whisper.cpp
     policy: track
