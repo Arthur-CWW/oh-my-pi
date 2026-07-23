@@ -1,0 +1,28 @@
+{
+  "name": "@workspace/remote-auth-broker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test:protocol": "bun test ./extension/test",
+    "test": "bun run test:protocol",
+    "check": "bun run typecheck && bun run test",
+    "vectors:generate": "node --experimental-strip-types contracts/generate-vectors.ts"
+  },
+  "dependencies": {
+    "effect": "^4.0.0-beta.71"
+  },
+  "peerDependencies": {
+    "@oh-my-pi/pi-coding-agent": "*"
+  },
+  "devDependencies": {
+    "@oh-my-pi/pi-coding-agent": "15.12.3",
+    "bun-types": "^1.3.9",
+    "typescript": "^5.9.3"
+  },
+  "pi": {
+    "extensions": [
+      "./extension/index.ts"
+    ]
+  }
+}

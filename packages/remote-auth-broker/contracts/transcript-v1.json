@@ -1,0 +1,59 @@
+{
+  "protocolVersion": 1,
+  "description": "Signatures and AEAD bind this binary encoding, never serialized JSON.",
+  "header": {
+    "magicHex": "52414231",
+    "domainTagEncoding": "u16be-byte-length followed by UTF-8 bytes"
+  },
+  "fieldEncoding": "u16be UTF-8 field-name length, field-name bytes, u32be value length, value bytes",
+  "primitiveEncoding": {
+    "string": "UTF-8 bytes after canonical value validation",
+    "enum": "UTF-8 bytes",
+    "u32": "exactly 4-byte unsigned big-endian",
+    "u64": "exactly 8-byte unsigned big-endian",
+    "optional": "single 00 byte for absent, or 01 followed by value bytes",
+    "array": "u32be element count, then for each element u32be byte length and element bytes",
+    "object": "its ordered field encodings concatenated; the containing field provides the object byte length"
+  },
+  "fieldPrimitiveEncoding": {
+    "principal.ownerEpoch": "string (UTF-8 bytes after canonical lowercase UUID validation)"
+  },
+  "domainTags": {
+    "desktopBrowserRequest": "remote-auth-broker/v1/desktop-browser/execution-request",
+    "sudoRequest": "remote-auth-broker/v1/sudo/execution-request",
+    "gdmHpkeInfo": "remote-auth-broker/v1/desktop-browser/gdm-hpke-info",
+    "gdmHpkeAad": "remote-auth-broker/v1/desktop-browser/gdm-hpke-aad",
+    "gdmEnvelopeSignature": "remote-auth-broker/v1/desktop-browser/gdm-envelope-signature"
+  },
+  "executionRequestFields": ["protocolVersion", "requestId", "nonce", "createdAt", "expiresAt", "principal", "authorizationModeRequested", "domain", "operation", "target", "purpose", "grantId"],
+  "principalFields": ["sessionId", "ownerEpoch", "pid", "uid", "codeIdentity", "buildDigest", "runnerInstanceIdentity", "ownershipSocketPath"],
+  "targetFields": {
+    "gdm": ["kind", "sshHostKeyDigest", "machineId", "bootId", "username", "uid", "pamService", "seat", "tty", "rhost", "greeterGeneration", "jetkvmDeviceId", "controllerGeneration"],
+    "bitwarden": ["kind", "hostIdentity", "graphicalSessionId", "chromeService", "chromeExecutableDigest", "chromePid", "profileIdentity", "browserTargetId", "windowId", "extensionId", "extensionVersion", "extensionSource", "manifestDigest", "uiTarget"],
+    "website": ["kind", "hostIdentity", "graphicalSessionId", "chromeService", "chromeExecutableDigest", "chromePid", "profileIdentity", "browserTargetId", "windowId", "extensionId", "extensionVersion", "extensionSource", "manifestDigest", "uiTarget", "originSet", "activeTabId", "frameId", "formActionOrigin", "foregroundWindowId", "credentialPairingId"],
+    "sudo": ["kind", "sshHostKeyDigest", "machineId", "bootId", "username", "uid", "sudoPolicyDigest", "actionId", "executable", "argvDigest"]
+  },
+  "gdmHpkeInfoFields": ["protocolVersion", "recipientKeyId"],
+  "gdmHpkeAadFields": ["requestTranscript", "challenge", "issueId", "sentinelHash"],
+  "gdmChallengeFields": ["protocolVersion", "challengeId", "challenge", "bootId", "issuedBoottimeMs", "expiresBoottimeMs", "policyDigest"],
+  "gdmEnvelopeSignatureFields": ["hpkeAadTranscript", "hpkeEnc", "ciphertext", "signingKeyId"],
+  "constraints": {
+    "maxFrameBytes": 262144,
+    "maxRequestLifetimeMs": 120000,
+    "maxGdmChallengeLifetimeMs": 20000,
+    "sortedUniqueOriginSet": true,
+    "noJsonMapsInSignedSemantics": true
+  },
+  "hpke": {
+    "mode": "base",
+    "kem": "DHKEM(X25519, HKDF-SHA256)",
+    "kdf": "HKDF-SHA256",
+    "aead": "ChaCha20Poly1305",
+    "rfc": 9180,
+    "kemId": "0x0020",
+    "kdfId": "0x0001",
+    "aeadId": "0x0003"
+  },
+  "signature": "Ed25519 over the complete transcript bytes",
+  "digest": "SHA-256 over the complete transcript bytes"
+}

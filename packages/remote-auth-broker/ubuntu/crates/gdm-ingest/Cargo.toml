@@ -1,0 +1,13 @@
+[package]
+name = "remote-auth-gdm-ingest"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "remote-auth-gdm-ingest"
+path = "src/main.rs"
+
+[dependencies]
+remote-auth-broker-protocol = { path = "../protocol" }
+remote-auth-broker-verifier-core = { path = "../verifier-core" }

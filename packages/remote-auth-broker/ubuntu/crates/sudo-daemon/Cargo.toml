@@ -1,0 +1,16 @@
+[package]
+name = "remote-auth-broker-sudo-daemon"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "remote-auth-sudod"
+path = "src/main.rs"
+
+[dependencies]
+libc = { workspace = true }
+remote-auth-broker-protocol = { path = "../protocol" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }

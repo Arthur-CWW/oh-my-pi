@@ -573,34 +573,97 @@ function processMatches(identity: ProcessIdentity): boolean {
 	);
 }
 
+interface OwnerProofChallenge {
+	readonly nonce: string;
+	readonly sessionId: string;
+	readonly ownerEpoch: string;
+	readonly runnerInstanceId: string;
+	readonly buildDigest: string;
+	readonly ownerPid: number;
+	readonly ownershipSocketPath: string;
+}
+
 interface OwnerProof {
 	readonly t: "ownerProof";
 	readonly nonce: string;
+	readonly sessionId: string;
 	readonly ownerEpoch: string;
-	readonly buildRevision?: BuildRevision;
-	readonly runnerInstanceId?: string;
+	readonly buildRevision: BuildRevision;
+	readonly runnerInstanceId: string;
 	readonly sessionMatch: true;
-	readonly phase: SessionLeaseV1["phase"];
+	readonly phase: "running";
+	readonly ownerPid: number;
+	readonly ownershipSocketPath: string;
+}
+
+function ownerProofChallenge(lease: SessionLeaseV1, identity: OwnerIdentitySidecarV1, nonce: string): OwnerProofChallenge {
+	return {
+		nonce,
+		sessionId: lease.sessionId,
+		ownerEpoch: lease.ownerEpoch,
+		runnerInstanceId: identity.runnerInstanceId,
+		buildDigest: identity.buildRevision.digest,
+		ownerPid: lease.controllerProcess.pid,
+		ownershipSocketPath: lease.socketPath,
+	};
 }
 
 function decodeOwnerProof(value: unknown): OwnerProof | undefined {
 	if (
 		!isRecord(value) ||
-		(Object.keys(value).length !== 5 && Object.keys(value).length !== 7) ||
+		Object.keys(value).length !== 10 ||
 		!Object.keys(value).every(key =>
-			["t", "nonce", "ownerEpoch", "buildRevision", "runnerInstanceId", "sessionMatch", "phase"].includes(key),
+			[
+				"t",
+				"nonce",
+				"sessionId",
+				"ownerEpoch",
+				"buildRevision",
+				"runnerInstanceId",
+				"sessionMatch",
+				"phase",
+				"ownerPid",
+				"ownershipSocketPath",
+			].includes(key),
 		) ||
-		"buildRevision" in value !== "runnerInstanceId" in value ||
+		value.t !== "ownerProof" ||
+		typeof value.nonce !== "string" ||
+		typeof value.sessionId !== "string" ||
+		value.sessionId.length === 0 ||
+		!isUuid(value.ownerEpoch) ||
+		!isBuildRevision(value.buildRevision) ||
+		!isUuid(value.runnerInstanceId) ||
+		value.sessionMatch !== true ||
+		value.phase !== "running" ||
+		typeof value.ownerPid !== "number" ||
+		!Number.isInteger(value.ownerPid) ||
+		value.ownerPid <= 0 ||
+		typeof value.ownershipSocketPath !== "string" ||
+		value.ownershipSocketPath.length === 0
+	)
+		return undefined;
+	return value as unknown as OwnerProof;
+}
+
+function decodeMuxOwnerProof(
+	value: unknown,
+): { readonly nonce: string; readonly ownerEpoch: string; readonly phase: SessionLeaseV1["phase"] } | undefined {
+	if (
+		!isRecord(value) ||
+		Object.keys(value).length !== 5 ||
+		!Object.keys(value).every(key => ["t", "nonce", "ownerEpoch", "sessionMatch", "phase"].includes(key)) ||
 		value.t !== "ownerProof" ||
 		typeof value.nonce !== "string" ||
 		!isUuid(value.ownerEpoch) ||
-		(value.buildRevision !== undefined && !isBuildRevision(value.buildRevision)) ||
-		(value.runnerInstanceId !== undefined && !isUuid(value.runnerInstanceId)) ||
 		value.sessionMatch !== true ||
 		(value.phase !== "acquiring" && value.phase !== "running" && value.phase !== "releasing")
 	)
 		return undefined;
-	return value as unknown as OwnerProof;
+	return value as {
+		readonly nonce: string;
+		readonly ownerEpoch: string;
+		readonly phase: SessionLeaseV1["phase"];
+	};
 }
 async function probeMuxLease(lease: SessionLeaseV1): Promise<boolean> {
 	const nonce = randomUUID();
@@ -625,7 +688,7 @@ async function probeMuxLease(lease: SessionLeaseV1): Promise<boolean> {
 		if (newline < 0) return;
 		clearTimeout(timeout);
 		try {
-			const proof = decodeOwnerProof(JSON.parse(body.slice(0, newline)));
+			const proof = decodeMuxOwnerProof(JSON.parse(body.slice(0, newline)));
 			finish(
 				proof !== undefined &&
 					proof.nonce === nonce &&
@@ -682,16 +745,17 @@ async function probeLease(lease: SessionLeaseV1, identity?: OwnerIdentitySidecar
 		helloTimeoutMs: 500,
 	});
 	try {
-		const proof = decodeOwnerProof(await client.ownerProof({ nonce }));
+		const proof = decodeOwnerProof(await client.ownerProof(ownerProofChallenge(lease, identity, nonce)));
 		return (
 			proof !== undefined &&
 			proof.nonce === nonce &&
+			proof.sessionId === lease.sessionId &&
 			leaseMatchesEpoch(lease, proof.ownerEpoch) &&
-			proof.buildRevision !== undefined &&
-			proof.runnerInstanceId !== undefined &&
 			sameBuildRevision(identity.buildRevision, proof.buildRevision) &&
 			identity.runnerInstanceId === proof.runnerInstanceId &&
-			proof.phase === lease.phase
+			proof.phase === "running" &&
+			proof.ownerPid === lease.controllerProcess.pid &&
+			proof.ownershipSocketPath === lease.socketPath
 		);
 	} catch {
 		return false;
@@ -797,8 +861,9 @@ class DirectRunnerEndpoint {
 		});
 	}
 
-	listen(): Promise<void> {
-		return this.#server.listen();
+	async listen(): Promise<void> {
+		await this.#server.listen();
+		await fs.chmod(this.#lease.socketPath, 0o600);
 	}
 
 	activate(): void {
@@ -817,7 +882,29 @@ class DirectRunnerEndpoint {
 	}
 
 	async #ownerProof(payload: unknown): Promise<OwnerProof> {
-		if (!isRecord(payload) || Object.keys(payload).length !== 1 || typeof payload.nonce !== "string") {
+		if (
+			!isRecord(payload) ||
+			Object.keys(payload).length !== 7 ||
+			!Object.keys(payload).every(key =>
+				[
+					"nonce",
+					"sessionId",
+					"ownerEpoch",
+					"runnerInstanceId",
+					"buildDigest",
+					"ownerPid",
+					"ownershipSocketPath",
+				].includes(key),
+			) ||
+			typeof payload.nonce !== "string" ||
+			typeof payload.sessionId !== "string" ||
+			typeof payload.ownerEpoch !== "string" ||
+			typeof payload.runnerInstanceId !== "string" ||
+			typeof payload.buildDigest !== "string" ||
+			typeof payload.ownerPid !== "number" ||
+			!Number.isInteger(payload.ownerPid) ||
+			typeof payload.ownershipSocketPath !== "string"
+		) {
 			throw new Error("Invalid owner proof request");
 		}
 		const [lease, identity] = await Promise.all([
@@ -837,18 +924,27 @@ class DirectRunnerEndpoint {
 			) ||
 			lease.sessionFile !== this.#lease.sessionFile ||
 			lease.sessionId !== this.#lease.sessionId ||
-			lease.phase !== "running"
+			lease.phase !== "running" ||
+			payload.sessionId !== lease.sessionId ||
+			payload.ownerEpoch !== lease.ownerEpoch ||
+			payload.runnerInstanceId !== this.#identity.runnerInstanceId ||
+			payload.buildDigest !== this.#identity.buildRevision.digest ||
+			payload.ownerPid !== lease.controllerProcess.pid ||
+			payload.ownershipSocketPath !== lease.socketPath
 		) {
 			throw new Error("Ownership proof is no longer current");
 		}
 		return {
 			t: "ownerProof",
 			nonce: payload.nonce,
+			sessionId: lease.sessionId,
 			ownerEpoch: lease.ownerEpoch,
 			buildRevision: this.#identity.buildRevision,
 			runnerInstanceId: this.#identity.runnerInstanceId,
 			sessionMatch: true,
-			phase: lease.phase,
+			phase: "running",
+			ownerPid: lease.controllerProcess.pid,
+			ownershipSocketPath: lease.socketPath,
 		};
 	}
 }

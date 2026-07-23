@@ -1,0 +1,27 @@
+[package]
+name = "pam-gdm-broker"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lib]
+name = "pam_gdm_broker"
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = ["pam-module"]
+pam-module = [
+    "dep:libc",
+    "dep:remote-auth-broker-verifier-core",
+    "dep:serde",
+    "dep:serde_json",
+    "dep:zeroize",
+]
+
+[dependencies]
+libc = { workspace = true, optional = true }
+remote-auth-broker-protocol = { path = "../protocol" }
+remote-auth-broker-verifier-core = { path = "../verifier-core", optional = true }
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+zeroize = { workspace = true, optional = true }

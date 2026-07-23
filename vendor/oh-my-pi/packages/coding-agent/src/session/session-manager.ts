@@ -315,12 +315,25 @@ class SessionEntryIndex {
 	}
 }
 
+export interface SessionOwnershipView {
+	readonly sessionFile: string;
+	readonly sessionId: string;
+	readonly ownerEpoch: string;
+	readonly ownerKind: SessionOwnershipHandle["ownerKind"];
+	readonly buildRevision: Readonly<SessionOwnershipHandle["buildRevision"]>;
+	readonly runnerInstanceIdentity: Readonly<SessionOwnershipHandle["runnerInstanceIdentity"]>;
+	readonly ownershipSocketPath: string;
+	isCurrent(): Promise<boolean>;
+	isFenced(): boolean;
+}
+
 export type ReadonlySessionManager = Pick<
 	SessionManager,
 	| "getCwd"
 	| "getSessionDir"
 	| "getSessionId"
 	| "getSessionFile"
+	| "getSessionOwnershipView"
 	| "getSessionName"
 	| "getSessionRevision"
 	| "getSessionCommandReceipt"
@@ -994,6 +1007,39 @@ export class SessionManager {
 	/** Current parent lease, when this manager has a durable writer. */
 	getSessionOwnership(): SessionOwnershipHandle | undefined {
 		return this.#ownership;
+	}
+
+	/**
+	 * Immutable ownership identity for extension-facing session context.
+	 *
+	 * The liveness checks remain bound to the ownership handle that produced this
+	 * view, so replacing the manager's handle fences every previously issued view.
+	 */
+	getSessionOwnershipView(): SessionOwnershipView | undefined {
+		const ownership = this.getSessionOwnership();
+		if (!ownership?.socketPath) return undefined;
+
+		return Object.freeze({
+			sessionFile: ownership.sessionFile,
+			sessionId: ownership.sessionId,
+			ownerEpoch: ownership.ownerEpoch,
+			ownerKind: ownership.ownerKind,
+			buildRevision: Object.freeze({
+				digest: ownership.buildRevision.digest,
+				version: ownership.buildRevision.version,
+			}),
+			runnerInstanceIdentity: Object.freeze({
+				runnerInstanceId: ownership.runnerInstanceIdentity.runnerInstanceId,
+				startedAt: ownership.runnerInstanceIdentity.startedAt,
+			}),
+			ownershipSocketPath: ownership.socketPath,
+			isCurrent: async (): Promise<boolean> =>
+				this.getSessionOwnership() === ownership &&
+				(await ownership.isCurrent()) &&
+				this.getSessionOwnership() === ownership,
+			isFenced: (): boolean =>
+				this.getSessionOwnership() !== ownership || ownership.isFenced?.() === true,
+		});
 	}
 
 	/** Observe the irreversible transition to a fenced, read-only session writer. */

@@ -1,0 +1,255 @@
+; Remote Auth Broker protocol v1. JSON transport is closed and length framed.
+; This CDDL is descriptive of the JSON data model. It is never a signing encoding.
+
+protocol-version = 1
+id = tstr .size (22..86)
+request-id = tstr .regexp "^[A-Za-z0-9_-]{22,64}$"
+nonce = tstr .regexp "^[A-Za-z0-9_-]{43}$"
+grant-id = tstr .regexp "^grant-v1:[A-Za-z0-9_-]{22,64}$"
+digest = tstr .regexp "^[0-9a-f]{64}$"
+uuid = tstr .regexp "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+b64url = tstr .regexp "^[A-Za-z0-9_-]+$"
+ciphertext = tstr .size (22..524288) .regexp "^([A-Za-z0-9_-]{4})*([A-Za-z0-9_-][AQgw]|[A-Za-z0-9_-]{2}[AEIMQUYcgkosw048]|[A-Za-z0-9_-]{4})$"
+text = tstr .size (1..256)
+time-ms = uint
+ownership-socket-path = tstr .size (1..103) .regexp "^/(?:[^/]+/)+owners-v1/[0-9a-f]{64}/claim/owner[.]sock$"
+
+principal = {
+  sessionId: text,
+  ownerEpoch: uuid,
+  pid: uint,
+  uid: uint,
+  codeIdentity: text,
+  buildDigest: digest,
+  runnerInstanceIdentity: text,
+  ownershipSocketPath: ownership-socket-path,
+}
+
+gdm-target = {
+  kind: "gdm",
+  sshHostKeyDigest: digest,
+  machineId: text,
+  bootId: text,
+  username: text,
+  uid: uint,
+  pamService: "gdm-password",
+  seat: text,
+  tty: text,
+  rhost: "empty" / "local",
+  greeterGeneration: uint,
+  jetkvmDeviceId: text,
+  controllerGeneration: uint,
+}
+
+bitwarden-binding = {
+  hostIdentity: text,
+  graphicalSessionId: text,
+  chromeService: text,
+  chromeExecutableDigest: digest,
+  chromePid: uint,
+  profileIdentity: text,
+  browserTargetId: text,
+  windowId: text,
+  extensionId: text,
+  extensionVersion: text,
+  extensionSource: "official-chrome-web-store",
+  manifestDigest: digest,
+  uiTarget: text,
+}
+
+bitwarden-target = (bitwarden-binding, { kind: "bitwarden" })
+website-target = (bitwarden-binding, {
+  kind: "website",
+  originSet: [1*16 text],
+  activeTabId: text,
+  frameId: text,
+  formActionOrigin: text,
+  foregroundWindowId: text,
+  credentialPairingId: text,
+})
+
+sudo-target = {
+  kind: "sudo",
+  sshHostKeyDigest: digest,
+  machineId: text,
+  bootId: text,
+  username: text,
+  uid: uint,
+  sudoPolicyDigest: digest,
+  actionId: text,
+  executable: text,
+  argvDigest: digest,
+}
+
+target = gdm-target / bitwarden-target / website-target / sudo-target
+
+execution-request = {
+  protocolVersion: protocol-version,
+  requestId: request-id,
+  nonce: nonce,
+  createdAt: time-ms,
+  expiresAt: time-ms,
+  principal: principal,
+  authorizationModeRequested: "delegated" / "biometric-one-shot",
+  domain: "desktop-browser" / "sudo",
+  operation: "gdm-login" / "bitwarden-unlock" / "website-autofill" / "sudo",
+  target: target,
+  purpose: text,
+  grantId: grant-id / null,
+}
+
+principal-selector = {
+  sessionId: text,
+  ownerEpoch: uuid,
+  uid: uint,
+  codeIdentity: text,
+  buildDigest: digest,
+}
+
+grant = {
+  protocolVersion: protocol-version,
+  grantId: grant-id,
+  principalSelector: principal-selector,
+  domain: "desktop-browser" / "sudo",
+  operation: "gdm-login" / "bitwarden-unlock" / "website-autofill" / "sudo",
+  targetPredicate: target,
+  riskCeiling: "low" / "medium" / "high" / "critical",
+  issuedAt: time-ms,
+  expiresAt: time-ms,
+  revokedAt: time-ms / null,
+  consumedAt: time-ms / null,
+  policyDigest: digest,
+  brokerBuildDigest: digest,
+  brokerCodeIdentity: text,
+  biometricEvidenceId: id,
+  biometricIssuedAt: time-ms,
+  lifecycleState: "active" / "consumed" / "expired" / "revoked" / "invalidated",
+}
+
+receipt-events = {
+  requestedAt: time-ms,
+  authorizedAt: time-ms / null,
+  executingAt: time-ms / null,
+  terminalAt: time-ms / null,
+}
+
+receipt = {
+  protocolVersion: protocol-version,
+  receiptId: id,
+  requestId: request-id,
+  grantId: grant-id / null,
+  domain: "desktop-browser" / "sudo",
+  operation: "gdm-login" / "bitwarden-unlock" / "website-autofill" / "sudo",
+  authorizationModeUsed: "delegated" / "biometric-one-shot",
+  targetFingerprint: digest,
+  state: "requested" / "authorized" / "executing" / "succeeded" / "failed" / "cancelled" / "expired" / "revoked" / "disabled",
+  errorCode: public-error / null,
+  events: receipt-events,
+  policyDigest: digest,
+  brokerBuildDigest: digest,
+  brokerCodeDigest: digest,
+  targetReleaseDisposition: "not-applicable" / "quarantined" / "destroyed" / "closed",
+  browserTargetGeneration: uint / null,
+}
+
+public-error = "inactive" / "disabled" / "unavailable" / "timeout" / "cancelled" /
+  "protocol-invalid" / "frame-invalid" / "excess-field" / "noncanonical-value" /
+  "principal-invalid" / "owner-stale" / "peer-mismatch" / "request-expired" /
+  "request-replayed" / "body-conflict" / "grant-required" / "grant-forbidden" /
+  "grant-invalid" / "policy-mismatch" / "domain-mismatch" / "target-mismatch" /
+  "review-blocked" / "signature-invalid" / "ciphertext-invalid" / "challenge-invalid" /
+  "claim-rejected" / "execution-failed" / "integrity-failure" / "internal"
+
+endpoint-status = { ready: bool, errorCode: public-error / null }
+public-status = {
+  protocolVersion: protocol-version,
+  canonicalStatus: "DESIGN/INACTIVE" / "ACTIVE" / "DISABLED" / "DEGRADED",
+  policyDigest: digest / null,
+  installedBuildDigest: digest / null,
+  runningBuildDigest: digest / null,
+  codeIdentity: text / null,
+  pid: uint / null,
+  socketPosture: "absent" / "owner-only" / "invalid",
+  jetkvmControllerGeneration: uint / null,
+  gdm: endpoint-status,
+  browser: endpoint-status,
+  sudo: endpoint-status,
+  errors: [*8 public-error],
+}
+
+control-request =
+  { action: "request-state", requestId: request-id } /
+  { action: "cancel", requestId: request-id } /
+  { action: "grant-list" } /
+  { action: "grant-revoke", grantId: grant-id } /
+  { action: "grant-expire", grantId: grant-id } /
+  { action: "credential-forget", credentialId: id } /
+  { action: "emergency-disable", reason: text } /
+  { action: "re-enable" } /
+  { action: "status" }
+
+gdm-challenge = {
+  protocolVersion: protocol-version,
+  challengeId: id,
+  challenge: nonce,
+  bootId: text,
+  issuedBoottimeMs: time-ms,
+  expiresBoottimeMs: time-ms,
+  policyDigest: digest,
+}
+
+gdm-envelope = {
+  protocolVersion: protocol-version,
+  request: execution-request,
+  challenge: gdm-challenge,
+  issueId: id,
+  sentinelHash: digest,
+  hpkeEnc: b64url,
+  ciphertext: ciphertext,
+  signingKeyId: id,
+  signature: b64url,
+}
+
+gdm-claim = {
+  protocolVersion: protocol-version,
+  requestId: request-id,
+  nonce: nonce,
+  issueId: id,
+  sentinel: tstr .regexp "^gdm-broker-v1:[A-Za-z0-9_-]{43}$",
+  username: text,
+  uid: uint,
+  pamService: "gdm-password",
+  seat: text,
+  tty: text,
+  rhost: "empty" / "local",
+  greeterGeneration: uint,
+  controllerGeneration: uint,
+}
+
+sudo-signed-request = {
+  protocolVersion: protocol-version,
+  request: execution-request,
+  canonicalBodyDigest: digest,
+  signingKeyId: id,
+  signature: b64url,
+}
+
+reviewer-result = {
+  protocolVersion: protocol-version,
+  reviewId: id,
+  canonicalRequestDigest: digest,
+  reviewerModel: text,
+  reviewerBuildDigest: digest,
+  promptPolicyDigest: digest,
+  risk: "low" / "medium" / "high" / "critical",
+  userAuthorization: "unknown" / "low" / "medium" / "high",
+  status: "completed" / "failed" / "cancelled",
+  outcome: "allow" / "deny" / "escalate" / "blocked",
+  reasonCode: "semantic_allow" / "semantic_deny" / "semantic_escalate" / "timeout" / "cancelled" / "model_failure" / "session_failure" / "provider_failure" / "transport_failure" / "parse_failure" / "missing_evidence" / "prompt_injection" / "digest_mismatch" / "truncated_input" / "omitted_security_field" / "canonical_action_unreconstructable" / "reviewer_setup_failure",
+  reason: text,
+  rationale: text,
+  attemptCount: 1..3,
+  startedAt: time-ms,
+  completedAt: time-ms,
+  expiresAt: time-ms,
+}
