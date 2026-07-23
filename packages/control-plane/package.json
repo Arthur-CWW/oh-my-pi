@@ -8,7 +8,9 @@
     ".": "./src/index.ts"
   },
   "bin": {
-    "control-plane": "./src/cli.ts"
+    "control-plane": "./src/cli.ts",
+    "control-plane-storage": "./src/storage-cli.ts",
+    "control-plane-storage-daemon": "./src/storage-daemon.ts"
   },
   "omp": {
     "extensions": [
@@ -21,6 +23,11 @@
     "check": "bun run typecheck && bun run test",
     "cli": "bun run src/cli.ts",
     "daemon": "bun run src/daemon.ts",
+    "storage": "bun run src/storage-cli.ts",
+    "storage:status": "bun run src/storage-cli.ts status",
+    "storage:dry-run": "bun run src/storage-cli.ts maintain --dry-run",
+    "storage:apply": "bun run src/storage-cli.ts maintain --apply",
+    "storage:daemon": "bun run src/storage-daemon.ts",
     "dev": "bun --watch src/daemon.ts",
     "dev:up": "./scripts/dev-up.sh",
     "evidence": "bun run src/evidence-cli.ts",
