@@ -1,9 +1,11 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { logger } from "@oh-my-pi/pi-utils";
+import type { IrcExternalBus, IrcExternalPeer } from "../irc/bus-external";
 import { AgentLifecycleManager, type AgentReviver } from "../registry/agent-lifecycle";
 import { AgentRegistry, MAIN_AGENT_ID } from "../registry/agent-registry";
 import type { AgentSession } from "../session/agent-session";
+import { type ProcessIdentity, processMatches } from "../session/process-identity";
 import type { RestartChildManifestEntryV1, SessionOwnershipHandle } from "../session/session-ownership";
 import type { FileEntry, ModelChangeEntry, SessionInitEntry, SubagentSessionMetadata } from "../session/session-entries";
 import type { SessionManager } from "../session/session-manager";
@@ -32,6 +34,8 @@ export type ReAdoptionDiagnosticReason =
 	| "ownership_lost"
 	| "legacy_journal"
 	| "terminal_state"
+	| "detached_process_dead"
+	| "detached_process_unverifiable"
 	| "manifest_unadopted";
 
 export interface ReAdoptionDiagnostic {
@@ -51,7 +55,8 @@ export interface ReAdoptedChild {
 	taskDepth: number;
 	parentTaskPrefix: string;
 	lifecycleState: ChildLifecycleState;
-	turnState: "interrupted_by_restart";
+	detachedProcess?: ProcessIdentity;
+	turnState: "detached_live" | "interrupted_by_restart";
 }
 
 export interface ReAdoptionResult {
@@ -75,6 +80,10 @@ export interface ReAdoptionOptions {
 	diagnosticJournal?: Pick<SessionManager, "appendCustomEntry" | "flush">;
 	/** Rollout recovery defers manifest-authorized turns until post-reexec health gates pass. */
 	deferInterruptedResume?: boolean;
+	/** Durable subprocess registry used to prove a detached child is still the same live process. */
+	externalBus?: Pick<IrcExternalBus, "listPeers"> & Partial<Pick<IrcExternalBus, "unregisterPeer">>;
+	/** Rebuild the parent-side async job around a fingerprint-verified detached worker. */
+	reattachRunningChild?: (child: ReAdoptedChild) => void | Promise<void>;
 	createReviver: (child: ReAdoptedChild, init: SessionInitEntry) => Promise<AgentReviver>;
 	/** Restarts one provider turn from its last journaled boundary. */
 	resumeInterruptedTurn?: (child: ReAdoptedChild, session: AgentSession) => Promise<void>;
@@ -88,6 +97,8 @@ interface ReAdoptionCandidate {
 	hotswapModel?: string;
 	restart?: ChildRestartRecord;
 	autoResumeAuthorized: boolean;
+	detachedPeer?: IrcExternalPeer;
+	detachedProcessDead: boolean;
 }
 
 function isSubagentMetadata(value: SubagentSessionMetadata | undefined): value is SubagentSessionMetadata {
@@ -163,9 +174,10 @@ function appendDiagnostic(
 }
 
 /**
- * Reconstruct durable direct children as parked lifecycle entries. This never
- * claims a former running turn or AsyncJobManager ownership: every adopted
- * child begins as an interrupted-by-restart parked handle.
+ * Reconstruct durable direct children from their journals and durable worker
+ * identity projection. Fingerprint-verified workers remain running under the
+ * same id; only fingerprint-proven dead workers or restart-checkpointed turns
+ * are rebuilt as parked sessions and resumed from journal continuity.
  */
 export async function reAdoptDirectChildren(options: ReAdoptionOptions): Promise<ReAdoptionResult> {
 	const result: ReAdoptionResult = {
@@ -193,6 +205,7 @@ export async function reAdoptDirectChildren(options: ReAdoptionOptions): Promise
 	};
 	const restartManifest = new Map((options.restartManifest ?? []).map(entry => [entry.agentId, entry]));
 	const unmatchedManifest = new Map(restartManifest);
+	const externalPeers = options.externalBus?.listPeers({ includeStale: true }) ?? [];
 	const diagnoseUnmatchedManifest = (): void => {
 		for (const entry of unmatchedManifest.values()) {
 			diagnostic(
@@ -312,6 +325,40 @@ export async function reAdoptDirectChildren(options: ReAdoptionOptions): Promise
 			options.predecessorOwnerEpoch !== undefined &&
 			restart?.predecessorOwnerEpoch === options.predecessorOwnerEpoch &&
 			(restart.status === "pending" || restart.status === "resuming");
+		let detachedPeer: IrcExternalPeer | undefined;
+		let detachedProcessDead = false;
+		if (childLifecycle.state === "running") {
+			const peers = externalPeers.filter(
+				peer =>
+					peer.agentId === metadata.agentId &&
+					peer.sessionFile !== undefined &&
+					samePath(peer.sessionFile, sessionFile),
+			);
+			if (peers.length === 1 && peers[0]?.processIdentity) {
+				if (processMatches(peers[0].processIdentity)) {
+					detachedPeer = peers[0];
+				} else {
+					detachedProcessDead = true;
+					options.externalBus?.unregisterPeer?.(peers[0].sessionId, peers[0].pid);
+					if (!restartAuthorizesRecovery) {
+						diagnostic(
+							sessionFile,
+							"detached_process_dead",
+							`detached process ${peers[0].processIdentity.pid} no longer matches its start fingerprint`,
+						);
+					}
+				}
+			} else if (peers.length > 0 || !restartAuthorizesRecovery) {
+				diagnostic(
+					sessionFile,
+					"detached_process_unverifiable",
+					peers.length > 1
+						? `multiple detached process registry rows claim ${metadata.agentId}`
+						: `running child ${metadata.agentId} has no unique PID+start-fingerprint registry row`,
+				);
+				continue;
+			}
+		}
 		if (terminalLifecycle && !restartAuthorizesRecovery && !hasLaterParkedTimeline(entries, childLifecycle)) {
 			diagnostic(sessionFile, "terminal_state", `child lifecycle is terminal (${childLifecycle.state})`);
 			continue;
@@ -326,8 +373,11 @@ export async function reAdoptDirectChildren(options: ReAdoptionOptions): Promise
 			metadata,
 			lifecycle: childLifecycle,
 			...(restart ? { restart } : {}),
-			autoResumeAuthorized: restartAuthorizesRecovery && restart?.state === "running",
+			autoResumeAuthorized:
+				!detachedPeer && ((restartAuthorizesRecovery && restart?.state === "running") || detachedProcessDead),
+			detachedProcessDead,
 			...(hotswap && typeof hotswap.model === "string" ? { hotswapModel: hotswap.model } : {}),
+			...(detachedPeer ? { detachedPeer } : {}),
 		});
 	}
 
@@ -336,8 +386,12 @@ export async function reAdoptDirectChildren(options: ReAdoptionOptions): Promise
 			diagnostic(candidate.sessionFile, "id_collision", `stable id ${candidate.metadata.agentId} belongs to multiple child journals`);
 			continue;
 		}
+		const desiredStatus = candidate.detachedPeer ? "running" : "parked";
 		const existing = registry.get(candidate.metadata.agentId);
-		if (existing && (existing.status !== "parked" || !samePath(existing.sessionFile ?? "", candidate.sessionFile))) {
+		if (
+			existing &&
+			(existing.status !== desiredStatus || !samePath(existing.sessionFile ?? "", candidate.sessionFile))
+		) {
 			diagnostic(candidate.sessionFile, "id_collision", `stable id ${candidate.metadata.agentId} is already owned by a live or different child`);
 			continue;
 		}
@@ -352,20 +406,28 @@ export async function reAdoptDirectChildren(options: ReAdoptionOptions): Promise
 			thinkingLevel: candidate.lifecycle.thinkingLevel ?? candidate.metadata.thinkingLevel,
 			hotswapModel: candidate.hotswapModel,
 			lifecycleState: candidate.lifecycle.state,
-			turnState: "interrupted_by_restart",
+			...(candidate.detachedPeer?.processIdentity
+				? { detachedProcess: candidate.detachedPeer.processIdentity }
+				: {}),
+			turnState: candidate.detachedPeer ? "detached_live" : "interrupted_by_restart",
 		};
 		let revive: AgentReviver;
 		try {
 			revive = await options.createReviver(child, candidate.init);
 		} catch (error) {
-			diagnostic(candidate.sessionFile,
+			diagnostic(
+				candidate.sessionFile,
 				"unavailable_model",
-				error instanceof Error ? error.message : "current model policy cannot revive this child",);
+				error instanceof Error ? error.message : "current model policy cannot revive this child",
+			);
 			continue;
 		}
 		if (!(await options.ownership.isCurrent())) return rollbackOwnershipLoss(candidate.sessionFile);
 		const current = registry.get(child.id);
-		if (current && (current.status !== "parked" || !samePath(current.sessionFile ?? "", candidate.sessionFile))) {
+		if (
+			current &&
+			(current.status !== desiredStatus || !samePath(current.sessionFile ?? "", candidate.sessionFile))
+		) {
 			diagnostic(candidate.sessionFile, "id_collision", `stable id ${child.id} changed ownership during re-adoption`);
 			continue;
 		}
@@ -377,7 +439,7 @@ export async function reAdoptDirectChildren(options: ReAdoptionOptions): Promise
 				parentId: MAIN_AGENT_ID,
 				session: null,
 				sessionFile: candidate.sessionFile,
-				status: "parked",
+				status: desiredStatus,
 				recovery: {
 					task: child.task,
 					model: child.model,
@@ -389,6 +451,19 @@ export async function reAdoptDirectChildren(options: ReAdoptionOptions): Promise
 			registeredIds.push(child.id);
 		}
 		lifecycle.adopt(child.id, { idleTtlMs: options.idleTtlMs, revive });
+		if (candidate.detachedPeer) {
+			try {
+				await options.reattachRunningChild?.(child);
+			} catch (error) {
+				await lifecycle.release(child.id);
+				diagnostic(
+					candidate.sessionFile,
+					"reviver_unavailable",
+					error instanceof Error ? error.message : "detached worker supervision could not be reattached",
+				);
+				continue;
+			}
+		}
 		result.adopted.push(child);
 		if (candidate.autoResumeAuthorized) result.autoResumeCandidates.push(child);
 		unmatchedManifest.delete(child.id);
@@ -397,14 +472,10 @@ export async function reAdoptDirectChildren(options: ReAdoptionOptions): Promise
 	diagnoseUnmatchedManifest();
 	// Registration is deliberately a barrier: a crash before this point leaves
 	// every journal checkpoint pending and safe for the next replacement.
-	if (!options.deferInterruptedResume && options.predecessorOwnerEpoch && options.resumeInterruptedTurn) {
+	if (!options.deferInterruptedResume && options.resumeInterruptedTurn) {
 		for (const candidate of candidates) {
-			const restart = candidate.restart;
 			if (
-				!restart ||
-				(restart.status !== "pending" && restart.status !== "resuming") ||
-				restart.state !== "running" ||
-				restart.predecessorOwnerEpoch !== options.predecessorOwnerEpoch ||
+				!candidate.autoResumeAuthorized ||
 				!result.adopted.some(child => child.id === candidate.metadata.agentId)
 			) {
 				continue;
@@ -414,22 +485,27 @@ export async function reAdoptDirectChildren(options: ReAdoptionOptions): Promise
 				const session = await lifecycle.ensureLive(candidate.metadata.agentId);
 				const child = result.adopted.find(adopted => adopted.id === candidate.metadata.agentId);
 				if (!child) continue;
-				const attemptId = crypto.randomUUID();
-				appendChildRestartRecord(session.sessionManager, {
-					...restart,
-					status: "resuming",
-					attemptId,
-					updatedAt: new Date().toISOString(),
-				});
-				await session.sessionManager.flush();
+				const restart = candidate.restart;
+				const attemptId = restart ? crypto.randomUUID() : undefined;
+				if (restart && attemptId) {
+					appendChildRestartRecord(session.sessionManager, {
+						...restart,
+						status: "resuming",
+						attemptId,
+						updatedAt: new Date().toISOString(),
+					});
+					await session.sessionManager.flush();
+				}
 				await options.resumeInterruptedTurn(child, session);
-				appendChildRestartRecord(session.sessionManager, {
-					...restart,
-					status: "resumed",
-					attemptId,
-					updatedAt: new Date().toISOString(),
-				});
-				await session.sessionManager.flush();
+				if (restart && attemptId) {
+					appendChildRestartRecord(session.sessionManager, {
+						...restart,
+						status: "resumed",
+						attemptId,
+						updatedAt: new Date().toISOString(),
+					});
+					await session.sessionManager.flush();
+				}
 			} catch (error) {
 				diagnostic(
 					candidate.sessionFile,

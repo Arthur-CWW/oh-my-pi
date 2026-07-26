@@ -49,6 +49,7 @@ import { loadOverallPlanReference } from "../plan-mode/plan-handoff";
 import { AgentLifecycleManager, type ReviveAdmissionAcquirer } from "../registry/agent-lifecycle";
 import type { AgentStatus } from "../registry/agent-registry";
 import { AgentRegistry, MAIN_AGENT_ID } from "../registry/agent-registry";
+import type { AgentSession } from "../session/agent-session";
 import { getSessionSpawnCordon, type SessionSpawnCordon } from "../session/session-control";
 import { generateCommitMessage } from "../utils/commit-message-generator";
 import * as git from "../utils/git";
@@ -71,7 +72,8 @@ import {
 	resolveTaskSpawnRoute,
 	snapshotTaskSpawnPolicy,
 } from "./spawn-route";
-import { runSubagentSpawnProcess } from "./spawn-worker-client";
+import { monitorDetachedSpawnWorker, runSubagentSpawnProcess } from "./spawn-worker-client";
+import type { ReAdoptedChild } from "./re-adopt";
 import {
 	recordFinalizedSubagentFailure,
 	recordThrownSubagentFailure,
@@ -600,9 +602,12 @@ export function findSpawnIdentityMatch(
 		}
 		if (!kind) continue;
 		const refuse =
-			candidate.revivable &&
-			(candidate.status === "idle" || candidate.status === "parked") &&
-			(kind === "exact" || kind === "continuation");
+			(!candidate.archived &&
+				candidate.status === "running" &&
+				(kind === "exact" || kind === "continuation")) ||
+			(candidate.revivable &&
+				(candidate.status === "idle" || candidate.status === "parked") &&
+				(kind === "exact" || kind === "continuation"));
 		const score = (refuse ? 10 : 0) + (kind === "exact" ? 3 : kind === "continuation" ? 2 : 1);
 		if (!best || score > best.score) {
 			best = {
@@ -718,6 +723,81 @@ export async function acquireReviveAdmissionSlot(
 		released = true;
 		semaphore.release();
 	};
+}
+
+export function reattachDetachedChildTask(options: {
+	manager: AsyncJobManager;
+	child: ReAdoptedChild;
+	ownerId?: string;
+}): string {
+	const { manager, child } = options;
+	const existing = manager.getJob(child.id);
+	if (existing?.status === "running") return existing.id;
+	const processIdentity = child.detachedProcess;
+	if (!processIdentity) throw new Error(`Detached child ${child.id} has no verified process identity`);
+	const registry = AgentRegistry.global();
+	const lifecycle = AgentLifecycleManager.global();
+	return manager.register(
+		"task",
+		child.id,
+		async ({ signal, markRunning }) => {
+			markRunning();
+			let outcome;
+			try {
+				outcome = await monitorDetachedSpawnWorker({
+					sessionFile: child.sessionFile,
+					processIdentity,
+					signal,
+				});
+			} catch (error) {
+				if (registry.get(child.id)?.sessionFile === child.sessionFile) await lifecycle.release(child.id);
+				throw error;
+			}
+			if (registry.get(child.id)?.sessionFile === child.sessionFile) registry.setStatus(child.id, "parked");
+			const transcript = `Transcript: history://${child.id}`;
+			if (outcome.state === "failed" || outcome.state === "interrupted") {
+				throw new TaskJobError(`Re-adopted background task ${child.id} ended ${outcome.state}. ${transcript}`);
+			}
+			return `Re-adopted background task ${child.id} complete. ${transcript}`;
+		},
+		{
+			id: child.id,
+			ownerId: options.ownerId ?? MAIN_AGENT_ID,
+			group: deriveSpawnGroup(options.ownerId ?? MAIN_AGENT_ID),
+		},
+	);
+}
+
+/** Supervise a journal-continuous replacement turn under its original async job id. */
+export function respawnReAdoptedChildTask(options: {
+	manager: AsyncJobManager;
+	child: ReAdoptedChild;
+	session: AgentSession;
+	ownerId?: string;
+}): string {
+	const { manager, child, session } = options;
+	const existing = manager.getJob(child.id);
+	if (existing?.status === "running") return existing.id;
+	return manager.register(
+		"task",
+		child.id,
+		async ({ signal, markRunning }) => {
+			markRunning();
+			const abort = (): void => session.agent.abort();
+			signal.addEventListener("abort", abort, { once: true });
+			try {
+				await session.agent.continue();
+				return `Re-adopted background task ${child.id} complete. Transcript: history://${child.id}`;
+			} finally {
+				signal.removeEventListener("abort", abort);
+			}
+		},
+		{
+			id: child.id,
+			ownerId: options.ownerId ?? MAIN_AGENT_ID,
+			group: deriveSpawnGroup(options.ownerId ?? MAIN_AGENT_ID),
+		},
+	);
 }
 
 /**

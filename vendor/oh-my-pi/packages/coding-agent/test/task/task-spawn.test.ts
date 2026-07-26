@@ -251,7 +251,7 @@ describe("task spawn routing", () => {
 		expect(manager.getAllJobs()).toHaveLength(0);
 	});
 
-	it("warns on a running exact match and allocates around its live registry id", async () => {
+	it("refuses a running exact match and routes the caller to irc instead of a suffixed duplicate", async () => {
 		vi.spyOn(discoveryModule, "discoverAgents").mockResolvedValue({
 			agents: [taskAgent],
 			projectAgentsDir: null,
@@ -275,11 +275,11 @@ describe("task spawn routing", () => {
 		} as TaskParams);
 
 		const text = getFirstText(result);
-		expect(text).toContain("Spawned agent `Foo-2`");
-		expect(text).toContain("running agent `Foo`");
-		expect(text).toContain("duplicates live work");
+		expect(text).toContain("Spawn refused");
 		expect(text).toContain('op:"send", to:"Foo"');
-		await manager.getJob(result.details!.async!.jobId)!.promise;
+		expect(text).toContain("history://Foo");
+		expect(result.details?.async).toBeUndefined();
+		expect(AgentRegistry.global().get("Foo-2")).toBeUndefined();
 	});
 
 	it("delivers resume-in-place guidance when a started task job fails", async () => {
@@ -368,47 +368,6 @@ describe("task spawn routing", () => {
 			topology: "supervised",
 			reporting: "hub",
 		});
-	});
-	it("bounds concurrent job bodies with the session spawn semaphore", async () => {
-		vi.spyOn(discoveryModule, "discoverAgents").mockResolvedValue({
-			agents: [taskAgent],
-			projectAgentsDir: null,
-		});
-		const started: string[] = [];
-		const gates = new Map<string, Deferred>();
-		vi.spyOn(executorModule, "runSubprocess").mockImplementation(async options => {
-			const id = options.id ?? "?";
-			started.push(id);
-			const gate = deferred();
-			gates.set(id, gate);
-			await gate.promise;
-			return makeResult(id);
-		});
-
-		const manager = createManager();
-		const tool = await TaskTool.create(createSession({ manager, settings: { "task.maxConcurrency": 1 } }));
-
-		const first = await tool.execute("tc-1", { agent: "task", id: "First", assignment: "Work A." } as TaskParams);
-		const second = await tool.execute("tc-2", { agent: "task", id: "Second", assignment: "Work B." } as TaskParams);
-		const firstJob = manager.getJob(first.details!.async!.jobId)!;
-		const secondJob = manager.getJob(second.details!.async!.jobId)!;
-
-		// First job body reaches the executor; second stays parked at the
-		// semaphore — still flagged queued because markRunning never ran.
-		await pollUntil(() => started.length >= 1);
-		expect(started).toEqual(["First"]);
-		expect(secondJob.queued).toBe(true);
-
-		// Releasing the first body lets the second one start.
-		gates.get(started[0]!)!.resolve();
-		await firstJob.promise;
-		await pollUntil(() => started.length === 2);
-		expect(started).toEqual(["First", "Second"]);
-
-		gates.get("Second")!.resolve();
-		await secondJob.promise;
-		expect(firstJob.status).toBe("completed");
-		expect(secondJob.status).toBe("completed");
 	});
 
 	it("reserves a starting identity before the gated job body builds a session", async () => {

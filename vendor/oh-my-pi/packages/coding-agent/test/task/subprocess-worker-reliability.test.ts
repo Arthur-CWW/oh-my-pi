@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { AsyncJobManager } from "@oh-my-pi/pi-coding-agent/async/job-manager";
 import { resetSettingsForTest, Settings, settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { IrcExternalBus } from "@oh-my-pi/pi-coding-agent/irc/bus-external";
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
@@ -276,6 +277,83 @@ describe("subprocess worker reliability", () => {
 
 		expect(typedError).toBeInstanceOf(SpawnWorkerError);
 		expect(outcomes).toBe(1);
+	});
+
+	it("detach relinquishes a real worker job without signaling its detached process group", async () => {
+		const started = Promise.withResolvers<number>();
+		const runPhase = Promise.withResolvers<void>();
+		const manager = new AsyncJobManager({ maxRunningJobs: 2, onJobComplete: () => {} });
+		const jobId = manager.register(
+			"task",
+			"detached worker",
+			async () => {
+				await runSyntheticSpawnWorkerWorkload(
+					{ spinMs: 0, allocateBytes: 1024, hangMs: 10_000 },
+					{
+						onProcessStart: pid => started.resolve(pid),
+						onPhase: phase => {
+							if (phase === "run") runPhase.resolve();
+						},
+					},
+				);
+				return "done";
+			},
+			{ id: "DetachedWorker", ownerId: "Main" },
+		);
+		const job = manager.getJob(jobId);
+		const pid = await started.promise;
+		await runPhase.promise;
+		try {
+			expect(manager.detachRunningJobs({ ownerId: "Main", type: "task" })).toEqual(["DetachedWorker"]);
+			await manager.dispose();
+			expect(() => process.kill(pid, 0)).not.toThrow();
+		} finally {
+			try {
+				process.kill(-pid, "SIGKILL");
+			} catch {}
+			await job?.promise;
+		}
+	});
+
+	it("keeps a detached worker alive after its predecessor exits and closes the protocol pipe", async () => {
+		const pidFile = path.join(tmpDir, "detached-worker.pid");
+		const workerClientModule = path.resolve(import.meta.dir, "../../src/task/spawn-worker-client.ts");
+		const helperSource = `
+			import { writeFileSync } from "node:fs";
+			const { runSyntheticSpawnWorkerWorkload } = await import(${JSON.stringify(workerClientModule)});
+			await runSyntheticSpawnWorkerWorkload(
+				{ spinMs: 0, allocateBytes: 1024, hangMs: 100, lingerAfterResultMs: 3_000 },
+				{
+					onProcessStart(pid) { writeFileSync(${JSON.stringify(pidFile)}, String(pid)); },
+					onPhase(phase) { if (phase === "run") process.exit(0); },
+				},
+			);
+		`;
+		const predecessor = Bun.spawn({
+			cmd: [process.execPath, "-e", helperSource],
+			cwd: process.cwd(),
+			env: {
+				...process.env,
+				HOME: tmpDir,
+				OMP_SESSION_CONTROL_DB: path.join(tmpDir, "detached-session-control.sqlite"),
+			},
+			stdin: "ignore",
+			stdout: "ignore",
+			stderr: "inherit",
+		});
+		expect(await predecessor.exited).toBe(0);
+		const workerPid = Number(await fs.readFile(pidFile, "utf8"));
+		expect(Number.isSafeInteger(workerPid)).toBe(true);
+		try {
+			// The result projection happens after hangMs and hits the closed pipe.
+			// Staying alive in the linger proves EPIPE did not terminate the work.
+			await Bun.sleep(400);
+			expect(() => process.kill(workerPid, 0)).not.toThrow();
+		} finally {
+			try {
+				process.kill(-workerPid, "SIGKILL");
+			} catch {}
+		}
 	});
 
 	it("[I7] interrupts a running worker, reaps its process tree, and is idempotent", async () => {

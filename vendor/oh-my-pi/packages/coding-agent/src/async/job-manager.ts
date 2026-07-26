@@ -89,6 +89,8 @@ export interface AsyncJob {
 	interrupted?: boolean;
 	hardCancelled?: boolean;
 	isolated?: boolean;
+	/** Ownership was relinquished without aborting the underlying detached work. */
+	detached?: boolean;
 	/**
 	 * Registry id of the agent that registered the job (e.g. "Main",
 	 * "AuthLoader"). Used by scoped cancel/list APIs so a subagent's teardown
@@ -162,6 +164,10 @@ export interface AsyncJobRegisterOptions {
  */
 export interface AsyncJobFilter {
 	ownerId?: string;
+}
+
+export interface AsyncJobDetachFilter extends AsyncJobFilter {
+	type?: AsyncJob["type"];
 }
 
 export class AsyncJobManager {
@@ -325,6 +331,7 @@ export class AsyncJobManager {
 					},
 				});
 				await progress.flush();
+				if (job.detached) return;
 				if (job.status === "cancelled") {
 					this.#scheduleEviction(id);
 					return;
@@ -336,6 +343,7 @@ export class AsyncJobManager {
 				this.#scheduleEviction(id);
 			} catch (error) {
 				await progress.flush();
+				if (job.detached) return;
 				if (job.status === "cancelled") {
 					this.#scheduleEviction(id);
 					return;
@@ -575,6 +583,24 @@ export class AsyncJobManager {
 			if (queued) continue;
 			this.#enqueueDelivery(jobId, job.status === "completed" ? (job.resultText ?? "") : (job.errorText ?? ""));
 		}
+	}
+
+	/**
+	 * Relinquish matching jobs without aborting their process work. Detached
+	 * subprocess groups continue independently and can be reconstructed by the
+	 * replacement parent from their durable registry and journal projection.
+	 */
+	detachRunningJobs(filter: AsyncJobDetachFilter): string[] {
+		const detached: string[] = [];
+		for (const job of this.getRunningJobs(filter)) {
+			if (filter.type && job.type !== filter.type) continue;
+			job.detached = true;
+			this.#jobs.delete(job.id);
+			this.#suppressedDeliveries.add(job.id);
+			this.#watchedJobs.delete(job.id);
+			detached.push(job.id);
+		}
+		return detached;
 	}
 
 	/**

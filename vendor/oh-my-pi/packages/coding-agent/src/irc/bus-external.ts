@@ -7,6 +7,11 @@ import {
 	decodeFleetCapability,
 	type FleetCapability,
 } from "../session/fleet-capability";
+import {
+	decodeProcessIdentity,
+	type ProcessIdentity,
+	processIdentityFor,
+} from "../session/process-identity";
 import type { IrcDeliveryRecord, IrcMessageOrigin } from "./bus";
 
 export type IrcExternalPeerState = "unknown" | "working" | "waiting_input" | "idle" | "paused";
@@ -46,6 +51,8 @@ export interface IrcExternalPeer {
 	name: string;
 	cwd: string;
 	pid: number;
+	/** PID-reuse-safe identity captured by the registering process. */
+	processIdentity?: ProcessIdentity;
 	lastSeen: string;
 	state: IrcExternalPeerState;
 	stateTs: string | null;
@@ -82,6 +89,7 @@ interface PeerRow {
 	owner_epoch: string | null;
 	build_digest: string | null;
 	version: string | null;
+	process_identity_json: string | null;
 	fleet_capability_json: string | null;
 	label_json: string | null;
 }
@@ -118,6 +126,7 @@ export interface IrcExternalRegistration {
 
 export interface IrcExternalBusOptions {
 	readonly readonly?: boolean;
+	readonly registrationEnabled?: boolean;
 }
 export const IRC_EXTERNAL_STALE_MS = 10 * 60 * 1000;
 /** Idle sessions touch their durable heartbeat before the ten-minute stale window. */
@@ -296,6 +305,7 @@ function toPeer(row: PeerRow): IrcExternalPeer {
 		name: row.name,
 		cwd: row.cwd,
 		pid: row.pid,
+		processIdentity: decodeProcessIdentity(row.process_identity_json),
 		lastSeen: row.last_seen,
 		state: normalizePeerState(row.state),
 		stateTs: row.state_ts,
@@ -315,6 +325,7 @@ function toUnregisteredPeer(peer: IrcExternalRegistration, pid: number): IrcExte
 		name: peer.name,
 		cwd: peer.cwd,
 		pid,
+		processIdentity: processIdentityFor(pid) ?? undefined,
 		lastSeen: nowIso(),
 		state: "unknown",
 		stateTs: null,
@@ -363,6 +374,7 @@ export class IrcExternalBus {
 	#agentIdWhere = "agent_id = $name";
 	#fleetCapabilitySelect = "fleet_capability_json";
 	#labelSelect = "label_json";
+	#processIdentitySelect = "process_identity_json";
 
 	#ensurePeerStateColumns(): void {
 		const columns = new Set(
@@ -392,6 +404,9 @@ export class IrcExternalBus {
 		if (!columns.has("version")) {
 			this.#db.run("ALTER TABLE peers ADD COLUMN version TEXT");
 		}
+		if (!columns.has("process_identity_json")) {
+			this.#db.run("ALTER TABLE peers ADD COLUMN process_identity_json TEXT");
+		}
 		if (!columns.has("fleet_capability_json")) {
 			this.#db.run("ALTER TABLE peers ADD COLUMN fleet_capability_json TEXT");
 		}
@@ -417,14 +432,14 @@ export class IrcExternalBus {
 	#getPeerBySessionId(sessionId: string): IrcExternalPeer | undefined {
 		const row = this.#db
 			.query<PeerRow, { $sessionId: string }>(
-				`SELECT session_id, agent_id, name, cwd, pid, last_seen, state, state_ts, explicit_name, session_file, owner_epoch, build_digest, version, ${this.#fleetCapabilitySelect}, ${this.#labelSelect} FROM peers WHERE session_id = $sessionId`,
+				`SELECT session_id, agent_id, name, cwd, pid, last_seen, state, state_ts, explicit_name, session_file, owner_epoch, build_digest, version, ${this.#processIdentitySelect}, ${this.#fleetCapabilitySelect}, ${this.#labelSelect} FROM peers WHERE session_id = $sessionId`,
 			)
 			.get({ $sessionId: sessionId });
 		return row ? toPeer(row) : undefined;
 	}
 
 	constructor(readonly dbPath: string = DEFAULT_DB_PATH, options: IrcExternalBusOptions = {}) {
-		this.#registrationEnabled = process.env.OMP_FLEET_REGISTER !== "0";
+		this.#registrationEnabled = options.registrationEnabled ?? process.env.OMP_FLEET_REGISTER !== "0";
 		if (!options.readonly) fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 		this.#db = options.readonly ? new Database(dbPath, { readonly: true }) : new Database(dbPath);
 		this.#db.run("PRAGMA busy_timeout = 3000");
@@ -439,6 +454,9 @@ export class IrcExternalBus {
 			}
 			if (!columns.some(column => column.name === "label_json")) {
 				this.#labelSelect = "NULL AS label_json";
+			}
+			if (!columns.some(column => column.name === "process_identity_json")) {
+				this.#processIdentitySelect = "NULL AS process_identity_json";
 			}
 			return;
 		}
@@ -458,6 +476,7 @@ export class IrcExternalBus {
 				owner_epoch TEXT,
 				build_digest TEXT,
 				version TEXT,
+				process_identity_json TEXT,
 				fleet_capability_json TEXT,
 				label_json TEXT
 			)
@@ -487,10 +506,11 @@ export class IrcExternalBus {
 		if (!this.#registrationEnabled) return toUnregisteredPeer(peer, pid);
 		const lastSeen = nowIso();
 		const labels = normalizePeerLabels(peer.labels);
+		const processIdentity = processIdentityFor(pid);
 		this.#db
 			.query(
-				`INSERT INTO peers (session_id, agent_id, name, cwd, pid, last_seen, explicit_name, session_file, owner_epoch, build_digest, version, fleet_capability_json, label_json)
-				 VALUES ($sessionId, $agentId, $name, $cwd, $pid, $lastSeen, $explicitName, $sessionFile, $ownerEpoch, $buildDigest, $version, $fleetCapabilityJson, $labelJson)
+				`INSERT INTO peers (session_id, agent_id, name, cwd, pid, last_seen, explicit_name, session_file, owner_epoch, build_digest, version, process_identity_json, fleet_capability_json, label_json)
+				 VALUES ($sessionId, $agentId, $name, $cwd, $pid, $lastSeen, $explicitName, $sessionFile, $ownerEpoch, $buildDigest, $version, $processIdentityJson, $fleetCapabilityJson, $labelJson)
 				 ON CONFLICT(session_id) DO UPDATE SET
 					agent_id = excluded.agent_id,
 					name = CASE WHEN peers.explicit_name = 1 THEN peers.name ELSE excluded.name END,
@@ -502,6 +522,7 @@ export class IrcExternalBus {
 					owner_epoch = excluded.owner_epoch,
 					build_digest = excluded.build_digest,
 					version = excluded.version,
+					process_identity_json = excluded.process_identity_json,
 					fleet_capability_json = excluded.fleet_capability_json,
 					label_json = excluded.label_json`,
 			)
@@ -517,6 +538,7 @@ export class IrcExternalBus {
 				$ownerEpoch: peer.ownerEpoch ?? null,
 				$buildDigest: peer.buildDigest ?? null,
 				$version: peer.version ?? null,
+				$processIdentityJson: processIdentity === null ? null : JSON.stringify(processIdentity),
 				$fleetCapabilityJson: peer.fleetCapability === undefined ? null : JSON.stringify(peer.fleetCapability),
 				$labelJson: labels === undefined ? null : JSON.stringify(labels),
 			});
@@ -640,7 +662,7 @@ export class IrcExternalBus {
 		const staleMs = options.staleMs ?? IRC_EXTERNAL_STALE_MS;
 		return this.#db
 			.query<PeerRow, []>(
-				`SELECT session_id, ${this.#agentIdSelect}, name, cwd, pid, last_seen, state, state_ts, explicit_name, session_file, owner_epoch, build_digest, version, ${this.#fleetCapabilitySelect}, ${this.#labelSelect} FROM peers ORDER BY last_seen DESC`,
+				`SELECT session_id, ${this.#agentIdSelect}, name, cwd, pid, last_seen, state, state_ts, explicit_name, session_file, owner_epoch, build_digest, version, ${this.#processIdentitySelect}, ${this.#fleetCapabilitySelect}, ${this.#labelSelect} FROM peers ORDER BY last_seen DESC`,
 			)
 			.all()
 			.filter(
@@ -687,7 +709,7 @@ export class IrcExternalBus {
 	findPeerByName(name: string, options: { excludeSessionId?: string } = {}): IrcExternalPeer | undefined {
 		const rows = this.#db
 			.query<PeerRow, { $name: string }>(
-				`SELECT session_id, ${this.#agentIdSelect}, name, cwd, pid, last_seen, state, state_ts, explicit_name, session_file, owner_epoch, build_digest, version, ${this.#fleetCapabilitySelect}, ${this.#labelSelect} FROM peers WHERE name = $name OR ${this.#agentIdWhere} ORDER BY last_seen DESC`,
+				`SELECT session_id, ${this.#agentIdSelect}, name, cwd, pid, last_seen, state, state_ts, explicit_name, session_file, owner_epoch, build_digest, version, ${this.#processIdentitySelect}, ${this.#fleetCapabilitySelect}, ${this.#labelSelect} FROM peers WHERE name = $name OR ${this.#agentIdWhere} ORDER BY last_seen DESC`,
 			)
 			.all({ $name: name });
 		const row = rows.find(

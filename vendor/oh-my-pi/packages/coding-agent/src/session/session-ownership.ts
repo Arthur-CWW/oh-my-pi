@@ -10,12 +10,9 @@ import {
 	type TerminalSessionWireClientHello,
 } from "../runner/wire/client";
 import { UnixTerminalSessionServer } from "../runner/wire/server";
+import { type ProcessIdentity, processIdentityFor, processMatches } from "./process-identity";
 
-export interface ProcessIdentity {
-	readonly bootId: string;
-	readonly pid: number;
-	readonly startFingerprint: string;
-}
+export type { ProcessIdentity } from "./process-identity";
 
 export interface SessionOwnerIdentity {
 	readonly buildRevision: BuildRevision;
@@ -554,23 +551,6 @@ async function readCmuxOwnerView(location: LeaseLocation): Promise<CmuxOwnerView
 	} catch {
 		return undefined;
 	}
-}
-function commandOutput(command: string[]): string {
-	const result = Bun.spawnSync({ cmd: command, stdout: "pipe", stderr: "ignore" });
-	return result.exitCode === 0 ? new TextDecoder().decode(result.stdout).trim().replace(/\s+/g, " ") : "";
-}
-
-function processIdentityFor(pid: number): ProcessIdentity | null {
-	const bootId = commandOutput(["/usr/sbin/sysctl", "-n", "kern.boottime"]);
-	const startFingerprint = commandOutput(["/bin/ps", "-o", "lstart=", "-p", String(pid)]);
-	return bootId && startFingerprint ? { bootId, pid, startFingerprint } : null;
-}
-
-function processMatches(identity: ProcessIdentity): boolean {
-	const current = processIdentityFor(identity.pid);
-	return (
-		current !== null && current.bootId === identity.bootId && current.startFingerprint === identity.startFingerprint
-	);
 }
 
 // A type alias (not an interface) so the challenge stays assignable to the

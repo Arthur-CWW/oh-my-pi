@@ -1,9 +1,12 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { AsyncJobManager } from "@oh-my-pi/pi-coding-agent/async/job-manager";
+import { IrcExternalBus } from "@oh-my-pi/pi-coding-agent/irc/bus-external";
 import { AgentLifecycleManager } from "@oh-my-pi/pi-coding-agent/registry/agent-lifecycle";
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
+import { reattachDetachedChildTask, respawnReAdoptedChildTask } from "@oh-my-pi/pi-coding-agent/task";
 import { reAdoptDirectChildren } from "@oh-my-pi/pi-coding-agent/task/re-adopt";
 import { CHILD_LIFECYCLE_CUSTOM_TYPE, type ChildLifecycleState } from "@oh-my-pi/pi-coding-agent/task/child-lifecycle";
 
@@ -117,6 +120,16 @@ async function writeChild(options: {
 	return file;
 }
 
+function startDetachedSleeper(): Bun.Subprocess<"ignore", "ignore", "ignore"> {
+	return Bun.spawn({
+		cmd: [process.execPath, "-e", "setInterval(() => {}, 1000)"],
+		stdin: "ignore",
+		stdout: "ignore",
+		stderr: "ignore",
+		detached: true,
+	});
+}
+
 describe("restart child re-adoption", () => {
 	beforeEach(() => {
 		AgentRegistry.resetGlobalForTests();
@@ -129,7 +142,7 @@ describe("restart child re-adoption", () => {
 		await Promise.all(tempDirs.splice(0).map(dir => fs.rm(dir, { recursive: true, force: true })));
 	});
 
-	it("re-adopts direct running, idle, and parked children as parked and revives them", async () => {
+	it("re-adopts idle and parked children but never fabricates an unverifiable running child", async () => {
 		const { parent, children } = await makeParent();
 		await writeChild({ parent, children, id: "Running", lifecycleState: "running" });
 		await writeChild({ parent, children, id: "Idle", lifecycleState: "idle" });
@@ -149,7 +162,8 @@ describe("restart child re-adoption", () => {
 			},
 		});
 
-		expect(result.adopted.map(child => child.id).sort()).toEqual(["Idle", "Parked", "Running"]);
+		expect(result.adopted.map(child => child.id).sort()).toEqual(["Idle", "Parked"]);
+		expect(result.diagnostics).toEqual([expect.objectContaining({ reason: "detached_process_unverifiable" })]);
 		expect(AgentRegistry.global().get("Parked")).toEqual(
 			expect.objectContaining({ status: "parked", session: null, sessionFile: childFile }),
 		);
@@ -176,15 +190,15 @@ describe("restart child re-adoption", () => {
 
 	it("keeps terminal, legacy, foreign, duplicate-id, isolated, corrupt, and unavailable children history-only", async () => {
 		const { parent, children } = await makeParent();
-		await writeChild({ parent, children, id: "Good" });
+		await writeChild({ parent, children, id: "Good", lifecycleState: "idle" });
 		await writeChild({ parent, children, id: "Terminal", lifecycleState: "completed" });
 		await writeChild({ parent, children, id: "Legacy", legacy: true });
 		await writeChild({ parent, children, id: "Foreign", parentFile: path.join(children, "other.jsonl") });
-		await writeChild({ parent, children, id: "Duplicate" });
-		await writeChild({ parent, children, id: "Duplicate", fileName: "Duplicate-copy" });
+		await writeChild({ parent, children, id: "Duplicate", lifecycleState: "idle" });
+		await writeChild({ parent, children, id: "Duplicate", fileName: "Duplicate-copy", lifecycleState: "idle" });
 		await writeChild({ parent, children, id: "Isolated", isolated: true });
 		await writeChild({ parent, children, id: "Corrupt", corrupt: true });
-		await writeChild({ parent, children, id: "Unavailable" });
+		await writeChild({ parent, children, id: "Unavailable", lifecycleState: "idle" });
 		AgentRegistry.global().register({ id: "Unavailable", displayName: "live", kind: "sub", session: {} as never });
 
 		const result = await reAdoptDirectChildren({
@@ -211,7 +225,7 @@ describe("restart child re-adoption", () => {
 
 	it("keeps a non-terminal child archived when a terminal direct journal claims its id", async () => {
 		const { parent, children } = await makeParent();
-		await writeChild({ parent, children, id: "Shared" });
+		await writeChild({ parent, children, id: "Shared", lifecycleState: "idle" });
 		await writeChild({ parent, children, id: "Shared", fileName: "Shared-completed", lifecycleState: "completed" });
 
 		const result = await reAdoptDirectChildren({
@@ -229,7 +243,7 @@ describe("restart child re-adoption", () => {
 
 	it("does not replace a child that becomes live while its reviver is created", async () => {
 		const { parent, children } = await makeParent();
-		await writeChild({ parent, children, id: "Raced" });
+		await writeChild({ parent, children, id: "Raced", lifecycleState: "idle" });
 
 		const result = await reAdoptDirectChildren({
 			parentSessionFile: parent,
@@ -398,8 +412,8 @@ describe("restart child re-adoption", () => {
 
 	it("rolls back all rows when ownership changes before a later registration", async () => {
 		const { parent, children } = await makeParent();
-		await writeChild({ parent, children, id: "First" });
-		await writeChild({ parent, children, id: "Second" });
+		await writeChild({ parent, children, id: "First", lifecycleState: "idle" });
+		await writeChild({ parent, children, id: "Second", lifecycleState: "idle" });
 		let checks = 0;
 		const result = await reAdoptDirectChildren({
 			parentSessionFile: parent,
@@ -411,5 +425,144 @@ describe("restart child re-adoption", () => {
 		expect(result.adopted).toEqual([]);
 		expect(result.diagnostics).toEqual([expect.objectContaining({ reason: "ownership_lost" })]);
 		expect(AgentRegistry.global().list()).toEqual([]);
+	});
+
+	it("re-adopts one fingerprint-verified detached process as the same addressable async job", async () => {
+		const { parent, children } = await makeParent();
+		const childFile = await writeChild({ parent, children, id: "LiveDetached", lifecycleState: "running" });
+		const worker = startDetachedSleeper();
+		const bus = new IrcExternalBus(path.join(children, "irc.sqlite"), { registrationEnabled: true });
+		bus.registerPeer({
+			sessionId: "LiveDetached",
+			agentId: "LiveDetached",
+			name: "LiveDetached",
+			cwd: children,
+			pid: worker.pid,
+			sessionFile: childFile,
+		});
+		const manager = new AsyncJobManager({ maxRunningJobs: 4, onJobComplete: () => {} });
+		let resumed = 0;
+		try {
+			const adopt = (withRestartManifest = false) =>
+				reAdoptDirectChildren({
+					parentSessionFile: parent,
+					parentSessionId: "parent",
+					idleTtlMs: 0,
+					ownership: ownership(parent),
+					externalBus: bus,
+					...(withRestartManifest
+						? {
+								predecessorOwnerEpoch: "previous-parent",
+								restartManifest: [
+									{ agentId: "LiveDetached", state: "running" as const, journalPath: childFile, queueCheckpoint: null },
+								],
+							}
+						: {}),
+					createReviver: async () => async () => ({ subscribe: () => () => {} }) as never,
+					reattachRunningChild: child => {
+						reattachDetachedChildTask({ manager, child });
+					},
+					resumeInterruptedTurn: async () => {
+						resumed += 1;
+					},
+				});
+			const first = await adopt();
+			const second = await adopt(true);
+			expect(first.diagnostics).toEqual([]);
+			expect(second.diagnostics).toEqual([]);
+			expect(first.adopted).toEqual([
+				expect.objectContaining({
+					id: "LiveDetached",
+					sessionFile: childFile,
+					turnState: "detached_live",
+				}),
+			]);
+			expect(AgentRegistry.global().get("LiveDetached")).toEqual(
+				expect.objectContaining({ id: "LiveDetached", status: "running", session: null, sessionFile: childFile }),
+			);
+			expect(manager.getRunningJobs().map(job => job.id)).toEqual(["LiveDetached"]);
+			expect(bus.findPeerByName("LiveDetached")?.processIdentity).toEqual(
+				expect.objectContaining({ pid: worker.pid }),
+			);
+			expect(resumed).toBe(0);
+		} finally {
+			manager.cancel("LiveDetached");
+			await manager.getJob("LiveDetached")?.promise;
+			await manager.dispose();
+			bus.close();
+			try {
+				process.kill(-worker.pid, "SIGKILL");
+			} catch {}
+			await worker.exited;
+		}
+	});
+
+	it("respawns only a fingerprint-proven dead child under its stable id and journal", async () => {
+		const { parent, children } = await makeParent();
+		const childFile = await writeChild({ parent, children, id: "DeadDetached", lifecycleState: "running" });
+		const worker = startDetachedSleeper();
+		const bus = new IrcExternalBus(path.join(children, "dead-irc.sqlite"), { registrationEnabled: true });
+		bus.registerPeer({
+			sessionId: "DeadDetached",
+			agentId: "DeadDetached",
+			name: "DeadDetached",
+			cwd: children,
+			pid: worker.pid,
+			sessionFile: childFile,
+		});
+		process.kill(-worker.pid, "SIGKILL");
+		await worker.exited;
+		const manager = new AsyncJobManager({ maxRunningJobs: 4, onJobComplete: () => {} });
+		let continued = 0;
+		let reopened: SessionManager | undefined;
+		try {
+			const result = await reAdoptDirectChildren({
+				parentSessionFile: parent,
+				parentSessionId: "parent",
+				idleTtlMs: 0,
+				ownership: ownership(parent),
+				externalBus: bus,
+				createReviver: async child => async () => {
+					reopened = await SessionManager.open(child.sessionFile);
+					return {
+						agent: {
+							continue: async () => {
+								continued += 1;
+							},
+							abort: () => {},
+						},
+						subscribe: () => () => {},
+						sessionManager: reopened,
+						dispose: async () => reopened?.close(),
+					} as never;
+				},
+				resumeInterruptedTurn: async (child, childSession) => {
+					respawnReAdoptedChildTask({ manager, child, session: childSession });
+				},
+			});
+			const job = manager.getJob("DeadDetached");
+			await job?.promise;
+			expect(result.adopted).toEqual([
+				expect.objectContaining({
+					id: "DeadDetached",
+					sessionFile: childFile,
+					turnState: "interrupted_by_restart",
+				}),
+			]);
+			expect(result.autoResumeCandidates.map(child => child.id)).toEqual(["DeadDetached"]);
+			expect(result.diagnostics).toEqual([expect.objectContaining({ reason: "detached_process_dead" })]);
+			expect(bus.findPeerByName("DeadDetached")).toBeUndefined();
+			expect(continued).toBe(1);
+			expect(job?.status).toBe("completed");
+			expect(reopened?.getSessionFile()).toBe(childFile);
+			expect(AgentRegistry.global().get("DeadDetached")).toEqual(
+				expect.objectContaining({ id: "DeadDetached", sessionFile: childFile, status: "idle" }),
+			);
+			expect(AgentRegistry.global().get("DeadDetached-2")).toBeUndefined();
+		} finally {
+			await manager.dispose();
+			await AgentLifecycleManager.global().release("DeadDetached");
+			bus.close();
+		}
 	});
 });

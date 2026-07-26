@@ -57,6 +57,7 @@ import { injectOmpExtensionCliRoots } from "./discovery/omp-extension-roots";
 import { ExtensionRunner } from "./extensibility/extensions/runner";
 import type { ExtensionUIContext } from "./extensibility/extensions/types";
 import { scheduleMarketplaceAutoUpdate } from "./extensibility/plugins/marketplace-auto-update";
+import { IrcExternalBus } from "./irc/bus-external";
 import type { MCPManager } from "./mcp";
 import { createRichDisposableTerminalViewFactory } from "./modes/disposable-interactive-view";
 import type { InteractiveMode } from "./modes/interactive-mode";
@@ -92,6 +93,7 @@ import {
 import { executeBuiltinSlashCommand } from "./slash-commands/builtin-registry";
 import { discoverTitleSystemPromptFile, resolvePromptInput } from "./system-prompt";
 import { createReAdoptedSessionReviver } from "./task/executor";
+import { reattachDetachedChildTask, respawnReAdoptedChildTask } from "./task";
 import { reAdoptDirectChildren } from "./task/re-adopt";
 import { configureSpawnPolicyRouting } from "./task/spawn-route";
 import { initTelemetryExport, isTelemetryExportEnabled } from "./telemetry-export";
@@ -1453,17 +1455,22 @@ export async function runRootCommand(
 				idleTtlMs: Math.trunc(Number(settingsInstance.get("task.agentIdleTtlMs") ?? 420_000) || 0),
 				ownership,
 				diagnosticJournal: session.sessionManager,
+				externalBus: IrcExternalBus.global(),
+				reattachRunningChild: child => {
+					const manager = session.asyncJobManager;
+					if (!manager) throw new Error(`Async job manager unavailable while re-adopting ${child.id}`);
+					reattachDetachedChildTask({ manager, child });
+				},
+				resumeInterruptedTurn: async (child, childSession) => {
+					const manager = session.asyncJobManager;
+					if (!manager) throw new Error(`Async job manager unavailable while respawning ${child.id}`);
+					respawnReAdoptedChildTask({ manager, child, session: childSession });
+					restartedTurn = true;
+				},
 				...(restartHandoff
 					? {
 							predecessorOwnerEpoch: restartHandoff.predecessorOwnerEpoch,
 							restartManifest: restartHandoff.childManifest,
-							resumeInterruptedTurn: async (_child: unknown, childSession: AgentSession) => {
-								const continuation = childSession.agent.continue();
-								restartedTurn = true;
-								void continuation.catch(error => {
-									logger.error("Restarted subagent turn failed", { error: String(error) });
-								});
-							},
 						}
 					: {}),
 				createReviver: (child, init) =>

@@ -4,8 +4,11 @@ import { isCompiledBinary, popLoopPhase, pushLoopPhase, workerHostEntry } from "
 import type { Settings } from "../config/settings";
 import { AgentRegistry } from "../registry/agent-registry";
 import { SessionManager } from "../session/session-manager";
+import { type ProcessIdentity, processMatches } from "../session/process-identity";
+import type { FileEntry } from "../session/session-entries";
 import type { EventBus } from "../utils/event-bus";
 import { type ExecutorOptions, finalizeSubprocessOutput, snapshotExecutorSettings } from "./executor";
+import { isTerminalChildLifecycleState, latestChildLifecycleRecord, type ChildLifecycleState } from "./child-lifecycle";
 import {
 	decodeSpawnWorkerRecord,
 	type SerializableExecutorOptions,
@@ -383,6 +386,78 @@ function isProcessAlive(pid: number): boolean {
 		return true;
 	} catch (error) {
 		return isRecord(error) && error.code === "EPERM";
+	}
+}
+
+export interface DetachedSpawnWorkerMonitorOptions {
+	sessionFile: string;
+	processIdentity: ProcessIdentity;
+	signal?: AbortSignal;
+	pollIntervalMs?: number;
+}
+
+export interface DetachedSpawnWorkerOutcome {
+	state: ChildLifecycleState;
+}
+
+async function latestDetachedWorkerLifecycle(sessionFile: string): Promise<ChildLifecycleState | undefined> {
+	try {
+		const entries: FileEntry[] = [];
+		for (const line of (await fs.readFile(sessionFile, "utf8")).split("\n")) {
+			if (!line.trim()) continue;
+			const entry: FileEntry = JSON.parse(line);
+			entries.push(entry);
+		}
+		const lifecycle = latestChildLifecycleRecord(entries);
+		return lifecycle && lifecycle !== null ? lifecycle.state : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+async function waitForDetachedWorkerPoll(signal: AbortSignal | undefined, delayMs: number): Promise<void> {
+	if (signal?.aborted) return;
+	const { promise: aborted, resolve } = Promise.withResolvers<void>();
+	const onAbort = (): void => resolve();
+	signal?.addEventListener("abort", onAbort, { once: true });
+	try {
+		await Promise.race([Bun.sleep(delayMs), aborted]);
+	} finally {
+		signal?.removeEventListener("abort", onAbort);
+	}
+}
+
+/**
+ * Reattach supervision to a worker whose protocol pipe belonged to a previous
+ * parent. The child journal is authoritative for completion; a running claim
+ * is retained only while the exact PID+start fingerprint still matches.
+ */
+export async function monitorDetachedSpawnWorker(
+	options: DetachedSpawnWorkerMonitorOptions,
+): Promise<DetachedSpawnWorkerOutcome> {
+	const pollIntervalMs = Math.max(25, Math.trunc(options.pollIntervalMs ?? 1_000));
+	while (true) {
+		const state = await latestDetachedWorkerLifecycle(options.sessionFile);
+		if (state && isTerminalChildLifecycleState(state)) return { state };
+		if (options.signal?.aborted) {
+			if (processMatches(options.processIdentity)) {
+				try {
+					process.kill(-options.processIdentity.pid, "SIGKILL");
+				} catch {
+					// The detached group may exit after the identity check.
+				}
+			}
+			throw new SpawnWorkerError("aborted", "Re-adopted subagent subprocess aborted");
+		}
+		if (!processMatches(options.processIdentity)) {
+			const finalState = await latestDetachedWorkerLifecycle(options.sessionFile);
+			if (finalState && isTerminalChildLifecycleState(finalState)) return { state: finalState };
+			throw new SpawnWorkerError(
+				"exit",
+				`Detached subagent subprocess pid ${options.processIdentity.pid} died without terminal journal evidence`,
+			);
+		}
+		await waitForDetachedWorkerPoll(options.signal, pollIntervalMs);
 	}
 }
 

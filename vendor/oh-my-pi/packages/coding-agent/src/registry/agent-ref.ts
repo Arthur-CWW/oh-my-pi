@@ -29,7 +29,7 @@ export interface AgentRef {
 		model?: string;
 		thinkingLevel?: string | null;
 		hotswapModel?: string;
-		turnState: "interrupted_by_restart";
+		turnState: "detached_live" | "interrupted_by_restart";
 	};
 	quota?: AgentQuotaAdmission;
 }

@@ -19,12 +19,18 @@ interface QueuedRecord {
 	droppable: boolean;
 }
 
+function isBrokenProtocolPipe(error: unknown): boolean {
+	return typeof error === "object" && error !== null && "code" in error && error.code === "EPIPE";
+}
+
 class BoundedJsonlWriter {
 	readonly #queue: QueuedRecord[] = [];
 	#queuedBytes = 0;
 	#draining: Promise<void> | undefined;
+	#disconnected = false;
 
 	enqueue(record: SpawnWorkerRecord, droppable = false): void {
+		if (this.#disconnected) return;
 		let encoded: Uint8Array;
 		try {
 			encoded = new TextEncoder().encode(`${JSON.stringify(record)}\n`);
@@ -64,9 +70,17 @@ class BoundedJsonlWriter {
 				writer.write(item.bytes);
 				await writer.flush();
 			}
+		} catch (error) {
+			if (!isBrokenProtocolPipe(error)) throw error;
+			// A detach-and-exit closes the predecessor's protocol pipe. The
+			// journal remains authoritative, so stop projecting events instead
+			// of killing the still-live worker on EPIPE.
+			this.#disconnected = true;
+			this.#queue.length = 0;
+			this.#queuedBytes = 0;
 		} finally {
 			this.#draining = undefined;
-			if (this.#queue.length > 0) this.#draining = this.#drain();
+			if (!this.#disconnected && this.#queue.length > 0) this.#draining = this.#drain();
 		}
 	}
 }

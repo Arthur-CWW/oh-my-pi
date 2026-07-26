@@ -4435,7 +4435,7 @@ export class AgentSession {
 	 * Remove all listeners, flush pending writes, and disconnect from agent.
 	 * Root scope is the default; child scope retains process-wide host services.
 	 */
-	async dispose({ scope = "root" }: SessionDisposeOptions = {}): Promise<void> {
+	async dispose({ scope = "root", childPolicy }: SessionDisposeOptions = {}): Promise<void> {
 		this.beginDispose();
 		try {
 			if (this.#extensionRunner?.hasHandlers("session_shutdown")) {
@@ -4466,12 +4466,20 @@ export class AgentSession {
 		const postPromptDrain = this.#cancelPostPromptTasks();
 		this.agent.abort();
 		await postPromptDrain;
+		const ownedAsyncManager = this.#ownedAsyncJobManager;
+		if (scope === "root" && childPolicy === "detach") {
+			// A config-reload/exit handoff relinquishes task supervision without
+			// aborting the detached worker groups. The replacement parent
+			// reconstructs these jobs only after PID+start-fingerprint proof.
+			ownedAsyncManager?.detachRunningJobs({ ownerId: this.#agentId, type: "task" });
+		}
 		// Cancel jobs this agent registered so a subagent's teardown doesn't
 		// leak its background bash/task work into the parent's manager. Only
 		// the session that owns the manager goes on to dispose it (which itself
 		// nukes any leftover jobs and pending deliveries).
 		this.#cancelOwnAsyncJobs();
-		const ownedAsyncManager = this.#ownedAsyncJobManager;
+		// Detached task jobs were removed above; ordinary root/child teardown
+		// still cancels every job owned by this session.
 		if (ownedAsyncManager) {
 			const drained = await ownedAsyncManager.dispose({ timeoutMs: 3_000 });
 			const deliveryState = ownedAsyncManager.getDeliveryState();
