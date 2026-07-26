@@ -46,6 +46,7 @@ Ancestor-first, each identity preserved:
 23. `lvowwnytwqzm` / `4cdd8b89d58d` — coalesce remote tmux workstreams natively; routing proof was updated to the required Opus 5 calibrated route
 24. `wlzlpqmmprwt` / `d870c8492ab5` — Majordomo directory and fenced migration control; preserves both IRC direct-audience hygiene and host identity
 25. `pzxymppyxtmm` / `b2978574b582` — Agent Hub panel focus, chord coverage, effort rendering, and `g i` route explanations; reconciled to mandatory explicit-effort routing and current model-context metadata
+26. `rvzlvzukkpsw` / `a8bc441e1378` — externalize the shared release registry and untrack 113 duplicate payload/receipt files without deleting the five existing 5.83 GiB on-disk copies
 
 The pre-existing ancestry from `xnvuspywkvrw` through `xqwrqwpwttnu`, plus the two old-main commits on the merge's other parent, remains intact. No leaf copy replaced those identities.
 
@@ -53,8 +54,8 @@ The pre-existing ancestry from `xnvuspywkvrw` through `xqwrqwpwttnu`, plus the t
 
 All six previously blocked priority units are now integrated and green. Their earlier failures were traced to omitted lineage foundations, intentionally disabled fleet registration in tests that exercise registration, or stale routing expectations—not accepted as permanent exclusions.
 - Duplicate losers remain excluded: `ruxxltns` (survivor `wlzlpqmm`), `nqzsksmo` (survivor `vqqopsnn`), `rxqzrmpm` (survivor `tkuzrpsv`), and `stssxsor/764449bc` (survivor `stssxsor/e7cef9b1`).
-- Active-owner exclusions remain untouched: `uwornqxy` and `rvzlvzuk`.
-- The nested cmux and separate dotfiles repositories were not touched. No remote push or deployment occurred.
+- Active-owner exclusion remains untouched: `uwornqxy`.
+- The nested cmux and separate dotfiles repositories were not touched. No remote push or deployment occurred; only the requested local OMP bless/rollout path ran.
 
 ## Final union gates
 
@@ -99,6 +100,9 @@ This receipt was written before the final union run. Observed commands and outpu
 - Agent Hub interaction contract, key grammar, route provenance/inspector, HUD, dual-lane, activation, and model-selector effort rendering
   - 68 passed, 0 failed, 447 expectations
   - exit 0
+- Release registry/storage path and link-OMP boundary tests
+  - 11 passed, 0 failed, 130 expectations
+  - exit 0
 - `cd packages/fleet-sync && bun test ./test/fleet-sync.test.ts`
   - 5 passed, 0 failed, 30 expectations
   - exit 0
@@ -106,3 +110,16 @@ This receipt was written before the final union run. Observed commands and outpu
   - `remote routing inspection and synchronization boundary checks passed`
   - `remote routing projection and atomic publish checks passed`
   - exit 0
+
+## Local promotion
+
+The parity-only first attempt correctly returned `no new commits`, but the installed artifact's command list lacked `omp disk`; source-tree parity was therefore insufficient artifact evidence. The promotion path gained an explicit, tested `--force` control (18 tests, 0 failures, 43 expectations) and rebuilt from the verified tip.
+
+First forced bless before the final release-storage landing:
+
+- version `16.0.1+fork.bd213ec5eccc`
+- digest `328c11ffc0107d0e6adffb67207dd28bce56869ea4a7f4b89edc631ccec5ccf8`
+- readiness receipt digest `1e1ee34d8f2227c37f77800af791113ca33707c84ce2424590c5bc13ae092f57`
+- rollout: 2 restarted, 19 skipped (13 unresponsive, 5 legacy), 0 remaining
+
+The final release-storage tip is promoted below.
