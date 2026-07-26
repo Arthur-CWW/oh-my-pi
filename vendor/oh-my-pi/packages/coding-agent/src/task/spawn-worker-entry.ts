@@ -4,6 +4,7 @@ import { type AgentRef, AgentRegistry } from "../registry/agent-registry";
 import { EventBus } from "../utils/event-bus";
 import {
 	decodeSpawnWorkerRequest,
+	SPAWN_WORKER_JOURNAL_START_MARKER,
 	SPAWN_WORKER_MAX_INPUT_BYTES,
 	SPAWN_WORKER_MAX_QUEUED_BYTES,
 	SPAWN_WORKER_MAX_RECORD_BYTES,
@@ -11,6 +12,7 @@ import {
 	type SpawnWorkerRecord,
 	type SpawnWorkerRegistryRef,
 	type SpawnWorkerRequest,
+	type SpawnWorkerRunRequest,
 } from "./spawn-worker-protocol";
 import { TASK_SUBAGENT_EVENT_CHANNEL, TASK_SUBAGENT_LIFECYCLE_CHANNEL, TASK_SUBAGENT_PROGRESS_CHANNEL } from "./types";
 
@@ -107,7 +109,7 @@ async function readRequest(): Promise<SpawnWorkerRequest> {
 	return decodeSpawnWorkerRequest(JSON.parse(lines[0]));
 }
 
-function registryRef(ref: AgentRef | undefined): SpawnWorkerRegistryRef | undefined {
+function registryRef(ref: AgentRef | undefined, launchGeneration?: string): SpawnWorkerRegistryRef | undefined {
 	if (!ref) return undefined;
 	return {
 		id: ref.id,
@@ -116,6 +118,7 @@ function registryRef(ref: AgentRef | undefined): SpawnWorkerRegistryRef | undefi
 		status: ref.status,
 		...(ref.parentId ? { parentId: ref.parentId } : {}),
 		sessionFile: ref.sessionFile,
+		...(launchGeneration ? { launchGeneration } : {}),
 	};
 }
 
@@ -145,6 +148,89 @@ export async function initializeSpawnWorkerSettings(
 	await Settings.init({ inMemory: true, cwd: request.options.cwd, overrides: request.settings });
 }
 
+async function writeJournalStartMarker(
+	request: Extract<SpawnWorkerRunRequest, { version: 2 }>,
+): Promise<number | undefined> {
+	const sessionFile = request.options.sessionFile;
+	if (!sessionFile) return undefined;
+	const { SessionManager } = await import("../session/session-manager");
+	const sessionManager = await SessionManager.open(sessionFile, undefined, undefined, {
+		initialCwd: request.options.worktree ?? request.options.cwd,
+		suppressBreadcrumb: true,
+	});
+	try {
+		await sessionManager.ensureOnDisk();
+		sessionManager.appendCustomEntry(SPAWN_WORKER_JOURNAL_START_MARKER, {
+			requestId: request.requestId,
+			launchGeneration: request.launchGeneration,
+			nonce: request.journalStartNonce,
+		});
+		await sessionManager.flush();
+	} finally {
+		await sessionManager.close();
+	}
+	return Bun.file(sessionFile).size;
+}
+
+interface JournalTailState {
+	readonly offset: number;
+	readonly remainder: string;
+}
+
+export async function readJournalYieldTail(
+	sessionFile: string,
+	state: JournalTailState,
+): Promise<{ readonly found: boolean; readonly state: JournalTailState }> {
+	try {
+		const file = Bun.file(sessionFile);
+		const end = file.size;
+		if (end < state.offset) return { found: false, state };
+		if (end === state.offset) return { found: false, state };
+		const appended = await file.slice(state.offset, end).text();
+		const text = `${state.remainder}${appended}`;
+		const lines = text.split("\n");
+		const remainder = text.endsWith("\n") ? "" : (lines.pop() ?? "");
+		const found = lines.some(line => {
+			if (line.trim().length === 0) return false;
+			try {
+				const entry = JSON.parse(line) as {
+					type?: unknown;
+					message?: { role?: unknown; toolName?: unknown; details?: { status?: unknown } };
+				};
+				return (
+					entry.type === "message" &&
+					entry.message?.role === "toolResult" &&
+					entry.message.toolName === "yield" &&
+					(entry.message.details?.status === "success" || entry.message.details?.status === "aborted")
+				);
+			} catch {
+				return false;
+			}
+		});
+		return { found, state: { offset: end, remainder } };
+	} catch {
+		return { found: false, state };
+	}
+}
+
+async function watchJournalYield(
+	sessionFile: string,
+	initialOffset: number,
+	announce: () => Promise<void>,
+	signal: AbortSignal,
+): Promise<void> {
+	let state: JournalTailState = { offset: initialOffset, remainder: "" };
+	while (!signal.aborted) {
+		const tail = await readJournalYieldTail(sessionFile, state);
+		if (tail.found) {
+			await announce();
+			return;
+		}
+		state = tail.state;
+		await Bun.sleep(10);
+	}
+}
+
 export async function startSpawnWorker(): Promise<void> {
 	const writer = new BoundedJsonlWriter();
 	let requestId = "unparsed";
@@ -153,11 +239,15 @@ export async function startSpawnWorker(): Promise<void> {
 	try {
 		const request = await readRequest();
 		requestId = request.requestId;
+		let journalOffset: number | undefined;
 		if (request.type === "run") process.env.OMP_SUBPROCESS_WORKER = "1";
 		// Install the serialized settings snapshot before loading the executor/tool graph.
 		// Edit's auto-generated-file guard reads the process-global proxy.
 		if (request.type === "run") {
 			await initializeSpawnWorkerSettings(request);
+			if (request.version === SPAWN_WORKER_PROTOCOL_VERSION) {
+				journalOffset = await writeJournalStartMarker(request);
+			}
 			workerIrcBus = IrcExternalBus.global();
 			workerIrcSessionId = request.options.id;
 			workerIrcBus.registerPeer({
@@ -170,22 +260,54 @@ export async function startSpawnWorker(): Promise<void> {
 			});
 		}
 		writer.enqueue({ ...recordBase(requestId), type: "ready", pid: process.pid });
-		writer.enqueue({ ...recordBase(requestId), type: "phase", phase: "decode", at: Date.now() });
+		await writer.flush();
+		writer.enqueue({
+			...recordBase(requestId),
+			type: "phase",
+			phase: "decode",
+			at: Date.now(),
+		});
 		if (request.type === "synthetic") {
-			writer.enqueue({ ...recordBase(requestId), type: "phase", phase: "run", at: Date.now() });
+			writer.enqueue({
+				...recordBase(requestId),
+				type: "phase",
+				phase: "run",
+				at: Date.now(),
+			});
 			await writer.flush();
 			writer.enqueue(await runSynthetic(request));
 			await writer.flush();
-			if (request.workload.lingerAfterResultMs) await Bun.sleep(request.workload.lingerAfterResultMs);
+			if (request.workload.lingerAfterResultMs) {
+				await Bun.sleep(request.workload.lingerAfterResultMs);
+			}
 			return;
 		}
 
+		let yieldAnnounced = false;
+		const announceYield = async (): Promise<void> => {
+			if (yieldAnnounced) return;
+			yieldAnnounced = true;
+			writer.enqueue({ ...recordBase(requestId), type: "yield-written" });
+			await writer.flush();
+		};
+		const watchController = new AbortController();
+		const yieldWatch =
+			request.options.sessionFile && journalOffset !== undefined
+				? watchJournalYield(request.options.sessionFile, journalOffset, announceYield, watchController.signal)
+				: undefined;
 		const registry = AgentRegistry.global();
 		for (const ref of request.registry) {
-			registry.register({ ...ref, session: null });
+			registry.register({
+				...ref,
+				session: null,
+				...(ref.launchGeneration ? { launchGeneration: ref.launchGeneration } : {}),
+			});
 		}
 		const unsubscribeRegistry = registry.onChange(event => {
-			const ref = registryRef(event.ref);
+			if (request.version === SPAWN_WORKER_PROTOCOL_VERSION && event.ref.id === request.options.id) {
+				registry.setLaunchGeneration(event.ref, request.launchGeneration);
+			}
+			const ref = registryRef(event.ref, registry.getLaunchGeneration(event.ref));
 			if (ref) writer.enqueue({ ...recordBase(requestId), type: "registry", ref });
 		});
 		const eventBus = new EventBus();
@@ -206,9 +328,36 @@ export async function startSpawnWorker(): Promise<void> {
 				eventBus,
 				onProgress: progress => writer.enqueue({ ...recordBase(requestId), type: "progress", progress }, true),
 			});
-			writer.enqueue({ ...recordBase(requestId), type: "phase", phase: "finalize", at: Date.now() });
-			writer.enqueue({ ...recordBase(requestId), type: "result", result, rssBytes: process.memoryUsage.rss() });
+			if (request.options.sessionFile && journalOffset !== undefined) {
+				const tail = await readJournalYieldTail(request.options.sessionFile, {
+					offset: journalOffset,
+					remainder: "",
+				});
+				if (tail.found) await announceYield();
+			}
+			// Release the external IRC registration BEFORE announcing terminal:
+			// once the result record is flushed the parent may reap this process
+			// group at any moment, so post-result cleanup is not guaranteed to run.
+			if (workerIrcBus && workerIrcSessionId) {
+				workerIrcBus.unregisterPeer(workerIrcSessionId, process.pid);
+				workerIrcBus.close();
+				workerIrcBus = undefined;
+			}
+			writer.enqueue({
+				...recordBase(requestId),
+				type: "phase",
+				phase: "finalize",
+				at: Date.now(),
+			});
+			writer.enqueue({
+				...recordBase(requestId),
+				type: "result",
+				result,
+				rssBytes: process.memoryUsage.rss(),
+			});
 		} finally {
+			watchController.abort();
+			await yieldWatch;
 			unsubscribeRegistry();
 			for (const unsubscribe of unsubscribeEvents) unsubscribe();
 			eventBus.clear();

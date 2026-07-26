@@ -1,11 +1,11 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { isCompiledBinary, popLoopPhase, pushLoopPhase, workerHostEntry } from "@oh-my-pi/pi-utils";
+import { isCompiledBinary, isEnoent, popLoopPhase, pushLoopPhase, workerHostEntry } from "@oh-my-pi/pi-utils";
 import type { Settings } from "../config/settings";
 import { AgentRegistry } from "../registry/agent-registry";
-import { SessionManager } from "../session/session-manager";
 import { type ProcessIdentity, processMatches } from "../session/process-identity";
 import type { FileEntry } from "../session/session-entries";
+import { SessionManager } from "../session/session-manager";
 import type { EventBus } from "../utils/event-bus";
 import { type ExecutorOptions, finalizeSubprocessOutput, snapshotExecutorSettings } from "./executor";
 import { isTerminalChildLifecycleState, latestChildLifecycleRecord, type ChildLifecycleState } from "./child-lifecycle";
@@ -13,8 +13,9 @@ import {
 	decodeSpawnWorkerRecord,
 	type SerializableExecutorOptions,
 	SPAWN_WORKER_ARG,
+	SPAWN_WORKER_JOURNAL_START_MARKER,
 	SPAWN_WORKER_MAX_RECORD_BYTES,
-	SPAWN_WORKER_PROTOCOL_VERSION,
+	SPAWN_WORKER_REQUEST_VERSION,
 	type SpawnWorkerErrorCode,
 	type SpawnWorkerRecord,
 	type SpawnWorkerRegistryRef,
@@ -71,6 +72,13 @@ export class SpawnWorkerError extends Error {
 	) {
 		super(message);
 		this.name = "SpawnWorkerError";
+	}
+}
+
+export class JournalRecoveryError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = "JournalRecoveryError";
 	}
 }
 
@@ -168,26 +176,33 @@ function serializeOptions(options: ExecutorOptions): SerializableExecutorOptions
 }
 
 function registrySnapshot(): SpawnWorkerRegistryRef[] {
-	return AgentRegistry.global()
-		.list()
-		.map(ref => ({
+	const registry = AgentRegistry.global();
+	return registry.list().map(ref => {
+		const launchGeneration = registry.getLaunchGeneration(ref);
+		return {
 			id: ref.id,
 			displayName: ref.displayName,
 			kind: ref.kind,
 			status: ref.status,
 			...(ref.parentId ? { parentId: ref.parentId } : {}),
 			sessionFile: ref.sessionFile,
-		}));
+			...(launchGeneration ? { launchGeneration } : {}),
+		};
+	});
 }
 
 function projectRegistry(ref: SpawnWorkerRegistryRef): void {
+	if (!ref.launchGeneration) return;
 	const registry = AgentRegistry.global();
 	const existing = registry.get(ref.id);
-	if (!existing || existing.sessionFile !== (ref.sessionFile ?? null)) {
-		registry.register({ ...ref, session: null });
-		return;
+	if (existing) {
+		if (registry.getLaunchGeneration(existing) !== ref.launchGeneration || existing.session !== null) return;
+		if (existing.sessionFile === (ref.sessionFile ?? null)) {
+			registry.setStatus(ref.id, ref.status);
+			return;
+		}
 	}
-	registry.setStatus(ref.id, ref.status);
+	registry.register({ ...ref, session: null, launchGeneration: ref.launchGeneration });
 }
 
 const activeWorkerReapers = new Set<Promise<void>>();
@@ -306,75 +321,191 @@ async function readCappedStderr(stream: ReadableStream<Uint8Array>): Promise<str
 	}
 }
 
-type RecoveredYield = { data?: unknown; status?: "success" | "aborted"; error?: string; schemaOverridden?: boolean };
+type RecoveredYield = {
+	data?: unknown;
+	status?: "success" | "aborted";
+	error?: string;
+	schemaOverridden?: boolean;
+};
+
+interface JournalFileIdentity {
+	readonly device: number;
+	readonly inode: number;
+}
+
+interface JournalCursor {
+	readonly offset: number;
+	readonly identity?: JournalFileIdentity;
+}
+
+interface JournalStartEntry {
+	readonly data: Record<string, unknown>;
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+async function captureJournalCursor(sessionFile: string | null | undefined): Promise<JournalCursor> {
+	if (!sessionFile) return { offset: 0 };
+	try {
+		const handle = await fs.open(sessionFile, "r");
+		try {
+			const stat = await handle.stat();
+			return { offset: stat.size, identity: { device: stat.dev, inode: stat.ino } };
+		} finally {
+			await handle.close();
+		}
+	} catch (error) {
+		if (isEnoent(error)) return { offset: 0 };
+		throw new JournalRecoveryError(error instanceof Error ? error.message : String(error));
+	}
+}
+
+function isJournalStart(entry: unknown): entry is JournalStartEntry {
+	return (
+		isRecord(entry) &&
+		entry.type === "custom" &&
+		entry.customType === SPAWN_WORKER_JOURNAL_START_MARKER &&
+		isRecord(entry.data)
+	);
+}
+
+function matchesJournalStart(entry: unknown, request: Extract<SpawnWorkerRunRequest, { version: 2 }>): boolean {
+	return (
+		isJournalStart(entry) &&
+		entry.data.requestId === request.requestId &&
+		entry.data.launchGeneration === request.launchGeneration &&
+		entry.data.nonce === request.journalStartNonce
+	);
+}
+
+function parseCurrentTurnYield(
+	text: string,
+	request: Extract<SpawnWorkerRunRequest, { version: 2 }>,
+): RecoveredYield | undefined {
+	let afterCurrentTurnStart = false;
+	const lines = text.split("\n");
+	if (!text.endsWith("\n")) lines.pop();
+	for (const line of lines) {
+		if (line.trim().length === 0) continue;
+		let entry: unknown;
+		try {
+			entry = JSON.parse(line);
+		} catch (error) {
+			if (!afterCurrentTurnStart) continue;
+			throw new JournalRecoveryError(error instanceof Error ? error.message : String(error));
+		}
+		if (isJournalStart(entry)) {
+			if (matchesJournalStart(entry, request)) {
+				afterCurrentTurnStart = true;
+				continue;
+			}
+			if (afterCurrentTurnStart) return undefined;
+			continue;
+		}
+		if (
+			!afterCurrentTurnStart ||
+			!isRecord(entry) ||
+			entry.type !== "message" ||
+			!isRecord(entry.message) ||
+			entry.message.role !== "toolResult" ||
+			entry.message.toolName !== "yield"
+		) {
+			continue;
+		}
+		const details = entry.message.details;
+		if (!isRecord(details) || (details.status !== "success" && details.status !== "aborted")) continue;
+		return {
+			data: details.data,
+			status: details.status,
+			error: typeof details.error === "string" ? details.error : undefined,
+			schemaOverridden: details.schemaOverridden === true ? true : undefined,
+		};
+	}
+	return undefined;
+}
+
 /**
- * Recover a terminal yield from the child journal when the worker's final JSONL
- * record races process teardown. The journal is the durable source of truth;
- * this path deliberately returns a typed failure when it cannot be read.
+ * Recover a terminal yield only after this launch's durable turn marker. An
+ * unchanged journal identity keeps the byte-offset fast path; a child-owned
+ * rewrite or shrink rescans the durable marker instead of trusting old bytes.
  */
+async function recoverCurrentTurnResultFromJournal(
+	request: SpawnWorkerRunRequest,
+	cursor: JournalCursor,
+): Promise<SingleResult | undefined> {
+	if (request.version !== 2) return undefined;
+	const sessionFile = request.options.sessionFile;
+	if (!sessionFile) return undefined;
+	let text: string;
+	try {
+		const handle = await fs.open(sessionFile, "r");
+		try {
+			const stat = await handle.stat();
+			const identityUnchanged =
+				cursor.identity !== undefined &&
+				stat.dev === cursor.identity.device &&
+				stat.ino === cursor.identity.inode &&
+				stat.size >= cursor.offset;
+			const start = identityUnchanged ? cursor.offset : 0;
+			if (stat.size === start) return undefined;
+			text = await Bun.file(handle.fd).slice(start, stat.size).text();
+		} finally {
+			await handle.close();
+		}
+	} catch (error) {
+		if (isEnoent(error) && cursor.identity === undefined) return undefined;
+		throw new JournalRecoveryError(error instanceof Error ? error.message : String(error));
+	}
+
+	const recoveredYield = parseCurrentTurnYield(text, request);
+	if (!recoveredYield) return undefined;
+	const yields = [recoveredYield];
+	const finalized = finalizeSubprocessOutput({
+		rawOutput: "",
+		exitCode: recoveredYield.status === "success" ? 0 : 1,
+		stderr: "",
+		doneAborted: false,
+		signalAborted: false,
+		completed: true,
+		yieldItems: yields,
+		outputSchema: request.options.outputSchema,
+	});
+	const output = finalized.rawOutput;
+	return {
+		index: request.options.index,
+		id: request.options.id,
+		agent: request.options.agent.name,
+		agentSource: request.options.agent.source,
+		task: request.options.task,
+		assignment: request.options.assignment,
+		description: request.options.description,
+		exitCode: finalized.exitCode,
+		output,
+		stderr: finalized.stderr,
+		truncated: false,
+		durationMs: 0,
+		tokens: 0,
+		requests: 0,
+		modelOverride: request.options.modelOverride,
+		routeReceipt: request.options.routeReceipt,
+		error: finalized.exitCode !== 0 && finalized.stderr ? finalized.stderr : undefined,
+		aborted: recoveredYield.status === "aborted",
+		abortReason: recoveredYield.status === "aborted" ? recoveredYield.error : undefined,
+		outputPath: request.options.artifactsDir
+			? path.join(request.options.artifactsDir, `${request.options.id}.md`)
+			: undefined,
+		extractedToolData: { yield: yields },
+		outputMeta: { lineCount: output.split("\n").length, charCount: output.length },
+	};
+}
+
 export async function recoverSpawnWorkerResultFromJournal(
 	request: SpawnWorkerRunRequest,
 ): Promise<SingleResult | undefined> {
-	const sessionFile = request.options.sessionFile;
-	if (!sessionFile) return undefined;
 	try {
-		const session = await SessionManager.open(sessionFile, undefined, undefined, { suppressBreadcrumb: true });
-		const yields: RecoveredYield[] = [];
-		for (const entry of session.getEntries()) {
-			if (entry.type !== "message" || !isRecord(entry.message) || entry.message.role !== "toolResult") continue;
-			const details = entry.message.details;
-			if (!isRecord(details) || (details.status !== "success" && details.status !== "aborted")) continue;
-			yields.push({
-				data: details.data,
-				status: details.status,
-				error: typeof details.error === "string" ? details.error : undefined,
-				schemaOverridden: details.schemaOverridden === true ? true : undefined,
-			});
-		}
-		const lastYield = yields[yields.length - 1];
-		if (!lastYield) return undefined;
-		const finalized = finalizeSubprocessOutput({
-			rawOutput: "",
-			exitCode: lastYield.status === "success" ? 0 : 1,
-			stderr: "",
-			doneAborted: false,
-			signalAborted: false,
-			completed: true,
-			yieldItems: yields,
-			outputSchema: request.options.outputSchema,
-		});
-		const output = finalized.rawOutput;
-		return {
-			index: request.options.index,
-			id: request.options.id,
-			agent: request.options.agent.name,
-			agentSource: request.options.agent.source,
-			task: request.options.task,
-			assignment: request.options.assignment,
-			description: request.options.description,
-			exitCode: finalized.exitCode,
-			output,
-			stderr: finalized.stderr,
-			truncated: false,
-			durationMs: 0,
-			tokens: 0,
-			requests: 0,
-			modelOverride: request.options.modelOverride,
-			routeReceipt: request.options.routeReceipt,
-			error: finalized.exitCode !== 0 && finalized.stderr ? finalized.stderr : undefined,
-			aborted: lastYield.status === "aborted",
-			abortReason: lastYield.status === "aborted" ? lastYield.error : undefined,
-			outputPath: request.options.artifactsDir
-				? path.join(request.options.artifactsDir, `${request.options.id}.md`)
-				: undefined,
-			extractedToolData: { yield: yields },
-			outputMeta: { lineCount: output.split("\n").length, charCount: output.length },
-		};
+		return await recoverCurrentTurnResultFromJournal(request, { offset: 0 });
 	} catch {
 		return undefined;
 	}
@@ -488,6 +619,8 @@ async function runRequest(
 	options: SpawnWorkerClientOptions,
 ): Promise<SingleResult | SyntheticSpawnResult> {
 	if (options.signal?.aborted) throw new SpawnWorkerError("aborted", "Subagent subprocess aborted before spawn");
+	const journalCursor =
+		request.type === "run" ? await captureJournalCursor(request.options.sessionFile) : { offset: 0 };
 	const command = spawnCommand();
 	let proc: Bun.Subprocess<"pipe", "pipe", "pipe">;
 	try {
@@ -504,16 +637,19 @@ async function runRequest(
 		throw new SpawnWorkerError("spawn", error instanceof Error ? error.message : String(error));
 	}
 
+	type TerminalError = SpawnWorkerError | JournalRecoveryError;
 	const startedAt = Date.now();
 	const terminal = Promise.withResolvers<void>();
 	let terminalClaimed = false;
-	let terminalError: SpawnWorkerError | undefined;
+	let terminalPending = false;
+	let terminalError: TerminalError | undefined;
 	let result: SingleResult | SyntheticSpawnResult | undefined;
 	let sawReady = false;
 	let latestProgress = request.type === "run" ? initialWorkerProgress(request) : undefined;
 	let latestTokens = latestProgress?.tokens ?? 0;
 	let lastTokenAdvanceAt = startedAt;
 	let probeInFlight = false;
+	let timeout: ReturnType<typeof setTimeout> | undefined;
 	const maxRssBytes = Math.max(1, Math.trunc(options.maxRssBytes ?? DEFAULT_MAX_RSS_BYTES));
 	const stallThresholdMs = Math.max(1, Math.trunc(options.stallThresholdMs ?? DEFAULT_STALL_THRESHOLD_MS));
 	const probeIntervalMs = Math.max(10, Math.min(30_000, Math.trunc(stallThresholdMs / 4)));
@@ -523,76 +659,116 @@ async function runRequest(
 		latestProgress = { ...latestProgress, livenessState: state, durationMs: Date.now() - startedAt };
 		options.onProgress?.(latestProgress);
 	};
-	const claimError = (error: SpawnWorkerError, signalOwnedGroup = true): void => {
+	const disarmTimeout = (): void => {
+		clearTimeout(timeout);
+		timeout = undefined;
+	};
+	const claimError = (error: TerminalError, signalOwnedGroup = true): void => {
 		if (terminalClaimed) return;
+		terminalPending = false;
 		terminalClaimed = true;
 		terminalError = error;
-		beginTeardown(signalOwnedGroup);
+		disarmTimeout();
 		terminal.resolve();
+		beginTeardown(signalOwnedGroup);
 	};
 	const claimResult = (value: SingleResult | SyntheticSpawnResult, signalOwnedGroup = true): void => {
-		if (terminalClaimed) return;
+		if (terminalClaimed || terminalPending) return;
 		terminalClaimed = true;
 		result = value;
-		beginTeardown(signalOwnedGroup);
+		disarmTimeout();
 		terminal.resolve();
+		beginTeardown(signalOwnedGroup);
 	};
-	const recoverAfterDeath = async (message: string): Promise<void> => {
-		if (terminalClaimed) return;
-		beginTeardown(false);
-		const recovered = request.type === "run" ? await recoverSpawnWorkerResultFromJournal(request) : undefined;
-		if (terminalClaimed) return;
-		if (recovered) {
-			claimResult(recovered, false);
+	const claimRecoveredResult = (value: SingleResult, signalOwnedGroup: boolean): void => {
+		if (terminalClaimed || request.type !== "run") return;
+		terminalPending = false;
+		if (request.version === 2 && request.options.sessionFile) {
+			AgentRegistry.global().projectJournalTerminal(
+				request.options.id,
+				request.options.sessionFile,
+				request.launchGeneration,
+			);
+		}
+		claimResult(value, signalOwnedGroup);
+	};
+	const recoverCurrentTurn = async (signalOwnedGroup: boolean): Promise<boolean> => {
+		if (terminalClaimed || request.type !== "run") return terminalClaimed;
+		const recovered = await recoverCurrentTurnResultFromJournal(request, journalCursor);
+		if (terminalClaimed) return true;
+		if (!recovered) return false;
+		claimRecoveredResult(recovered, signalOwnedGroup);
+		return true;
+	};
+	const recoverOrFail = async (error: SpawnWorkerError, signalOwnedGroup = true, emitDead = false): Promise<void> => {
+		if (terminalClaimed || terminalPending) return;
+		terminalPending = true;
+		try {
+			if (await recoverCurrentTurn(signalOwnedGroup)) return;
+		} catch (recoveryError) {
+			if (terminalClaimed) return;
+			if (emitDead && request.type === "run") emitLiveness("dead");
+			claimError(
+				recoveryError instanceof JournalRecoveryError
+					? recoveryError
+					: new JournalRecoveryError(
+							recoveryError instanceof Error ? recoveryError.message : String(recoveryError),
+						),
+			);
 			return;
 		}
-		if (request.type === "run") emitLiveness("dead");
-		claimError(new SpawnWorkerError("exit", message), false);
+		if (emitDead && request.type === "run") emitLiveness("dead");
+		claimError(error, signalOwnedGroup);
 	};
-	const failAndKill = (error: SpawnWorkerError): void => claimError(error);
-	const onAbort = (): void => failAndKill(new SpawnWorkerError("aborted", "Subagent subprocess aborted"));
+	const failProtocol = (message: string): Promise<void> => recoverOrFail(new SpawnWorkerError("protocol", message));
+	const onAbort = (): void => {
+		void recoverOrFail(new SpawnWorkerError("aborted", "Subagent subprocess aborted"));
+	};
 	options.signal?.addEventListener("abort", onAbort, { once: true });
 	if (options.signal?.aborted) onAbort();
-	const timeout =
-		options.timeoutMs && options.timeoutMs > 0
-			? setTimeout(
-					() =>
-						failAndKill(new SpawnWorkerError("timeout", `Subagent subprocess exceeded ${options.timeoutMs}ms`)),
-					options.timeoutMs,
-				)
-			: undefined;
+	if (options.timeoutMs && options.timeoutMs > 0) {
+		timeout = setTimeout(() => {
+			void recoverOrFail(new SpawnWorkerError("timeout", `Subagent subprocess exceeded ${options.timeoutMs}ms`));
+		}, options.timeoutMs);
+	}
 	const stopRssWatch = watchWorkerRss(proc.pid, {
 		maxBytes: maxRssBytes,
-		onExceeded: rssBytes =>
-			failAndKill(new SpawnWorkerError("rss-limit", `Subagent subprocess RSS ${rssBytes} exceeded ${maxRssBytes}`)),
+		onExceeded: rssBytes => {
+			void recoverOrFail(
+				new SpawnWorkerError("rss-limit", `Subagent subprocess RSS ${rssBytes} exceeded ${maxRssBytes}`),
+			);
+		},
 	});
 
 	const stderrPromise = readCappedStderr(proc.stderr);
 	const stdoutPromise = (async (): Promise<void> => {
 		const reader = proc.stdout.getReader();
 		const decoder = new TextDecoder();
+		const encoder = new TextEncoder();
 		let buffer = "";
-		const handleLine = (line: string): void => {
+		const handleLine = async (line: string): Promise<void> => {
 			if (terminalClaimed) return;
-			if (new TextEncoder().encode(line).byteLength > SPAWN_WORKER_MAX_RECORD_BYTES) {
-				failAndKill(new SpawnWorkerError("protocol", "Subagent subprocess emitted an oversized record"));
+			if (encoder.encode(line).byteLength > SPAWN_WORKER_MAX_RECORD_BYTES) {
+				await failProtocol("Subagent subprocess emitted an oversized record");
 				return;
 			}
 			let record: SpawnWorkerRecord;
 			try {
 				record = decodeSpawnWorkerRecord(JSON.parse(line));
 			} catch (error) {
-				failAndKill(new SpawnWorkerError("protocol", error instanceof Error ? error.message : String(error)));
+				await failProtocol(error instanceof Error ? error.message : String(error));
 				return;
 			}
 			if (record.requestId !== request.requestId) {
-				failAndKill(new SpawnWorkerError("protocol", "Subagent subprocess request id mismatch"));
+				await failProtocol("Subagent subprocess request id mismatch");
 				return;
 			}
 			switch (record.type) {
 				case "ready":
-					if (sawReady || record.pid !== proc.pid)
-						failAndKill(new SpawnWorkerError("protocol", "Invalid worker ready record"));
+					if (sawReady || record.pid !== proc.pid) {
+						await failProtocol("Invalid worker ready record");
+						return;
+					}
 					sawReady = true;
 					break;
 				case "phase":
@@ -612,48 +788,82 @@ async function runRequest(
 				case "event":
 					options.eventBus?.emit(record.channel, record.payload);
 					break;
+				case "yield-written":
+					if (!sawReady) {
+						claimError(
+							new SpawnWorkerError("protocol", "Subagent subprocess emitted yield-written before ready"),
+						);
+						break;
+					}
+					disarmTimeout();
+					if (request.type !== "run") {
+						await failProtocol("Synthetic subprocess emitted a yield-written record");
+						break;
+					}
+					try {
+						const recovered = await recoverCurrentTurn(true);
+						if (!recovered && !terminalClaimed) {
+							claimError(new JournalRecoveryError("Yield record was not recoverable from the child journal"));
+						}
+					} catch (error) {
+						if (!terminalClaimed) {
+							claimError(
+								error instanceof JournalRecoveryError
+									? error
+									: new JournalRecoveryError(error instanceof Error ? error.message : String(error)),
+							);
+						}
+					}
+					break;
 				case "result":
 					if (!sawReady) {
-						failAndKill(new SpawnWorkerError("protocol", "Subagent subprocess emitted a result before ready"));
+						await failProtocol("Subagent subprocess emitted a result before ready");
 						break;
 					}
 					claimResult(record.result);
 					break;
 				case "synthetic-result":
 					if (!sawReady) {
-						failAndKill(new SpawnWorkerError("protocol", "Subagent subprocess emitted a result before ready"));
+						await failProtocol("Subagent subprocess emitted a result before ready");
 						break;
 					}
 					claimResult({ allocatedBytes: record.allocatedBytes, rssBytes: record.rssBytes });
 					break;
 				case "error":
 					if (!sawReady) {
-						failAndKill(new SpawnWorkerError("protocol", "Subagent subprocess emitted an error before ready"));
+						await failProtocol("Subagent subprocess emitted an error before ready");
 						break;
 					}
-					failAndKill(new SpawnWorkerError(record.code, record.message));
+					await recoverOrFail(new SpawnWorkerError(record.code, record.message));
 					break;
 			}
 		};
 		try {
 			while (true) {
-				const { done, value } = await reader.read();
+				const read = await reader.read().catch(async error => {
+					await recoverOrFail(
+						new SpawnWorkerError("protocol", error instanceof Error ? error.message : String(error)),
+					);
+					return undefined;
+				});
+				if (!read) return;
+				const { done, value } = read;
 				if (done) break;
 				buffer += decoder.decode(value, { stream: true });
 				let newline = buffer.indexOf("\n");
 				while (newline >= 0) {
 					const line = buffer.slice(0, newline);
 					buffer = buffer.slice(newline + 1);
-					if (line.length > 0) handleLine(line);
+					if (line.length > 0) await handleLine(line);
 					newline = buffer.indexOf("\n");
 				}
-				if (new TextEncoder().encode(buffer).byteLength > SPAWN_WORKER_MAX_RECORD_BYTES) {
-					failAndKill(new SpawnWorkerError("protocol", "Subagent subprocess unterminated record exceeded cap"));
+				if (encoder.encode(buffer).byteLength > SPAWN_WORKER_MAX_RECORD_BYTES) {
+					await failProtocol("Subagent subprocess unterminated record exceeded cap");
 					break;
 				}
 			}
 			buffer += decoder.decode();
-			if (buffer.trim().length > 0) handleLine(buffer);
+			if (buffer.trim().length > 0) await handleLine(buffer);
 		} finally {
 			reader.releaseLock();
 		}
@@ -678,7 +888,11 @@ async function runRequest(
 			if (!tokenRateStuck && !journalStale) return;
 			emitLiveness("stalled");
 			if (isProcessAlive(proc.pid)) return;
-			await recoverAfterDeath(`Subagent subprocess pid ${proc.pid} died without a terminal journal record`);
+			await recoverOrFail(
+				new SpawnWorkerError("exit", `Subagent subprocess pid ${proc.pid} died without a terminal journal record`),
+				false,
+				true,
+			);
 		} finally {
 			probeInFlight = false;
 		}
@@ -698,21 +912,20 @@ async function runRequest(
 				values => [values[0], values[1]] as const,
 			);
 			if (terminalClaimed) return;
-			if (!sawReady) {
-				await recoverAfterDeath("Subagent subprocess exited before ready or writing a terminal journal record");
-				return;
-			}
-			if (result) {
-				claimResult(result);
-				return;
-			}
-			await recoverAfterDeath(
-				exitCode !== 0
-					? `Subagent subprocess exited with code ${exitCode}${stderr.trim() ? `: ${stderr.trim()}` : ""}`
-					: "Subagent subprocess exited without a result or terminal journal record",
+			await recoverOrFail(
+				new SpawnWorkerError(
+					"exit",
+					!sawReady
+						? "Subagent subprocess exited before ready or writing a terminal journal record"
+						: exitCode !== 0
+							? `Subagent subprocess exited with code ${exitCode}${stderr.trim() ? `: ${stderr.trim()}` : ""}`
+							: "Subagent subprocess exited without a result or terminal journal record",
+				),
+				false,
+				true,
 			);
 		} catch (error) {
-			claimError(
+			await recoverOrFail(
 				error instanceof SpawnWorkerError
 					? error
 					: new SpawnWorkerError("protocol", error instanceof Error ? error.message : String(error)),
@@ -727,21 +940,31 @@ async function runRequest(
 		if (!result) throw new SpawnWorkerError("protocol", "Subagent subprocess settled without an outcome");
 		return result;
 	} finally {
-		clearTimeout(timeout);
+		disarmTimeout();
 		clearInterval(livenessTimer);
 		stopRssWatch();
 		options.signal?.removeEventListener("abort", onAbort);
 	}
 }
 
-export function runSubagentSpawnProcess(options: ExecutorOptions, settings: Settings): Promise<SingleResult> {
+export function runSubagentSpawnProcess(
+	options: ExecutorOptions,
+	settings: Settings,
+	clientOptions: SpawnWorkerClientOptions = {},
+): Promise<SingleResult> {
 	pushLoopPhase(`subagent:${options.id}:request-snapshot`);
 	let request: SpawnWorkerRunRequest;
 	try {
+		const registry = AgentRegistry.global();
+		const launchGeneration = crypto.randomUUID();
+		const currentRef = registry.get(options.id);
+		if (currentRef) registry.setLaunchGeneration(currentRef, launchGeneration, options.sessionFile);
 		request = {
-			version: SPAWN_WORKER_PROTOCOL_VERSION,
+			version: SPAWN_WORKER_REQUEST_VERSION,
 			type: "run",
 			requestId: crypto.randomUUID(),
+			launchGeneration,
+			journalStartNonce: crypto.randomUUID(),
 			options: serializeOptions(options),
 			settings: snapshotExecutorSettings(settings),
 			registry: registrySnapshot(),
@@ -760,11 +983,12 @@ export function runSubagentSpawnProcess(options: ExecutorOptions, settings: Sett
 	const runtimeLimitMs = options.maxRuntimeMs ?? settings.get("task.maxRuntimeMs");
 	const timeoutMs = runtimeLimitMs > 0 ? runtimeLimitMs + SETUP_TIMEOUT_GRACE_MS : undefined;
 	return runRequest(request, {
-		signal: options.signal,
-		timeoutMs,
-		stallThresholdMs: settings.get("task.stallThresholdMs"),
-		onProgress: options.onProgress,
-		eventBus: options.eventBus,
+		...clientOptions,
+		signal: clientOptions.signal ?? options.signal,
+		timeoutMs: clientOptions.timeoutMs ?? timeoutMs,
+		stallThresholdMs: clientOptions.stallThresholdMs ?? settings.get("task.stallThresholdMs"),
+		onProgress: clientOptions.onProgress ?? options.onProgress,
+		eventBus: clientOptions.eventBus ?? options.eventBus,
 	}).then(result => result as SingleResult);
 }
 
@@ -773,7 +997,7 @@ export function runSyntheticSpawnWorkerWorkload(
 	options: SpawnWorkerClientOptions = {},
 ): Promise<SyntheticSpawnResult> {
 	const request: SpawnWorkerSyntheticRequest = {
-		version: SPAWN_WORKER_PROTOCOL_VERSION,
+		version: SPAWN_WORKER_REQUEST_VERSION,
 		type: "synthetic",
 		requestId: crypto.randomUUID(),
 		workload,

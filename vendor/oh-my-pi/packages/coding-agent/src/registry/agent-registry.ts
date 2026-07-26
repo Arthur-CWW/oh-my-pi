@@ -56,6 +56,8 @@ export interface RegisterInput {
 	session: AgentSession | null;
 	sessionFile?: string | null;
 	status?: AgentStatus;
+	/** Opaque subprocess launch identity; never inferred across process boundaries. */
+	launchGeneration?: string;
 	/**
 	 * Reserved-but-not-yet-live marker. A nonblocking spawn registers the child
 	 * `running` + `starting: true` before its gated job body builds a real
@@ -84,6 +86,7 @@ export class AgentRegistry {
 	}
 
 	readonly #refs = new Map<string, AgentRef>();
+	readonly #launchGenerations = new WeakMap<AgentRef, string>();
 	#nextSpawnIndex = 0;
 	readonly #listeners = new Set<RegistryListener>();
 
@@ -106,8 +109,23 @@ export class AgentRegistry {
 			quota: input.quota ?? existing?.quota,
 		};
 		this.#refs.set(ref.id, ref);
+		if (input.launchGeneration) this.#launchGenerations.set(ref, input.launchGeneration);
 		this.#emit({ type: "registered", ref });
 		return ref;
+	}
+
+	setLaunchGeneration(ref: AgentRef, launchGeneration: string, startingSessionFile?: string | null): boolean {
+		if (this.#refs.get(ref.id) !== ref) return false;
+		this.#launchGenerations.set(ref, launchGeneration);
+		if (ref.starting === true && ref.session === null && ref.sessionFile === null && startingSessionFile) {
+			ref.sessionFile = startingSessionFile;
+		}
+		return true;
+	}
+
+	getLaunchGeneration(ref: AgentRef): string | undefined {
+		if (this.#refs.get(ref.id) !== ref) return undefined;
+		return this.#launchGenerations.get(ref);
 	}
 
 	setStatus(id: string, status: AgentStatus): void {
@@ -135,6 +153,31 @@ export class AgentRegistry {
 		ref.starting = false;
 		ref.status = "aborted";
 		ref.session = null;
+		ref.activity = undefined;
+		ref.lastActivity = Date.now();
+		this.#emit({ type: "status_changed", ref });
+	}
+
+	/**
+	 * Project a durable child-journal terminal yield into the parent process.
+	 * The journal owns the terminal state; the child worker reaper owns teardown.
+	 *
+	 * Recovery may mutate only the dormant, journal-bearing ref tagged with the
+	 * launch generation carried by this worker. A revival, replacement, or new
+	 * launch has a different (or absent) generation and wins over late recovery.
+	 */
+	projectJournalTerminal(id: string, expectedSessionFile: string, launchGeneration: string): void {
+		const ref = this.#refs.get(id);
+		if (
+			!ref ||
+			this.#launchGenerations.get(ref) !== launchGeneration ||
+			ref.sessionFile !== expectedSessionFile ||
+			ref.session !== null
+		) {
+			return;
+		}
+		ref.status = "parked";
+		ref.starting = false;
 		ref.activity = undefined;
 		ref.lastActivity = Date.now();
 		this.#emit({ type: "status_changed", ref });
