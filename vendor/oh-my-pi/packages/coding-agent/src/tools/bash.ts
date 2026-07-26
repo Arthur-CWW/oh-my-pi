@@ -838,7 +838,7 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
 			// Suppress the completion delivery up front so a job finishing while we
 			// foreground-wait cannot also be injected by the delivery loop. Lifted
 			// via resumeDeliveries() if we end up backgrounding after all.
-			autoBgManager.acknowledgeDeliveries([job.jobId]);
+			autoBgManager.suppressDeliveries([job.jobId]);
 			const waitResult = await this.#waitForManagedBashJob(job, autoBackgroundWaitMs, signal);
 			if (waitResult.kind === "completed") {
 				return waitResult.result;
@@ -1174,7 +1174,10 @@ export function createShellRenderer<TArgs>(config: ShellRendererConfig<TArgs>) {
 			const header =
 				config.showHeader === false
 					? undefined
-					: renderStatusLine({ icon: "pending", title: options.headline ?? config.resolveTitle(args, options) }, uiTheme);
+					: renderStatusLine(
+							{ icon: "pending", title: options.headline ?? config.resolveTitle(args, options) },
+							uiTheme,
+						);
 			const outputBlock = new CachedOutputBlock();
 			return markFramedBlockComponent({
 				render: (width: number): readonly string[] =>

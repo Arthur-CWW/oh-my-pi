@@ -38,7 +38,12 @@ import {
 	Snowflake,
 } from "@oh-my-pi/pi-utils";
 import { ADVISOR_READONLY_TOOL_NAMES, discoverWatchdogFiles } from "./advisor";
-import { type AsyncJob, AsyncJobManager } from "./async";
+import { AsyncJobManager, asyncJobCompletionAgentId } from "./async";
+import {
+	ASYNC_JOB_RESULT_YIELD_KIND,
+	admitParentCompletionReceipt,
+	replayParentCompletionReceipts,
+} from "./async/parent-receipt";
 import { AutoLearnController, buildAutoLearnInstructions } from "./autolearn/controller";
 import { loadCapability } from "./capability";
 import { type Rule, ruleCapability, setActiveRules } from "./capability/rule";
@@ -141,6 +146,7 @@ import {
 	wrapSteeringForModel,
 } from "./session/messages";
 import { getRestorableSessionModels, getRestorableSessionThinkingLevel } from "./session/session-context";
+import type { AsyncJobCompletionReceipt } from "./session/session-entries";
 import { SessionManager } from "./session/session-manager";
 import type { SessionOwnershipHandle } from "./session/session-ownership";
 import { SnapcompactInlineTransformer } from "./session/snapcompact-inline";
@@ -215,12 +221,7 @@ import { EventBus } from "./utils/event-bus";
 import { buildNamedToolChoice } from "./utils/tool-choice";
 import { buildWorkspaceTree, type WorkspaceTree } from "./workspace-tree";
 
-type AsyncResultEntry = {
-	jobId: string;
-	result: string;
-	job: AsyncJob | undefined;
-	durationMs: number | undefined;
-};
+type AsyncResultEntry = AsyncJobCompletionReceipt;
 
 type AsyncResultJobDetails = {
 	jobId: string;
@@ -243,14 +244,14 @@ function buildAsyncResultBatchMessage(entries: AsyncResultEntry[]): CustomMessag
 	const jobs = entries.map(entry => ({
 		jobId: entry.jobId,
 		result: entry.result,
-		type: entry.job?.type,
-		label: entry.job?.label,
+		jobType: entry.jobType,
+		label: entry.label,
 		durationMs: entry.durationMs,
 	}));
 	const details: AsyncResultDetails = {
 		jobs: jobs.map(job => ({
 			jobId: job.jobId,
-			type: job.type,
+			type: job.jobType,
 			label: job.label,
 			durationMs: job.durationMs,
 		})),
@@ -1494,28 +1495,31 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		!options.parentTaskPrefix && !AsyncJobManager.instance()
 			? new AsyncJobManager({
 					maxRunningJobs: asyncMaxJobs,
-					onJobComplete: async (jobId, result, job) => {
-						if (!session || asyncJobManager!.isDeliverySuppressed(jobId)) return;
+					onJobAcknowledge: async receipts => {
+						await sessionManager.acknowledgeAsyncJobCompletions(receipts);
+					},
+					onJobComplete: async (jobId, result, job, sequence) => {
 						const group = job?.group;
 						if (group?.reporting === "hub" && group.topology === "flat") return;
 						const formattedResult = await formatAsyncResultForFollowUp(result);
-						if (asyncJobManager!.isDeliverySuppressed(jobId)) return;
-
 						const targetSession =
 							group?.reporting === "hub" && group.topology === "supervised" && group.coordinatorId
 								? agentRegistry.get(group.coordinatorId)?.session
 								: session;
-						if (!targetSession) {
-							throw new Error(`Completion recipient is unavailable for ${jobId}`);
-						}
-
 						const durationMs = job ? Math.max(0, Date.now() - job.startTime) : undefined;
-						targetSession.yieldQueue.enqueue<AsyncResultEntry>("async-result", {
-							jobId,
-							result: formattedResult,
-							job,
-							durationMs,
-						});
+						await admitParentCompletionReceipt(
+							sessionManager,
+							targetSession && !targetSession.isDisposed ? targetSession.yieldQueue : undefined,
+							{
+								agentId: job ? asyncJobCompletionAgentId(job) : jobId,
+								jobId,
+								sequence,
+								result: formattedResult,
+								jobType: job?.type,
+								label: job?.label,
+								durationMs,
+							},
+						);
 					},
 				})
 			: undefined;
@@ -2724,12 +2728,13 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		await session.reconcilePlanWorkflowFromJournal();
 		await session.reconcileGoalWorkflowFromJournal();
 		hasSession = true;
-		if (scopedAsyncJobManager) {
-			session.yieldQueue.register<AsyncResultEntry>("async-result", {
-				isStale: entry => scopedAsyncJobManager.isDeliverySuppressed(entry.jobId),
-				build: buildAsyncResultBatchMessage,
-			});
-		}
+		session.yieldQueue.register<AsyncResultEntry>(ASYNC_JOB_RESULT_YIELD_KIND, {
+			isStale: entry =>
+				sessionManager.isAsyncJobCompletionAcknowledged(entry) ||
+				(scopedAsyncJobManager?.isDeliverySuppressed(entry.jobId) ?? false),
+			build: buildAsyncResultBatchMessage,
+		});
+		replayParentCompletionReceipts(sessionManager, session.yieldQueue);
 		session.yieldQueue.register<McpNotificationEntry>("mcp-notification", {
 			build: buildMcpNotificationBatchMessage,
 		});

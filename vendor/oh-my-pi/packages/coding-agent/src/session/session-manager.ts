@@ -27,12 +27,21 @@ import {
 	type SessionContext,
 } from "./session-context";
 import {
+	ASYNC_JOB_COMPLETION_ACK_CUSTOM_TYPE,
+	ASYNC_JOB_COMPLETION_RECEIPT_CUSTOM_TYPE,
+	type AsyncJobCompletionAcknowledgement,
+	type AsyncJobCompletionReceipt,
+	type AsyncJobCompletionReceiptIdentity,
+	asyncJobCompletionAcknowledgementKey,
+	asyncJobCompletionReceiptKey,
 	type BranchSummaryEntry,
 	type CompactionEntry,
 	CURRENT_SESSION_VERSION,
 	type CustomEntry,
 	type CustomMessageEntry,
 	type DurableDeliveryIdentity,
+	decodeAsyncJobCompletionAcknowledgement,
+	decodeAsyncJobCompletionReceipt,
 	decodeDurableDeliveryIdentity,
 	decodeSessionCommandEntry,
 	decodeSessionWorkstream,
@@ -441,7 +450,37 @@ function contentEquals(left: string | UserContent[], right: string | UserContent
 			case "video":
 				return other.type === "video" && block.data === other.data && block.mimeType === other.mimeType;
 		}
+		return false;
 	});
+}
+
+function asyncJobCompletionReceiptsEqual(left: AsyncJobCompletionReceipt, right: AsyncJobCompletionReceipt): boolean {
+	return (
+		left.version === right.version &&
+		left.agentId === right.agentId &&
+		left.jobId === right.jobId &&
+		left.sequence === right.sequence &&
+		left.result === right.result &&
+		left.jobType === right.jobType &&
+		left.label === right.label &&
+		left.durationMs === right.durationMs
+	);
+}
+
+export interface AsyncJobCompletionReceiptAdmission {
+	receipt: AsyncJobCompletionReceipt;
+	replayed: boolean;
+	acknowledged: boolean;
+}
+
+export class AsyncJobCompletionReceiptConflictError extends Error {
+	readonly receiptKey: string;
+
+	constructor(receiptKey: string) {
+		super(`Async job completion receipt key was reused with different content: ${receiptKey}`);
+		this.name = "AsyncJobCompletionReceiptConflictError";
+		this.receiptKey = receiptKey;
+	}
 }
 
 export interface DurableCustomMessageInput {
@@ -1037,8 +1076,7 @@ export class SessionManager {
 				this.getSessionOwnership() === ownership &&
 				(await ownership.isCurrent()) &&
 				this.getSessionOwnership() === ownership,
-			isFenced: (): boolean =>
-				this.getSessionOwnership() !== ownership || ownership.isFenced?.() === true,
+			isFenced: (): boolean => this.getSessionOwnership() !== ownership || ownership.isFenced?.() === true,
 		});
 	}
 
@@ -1870,6 +1908,143 @@ export class SessionManager {
 		const entry: CustomEntry = { type: "custom", customType, data, ...this.#freshEntryFields() };
 		this.#recordEntry(entry);
 		return entry.id;
+	}
+
+	/**
+	 * Admit a child-completion receipt exactly once. Persistence commits before
+	 * the promise resolves so callers may safely attempt in-memory delivery next.
+	 */
+	appendAsyncJobCompletionReceipt(
+		input: Omit<AsyncJobCompletionReceipt, "version">,
+	): Promise<AsyncJobCompletionReceiptAdmission> {
+		return this.#enqueueSessionCommand(() => this.#appendAsyncJobCompletionReceiptNow(input));
+	}
+
+	async #appendAsyncJobCompletionReceiptNow(
+		input: Omit<AsyncJobCompletionReceipt, "version">,
+	): Promise<AsyncJobCompletionReceiptAdmission> {
+		const receipt = decodeAsyncJobCompletionReceipt({ version: 1, ...input });
+		if (!receipt) throw new TypeError("Invalid async job completion receipt");
+		const receiptKey = asyncJobCompletionReceiptKey(receipt);
+		for (const entry of this.#entries) {
+			if (entry.type !== "custom" || entry.customType !== ASYNC_JOB_COMPLETION_RECEIPT_CUSTOM_TYPE) continue;
+			const existing = decodeAsyncJobCompletionReceipt(entry.data);
+			if (!existing || asyncJobCompletionReceiptKey(existing) !== receiptKey) continue;
+			if (!asyncJobCompletionReceiptsEqual(existing, receipt)) {
+				throw new AsyncJobCompletionReceiptConflictError(receiptKey);
+			}
+			return {
+				receipt: existing,
+				replayed: true,
+				acknowledged: this.isAsyncJobCompletionAcknowledged(existing),
+			};
+		}
+
+		const entry: CustomEntry<AsyncJobCompletionReceipt> = {
+			type: "custom",
+			customType: ASYNC_JOB_COMPLETION_RECEIPT_CUSTOM_TYPE,
+			data: receipt,
+			...this.#freshEntryFields(),
+		};
+		this.#stateCommandPersistenceInFlight = true;
+		this.#reserveEntryForPersistence(entry);
+		try {
+			await this.#persistReservedEntry(entry);
+		} catch (error) {
+			this.#rollbackReservedEntry(entry);
+			throw error;
+		} finally {
+			this.#stateCommandPersistenceInFlight = false;
+		}
+		this.#notifyEntryListeners(entry);
+		return {
+			receipt,
+			replayed: false,
+			acknowledged: this.isAsyncJobCompletionAcknowledged(receipt),
+		};
+	}
+
+	/**
+	 * Persist cumulative acknowledgements for the supplied job receipt sequences.
+	 * A later sequence subsumes every earlier receipt for the same child and job.
+	 */
+	acknowledgeAsyncJobCompletions(identities: readonly AsyncJobCompletionReceiptIdentity[]): Promise<number> {
+		const throughByJob = new Map<string, AsyncJobCompletionReceiptIdentity>();
+		for (const identity of identities) {
+			if (!decodeAsyncJobCompletionReceipt({ version: 1, ...identity, result: "" })) {
+				throw new TypeError("Invalid async job completion acknowledgement identity");
+			}
+			const key = asyncJobCompletionAcknowledgementKey(identity);
+			const existing = throughByJob.get(key);
+			if (!existing || identity.sequence > existing.sequence) throughByJob.set(key, identity);
+		}
+		if (throughByJob.size === 0) return Promise.resolve(0);
+		return this.#enqueueSessionCommand(async () => {
+			let appended = 0;
+			for (const identity of throughByJob.values()) {
+				if (this.#asyncJobCompletionAcknowledgedThrough(identity.agentId, identity.jobId) >= identity.sequence) {
+					continue;
+				}
+				const acknowledgement: AsyncJobCompletionAcknowledgement = {
+					version: 1,
+					agentId: identity.agentId,
+					jobId: identity.jobId,
+					throughSequence: identity.sequence,
+					acknowledgedAt: nowIso(),
+				};
+				const entry: CustomEntry<AsyncJobCompletionAcknowledgement> = {
+					type: "custom",
+					customType: ASYNC_JOB_COMPLETION_ACK_CUSTOM_TYPE,
+					data: acknowledgement,
+					...this.#freshEntryFields(),
+				};
+				this.#stateCommandPersistenceInFlight = true;
+				this.#reserveEntryForPersistence(entry);
+				try {
+					await this.#persistReservedEntry(entry);
+				} catch (error) {
+					this.#rollbackReservedEntry(entry);
+					throw error;
+				} finally {
+					this.#stateCommandPersistenceInFlight = false;
+				}
+				this.#notifyEntryListeners(entry);
+				appended++;
+			}
+			return appended;
+		});
+	}
+
+	isAsyncJobCompletionAcknowledged(identity: AsyncJobCompletionReceiptIdentity): boolean {
+		return this.#asyncJobCompletionAcknowledgedThrough(identity.agentId, identity.jobId) >= identity.sequence;
+	}
+
+	getUnacknowledgedAsyncJobCompletionReceipts(): AsyncJobCompletionReceipt[] {
+		const receipts = new Map<string, AsyncJobCompletionReceipt>();
+		for (const entry of this.#entries) {
+			if (entry.type !== "custom" || entry.customType !== ASYNC_JOB_COMPLETION_RECEIPT_CUSTOM_TYPE) continue;
+			const receipt = decodeAsyncJobCompletionReceipt(entry.data);
+			if (!receipt) continue;
+			const key = asyncJobCompletionReceiptKey(receipt);
+			if (!receipts.has(key)) receipts.set(key, receipt);
+		}
+		return [...receipts.values()].filter(receipt => !this.isAsyncJobCompletionAcknowledged(receipt));
+	}
+
+	#asyncJobCompletionAcknowledgedThrough(agentId: string, jobId: string): number {
+		let throughSequence = 0;
+		for (const entry of this.#entries) {
+			if (entry.type !== "custom" || entry.customType !== ASYNC_JOB_COMPLETION_ACK_CUSTOM_TYPE) continue;
+			const acknowledgement = decodeAsyncJobCompletionAcknowledgement(entry.data);
+			if (
+				acknowledgement?.agentId === agentId &&
+				acknowledgement.jobId === jobId &&
+				acknowledgement.throughSequence > throughSequence
+			) {
+				throughSequence = acknowledgement.throughSequence;
+			}
+		}
+		return throughSequence;
 	}
 
 	/**

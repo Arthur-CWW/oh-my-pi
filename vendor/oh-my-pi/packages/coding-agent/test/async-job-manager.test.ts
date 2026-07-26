@@ -172,7 +172,7 @@ describe("AsyncJobManager", () => {
 		expect(completions).toHaveLength(0);
 	});
 
-	test("refreshResultText updates terminal jobs without re-enqueueing delivery", async () => {
+	test("refreshResultText creates a fresh completion delivery", async () => {
 		const completions: Array<{ jobId: string; text: string }> = [];
 		const manager = new AsyncJobManager({
 			onJobComplete: async (jobId, text) => {
@@ -197,9 +197,13 @@ describe("AsyncJobManager", () => {
 		expect(manager.getJob(failedJobId)?.status).toBe("failed");
 		expect(manager.getJob(failedJobId)?.resultText).toBe("recovered result");
 		expect(manager.getJob(failedJobId)?.errorText).toBeUndefined();
-		expect(manager.hasPendingDeliveries()).toBe(false);
-		await manager.drainDeliveries({ timeoutMs: 50 });
-		expect(completions).toHaveLength(2);
+		await manager.drainDeliveries({ timeoutMs: 2_000 });
+		expect(completions).toEqual([
+			{ jobId: completedJobId, text: "original" },
+			{ jobId: failedJobId, text: "first failure" },
+			{ jobId: completedJobId, text: "fresh result" },
+			{ jobId: failedJobId, text: "recovered result" },
+		]);
 	});
 
 	test("refreshResultText rejects running jobs", async () => {
@@ -429,7 +433,7 @@ describe("AsyncJobManager", () => {
 		}
 
 		expect(manager.hasPendingDeliveries()).toBe(true);
-		const removed = manager.acknowledgeDeliveries([jobId]);
+		const removed = await manager.acknowledgeDeliveries([jobId]);
 		expect(removed).toBeGreaterThanOrEqual(1);
 
 		const drained = await manager.drainDeliveries({ timeoutMs: 200 });
@@ -495,7 +499,7 @@ describe("AsyncJobManager", () => {
 		expect(subagentCompletions).toEqual([{ jobId: targetJobId, text: "subagent result" }]);
 		expect(manager.hasPendingDeliveries({ ownerId: "3-AuthLoader" })).toBe(false);
 
-		expect(manager.acknowledgeDeliveries([mainJobId])).toBe(0);
+		expect(await manager.acknowledgeDeliveries([mainJobId])).toBe(0);
 		expect(manager.hasPendingDeliveries({ ownerId: "0-Main" })).toBe(false);
 		releaseMainDelivery();
 		await Bun.sleep(0);

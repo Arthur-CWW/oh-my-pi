@@ -511,6 +511,86 @@ export function decodeDurableDeliveryIdentity(value: unknown): DurableDeliveryId
 	return { inputId: candidate.inputId, inputRevision: candidate.inputRevision };
 }
 
+export const ASYNC_JOB_COMPLETION_RECEIPT_CUSTOM_TYPE = "async_job_completion_receipt";
+export const ASYNC_JOB_COMPLETION_ACK_CUSTOM_TYPE = "async_job_completion_ack";
+
+export interface AsyncJobCompletionReceiptIdentity {
+	agentId: string;
+	jobId: string;
+	sequence: number;
+}
+
+export interface AsyncJobCompletionReceipt extends AsyncJobCompletionReceiptIdentity {
+	version: 1;
+	result: string;
+	jobType?: "bash" | "task";
+	label?: string;
+	durationMs?: number;
+}
+
+export interface AsyncJobCompletionAcknowledgement {
+	version: 1;
+	agentId: string;
+	jobId: string;
+	throughSequence: number;
+	acknowledgedAt: string;
+}
+
+export function asyncJobCompletionReceiptKey(identity: AsyncJobCompletionReceiptIdentity): string {
+	return `${identity.agentId}\u0000${identity.jobId}\u0000${identity.sequence}`;
+}
+
+export function asyncJobCompletionAcknowledgementKey(
+	acknowledgement: Pick<AsyncJobCompletionAcknowledgement, "agentId" | "jobId">,
+): string {
+	return `${acknowledgement.agentId}\u0000${acknowledgement.jobId}`;
+}
+
+export function decodeAsyncJobCompletionReceipt(value: unknown): AsyncJobCompletionReceipt | undefined {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+	const candidate = value as Record<string, unknown>;
+	if (
+		candidate.version !== 1 ||
+		typeof candidate.agentId !== "string" ||
+		candidate.agentId.length === 0 ||
+		typeof candidate.jobId !== "string" ||
+		candidate.jobId.length === 0 ||
+		typeof candidate.sequence !== "number" ||
+		!Number.isSafeInteger(candidate.sequence) ||
+		candidate.sequence < 1 ||
+		typeof candidate.result !== "string" ||
+		(candidate.jobType !== undefined && candidate.jobType !== "bash" && candidate.jobType !== "task") ||
+		(candidate.label !== undefined && typeof candidate.label !== "string") ||
+		(candidate.durationMs !== undefined &&
+			(typeof candidate.durationMs !== "number" ||
+				!Number.isFinite(candidate.durationMs) ||
+				candidate.durationMs < 0))
+	) {
+		return undefined;
+	}
+	return value as AsyncJobCompletionReceipt;
+}
+
+export function decodeAsyncJobCompletionAcknowledgement(value: unknown): AsyncJobCompletionAcknowledgement | undefined {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+	const candidate = value as Record<string, unknown>;
+	if (
+		candidate.version !== 1 ||
+		typeof candidate.agentId !== "string" ||
+		candidate.agentId.length === 0 ||
+		typeof candidate.jobId !== "string" ||
+		candidate.jobId.length === 0 ||
+		typeof candidate.throughSequence !== "number" ||
+		!Number.isSafeInteger(candidate.throughSequence) ||
+		candidate.throughSequence < 1 ||
+		typeof candidate.acknowledgedAt !== "string" ||
+		candidate.acknowledgedAt.length === 0
+	) {
+		return undefined;
+	}
+	return value as AsyncJobCompletionAcknowledgement;
+}
+
 /**
  * Custom message entry for extensions to inject messages into LLM context.
  * Use customType to identify your extension's entries.

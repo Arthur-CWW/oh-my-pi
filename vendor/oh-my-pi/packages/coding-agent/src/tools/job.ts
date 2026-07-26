@@ -431,7 +431,7 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 		return { content: [{ type: "text", text }], details: { jobs: [] } };
 	}
 
-	#buildResult(
+	async #buildResult(
 		manager: AsyncJobManager,
 		jobs: {
 			id: string;
@@ -446,7 +446,7 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 		}[],
 		cancelOutcomes: CancelOutcome[],
 		interruptOutcomes: InterruptOutcome[] = [],
-	): AgentToolResult<JobToolDetails> {
+	): Promise<AgentToolResult<JobToolDetails>> {
 		// Deduplicate by id (cancelled jobs may also appear in the watched set).
 		const seen = new Set<string>();
 		const uniqueJobs = jobs.filter(j => {
@@ -456,7 +456,7 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 		});
 		const jobResults = this.#snapshotJobs(uniqueJobs);
 
-		manager.acknowledgeDeliveries(jobResults.filter(j => j.status !== "running").map(j => j.id));
+		await manager.acknowledgeDeliveries(jobResults.filter(j => j.status !== "running").map(j => j.id));
 
 		const completed = jobResults.filter(j => j.status !== "running");
 		const running = jobResults.filter(j => j.status === "running");

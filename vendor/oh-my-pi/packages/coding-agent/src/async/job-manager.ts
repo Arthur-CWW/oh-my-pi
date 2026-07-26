@@ -100,6 +100,8 @@ export interface AsyncJob {
 	ownerId?: string;
 	/** Snapshot group routing metadata. Group configuration changes affect only later registrations. */
 	group?: AsyncJobGroupMetadata;
+	/** Monotonic result revision used to fence durable parent receipt admission. */
+	completionSequence: number;
 	/**
 	 * Job is registered but parked behind a caller-managed gate (e.g. a task
 	 * batch semaphore). Queued jobs do not count toward the running-job limit
@@ -109,7 +111,8 @@ export interface AsyncJob {
 }
 
 export interface AsyncJobManagerOptions {
-	onJobComplete: (jobId: string, text: string, job?: AsyncJob) => void | Promise<void>;
+	onJobComplete: (jobId: string, text: string, job: AsyncJob | undefined, sequence: number) => void | Promise<void>;
+	onJobAcknowledge?: (receipts: readonly AsyncJobDeliveryAcknowledgement[]) => void | Promise<void>;
 	maxRunningJobs?: number;
 	retentionMs?: number;
 	/** Maximum UTF-8 bytes retained for a terminal job after reliable delivery. */
@@ -131,10 +134,22 @@ interface AsyncJobDelivery {
 	jobId: string;
 	text: string;
 	attempt: number;
+	sequence: number;
 	nextAttemptAt: number;
 	lastError?: string;
 	ownerId?: string;
 	promise?: Promise<void>;
+}
+
+export interface AsyncJobDeliveryAcknowledgement {
+	agentId: string;
+	jobId: string;
+	sequence: number;
+	job: AsyncJob;
+}
+
+export function asyncJobCompletionAgentId(job: AsyncJob): string {
+	return job.type === "task" ? job.id : (job.ownerId ?? job.id);
 }
 
 export interface AsyncJobDeliveryState {
@@ -197,6 +212,7 @@ export class AsyncJobManager {
 	readonly #pollEscalation = new Map<string | undefined, PollEscalationState>();
 	readonly #groupConfigurations = new Map<string, AsyncJobGroupConfiguration>();
 	readonly #onJobComplete: AsyncJobManagerOptions["onJobComplete"];
+	readonly #onJobAcknowledge: AsyncJobManagerOptions["onJobAcknowledge"];
 	readonly #maxRunningJobs: number;
 	readonly #retentionMs: number;
 	readonly #completionSummaryBytes: number;
@@ -217,6 +233,7 @@ export class AsyncJobManager {
 
 	constructor(options: AsyncJobManagerOptions) {
 		this.#onJobComplete = options.onJobComplete;
+		this.#onJobAcknowledge = options.onJobAcknowledge;
 		this.#maxRunningJobs = Math.max(1, Math.floor(options.maxRunningJobs ?? DEFAULT_MAX_RUNNING_JOBS));
 		this.#retentionMs = Math.max(0, Math.floor(options.retentionMs ?? DEFAULT_RETENTION_MS));
 		this.#completionSummaryBytes = Math.max(
@@ -251,7 +268,8 @@ export class AsyncJobManager {
 		job.group.reporting = "main";
 		const text = job.resultText ?? job.errorText;
 		if (!text || this.#hasDelivery(jobId)) return true;
-		this.#enqueueDelivery(jobId, text);
+		job.completionSequence++;
+		this.#enqueueDelivery(jobId, text, job.completionSequence);
 		return true;
 	}
 
@@ -306,6 +324,7 @@ export class AsyncJobManager {
 			label,
 			abortController,
 			promise: Promise.resolve(),
+			completionSequence: 0,
 			ownerId: options?.ownerId,
 			group: options?.group
 				? {
@@ -339,7 +358,8 @@ export class AsyncJobManager {
 				job.status = "completed";
 				if (job.interruptRequested) job.interrupted = true;
 				job.resultText = text;
-				this.#enqueueDelivery(id, text);
+				job.completionSequence++;
+				this.#enqueueDelivery(id, text, job.completionSequence);
 				this.#scheduleEviction(id);
 			} catch (error) {
 				await progress.flush();
@@ -351,7 +371,8 @@ export class AsyncJobManager {
 				const errorText = error instanceof Error ? error.message : String(error);
 				job.status = "failed";
 				job.errorText = errorText;
-				this.#enqueueDelivery(id, errorText);
+				job.completionSequence++;
+				this.#enqueueDelivery(id, errorText, job.completionSequence);
 				this.#scheduleEviction(id);
 			}
 		})();
@@ -401,6 +422,11 @@ export class AsyncJobManager {
 		if (!job || (job.status !== "completed" && job.status !== "failed")) return false;
 		job.resultText = text;
 		if (job.errorText !== undefined) job.errorText = undefined;
+		job.completionSequence++;
+		// A refreshed child result is a new delivery generation. A prior explicit
+		// acknowledgement covers only the earlier sequence.
+		this.#suppressedDeliveries.delete(id);
+		this.#enqueueDelivery(id, text, job.completionSequence);
 		return true;
 	}
 
@@ -548,14 +574,52 @@ export class AsyncJobManager {
 		this.#pollEscalation.set(ownerId, { level: prev?.level ?? 0, lastPollEndAt: now });
 	}
 
-	acknowledgeDeliveries(jobIds: string[]): number {
+	async acknowledgeDeliveries(jobIds: string[]): Promise<number> {
 		const uniqueJobIds = Array.from(new Set(jobIds.map(id => id.trim()).filter(id => id.length > 0)));
 		if (uniqueJobIds.length === 0) return 0;
 
+		const acknowledgements: AsyncJobDeliveryAcknowledgement[] = [];
 		for (const jobId of uniqueJobIds) {
 			this.#suppressedDeliveries.add(jobId);
+			const job = this.#jobs.get(jobId);
+			if (job && job.completionSequence > 0) {
+				acknowledgements.push({
+					agentId: asyncJobCompletionAgentId(job),
+					jobId,
+					sequence: job.completionSequence,
+					job,
+				});
+			}
 		}
 
+		const removed = this.#removeSuppressedDeliveries();
+		try {
+			await this.#onJobAcknowledge?.(acknowledgements);
+		} catch (error) {
+			for (const jobId of uniqueJobIds) this.#suppressedDeliveries.delete(jobId);
+			for (const jobId of uniqueJobIds) {
+				const job = this.#jobs.get(jobId);
+				if (job && (job.status === "completed" || job.status === "failed") && !this.#hasDelivery(jobId)) {
+					this.#enqueueDelivery(
+						jobId,
+						job.status === "completed" ? (job.resultText ?? "") : (job.errorText ?? ""),
+						job.completionSequence,
+					);
+				}
+			}
+			throw error;
+		}
+		return removed;
+	}
+
+	/** Temporarily suppress delivery while a foreground caller waits for a job. */
+	suppressDeliveries(jobIds: string[]): number {
+		const uniqueJobIds = Array.from(new Set(jobIds.map(id => id.trim()).filter(id => id.length > 0)));
+		for (const jobId of uniqueJobIds) this.#suppressedDeliveries.add(jobId);
+		return this.#removeSuppressedDeliveries();
+	}
+
+	#removeSuppressedDeliveries(): number {
 		const before = this.#deliveries.length;
 		this.#deliveries.splice(
 			0,
@@ -566,9 +630,8 @@ export class AsyncJobManager {
 	}
 
 	/**
-	 * Lift a foreground-wait suppression set via `acknowledgeDeliveries`. If the
-	 * job already finished while suppressed (its delivery enqueue was skipped),
-	 * re-enqueue the completion so the result is still delivered exactly once.
+	 * Lift a temporary foreground-wait suppression. If the job finished while
+	 * suppressed, enqueue its current completion generation.
 	 */
 	resumeDeliveries(jobIds: string[]): void {
 		for (const rawId of jobIds) {
@@ -581,7 +644,11 @@ export class AsyncJobManager {
 				this.#deliveries.some(delivery => delivery.jobId === jobId) ||
 				this.#inFlightDeliveries.some(delivery => delivery.jobId === jobId);
 			if (queued) continue;
-			this.#enqueueDelivery(jobId, job.status === "completed" ? (job.resultText ?? "") : (job.errorText ?? ""));
+			this.#enqueueDelivery(
+				jobId,
+				job.status === "completed" ? (job.resultText ?? "") : (job.errorText ?? ""),
+				job.completionSequence,
+			);
 		}
 	}
 
@@ -811,14 +878,12 @@ export class AsyncJobManager {
 		);
 	}
 
-	#enqueueDelivery(jobId: string, text: string): void {
-		// Skip delivery if already acknowledged
-		if (this.isDeliverySuppressed(jobId)) {
-			return;
-		}
+	#enqueueDelivery(jobId: string, text: string, sequence: number): void {
+		if (this.isDeliverySuppressed(jobId)) return;
 		this.#deliveries.push({
 			jobId,
 			text,
+			sequence,
 			attempt: 0,
 			nextAttemptAt: Date.now(),
 			ownerId: this.#jobs.get(jobId)?.ownerId,
@@ -872,7 +937,7 @@ export class AsyncJobManager {
 			this.#inFlightDeliveries.push(delivery);
 			let delivered = false;
 			try {
-				await this.#onJobComplete(delivery.jobId, delivery.text, this.#jobs.get(delivery.jobId));
+				await this.#onJobComplete(delivery.jobId, delivery.text, this.#jobs.get(delivery.jobId), delivery.sequence);
 				this.#compactTerminalJob(delivery.jobId);
 				delivered = true;
 			} catch (error) {
