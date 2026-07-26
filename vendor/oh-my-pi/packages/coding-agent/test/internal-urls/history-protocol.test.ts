@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { InternalUrlRouter } from "@oh-my-pi/pi-coding-agent/internal-urls";
 import { listArchivedDirectChildren } from "@oh-my-pi/pi-coding-agent/internal-urls/history-protocol";
 import { IrcExternalBus } from "@oh-my-pi/pi-coding-agent/irc/bus-external";
@@ -19,6 +20,8 @@ import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { CURRENT_SESSION_VERSION } from "@oh-my-pi/pi-coding-agent/session/session-entries";
 import { CHILD_LIFECYCLE_CUSTOM_TYPE, type ChildLifecycleState } from "@oh-my-pi/pi-coding-agent/task/child-lifecycle";
+import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
+import { ReadTool } from "@oh-my-pi/pi-coding-agent/tools/read";
 
 async function withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
 	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "history-protocol-"));
@@ -50,6 +53,18 @@ async function sha256(file: string): Promise<string> {
 
 function fakeLiveSession(messages: unknown[]): AgentSession {
 	return { messages } as unknown as AgentSession;
+}
+
+function createReadTool(cwd: string): ReadTool {
+	const session: ToolSession = {
+		cwd,
+		hasUI: false,
+		getSessionFile: () => null,
+		getSessionSpawns: () => null,
+		ircDbPath: fleetDbPath,
+		settings: Settings.isolated(),
+	};
+	return new ReadTool(session);
 }
 
 /** Minimal current-version session JSONL: header + a linear user/assistant chain. */
@@ -232,7 +247,7 @@ describe("history:// protocol", () => {
 		previousHome = process.env.HOME;
 		previousControlDb = process.env.OMP_SESSION_CONTROL_DB;
 		testHome = await fs.mkdtemp(path.join(os.tmpdir(), "history-protocol-home-"));
-		fleetDbPath = path.join(testHome, "irc-bus.sqlite");
+		fleetDbPath = path.join(testHome, ".omp", "agent", "irc-bus.sqlite");
 		process.env.HOME = testHome;
 		process.env.OMP_SESSION_CONTROL_DB = path.join(testHome, "session-control.sqlite");
 	});
@@ -550,6 +565,60 @@ describe("history:// protocol", () => {
 			expect(child.sourcePath).toBe(childFile);
 			expect(child.content).toContain("# Child (remote)");
 			expect(child.content).toContain("parked hello");
+		});
+	});
+
+	it("reads local, global, child, colon-bearing, selected, raw, and queried histories end to end", async () => {
+		await withTempDir(async dir => {
+			const localFile = path.join(dir, "local.jsonl");
+			await Bun.write(localFile, sessionFixtureJsonl());
+			for (const id of ["LocalAgent", "Team:Worker"]) {
+				AgentRegistry.global().register({
+					id,
+					displayName: "task",
+					kind: "sub",
+					session: null,
+					sessionFile: localFile,
+					status: "parked",
+				});
+			}
+
+			const sessionId = "019f9bf1-6914-72c7-98ce-d41bc464cdc2";
+			const parentFile = path.join(dir, "global.jsonl");
+			const childrenDir = parentFile.slice(0, -".jsonl".length);
+			const childFile = path.join(childrenDir, "Worker.jsonl");
+			await fs.mkdir(childrenDir);
+			await Bun.write(parentFile, sessionFixtureJsonl());
+			await Bun.write(childFile, sessionFixtureJsonl());
+			registerFleetPeer(sessionId, parentFile);
+
+			const tool = createReadTool(dir);
+			let call = 0;
+			const readText = async (target: string): Promise<string> => {
+				const result = await tool.execute(`history-read-${++call}`, { path: target });
+				return result.content.flatMap(block => (block.type === "text" ? [block.text] : [])).join("\n");
+			};
+
+			expect(await readText("history://LocalAgent")).toContain("# LocalAgent (parked)");
+			expect(await readText(`history://${sessionId}`)).toContain(`# ${sessionId} (remote)`);
+			expect(await readText(`history://${sessionId}/Worker`)).toContain("# Worker (remote)");
+			expect(await readText("history://Team:Worker")).toContain("# Team:Worker (parked)");
+
+			const oneLine = await readText("history://LocalAgent:1");
+			const lineRange = await readText("history://LocalAgent:3-4");
+			expect(oneLine).toContain("# LocalAgent (parked)");
+			expect(lineRange).toContain("parked hello");
+
+			const raw = await readText("history://LocalAgent:raw");
+			const direct = await InternalUrlRouter.instance().resolve("history://LocalAgent");
+			expect(raw).toBe(direct.content);
+
+			const queryTarget = "history://LocalAgent:raw?op=search&q=parked%20hello";
+			const query = await readText(queryTarget);
+			expect(query).toContain("1 match");
+			expect(query).toContain("parked hello");
+
+			await expect(readText("history://DefinitelyMissing")).rejects.toThrow("Unknown agent: DefinitelyMissing");
 		});
 	});
 

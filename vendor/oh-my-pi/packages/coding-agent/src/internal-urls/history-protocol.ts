@@ -7,7 +7,9 @@
  *
  * URL forms:
  * - history:// - Index of all registry agents (id, status, kind, last activity)
- * - history://<agentId> - Concise markdown transcript of that agent
+ * - history://<agent-id> - Local live, parked, or archived agent transcript
+ * - history://<session-id> - Fleet session's Main transcript
+ * - history://<session-id>/<agent-id> - Fleet session child transcript
  */
 import * as fs from "node:fs/promises";
 import * as path from "node:path";

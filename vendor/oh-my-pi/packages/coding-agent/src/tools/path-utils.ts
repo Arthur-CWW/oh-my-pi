@@ -30,6 +30,7 @@ const INTERNAL_SCHEMES_WITH_SELECTORS: Record<string, true> = {
 	agent: true,
 	artifact: true,
 	issue: true,
+	history: true,
 	local: true,
 	memory: true,
 	omp: true,
@@ -336,19 +337,26 @@ export function splitInternalUrlSel(rawPath: string): { path: string; sel?: stri
 	if (!INTERNAL_SCHEMES_WITH_SELECTORS[scheme]) return { path: rawPath };
 
 	const schemeEnd = schemeMatch[0].length;
-	let path = rawPath;
+	const queryIndex = rawPath.indexOf("?", schemeEnd);
+	const hashIndex = rawPath.indexOf("#", schemeEnd);
+	let resourceEnd = rawPath.length;
+	if (queryIndex >= 0) resourceEnd = queryIndex;
+	if (hashIndex >= 0 && hashIndex < resourceEnd) resourceEnd = hashIndex;
+
+	let resource = rawPath.slice(0, resourceEnd);
+	const suffix = rawPath.slice(resourceEnd);
 	const chunks: string[] = [];
 	while (true) {
-		const colon = path.lastIndexOf(":");
+		const colon = resource.lastIndexOf(":");
 		// Stop before crossing into the scheme separator `://`.
 		if (colon < schemeEnd) break;
-		const tail = path.slice(colon + 1);
+		const tail = resource.slice(colon + 1);
 		if (!INTERNAL_URL_SELECTOR_PART_RE.test(tail)) break;
 		chunks.unshift(tail);
-		path = path.slice(0, colon);
+		resource = resource.slice(0, colon);
 	}
 	if (chunks.length === 0) return { path: rawPath };
-	return { path, sel: chunks.join(":") };
+	return { path: `${resource}${suffix}`, sel: chunks.join(":") };
 }
 
 function assertNotInternalUrl(expanded: string, original: string): void {

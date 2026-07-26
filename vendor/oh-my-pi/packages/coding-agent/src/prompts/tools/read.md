@@ -69,7 +69,7 @@ For `.sqlite`, `.sqlite3`, `.db`, `.db3`:
 
 # Internal URIs
 
-All `path` URI schemes resolve transparently and take the same line selectors. `artifact://<id>` recovers full output a previous bash/eval/tool result spilled or truncated. `history://<agentId>` is an agent's transcript as concise markdown; bare `history://` lists agents.
+All `path` URI schemes resolve transparently and take the same line selectors. `artifact://<id>` recovers full output a previous bash/eval/tool result spilled or truncated. `history://<agent-id>` is a local agent transcript; `history://<session-id>` and `history://<session-id>/<agent-id>` resolve fleet sessions read-only; bare `history://` lists agents.
 
 <critical>
 - You MUST use `read` for every file, directory, archive, and URL inspection. `cat`, `head`, `tail`, `less`, `more`, `ls`, `tar`, `unzip`, `curl`, `wget` are FORBIDDEN bash calls, however short or convenient.

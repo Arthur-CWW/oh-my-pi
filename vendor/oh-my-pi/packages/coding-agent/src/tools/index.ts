@@ -276,6 +276,8 @@ export interface ToolSession {
 	mcpManager?: MCPManager;
 	/** Local protocol root to propagate to nested subagents and eval-created agents. */
 	localProtocolOptions?: LocalProtocolOptions;
+	/** Optional fleet IRC database override for internal history:// resolution. */
+	ircDbPath?: string;
 	/** Settings instance for passing to subagents */
 	settings: Settings;
 	/** Plan mode state (if active) */
