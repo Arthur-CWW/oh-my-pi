@@ -1,0 +1,17 @@
+{
+  "name": "@wirebabel/fleet-sync",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Non-destructive immutable fleet state replication",
+  "scripts": {
+    "fleet-sync": "bun src/cli.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^25.2.3",
+    "bun-types": "^1.3.9",
+    "typescript": "^5.9.3"
+  }
+}
