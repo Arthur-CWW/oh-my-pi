@@ -131,6 +131,7 @@ export function composePromotionReport(
 
 export interface PromotionOptions {
 	readonly noRollout: boolean;
+	readonly force: boolean;
 	readonly verbose: boolean;
 }
 
@@ -139,13 +140,15 @@ export function parsePromotionOptions(
 	environment: NodeJS.ProcessEnv = process.env,
 ): PromotionOptions {
 	let verbose = false;
+	let force = false;
 	let noRollout = environment.OMP_PROMOTE_ROLLOUT === "0";
 	for (const arg of argv) {
 		if (arg === "--verbose") verbose = true;
 		else if (arg === "--no-rollout") noRollout = true;
+		else if (arg === "--force") force = true;
 		else throw new Error(`unknown option: ${arg}`);
 	}
-	return { noRollout, verbose };
+	return { force, noRollout, verbose };
 }
 
 export interface RolloutSummaryCounts {
@@ -333,7 +336,7 @@ export async function promote(
 		const head = await run(["git", "rev-parse", config.revision], config.repoRoot);
 		const stableRevision = await readInstalledBuildRevision(stable, config.repoRoot);
 		const blessedCommit = blessedCommitFromVersion(stableRevision.version);
-		const initialDecision = decidePromotion(await vendorChanged(config.repoRoot, blessedCommit, head), "not-run");
+		const initialDecision = decidePromotion(options.force || await vendorChanged(config.repoRoot, blessedCommit, head), "not-run");
 		if (initialDecision.kind === "noop") {
 			console.log(initialDecision.message);
 			return;

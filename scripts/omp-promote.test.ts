@@ -110,9 +110,10 @@ describe("promotion reporting", () => {
 
 describe("rollout options and summary", () => {
 	it("parses rollout controls from flags and environment", () => {
-		expect(parsePromotionOptions(["--verbose"], {})).toEqual({ noRollout: false, verbose: true });
-		expect(parsePromotionOptions(["--no-rollout"], {})).toEqual({ noRollout: true, verbose: false });
-		expect(parsePromotionOptions([], { OMP_PROMOTE_ROLLOUT: "0" })).toEqual({ noRollout: true, verbose: false });
+		expect(parsePromotionOptions(["--verbose"], {})).toEqual({ force: false, noRollout: false, verbose: true });
+		expect(parsePromotionOptions(["--no-rollout"], {})).toEqual({ force: false, noRollout: true, verbose: false });
+		expect(parsePromotionOptions(["--force"], {})).toEqual({ force: true, noRollout: false, verbose: false });
+		expect(parsePromotionOptions([], { OMP_PROMOTE_ROLLOUT: "0" })).toEqual({ force: false, noRollout: true, verbose: false });
 		expect(() => parsePromotionOptions(["--unexpected"], {})).toThrow("unknown option");
 	});
 
