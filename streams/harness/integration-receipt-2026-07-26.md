@@ -122,4 +122,8 @@ First forced bless before the final release-storage landing:
 - readiness receipt digest `1e1ee34d8f2227c37f77800af791113ca33707c84ce2424590c5bc13ae092f57`
 - rollout: 2 restarted, 19 skipped (13 unresponsive, 5 legacy), 0 remaining
 
-The final release-storage tip is promoted below.
+The final release-storage-tip promotion (`9ef678d34399`) completed install, generation, typecheck, native build, link tests, and bundle, then stopped safely at candidate install:
+
+`link-omp: immutable releases is workspace-local state; run 'omp workspace storage migrate --dry-run' before linking`
+
+The requested dry-run completed against `/Users/arthur/agents` and produced guarded migration/rollback commands (plan digest `b7baa5b18adfd0cf44ba022363607bc70a7f51e67e55d7c522acaaa16cea41fa`). No migration command ran and the five 5.83 GiB copies remain untouched. The active blessed build therefore remains `16.0.1+fork.bd213ec5eccc` / `328c11ffc0107d0e6adffb67207dd28bce56869ea4a7f4b89edc631ccec5ccf8`; `omp --help` confirms that this running artifact contains `disk` and the landed resume/routing command surface. Only the release-storage landing itself awaits reviewed execution of its generated migration plan before it can be blessed.
