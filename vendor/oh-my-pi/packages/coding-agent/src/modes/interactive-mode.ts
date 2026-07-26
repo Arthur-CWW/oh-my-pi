@@ -1405,8 +1405,8 @@ export class InteractiveMode implements InteractiveModeContext, SubmittedInputRe
 
 	rebuildChatFromMessages(): void {
 		this.chatContainer.clear();
-		// Full-history transcript: compactions render as inline dividers instead
-		// of restarting the visible conversation (the LLM context still resets).
+		// Build the display transcript (compactions remain inline); UiHelpers
+		// materializes only its bounded tail so rebuilds cannot retain full history.
 		const context = this.viewSession.buildTranscriptSessionContext();
 		this.renderSessionContext(context);
 		// During the pre-streaming window — after `startPendingSubmission` has

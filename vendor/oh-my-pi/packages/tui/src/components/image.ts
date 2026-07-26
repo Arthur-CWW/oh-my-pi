@@ -273,7 +273,7 @@ function normalizeCap(cap: number): number {
 }
 
 export class Image implements Component {
-	#base64Data: string;
+	#base64Data: string | undefined;
 	#mimeType: string;
 	#dimensions: ImageDimensions;
 	#theme: ImageTheme;
@@ -283,7 +283,7 @@ export class Image implements Component {
 
 	#cachedLines?: string[];
 	#cachedWidth?: number;
-	#cachedSuppressed = false;
+	#cachedFallback = false;
 	// Tallest graphic placement this image has rendered. The text fallback
 	// pads itself to this height so a budget demotion never shrinks the block
 	// (its rows may already be committed to native scrollback).
@@ -305,6 +305,11 @@ export class Image implements Component {
 		this.#imageId = options.budget ? options.budget.acquireId(options.imageKey) : undefined;
 	}
 
+	/** Whether this component still owns the encoded source payload. */
+	get hasRetainedPayload(): boolean {
+		return this.#base64Data !== undefined;
+	}
+
 	invalidate(): void {
 		this.#cachedLines = undefined;
 		this.#cachedWidth = undefined;
@@ -318,7 +323,8 @@ export class Image implements Component {
 		// already text.
 		const suppressed = hasProtocol && this.#budget !== undefined ? this.#budget.observe(this.#imageId ?? 0) : false;
 
-		if (this.#cachedLines && this.#cachedWidth === width && this.#cachedSuppressed === suppressed) {
+		const renderFallback = !hasProtocol || suppressed || this.#base64Data === undefined;
+		if (this.#cachedLines && this.#cachedWidth === width && this.#cachedFallback === renderFallback) {
 			return this.#cachedLines;
 		}
 
@@ -326,12 +332,15 @@ export class Image implements Component {
 		const maxWidth = cap != null && cap > 0 ? Math.min(width - 2, cap) : width - 2;
 
 		let lines: string[];
+		let usedFallback = renderFallback;
 
-		if (hasProtocol && !suppressed) {
+		if (!renderFallback) {
+			// `renderFallback` proves the payload is present.
+			const base64Data = this.#base64Data!;
 			// Transmit the data once (keyed by id); thereafter renderImage returns
 			// just the placement, so repaints never re-send the base64.
 			const needsTransmit = this.#imageId != null && (this.#budget?.shouldTransmit(this.#imageId) ?? false);
-			const result = renderImage(this.#base64Data, this.#dimensions, {
+			const result = renderImage(base64Data, this.#dimensions, {
 				maxWidthCells: maxWidth,
 				maxHeightCells: this.#options.maxHeightCells,
 				imageId: this.#imageId,
@@ -358,15 +367,20 @@ export class Image implements Component {
 				lines.push(moveUp + (result.sequence ?? ""));
 			} else {
 				lines = this.#fallbackLines();
+				usedFallback = true;
 			}
-			this.#renderedGraphicRows = Math.max(this.#renderedGraphicRows, lines.length);
+			if (!usedFallback) this.#renderedGraphicRows = Math.max(this.#renderedGraphicRows, lines.length);
 		} else {
 			lines = this.#fallbackLines();
 		}
 
+		// A text-only or budget-demoted image can never need its encoded source
+		// again. Drop both the payload and, below, any cached transmit sequence.
+		if (usedFallback) this.#base64Data = undefined;
+
 		this.#cachedLines = lines;
 		this.#cachedWidth = width;
-		this.#cachedSuppressed = suppressed;
+		this.#cachedFallback = usedFallback;
 
 		return lines;
 	}

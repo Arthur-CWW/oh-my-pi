@@ -1,10 +1,20 @@
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage, ImageContent, Message, Usage } from "@oh-my-pi/pi-ai";
-import { type Component, Spacer, Text, TruncatedText } from "@oh-my-pi/pi-tui";
+import {
+	type Component,
+	DEFAULT_MAX_INLINE_IMAGES,
+	getImageDimensions,
+	imageFallback,
+	Spacer,
+	TERMINAL,
+	Text,
+	TruncatedText,
+} from "@oh-my-pi/pi-tui";
 import type { AdvisorMessageDetails } from "../../advisor";
 import { COLLAB_PROMPT_MESSAGE_TYPE } from "../../collab/protocol";
 import { settings } from "../../config/settings";
 import { getFileSnapshotStore } from "../../edit/file-snapshot-store";
+import { JOURNAL_TAIL_BYTES } from "../../journal/projection";
 import { createAdvisorMessageCard } from "../../modes/components/advisor-message";
 import { AssistantMessageComponent } from "../../modes/components/assistant-message";
 import { createBackgroundTanDispatchBlock } from "../../modes/components/background-tan-message";
@@ -71,6 +81,162 @@ function imageLinksForMessage(
 			content.type === "image" && typeof content.data === "string" && typeof content.mimeType === "string",
 	);
 	return materializeImageReferenceLinksSync(images, putBlobSync);
+}
+
+const TRANSCRIPT_RESTORE_MAX_MESSAGES = 200;
+const TRANSCRIPT_RESTORE_MAX_BYTES = JOURNAL_TAIL_BYTES;
+
+interface EncodedImage {
+	type?: string;
+	data: string;
+	mimeType: string;
+}
+
+interface TranscriptTail {
+	messages: readonly AgentMessage[];
+	omittedMessages: number;
+}
+
+function isEncodedImage(value: unknown): value is EncodedImage {
+	if (!value || typeof value !== "object") return false;
+	const image = value as Partial<EncodedImage>;
+	return (
+		(image.type === undefined || image.type === "image") &&
+		typeof image.data === "string" &&
+		typeof image.mimeType === "string"
+	);
+}
+
+function estimateMaterializedBytes(
+	value: unknown,
+	limit: number,
+	imagePayloads: { remaining: number },
+	seen: WeakSet<object>,
+): number {
+	if (limit < 0) return 1;
+	if (typeof value === "string") return Math.min(limit + 1, Buffer.byteLength(value, "utf8"));
+	if (value == null) return 0;
+	if (typeof value !== "object") return 8;
+	if (seen.has(value)) return 0;
+	seen.add(value);
+
+	if (isEncodedImage(value)) {
+		let total = Buffer.byteLength(value.mimeType, "utf8") + 8;
+		if (imagePayloads.remaining > 0) {
+			imagePayloads.remaining--;
+			total += Math.min(limit + 1, Buffer.byteLength(value.data, "utf8"));
+		}
+		return Math.min(limit + 1, total);
+	}
+
+	let total = 0;
+	if (Array.isArray(value)) {
+		for (let index = value.length - 1; index >= 0; index--) {
+			total += estimateMaterializedBytes(value[index], limit - total, imagePayloads, seen);
+			if (total > limit) break;
+		}
+		return total;
+	}
+	for (const key in value as Record<string, unknown>) {
+		total += Buffer.byteLength(key, "utf8");
+		if (total > limit) break;
+		total += estimateMaterializedBytes(
+			(value as Record<string, unknown>)[key],
+			limit - total,
+			imagePayloads,
+			seen,
+		);
+		if (total > limit) break;
+	}
+	return total;
+}
+
+function selectTranscriptTail(messages: readonly AgentMessage[], retainedImagePayloads: number): TranscriptTail {
+	let start = messages.length;
+	let count = 0;
+	let bytes = 0;
+	const imagePayloads = { remaining: retainedImagePayloads };
+
+	while (start > 0 && count < TRANSCRIPT_RESTORE_MAX_MESSAGES) {
+		const message = messages[start - 1];
+		if (!message) break;
+		const size = estimateMaterializedBytes(
+			message,
+			TRANSCRIPT_RESTORE_MAX_BYTES - bytes,
+			imagePayloads,
+			new WeakSet(),
+		);
+		if (count > 0 && bytes + size > TRANSCRIPT_RESTORE_MAX_BYTES) break;
+		start--;
+		count++;
+		bytes += size;
+		if (bytes > TRANSCRIPT_RESTORE_MAX_BYTES) break;
+	}
+
+	// A result without its preceding tool call cannot render. Move forward to a
+	// coherent message boundary instead of materializing an inert component.
+	while (start < messages.length && messages[start]?.role === "toolResult") start++;
+	return {
+		messages: start === 0 ? messages : messages.slice(start),
+		omittedMessages: start,
+	};
+}
+
+function countImagePayloads(messages: readonly AgentMessage[]): number {
+	let count = 0;
+	for (const message of messages) {
+		if (message.role !== "toolResult") continue;
+		for (const content of message.content) {
+			if (isEncodedImage(content)) count++;
+		}
+		const detailImages =
+			message.details && typeof message.details === "object"
+				? (message.details as { images?: unknown }).images
+				: undefined;
+		if (!Array.isArray(detailImages)) continue;
+		for (const image of detailImages) {
+			if (isEncodedImage(image)) count++;
+		}
+	}
+	return count;
+}
+
+function imageFallbackBlock(image: EncodedImage): { type: "text"; text: string } {
+	const dimensions = getImageDimensions(image.data, image.mimeType) ?? undefined;
+	return { type: "text", text: imageFallback(image.mimeType, dimensions) };
+}
+
+function releaseHistoricalImagePayloads(
+	message: Extract<AgentMessage, { role: "toolResult" }>,
+	release: { remaining: number },
+): AgentMessage {
+	if (release.remaining <= 0) return message;
+	let changed = false;
+	const content = message.content.map(block => {
+		if (!isEncodedImage(block) || release.remaining <= 0) return block;
+		release.remaining--;
+		changed = true;
+		return imageFallbackBlock(block);
+	});
+
+	let details = message.details;
+	const detailImages =
+		details && typeof details === "object" ? (details as { images?: unknown }).images : undefined;
+	if (Array.isArray(detailImages) && release.remaining > 0) {
+		const retained: unknown[] = [];
+		for (const image of detailImages) {
+			if (!isEncodedImage(image) || release.remaining <= 0) {
+				retained.push(image);
+				continue;
+			}
+			release.remaining--;
+			changed = true;
+			content.push(imageFallbackBlock(image));
+		}
+		if (changed) details = { ...(details as Record<string, unknown>), images: retained };
+	}
+
+	return changed ? ({ ...message, content, details } as AgentMessage) : message;
 }
 
 export class UiHelpers {
@@ -374,6 +540,30 @@ export class UiHelpers {
 			this.ctx.statusLine.invalidate();
 			this.ctx.updateEditorBorderColor();
 		}
+		const showImages = settings.get("terminal.showImages");
+		const configuredImageCap = this.ctx.ui.imageBudget?.cap ?? DEFAULT_MAX_INLINE_IMAGES;
+		const retainedImagePayloads =
+			showImages && TERMINAL.imageProtocol != null
+				? configuredImageCap > 0
+					? Math.min(configuredImageCap, DEFAULT_MAX_INLINE_IMAGES)
+					: DEFAULT_MAX_INLINE_IMAGES
+				: 0;
+		const transcript = selectTranscriptTail(sessionContext.messages, retainedImagePayloads);
+		const imagePayloadsToRelease = {
+			remaining: Math.max(0, countImagePayloads(transcript.messages) - retainedImagePayloads),
+		};
+		if (transcript.omittedMessages > 0) {
+			this.ctx.chatContainer.addChild(
+				new Text(
+					theme.fg(
+						"dim",
+						`… ${transcript.omittedMessages} earlier transcript messages omitted from the restored view`,
+					),
+					1,
+					0,
+				),
+			);
+		}
 
 		let readGroup: ReadToolGroupComponent | null = null;
 		const readToolCallArgs = new Map<string, Record<string, unknown>>();
@@ -410,7 +600,11 @@ export class UiHelpers {
 			// updateResult armed.
 			previous.seal();
 		};
-		for (const message of sessionContext.messages) {
+		for (const sourceMessage of transcript.messages) {
+			const message =
+				sourceMessage.role === "toolResult"
+					? releaseHistoricalImagePayloads(sourceMessage, imagePayloadsToRelease)
+					: sourceMessage;
 			if (message.role !== "toolResult") flushPendingUsage();
 			// Assistant messages need special handling for tool calls
 			if (message.role === "assistant") {
@@ -490,7 +684,7 @@ export class UiHelpers {
 						renderArgs,
 						{
 							snapshots: getFileSnapshotStore(this.ctx.viewSession),
-							showImages: settings.get("terminal.showImages"),
+							showImages,
 							editFuzzyThreshold: settings.get("edit.fuzzyThreshold"),
 							editAllowFuzzy: settings.get("edit.fuzzyMatch"),
 							liveRegion: this.ctx.chatContainer,
@@ -525,7 +719,12 @@ export class UiHelpers {
 					const images: ImageContent[] = message.content.filter(
 						(content): content is ImageContent => content.type === "image",
 					);
-					if (images.length > 0 && assistantComponent && settings.get("terminal.showImages")) {
+					if (
+						images.length > 0 &&
+						assistantComponent &&
+						showImages &&
+						TERMINAL.imageProtocol != null
+					) {
 						assistantComponent.setToolResultImages(message.toolCallId, images);
 						const hasText = message.content.some(c => c.type === "text");
 						if (!hasText) {
@@ -593,7 +792,7 @@ export class UiHelpers {
 
 	renderInitialMessages(options: RenderInitialMessagesOptions = {}): void {
 		// This path is used to rebuild the visible chat transcript (e.g. after custom/debug UI).
-		// Clear existing rendered chat first to avoid duplicating the full session in the container.
+		// Clear existing rendered chat first to avoid duplicating the restored tail.
 		// On a non-preserving rebuild the existing blocks are discarded for good, so
 		// dispose them (stopping any live timers/subscriptions) before clearing. When
 		// preserving, the same instances are re-added below, so detach without dispose.
@@ -607,8 +806,8 @@ export class UiHelpers {
 		this.ctx.pendingBashComponents = [];
 		this.ctx.pendingPythonComponents = [];
 
-		// Display always uses the full-history transcript: compactions show as
-		// inline dividers instead of restarting the visible conversation.
+		// Build from the display transcript so compactions remain inline; the
+		// renderer above bounds the materialized tail.
 		const context = this.ctx.viewSession.buildTranscriptSessionContext();
 		this.ctx.renderSessionContext(context, {
 			updateFooter: true,
