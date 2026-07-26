@@ -70,11 +70,30 @@ export interface UsageLimit {
  * later (OpenAI Codex "saved rate limit resets"). The redeem itself is a
  * separate, provider-specific action; this is the read-only count for display.
  */
+export type UsageResetAutomationStatus = "disabled" | "scheduled" | "retrying" | "redeemed" | "failed";
+
+export type UsageResetAutomationReason =
+	| "transport"
+	| "provider"
+	| "expired"
+	| "attempt-limit"
+	| "manual-mode"
+	| "capability-unavailable";
+
+export interface UsageResetAutomation {
+	status: UsageResetAutomationStatus;
+	updatedAt: number;
+	nextAttemptAt?: number;
+	reason?: UsageResetAutomationReason;
+}
+
 export interface UsageResetCredits {
 	/** Number of resets available to redeem right now. */
 	availableCount: number;
 	/** Earliest expiry of an available reset credit, in epoch milliseconds, when reported. */
 	expiresAt?: number;
+	/** Durable pre-expiry automation receipt projected by the local scheduler. */
+	automation?: UsageResetAutomation;
 }
 
 /** Aggregated usage report for a provider. */
@@ -179,9 +198,19 @@ export const usageLimitSchema = z.object({
 	notes: z.array(z.string()).optional(),
 });
 
+export const usageResetAutomationSchema = z.object({
+	status: z.enum(["disabled", "scheduled", "retrying", "redeemed", "failed"]),
+	updatedAt: z.number(),
+	nextAttemptAt: z.number().optional(),
+	reason: z
+		.enum(["transport", "provider", "expired", "attempt-limit", "capability-unavailable", "manual-mode"])
+		.optional(),
+});
+
 export const usageResetCreditsSchema = z.object({
 	availableCount: z.number(),
 	expiresAt: z.number().optional(),
+	automation: usageResetAutomationSchema.optional(),
 });
 
 export const usageReportSchema = z.object({

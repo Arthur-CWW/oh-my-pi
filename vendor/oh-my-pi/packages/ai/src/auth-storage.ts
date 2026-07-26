@@ -41,7 +41,9 @@ import { codexRankingStrategy, openaiCodexUsageProvider } from "./usage/openai-c
 import {
 	type CodexResetConsumeCode,
 	type CodexResetCredit,
+	type CodexResetCreditList,
 	consumeCodexResetCredit,
+	findEarliestRedeemableCodexResetCredit,
 	listCodexResetCredits,
 } from "./usage/openai-codex-reset";
 import { zaiUsageProvider } from "./usage/zai";
@@ -538,6 +540,13 @@ const USAGE_FAILURE_BACKOFF_MS = 10_000;
 // Bumped from 3s — Claude usage retries up to 3 times with exponential backoff
 // (~3.5s total worst case); a tight per-request budget aborts retries mid-cycle.
 const DEFAULT_USAGE_REQUEST_TIMEOUT_MS = 10_000;
+/** Bound the optional detail probe so a healthy `/usage` report is never held hostage by it. */
+const RESET_CREDIT_DETAIL_TIMEOUT_MS = 5_000;
+/**
+ * A tiny cross-surface reuse window coalesces adjacent `/usage` and `/usage reset`
+ * reads without turning the dedicated listing route into a long-lived truth cache.
+ */
+const RESET_CREDIT_LIST_REUSE_MS = 5_000;
 const USAGE_REPORT_CACHE_KEY_VERSION_OVERRIDES: Partial<Record<Provider, number>> = {
 	"google-antigravity": 2,
 };
@@ -705,6 +714,7 @@ export interface ResetCreditRedeemOutcome {
 	 * `http_<status>` (unexpected HTTP).
 	 */
 	code: CodexResetConsumeCode;
+	status?: number;
 	accountId?: string;
 	email?: string;
 	/** The credit that was spent (when one was). */
@@ -1000,6 +1010,8 @@ export class AuthStorage {
 	#usageRequestInFlight: Map<string, Promise<UsageReport | null>> = new Map();
 	#usageHeaderIngestAt: Map<string, number> = new Map();
 	#usageReportsInFlight: Map<string, Promise<UsageReport[] | null>> = new Map();
+	#resetCreditListCache: Map<string, UsageCacheEntry<CodexResetCreditList>> = new Map();
+	#resetCreditListInFlight: Map<string, Promise<CodexResetCreditList | null>> = new Map();
 	#usageFetch: typeof fetch;
 	#usageRequestTimeoutMs: number;
 	#usageLogger?: UsageLogger;
@@ -1230,6 +1242,7 @@ export class AuthStorage {
 	 * Reload credentials from storage.
 	 */
 	async reload(): Promise<void> {
+		this.#resetCreditListCache.clear();
 		const records = this.#store.listAuthCredentials();
 		const grouped = new Map<string, StoredCredential[]>();
 		for (const record of records) {
@@ -2093,6 +2106,51 @@ export class AuthStorage {
 		});
 	}
 
+	async #fetchCodexResetCreditList(
+		request: UsageRequestDescriptor,
+		signal?: AbortSignal,
+		fresh = false,
+	): Promise<CodexResetCreditList | null> {
+		if (
+			request.provider !== "openai-codex" ||
+			request.credential.type !== "oauth" ||
+			!request.credential.accessToken
+		) {
+			return null;
+		}
+
+		const cacheKey = this.#buildUsageReportCacheKey(request);
+		const nowMs = Date.now();
+		const cached = this.#resetCreditListCache.get(cacheKey);
+		if (!fresh && cached && cached.expiresAt > nowMs) return cached.value;
+		if (cached) this.#resetCreditListCache.delete(cacheKey);
+
+		let shared = this.#resetCreditListInFlight.get(cacheKey);
+		if (!shared) {
+			shared = listCodexResetCredits({
+				accessToken: request.credential.accessToken,
+				accountId: request.credential.accountId,
+				baseUrl: request.baseUrl,
+				fetch: this.#usageFetch,
+				signal: AbortSignal.timeout(RESET_CREDIT_DETAIL_TIMEOUT_MS),
+			})
+				.then(list => {
+					if (list) {
+						this.#resetCreditListCache.set(cacheKey, {
+							value: list,
+							expiresAt: Date.now() + RESET_CREDIT_LIST_REUSE_MS,
+						});
+					}
+					return list;
+				})
+				.finally(() => {
+					this.#resetCreditListInFlight.delete(cacheKey);
+				});
+			this.#resetCreditListInFlight.set(cacheKey, shared);
+		}
+		return raceUsageWithSignal(shared, signal);
+	}
+
 	async #fetchUsageUncached(request: UsageRequestDescriptor, timeoutMs?: number): Promise<UsageReport | null> {
 		const resolver = this.#usageProviderResolver;
 		if (!resolver) return null;
@@ -2182,8 +2240,9 @@ export class AuthStorage {
 
 		if (providerImpl.supports && !providerImpl.supports(params)) return null;
 
+		let report: UsageReport | null;
 		try {
-			return await providerImpl.fetchUsage(params, {
+			report = await providerImpl.fetchUsage(params, {
 				fetch: this.#usageFetch,
 				logger: this.#usageLogger,
 			});
@@ -2193,6 +2252,26 @@ export class AuthStorage {
 				error: String(error),
 			});
 			return null;
+		}
+
+		if (!report?.resetCredits || report.resetCredits.availableCount <= 0 || params.provider !== "openai-codex") {
+			return report;
+		}
+
+		try {
+			const list = await this.#fetchCodexResetCreditList(params, timeoutSignal);
+			if (!list) return report;
+			const earliest = findEarliestRedeemableCodexResetCredit(list.credits, Date.now());
+			if (!earliest) return report;
+			return {
+				...report,
+				resetCredits: {
+					...report.resetCredits,
+					expiresAt: earliest.expiresAt,
+				},
+			};
+		} catch {
+			return report;
 		}
 	}
 
@@ -3055,7 +3134,8 @@ export class AuthStorage {
 		}
 
 		const useCodexCapacityWeights =
-			provider === "openai-codex" && unblocked.some(candidate => candidate.capacityUsable && candidate.weightedRemaining > 0);
+			provider === "openai-codex" &&
+			unblocked.some(candidate => candidate.capacityUsable && candidate.weightedRemaining > 0);
 		const weightFor = (candidate: RankedOAuthCandidate): number => {
 			if (useCodexCapacityWeights) return candidate.capacityUsable ? candidate.weightedRemaining : 0;
 			return 1 + (priorityByCandidate.get(candidate) ?? 0);
@@ -3904,19 +3984,21 @@ export class AuthStorage {
 
 	/**
 	 * List saved rate-limit resets for every stored OAuth account of `provider`
-	 * (Codex), fetched LIVE from the dedicated `rate-limit-reset-credits` route.
+	 * (Codex), fetched from the dedicated `rate-limit-reset-credits` route.
 	 *
 	 * This deliberately bypasses the usage-report cache: `/wham/usage` is
 	 * IP-rate-limited and may serve stale (or pre-feature) snapshots when many
-	 * accounts are polled, which would hide redeemable credits. One entry per
-	 * account, with the session's active account flagged and unreachable
-	 * accounts carrying an `error`.
+	 * accounts are polled, which would hide redeemable credits. A successful
+	 * detail response is reused only for a few seconds so adjacent `/usage` and
+	 * reset-list surfaces do not duplicate the same request.
 	 */
 	async listResetCredits(options?: {
 		provider?: string;
 		sessionId?: string;
 		baseUrlResolver?: (provider: string) => string | undefined;
 		signal?: AbortSignal;
+		/** Bypass the short adjacent-surface reuse cache for a pre-mutation authority check. */
+		fresh?: boolean;
 	}): Promise<ResetCreditAccountStatus[]> {
 		const provider = options?.provider ?? "openai-codex";
 		const accesses = await this.getOAuthAccesses(provider);
@@ -3936,13 +4018,20 @@ export class AuthStorage {
 					active,
 				};
 				if (!access.ok) return { ...base, availableCount: 0, credits: [], error: access.error };
-				const list = await listCodexResetCredits({
-					accessToken: access.accessToken,
-					accountId: access.accountId,
-					baseUrl,
-					fetch: this.#usageFetch,
-					signal: options?.signal,
-				});
+				const list = await this.#fetchCodexResetCreditList(
+					this.#buildUsageRequest(
+						provider,
+						{
+							type: "oauth",
+							accessToken: access.accessToken,
+							accountId: access.accountId,
+							email: access.email,
+						},
+						baseUrl,
+					),
+					options?.signal,
+					options?.fresh,
+				);
 				if (!list) return { ...base, availableCount: 0, credits: [], error: "Failed to load saved resets" };
 				return { ...base, availableCount: list.availableCount, credits: list.credits };
 			}),
@@ -3962,6 +4051,7 @@ export class AuthStorage {
 		target: ResetCreditTarget;
 		provider?: string;
 		creditId?: string;
+		redeemRequestId?: string;
 		baseUrlResolver?: (provider: string) => string | undefined;
 		signal?: AbortSignal;
 	}): Promise<ResetCreditRedeemOutcome> {
@@ -3996,6 +4086,7 @@ export class AuthStorage {
 
 		const result = await consumeCodexResetCredit({
 			creditId,
+			redeemRequestId: options.redeemRequestId,
 			accessToken: match.accessToken,
 			accountId: match.accountId,
 			baseUrl,
@@ -4009,7 +4100,14 @@ export class AuthStorage {
 			// keeps skipping/under-ranking the freshly-reset account.
 			if (match.credentialId !== undefined) this.#clearCredentialBlocks(provider, match.credentialId);
 		}
-		return { ok: result.ok, code: result.code, accountId: match.accountId, email: match.email, creditId };
+		return {
+			ok: result.ok,
+			code: result.code,
+			status: result.status,
+			accountId: match.accountId,
+			email: match.email,
+			creditId,
+		};
 	}
 
 	/**
@@ -4025,6 +4123,7 @@ export class AuthStorage {
 			);
 			const existing = this.#usageCache.getStale<UsageReport | null>(cacheKey);
 			this.#usageCache.set(cacheKey, { value: existing?.value ?? null, expiresAt: expired });
+			this.#resetCreditListCache.delete(cacheKey);
 		}
 	}
 

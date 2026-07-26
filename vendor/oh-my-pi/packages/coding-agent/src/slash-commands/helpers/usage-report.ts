@@ -3,7 +3,7 @@ import type { OAuthAccountIdentity } from "../../session/auth-storage";
 import type { SlashCommandRuntime } from "../types";
 import { reportMatchesActiveAccount } from "./active-oauth-account";
 import { formatDuration, renderAsciiBar } from "./format";
-import { createUsageDeadlineFormatter } from "./usage-deadline";
+import { createUsageDeadlineFormatter, formatUsageResetAutomation } from "./usage-deadline";
 
 function formatProviderName(provider: string): string {
 	return provider
@@ -58,17 +58,20 @@ export function renderUsageReports(
 		for (const report of providerReports) {
 			const inUse = reportMatchesActiveAccount(report, activeAccount);
 			const savedResets = report.resetCredits?.availableCount ?? 0;
+			const resetLabel =
+				typeof report.metadata?.email === "string"
+					? report.metadata.email
+					: typeof report.metadata?.accountId === "string"
+						? report.metadata.accountId
+						: "account";
+			const automation = formatUsageResetAutomation(report.resetCredits?.automation, nowMs, formatDeadline);
 			if (savedResets > 0) {
-				const resetLabel =
-					typeof report.metadata?.email === "string"
-						? report.metadata.email
-						: typeof report.metadata?.accountId === "string"
-							? report.metadata.accountId
-							: "account";
 				const expiry = formatDeadline(report.resetCredits?.expiresAt);
 				lines.push(
-					`- ${resetLabel}: ${savedResets} saved rate-limit reset${savedResets === 1 ? "" : "s"} available${expiry ? ` · expires ${expiry}` : ""} — /usage reset to spend`,
+					`- ${resetLabel}: ${savedResets} saved rate-limit reset${savedResets === 1 ? "" : "s"} available${expiry ? ` · expires ${expiry}` : ""}${automation ? ` · ${automation}` : ""} — /usage reset to spend`,
 				);
+			} else if (automation) {
+				lines.push(`- ${resetLabel}: ${automation}`);
 			}
 			if (report.limits.length === 0) {
 				const email = typeof report.metadata?.email === "string" ? report.metadata.email : "account";

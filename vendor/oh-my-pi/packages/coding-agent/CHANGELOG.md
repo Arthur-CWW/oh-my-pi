@@ -59,6 +59,7 @@
 - Added opt-in ambient main-session labels (`irc.ambientRename.enabled`, 5-minute `irc.ambientRename.intervalMs` default), preserving explicit peer names while using the `smol` role for stale automatic labels.
 - Added an opt-in, jittered 90-minute feed watcher for model-availability and usage-limit announcements, with durable cursors, conditional RSS requests, Nitter/RSS Bridge fallback, `smol` batch classification, availability-ledger updates, and session/IRC notices.
 - Added default-on OpenAI Codex weekly-quota saved-reset redemption with per-window idempotency, a one-reset-per-24-hours safety cap, structured audit logs, and session notices for every outcome.
+- Saved Codex resets with a valid expiry now schedule a durable, cross-process-fenced redemption 30 minutes before expiry by default (configurable from 5 minutes to 24 hours), honoring manual reset mode, rechecking the exact credit before bounded idempotent attempts, and projecting receipts or failures in `/usage`.
 - Added the local append-only Fable refusal corpus and `omp refusals` commands for redacted evidence, verdicts, aggregate stats, and no-tools replay of false positives.
 - Added default-on fleet incident detection for correlated transient network failures, with one IRC/ErrorInbox notice, shared session-control state, connectivity-probed clearing, and journaled automatic child salvage.
 - Added epoch-fenced `prepare-rollout` session control with durable cordons, safe bounded drain checkpoints, restart-child manifests, manual-pause provenance, and typed task-spawn refusal.

@@ -36,7 +36,7 @@ describe("compact usage deadline projection", () => {
 	it("renders limit resets and provider-reported saved-reset expiry with the same formatter", () => {
 		const nowMs = Date.parse("2026-07-26T17:00:00Z");
 		const resetsAt = Date.parse("2026-07-26T20:00:00Z");
-		const expiresAt = Date.parse("2026-07-27T17:00:00Z");
+		const expiresAt = Date.parse("2026-07-26T20:15:00Z");
 		const report: UsageReport = {
 			provider: "openai-codex",
 			fetchedAt: nowMs,
@@ -56,7 +56,7 @@ describe("compact usage deadline projection", () => {
 		const text = renderUsageReports([report], nowMs, PACIFIC);
 
 		expect(text).toContain("resets Jul 26, 2026 at 1:00 PM PDT (in 3h)");
-		expect(text).toContain("1 saved rate-limit reset available · expires Jul 27, 2026 at 10:00 AM PDT (in 24h)");
+		expect(text).toContain("1 saved rate-limit reset available · expires Jul 26, 2026 at 1:15 PM PDT (in 3h 15m)");
 	});
 
 	it("omits the reset row when the provider reports no reset time", () => {

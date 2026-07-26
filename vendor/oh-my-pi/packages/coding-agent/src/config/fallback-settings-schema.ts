@@ -90,16 +90,29 @@ export const CODEX_RESET_SETTINGS_SCHEMA = {
 			group: "Services",
 			label: "Codex Auto-Redeem Saved Resets",
 			description:
-				"When a turn is blocked by the Codex weekly limit on the active account and no other account is available, automatically spend one eligible saved reset. yes is the default, unset asks before spending, and no disables the check. Requires retries enabled.",
+				"Automatically spend one eligible saved reset when the active account is blocked by the Codex weekly limit or shortly before the credit expires. yes is the default; unset asks on blocked turns but leaves unattended expiry salvage disabled; no disables both paths.",
 			options: [
 				{
 					value: "unset",
 					label: "Unset",
-					description: "Check eligibility, then ask before spending the first saved reset.",
+					description: "Ask before spending for a blocked turn; do not redeem unattended near expiry.",
 				},
 				{ value: "yes", label: "Yes", description: "Spend eligible saved resets without prompting." },
 				{ value: "no", label: "No", description: "Do not run the saved-reset auto-redeem check." },
 			],
+		},
+	},
+	"codexResets.expiryLeadMinutes": {
+		type: "number",
+		default: 30,
+		min: 5,
+		max: 24 * 60,
+		integer: true,
+		ui: {
+			tab: "providers",
+			group: "Services",
+			label: "Codex Saved Reset Expiry Lead",
+			description: "Automatically redeem saved resets 5m..24h before they expire.",
 		},
 	},
 	"codexResets.minBlockedMinutes": {
@@ -130,6 +143,7 @@ export type CodexAutoRedeemMode = "unset" | "yes" | "no";
 export interface CodexResetsSettings {
 	autoRedeem: CodexAutoRedeemMode;
 	minBlockedMinutes: number;
+	expiryLeadMinutes: number;
 	keepCredits: number;
 }
 

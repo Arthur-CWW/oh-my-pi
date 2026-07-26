@@ -50,6 +50,28 @@ export interface CodexResetCreditList {
 	availableCount: number;
 }
 
+/** True only while a saved reset is safe to redeem. */
+export function isCodexResetCreditRedeemable(credit: CodexResetCredit, nowMs: number): boolean {
+	if ((credit.status ?? "available") !== "available") return false;
+	if (credit.redeemedAt != null || credit.redeemStartedAt != null || !credit.expiresAt) return false;
+	const expiresAt = Date.parse(credit.expiresAt);
+	return Number.isFinite(expiresAt) && expiresAt > nowMs;
+}
+
+/** Earliest future redeemable credit, keeping the opaque id in memory only. */
+export function findEarliestRedeemableCodexResetCredit(
+	credits: ReadonlyArray<CodexResetCredit>,
+	nowMs: number,
+): { credit: CodexResetCredit; expiresAt: number } | undefined {
+	let earliest: { credit: CodexResetCredit; expiresAt: number } | undefined;
+	for (const credit of credits) {
+		if (!isCodexResetCreditRedeemable(credit, nowMs)) continue;
+		const expiresAt = Date.parse(credit.expiresAt ?? "");
+		if (!earliest || expiresAt < earliest.expiresAt) earliest = { credit, expiresAt };
+	}
+	return earliest;
+}
+
 /**
  * Consume outcome `code`. `reset` means a window was actually reset; the others
  * are no-op business outcomes the caller should surface verbatim-ish to the user.

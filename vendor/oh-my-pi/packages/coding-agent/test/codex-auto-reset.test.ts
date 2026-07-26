@@ -262,6 +262,16 @@ describe("evaluateCodexAutoRedeem", () => {
 		expect(shouldPromptCodexAutoRedeem("no")).toBe(false);
 	});
 
+	it("exposes the saved-reset expiry lead setting", () => {
+		const setting = SETTINGS_SCHEMA["codexResets.expiryLeadMinutes"];
+		expect(setting.default).toBe(30);
+		expect(setting.min).toBe(5);
+		expect(setting.max).toBe(24 * 60);
+		expect(setting.ui?.tab).toBe("providers");
+		expect(setting.ui?.group).toBe("Services");
+		expect(Settings.isolated().get("codexResets.expiryLeadMinutes")).toBe(30);
+	});
+
 	it("migrates legacy boolean autoRedeem config to the tri-state policy", () => {
 		expect(Settings.isolated().get("codexResets.autoRedeem")).toBe("yes");
 		expect(Settings.isolated({ "codexResets.autoRedeem": true }).get("codexResets.autoRedeem")).toBe("yes");

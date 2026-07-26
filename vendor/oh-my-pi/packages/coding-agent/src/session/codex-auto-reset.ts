@@ -2,18 +2,16 @@
  * Pure decision predicate for auto-redeeming a saved OpenAI Codex rate-limit
  * reset, plus the process-wide coordinator that serializes attempts.
  *
- * WHY THIS IS REACTIVE-ONLY (never proactive):
+ * WHY THE BLOCK-RECOVERY PATH IS REACTIVE:
  * The only trustworthy "blocked right now" signal is a live 429 /
  * `usage_limit_reached` from a request authenticated as the session's active
  * Codex credential. The session hook calls this predicate from the usage-limit
  * branch of the retry pipeline, *after* free remedies (sibling-account switch)
- * fail and *before* model fallback. A proactive surface (the status-line usage
- * poll) cannot be used: at `used_percent < 100` the account is not actually
- * limited, so redeeming would be a credit-wasting no-op; at exactly 100 the
- * user may be idle, so the freshly-reset weekly window would tick away with
- * nobody working. Saved resets are a scarce, ~monthly, effectively
- * irreversible resource — every gate here is biased to precision over recall:
- * we would rather miss a redeem than waste a credit.
+ * fail and *before* model fallback. A usage poll must not spend a credit merely
+ * because a meter reached 100% while the user is idle. The separate
+ * `codex-expiry-reset.ts` lifecycle has a different safety contract: it may
+ * salvage an otherwise-unused credit only inside its configured pre-expiry
+ * window, after an authoritative detail recheck and cross-process lock.
  *
  * THE DECISION-2 TRAP (status MUST NOT be used to find the blocker):
  * `openai-codex.ts` applies the top-level `rate_limit.limit_reached` flag to
@@ -51,6 +49,7 @@ import type { Settings } from "../config/settings";
 import type { CodexAutoRedeemMode } from "../config/settings-schema";
 import type { ExtensionRunner } from "../extensibility/extensions";
 import { reportMatchesActiveAccount } from "../slash-commands/helpers/active-oauth-account";
+import { getCodexExpiryResetScheduler } from "./codex-expiry-reset";
 
 /** Weekly window counts as exhausted at `usedFraction >= 0.999` (used_percent >= 99.9). */
 export const WEEKLY_EXHAUSTED_MIN_FRACTION = 0.999;
@@ -218,10 +217,12 @@ export async function fetchCodexUsageReports(
 ): Promise<UsageReport[] | null> {
 	const authStorage = modelRegistry.authStorage;
 	if (!authStorage.fetchUsageReports) return null;
-	return authStorage.fetchUsageReports({
+	const reports = await authStorage.fetchUsageReports({
 		baseUrlResolver: provider => modelRegistry.getProviderBaseUrl?.(provider),
 		signal,
 	});
+	if (!reports) return null;
+	return (await getCodexExpiryResetScheduler(modelRegistry)?.observeReports(reports)) ?? reports;
 }
 
 export function redeemCodexResetCredit(
@@ -357,8 +358,6 @@ export async function runCodexAutoRedeem(runtime: CodexAutoRedeemRuntime): Promi
 			logger.info("codex-auto-reset audit", {
 				at: new Date().toISOString(),
 				action: "POST /wham/rate-limit-reset-credits/consume",
-				account: decision.accountKey,
-				window: decision.blockKey,
 				result: "transport-error",
 				error: String(error),
 			});
@@ -372,8 +371,6 @@ export async function runCodexAutoRedeem(runtime: CodexAutoRedeemRuntime): Promi
 		logger.info("codex-auto-reset audit", {
 			at: new Date().toISOString(),
 			action: "POST /wham/rate-limit-reset-credits/consume",
-			account: decision.accountKey,
-			window: decision.blockKey,
 			result: outcome.code,
 		});
 		switch (outcome.code) {

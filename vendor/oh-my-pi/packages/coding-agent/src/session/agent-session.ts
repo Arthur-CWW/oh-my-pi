@@ -310,6 +310,7 @@ import {
 	redeemCodexResetCredit,
 	runCodexAutoRedeem,
 } from "./codex-auto-reset";
+import { ensureCodexExpiryResetScheduler } from "./codex-expiry-reset";
 import { createCompactionReceipt, estimateCompactedContextTokens } from "./compaction-receipt";
 import {
 	type CustomInputPayload,
@@ -2088,6 +2089,9 @@ export class AgentSession {
 		this.#unsubscribeAgent = this.agent.subscribe(this.#handleAgentEvent);
 		// Re-evaluate append-only context mode when the setting changes at runtime.
 		this.#unsubscribeAppendOnly = onAppendOnlyModeChanged(_value => this.#syncAppendOnlyContext(this.model));
+		// Process-global scheduler: an authoritative reset-credit scan on startup
+		// rebuilds due timers after restart; per-account file locks fence sibling processes.
+		ensureCodexExpiryResetScheduler(this.#modelRegistry, this.settings);
 	}
 	// -------------------------------------------------------------------------
 	// Advisor runtime lifecycle

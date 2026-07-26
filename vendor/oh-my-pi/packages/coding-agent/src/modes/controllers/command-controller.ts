@@ -47,7 +47,7 @@ import { formatCompactionReceipt, getLatestCompactionReceipt } from "../../sessi
 import type { NewSessionOptions } from "../../session/session-entries";
 import { formatShakeSummary, type ShakeMode, type ShakeResult } from "../../session/shake-types";
 import { limitMatchesActiveAccount } from "../../slash-commands/helpers/active-oauth-account";
-import { createUsageDeadlineFormatter } from "../../slash-commands/helpers/usage-deadline";
+import { createUsageDeadlineFormatter, formatUsageResetAutomation } from "../../slash-commands/helpers/usage-deadline";
 import { outputMeta } from "../../tools/output-meta";
 import { resolveToCwd, stripOuterDoubleQuotes } from "../../tools/path-utils";
 import { replaceTabs } from "../../tools/render-utils";
@@ -1727,7 +1727,8 @@ function renderUsageReports(
 		const resetAccountLines: string[] = [];
 		for (const report of providerReports) {
 			const count = report.resetCredits?.availableCount ?? 0;
-			if (count <= 0) continue;
+			const automation = formatUsageResetAutomation(report.resetCredits?.automation, nowMs, formatDeadline);
+			if (count <= 0 && !automation) continue;
 			const label =
 				(report.metadata?.email as string | undefined) ??
 				(report.metadata?.accountId as string | undefined) ??
@@ -1737,8 +1738,9 @@ function renderUsageReports(
 				((!!activeAccount.accountId && activeAccount.accountId === report.metadata?.accountId) ||
 					(!!activeAccount.email && activeAccount.email === report.metadata?.email));
 			const expiry = formatDeadline(report.resetCredits?.expiresAt);
+			const countLabel = count > 0 ? `${count} saved reset${count === 1 ? "" : "s"}` : "no saved resets available";
 			resetAccountLines.push(
-				`    • ${label}: ${count} saved reset${count === 1 ? "" : "s"}${expiry ? ` · expires ${expiry}` : ""}${isActive ? " (active)" : ""}`,
+				`    • ${label}: ${countLabel}${expiry ? ` · expires ${expiry}` : ""}${automation ? ` · ${automation}` : ""}${isActive ? " (active)" : ""}`,
 			);
 		}
 		if (resetAccountLines.length > 0) {
