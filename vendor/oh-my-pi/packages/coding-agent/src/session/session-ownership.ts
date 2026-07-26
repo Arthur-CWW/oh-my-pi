@@ -8,9 +8,8 @@ import type { BuildRevision, RunnerInstanceIdentity } from "../runner/protocol";
 import type { TerminalSessionTransport } from "../runner/terminal-session-transport";
 import { type TerminalSessionWireClientHello, UnixSocketTerminalSessionTransport } from "../runner/wire/client";
 import { UnixTerminalSessionServer } from "../runner/wire/server";
-import { type ProcessIdentity, processIdentityFor, processMatches } from "./process-identity";
 
-export type { ProcessIdentity } from "./process-identity";
+export type { ProcessIdentity } from "../resource/process-identity";
 
 export interface SessionOwnerIdentity {
 	readonly buildRevision: BuildRevision;

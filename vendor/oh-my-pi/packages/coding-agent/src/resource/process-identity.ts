@@ -38,3 +38,27 @@ export function matchesProcessIdentity(identity: ProcessIdentity): boolean {
 		current !== null && current.bootId === identity.bootId && current.startFingerprint === identity.startFingerprint
 	);
 }
+
+/** Decode a durable identity value (JSON string or object) without trusting its shape. */
+export function decodeProcessIdentity(value: unknown): ProcessIdentity | undefined {
+	if (typeof value === "string") {
+		try {
+			value = JSON.parse(value);
+		} catch {
+			return undefined;
+		}
+	}
+	if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+	const record = value as Record<string, unknown>;
+	if (
+		Object.keys(record).length !== 3 ||
+		typeof record.bootId !== "string" ||
+		typeof record.pid !== "number" ||
+		!Number.isSafeInteger(record.pid) ||
+		record.pid <= 0 ||
+		typeof record.startFingerprint !== "string"
+	) {
+		return undefined;
+	}
+	return { bootId: record.bootId, pid: record.pid, startFingerprint: record.startFingerprint };
+}

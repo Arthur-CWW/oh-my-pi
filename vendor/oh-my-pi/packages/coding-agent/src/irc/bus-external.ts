@@ -10,8 +10,8 @@ import {
 import {
 	decodeProcessIdentity,
 	type ProcessIdentity,
-	processIdentityFor,
-} from "../session/process-identity";
+	readProcessIdentity,
+} from "../resource/process-identity";
 import type { IrcDeliveryRecord, IrcMessageOrigin } from "./bus";
 
 export type IrcExternalPeerState = "unknown" | "working" | "waiting_input" | "idle" | "paused";
@@ -328,7 +328,7 @@ function toUnregisteredPeer(peer: IrcExternalRegistration, pid: number): IrcExte
 		name: peer.name,
 		cwd: peer.cwd,
 		pid,
-		processIdentity: processIdentityFor(pid) ?? undefined,
+		processIdentity: readProcessIdentity(pid) ?? undefined,
 		lastSeen: nowIso(),
 		state: "unknown",
 		stateTs: null,
@@ -509,7 +509,7 @@ export class IrcExternalBus {
 		if (!this.#registrationEnabled) return toUnregisteredPeer(peer, pid);
 		const lastSeen = nowIso();
 		const labels = normalizePeerLabels(peer.labels);
-		const processIdentity = processIdentityFor(pid);
+		const processIdentity = readProcessIdentity(pid);
 		this.#db
 			.query(
 				`INSERT INTO peers (session_id, agent_id, name, cwd, pid, last_seen, explicit_name, session_file, owner_epoch, build_digest, version, process_identity_json, fleet_capability_json, label_json)

@@ -5,7 +5,7 @@ import type { IrcExternalBus, IrcExternalPeer } from "../irc/bus-external";
 import { AgentLifecycleManager, type AgentReviver } from "../registry/agent-lifecycle";
 import { AgentRegistry, MAIN_AGENT_ID } from "../registry/agent-registry";
 import type { AgentSession } from "../session/agent-session";
-import { type ProcessIdentity, processMatches } from "../session/process-identity";
+import { matchesProcessIdentity, type ProcessIdentity } from "../resource/process-identity";
 import type { RestartChildManifestEntryV1, SessionOwnershipHandle } from "../session/session-ownership";
 import type { FileEntry, ModelChangeEntry, SessionInitEntry, SubagentSessionMetadata } from "../session/session-entries";
 import type { SessionManager } from "../session/session-manager";
@@ -335,7 +335,7 @@ export async function reAdoptDirectChildren(options: ReAdoptionOptions): Promise
 					samePath(peer.sessionFile, sessionFile),
 			);
 			if (peers.length === 1 && peers[0]?.processIdentity) {
-				if (processMatches(peers[0].processIdentity)) {
+				if (matchesProcessIdentity(peers[0].processIdentity)) {
 					detachedPeer = peers[0];
 				} else {
 					detachedProcessDead = true;

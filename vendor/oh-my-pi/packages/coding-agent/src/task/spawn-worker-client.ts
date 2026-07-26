@@ -3,7 +3,7 @@ import * as path from "node:path";
 import { isCompiledBinary, isEnoent, popLoopPhase, pushLoopPhase, workerHostEntry } from "@oh-my-pi/pi-utils";
 import type { Settings } from "../config/settings";
 import { AgentRegistry } from "../registry/agent-registry";
-import { type ProcessIdentity, processMatches } from "../session/process-identity";
+import { matchesProcessIdentity, type ProcessIdentity } from "../resource/process-identity";
 import type { FileEntry } from "../session/session-entries";
 import { SessionManager } from "../session/session-manager";
 import type { EventBus } from "../utils/event-bus";
@@ -571,7 +571,7 @@ export async function monitorDetachedSpawnWorker(
 		const state = await latestDetachedWorkerLifecycle(options.sessionFile);
 		if (state && isTerminalChildLifecycleState(state)) return { state };
 		if (options.signal?.aborted) {
-			if (processMatches(options.processIdentity)) {
+			if (matchesProcessIdentity(options.processIdentity)) {
 				try {
 					process.kill(-options.processIdentity.pid, "SIGKILL");
 				} catch {
@@ -580,7 +580,7 @@ export async function monitorDetachedSpawnWorker(
 			}
 			throw new SpawnWorkerError("aborted", "Re-adopted subagent subprocess aborted");
 		}
-		if (!processMatches(options.processIdentity)) {
+		if (!matchesProcessIdentity(options.processIdentity)) {
 			const finalState = await latestDetachedWorkerLifecycle(options.sessionFile);
 			if (finalState && isTerminalChildLifecycleState(finalState)) return { state: finalState };
 			throw new SpawnWorkerError(
