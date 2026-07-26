@@ -394,6 +394,76 @@ describe("automation ledger and daemon", () => {
 		);
 	});
 
+	it("recycles at a cycle boundary when RSS crosses the bound, after finishing due runs", async () => {
+		const agentDir = await makeTempDir();
+		await Bun.write(
+			path.join(agentDir, "automations.yml"),
+			"automations:\n  - name: local-check\n    schedule: 30m\n    prompt: Reply with OK.\n    cwd: .\n",
+		);
+		const fired: string[] = [];
+		const recycles: string[] = [];
+		await runAutomationDaemon({
+			agentDir,
+			nowMs: () => 1_000,
+			random: () => 0,
+			checkIntervalMs: 1,
+			maxJitterMs: 0,
+			rss: () => 4 * 1024 * 1024 * 1024,
+			onRecycle: reason => {
+				recycles.push(reason);
+			},
+			run: async entry => {
+				fired.push(entry.name);
+				return {
+					name: entry.name,
+					runAt: 1_000,
+					durationMs: 1,
+					status: "succeeded",
+					sessionFile: "/tmp/session.jsonl",
+					outputSummary: "OK",
+				};
+			},
+		});
+		expect(fired).toEqual(["local-check"]);
+		expect(recycles).toEqual(["rss"]);
+	});
+
+	it("recycles on uptime and never interrupts a cycle mid-run", async () => {
+		const agentDir = await makeTempDir();
+		await Bun.write(
+			path.join(agentDir, "automations.yml"),
+			"automations:\n  - name: local-check\n    schedule: 30m\n    prompt: Reply with OK.\n    cwd: .\n",
+		);
+		let clock = 1_000;
+		const recycles: string[] = [];
+		const fired: string[] = [];
+		await runAutomationDaemon({
+			agentDir,
+			nowMs: () => clock,
+			random: () => 0,
+			checkIntervalMs: 1,
+			maxJitterMs: 0,
+			maxUptimeMs: 5,
+			onRecycle: reason => {
+				recycles.push(reason);
+			},
+			run: async entry => {
+				fired.push(entry.name);
+				clock += 10;
+				return {
+					name: entry.name,
+					runAt: clock,
+					durationMs: 1,
+					status: "succeeded",
+					sessionFile: "/tmp/session.jsonl",
+					outputSummary: "OK",
+				};
+			},
+		});
+		expect(fired).toEqual(["local-check"]);
+		expect(recycles).toEqual(["uptime"]);
+	});
+
 
 	it("places stable journals where the root session scan can discover them", async () => {
 		const sessionsDir = await makeTempDir();

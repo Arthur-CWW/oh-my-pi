@@ -22,6 +22,10 @@ export const AUTOMATION_COMMAND_OUTPUT_MAX_BYTES = DEFAULT_MAX_BYTES;
 export const DEFAULT_AUTOMATION_LANE = "smol";
 export const DAEMON_CHECK_INTERVAL_MS = 60_000;
 export const DAEMON_MAX_JITTER_MS = 15_000;
+/** Recycle the daemon once its RSS crosses this bound (observed: 7 GiB after 5 days). */
+export const DAEMON_MAX_RSS_BYTES = 1_536 * 1024 * 1024;
+/** Recycle the daemon after this uptime even when RSS stays low. */
+export const DAEMON_MAX_UPTIME_MS = 12 * 60 * 60 * 1000;
 
 const AutomationEntrySchema = Schema.Struct({
 	name: Schema.String,
@@ -160,6 +164,14 @@ export interface AutomationDaemonOptions extends AutomationRunOptions {
 	readonly checkIntervalMs?: number;
 	readonly maxJitterMs?: number;
 	readonly maxCycles?: number;
+	/** Recycle bound on process RSS; the daemon returns cleanly once crossed (supervisor restarts it). */
+	readonly maxRssBytes?: number;
+	/** Recycle bound on daemon uptime. */
+	readonly maxUptimeMs?: number;
+	/** RSS probe, injectable for tests. */
+	readonly rss?: () => number;
+	/** Invoked once when a recycle bound triggers, before the daemon returns. */
+	readonly onRecycle?: (reason: "rss" | "uptime") => void | Promise<void>;
 	readonly onRun?: (entry: AutomationEntry) => void | Promise<void>;
 	readonly run?: (entry: AutomationEntry) => Promise<AutomationRunResult>;
 	readonly onError?: (entry: AutomationEntry, error: unknown) => void | Promise<void>;
@@ -623,6 +635,15 @@ export async function runAutomationDaemon(options: AutomationDaemonOptions = {})
 	const checkIntervalMs = options.checkIntervalMs ?? DAEMON_CHECK_INTERVAL_MS;
 	const maxJitterMs = options.maxJitterMs ?? DAEMON_MAX_JITTER_MS;
 	const agentDir = options.agentDir ?? getAgentDir();
+	const maxRssBytes = options.maxRssBytes ?? DAEMON_MAX_RSS_BYTES;
+	const maxUptimeMs = options.maxUptimeMs ?? DAEMON_MAX_UPTIME_MS;
+	const rss = options.rss ?? (() => process.memoryUsage.rss());
+	const startedAt = now();
+	const recycleReason = (): "rss" | "uptime" | undefined => {
+		if (rss() > maxRssBytes) return "rss";
+		if (now() - startedAt > maxUptimeMs) return "uptime";
+		return undefined;
+	};
 	let cycles = 0;
 	while (!options.signal?.aborted && (options.maxCycles === undefined || cycles < options.maxCycles)) {
 		cycles += 1;
@@ -641,6 +662,13 @@ export async function runAutomationDaemon(options: AutomationDaemonOptions = {})
 				// The failed run is journaled; report it and continue supervising the remaining jobs.
 				await options.onError?.(entry, error);
 			}
+		}
+		// Recycle at the cycle boundary: never mid-run, so every automation's
+		// ledger write completes. The supervisor (launchd KeepAlive) restarts us.
+		const reason = recycleReason();
+		if (reason !== undefined) {
+			await options.onRecycle?.(reason);
+			return;
 		}
 		if (!options.signal?.aborted && (options.maxCycles === undefined || cycles < options.maxCycles)) {
 			await sleep(checkIntervalMs, options.signal);
