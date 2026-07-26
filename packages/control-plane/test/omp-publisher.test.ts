@@ -1,4 +1,5 @@
-import { existsSync, readFileSync, rmSync } from "node:fs"
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { expect, test } from "bun:test"
@@ -6,10 +7,16 @@ import { Effect, Schema } from "effect"
 
 import type { ExtensionContextLike, OmpToolDefinitionLike, PapercutToolParamsLike, PiLike } from "../src/omp-events"
 import createOmpPublisher from "../src/omp-publisher"
-import { OutboxEnvelopeSchema, outboxPathFor, type JsonValue } from "../src/outbox"
+import {
+  contentObjectPathFor,
+  OutboxEnvelopeSchema,
+  outboxLeasePathFor,
+  outboxPathFor,
+  outboxTerminalPathFor,
+  type JsonValue,
+} from "../src/outbox"
 import { LedgerStore, openLedger } from "../src"
 
-const tmpDir = join(import.meta.dir, ".tmp", "omp-publisher")
 
 class FakePi {
   private readonly handlers: Record<string, Array<(event: never, ctx: ExtensionContextLike) => unknown>> = {}
@@ -46,11 +53,16 @@ class FakePi {
 }
 
 test("OMP publisher writes schema-valid monotonic outbox envelopes with captured model request", () => {
-  rmSync(tmpDir, { recursive: true, force: true })
+  const tmpDir = mkdtempSync(join(tmpdir(), "control-plane-publisher-"))
 
   const sessionId = "session-1"
   const sessionDir = join(tmpDir, "sessions")
   const outboxDir = join(tmpDir, "outbox")
+  const rawDir = join(tmpDir, "raw")
+  process.env["HOME"] = join(tmpDir, "home")
+  process.env["AGENT_CONTROL_PLANE_RAW_DIR"] = rawDir
+  process.env["OMP_SESSION_CONTROL_DB"] = join(tmpDir, "session-control.sqlite")
+  process.env["AGENT_CONTROL_PLANE_RAW_CAPTURE"] = "1"
   process.env["AGENT_CONTROL_PLANE_OUTBOX_DIR"] = outboxDir
   const sessionFile = join(sessionDir, "2026-07-04_session-1.jsonl")
   const ctx = {
@@ -94,8 +106,8 @@ test("OMP publisher writes schema-valid monotonic outbox envelopes with captured
   const lines = readFileSync(outboxPath, "utf8").trimEnd().split("\n")
   const envelopes = lines.map((line) => Schema.decodeUnknownSync(OutboxEnvelopeSchema)(JSON.parse(line) as unknown))
 
-  expect(envelopes.map((envelope) => envelope.kind)).toEqual(["session", "event", "event", "modelCall", "turn", "event"])
-  expect(envelopes.map((envelope) => envelope.seq)).toEqual([0, 1, 2, 3, 4, 5])
+  expect(envelopes.map((envelope) => envelope.kind)).toEqual(["session", "event", "event", "modelCall", "event", "turn", "event"])
+  expect(envelopes.map((envelope) => envelope.seq)).toEqual([0, 1, 2, 3, 4, 5, 6])
   expect(envelopes.every((envelope) => envelope.v === 1 && envelope.sessionId === sessionId)).toBe(true)
 
   const turnEnvelope = envelopes.find((envelope) => envelope.kind === "turn")
@@ -140,7 +152,21 @@ test("OMP publisher writes schema-valid monotonic outbox envelopes with captured
   expect(modelPayload.latencyMs).toBe(250)
   expect(modelPayload.outcome).toBe("ok")
   expect(modelPayload.rawRequestSupport).toBe("captured")
-  expect(modelPayload.rawRequest).toEqual({ messages: ["hi"], temperature: 0.2 })
+  expect(modelPayload.rawRequest).toBeUndefined()
+  const rawRequestRef = jsonRecord(modelPayload.rawRequestRef ?? null)
+  expect(rawRequestRef).toMatchObject({
+    v: 1,
+    algorithm: "sha256",
+    byteLength: 37,
+    contentType: "application/json",
+    representation: "json-utf8",
+    summary: { redacted: true, valueType: "object", itemCount: 2 },
+  })
+  expect(readFileSync(contentObjectPathFor(rawDir, String(rawRequestRef.digest)), "utf8"))
+    .toBe("{\"messages\":[\"hi\"],\"temperature\":0.2}")
+  expect(existsSync(outboxLeasePathFor(sessionId, outboxDir))).toBe(true)
+  expect(existsSync(outboxTerminalPathFor(sessionId, outboxDir))).toBe(true)
+  expect(modelPayload.rawRequestArtifact).toBe(`artifact_${String(rawRequestRef.digest).slice(0, 32)}`)
   expect(modelPayload).toMatchObject({
     machine: "unknown",
     branchId: "root",
@@ -160,13 +186,17 @@ test("OMP publisher writes schema-valid monotonic outbox envelopes with captured
     cost: 0.012,
     latencyMs: 250,
     outcome: "ok",
-    rawRequestArtifact: "",
     rawResponseArtifact: "",
   })
 })
 
 test("OMP papercut tool schema-decodes input and aggregates through the ledger", async () => {
-  rmSync(tmpDir, { recursive: true, force: true })
+  const tmpDir = mkdtempSync(join(tmpdir(), "control-plane-publisher-"))
+  process.env["HOME"] = join(tmpDir, "home")
+  process.env["AGENT_CONTROL_PLANE_OUTBOX_DIR"] = join(tmpDir, "outbox")
+  process.env["OMP_SESSION_CONTROL_DB"] = join(tmpDir, "session-control.sqlite")
+  process.env["AGENT_CONTROL_PLANE_RAW_DIR"] = join(tmpDir, "raw")
+  process.env["AGENT_CONTROL_PLANE_RAW_CAPTURE"] = "1"
   const invalidDbPath = join(tmpDir, "invalid-papercut.sqlite")
   const dbPath = join(tmpDir, "papercut.sqlite")
   const previousDbPath = process.env["AGENT_CONTROL_PLANE_DB"]

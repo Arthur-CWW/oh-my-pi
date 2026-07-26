@@ -1,7 +1,16 @@
-import { existsSync, readFileSync } from "node:fs"
 import { Effect, Schema } from "effect"
 
-import { appendOutboxLine, OutboxEnvelopeSchema, outboxPathFor, type JsonValue, type KnownOutboxKind } from "./outbox"
+import {
+  appendOutboxLine,
+  outboxPathFor,
+  recoverOutboxSession,
+  recordOutboxTerminalReleased,
+  type JsonValue,
+  type KnownOutboxKind,
+  type OutboxAppendReceipt,
+  type OutboxEnvelope,
+} from "./outbox"
+import { captureRawProviderPayload, type RawCaptureResult } from "./raw-capture"
 import { decodePapercutInput, defaultLedgerPath, LedgerStore, openLedger } from "./index"
 import type {
   AgentTimelinePayloadV1,
@@ -27,7 +36,7 @@ interface SessionState {
   readonly sessionId: string
   readonly sessionFile: string
   readonly outboxPath: string
-  nextSeq: number
+  nextSeq?: number
   latestProviderRequest?: CapturedProviderRequest
   readonly turnStarts: Map<number, TurnStartSnapshot>
   activeRouteResolutionId?: string
@@ -40,8 +49,7 @@ interface CapturedProviderRequest {
   readonly provider?: string
   readonly model?: string
   readonly api?: string
-  readonly payload: JsonValue
-  readonly rawRequestSupport: "captured" | "unsupported"
+  readonly raw: RawCaptureResult
 }
 
 interface TurnStartSnapshot {
@@ -149,29 +157,31 @@ function papercutFailure(text: string): { readonly content: readonly { readonly 
 }
 class OmpOutboxPublisher implements OmpPublisherHooks {
   publishAgentTimeline(payload: AgentTimelinePayloadV1, ctx: ExtensionContextLike): void {
-    const event = Schema.decodeUnknownSync(AgentTimelinePayloadV1Schema)(payload)
-    const state = this.stateForContext(ctx)
-    this.append(state, "agentTimeline", event.occurredAt, () => event)
+    this.publishAgentTimelineEnvelope(Schema.decodeUnknownSync(AgentTimelinePayloadV1Schema)(payload), ctx)
   }
 
   publishRouteResolution(payload: RouteResolutionPayloadV1, ctx: ExtensionContextLike): void {
-    const resolution = Schema.decodeUnknownSync(RouteResolutionPayloadV1Schema)(payload)
-    const state = this.stateForContext(ctx)
-    this.append(state, "routeResolution", resolution.occurredAt, () => resolution)
-    state.activeRouteResolutionId = resolution.resolutionId
+    this.publishRouteResolutionEnvelope(Schema.decodeUnknownSync(RouteResolutionPayloadV1Schema)(payload), ctx)
   }
 
   onSessionEntry(entry: SessionEntryLike, ctx: ExtensionContextLike): void {
     if (entry.type !== "custom" || entry.data === undefined) return
     const state = this.stateForContext(ctx)
     if (state.publishedRouteEntryIds.has(entry.id)) return
+
+    let admitted = false
     if (entry.customType === "omp:agent-timeline:v1") {
-      state.publishedRouteEntryIds.add(entry.id)
-      this.publishAgentTimeline(Schema.decodeUnknownSync(AgentTimelinePayloadV1Schema)(entry.data), ctx)
+      admitted = this.publishAgentTimelineEnvelope(
+        Schema.decodeUnknownSync(AgentTimelinePayloadV1Schema)(entry.data),
+        ctx,
+      )
     } else if (entry.customType === "omp:route-resolution:v1") {
-      state.publishedRouteEntryIds.add(entry.id)
-      this.publishRouteResolution(Schema.decodeUnknownSync(RouteResolutionPayloadV1Schema)(entry.data), ctx)
+      admitted = this.publishRouteResolutionEnvelope(
+        Schema.decodeUnknownSync(RouteResolutionPayloadV1Schema)(entry.data),
+        ctx,
+      )
     }
+    if (admitted) state.publishedRouteEntryIds.add(entry.id)
   }
 
   syncRouteJournal(ctx: ExtensionContextLike): void {
@@ -182,6 +192,29 @@ class OmpOutboxPublisher implements OmpPublisherHooks {
 
   private readonly sessions = new Map<string, SessionState>()
   private currentSessionId: string | undefined
+  private publishAgentTimelineEnvelope(event: AgentTimelinePayloadV1, ctx: ExtensionContextLike): boolean {
+    const state = this.stateForContext(ctx)
+    return this.append(state, "agentTimeline", event.occurredAt, () => event)?.admitted === true
+  }
+
+  private publishRouteResolutionEnvelope(resolution: RouteResolutionPayloadV1, ctx: ExtensionContextLike): boolean {
+    const state = this.stateForContext(ctx)
+    const receipt = this.append(state, "routeResolution", resolution.occurredAt, () => resolution)
+    if (receipt?.admitted !== true) return false
+    state.activeRouteResolutionId = resolution.resolutionId
+    return true
+  }
+
+  private appendRawRequestMetadata(state: SessionState, ts: number, modelCallId: string, raw: RawCaptureResult): void {
+    this.appendEvent(state, ts, undefined, "rawRequestMetadata", compactJson({
+      modelCallId,
+      sha256: raw.sha256,
+      bytes: raw.bytes,
+      representation: raw.representation,
+      captureStatus: raw.status,
+    }))
+  }
+
 
   guard<E>(handler: (event: E, ctx: ExtensionContextLike) => void): (event: E, ctx: ExtensionContextLike) => void {
     return (event, ctx) => {
@@ -190,10 +223,9 @@ class OmpOutboxPublisher implements OmpPublisherHooks {
         handler(event, ctx)
       } catch (cause) {
         try {
-          this.appendPublisherError(ctx, cause as Error | object | string | number | boolean | symbol | bigint | null | undefined)
+          this.appendPublisherError(ctx, cause)
         } catch {
-          // Never throw into the OMP harness. If the error outbox append also fails,
-          // the publisher has no safer local durability sink.
+          // Publisher failures never escape into the OMP harness.
         }
       }
     }
@@ -233,20 +265,22 @@ class OmpOutboxPublisher implements OmpPublisherHooks {
 
     if (phase === "start") {
       const startedAt = timestampMillis(event.startedAt ?? event.timestamp)
-      state.turnStarts.set(turnOrdinal, {
+      const snapshot: TurnStartSnapshot = {
         startedAt,
         contextTokens: event.contextTokens ?? event.message?.usage?.totalTokens ?? 0,
         toolCalls: event.toolCalls ?? event.toolResults?.length ?? 0,
         toolCallSummary,
         editBytes: event.editBytes ?? 0,
         yieldKind: event.yieldKind,
-      })
-      this.appendEvent(state, startedAt, event.branchId, "turn_start", {
+      }
+      if (this.appendEvent(state, startedAt, event.branchId, "turn_start", {
         turnIndex: turnOrdinal,
         branchId,
-        contextTokens: event.contextTokens ?? event.message?.usage?.totalTokens ?? 0,
-        toolCalls: event.toolCalls ?? event.toolResults?.length ?? 0,
-      })
+        contextTokens: snapshot.contextTokens,
+        toolCalls: snapshot.toolCalls,
+      })) {
+        state.turnStarts.set(turnOrdinal, snapshot)
+      }
       return
     }
 
@@ -255,9 +289,8 @@ class OmpOutboxPublisher implements OmpPublisherHooks {
     const duration = event.turnDurationMs ?? event.duration ?? event.message?.duration ?? 0
     const summary = toolCallSummary ?? start?.toolCallSummary
     const startedAt = event.startedAt === undefined ? start?.startedAt ?? endedAt : timestampMillis(event.startedAt)
-    state.turnStarts.delete(turnOrdinal)
 
-    this.append(state, "turn", endedAt, () => compactJson({
+    const receipt = this.append(state, "turn", endedAt, () => compactJson({
       id: `${state.sessionId}:turn:${turnOrdinal}`,
       sessionId: state.sessionId,
       branchId,
@@ -271,7 +304,10 @@ class OmpOutboxPublisher implements OmpPublisherHooks {
       turnDurationMs: duration,
       yieldKind: event.yieldKind ?? start?.yieldKind ?? event.message?.stopReason ?? "unknown",
     }))
-    this.resolveAttributionBackfill(state, ctx, endedAt)
+    if (receipt?.admitted === true) {
+      state.turnStarts.delete(turnOrdinal)
+      this.resolveAttributionBackfill(state, ctx, endedAt)
+    }
   }
 
   onMessageStart(event: MessageStartPayload, ctx: ExtensionContextLike): void {
@@ -286,8 +322,7 @@ class OmpOutboxPublisher implements OmpPublisherHooks {
       provider: event.provider,
       model: event.model,
       api: event.api,
-      payload: event.payload ?? null,
-      rawRequestSupport: event.payload === undefined ? "unsupported" : "captured",
+      raw: captureRawProviderPayload(event.payload),
     }
   }
 
@@ -300,58 +335,72 @@ class OmpOutboxPublisher implements OmpPublisherHooks {
     const message = event.message
     const usage = message.usage
     const captured = state.latestProviderRequest
+    state.latestProviderRequest = undefined
     const branchId = event.branchId ?? captured?.branchId ?? "root"
     const ts = timestampMillis(message.timestamp ?? event.timestamp)
     const provider = message.provider ?? captured?.provider ?? message.upstreamProvider ?? "unknown"
     const model = message.model ?? captured?.model ?? "unknown"
     const attribution = attributionString(provider, model, message.thinkingLevel)
-    const modelCallId = `${state.sessionId}:modelCall:${state.nextSeq}`
-    const rawRequestSupport = captured?.rawRequestSupport ?? "unsupported"
-    const rawRequest = captured?.payload ?? null
-    state.latestProviderRequest = undefined
+    const raw = captured?.raw
+    const rawRequestSupport = raw === undefined || raw.status === "unsupported"
+      ? "unsupported"
+      : raw.status === "stored" || raw.status === "duplicate"
+        ? "captured"
+        : "digest-only"
+    let modelCallId = ""
 
-    this.append(state, "modelCall", ts, () => compactJson({
-      id: modelCallId,
-      ts,
-      machine: "unknown",
-      session: state.sessionId,
-      sessionId: state.sessionId,
-      branchId,
-      agent: "omp",
-      api: message.api ?? captured?.api ?? "unknown",
-      model,
-      provider,
-      upstreamProvider: message.upstreamProvider,
-      attribution,
-      effort: "unknown",
-      promptHash: "unknown",
-      systemPromptHash: "unknown",
-      skillProfile: "unknown",
-      contextManifest: "unknown",
-      packetId: "",
-      tokensIn: usage?.input ?? 0,
-      tokensOut: usage?.output ?? 0,
-      cacheRead: usage?.cacheRead ?? 0,
-      cacheWrite: usage?.cacheWrite ?? 0,
-      totalTokens: usage?.totalTokens ?? 0,
-      reasoningTokens: usage?.reasoningTokens ?? 0,
-      premiumRequests: usage?.premiumRequests ?? 0,
-      cost: usage?.cost ?? 0,
-      latencyMs: message.duration ?? 0,
-      ttftMs: message.ttft ?? 0,
-      outcome: outcomeFor(message),
-      errorClass: errorClassFor(message),
-      errorMessage: message.errorMessage,
-      stopReason: message.stopReason,
-      stopDetails: message.stopDetails,
-      retryOf: undefined,
-      fallbackFrom: undefined,
-      rawRequestArtifact: "",
-      rawResponseArtifact: "",
-      rawRequestSupport,
-      rawRequest,
-      routeResolutionId: state.activeRouteResolutionId,
-    }))
+    const receipt = this.append(state, "modelCall", ts, (seq) => {
+      modelCallId = `${state.sessionId}:modelCall:${seq}`
+      return compactJson({
+        id: modelCallId,
+        ts,
+        machine: "unknown",
+        session: state.sessionId,
+        sessionId: state.sessionId,
+        branchId,
+        agent: "omp",
+        api: message.api ?? captured?.api ?? "unknown",
+        model,
+        provider,
+        upstreamProvider: message.upstreamProvider,
+        attribution,
+        effort: "unknown",
+        promptHash: "unknown",
+        systemPromptHash: "unknown",
+        skillProfile: "unknown",
+        contextManifest: "unknown",
+        packetId: "",
+        tokensIn: usage?.input ?? 0,
+        tokensOut: usage?.output ?? 0,
+        cacheRead: usage?.cacheRead ?? 0,
+        cacheWrite: usage?.cacheWrite ?? 0,
+        totalTokens: usage?.totalTokens ?? 0,
+        reasoningTokens: usage?.reasoningTokens ?? 0,
+        premiumRequests: usage?.premiumRequests ?? 0,
+        cost: usage?.cost ?? 0,
+        latencyMs: message.duration ?? 0,
+        ttftMs: message.ttft ?? 0,
+        outcome: outcomeFor(message),
+        errorClass: errorClassFor(message),
+        errorMessage: message.errorMessage,
+        stopReason: message.stopReason,
+        stopDetails: message.stopDetails,
+        retryOf: undefined,
+        fallbackFrom: undefined,
+        rawRequestArtifact: raw?.artifactId ?? "",
+        rawRequestRef: raw?.reference,
+        rawResponseArtifact: "",
+        rawRequestSupport,
+        rawRequestDigest: raw?.sha256,
+        rawRequestBytes: raw?.bytes,
+        rawRequestRepresentation: raw?.representation,
+        rawRequestCaptureStatus: raw?.status,
+        routeResolutionId: state.activeRouteResolutionId,
+      })
+    })
+    if (receipt?.admitted !== true) return
+
+    if (raw !== undefined) this.appendRawRequestMetadata(state, ts, modelCallId, raw)
     this.cacheAttribution(state, ts, {
       modelCallId,
       messageTimestamp: ts,
@@ -410,11 +459,12 @@ class OmpOutboxPublisher implements OmpPublisherHooks {
     const state = this.stateForContext(ctx)
     const ts = timestampMillis(event.timestamp)
     this.resolveAttributionBackfill(state, ctx, ts)
-    this.appendEvent(state, ts, undefined, "session_shutdown", {
+    const admitted = this.appendEvent(state, ts, undefined, "session_shutdown", {
       sessionId: state.sessionId,
       sessionFile: state.sessionFile,
       reason: event.reason ?? null,
     })
+    if (admitted) recordOutboxTerminalReleased(state.outboxPath, state.sessionId, new Date(ts).toISOString())
   }
 
   private stateForContext(ctx: ExtensionContextLike): SessionState {
@@ -428,12 +478,15 @@ class OmpOutboxPublisher implements OmpPublisherHooks {
     }
 
     const outboxPath = outboxPathFor(sessionId)
+    const recovery = recoverOutboxSession(outboxPath, sessionId)
     const state: SessionState = {
       sessionId,
       sessionFile,
       outboxPath,
-      nextSeq: countExistingOutboxLines(outboxPath),
-      activeRouteResolutionId: activeRouteResolutionIdFor(outboxPath),
+      nextSeq: recovery.recovered ? recovery.nextSeq : undefined,
+      activeRouteResolutionId: recovery.recovered
+        ? routeResolutionIdFromEnvelope(recovery.latestRouteResolution)
+        : undefined,
       publishedRouteEntryIds: new Set(),
       turnStarts: new Map(),
       pendingAttributions: new Map(),
@@ -442,9 +495,22 @@ class OmpOutboxPublisher implements OmpPublisherHooks {
     return state
   }
 
-  private append(state: SessionState, kind: KnownOutboxKind, ts: number, buildPayload: PayloadBuilder): void {
+  private append(
+    state: SessionState,
+    kind: KnownOutboxKind,
+    ts: number,
+    buildPayload: PayloadBuilder,
+  ): OutboxAppendReceipt {
+    if (state.nextSeq === undefined) {
+      const recovery = recoverOutboxSession(state.outboxPath, state.sessionId)
+      if (!recovery.recovered) {
+        return { admitted: false, seq: -1, bytes: 0, reason: recovery.reason }
+      }
+      state.nextSeq = recovery.nextSeq
+      state.activeRouteResolutionId = routeResolutionIdFromEnvelope(recovery.latestRouteResolution)
+    }
     const seq = state.nextSeq
-    appendOutboxLine(state.outboxPath, {
+    const receipt = appendOutboxLine(state.outboxPath, {
       v: 1,
       kind,
       sessionId: state.sessionId,
@@ -452,7 +518,8 @@ class OmpOutboxPublisher implements OmpPublisherHooks {
       ts,
       payload: buildPayload(seq),
     })
-    state.nextSeq = seq + 1
+    if (receipt.admitted) state.nextSeq = seq + 1
+    return receipt
   }
 
   private appendBranch(state: SessionState, ts: number, branchId: string | undefined, kind: string, meta: JsonRecord): void {
@@ -467,8 +534,8 @@ class OmpOutboxPublisher implements OmpPublisherHooks {
     }))
   }
 
-  private appendEvent(state: SessionState, ts: number, branchId: string | undefined, kind: string, payload: JsonValue): void {
-    this.append(state, "event", ts, (seq) => compactJson({
+  private appendEvent(state: SessionState, ts: number, branchId: string | undefined, kind: string, payload: JsonValue): boolean {
+    return this.append(state, "event", ts, (seq) => compactJson({
       id: `${state.sessionId}:${seq}`,
       ts,
       sessionId: state.sessionId,
@@ -477,21 +544,21 @@ class OmpOutboxPublisher implements OmpPublisherHooks {
       kind,
       payloadVersion: 1,
       payload,
-    }))
+    }))?.admitted === true
   }
 
   private cacheAttribution(state: SessionState, ts: number, pending: PendingAttribution): void {
-    state.pendingAttributions.set(pending.modelCallId, pending)
-    while (state.pendingAttributions.size > MAX_PENDING_ATTRIBUTIONS) {
-      for (const [modelCallId] of state.pendingAttributions) {
-        state.pendingAttributions.delete(modelCallId)
-        this.appendEvent(state, ts, undefined, "attributionMiss", {
-          modelCallId,
-          reason: "cacheLimitExceeded",
-        })
-        break
+    if (!state.pendingAttributions.has(pending.modelCallId) && state.pendingAttributions.size >= MAX_PENDING_ATTRIBUTIONS) {
+      const oldest = state.pendingAttributions.keys().next().value as string | undefined
+      if (oldest === undefined || !this.appendEvent(state, ts, undefined, "attributionMiss", {
+        modelCallId: oldest,
+        reason: "cacheLimitExceeded",
+      })) {
+        return
       }
+      state.pendingAttributions.delete(oldest)
     }
+    state.pendingAttributions.set(pending.modelCallId, pending)
   }
 
   private resolveAttributionBackfill(state: SessionState, ctx: ExtensionContextLike, ts: number): void {
@@ -513,29 +580,31 @@ class OmpOutboxPublisher implements OmpPublisherHooks {
       }
 
       if (entryId !== undefined) {
-        state.pendingAttributions.delete(modelCallId)
-        this.appendEvent(state, ts, undefined, "attribution", {
+        if (this.appendEvent(state, ts, undefined, "attribution", {
           modelCallId,
           entryId,
           attribution: pending.attribution,
-        })
+        })) {
+          state.pendingAttributions.delete(modelCallId)
+        }
         continue
       }
 
       const probes = pending.probes + 1
       if (probes >= 2) {
-        state.pendingAttributions.delete(modelCallId)
-        this.appendEvent(state, ts, undefined, "attributionMiss", {
+        if (this.appendEvent(state, ts, undefined, "attributionMiss", {
           modelCallId,
           reason: "entryNotFound",
-        })
+        })) {
+          state.pendingAttributions.delete(modelCallId)
+        }
       } else {
         state.pendingAttributions.set(modelCallId, { ...pending, probes })
       }
     }
   }
 
-  private appendPublisherError(ctx: ExtensionContextLike, cause: Error | object | string | number | boolean | symbol | bigint | null | undefined): void {
+  private appendPublisherError(ctx: ExtensionContextLike, cause: unknown): void {
     const state = this.currentSessionId === undefined ? this.stateForContext(ctx) : this.sessions.get(this.currentSessionId) ?? this.stateForContext(ctx)
     this.appendEvent(state, 0, undefined, "publisherError", {
       message: cause instanceof Error ? cause.message : String(cause),
@@ -589,46 +658,12 @@ function errorClassFor(message: AssistantMessage): string | null {
   }
 }
 
-function activeRouteResolutionIdFor(path: string): string | undefined {
-  if (!existsSync(path)) {
-    return undefined
-  }
-
-  let activeRouteResolutionId: string | undefined
-  for (const line of readFileSync(path, "utf8").split("\n")) {
-    if (line === "") {
-      continue
-    }
-
-    try {
-      const envelope = Schema.decodeUnknownOption(OutboxEnvelopeSchema)(JSON.parse(line) as unknown)
-      if (envelope._tag !== "Some" || envelope.value.v !== 1 || envelope.value.kind !== "routeResolution") {
-        continue
-      }
-      const payload = Schema.decodeUnknownOption(RouteResolutionPayloadV1Schema)(envelope.value.payload, { onExcessProperty: "ignore" })
-      if (payload._tag === "Some") {
-        activeRouteResolutionId = payload.value.resolutionId
-      }
-    } catch {
-      // Existing outbox bytes, including malformed or future envelopes, remain untouched.
-    }
-  }
-  return activeRouteResolutionId
-}
-
-function countExistingOutboxLines(path: string): number {
-  if (!existsSync(path)) {
-    return 0
-  }
-
-  const bytes = readFileSync(path)
-  let lines = 0
-  for (const byte of bytes) {
-    if (byte === 10) {
-      lines += 1
-    }
-  }
-  return bytes.length > 0 && bytes[bytes.length - 1] !== 10 ? lines + 1 : lines
+function routeResolutionIdFromEnvelope(envelope: OutboxEnvelope | undefined): string | undefined {
+  if (envelope === undefined) return undefined
+  const payload = Schema.decodeUnknownOption(RouteResolutionPayloadV1Schema)(envelope.payload, {
+    onExcessProperty: "ignore",
+  })
+  return payload._tag === "Some" ? payload.value.resolutionId : undefined
 }
 
 function compactJson(record: LooseJsonRecord): JsonRecord {

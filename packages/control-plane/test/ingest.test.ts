@@ -66,12 +66,11 @@ test("outbox ingest is idempotent and resumes from a truncated tail", async () =
     expect(second).toEqual({ inserted: 0, ignored: 10, malformed: 1 })
   }).pipe(Effect.provide(openLedger(dbPath))))
 
-  appendOutboxLine(outboxPath, envelope(11, "event", {
+  appendFileSync(outboxPath, `${JSON.stringify(envelope(11, "event", {
     kind: "tailEvent",
     payloadVersion: 1,
     payload: { resumed: true },
-  }))
-  appendOutboxLine(outboxPath, envelope(12, "providerCall", {
+  }))}\n${JSON.stringify(envelope(12, "providerCall", {
     branchId: rootBranchId,
     packetId: "packet-tail",
     provider: "tail-provider",
@@ -80,7 +79,7 @@ test("outbox ingest is idempotent and resumes from a truncated tail", async () =
     latencyMs: 20,
     outcome: "ok",
     usage: JSON.stringify({ calls: 1 }),
-  }))
+  }))}\n`, "utf8")
 
   await Effect.runPromise(Effect.gen(function* () {
     const resumed = yield* ingestOutbox(outboxPath, { batchSize: 4 })
@@ -106,7 +105,7 @@ test("ingest stores live model call throughput fields", async () => {
   const liveDbPath = join(tmpDir, "ingest-live-shape.sqlite")
   const liveOutboxPath = join(tmpDir, "live-shape-outbox.jsonl")
 
-  appendOutboxLine(liveOutboxPath, envelope(21, "modelCall", {
+  appendFileSync(liveOutboxPath, `${JSON.stringify(envelope(21, "modelCall", {
     id: "live-shape-model-call",
     machine: "m1",
     session: sessionId,
@@ -146,7 +145,7 @@ test("ingest stores live model call throughput fields", async () => {
     rawResponseArtifact: "",
     rawRequestSupport: "captured",
     rawRequest: { type: "response.create", model: "gpt-5.5" },
-  }))
+  }))}\n`, "utf8")
 
   await Effect.runPromise(Effect.gen(function* () {
     const result = yield* ingestOutbox(liveOutboxPath)
@@ -250,8 +249,7 @@ function writeFixtureOutbox(): void {
     meta: "{}",
   }))
   appendOutboxLine(outboxPath, envelope(8, "mysteryKind", { weird: "snowman ☃ and nul \u0000", nested: [1, null, { ok: true }] }))
-  appendFileSync(outboxPath, "not-json {\n", "utf8")
-  appendOutboxLine(outboxPath, envelope(10, "turn", {
+  appendFileSync(outboxPath, `${JSON.stringify(envelope(10, "turn", {
     branchId: rootBranchId,
     seq: 2,
     startedAt: 1_300,
@@ -260,7 +258,7 @@ function writeFixtureOutbox(): void {
     editBytes: 64,
     turnDurationMs: 200,
     yieldKind: "future-version",
-  }, 2))
+  }, 2))}\nnot-json {\n`, "utf8")
 }
 
 function envelope(seq: number, kind: string, payload: JsonValue, v = 1): OutboxEnvelope {

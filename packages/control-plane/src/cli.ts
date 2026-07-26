@@ -1,13 +1,18 @@
 #!/usr/bin/env bun
 
 import { randomUUID } from "node:crypto"
-import { hostname } from "node:os"
+import { readFileSync } from "node:fs"
+import { homedir, hostname } from "node:os"
+import { join } from "node:path"
 
 import { Effect } from "effect"
 
 import { ArtifactError, StorageError } from "./errors"
 import { ingestOutbox } from "./ingest"
 import { decodePapercutInput, LedgerStore, defaultLedgerPath, openLedger, type EventFilters, type ModelCallFilters, type PapercutReportResult, type StatusSummary } from "./index"
+import { defaultOutboxDir } from "./outbox"
+import { defaultLegacyPeerDbPath, migrateOutboxes } from "./outbox-migrate"
+import { outboxRetentionStatus, pruneOutbox, type FleetSyncReceiptTrustV1 } from "./outbox-retention"
 import {
   RoutingStore,
   openRoutingStore,
@@ -150,6 +155,7 @@ class CliUsageError {
 
 export async function runCli(argv: readonly string[] = Bun.argv.slice(2)): Promise<number> {
   if (argv[0] === "queue") return runQueueCli(argv.slice(1))
+  if (argv[0] === "outbox") return runOutboxCli(argv.slice(1))
   const parsed = parseCommand(argv)
   if (parsed instanceof CliUsageError) {
     writeJsonError({ class: "UsageError", error: parsed.message })
@@ -195,6 +201,223 @@ export async function runCli(argv: readonly string[] = Bun.argv.slice(2)): Promi
       return runOpsReleases(parsed)
   }
 }
+
+function runOutboxCli(argv: readonly string[]): number {
+  const subcommand = argv[0]
+  if (subcommand !== "status" && subcommand !== "prune" && subcommand !== "migrate") {
+    writeJsonError({
+      class: "UsageError",
+      error: "usage: control-plane outbox <status|prune|migrate> [options]",
+    })
+    return 1
+  }
+
+  const parsed = parseOutboxOptions(argv.slice(1))
+  if (parsed instanceof CliUsageError) {
+    writeJsonError({ class: "UsageError", error: parsed.message })
+    return 1
+  }
+  if (subcommand === "status" && parsed.mode !== undefined) {
+    writeJsonError({ class: "UsageError", error: "outbox status does not accept --dry-run or --apply" })
+    return 1
+  }
+  if (subcommand !== "status" && parsed.mode === undefined) {
+    writeJsonError({
+      class: "UsageError",
+      error: `${subcommand} requires exactly one of --dry-run or --apply`,
+    })
+    return 1
+  }
+
+  const common = {
+    outboxDir: parsed.outboxDir,
+    cursorPath: parsed.cursorPath,
+    archiveDir: parsed.archiveDir,
+    graceMs: parsed.graceMs,
+    ...(parsed.rawDir === undefined ? {} : { rawDir: parsed.rawDir }),
+    ...(parsed.currentFile === undefined ? {} : { currentFile: parsed.currentFile }),
+  }
+  const result = subcommand === "status"
+    ? outboxRetentionStatus(common)
+    : subcommand === "prune"
+      ? pruneOutbox({
+        ...common,
+        ...(parsed.h11ManifestDir === undefined ? {} : { h11ManifestDir: parsed.h11ManifestDir }),
+        ...(parsed.h11AssetRoot === undefined ? {} : { h11AssetRoot: parsed.h11AssetRoot }),
+        ...(parsed.immutableReceiptDir === undefined
+          ? {}
+          : { immutableReceiptDir: parsed.immutableReceiptDir }),
+        ...(parsed.immutableReceiptTrust === undefined
+          ? {}
+          : { immutableReceiptTrust: parsed.immutableReceiptTrust }),
+      }, parsed.mode ?? "dry-run")
+      : migrateOutboxes({
+        ...common,
+        dbPath: parsed.dbPath,
+        peerDbPath: parsed.peerDbPath,
+        ...(parsed.quarantineDir === undefined ? {} : { quarantineDir: parsed.quarantineDir }),
+        ...(parsed.stagingDir === undefined ? {} : { stagingDir: parsed.stagingDir }),
+        ...(parsed.onlyFile === undefined ? {} : { onlyFile: parsed.onlyFile }),
+        metadataOnly: parsed.metadataOnly,
+      }, parsed.mode ?? "dry-run")
+
+  writeStdout(parsed.json ? JSON.stringify(result) : JSON.stringify(result, null, 2))
+  return 0
+}
+
+interface OutboxCliOptions {
+  readonly outboxDir: string
+  readonly cursorPath: string
+  readonly archiveDir: string
+  readonly rawDir?: string
+  readonly currentFile?: string
+  readonly dbPath: string
+  readonly peerDbPath: string
+  readonly quarantineDir?: string
+  readonly stagingDir?: string
+  readonly onlyFile?: string
+  readonly h11ManifestDir?: string
+  readonly h11AssetRoot?: string
+  readonly immutableReceiptDir?: string
+  readonly immutableReceiptTrust?: FleetSyncReceiptTrustV1
+  readonly graceMs: number
+  readonly metadataOnly: boolean
+  readonly mode?: "dry-run" | "apply"
+  readonly json: boolean
+}
+
+function parseOutboxOptions(argv: readonly string[]): OutboxCliOptions | CliUsageError {
+  let outboxDir = defaultOutboxDir()
+  let cursorPath = join(homedir(), ".agent-control-plane", "ingest-cursors.json")
+  let archiveDir = join(homedir(), ".agent-control-plane", "outbox-archive")
+  let rawDir: string | undefined
+  let currentFile: string | undefined
+  let dbPath = defaultLedgerPath()
+  let peerDbPath = defaultLegacyPeerDbPath()
+  let quarantineDir: string | undefined
+  let stagingDir: string | undefined
+  let onlyFile: string | undefined
+  let h11ManifestDir: string | undefined
+  let h11AssetRoot: string | undefined
+  let immutableReceiptDir: string | undefined
+  let fleetSyncProducerId: string | undefined
+  let fleetSyncKeyId: string | undefined
+  let fleetSyncSourceHost: string | undefined
+  let fleetSyncDestinationHost: string | undefined
+  let fleetSyncPublicKeyFile: string | undefined
+  let graceMs = DEFAULT_OUTBOX_GRACE_MS
+  let metadataOnly = false
+  let mode: "dry-run" | "apply" | undefined
+  let json = false
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index]
+    if (argument === "--json") {
+      json = true
+      continue
+    }
+    if (argument === "--metadata-only") {
+      metadataOnly = true
+      continue
+    }
+    if (argument === "--dry-run" || argument === "--apply") {
+      const nextMode = argument === "--dry-run" ? "dry-run" : "apply"
+      if (mode !== undefined && mode !== nextMode) {
+        return new CliUsageError("choose exactly one of --dry-run or --apply")
+      }
+      mode = nextMode
+      continue
+    }
+
+    const separator = argument?.indexOf("=") ?? -1
+    const flag = separator >= 0 ? argument?.slice(0, separator) : argument
+    const value = separator >= 0 ? argument?.slice(separator + 1) : argv[index + 1]
+    if (separator < 0) index += 1
+    if (flag === undefined || value === undefined || value.length === 0) {
+      return new CliUsageError(`missing value for ${flag ?? "option"}`)
+    }
+    switch (flag) {
+      case "--outbox": outboxDir = value; break
+      case "--cursor": cursorPath = value; break
+      case "--archive": archiveDir = value; break
+      case "--raw": rawDir = value; break
+      case "--current": currentFile = value; break
+      case "--db": dbPath = value; break
+      case "--peer-db": peerDbPath = value; break
+      case "--quarantine": quarantineDir = value; break
+      case "--staging": stagingDir = value; break
+      case "--file": onlyFile = value; break
+      case "--h11-manifest-dir": h11ManifestDir = value; break
+      case "--h11-asset-root": h11AssetRoot = value; break
+      case "--immutable-receipt-dir": immutableReceiptDir = value; break
+      case "--fleet-sync-producer-id": fleetSyncProducerId = value; break
+      case "--fleet-sync-key-id": fleetSyncKeyId = value; break
+      case "--fleet-sync-source-host": fleetSyncSourceHost = value; break
+      case "--fleet-sync-destination-host": fleetSyncDestinationHost = value; break
+      case "--fleet-sync-public-key-file": fleetSyncPublicKeyFile = value; break
+      case "--grace-ms": {
+        const parsed = Number(value)
+        if (!Number.isSafeInteger(parsed) || parsed < 0) {
+          return new CliUsageError("--grace-ms must be a nonnegative safe integer")
+        }
+        graceMs = parsed
+        break
+      }
+      default: return new CliUsageError(`unknown outbox option: ${flag}`)
+    }
+  }
+  if (metadataOnly && mode === "apply") {
+    return new CliUsageError("--metadata-only is only valid with --dry-run")
+  }
+  const trustParts = [
+    fleetSyncProducerId,
+    fleetSyncKeyId,
+    fleetSyncSourceHost,
+    fleetSyncDestinationHost,
+    fleetSyncPublicKeyFile,
+  ]
+  const trustPartCount = trustParts.filter((part) => part !== undefined).length
+  if (trustPartCount !== 0 && trustPartCount !== trustParts.length) {
+    return new CliUsageError("fleet-sync receipt trust requires producer id, key id, source host, destination host, and public key file")
+  }
+  let immutableReceiptTrust: FleetSyncReceiptTrustV1 | undefined
+  if (fleetSyncProducerId !== undefined && fleetSyncKeyId !== undefined && fleetSyncSourceHost !== undefined &&
+      fleetSyncDestinationHost !== undefined && fleetSyncPublicKeyFile !== undefined) {
+    try {
+      immutableReceiptTrust = {
+        producerId: fleetSyncProducerId,
+        keyId: fleetSyncKeyId,
+        sourceHost: fleetSyncSourceHost,
+        destinationHost: fleetSyncDestinationHost,
+        publicKey: readFileSync(fleetSyncPublicKeyFile, "utf8"),
+      }
+    } catch {
+      return new CliUsageError(`unable to read fleet-sync public key file: ${fleetSyncPublicKeyFile}`)
+    }
+  }
+  return {
+    outboxDir,
+    cursorPath,
+    archiveDir,
+    ...(rawDir === undefined ? {} : { rawDir }),
+    ...(currentFile === undefined ? {} : { currentFile }),
+    dbPath,
+    peerDbPath,
+    ...(quarantineDir === undefined ? {} : { quarantineDir }),
+    ...(stagingDir === undefined ? {} : { stagingDir }),
+    ...(onlyFile === undefined ? {} : { onlyFile }),
+    ...(h11ManifestDir === undefined ? {} : { h11ManifestDir }),
+    ...(h11AssetRoot === undefined ? {} : { h11AssetRoot }),
+    ...(immutableReceiptDir === undefined ? {} : { immutableReceiptDir }),
+    ...(immutableReceiptTrust === undefined ? {} : { immutableReceiptTrust }),
+    graceMs,
+    metadataOnly,
+    ...(mode === undefined ? {} : { mode }),
+    json,
+  }
+}
+
+const DEFAULT_OUTBOX_GRACE_MS = 24 * 60 * 60 * 1_000
 
 function runStatus(command: StatusCommand): Promise<number> {
   const program = Effect.gen(function* () {

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto"
-import { readFileSync } from "node:fs"
+import { closeSync, constants, openSync, readFileSync, readSync, statSync } from "node:fs"
 
 import { Effect, Schema } from "effect"
 
@@ -21,7 +21,20 @@ import {
   type TimelineInput,
   type TurnInput,
 } from "./ledger"
-import { type JsonValue, JsonValueSchema, type KnownOutboxKind, OutboxEnvelopeSchema, type OutboxEnvelope, RelayLifecyclePayloadV1Schema, WorkLeasePayloadV1Schema } from "./outbox"
+import {
+  contentObjectPathFor,
+  defaultRawCaptureDir,
+  MAX_SERIALIZED_OUTBOX_RECORD_BYTES,
+  type JsonValue,
+  JsonValueSchema,
+  type KnownOutboxKind,
+  OutboxEnvelopeSchema,
+  type OutboxEnvelope,
+  RawContentReferenceV1Schema,
+  type RawContentReferenceV1,
+  RelayLifecyclePayloadV1Schema,
+  WorkLeasePayloadV1Schema,
+} from "./outbox"
 import {
   AgentTimelinePayloadV1Schema,
   type AgentTimelinePayloadV1,
@@ -40,6 +53,8 @@ const DEFAULT_BATCH_SIZE = 500
 
 export interface IngestOutboxOptions {
   readonly batchSize?: number
+  readonly rawDir?: string
+  readonly endOffset?: number
 }
 
 export interface IngestOutboxResult {
@@ -154,6 +169,7 @@ const ModelCallPayloadSchema = Schema.Struct({
   attribution: OptionalString,
   rawRequestSupport: OptionalString,
   rawRequest: Schema.optionalKey(JsonValueSchema),
+  rawRequestRef: Schema.optionalKey(JsonValueSchema),
 })
 
 type ModelCallPayload = Schema.Schema.Type<typeof ModelCallPayloadSchema>
@@ -225,55 +241,118 @@ export function ingestOutbox(
 ): Effect.Effect<IngestOutboxResult, StorageError | ArtifactError, LedgerStore> {
   return Effect.gen(function* () {
     const store = yield* LedgerStore
-    const content = yield* Effect.try({
-      try: () => readFileSync(filePath, "utf8"),
-      catch: (cause) => new StorageError({ operation: "ingestOutbox", message: errorMessage(cause), cause: errorMessage(cause), context: filePath }),
-    })
     const rows: BatchRow[] = []
-    let malformed = 0
-    let materializedInserted = 0
-    let materializedIgnored = 0
     const attributions: AttributionInput[] = []
-    const lines = content.split("\n")
-
-    for (let index = 0; index < lines.length; index += 1) {
-      const rawLine = lines[index]
-      if (rawLine === "") continue
-      const mapping = mapLine(filePath, index + 1, rawLine)
-      if (mapping.rawRequestArtifact !== undefined && mapping.row.kind === "modelCall") {
-        const artifact = yield* store.putArtifact({ content: mapping.rawRequestArtifact.content }, mapping.rawRequestArtifact.meta)
-        if (artifact.inserted) {
-          materializedInserted += 1
-        } else {
-          materializedIgnored += 1
-        }
-        rows.push({ kind: "modelCall", payload: { ...mapping.row.payload, rawRequestArtifact: artifact.id } })
-      } else {
-        rows.push(mapping.row)
-      }
-      if (mapping.attribution !== undefined) {
-        attributions.push(mapping.attribution)
-      }
-      if (mapping.malformed) malformed += 1
-    }
-
-    let inserted = materializedInserted
-    let ignored = materializedIgnored
     const batchSize = normalizedBatchSize(options.batchSize)
-    for (let index = 0; index < rows.length; index += batchSize) {
-      const result = yield* store.ingestBatch(rows.slice(index, index + batchSize))
+    const rawDir = options.rawDir ?? defaultRawCaptureDir()
+    let inserted = 0
+    let ignored = 0
+    let malformed = 0
+
+    const flush = () => Effect.gen(function* () {
+      if (rows.length === 0) return
+      const batchRows = rows.splice(0)
+      const batchAttributions = attributions.splice(0)
+      const result = yield* store.ingestBatch(batchRows)
       inserted += result.inserted
       ignored += result.ignored
-    }
-    for (const attribution of attributions) {
-      yield* store.attributeModelCall(attribution.modelCallId, attribution.entryId)
-    }
+      for (const attribution of batchAttributions) {
+        yield* store.attributeModelCall(attribution.modelCallId, attribution.entryId)
+      }
+    })
 
+    try {
+      for (const line of streamLines(filePath, options.endOffset)) {
+        if (line.rawLine === "") continue
+        const mapping = yield* Effect.try({
+          try: () => mapLine(filePath, line.lineNumber, line.rawLine, rawDir),
+          catch: (cause) => storageFailure(filePath, cause),
+        })
+        if (mapping.rawRequestArtifact !== undefined && mapping.row.kind === "modelCall") {
+          const artifact = yield* store.putArtifact(
+            { content: mapping.rawRequestArtifact.content },
+            mapping.rawRequestArtifact.meta,
+          )
+          if (artifact.inserted) inserted += 1
+          else ignored += 1
+          rows.push({
+            kind: "modelCall",
+            payload: { ...mapping.row.payload, rawRequestArtifact: artifact.id },
+          })
+        } else {
+          rows.push(mapping.row)
+        }
+        if (mapping.attribution !== undefined) attributions.push(mapping.attribution)
+        if (mapping.malformed) malformed += 1
+        if (rows.length >= batchSize) yield* flush()
+      }
+    } catch (cause) {
+      return yield* Effect.fail(storageFailure(filePath, cause))
+    }
+    yield* flush()
     return { inserted, ignored, malformed }
   })
 }
 
-function mapLine(filePath: string, lineNumber: number, rawLine: string): RowMapping {
+interface StreamedLine {
+  readonly lineNumber: number
+  readonly rawLine: string
+}
+
+function* streamLines(filePath: string, endOffset: number | undefined): Generator<StreamedLine> {
+  const size = statSync(filePath).size
+  const limit = endOffset ?? size
+  if (!Number.isSafeInteger(limit) || limit < 0 || limit > size) {
+    throw new Error(`Invalid ingest end offset ${String(endOffset)} for ${filePath}`)
+  }
+  const descriptor = openSync(
+    filePath,
+    constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+  )
+  const chunk = Buffer.allocUnsafe(64 * 1024)
+  let pending = Buffer.alloc(0)
+  let position = 0
+  let lineNumber = 0
+  try {
+    while (position < limit) {
+      const count = readSync(
+        descriptor,
+        chunk,
+        0,
+        Math.min(chunk.length, limit - position),
+        position,
+      )
+      if (count === 0) throw new Error(`Unexpected EOF while ingesting ${filePath}`)
+      position += count
+      const bytes = pending.length === 0
+        ? chunk.subarray(0, count)
+        : Buffer.concat([pending, chunk.subarray(0, count)])
+      let start = 0
+      for (let index = 0; index < bytes.length; index += 1) {
+        if (bytes[index] !== 0x0a) continue
+        const line = bytes.subarray(start, index)
+        if (line.length > MAX_SERIALIZED_OUTBOX_RECORD_BYTES) {
+          throw new Error(`Outbox record exceeds ${MAX_SERIALIZED_OUTBOX_RECORD_BYTES} bytes`)
+        }
+        lineNumber += 1
+        yield { lineNumber, rawLine: line.toString("utf8") }
+        start = index + 1
+      }
+      pending = Buffer.from(bytes.subarray(start))
+      if (pending.length > MAX_SERIALIZED_OUTBOX_RECORD_BYTES) {
+        throw new Error(`Outbox record exceeds ${MAX_SERIALIZED_OUTBOX_RECORD_BYTES} bytes`)
+      }
+    }
+    if (pending.length > 0) {
+      lineNumber += 1
+      yield { lineNumber, rawLine: pending.toString("utf8") }
+    }
+  } finally {
+    closeSync(descriptor)
+  }
+}
+
+function mapLine(filePath: string, lineNumber: number, rawLine: string, rawDir: string): RowMapping {
   let parsed: unknown
   try {
     parsed = JSON.parse(rawLine)
@@ -292,10 +371,10 @@ function mapLine(filePath: string, lineNumber: number, rawLine: string): RowMapp
     return { row: genericEvent(envelope, rawLine), malformed: false }
   }
 
-  return mapKnownEnvelopeRow(envelope, envelope.kind, rawLine)
+  return mapKnownEnvelopeRow(envelope, envelope.kind, rawLine, rawDir)
 }
 
-function mapKnownEnvelopeRow(envelope: OutboxEnvelope, kind: KnownOutboxKind, rawLine: string): RowMapping {
+function mapKnownEnvelopeRow(envelope: OutboxEnvelope, kind: KnownOutboxKind, rawLine: string, rawDir: string): RowMapping {
   switch (kind) {
     case "session": {
       const payload = Schema.decodeUnknownOption(SessionPayloadSchema)(envelope.payload, { onExcessProperty: "ignore" })
@@ -328,7 +407,7 @@ function mapKnownEnvelopeRow(envelope: OutboxEnvelope, kind: KnownOutboxKind, ra
       return {
         row: { kind, payload: modelCallInput(envelope, payload.value) },
         malformed: false,
-        rawRequestArtifact: rawRequestArtifactInput(envelope, payload.value),
+        rawRequestArtifact: rawRequestArtifactInput(envelope, payload.value, rawDir),
       }
     }
     case "providerCall": {
@@ -823,19 +902,47 @@ function validateNullableSha256(value: string | null, field: string): void {
   }
 }
 
-function rawRequestArtifactInput(envelope: OutboxEnvelope, payload: ModelCallPayload): RawRequestArtifactInput | undefined {
-  if (payload.rawRequestSupport !== "captured" || payload.rawRequest === undefined) {
+function rawRequestArtifactInput(
+  envelope: OutboxEnvelope,
+  payload: ModelCallPayload,
+  rawDir: string,
+): RawRequestArtifactInput | undefined {
+  let content: string
+  let reference: RawContentReferenceV1 | undefined
+  if (payload.rawRequestRef !== undefined) {
+    const decoded = Schema.decodeUnknownOption(RawContentReferenceV1Schema)(payload.rawRequestRef)
+    if (decoded._tag === "Some") {
+      reference = decoded.value
+      try {
+        const bytes = readFileSync(contentObjectPathFor(rawDir, reference.digest))
+        const digest = createHash("sha256").update(bytes).digest("hex")
+        if (bytes.byteLength !== reference.byteLength || digest !== reference.digest) {
+          throw new Error("raw request content reference verification failed")
+        }
+        content = bytes.toString("utf8")
+      } catch (cause) {
+        if (payload.rawRequest === undefined) throw cause
+        reference = undefined
+        content = jsonText(payload.rawRequest)
+      }
+    } else {
+      if (payload.rawRequest === undefined) throw new Error("invalid raw request content reference")
+      content = jsonText(payload.rawRequest)
+    }
+  } else if (payload.rawRequest !== undefined) {
+    content = jsonText(payload.rawRequest)
+  } else {
     return undefined
   }
 
   return {
-    content: jsonText(payload.rawRequest),
+    content,
     meta: {
       ts: envelope.ts,
       sessionId: envelope.sessionId,
       kind: "rawRequest",
       retention: "default",
-      meta: "{}",
+      meta: reference === undefined ? "{}" : JSON.stringify(reference),
     },
   }
 }
@@ -926,6 +1033,16 @@ function jsonText(value: JsonValue): string {
 
 function normalizedBatchSize(batchSize: number | undefined): number {
   return batchSize === undefined ? DEFAULT_BATCH_SIZE : Math.max(1, Math.floor(batchSize))
+}
+
+function storageFailure(filePath: string, cause: unknown): StorageError {
+  const message = errorMessage(cause)
+  return new StorageError({
+    operation: "ingestOutbox",
+    message,
+    cause: message,
+    context: filePath,
+  })
 }
 
 function errorMessage(cause: unknown): string {

@@ -1,0 +1,11 @@
+[tasks."control-plane:outbox-status"]
+description = "Inventory control-plane outboxes without reading provider bodies"
+run = "bun packages/control-plane/src/cli.ts outbox status --json"
+
+[tasks."control-plane:outbox-prune-dry-run"]
+description = "Show conservatively eligible outbox reclaim candidates"
+run = "bun packages/control-plane/src/cli.ts outbox prune --dry-run --json"
+
+[tasks."control-plane:outbox-migrate-dry-run"]
+description = "Inventory legacy owner metadata without reading outbox bodies"
+run = "bun packages/control-plane/src/cli.ts outbox migrate --dry-run --metadata-only --json"

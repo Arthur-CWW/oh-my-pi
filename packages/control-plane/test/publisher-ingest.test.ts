@@ -1,7 +1,8 @@
-import { rmSync } from "node:fs"
+import { mkdtempSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { afterAll, expect, test } from "bun:test"
+import { expect, test } from "bun:test"
 import { Effect } from "effect"
 
 import { ingestOutbox } from "../src/ingest"
@@ -10,11 +11,6 @@ import type { ExtensionContextLike, PiLike } from "../src/omp-events"
 import createOmpPublisher from "../src/omp-publisher"
 import { outboxPathFor } from "../src/outbox"
 
-const tmpDir = join(import.meta.dir, ".tmp", "publisher-ingest")
-
-afterAll(() => {
-  rmSync(tmpDir, { recursive: true, force: true })
-})
 
 class FakePi {
   private readonly handlers: Record<string, Array<(event: never, ctx: ExtensionContextLike) => unknown>> = {}
@@ -31,13 +27,17 @@ class FakePi {
 }
 
 test("real OMP publisher output ingests without seam degradation", async () => {
-  rmSync(tmpDir, { recursive: true, force: true })
+  const tmpDir = mkdtempSync(join(tmpdir(), "control-plane-publisher-ingest-"))
 
   const previousOutboxDir = process.env["AGENT_CONTROL_PLANE_OUTBOX_DIR"]
   const sessionId = "publisher-ingest-session"
   const outboxDir = join(tmpDir, "outbox")
   const dbPath = join(tmpDir, "ledger.sqlite")
+  process.env["HOME"] = join(tmpDir, "home")
   process.env["AGENT_CONTROL_PLANE_OUTBOX_DIR"] = outboxDir
+  process.env["AGENT_CONTROL_PLANE_RAW_DIR"] = join(tmpDir, "raw")
+  process.env["OMP_SESSION_CONTROL_DB"] = join(tmpDir, "session-control.sqlite")
+  process.env["AGENT_CONTROL_PLANE_RAW_CAPTURE"] = "1"
 
   const ctx = {
     cwd: "/repo/example",
