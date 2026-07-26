@@ -1107,6 +1107,21 @@ function buildMCPPromptCommands(manager: MCPManager): LoadedCustomCommand[] {
 	}
 	return commands;
 }
+const reloadAwareModelRegistries = new WeakMap<Settings, WeakSet<ModelRegistry>>();
+
+function wireModelRegistryToSettings(settings: Settings, modelRegistry: ModelRegistry): void {
+	let registries = reloadAwareModelRegistries.get(settings);
+	if (!registries) {
+		registries = new WeakSet();
+		reloadAwareModelRegistries.set(settings, registries);
+	}
+	if (registries.has(modelRegistry)) return;
+	registries.add(modelRegistry);
+	settings.onChange(notice => {
+		if (notice.kind === "changed") modelRegistry.refreshInBackground();
+	});
+}
+
 /**
  * Create an AgentSession with the specified options.
  *
@@ -1173,6 +1188,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		}
 	});
 	const settings = options.settings ?? (await logger.time("settings", Settings.init, { cwd, agentDir }));
+	wireModelRegistryToSettings(settings, modelRegistry);
 	logger.time("initializeWithSettings", initializeWithSettings, settings);
 	if (!options.modelRegistry) {
 		modelRegistry.refreshInBackground();

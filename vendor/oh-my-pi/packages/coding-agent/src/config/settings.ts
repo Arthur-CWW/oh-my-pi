@@ -14,6 +14,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import {
 	getAgentDbPath,
 	getAgentDir,
@@ -27,7 +28,7 @@ import {
 import { YAML } from "bun";
 import { type Settings as SettingsCapabilityItem, settingsCapability } from "../capability/settings";
 import type { ModelRole } from "../config/model-roles";
-import { loadCapability } from "../discovery";
+import { invalidate as invalidateCapabilityPath, loadCapability } from "../discovery";
 import { isLightTheme, setAutoThemeMapping, setColorBlindMode, setSymbolPreset } from "../modes/theme/theme";
 import { AgentStorage } from "../session/agent-storage";
 import { type EditMode, normalizeEditMode } from "../utils/edit-mode";
@@ -69,12 +70,16 @@ export interface SettingsOptions {
 	configFiles?: string[];
 }
 
-export type ModelRoleWinningLayer =
-	| "runtime_override"
-	| "config_overlay"
-	| "project"
-	| "global"
-	| "default";
+export type SettingsChangeNotice =
+	| { kind: "changed"; changedPaths: readonly SettingPath[] }
+	| { kind: "warning"; message: string };
+
+type LoadedProjectSettings = {
+	data: RawSettings;
+	paths: string[];
+};
+
+export type ModelRoleWinningLayer = "runtime_override" | "config_overlay" | "project" | "global" | "default";
 
 export interface ModelRoleResolution {
 	role: string;
@@ -225,6 +230,8 @@ export class Settings {
 	#project: RawSettings = {};
 	/** Extra config.yml-style overlays passed by CLI */
 	#configOverlay: RawSettings = {};
+	/** Resolved project files contributing to the project layer */
+	#projectConfigPaths: string[] = [];
 	/** Runtime overrides (not persisted) */
 	#overrides: RawSettings = {};
 	/** Merged view (global + project + overrides) */
@@ -241,6 +248,17 @@ export class Settings {
 	/** Pending save (debounced) */
 	#saveTimer?: NodeJS.Timeout;
 	#savePromise?: Promise<void>;
+	/** Serialized disk reloads and live file-watch state */
+	#reloadPromise: Promise<void> = Promise.resolve();
+	#watchDebounceTimer?: NodeJS.Timeout;
+	#watchers = new Map<string, fs.FSWatcher>();
+	#pendingWatchPaths = new Set<string>();
+	#selfWriteGeneration = 0;
+	#selfWriteTokens = new Map<string, { generation: number; token: string }>();
+	#lastReloadWarningToken?: string;
+	#persistentMutationGeneration = 0;
+	#changeListeners = new Set<(notice: SettingsChangeNotice) => void>();
+	#disposed = false;
 
 	/** Whether to persist changes */
 	#persist: boolean;
@@ -270,7 +288,26 @@ export class Settings {
 	 * Call once at startup before accessing `settings`.
 	 */
 	static init(options: SettingsOptions = {}): Promise<Settings> {
-		if (globalInstancePromise) return globalInstancePromise;
+		const requestedAgentDir = options.agentDir === undefined ? undefined : path.normalize(options.agentDir);
+		if (globalInstancePromise) {
+			if (
+				requestedAgentDir === undefined ||
+				(globalInstance !== null && globalInstance.#agentDir === requestedAgentDir)
+			) {
+				return globalInstancePromise;
+			}
+			return globalInstancePromise.then(async instance => {
+				if (instance.#agentDir === requestedAgentDir) return instance;
+				await instance.flush();
+				instance.dispose();
+				if (globalInstance === instance) {
+					globalInstance = null;
+					globalInstancePromise = null;
+					clearBoundSettingsMethods();
+				}
+				return Settings.init(options);
+			});
+		}
 
 		const instance = new Settings(options);
 		const promise = instance.#load();
@@ -327,7 +364,8 @@ export class Settings {
 		}
 
 		const value = getByPath(this.#merged, SETTING_PATH_SEGMENTS[path]);
-		const resolvedValue = value !== undefined ? (resolvePathScopedStringArray(path, value, this.#cwd) ?? value) : undefined;
+		const resolvedValue =
+			value !== undefined ? (resolvePathScopedStringArray(path, value, this.#cwd) ?? value) : undefined;
 		const resolved =
 			resolvedValue !== undefined && validateSettingValue(path, resolvedValue) ? resolvedValue : getDefault(path);
 		this.#resolvedCache.set(path, resolved);
@@ -343,6 +381,17 @@ export class Settings {
 	}
 
 	/**
+	 * Subscribe to live disk reload changes and reload warnings.
+	 * Returns an unsubscribe function.
+	 */
+	onChange(cb: (notice: SettingsChangeNotice) => void): () => void {
+		this.#changeListeners.add(cb);
+		return () => {
+			this.#changeListeners.delete(cb);
+		};
+	}
+
+	/**
 	 * Set a setting value (sync).
 	 * Updates global settings and queues a background save.
 	 * Triggers hooks for settings that have side effects.
@@ -353,6 +402,7 @@ export class Settings {
 		}
 		const prev = this.get(path);
 		const segments = path.split(".");
+		this.#persistentMutationGeneration++;
 		setByPath(this.#global, segments, value);
 		this.#modified.add(path);
 		this.#rebuildMerged();
@@ -396,8 +446,8 @@ export class Settings {
 	}
 
 	#fireEffectiveSettingChanged(path: SettingPath, value: unknown, prev: unknown): void {
-		if (Object.is(value, prev)) return;
-		if (path === "statusLine.sessionAccent") {
+		if (isDeepStrictEqual(value, prev)) return;
+		if (path.startsWith("statusLine.")) {
 			statusLineSessionAccentSignal.fire();
 		}
 	}
@@ -421,29 +471,28 @@ export class Settings {
 
 	/**
 	 * Reload persisted settings layers from disk while keeping runtime overrides.
-	 * Pending in-process writes are flushed first so this never discards settings
-	 * changed through the live Settings instance.
+	 * Reload failures preserve the previous good layers and are surfaced through
+	 * the change-notice subscription instead of escaping into a live session.
 	 */
 	async reloadFromDisk(): Promise<void> {
 		if (!this.#persist || !this.#configPath) return;
+		const paths = this.#resolvedConfigPaths();
+		this.#reloadPromise = this.#reloadPromise.then(() => this.#reloadPersistedLayers(paths));
+		await this.#reloadPromise;
+	}
 
-		await this.flush();
-		if (this.#modified.size > 0) {
-			throw new Error("pending settings save did not complete");
+	/** Stop file watching and release change subscribers. */
+	dispose(): void {
+		if (this.#disposed) return;
+		this.#disposed = true;
+		if (this.#watchDebounceTimer) {
+			clearTimeout(this.#watchDebounceTimer);
+			this.#watchDebounceTimer = undefined;
 		}
-
-		const global = await this.#loadYaml(this.#configPath);
-		const project = await this.#loadProjectSettings();
-		const configOverlay = await this.#loadConfigOverlays();
-		if (this.#modified.size > 0) {
-			throw new Error("settings changed while reload was in progress");
-		}
-
-		this.#global = global;
-		this.#project = project;
-		this.#configOverlay = configOverlay;
-		this.#rebuildMerged();
-		this.#fireAllHooks();
+		for (const watcher of this.#watchers.values()) watcher.close();
+		this.#watchers.clear();
+		this.#pendingWatchPaths.clear();
+		this.#changeListeners.clear();
 	}
 
 	async cloneForCwd(cwd: string): Promise<Settings> {
@@ -454,12 +503,17 @@ export class Settings {
 		});
 		cloned.#storage = this.#storage;
 		cloned.#global = structuredClone(this.#global);
-		cloned.#project = this.#persist ? await cloned.#loadProjectSettings() : structuredClone(this.#project);
+		const project = this.#persist
+			? await cloned.#loadProjectSettings()
+			: { data: structuredClone(this.#project), paths: [...this.#projectConfigPaths] };
+		cloned.#project = project.data;
+		cloned.#projectConfigPaths = project.paths;
 		cloned.#configFiles = [...this.#configFiles];
 		cloned.#configOverlay = structuredClone(this.#configOverlay);
 		cloned.#overrides = structuredClone(this.#overrides);
 		cloned.#rebuildMerged();
 		cloned.#fireAllHooks();
+		cloned.#configureWatchers();
 		return cloned;
 	}
 
@@ -480,10 +534,13 @@ export class Settings {
 		if (normalized === this.#cwd) return;
 		this.#cwd = normalized;
 		if (this.#persist) {
-			this.#project = await this.#loadProjectSettings();
+			const project = await this.#loadProjectSettings();
+			this.#project = project.data;
+			this.#projectConfigPaths = project.paths;
 		}
 		this.#rebuildMerged();
 		this.#fireAllHooks();
+		this.#configureWatchers();
 	}
 
 	// ─────────────────────────────────────────────────────────────────────────
@@ -554,7 +611,6 @@ export class Settings {
 		return this.get("bashInterceptor.patterns");
 	}
 
-
 	/**
 	 * Set a model role (helper for modelRoles record).
 	 */
@@ -609,8 +665,7 @@ export class Settings {
 
 		if (conflicts.length > 0) {
 			const messages = conflicts.map(
-				({ role, source }) =>
-					`modelRoles.${role} is overridden by ${source} settings and cannot be changed here`,
+				({ role, source }) => `modelRoles.${role} is overridden by ${source} settings and cannot be changed here`,
 			);
 			throw new Error(messages.join("; "));
 		}
@@ -728,7 +783,6 @@ export class Settings {
 		this.override("modelRoles", next);
 	}
 
-
 	/**
 	 * Set disabled providers (for compatibility with discovery system).
 	 */
@@ -740,12 +794,178 @@ export class Settings {
 	// Loading
 	// ─────────────────────────────────────────────────────────────────────────
 
+	#resolvedConfigPaths(): string[] {
+		const paths = [
+			...(this.#configPath ? [this.#configPath] : []),
+			...this.#configFiles,
+			...this.#projectConfigPaths,
+		];
+		return [...new Set(paths.map(filePath => path.resolve(filePath)))];
+	}
+
+	#configureWatchers(): void {
+		for (const watcher of this.#watchers.values()) watcher.close();
+		this.#watchers.clear();
+		if (!this.#persist || this.#disposed) return;
+
+		const targetsByDirectory = new Map<string, Set<string>>();
+		for (const filePath of this.#resolvedConfigPaths()) {
+			const directory = path.dirname(filePath);
+			let targets = targetsByDirectory.get(directory);
+			if (!targets) {
+				targets = new Set();
+				targetsByDirectory.set(directory, targets);
+			}
+			targets.add(filePath);
+		}
+
+		for (const [directory, targets] of targetsByDirectory) {
+			try {
+				const watcher = fs.watch(directory, { persistent: false }, (_event, filename) => {
+					const changedPath = filename ? path.resolve(directory, filename.toString()) : undefined;
+					for (const target of targets) {
+						if (!changedPath || target === changedPath) this.#pendingWatchPaths.add(target);
+					}
+					this.#scheduleWatchedReload();
+				});
+				watcher.on("error", error => {
+					logger.warn("Settings: config watcher failed", { path: directory, error: String(error) });
+				});
+				this.#watchers.set(directory, watcher);
+			} catch (error) {
+				logger.warn("Settings: failed to watch config directory", { path: directory, error: String(error) });
+			}
+		}
+	}
+
+	#scheduleWatchedReload(): void {
+		if (this.#pendingWatchPaths.size === 0 || this.#disposed) return;
+		if (this.#watchDebounceTimer) clearTimeout(this.#watchDebounceTimer);
+		this.#watchDebounceTimer = setTimeout(() => {
+			this.#watchDebounceTimer = undefined;
+			const paths = [...this.#pendingWatchPaths];
+			this.#pendingWatchPaths.clear();
+			this.#reloadPromise = this.#reloadPromise.then(() => this.#reloadPersistedLayers(paths, true));
+			void this.#reloadPromise.catch(error => {
+				logger.warn("Settings: unexpected config reload failure", { error: String(error) });
+			});
+		}, 150);
+		this.#watchDebounceTimer.unref?.();
+	}
+
+	async #reloadPersistedLayers(triggerPaths: readonly string[], ignoreSelfWrites = false): Promise<void> {
+		if (!this.#persist || !this.#configPath || this.#disposed) return;
+		const paths = ignoreSelfWrites ? await this.#withoutSelfWrites(triggerPaths) : [...triggerPaths];
+		if (paths.length === 0) return;
+
+		for (const filePath of paths) {
+			invalidateCapabilityPath(filePath);
+			invalidateCapabilityPath(path.dirname(filePath));
+		}
+
+		for (;;) {
+			if (this.#watchDebounceTimer) {
+				clearTimeout(this.#watchDebounceTimer);
+				this.#watchDebounceTimer = undefined;
+			}
+			if (this.#saveTimer) {
+				clearTimeout(this.#saveTimer);
+				this.#saveTimer = undefined;
+			}
+			if (this.#savePromise) await this.#savePromise;
+
+			const mutationGeneration = this.#persistentMutationGeneration;
+			try {
+				const global = await this.#loadYaml(this.#configPath, true);
+				const project = await this.#loadProjectSettings(paths);
+				const configOverlay = await this.#loadConfigOverlays();
+				if (mutationGeneration !== this.#persistentMutationGeneration) continue;
+
+				for (const modifiedPath of this.#modified) {
+					const segments = modifiedPath.split(".");
+					setByPath(global, segments, getByPath(this.#global, segments));
+				}
+
+				const previous = new Map<SettingPath, unknown>();
+				for (const settingPath of Object.keys(SETTINGS_SCHEMA) as SettingPath[]) {
+					previous.set(settingPath, this.get(settingPath));
+				}
+
+				this.#global = global;
+				this.#project = project.data;
+				this.#projectConfigPaths = [...new Set([...this.#projectConfigPaths, ...project.paths])];
+				this.#configOverlay = configOverlay;
+				this.#rebuildMerged();
+
+				const changedPaths: SettingPath[] = [];
+				let statusLineChanged = false;
+				for (const settingPath of Object.keys(SETTINGS_SCHEMA) as SettingPath[]) {
+					const prev = previous.get(settingPath);
+					const next = this.get(settingPath);
+					if (isDeepStrictEqual(next, prev)) continue;
+					changedPaths.push(settingPath);
+					const hook = SETTING_HOOKS[settingPath];
+					if (hook) hook(next as any, prev as any);
+					if (settingPath.startsWith("statusLine.")) statusLineChanged = true;
+				}
+				if (statusLineChanged) statusLineSessionAccentSignal.fire();
+
+				this.#lastReloadWarningToken = undefined;
+				this.#configureWatchers();
+				if (this.#modified.size > 0) this.#queueSave();
+				if (changedPaths.length > 0) this.#emitChangeNotice({ kind: "changed", changedPaths });
+				return;
+			} catch (error) {
+				await this.#emitReloadWarning(error, paths);
+				return;
+			}
+		}
+	}
+
+	async #withoutSelfWrites(paths: readonly string[]): Promise<string[]> {
+		const external: string[] = [];
+		for (const filePath of paths) {
+			const normalized = path.resolve(filePath);
+			const selfWrite = this.#selfWriteTokens.get(normalized);
+			if (selfWrite && selfWrite.token === (await this.#fileToken(normalized))) continue;
+			external.push(normalized);
+		}
+		return external;
+	}
+
+	async #fileToken(filePath: string): Promise<string> {
+		try {
+			const stat = await fs.promises.stat(filePath, { bigint: true });
+			return `${stat.mtimeNs}:${stat.size}`;
+		} catch (error) {
+			return isEnoent(error) ? "missing" : `error:${String(error)}`;
+		}
+	}
+
+	async #emitReloadWarning(error: unknown, paths: readonly string[]): Promise<void> {
+		const tokens = await Promise.all(paths.map(async filePath => `${filePath}:${await this.#fileToken(filePath)}`));
+		const token = tokens.sort().join("|");
+		if (token === this.#lastReloadWarningToken) return;
+		this.#lastReloadWarningToken = token;
+		const detail = error instanceof Error ? error.message : String(error);
+		const message = `Settings reload ignored: ${detail}`;
+		logger.warn(message);
+		this.#emitChangeNotice({ kind: "warning", message });
+	}
+
+	#emitChangeNotice(notice: SettingsChangeNotice): void {
+		for (const listener of [...this.#changeListeners]) {
+			try {
+				listener(notice);
+			} catch (error) {
+				logger.warn("Settings: change-notice hook failed", { error: String(error) });
+			}
+		}
+	}
+
 	async #load(): Promise<Settings> {
 		// Project settings load (loadCapability scans cwd) is independent of the
-		// persist chain (storage open → legacy migration → global config.yml read),
-		// so kick it off first and await after the persist chain completes. The
-		// persist steps remain sequential: migration may write config.yml, which
-		// #loadYaml then reads; migration's db fallback needs #storage opened.
+		// persist chain (storage open → legacy migration → global config.yml read).
 		const projectPromise = this.#loadProjectSettings();
 
 		if (this.#persist) {
@@ -755,42 +975,55 @@ export class Settings {
 			await this.#seedLastChangelogVersionMarker();
 		}
 
-		this.#project = await projectPromise;
+		const project = await projectPromise;
+		this.#project = project.data;
+		this.#projectConfigPaths = project.paths;
 		this.#configOverlay = await this.#loadConfigOverlays();
 
-		// Build merged view (global → project → overrides; project wins over global)
 		this.#rebuildMerged();
 		this.#fireAllHooks();
+		this.#configureWatchers();
 		return this;
 	}
 
-	async #loadYaml(filePath: string): Promise<RawSettings> {
+	async #loadYaml(filePath: string, strict = false): Promise<RawSettings> {
 		try {
 			const content = await Bun.file(filePath).text();
 			const parsed = YAML.parse(content);
-			if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+			if (parsed === null || parsed === undefined) return {};
+			if (typeof parsed !== "object" || Array.isArray(parsed)) {
+				if (strict) throw new Error("expected a YAML mapping");
 				return {};
 			}
 			return this.#migrateRawSettings(parsed as RawSettings);
 		} catch (error) {
 			if (isEnoent(error)) return {};
+			if (strict) throw new Error(`Failed to load config ${filePath}: ${String(error)}`);
 			logger.warn("Settings: failed to load", { path: filePath, error: String(error) });
 			return {};
 		}
 	}
 
-	async #loadProjectSettings(): Promise<RawSettings> {
+	async #loadProjectSettings(strictPaths: readonly string[] = []): Promise<LoadedProjectSettings> {
 		try {
 			const result = await loadCapability(settingsCapability.id, { cwd: this.#cwd });
+			const strictWarning = result.warnings.find(warning =>
+				strictPaths.some(filePath => warning.includes(filePath)),
+			);
+			if (strictWarning) throw new Error(strictWarning);
+
 			let merged: RawSettings = {};
+			const paths: string[] = [];
 			for (const item of result.items as SettingsCapabilityItem[]) {
 				if (item.level === "project") {
 					merged = this.#deepMerge(merged, item.data as RawSettings);
+					paths.push(path.resolve(item.path));
 				}
 			}
-			return this.#migrateRawSettings(merged);
-		} catch {
-			return {};
+			return { data: this.#migrateRawSettings(merged), paths };
+		} catch (error) {
+			if (strictPaths.length > 0) throw error;
+			return { data: {}, paths: [] };
 		}
 	}
 
@@ -1139,10 +1372,17 @@ export class Settings {
 		}
 		this.#saveTimer = setTimeout(() => {
 			this.#saveTimer = undefined;
-			this.#saveNow().catch(err => {
-				logger.warn("Settings: background save failed", { error: String(err) });
-			});
+			const savePromise = this.#saveNow();
+			this.#savePromise = savePromise;
+			void savePromise
+				.catch(error => {
+					logger.warn("Settings: background save failed", { error: String(error) });
+				})
+				.finally(() => {
+					if (this.#savePromise === savePromise) this.#savePromise = undefined;
+				});
 		}, 100);
+		this.#saveTimer.unref?.();
 	}
 
 	async #saveNow(): Promise<void> {
@@ -1150,33 +1390,55 @@ export class Settings {
 
 		const configPath = this.#configPath;
 		const modifiedPaths = [...this.#modified];
+		const previous = new Map<SettingPath, unknown>();
+		for (const settingPath of Object.keys(SETTINGS_SCHEMA) as SettingPath[]) {
+			previous.set(settingPath, this.get(settingPath));
+		}
 		this.#modified.clear();
+		let saved = false;
 
 		try {
 			await withFileLock(configPath, async () => {
-				// Re-read to preserve external changes
-				const current = await this.#loadYaml(configPath);
+				// Re-read strictly to preserve valid external changes. A malformed
+				// external edit must never be replaced by this process's partial save.
+				const current = await this.#loadYaml(configPath, true);
 
-				// Apply only our modified paths
-				for (const modPath of modifiedPaths) {
-					const segments = modPath.split(".");
-					const value = getByPath(this.#global, segments);
-					setByPath(current, segments, value);
+				for (const modifiedPath of modifiedPaths) {
+					const segments = modifiedPath.split(".");
+					setByPath(current, segments, getByPath(this.#global, segments));
 				}
 
-				// Update our global with any external changes we preserved
+				await Bun.write(configPath, YAML.stringify(current, null, 2));
 				this.#global = current;
-				await Bun.write(configPath, YAML.stringify(this.#global, null, 2));
+				const generation = ++this.#selfWriteGeneration;
+				const normalizedPath = path.resolve(configPath);
+				this.#selfWriteTokens.set(normalizedPath, {
+					generation,
+					token: await this.#fileToken(normalizedPath),
+				});
+				saved = true;
 			});
 		} catch (error) {
 			logger.warn("Settings: save failed", { error: String(error) });
-			// Re-add failed paths for retry
-			for (const p of modifiedPaths) {
-				this.#modified.add(p);
-			}
+			for (const modifiedPath of modifiedPaths) this.#modified.add(modifiedPath);
 		}
 
 		this.#rebuildMerged();
+		if (!saved) return;
+
+		const changedPaths: SettingPath[] = [];
+		let statusLineChanged = false;
+		for (const settingPath of Object.keys(SETTINGS_SCHEMA) as SettingPath[]) {
+			const prev = previous.get(settingPath);
+			const next = this.get(settingPath);
+			if (isDeepStrictEqual(next, prev)) continue;
+			changedPaths.push(settingPath);
+			const hook = SETTING_HOOKS[settingPath];
+			if (hook) hook(next as any, prev as any);
+			if (settingPath.startsWith("statusLine.")) statusLineChanged = true;
+		}
+		if (statusLineChanged) statusLineSessionAccentSignal.fire();
+		if (changedPaths.length > 0) this.#emitChangeNotice({ kind: "changed", changedPaths });
 	}
 
 	// ─────────────────────────────────────────────────────────────────────────
@@ -1319,11 +1581,11 @@ const appendOnlyModeSignal = new SettingSignal<[value: string]>("provider.append
  */
 export const onAppendOnlyModeChanged = (cb: (value: string) => void) => appendOnlyModeSignal.on(cb);
 
-/** Fires when `statusLine.sessionAccent` changes at runtime. */
+/** Fires when any effective `statusLine.*` setting changes at runtime. */
 const statusLineSessionAccentSignal = new SettingSignal("statusLine.sessionAccent");
 
 /**
- * Subscribe to session-accent setting changes.
+ * Subscribe to status-line setting changes (legacy session-accent hook name).
  * Returns an unsubscribe function. Callers should re-read settings in the callback.
  */
 export const onStatusLineSessionAccentChanged = (cb: () => void) => statusLineSessionAccentSignal.on(cb);
@@ -1366,6 +1628,7 @@ export function isSettingsInitialized(): boolean {
  * @internal
  */
 export function resetSettingsForTest(): void {
+	globalInstance?.dispose();
 	globalInstance = null;
 	globalInstancePromise = null;
 	clearBoundSettingsMethods();
@@ -1395,4 +1658,3 @@ export const settings = new Proxy({} as Settings, {
 		return value;
 	},
 });
-

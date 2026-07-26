@@ -439,6 +439,7 @@ export function createAcpSessionFactory(args: AcpSessionFactoryOptions): AcpSess
 async function runInteractiveMode(
 	mode: InteractiveMode,
 	session: AgentSession,
+	activeSettings: Settings,
 	notifs: (InteractiveModeNotify | null)[],
 	versionCheckPromise: Promise<string | undefined>,
 	initialMessages: string[],
@@ -452,14 +453,14 @@ async function runInteractiveMode(
 	// their TUI/OAuth/search/theme deps) is heavy, yet the common case only needs
 	// to know whether the stored setup version is current. Lazy-load the wizard
 	// barrel only when setup is stale or forced; otherwise skip it entirely.
-	const storedSetupVersion = settings.get("setupVersion");
+	const storedSetupVersion = activeSettings.get("setupVersion");
 	const setupWizard =
 		forceSetupWizard || storedSetupVersion < CURRENT_SETUP_VERSION ? await import("./modes/setup-wizard") : undefined;
 	const setupScenes = setupWizard
 		? await setupWizard.selectSetupScenes(storedSetupVersion, setupWizard.ALL_SCENES, mode, {
 				resuming,
 				isTTY: process.stdin.isTTY && process.stdout.isTTY,
-				setupWizardEnabled: settings.get("startup.setupWizard"),
+				setupWizardEnabled: activeSettings.get("startup.setupWizard"),
 				force: forceSetupWizard,
 			})
 		: [];
@@ -475,7 +476,7 @@ async function runInteractiveMode(
 
 	versionCheckPromise
 		.then(newVersion => {
-			if (!settings.get("startup.checkUpdate")) {
+			if (!activeSettings.get("startup.checkUpdate")) {
 				return;
 			}
 			if (newVersion) {
@@ -507,11 +508,22 @@ async function runInteractiveMode(
 		await executeBuiltinSlashCommand(`/join ${joinLink}`, { ctx: mode });
 	}
 
-	await submitInitialPrompts(mode, session, initialMessages, initialMessage, initialAttachments);
+	const unsubscribeSettingsChanges = activeSettings.onChange(notice => {
+		if (notice.kind === "warning") {
+			mode.showWarning(notice.message);
+			return;
+		}
+		mode.showStatus(`Settings reloaded: ${notice.changedPaths.join(", ")}`);
+	});
+	try {
+		await submitInitialPrompts(mode, session, initialMessages, initialMessage, initialAttachments);
 
-	while (true) {
-		const input = await mode.getUserInput();
-		await submitInteractiveInput(mode, session, input);
+		while (true) {
+			const input = await mode.getUserInput();
+			await submitInteractiveInput(mode, session, input);
+		}
+	} finally {
+		unsubscribeSettingsChanges();
 	}
 }
 
@@ -1577,6 +1589,7 @@ export async function runRootCommand(
 					runInteractiveMode(
 						mode,
 						session,
+						settingsInstance,
 						notifs,
 						versionCheckPromise,
 						initialArgs.messages,
