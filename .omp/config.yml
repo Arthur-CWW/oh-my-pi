@@ -60,6 +60,9 @@ task:
   eager: always
   enableLsp: true
   maxConcurrency: 8
+  globalAdmission:
+    maxConcurrency: 8
+    attemptReservationBytes: 1610612736
   isolation: 
     mode: apfs
   softRequestBudget: 80

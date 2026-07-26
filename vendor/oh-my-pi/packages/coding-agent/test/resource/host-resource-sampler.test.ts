@@ -3,10 +3,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { HostResourceAdmission } from "@oh-my-pi/pi-coding-agent/resource/host-resource-admission";
-import {
-	defaultHostMemoryBudgetBytes,
-	sampleLeaseProcessTrees,
-} from "@oh-my-pi/pi-coding-agent/resource/host-resource-sampler";
+import { sampleLeaseProcessTrees } from "@oh-my-pi/pi-coding-agent/resource/host-resource-sampler";
 import { readProcessIdentity } from "@oh-my-pi/pi-coding-agent/resource/process-identity";
 
 describe("host resource sampler", () => {
@@ -75,10 +72,5 @@ describe("host resource sampler", () => {
 			else process.env.OMP_SESSION_CONTROL_DB = previousControlDb;
 			await fs.rm(root, { recursive: true, force: true });
 		}
-	});
-
-	it("caps the default at 52 GiB and otherwise uses sixty percent of RAM", () => {
-		expect(defaultHostMemoryBudgetBytes(10_000)).toBe(6_000);
-		expect(defaultHostMemoryBudgetBytes(100 * 1_073_741_824)).toBe(52 * 1_073_741_824);
 	});
 });

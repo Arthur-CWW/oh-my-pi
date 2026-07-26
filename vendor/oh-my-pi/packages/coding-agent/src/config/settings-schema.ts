@@ -2,7 +2,7 @@ import { THINKING_EFFORTS } from "@oh-my-pi/pi-ai";
 import { DEFAULT_SHARE_URL } from "@oh-my-pi/pi-wire";
 import { SHAPE_VARIANT_NAMES } from "@oh-my-pi/snapcompact";
 import { DEFAULT_RELAY_URL } from "../collab/protocol";
-import { DEFAULT_ATTEMPT_RESERVATION_BYTES, defaultHostMemoryBudgetBytes } from "../resource/host-resource-sampler";
+import { DEFAULT_ATTEMPT_RESERVATION_BYTES } from "../resource/host-resource-profile";
 import { DEFAULT_STT_MODEL_KEY, STT_MODEL_OPTIONS, STT_MODEL_VALUES } from "../stt/models";
 import { AUTO_THINKING, getConfiguredThinkingLevelMetadata, getThinkingLevelMetadata } from "../thinking";
 import {
@@ -3798,7 +3798,7 @@ export const SETTINGS_SCHEMA = {
 
 	"task.globalAdmission.memoryBudgetBytes": {
 		type: "number",
-		default: defaultHostMemoryBudgetBytes(),
+		default: undefined,
 		min: 1,
 		max: Number.MAX_SAFE_INTEGER,
 		integer: true,
@@ -3806,8 +3806,23 @@ export const SETTINGS_SCHEMA = {
 		ui: {
 			tab: "tasks",
 			group: "Subagents",
-			label: "Host Memory Budget",
-			description: "Maximum memory bytes reserved and observed across subagents in every OMP session on this host",
+			label: "Host Memory Budget Cap",
+			description:
+				"Optional per-host ceiling on the live memory-derived admission budget; unset uses cgroup/sysconf capacity with reserved headroom",
+		},
+	},
+	"task.globalAdmission.maxConcurrency": {
+		type: "number",
+		default: 0,
+		min: 0,
+		max: Number.MAX_SAFE_INTEGER,
+		integer: true,
+		scope: "global",
+		ui: {
+			tab: "tasks",
+			group: "Subagents",
+			label: "Host Concurrency Cap",
+			description: "Optional per-host cap; zero is resource-bounded by live CPU and memory rather than unlimited",
 		},
 	},
 	"task.globalAdmission.attemptReservationBytes": {

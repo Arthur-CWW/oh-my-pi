@@ -199,6 +199,7 @@ const HOST_DEFAULTED_SETTING_PATHS: SettingPath[] = [
 	"task.batch",
 	"task.maxConcurrency",
 	"task.globalAdmission.memoryBudgetBytes",
+	"task.globalAdmission.maxConcurrency",
 	"task.globalAdmission.attemptReservationBytes",
 	"task.maxRecursionDepth",
 	"task.disabledAgents",

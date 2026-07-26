@@ -952,8 +952,13 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 				`Cannot prove process identity before starting ${agentId}`,
 			);
 		}
+		const childReservationBytes = this.session.settings.getGlobal(
+			"task.globalAdmission.attemptReservationBytes",
+		);
 		return HostResourceAdmission.global({
 			memoryBudgetBytes: this.session.settings.getGlobal("task.globalAdmission.memoryBudgetBytes"),
+			userCap: this.session.settings.getGlobal("task.globalAdmission.maxConcurrency"),
+			childReservationBytes,
 			onPressure: async () => {
 				await AgentLifecycleManager.global().reclaimIdleChildrenForHostPressure();
 			},
@@ -967,7 +972,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 				agentId,
 				jobId,
 				holderProcess,
-				reservationBytes: this.session.settings.getGlobal("task.globalAdmission.attemptReservationBytes"),
+				reservationBytes: childReservationBytes,
 			},
 			{
 				signal,

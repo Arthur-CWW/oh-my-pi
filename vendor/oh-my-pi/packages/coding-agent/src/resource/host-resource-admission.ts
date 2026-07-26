@@ -4,14 +4,14 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { resolveIrcExternalDbPath } from "../irc/bus-external";
 import {
+	computeHostResourceProfile,
 	DEFAULT_ATTEMPT_RESERVATION_BYTES,
-	defaultHostMemoryBudgetBytes,
-	type LeaseProcessTarget,
-	sampleLeaseProcessTrees,
-} from "./host-resource-sampler";
+	type HostResourceProbe,
+	type HostResourceProfile,
+} from "./host-resource-profile";
+import { type LeaseProcessTarget, sampleLeaseProcessTrees } from "./host-resource-sampler";
 import { type ProcessIdentity, readProcessIdentity } from "./process-identity";
 
-export const COMPILED_MAX_LIVE_ATTEMPTS = 16;
 const RESOURCE_SCHEMA_VERSION = 2;
 const DEFAULT_LEASE_TTL_MS = 10_000;
 const DEFAULT_WAITER_HEARTBEAT_MS = 5_000;
@@ -24,7 +24,7 @@ const GC_PRESSURE_RATIO = 0.8;
 const HARD_PRESSURE_RATIO = 0.95;
 
 export type ResourceAttemptKind = "spawn" | "revive";
-export type AdmissionDeferredReason = "memory-budget" | "safety-ceiling" | "stale-owner-reaping";
+export type AdmissionDeferredReason = "memory-budget" | "concurrency-cap" | "stale-owner-reaping";
 export type AdmissionRejectedReason = "authority-unavailable" | "cancelled" | "pressure-hard";
 export type HostResourcePressureState = "normal" | "gc" | "hard";
 
@@ -57,6 +57,9 @@ export interface HostMemoryPressureDoorbell {
 export interface HostResourceAdmissionOptions {
 	readonly dbPath?: string;
 	readonly memoryBudgetBytes?: number;
+	readonly userCap?: number;
+	readonly childReservationBytes?: number;
+	readonly hostResourceProbe?: HostResourceProbe;
 	readonly leaseTtlMs?: number;
 	readonly waiterHeartbeatMs?: number;
 	readonly waiterStaleMs?: number;
@@ -107,7 +110,17 @@ export interface HostResourcePoolReceipt {
 }
 
 export interface HostResourcePoolSnapshot {
-	readonly safetyCeiling: number;
+	readonly mode: HostResourceProfile["mode"];
+	readonly userCap: number | null;
+	readonly effectiveLimit: number;
+	readonly limitingBounds: HostResourceProfile["limitingBounds"];
+	readonly limitExplanation: string;
+	readonly cpuCapacity: number;
+	readonly memoryCapacity: number;
+	readonly reservedHeadroomBytes: number;
+	readonly effectiveMemoryBytes: number;
+	readonly effectiveCpuCount: number;
+	readonly availableSlots: number;
 	readonly memoryBudgetBytes: number;
 	readonly reservedBytes: number;
 	readonly observedBytes: number;
@@ -330,12 +343,7 @@ export class HostResourceAdmission {
 					"Host resource authority is already bound to a different SQLite database",
 				);
 			}
-			if (options.memoryBudgetBytes !== undefined) {
-				HostResourceAdmission.#global.#memoryBudgetBytes = normalizedPositiveInteger(
-					options.memoryBudgetBytes,
-					defaultHostMemoryBudgetBytes(),
-				);
-			}
+			HostResourceAdmission.#global.#refreshResourceProfile(options);
 			if (options.onPressure) HostResourceAdmission.#global.#onPressure = options.onPressure;
 		}
 		return HostResourceAdmission.#global;
@@ -354,7 +362,11 @@ export class HostResourceAdmission {
 	readonly #queuePollMs: number;
 	readonly #observationMaxAgeMs: number;
 	readonly #samplerTimer: NodeJS.Timeout;
-	#memoryBudgetBytes: number;
+	#resourceProfile: HostResourceProfile;
+	#userCap: number | undefined;
+	#memoryBudgetCap: number | undefined;
+	#childReservationBytes: number | undefined;
+	#hostResourceProbe: HostResourceProbe | undefined;
 	#onPressure: ((doorbell: HostMemoryPressureDoorbell) => void | Promise<void>) | undefined;
 	#lastHandledPressureEpoch = 0;
 	#sampleInFlight: Promise<void> | undefined;
@@ -362,7 +374,16 @@ export class HostResourceAdmission {
 
 	constructor(options: HostResourceAdmissionOptions = {}) {
 		this.dbPath = resolveIrcExternalDbPath(options.dbPath);
-		this.#memoryBudgetBytes = normalizedPositiveInteger(options.memoryBudgetBytes, defaultHostMemoryBudgetBytes());
+		this.#userCap = options.userCap;
+		this.#memoryBudgetCap = options.memoryBudgetBytes;
+		this.#childReservationBytes = options.childReservationBytes;
+		this.#hostResourceProbe = options.hostResourceProbe;
+		this.#resourceProfile = computeHostResourceProfile({
+			userCap: this.#userCap,
+			memoryBudgetBytes: this.#memoryBudgetCap,
+			childReservationBytes: this.#childReservationBytes,
+			probe: this.#hostResourceProbe,
+		});
 		this.#leaseTtlMs = normalizedPositiveInteger(options.leaseTtlMs, DEFAULT_LEASE_TTL_MS);
 		this.#waiterHeartbeatMs = normalizedPositiveInteger(options.waiterHeartbeatMs, DEFAULT_WAITER_HEARTBEAT_MS);
 		this.#waiterStaleMs = normalizedPositiveInteger(options.waiterStaleMs, DEFAULT_WAITER_STALE_MS);
@@ -393,6 +414,19 @@ export class HostResourceAdmission {
 			});
 		}, sampleIntervalMs);
 		this.#samplerTimer.unref?.();
+	}
+
+	#refreshResourceProfile(options: HostResourceAdmissionOptions): void {
+		if (options.userCap !== undefined) this.#userCap = options.userCap;
+		if (options.memoryBudgetBytes !== undefined) this.#memoryBudgetCap = options.memoryBudgetBytes;
+		if (options.childReservationBytes !== undefined) this.#childReservationBytes = options.childReservationBytes;
+		if (options.hostResourceProbe !== undefined) this.#hostResourceProbe = options.hostResourceProbe;
+		this.#resourceProfile = computeHostResourceProfile({
+			userCap: this.#userCap,
+			memoryBudgetBytes: this.#memoryBudgetCap,
+			childReservationBytes: this.#childReservationBytes,
+			probe: this.#hostResourceProbe,
+		});
 	}
 
 	close(): void {
@@ -449,7 +483,7 @@ export class HostResourceAdmission {
 					);
 				}
 				const reason: AdmissionDeferredReason =
-					snapshot.leases.length >= COMPILED_MAX_LIVE_ATTEMPTS ? "safety-ceiling" : "memory-budget";
+					snapshot.leases.length >= snapshot.effectiveLimit ? "concurrency-cap" : "memory-budget";
 				if (!deferredReceiptWritten) {
 					this.#recordDeferred(request.attemptId);
 					deferredReceiptWritten = true;
@@ -730,7 +764,7 @@ export class HostResourceAdmission {
 			if (waiters.length === 0 || waiters.some(row => row.attempt_id === attemptId && row.rejection_reason))
 				return undefined;
 			const leases = this.#leaseRows();
-			if (leases.length >= COMPILED_MAX_LIVE_ATTEMPTS) return undefined;
+			if (leases.length >= this.#resourceProfile.effectiveLimit) return undefined;
 			const sessionHeads = new Map<string, WaiterRow>();
 			for (const waiter of waiters) {
 				if (!waiter.rejection_reason && !sessionHeads.has(waiter.session_id))
@@ -749,8 +783,8 @@ export class HostResourceAdmission {
 			if (!selected || selected.attempt_id !== attemptId) return undefined;
 			const now = Date.now();
 			const projectedBytes = this.#resourceTotals(leases, now).chargedBytes + selected.reservation_bytes;
-			if (projectedBytes > this.#memoryBudgetBytes) return undefined;
-			if (projectedBytes / this.#memoryBudgetBytes >= HARD_PRESSURE_RATIO) {
+			if (projectedBytes > this.#resourceProfile.memoryBudgetBytes) return undefined;
+			if (projectedBytes / this.#resourceProfile.memoryBudgetBytes >= HARD_PRESSURE_RATIO) {
 				this.#setPressureStateLocked("hard", projectedBytes, now);
 				this.#rejectWaitersLocked(now);
 				return undefined;
@@ -806,7 +840,7 @@ export class HostResourceAdmission {
 				attemptId: selected.attempt_id,
 				leaseId,
 				chargedBytes: projectedBytes,
-				budgetBytes: this.#memoryBudgetBytes,
+				budgetBytes: this.#resourceProfile.memoryBudgetBytes,
 			});
 			this.#refreshPressureLocked(now);
 			return new HostResourceLease(
@@ -870,7 +904,7 @@ export class HostResourceAdmission {
 
 	#refreshPressureLocked(now: number): void {
 		const chargedBytes = this.#resourceTotals(this.#leaseRows(), now).chargedBytes;
-		const ratio = chargedBytes / this.#memoryBudgetBytes;
+		const ratio = chargedBytes / this.#resourceProfile.memoryBudgetBytes;
 		const next: HostResourcePressureState =
 			ratio >= HARD_PRESSURE_RATIO ? "hard" : ratio >= GC_PRESSURE_RATIO ? "gc" : "normal";
 		this.#setPressureStateLocked(next, chargedBytes, now);
@@ -894,7 +928,7 @@ export class HostResourceAdmission {
 			atMs: now,
 			pressureState: next,
 			chargedBytes,
-			budgetBytes: this.#memoryBudgetBytes,
+			budgetBytes: this.#resourceProfile.memoryBudgetBytes,
 		});
 	}
 
@@ -1005,13 +1039,32 @@ export class HostResourceAdmission {
 			throw new HostAdmissionCorruptError("Host resource receipt snapshot is malformed", { cause: error });
 		}
 		return {
-			safetyCeiling: COMPILED_MAX_LIVE_ATTEMPTS,
-			memoryBudgetBytes: this.#memoryBudgetBytes,
+			mode: this.#resourceProfile.mode,
+			userCap: this.#resourceProfile.userCap,
+			effectiveLimit: this.#resourceProfile.effectiveLimit,
+			limitingBounds: this.#resourceProfile.limitingBounds,
+			limitExplanation: this.#resourceProfile.explanation,
+			cpuCapacity: this.#resourceProfile.cpuCapacity,
+			memoryCapacity: this.#resourceProfile.memoryCapacity,
+			reservedHeadroomBytes: this.#resourceProfile.reservedHeadroomBytes,
+			effectiveMemoryBytes: this.#resourceProfile.effectiveMemoryBytes,
+			effectiveCpuCount: this.#resourceProfile.effectiveCpuCount,
+			availableSlots: Math.max(
+				0,
+				Math.min(
+					this.#resourceProfile.effectiveLimit - leases.length,
+					Math.floor(
+						(this.#resourceProfile.memoryBudgetBytes - totals.chargedBytes) /
+							this.#resourceProfile.childReservationBytes,
+					),
+				),
+			),
+			memoryBudgetBytes: this.#resourceProfile.memoryBudgetBytes,
 			reservedBytes: totals.reservedBytes,
 			observedBytes: totals.observedBytes,
 			chargedBytes: totals.chargedBytes,
 			pressureState: pressureState(state.pressure_state),
-			pressureRatio: totals.chargedBytes / this.#memoryBudgetBytes,
+			pressureRatio: totals.chargedBytes / this.#resourceProfile.memoryBudgetBytes,
 			pressureEpoch: state.pressure_epoch,
 			sampledAtMs: state.sample_at_ms,
 			waiters: waiters.map(row => ({

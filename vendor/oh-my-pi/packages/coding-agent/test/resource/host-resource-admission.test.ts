@@ -50,7 +50,18 @@ describe("HostResourceAdmission memory budget", () => {
 	});
 
 	function open(options: ConstructorParameters<typeof HostResourceAdmission>[0]): HostResourceAdmission {
-		const admission = new HostResourceAdmission({ dbPath, queuePollMs: 5, sampleIntervalMs: 60_000, ...options });
+		const admission = new HostResourceAdmission({
+			dbPath,
+			queuePollMs: 5,
+			sampleIntervalMs: 60_000,
+			childReservationBytes: 1,
+			hostResourceProbe: {
+				systemMemoryBytes: 512 * 1_073_741_824,
+				systemCpuCount: 128,
+				warnings: [],
+			},
+			...options,
+		});
 		admissions.push(admission);
 		return admission;
 	}
@@ -81,7 +92,9 @@ describe("HostResourceAdmission memory budget", () => {
 			leases.push(await admission.acquire(request(`attempt-${index}`, `session-${index}`, 100)));
 		}
 		expect(admission.inspect()).toMatchObject({
-			safetyCeiling: 16,
+			mode: "resource-bounded",
+			effectiveLimit: 102,
+			limitingBounds: ["cpu"],
 			memoryBudgetBytes: 10_000,
 			reservedBytes: 400,
 			chargedBytes: 400,

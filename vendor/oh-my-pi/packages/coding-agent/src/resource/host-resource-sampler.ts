@@ -1,19 +1,9 @@
-import * as os from "node:os";
 import { matchesProcessIdentity, type ProcessIdentity } from "./process-identity";
 
-const GIB = 1_073_741_824;
 const DEFAULT_MAX_OUTPUT_BYTES = 16 * 1_048_576;
 const DEFAULT_MAX_PROCESSES = 100_000;
 const DEFAULT_TIMEOUT_MS = 2_000;
 const PS_COMMAND = Object.freeze(["/bin/ps", "-axo", "pid=,ppid=,rss="] as const);
-
-export const DEFAULT_ATTEMPT_RESERVATION_BYTES = Math.floor(1.5 * GIB);
-
-/** Default host pool budget: sixty percent of RAM, capped at 52 GiB. */
-export function defaultHostMemoryBudgetBytes(totalBytes = os.totalmem()): number {
-	const boundedTotal = Number.isSafeInteger(totalBytes) && totalBytes > 0 ? totalBytes : 52 * GIB;
-	return Math.min(52 * GIB, Math.floor(boundedTotal * 0.6));
-}
 
 export interface LeaseProcessTarget {
 	readonly leaseId: string;
