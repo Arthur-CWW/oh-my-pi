@@ -39,6 +39,7 @@ export const commands: OmpCommandEntry[] = [
 	commandEntry({ name: "say", load: () => import("./commands/say").then(m => m.default) }),
 	commandEntry({ name: "rollout", load: () => import("./session/rollout").then(m => m.default) }),
 	commandEntry({ name: "setup", load: () => import("./commands/setup").then(m => m.default) }),
+	commandEntry({ name: "sessions", load: () => import("./commands/sessions").then(m => m.default) }),
 	commandEntry({ name: "shell", load: () => import("./commands/shell").then(m => m.default) }),
 	commandEntry({ name: "read", load: () => import("./commands/read").then(m => m.default) }),
 	commandEntry({ name: "ssh", load: () => import("./commands/ssh").then(m => m.default) }),

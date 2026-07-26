@@ -803,7 +803,8 @@ export const SETTINGS_SCHEMA = {
 			tab: "appearance",
 			group: "Display",
 			label: "Mouse Support",
-			description: "Enable mouse reporting in fullscreen views. Off preserves terminal-native selection and copy/paste.",
+			description:
+				"Enable mouse reporting in fullscreen views. Off preserves terminal-native selection and copy/paste.",
 		},
 	},
 
@@ -3736,6 +3737,17 @@ export const SETTINGS_SCHEMA = {
 	"task.isolateSetup": {
 		type: "boolean",
 		default: undefined,
+	},
+
+	"majordomo.idleReclaimer.enabled": {
+		type: "boolean",
+		default: false,
+		ui: {
+			tab: "tasks",
+			group: "Automations",
+			label: "Majordomo Idle Reclaimer",
+			description: "Checkpoint and park provably idle, childless sessions during automation sweeps",
+		},
 	},
 
 	"quotaAdmission.enabled": {

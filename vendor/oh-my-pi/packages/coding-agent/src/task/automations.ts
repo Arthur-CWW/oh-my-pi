@@ -9,6 +9,10 @@ import { resolveModelOverrideWithAuthFallback } from "../config/model-resolver";
 import { getKnownRoleIds, MODEL_ROLE_IDS } from "../config/model-roles";
 import { Settings } from "../config/settings";
 import type { MCPManager } from "../mcp/manager";
+import {
+	IDLE_RECLAIMER_SWEEP_INTERVAL_MS,
+	runIdleReclaimerSweep as sweepIdleSessions,
+} from "../resource/idle-reclaimer";
 import { createAgentSession, discoverAuthStorage } from "../sdk";
 import type { AgentSession } from "../session/agent-session";
 import { SessionManager } from "../session/session-manager";
@@ -157,7 +161,6 @@ export interface AutomationRunOptions {
 	readonly signal?: AbortSignal;
 }
 
-
 export interface AutomationDaemonOptions extends AutomationRunOptions {
 	readonly sleep?: (durationMs: number, signal?: AbortSignal) => Promise<void>;
 	readonly random?: () => number;
@@ -175,6 +178,10 @@ export interface AutomationDaemonOptions extends AutomationRunOptions {
 	readonly onRun?: (entry: AutomationEntry) => void | Promise<void>;
 	readonly run?: (entry: AutomationEntry) => Promise<AutomationRunResult>;
 	readonly onError?: (entry: AutomationEntry, error: unknown) => void | Promise<void>;
+	readonly idleReclaimerEnabled?: boolean;
+	readonly idleReclaimerSweepIntervalMs?: number;
+	readonly idleReclaimerSweep?: () => Promise<void>;
+	readonly onIdleReclaimerError?: (error: unknown) => void | Promise<void>;
 }
 
 function cleanRequired(value: string, field: string, name?: string): string {
@@ -311,10 +318,7 @@ function decodeAutomationLedgerEntry(input: unknown): AutomationLedgerEntry {
 		if (decoded.command.length === 0 || decoded.command.some(argument => argument.trim().length === 0)) {
 			throw new Error("Automation ledger command must contain nonempty arguments");
 		}
-		if (
-			decoded.exitCode !== null &&
-			(!Number.isSafeInteger(decoded.exitCode) || decoded.exitCode < 0)
-		) {
+		if (decoded.exitCode !== null && (!Number.isSafeInteger(decoded.exitCode) || decoded.exitCode < 0)) {
 			throw new Error("Automation ledger exitCode must be a non-negative safe integer or null");
 		}
 		const expectedStatus = decoded.exitCode === 0 ? "succeeded" : "failed";
@@ -459,11 +463,7 @@ async function executeAutomationCommand(
 	};
 }
 
-function formatCommandFailure(
-	entry: CommandAutomationEntry,
-	result: CommandExecutionResult,
-	aborted: boolean,
-): string {
+function formatCommandFailure(entry: CommandAutomationEntry, result: CommandExecutionResult, aborted: boolean): string {
 	const lines = [
 		`Automation ${entry.name} command ${aborted ? "was aborted" : "failed"} with exit code ${result.exitCode}: ${JSON.stringify(entry.command)}`,
 	];
@@ -532,7 +532,12 @@ export async function runAutomationOnce(
 				entry.model === undefined && MODEL_ROLE_IDS.includes(requestedSelector as (typeof MODEL_ROLE_IDS)[number])
 					? `pi/${requestedSelector}`
 					: requestedSelector;
-			const resolution = await resolveModelOverrideWithAuthFallback([roleSelector], undefined, modelRegistry, settings);
+			const resolution = await resolveModelOverrideWithAuthFallback(
+				[roleSelector],
+				undefined,
+				modelRegistry,
+				settings,
+			);
 			if (!resolution.model) {
 				const availableRoles: string[] = [];
 				for (const role of getKnownRoleIds(settings)) {
@@ -548,7 +553,9 @@ export async function runAutomationOnce(
 					availableRoles.length > 0
 						? ` Available roles: ${availableRoles.join(", ")}.`
 						: " No automation roles are available.";
-				throw new Error(`No available model for automation lane ${JSON.stringify(requestedSelector)}.${candidates}`);
+				throw new Error(
+					`No available model for automation lane ${JSON.stringify(requestedSelector)}.${candidates}`,
+				);
 			}
 			const created = await createSession({
 				cwd: entry.cwd,
@@ -644,9 +651,36 @@ export async function runAutomationDaemon(options: AutomationDaemonOptions = {})
 		if (now() - startedAt > maxUptimeMs) return "uptime";
 		return undefined;
 	};
+	const superviseIdleReclaimer =
+		options.idleReclaimerEnabled !== undefined || options.idleReclaimerSweep !== undefined;
+	const idleReclaimerSweepIntervalMs = Math.max(
+		1,
+		options.idleReclaimerSweepIntervalMs ?? IDLE_RECLAIMER_SWEEP_INTERVAL_MS,
+	);
+	let lastIdleReclaimerSweepAt: number | undefined;
 	let cycles = 0;
 	while (!options.signal?.aborted && (options.maxCycles === undefined || cycles < options.maxCycles)) {
 		cycles += 1;
+		if (superviseIdleReclaimer) {
+			const sweepAt = now();
+			if (
+				lastIdleReclaimerSweepAt === undefined ||
+				sweepAt - lastIdleReclaimerSweepAt >= idleReclaimerSweepIntervalMs
+			) {
+				lastIdleReclaimerSweepAt = sweepAt;
+				try {
+					if (options.idleReclaimerSweep) await options.idleReclaimerSweep();
+					else
+						await sweepIdleSessions({
+							enabled: options.idleReclaimerEnabled ?? false,
+							agentDir,
+							nowMs: () => sweepAt,
+						});
+				} catch (error) {
+					await options.onIdleReclaimerError?.(error);
+				}
+			}
+		}
 		const entries = await loadAutomationRegistry(agentDir);
 		for (const entry of entries) {
 			if (!entry.enabled || options.signal?.aborted) continue;

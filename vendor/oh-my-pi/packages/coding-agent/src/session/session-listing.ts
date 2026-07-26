@@ -3,8 +3,8 @@ import * as path from "node:path";
 import type { Message, TextContent } from "@oh-my-pi/pi-ai";
 import { getAgentDir as getDefaultAgentDir, logger, parseJsonlLenient, toError } from "@oh-my-pi/pi-utils";
 import { decodeSessionWorkstream, type SessionWorkstream } from "./session-entries";
-import { computeDefaultSessionDir } from "./session-paths";
 import { inspectLiveSessionOwnerDetails, type SessionOwnerDetails } from "./session-ownership";
+import { computeDefaultSessionDir } from "./session-paths";
 import { FileSessionStorage, type SessionStorage } from "./session-storage";
 
 /**
@@ -146,7 +146,7 @@ function extractTextFromContent(content: Message["content"]): string {
  * partial fragment — it simply fails to parse and is skipped. We walk backwards to
  * the last `message` entry and classify by its role / stop reason.
  */
-function deriveSessionStatus(suffix: string): SessionStatus {
+export function deriveSessionStatus(suffix: string): SessionStatus {
 	if (!suffix) return "unknown";
 	const lines = suffix.split("\n");
 	for (let i = lines.length - 1; i >= 0; i--) {

@@ -1,5 +1,6 @@
 import { Effect, Option } from "effect";
 import { Argument, Command, Flag } from "effect/unstable/cli";
+import { Settings } from "../config/settings";
 import {
 	type AutomationEntry,
 	AutomationRunError,
@@ -33,9 +34,7 @@ function reportAutomationFailure(error: AutomationRunError, json: boolean): void
 	if (json) {
 		process.stdout.write(`${JSON.stringify(error.result)}\n`);
 	} else {
-		process.stderr.write(
-			`${error.result.name}: failed (${error.result.durationMs}ms)\n${error.message}\n`,
-		);
+		process.stderr.write(`${error.result.name}: failed (${error.result.durationMs}ms)\n${error.message}\n`);
 	}
 	process.exitCode = error.result.exitCode ?? 1;
 }
@@ -47,9 +46,7 @@ export default Command.make(
 			Argument.withDescription("list (default), run, status, or daemon"),
 			Argument.withDefault("list"),
 		),
-		name: Argument.optional(
-			Argument.string("name").pipe(Argument.withDescription("Automation name")),
-		),
+		name: Argument.optional(Argument.string("name").pipe(Argument.withDescription("Automation name"))),
 		json: Flag.boolean("json").pipe(
 			Flag.withAlias("j"),
 			Flag.withDescription("Output JSON"),
@@ -70,7 +67,7 @@ export default Command.make(
 						entries.map(entry => [
 							entry.name,
 							entry.schedule,
-							entry.command ? "command" : entry.model ?? entry.lane,
+							entry.command ? "command" : (entry.model ?? entry.lane),
 							entry.enabled ? "yes" : "no",
 							entry.cwd,
 						]),
@@ -79,9 +76,7 @@ export default Command.make(
 				}
 				case "run": {
 					try {
-						const result = await runAutomationOnce(
-							findAutomation(entries, Option.getOrUndefined(config.name)),
-						);
+						const result = await runAutomationOnce(findAutomation(entries, Option.getOrUndefined(config.name)));
 						if (config.json) process.stdout.write(`${JSON.stringify(result)}\n`);
 						else
 							process.stdout.write(
@@ -129,11 +124,17 @@ export default Command.make(
 					process.once("SIGINT", abort);
 					process.once("SIGTERM", abort);
 					try {
+						const settings = await Settings.init();
 						await runAutomationDaemon({
 							signal: controller.signal,
+							idleReclaimerEnabled: settings.get("majordomo.idleReclaimer.enabled"),
 							onError: (entry, error) => {
 								const message = error instanceof Error ? error.message : String(error);
 								process.stderr.write(`${entry.name}: failed\n${message}\n`);
+							},
+							onIdleReclaimerError: error => {
+								const message = error instanceof Error ? error.message : String(error);
+								process.stderr.write(`idle-reclaimer: failed\n${message}\n`);
 							},
 						});
 					} catch (error) {
