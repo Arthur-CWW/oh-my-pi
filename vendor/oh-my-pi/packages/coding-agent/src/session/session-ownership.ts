@@ -573,7 +573,9 @@ function processMatches(identity: ProcessIdentity): boolean {
 	);
 }
 
-interface OwnerProofChallenge {
+// A type alias (not an interface) so the challenge stays assignable to the
+// wire transport's JsonValue parameter without a cast.
+type OwnerProofChallenge = {
 	readonly nonce: string;
 	readonly sessionId: string;
 	readonly ownerEpoch: string;
@@ -581,7 +583,7 @@ interface OwnerProofChallenge {
 	readonly buildDigest: string;
 	readonly ownerPid: number;
 	readonly ownershipSocketPath: string;
-}
+};
 
 interface OwnerProof {
 	readonly t: "ownerProof";
