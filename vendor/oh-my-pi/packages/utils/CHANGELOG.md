@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added the call-time `OMP_CONFIG_ROOT` override for profile-owned state roots, with typed rejection of relative paths, so in-process tests can isolate browser and eval ownership state without changing `HOME`.
+
 ## [15.13.3] - 2026-06-15
 
 ### Added

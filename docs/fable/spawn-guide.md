@@ -2,7 +2,7 @@
 
 Apply this doctrine to every task spawn.
 
-- Isolate all test state under a fresh tmpdir: swap `HOME`, inject an `IrcExternalBus` database path, and set `OMP_SESSION_CONTROL_DB` to a tmpdir database. HOME swapping alone is insufficient.
+- Isolate all test state under a fresh tmpdir: set `OMP_CONFIG_ROOT` to a tmpdir config root, inject an `IrcExternalBus` database path, and set `OMP_SESSION_CONTROL_DB` to a tmpdir database. HOME swapping alone is insufficient.
 - Never commit, clean, or reset repository state. Preserve the working tree for the coordinator.
 - Run focused gates only: the named/new tests and the required package typecheck. Do not repair foreign failures.
 - IRC before editing a shared file; identify the current owner and exact seam first.

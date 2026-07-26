@@ -1,8 +1,9 @@
 /**
  * Centralized path helpers for omp config directories.
  *
- * Uses PI_CONFIG_DIR (default ".omp") for the config root and
- * PI_CODING_AGENT_DIR to override the agent directory.
+ * Uses OMP_CONFIG_ROOT for an explicit absolute config root, otherwise
+ * PI_CONFIG_DIR (default ".omp") under the user's home directory.
+ * PI_CODING_AGENT_DIR overrides the default profile's agent directory.
  *
  * On Linux, if XDG_DATA_HOME / XDG_STATE_HOME / XDG_CACHE_HOME environment
  * variables are set, paths are redirected to XDG-compliant locations under
@@ -21,6 +22,19 @@ export const APP_NAME: string = "omp";
 
 /** Config directory name (e.g. ".omp") */
 export const CONFIG_DIR_NAME: string = ".omp";
+
+/** Absolute config-root override, evaluated at call time. */
+export const CONFIG_ROOT_ENV = "OMP_CONFIG_ROOT";
+
+/** Raised when {@link CONFIG_ROOT_ENV} contains a relative filesystem path. */
+export class InvalidConfigRootError extends Error {
+	readonly code = "INVALID_CONFIG_ROOT";
+
+	constructor(readonly root: string) {
+		super(`${CONFIG_ROOT_ENV} must be an absolute path, received ${JSON.stringify(root)}`);
+		this.name = "InvalidConfigRootError";
+	}
+}
 
 /** Version (e.g. "1.0.0" or "1.0.0+fork.abcdef1" for local fork binaries) */
 const FORK_HASH = process.env.PI_FORK_HASH?.trim();
@@ -102,6 +116,11 @@ function readProfileFromEnvSafe(): string | undefined {
 }
 
 function getBaseConfigRoot(): string {
+	const override = process.env[CONFIG_ROOT_ENV];
+	if (override) {
+		if (!path.isAbsolute(override)) throw new InvalidConfigRootError(override);
+		return path.normalize(override);
+	}
 	return path.join(os.homedir(), getConfigDirName());
 }
 
@@ -457,7 +476,7 @@ export function getActiveProfile(): string | undefined {
 	return activeProfile;
 }
 
-/** Resolve the config root that backs a profile without activating it. */
+/** Resolve the config root that backs a profile, honoring `OMP_CONFIG_ROOT` at call time. */
 export function getProfileRootDir(profile: string | undefined): string {
 	return getProfileConfigRoot(normalizeProfileName(profile));
 }
