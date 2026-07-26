@@ -141,7 +141,7 @@ assert not ("advisor" in ($inspection.routing.stream | columns))
 assert equal ($inspection.routing.root.task | columns) [agentModelOverrides]
 assert (($inspection.routing.root.retry | columns) | all {|key| $key in [fallbackChains modelFallback fallbackRevertPolicy] })
 assert equal ($inspection.models | length) 3
-assert ($inspection.models | all {|row| $"($row.provider)/($row.id)" in [anthropic/claude-opus-4-6 openai-codex/gpt-5.6-luna openai-codex/gpt-5.6-sol] })
+assert ($inspection.models | all {|row| $"($row.provider)/($row.id)" in [anthropic/claude-opus-5 openai-codex/gpt-5.6-luna openai-codex/gpt-5.6-sol] })
 assert not ($inspection.models | any {|row| $row.provider == "google" })
 
 # Matching hashes are a routing-only no-op.

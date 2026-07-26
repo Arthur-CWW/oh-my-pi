@@ -69,6 +69,12 @@ workspaces:
     streams:
       harness:
         ompConfig: .omp/desktop-config.yml
+        tmuxSession: harness
+        tmuxWindows:
+          orchestrator: orchestrator
+          services: services
+          review: review
+          server: server
         setupDirs:
           - packages/fleet-observer
           - packages/fleet-board
@@ -98,6 +104,12 @@ workspaces:
             path: /
       primer:
         ompConfig: .omp/primer-config.yml
+        tmuxSession: primer
+        tmuxWindows:
+          orchestrator: orchestrator
+          services: services
+          review: review
+          server: server
         setupDirs:
           - packages/primer-daemon
           - packages/stema
@@ -131,6 +143,12 @@ workspaces:
             path: /
       companion:
         ompConfig: .omp/companion-config.yml
+        tmuxSession: companion
+        tmuxWindows:
+          orchestrator: orchestrator
+          services: services
+          review: review
+          server: server
         setupDirs:
           - apps/ai-companion-rtc
           - apps/xanadu
@@ -163,6 +181,12 @@ workspaces:
             path: /
       playground:
         ompConfig: .omp/playground-config.yml
+        tmuxSession: playground
+        tmuxWindows:
+          orchestrator: orchestrator
+          services: services
+          review: review
+          server: server
         errorLog: data/scene-playground/errors.log
         setupDirs:
           - apps/scene-playground
@@ -212,6 +236,25 @@ workspaces:
       companion: /home/arthur/agents-companion
       primer: /home/arthur/agents-primer
       playground: /home/arthur/agents-playground
+    tmuxMigrationSources:
+      companion:
+        - session: companion-h11
+          window: "π: companion-h11-successor"
+          targetWindow: orchestrator
+        - session: companion-review-h11
+          window: arthur
+          targetWindow: server
+      primer:
+        - session: primer-h11-successor
+          window: orchestrator
+          targetWindow: orchestrator
+      playground:
+        - session: agent-playground-successor
+          window: orchestrator
+          targetWindow: orchestrator
+        - session: playground-scene
+          window: server
+          targetWindow: server
     laneRoot: /home/arthur/tmp/harness-lanes/workspaces
     laneManifest: /home/arthur/tmp/harness-lanes/manifest.json
     laneBundleRoot: /home/arthur/tmp/harness-lanes/bundles

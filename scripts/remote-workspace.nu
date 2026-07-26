@@ -153,6 +153,41 @@ def validate-catalog [catalog: record] {
             }
             valid-root ($routing_roots | get $routing_stream) $workspace.user
         }
+        let migration_sources = ($workspace.tmuxMigrationSources? | default {})
+        if ($migration_sources | describe) !~ '^record' {
+            error make {msg: $"tmuxMigrationSources must be a record for ($workspace_name)"}
+        }
+        for migration_stream in ($migration_sources | columns) {
+            valid-id $migration_stream $"tmux migration stream for ($workspace_name)"
+            if $migration_stream not-in ($workspace.streams | columns) {
+                error make {msg: $"Unknown tmux migration stream for ($workspace_name): ($migration_stream)"}
+            }
+            let sources = ($migration_sources | get $migration_stream)
+            if ($sources | describe) !~ '^(list|table)' or ($sources | is-empty) {
+                error make {msg: $"tmux migration sources must be a non-empty list for ($workspace_name)/($migration_stream)"}
+            }
+            let stream_windows = ($workspace.streams | get $migration_stream | get tmuxWindows | values)
+            for source in $sources {
+                if ($source | describe) !~ '^record' or ($source | columns | sort) != [session targetWindow window] {
+                    error make {msg: $"tmux migration source must define session, window, and targetWindow for ($workspace_name)/($migration_stream)"}
+                }
+                valid-id $source.session $"tmux migration source session for ($workspace_name)/($migration_stream)"
+                if ($source.window | describe) != "string" or ($source.window | is-empty) or ($source.window | str contains "\n") {
+                    error make {msg: $"Invalid tmux migration source window for ($workspace_name)/($migration_stream)"}
+                }
+                valid-id $source.targetWindow $"tmux migration target window for ($workspace_name)/($migration_stream)"
+                if $source.targetWindow not-in $stream_windows {
+                    error make {msg: $"Unknown tmux migration target window for ($workspace_name)/($migration_stream): ($source.targetWindow)"}
+                }
+            }
+            if ($sources.targetWindow | uniq | length) != ($sources | length) {
+                error make {msg: $"tmux migration target windows must be unique for ($workspace_name)/($migration_stream)"}
+            }
+            let source_identities = ($sources | each {|source| [$source.session $source.window] | to json --raw })
+            if ($source_identities | uniq | length) != ($sources | length) {
+                error make {msg: $"tmux migration source windows must be unique for ($workspace_name)/($migration_stream)"}
+            }
+        }
         let lane_root = ($workspace.laneRoot? | default null)
         if $lane_root != null {
             valid-lane-root $lane_root $workspace "laneRoot"
@@ -189,6 +224,19 @@ def validate-catalog [catalog: record] {
             let allowed_harness_config = $stream_name == "harness" and $omp_config == ".omp/desktop-config.yml"
             if (($omp_config | describe) != "string") or ($omp_config != $canonical_omp_config and not $allowed_harness_config) {
                 error make {msg: $"Invalid ompConfig for ($workspace_name)/($stream_name): ($omp_config)"}
+            }
+            if ($stream.tmuxSession? | describe) != "string" or $stream.tmuxSession != $stream_name {
+                error make {msg: $"tmuxSession must equal stream name for ($workspace_name)/($stream_name)"}
+            }
+            let tmux_windows = ($stream.tmuxWindows? | default null)
+            if ($tmux_windows | describe) !~ '^record' or ($tmux_windows | columns | sort) != [orchestrator review server services] {
+                error make {msg: $"tmuxWindows must define orchestrator, review, server, and services for ($workspace_name)/($stream_name)"}
+            }
+            for window_name in ($tmux_windows | values) {
+                valid-id $window_name $"tmux window for ($workspace_name)/($stream_name)"
+            }
+            if ($tmux_windows | values | uniq | length) != 4 {
+                error make {msg: $"tmuxWindows must be unique for ($workspace_name)/($stream_name)"}
             }
             let setup_dirs = ($stream.setupDirs? | default null)
             if (($setup_dirs | describe) !~ '^list') or ($setup_dirs | is-empty) {
@@ -348,12 +396,6 @@ def remote-lane-action [workspace: record, workspace_name: string, action: strin
     }
 }
 
-def remote-attach [workspace: record, workspace_name: string, stream_name: string, manifest_path: string] {
-    install-runner $workspace $manifest_path
-    let destination = (target $workspace)
-    let remote_nu = $workspace.remoteNu
-    checked-external --stream "Remote workspace attach" { ^ssh -t ...$ssh_options $destination $remote_nu --no-config-file $workspace.remoteRunner _attach $stream_name --workspace $workspace_name --catalog $workspace.remoteManifest }
-}
 
 def probe-value [output: string, key: string] {
     let prefix = $"($key)="
@@ -1262,9 +1304,210 @@ def require-services-enabled [stream: record, action: string] {
     }
 }
 
+def tmux-session-exists [session_name: string] {
+    let result = (^tmux list-sessions -F '#{session_name}' | complete)
+    if $result.exit_code != 0 {
+        if ($result.stderr | str contains "no server running") { return false }
+        error make {msg: $"Unable to list tmux sessions: ($result.stderr | str trim)"}
+    }
+    ($result.stdout | lines | where {|name| $name == $session_name } | length) == 1
+}
+
+def tmux-format-value [target: string, format: string] {
+    let result = (^tmux display-message -p -t $target $format | complete)
+    if $result.exit_code != 0 { error make {msg: $"Unable to read tmux format ($format) for ($target)"} }
+    $result.stdout | str replace --regex '\r?\n$' ''
+}
+
+def tmux-windows [session_name: string] {
+    let result = (^tmux list-windows -t $session_name -F '#{window_id}' | complete)
+    if $result.exit_code != 0 { error make {msg: $"Unable to list tmux windows for ($session_name)"} }
+    $result.stdout | lines | where {|id| not ($id | is-empty) } | each {|id|
+        {
+            name: (tmux-format-value $id '#{window_name}')
+            id: $id
+            index: (tmux-format-value $id '#{window_index}')
+        }
+    }
+}
+
+def tmux-window-names [session_name: string] {
+    tmux-windows $session_name | get name
+}
+
+export def ensure-tmux-window [session_name: string, window_name: string, root: string, command: string] {
+    valid-id $session_name "tmux session"
+    valid-id $window_name "tmux window"
+    if not (tmux-session-exists $session_name) {
+        let window_id = (checked-external "Create tmux workstream session" { ^tmux new-session -d -P -F '#{window_id}' -s $session_name -n $window_name -c $root $command } | str trim)
+        if ($window_id | is-empty) { error make {msg: $"Tmux did not report the created window for ($session_name)"} }
+        rename-tmux-window $window_id $window_name
+        return {session: $session_name, window: $window_name, windowId: $window_id, createdSession: true, createdWindow: true}
+    }
+    let matches = (tmux-windows $session_name | where name == $window_name)
+    if ($matches | length) > 1 { error make {msg: $"Ambiguous tmux window ($session_name):($window_name)"} }
+    if ($matches | length) == 1 {
+        let window_id = ($matches | first | get id)
+        return {session: $session_name, window: $window_name, windowId: $window_id, createdSession: false, createdWindow: false}
+    }
+    let window_id = (checked-external "Create tmux workstream window" { ^tmux new-window -d -P -F '#{window_id}' -t $"($session_name):" -n $window_name -c $root $command } | str trim)
+    if ($window_id | is-empty) { error make {msg: $"Tmux did not report the created window for ($session_name):($window_name)"} }
+    rename-tmux-window $window_id $window_name
+    {session: $session_name, window: $window_name, windowId: $window_id, createdSession: false, createdWindow: true}
+}
+
+export def inspect-tmux-topology [workspace: record, stream_name: string] {
+    let stream = (select-stream $workspace $stream_name)
+    let result = (^tmux list-windows -a -F '#{window_id}' | complete)
+    let rows = if $result.exit_code == 0 {
+        $result.stdout | lines | where {|id| not ($id | is-empty) } | each {|id|
+            {
+                session: (tmux-format-value $id '#{session_name}')
+                sessionId: (tmux-format-value $id '#{session_id}')
+                window: (tmux-format-value $id '#{window_name}')
+                windowId: $id
+                panePid: (tmux-format-value $id '#{pane_pid}')
+                command: (tmux-format-value $id '#{pane_current_command}')
+                startCommand: (tmux-format-value $id '#{pane_start_command}')
+                root: (tmux-format-value $id '#{pane_current_path}')
+                automaticRename: ((tmux-format-value $id '#{automatic-rename}') == "1")
+                allowRename: ((tmux-format-value $id '#{allow-rename}') == "1")
+                paneTitle: (tmux-format-value $id '#{pane_title}')
+            }
+        }
+    } else if ($result.stderr | str contains "no server running") {
+        []
+    } else {
+        error make {msg: $"Unable to inspect tmux topology: ($result.stderr | str trim)"}
+    }
+    let hooks_result = (^tmux show-hooks -g | complete)
+    let rename_hooks = if $hooks_result.exit_code == 0 {
+        $hooks_result.stdout | lines | where {|line| $line | str contains "rename" }
+    } else {
+        []
+    }
+    {
+        host: $workspace.host
+        stream: $stream_name
+        canonical: {session: $stream.tmuxSession, windows: $stream.tmuxWindows}
+        configuredSources: ($workspace.tmuxMigrationSources? | default {} | get --optional $stream_name | default [])
+        renameHooks: $rename_hooks
+        topology: $rows
+    }
+}
+
+def rename-tmux-window [window_target: string, window_name: string] {
+    checked-external "Override automatic rename hook for canonical window" { ^tmux set-hook -w -t $window_target after-rename-window "" } | ignore
+    checked-external "Disable automatic tmux window renaming" { ^tmux set-option -w -t $window_target automatic-rename off } | ignore
+    checked-external "Disable pane-controlled tmux window renaming" { ^tmux set-option -w -t $window_target allow-rename off } | ignore
+    let automatic_rename = (checked-external "Verify automatic tmux renaming policy" { ^tmux show-options -w -v -t $window_target automatic-rename } | str trim)
+    let allow_rename = (checked-external "Verify pane-controlled tmux renaming policy" { ^tmux show-options -w -v -t $window_target allow-rename } | str trim)
+    if $automatic_rename != "off" or $allow_rename != "off" {
+        error make {msg: $"Unable to pin tmux window name policy for ($window_target)"}
+    }
+    checked-external "Rename canonical tmux window" { ^tmux rename-window -t $window_target $window_name } | ignore
+    let observed_name = (checked-external "Verify canonical tmux window name" { ^tmux display-message -p -t $window_target '#{window_name}' } | str trim)
+    if $observed_name != $window_name { error make {msg: $"Tmux window rename did not persist for ($window_target): ($observed_name)"} }
+}
+
+export def migrate-tmux-topology [workspace: record, stream_name: string] {
+
+    let stream = (select-stream $workspace $stream_name)
+    let target_session = $stream.tmuxSession
+    let configured_sources = ($workspace.tmuxMigrationSources? | default {} | get --optional $stream_name | default [])
+    if ($configured_sources | is-empty) { error make {msg: $"No positively identified tmux migration source for ($workspace.host)/($stream_name)"} }
+
+    let live_sources = ($configured_sources | each {|source|
+        if not (tmux-session-exists $source.session) { return null }
+        let source_matches = (tmux-windows $source.session | where name == $source.window)
+        if ($source_matches | length) > 1 { error make {msg: $"Migration source window is ambiguous for ($source.session):($source.window)"} }
+        if ($source_matches | is-empty) { null } else { $source | merge {windowId: ($source_matches | first | get id), windowIndex: ($source_matches | first | get index)} }
+    } | compact)
+    for target_window in ($configured_sources.targetWindow | uniq) {
+        if ($live_sources | where targetWindow == $target_window | length) > 1 {
+            error make {msg: $"Ambiguous tmux migration sources for ($workspace.host)/($stream_name)/($target_window)"}
+        }
+    }
+
+    let target_exists = (tmux-session-exists $target_session)
+    let canonical_windows = if $target_exists { tmux-window-names $target_session } else { [] }
+    for target_window in ($configured_sources.targetWindow | uniq) {
+        let live_count = ($live_sources | where targetWindow == $target_window | length)
+        let canonical_count = ($canonical_windows | where {|name| $name == $target_window } | length)
+        if $canonical_count > 1 { error make {msg: $"Canonical tmux target is ambiguous for ($workspace.host)/($stream_name)/($target_window)"} }
+        if $live_count == 1 and $canonical_count == 1 { error make {msg: $"Canonical tmux target window already exists for ($workspace.host)/($stream_name)/($target_window)"} }
+        if $live_count == 0 and $canonical_count == 0 { error make {msg: $"No live tmux migration source for ($workspace.host)/($stream_name)/($target_window)"} }
+    }
+    if ($live_sources | is-empty) {
+        return {
+            host: $workspace.host
+            stream: $stream_name
+            session: $target_session
+            migrated: false
+            reason: "already-canonical"
+            windows: $canonical_windows
+            rollback: []
+        }
+    }
+
+    mut remaining_sources = $live_sources
+    mut operations = []
+    mut rollback = []
+    if not $target_exists {
+        let preferred = ($remaining_sources | where targetWindow == $stream.tmuxWindows.orchestrator)
+        let source = (if ($preferred | is-empty) { $remaining_sources | first } else { $preferred | first })
+        checked-external "Rename canonical tmux workstream session" { ^tmux rename-session -t $source.session $target_session } | ignore
+        $operations = ($operations | append {operation: "rename-session", from: $source.session, to: $target_session})
+        $rollback = ($rollback | prepend {operation: "rename-session", from: $target_session, to: $source.session})
+        if $source.window != $source.targetWindow {
+            rename-tmux-window $"($target_session):($source.windowIndex)" $source.targetWindow
+            $operations = ($operations | append {operation: "rename-window", session: $target_session, from: $source.window, to: $source.targetWindow})
+            $rollback = ($rollback | prepend {operation: "rename-window", windowId: $source.windowId, from: $source.targetWindow, to: $source.window, automaticRename: "on", afterRenameHook: "inherit"})
+        }
+        $remaining_sources = ($remaining_sources | where {|candidate| $candidate != $source })
+    }
+
+    for source in $remaining_sources {
+        if $source.session == $target_session {
+            if $source.window != $source.targetWindow {
+                rename-tmux-window $"($target_session):($source.windowIndex)" $source.targetWindow
+                $operations = ($operations | append {operation: "rename-window", session: $target_session, from: $source.window, to: $source.targetWindow})
+                $rollback = ($rollback | prepend {operation: "rename-window", windowId: $source.windowId, from: $source.targetWindow, to: $source.window, automaticRename: "on", afterRenameHook: "inherit"})
+            }
+            continue
+        }
+        checked-external "Move process into canonical tmux session" { ^tmux move-window -s $source.windowId -t $"($target_session):" } | ignore
+        if $source.window != $source.targetWindow {
+            let moved_window = (tmux-windows $target_session | where id == $source.windowId)
+            if ($moved_window | length) != 1 { error make {msg: $"Unable to identify moved tmux window ($source.windowId)"} }
+            rename-tmux-window $"($target_session):($moved_window | first | get index)" $source.targetWindow
+        }
+        $operations = ($operations | append {operation: "move-window", from: $"($source.session):($source.window)", to: $"($target_session):($source.targetWindow)"})
+        $rollback = ($rollback | prepend {
+            operation: "move-window"
+            windowId: $source.windowId
+            sourceSession: $source.session
+            sourceWindow: $source.window
+            from: $"($target_session):($source.targetWindow)"
+            to: $"($source.session):($source.window)"
+            createSessionIfMissing: $source.session
+        })
+    }
+    {
+        host: $workspace.host
+        stream: $stream_name
+        session: $target_session
+        migrated: true
+        windows: (tmux-window-names $target_session)
+        operations: $operations
+        rollback: $rollback
+    }
+}
+
 def remote-service [workspace: record, stream: record, action: string, stream_name: string] {
     require-services-enabled $stream $action
-    cd $workspace.root
+    let root = (routing-root $workspace $stream_name)
+    cd $root
     let bun_dir = ($workspace.bun | path dirname)
     $env.PATH = if (($env.PATH | describe) =~ '^list') {
         [$bun_dir] | append $env.PATH
@@ -1273,15 +1516,23 @@ def remote-service [workspace: record, stream: record, action: string, stream_na
     }
     match $action {
         "up" => {
-            let portless_runtime = (resolve-portless $workspace.root)
+            let portless_runtime = (resolve-portless $root)
             let node = $portless_runtime.node
             let portless = $portless_runtime.portless
             checked-external --stream "Prune remote Portless routes" { ^$node $portless prune }
-            checked-external --stream "Start services for ($stream_name)" { ^mise run up $stream_name }
+            let command = $"mise run up ($stream_name)"
+            ensure-tmux-window $stream.tmuxSession $stream.tmuxWindows.services $root $command | to json --indent 2 | print
         }
         "down" => {
             checked-external --stream "Stop services for ($stream_name)" { ^mise run down $stream_name }
-            let portless_runtime = (resolve-portless $workspace.root)
+            if (tmux-session-exists $stream.tmuxSession) {
+                let service_windows = (tmux-window-names $stream.tmuxSession | where {|name| $name == $stream.tmuxWindows.services })
+                if ($service_windows | length) > 1 { error make {msg: $"Ambiguous services window for ($stream_name)"} }
+                if ($service_windows | length) == 1 {
+                    checked-external "Close services tmux window" { ^tmux kill-window -t $"($stream.tmuxSession):($stream.tmuxWindows.services)" } | ignore
+                }
+            }
+            let portless_runtime = (resolve-portless $root)
             let node = $portless_runtime.node
             let portless = $portless_runtime.portless
             checked-external --stream "Prune remote Portless routes" { ^$node $portless prune }
@@ -1326,43 +1577,64 @@ def remote-review [workspace: record, stream: record] {
     } | to json --indent 2
 }
 
-def launcher-path [workspace: record, stream_name: string] {
-    $"($workspace.root)/.runtime/remote-workspace/launch-($stream_name).nu"
+def launcher-path [root: string, stream_name: string] {
+    $"($root)/.runtime/remote-workspace/launch-($stream_name).nu"
 }
 
 def remote-launch [workspace: record, stream: record, stream_name: string] {
-    let tmux_name = $"agent-($stream_name)"
-    if (^tmux has-session -t $tmux_name | complete).exit_code == 0 {
-        {launched: false, reason: "already-running", tmux: $tmux_name} | to json --indent 2
-        return
-    }
-    let launcher = (launcher-path $workspace $stream_name)
+    let root = (routing-root $workspace $stream_name)
+    let launcher = (launcher-path $root $stream_name)
     mkdir ($launcher | path dirname)
     let prompt = ($stream.promptRefs | each {|ref| $"@($ref)" } | str join " ")
     let bun_dir = ($workspace.bun | path dirname)
     [
         "#!/usr/bin/env -S nu --no-config-file"
         $"use '($workspace.remoteRunner)' checked-external"
-        $"cd ($workspace.root)"
+        $"cd ($root)"
         $"let bun = '($workspace.bun)'"
         $"let bun_dir = '($bun_dir)'"
         "$env.PATH = if (($env.PATH | describe) =~ '^list') { [$bun_dir] | append $env.PATH } else { [$bun_dir $env.PATH] | str join (char esep) }"
         $"checked-external --stream 'Source OMP agent' { ^$bun vendor/oh-my-pi/packages/coding-agent/src/cli.ts --config ($stream.ompConfig) --workstream ($stream_name) '($prompt)' }"
     ] | str join "\n" | save -f $launcher
-    let remote_nu = $workspace.remoteNu
-    let command = $"($remote_nu) --no-config-file ($launcher)"
-    checked-external --stream "Launch agent tmux session ($tmux_name)" { ^tmux new-session -d -s $tmux_name -n orchestrator -c $workspace.root $command }
-    sleep 2sec
-    if (^tmux has-session -t $tmux_name | complete).exit_code != 0 {
-        error make {msg: $"Agent tmux session failed to start: ($tmux_name)"}
+    let command = $"($workspace.remoteNu) --no-config-file ($launcher)"
+    let receipt = (ensure-tmux-window $stream.tmuxSession $stream.tmuxWindows.orchestrator $root $command)
+    if $receipt.createdWindow {
+        sleep 2sec
+        if not (tmux-session-exists $stream.tmuxSession) {
+            error make {msg: $"Agent tmux session failed to start: ($stream.tmuxSession)"}
+        }
     }
-    {launched: true, tmux: $tmux_name, root: $workspace.root, prompt_refs: $stream.promptRefs} | to json --indent 2
+    $receipt | merge {root: $root, prompt_refs: $stream.promptRefs} | to json --indent 2
+}
+
+
+export def open-native-tmux-projection [workspace: record, workspace_name: string, session_name: string] {
+    valid-id $session_name "tmux session"
+    let cmux = (command-path cmux)
+    let help = (^$cmux ssh-tmux --help | complete)
+    let supports_targeted_projection = $help.exit_code == 0 and (($help.stdout + $help.stderr) | str contains "--session")
+    if not $supports_targeted_projection {
+        return {
+            workspace: $workspace_name
+            host: $workspace.host
+            session: $session_name
+            projectionOpened: false
+            gate: "cmux-targeted-remote-tmux-projection-unavailable"
+        }
+    }
+    checked-external "Open targeted native remote tmux projection" { ^$cmux ssh-tmux $workspace.host --session $session_name --no-focus } | ignore
+    {
+        workspace: $workspace_name
+        host: $workspace.host
+        session: $session_name
+        projectionOpened: true
+        command: [$cmux ssh-tmux $workspace.host --session $session_name --no-focus]
+    }
 }
 
 def remote-probe [workspace: record, stream: record, stream_name: string] {
-    cd $workspace.root
-    let bun = $workspace.bun
-    let stdout = (checked-external "Source OMP probe" { ^$bun vendor/oh-my-pi/packages/coding-agent/src/cli.ts --config $stream.ompConfig --workstream $stream_name --print "Reply exactly READY" })
+    cd (routing-root $workspace $stream_name)
+    let stdout = (checked-external "Compiled OMP probe" { ^$workspace.omp --config $stream.ompConfig --workstream $stream_name --print "Reply exactly READY" })
     {
         exit_code: 0,
         stdout: ($stdout | str trim),
@@ -1521,8 +1793,9 @@ def main [
             "_review" => { let stream_config = (select-stream $workspace_config $stream_name); remote-review $workspace_config $stream_config | print }
             "_errors" => { let stream_config = (select-stream $workspace_config $stream_name); remote-errors $workspace_config $stream_config $stream_name }
             "_launch" => { let stream_config = (select-stream $workspace_config $stream_name); remote-launch $workspace_config $stream_config $stream_name | print }
-            "_screen" => { require-stream $workspace_config $stream_name; checked-external --stream "Capture agent tmux screen" { ^tmux capture-pane -p -t $"agent-($stream_name):orchestrator" -S -80 } }
-            "_attach" => { require-stream $workspace_config $stream_name; checked-external --stream "Attach agent tmux session" { ^tmux attach-session -t $"agent-($stream_name)" } }
+            "_screen" => { let stream_config = (select-stream $workspace_config $stream_name); checked-external --stream "Capture agent tmux screen" { ^tmux capture-pane -p -t $"($stream_config.tmuxSession):($stream_config.tmuxWindows.orchestrator)" -S -80 } }
+            "_tmux:inspect" => { inspect-tmux-topology $workspace_config $stream_name | to json --indent 2 | print }
+            "_tmux:migrate" => { migrate-tmux-topology $workspace_config $stream_name | to json --indent 2 | print }
             "_probe" => { let stream_config = (select-stream $workspace_config $stream_name); remote-probe $workspace_config $stream_config $stream_name | print }
             "_lane:new" => {
                 if ($arguments | length) < 2 { error make {msg: "_lane:new requires <stream> <lane> [owned-paths...]"} }
@@ -1581,6 +1854,17 @@ def main [
             require-stream $workspace_config $stream_name
             routing-sync $workspace_config $workspace $stream_name $source_root | to json --indent 2 | print
         }
+        "tmux:inspect" => {
+            if ($arguments | length) != 1 { error make {msg: "tmux:inspect requires <stream>"} }
+            require-stream $workspace_config $stream_name
+            remote-action $workspace_config $workspace "_tmux:inspect" $stream_name $manifest_path | print
+        }
+        "tmux:migrate" => {
+            if ($arguments | length) != 1 { error make {msg: "tmux:migrate requires <stream>"} }
+            let stream_config = (select-stream $workspace_config $stream_name)
+            remote-action $workspace_config $workspace "_tmux:migrate" $stream_name $manifest_path | print
+            open-native-tmux-projection $workspace_config $workspace $stream_config.tmuxSession | to json --indent 2 | print
+        }
         "doctor" => { doctor $workspace_config $workspace $manifest_path }
         "sync" => { require-stream $workspace_config $stream_name; sync-source $manifest $workspace_config $workspace $stream_name $manifest_path }
         "setup" => {
@@ -1593,6 +1877,7 @@ def main [
             let stream_config = (select-stream $workspace_config $stream_name)
             require-services-enabled $stream_config "up"
             remote-action $workspace_config $workspace _up $stream_name $manifest_path | print
+            open-native-tmux-projection $workspace_config $workspace $stream_config.tmuxSession | to json --indent 2 | print
             ensure-forward $workspace_config $workspace $stream_name
         }
         "down" => {
@@ -1632,13 +1917,14 @@ def main [
         "errors" => { require-stream $workspace_config $stream_name; remote-action --stream-output $workspace_config $workspace _errors $stream_name $manifest_path }
         "review" => { require-stream $workspace_config $stream_name; review $workspace_config $workspace $stream_name }
         "launch" => {
-            require-stream $workspace_config $stream_name
+            let stream_config = (select-stream $workspace_config $stream_name)
             remote-action $workspace_config $workspace _launch $stream_name $manifest_path | print
+            open-native-tmux-projection $workspace_config $workspace $stream_config.tmuxSession | to json --indent 2 | print
             ensure-forward $workspace_config $workspace $stream_name
         }
         "screen" => { require-stream $workspace_config $stream_name; remote-action $workspace_config $workspace _screen $stream_name $manifest_path | print }
-        "attach" => { require-stream $workspace_config $stream_name; remote-attach $workspace_config $workspace $stream_name $manifest_path }
+        "attach" => { error make {msg: "Direct SSH attach is disabled; use the native cmux remote tmux workspace"} }
         "probe" => { require-stream $workspace_config $stream_name; remote-action $workspace_config $workspace _probe $stream_name $manifest_path | print }
-        _ => { error make {msg: "Usage: remote-workspace.nu <doctor|sync|setup|routing:inspect|routing:sync|up|down|status|errors|review|launch|screen|attach|probe|forward|lane:new|lane:list|lane:bundle|lane:drop> [arguments...]"} }
+        _ => { error make {msg: "Usage: remote-workspace.nu <doctor|sync|setup|routing:inspect|routing:sync|tmux:inspect|tmux:migrate|up|down|status|errors|review|launch|screen|probe|forward|lane:new|lane:list|lane:bundle|lane:drop> [arguments...]"} }
     }
 }
