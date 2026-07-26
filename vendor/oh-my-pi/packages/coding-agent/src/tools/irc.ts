@@ -19,8 +19,8 @@ import type { RenderResultOptions } from "../extensibility/custom-tools/types";
 import { IrcBus, type IrcDeliveryReceipt, type IrcDeliveryRecord, type IrcMessage } from "../irc/bus";
 import { getIrcExternalPeerDisplayState, IrcExternalBus, resolveIrcExternalPeerName } from "../irc/bus-external";
 import { renderTranscriptBodyLines } from "../modes/components/transcript-body";
-import { transcriptDisplayCacheVersion, type TranscriptDisplayContext } from "../modes/transcript-display";
 import type { Theme } from "../modes/theme/theme";
+import { type TranscriptDisplayContext, transcriptDisplayCacheVersion } from "../modes/transcript-display";
 import ircDescription from "../prompts/tools/irc.md" with { type: "text" };
 import type { AgentRegistry } from "../registry/agent-registry";
 import { createFleetCapability } from "../session/fleet-capability";
@@ -28,13 +28,7 @@ import { CURRENT_SESSION_CONTROL_PROTOCOL } from "../session/session-control";
 import { canSpawnAtDepth } from "../task/types";
 import { Ellipsis, renderStatusLine, truncateToWidth } from "../tui";
 import type { ToolSession } from ".";
-import {
-	buildIrcCallLines,
-	buildIrcResultLines,
-	ircGlyph,
-	type IrcRenderArgs,
-	messageAge,
-} from "./irc-renderer";
+import { buildIrcCallLines, buildIrcResultLines, type IrcRenderArgs, ircGlyph, messageAge } from "./irc-renderer";
 import { createCachedComponent } from "./render-utils";
 
 const DEFAULT_IRC_TIMEOUT_MS = 120_000;
@@ -485,10 +479,9 @@ export class IrcTool implements AgentTool<typeof ircSchema, IrcDetails> {
 		const senderId = this.session.getAgentId?.() ?? undefined;
 		const ownership = this.session.sessionManager?.getSessionOwnership();
 		const isSubprocessWorker = process.env.OMP_SUBPROCESS_WORKER === "1" && senderId !== undefined;
-		const sessionId =
-			isSubprocessWorker
-				? senderId
-				: (ownership?.sessionId ?? this.session.getSessionId?.() ?? `${this.session.cwd}:${process.pid}`);
+		const sessionId = isSubprocessWorker
+			? senderId
+			: (ownership?.sessionId ?? this.session.getSessionId?.() ?? `${this.session.cwd}:${process.pid}`);
 		const bus = this.externalBus ?? IrcExternalBus.global();
 		const name = isSubprocessWorker
 			? senderId
@@ -633,10 +626,22 @@ export const ircToolRenderer = {
 		return createCachedComponent(
 			() => options.expanded,
 			(width, expanded) => {
-				const lines = buildIrcResultLines(result, details, args, expanded, width, uiTheme, options.transcriptDisplay);
+				const lines = buildIrcResultLines(
+					result,
+					details,
+					args,
+					expanded,
+					width,
+					uiTheme,
+					options.transcriptDisplay,
+				);
 				if (options.headline) {
 					lines[0] = renderStatusLine(
-						{ icon: result.isError ? "error" : options.isPartial ? "running" : "success", spinnerFrame: options.spinnerFrame, title: options.headline },
+						{
+							icon: result.isError ? "error" : options.isPartial ? "running" : "success",
+							spinnerFrame: options.spinnerFrame,
+							title: options.headline,
+						},
 						uiTheme,
 					);
 				}

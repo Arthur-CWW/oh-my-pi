@@ -157,10 +157,7 @@ export function snapshotRequestedToolNames(toolNames: readonly string[] | undefi
 
 interface FollowUpResultRouter {
 	arm(): void;
-	subscribe(
-		session: AgentSession,
-		onLifecycleEvent: (event: AgentSessionEvent) => void,
-	): () => void;
+	subscribe(session: AgentSession, onLifecycleEvent: (event: AgentSessionEvent) => void): () => void;
 }
 
 function resultText(result: unknown): string | undefined {
@@ -452,6 +449,10 @@ export interface ExecutorOptions {
 	parentTelemetry?: AgentTelemetryConfig;
 	/** Skills to autoload via sendCustomMessage before the first prompt */
 	autoloadSkills?: Skill[];
+}
+
+export function resolveSubagentWorkingDirectory(cwd: string, worktree?: string): string {
+	return worktree ?? cwd;
 }
 
 function parseStringifiedJson(value: unknown): unknown {
@@ -2323,7 +2324,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 				: (thinkingLevel ?? resolvedThinkingLevel);
 
 			const parentWorkstream = options.parentWorkstream;
-			const effectiveCwd = worktree ?? cwd;
+			const effectiveCwd = resolveSubagentWorkingDirectory(cwd, worktree);
 			// Classification is copied once into the child's own header. Reopened
 			// children keep their persisted value; inherited writes never override it.
 			const sessionManager = sessionFile
@@ -2387,7 +2388,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 			// Materialize initial child options once. The parked-session descriptor below
 			// retains only data, so revival cannot retain this executor closure.
 			const buildSubagentSessionOptions = (sessionManagerForRun: SessionManager): CreateAgentSessionOptions => ({
-				cwd: worktree ?? cwd,
+				cwd: effectiveCwd,
 				authStorage,
 				modelRegistry,
 				quotaAdmission: options.quotaAdmission,
@@ -2538,7 +2539,8 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 									definitionSourcePath,
 									assignment: assignment ?? task,
 									context: options.context,
-									resolvedModel: routeReceipt?.route.selector ?? (model ? `${model.provider}/${model.id}` : undefined),
+									resolvedModel:
+										routeReceipt?.route.selector ?? (model ? `${model.provider}/${model.id}` : undefined),
 									route: routeReceipt,
 									buildVersion: options.buildVersion,
 									buildDigest: options.buildDigest,

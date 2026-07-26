@@ -200,7 +200,7 @@ describe("task progress rendering", () => {
 		expect(row).not.toContain(theme.fg("accent", titlePart));
 	});
 
-	it("shows the dispatch glyph in the header while agents run, not a spinner", async () => {
+	it("shows a spinner in the header while agents run, not the dispatch glyph", async () => {
 		const theme = (await getThemeByName("dark"))!;
 		const options: RenderResultOptions = { expanded: false, isPartial: true, spinnerFrame: 0 };
 		const header = findRow(
@@ -213,9 +213,8 @@ describe("task progress rendering", () => {
 		);
 
 		const stripped = Bun.stripANSI(header);
-		expect(stripped).toContain(`${theme.symbol("tool.task")} Task`);
-		expect(stripped).not.toContain(theme.status.running);
-		expect(stripped).not.toContain(theme.getSpinnerFrames("status")[0]);
+		expect(stripped).toContain(theme.getSpinnerFrames("status")[0]);
+		expect(stripped).not.toContain(theme.symbol("tool.task"));
 	});
 
 	it("renders the assignment markdown inside the result frame", async () => {
@@ -506,7 +505,7 @@ describe("task result detail-less state", () => {
 		expect(stripped).toContain("Validation failed");
 	});
 
-	it("renders a detail-less success with the accent bullet, not an error glyph", async () => {
+	it("renders a detail-less success with the success glyph, not an error glyph", async () => {
 		const theme = (await getThemeByName("dark"))!;
 		setThemeInstance(theme);
 		const options: RenderResultOptions = { expanded: false, isPartial: false };
@@ -516,7 +515,7 @@ describe("task result detail-less state", () => {
 		});
 		const stripped = Bun.stripANSI(component.render(120).join("\n"));
 
-		expect(stripped).toContain(theme.status.done);
+		expect(stripped).toContain(theme.status.success);
 		expect(stripped).not.toContain(theme.status.error);
 	});
 });

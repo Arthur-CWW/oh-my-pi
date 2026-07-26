@@ -49,7 +49,7 @@ describe("subagent COOP irc guidance", () => {
 describe("composeSpawnAdvisory", () => {
 	const worker = (role?: string): TaskItem => ({ assignment: "x", role });
 
-	it("joins the specialization tip and the irc coordination suggestion for an async generic fanout", () => {
+	it("joins the deprecated-alias migration with the irc coordination suggestion for an async fanout", () => {
 		const advisory = composeSpawnAdvisory({
 			agentName: "task",
 			items: [worker(), worker()],
@@ -57,11 +57,11 @@ describe("composeSpawnAdvisory", () => {
 			ircEnabled: true,
 			willRunAsync: true,
 		});
-		expect(advisory).toContain("`role`");
+		expect(advisory).toContain('agent: "implementer"');
 		expect(advisory).toContain("Coordinate:");
 	});
 
-	it("drops the coordination suggestion on the sync path but keeps the specialization tip", () => {
+	it("drops the coordination suggestion on the sync path but keeps the deprecated-alias migration", () => {
 		const advisory = composeSpawnAdvisory({
 			agentName: "task",
 			items: [worker(), worker()],
@@ -69,11 +69,11 @@ describe("composeSpawnAdvisory", () => {
 			ircEnabled: true,
 			willRunAsync: false,
 		});
-		expect(advisory).toContain("`role`");
+		expect(advisory).toContain("deprecated-alias");
 		expect(advisory).not.toContain("Coordinate:");
 	});
 
-	it("omits coordination when irc is unavailable, even async", () => {
+	it("omits coordination when irc is unavailable but keeps the deprecated-alias migration", () => {
 		const advisory = composeSpawnAdvisory({
 			agentName: "task",
 			items: [worker(), worker()],
@@ -81,7 +81,7 @@ describe("composeSpawnAdvisory", () => {
 			ircEnabled: false,
 			willRunAsync: true,
 		});
-		expect(advisory).toContain("`role`");
+		expect(advisory).toContain("deprecated-alias");
 		expect(advisory).not.toContain("Coordinate:");
 	});
 
@@ -97,15 +97,15 @@ describe("composeSpawnAdvisory", () => {
 		).toBeUndefined();
 	});
 
-	it("returns undefined at max depth (no spawn capacity)", () => {
-		expect(
-			composeSpawnAdvisory({
-				agentName: "task",
-				items: [worker(), worker()],
-				depthCapacity: false,
-				ircEnabled: true,
-				willRunAsync: true,
-			}),
-		).toBeUndefined();
+	it("keeps the deprecated-alias migration at max depth without suggesting coordination", () => {
+		const advisory = composeSpawnAdvisory({
+			agentName: "task",
+			items: [worker(), worker()],
+			depthCapacity: false,
+			ircEnabled: true,
+			willRunAsync: true,
+		});
+		expect(advisory).toContain("deprecated-alias");
+		expect(advisory).not.toContain("Coordinate:");
 	});
 });

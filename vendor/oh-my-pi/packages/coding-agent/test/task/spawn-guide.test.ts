@@ -32,13 +32,19 @@ describe("task spawn guide", () => {
 		expect(context!.indexOf("Spawn guide:")).toBeLessThan(context!.indexOf("Shared goal"));
 	});
 
-	it("resolves the default guide from the repository root", async () => {
-		const repoRoot = path.resolve(import.meta.dir, "../../../../../..");
+	it("resolves the default guide from the enclosing jj workspace root", async () => {
+		const repoRoot = path.join(tempDir, "workspace");
+		const guidePath = path.join(repoRoot, "docs/fable/spawn-guide.md");
 		const nestedCwd = path.join(repoRoot, "vendor", "oh-my-pi", "packages", "coding-agent");
+		await fs.mkdir(path.join(repoRoot, ".jj", "repo"), { recursive: true });
+		await fs.mkdir(nestedCwd, { recursive: true });
+		await fs.mkdir(path.dirname(guidePath), { recursive: true });
+		await fs.writeFile(guidePath, "Use the workspace-local guide.", "utf8");
 
 		const context = await prepareSpawnContext(nestedCwd, undefined, "Shared goal");
 
-		expect(context).toContain(`Spawn guide: ${path.join(repoRoot, "docs/fable/spawn-guide.md")} (`);
+		expect(context).toContain(`Spawn guide: ${guidePath} (`);
+		expect(context).toContain("Use the workspace-local guide.");
 	});
 
 	it("treats an absent guide as a clean no-op", async () => {

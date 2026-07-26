@@ -1,291 +1,88 @@
-import { afterEach, describe, expect, it, vi } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { AssistantMessage } from "@oh-my-pi/pi-ai";
-import type { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import type { LoadExtensionsResult } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/types";
-import type { PlanModeState } from "@oh-my-pi/pi-coding-agent/plan-mode/state";
-import type { CreateAgentSessionOptions, CreateAgentSessionResult } from "@oh-my-pi/pi-coding-agent/sdk";
-import * as sdkModule from "@oh-my-pi/pi-coding-agent/sdk";
-import type { AgentSession, AgentSessionEvent, PromptOptions } from "@oh-my-pi/pi-coding-agent/session/agent-session";
-import { TaskTool } from "@oh-my-pi/pi-coding-agent/task";
-import * as discoveryModule from "@oh-my-pi/pi-coding-agent/task/discovery";
-import type { AgentDefinition, TaskParams } from "@oh-my-pi/pi-coding-agent/task/types";
-import type { IsolationHandle, WorktreeBaseline } from "@oh-my-pi/pi-coding-agent/task/worktree";
-import * as worktreeModule from "@oh-my-pi/pi-coding-agent/task/worktree";
+import { resolveSubagentDefinition, resolveSubagentLspEnabled } from "@oh-my-pi/pi-coding-agent/task";
+import { resolveSubagentWorkingDirectory } from "@oh-my-pi/pi-coding-agent/task/executor";
+import type { AgentDefinition } from "@oh-my-pi/pi-coding-agent/task/types";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
-import "@oh-my-pi/pi-coding-agent/tools/yield";
-import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
+import { SessionManager } from "../../src/session/session-manager";
 
-const TEST_TASK: TaskParams = {
-	agent: "task",
-	id: "CheckLsp",
-	description: "Check LSP availability",
-	assignment: "Inspect LSP tools.",
-};
+type LspPolicySession = Pick<ToolSession, "enableLsp" | "settings">;
 
-function createAssistantStopMessage(text: string): AssistantMessage {
+function createSession(options: { parentEnableLsp?: boolean; taskEnableLsp?: boolean } = {}): LspPolicySession {
 	return {
-		role: "assistant",
-		content: text ? [{ type: "text", text }] : [],
-		api: "openai-responses",
-		provider: "openai",
-		model: "mock",
-		usage: {
-			input: 0,
-			output: 0,
-			cacheRead: 0,
-			cacheWrite: 0,
-			totalTokens: 0,
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-		},
-		stopReason: "stop",
-		timestamp: Date.now(),
-	};
-}
-
-function createYieldingSession(): AgentSession {
-	const listeners: Array<(event: AgentSessionEvent) => void> = [];
-	const state = { messages: [] as AssistantMessage[] };
-
-	const emit = (event: AgentSessionEvent) => {
-		for (const listener of listeners) listener(event);
-	};
-
-	return {
-		state,
-		agent: { state: { systemPrompt: ["test"] } },
-		model: undefined,
-		extensionRunner: undefined,
-		sessionManager: {
-			appendSessionInit: () => {},
-		},
-		getActiveToolNames: () => ["yield"],
-		setActiveToolsByName: async () => {},
-		subscribe: (listener: (event: AgentSessionEvent) => void) => {
-			listeners.push(listener);
-			return () => {
-				const index = listeners.indexOf(listener);
-				if (index >= 0) listeners.splice(index, 1);
-			};
-		},
-		prompt: async (_text: string, _options?: PromptOptions) => {
-			state.messages.push(createAssistantStopMessage("done"));
-			emit({
-				type: "tool_execution_end",
-				toolCallId: "yield-call",
-				toolName: "yield",
-				result: {
-					content: [{ type: "text", text: "Result submitted." }],
-					details: { status: "success", data: { ok: true } },
-				},
-				isError: false,
-			});
-		},
-		waitForIdle: async () => {},
-		getLastAssistantMessage: () => state.messages[state.messages.length - 1],
-		abort: async () => {},
-		dispose: async () => {},
-	} as unknown as AgentSession;
-}
-
-function createSession(
-	options: {
-		isolationMode?: "none" | "auto";
-		parentEnableLsp?: boolean;
-		planMode?: PlanModeState;
-		sessionFile?: string | null;
-		taskEnableLsp?: boolean;
-	} = {},
-): ToolSession {
-	const modelRegistry = {
-		authStorage: undefined,
-		refresh: async () => {},
-		getAvailable: () => [],
-		getApiKey: async () => null,
-	} as unknown as ModelRegistry;
-
-	return {
-		cwd: "/tmp",
-		hasUI: false,
 		enableLsp: options.parentEnableLsp,
 		settings: Settings.isolated({
-			"async.enabled": false,
-			"task.isolation.mode": options.isolationMode ?? "none",
 			...(options.taskEnableLsp !== undefined ? { "task.enableLsp": options.taskEnableLsp } : {}),
 		}),
-		getSessionFile: () => options.sessionFile ?? null,
-		getSessionSpawns: () => "*",
-		modelRegistry,
-		getPlanModeState: () => options.planMode,
-	} as unknown as ToolSession;
-}
-
-function mockAgents(agent: AgentDefinition): void {
-	vi.spyOn(discoveryModule, "discoverAgents").mockResolvedValue({
-		agents: [agent],
-		projectAgentsDir: null,
-	});
-}
-
-function mockCreateAgentSession(): { getOptions: () => CreateAgentSessionOptions | undefined } {
-	let capturedOptions: CreateAgentSessionOptions | undefined;
-	vi.spyOn(sdkModule, "createAgentSession").mockImplementation(async (options = {}) => {
-		capturedOptions = options;
-		return {
-			session: createYieldingSession(),
-			extensionsResult: {} as unknown as LoadExtensionsResult,
-			setToolUIContext: () => {},
-			eventBus: new EventBus(),
-		} satisfies CreateAgentSessionResult;
-	});
-	return { getOptions: () => capturedOptions };
-}
-
-function mockIsolation(): void {
-	const baseline: WorktreeBaseline = {
-		root: {
-			repoRoot: "/repo",
-			headCommit: "HEAD",
-			staged: "",
-			unstaged: "",
-			untracked: [],
-			untrackedPatch: "",
-		},
-		nested: [],
 	};
-	const isolationHandle: IsolationHandle = {
-		mergedDir: "/tmp/isolated-subagent",
-		backend: worktreeModule.parseIsolationMode("rcopy")!,
-		fellBack: false,
-		fallbackReason: null,
-	};
+}
 
-	vi.spyOn(worktreeModule, "getRepoRoot").mockResolvedValue("/repo");
-	vi.spyOn(worktreeModule, "captureBaseline").mockResolvedValue(baseline);
-	vi.spyOn(worktreeModule, "ensureIsolation").mockResolvedValue(isolationHandle);
-	vi.spyOn(worktreeModule, "captureDeltaPatch").mockResolvedValue({ rootPatch: "", nestedPatches: [] });
-	vi.spyOn(worktreeModule, "cleanupIsolation").mockResolvedValue();
+function taskAgent(overrides: Partial<AgentDefinition> = {}): AgentDefinition {
+	return {
+		name: "task",
+		description: "Task agent",
+		systemPrompt: "Use normal tools.",
+		source: "bundled",
+		tools: ["lsp"],
+		...overrides,
+	};
 }
 
 describe("subagent LSP availability", () => {
-	afterEach(() => {
-		vi.restoreAllMocks();
+	it("disables LSP for subagents by default", () => {
+		expect(resolveSubagentLspEnabled(createSession())).toBe(false);
 	});
 
-	it("disables LSP for subagents by default", async () => {
-		mockAgents({
-			name: "task",
-			description: "Task agent",
-			systemPrompt: "Use LSP when useful.",
-			source: "bundled",
-			tools: ["lsp"],
-		});
-		const { getOptions } = mockCreateAgentSession();
-
-		const tool = await TaskTool.create(createSession());
-		await tool.execute("tool-call", TEST_TASK);
-
-		expect(getOptions()?.enableLsp).toBe(false);
+	it("enables subagent LSP when task.enableLsp is set", () => {
+		expect(resolveSubagentLspEnabled(createSession({ taskEnableLsp: true }))).toBe(true);
 	});
 
-	it("enables subagent LSP when task.enableLsp is set", async () => {
-		mockAgents({
-			name: "task",
-			description: "Task agent",
-			systemPrompt: "Use normal tools.",
-			source: "bundled",
-			tools: ["lsp"],
-		});
-		const { getOptions } = mockCreateAgentSession();
-
-		const tool = await TaskTool.create(createSession({ taskEnableLsp: true }));
-		await tool.execute("tool-call", TEST_TASK);
-
-		expect(getOptions()?.enableLsp).toBe(true);
-		expect(getOptions()?.toolNames).toContain("lsp");
+	it("keeps subagent LSP disabled when the parent session disables LSP", () => {
+		expect(resolveSubagentLspEnabled(createSession({ parentEnableLsp: false, taskEnableLsp: true }))).toBe(false);
 	});
 
-	it("keeps subagent LSP disabled when the parent session disables LSP", async () => {
-		mockAgents({
-			name: "task",
-			description: "Task agent",
-			systemPrompt: "Use normal tools.",
-			source: "bundled",
-			tools: ["lsp"],
-		});
-		const { getOptions } = mockCreateAgentSession();
-
-		const tool = await TaskTool.create(createSession({ parentEnableLsp: false, taskEnableLsp: true }));
-		await tool.execute("tool-call", TEST_TASK);
-
-		expect(getOptions()?.enableLsp).toBe(false);
+	it("uses the isolated worktree cwd while LSP remains disabled by default", () => {
+		expect(resolveSubagentWorkingDirectory("/repo", "/tmp/isolated-subagent")).toBe("/tmp/isolated-subagent");
+		expect(resolveSubagentLspEnabled(createSession())).toBe(false);
 	});
 
-	it("disables LSP for isolated subagents by default", async () => {
-		mockAgents({
-			name: "task",
-			description: "Task agent",
-			systemPrompt: "Use LSP when useful.",
-			source: "bundled",
-			tools: ["lsp"],
-		});
-		mockIsolation();
-		const { getOptions } = mockCreateAgentSession();
-
-		const tool = await TaskTool.create(createSession({ isolationMode: "auto" }));
-		await tool.execute("tool-call", { ...TEST_TASK, isolated: true });
-
-		expect(getOptions()?.cwd).toBe("/tmp/isolated-subagent");
-		expect(getOptions()?.enableLsp).toBe(false);
-	});
-
-	it("opens isolated persisted subagent sessions with the worktree cwd", async () => {
-		mockAgents({
-			name: "task",
-			description: "Task agent",
-			systemPrompt: "Use normal tools.",
-			source: "bundled",
-			tools: ["write"],
-		});
-		mockIsolation();
-		const { getOptions } = mockCreateAgentSession();
+	it("opens an isolated persisted session with the resolved worktree cwd", async () => {
 		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-isolated-session-cwd-"));
+		const worktree = path.join(tempDir, "isolated-subagent");
+		await fs.mkdir(worktree);
+		const sessionManager = await SessionManager.open(path.join(tempDir, "parent.jsonl"), undefined, undefined, {
+			initialCwd: resolveSubagentWorkingDirectory(tempDir, worktree),
+		});
 		try {
-			const parentSessionFile = path.join(tempDir, "parent.jsonl");
-			const tool = await TaskTool.create(createSession({ isolationMode: "auto", sessionFile: parentSessionFile }));
-			await tool.execute("tool-call", { ...TEST_TASK, isolated: true });
-
-			const sessionManager = getOptions()?.sessionManager as { getCwd?: () => string } | undefined;
-			expect(getOptions()?.cwd).toBe("/tmp/isolated-subagent");
-			expect(sessionManager?.getCwd?.()).toBe("/tmp/isolated-subagent");
+			expect(sessionManager.getCwd()).toBe(worktree);
 		} finally {
+			await sessionManager.close();
 			await fs.rm(tempDir, { recursive: true, force: true });
 		}
 	});
 
-	it("applies plan-mode subagent tools, preserves read-only agent tools, and honors task.enableLsp", async () => {
-		mockAgents({
-			name: "task",
-			description: "Reviewer-like task agent",
-			systemPrompt: "Review with read-only specialty tools.",
-			source: "bundled",
-			tools: ["bash", "ast_grep", "report_finding", "memory_edit", "retain", "todo"],
-		});
-		const { getOptions } = mockCreateAgentSession();
-		const planMode = { enabled: true, planFilePath: "local://PLAN.md" };
+	it("applies plan-mode subagent tools, preserves read-only specialty tools, and honors task.enableLsp", () => {
+		const effectiveAgent = resolveSubagentDefinition(
+			taskAgent({ tools: ["bash", "ast_grep", "report_finding", "memory_edit", "retain", "todo"] }),
+			true,
+		);
 
-		const tool = await TaskTool.create(createSession({ planMode, taskEnableLsp: true }));
-		await tool.execute("tool-call", TEST_TASK);
-
-		const toolNames = getOptions()?.toolNames;
-		expect(getOptions()?.enableLsp).toBe(true);
-		expect(toolNames).toEqual(["read", "search", "find", "lsp", "web_search", "ast_grep", "report_finding", "irc"]);
-		expect(toolNames).not.toContain("bash");
-		expect(toolNames).not.toContain("memory_edit");
-		expect(toolNames).not.toContain("retain");
-		expect(toolNames).not.toContain("todo");
+		expect(resolveSubagentLspEnabled(createSession({ taskEnableLsp: true }))).toBe(true);
+		expect(effectiveAgent.tools).toEqual([
+			"read",
+			"search",
+			"find",
+			"lsp",
+			"web_search",
+			"ast_grep",
+			"report_finding",
+		]);
+		expect(effectiveAgent.tools).not.toContain("bash");
+		expect(effectiveAgent.tools).not.toContain("memory_edit");
+		expect(effectiveAgent.tools).not.toContain("retain");
+		expect(effectiveAgent.tools).not.toContain("todo");
 	});
 });

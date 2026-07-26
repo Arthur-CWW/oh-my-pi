@@ -61,6 +61,7 @@ import type { AgentSession } from "../session/agent-session";
 import { getSessionSpawnCordon, type SessionSpawnCordon } from "../session/session-control";
 import { generateCommitMessage } from "../utils/commit-message-generator";
 import * as git from "../utils/git";
+import * as jj from "../utils/jj";
 import { type DiscoveryResult, discoverAgents, getAgent } from "./discovery";
 import { type ExecutorOptions, runSubprocess } from "./executor";
 import { generateTaskName } from "./name-generator";
@@ -111,6 +112,10 @@ interface SpawnGuideCacheEntry {
 }
 
 const spawnGuideCache = new Map<string, SpawnGuideCacheEntry>();
+async function resolveRepositoryRoot(cwd: string): Promise<string> {
+	return (await jj.repo.root(cwd)) ?? getRepoRoot(cwd);
+}
+
 const defaultSpawnGuidePathCache = new Map<string, Promise<string>>();
 
 async function resolveSpawnGuidePath(cwd: string, configuredPath?: string): Promise<string> {
@@ -121,7 +126,7 @@ async function resolveSpawnGuidePath(cwd: string, configuredPath?: string): Prom
 	const resolvedCwd = path.resolve(cwd);
 	let cached = defaultSpawnGuidePathCache.get(resolvedCwd);
 	if (!cached) {
-		cached = getRepoRoot(resolvedCwd)
+		cached = resolveRepositoryRoot(resolvedCwd)
 			.then(repoRoot => path.join(repoRoot, requestedPath))
 			.catch(() => path.resolve(resolvedCwd, requestedPath));
 		defaultSpawnGuidePathCache.set(resolvedCwd, cached);
@@ -251,7 +256,28 @@ export const READ_ONLY_TOOL_NAMES: ReadonlySet<string> = new Set([
 	"search_tool_bm25",
 ]);
 
+const PLAN_MODE_BASE_TOOLS = ["read", "search", "find", "lsp", "web_search"];
 const PLAN_MODE_AGENT_TOOL_ALLOWLIST: ReadonlySet<string> = new Set(["ast_grep", "report_finding"]);
+
+export function resolveSubagentLspEnabled(session: Pick<ToolSession, "enableLsp" | "settings">): boolean {
+	return (session.enableLsp ?? true) && session.settings.get("task.enableLsp");
+}
+
+export function resolveSubagentDefinition(agent: AgentDefinition, planModeEnabled: boolean): AgentDefinition {
+	if (!planModeEnabled) return agent;
+	const tools = [
+		...PLAN_MODE_BASE_TOOLS,
+		...(agent.tools ?? []).filter(
+			tool => PLAN_MODE_AGENT_TOOL_ALLOWLIST.has(tool) && !PLAN_MODE_BASE_TOOLS.includes(tool),
+		),
+	];
+	return {
+		...agent,
+		systemPrompt: `${planModeSubagentPrompt}\n\n${agent.systemPrompt}`,
+		tools,
+		spawns: undefined,
+	};
+}
 
 export function isReadOnlyAgent(agent: AgentDefinition): boolean {
 	return !!agent.tools?.length && agent.tools.every(tool => READ_ONLY_TOOL_NAMES.has(tool));
@@ -1618,7 +1644,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 		const mergeMode = this.session.settings.get("task.isolation.merge");
 		const commitStyle = this.session.settings.get("task.isolation.commits");
 		const taskDepth = this.session.taskDepth ?? 0;
-		const subagentLspEnabled = (this.session.enableLsp ?? true) && this.session.settings.get("task.enableLsp");
+		const subagentLspEnabled = resolveSubagentLspEnabled(this.session);
 
 		if (isolationMode === "none" && "isolated" in params) {
 			return {
@@ -1654,21 +1680,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 		}
 
 		const planModeState = this.session.getPlanModeState?.();
-		const planModeBaseTools = ["read", "search", "find", "lsp", "web_search"];
-		const planModeTools = [
-			...planModeBaseTools,
-			...(agent.tools ?? []).filter(
-				tool => PLAN_MODE_AGENT_TOOL_ALLOWLIST.has(tool) && !planModeBaseTools.includes(tool),
-			),
-		];
-		const effectiveAgent: typeof agent = planModeState?.enabled
-			? {
-					...agent,
-					systemPrompt: `${planModeSubagentPrompt}\n\n${agent.systemPrompt}`,
-					tools: planModeTools,
-					spawns: undefined,
-				}
-			: agent;
+		const effectiveAgent = resolveSubagentDefinition(agent, planModeState?.enabled === true);
 
 		const policySnapshot = preResolved ? undefined : await snapshotTaskSpawnPolicy(this.session);
 		let routeDecision =
