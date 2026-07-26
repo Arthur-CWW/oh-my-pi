@@ -32,7 +32,7 @@ import { invalidate as invalidateCapabilityPath, loadCapability } from "../disco
 import { isLightTheme, setAutoThemeMapping, setColorBlindMode, setSymbolPreset } from "../modes/theme/theme";
 import { AgentStorage } from "../session/agent-storage";
 import { type EditMode, normalizeEditMode } from "../utils/edit-mode";
-import { withFileLock } from "./file-lock";
+import { updateConfigAtomically, writeConfigAtomically } from "./atomic-config-writer";
 import {
 	type BashInterceptorRule,
 	type GroupPrefix,
@@ -891,6 +891,8 @@ export class Settings {
 				const global = await this.#loadYaml(this.#configPath, true);
 				const project = await this.#loadProjectSettings(paths);
 				const configOverlay = await this.#loadConfigOverlays();
+				this.#assertDecodedSettings(project.data, "project settings");
+				this.#assertDecodedSettings(configOverlay, "config overlay");
 				if (mutationGeneration !== this.#persistentMutationGeneration) continue;
 
 				for (const modifiedPath of this.#modified) {
@@ -1001,13 +1003,19 @@ export class Settings {
 	async #loadYaml(filePath: string, strict = false): Promise<RawSettings> {
 		try {
 			const content = await Bun.file(filePath).text();
+			if (strict && content.trim().length === 0) throw new Error("config is empty");
 			const parsed = YAML.parse(content);
-			if (parsed === null || parsed === undefined) return {};
+			if (parsed === null || parsed === undefined) {
+				if (strict) throw new Error("expected a YAML mapping");
+				return {};
+			}
 			if (typeof parsed !== "object" || Array.isArray(parsed)) {
 				if (strict) throw new Error("expected a YAML mapping");
 				return {};
 			}
-			return this.#migrateRawSettings(parsed as RawSettings);
+			const migrated = this.#migrateRawSettings(parsed as RawSettings);
+			if (strict) this.#assertDecodedSettings(migrated, filePath);
+			return migrated;
 		} catch (error) {
 			if (isEnoent(error)) return {};
 			if (strict) throw new Error(`Failed to load config ${filePath}: ${String(error)}`);
@@ -1032,7 +1040,9 @@ export class Settings {
 					paths.push(path.resolve(item.path));
 				}
 			}
-			return { data: this.#migrateRawSettings(merged), paths };
+			const migrated = this.#migrateRawSettings(merged);
+			if (strictPaths.length > 0) this.#assertDecodedSettings(migrated, "project settings");
+			return { data: migrated, paths };
 		} catch (error) {
 			if (strictPaths.length > 0) throw error;
 			return { data: {}, paths: [] };
@@ -1115,7 +1125,7 @@ export class Settings {
 		// 3. Write merged settings
 		if (migrated && Object.keys(settings).length > 0) {
 			try {
-				await Bun.write(this.#configPath, YAML.stringify(settings, null, 2));
+				await writeConfigAtomically(this.#configPath, YAML.stringify(settings, null, 2));
 				logger.debug("Settings: migrated to config.yml", { path: this.#configPath });
 			} catch {}
 		}
@@ -1350,6 +1360,26 @@ export class Settings {
 		return raw;
 	}
 
+	#assertDecodedSettings(raw: RawSettings, source: string): void {
+		for (const settingPath of Object.keys(SETTINGS_SCHEMA) as SettingPath[]) {
+			const value = getByPath(raw, SETTING_PATH_SEGMENTS[settingPath]);
+			if (value === undefined) continue;
+
+			const definition = SETTINGS_SCHEMA[settingPath];
+			const valid =
+				definition.type === "boolean"
+					? typeof value === "boolean"
+					: definition.type === "string"
+						? typeof value === "string"
+						: definition.type === "array"
+							? Array.isArray(value)
+							: definition.type === "record"
+								? value !== null && typeof value === "object" && !Array.isArray(value)
+								: validateSettingValue(settingPath, value);
+			if (!valid) throw new Error(`Invalid setting ${settingPath} in ${source}`);
+		}
+	}
+
 	/**
 	 * One-time migration: seed the last-changelog-version marker file from the
 	 * legacy config.yml key. An existing marker always wins — it is the newer
@@ -1410,9 +1440,10 @@ export class Settings {
 		let saved = false;
 
 		try {
-			await withFileLock(configPath, async () => {
-				// Re-read strictly to preserve valid external changes. A malformed
-				// external edit must never be replaced by this process's partial save.
+			const current = await updateConfigAtomically(configPath, async () => {
+				// Re-read strictly while holding the cross-process writer lock.
+				// A malformed external edit must never be replaced by this
+				// process's partial save.
 				const current = await this.#loadYaml(configPath, true);
 
 				for (const modifiedPath of modifiedPaths) {
@@ -1420,16 +1451,16 @@ export class Settings {
 					setByPath(current, segments, getByPath(this.#global, segments));
 				}
 
-				await Bun.write(configPath, YAML.stringify(current, null, 2));
-				this.#global = current;
-				const generation = ++this.#selfWriteGeneration;
-				const normalizedPath = path.resolve(configPath);
-				this.#selfWriteTokens.set(normalizedPath, {
-					generation,
-					token: await this.#fileToken(normalizedPath),
-				});
-				saved = true;
+				return { content: YAML.stringify(current, null, 2), value: current };
 			});
+			this.#global = current;
+			const generation = ++this.#selfWriteGeneration;
+			const normalizedPath = path.resolve(configPath);
+			this.#selfWriteTokens.set(normalizedPath, {
+				generation,
+				token: await this.#fileToken(normalizedPath),
+			});
+			saved = true;
 		} catch (error) {
 			logger.warn("Settings: save failed", { error: String(error) });
 			for (const modifiedPath of modifiedPaths) this.#modified.add(modifiedPath);

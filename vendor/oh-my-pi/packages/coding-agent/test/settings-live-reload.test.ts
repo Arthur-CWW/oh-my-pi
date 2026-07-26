@@ -98,4 +98,34 @@ describe("Settings live config reload", () => {
 			unsubscribe();
 		}
 	});
+
+	it("ignores temp files and retains the last good config across invalid replacements", async () => {
+		const settings = await Settings.init({ cwd: projectDir, agentDir });
+		const notices: SettingsChangeNotice[] = [];
+		const unsubscribe = settings.onChange(notice => notices.push(notice));
+
+		try {
+			await Bun.write(path.join(agentDir, ".config.yml.tmp-injected"), "display:\n  tabWidth: [\n");
+			await Bun.sleep(250);
+			expect(notices).toEqual([]);
+			expect(settings.get("display.tabWidth")).toBe(2);
+
+			for (const invalid of ["", "display:\n  tabWidth: [\n", "display:\n  tabWidth: nope\n"]) {
+				const warning = nextNotice(settings, notice => notice.kind === "warning");
+				await Bun.write(configPath, invalid);
+				await warning;
+				expect(settings.get("display.tabWidth")).toBe(2);
+			}
+
+			const changed = nextNotice(
+				settings,
+				notice => notice.kind === "changed" && notice.changedPaths.includes("display.tabWidth"),
+			);
+			await Bun.write(configPath, YAML.stringify({ display: { tabWidth: 6 } }, null, 2));
+			await changed;
+			expect(settings.get("display.tabWidth")).toBe(6);
+		} finally {
+			unsubscribe();
+		}
+	});
 });
