@@ -38,12 +38,12 @@ import type {
 	GetCheckpointStateReceipt,
 	InterruptPromptCommand,
 	InterruptPromptReceipt,
+	PrepareHostTransitionCommand,
+	PrepareHostTransitionReceipt,
 	RefreshSshToolCommand,
 	RefreshSshToolReceipt,
 	ReloadSessionCommand,
 	ReloadSessionReceipt,
-	PrepareHostTransitionCommand,
-	PrepareHostTransitionReceipt,
 	ReplaceTodosCommand,
 	ReplaceTodosReceipt,
 	RunCompactionCommand,
@@ -167,12 +167,21 @@ export interface TerminalSessionSubscription {
 	readonly take: Effect.Effect<TerminalSessionDelivery, RunnerFailure, Scope.Scope>;
 }
 
-/** Controller-only projection. The live AgentSession and SessionManager never cross this boundary. */
-export interface TerminalSessionView {
+/** Capability-fenced projection. The live AgentSession and SessionManager never cross this boundary. */
+interface TerminalSessionViewBase {
 	readonly viewId: string;
 	readonly epoch: number;
 	readonly snapshot: () => Effect.Effect<TerminalSessionSnapshot, RunnerFailure, Scope.Scope>;
 	readonly subscribe: () => Effect.Effect<TerminalSessionSubscription, RunnerFailure, Scope.Scope>;
+	readonly detach: () => Effect.Effect<void, RunnerFailure, Scope.Scope>;
+}
+
+export interface TerminalSessionObserverView extends TerminalSessionViewBase {
+	readonly capability: "observer";
+}
+
+export interface TerminalSessionControllerView extends TerminalSessionViewBase {
+	readonly capability: "controller";
 	readonly getContextUsage: (options?: {
 		readonly contextWindow?: number;
 	}) => Effect.Effect<TerminalContextUsage | undefined, RunnerFailure, Scope.Scope>;
@@ -275,5 +284,6 @@ export interface TerminalSessionView {
 	readonly interruptPrompt: (
 		command: InterruptPromptCommand,
 	) => Effect.Effect<InterruptPromptReceipt, RunnerFailure, Scope.Scope>;
-	readonly detach: () => Effect.Effect<void, RunnerFailure, Scope.Scope>;
 }
+
+export type TerminalSessionView = TerminalSessionObserverView | TerminalSessionControllerView;

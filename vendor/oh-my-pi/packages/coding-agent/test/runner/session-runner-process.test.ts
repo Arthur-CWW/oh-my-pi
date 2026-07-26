@@ -40,6 +40,7 @@ async function construct(root: string) {
 		buildRevision: runnerIdentity.buildRevision,
 		runnerInstanceIdentity: runnerIdentity.runnerInstance,
 	});
+	if (!ownership.socketPath) throw new Error("direct ownership socket was not created");
 	const model = getBundledModel("anthropic", "claude-sonnet-4-5");
 	if (!model) throw new Error("bundled model unavailable");
 	const authStorage = await AuthStorage.create(path.join(root, "auth.db"));
@@ -74,8 +75,74 @@ async function construct(root: string) {
 		sessionFile,
 		sessionId: sessionManager.getSessionId(),
 		ownershipEpoch: ownership.ownerEpoch,
+		ownershipSessionFile: ownership.sessionFile,
+		ownershipSessionId: ownership.sessionId,
+		socketPath: ownership.socketPath,
 		runnerIdentity,
 	};
+}
+
+async function readLiveRunnerSnapshot(
+	composition: Awaited<ReturnType<typeof construct>>,
+): Promise<Record<string, unknown>> {
+	const authority = {
+		uid: typeof process.getuid === "function" ? process.getuid() : 0,
+		canonicalSessionPath: composition.ownershipSessionFile,
+		namespaceDigest: path.basename(path.dirname(path.dirname(composition.socketPath))),
+	};
+	const hello = {
+		protocol: { minMajor: 1, maxMajor: 1, maxMinor: 0 },
+		sessionId: composition.ownershipSessionId,
+		ownerEpoch: composition.ownershipEpoch,
+		runnerInstanceId: composition.runnerIdentity.runnerInstance.runnerInstanceId,
+		build: composition.runnerIdentity.buildRevision,
+		authority,
+		requestedCapability: "observer",
+		features: ["event-resync"],
+	};
+	const proof = {
+		nonce: randomUUID(),
+		sessionId: composition.ownershipSessionId,
+		ownerEpoch: composition.ownershipEpoch,
+		runnerInstanceId: composition.runnerIdentity.runnerInstance.runnerInstanceId,
+		buildDigest: composition.runnerIdentity.buildRevision.digest,
+		ownerPid: process.pid,
+		ownershipSocketPath: composition.socketPath,
+	};
+	const source = `
+import { UnixSocketTerminalSessionTransport } from "./src/runner/wire/client";
+const input = JSON.parse(process.env.OMP_RUNNER_WIRE_INPUT);
+const observer = new UnixSocketTerminalSessionTransport({ socketPath: input.socketPath, hello: input.hello });
+const ownerProof = await observer.ownerProof(input.proof);
+const attachment = await observer.attach({ viewId: "process-observer", commandId: "attach-process-observer", correlationId: "attach-process-observer" });
+const snapshot = await observer.requestSnapshot();
+await attachment.detach();
+const stale = new UnixSocketTerminalSessionTransport({
+	socketPath: input.socketPath,
+	hello: { ...input.hello, ownerEpoch: "44444444-4444-4444-8444-444444444444", requestedCapability: "controller" },
+	requestTimeoutMs: 250,
+	helloTimeoutMs: 250,
+});
+const staleControllerDenied = await stale.ownerProof(input.proof).then(() => false, () => true);
+await stale.close().catch(() => {});
+process.stdout.write(JSON.stringify({ ownerProof, snapshot, staleControllerDenied }));
+`;
+	const child = Bun.spawn([process.execPath, "-e", source], {
+		cwd: path.resolve(import.meta.dir, "../.."),
+		env: {
+			...process.env,
+			OMP_RUNNER_WIRE_INPUT: JSON.stringify({ socketPath: composition.socketPath, hello, proof }),
+		},
+		stdout: "pipe",
+		stderr: "pipe",
+	});
+	const [stdout, stderr, exitCode] = await Promise.all([
+		new Response(child.stdout).text(),
+		new Response(child.stderr).text(),
+		child.exited,
+	]);
+	if (exitCode !== 0) throw new Error(`wire observer failed (${exitCode}): ${stderr}\n${stdout}`);
+	return JSON.parse(stdout) as Record<string, unknown>;
 }
 
 async function childMain(mode: string, root: string): Promise<void> {
@@ -179,6 +246,7 @@ async function childMain(mode: string, root: string): Promise<void> {
 		process.exit(0);
 	}
 	if (mode === "accept") {
+		const wire = await readLiveRunnerSnapshot(composition);
 		const receipts = await Effect.runPromise(
 			Effect.scoped(
 				Effect.gen(function* () {
@@ -213,7 +281,10 @@ async function childMain(mode: string, root: string): Promise<void> {
 						expectedRevision: 1,
 						viewId: controller.viewId,
 						controllerEpoch: controller.controllerEpoch,
-						payload: { text: "accepted without claiming provider completion", deliveryClass: "followUp" as const },
+						payload: {
+							text: "accepted without claiming provider completion",
+							deliveryClass: "followUp" as const,
+						},
 					};
 					const accepted = yield* controller.submitInput(command);
 					const replayed = yield* controller.submitInput(command);
@@ -245,7 +316,16 @@ async function childMain(mode: string, root: string): Promise<void> {
 					const cancelled = yield* controller.cancelQueuedInput(cancelCommand);
 					const cancelReplayed = yield* controller.cancelQueuedInput(cancelCommand);
 					const finalSnapshot = yield* controller.snapshot();
-					return { accepted, replayed, edited, editReplayed, cancelled, cancelReplayed, initialSnapshot, finalSnapshot };
+					return {
+						accepted,
+						replayed,
+						edited,
+						editReplayed,
+						cancelled,
+						cancelReplayed,
+						initialSnapshot,
+						finalSnapshot,
+					};
 				}),
 			),
 		);
@@ -255,6 +335,7 @@ async function childMain(mode: string, root: string): Promise<void> {
 				sessionFile: composition.sessionFile,
 				ownershipEpoch: composition.ownershipEpoch,
 				runnerIdentity: composition.runnerIdentity,
+				wire,
 			})}`,
 		);
 		process.exit(0);
@@ -287,6 +368,7 @@ async function spawnChild(mode: "accept" | "stop", root: string): Promise<Record
 			...process.env,
 			AGENT_MUX_DIR: path.join(root, "mux"),
 			HOME: root,
+			OMP_CONFIG_ROOT: path.join(root, "config"),
 			OMP_SESSION_CONTROL_DB: path.join(root, "session-control.sqlite"),
 			OMP_FLEET_REGISTER: "0",
 			OMP_SESSION_RUNNER_CHILD_MODE: mode,
@@ -425,7 +507,7 @@ describe("runner canary readiness process", () => {
 		const { candidate } = await createCanaryCandidate(root);
 		await fs.appendFile(candidate, "\n// corrupted after content-addressing\n");
 		const output = path.join(root, "receipt.json");
-		await fs.writeFile(output, "{\"stale\":true}\n");
+		await fs.writeFile(output, '{"stale":true}\n');
 
 		const processResult = await runReadinessDriver(candidate, fixtureRoot, output);
 		expect(processResult.exitCode).toBe(1);
@@ -463,6 +545,20 @@ describe("createSessionRunner process composition", () => {
 		expect(editReplayed).toEqual({ ...edited, replayed: true });
 		expect(cancelReplayed).toEqual({ ...cancelled, replayed: true });
 		const runnerIdentity = result.runnerIdentity as Record<string, unknown>;
+		const wire = result.wire as Record<string, unknown>;
+		const wireProof = wire.ownerProof as Record<string, unknown>;
+		const wireSnapshot = wire.snapshot as Record<string, unknown>;
+		const wireRunner = wireSnapshot.runner as Record<string, unknown>;
+		expect(wireProof).toMatchObject({
+			t: "ownerProof",
+			sessionId: result.sessionFile ? (wireSnapshot.session as Record<string, unknown>).sessionId : undefined,
+			ownerEpoch: result.ownershipEpoch,
+			sessionMatch: true,
+			phase: "running",
+		});
+		expect(wireRunner.runnerIdentity).toEqual(result.runnerIdentity);
+		expect(Number(wireRunner.revision)).toBeGreaterThanOrEqual(0);
+		expect(wire.staleControllerDenied).toBe(true);
 		const initialSnapshot = result.initialSnapshot as Record<string, unknown>;
 		const finalSnapshot = result.finalSnapshot as Record<string, unknown>;
 		expect(initialSnapshot.runnerIdentity).toEqual(runnerIdentity);

@@ -1,8 +1,9 @@
 import { Effect, Exit, Scope } from "effect";
 import { RunnerViewNotAttachedError } from "./errors";
-import { RUNNER_SCHEMA_VERSION, type AttachRunnerViewCommand } from "./protocol";
+import { type AttachRunnerViewCommand, RUNNER_SCHEMA_VERSION } from "./protocol";
 import type { RunnerFailure, SessionRunner } from "./session-runner";
 import type {
+	TerminalSessionControllerView,
 	TerminalSessionDelivery,
 	TerminalSessionSnapshot,
 	TerminalSessionSubscription,
@@ -21,33 +22,33 @@ export interface TerminalSessionAttachment {
 }
 
 interface TerminalSessionCommandMethodMap {
-	readonly submit: TerminalSessionView["submit"];
-	readonly submitCustomMessage: TerminalSessionView["submitCustomMessage"];
-	readonly edit: TerminalSessionView["edit"];
-	readonly cancel: TerminalSessionView["cancel"];
-	readonly setActiveTools: TerminalSessionView["setActiveTools"];
-	readonly replaceTodos: TerminalSessionView["replaceTodos"];
-	readonly refreshSshTool: TerminalSessionView["refreshSshTool"];
-	readonly setModel: TerminalSessionView["setModel"];
-	readonly cycleModel: TerminalSessionView["cycleModel"];
-	readonly setThinkingLevel: TerminalSessionView["setThinkingLevel"];
-	readonly transitionPlanMode: TerminalSessionView["transitionPlanMode"];
-	readonly transitionGoalMode: TerminalSessionView["transitionGoalMode"];
-	readonly shake: TerminalSessionView["shake"];
-	readonly cancelShake: TerminalSessionView["cancelShake"];
-	readonly handoff: TerminalSessionView["handoff"];
-	readonly cancelHandoff: TerminalSessionView["cancelHandoff"];
-	readonly getCheckpointState: TerminalSessionView["getCheckpointState"];
-	readonly setCheckpointState: TerminalSessionView["setCheckpointState"];
-	readonly reload: TerminalSessionView["reload"];
-	readonly prepareHostTransition: TerminalSessionView["prepareHostTransition"];
-	readonly compact: TerminalSessionView["compact"];
-	readonly cancelCompaction: TerminalSessionView["cancelCompaction"];
-	readonly runEphemeralTurn: TerminalSessionView["runEphemeralTurn"];
-	readonly cancelEphemeralTurn: TerminalSessionView["cancelEphemeralTurn"];
-	readonly runLocalOperation: TerminalSessionView["runLocalOperation"];
-	readonly cancelLocalOperation: TerminalSessionView["cancelLocalOperation"];
-	readonly interruptPrompt: TerminalSessionView["interruptPrompt"];
+	readonly submit: TerminalSessionControllerView["submit"];
+	readonly submitCustomMessage: TerminalSessionControllerView["submitCustomMessage"];
+	readonly edit: TerminalSessionControllerView["edit"];
+	readonly cancel: TerminalSessionControllerView["cancel"];
+	readonly setActiveTools: TerminalSessionControllerView["setActiveTools"];
+	readonly replaceTodos: TerminalSessionControllerView["replaceTodos"];
+	readonly refreshSshTool: TerminalSessionControllerView["refreshSshTool"];
+	readonly setModel: TerminalSessionControllerView["setModel"];
+	readonly cycleModel: TerminalSessionControllerView["cycleModel"];
+	readonly setThinkingLevel: TerminalSessionControllerView["setThinkingLevel"];
+	readonly transitionPlanMode: TerminalSessionControllerView["transitionPlanMode"];
+	readonly transitionGoalMode: TerminalSessionControllerView["transitionGoalMode"];
+	readonly shake: TerminalSessionControllerView["shake"];
+	readonly cancelShake: TerminalSessionControllerView["cancelShake"];
+	readonly handoff: TerminalSessionControllerView["handoff"];
+	readonly cancelHandoff: TerminalSessionControllerView["cancelHandoff"];
+	readonly getCheckpointState: TerminalSessionControllerView["getCheckpointState"];
+	readonly setCheckpointState: TerminalSessionControllerView["setCheckpointState"];
+	readonly reload: TerminalSessionControllerView["reload"];
+	readonly prepareHostTransition: TerminalSessionControllerView["prepareHostTransition"];
+	readonly compact: TerminalSessionControllerView["compact"];
+	readonly cancelCompaction: TerminalSessionControllerView["cancelCompaction"];
+	readonly runEphemeralTurn: TerminalSessionControllerView["runEphemeralTurn"];
+	readonly cancelEphemeralTurn: TerminalSessionControllerView["cancelEphemeralTurn"];
+	readonly runLocalOperation: TerminalSessionControllerView["runLocalOperation"];
+	readonly cancelLocalOperation: TerminalSessionControllerView["cancelLocalOperation"];
+	readonly interruptPrompt: TerminalSessionControllerView["interruptPrompt"];
 }
 
 type TerminalSessionCommandMethod = TerminalSessionCommandMethodMap[keyof TerminalSessionCommandMethodMap];
@@ -90,7 +91,8 @@ export type TerminalSessionRequestOperation =
 	| "invokePlanResolve"
 	| "requestGoalContinuation";
 
-type TerminalSessionRequestMethod<Operation extends TerminalSessionRequestOperation> = TerminalSessionView[Operation];
+type TerminalSessionRequestMethod<Operation extends TerminalSessionRequestOperation> =
+	TerminalSessionControllerView[Operation];
 
 export type TerminalSessionRequestArguments<Operation extends TerminalSessionRequestOperation> = MethodArguments<
 	TerminalSessionRequestMethod<Operation>
@@ -124,13 +126,15 @@ export class LocalTerminalSessionTransport implements TerminalSessionTransport {
 	readonly #scope = Scope.makeUnsafe("sequential");
 	readonly #listeners = new Set<TerminalSessionDeliveryListener>();
 	readonly #runner: SessionRunner;
+	readonly #capability: "controller" | "observer";
 	#view: TerminalSessionView | undefined;
 	#attachedViewId: string | undefined;
 	#attaching = false;
 	#closed = false;
 
-	constructor(runner: SessionRunner) {
+	constructor(runner: SessionRunner, capability: "controller" | "observer" = "controller") {
 		this.#runner = runner;
+		this.#capability = capability;
 	}
 
 	readonly #run = <Success>(effect: Effect.Effect<Success, RunnerFailure, Scope.Scope>): Promise<Success> =>
@@ -144,15 +148,16 @@ export class LocalTerminalSessionTransport implements TerminalSessionTransport {
 		let view: TerminalSessionView | undefined;
 		try {
 			const runnerSnapshot = await this.#run(this.#runner.snapshot());
-			view = await this.#run(
-				this.#runner.attachTerminalView({
-					...request,
-					schemaVersion: RUNNER_SCHEMA_VERSION,
-					kind: "attachView",
-					expectedRevision: runnerSnapshot.revision,
-					capability: "controller",
-				}),
-			);
+			const attachRequest = {
+				...request,
+				schemaVersion: RUNNER_SCHEMA_VERSION,
+				kind: "attachView" as const,
+				expectedRevision: runnerSnapshot.revision,
+			};
+			view =
+				this.#capability === "controller"
+					? await this.#run(this.#runner.attachTerminalView({ ...attachRequest, capability: "controller" }))
+					: await this.#run(this.#runner.attachTerminalObserverView({ ...attachRequest, capability: "observer" }));
 			const subscription = await this.#run(view.subscribe());
 			this.#view = view;
 			this.#attachedViewId = view.viewId;
@@ -190,7 +195,7 @@ export class LocalTerminalSessionTransport implements TerminalSessionTransport {
 		(await this.#sendCommand(command)) as TerminalSessionCommandResultFor<Command>;
 
 	readonly #sendCommand = async (command: TerminalSessionCommand): Promise<TerminalSessionCommandResult> => {
-		const view = this.#requireView();
+		const view = this.#requireControllerView();
 		switch (command.kind) {
 			case "submitInput":
 				return this.#run(view.submit(command));
@@ -273,17 +278,19 @@ export class LocalTerminalSessionTransport implements TerminalSessionTransport {
 		operation: TerminalSessionRequestOperation,
 		args: MethodArguments<TerminalSessionRequestMethod<TerminalSessionRequestOperation>>,
 	): Promise<TerminalSessionRequestResult<TerminalSessionRequestOperation>> => {
-		const view = this.#requireView();
+		const view = this.#requireControllerView();
 		switch (operation) {
 			case "getContextUsage":
-				return this.#run(view.getContextUsage(...(args as Parameters<TerminalSessionView["getContextUsage"]>)));
+				return this.#run(
+					view.getContextUsage(...(args as Parameters<TerminalSessionControllerView["getContextUsage"]>)),
+				);
 			case "getSessionStats":
 				return this.#run(view.getSessionStats());
 			case "getAdvisorStats":
 				return this.#run(view.getAdvisorStats());
 			case "getAsyncJobSnapshot":
 				return this.#run(
-					view.getAsyncJobSnapshot(...(args as Parameters<TerminalSessionView["getAsyncJobSnapshot"]>)),
+					view.getAsyncJobSnapshot(...(args as Parameters<TerminalSessionControllerView["getAsyncJobSnapshot"]>)),
 				);
 			case "getHindsightSessionState":
 				return this.#run(view.getHindsightSessionState());
@@ -291,12 +298,12 @@ export class LocalTerminalSessionTransport implements TerminalSessionTransport {
 				return this.#run(view.getAllToolNames());
 			case "formatSessionAsText":
 				return this.#run(
-					view.formatSessionAsText(...(args as Parameters<TerminalSessionView["formatSessionAsText"]>)),
+					view.formatSessionAsText(...(args as Parameters<TerminalSessionControllerView["formatSessionAsText"]>)),
 				);
 			case "formatAdvisorHistoryAsText":
 				return this.#run(
 					view.formatAdvisorHistoryAsText(
-						...(args as Parameters<TerminalSessionView["formatAdvisorHistoryAsText"]>),
+						...(args as Parameters<TerminalSessionControllerView["formatAdvisorHistoryAsText"]>),
 					),
 				);
 			case "getModelCatalog":
@@ -310,15 +317,19 @@ export class LocalTerminalSessionTransport implements TerminalSessionTransport {
 			case "getTurnLifecycle":
 				return this.#run(view.getTurnLifecycle());
 			case "saveDraft":
-				return this.#run(view.saveDraft(...(args as Parameters<TerminalSessionView["saveDraft"]>)));
+				return this.#run(view.saveDraft(...(args as Parameters<TerminalSessionControllerView["saveDraft"]>)));
 			case "consumeDraft":
 				return this.#run(view.consumeDraft());
 			case "invokeExtensionCommand":
 				return this.#run(
-					view.invokeExtensionCommand(...(args as Parameters<TerminalSessionView["invokeExtensionCommand"]>)),
+					view.invokeExtensionCommand(
+						...(args as Parameters<TerminalSessionControllerView["invokeExtensionCommand"]>),
+					),
 				);
 			case "invokePlanResolve":
-				return this.#run(view.invokePlanResolve(...(args as Parameters<TerminalSessionView["invokePlanResolve"]>)));
+				return this.#run(
+					view.invokePlanResolve(...(args as Parameters<TerminalSessionControllerView["invokePlanResolve"]>)),
+				);
 			case "requestGoalContinuation":
 				return this.#run(view.requestGoalContinuation());
 			default:
@@ -336,9 +347,7 @@ export class LocalTerminalSessionTransport implements TerminalSessionTransport {
 						for (const listener of this.#listeners) {
 							try {
 								listener(delivery);
-							} catch {
-								continue;
-							}
+							} catch {}
 						}
 					}),
 				),
@@ -366,5 +375,11 @@ export class LocalTerminalSessionTransport implements TerminalSessionTransport {
 		throw new Error(
 			this.#closed ? "Terminal session transport is closed" : "Terminal session transport is not attached",
 		);
+	}
+
+	#requireControllerView(): TerminalSessionControllerView {
+		const view = this.#requireView();
+		if (view.capability === "controller") return view;
+		throw new Error("Terminal session transport requires controller capability");
 	}
 }

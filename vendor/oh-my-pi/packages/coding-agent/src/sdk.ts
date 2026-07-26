@@ -117,6 +117,7 @@ import { type AgentQuotaAdmission, AgentRegistry, MAIN_AGENT_ID } from "./regist
 import type { RunnerIdentity } from "./runner/protocol";
 import type { SessionRunner } from "./runner/session-runner";
 import { makeSessionRunnerLive } from "./runner/session-runner";
+import { LocalTerminalSessionTransport } from "./runner/terminal-session-transport";
 import { createBlockedMediaConverter } from "./sdk-media-content";
 import {
 	collectEnvSecrets,
@@ -3042,6 +3043,9 @@ export async function createSessionRunner(options: CreateSessionRunnerOptions): 
 					{ mailboxCapacity, eventCapacity, childStopPolicy },
 				),
 			),
+		);
+		ownership.bindTerminalSessionTransportFactory?.(
+			capability => new LocalTerminalSessionTransport(liveRunner, capability),
 		);
 		transferred = true;
 		let scopeClosed = false;

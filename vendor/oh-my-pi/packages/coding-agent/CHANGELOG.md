@@ -4,6 +4,7 @@
 
 ### Added
 - Async child completions now commit idempotent receipts to the parent journal before live delivery; disposed parents replay unacknowledged receipts on resume, job polling persists acknowledgements, and refreshed child results use fenced delivery generations.
+- Live session ownership sockets now serve epoch-fenced observer attachments, owner proof, and terminal snapshots over the existing runner wire protocol.
 - `history://<target>` now supports bounded decoded transcript search and exact record retrieval without rendering the full transcript into the caller, preserving existing bare-history behavior and scope checks.
 - Generated handoffs now begin with a code-stamped predecessor provenance block, and successor journals store schema-decoded lineage records with walkable handoff-chain pointers.
 - Shared Scope-managed `TablePreviewComponent` (table + live preview + key routing + guaranteed finalizers on unmount); `/agents` dashboard is the first consumer — selection, filtering, scrolling, and preview assembly are no longer reimplemented per surface.

@@ -4,10 +4,6 @@ import type { PythonResult } from "../eval/py/executor";
 import type { BashResult } from "../exec/bash-executor";
 import { IrcBus } from "../irc/bus";
 import type { InteractiveHostIntent } from "../modes/interactive-host-intent";
-import { captureRestartChildManifest } from "../session/restart-child-manifest";
-import type { ReleaseRegistryValidationOptions } from "../session/release-registry-validation";
-import { type RolloutCheckpoint, type RolloutPauseProvenance } from "../session/rollout-checkpoint";
-import { writeRestartHandoff } from "../session/session-ownership";
 import { type AgentSession, type AgentSessionEvent, PromptOperationConflictError } from "../session/agent-session";
 import {
 	type DurableCustomPayload,
@@ -19,6 +15,10 @@ import {
 	DurableInputRunnerRevisionConflictError,
 	SessionOwnershipLostError,
 } from "../session/durable-input-queue";
+import type { ReleaseRegistryValidationOptions } from "../session/release-registry-validation";
+import { captureRestartChildManifest } from "../session/restart-child-manifest";
+import type { RolloutCheckpoint, RolloutPauseProvenance } from "../session/rollout-checkpoint";
+import type { PrepareRolloutCommand, SessionControlCommand, SessionControlResult } from "../session/session-control";
 import type {
 	SessionEntry,
 	SetModelSessionCommand,
@@ -32,8 +32,8 @@ import {
 	SessionRevisionConflictError,
 	SessionStateCommandInFlightError,
 } from "../session/session-manager";
-import type { PrepareRolloutCommand, SessionControlCommand, SessionControlResult } from "../session/session-control";
 import type { SessionOwnershipHandle } from "../session/session-ownership";
+import { writeRestartHandoff } from "../session/session-ownership";
 import {
 	InvalidRunnerCommandError,
 	RunnerCompactionCommandConflictError,
@@ -87,8 +87,8 @@ import {
 	decodeEditQueuedInputCommand,
 	decodeGetCheckpointStateCommand,
 	decodeInterruptPromptCommand,
-	decodeRefreshSshToolCommand,
 	decodePrepareHostTransitionCommand,
+	decodeRefreshSshToolCommand,
 	decodeReloadSessionCommand,
 	decodeReplaceTodosCommand,
 	decodeRunCompactionCommand,
@@ -108,11 +108,11 @@ import {
 	type GetCheckpointStateReceipt,
 	type InterruptPromptCommand,
 	type InterruptPromptReceipt,
+	type PrepareHostTransitionCommand,
+	type PrepareHostTransitionReceipt,
 	type RefreshSshToolCommand,
 	type RefreshSshToolReceipt,
 	type ReleaseRunnerControllerCommand,
-	type PrepareHostTransitionCommand,
-	type PrepareHostTransitionReceipt,
 	type ReloadSessionCommand,
 	type ReloadSessionReceipt,
 	type ReplaceTodosCommand,
@@ -149,7 +149,9 @@ import {
 } from "./protocol";
 import { makeSessionControlHandlers } from "./session-control-handler";
 import type {
+	TerminalSessionControllerView,
 	TerminalSessionDelivery,
+	TerminalSessionObserverView,
 	TerminalSessionSnapshot,
 	TerminalSessionSubscription,
 	TerminalSessionView,
@@ -300,7 +302,10 @@ export interface SessionRunner {
 	) => Effect.Effect<SessionRunnerView, RunnerFailure, Scope.Scope>;
 	readonly attachTerminalView: (
 		command: AttachRunnerViewCommand,
-	) => Effect.Effect<TerminalSessionView, RunnerFailure, Scope.Scope>;
+	) => Effect.Effect<TerminalSessionControllerView, RunnerFailure, Scope.Scope>;
+	readonly attachTerminalObserverView: (
+		command: AttachRunnerViewCommand,
+	) => Effect.Effect<TerminalSessionObserverView, RunnerFailure, Scope.Scope>;
 	readonly snapshot: () => Effect.Effect<SessionRunnerSnapshot, RunnerFailure, Scope.Scope>;
 	readonly applySessionControl: (
 		command: SessionControlCommand,
@@ -1636,9 +1641,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 												mode: result.mode,
 												toolResultsDropped: result.toolResultsDropped,
 												blocksDropped: result.blocksDropped,
-												...(result.mediaDropped === undefined
-													? {}
-													: { mediaDropped: result.mediaDropped }),
+												...(result.mediaDropped === undefined ? {} : { mediaDropped: result.mediaDropped }),
 												tokensFreed: result.tokensFreed,
 												...(result.artifactId === undefined ? {} : { artifactId: result.artifactId }),
 											},
@@ -2248,10 +2251,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 				return { intent, cancelled: false };
 			case "restartProcess": {
 				await resources.sessionManager.flush();
-				const childManifest = await captureRestartChildManifest(
-					resources.session,
-					resources.ownership.ownerEpoch,
-				);
+				const childManifest = await captureRestartChildManifest(resources.session, resources.ownership.ownerEpoch);
 				await writeRestartHandoff(resources.ownership, childManifest);
 				return {
 					intent,
@@ -2394,7 +2394,9 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 															sessionId: resources.session.sessionId,
 															...(sessionFile === undefined ? {} : { sessionFile }),
 															cwd: resources.sessionManager.getCwd(),
-															...(outcome.editorText === undefined ? {} : { editorText: outcome.editorText }),
+															...(outcome.editorText === undefined
+																? {}
+																: { editorText: outcome.editorText }),
 														},
 													}),
 											...(outcome.restartSpawn === undefined ? {} : { restartSpawn: outcome.restartSpawn }),
@@ -2422,7 +2424,6 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 		const receipt = yield* Deferred.await(admitted.record.deferred);
 		return admitted.replayed ? { ...receipt, replayed: true } : receipt;
 	});
-
 
 	const sameCompactionCommand = (left: RunCompactionCommand, right: RunCompactionCommand): boolean =>
 		left.schemaVersion === right.schemaVersion &&
@@ -4100,12 +4101,9 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 		return observerView(command.viewId);
 	});
 
-	const attachTerminalView = Effect.fn("Runner.attachTerminalView")(function* (command: AttachRunnerViewCommand) {
-		if (command.capability !== "controller") {
-			return yield* Effect.fail(
-				new RunnerViewCapabilityError({ viewId: command.viewId, requiredCapability: "controller" }),
-			);
-		}
+	const attachTerminalProjection = Effect.fn("Runner.attachTerminalProjection")(function* (
+		command: AttachRunnerViewCommand,
+	) {
 		const terminalEvents = yield* PubSub.sliding<TerminalRawDelivery>(options.eventCapacity);
 		terminalViews.set(command.viewId, { events: terminalEvents });
 		if (unsubscribeTerminalAgent === undefined) {
@@ -4130,19 +4128,17 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 				onSuccess: Effect.succeed,
 			}),
 		);
-		if (attached.capability !== "controller") {
-			return yield* Effect.fail(
-				new RunnerViewCapabilityError({ viewId: command.viewId, requiredCapability: "controller" }),
-			);
+		const epoch = attached.capability === "controller" ? attached.controllerEpoch : 0;
+		const planResolveCapabilityEpoch =
+			attached.capability === "controller" ? resources.session.bindPlanResolveCapability(epoch) : undefined;
+		if (planResolveCapabilityEpoch !== undefined) {
+			terminalViews.get(command.viewId)!.planResolveCapabilityEpoch = planResolveCapabilityEpoch;
 		}
-		const epoch = attached.controllerEpoch;
-		const planResolveCapabilityEpoch = resources.session.bindPlanResolveCapability(epoch);
-		terminalViews.get(command.viewId)!.planResolveCapabilityEpoch = planResolveCapabilityEpoch;
 
 		const terminalSnapshot = () =>
 			enqueue(
 				Effect.gen(function* () {
-					yield* requireController(command.viewId, epoch);
+					yield* requireView(command.viewId);
 					return yield* materializeTerminalSnapshot(true);
 				}),
 			);
@@ -4282,14 +4278,16 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 		const invokeExtensionCommand = (name: string, args: string) =>
 			terminalOutsideMailboxRead(() => resources.session.invokeExtensionCommand(name, args));
 		const invokePlanResolve = (input: import("../session/durable-input-queue").JsonValue) =>
-			terminalOutsideMailboxRead(() => resources.session.invokePlanResolve(input, planResolveCapabilityEpoch));
+			planResolveCapabilityEpoch === undefined
+				? Effect.fail(new RunnerViewCapabilityError({ viewId: command.viewId, requiredCapability: "controller" }))
+				: terminalOutsideMailboxRead(() => resources.session.invokePlanResolve(input, planResolveCapabilityEpoch));
 		const requestGoalContinuation = () =>
 			terminalOutsideMailboxRead(() => resources.session.requestGoalContinuation());
 		const subscribe = Effect.fn("Runner.subscribeTerminalView")(function* () {
 			const subscription = yield* PubSub.subscribe(terminalEvents);
 			const starting = yield* enqueue(
 				Effect.gen(function* () {
-					yield* requireController(command.viewId, epoch);
+					yield* requireView(command.viewId);
 					return terminalSequence;
 				}),
 			);
@@ -4334,9 +4332,11 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 						correlationId: command.correlationId,
 						expectedRevision: revision,
 						viewId: command.viewId,
-						controllerEpoch: epoch,
+						...(attachedView.capability === "controller" ? { controllerEpoch: epoch } : {}),
 					};
-					resources.session.unbindPlanResolveCapability(planResolveCapabilityEpoch);
+					if (planResolveCapabilityEpoch !== undefined) {
+						resources.session.unbindPlanResolveCapability(planResolveCapabilityEpoch);
+					}
 					views.delete(command.viewId);
 					if (activeController?.viewId === command.viewId) activeController = undefined;
 					yield* publishEvent({
@@ -4354,11 +4354,19 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 			}
 			yield* PubSub.shutdown(terminalEvents);
 		});
-		return {
+		const projection = {
 			viewId: command.viewId,
 			epoch,
 			snapshot: terminalSnapshot,
 			subscribe,
+			detach,
+		};
+		if (attached.capability === "observer") {
+			return { ...projection, capability: "observer" } satisfies TerminalSessionView;
+		}
+		return {
+			...projection,
+			capability: "controller",
 			getContextUsage,
 			getSessionStats,
 			getAdvisorStats,
@@ -4404,8 +4412,33 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 			runLocalOperation: attached.runLocalOperation,
 			cancelLocalOperation: attached.cancelLocalOperation,
 			interruptPrompt: attached.interruptPrompt,
-			detach,
 		} satisfies TerminalSessionView;
+	});
+	const attachTerminalView = Effect.fn("Runner.attachTerminalView")(function* (command: AttachRunnerViewCommand) {
+		if (command.capability !== "controller") {
+			return yield* Effect.fail(
+				new RunnerViewCapabilityError({ viewId: command.viewId, requiredCapability: "controller" }),
+			);
+		}
+		const view = yield* attachTerminalProjection(command);
+		if (view.capability === "controller") return view;
+		return yield* Effect.fail(
+			new RunnerViewCapabilityError({ viewId: command.viewId, requiredCapability: "controller" }),
+		);
+	});
+	const attachTerminalObserverView = Effect.fn("Runner.attachTerminalObserverView")(function* (
+		command: AttachRunnerViewCommand,
+	) {
+		if (command.capability !== "observer") {
+			return yield* Effect.fail(
+				new InvalidRunnerCommandError({ issue: "Terminal observer attachment requires observer capability" }),
+			);
+		}
+		const view = yield* attachTerminalProjection(command);
+		if (view.capability === "observer") return view;
+		return yield* Effect.fail(
+			new InvalidRunnerCommandError({ issue: "Terminal observer attachment returned controller capability" }),
+		);
 	});
 
 	const { applySessionControl, prepareRollout } = makeSessionControlHandlers({
@@ -4533,5 +4566,13 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 	yield* Effect.addFinalizer(() =>
 		stop().pipe(Effect.matchCauseEffect({ onFailure: () => Effect.void, onSuccess: () => Effect.void })),
 	);
-	return { attachView, attachTerminalView, snapshot, applySessionControl, prepareRollout, stop } satisfies SessionRunner;
+	return {
+		attachView,
+		attachTerminalView,
+		attachTerminalObserverView,
+		snapshot,
+		applySessionControl,
+		prepareRollout,
+		stop,
+	} satisfies SessionRunner;
 });

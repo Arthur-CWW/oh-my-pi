@@ -7,6 +7,7 @@ import { matchesProcessIdentity, type ProcessIdentity, readProcessIdentity } fro
 import type { BuildRevision, RunnerInstanceIdentity } from "../runner/protocol";
 import type { TerminalSessionTransport } from "../runner/terminal-session-transport";
 import { type TerminalSessionWireClientHello, UnixSocketTerminalSessionTransport } from "../runner/wire/client";
+import type { WireCapability } from "../runner/wire/common";
 import { UnixTerminalSessionServer } from "../runner/wire/server";
 
 export type { ProcessIdentity } from "../resource/process-identity";
@@ -86,7 +87,9 @@ export interface SessionOwnershipHandle {
 	readonly runnerInstanceIdentity: RunnerInstanceIdentity;
 	readonly socketPath?: string;
 	/** Makes runner view traffic available on the already-bound ownership endpoint. */
-	bindTerminalSessionTransportFactory?(createTransport: () => TerminalSessionTransport): void;
+	bindTerminalSessionTransportFactory?(
+		createTransport: (capability: WireCapability) => TerminalSessionTransport,
+	): void;
 	isCurrent(): Promise<boolean>;
 	/** Synchronous fence for append-only hot paths after a heartbeat discovers loss. */
 	isFenced?(): boolean;
@@ -820,7 +823,7 @@ class DirectRunnerEndpoint {
 	readonly #lease: SessionLeaseV1;
 	readonly #identity: OwnerIdentitySidecarV1;
 	readonly #server: UnixTerminalSessionServer;
-	#createTransport: (() => TerminalSessionTransport) | undefined;
+	#createTransport: ((capability: WireCapability) => TerminalSessionTransport) | undefined;
 	#live = false;
 
 	constructor(location: LeaseLocation, lease: SessionLeaseV1, identity: OwnerIdentitySidecarV1) {
@@ -829,10 +832,10 @@ class DirectRunnerEndpoint {
 		this.#identity = identity;
 		this.#server = new UnixTerminalSessionServer({
 			socketPath: lease.socketPath,
-			createTransport: () => {
+			createTransport: capability => {
 				const createTransport = this.#createTransport;
 				if (!createTransport) throw new Error("Runner terminal transport is not available");
-				return createTransport();
+				return createTransport(capability);
 			},
 			hello: {
 				protocol: { minMajor: 1, maxMajor: 1, maxMinor: 0 },
@@ -857,7 +860,9 @@ class DirectRunnerEndpoint {
 		this.#live = true;
 	}
 
-	bindTerminalSessionTransportFactory(createTransport: () => TerminalSessionTransport): void {
+	bindTerminalSessionTransportFactory(
+		createTransport: (capability: WireCapability) => TerminalSessionTransport,
+	): void {
 		if (!this.#live) throw new Error("Cannot bind transport to an inactive ownership endpoint");
 		this.#createTransport = createTransport;
 	}
@@ -983,7 +988,9 @@ class DirectOwnershipHandle implements SessionOwnershipHandle {
 		this.#heartbeat.unref?.();
 	}
 
-	bindTerminalSessionTransportFactory(createTransport: () => TerminalSessionTransport): void {
+	bindTerminalSessionTransportFactory(
+		createTransport: (capability: WireCapability) => TerminalSessionTransport,
+	): void {
 		if (this.#released) throw new Error("Cannot bind transport after ownership release");
 		this.#endpoint.bindTerminalSessionTransportFactory(createTransport);
 	}

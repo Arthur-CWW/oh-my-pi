@@ -3,20 +3,21 @@ import * as fs from "node:fs/promises";
 import * as net from "node:net";
 import type { Schema } from "effect";
 import type {
-	TerminalSessionAttachRequest,
 	TerminalSessionAttachment,
+	TerminalSessionAttachRequest,
 	TerminalSessionCommand,
 	TerminalSessionRequestOperation,
 	TerminalSessionTransport,
 } from "../terminal-session-transport";
 import type { TerminalSessionDelivery } from "../terminal-session-view";
-import { DEFAULT_MAX_WIRE_FRAME_BYTES, IncrementalWireFrameDecoder, encodeLengthPrefixedWireFrame } from "./codec";
+import { DEFAULT_MAX_WIRE_FRAME_BYTES, encodeLengthPrefixedWireFrame, IncrementalWireFrameDecoder } from "./codec";
+import type { WireCapability } from "./common";
 import {
+	toWireErrorEnvelope,
 	WireDecodeError,
 	WireFrameOversizeError,
 	WireHelloRejectedError,
 	WireResyncRequiredError,
-	toWireErrorEnvelope,
 } from "./errors";
 import type {
 	ClientHelloFrame,
@@ -56,7 +57,7 @@ const DEFAULT_OUTBOUND_QUEUE_CAPACITY = 256;
 
 export interface TerminalSessionWireServerOptions {
 	readonly socketPath: string;
-	readonly createTransport: () => TerminalSessionTransport;
+	readonly createTransport: (capability: WireCapability) => TerminalSessionTransport;
 	readonly hello: HelloNegotiationExpectation;
 	readonly ownerProof: (payload: JsonValue, hello: ClientHelloFrame) => JsonValue | Promise<JsonValue>;
 	readonly maxFrameBytes?: number;
@@ -256,7 +257,7 @@ class BoundedSocketWriter {
 
 class ServerConnection {
 	readonly #socket: net.Socket;
-	readonly #createTransport: () => TerminalSessionTransport;
+	readonly #createTransport: TerminalSessionWireServerOptions["createTransport"];
 	readonly #expectedHello: HelloNegotiationExpectation;
 	readonly #ownerProof: TerminalSessionWireServerOptions["ownerProof"];
 	readonly #decoder: IncrementalWireFrameDecoder;
@@ -381,10 +382,9 @@ class ServerConnection {
 				return this.#ownerProof(frame.payload, hello);
 			case "attachTerminalView": {
 				if (this.#attachment) throw requestDecodeError("A terminal view is already attached");
-				if (this.#grantedCapability !== "controller") {
-					throw requestDecodeError("Terminal session attachment requires controller capability");
-				}
-				const transport = this.#createTransport();
+				const capability = this.#grantedCapability;
+				if (!capability) throw requestDecodeError("Hello negotiation did not grant a terminal capability");
+				const transport = this.#createTransport(capability);
 				this.#transport = transport;
 				let attachment: TerminalSessionAttachment;
 				try {
@@ -403,9 +403,15 @@ class ServerConnection {
 				return { viewId: attachment.viewId, epoch: attachment.epoch };
 			}
 			case "terminalCommand":
+				if (this.#grantedCapability !== "controller") {
+					throw requestDecodeError("Terminal commands require controller capability");
+				}
 				this.#requireAttachment();
 				return this.#requireTransport().sendCommand(decodeTerminalCommand(frame.payload));
 			case "terminalRequest": {
+				if (this.#grantedCapability !== "controller") {
+					throw requestDecodeError("Terminal requests require controller capability");
+				}
 				this.#requireAttachment();
 				const request = decodeTerminalRequest(frame.payload);
 				const transportRequest = this.#requireTransport().request as (
