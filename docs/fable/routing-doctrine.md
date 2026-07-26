@@ -2,7 +2,7 @@
 
 Status: canonical, model-agnostic policy  
 Owner: frontier orchestrator  
-Last reconciled: 2026-07-10
+Last reconciled: 2026-07-26
 
 This document governs how an orchestrator routes work across agent lanes. It is policy, not a list of currently fashionable models. Provider availability, model releases, account quotas, and observed temperaments change; the decision contract does not.
 
@@ -55,7 +55,7 @@ The winning value is selected in this order:
 4. workspace policy;
 5. global policy.
 
-Higher layers override lower layers only visibly. A resolution MUST identify each source consulted, every overridden value, and the final value; no runtime override, inherited default, or account selection may silently shadow another layer. An explicit choice is an intentional exception, not new policy, and must carry a reason and scope.
+Higher layers override lower layers only visibly. A resolution MUST identify each source consulted, every overridden value, and the final value; no runtime override, lower-layer default, or account selection may silently shadow another layer. A child route without an explicit provider/model and effort is invalid; it MUST be rejected rather than filled from its parent session. An explicit choice is an intentional exception, not new policy, and must carry a reason and scope.
 
 ## Lane registry, states, and evidence
 
@@ -86,6 +86,10 @@ A new release enters as a **candidate**, never as a default because of release c
 ### Minimum effective effort
 
 Effort/thinking level is independent of lane selection and is an experiment axis. Start at the lowest evidence-supported effort that can meet acceptance; bounded, low-entropy implementation normally avoids high or extra-high effort. Escalate medium to high only for ambiguity, hard planning, failed acceptance, irreversible decisions, or evidence that the marginal gain exceeds added token and latency cost. Treat diminishing returns from high or extra-high effort as a provider-agnostic hypothesis to measure, not doctrine.
+
+**Current effort calibration (Arthur, 2026-07-26).** For equivalent work, Sol runs one to two named effort steps below Luna. Routine Luna scouting, mechanical work, review, and QA run at medium. Routine Sol implementation runs at medium; narrow mechanical Sol implementation runs at low. Extra-high is reserved for an explicitly justified packet-local exception and is never a responsibility or stream default.
+
+**Rationale.** Effort labels are model-relative, not a cross-model quality scale. Applying the same high or extra-high posture across lanes over-routes Sol, spends latency and tokens without a demonstrated acceptance gain, and obscures whether capability or effort caused an outcome. Explicit role baselines keep routes auditable; one-axis escalation preserves useful evidence.
 
 ### Minimum-effective-cost frontier
 

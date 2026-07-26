@@ -2,17 +2,17 @@
 # Use with: omp --config ./.omp/primer-config.yml
 # Adds primer-local skills.
 
-model: openai-codex/gpt-5.6-sol:high
+model: openai-codex/gpt-5.6-sol:medium
 serviceTier: none
 
 modelRoles:
-  default: openai-codex/gpt-5.6-sol:high
-  orchestrator: openai-codex/gpt-5.6-sol:high
+  default: openai-codex/gpt-5.6-sol:medium
+  orchestrator: openai-codex/gpt-5.6-sol:medium
   smol: openai-codex/gpt-5.6-luna:medium
   task: openai-codex/gpt-5.6-luna:medium
-  slow: openai-codex/gpt-5.6-sol:high
-  plan: openai-codex/gpt-5.6-sol:high
-  advisor: openai-codex/gpt-5.6-sol:high
+  slow: openai-codex/gpt-5.6-sol:medium
+  plan: openai-codex/gpt-5.6-sol:medium
+  advisor: openai-codex/gpt-5.6-sol:medium
   designer: anthropic/claude-opus-5:medium
   # inspect_image uses this provider-qualified capability role strictly.
   vision: openai-codex/gpt-5.6-luna:medium
@@ -30,6 +30,19 @@ task:
   softRequestBudget: 40
   isolation:
     mode: apfs
+  agentModelOverrides:
+    quick_task: openai-codex/gpt-5.6-luna:medium
+    explore: openai-codex/gpt-5.6-luna:medium
+    librarian: openai-codex/gpt-5.6-luna:medium
+    reviewer: openai-codex/gpt-5.6-luna:medium
+    qa: openai-codex/gpt-5.6-luna:medium
+    plan: openai-codex/gpt-5.6-sol:medium
+    implementer: openai-codex/gpt-5.6-sol:medium
+    oracle: openai-codex/gpt-5.6-sol:medium
+    operator: openai-codex/gpt-5.6-sol:medium
+    synthesizer: openai-codex/gpt-5.6-sol:medium
+    task: openai-codex/gpt-5.6-luna:medium
+    designer: anthropic/claude-opus-5:medium
 
 providers:
   webSearch: kagi

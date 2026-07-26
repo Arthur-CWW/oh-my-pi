@@ -69,14 +69,15 @@ task:
   showResolvedModelBadge: true
   maxRecursionDepth: 3
   agentModelOverrides: 
+    quick_task: openai-codex/gpt-5.6-luna:medium
     explore: openai-codex/gpt-5.6-luna:medium
     librarian: openai-codex/gpt-5.6-luna:medium
     reviewer: openai-codex/gpt-5.6-luna:medium
-    quick_task: openai-codex/gpt-5.6-luna:medium
     qa: openai-codex/gpt-5.6-luna:medium
     plan: openai-codex/gpt-5.6-sol:medium
     implementer: openai-codex/gpt-5.6-sol:medium
     oracle: openai-codex/gpt-5.6-sol:medium
+    operator: openai-codex/gpt-5.6-sol:medium
     synthesizer: openai-codex/gpt-5.6-sol:medium
     task: openai-codex/gpt-5.6-luna:medium
     designer: anthropic/claude-opus-5:medium
