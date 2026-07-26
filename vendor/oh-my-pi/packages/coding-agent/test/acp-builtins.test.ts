@@ -289,7 +289,7 @@ describe("ACP builtin slash commands", () => {
 		expect(output[0]).toContain("Openai Codex");
 		expect(output[0]).toContain("5 hours (prolite)");
 		expect(output[0]).toContain("user@example.com: 0.24 unknown used (76.0% left)");
-		expect(output[0]).toContain("resets in");
+		expect(output[0]).toMatch(/resets .+ \(in \d+[smhd]\)/);
 	});
 	it("/usage show renders the same report as plain /usage", async () => {
 		const now = 1_700_000_000_000;
@@ -347,7 +347,11 @@ describe("ACP builtin slash commands", () => {
 		const result = await executeAcpBuiltinSlashCommand("/usage reset active", runtime);
 
 		expect(result).toEqual({ consumed: true });
-		expect(redeemedTarget).toEqual({ credentialId: 42, accountId: "account-1", email: "user@example.com" });
+		expect(redeemedTarget).toEqual({
+			credentialId: 42,
+			accountId: "account-1",
+			email: "user@example.com",
+		});
 		expect(output).toEqual(["Reset applied for user@example.com — your rate-limit window has been refreshed."]);
 	});
 
@@ -379,8 +383,24 @@ describe("ACP builtin slash commands", () => {
 	it("jobs: lists running and recent jobs from snapshot", async () => {
 		const { output, runtime } = createRuntime();
 		runtime.session.getAsyncJobSnapshot = () => ({
-			running: [{ id: "j1", type: "bash", status: "running", label: "npm install", startTime: Date.now() - 5000 }],
-			recent: [{ id: "j2", type: "task", status: "completed", label: "build done", startTime: Date.now() - 60_000 }],
+			running: [
+				{
+					id: "j1",
+					type: "bash",
+					status: "running",
+					label: "npm install",
+					startTime: Date.now() - 5000,
+				},
+			],
+			recent: [
+				{
+					id: "j2",
+					type: "task",
+					status: "completed",
+					label: "build done",
+					startTime: Date.now() - 60_000,
+				},
+			],
 			delivery: { queued: 0, delivering: false, pendingJobIds: [] },
 		});
 

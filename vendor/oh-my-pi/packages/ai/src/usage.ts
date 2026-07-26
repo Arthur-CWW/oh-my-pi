@@ -73,6 +73,8 @@ export interface UsageLimit {
 export interface UsageResetCredits {
 	/** Number of resets available to redeem right now. */
 	availableCount: number;
+	/** Earliest expiry of an available reset credit, in epoch milliseconds, when reported. */
+	expiresAt?: number;
 }
 
 /** Aggregated usage report for a provider. */
@@ -179,6 +181,7 @@ export const usageLimitSchema = z.object({
 
 export const usageResetCreditsSchema = z.object({
 	availableCount: z.number(),
+	expiresAt: z.number().optional(),
 });
 
 export const usageReportSchema = z.object({

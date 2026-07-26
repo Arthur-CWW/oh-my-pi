@@ -19,6 +19,7 @@ import { formatDuration, formatNumber } from "@oh-my-pi/pi-utils";
 import chalk from "chalk";
 import { ModelRegistry } from "../config/model-registry";
 import { discoverAuthStorage } from "../sdk";
+import { createUsageDeadlineFormatter, type UsageDeadlineFormatter } from "../slash-commands/helpers/usage-deadline";
 
 const BAR_WIDTH = 28;
 
@@ -317,6 +318,7 @@ function formatAccountHeader(
 	report: UsageReport,
 	index: number,
 	nowMs: number,
+	formatDeadline: UsageDeadlineFormatter,
 	redaction?: Map<string, string>,
 ): string {
 	const status = aggregateStatus(report.limits);
@@ -326,22 +328,25 @@ function formatAccountHeader(
 	const planType = report.metadata?.planType;
 	if (typeof planType === "string" && planType) header += chalk.dim(` · plan: ${planType}`);
 	const savedResets = report.resetCredits?.availableCount ?? 0;
-	if (savedResets > 0) header += chalk.cyan(` · ✦ ${savedResets} saved reset${savedResets === 1 ? "" : "s"}`);
+	if (savedResets > 0) {
+		const expiry = formatDeadline(report.resetCredits?.expiresAt);
+		header += chalk.cyan(
+			` · ✦ ${savedResets} saved reset${savedResets === 1 ? "" : "s"}${expiry ? ` · expires ${expiry}` : ""}`,
+		);
+	}
 	if (report.fetchedAt && nowMs - report.fetchedAt > 90_000) {
 		header += chalk.dim(` · fetched ${formatDuration(nowMs - report.fetchedAt)} ago`);
 	}
 	return header;
 }
 
-function formatLimitLine(limit: UsageLimit, labelWidth: number, nowMs: number): string[] {
+function formatLimitLine(limit: UsageLimit, labelWidth: number, formatDeadline: UsageDeadlineFormatter): string[] {
 	const status = resolveStatus(limit);
 	const title = limitTitle(limit);
 	const padded = title.padEnd(labelWidth);
 	const details: string[] = [describeAmount(limit)];
-	const resetsAt = limit.window?.resetsAt;
-	if (resetsAt !== undefined && resetsAt > nowMs) {
-		details.push(`resets in ${formatDuration(resetsAt - nowMs)}`);
-	}
+	const reset = formatDeadline(limit.window?.resetsAt);
+	if (reset) details.push(`resets ${reset}`);
 	const lines = [
 		`      ${STATUS_COLOR[status]("●")} ${padded}  ${renderBar(limit)}  ${chalk.dim(details.join(" · "))}`,
 	];
@@ -418,7 +423,9 @@ export function formatUsageBreakdown(
 	accounts: UsageAccountIdentity[],
 	nowMs: number,
 	redaction?: Map<string, string>,
+	timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone,
 ): string {
+	const formatDeadline = createUsageDeadlineFormatter(nowMs, timeZone);
 	const reportsByProvider = new Map<string, UsageReport[]>();
 	for (const report of reports) {
 		const list = reportsByProvider.get(report.provider) ?? [];
@@ -456,13 +463,13 @@ export function formatUsageBreakdown(
 			.reduce((max, limit) => Math.max(max, limitTitle(limit).length), 0);
 
 		providerReports.forEach((report, index) => {
-			lines.push(`  ${formatAccountHeader(report, index, nowMs, redaction)}`);
+			lines.push(`  ${formatAccountHeader(report, index, nowMs, formatDeadline, redaction)}`);
 			if (report.limits.length === 0) {
 				lines.push(`      ${chalk.dim("no limits reported")}`);
 				return;
 			}
 			for (const limit of report.limits) {
-				lines.push(...formatLimitLine(limit, labelWidth, nowMs));
+				lines.push(...formatLimitLine(limit, labelWidth, formatDeadline));
 			}
 		});
 
@@ -685,7 +692,10 @@ export async function runUsageCommand(cmd: UsageCommandArgs): Promise<void> {
 			const days = cmd.days !== undefined && Number.isFinite(cmd.days) && cmd.days > 0 ? cmd.days : 7;
 			const nowMs = Date.now();
 			const sinceMs = nowMs - days * 86_400_000;
-			const entries = authStorage.listUsageHistory({ sinceMs, provider: cmd.provider?.toLowerCase() });
+			const entries = authStorage.listUsageHistory({
+				sinceMs,
+				provider: cmd.provider?.toLowerCase(),
+			});
 			const redaction = cmd.redact ? buildRedactionMap(collectHistoryIdentityStrings(entries)) : undefined;
 			if (cmd.json) {
 				const masked = redaction

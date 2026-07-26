@@ -28,13 +28,13 @@ import {
 import { resolveMemoryBackend } from "../../memory-backend";
 import { BashExecutionComponent } from "../../modes/components/bash-execution";
 import { BorderedLoader } from "../../modes/components/bordered-loader";
-import { DynamicBorder } from "../../modes/components/dynamic-border";
-import { keyHint } from "../../modes/components/keybinding-hints";
 import { CommandOutputOverlayComponent } from "../../modes/components/command-line";
-import { ToolsView } from "../../modes/components/tools-view";
-import { UsageHudComponent } from "../../modes/components/usage-hud";
+import { DynamicBorder } from "../../modes/components/dynamic-border";
 import { EvalExecutionComponent } from "../../modes/components/eval-execution";
+import { keyHint } from "../../modes/components/keybinding-hints";
+import { ToolsView } from "../../modes/components/tools-view";
 import { TranscriptBlock } from "../../modes/components/transcript-container";
+import { UsageHudComponent } from "../../modes/components/usage-hud";
 import { getMarkdownTheme, getSymbolTheme, theme } from "../../modes/theme/theme";
 import type { InteractiveModeContext } from "../../modes/types";
 import { computeContextBreakdown, renderContextUsage } from "../../modes/utils/context-usage";
@@ -47,6 +47,7 @@ import { formatCompactionReceipt, getLatestCompactionReceipt } from "../../sessi
 import type { NewSessionOptions } from "../../session/session-entries";
 import { formatShakeSummary, type ShakeMode, type ShakeResult } from "../../session/shake-types";
 import { limitMatchesActiveAccount } from "../../slash-commands/helpers/active-oauth-account";
+import { createUsageDeadlineFormatter } from "../../slash-commands/helpers/usage-deadline";
 import { outputMeta } from "../../tools/output-meta";
 import { resolveToCwd, stripOuterDoubleQuotes } from "../../tools/path-utils";
 import { replaceTabs } from "../../tools/render-utils";
@@ -296,7 +297,9 @@ export class CommandController {
 		}
 	}
 
-	async handleSessionCommand(showOutput: (message: string) => void = message => this.#showCommandOutput(message)): Promise<void> {
+	async handleSessionCommand(
+		showOutput: (message: string) => void = message => this.#showCommandOutput(message),
+	): Promise<void> {
 		const stats = this.ctx.session.getSessionStats();
 		const premiumRequests =
 			"premiumRequests" in stats && typeof stats.premiumRequests === "number"
@@ -445,7 +448,9 @@ export class CommandController {
 		showOutput(info);
 	}
 
-	async handleJobsCommand(showOutput: (message: string) => void = message => this.#showCommandOutput(message)): Promise<void> {
+	async handleJobsCommand(
+		showOutput: (message: string) => void = message => this.#showCommandOutput(message),
+	): Promise<void> {
 		const snapshot = this.ctx.session.getAsyncJobSnapshot({ recentLimit: 5 });
 		if (!snapshot) {
 			this.ctx.showWarning("Async background jobs are unavailable in this session.");
@@ -485,7 +490,9 @@ export class CommandController {
 	async handleUsageCommand(reports?: UsageReport[] | null): Promise<void> {
 		let usageReports = reports ?? null;
 		if (!usageReports) {
-			const provider = this.ctx.session as { fetchUsageReports?: () => Promise<UsageReport[] | null> };
+			const provider = this.ctx.session as {
+				fetchUsageReports?: () => Promise<UsageReport[] | null>;
+			};
 			if (!provider.fetchUsageReports) {
 				this.ctx.showWarning("Usage reporting is not configured for this session.");
 				return;
@@ -511,8 +518,13 @@ export class CommandController {
 					this.ctx.session.sessionId,
 				)
 			: undefined;
-		const output = renderUsageReports(usageReports, theme, Date.now(), availableWidth, provider =>
-			provider === currentProvider ? activeAccount : undefined,
+		const output = renderUsageReports(
+			usageReports,
+			theme,
+			Date.now(),
+			Intl.DateTimeFormat().resolvedOptions().timeZone,
+			availableWidth,
+			provider => (provider === currentProvider ? activeAccount : undefined),
 		);
 		this.#showUsageHud(output);
 	}
@@ -1346,11 +1358,16 @@ export class CommandController {
 			// Build spawn args
 			const args = [
 				"scripts/successor.ts",
-				"--handoff", handoffPath,
-				"--stream", streamSlug,
-				"--model", modelSelector,
-				"--predecessor", predecessorHandle,
-				"--title", streamSlug,
+				"--handoff",
+				handoffPath,
+				"--stream",
+				streamSlug,
+				"--model",
+				modelSelector,
+				"--predecessor",
+				predecessorHandle,
+				"--title",
+				streamSlug,
 			];
 			if (options?.keepSource) {
 				args.push("--keep-source");
@@ -1532,54 +1549,19 @@ function formatUnlimitedReportLabel(report: UsageReport, index: number): string 
 	return `account ${index + 1}`;
 }
 
-function formatResetShort(limit: UsageLimit, nowMs: number): string | undefined {
-	const resetsAt = limit.window?.resetsAt;
-	if (resetsAt === undefined) return undefined;
-	// Codex returns the prior window's reset_at until a new request opens a fresh window —
-	// rendering a negative delta is meaningless, so drop the suffix in that case.
-	if (resetsAt <= nowMs) return undefined;
-	return formatDuration(resetsAt - nowMs);
-}
-
 function formatAccountHeaderRow(
 	limits: UsageLimit[],
 	reports: UsageReport[],
-	nowMs: number,
 	columnWidth: number,
 	uiTheme: typeof theme,
 	activeAccount?: OAuthAccountIdentity,
 ): string[] {
-	const parts = limits.map((limit, index) => {
-		const reset = formatResetShort(limit, nowMs);
+	return limits.map((limit, index) => {
 		const report = reports[index];
 		const active = report !== undefined && limitMatchesActiveAccount(report, limit, activeAccount);
-		const label = formatAccountLabel(limit, report, index);
-		return {
-			label: active ? `● ${label}` : label,
-			suffix: reset ? `(${reset})` : "",
-			active,
-		};
-	});
-	const maxSuffixWidth = parts.reduce((max, p) => Math.max(max, visibleWidth(p.suffix)), 0);
-	const gap = maxSuffixWidth > 0 ? 1 : 0;
-	const prefixBudget = columnWidth - maxSuffixWidth - gap;
-
-	// If suffix can't share the cell with at least `x…`, fall back to whole-label truncation.
-	if (prefixBudget < 2) {
-		return parts.map(p => {
-			const full = p.suffix ? `${p.label} ${p.suffix}` : p.label;
-			const cell = padColumn(truncateJobLabel(full, columnWidth), columnWidth);
-			return p.active ? uiTheme.fg("accent", cell) : cell;
-		});
-	}
-
-	return parts.map(p => {
-		const prefix = truncateJobLabel(p.label, prefixBudget);
-		const prefixCell = prefix + " ".repeat(prefixBudget - visibleWidth(prefix));
-		const styledPrefix = p.active ? uiTheme.fg("accent", prefixCell) : prefixCell;
-		if (!p.suffix) return styledPrefix + " ".repeat(maxSuffixWidth + gap);
-		const suffixPad = " ".repeat(maxSuffixWidth - visibleWidth(p.suffix));
-		return `${styledPrefix} ${suffixPad}${uiTheme.fg("dim", p.suffix)}`;
+		const label = `${active ? "● " : ""}${formatAccountLabel(limit, report, index)}`;
+		const cell = padColumn(truncateJobLabel(label, columnWidth), columnWidth);
+		return active ? uiTheme.fg("accent", cell) : cell;
 	});
 }
 
@@ -1629,20 +1611,6 @@ function formatAggregateAmount(limits: UsageLimit[]): string {
 	// No account IDs available — keep the pre-existing fallback so providers
 	// that don't populate scope.accountId still show a summary.
 	return `${limits.length} accts`;
-}
-
-function resolveResetRange(limits: UsageLimit[], nowMs: number): string | null {
-	const absolute = limits
-		.map(limit => limit.window?.resetsAt)
-		.filter((value): value is number => value !== undefined && Number.isFinite(value) && value > nowMs);
-	if (absolute.length === 0) return null;
-	const offsets = absolute.map(value => value - nowMs);
-	const minReset = Math.min(...offsets);
-	const maxReset = Math.max(...offsets);
-	if (maxReset - minReset > 60_000) {
-		return `resets in ${formatDuration(minReset)}–${formatDuration(maxReset)}`;
-	}
-	return `resets in ${formatDuration(minReset)}`;
 }
 
 function resolveStatusIcon(status: UsageLimit["status"], uiTheme: typeof theme): string {
@@ -1698,9 +1666,11 @@ function renderUsageReports(
 	reports: UsageReport[],
 	uiTheme: typeof theme,
 	nowMs: number,
+	timeZone: string,
 	availableWidth: number,
 	resolveActiveAccount?: (provider: string) => OAuthAccountIdentity | undefined,
 ): string {
+	const formatDeadline = createUsageDeadlineFormatter(nowMs, timeZone);
 	const lines: string[] = [];
 	const latestFetchedAt = Math.max(...reports.map(report => report.fetchedAt ?? 0));
 	const headerSuffix = latestFetchedAt ? ` (${formatDuration(nowMs - latestFetchedAt)} ago)` : "";
@@ -1766,8 +1736,9 @@ function renderUsageReports(
 				!!activeAccount &&
 				((!!activeAccount.accountId && activeAccount.accountId === report.metadata?.accountId) ||
 					(!!activeAccount.email && activeAccount.email === report.metadata?.email));
+			const expiry = formatDeadline(report.resetCredits?.expiresAt);
 			resetAccountLines.push(
-				`    • ${label}: ${count} saved reset${count === 1 ? "" : "s"}${isActive ? " (active)" : ""}`,
+				`    • ${label}: ${count} saved reset${count === 1 ? "" : "s"}${expiry ? ` · expires ${expiry}` : ""}${isActive ? " (active)" : ""}`,
 			);
 		}
 		if (resetAccountLines.length > 0) {
@@ -1792,7 +1763,12 @@ function renderUsageReports(
 			});
 			const sortedLimits = entries.map(entry => entry.limit);
 			const sortedReports = entries.map(entry => entry.report);
-			return { group, sortedLimits, sortedReports, amountText: formatAggregateAmount(sortedLimits) };
+			return {
+				group,
+				sortedLimits,
+				sortedReports,
+				amountText: formatAggregateAmount(sortedLimits),
+			};
 		});
 
 		const sectionCount = renderableGroups.reduce((max, g) => Math.max(max, g.sortedLimits.length), 0);
@@ -1808,7 +1784,6 @@ function renderUsageReports(
 			const accountLabels = formatAccountHeaderRow(
 				sortedLimits,
 				sortedReports,
-				nowMs,
 				sectionColumnWidth,
 				uiTheme,
 				activeAccount,
@@ -1818,9 +1793,15 @@ function renderUsageReports(
 				padColumn(renderUsageBar(limit, uiTheme, sectionColumnWidth), sectionColumnWidth),
 			);
 			lines.push(`  ${bars.join(" ")} ${amountText}`.trimEnd());
-			const resetText = sortedLimits.length <= 1 ? resolveResetRange(sortedLimits, nowMs) : null;
-			if (resetText) {
-				lines.push(`  ${uiTheme.fg("dim", resetText)}`.trimEnd());
+			for (let index = 0; index < sortedLimits.length; index++) {
+				const limit = sortedLimits[index]!;
+				const reset = formatDeadline(limit.window?.resetsAt);
+				if (!reset) continue;
+				const prefix =
+					sortedLimits.length === 1
+						? "resets"
+						: `${formatAccountLabel(limit, sortedReports[index], index)}: resets`;
+				lines.push(`  ${uiTheme.fg("dim", `${prefix} ${reset}`)}`.trimEnd());
 			}
 			const notes = sortedLimits.flatMap(limit => limit.notes ?? []);
 			if (notes.length > 0) {

@@ -3,6 +3,7 @@ import type { OAuthAccountIdentity } from "../../session/auth-storage";
 import type { SlashCommandRuntime } from "../types";
 import { reportMatchesActiveAccount } from "./active-oauth-account";
 import { formatDuration, renderAsciiBar } from "./format";
+import { createUsageDeadlineFormatter } from "./usage-deadline";
 
 function formatProviderName(provider: string): string {
 	return provider
@@ -33,11 +34,13 @@ function formatUsageReportAccount(report: UsageReport, limit: UsageLimit, index:
 	return `account ${index + 1}`;
 }
 
-function renderUsageReports(
+export function renderUsageReports(
 	reports: UsageReport[],
 	nowMs: number,
+	timeZone: string,
 	resolveActiveAccount?: (provider: string) => OAuthAccountIdentity | undefined,
 ): string {
+	const formatDeadline = createUsageDeadlineFormatter(nowMs, timeZone);
 	const latestFetchedAt = Math.max(...reports.map(report => report.fetchedAt ?? 0));
 	const lines = [`Usage${latestFetchedAt ? ` (${formatDuration(nowMs - latestFetchedAt)} ago)` : ""}`];
 	const grouped = new Map<string, UsageReport[]>();
@@ -62,8 +65,9 @@ function renderUsageReports(
 						: typeof report.metadata?.accountId === "string"
 							? report.metadata.accountId
 							: "account";
+				const expiry = formatDeadline(report.resetCredits?.expiresAt);
 				lines.push(
-					`- ${resetLabel}: ${savedResets} saved rate-limit reset${savedResets === 1 ? "" : "s"} available — /usage reset to spend`,
+					`- ${resetLabel}: ${savedResets} saved rate-limit reset${savedResets === 1 ? "" : "s"} available${expiry ? ` · expires ${expiry}` : ""} — /usage reset to spend`,
 				);
 			}
 			if (report.limits.length === 0) {
@@ -80,9 +84,8 @@ function renderUsageReports(
 					`  ${formatUsageReportAccount(report, limit, index)}: ${formatUsageAmount(limit)}${inUse ? "  ← in use by this session" : ""}`,
 				);
 				lines.push(`  ${renderAsciiBar(limit.amount.usedFraction)}`);
-				if (limit.window?.resetsAt && limit.window.resetsAt > nowMs) {
-					lines.push(`  resets in ${formatDuration(limit.window.resetsAt - nowMs)}`);
-				}
+				const reset = formatDeadline(limit.window?.resetsAt);
+				if (reset) lines.push(`  resets ${reset}`);
 				if (limit.notes && limit.notes.length > 0) lines.push(`  ${limit.notes.join(" • ")}`);
 			}
 		}
@@ -109,7 +112,7 @@ export async function buildUsageReportText(runtime: SlashCommandRuntime): Promis
 						runtime.session.sessionId,
 					)
 				: undefined;
-			return renderUsageReports(reports, Date.now(), providerId =>
+			return renderUsageReports(reports, Date.now(), Intl.DateTimeFormat().resolvedOptions().timeZone, providerId =>
 				providerId === currentProvider ? activeAccount : undefined,
 			);
 		}
