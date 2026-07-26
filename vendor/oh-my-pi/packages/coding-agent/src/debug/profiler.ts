@@ -1,6 +1,11 @@
+import { Session } from "node:inspector/promises";
+
 /**
  * CPU and heap profiling wrappers for debug reports.
  */
+
+export const DEFAULT_CPU_PROFILE_DURATION_MS = 30_000;
+const CPU_PROFILE_SAMPLING_INTERVAL_US = 100;
 
 export interface CpuProfile {
 	data: string;
@@ -8,8 +13,15 @@ export interface CpuProfile {
 }
 
 export interface ProfilerSession {
-	/** Stop profiling and return the profile data */
+	/** Resolves when the maximum profiling duration elapses. */
+	readonly expired: Promise<void>;
+	/** Stop profiling and return the profile data. Repeated calls return the same promise. */
 	stop(): Promise<CpuProfile>;
+}
+
+export interface CpuProfileOptions {
+	/** Maximum profiling duration. Defaults to 30 seconds. */
+	durationMs?: number;
 }
 
 /** V8 CPU Profile node structure */
@@ -37,7 +49,7 @@ interface CpuProfileData {
  * Format CPU profile data as markdown for LLM analysis.
  * Extracts top functions by self time and call counts.
  */
-function formatProfileAsMarkdown(profileJson: string): string {
+export function formatProfileAsMarkdown(profileJson: string): string {
 	try {
 		const profile = JSON.parse(profileJson) as CpuProfileData;
 		const nodes = profile.nodes ?? [];
@@ -75,17 +87,16 @@ function formatProfileAsMarkdown(profileJson: string): string {
 			}
 		}
 
-		// Sort by self time and get top functions
-		const sorted = Array.from(nodeMap.values())
-			.filter(n => n.selfTime > 0 && n.functionName !== "(root)" && n.functionName !== "(idle)")
-			.sort((a, b) => b.selfTime - a.selfTime)
-			.slice(0, 30);
+		// Percentages describe the complete profile, not only the displayed top 30.
+		const significantNodes = Array.from(nodeMap.values()).filter(
+			n => n.selfTime > 0 && n.functionName !== "(root)" && n.functionName !== "(idle)",
+		);
+		const totalTime = significantNodes.reduce((sum, n) => sum + n.selfTime, 0);
+		const sorted = significantNodes.sort((a, b) => b.selfTime - a.selfTime).slice(0, 30);
 
 		if (sorted.length === 0) {
 			return "# CPU Profile Summary\n\nNo significant CPU activity recorded.";
 		}
-
-		const totalTime = sorted.reduce((sum, n) => sum + n.selfTime, 0);
 
 		const lines = ["# CPU Profile Summary", ""];
 		lines.push(`Total profiled time: ${(totalTime / 1000).toFixed(1)}ms`);
@@ -112,33 +123,87 @@ function formatProfileAsMarkdown(profileJson: string): string {
  * Start CPU profiling.
  * Returns a session that can be stopped to get the profile data.
  */
-export async function startCpuProfile(): Promise<ProfilerSession> {
-	const v8 = await import("node:v8");
-	v8.setFlagsFromString("--allow-natives-syntax");
+export async function startCpuProfile(options?: CpuProfileOptions): Promise<ProfilerSession> {
+	const durationMs = options?.durationMs ?? DEFAULT_CPU_PROFILE_DURATION_MS;
+	if (!Number.isFinite(durationMs) || durationMs <= 0) {
+		throw new RangeError("CPU profile duration must be a positive finite number");
+	}
 
-	const { Session } = await import("node:inspector/promises");
 	const session = new Session();
 	session.connect();
 
-	await session.post("Profiler.enable");
-	// Default CDP interval is 1ms, which mis-attributes await-resumption samples
-	// to the line after `await` (one sparse sample inherits the entire wait). 100µs
-	// scatters samples enough to keep CPU vs. async-wait attribution honest.
-	await session.post("Profiler.setSamplingInterval", { interval: 100 });
-	await session.post("Profiler.start");
-
-	return {
-		async stop(): Promise<CpuProfile> {
-			const result = await session.post("Profiler.stop");
+	try {
+		await session.post("Profiler.enable");
+		// A 100µs interval avoids attributing sparse await-resumption samples to
+		// async wait time. The 30s default cap bounds a session to roughly 300,000
+		// samples at this interval.
+		await session.post("Profiler.setSamplingInterval", { interval: CPU_PROFILE_SAMPLING_INTERVAL_US });
+		await session.post("Profiler.start");
+	} catch (error) {
+		try {
 			await session.post("Profiler.disable");
+		} catch {
+			// Preserve the profiler startup failure after best-effort cleanup.
+		}
+		try {
 			session.disconnect();
+		} catch {
+			// Preserve the profiler startup failure after best-effort cleanup.
+		}
+		throw error;
+	}
 
-			const data = JSON.stringify(result.profile, null, 2);
+	const expiration = Promise.withResolvers<void>();
+	let stopPromise: Promise<CpuProfile> | undefined;
+	let timer: NodeJS.Timeout;
+
+	const stop = (): Promise<CpuProfile> => {
+		if (stopPromise) return stopPromise;
+		clearTimeout(timer);
+
+		stopPromise = (async () => {
+			let profile: CpuProfileData | undefined;
+			let stopError: unknown;
+			try {
+				const result = await session.post("Profiler.stop");
+				profile = result.profile as CpuProfileData;
+			} catch (error) {
+				stopError = error;
+			}
+
+			let cleanupError: unknown;
+			try {
+				await session.post("Profiler.disable");
+			} catch (error) {
+				cleanupError = error;
+			}
+			try {
+				session.disconnect();
+			} catch (error) {
+				cleanupError ??= error;
+			}
+
+			if (stopError !== undefined) throw stopError;
+			if (cleanupError !== undefined) throw cleanupError;
+
+			if (!profile) throw new Error("CPU profiler stopped without returning profile data");
+			const data = JSON.stringify(profile, null, 2);
 			const markdown = formatProfileAsMarkdown(data);
-
 			return { data, markdown };
-		},
+		})();
+
+		return stopPromise;
 	};
+
+	timer = setTimeout(() => {
+		expiration.resolve();
+		void stop().catch(() => {
+			// The same failure remains observable to callers awaiting stop().
+		});
+	}, durationMs);
+	timer.unref?.();
+
+	return { expired: expiration.promise, stop };
 }
 
 export interface HeapSnapshot {

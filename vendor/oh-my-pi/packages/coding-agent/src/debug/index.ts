@@ -155,28 +155,29 @@ export class DebugSelectorComponent extends Container {
 		block.addChild(new Text(theme.fg("accent", `${theme.status.info} CPU profiling started`), 1, 0));
 		block.addChild(new Spacer(1));
 		block.addChild(
-			new Text(theme.fg("muted", "Reproduce the performance issue, then press Enter to stop profiling."), 1, 0),
+			new Text(
+				theme.fg("muted", "Reproduce the issue, then press Enter to stop (automatic after 30 seconds)."),
+				1,
+				0,
+			),
 		);
 		this.ctx.present(block);
 
-		// Wait for Enter keypress
+		// Wait for Enter/Escape or the profiler's hard expiry. Always restore
+		// editor handlers, including when the session expires or waiting fails.
 		const { promise, resolve } = Promise.withResolvers<void>();
 		const originalOnEscape = this.ctx.editor.onEscape;
 		const originalOnSubmit = this.ctx.editor.onSubmit;
 
-		this.ctx.editor.onSubmit = () => {
+		this.ctx.editor.onSubmit = () => resolve();
+		this.ctx.editor.onEscape = () => resolve();
+
+		try {
+			await Promise.race([promise, session.expired]);
+		} finally {
 			this.ctx.editor.onEscape = originalOnEscape;
 			this.ctx.editor.onSubmit = originalOnSubmit;
-			resolve();
-		};
-
-		this.ctx.editor.onEscape = () => {
-			this.ctx.editor.onEscape = originalOnEscape;
-			this.ctx.editor.onSubmit = originalOnSubmit;
-			resolve();
-		};
-
-		await promise;
+		}
 
 		// Stop profiling and create report
 		const loader = new Loader(
