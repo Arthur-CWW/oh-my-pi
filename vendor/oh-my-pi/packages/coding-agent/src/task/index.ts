@@ -68,7 +68,12 @@ import { getSessionSpawnCordon, type SessionSpawnCordon } from "../session/sessi
 import { generateCommitMessage } from "../utils/commit-message-generator";
 import * as git from "../utils/git";
 import * as jj from "../utils/jj";
-import { type DiscoveryResult, discoverAgents, getAgent } from "./discovery";
+import {
+	createTaskCapabilitySnapshot,
+	type TaskCapabilitySnapshot,
+	discoverAgents,
+	getAgent,
+} from "./discovery";
 import { type ExecutorOptions, runSubprocess } from "./executor";
 import { generateTaskName } from "./name-generator";
 import { AgentOutputManager } from "./output-manager";
@@ -301,39 +306,24 @@ export function formatResultOutputFallback(result: Pick<SingleResult, "output" |
 }
 
 /**
- * Render the tool description from a cached agent list and current settings.
+ * Render the tool description from the capability snapshot shared with execution.
  */
 function renderDescription(
-	agents: AgentDefinition[],
+	capabilities: TaskCapabilitySnapshot,
 	maxConcurrency: number,
 	isolationEnabled: boolean,
-	disabledAgents: string[],
 	batchEnabled: boolean,
 	asyncEnabled: boolean,
 	ircEnabled: boolean,
-	parentSpawns: string,
 ): string {
-	const spawningDisabled = parentSpawns === "";
-	let filteredAgents = disabledAgents.length > 0 ? agents.filter(a => !disabledAgents.includes(a.name)) : agents;
-	if (spawningDisabled) {
-		filteredAgents = [];
-	} else if (parentSpawns !== "*") {
-		const allowed = new Set(
-			parentSpawns
-				.split(",")
-				.map(s => s.trim())
-				.filter(Boolean),
-		);
-		filteredAgents = filteredAgents.filter(a => allowed.has(a.name));
-	}
-	const renderedAgents = filteredAgents.map(agent => ({
+	const renderedAgents = capabilities.agents.map(agent => ({
 		name: agent.name,
 		description: agent.description,
 		readOnly: isReadOnlyAgent(agent),
 	}));
 	return prompt.render(taskDescriptionTemplate, {
 		agents: renderedAgents,
-		spawningDisabled,
+		spawningDisabled: capabilities.spawningDisabled,
 		MAX_CONCURRENCY: maxConcurrency,
 		isolationEnabled,
 		batchEnabled,
@@ -348,6 +338,21 @@ function createTaskModeError(text: string): AgentToolResult<TaskToolDetails> {
 		details: { projectAgentsDir: null, results: [], totalDurationMs: 0 },
 	};
 }
+function createUnknownTaskCapabilityError(
+	agentName: string,
+	capabilities: TaskCapabilitySnapshot,
+): AgentToolResult<TaskToolDetails> {
+	const available = capabilities.agents.map(agent => agent.name).join(", ") || "none";
+	return {
+		content: [{ type: "text", text: `Unknown agent "${agentName}". Available: ${available}` }],
+		details: {
+			projectAgentsDir: capabilities.projectAgentsDir,
+			results: [],
+			totalDurationMs: 0,
+		},
+	};
+}
+
 
 function createSpawnCordonRefusal(cordon: SessionSpawnCordon): AgentToolResult<TaskToolDetails> {
 	return {
@@ -701,36 +706,6 @@ export function renderSpawnIdentityNotice(match: SpawnIdentityMatch): string {
 	);
 }
 
-/**
- * Process-level memo for create-time agent discovery, keyed by resolved cwd.
- *
- * `TaskTool.create` runs for every (sub)agent session in this process and the
- * walk-up + plugin-registry scan in `discoverAgents` is identical for a given
- * cwd, so repeat creations reuse the first scan. Execution-time discovery
- * (`#runSpawn`) intentionally stays fresh. The memo also tracks the live
- * `discoverAgents` binding: test spies swap that binding, which invalidates
- * the memo automatically.
- */
-const discoveryMemo = new Map<string, Promise<DiscoveryResult>>();
-let discoveryMemoFn: typeof discoverAgents | undefined;
-
-function discoverAgentsForCreate(cwd: string): Promise<DiscoveryResult> {
-	const fn = discoverAgents;
-	if (discoveryMemoFn !== fn) {
-		discoveryMemoFn = fn;
-		discoveryMemo.clear();
-	}
-	const key = path.resolve(cwd);
-	let pending = discoveryMemo.get(key);
-	if (!pending) {
-		pending = fn(cwd);
-		discoveryMemo.set(key, pending);
-		pending.catch(() => {
-			if (discoveryMemo.get(key) === pending) discoveryMemo.delete(key);
-		});
-	}
-	return pending;
-}
 
 export function reattachDetachedChildTask(options: {
 	manager: AsyncJobManager;
@@ -920,8 +895,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 	// so the task renders as ONE block that transitions in place — not a pending
 	// call frame stacked above the result frame. Mirrors `taskToolRenderer`.
 	readonly mergeCallAndResult = true;
-	readonly #discoveredAgents: AgentDefinition[];
-	readonly #blockedAgent: string | undefined;
+	readonly #capabilities: TaskCapabilitySnapshot;
 	/** Schedule-time route decisions keyed by agentId, consumed by #runSpawn to avoid duplicate work. */
 	#preResolvedModels = new Map<string, SpawnRouteDecision>();
 	readonly #fallbackAdmissionSessionId = `ephemeral:${process.pid}:${randomUUID()}`;
@@ -936,28 +910,24 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 		return renderTaskCall(repairTaskParams(args as TaskParams), options, theme);
 	}
 
-	/** Dynamic description that reflects current disabled-agent settings */
+	/** Description and execution share the immutable create-time capability snapshot. */
 	get description(): string {
-		const disabledAgents = this.session.settings.get("task.disabledAgents") as string[];
 		const maxConcurrency = this.session.settings.get("task.maxConcurrency");
 		const isolationMode = this.session.settings.get("task.isolation.mode");
 		return renderDescription(
-			this.#discoveredAgents,
+			this.#capabilities,
 			maxConcurrency,
 			isolationMode !== "none",
-			disabledAgents,
 			this.#isBatchEnabled(),
 			this.session.settings.get("async.enabled"),
 			isIrcEnabled(this.session.settings, this.session.taskDepth ?? 0),
-			this.session.getSessionSpawns() ?? "*",
 		);
 	}
 	private constructor(
 		private readonly session: ToolSession,
-		discoveredAgents: AgentDefinition[],
+		capabilities: TaskCapabilitySnapshot,
 	) {
-		this.#blockedAgent = $env.PI_BLOCKED_AGENT;
-		this.#discoveredAgents = discoveredAgents;
+		this.#capabilities = capabilities;
 		this.#resourceLeaseAcquirer = agentId => {
 			const attemptId = randomUUID();
 			return this.#acquireResourceLease(attemptId, "revive", agentId, `revive:${attemptId}`);
@@ -1014,11 +984,16 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 	}
 
 	/**
-	 * Create a TaskTool instance with async agent discovery.
+	 * Create a TaskTool generation with one executable capability snapshot.
 	 */
 	static async create(session: ToolSession): Promise<TaskTool> {
-		const { agents } = await discoverAgentsForCreate(session.cwd);
-		return new TaskTool(session, agents);
+		const discovery = await discoverAgents(session.cwd);
+		const capabilities = createTaskCapabilitySnapshot(discovery, {
+			disabledAgents: session.settings.get("task.disabledAgents"),
+			parentSpawns: session.getSessionSpawns() ?? "*",
+			blockedAgent: $env.PI_BLOCKED_AGENT,
+		});
+		return new TaskTool(session, capabilities);
 	}
 
 	async #spawnIdentityCandidates(): Promise<SpawnIdentityCandidate[]> {
@@ -1063,6 +1038,9 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 		if (this.session.isSessionControlPaused?.()) return createSessionPausedRefusal();
 		const cordon = this.session.getSessionId ? getSessionSpawnCordon(this.session.getSessionId() ?? "") : undefined;
 		if (cordon) return createSpawnCordonRefusal(cordon);
+		const selectedAgent = getAgent(this.#capabilities.agents, params.agent ?? "");
+		if (!selectedAgent) return createUnknownTaskCapabilityError(params.agent ?? "", this.#capabilities);
+
 
 		if (batchEnabled) {
 			const context = await prepareSpawnContext(
@@ -1074,7 +1052,6 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 		}
 
 		const spawnItems = resolveSpawnItems(params);
-		const selectedAgent = this.#discoveredAgents.find(agent => agent.name === params.agent);
 		const asyncEnabled = this.session.settings.get("async.enabled");
 		const manager = asyncEnabled ? this.session.asyncJobManager : undefined;
 		const depthCapacity = canSpawnAtDepth(
@@ -1696,7 +1673,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 		if (this.session.isSessionControlPaused?.()) return createSessionPausedRefusal();
 		const cordon = this.session.getSessionId ? getSessionSpawnCordon(this.session.getSessionId() ?? "") : undefined;
 		if (cordon) return createSpawnCordonRefusal(cordon);
-		const { agents, projectAgentsDir } = await discoverAgents(this.session.cwd);
+		const { agents, projectAgentsDir } = this.#capabilities;
 		const agentName = params.agent ?? "";
 		const preResolved = preAllocatedId ? this.#preResolvedModels.get(preAllocatedId) : undefined;
 		if (preAllocatedId) this.#preResolvedModels.delete(preAllocatedId);
@@ -1717,31 +1694,10 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 			};
 		}
 
-		// Validate agent exists
+		// Defensive resolution for scheduled jobs: use the same capabilities
+		// that were rendered and accepted by execute(), never fresh discovery.
 		const agent = getAgent(agents, agentName);
-		if (!agent) {
-			const available = agents.map(a => a.name).join(", ") || "none";
-			return {
-				content: [{ type: "text", text: `Unknown agent "${agentName}". Available: ${available}` }],
-				details: { projectAgentsDir, results: [], totalDurationMs: 0 },
-			};
-		}
-
-		// Check if agent is disabled in settings
-		const disabledAgents = this.session.settings.get("task.disabledAgents") as string[];
-		if (disabledAgents.length > 0 && disabledAgents.includes(agentName)) {
-			const enabled = agents.filter(a => !disabledAgents.includes(a.name)).map(a => a.name);
-			return {
-				content: [
-					{
-						type: "text",
-
-						text: `Agent "${agentName}" is disabled in settings. Enable it via /agents, or use a different agent type.${enabled.length > 0 ? ` Available: ${enabled.join(", ")}` : ""}`,
-					},
-				],
-				details: { projectAgentsDir, results: [], totalDurationMs: 0 },
-			};
-		}
+		if (!agent) return createUnknownTaskCapabilityError(agentName, this.#capabilities);
 
 		const planModeState = this.session.getPlanModeState?.();
 		const effectiveAgent = resolveSubagentDefinition(agent, planModeState?.enabled === true);
@@ -1834,37 +1790,8 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 					localProtocolOptions,
 				);
 
+
 		try {
-			// Check self-recursion prevention
-			if (this.#blockedAgent && agentName === this.#blockedAgent) {
-				return {
-					content: [
-						{
-							type: "text",
-							text: `Cannot spawn ${this.#blockedAgent} agent from within itself (recursion prevention). Use a different agent type.`,
-						},
-					],
-					details: { projectAgentsDir, results: [], totalDurationMs: Date.now() - startTime },
-				};
-			}
-
-			// Check spawn restrictions from parent
-			const parentSpawns = this.session.getSessionSpawns() ?? "*";
-			const allowedSpawns = parentSpawns.split(",").map(s => s.trim());
-			const isSpawnAllowed = (): boolean => {
-				if (parentSpawns === "") return false; // Empty = deny all
-				if (parentSpawns === "*") return true; // Wildcard = allow all
-				return allowedSpawns.includes(agentName);
-			};
-
-			if (!isSpawnAllowed()) {
-				const allowed = parentSpawns === "" ? "none (spawns disabled for this agent)" : parentSpawns;
-				return {
-					content: [{ type: "text", text: `Cannot spawn '${agentName}'. Allowed: ${allowed}` }],
-					details: { projectAgentsDir, results: [], totalDurationMs: Date.now() - startTime },
-				};
-			}
-
 			await fs.mkdir(effectiveArtifactsDir, { recursive: true });
 
 			// Allocate a unique ID across the session to prevent artifact collisions

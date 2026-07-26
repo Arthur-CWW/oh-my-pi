@@ -81,6 +81,7 @@
 ### Fixed
 - Lease-revoked session writers now become terminal before mutating memory or disk, cancel stale AgentSession callbacks, suppress recursive ErrorInbox writes, and retarget idempotent child-completion receipts to the live parent owner.
 - `read history://...` now separates line/raw selectors from local and fleet history targets before routing, including UUID sessions, session/agent paths, query projections, and colon-bearing agent IDs.
+- Task responsibility discovery now snapshots one executable roster per tool generation, omits settings-disabled roles from every prompt surface, and resolves execution against the same snapshot while later settings/model changes apply to subsequent generations and spawns.
 - Vim `#undo` now closes the active insert transaction before traversing history, skips a prefix-only transaction, and routes Ctrl-R to history search in insert mode versus redo in normal mode.
 - `omp sessions resume` now safely resolves either idle-reclaimer receipts or health-confirmed orphaned journals, refuses live/fingerprint-matched owners, quarantines corrupt owner claims with receipts, fences concurrent recovery with a fresh owner epoch, and refreshes known cmux surface bindings to `~/.bun/bin/omp --session`.
 - Provider request-failure notices now surface the endpoint/SDK/refusal message in the headline and durable ErrorInbox record, bounded to 2 KiB with authorization and API-key material redacted.

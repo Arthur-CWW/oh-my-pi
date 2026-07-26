@@ -25,14 +25,10 @@ describe("task.async-fallback", () => {
 		vi.restoreAllMocks();
 	});
 
-	it("falls back to sync execution when the session has no job manager", async () => {
-		// Two-stage spy: the initial discovery during `TaskTool.create` advertises
-		// `task` so the tool builds; the executor's later call (inside the sync
-		// `#runSpawn`) advertises *nothing*, forcing the unique "Unknown agent"
-		// message. That re-discovery only happens on the sync codepath — the
-		// async path resolves agents from the create-time snapshot and returns a
-		// job stub immediately — so hitting it proves the missing
-		// `session.asyncJobManager` routed us through the sync fallback.
+	it("falls back to sync execution without rediscovering task capabilities", async () => {
+		// The missing asyncJobManager routes through the synchronous run path.
+		// A deliberately invalid model stops after responsibility resolution,
+		// proving that path retains the create-time capability snapshot.
 		const discoverSpy = vi.spyOn(discoveryModule, "discoverAgents");
 		discoverSpy.mockResolvedValueOnce({
 			agents: [
@@ -54,13 +50,13 @@ describe("task.async-fallback", () => {
 			agent: "task",
 			id: "One",
 			description: "label",
+			model: "not-a-real-model",
 			assignment: "Do the thing.",
 		} as TaskParams);
 
 		const text = getFirstText(result);
-		expect(text).toContain('Unknown agent "task"');
-		expect(text).toContain("Available: none");
-		// create + sync-path re-discovery; the async path would have stopped at one.
 		expect(discoverSpy).toHaveBeenCalledTimes(2);
+		expect(text).toContain("Durable subagent sessions require the live parent session file and id");
+		expect(text).not.toContain('Unknown agent "task"');
 	});
 });

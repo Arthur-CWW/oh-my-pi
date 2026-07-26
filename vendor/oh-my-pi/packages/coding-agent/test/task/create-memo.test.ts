@@ -1,17 +1,10 @@
-import { afterEach, describe, expect, it, vi } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { TaskTool } from "@oh-my-pi/pi-coding-agent/task";
-import * as discoveryModule from "@oh-my-pi/pi-coding-agent/task/discovery";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
-
-const TEST_AGENTS = [
-	{
-		name: "task",
-		description: "General-purpose task agent",
-		systemPrompt: "You are a task agent.",
-		source: "bundled" as const,
-	},
-];
 
 function createSession(cwd: string): ToolSession {
 	return {
@@ -23,44 +16,42 @@ function createSession(cwd: string): ToolSession {
 	} as unknown as ToolSession;
 }
 
-describe("TaskTool.create discovery memo", () => {
-	afterEach(() => {
-		vi.restoreAllMocks();
+describe("TaskTool capability generations", () => {
+	let cwd = "";
+
+	beforeEach(async () => {
+		cwd = await fs.mkdtemp(path.join(os.tmpdir(), "task-capability-generation-"));
+		await fs.mkdir(path.join(cwd, ".omp", "agents"), { recursive: true });
 	});
 
-	it("reuses one discovery scan across repeated creations with the same cwd", async () => {
-		const spy = vi
-			.spyOn(discoveryModule, "discoverAgents")
-			.mockResolvedValue({ agents: TEST_AGENTS, projectAgentsDir: null });
-
-		const first = await TaskTool.create(createSession("/tmp"));
-		const second = await TaskTool.create(createSession("/tmp"));
-
-		expect(spy).toHaveBeenCalledTimes(1);
-		expect(first.description).toBe(second.description);
+	afterEach(async () => {
+		await fs.rm(cwd, { recursive: true, force: true });
 	});
 
-	it("rescans for a different cwd", async () => {
-		const spy = vi
-			.spyOn(discoveryModule, "discoverAgents")
-			.mockResolvedValue({ agents: TEST_AGENTS, projectAgentsDir: null });
+	async function writeAgent(description: string): Promise<void> {
+		await Bun.write(
+			path.join(cwd, ".omp", "agents", "capability_probe.md"),
+			`---\nname: capability_probe\ndescription: ${description}\nmodel: pi/smol\n---\n\nProbe task capabilities.\n`,
+		);
+	}
 
-		await TaskTool.create(createSession("/tmp"));
-		await TaskTool.create(createSession("/tmp/omp-memo-other"));
+	it("discovers newly added responsibilities in the next generation", async () => {
+		const first = await TaskTool.create(createSession(cwd));
+		await writeAgent("Fresh capability");
+		const second = await TaskTool.create(createSession(cwd));
 
-		expect(spy).toHaveBeenCalledTimes(2);
+		expect(first.description).not.toContain("# capability_probe");
+		expect(second.description).toContain("# capability_probe\nFresh capability");
 	});
 
-	it("does not cache a rejected discovery", async () => {
-		const spy = vi
-			.spyOn(discoveryModule, "discoverAgents")
-			.mockRejectedValueOnce(new Error("boom"))
-			.mockResolvedValue({ agents: TEST_AGENTS, projectAgentsDir: null });
+	it("keeps an existing generation immutable while the next generation rescans", async () => {
+		await writeAgent("Generation one");
+		const first = await TaskTool.create(createSession(cwd));
+		await writeAgent("Generation two");
+		const second = await TaskTool.create(createSession(cwd));
 
-		await expect(TaskTool.create(createSession("/tmp"))).rejects.toThrow("boom");
-		const tool = await TaskTool.create(createSession("/tmp"));
-
-		expect(tool.description).toContain("task");
-		expect(spy).toHaveBeenCalledTimes(2);
+		expect(first.description).toContain("# capability_probe\nGeneration one");
+		expect(first.description).not.toContain("Generation two");
+		expect(second.description).toContain("# capability_probe\nGeneration two");
 	});
 });

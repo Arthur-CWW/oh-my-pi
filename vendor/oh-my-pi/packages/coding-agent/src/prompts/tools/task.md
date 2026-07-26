@@ -45,17 +45,13 @@
 </parameters>
 
 <responsibilities>
-- `implementer`: implementation and code changes
-- `qa`: test execution and proof collection
-- `operator`: operational or environment work
-- `synthesizer`: integrate findings and produce the final synthesis
-- `explore`: scouting and research
-- `reviewer`: code and design review
-- `designer`: UI/UX design and implementation
-- `plan`: architecture and implementation planning
-- `librarian`: source-verified library research
-- `oracle`: senior engineering judgment and implementation
-- `quick_task`: strictly mechanical updates or data collection
+{{#if spawningDisabled}}
+No responsibilities are available in this context.
+{{else}}
+{{#list agents join="\n"}}
+- `{{name}}`: {{description}}
+{{/list}}
+{{/if}}
 </responsibilities>
 
 `task` is a deprecated alias for `implementer` during migration; use `implementer`.

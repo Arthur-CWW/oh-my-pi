@@ -36,4 +36,10 @@ describe("task tool description: role parameter", () => {
 		// rather than the exact copy-edited wording/capitalization.
 		expect(out).toMatch(/tailor[^\n]*role/i);
 	});
+
+	it("derives the responsibility list from executable agents", () => {
+		const out = render(true);
+		expect(out).toContain("- `explore`: scout");
+		expect(out).not.toContain("`operator`");
+	});
 });

@@ -30,6 +30,61 @@ export interface DiscoveryResult {
 	projectAgentsDir: string | null;
 }
 
+/** Agent capabilities advertised and resolved by one TaskTool generation. */
+export interface TaskCapabilitySnapshot {
+	readonly agents: readonly AgentDefinition[];
+	readonly projectAgentsDir: string | null;
+	readonly spawningDisabled: boolean;
+}
+
+export interface TaskCapabilitySnapshotOptions {
+	readonly disabledAgents: readonly string[];
+	readonly parentSpawns: string;
+	readonly blockedAgent?: string;
+}
+
+/**
+ * Freeze the executable responsibility set for one TaskTool instance.
+ *
+ * Discovery results may be reused by callers, so clone every mutable array
+ * before freezing. Settings changes belong to the next tool generation; the
+ * current prompt and execution path must keep resolving this exact set.
+ */
+export function createTaskCapabilitySnapshot(
+	discovery: DiscoveryResult,
+	options: TaskCapabilitySnapshotOptions,
+): TaskCapabilitySnapshot {
+	const disabled = new Set(options.disabledAgents);
+	const allowed =
+		options.parentSpawns === "*"
+			? undefined
+			: new Set(
+					options.parentSpawns
+						.split(",")
+						.map(name => name.trim())
+						.filter(Boolean),
+				);
+	const agents = discovery.agents
+		.filter(agent => !disabled.has(agent.name))
+		.filter(agent => allowed === undefined || allowed.has(agent.name))
+		.filter(agent => agent.name !== options.blockedAgent)
+		.map(agent =>
+			Object.freeze({
+				...agent,
+				tools: agent.tools ? [...agent.tools] : undefined,
+				spawns: Array.isArray(agent.spawns) ? [...agent.spawns] : agent.spawns,
+				model: agent.model ? [...agent.model] : undefined,
+				autoloadSkills: agent.autoloadSkills ? [...agent.autoloadSkills] : undefined,
+			}),
+		);
+	return Object.freeze({
+		agents: Object.freeze(agents),
+		projectAgentsDir: discovery.projectAgentsDir,
+		spawningDisabled: options.parentSpawns === "",
+	});
+}
+
+
 /** Stable data projection consumed by agent pickers and preview surfaces. */
 export interface AgentPickerEntry {
 	name: string;
@@ -136,6 +191,7 @@ export async function discoverAgents(cwd: string, home: string = os.homedir()): 
 /**
  * Get an agent by name from discovered agents.
  */
-export function getAgent(agents: AgentDefinition[], name: string): AgentDefinition | undefined {
+export function getAgent(agents: readonly AgentDefinition[], name: string): AgentDefinition | undefined {
 	return agents.find(a => a.name === name);
 }
+
