@@ -5,7 +5,10 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { AsyncJobManager } from "@oh-my-pi/pi-coding-agent/async/job-manager";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { HostResourceAdmission } from "@oh-my-pi/pi-coding-agent/resource/host-resource-admission";
+import {
+	DEFAULT_ATTEMPT_RESERVATION_BYTES,
+	HostResourceAdmission,
+} from "@oh-my-pi/pi-coding-agent/resource/host-resource-admission";
 import { AgentLifecycleManager } from "@oh-my-pi/pi-coding-agent/registry/agent-lifecycle";
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import { TaskTool } from "@oh-my-pi/pi-coding-agent/task";
@@ -30,10 +33,12 @@ function createSession(options: {
 	agentId?: string;
 	sessionId?: string;
 }): ToolSession {
+	const settings = Settings.isolated(options.settings ?? {});
+	settings.set("task.globalAdmission.memoryBudgetBytes", DEFAULT_ATTEMPT_RESERVATION_BYTES * 2 - 1);
 	return {
 		cwd: "/tmp",
 		hasUI: false,
-		settings: Settings.isolated(options.settings ?? {}),
+		settings,
 		getSessionFile: () => null,
 		getSessionSpawns: () => "*",
 		getAgentId: () => options.agentId,
@@ -107,7 +112,7 @@ describe("live child admission", () => {
 		HostResourceAdmission.resetGlobalForTests();
 		HostResourceAdmission.global({
 			dbPath: path.join(root, "irc-bus.sqlite"),
-			maxLiveAttempts: 1,
+			memoryBudgetBytes: DEFAULT_ATTEMPT_RESERVATION_BYTES * 2 - 1,
 			queuePollMs: 5,
 		});
 		const audit = new Database(path.join(root, "irc-bus.sqlite"));
@@ -142,7 +147,7 @@ describe("live child admission", () => {
 	});
 
 
-	it("cancels a queued spawn before the occupied slot releases without leaking admission", async () => {
+	it("cancels a queued spawn before the occupied memory budget releases without leaking admission", async () => {
 		vi.spyOn(discoveryModule, "discoverAgents").mockResolvedValue({
 			agents: [taskAgent],
 			projectAgentsDir: null,
@@ -209,7 +214,7 @@ describe("live child admission", () => {
 		}
 	});
 
-	it("releases the admission slot when a child throws during startup so the next spawn admits", async () => {
+	it("releases reserved memory when child startup throws so the next spawn admits", async () => {
 		vi.spyOn(discoveryModule, "discoverAgents").mockResolvedValue({
 			agents: [taskAgent],
 			projectAgentsDir: null,
@@ -257,7 +262,7 @@ describe("live child admission", () => {
 		}
 	});
 
-	it("routes every batch item through the width-one host authority", async () => {
+	it("routes every batch item through the host memory authority", async () => {
 		vi.spyOn(discoveryModule, "discoverAgents").mockResolvedValue({
 			agents: [taskAgent],
 			projectAgentsDir: null,

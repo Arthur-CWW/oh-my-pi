@@ -4,7 +4,10 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { AsyncJobManager } from "@oh-my-pi/pi-coding-agent/async/job-manager";
-import { HostResourceAdmission } from "@oh-my-pi/pi-coding-agent/resource/host-resource-admission";
+import {
+	DEFAULT_ATTEMPT_RESERVATION_BYTES,
+	HostResourceAdmission,
+} from "@oh-my-pi/pi-coding-agent/resource/host-resource-admission";
 import { readProcessIdentity } from "@oh-my-pi/pi-coding-agent/resource/process-identity";
 import { AgentLifecycleManager } from "@oh-my-pi/pi-coding-agent/registry/agent-lifecycle";
 import { AgentRegistry, MAIN_AGENT_ID } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
@@ -124,7 +127,7 @@ describe("AgentLifecycleManager", () => {
 		HostResourceAdmission.resetGlobalForTests();
 		HostResourceAdmission.global({
 			dbPath: path.join(root, "irc-bus.sqlite"),
-			maxLiveAttempts: 1,
+			memoryBudgetBytes: DEFAULT_ATTEMPT_RESERVATION_BYTES * 2 - 1,
 			queuePollMs: 5,
 		});
 		const audit = new Database(path.join(root, "irc-bus.sqlite"));
@@ -518,7 +521,7 @@ describe("AgentLifecycleManager", () => {
 			agentId: "held-child",
 			jobId: "held-job",
 			holderProcess,
-			reservationBytes: 0,
+			reservationBytes: DEFAULT_ATTEMPT_RESERVATION_BYTES,
 		});
 		const controller = new AbortController();
 		let signal: AbortSignal | undefined = controller.signal;
@@ -545,7 +548,7 @@ describe("AgentLifecycleManager", () => {
 						agentId: "3a-Sub",
 						jobId: `revive-job-${attempt}`,
 						holderProcess,
-						reservationBytes: 0,
+						reservationBytes: DEFAULT_ATTEMPT_RESERVATION_BYTES,
 					},
 					{ signal },
 				),

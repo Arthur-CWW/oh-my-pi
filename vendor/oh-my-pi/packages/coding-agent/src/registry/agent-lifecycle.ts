@@ -10,10 +10,12 @@
  * `parked` ↔ `idle`.
  */
 
+import { gcAndSweep } from "bun:jsc";
 import { randomUUID } from "node:crypto";
 import { logger } from "@oh-my-pi/pi-utils";
 import { AsyncJobManager } from "../async/job-manager";
 import {
+	DEFAULT_ATTEMPT_RESERVATION_BYTES,
 	HostAdmissionRejectedError,
 	HostResourceAdmission,
 	type HostResourceLease,
@@ -188,6 +190,18 @@ export class AgentLifecycleManager {
 		const failures = results.flatMap(result => (result.status === "rejected" ? [result.reason] : []));
 		if (failures.length > 0) throw new AggregateError(failures, "Failed to release one or more parked agents");
 		return candidates.reduce((count, id) => count + (this.#registry.get(id) === undefined ? 1 : 0), 0);
+	}
+
+	/**
+	 * Cooperative host-pressure doorbell: force the Bun/JSC collector, then
+	 * park every currently idle child so its live session resources are disposed.
+	 */
+	async reclaimIdleChildrenForHostPressure(): Promise<number> {
+		Bun.gc(true);
+		gcAndSweep();
+		const idleIds = [...this.#adopted.keys()].filter(id => this.#registry.get(id)?.status === "idle");
+		await Promise.all(idleIds.map(id => this.park(id)));
+		return idleIds.length;
 	}
 
 	/**
@@ -611,7 +625,11 @@ export class AgentLifecycleManager {
 			);
 		}
 		const attemptId = randomUUID();
-		return HostResourceAdmission.global().acquire({
+		return HostResourceAdmission.global({
+			onPressure: async () => {
+				await this.reclaimIdleChildrenForHostPressure();
+			},
+		}).acquire({
 			attemptId,
 			kind: "revive",
 			sessionId: ref.parentId ?? MAIN_AGENT_ID,
@@ -620,7 +638,7 @@ export class AgentLifecycleManager {
 			agentId: id,
 			jobId: `revive:${attemptId}`,
 			holderProcess,
-			reservationBytes: 0,
+			reservationBytes: DEFAULT_ATTEMPT_RESERVATION_BYTES,
 		});
 	}
 

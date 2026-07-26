@@ -5,7 +5,10 @@ import * as path from "node:path";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { SettingPath } from "@oh-my-pi/pi-coding-agent/config/settings-schema";
-import { HostResourceAdmission } from "@oh-my-pi/pi-coding-agent/resource/host-resource-admission";
+import {
+	DEFAULT_ATTEMPT_RESERVATION_BYTES,
+	HostResourceAdmission,
+} from "@oh-my-pi/pi-coding-agent/resource/host-resource-admission";
 import { readProcessIdentity } from "@oh-my-pi/pi-coding-agent/resource/process-identity";
 import { IrcBus, type IrcMessage } from "@oh-my-pi/pi-coding-agent/irc/bus";
 import { AgentLifecycleManager } from "@oh-my-pi/pi-coding-agent/registry/agent-lifecycle";
@@ -119,7 +122,7 @@ describe("IRC", () => {
 		HostResourceAdmission.resetGlobalForTests();
 		HostResourceAdmission.global({
 			dbPath: path.join(root, "irc-bus.sqlite"),
-			maxLiveAttempts: 1,
+			memoryBudgetBytes: DEFAULT_ATTEMPT_RESERVATION_BYTES * 2 - 1,
 			queuePollMs: 5,
 		});
 		IrcBus.resetGlobalForTests();
@@ -247,7 +250,7 @@ describe("IRC", () => {
 				agentId: "held-child",
 				jobId: "held-job",
 				holderProcess: readProcessIdentity(process.pid)!,
-				reservationBytes: 0,
+				reservationBytes: DEFAULT_ATTEMPT_RESERVATION_BYTES,
 			});
 			const sub = makeFakeSession();
 			sub.setOutcome("woken");
@@ -270,7 +273,7 @@ describe("IRC", () => {
 			expect(admission.inspect()).toMatchObject({ leases: [], waiters: [] });
 		});
 
-		it("never bypasses a saturated width-one authority during circular revival", async () => {
+		it("never bypasses a saturated host memory budget during circular revival", async () => {
 			const admission = HostResourceAdmission.global();
 			const held = await admission.acquire({
 				attemptId: "irc-held-circular",
@@ -281,7 +284,7 @@ describe("IRC", () => {
 				agentId: "held-child",
 				jobId: "held-job",
 				holderProcess: readProcessIdentity(process.pid)!,
-				reservationBytes: 0,
+				reservationBytes: DEFAULT_ATTEMPT_RESERVATION_BYTES,
 			});
 			const sub = makeFakeSession();
 			sub.setOutcome("woken");

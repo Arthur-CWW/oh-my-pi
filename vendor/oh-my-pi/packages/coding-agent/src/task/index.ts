@@ -700,7 +700,6 @@ function discoverAgentsForCreate(cwd: string): Promise<DiscoveryResult> {
 	return pending;
 }
 
-
 export function reattachDetachedChildTask(options: {
 	manager: AsyncJobManager;
 	child: ReAdoptedChild;
@@ -886,9 +885,6 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 		jobId: string,
 		signal?: AbortSignal,
 	): Promise<HostResourceLease> {
-		if (this.session.settings.getGlobal("task.globalAdmission.mode") !== "fixed") {
-			throw new HostAdmissionRejectedError("authority-unavailable", "Only fixed host resource admission is available");
-		}
 		const holderProcess = readProcessIdentity(process.pid);
 		if (!holderProcess) {
 			throw new HostAdmissionRejectedError(
@@ -897,7 +893,10 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 			);
 		}
 		return HostResourceAdmission.global({
-			maxLiveAttempts: this.session.settings.getGlobal("task.globalAdmission.maxLiveAttempts"),
+			memoryBudgetBytes: this.session.settings.getGlobal("task.globalAdmission.memoryBudgetBytes"),
+			onPressure: async () => {
+				await AgentLifecycleManager.global().reclaimIdleChildrenForHostPressure();
+			},
 		}).acquire(
 			{
 				attemptId,
@@ -908,7 +907,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 				agentId,
 				jobId,
 				holderProcess,
-				reservationBytes: 0,
+				reservationBytes: this.session.settings.getGlobal("task.globalAdmission.attemptReservationBytes"),
 			},
 			{
 				signal,
@@ -1337,13 +1336,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 			async ({ jobId: ownJobId, signal: runSignal, reportProgress, markRunning }) => {
 				let resourceLease: HostResourceLease;
 				try {
-					resourceLease = await this.#acquireResourceLease(
-						attemptId,
-						"spawn",
-						agentId,
-						ownJobId,
-						runSignal,
-					);
+					resourceLease = await this.#acquireResourceLease(attemptId, "spawn", agentId, ownJobId, runSignal);
 				} catch (error) {
 					this.#preResolvedModels.delete(agentId);
 					progress.status = "aborted";

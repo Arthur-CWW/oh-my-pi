@@ -2,6 +2,10 @@ import { THINKING_EFFORTS } from "@oh-my-pi/pi-ai";
 import { DEFAULT_SHARE_URL } from "@oh-my-pi/pi-wire";
 import { SHAPE_VARIANT_NAMES } from "@oh-my-pi/snapcompact";
 import { DEFAULT_RELAY_URL } from "../collab/protocol";
+import {
+	DEFAULT_ATTEMPT_RESERVATION_BYTES,
+	defaultHostMemoryBudgetBytes,
+} from "../resource/host-resource-sampler";
 import { DEFAULT_STT_MODEL_KEY, STT_MODEL_OPTIONS, STT_MODEL_VALUES } from "../stt/models";
 import { AUTO_THINKING, getConfiguredThinkingLevelMetadata, getThinkingLevelMetadata } from "../thinking";
 import {
@@ -3771,35 +3775,33 @@ export const SETTINGS_SCHEMA = {
 		},
 	},
 
-	"task.globalAdmission.mode": {
-		type: "enum",
-		values: ["fixed"],
-		default: "fixed",
-		scope: "global",
-		ui: {
-			tab: "tasks",
-			group: "Subagents",
-			label: "Global Admission Mode",
-			description: "Host-scoped child admission policy. Fixed width is mandatory.",
-		},
-	},
-	"task.globalAdmission.maxLiveAttempts": {
+	"task.globalAdmission.memoryBudgetBytes": {
 		type: "number",
-		default: 1,
+		default: defaultHostMemoryBudgetBytes(),
 		min: 1,
-		max: 3,
+		max: Number.MAX_SAFE_INTEGER,
 		integer: true,
 		scope: "global",
 		ui: {
 			tab: "tasks",
 			group: "Subagents",
-			label: "Global Live Attempts",
-			description: "Maximum live child attempts shared by every OMP session on this host",
-			options: [
-				{ value: "1", label: "1 attempt" },
-				{ value: "2", label: "2 attempts" },
-				{ value: "3", label: "3 attempts" },
-			],
+			label: "Host Memory Budget",
+			description:
+				"Maximum memory bytes reserved and observed across subagents in every OMP session on this host",
+		},
+	},
+	"task.globalAdmission.attemptReservationBytes": {
+		type: "number",
+		default: DEFAULT_ATTEMPT_RESERVATION_BYTES,
+		min: 1,
+		max: Number.MAX_SAFE_INTEGER,
+		integer: true,
+		scope: "global",
+		ui: {
+			tab: "tasks",
+			group: "Subagents",
+			label: "Subagent Memory Reservation",
+			description: "Declared memory estimate in bytes reserved before each subagent starts",
 		},
 	},
 

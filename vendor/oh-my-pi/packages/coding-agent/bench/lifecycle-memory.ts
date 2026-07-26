@@ -267,7 +267,7 @@ export async function runFanoutAdmissionScenario(spawns = 12, cap = 3): Promise<
 	const dbDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-bench-admission-"));
 	const admission = new HostResourceAdmission({
 		dbPath: path.join(dbDir, "admission.sqlite"),
-		maxLiveAttempts: cap,
+		memoryBudgetBytes: Math.ceil((cap * 100) / 0.94),
 		queuePollMs: 1,
 	});
 	const holderProcess = readProcessIdentity(process.pid);
@@ -286,7 +286,7 @@ export async function runFanoutAdmissionScenario(spawns = 12, cap = 3): Promise<
 					agentId: `bench-child-${index}`,
 					jobId: `bench-job-${index}`,
 					holderProcess,
-					reservationBytes: 0,
+					reservationBytes: 100,
 				});
 				liveSessions++;
 				peakLiveSessions = Math.max(peakLiveSessions, liveSessions);

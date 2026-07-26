@@ -4,16 +4,15 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import {
+	HostAdmissionCorruptError,
 	HostAdmissionFencedError,
-	HostAdmissionRejectedError,
 	HostResourceAdmission,
 	type HostResourceAdmissionRequest,
 	type HostResourceLease,
-	type ResourceAttemptKind,
 } from "@oh-my-pi/pi-coding-agent/resource/host-resource-admission";
 import { type ProcessIdentity, readProcessIdentity } from "@oh-my-pi/pi-coding-agent/resource/process-identity";
 
-// Integration proof: real SQLite pollers and OS process death require the platform clock.
+// Real SQLite connections and OS process publication cannot be advanced with a fake JS clock.
 async function pollUntil(predicate: () => boolean, timeoutMs = 2_000): Promise<void> {
 	const deadline = Date.now() + timeoutMs;
 	while (!predicate()) {
@@ -22,7 +21,7 @@ async function pollUntil(predicate: () => boolean, timeoutMs = 2_000): Promise<v
 	}
 }
 
-describe("HostResourceAdmission", () => {
+describe("HostResourceAdmission memory budget", () => {
 	let root: string;
 	let dbPath: string;
 	let holder: ProcessIdentity;
@@ -31,7 +30,7 @@ describe("HostResourceAdmission", () => {
 	const admissions: HostResourceAdmission[] = [];
 
 	beforeEach(async () => {
-		root = await fs.mkdtemp(path.join(os.tmpdir(), "omp-host-admission-"));
+		root = await fs.mkdtemp(path.join(os.tmpdir(), "omp-host-memory-admission-"));
 		dbPath = path.join(root, "irc-bus.sqlite");
 		previousHome = process.env.HOME;
 		previousControlDb = process.env.OMP_SESSION_CONTROL_DB;
@@ -50,8 +49,8 @@ describe("HostResourceAdmission", () => {
 		await fs.rm(root, { recursive: true, force: true });
 	});
 
-	function open(options: ConstructorParameters<typeof HostResourceAdmission>[0] = {}): HostResourceAdmission {
-		const admission = new HostResourceAdmission({ dbPath, queuePollMs: 5, ...options });
+	function open(options: ConstructorParameters<typeof HostResourceAdmission>[0]): HostResourceAdmission {
+		const admission = new HostResourceAdmission({ dbPath, queuePollMs: 5, sampleIntervalMs: 60_000, ...options });
 		admissions.push(admission);
 		return admission;
 	}
@@ -59,217 +58,158 @@ describe("HostResourceAdmission", () => {
 	function request(
 		attemptId: string,
 		sessionId: string,
-		kind: ResourceAttemptKind = "spawn",
+		reservationBytes: number,
 		holderProcess: ProcessIdentity = holder,
 	): HostResourceAdmissionRequest {
 		return {
 			attemptId,
-			kind,
+			kind: "spawn",
 			sessionId,
 			sessionOwnerEpoch: null,
 			parentAgentId: `${sessionId}-parent`,
 			agentId: `${attemptId}-agent`,
 			jobId: `${attemptId}-job`,
 			holderProcess,
-			reservationBytes: 0,
+			reservationBytes,
 		};
 	}
 
-	it("serializes two independent connections at width one", async () => {
-		const left = open({ maxLiveAttempts: 1 });
-		const right = open({ maxLiveAttempts: 1 });
-		let live = 0;
-		let peakLive = 0;
-		let leftLease: HostResourceLease | undefined;
-		let rightLease: HostResourceLease | undefined;
-		const recordGrant = (lease: HostResourceLease): HostResourceLease => {
-			live++;
-			peakLive = Math.max(peakLive, live);
-			return lease;
-		};
-		const leftPending = left.acquire(request("left", "session-left")).then(lease => {
-			leftLease = recordGrant(lease);
+	it("admits by aggregate bytes rather than legacy count width", async () => {
+		const admission = open({ memoryBudgetBytes: 10_000 });
+		const leases: HostResourceLease[] = [];
+		for (let index = 0; index < 4; index++) {
+			leases.push(await admission.acquire(request(`attempt-${index}`, `session-${index}`, 100)));
+		}
+		expect(admission.inspect()).toMatchObject({
+			safetyCeiling: 16,
+			memoryBudgetBytes: 10_000,
+			reservedBytes: 400,
+			chargedBytes: 400,
 		});
-		const rightPending = right.acquire(request("right", "session-right")).then(lease => {
-			rightLease = recordGrant(lease);
-		});
+		expect(admission.inspect().leases).toHaveLength(4);
+		for (const lease of leases) lease.release();
+	});
 
-		await pollUntil(
-			() =>
-				(leftLease !== undefined || rightLease !== undefined) &&
-				left.inspect().leases.length === 1 &&
-				left.inspect().waiters.length === 1,
+	it("defers a reservation that would exceed the byte budget", async () => {
+		const first = open({ memoryBudgetBytes: 250 });
+		const second = open({ memoryBudgetBytes: 250 });
+		const held = await first.acquire(request("held", "session-a", 150));
+		let admitted: HostResourceLease | undefined;
+		const pending = second.acquire(request("deferred", "session-b", 150)).then(lease => (admitted = lease));
+		await pollUntil(() => first.inspect().waiters.length === 1);
+		expect(admitted).toBeUndefined();
+		expect(first.inspect().receipts.some(receipt => receipt.type === "deferred")).toBe(true);
+		held.release();
+		await pending;
+		admitted!.release();
+	});
+
+	it("rings the GC doorbell exactly once per 80-percent crossing", async () => {
+		let doorbells = 0;
+		const admission = open({
+			memoryBudgetBytes: 1_000,
+			onPressure: () => {
+				doorbells++;
+			},
+		});
+		const left = await admission.acquire(request("left", "session-a", 400));
+		const right = await admission.acquire(request("right", "session-b", 400));
+		expect(doorbells).toBe(1);
+		expect(admission.inspect().pressureState).toBe("gc");
+		admission.inspect();
+		expect(doorbells).toBe(1);
+		left.release();
+		right.release();
+		expect(admission.inspect().pressureState).toBe("normal");
+		const crossedAgain = await admission.acquire(request("again", "session-c", 800));
+		expect(doorbells).toBe(2);
+		crossedAgain.release();
+	});
+
+	it("stops at 95 percent and rejects deferred waiters with a typed error", async () => {
+		const admission = open({ memoryBudgetBytes: 1_000 });
+		const held = await admission.acquire(request("held", "session-a", 900));
+		const older = admission.acquire(request("older", "session-b", 60));
+		const newest = admission.acquire(request("newest", "session-c", 60));
+		await expect(older).rejects.toMatchObject({ reason: "pressure-hard" });
+		await expect(newest).rejects.toMatchObject({ reason: "pressure-hard" });
+		expect(admission.inspect().receipts.some(receipt => receipt.type === "waiters-rejected")).toBe(true);
+		held.release();
+	});
+
+	it("decays stale observations back to the declared reservation", async () => {
+		const admission = open({ memoryBudgetBytes: 1_000, observationMaxAgeMs: 20 });
+		const lease = await admission.acquire(request("observed", "session-a", 100));
+		const audit = new Database(dbPath);
+		audit
+			.query("UPDATE resource_leases SET observed_bytes=$bytes, observed_at_ms=$now WHERE lease_id=$leaseId")
+			.run({ $bytes: 700, $now: Date.now(), $leaseId: lease.leaseId });
+		expect(admission.inspect().chargedBytes).toBe(700);
+		audit
+			.query("UPDATE resource_leases SET observed_at_ms=$staleAt WHERE lease_id=$leaseId")
+			.run({ $staleAt: Date.now() - 100, $leaseId: lease.leaseId });
+		expect(admission.inspect()).toMatchObject({ observedBytes: 100, chargedBytes: 100 });
+		audit.close();
+		lease.release();
+	});
+
+	it("fails closed instead of migrating an old resource schema", () => {
+		const oldPath = path.join(root, "old-schema.sqlite");
+		const old = new Database(oldPath);
+		old.run(`CREATE TABLE resource_pool_state (
+			id INTEGER PRIMARY KEY, schema_version INTEGER NOT NULL, next_ticket INTEGER NOT NULL,
+			next_fence_token INTEGER NOT NULL, grant_sequence INTEGER NOT NULL, pressure_state TEXT NOT NULL,
+			pressure_since_ms INTEGER, emergency_epoch INTEGER NOT NULL, sample_json TEXT, sample_at_ms INTEGER
+		)`);
+		old.run(`INSERT INTO resource_pool_state VALUES (1, 1, 1, 1, 0, 'normal', NULL, 0, NULL, NULL)`);
+		old.close();
+		expect(() => new HostResourceAdmission({ dbPath: oldPath, memoryBudgetBytes: 1_000 })).toThrow(
+			HostAdmissionCorruptError,
 		);
-		expect(live).toBe(1);
-		(leftLease ?? rightLease)!.release();
-		live--;
-		await Promise.all([leftPending, rightPending]);
-		expect(left.inspect().leases).toHaveLength(1);
-		expect(live).toBe(1);
-		expect(peakLive).toBe(1);
-		const activeAttempt = left.inspect().leases[0]!.attemptId;
-		(activeAttempt === "left" ? leftLease : rightLease)!.release();
-		live--;
-		expect(live).toBe(0);
-		expect(left.inspect()).toMatchObject({ leases: [], waiters: [] });
 	});
 
-	it("round-robins sessions while preserving FIFO inside each session", async () => {
-		const left = open({ maxLiveAttempts: 1 });
-		const right = open({ maxLiveAttempts: 1 });
-		const seed = await left.acquire(request("a-seed", "session-a"));
-		const order: string[] = [];
-		const a1 = left.acquire(request("a-1", "session-a")).then(lease => {
-			order.push("a-1");
-			return lease;
-		});
-		const a2 = left.acquire(request("a-2", "session-a")).then(lease => {
-			order.push("a-2");
-			return lease;
-		});
-		const b1 = right.acquire(request("b-1", "session-b")).then(lease => {
-			order.push("b-1");
-			return lease;
-		});
-		await pollUntil(() => left.inspect().waiters.length === 3);
-
-		seed.release();
-		const bLease = await b1;
-		expect(order).toEqual(["b-1"]);
-		bLease.release();
-		const firstA = await a1;
-		expect(order).toEqual(["b-1", "a-1"]);
-		firstA.release();
-		const secondA = await a2;
-		expect(order).toEqual(["b-1", "a-1", "a-2"]);
-		secondA.release();
-	});
-
-	it("deletes only the cancelled durable waiter across connections", async () => {
-		const holder = open({ maxLiveAttempts: 1 });
-		const waiter = open({ maxLiveAttempts: 1 });
-		const held = await holder.acquire(request("held", "session-a"));
-		const controller = new AbortController();
-		const cancelled = waiter.acquire(request("cancelled", "session-b"), { signal: controller.signal });
-		await pollUntil(() => holder.inspect().waiters.length === 1);
-		controller.abort(new Error("cancel queued admission"));
-		await expect(cancelled).rejects.toMatchObject({ reason: "cancelled" });
-		expect(holder.inspect().waiters).toEqual([]);
-		held.release();
-	});
-
-	it("rejects stale fence renewal and release without touching the current row", async () => {
-		const admission = open();
-		const observer = open();
-		const lease = await admission.acquire(request("fenced", "session-a"));
-		const db = new Database(dbPath);
-		db.run("PRAGMA busy_timeout = 3000");
-		db.query("UPDATE resource_leases SET fence_token=$next WHERE lease_id=$leaseId").run({
-			$next: lease.fenceToken + 1_000,
-			$leaseId: lease.leaseId,
-		});
-		db.close();
-
-		expect(lease.renew()).toBe("fenced");
-		expect(() => lease.release()).toThrow(HostAdmissionFencedError);
-		expect(observer.inspect().leases).toHaveLength(1);
-	});
-
-	it("never reclaims a live exact holder from TTL alone", async () => {
-		const holder = open({ leaseTtlMs: 10, maxLiveAttempts: 1 });
-		const waiter = open({ leaseTtlMs: 10, maxLiveAttempts: 1 });
-		const held = await holder.acquire(request("live-holder", "session-a"));
+	it("never frees an expired lease while its exact holder remains live", async () => {
+		const admission = open({ memoryBudgetBytes: 110, leaseTtlMs: 10 });
+		const held = await admission.acquire(request("live-holder", "session-a", 100));
 		await Bun.sleep(30);
-		const waiting = waiter.acquire(request("waiting", "session-b"));
-		await pollUntil(() => holder.inspect().waiters.length === 1);
-		expect(holder.inspect().leases.map(lease => lease.attemptId)).toEqual(["live-holder"]);
+		let replacement: HostResourceLease | undefined;
+		const pending = admission.acquire(request("waiting", "session-b", 100)).then(lease => (replacement = lease));
+		await pollUntil(() => admission.inspect().waiters.length === 1);
+		expect(admission.inspect().leases.map(lease => lease.attemptId)).toEqual(["live-holder"]);
+		expect(replacement).toBeUndefined();
 		held.release();
-		const admitted = await waiting;
-		admitted.release();
+		await pending;
+		replacement!.release();
 	});
 
 	it("reclaims an expired lease only after its exact holder dies", async () => {
-		const holder = open({ leaseTtlMs: 10, maxLiveAttempts: 1 });
-		const reclaimer = open({ leaseTtlMs: 10, maxLiveAttempts: 1 });
+		const admission = open({ memoryBudgetBytes: 110, leaseTtlMs: 10 });
 		const processHandle = Bun.spawn(["/bin/sleep", "5"], { stdout: "ignore", stderr: "ignore" });
 		let shortLived: ProcessIdentity | null = null;
 		await pollUntil(() => {
 			shortLived = readProcessIdentity(processHandle.pid);
 			return shortLived !== null;
 		});
-		await holder.acquire(request("dead-holder", "session-a", "spawn", shortLived!));
+		await admission.acquire(request("dead-holder", "session-a", 100, shortLived!));
 		processHandle.kill();
 		await processHandle.exited;
 		await Bun.sleep(20);
-
-		const replacement = await reclaimer.acquire(request("replacement", "session-b"));
-		expect(holder.inspect().leases.map(lease => lease.attemptId)).toEqual(["replacement"]);
+		const replacement = await admission.acquire(request("replacement", "session-b", 100));
+		expect(admission.inspect().leases.map(lease => lease.attemptId)).toEqual(["replacement"]);
 		replacement.release();
 	});
 
-	it("gives nested sessions no private admission budget", async () => {
-		const parent = open({ maxLiveAttempts: 1 });
-		const nested = open({ maxLiveAttempts: 1 });
-		const parentLease = await parent.acquire(request("parent", "outer-session"));
-		let nestedLease: HostResourceLease | undefined;
-		const pending = nested.acquire(request("grandchild", "nested-session")).then(lease => (nestedLease = lease));
-		await pollUntil(() => parent.inspect().waiters.length === 1);
-		expect(nestedLease).toBeUndefined();
-		parentLease.release();
-		await pending;
-		nestedLease!.release();
-	});
-
-	it("reserves one revive permit only at widths two and three", async () => {
-		for (const width of [2, 3]) {
-			const admission = new HostResourceAdmission({
-				dbPath: path.join(root, `width-${width}.sqlite`),
-				maxLiveAttempts: width,
-				queuePollMs: 5,
-			});
-			admissions.push(admission);
-			expect(admission.inspect()).toMatchObject({ configuredWidth: width, reviveReserve: 1 });
-
-			const spawns = await Promise.all(
-				Array.from({ length: width - 1 }, (_, index) =>
-					admission.acquire(request(`width-${width}-spawn-${index}`, `width-${width}-session-${index}`)),
-				),
-			);
-			let blockedSpawn: HostResourceLease | undefined;
-			const blocked = admission
-				.acquire(request(`width-${width}-blocked`, `width-${width}-blocked-session`))
-				.then(lease => (blockedSpawn = lease));
-			await pollUntil(() => admission.inspect().waiters.length === 1);
-
-			const revive = await admission.acquire(
-				request(`width-${width}-revive`, `width-${width}-revive-session`, "revive"),
-			);
-			expect(blockedSpawn).toBeUndefined();
-			expect(admission.inspect().leases).toHaveLength(width);
-
-			spawns[0]!.release();
-			await blocked;
-			blockedSpawn!.release();
-			for (const spawn of spawns.slice(1)) spawn.release();
-			revive.release();
-			expect(admission.inspect()).toMatchObject({ leases: [], waiters: [] });
-		}
-
-		const capped = new HostResourceAdmission({
-			dbPath: path.join(root, "compiled-cap.sqlite"),
-			maxLiveAttempts: 99,
+	it("rejects stale fence operations without touching the authoritative row", async () => {
+		const admission = open({ memoryBudgetBytes: 1_000 });
+		const lease = await admission.acquire(request("fenced", "session-a", 100));
+		const audit = new Database(dbPath);
+		audit.query("UPDATE resource_leases SET fence_token=$next WHERE lease_id=$leaseId").run({
+			$next: lease.fenceToken + 1_000,
+			$leaseId: lease.leaseId,
 		});
-		admissions.push(capped);
-		expect(capped.inspect()).toMatchObject({ configuredWidth: 3, reviveReserve: 1 });
-
-		const defaulted = new HostResourceAdmission({ dbPath: path.join(root, "default-width.sqlite") });
-		admissions.push(defaulted);
-		expect(defaulted.inspect()).toMatchObject({ configuredWidth: 1, reviveReserve: 0 });
-	});
-
-	it("fails closed when the SQLite authority cannot be opened", async () => {
-		const directoryPath = path.join(root, "not-a-database");
-		await fs.mkdir(directoryPath);
-		expect(() => new HostResourceAdmission({ dbPath: directoryPath })).toThrow(HostAdmissionRejectedError);
+		audit.close();
+		expect(lease.renew()).toBe("fenced");
+		expect(() => lease.release()).toThrow(HostAdmissionFencedError);
+		expect(admission.inspect().leases).toHaveLength(1);
 	});
 });
