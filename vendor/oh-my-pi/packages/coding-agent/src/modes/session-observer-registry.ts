@@ -46,6 +46,7 @@ const STATUS_MAP: Record<string, ObservableSession["status"]> = {
 function observerStatusForRegistry(status: AgentStatus): ObservableSession["status"] {
 	switch (status) {
 		case "running":
+		case "waiting-provider":
 			return "active";
 		case "aborted":
 			return "aborted";

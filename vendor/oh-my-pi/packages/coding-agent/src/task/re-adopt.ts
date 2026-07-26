@@ -10,6 +10,11 @@ import type { RestartChildManifestEntryV1, SessionOwnershipHandle } from "../ses
 import type { FileEntry, ModelChangeEntry, SessionInitEntry, SubagentSessionMetadata } from "../session/session-entries";
 import type { SessionManager } from "../session/session-manager";
 import {
+	isPendingProviderRecovery,
+	latestProviderRecoveryRecord,
+	type ProviderRecoveryRecord,
+} from "../session/provider-recovery";
+import {
 	appendChildRestartRecord,
 	isTerminalChildLifecycleState,
 	latestChildLifecycleRecord,
@@ -55,6 +60,7 @@ export interface ReAdoptedChild {
 	taskDepth: number;
 	parentTaskPrefix: string;
 	lifecycleState: ChildLifecycleState;
+	providerRecovery?: ProviderRecoveryRecord;
 	detachedProcess?: ProcessIdentity;
 	turnState: "detached_live" | "interrupted_by_restart";
 }
@@ -94,6 +100,7 @@ interface ReAdoptionCandidate {
 	init: SessionInitEntry;
 	metadata: SubagentSessionMetadata;
 	lifecycle: ChildLifecycleRecord;
+	providerRecovery?: ProviderRecoveryRecord;
 	hotswapModel?: string;
 	restart?: ChildRestartRecord;
 	autoResumeAuthorized: boolean;
@@ -293,6 +300,15 @@ export async function reAdoptDirectChildren(options: ReAdoptionOptions): Promise
 			diagnostic(sessionFile, "owner_record_corrupt", "lifecycle ownership does not match this direct child journal");
 			continue;
 		}
+		const providerRecovery = latestProviderRecoveryRecord(entries);
+		if (providerRecovery === null) {
+			diagnostic(sessionFile, "corrupt_journal", "provider recovery record is malformed");
+			continue;
+		}
+		if (childLifecycle.state === "waiting-provider" && !isPendingProviderRecovery(providerRecovery)) {
+			diagnostic(sessionFile, "owner_record_corrupt", "waiting-provider child has no pending recovery record");
+			continue;
+		}
 		const terminalLifecycle = isTerminalChildLifecycleState(childLifecycle.state);
 		const hotswap = [...entries].reverse().find(
 			(entry): entry is ModelChangeEntry => entry.type === "model_change" && entry.role === "hotswap",
@@ -372,6 +388,7 @@ export async function reAdoptDirectChildren(options: ReAdoptionOptions): Promise
 			init,
 			metadata,
 			lifecycle: childLifecycle,
+			...(providerRecovery ? { providerRecovery } : {}),
 			...(restart ? { restart } : {}),
 			autoResumeAuthorized:
 				!detachedPeer && ((restartAuthorizesRecovery && restart?.state === "running") || detachedProcessDead),
@@ -406,6 +423,7 @@ export async function reAdoptDirectChildren(options: ReAdoptionOptions): Promise
 			thinkingLevel: candidate.lifecycle.thinkingLevel ?? candidate.metadata.thinkingLevel,
 			hotswapModel: candidate.hotswapModel,
 			lifecycleState: candidate.lifecycle.state,
+			...(candidate.providerRecovery ? { providerRecovery: candidate.providerRecovery } : {}),
 			...(candidate.detachedPeer?.processIdentity
 				? { detachedProcess: candidate.detachedPeer.processIdentity }
 				: {}),

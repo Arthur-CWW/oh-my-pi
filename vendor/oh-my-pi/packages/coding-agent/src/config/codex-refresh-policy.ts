@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { AuthStorage, OAuthCredential } from "../session/auth-storage";
 import { settings } from "./settings";
 
@@ -6,6 +7,7 @@ const OAUTH_REFRESH_SKEW_MS = 60_000;
 
 const DEFAULT_CODEX_SLOT_KEY = "__default_codex_slot__";
 const slotOffsets = new Map<string, number>();
+const invalidCredentialSlots = new Set<string>();
 
 export interface FreshCodexOAuthCredentialSlot {
 	readonly id: string;
@@ -48,8 +50,8 @@ function isFreshCodexOAuthCredential(credential: OAuthCredential, now: number): 
 	return typeof credential.expires === "number" && now + OAUTH_REFRESH_SKEW_MS < credential.expires;
 }
 
-function codexSlotId(index: number): string {
-	return String(index);
+function codexSlotId(credential: OAuthCredential): string {
+	return createHash("sha256").update(credential.access).digest("hex");
 }
 
 export function getFreshCodexOAuthCredentialSlots(
@@ -61,9 +63,11 @@ export function getFreshCodexOAuthCredentialSlots(
 	for (let index = 0; index < credentials.length; index += 1) {
 		const credential = credentials[index];
 		if (!credential || !isFreshCodexOAuthCredential(credential, now)) continue;
+		const id = codexSlotId(credential);
+		if (invalidCredentialSlots.has(id)) continue;
 		slots.push({
 			index,
-			id: codexSlotId(index),
+			id,
 			credential,
 			...(credential.accountId !== undefined ? { accountId: credential.accountId } : {}),
 		});
@@ -104,8 +108,13 @@ export function advanceCodexOAuthCredentialSlot(key: string | undefined): void {
 	slotOffsets.set(normalizedKey, (slotOffsets.get(normalizedKey) ?? 0) + 1);
 }
 
+export function quarantineCodexOAuthCredentialSlot(slot: Pick<FreshCodexOAuthCredentialSlot, "id">): void {
+	invalidCredentialSlots.add(slot.id);
+}
+
 export function _resetCodexOAuthCredentialSlotsForTest(): void {
 	slotOffsets.clear();
+	invalidCredentialSlots.clear();
 }
 
 export function hasFreshCodexOAuthCredential(authStorage: Pick<AuthStorage, "getAll">): boolean {

@@ -30,7 +30,7 @@ export interface AgentHubTurnStatus {
 
 export interface AgentHubSelectedLiveState {
 	readonly retry?: {
-		readonly cause: "network" | "rate-limit" | "provider";
+		readonly cause: "network" | "rate-limit" | "auth" | "provider";
 		readonly attempt: number;
 		readonly maxAttempts: number;
 		readonly delayMs: number;
@@ -39,7 +39,7 @@ export interface AgentHubSelectedLiveState {
 	readonly fallbackApproval?: {
 		readonly sourceModel: string;
 		readonly proposedModel: string;
-		readonly cause: "network" | "rate-limit" | "provider";
+		readonly cause: "network" | "rate-limit" | "auth" | "provider";
 		readonly taskContext: string;
 	};
 	readonly error?: {
@@ -195,6 +195,8 @@ function retryCauseLabel(cause: NonNullable<AgentHubSelectedLiveState["retry"]>[
 			return "network/DNS";
 		case "rate-limit":
 			return "rate limited";
+		case "auth":
+			return "waiting for credentials";
 		case "provider":
 			return "provider error";
 	}

@@ -76,13 +76,18 @@ const DEFAULT_GROUP_CONFIGURATION: AsyncJobGroupConfiguration = {
 export interface AsyncJob {
 	id: string;
 	type: "bash" | "task";
-	status: "running" | "completed" | "failed" | "cancelled";
+	status: "running" | "waiting-provider" | "completed" | "failed" | "cancelled";
 	startTime: number;
 	label: string;
 	abortController: AbortController;
 	promise: Promise<void>;
 	resultText?: string;
 	errorText?: string;
+	providerRecovery?: {
+		reason: "auth-invalid" | "rate-limit";
+		userAction: "refresh-credentials" | "wait-for-reset";
+		retryAt?: number;
+	};
 	interruptRequested?: boolean;
 	interruptReason?: string;
 	interruptRequestedBy?: string;
@@ -347,6 +352,8 @@ export class AsyncJobManager {
 					reportProgress,
 					markRunning: () => {
 						job.queued = false;
+						job.status = "running";
+						job.providerRecovery = undefined;
 					},
 				});
 				await progress.flush();
@@ -390,7 +397,7 @@ export class AsyncJobManager {
 		const job = this.#jobs.get(id);
 		if (!job) return false;
 		if (filter?.ownerId && job.ownerId !== filter.ownerId) return false;
-		if (job.status !== "running") return false;
+		if (job.status !== "running" && job.status !== "waiting-provider") return false;
 		job.status = "cancelled";
 		if (job.interruptRequested) job.hardCancelled = true;
 		job.abortController.abort();
@@ -407,7 +414,14 @@ export class AsyncJobManager {
 		const job = this.#jobs.get(id);
 		if (!job) return false;
 		if (filter?.ownerId && job.ownerId !== filter.ownerId) return false;
-		if (job.status !== "running" || job.queued || job.interruptRequested || job.isolated) return false;
+		if (
+			(job.status !== "running" && job.status !== "waiting-provider") ||
+			job.queued ||
+			job.interruptRequested ||
+			job.isolated
+		) {
+			return false;
+		}
 		const interruptReason = reason?.trim();
 		const attribution = requestedBy ?? filter?.ownerId;
 		job.interruptRequested = true;
@@ -433,9 +447,29 @@ export class AsyncJobManager {
 	getJob(id: string): AsyncJob | undefined {
 		return this.#jobs.get(id);
 	}
+	markWaitingProvider(
+		id: string,
+		recovery: NonNullable<AsyncJob["providerRecovery"]>,
+	): boolean {
+		const job = this.#jobs.get(id);
+		if (!job || (job.status !== "running" && job.status !== "waiting-provider")) return false;
+		job.status = "waiting-provider";
+		job.providerRecovery = recovery;
+		return true;
+	}
+
+	markRunning(id: string): boolean {
+		const job = this.#jobs.get(id);
+		if (!job || (job.status !== "running" && job.status !== "waiting-provider")) return false;
+		job.status = "running";
+		job.providerRecovery = undefined;
+		return true;
+	}
 
 	getRunningJobs(filter?: AsyncJobFilter): AsyncJob[] {
-		return this.#filterJobs(this.#jobs.values(), filter).filter(job => job.status === "running");
+		return this.#filterJobs(this.#jobs.values(), filter).filter(
+			job => job.status === "running" || job.status === "waiting-provider",
+		);
 	}
 
 	getRecentJobs(limit = 10, filter?: AsyncJobFilter): AsyncJob[] {
@@ -463,7 +497,7 @@ export class AsyncJobManager {
 				UTF8_ENCODER.encode(job.ownerId ?? "").byteLength +
 				UTF8_ENCODER.encode(job.resultText ?? "").byteLength +
 				UTF8_ENCODER.encode(job.errorText ?? "").byteLength;
-			if (job.status === "running") {
+			if (job.status === "running" || job.status === "waiting-provider") {
 				runningCount++;
 				runningBytes += bytes;
 			} else {
@@ -501,7 +535,14 @@ export class AsyncJobManager {
 		if (this.#memoryPressureBytes === undefined || heapUsedBytes < this.#memoryPressureBytes) return 0;
 		let evicted = 0;
 		for (const [jobId, job] of this.#jobs) {
-			if (job.status === "running" || this.#watchedJobs.has(jobId) || this.#hasDelivery(jobId)) continue;
+			if (
+				job.status === "running" ||
+				job.status === "waiting-provider" ||
+				this.#watchedJobs.has(jobId) ||
+				this.#hasDelivery(jobId)
+			) {
+				continue;
+			}
 			this.#evictJob(jobId);
 			evicted++;
 		}
@@ -774,7 +815,7 @@ export class AsyncJobManager {
 
 	#compactTerminalJob(jobId: string): void {
 		const job = this.#jobs.get(jobId);
-		if (!job || job.status === "running") return;
+		if (!job || job.status === "running" || job.status === "waiting-provider") return;
 		if (job.resultText !== undefined) job.resultText = this.#truncateUtf8(job.resultText);
 		if (job.errorText !== undefined) job.errorText = this.#truncateUtf8(job.errorText);
 		// A settled promise may retain the async closure graph in JSC. Replace it

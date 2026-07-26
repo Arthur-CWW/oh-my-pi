@@ -21,7 +21,14 @@ export type ChildRestartRecordDecode =
 	| { kind: "invalid" }
 	| { kind: "valid"; record: ChildRestartRecord };
 
-export type ChildLifecycleState = "running" | "idle" | "parked" | "completed" | "failed" | "interrupted";
+export type ChildLifecycleState =
+	| "running"
+	| "waiting-provider"
+	| "idle"
+	| "parked"
+	| "completed"
+	| "failed"
+	| "interrupted";
 
 export interface ChildLifecycleRecord {
 	version: 1;
@@ -43,6 +50,7 @@ type LifecycleSessionManager = Pick<SessionManager, "appendCustomEntry" | "getEn
 
 const CHILD_LIFECYCLE_STATES: Record<ChildLifecycleState, true> = {
 	running: true,
+	"waiting-provider": true,
 	idle: true,
 	parked: true,
 	completed: true,

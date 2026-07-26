@@ -23,7 +23,7 @@ export interface SpawnWorkerRegistryRef {
 	displayName: string;
 	kind: "main" | "sub";
 	parentId?: string;
-	status: "running" | "idle" | "parked" | "aborted";
+	status: "running" | "waiting-provider" | "idle" | "parked" | "aborted";
 	sessionFile?: string | null;
 	launchGeneration?: string;
 }
@@ -220,7 +220,13 @@ function decodeRegistryRef(
 	const kind = input.kind;
 	if (kind !== "main" && kind !== "sub") throw new Error(`${label}.kind is invalid`);
 	const status = input.status;
-	if (status !== "running" && status !== "idle" && status !== "parked" && status !== "aborted") {
+	if (
+		status !== "running" &&
+		status !== "waiting-provider" &&
+		status !== "idle" &&
+		status !== "parked" &&
+		status !== "aborted"
+	) {
 		throw new Error(`${label}.status is invalid`);
 	}
 	if (input.sessionFile !== undefined && input.sessionFile !== null && typeof input.sessionFile !== "string") {

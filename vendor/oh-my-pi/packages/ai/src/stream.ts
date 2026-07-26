@@ -10,7 +10,7 @@ import {
 import { CATALOG_PROVIDERS, type ProviderCatalogEntry } from "@oh-my-pi/pi-catalog/provider-models";
 import { $env, $pickenv, extractHttpStatusFromError } from "@oh-my-pi/pi-utils";
 import { getCustomApi } from "./api-registry";
-import { AUTH_RETRY_STEPS, isApiKeyResolver, resolveRetryKey } from "./auth-retry";
+import { isApiKeyResolver, resolveRetryKey } from "./auth-retry";
 import { ProviderHttpError } from "./errors";
 import type { BedrockOptions } from "./providers/amazon-bedrock";
 import type { AnthropicOptions } from "./providers/anthropic";
@@ -64,7 +64,7 @@ import type {
 } from "./types";
 import { assertContextVideoInputSupported } from "./video-input";
 import { AssistantMessageEventStream } from "./utils/event-stream";
-import { isTransientNetworkError } from "./utils/network-error";
+import { isAuthenticationInvalidError, isTransientNetworkError } from "./utils/network-error";
 import { withRequestDebugFetch } from "./utils/request-debug";
 
 function isGoogleVertexAuthenticatedModel(model: Model<Api>): boolean {
@@ -347,12 +347,10 @@ function extractStatusFromAssistantError(message: AssistantMessage): number | un
 function isRetryableUpstreamError(error: unknown, status: number | undefined, message: string | undefined): boolean {
 	const networkError = error instanceof Error ? error : message;
 	if (networkError !== undefined && isTransientNetworkError(networkError)) return false;
-	// 401 means the credential is bad. Usage-limit phrasing (Codex's
-	// "You have hit your ChatGPT usage limit", Anthropic's "usage_limit_reached",
-	// Google's "resource_exhausted") means this account is parked but a
-	// sibling credential can usually pick the request up. Both are
-	// rotatable via `onAuthError` — the auth-gateway maps the former to
-	// `invalidateCredentialMatching` and the latter to `markUsageLimitReached`.
+	// A credential can be invalidated without a reliable HTTP status (observed
+	// in Codex response-stream errors). Match the provider's typed auth wording
+	// as well as 401, then let the resolver refresh or rotate the exact slot.
+	if (message && isAuthenticationInvalidError(message, status)) return true;
 	if (status === 401) return true;
 	return !!message && isUsageLimitError(message);
 }
@@ -466,19 +464,25 @@ export function streamSimple<TApi extends Api>(
 			}
 			let failure = await runAttempt(lastKey, true);
 			if (!failure) return;
-			// a/b/c policy: refresh the same account (lastChance=false), then
-			// switch to a sibling (lastChance=true). A step is skipped when the
-			// resolver yields the same key it just tried or `undefined`; the
-			// final step's attempt clears the capture flag so it emits directly.
-			for (let step = 0; step < AUTH_RETRY_STEPS.length; step++) {
-				// Caller aborted between attempts: don't mint a fresh token or fire
-				// another doomed request — emit the captured failure instead.
-				if (signal?.aborted) break;
-				const nextKey = await resolveRetryKey(apiKeyResolver, AUTH_RETRY_STEPS[step]!, failure.error, signal);
-				if (nextKey === undefined || nextKey === lastKey) continue;
-				lastKey = nextKey;
-				const isLastStep = step === AUTH_RETRY_STEPS.length - 1;
-				const next = await runAttempt(nextKey, !isLastStep);
+			const attemptedKeys = new Set<string>([lastKey]);
+
+			// Step (b): refresh the same account exactly once.
+			const refreshedKey = await resolveRetryKey(apiKeyResolver, false, failure.error, signal);
+			if (refreshedKey !== undefined && !attemptedKeys.has(refreshedKey) && !signal?.aborted) {
+				attemptedKeys.add(refreshedKey);
+				const next = await runAttempt(refreshedKey, true);
+				if (!next) return;
+				failure = next;
+			}
+
+			// Step (c): walk every remaining credential. The duplicate-key fence
+			// is the termination condition for cyclic resolvers and guarantees an
+			// invalid access token is never sent twice.
+			while (!signal?.aborted) {
+				const nextKey = await resolveRetryKey(apiKeyResolver, true, failure.error, signal);
+				if (nextKey === undefined || attemptedKeys.has(nextKey)) break;
+				attemptedKeys.add(nextKey);
+				const next = await runAttempt(nextKey, true);
 				if (!next) return;
 				failure = next;
 			}

@@ -18,6 +18,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import path from "node:path";
 import type { AgentTool, AgentToolResult, AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
+import type { AuthStorage } from "@oh-my-pi/pi-ai";
 import { $env, isEnoent, logger, prompt, Snowflake, VERSION } from "@oh-my-pi/pi-utils";
 import type { ToolSession } from "..";
 import { MCPManager } from "../mcp/manager";
@@ -58,6 +59,11 @@ import {
 } from "../resource/host-resource-admission";
 import { readProcessIdentity } from "../resource/process-identity";
 import type { AgentSession } from "../session/agent-session";
+import {
+	transitionProviderRecoveryRecord,
+	waitForProviderRecovery,
+	type ProviderRecoveryRecord,
+} from "../session/provider-recovery";
 import { getSessionSpawnCordon, type SessionSpawnCordon } from "../session/session-control";
 import { generateCommitMessage } from "../utils/commit-message-generator";
 import * as git from "../utils/git";
@@ -799,6 +805,64 @@ export function respawnReAdoptedChildTask(options: {
 			group: deriveSpawnGroup(options.ownerId ?? MAIN_AGENT_ID),
 		},
 	);
+}
+
+/** Rebuild a waiting-provider job without replacing its child id or transcript. */
+export function resumeWaitingProviderChildTask(options: {
+	manager: AsyncJobManager;
+	child: ReAdoptedChild;
+	session: AgentSession;
+	authStorage: Pick<AuthStorage, "getGeneration" | "onGenerationChanged">;
+	recovery: ProviderRecoveryRecord;
+	ownerId?: string;
+}): string {
+	const { manager, child, session, authStorage, recovery } = options;
+	const existing = manager.getJob(child.id);
+	if (existing?.status === "running" || existing?.status === "waiting-provider") return existing.id;
+	const jobId = manager.register(
+		"task",
+		child.id,
+		async ({ signal, markRunning }) => {
+			const outcome = await waitForProviderRecovery({ record: recovery, authStorage, signal });
+			if (outcome !== "ready") {
+				transitionProviderRecoveryRecord(
+					session.sessionManager,
+					outcome === "cancelled" ? "cancelled" : "exhausted",
+				);
+				await session.sessionManager.flush();
+				throw new Error(
+					outcome === "cancelled"
+						? "Provider recovery cancelled."
+						: "Provider recovery deadline reached before credentials or quota became available.",
+				);
+			}
+			transitionProviderRecoveryRecord(session.sessionManager, "retrying");
+			await session.sessionManager.flush();
+			markRunning();
+			AgentRegistry.global().setStatus(child.id, "running");
+			const abort = (): void => session.agent.abort();
+			signal.addEventListener("abort", abort, { once: true });
+			try {
+				await session.agent.continue();
+				await session.waitForIdle();
+				return `Re-adopted background task ${child.id} resumed after provider recovery. Transcript: history://${child.id}`;
+			} finally {
+				signal.removeEventListener("abort", abort);
+			}
+		},
+		{
+			id: child.id,
+			ownerId: options.ownerId ?? MAIN_AGENT_ID,
+			group: deriveSpawnGroup(options.ownerId ?? MAIN_AGENT_ID),
+		},
+	);
+	manager.markWaitingProvider(jobId, {
+		reason: recovery.kind,
+		userAction: recovery.userAction,
+		...(recovery.retryAt === undefined ? {} : { retryAt: recovery.retryAt }),
+	});
+	AgentRegistry.global().setStatus(child.id, "waiting-provider");
+	return jobId;
 }
 
 /**

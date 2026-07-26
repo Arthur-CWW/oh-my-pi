@@ -5,6 +5,7 @@ import {
 	getFreshCodexOAuthCredential,
 	getFreshCodexOAuthCredentialSlot,
 	hasFreshCodexOAuthCredential,
+	quarantineCodexOAuthCredentialSlot,
 	isCodexRefreshManual,
 } from "@oh-my-pi/pi-coding-agent/config/codex-refresh-policy";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
@@ -98,7 +99,7 @@ describe("Codex refresh policy", () => {
 		);
 		expect(primaryInitialSlot.credential).toBe(primaryInitial);
 		expect(primaryInitialSlot.accountId).toBe(primaryInitial.accountId);
-		expect(primaryInitialSlot.id).toBe(String(primaryInitialSlot.index));
+		expect(primaryInitialSlot.id).toMatch(/^[a-f0-9]{64}$/);
 		expect(getFreshCodexOAuthCredential(storage, primaryKey, now)).toBe(primaryInitial);
 		expect(getFreshCodexOAuthCredential(storage, siblingKey, now)).toBe(siblingInitial);
 
@@ -110,7 +111,7 @@ describe("Codex refresh policy", () => {
 		);
 		expect(primarySecondSlot.credential).toBe(primarySecond);
 		expect(primarySecondSlot.accountId).toBe(primarySecond.accountId);
-		expect(primarySecondSlot.id).toBe(String(primarySecondSlot.index));
+		expect(primarySecondSlot.id).toMatch(/^[a-f0-9]{64}$/);
 		expect(primarySecondSlot.index).not.toBe(primaryInitialSlot.index);
 		expect(primarySecond).not.toBe(primaryInitial);
 		expect(getFreshCodexOAuthCredential(storage, siblingKey, now)).toBe(siblingInitial);
@@ -121,6 +122,28 @@ describe("Codex refresh policy", () => {
 
 		advanceCodexOAuthCredentialSlot(primaryKey);
 		expect(getFreshCodexOAuthCredential(storage, primaryKey, now)).toBe(primaryInitial);
+	});
+
+	it("quarantines only the invalid opaque slot and selects a healthy sibling", () => {
+		const now = Date.now();
+		const credentials = ["bad-access-token", "healthy-access-token"].map((access, index) => ({
+			type: "oauth" as const,
+			access,
+			refresh: `refresh-${index}`,
+			expires: now + 120_000,
+			accountId: `acct-${index}`,
+		}));
+		const storage = authStorageWith({ "openai-codex": credentials });
+		const key = "session-quarantine";
+		const invalid = requireValue(getFreshCodexOAuthCredentialSlot(storage, key, now), "invalid slot");
+
+		quarantineCodexOAuthCredentialSlot(invalid);
+		const replacement = requireValue(getFreshCodexOAuthCredentialSlot(storage, key, now), "replacement slot");
+
+		expect(replacement.id).not.toBe(invalid.id);
+		expect(replacement.credential).not.toBe(invalid.credential);
+		expect(replacement.id).not.toContain(invalid.credential.access);
+		expect(getFreshCodexOAuthCredential(storage, key, now)).toBe(replacement.credential);
 	});
 
 	it("skips expired slots while advancing fresh Codex OAuth selection", () => {

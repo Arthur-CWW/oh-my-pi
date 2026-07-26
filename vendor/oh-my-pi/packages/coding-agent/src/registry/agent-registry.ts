@@ -19,12 +19,13 @@ export const MAIN_AGENT_ID = "Main";
 
 /**
  * - `running`: a turn is in flight.
+ * - `waiting-provider`: the same turn is durably parked until credentials or quota recover.
  * - `idle`: live AgentSession in memory, awaiting work. Finished agents are
  *   `idle`, not removed.
  * - `parked`: session disposed; AgentRef + sessionFile retained, revivable.
  * - `aborted`: hard-killed, terminal.
  */
-export type AgentStatus = "running" | "idle" | "parked" | "aborted";
+export type AgentStatus = "running" | "waiting-provider" | "idle" | "parked" | "aborted";
 export type AgentKind = "main" | "sub";
 
 export interface AgentQuotaAdmission {
@@ -246,7 +247,11 @@ export class AgentRegistry {
 	 * Flat namespace: every agent can see every other agent.
 	 */
 	listVisibleTo(id: string): AgentRef[] {
-		return this.list().filter(ref => ref.id !== id && (ref.status === "running" || ref.status === "idle"));
+		return this.list().filter(
+			ref =>
+				ref.id !== id &&
+				(ref.status === "running" || ref.status === "waiting-provider" || ref.status === "idle"),
+		);
 	}
 
 	onChange(listener: RegistryListener): () => void {

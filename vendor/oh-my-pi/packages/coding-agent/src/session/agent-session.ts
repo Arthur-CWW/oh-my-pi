@@ -101,6 +101,7 @@ import {
 	deriveClaudeDeviceId,
 	Effort,
 	isContextOverflow,
+	isAuthenticationInvalidError,
 	isUsageLimitError,
 	parseRateLimitReason,
 	resolveServiceTier,
@@ -387,6 +388,13 @@ import type {
 import { EPHEMERAL_MODEL_CHANGE_ROLE } from "./session-entries";
 import { formatSessionHistoryMarkdown } from "./session-history-format";
 import { type SessionManager, SessionStateCommandInFlightError } from "./session-manager";
+import {
+	appendProviderRecoveryRecord,
+	createProviderRecoveryRecord,
+	latestProviderRecoveryRecord,
+	transitionProviderRecoveryRecord,
+	waitForProviderRecovery,
+} from "./provider-recovery";
 import {
 	type ActiveRetryFallbackState,
 	compactionPreparationHasVideo,
@@ -3045,6 +3053,14 @@ export class AgentSession {
 							model: formatRetryFallbackSelector(this.model, this.thinkingLevel),
 							role: this.#activeRetryFallback.role,
 						});
+					}
+					const providerRecovery = latestProviderRecoveryRecord(this.sessionManager.getEntries());
+					if (
+						providerRecovery &&
+						(providerRecovery.state === "waiting" || providerRecovery.state === "retrying")
+					) {
+						transitionProviderRecoveryRecord(this.sessionManager, "resolved");
+						await this.sessionManager.flush();
 					}
 					await this.#emitSessionEvent({
 						type: "auto_retry_end",
@@ -12497,6 +12513,8 @@ export class AgentSession {
 		const errorMessage = message.errorMessage || "Unknown error";
 		const requestFailureCause = classifyRequestFailure({ message: errorMessage, status: message.errorStatus });
 		const transientNetwork = requestFailureCause === "network";
+		const authenticationInvalid =
+			requestFailureCause === "auth" || isAuthenticationInvalidError(errorMessage, message.errorStatus);
 		const networkHoldMs = Math.max(0, retrySettings.networkHoldMs);
 		let networkElapsedMs = 0;
 		if (transientNetwork) {
@@ -12508,11 +12526,12 @@ export class AgentSession {
 			this.#retryAttempt = 0;
 		}
 		this.#retryAttempt++;
-		const retryCause =
-			transientNetwork ||
-			requestFailureCause === "rate-limit" ||
-			isUsageLimitError(errorMessage) ||
-			/\brate.?limit\b|too many requests|\b429\b/i.test(errorMessage)
+		const retryCause = authenticationInvalid
+			? "auth"
+			: transientNetwork ||
+				  requestFailureCause === "rate-limit" ||
+				  isUsageLimitError(errorMessage) ||
+				  /\brate.?limit\b|too many requests|\b429\b/i.test(errorMessage)
 				? transientNetwork
 					? "network"
 					: "rate-limit"
@@ -12550,11 +12569,16 @@ export class AgentSession {
 				success: false,
 				attempt: transientNetwork ? this.#retryAttempt : this.#retryAttempt - 1,
 				finalError: transientNetwork
-					? `Provider unreachable (network/DNS) after retrying for ${networkHoldMs}ms. Last error: ${errorMessage}`
-					: contentFilterBlocked
-						? this.#contentFilterFailureMessage()
-						: message.errorMessage,
+					? `Provider unreachable (network/DNS) after retrying for ${networkHoldMs}ms.`
+					: authenticationInvalid
+						? "Provider credentials are still invalid after the recovery retry cap."
+						: contentFilterBlocked
+							? this.#contentFilterFailureMessage()
+							: "Provider retry cap reached.",
 			});
+			if (this.#agentKind === "sub" && (authenticationInvalid || retryCause === "rate-limit")) {
+				transitionProviderRecoveryRecord(this.sessionManager, "exhausted");
+			}
 			this.#retryAttempt = 0;
 			this.#contentFilterRerouteFailures = 0;
 			this.#resolveRetry();
@@ -12577,7 +12601,7 @@ export class AgentSession {
 			this.#resetCurrentResponsesProviderSession("stale replay error");
 		}
 
-		if (this.model && !staleOpenAIResponsesReplayError && isUsageLimitError(errorMessage)) {
+		if (this.model && !staleOpenAIResponsesReplayError && retryCause === "rate-limit") {
 			const retryAfterMs = parsedRetryAfterMs ?? calculateRateLimitBackoffMs(parseRateLimitReason(errorMessage));
 			const outcome = await this.#modelRegistry.authStorage.markUsageLimitReached(
 				this.model.provider,
@@ -12622,7 +12646,13 @@ export class AgentSession {
 
 		const requiresVideo = messagesHaveVideo(this.agent.state.messages);
 		const currentSelector = this.model ? formatRetryFallbackSelector(this.model, this.thinkingLevel) : undefined;
-		if (!transientNetwork && !staleOpenAIResponsesReplayError && !switchedCredential && currentSelector) {
+		if (
+			retryCause !== "auth" &&
+			!transientNetwork &&
+			!staleOpenAIResponsesReplayError &&
+			!switchedCredential &&
+			currentSelector
+		) {
 			if (retrySettings.fallbackApproval && (!contentFilterBlocked || this.#retryAttempt > 1)) {
 				const approvalRequested = await this.#requestRetryFallbackApproval(currentSelector, retryCause, generation);
 				if (approvalRequested) {
@@ -12664,7 +12694,13 @@ export class AgentSession {
 		// assistant error message is preserved in agent state so the caller
 		// can act on it.
 		const maxDelayMs = retrySettings.maxDelayMs;
-		if (!transientNetwork && maxDelayMs > 0 && delayMs > maxDelayMs && !switchedCredential) {
+		if (
+			this.#agentKind !== "sub" &&
+			!transientNetwork &&
+			maxDelayMs > 0 &&
+			delayMs > maxDelayMs &&
+			!switchedCredential
+		) {
 			const attempt = this.#retryAttempt;
 			this.#retryAttempt = 0;
 			this.#contentFilterRerouteFailures = 0;
@@ -12672,10 +12708,43 @@ export class AgentSession {
 				type: "auto_retry_end",
 				success: false,
 				attempt,
-				finalError: `Provider requested ${delayMs}ms wait, exceeds retry.maxDelayMs (${maxDelayMs}ms). Original error: ${errorMessage}`,
+				finalError: `Provider requested a wait beyond retry.maxDelayMs (${maxDelayMs}ms).`,
 			});
 			this.#resolveRetry();
 			return false;
+		}
+
+		const durableProviderWait =
+			this.#agentKind === "sub" &&
+			this.#agentId !== undefined &&
+			this.model !== undefined &&
+			(authenticationInvalid || (retryCause === "rate-limit" && !switchedCredential));
+		const providerRecoveryNow = Date.now();
+		let providerRecoveryRecord = durableProviderWait
+			? createProviderRecoveryRecord({
+					agentId: this.#agentId!,
+					provider: this.model!.provider,
+					model: this.model!.id,
+					route: `${this.model!.provider}/${this.model!.id}`,
+					kind: authenticationInvalid ? "auth-invalid" : "rate-limit",
+					attempt: this.#retryAttempt,
+					maxAttempts: retrySettings.maxRetries,
+					now: providerRecoveryNow,
+					...(authenticationInvalid ? {} : { retryAt: providerRecoveryNow + delayMs }),
+				})
+			: undefined;
+		if (providerRecoveryRecord) {
+			const previous = latestProviderRecoveryRecord(this.sessionManager.getEntries());
+			if (
+				previous &&
+				(previous.state === "waiting" || previous.state === "retrying") &&
+				previous.route === providerRecoveryRecord.route &&
+				previous.kind === providerRecoveryRecord.kind
+			) {
+				providerRecoveryRecord = { ...providerRecoveryRecord, deadlineAt: previous.deadlineAt };
+			}
+			appendProviderRecoveryRecord(this.sessionManager, providerRecoveryRecord);
+			await this.sessionManager.flush();
 		}
 
 		await this.#emitSessionEvent({
@@ -12686,7 +12755,13 @@ export class AgentSession {
 				? Math.max(retrySettings.maxRetries, this.#retryAttempt)
 				: retrySettings.maxRetries,
 			delayMs,
-			errorMessage: classifierRefusal ? `${REFUSAL_REROUTE_ANNOTATION} ${errorMessage}` : errorMessage,
+			errorMessage: authenticationInvalid
+				? "Provider credentials need refresh; this child will resume when the credential store changes."
+				: retryCause === "rate-limit" && durableProviderWait
+					? `Provider quota unavailable; this child will resume after ${new Date(providerRecoveryNow + delayMs).toISOString()}.`
+					: classifierRefusal
+						? `${REFUSAL_REROUTE_ANNOTATION} ${errorMessage}`
+						: errorMessage,
 		});
 
 		// Remove error message from agent state (keep in session for history)
@@ -12700,10 +12775,28 @@ export class AgentSession {
 		this.#retryAbortController?.abort();
 		this.#retryAbortController = retryAbortController;
 		try {
-			await scheduler.wait(delayMs, { signal: retryAbortController.signal });
+			if (providerRecoveryRecord) {
+				const outcome = await waitForProviderRecovery({
+					record: providerRecoveryRecord,
+					authStorage: this.#modelRegistry.authStorage,
+					signal: retryAbortController.signal,
+				});
+				if (outcome !== "ready") throw new Error(outcome);
+				transitionProviderRecoveryRecord(this.sessionManager, "retrying");
+				await this.sessionManager.flush();
+			} else {
+				await scheduler.wait(delayMs, { signal: retryAbortController.signal });
+			}
 		} catch {
 			if (this.#retryAbortController !== retryAbortController) {
 				return false;
+			}
+			if (providerRecoveryRecord) {
+				transitionProviderRecoveryRecord(
+					this.sessionManager,
+					retryAbortController.signal.aborted ? "cancelled" : "exhausted",
+				);
+				await this.sessionManager.flush();
 			}
 			// Aborted during sleep - emit end event so UI can clean up
 			const attempt = this.#retryAttempt;

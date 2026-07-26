@@ -105,6 +105,8 @@ function failureAction(cause: RequestFailureCause): string {
 			return "network request failed";
 		case "rate-limit":
 			return "request rate limited";
+		case "auth":
+			return "provider authentication failed";
 		case "provider-error":
 			return "provider request failed";
 	}

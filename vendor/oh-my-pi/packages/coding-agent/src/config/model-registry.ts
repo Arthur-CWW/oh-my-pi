@@ -69,6 +69,7 @@ import {
 	getFreshCodexOAuthCredentialSlot,
 	isCodexRefreshManual,
 	warnCodexRefreshGated,
+	quarantineCodexOAuthCredentialSlot,
 } from "./codex-refresh-policy";
 import type { ConfigError, ConfigFile } from "./config-file";
 import {
@@ -1964,17 +1965,21 @@ export class ModelRegistry {
 	}
 
 	#manualCodexApiKeyResolver(options: ApiKeyResolverOptions = {}): ApiKeyResolver {
-		const { sessionId, baseUrl, modelId } = options;
-		return async ({ lastChance, error, signal }) => {
+		const { sessionId } = options;
+		let currentSlot = getFreshCodexOAuthCredentialSlot(this.authStorage, sessionId);
+		return async ({ lastChance, error }) => {
 			if (error === undefined) {
-				return this.getApiKeyForProvider("openai-codex", sessionId, { baseUrl, modelId, signal });
+				currentSlot = getFreshCodexOAuthCredentialSlot(this.authStorage, sessionId);
+				return currentSlot?.credential.access;
 			}
-			if (lastChance) {
-				advanceCodexOAuthCredentialSlot(sessionId);
-				return this.getApiKeyForProvider("openai-codex", sessionId, { baseUrl, modelId, signal });
+			if (currentSlot) quarantineCodexOAuthCredentialSlot(currentSlot);
+			if (!lastChance) {
+				warnCodexRefreshGated();
+				return undefined;
 			}
-			warnCodexRefreshGated();
-			return undefined;
+			advanceCodexOAuthCredentialSlot(sessionId);
+			currentSlot = getFreshCodexOAuthCredentialSlot(this.authStorage, sessionId);
+			return currentSlot?.credential.access;
 		};
 	}
 

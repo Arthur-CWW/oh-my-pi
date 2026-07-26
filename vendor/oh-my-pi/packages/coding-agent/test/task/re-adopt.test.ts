@@ -6,6 +6,7 @@ import { IrcExternalBus } from "@oh-my-pi/pi-coding-agent/irc/bus-external";
 import { AgentLifecycleManager } from "@oh-my-pi/pi-coding-agent/registry/agent-lifecycle";
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
+import { PROVIDER_RECOVERY_CUSTOM_TYPE } from "@oh-my-pi/pi-coding-agent/session/provider-recovery";
 import { reattachDetachedChildTask, respawnReAdoptedChildTask } from "@oh-my-pi/pi-coding-agent/task";
 import { reAdoptDirectChildren } from "@oh-my-pi/pi-coding-agent/task/re-adopt";
 import { CHILD_LIFECYCLE_CUSTOM_TYPE, type ChildLifecycleState } from "@oh-my-pi/pi-coding-agent/task/child-lifecycle";
@@ -53,6 +54,7 @@ async function writeChild(options: {
 	lifecycleState?: ChildLifecycleState;
 	legacy?: boolean;
 	parkedTimeline?: boolean;
+	providerRecovery?: "auth-invalid" | "rate-limit";
 }): Promise<string> {
 	const file = path.join(options.children, `${options.fileName ?? options.id}.jsonl`);
 	if (options.corrupt) {
@@ -103,6 +105,33 @@ async function writeChild(options: {
 						},
 					}),
 				]),
+			...(options.providerRecovery
+				? [
+						JSON.stringify({
+							type: "custom",
+							id: "provider-recovery",
+							parentId: "lifecycle",
+							timestamp,
+							customType: PROVIDER_RECOVERY_CUSTOM_TYPE,
+							data: {
+								version: 1,
+								agentId: options.id,
+								provider: "openai-codex",
+								model: "gpt-test",
+								route: "openai-codex/gpt-test",
+								kind: options.providerRecovery,
+								state: "waiting",
+								userAction:
+									options.providerRecovery === "auth-invalid" ? "refresh-credentials" : "wait-for-reset",
+								attempt: 1,
+								maxAttempts: 3,
+								deadlineAt: Date.now() + 60_000,
+								...(options.providerRecovery === "rate-limit" ? { retryAt: Date.now() + 1_000 } : {}),
+								updatedAt: timestamp,
+							},
+						}),
+					]
+				: []),
 			...(options.parkedTimeline
 				? [
 						JSON.stringify({
@@ -186,6 +215,38 @@ describe("restart child re-adoption", () => {
 		expect(result.diagnostics).toEqual([]);
 		expect(result.adopted.map(child => child.id)).toEqual(["ParkedAfterTurn"]);
 		expect(AgentRegistry.global().get("ParkedAfterTurn")?.status).toBe("parked");
+	});
+
+	it("re-adopts a waiting-provider child with the same id, journal, and recovery state", async () => {
+		const { parent, children } = await makeParent();
+		const childFile = await writeChild({
+			parent,
+			children,
+			id: "Waiting",
+			lifecycleState: "waiting-provider",
+			providerRecovery: "auth-invalid",
+		});
+
+		const result = await reAdoptDirectChildren({
+			parentSessionFile: parent,
+			parentSessionId: "parent",
+			idleTtlMs: 0,
+			ownership: ownership(parent),
+			createReviver: async () => async () => ({ subscribe: () => () => {} }) as never,
+		});
+
+		expect(result.diagnostics).toEqual([]);
+		expect(result.adopted).toEqual([
+			expect.objectContaining({
+				id: "Waiting",
+				sessionFile: childFile,
+				lifecycleState: "waiting-provider",
+				providerRecovery: expect.objectContaining({ kind: "auth-invalid", state: "waiting" }),
+			}),
+		]);
+		expect(AgentRegistry.global().get("Waiting")).toEqual(
+			expect.objectContaining({ status: "parked", sessionFile: childFile }),
+		);
 	});
 
 	it("keeps terminal, legacy, foreign, duplicate-id, isolated, corrupt, and unavailable children history-only", async () => {

@@ -160,6 +160,8 @@ function statusBadge(status: AgentStatus): string {
 	switch (status) {
 		case "running":
 			return theme.fg("accent", "● RUN");
+		case "waiting-provider":
+			return theme.fg("warning", "◷ WAIT");
 		case "idle":
 			return theme.fg("success", "○ IDLE");
 		case "parked":
@@ -464,6 +466,7 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 	#registryRefs = new Map<string, AgentRef>();
 	#refsByStatus: Record<AgentStatus, Map<string, AgentRef>> = {
 		running: new Map(),
+		"waiting-provider": new Map(),
 		idle: new Map(),
 		parked: new Map(),
 		aborted: new Map(),
@@ -500,7 +503,13 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 	#showTerminalAgents = false;
 	#showHistoricalAgents = true;
 	#hiddenTerminalCount = 0;
-	#statusCounts: Record<AgentStatus, number> = { running: 0, idle: 0, parked: 0, aborted: 0 };
+	#statusCounts: Record<AgentStatus, number> = {
+		running: 0,
+		"waiting-provider": 0,
+		idle: 0,
+		parked: 0,
+		aborted: 0,
+	};
 	#sectionStarts: Array<{ index: number; label: string }> = [];
 	#notice: string | undefined;
 	/** Filtered identities, not eagerly-built row objects; rows materialize at the viewport only. */
@@ -1088,11 +1097,16 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 		if (this.#orderedRegistryGeneration !== this.#registryGeneration) {
 			const counts: Record<AgentStatus, number> = {
 				running: this.#refsByStatus.running.size,
+				"waiting-provider": this.#refsByStatus["waiting-provider"].size,
 				idle: this.#refsByStatus.idle.size,
 				parked: this.#refsByStatus.parked.size,
 				aborted: this.#refsByStatus.aborted.size,
 			};
-			const rows = [...this.#orderedStatus("running"), ...this.#orderedStatus("idle")];
+			const rows = [
+				...this.#orderedStatus("running"),
+				...this.#orderedStatus("waiting-provider"),
+				...this.#orderedStatus("idle"),
+			];
 			if (this.#showHistoricalAgents || this.#tableQuery()) rows.push(...this.#orderedStatus("parked"));
 			if (this.#showTerminalAgents) rows.push(...this.#orderedStatus("aborted"));
 			this.#rows = rows;

@@ -78,6 +78,7 @@ import {
 	discoverAuthStorage,
 	loadSessionExtensions,
 } from "./sdk";
+import { AgentLifecycleManager } from "./registry/agent-lifecycle";
 import type { AgentSession } from "./session/agent-session";
 import type { AuthStorage } from "./session/auth-storage";
 import { resolveNewestInstalledRelease } from "./session/release-registry-validation";
@@ -102,7 +103,11 @@ import {
 import { executeBuiltinSlashCommand } from "./slash-commands/builtin-registry";
 import { discoverTitleSystemPromptFile, resolvePromptInput } from "./system-prompt";
 import { createReAdoptedSessionReviver } from "./task/executor";
-import { reattachDetachedChildTask, respawnReAdoptedChildTask } from "./task";
+import {
+	reattachDetachedChildTask,
+	respawnReAdoptedChildTask,
+	resumeWaitingProviderChildTask,
+} from "./task";
 import { reAdoptDirectChildren } from "./task/re-adopt";
 import { configureSpawnPolicyRouting } from "./task/spawn-route";
 import { initTelemetryExport, isTelemetryExportEnabled } from "./telemetry-export";
@@ -1597,6 +1602,26 @@ export async function runRootCommand(
 						modelRegistry,
 					}),
 			});
+			for (const child of adoption.adopted) {
+				if (child.lifecycleState !== "waiting-provider" || !child.providerRecovery) continue;
+				const childSession = await AgentLifecycleManager.global().ensureLive(child.id);
+				const manager = session.asyncJobManager;
+				if (!manager) throw new Error(`Async job manager unavailable while restoring provider wait for ${child.id}`);
+				resumeWaitingProviderChildTask({
+					manager,
+					child,
+					session: childSession,
+					authStorage,
+					recovery: child.providerRecovery,
+				});
+				const retry = child.providerRecovery.retryAt
+					? ` Next retry: ${new Date(child.providerRecovery.retryAt).toISOString()}.`
+					: "";
+				notifs.push({
+					kind: "info",
+					message: `Subagent ${child.id} is waiting for provider recovery.${retry}`,
+				});
+			}
 			if (restartHandoff && adoption.diagnostics.length === 0) {
 				await removeRestartHandoff(
 					resumedParentFile,

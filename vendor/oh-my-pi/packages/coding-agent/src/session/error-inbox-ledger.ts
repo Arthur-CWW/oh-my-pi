@@ -14,7 +14,7 @@ export interface ResolveFallbackApprovalAction {
 	readonly agentId: string;
 	readonly sourceModel: string;
 	readonly proposedModel: string;
-	readonly cause: "network" | "rate-limit" | "provider";
+	readonly cause: "network" | "rate-limit" | "auth" | "provider";
 	readonly taskContext: string;
 	readonly options: readonly ["wait", "approve", "choose", "abort"];
 }

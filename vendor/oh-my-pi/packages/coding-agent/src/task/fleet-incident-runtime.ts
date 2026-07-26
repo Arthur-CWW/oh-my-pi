@@ -28,7 +28,7 @@ export interface FleetSalvageAgent {
 	readonly id: string;
 	readonly kind: "main" | "sub";
 	readonly parentId?: string;
-	readonly status: "running" | "idle" | "parked" | "aborted";
+	readonly status: "running" | "waiting-provider" | "idle" | "parked" | "aborted";
 }
 
 export interface FleetSalvageDependencies {

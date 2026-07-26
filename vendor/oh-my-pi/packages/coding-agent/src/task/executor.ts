@@ -2213,10 +2213,23 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 	});
 	const installRegistryStatusSync = (target: AgentSession): (() => void) =>
 		followUpResultRouter.subscribe(target, event => {
+			const asyncJobId = options.asyncJobId ?? id;
 			if (event.type === "agent_start") {
 				AgentRegistry.global().setStatus(id, "running");
+				options.asyncJobManager?.markRunning(asyncJobId);
 				appendLifecycleState?.("running");
-			} else if (event.type === "agent_end") {
+			} else if (
+				event.type === "auto_retry_start" &&
+				(event.cause === "auth" || (event.cause === "rate-limit" && event.delayMs > 0))
+			) {
+				AgentRegistry.global().setStatus(id, "waiting-provider");
+				options.asyncJobManager?.markWaitingProvider(asyncJobId, {
+					reason: event.cause === "auth" ? "auth-invalid" : "rate-limit",
+					userAction: event.cause === "auth" ? "refresh-credentials" : "wait-for-reset",
+					...(event.cause === "rate-limit" ? { retryAt: Date.now() + event.delayMs } : {}),
+				});
+				appendLifecycleState?.("waiting-provider");
+			} else if (event.type === "agent_end" && AgentRegistry.global().get(id)?.status !== "waiting-provider") {
 				AgentRegistry.global().setStatus(id, "idle");
 				appendLifecycleState?.("idle");
 			}

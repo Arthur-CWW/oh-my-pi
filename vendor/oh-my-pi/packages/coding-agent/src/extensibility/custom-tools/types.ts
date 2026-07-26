@@ -121,7 +121,7 @@ export type CustomToolSessionEvent =
 	  }
 	| {
 			reason: "auto_retry_start";
-			cause: "network" | "rate-limit" | "provider";
+			cause: "network" | "rate-limit" | "auth" | "provider";
 			attempt: number;
 			maxAttempts: number;
 			delayMs: number;

@@ -3,7 +3,7 @@
  * agent retry state machine. `provider` remains the retry-policy bucket; the
  * operator-facing surface renders it as the more explicit `provider-error`.
  */
-export type RetryCause = "network" | "rate-limit" | "provider";
+export type RetryCause = "network" | "rate-limit" | "auth" | "provider";
 
 export type RequestFailureCause =
 	| Exclude<RetryCause, "provider">
@@ -20,6 +20,8 @@ interface StructuredRequestFailure {
 }
 
 const RATE_LIMIT_MESSAGE_REGEX = /\brate.?limit\b|too many requests|\b429\b/i;
+const AUTH_INVALID_MESSAGE_REGEX =
+	/invalidated oauth token|invalid oauth token|oauth token (?:was )?(?:revoked|invalid|expired)|authentication_error|invalid authentication credentials|unauthorized/i;
 const STREAM_ABORT_MESSAGE_REGEX =
 	/stream (?:stalled|timed out|ended|closed|terminated)|waiting for (?:the first|the next) event/i;
 const TIMEOUT_MESSAGE_REGEX = /\btimed? ?out\b|\btimeout\b/i;
@@ -45,6 +47,9 @@ export function classifyAbortReason(
 	}
 	return "parent-cancel";
 }
+export function isAuthenticationInvalidError(message: string, status?: number): boolean {
+	return status === 401 || AUTH_INVALID_MESSAGE_REGEX.test(message);
+}
 
 /**
  * Classify one provider/request failure without relying on SDK-specific
@@ -69,6 +74,7 @@ export function classifyRequestFailure(
 			case "provider-stream-abort":
 			case "network":
 			case "rate-limit":
+			case "auth":
 			case "provider-error":
 				return structuredCause;
 		}
@@ -79,6 +85,9 @@ export function classifyRequestFailure(
 	if (USER_INTERRUPT_MESSAGE_REGEX.test(message)) return "user-interrupt";
 	if (STREAM_ABORT_MESSAGE_REGEX.test(message)) return "provider-stream-abort";
 	if (TIMEOUT_MESSAGE_REGEX.test(message)) return "timeout";
+	if (isAuthenticationInvalidError(message, typeof structured?.status === "number" ? structured.status : undefined)) {
+		return "auth";
+	}
 	if (structured?.status === 429) return "rate-limit";
 	if (RATE_LIMIT_MESSAGE_REGEX.test(message)) return "rate-limit";
 	if (isTransientNetworkError(error instanceof Error || typeof error === "string" ? error : message)) return "network";
