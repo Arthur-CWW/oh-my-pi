@@ -1,11 +1,12 @@
-import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
+import { isProviderThinkingEffort, type ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { Api, Model } from "@oh-my-pi/pi-ai";
 import { type ModelLookupRegistry, resolveModelOverride } from "../config/model-resolver";
+import { modelFamilyToken } from "@oh-my-pi/pi-catalog/identity";
 import { MODEL_ROLE_IDS } from "../config/model-roles";
 import { resolveConfiguredModelPatterns } from "../config/role-resolution";
 import type { Settings } from "../config/settings";
 import type { PolicySnapshot, PolicySourceLayer, ProviderPostureEntry } from "../policy/policy-projection";
-import type { CoreRoutingKey } from "../policy/policy-records";
+import type { CoreRoutingKey, ResponsibilityRouteCeiling, RoutingEnforcementValue } from "../policy/policy-records";
 import type { AgentQuotaAdmission } from "../registry/agent-registry";
 import type { QuotaModel } from "./quota-admission";
 
@@ -16,12 +17,13 @@ export type SpawnRouteSource =
 	| "session_temporary"
 	| "policy"
 	| "agent_model_override"
+	| "responsibility_default"
 	| "agent_frontmatter"
 	| "session_inherited"
 	| "global_default";
 
 /** Sources which can appear after the initial spawn decision has been made. */
-export type SubsequentSpawnRouteSource = SpawnRouteSource | "automatic_reroute" | "auth_fallback";
+export type SubsequentSpawnRouteSource = SpawnRouteSource | "policy_enforced" | "automatic_reroute" | "auth_fallback";
 
 /** Compatibility status attached to a responsibility route. */
 export type SpawnRouteAlias = "deprecated-alias";
@@ -31,6 +33,7 @@ export interface SpawnRouteInput {
 	readonly sessionExplicit?: string | readonly string[];
 	readonly sessionTemporary?: string | readonly string[];
 	readonly agentModelOverride?: string | readonly string[];
+	readonly responsibilityDefault?: string | readonly string[];
 	readonly agentFrontmatter?: string | readonly string[];
 	readonly sessionInherited?: string | readonly string[];
 	readonly globalDefault?: string | readonly string[];
@@ -71,9 +74,10 @@ export interface ResolvedRoute {
 }
 
 export interface SpawnRouteInvalidError {
-	readonly kind: "invalid_spawn_route";
+	readonly kind: "invalid_spawn_route" | "missing_responsibility_route" | "missing_route_effort";
 	readonly requested: readonly string[];
 	readonly patterns: readonly string[];
+	readonly reason?: string;
 }
 
 export interface SpawnRouteQuotaBlock {
@@ -104,6 +108,35 @@ export interface SpawnRoutePolicyExclusion extends Omit<SpawnRouteProviderDenyCo
 	readonly reason: string;
 }
 
+export interface SpawnRouteEnforcementReceipt {
+	readonly key: "core.routing.enforcement";
+	readonly responsibility: string;
+	readonly outcome: "unchanged" | "overridden" | "excepted";
+	readonly requestedSelector: string;
+	readonly effectiveSelector: string;
+	readonly targetSelector: string;
+	readonly category?: string;
+	readonly modelFamily?: string;
+	readonly transactionId: string;
+	readonly sequence: number;
+	readonly recordHash: string;
+	readonly reason: string;
+	readonly effectiveFrom: string;
+	readonly expiresAt?: string;
+	readonly snapshotAt: string;
+}
+
+export interface SpawnRouteEnforcementBlock {
+	readonly kind: "routing_policy_enforcement";
+	readonly responsibility: string;
+	readonly requestedSelector: string;
+	readonly targetSelector: string;
+	readonly transactionId?: string;
+	readonly reason: string;
+	readonly expiresAt?: string;
+	readonly snapshotAt: string;
+}
+
 export interface SpawnRoutePolicyBlock {
 	readonly kind: "provider_policy_denied";
 	readonly requested: readonly string[];
@@ -111,7 +144,7 @@ export interface SpawnRoutePolicyBlock {
 	readonly exclusions: readonly SpawnRoutePolicyExclusion[];
 }
 
-export type SpawnRouteBlock = SpawnRouteQuotaBlock | SpawnRoutePolicyBlock;
+export type SpawnRouteBlock = SpawnRouteQuotaBlock | SpawnRoutePolicyBlock | SpawnRouteEnforcementBlock;
 
 export interface SpawnRouteAttempt {
 	readonly source: SubsequentSpawnRouteSource;
@@ -138,15 +171,25 @@ export interface SpawnRouteDecision {
 	readonly priorAttempts?: readonly SpawnRouteAttempt[];
 	readonly responsibility?: string;
 	readonly alias?: SpawnRouteAlias;
+	readonly routeEnforcement?: SpawnRouteEnforcementReceipt;
 	/** Immutable deny rules derived from the policy snapshot used for this decision. */
 	readonly providerDenyConstraints?: readonly SpawnRouteProviderDenyConstraint[];
 	/** Denied concrete candidates skipped while resolving or reconciling this route. */
 	readonly excludedPolicyCandidates?: readonly SpawnRoutePolicyExclusion[];
 }
 
+export type SpawnRouteEnforcementSource =
+	| "responsibility_default"
+	| "packet_local_escalation"
+	| "policy_enforcement"
+	| "runtime_reconciliation";
+
 export interface SpawnRouteReceipt {
 	readonly source: SubsequentSpawnRouteSource;
 	readonly route: ResolvedRoute;
+	readonly requestedSelector: string;
+	readonly effectiveSelector: string;
+	readonly enforcementSource: SpawnRouteEnforcementSource;
 	readonly originalSource?: SubsequentSpawnRouteSource;
 	readonly originalRoute?: ResolvedRoute;
 	readonly reason?: string;
@@ -161,6 +204,7 @@ export interface SpawnRouteReceipt {
 	readonly responsibility?: string;
 	/** Compatibility status when the requested template was an alias. */
 	readonly alias?: SpawnRouteAlias;
+	readonly routeEnforcement?: SpawnRouteEnforcementReceipt;
 	/** Provenance source which won the lane decision. */
 	readonly resolutionSource: SubsequentSpawnRouteSource;
 	/** Final concrete lane after quota/auth reconciliation. */
@@ -388,7 +432,7 @@ function providerPolicyBlock(
  * Resolve the initial spawn route without performing I/O or mutating session state.
  * Explicit spawn and session selectors are terminal: an unresolved value is an error.
  */
-export function resolveSpawnRoute(inputs: SpawnRouteInput): SpawnRouteDecision {
+function resolveSpawnRouteUnenforced(inputs: SpawnRouteInput): SpawnRouteDecision {
 	const effectivePolicy = inputs.policyKey === undefined ? undefined : inputs.policySnapshot?.values[inputs.policyKey];
 	const policy: ConsultedPolicyRoute | undefined =
 		inputs.policyKey === undefined || inputs.policySnapshot === undefined || effectivePolicy === undefined
@@ -400,20 +444,28 @@ export function resolveSpawnRoute(inputs: SpawnRouteInput): SpawnRouteDecision {
 					sequence: effectivePolicy.sequence,
 					snapshotAt: inputs.policySnapshot.at,
 				};
-	const tiers: readonly RouteTier[] = [
-		{ source: "spawn_explicit", explicit: true, selectors: inputs.spawnExplicit },
-		{ source: "session_explicit", explicit: true, selectors: inputs.sessionExplicit },
-		{ source: "session_temporary", explicit: false, selectors: inputs.sessionTemporary },
-		{ source: "policy", explicit: false, selectors: effectivePolicy?.value, policy },
-		{ source: "agent_model_override", explicit: false, selectors: inputs.agentModelOverride },
-		{ source: "agent_frontmatter", explicit: false, selectors: inputs.agentFrontmatter },
-		{ source: "session_inherited", explicit: false, selectors: inputs.sessionInherited },
-		{
-			source: "global_default",
-			explicit: false,
-			selectors: inputs.globalDefault ?? inputs.settings.getModelRole("default"),
-		},
-	];
+	const tiers: readonly RouteTier[] =
+		inputs.responsibility === undefined
+			? [
+					{ source: "spawn_explicit", explicit: true, selectors: inputs.spawnExplicit },
+					{ source: "session_explicit", explicit: true, selectors: inputs.sessionExplicit },
+					{ source: "session_temporary", explicit: false, selectors: inputs.sessionTemporary },
+					{ source: "policy", explicit: false, selectors: effectivePolicy?.value, policy },
+					{ source: "agent_model_override", explicit: false, selectors: inputs.agentModelOverride },
+					{ source: "agent_frontmatter", explicit: false, selectors: inputs.agentFrontmatter },
+					{ source: "session_inherited", explicit: false, selectors: inputs.sessionInherited },
+					{
+						source: "global_default",
+						explicit: false,
+						selectors: inputs.globalDefault ?? inputs.settings.getModelRole("default"),
+					},
+				]
+			: [
+					{ source: "spawn_explicit", explicit: true, selectors: inputs.spawnExplicit },
+					{ source: "agent_model_override", explicit: true, selectors: inputs.agentModelOverride },
+					{ source: "responsibility_default", explicit: true, selectors: inputs.responsibilityDefault },
+					{ source: "agent_frontmatter", explicit: true, selectors: inputs.agentFrontmatter },
+				];
 	const constraints = providerDenyConstraints(inputs.policySnapshot);
 	const consulted: ConsultedRouteInput[] = [];
 	const exclusions: SpawnRoutePolicyExclusion[] = [];
@@ -537,6 +589,205 @@ export function resolveSpawnRoute(inputs: SpawnRouteInput): SpawnRouteDecision {
 		invalid: undefined,
 	};
 }
+function validateResponsibilityRoute(decision: SpawnRouteDecision, responsibility: string | undefined): SpawnRouteDecision {
+	if (responsibility === undefined || decision.invalid !== undefined || decision.block !== undefined) return decision;
+	if (decision.route === undefined) {
+		return {
+			...decision,
+			invalid: {
+				kind: "missing_responsibility_route",
+				requested: decision.selectedSelectors,
+				patterns: decision.resolvedPatterns,
+				reason: `responsibility "${responsibility}" has no executable model selector`,
+			},
+		};
+	}
+	const effort = decision.route.thinking;
+	if (
+		effort === undefined ||
+		!isProviderThinkingEffort(effort) ||
+		!decision.route.selector.endsWith(`:${effort}`)
+	) {
+		return {
+			...decision,
+			route: undefined,
+			invalid: {
+				kind: "missing_route_effort",
+				requested: decision.selectedSelectors,
+				patterns: decision.resolvedPatterns,
+				reason: `responsibility "${responsibility}" resolved ${decision.route.selector} without an explicit provider effort`,
+			},
+		};
+	}
+	return decision;
+}
+
+
+function enforcementTargetSelector(ceiling: ResponsibilityRouteCeiling): string {
+	return "selector" in ceiling ? ceiling.selector : `pi/${ceiling.role}`;
+}
+
+function enforcementPatterns(ceiling: ResponsibilityRouteCeiling, settings: Settings): readonly string[] {
+	const target = enforcementTargetSelector(ceiling);
+	const normalized = MODEL_ROLE_IDS.includes(target as (typeof MODEL_ROLE_IDS)[number]) ? `pi/${target}` : target;
+	return immutable(resolveConfiguredModelPatterns([normalized], settings));
+}
+
+function resolvedRouteModelFamily(
+	route: ResolvedRoute,
+	modelRegistry: ModelLookupRegistry,
+): string {
+	const model = modelRegistry
+		.getAvailable()
+		.find(candidate => candidate.provider === route.provider && candidate.id === route.model);
+	if (model === undefined) return modelFamilyToken(route.model) || route.provider.toLowerCase();
+	return modelFamilyToken(modelRegistry.getCanonicalId?.(model) ?? model.id) || model.provider.toLowerCase();
+}
+
+function enforcementBlock(
+	decision: SpawnRouteDecision,
+	snapshot: PolicySnapshot,
+	ceiling: ResponsibilityRouteCeiling,
+	reason: string,
+): SpawnRouteDecision {
+	const effective = snapshot.values["core.routing.enforcement"];
+	const transaction = snapshot.transactions.find(record => record.transactionId === effective?.transactionId);
+	return {
+		...decision,
+		block: {
+			kind: "routing_policy_enforcement",
+			responsibility: ceiling.responsibility,
+			requestedSelector: decision.route?.selector ?? decision.selectedSelectors.join(", "),
+			targetSelector: enforcementTargetSelector(ceiling),
+			...(effective?.transactionId === undefined ? {} : { transactionId: effective.transactionId }),
+			reason,
+			...(transaction?.expiresAt === undefined ? {} : { expiresAt: transaction.expiresAt }),
+			snapshotAt: snapshot.at,
+		},
+	};
+}
+
+function enforceSpawnRoute(decision: SpawnRouteDecision, inputs: SpawnRouteInput): SpawnRouteDecision {
+	const responsibility = inputs.responsibility;
+	const snapshot = inputs.policySnapshot;
+	if (
+		responsibility === undefined ||
+		snapshot === undefined ||
+		decision.invalid !== undefined ||
+		decision.block !== undefined ||
+		decision.route === undefined
+	)
+		return decision;
+	const effective = snapshot.values["core.routing.enforcement"];
+	const value = effective?.value as RoutingEnforcementValue | undefined;
+	const ceiling = value?.routes.find(candidate => candidate.responsibility === responsibility);
+	if (effective === undefined || value === undefined || ceiling === undefined) return decision;
+	const transaction = snapshot.transactions.find(record => record.transactionId === effective.transactionId);
+	if (transaction === undefined || effective.transactionId === undefined || effective.recordHash === undefined) {
+		return enforcementBlock(decision, snapshot, ceiling, "active routing enforcement lacks transaction provenance");
+	}
+	const targetSelector = enforcementTargetSelector(ceiling);
+	const baseReceipt = {
+		key: "core.routing.enforcement" as const,
+		responsibility,
+		requestedSelector: decision.route.selector,
+		targetSelector,
+		...(ceiling.category === undefined ? {} : { category: ceiling.category }),
+		...(ceiling.modelFamily === undefined ? {} : { modelFamily: ceiling.modelFamily }),
+		transactionId: effective.transactionId,
+		sequence: effective.sequence,
+		recordHash: effective.recordHash,
+		reason: transaction.reason,
+		effectiveFrom: transaction.effectiveFrom,
+		...(transaction.expiresAt === undefined ? {} : { expiresAt: transaction.expiresAt }),
+		snapshotAt: snapshot.at,
+	};
+	if (ceiling.category !== undefined && value.exemptCategories?.includes(ceiling.category)) {
+		return {
+			...decision,
+			routeEnforcement: {
+				...baseReceipt,
+				outcome: "excepted",
+				effectiveSelector: decision.route.selector,
+			},
+		};
+	}
+	if (inputs.modelRegistry === undefined) {
+		return enforcementBlock(decision, snapshot, ceiling, "routing enforcement cannot resolve without a model registry");
+	}
+	const patterns = enforcementPatterns(ceiling, inputs.settings);
+	const resolved = resolveEligibleRoute(
+		patterns,
+		"policy_enforced",
+		inputs.modelRegistry,
+		inputs.settings,
+		inputs.parentActiveSelector,
+		decision.providerDenyConstraints ?? [],
+	);
+	const targetRoute = resolved.route;
+	if (targetRoute === undefined) {
+		return enforcementBlock(
+			appendSpawnRoutePolicyExclusions(decision, resolved.exclusions),
+			snapshot,
+			ceiling,
+			`enforced target ${targetSelector} did not resolve to an allowed model`,
+		);
+	}
+	if (
+		ceiling.modelFamily !== undefined &&
+		resolvedRouteModelFamily(targetRoute, inputs.modelRegistry) !== ceiling.modelFamily
+	) {
+		return enforcementBlock(
+			decision,
+			snapshot,
+			ceiling,
+			`enforced target ${targetSelector} does not resolve to model family ${ceiling.modelFamily}`,
+		);
+	}
+	const unchanged =
+		targetRoute.provider === decision.route.provider &&
+		targetRoute.model === decision.route.model &&
+		targetRoute.thinking === decision.route.thinking;
+	if (!unchanged && ceiling.action === "refuse") {
+		return enforcementBlock(
+			decision,
+			snapshot,
+			ceiling,
+			`requested route ${decision.route.selector} is outside enforced target ${targetRoute.selector}`,
+		);
+	}
+	return {
+		...decision,
+		source: "policy_enforced",
+		explicit: true,
+		selectedSelectors: immutable([targetSelector]),
+		resolvedPatterns: patterns,
+		route: targetRoute,
+		originalSource: decision.source,
+		originalRoute: decision.route,
+		reason: transaction.reason,
+		routeEnforcement: {
+			...baseReceipt,
+			outcome: unchanged ? "unchanged" : "overridden",
+			effectiveSelector: targetRoute.selector,
+		},
+		priorAttempts: unchanged
+			? decision.priorAttempts
+			: immutable([
+					...(decision.priorAttempts ?? []),
+					...(decision.source === undefined
+						? []
+						: [{ source: decision.source, route: decision.route, reason: transaction.reason }]),
+				]),
+		block: undefined,
+		invalid: undefined,
+	};
+}
+
+export function resolveSpawnRoute(inputs: SpawnRouteInput): SpawnRouteDecision {
+	const decision = validateResponsibilityRoute(resolveSpawnRouteUnenforced(inputs), inputs.responsibility);
+	return enforceSpawnRoute(decision, inputs);
+}
 
 export function admitSpawnRoute(decision: SpawnRouteDecision, quotaAdmission: AgentQuotaAdmission): SpawnRouteDecision {
 	return { ...decision, quotaAdmission };
@@ -633,6 +884,16 @@ export function toSpawnRouteReceipt(decision: SpawnRouteDecision): SpawnRouteRec
 	return {
 		source: decision.source,
 		route: decision.route,
+		requestedSelector: decision.originalRoute?.selector ?? decision.selectedSelectors.join(", "),
+		effectiveSelector: decision.route.selector,
+		enforcementSource:
+			decision.routeEnforcement !== undefined
+				? "policy_enforcement"
+				: decision.source === "spawn_explicit"
+					? "packet_local_escalation"
+					: decision.source === "automatic_reroute" || decision.source === "auth_fallback"
+						? "runtime_reconciliation"
+						: "responsibility_default",
 		originalSource: decision.originalSource,
 		originalRoute: decision.originalRoute,
 		reason: decision.reason,
@@ -646,5 +907,6 @@ export function toSpawnRouteReceipt(decision: SpawnRouteDecision): SpawnRouteRec
 		alias: decision.alias,
 		resolutionSource: decision.source,
 		resolvedLane: decision.route.selector,
+		routeEnforcement: decision.routeEnforcement,
 	};
 }

@@ -42,7 +42,7 @@ const secondary = buildModel({
 	maxTokens: 8192,
 });
 const registry: ModelLookupRegistry = { getAvailable: () => [primary, secondary] };
-type LegacySpawnRouteSource = Exclude<SpawnRouteSource, "policy">;
+type LegacySpawnRouteSource = Exclude<SpawnRouteSource, "policy" | "responsibility_default">;
 
 const policyKey: CoreRoutingKey = "core.routing.implementer";
 const policySnapshotAt = "2026-07-15T00:00:00.000Z";
@@ -308,16 +308,16 @@ describe("resolveSpawnRoute", () => {
 	] as const)("resolves the %s responsibility lane without inheriting the parent session", responsibility => {
 		const settings = Settings.isolated({
 			modelRoles: {
-				[responsibility]: "openai/smol-literal",
-				default: "openai-codex/gpt-5.6-terra",
+				[responsibility]: "openai-codex/gpt-5.6-terra:medium",
+				default: "openai/smol-literal",
 			},
 		});
 		const decision = resolveSpawnRoute({
 			settings,
 			modelRegistry: registry,
 			agentFrontmatter: `pi/${responsibility}`,
-			sessionInherited: "openai-codex/gpt-5.6-terra",
-			parentActiveSelector: "openai-codex/gpt-5.6-terra",
+			sessionInherited: "openai/smol-literal",
+			parentActiveSelector: "openai/smol-literal",
 			responsibility,
 		});
 		const receipt = toSpawnRouteReceipt(decision);
@@ -326,7 +326,7 @@ describe("resolveSpawnRoute", () => {
 		expect(receipt).toMatchObject({
 			responsibility,
 			resolutionSource: "agent_frontmatter",
-			resolvedLane: "openai/smol-literal",
+			resolvedLane: "openai-codex/gpt-5.6-terra:medium",
 		});
 		expect(receipt.route.selector).not.toBe(receipt.route.parentActiveSelector);
 	});
@@ -343,26 +343,29 @@ describe("resolveSpawnRoute", () => {
 		const inheritedImplementer = resolveSpawnRoute({
 			...base,
 			settings: Settings.isolated({
-				modelRoles: { implementer: "openai/smol-literal", default: "openai-codex/gpt-5.6-terra" },
+				modelRoles: {
+					implementer: "openai-codex/gpt-5.6-terra:medium",
+					default: "openai/smol-literal",
+				},
 			}),
 		});
 		expect(toSpawnRouteReceipt(inheritedImplementer)).toMatchObject({
 			alias: "deprecated-alias",
 			responsibility: "implementer",
 			resolutionSource: "agent_frontmatter",
-			resolvedLane: "openai/smol-literal",
+			resolvedLane: "openai-codex/gpt-5.6-terra:medium",
 		});
 
 		const configuredAlias = resolveSpawnRoute({
 			...base,
 			settings: Settings.isolated({
 				modelRoles: {
-					task: "openai-codex/gpt-5.6-terra",
-					implementer: "openai/smol-literal",
+					task: "openai-codex/gpt-5.6-terra:medium",
+					implementer: "openai-codex/gpt-5.6-terra:low",
 				},
 			}),
 		});
-		expect(configuredAlias.route?.selector).toBe("openai-codex/gpt-5.6-terra");
+		expect(configuredAlias.route?.selector).toBe("openai-codex/gpt-5.6-terra:medium");
 	});
 
 	it("does not fall through an unavailable responsibility chain to the parent session", () => {
@@ -383,9 +386,9 @@ describe("resolveSpawnRoute", () => {
 
 	it("keeps an explicit spawn model above responsibility lane resolution", () => {
 		const decision = resolveSpawnRoute({
-			settings: Settings.isolated({ modelRoles: { implementer: "openai/smol-literal" } }),
+			settings: Settings.isolated({ modelRoles: { implementer: "openai-codex/gpt-5.6-terra:low" } }),
 			modelRegistry: registry,
-			spawnExplicit: "openai-codex/gpt-5.6-terra",
+			spawnExplicit: "openai-codex/gpt-5.6-terra:medium",
 			agentFrontmatter: "pi/implementer",
 			sessionInherited: "openai/smol-literal",
 			responsibility: "implementer",
@@ -393,7 +396,7 @@ describe("resolveSpawnRoute", () => {
 		expect(toSpawnRouteReceipt(decision)).toMatchObject({
 			responsibility: "implementer",
 			resolutionSource: "spawn_explicit",
-			resolvedLane: "openai-codex/gpt-5.6-terra",
+			resolvedLane: "openai-codex/gpt-5.6-terra:medium",
 		});
 	});
 

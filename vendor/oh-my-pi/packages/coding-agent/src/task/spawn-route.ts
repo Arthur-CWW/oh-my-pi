@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import * as path from "node:path";
 import { logger } from "@oh-my-pi/pi-utils";
 import { Effect } from "effect";
 import type { ToolSession } from "..";
@@ -32,7 +33,7 @@ export interface SpawnPolicyRoutingOptions {
 	readonly directory?: string;
 }
 
-type SpawnPolicySession = Pick<ToolSession, "sessionManager">;
+type SpawnPolicySession = Pick<ToolSession, "sessionManager" | "settings">;
 
 const QUOTA_USAGE_ADMISSION_TIMEOUT_MS = 2_000;
 function raceQuotaUsageWithSignal<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
@@ -82,16 +83,8 @@ export async function snapshotTaskSpawnPolicy(
 	session: SpawnPolicySession,
 	options: SpawnPolicyRoutingOptions = {},
 ): Promise<PolicySnapshot> {
-	const directory = options.directory ?? configuredPolicyDirectory;
-	if (directory === undefined) {
-		return {
-			at: new Date().toISOString(),
-			values: {},
-			transactions: [],
-			expiredTransactionIds: [],
-			futureTransactionIds: [],
-		};
-	}
+	const directory =
+		options.directory ?? configuredPolicyDirectory ?? path.join(session.settings.getAgentDir(), "policy");
 	const journal = policyReader({ directory });
 	const workstream = sessionWorkstream(session);
 	return Effect.runPromise(
@@ -101,12 +94,34 @@ export async function snapshotTaskSpawnPolicy(
 	);
 }
 
-function policyKeyForSpawn(
-	deprecatedTaskAlias: boolean,
-	responsibility: string,
-	modelSelectors: readonly string[] | undefined,
-): CoreRoutingKey {
-	if (deprecatedTaskAlias) return "core.routing.implementer";
+export const EXACT_RESPONSIBILITY_ROUTES = Object.freeze({
+	quick_task: "openai-codex/gpt-5.6-luna:medium",
+	explore: "openai-codex/gpt-5.6-luna:medium",
+	librarian: "openai-codex/gpt-5.6-luna:medium",
+	reviewer: "openai-codex/gpt-5.6-luna:medium",
+	qa: "openai-codex/gpt-5.6-luna:medium",
+	research: "openai-codex/gpt-5.6-luna:medium",
+	authenticated_web: "openai-codex/gpt-5.6-luna:medium",
+	vision: "openai-codex/gpt-5.6-luna:medium",
+	smol: "openai-codex/gpt-5.6-luna:medium",
+	task: "openai-codex/gpt-5.6-luna:medium",
+	plan: "openai-codex/gpt-5.6-sol:medium",
+	implementer: "openai-codex/gpt-5.6-sol:medium",
+	oracle: "openai-codex/gpt-5.6-sol:medium",
+	operator: "openai-codex/gpt-5.6-sol:medium",
+	synthesizer: "openai-codex/gpt-5.6-sol:medium",
+	orchestrator: "openai-codex/gpt-5.6-sol:medium",
+	default: "openai-codex/gpt-5.6-sol:medium",
+	designer: "anthropic/claude-opus-5:medium",
+});
+export function exactResponsibilityRoute(responsibility: string): string | undefined {
+	return Object.hasOwn(EXACT_RESPONSIBILITY_ROUTES, responsibility)
+		? EXACT_RESPONSIBILITY_ROUTES[responsibility as keyof typeof EXACT_RESPONSIBILITY_ROUTES]
+		: undefined;
+}
+
+
+function policyKeyForSpawn(responsibility: string, modelSelectors: readonly string[] | undefined): CoreRoutingKey {
 	for (const selector of modelSelectors ?? []) {
 		const role = selector.startsWith("pi/") ? selector.slice(3).split(":", 1)[0] : undefined;
 		const key = role === undefined ? undefined : `core.routing.${role}`;
@@ -165,26 +180,21 @@ export function resolveTaskSpawnRoute(
 	params: TaskParams,
 	policySnapshot?: PolicySnapshot,
 ): SpawnRouteDecision {
-	const deprecatedTaskAlias = agentName === "task";
-	const responsibility = deprecatedTaskAlias ? "implementer" : agentName;
+	const responsibility = agentName;
 	const agentModelOverrides = session.settings.get("task.agentModelOverrides");
 	const parentActiveSelector = session.getActiveModelString?.();
-	const policyKey = policyKeyForSpawn(deprecatedTaskAlias, responsibility, effectiveAgent.model);
+	const policyKey = policyKeyForSpawn(responsibility, effectiveAgent.model);
 	return resolveSpawnRoute({
 		spawnExplicit: params.model,
-		sessionExplicit: session.getExplicitModelString?.(),
-		sessionTemporary: session.getTemporaryModelString?.(),
 		agentModelOverride: agentModelOverrides[agentName],
-		agentFrontmatter: deprecatedTaskAlias ? "pi/task" : effectiveAgent.model,
-		sessionInherited: parentActiveSelector,
-		globalDefault: session.settings.getModelRole("default"),
+		responsibilityDefault: exactResponsibilityRoute(responsibility),
+		agentFrontmatter: effectiveAgent.model,
 		policyKey,
 		policySnapshot,
 		settings: session.settings,
 		modelRegistry: session.modelRegistry,
 		parentActiveSelector,
 		responsibility,
-		alias: deprecatedTaskAlias ? "deprecated-alias" : undefined,
 	});
 }
 
@@ -326,6 +336,9 @@ export function formatTaskRouteError(
 	decision: SpawnRouteDecision,
 ): string | undefined {
 	if (decision.invalid) {
+		if (decision.invalid.kind !== "invalid_spawn_route") {
+			return `Task route admission rejected responsibility "${agentName}": ${decision.invalid.reason ?? decision.invalid.kind}. Every responsibility route must resolve to an explicit provider/model:effort selector; parent-session inheritance is not executable.`;
+		}
 		return formatInvalidModelOverrideError({
 			agentName,
 			requested: [...decision.invalid.requested],
@@ -343,6 +356,13 @@ export function formatTaskRouteError(
 			.join("; ");
 		const subject = decision.explicit ? "explicit model pin" : "model route";
 		return `Provider policy denied ${subject} for task agent "${agentName}": ${requested}. ${reasons}. Policy snapshot: ${decision.block.exclusions[0]?.snapshotAt ?? "unknown"}.`;
+	}
+	if (decision.block?.kind === "routing_policy_enforcement") {
+		const expiry =
+			decision.block.expiresAt === undefined ? "" : ` Enforcement expires ${decision.block.expiresAt}.`;
+		const transaction =
+			decision.block.transactionId === undefined ? "" : ` Policy transaction ${decision.block.transactionId}.`;
+		return `Routing policy refused task agent "${agentName}" route ${decision.block.requestedSelector}: ${decision.block.reason}.${transaction}${expiry} Snapshot: ${decision.block.snapshotAt}.`;
 	}
 	if (decision.block?.kind === "quota_admission_blocked") {
 		const reason = decision.block.reason ? ` (${decision.block.reason})` : "";

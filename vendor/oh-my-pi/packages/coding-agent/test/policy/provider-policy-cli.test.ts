@@ -5,6 +5,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { collectImport, importMutations, runPolicyCommand } from "../../src/cli/policy-cli";
 import { IrcExternalBus } from "../../src/irc/bus-external";
+import { POLICY_REGISTRY_VERSION } from "../../src/policy/policy-records";
 import { SessionControlBus } from "../../src/session/session-control";
 
 const temporaryDirectories: string[] = [];
@@ -128,7 +129,7 @@ describe("provider policy CLI", () => {
 				author: { kind: "cli", sessionId: "fable-overnight" },
 				source: { kind: "cli", uri: "HR-176" },
 				reason: expect.stringContaining("Arthur 2026-07-17"),
-				registry: { version: 4 },
+				registry: { version: POLICY_REGISTRY_VERSION },
 				mutations: [
 					{
 						key: "core.providers.deny.routes",

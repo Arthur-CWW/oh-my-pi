@@ -28,6 +28,7 @@ import {
 	type AnyPolicyKey,
 	type AnyPolicyValue,
 	CORE_BUDGET_FRAGMENT_VERSION,
+	CORE_ROUTING_ENFORCEMENT_FRAGMENT_VERSION,
 	CORE_FALLBACK_FRAGMENT_VERSION,
 	CORE_NON_PROVIDER_KEYS,
 	CORE_POLICY_KEYS,
@@ -38,6 +39,7 @@ import {
 	type CoreNonProviderKey,
 	type CoreProviderKey,
 	type CoreRoutingValue,
+	type RoutingEnforcementValue,
 	decodePolicyValueForKey,
 	type ExtensionPolicyKey,
 	type FallbackChainsValue,
@@ -367,6 +369,15 @@ function setMutation(
 				...provenance,
 				fragmentVersion: CORE_PROVIDER_FRAGMENT_VERSION,
 				value: value as ProviderRouteDenyValue,
+			};
+		case "core.routing.enforcement":
+			return {
+				op: "set",
+				key,
+				scope,
+				...provenance,
+				fragmentVersion: CORE_ROUTING_ENFORCEMENT_FRAGMENT_VERSION,
+				value: value as RoutingEnforcementValue,
 			};
 		case "core.fallback.chains":
 			return {

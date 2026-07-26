@@ -6,11 +6,13 @@ import {
 	CORE_BUDGET_FRAGMENT_VERSION,
 	CORE_FALLBACK_FRAGMENT_VERSION,
 	CORE_PROVIDER_FRAGMENT_VERSION,
+	CORE_ROUTING_ENFORCEMENT_FRAGMENT_VERSION,
 	CORE_ROUTING_FRAGMENT_VERSION,
 	decodePolicyValueForKey,
 	isCoreBudgetKey,
 	isCoreFallbackKey,
 	isCoreProviderKey,
+	isCoreRoutingEnforcementKey,
 	isCoreRoutingKey,
 	isPolicyKey,
 	type ExtensionPolicyKey,
@@ -19,6 +21,7 @@ import {
 	type PolicyMutationV1,
 	type PolicyScope,
 	type PolicyTransactionV1,
+	type RoutingEnforcementValue,
 	type PolicyValue,
 } from "./policy-records";
 
@@ -290,6 +293,16 @@ function candidatesFromSettings(
 			const candidate = decodeCandidate(source, `task.${legacyKey}`, policyKey, parsed.task[legacyKey], issues);
 			if (candidate) candidates.push(candidate);
 		}
+		if (parsed.task.routeEnforcement !== undefined) {
+			const candidate = decodeCandidate(
+				source,
+				"task.routeEnforcement",
+				"core.routing.enforcement",
+				parsed.task.routeEnforcement,
+				issues,
+			);
+			if (candidate) candidates.push(candidate);
+		}
 	}
 	return candidates;
 }
@@ -347,6 +360,12 @@ function mutationFor(candidate: PolicyImportCandidate): PolicyMutationV1 {
 		return { ...common, key: candidate.key, fragmentVersion: CORE_FALLBACK_FRAGMENT_VERSION } as PolicyMutationV1;
 	if (isCoreBudgetKey(candidate.key))
 		return { ...common, key: candidate.key, fragmentVersion: CORE_BUDGET_FRAGMENT_VERSION } as PolicyMutationV1;
+	if (isCoreRoutingEnforcementKey(candidate.key))
+		return {
+			...common,
+			key: candidate.key,
+			fragmentVersion: CORE_ROUTING_ENFORCEMENT_FRAGMENT_VERSION,
+		} as PolicyMutationV1;
 	if (isCoreRoutingKey(candidate.key))
 		return { ...common, key: candidate.key, fragmentVersion: CORE_ROUTING_FRAGMENT_VERSION } as PolicyMutationV1;
 	throw new Error(`Unsupported policy import key: ${candidate.key}`);
@@ -359,6 +378,7 @@ function scopeIdentity(scope: PolicyScope): string {
 function mergeSemantics(key: PolicyKey): PolicyImportConflictV1["mergeSemantics"] {
 	if (key === "core.providers.deny.providers" || key === "core.providers.deny.models") return "array-replace";
 	if (key === "core.fallback.chains") return "map-replace";
+	if (key === "core.routing.enforcement") return "map-replace";
 	return "scalar-last-wins";
 }
 
@@ -447,16 +467,19 @@ export function exportLegacyPolicyYaml(records: readonly PolicyTransactionV1[]):
 		}
 	}
 	const modelRoles: Record<string, string> = {};
-	const task: Record<string, number> = {};
+	const task: Record<string, unknown> = {};
 	const redactedPaths: string[] = [];
 	let disabledProviders: readonly string[] | undefined;
 	let disabledModels: readonly string[] | undefined;
 	let fallbackChains: Readonly<Record<string, readonly string[]>> | undefined;
+	let routeEnforcement: RoutingEnforcementValue | undefined;
 	for (const [key, value] of applied) {
 		if (isCoreRoutingKey(key)) {
 			const role = key.slice("core.routing.".length);
 			if (typeof value === "string" && !secretClassification(`modelRoles.${role}`, value)) modelRoles[role] = value;
 			else redactedPaths.push(`modelRoles.${role}`);
+		} else if (key === "core.routing.enforcement") {
+			routeEnforcement = value as RoutingEnforcementValue;
 		} else if (key === "core.providers.deny.providers" && typeof value === "object" && "providerIds" in value) {
 			disabledProviders = value.providerIds;
 		} else if (key === "core.providers.deny.models" && typeof value === "object" && "models" in value) {
@@ -467,6 +490,7 @@ export function exportLegacyPolicyYaml(records: readonly PolicyTransactionV1[]):
 			task[key.slice("core.budgets.task.".length)] = value;
 		}
 	}
+	if (routeEnforcement !== undefined) task.routeEnforcement = routeEnforcement;
 	const document: Record<string, unknown> = {
 		generatedPolicySnapshot: {
 			generated: true,
@@ -532,6 +556,10 @@ export function ignoreImportedYamlForPolicyRuntime(
 			if (!(key in task)) continue;
 			delete task[key];
 			ignoredKeyPaths.push(`task.${key}`);
+		}
+		if ("routeEnforcement" in task) {
+			delete task.routeEnforcement;
+			ignoredKeyPaths.push("task.routeEnforcement");
 		}
 		filtered.task = task;
 	}

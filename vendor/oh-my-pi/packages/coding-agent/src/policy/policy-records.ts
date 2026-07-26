@@ -2,8 +2,9 @@ import { Schema } from "effect";
 import type { PolicyJsonValue } from "./policy-fragment-registry";
 
 export const POLICY_SCHEMA_VERSION = 1 as const;
-export const POLICY_REGISTRY_VERSION = 4 as const;
+export const POLICY_REGISTRY_VERSION = 5 as const;
 export const CORE_ROUTING_FRAGMENT_VERSION = 1 as const;
+export const CORE_ROUTING_ENFORCEMENT_FRAGMENT_VERSION = 1 as const;
 export const CORE_PROVIDER_FRAGMENT_VERSION = 2 as const;
 export const CORE_FALLBACK_FRAGMENT_VERSION = 1 as const;
 export const CORE_BUDGET_FRAGMENT_VERSION = 1 as const;
@@ -61,6 +62,49 @@ export const CoreRoutingKeySchema = Schema.Literals(CORE_ROUTING_KEYS);
 export type CoreRoutingKey = typeof CoreRoutingKeySchema.Type;
 export const CoreRoutingValueSchema = NonEmptyStringSchema;
 export type CoreRoutingValue = typeof CoreRoutingValueSchema.Type;
+
+export const CORE_ROUTING_ENFORCEMENT_KEYS = ["core.routing.enforcement"] as const;
+export const CoreRoutingEnforcementKeySchema = Schema.Literals(CORE_ROUTING_ENFORCEMENT_KEYS);
+export type CoreRoutingEnforcementKey = typeof CoreRoutingEnforcementKeySchema.Type;
+export const RouteEnforcementActionSchema = Schema.Literals(["override", "refuse"]);
+export type RouteEnforcementAction = typeof RouteEnforcementActionSchema.Type;
+const RouteEnforcementCommonFields = {
+	responsibility: NonEmptyStringSchema,
+	action: RouteEnforcementActionSchema,
+	modelFamily: Schema.optional(NonEmptyStringSchema),
+	category: Schema.optional(NonEmptyStringSchema),
+};
+export const SelectorRouteCeilingSchema = Schema.Struct({
+	...RouteEnforcementCommonFields,
+	selector: NonEmptyStringSchema,
+});
+export const RoleRouteCeilingSchema = Schema.Struct({
+	...RouteEnforcementCommonFields,
+	role: PolicyModelRoleSchema,
+});
+export const ResponsibilityRouteCeilingSchema = Schema.Union([
+	SelectorRouteCeilingSchema,
+	RoleRouteCeilingSchema,
+]);
+export type ResponsibilityRouteCeiling = typeof ResponsibilityRouteCeilingSchema.Type;
+
+function hasUniqueRouteCeilings(routes: readonly ResponsibilityRouteCeiling[]): boolean {
+	return new Set(routes.map(route => route.responsibility)).size === routes.length;
+}
+
+const ResponsibilityRouteCeilingsSchema = Schema.Array(ResponsibilityRouteCeilingSchema).pipe(
+	Schema.check(Schema.isMinLength(1)),
+	Schema.refine((routes): routes is readonly ResponsibilityRouteCeiling[] => hasUniqueRouteCeilings(routes)),
+);
+const RouteEnforcementExceptionCategoriesSchema = Schema.Array(NonEmptyStringSchema).pipe(
+	Schema.check(Schema.isMinLength(1)),
+	Schema.refine((categories): categories is readonly string[] => new Set(categories).size === categories.length),
+);
+export const RoutingEnforcementValueSchema = Schema.Struct({
+	routes: ResponsibilityRouteCeilingsSchema,
+	exemptCategories: Schema.optional(RouteEnforcementExceptionCategoriesSchema),
+});
+export type RoutingEnforcementValue = typeof RoutingEnforcementValueSchema.Type;
 
 export const CORE_PROVIDER_KEYS = [
 	"core.providers.deny.providers",
@@ -158,9 +202,18 @@ export type CoreBudgetKey = typeof CoreBudgetKeySchema.Type;
 export const CoreBudgetValueSchema = NonNegativeIntSchema;
 export type CoreBudgetValue = typeof CoreBudgetValueSchema.Type;
 
-export const CORE_NON_PROVIDER_KEYS = [...CORE_ROUTING_KEYS, ...CORE_FALLBACK_KEYS, ...CORE_BUDGET_KEYS] as const;
+export const CORE_NON_PROVIDER_KEYS = [
+	...CORE_ROUTING_KEYS,
+	...CORE_ROUTING_ENFORCEMENT_KEYS,
+	...CORE_FALLBACK_KEYS,
+	...CORE_BUDGET_KEYS,
+] as const;
 export type CoreNonProviderKey = (typeof CORE_NON_PROVIDER_KEYS)[number];
-export type CoreNonProviderValue = CoreRoutingValue | CoreFallbackValue | CoreBudgetValue;
+export type CoreNonProviderValue =
+	| CoreRoutingValue
+	| RoutingEnforcementValue
+	| CoreFallbackValue
+	| CoreBudgetValue;
 export const CORE_POLICY_KEYS = [...CORE_NON_PROVIDER_KEYS, ...CORE_PROVIDER_KEYS] as const;
 export const PolicyKeySchema = Schema.Literals(CORE_POLICY_KEYS);
 export type PolicyKey = typeof PolicyKeySchema.Type;
@@ -171,11 +224,13 @@ export type PolicyValueForKey<Key extends PolicyKey> = Key extends "core.provide
 		? ModelDenyValue
 		: Key extends "core.providers.deny.routes"
 			? ProviderRouteDenyValue
-			: Key extends CoreFallbackKey
-				? FallbackChainsValue
-				: Key extends CoreBudgetKey
-					? CoreBudgetValue
-					: CoreRoutingValue;
+			: Key extends CoreRoutingEnforcementKey
+				? RoutingEnforcementValue
+				: Key extends CoreFallbackKey
+					? FallbackChainsValue
+					: Key extends CoreBudgetKey
+						? CoreBudgetValue
+						: CoreRoutingValue;
 
 export type ExtensionPolicyKey = `ext.${string}`;
 export type AnyPolicyKey = PolicyKey | ExtensionPolicyKey;
@@ -222,6 +277,13 @@ const SetCoreRoutingPolicyMutationV1Schema = Schema.Struct({
 	fragmentVersion: Schema.Literals([1, 2, 3]),
 	value: CoreRoutingValueSchema,
 });
+const SetRoutingEnforcementPolicyMutationV1Schema = Schema.Struct({
+	op: Schema.Literal("set"),
+	key: CoreRoutingEnforcementKeySchema,
+	...MutationScopeFields,
+	fragmentVersion: Schema.Literal(CORE_ROUTING_ENFORCEMENT_FRAGMENT_VERSION),
+	value: RoutingEnforcementValueSchema,
+});
 const SetProviderDenyPolicyMutationV1Schema = Schema.Struct({
 	op: Schema.Literal("set"),
 	key: Schema.Literal("core.providers.deny.providers"),
@@ -248,6 +310,12 @@ const ClearCoreRoutingPolicyMutationV1Schema = Schema.Struct({
 	key: CoreRoutingKeySchema,
 	...MutationScopeFields,
 	fragmentVersion: Schema.Literals([1, 2, 3]),
+});
+const ClearRoutingEnforcementPolicyMutationV1Schema = Schema.Struct({
+	op: Schema.Literal("clear"),
+	key: CoreRoutingEnforcementKeySchema,
+	...MutationScopeFields,
+	fragmentVersion: Schema.Literal(CORE_ROUTING_ENFORCEMENT_FRAGMENT_VERSION),
 });
 const ClearProviderPolicyMutationV1Schema = Schema.Struct({
 	op: Schema.Literal("clear"),
@@ -296,6 +364,7 @@ const ClearExtensionPolicyMutationV1Schema = Schema.Struct({
 });
 export const SetPolicyMutationV1Schema = Schema.Union([
 	SetCoreRoutingPolicyMutationV1Schema,
+	SetRoutingEnforcementPolicyMutationV1Schema,
 	SetProviderDenyPolicyMutationV1Schema,
 	SetModelDenyPolicyMutationV1Schema,
 	SetProviderRouteDenyPolicyMutationV1Schema,
@@ -305,6 +374,7 @@ export const SetPolicyMutationV1Schema = Schema.Union([
 ]);
 export const ClearPolicyMutationV1Schema = Schema.Union([
 	ClearCoreRoutingPolicyMutationV1Schema,
+	ClearRoutingEnforcementPolicyMutationV1Schema,
 	ClearProviderPolicyMutationV1Schema,
 	ClearFallbackPolicyMutationV1Schema,
 	ClearBudgetPolicyMutationV1Schema,
@@ -480,6 +550,10 @@ export function isCoreRoutingKey(key: string): key is CoreRoutingKey {
 	return (CORE_ROUTING_KEYS as readonly string[]).includes(key);
 }
 
+
+export function isCoreRoutingEnforcementKey(key: string): key is CoreRoutingEnforcementKey {
+	return (CORE_ROUTING_ENFORCEMENT_KEYS as readonly string[]).includes(key);
+}
 export function isCoreProviderKey(key: string): key is CoreProviderKey {
 	return (CORE_PROVIDER_KEYS as readonly string[]).includes(key);
 }
@@ -509,6 +583,8 @@ export function decodePolicyValueForKey<Key extends PolicyKey>(key: Key, input: 
 			return Schema.decodeUnknownSync(ModelDenyValueSchema)(input, options) as PolicyValueForKey<Key>;
 		case "core.providers.deny.routes":
 			return Schema.decodeUnknownSync(ProviderRouteDenyValueSchema)(input, options) as PolicyValueForKey<Key>;
+		case "core.routing.enforcement":
+			return Schema.decodeUnknownSync(RoutingEnforcementValueSchema)(input, options) as PolicyValueForKey<Key>;
 		case "core.fallback.chains":
 			return Schema.decodeUnknownSync(FallbackChainsValueSchema)(input, options) as PolicyValueForKey<Key>;
 		case "core.budgets.task.maxConcurrency":

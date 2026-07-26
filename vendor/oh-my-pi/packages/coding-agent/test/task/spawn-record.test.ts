@@ -15,6 +15,9 @@ afterEach(async () => {
 
 const route: SpawnRouteReceipt = {
 	source: "auth_fallback",
+	requestedSelector: "anthropic/claude-sonnet",
+	effectiveSelector: "openai/gpt-5.6",
+	enforcementSource: "runtime_reconciliation",
 	responsibility: "implementer",
 	alias: "deprecated-alias",
 	resolutionSource: "auth_fallback",

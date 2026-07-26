@@ -8,14 +8,14 @@ serviceTier: none
 modelRoles:
   default: openai-codex/gpt-5.6-sol:high
   orchestrator: openai-codex/gpt-5.6-sol:high
-  smol: openai-codex/gpt-5.6-luna:xhigh
-  task: openai-codex/gpt-5.6-luna:xhigh
+  smol: openai-codex/gpt-5.6-luna:medium
+  task: openai-codex/gpt-5.6-luna:medium
   slow: openai-codex/gpt-5.6-sol:high
   plan: openai-codex/gpt-5.6-sol:high
   advisor: openai-codex/gpt-5.6-sol:high
-  designer: anthropic/claude-opus-4-6
+  designer: anthropic/claude-opus-5:medium
   # inspect_image uses this provider-qualified capability role strictly.
-  vision: openai-codex/gpt-5.6-luna
+  vision: openai-codex/gpt-5.6-luna:medium
 
 advisor:
   enabled: true

@@ -72,7 +72,9 @@ export type RouteResolutionSource = Linkage & {
 			| "session_explicit"
 			| "session_temporary"
 			| "agent_model_override"
+			| "responsibility_default"
 			| "policy"
+			| "policy_enforced"
 			| "agent_frontmatter"
 			| "session_inherited"
 			| "global_default"
@@ -88,7 +90,9 @@ export type RouteResolutionSource = Linkage & {
 			| "session_explicit"
 			| "session_temporary"
 			| "policy"
+			| "policy_enforced"
 			| "agent_model_override"
+			| "responsibility_default"
 			| "agent_frontmatter"
 			| "session_inherited"
 			| "global_default"
@@ -115,7 +119,7 @@ export type RouteResolutionSource = Linkage & {
 		effort: string;
 		disposition: "selected" | "rerouted";
 		fallbackOrdinal: number | null;
-		rejectionCode: "quota_admission" | "auth_fallback" | null;
+		rejectionCode: "quota_admission" | "auth_fallback" | "policy_enforcement" | null;
 		rejectionReason: string | null;
 		failedConstraintIds: readonly string[];
 	}[];
@@ -274,11 +278,17 @@ export function createSpawnRouteResolution(
 					effort: attemptedRoute.effort,
 					disposition: "rerouted" as const,
 					fallbackOrdinal: index,
-					rejectionCode: quota ? ("quota_admission" as const) : ("auth_fallback" as const),
+					rejectionCode: quota
+						? ("quota_admission" as const)
+						: receipt.routeEnforcement
+							? ("policy_enforcement" as const)
+							: ("auth_fallback" as const),
 					rejectionReason: quota?.decisionReason ?? attempt.reason ?? null,
-					failedConstraintIds: [quota?.quotaPoolId, quota?.limitWindowId].filter(
-						(value): value is string => value !== undefined,
-					),
+					failedConstraintIds: [
+						quota?.quotaPoolId,
+						quota?.limitWindowId,
+						receipt.routeEnforcement?.transactionId,
+					].filter((value): value is string => value !== undefined),
 				};
 			}),
 	];
@@ -303,7 +313,9 @@ export function createSpawnRouteResolution(
 					? [receipt.quotaAdmission?.quotaPoolId, receipt.quotaAdmission?.limitWindowId].filter(
 							(value): value is string => value !== undefined,
 						)
-					: [],
+					: receipt.routeEnforcement
+						? [receipt.routeEnforcement.transactionId]
+						: [],
 			consultedSources: receipt.consulted.map(input => input.source),
 			overriddenValues: receipt.overridden.flatMap(input => input.patterns),
 		},

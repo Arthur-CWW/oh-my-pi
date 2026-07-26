@@ -29,7 +29,7 @@ const POLICY_LOCK_FILENAME = "policy-v1.lock";
 
 export const POLICY_REGISTRY_DIGEST = createHash("sha256")
 	.update(
-		"registry:v4;core.routing:v1-3:default,smol,slow,vision,plan,designer,commit,title,implementer,qa,operator,synthesizer,task,advisor;core.providers:v2:deny.providers{providerIds[]},deny.models{models[{provider,model}]},deny.routes{routes[{provider,modelFamily:claude}]};core.fallback:v1:chains{role:[selector+]};core.budgets.task:v1:maxConcurrency,maxRuntimeMs,softRequestBudget{nonnegative-int}",
+		"registry:v5;core.routing:v1-3:default,smol,slow,vision,plan,designer,commit,title,implementer,qa,operator,synthesizer,task,advisor;core.routing.enforcement:v1:routes[{responsibility,action,selector|role,modelFamily?,category?}],exemptCategories[];core.providers:v2:deny.providers{providerIds[]},deny.models{models[{provider,model}]},deny.routes{routes[{provider,modelFamily:claude}]};core.fallback:v1:chains{role:[selector+]};core.budgets.task:v1:maxConcurrency,maxRuntimeMs,softRequestBudget{nonnegative-int}",
 	)
 	.digest("hex");
 
@@ -365,15 +365,23 @@ export class PolicyJournal {
 				reason: `transaction not found: ${input.transactionId}`,
 			});
 		}
+		const registry = { version: POLICY_REGISTRY_VERSION, digest: POLICY_REGISTRY_DIGEST };
+		const createdAt = this.#now().toISOString();
+		const effectiveFrom = input.effectiveFrom ?? createdAt;
+		const expiresAt =
+			target.expiresAt !== undefined && Date.parse(target.expiresAt) > Date.parse(effectiveFrom)
+				? target.expiresAt
+				: undefined;
 		return {
 			transactionId: randomUUID(),
-			createdAt: this.#now().toISOString(),
-			effectiveFrom: input.effectiveFrom ?? this.#now().toISOString(),
+			createdAt,
+			effectiveFrom,
+			...(expiresAt === undefined ? {} : { expiresAt }),
 			author: input.author,
 			source: input.source,
 			reason: input.reason,
 			rollbackOf: target.transactionId,
-			registry: target.registry,
+			registry,
 			mutations: target.mutations.map(mutation => this.#inverseMutation(records, target.sequence, mutation)),
 		};
 	}

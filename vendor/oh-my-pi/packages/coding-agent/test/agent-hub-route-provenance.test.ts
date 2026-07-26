@@ -37,6 +37,16 @@ function routeReceipt(
 	const [modelId, thinking] = selector.split(":");
 	return {
 		source,
+		requestedSelector: selector,
+		effectiveSelector: selector,
+		enforcementSource:
+			source === "spawn_explicit"
+				? "packet_local_escalation"
+				: source === "automatic_reroute" || source === "auth_fallback"
+					? "runtime_reconciliation"
+					: source === "policy_enforced"
+						? "policy_enforcement"
+						: "responsibility_default",
 		responsibility: "implementer",
 		alias: "deprecated-alias",
 		resolutionSource: source,

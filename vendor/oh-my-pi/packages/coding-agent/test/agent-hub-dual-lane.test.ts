@@ -64,6 +64,9 @@ function fixture(assignment: string) {
 			resolvedModel: "openai-codex/gpt-5.6-sol:medium",
 			routeReceipt: {
 				source: "automatic_reroute",
+				requestedSelector: "anthropic/claude-opus-4-5",
+				effectiveSelector: "openai-codex/gpt-5.6-sol:medium",
+				enforcementSource: "runtime_reconciliation",
 				responsibility: "implementer",
 				alias: "deprecated-alias",
 				resolutionSource: "automatic_reroute",

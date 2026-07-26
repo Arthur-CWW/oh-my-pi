@@ -187,6 +187,10 @@ export function formatRouteInspection(input: RouteInspectionInput): string {
 			lines.push(
 				`selected: blocked selector=${decision.block.selector}; reason=${decision.block.reason ?? "quota admission"} reset=${decision.block.resetAt ?? "unknown"} [source: quota admission decision]`,
 			);
+		} else if (decision.block.kind === "routing_policy_enforcement") {
+			lines.push(
+				`selected: blocked selector=${decision.block.requestedSelector}; reason=${decision.block.reason} [source: policy transaction=${decision.block.transactionId ?? "unknown"} snapshot=${decision.block.snapshotAt}]`,
+			);
 		} else {
 			lines.push(
 				`selected: blocked selectors=${decision.block.requested.join(",")}; reason=provider policy denied [source: policy snapshot]`,
@@ -217,6 +221,11 @@ export function formatRouteInspection(input: RouteInspectionInput): string {
 	}
 	appendPolicyLayers(lines, input.policySnapshot, policyKey(decision));
 	lines.push(temporaryPostureLine(input.policySnapshot, policyKey(decision)));
+	if (decision.routeEnforcement) {
+		lines.push(
+			`route enforcement: ${decision.routeEnforcement.outcome} requested=${decision.routeEnforcement.requestedSelector} effective=${decision.routeEnforcement.effectiveSelector} expires=${decision.routeEnforcement.expiresAt ?? "none"}; reason=${decision.routeEnforcement.reason} [source: policy transaction=${decision.routeEnforcement.transactionId} sequence=${decision.routeEnforcement.sequence} snapshot=${decision.routeEnforcement.snapshotAt}]`,
+		);
+	}
 	for (const [index, attempt] of (decision.priorAttempts ?? []).entries()) {
 		lines.push(
 			`fallback ${index + 1}: rejected ${attempt.route.selector}; reason=${attempt.reason ?? attempt.quotaAdmission?.decisionReason ?? "ineligible"} [source: ${attempt.quotaAdmission ? "quota admission receipt" : `${input.receiptSource} priorAttempts`}]`,
@@ -231,6 +240,10 @@ export function formatRouteInspection(input: RouteInspectionInput): string {
 		if (decision.block.kind === "quota_admission_blocked") {
 			lines.push(
 				`blocked: ${decision.block.selector}; reason=${decision.block.reason ?? "quota/ineligible"} [source: quota admission receipt]`,
+			);
+		} else if (decision.block.kind === "routing_policy_enforcement") {
+			lines.push(
+				`blocked: ${decision.block.requestedSelector}; reason=${decision.block.reason} [source: routing enforcement transaction=${decision.block.transactionId ?? "unknown"}]`,
 			);
 		} else {
 			lines.push(

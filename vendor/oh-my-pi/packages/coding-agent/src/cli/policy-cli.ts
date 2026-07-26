@@ -233,10 +233,11 @@ async function runImport(
 	const collected = await collectImport(configPath, request.frontmatterPaths ?? [], projectPaths, request.workstream);
 	const detail = importMutations(collected.candidates);
 	const at = now();
+	const interval = resolveSetInterval(request, at);
 	const draft: PolicyTransactionDraftV1 = {
 		transactionId: randomUUID(),
 		createdAt: at.toISOString(),
-		effectiveFrom: at.toISOString(),
+		...interval,
 		author: authorFor(journal, "import", request.author),
 		source: sourceFor(collected.report.digest, configPath),
 		reason: request.reason ?? "bootstrap policy import",
