@@ -4,6 +4,7 @@
 
 ### Added
 - Added strict, append-only refusal context-repair overlays with immutable source digests, dependency-safe projection, human review/revert controls, and the `omp context-repair` review surface.
+- Tool issues now project AutoQA, friction, and ErrorInbox evidence into one append-only closure queue with build-aware recurrence, provenance, redaction, dispositions, and fleet/grievance queries.
 - `omp sessions health` now reports versioned read-only local-session evidence as a table or JSON, including process fingerprints, journal/queue age, active turns, held child attempts, process-tree RSS, build/owner metadata, and canonical divergence classifications.
 - Async child completions now commit idempotent receipts to the parent journal before live delivery; disposed parents replay unacknowledged receipts on resume, job polling persists acknowledgements, and refreshed child results use fenced delivery generations.
 - Live session ownership sockets now serve epoch-fenced observer attachments, owner proof, and terminal snapshots over the existing runner wire protocol.

@@ -1,6 +1,16 @@
 import { Effect, Option } from "effect";
 import { Argument, Command, Flag } from "effect/unstable/cli";
 import {
+	applyFleetLabel,
+	collectFleetErrors,
+	collectFleetStatus,
+	formatFleetErrors,
+	formatFleetLabel,
+	formatFleetPrune,
+	formatFleetStatus,
+	pruneFleetPeers,
+} from "../cli/fleet-cli";
+import {
 	executeFleetPinOperation,
 	executeFleetRollback,
 	executeFleetRollout,
@@ -11,22 +21,21 @@ import {
 	resolveFleetSelectors,
 } from "../cli/fleet-operations";
 import {
-	applyFleetLabel,
-	collectFleetErrors,
-	collectFleetStatus,
-	formatFleetErrors,
-	formatFleetLabel,
-	formatFleetPrune,
-	formatFleetStatus,
-	pruneFleetPeers,
-} from "../cli/fleet-cli";
+	collectFleetOverview,
+	formatFleetOverview,
+	formatFleetOverviewJson,
+} from "../cli/fleet-overview";
+import {
+	collectToolIssueProjection,
+	formatToolIssueProjection,
+} from "../cli/tool-issue-projection";
 import { SessionControlBus } from "../session/session-control";
-import { collectFleetOverview, formatFleetOverview, formatFleetOverviewJson } from "../cli/fleet-overview";
 
 const ACTIONS = [
 	"status",
 	"overview",
 	"errors",
+	"issues",
 	"prune",
 	"pause",
 	"resume",
@@ -121,19 +130,30 @@ export default Command.make(
 				Argument.withDescription("Action value (digest, channel, rollout ID, or selector)"),
 			),
 		),
-		blessed: Flag.boolean("blessed").pipe(Flag.withDescription("Select the blessed stable release")),
+		blessed: Flag.boolean("blessed").pipe(
+			Flag.withDescription("Select the blessed stable release"),
+		),
 		digest: Flag.optional(
-			Flag.string("digest").pipe(Flag.withDescription("Select an exact 64-character release digest")),
+			Flag.string("digest").pipe(
+				Flag.withDescription("Select an exact 64-character release digest"),
+			),
 		),
 		canary: Flag.optional(
 			Flag.string("canary").pipe(Flag.withDescription("Explicit canary selector for rollout")),
 		),
-		"wave-size": Flag.integer("wave-size").pipe(Flag.withDescription("Rolling wave size"), Flag.withDefault(1)),
+		"wave-size": Flag.integer("wave-size").pipe(
+			Flag.withDescription("Rolling wave size"),
+			Flag.withDefault(1),
+		),
 		"dry-run": Flag.boolean("dry-run").pipe(
 			Flag.withDescription("Create and print a rollout plan without control sends"),
 		),
-		apply: Flag.boolean("apply").pipe(Flag.withDescription("Apply a fleet prune (prune defaults to dry-run)")),
-		to: Flag.optional(Flag.string("to").pipe(Flag.withDescription("Rollback target: previous or an exact digest"))),
+		apply: Flag.boolean("apply").pipe(
+			Flag.withDescription("Apply a fleet prune (prune defaults to dry-run)"),
+		),
+		to: Flag.optional(
+			Flag.string("to").pipe(Flag.withDescription("Rollback target: previous or an exact digest")),
+		),
 		workstream: Flag.optional(
 			Flag.string("workstream").pipe(Flag.withDescription("Filter by durable workstream ID")),
 		),
@@ -144,20 +164,30 @@ export default Command.make(
 			Flag.withDescription("Workspace path prefix or stream slug claim (repeatable)"),
 			Flag.atLeast(0),
 		),
-		name: Flag.optional(Flag.string("name").pipe(Flag.withDescription("Ambient peer display name"))),
+		name: Flag.optional(
+			Flag.string("name").pipe(Flag.withDescription("Ambient peer display name")),
+		),
 		all: Flag.boolean("all").pipe(Flag.withDescription("Include stale peers or select all peers")),
 		since: Flag.optional(
-			Flag.string("since").pipe(Flag.withDescription("Errors since ISO time or duration (for example 2h or 7d)")),
+			Flag.string("since").pipe(
+				Flag.withDescription("Errors since ISO time or duration (for example 2h or 7d)"),
+			),
 		),
-		session: Flag.optional(Flag.string("session").pipe(Flag.withDescription("Filter errors by session ID"))),
-		rollout: Flag.optional(Flag.string("rollout").pipe(Flag.withDescription("Filter errors by rollout ID"))),
-		status: Flag.boolean("status").pipe(Flag.withDescription("Show pause status instead of issuing a command")),
+		session: Flag.optional(
+			Flag.string("session").pipe(Flag.withDescription("Filter errors by session ID")),
+		),
+		rollout: Flag.optional(
+			Flag.string("rollout").pipe(Flag.withDescription("Filter errors by rollout ID")),
+		),
+		status: Flag.boolean("status").pipe(
+			Flag.withDescription("Show pause status instead of issuing a command"),
+		),
 		"include-paused": Flag.boolean("include-paused").pipe(
 			Flag.withDescription("Include paused sessions in rollout"),
 		),
 		json: Flag.boolean("json").pipe(Flag.withDescription("Output as JSON (overview)")),
 	},
-	config =>
+	(config) =>
 		Effect.promise(async () => {
 			const flags: FleetFlags = {
 				blessed: config.blessed,
@@ -183,10 +213,14 @@ export default Command.make(
 			const selector = Option.getOrUndefined(config.selector);
 			const value = Option.getOrUndefined(config.value);
 			const selectors = selector ? [selector] : [];
-			if (flags.claim !== undefined && action !== "label") fail("--claim is accepted only by fleet label");
+			if (flags.claim !== undefined && action !== "label")
+				fail("--claim is accepted only by fleet label");
 
 			if (flags.digest && flags.blessed) fail("--digest and --blessed are mutually exclusive");
-			if (flags["wave-size"] !== undefined && (!Number.isSafeInteger(flags["wave-size"]) || flags["wave-size"] < 1))
+			if (
+				flags["wave-size"] !== undefined &&
+				(!Number.isSafeInteger(flags["wave-size"]) || flags["wave-size"] < 1)
+			)
 				fail("--wave-size must be a positive integer");
 			if (flags.apply && action !== "prune") fail("--apply is accepted only by fleet prune");
 			if (flags.apply && flags["dry-run"]) fail("--apply and --dry-run are mutually exclusive");
@@ -205,7 +239,7 @@ export default Command.make(
 				let rows = await collectFleetStatus({ workstream: flags.workstream, all: flags.all });
 				if (selector)
 					rows = rows.filter(
-						row =>
+						(row) =>
 							row.sessionId === selector ||
 							row.name === selector ||
 							row.workstream === selector ||
@@ -222,12 +256,12 @@ export default Command.make(
 				let rows = collectFleetOverview({ workstream: flags.workstream, all: flags.all });
 				if (selector)
 					rows = rows.filter(
-						row =>
-							row.sessionId === selector ||
-							row.name === selector ||
-							row.workstream === selector,
+						(row) =>
+							row.sessionId === selector || row.name === selector || row.workstream === selector,
 					);
-				process.stdout.write(flags.json ? formatFleetOverviewJson(rows) : formatFleetOverview(rows));
+				process.stdout.write(
+					flags.json ? formatFleetOverviewJson(rows) : formatFleetOverview(rows),
+				);
 				return;
 			}
 
@@ -237,7 +271,11 @@ export default Command.make(
 				if (!selector) fail("label requires a session ID");
 				if (value) labelReject(value);
 				const claims =
-					flags.claim === undefined ? undefined : flags.claim.some(claim => claim === "") ? [] : flags.claim;
+					flags.claim === undefined
+						? undefined
+						: flags.claim.some((claim) => claim === "")
+							? []
+							: flags.claim;
 				if (
 					flags.summary === undefined &&
 					flags.name === undefined &&
@@ -303,6 +341,36 @@ export default Command.make(
 				return;
 			}
 
+			if (action === "issues") {
+				if (
+					selector ||
+					value ||
+					flags.digest ||
+					flags.blessed ||
+					flags.canary ||
+					flags.to ||
+					flags["wave-size"] !== 1 ||
+					flags["dry-run"] ||
+					flags.all ||
+					flags.rollout ||
+					flags.status ||
+					flags["include-paused"]
+				)
+					fail("issues accepts --since, --session, --workstream, and --json");
+				const projection = await collectToolIssueProjection({
+					since: flags.since,
+					session: flags.session,
+					workstream: flags.workstream,
+					limit: 10,
+				});
+				process.stdout.write(
+					flags.json
+						? `${JSON.stringify(projection, null, 2)}\n`
+						: formatToolIssueProjection(projection),
+				);
+				return;
+			}
+
 			if (action === "pause" || action === "resume") {
 				if (flags.status && action === "pause") {
 					const bus = new SessionControlBus();
@@ -312,7 +380,8 @@ export default Command.make(
 							process.stdout.write("No sessions are currently paused.\n");
 						} else {
 							const lines = paused.map(
-								row => `PAUSED\tsessionId=${row.sessionId}\townerEpoch=${row.ownerEpoch}\tsince=${row.updatedAt}\n`,
+								(row) =>
+									`PAUSED\tsessionId=${row.sessionId}\townerEpoch=${row.ownerEpoch}\tsince=${row.updatedAt}\n`,
 							);
 							process.stdout.write(lines.join(""));
 						}
@@ -331,10 +400,15 @@ export default Command.make(
 					flags["dry-run"]
 				)
 					fail(`${action} accepts a selector (default all) and --workstream`);
-				const targets = await resolveFleetSelectors({ selectors, workstream: flags.workstream, all: !selector });
+				const targets = await resolveFleetSelectors({
+					selectors,
+					workstream: flags.workstream,
+					all: !selector,
+				});
 				if (targets.length === 0) fail(`${action} selector matched no fresh target`);
 				const receipts = [];
-				for (const target of targets) receipts.push(await issueFleetControl({ action, peer: target.peer }));
+				for (const target of targets)
+					receipts.push(await issueFleetControl({ action, peer: target.peer }));
 				process.stdout.write(formatFleetActionReceipts(receipts));
 				return;
 			}
@@ -399,7 +473,8 @@ export default Command.make(
 					fail(
 						"rollout requires exactly one of --blessed or --digest and accepts --workstream, --canary, --wave-size, --dry-run",
 					);
-				if (flags.canary !== undefined && !flags.canary.trim()) fail("--canary requires a selector");
+				if (flags.canary !== undefined && !flags.canary.trim())
+					fail("--canary requires a selector");
 				const targets = await resolveFleetSelectors({ workstream: flags.workstream });
 				if (targets.length === 0) fail("rollout matched no fresh targets");
 				const result = await executeFleetRollout({
@@ -451,7 +526,7 @@ export default Command.make(
 				process.stdout.write(
 					`${result.execution.receipts
 						.map(
-							receipt =>
+							(receipt) =>
 								`ROLLBACK\\tsessionId=${receipt.sessionId}\\ttargetId=${receipt.targetId}\\ttargetDigest=${receipt.targetDigest}\\tstate=${receipt.state}\\treason=${receipt.reason ?? "-"}\\n`,
 						)
 						.join("")}`,
@@ -465,13 +540,32 @@ export default Command.make(
 	Command.withDescription("Inspect and operate the local OMP fleet"),
 	Command.withExamples([
 		{ command: "omp fleet status", description: "Show fresh fleet peers" },
-		{ command: "omp fleet status --all --workstream fleet-rollout", description: "Include stale peers for one workstream" },
+		{
+			command: "omp fleet status --all --workstream fleet-rollout",
+			description: "Include stale peers for one workstream",
+		},
+		{
+			command: "omp fleet issues --since 36h",
+			description: "Top recurring tool issues across evidence sources",
+		},
 		{ command: "omp fleet prune", description: "Preview stale dead test/temp peer index cleanup" },
-		{ command: "omp fleet prune --apply", description: "Apply stale dead test/temp peer index cleanup" },
+		{
+			command: "omp fleet prune --apply",
+			description: "Apply stale dead test/temp peer index cleanup",
+		},
 		{ command: "omp fleet pause agent-handle", description: "Pause a peer by exact handle" },
-		{ command: "omp fleet pin agent-handle <sha256>", description: "Pin one peer to an immutable digest" },
-		{ command: "omp fleet rollout --blessed --dry-run", description: "Journal a blessed rollout plan" },
-		{ command: "omp fleet rollback <rollout-id> --to previous", description: "Roll back one durable rollout to N-1" },
+		{
+			command: "omp fleet pin agent-handle <sha256>",
+			description: "Pin one peer to an immutable digest",
+		},
+		{
+			command: "omp fleet rollout --blessed --dry-run",
+			description: "Journal a blessed rollout plan",
+		},
+		{
+			command: "omp fleet rollback <rollout-id> --to previous",
+			description: "Roll back one durable rollout to N-1",
+		},
 		{ command: "omp fleet overview", description: "High-level fleet overview" },
 		{ command: "omp fleet overview --json", description: "Machine-readable fleet overview" },
 	]),

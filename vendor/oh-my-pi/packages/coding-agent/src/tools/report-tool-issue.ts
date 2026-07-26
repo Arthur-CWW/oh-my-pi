@@ -31,12 +31,17 @@ function buildReportToolIssueParams(activeBuiltinNames: readonly string[]) {
 	// Enum gives the model a tight schema; the runtime check in `execute` is the
 	// source of truth (handles models that ignore the enum and the empty-list
 	// fallback used by call sites that don't know the active set yet).
-	const toolSchema = activeBuiltinNames.length > 0 ? z.enum(activeBuiltinNames as [string, ...string[]]) : z.string();
+	const toolSchema =
+		activeBuiltinNames.length > 0
+			? z.enum(activeBuiltinNames as [string, ...string[]])
+			: z.string();
 	return z.object({
 		tool: toolSchema.describe("tool name"),
 		report: z
 			.string()
-			.describe("unexpected behavior; generic, NEVER PII (paths, file contents, identifiers, prompt text)"),
+			.describe(
+				"unexpected behavior; generic, NEVER PII (paths, file contents, identifiers, prompt text)",
+			),
 	});
 }
 
@@ -152,7 +157,8 @@ function persistConsent(localSettings: Settings | undefined, granted: boolean): 
  */
 export async function resolveAutoQaConsent(settings: Settings | undefined): Promise<boolean> {
 	if (cachedConsent !== null) return cachedConsent;
-	const persisted = readPersistedConsent(settings) ?? readPersistedConsent(persistentConsentSettings ?? undefined);
+	const persisted =
+		readPersistedConsent(settings) ?? readPersistedConsent(persistentConsentSettings ?? undefined);
 	if (persisted !== null) {
 		cachedConsent = persisted;
 		return persisted;
@@ -184,6 +190,76 @@ export async function resolveAutoQaConsent(settings: Settings | undefined): Prom
 }
 
 let cachedDb: Database | null = null;
+const GRIEVANCE_COLUMN_MIGRATIONS = [
+	["pushed", "pushed INTEGER NOT NULL DEFAULT 0"],
+	["created_at", "created_at TEXT"],
+	["session_id", "session_id TEXT"],
+	["agent_id", "agent_id TEXT"],
+	["tool_call_id", "tool_call_id TEXT"],
+	["build_digest", "build_digest TEXT"],
+	["platform", "platform TEXT"],
+	["architecture", "architecture TEXT"],
+] as const;
+
+/** Idempotently prepare either a new or legacy AutoQA database. */
+export function prepareAutoQaDb(db: Database): void {
+	db.run("PRAGMA busy_timeout = 5000");
+	db.run(`
+		PRAGMA journal_mode=WAL;
+		PRAGMA synchronous=NORMAL;
+		CREATE TABLE IF NOT EXISTS grievances (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			model TEXT NOT NULL,
+			version TEXT NOT NULL,
+			tool TEXT NOT NULL,
+			report TEXT NOT NULL,
+			pushed INTEGER NOT NULL DEFAULT 0,
+			created_at TEXT,
+			session_id TEXT,
+			agent_id TEXT,
+			tool_call_id TEXT,
+			build_digest TEXT,
+			platform TEXT,
+			architecture TEXT
+		);
+	`);
+	const cols = db.prepare("PRAGMA table_info(grievances)").all() as Array<{ name: string }>;
+	const existingColumns = new Set(cols.map((column) => column.name));
+	for (const [name, definition] of GRIEVANCE_COLUMN_MIGRATIONS) {
+		if (!existingColumns.has(name)) db.run(`ALTER TABLE grievances ADD COLUMN ${definition}`);
+	}
+	db.run("CREATE INDEX IF NOT EXISTS grievances_pushed_idx ON grievances(pushed, id)");
+	db.run("CREATE INDEX IF NOT EXISTS grievances_created_at_idx ON grievances(created_at, id)");
+}
+
+/** Persist local-only provenance while leaving the upload payload redacted to its legacy fields. */
+export function recordToolIssueEvidence(
+	db: Database,
+	session: ToolSession,
+	toolCallId: string,
+	tool: string,
+	report: string,
+	recordedAt = new Date().toISOString(),
+): void {
+	db.prepare(
+		`INSERT INTO grievances (
+			model, version, tool, report, created_at, session_id, agent_id,
+			tool_call_id, build_digest, platform, architecture
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	).run(
+		session.getActiveModelString?.() ?? "unknown",
+		session.buildVersion ?? VERSION,
+		tool,
+		report,
+		recordedAt,
+		session.getSessionId?.() ?? null,
+		session.getAgentId?.() ?? null,
+		toolCallId,
+		session.buildDigest ?? null,
+		process.platform,
+		process.arch,
+	);
+}
 
 /**
  * Open (or return the cached handle for) the auto-QA SQLite database at
@@ -201,32 +277,7 @@ export function openAutoQaDb(): Database | null {
 	if (cachedDb) return cachedDb;
 	try {
 		const db = new Database(getAutoQaDbDir());
-		// Install the busy handler BEFORE any lock-taking statement. See #2421.
-		db.run("PRAGMA busy_timeout = 5000");
-		db.run(`
-			PRAGMA journal_mode=WAL;
-			PRAGMA synchronous=NORMAL;
-			CREATE TABLE IF NOT EXISTS grievances (
-				id INTEGER PRIMARY KEY AUTOINCREMENT,
-				model TEXT NOT NULL,
-				version TEXT NOT NULL,
-				tool TEXT NOT NULL,
-				report TEXT NOT NULL,
-				pushed INTEGER NOT NULL DEFAULT 0
-			);
-		`);
-		// Migration: pre-`pushed` databases get the column tacked on. Existing
-		// rows default to `0` (unpushed), so legacy grievances from before the
-		// consent + push pipeline went live get swept up by the next flush —
-		// exactly the behaviour we want for users who just granted consent.
-		const cols = db.prepare("PRAGMA table_info(grievances)").all() as Array<{ name: string }>;
-		if (!cols.some(c => c.name === "pushed")) {
-			db.run("ALTER TABLE grievances ADD COLUMN pushed INTEGER NOT NULL DEFAULT 0");
-		}
-		// Speed up the per-batch `WHERE pushed = 0` scan that drives the flush
-		// loop. Without the index every batch becomes a full table scan once
-		// pushed rows dominate the table.
-		db.run("CREATE INDEX IF NOT EXISTS grievances_pushed_idx ON grievances(pushed, id)");
+		prepareAutoQaDb(db);
 		cachedDb = db;
 		return db;
 	} catch {
@@ -308,7 +359,10 @@ function envOverrideString(name: string): string | undefined {
 	return trimmed.length > 0 ? trimmed : undefined;
 }
 
-function resolvePushConfig(settings: Settings | undefined, bypassConsent: boolean): PushConfig | null {
+function resolvePushConfig(
+	settings: Settings | undefined,
+	bypassConsent: boolean,
+): PushConfig | null {
 	if (!isAutoQaEnabled(settings)) return null;
 
 	// Consent IS the push opt-in for the auto-flush path. `bypassConsent`
@@ -320,7 +374,8 @@ function resolvePushConfig(settings: Settings | undefined, bypassConsent: boolea
 		if (!consented && !$flag("PI_AUTO_QA_PUSH")) return null;
 	}
 
-	const endpoint = envOverrideString("PI_AUTO_QA_PUSH_URL") ?? settings?.get("dev.autoqaPush.endpoint");
+	const endpoint =
+		envOverrideString("PI_AUTO_QA_PUSH_URL") ?? settings?.get("dev.autoqaPush.endpoint");
 	if (!endpoint || endpoint.trim().length === 0) return null;
 
 	const token = envOverrideString("PI_AUTO_QA_PUSH_TOKEN") ?? settings?.get("dev.autoqaPush.token");
@@ -335,7 +390,11 @@ interface GrievanceRow {
 	report: string;
 }
 
-async function performFlush(db: Database, config: PushConfig, options: FlushOptions = {}): Promise<FlushResult> {
+async function performFlush(
+	db: Database,
+	config: PushConfig,
+	options: FlushOptions = {},
+): Promise<FlushResult> {
 	const selectStmt = db.prepare(
 		"SELECT id, model, version, tool, report FROM grievances WHERE pushed = 0 ORDER BY id ASC LIMIT ?",
 	);
@@ -343,7 +402,9 @@ async function performFlush(db: Database, config: PushConfig, options: FlushOpti
 	// Mid-flight inserts are NOT folded in (the worker drains them too, but
 	// the progress bar treats the initial backlog as the denominator).
 	if (options.onStart) {
-		const totalRow = db.prepare("SELECT COUNT(*) AS n FROM grievances WHERE pushed = 0").get() as { n: number };
+		const totalRow = db.prepare("SELECT COUNT(*) AS n FROM grievances WHERE pushed = 0").get() as {
+			n: number;
+		};
 		options.onStart(totalRow.n);
 	}
 	const fetchImpl = options.fetch ?? fetch;
@@ -401,7 +462,7 @@ async function performFlush(db: Database, config: PushConfig, options: FlushOpti
 		// our behalf. `id IN (?, ?, …)` rather than a range so a non-contiguous
 		// batch (after partial fills, retries, etc.) still flips exactly what
 		// we sent.
-		const ids = rows.map(r => r.id);
+		const ids = rows.map((r) => r.id);
 		const placeholders = ids.map(() => "?").join(",");
 		db.prepare(`UPDATE grievances SET pushed = 1 WHERE id IN (${placeholders})`).run(...ids);
 		totalPushed += rows.length;
@@ -457,8 +518,10 @@ export async function flushGrievances(
 	}
 }
 
-export function createReportToolIssueTool(session: ToolSession, activeBuiltinNames: readonly string[] = []): AgentTool {
-	const getModel = () => session.getActiveModelString?.() ?? "unknown";
+export function createReportToolIssueTool(
+	session: ToolSession,
+	activeBuiltinNames: readonly string[] = [],
+): AgentTool {
 	// Snapshotted at construction time. The model's enum is built from the same
 	// snapshot; mid-session drift (extensions registering later, etc.) is caught
 	// by the silent-drop guard below.
@@ -472,7 +535,7 @@ export function createReportToolIssueTool(session: ToolSession, activeBuiltinNam
 		description: "Report unexpected tool behavior for automated QA tracking.",
 		parameters: buildReportToolIssueParams(activeBuiltinNames),
 		intent: "omit",
-		async execute(_toolCallId, rawParams) {
+		async execute(toolCallId, rawParams) {
 			// Save is unconditional: the row lives in the user's own SQLite
 			// at ~/.omp/agent/autoqa.db regardless of consent — they always
 			// own their local data and can inspect or wipe it via `omp grievances`.
@@ -484,7 +547,9 @@ export function createReportToolIssueTool(session: ToolSession, activeBuiltinNam
 				// Some models emit `proxy_<name>` for tools routed through a
 				// passthrough wrapper. Strip the prefix before allowlist check so
 				// `proxy_read` lands as a report against `read`, not a silent drop.
-				const canonicalTool = params.tool.startsWith("proxy_") ? params.tool.slice("proxy_".length) : params.tool;
+				const canonicalTool = params.tool.startsWith("proxy_")
+					? params.tool.slice("proxy_".length)
+					: params.tool;
 				// Silently drop reports targeting tools that aren't shipped built-ins
 				// (MCP servers, extensions that overrode a built-in name, typos).
 				// Not the model's fault — no error, no DB row, just acknowledge.
@@ -495,12 +560,7 @@ export function createReportToolIssueTool(session: ToolSession, activeBuiltinNam
 				}
 				const db = openAutoQaDb();
 				if (db) {
-					db.prepare("INSERT INTO grievances (model, version, tool, report) VALUES (?, ?, ?, ?)").run(
-						getModel(),
-						VERSION,
-						canonicalTool,
-						params.report,
-					);
+					recordToolIssueEvidence(db, session, toolCallId, canonicalTool, params.report);
 					// Fire-and-forget background pipeline:
 					//   1. Trigger the consent popup if it hasn't been answered
 					//      (single-flight inside `resolveAutoQaConsent`; subagents

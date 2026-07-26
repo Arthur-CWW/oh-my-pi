@@ -3,9 +3,9 @@ import { getAgentDir } from "@oh-my-pi/pi-utils";
 import {
 	getIrcExternalPeerDisplayState,
 	IrcExternalBus,
-	isIrcExternalPeerProcessAlive,
 	type IrcExternalPeer,
 	type IrcPeerPruneResult,
+	isIrcExternalPeerProcessAlive,
 } from "../irc/bus-external";
 import { decodeJournalEntries, projectJournalEntries } from "../journal/projection";
 import {
@@ -14,12 +14,21 @@ import {
 	type FleetProtocolRange,
 } from "../session/fleet-capability";
 import { RolloutJournal, type RolloutPeerSnapshot } from "../session/rollout-journal";
-import { CURRENT_SESSION_CONTROL_PROTOCOL, SESSION_CONTROL_DB_PATH } from "../session/session-control";
-import { type CustomEntry, decodeSessionWorkstream, type SessionHeader } from "../session/session-entries";
+import {
+	CURRENT_SESSION_CONTROL_PROTOCOL,
+	SESSION_CONTROL_DB_PATH,
+} from "../session/session-control";
+import {
+	type CustomEntry,
+	decodeSessionWorkstream,
+	type SessionHeader,
+} from "../session/session-entries";
 import { type FleetIncident, FleetIncidentStore } from "../task/fleet-incident";
 import { sampleFleetResources } from "./fleet-resource-sampler";
 
-const LOCAL_COMPATIBILITY = createFleetCompatibilityProfile(CURRENT_SESSION_CONTROL_PROTOCOL, ["status"]);
+const LOCAL_COMPATIBILITY = createFleetCompatibilityProfile(CURRENT_SESSION_CONTROL_PROTOCOL, [
+	"status",
+]);
 
 export interface FleetStatusOptions {
 	readonly workstream?: string;
@@ -48,7 +57,6 @@ export interface FleetLabelOptions {
 	readonly claims?: readonly string[];
 	readonly ircDbPath?: string;
 }
-
 
 export interface FleetLabelResult {
 	readonly sessionId: string;
@@ -90,6 +98,8 @@ export interface FleetErrorsOptions {
 }
 
 export interface FleetErrorRow {
+	readonly eventId: string;
+	readonly tool: string;
 	readonly sessionId: string;
 	readonly workstream: string;
 	readonly cause: string;
@@ -145,7 +155,9 @@ async function readPeerJournal(peer: IrcExternalPeer): Promise<{
 }> {
 	if (!peer.sessionFile) return { pin: {} };
 	try {
-		const projection = projectJournalEntries(decodeJournalEntries(await Bun.file(peer.sessionFile).text()));
+		const projection = projectJournalEntries(
+			decodeJournalEntries(await Bun.file(peer.sessionFile).text()),
+		);
 		if (!projection) return { pin: {} };
 		let pin: FleetPinProjection = {};
 		for (const entry of projection.entries) {
@@ -179,7 +191,10 @@ function openReadonlyRolloutJournal(dbPath: string | undefined): RolloutJournal 
 	}
 }
 
-function recoveredSnapshotMatchesPeer(peer: IrcExternalPeer, snapshot: RolloutPeerSnapshot): boolean {
+function recoveredSnapshotMatchesPeer(
+	peer: IrcExternalPeer,
+	snapshot: RolloutPeerSnapshot,
+): boolean {
 	if (snapshot.phase !== "recovered") return true;
 	if (!peer.sessionFile || !snapshot.sessionFile) return false;
 	const digest = peer.fleetCapability?.buildDigest ?? peer.buildDigest;
@@ -190,7 +205,9 @@ function recoveredSnapshotMatchesPeer(peer: IrcExternalPeer, snapshot: RolloutPe
 	);
 }
 
-export async function collectFleetStatus(options: FleetStatusOptions = {}): Promise<readonly FleetStatusRow[]> {
+export async function collectFleetStatus(
+	options: FleetStatusOptions = {},
+): Promise<readonly FleetStatusRow[]> {
 	const nowMs = options.nowMs ?? Date.now();
 	const isProcessAlive = options.isProcessAlive ?? isIrcExternalPeerProcessAlive;
 	let bus: IrcExternalBus | undefined;
@@ -205,7 +222,9 @@ export async function collectFleetStatus(options: FleetStatusOptions = {}): Prom
 		const entries: Array<{ readonly pid: number; readonly row: FleetStatusRow }> = [];
 		for (const peer of peers) {
 			const journal = await readPeerJournal(peer);
-			const workstream = formatWorkstream(peer.fleetCapability?.workstream ?? journal.header?.workstream);
+			const workstream = formatWorkstream(
+				peer.fleetCapability?.workstream ?? journal.header?.workstream,
+			);
 			const displayState = getIrcExternalPeerDisplayState(peer, nowMs);
 			const staleLiveIdle =
 				displayState === "disconnected" &&
@@ -216,7 +235,10 @@ export async function collectFleetStatus(options: FleetStatusOptions = {}): Prom
 			const compatibility = classifyFleetCompatibility(peer, LOCAL_COMPATIBILITY);
 			let rollout: RolloutPeerSnapshot | undefined;
 			try {
-				rollout = rolloutJournal?.latestForPeer({ sessionId: peer.sessionId, sessionFile: peer.sessionFile });
+				rollout = rolloutJournal?.latestForPeer({
+					sessionId: peer.sessionId,
+					sessionFile: peer.sessionFile,
+				});
 				if (rollout && !recoveredSnapshotMatchesPeer(peer, rollout)) rollout = undefined;
 			} catch {
 				rollout = undefined;
@@ -245,7 +267,7 @@ export async function collectFleetStatus(options: FleetStatusOptions = {}): Prom
 				},
 			});
 		}
-		const resources = await sampleFleetResources(entries.map(entry => entry.pid));
+		const resources = await sampleFleetResources(entries.map((entry) => entry.pid));
 		return entries.map(({ pid, row }) => {
 			const resource = resources.get(pid);
 			return resource === undefined
@@ -286,7 +308,7 @@ export function formatFleetStatus(rows: readonly FleetStatusRow[]): string {
 		"UPTIME",
 	].join("\t");
 	return `${header}\n${rows
-		.map(row =>
+		.map((row) =>
 			[
 				row.sessionId,
 				row.name,
@@ -305,7 +327,9 @@ export function formatFleetStatus(rows: readonly FleetStatusRow[]): string {
 				row.pin,
 				row.rollout,
 				typeof row.rssMb === "number" && Number.isFinite(row.rssMb) ? row.rssMb.toFixed(1) : "-",
-				typeof row.cpuPercent === "number" && Number.isFinite(row.cpuPercent) ? row.cpuPercent.toFixed(1) : "-",
+				typeof row.cpuPercent === "number" && Number.isFinite(row.cpuPercent)
+					? row.cpuPercent.toFixed(1)
+					: "-",
 				row.uptime,
 			]
 				.map(printable)
@@ -322,19 +346,27 @@ function defaultFleetIrcDbPath(): string | undefined {
 export function applyFleetLabel(options: FleetLabelOptions): FleetLabelResult {
 	const bus = new IrcExternalBus(options.ircDbPath ?? defaultFleetIrcDbPath());
 	try {
-		const peer = bus.listPeers({ includeStale: true }).find(candidate => candidate.sessionId === options.sessionId);
+		const peer = bus
+			.listPeers({ includeStale: true })
+			.find((candidate) => candidate.sessionId === options.sessionId);
 		if (!peer) return { sessionId: options.sessionId, found: false, applied: [] };
 
 		const applied: FleetLabelField[] = [];
 		let skippedName: FleetLabelResult["skippedName"];
-		if (options.summary !== undefined && bus.mergePeerLabels(options.sessionId, { summary: options.summary })) {
+		if (
+			options.summary !== undefined &&
+			bus.mergePeerLabels(options.sessionId, { summary: options.summary })
+		) {
 			applied.push("summary");
 		}
 		if (options.name !== undefined) {
 			if (bus.updatePeerName(options.sessionId, options.name)) applied.push("name");
 			else skippedName = peer.explicitName ? "explicit_name" : "unchanged";
 		}
-		if (options.workstream !== undefined && bus.mergePeerLabels(options.sessionId, { workstream: options.workstream })) {
+		if (
+			options.workstream !== undefined &&
+			bus.mergePeerLabels(options.sessionId, { workstream: options.workstream })
+		) {
 			applied.push("workstream");
 		}
 		if (options.claims !== undefined) {
@@ -349,9 +381,13 @@ export function applyFleetLabel(options: FleetLabelOptions): FleetLabelResult {
 
 export function formatFleetLabel(result: FleetLabelResult): string {
 	if (!result.found) return "";
-	const lines = result.applied.map(field => `APPLIED\tsessionId=${printable(result.sessionId)}\tfield=${field}`);
+	const lines = result.applied.map(
+		(field) => `APPLIED\tsessionId=${printable(result.sessionId)}\tfield=${field}`,
+	);
 	if (result.skippedName !== undefined) {
-		lines.push(`SKIPPED\tsessionId=${printable(result.sessionId)}\tfield=name\treason=${result.skippedName}`);
+		lines.push(
+			`SKIPPED\tsessionId=${printable(result.sessionId)}\tfield=name\treason=${result.skippedName}`,
+		);
 	}
 	return lines.length > 0 ? `${lines.join("\n")}\n` : "";
 }
@@ -378,9 +414,15 @@ export function pruneFleetPeers(options: FleetPruneOptions = {}): IrcPeerPruneRe
 export function formatFleetPrune(result: IrcPeerPruneResult, applied: boolean): string {
 	const lines = ["SESSION\tNAME\tPID\tLAST_SEEN\tREASON"];
 	for (const { peer, reason } of result.candidates) {
-		lines.push([peer.sessionId, peer.name, String(peer.pid), peer.lastSeen, reason].map(printable).join("\t"));
+		lines.push(
+			[peer.sessionId, peer.name, String(peer.pid), peer.lastSeen, reason]
+				.map(printable)
+				.join("\t"),
+		);
 	}
-	lines.push(`${applied ? "APPLIED" : "DRY_RUN"}\tcandidates=${result.candidates.length}\tdeleted=${result.deleted}`);
+	lines.push(
+		`${applied ? "APPLIED" : "DRY_RUN"}\tcandidates=${result.candidates.length}\tdeleted=${result.deleted}`,
+	);
 	return `${lines.join("\n")}\n`;
 }
 
@@ -410,16 +452,24 @@ function decodeErrorRow(
 	header: SessionHeader,
 	sourceJournalUri: string,
 ): FleetErrorRow | undefined {
-	if (entry.customType !== "ui_error" || !isRecord(entry.data) || entry.data.version !== 2) return undefined;
+	if (entry.customType !== "ui_error" || !isRecord(entry.data) || entry.data.version !== 2)
+		return undefined;
 	const firstTimestamp =
-		typeof entry.data.firstTimestamp === "number" ? entry.data.firstTimestamp : Date.parse(entry.timestamp);
-	const lastTimestamp = typeof entry.data.lastTimestamp === "number" ? entry.data.lastTimestamp : firstTimestamp;
+		typeof entry.data.firstTimestamp === "number"
+			? entry.data.firstTimestamp
+			: Date.parse(entry.timestamp);
+	const lastTimestamp =
+		typeof entry.data.lastTimestamp === "number" ? entry.data.lastTimestamp : firstTimestamp;
 	if (!Number.isFinite(lastTimestamp)) return undefined;
-	const count = typeof entry.data.count === "number" && entry.data.count > 0 ? Math.trunc(entry.data.count) : 1;
+	const count =
+		typeof entry.data.count === "number" && entry.data.count > 0 ? Math.trunc(entry.data.count) : 1;
+	const cause = stringField(entry.data, "cause", "category", "errorClass") ?? "unknown";
 	return {
+		eventId: stringField(entry.data, "id") ?? "-",
+		tool: stringField(entry.data, "tool", "operation", "source") ?? cause,
 		sessionId: header.id,
 		workstream: formatWorkstream(header.workstream),
-		cause: stringField(entry.data, "cause", "category", "errorClass") ?? "unknown",
+		cause,
 		timestamp: lastTimestamp,
 		buildVersion: stringField(entry.data, "buildVersion", "version") ?? "unknown/legacy",
 		buildDigest: stringField(entry.data, "buildDigest", "runnerBuildDigest") ?? "unknown/legacy",
@@ -436,7 +486,8 @@ function latestErrorEntries(entries: readonly CustomEntry[]): readonly CustomEnt
 			latestByEventId.clear();
 			continue;
 		}
-		if (entry.customType !== "ui_error" || !isRecord(entry.data) || entry.data.version !== 2) continue;
+		if (entry.customType !== "ui_error" || !isRecord(entry.data) || entry.data.version !== 2)
+			continue;
 		const eventId = stringField(entry.data, "id");
 		if (eventId) latestByEventId.set(eventId, entry);
 	}
@@ -445,7 +496,9 @@ function latestErrorEntries(entries: readonly CustomEntry[]): readonly CustomEnt
 
 async function collectJournalPaths(sessionsRoot: string): Promise<readonly string[]> {
 	try {
-		return await Array.fromAsync(new Bun.Glob("*/*.jsonl").scan(sessionsRoot), name => path.join(sessionsRoot, name));
+		return await Array.fromAsync(new Bun.Glob("*/*.jsonl").scan(sessionsRoot), (name) =>
+			path.join(sessionsRoot, name),
+		);
 	} catch {
 		return [];
 	}
@@ -463,19 +516,25 @@ function readIncidentsReadonly(dbPath: string | undefined): readonly FleetIncide
 	}
 }
 
-export async function collectFleetErrors(options: FleetErrorsOptions = {}): Promise<FleetErrorsProjection> {
+export async function collectFleetErrors(
+	options: FleetErrorsOptions = {},
+): Promise<FleetErrorsProjection> {
 	const since = parseSince(options.since, options.nowMs);
 	const sessionsRoot = options.sessionsRoot ?? path.join(getAgentDir(), "sessions");
 	const rows: FleetErrorRow[] = [];
 	for (const journalPath of await collectJournalPaths(sessionsRoot)) {
 		try {
-			const projection = projectJournalEntries(decodeJournalEntries(await Bun.file(journalPath).text()));
+			const projection = projectJournalEntries(
+				decodeJournalEntries(await Bun.file(journalPath).text()),
+			);
 			if (!projection) continue;
 			const workstream = formatWorkstream(projection.header.workstream);
 			if (options.session && projection.header.id !== options.session) continue;
 			if (options.workstream && workstream !== options.workstream) continue;
 			const sourceJournalUri = Bun.pathToFileURL(journalPath).href;
-			const customEntries = projection.entries.filter((entry): entry is CustomEntry => entry.type === "custom");
+			const customEntries = projection.entries.filter(
+				(entry): entry is CustomEntry => entry.type === "custom",
+			);
 			for (const entry of latestErrorEntries(customEntries)) {
 				const row = decodeErrorRow(entry, projection.header, sourceJournalUri);
 				if (!row || (since !== undefined && row.timestamp < since)) continue;
@@ -493,14 +552,19 @@ export async function collectFleetErrors(options: FleetErrorsOptions = {}): Prom
 			right.timestamp - left.timestamp,
 	);
 	const incidents = readIncidentsReadonly(options.controlDbPath).filter(
-		incident =>
-			since === undefined || incident.openedAt >= since || incident.evidence.some(item => item.occurredAt >= since),
+		(incident) =>
+			since === undefined ||
+			incident.openedAt >= since ||
+			incident.evidence.some((item) => item.occurredAt >= since),
 	);
 	return { errors: rows, incidents };
 }
 
 export function formatFleetErrors(projection: FleetErrorsProjection): string {
-	const lines = ["ERRORS", "SESSION\tWORKSTREAM\tCAUSE\tTIME\tBUILD_VERSION\tBUILD_DIGEST\tROLLOUT\tCOUNT\tMESSAGE\tSOURCE_JOURNAL_URI"];
+	const lines = [
+		"ERRORS",
+		"SESSION\tWORKSTREAM\tCAUSE\tTIME\tBUILD_VERSION\tBUILD_DIGEST\tROLLOUT\tCOUNT\tMESSAGE\tSOURCE_JOURNAL_URI",
+	];
 	for (const row of projection.errors) {
 		lines.push(
 			[
@@ -529,7 +593,7 @@ export function formatFleetErrors(projection: FleetErrorsProjection): string {
 				new Date(incident.openedAt).toISOString(),
 				String(incident.evidence.length),
 				incident.evidence
-					.map(item => item.journalUri)
+					.map((item) => item.journalUri)
 					.filter((uri): uri is string => uri !== undefined)
 					.join(",") || "-",
 			]

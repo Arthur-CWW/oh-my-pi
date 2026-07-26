@@ -4,6 +4,12 @@
 import chalk from "chalk";
 import { Settings } from "../config/settings";
 import { flushGrievances, openAutoQaDb } from "../tools/report-tool-issue";
+import {
+	appendToolIssueDisposition,
+	collectToolIssueProjection,
+	formatToolIssueProjection,
+	type ToolIssueDisposition,
+} from "./tool-issue-projection";
 
 interface GrievanceRow {
 	id: number;
@@ -34,6 +40,27 @@ export interface PushGrievancesOptions {
 	/** Emit the {@link FlushResult} as JSON instead of a status line. */
 	json?: boolean;
 }
+
+export interface TriageToolIssuesOptions {
+	readonly limit: number;
+	readonly tool?: string;
+	readonly disposition?: ToolIssueDisposition;
+	readonly since?: string;
+	readonly session?: string;
+	readonly json: boolean;
+}
+
+export interface SetToolIssueStatusOptions {
+	readonly issueKey: string;
+	readonly disposition: ToolIssueDisposition;
+	readonly owner?: string;
+	readonly change?: string;
+	readonly proof?: string;
+	readonly reason?: string;
+	readonly canonicalIssueKey?: string;
+	readonly build?: string;
+	readonly json: boolean;
+}
 export async function listGrievances(options: ListGrievancesOptions): Promise<void> {
 	const db = openAutoQaDb();
 	if (!db) {
@@ -41,7 +68,9 @@ export async function listGrievances(options: ListGrievancesOptions): Promise<vo
 			console.log("[]");
 		} else {
 			console.log(
-				chalk.dim("No grievances database found. Enable auto-QA with PI_AUTO_QA=1 or the dev.autoqa setting."),
+				chalk.dim(
+					"No grievances database found. Enable auto-QA with PI_AUTO_QA=1 or the dev.autoqa setting.",
+				),
 			);
 		}
 		return;
@@ -51,7 +80,9 @@ export async function listGrievances(options: ListGrievancesOptions): Promise<vo
 		let rows: GrievanceRow[];
 		if (options.tool) {
 			rows = db
-				.prepare("SELECT id, model, version, tool, report FROM grievances WHERE tool = ? ORDER BY id DESC LIMIT ?")
+				.prepare(
+					"SELECT id, model, version, tool, report FROM grievances WHERE tool = ? ORDER BY id DESC LIMIT ?",
+				)
 				.all(options.tool, options.limit) as GrievanceRow[];
 		} else {
 			rows = db
@@ -77,10 +108,41 @@ export async function listGrievances(options: ListGrievancesOptions): Promise<vo
 			console.log();
 		}
 
-		console.log(chalk.dim(`Showing ${rows.length} most recent${options.tool ? ` for ${options.tool}` : ""}`));
+		console.log(
+			chalk.dim(`Showing ${rows.length} most recent${options.tool ? ` for ${options.tool}` : ""}`),
+		);
 	} finally {
 		db.close();
 	}
+}
+
+export async function triageToolIssues(options: TriageToolIssuesOptions): Promise<void> {
+	const projection = await collectToolIssueProjection(options);
+	process.stdout.write(
+		options.json
+			? `${JSON.stringify(projection, null, 2)}\n`
+			: formatToolIssueProjection(projection),
+	);
+}
+
+export async function setToolIssueStatus(options: SetToolIssueStatusOptions): Promise<void> {
+	const event = await appendToolIssueDisposition({
+		issueKey: options.issueKey,
+		disposition: options.disposition,
+		owner: options.owner,
+		change: options.change,
+		proof: options.proof,
+		reason: options.reason,
+		canonicalIssueKey: options.canonicalIssueKey,
+		build: options.build,
+	});
+	if (options.json) {
+		process.stdout.write(`${JSON.stringify(event, null, 2)}\n`);
+		return;
+	}
+	process.stdout.write(
+		`STATUS\t${event.issueKey}\t${event.disposition}\towner=${event.owner ?? "-"}\tchange=${event.change ?? "-"}\tproof=${event.proof ?? "-"}\n`,
+	);
 }
 
 /**
@@ -92,7 +154,9 @@ export async function listGrievances(options: ListGrievancesOptions): Promise<vo
  * does not exist yet.
  */
 export async function cleanGrievances(options: CleanGrievancesOptions): Promise<void> {
-	const selectors = [options.id !== undefined, !!options.tool, !!options.all].filter(Boolean).length;
+	const selectors = [options.id !== undefined, !!options.tool, !!options.all].filter(
+		Boolean,
+	).length;
 	if (selectors === 0) {
 		console.error(chalk.red("Specify exactly one of --id, --tool, or --all."));
 		process.exitCode = 1;
@@ -110,7 +174,9 @@ export async function cleanGrievances(options: CleanGrievancesOptions): Promise<
 			console.log(JSON.stringify({ deleted: 0 }));
 		} else {
 			console.log(
-				chalk.dim("No grievances database found. Enable auto-QA with PI_AUTO_QA=1 or the dev.autoqa setting."),
+				chalk.dim(
+					"No grievances database found. Enable auto-QA with PI_AUTO_QA=1 or the dev.autoqa setting.",
+				),
 			);
 		}
 		return;
@@ -147,7 +213,11 @@ export async function cleanGrievances(options: CleanGrievancesOptions): Promise<
 		}
 
 		const scope =
-			options.id !== undefined ? `#${options.id}` : options.tool ? `for ${options.tool}` : "(all entries)";
+			options.id !== undefined
+				? `#${options.id}`
+				: options.tool
+					? `for ${options.tool}`
+					: "(all entries)";
 		console.log(chalk.green(`Deleted ${deleted} grievance${deleted === 1 ? "" : "s"} ${scope}.`));
 	} finally {
 		db.close();
@@ -214,11 +284,11 @@ export async function pushGrievances(options: PushGrievancesOptions): Promise<vo
 	try {
 		const result = await flushGrievances(db, settings, {
 			bypassConsent: true,
-			onStart: t => {
+			onStart: (t) => {
 				total = t;
 				if (!options.json) bar = makeProgressBar(t);
 			},
-			onProgress: pushed => bar.update(pushed),
+			onProgress: (pushed) => bar.update(pushed),
 		});
 		bar.finish();
 
@@ -240,7 +310,9 @@ export async function pushGrievances(options: PushGrievancesOptions): Promise<vo
 			return;
 		}
 		if (result.ok) {
-			console.log(chalk.green(`Pushed ${result.pushed}/${total} grievance${result.pushed === 1 ? "" : "s"}.`));
+			console.log(
+				chalk.green(`Pushed ${result.pushed}/${total} grievance${result.pushed === 1 ? "" : "s"}.`),
+			);
 			return;
 		}
 		const remaining = total - result.pushed;
