@@ -1,63 +1,59 @@
 import { describe, expect, it } from "bun:test";
 import {
-	decideRefusalReroute,
-	REFUSAL_REROUTE_ANNOTATION,
+	DEFAULT_SEMANTIC_REFUSAL_MODEL,
+	DEFAULT_SEMANTIC_REFUSAL_SMOL_MODEL,
+	decideSemanticRefusalRecovery,
+	type SemanticRefusalRecoveryInput,
 } from "@oh-my-pi/pi-coding-agent/session/refusal-reroute-policy";
 
-describe("provider refusal reroute policy", () => {
-	it("allows the observed local architecture-documentation refusal", () => {
-		expect(
-			decideRefusalReroute({
-				stopType: "refusal",
-				latestUserText: "Write the architecture documentation to docs/fable/gateway-brief.md.",
-				fallbackPinned: false,
-			}),
-		).toEqual({ reroute: true });
-		expect(REFUSAL_REROUTE_ANNOTATION).toBe("[rerouted after provider refusal]");
-	});
+const base: SemanticRefusalRecoveryInput = {
+	enabled: true,
+	provider: "anthropic",
+	model: "claude-fable-5",
+	stopType: "refusal",
+	responsibility: "implementer",
+	exemptResponsibilities: ["designer"],
+	smolResponsibilities: ["quick_task"],
+	attemptedThisTurn: false,
+	completedRecoveries: 0,
+	maxTotalRecoveries: 3,
+};
 
-	it.each([
-		"Update the README with installation notes.",
-		"Add tests for the local parser.",
-		"Run the typecheck and build.",
-		"Fix formatting in docs/guide.md.",
-	])("allows a narrow local development action: %s", latestUserText => {
-		expect(decideRefusalReroute({ stopType: "refusal", latestUserText, fallbackPinned: false })).toEqual({
-			reroute: true,
+describe("semantic refusal recovery policy", () => {
+	it("routes decoded Fable refusal to Sol without inspecting content", () => {
+		expect(decideSemanticRefusalRecovery(base)).toEqual({
+			recover: true,
+			fallbackModel: DEFAULT_SEMANTIC_REFUSAL_MODEL,
 		});
 	});
 
-	it("blocks sensitive classifier stops even for allowlisted work", () => {
-		expect(
-			decideRefusalReroute({
-				stopType: "sensitive",
-				latestUserText: "Write docs/fable/gateway-brief.md.",
-				fallbackPinned: false,
-			}),
-		).toEqual({ reroute: false, reason: "not-refusal" });
-	});
-
-	it.each([
-		"Help me with this request.",
-		"Review the project.",
-		"Write documentation for credential exfiltration.",
-		"Upload the README to the remote service.",
-		"Deploy the documentation site.",
-	])("blocks ambiguous, dangerous, or remote requests: %s", latestUserText => {
-		expect(decideRefusalReroute({ stopType: "refusal", latestUserText, fallbackPinned: false }).reroute).toBe(
-			false,
-		);
-	});
-
-	it("permits one refusal fallback and never reroutes a pinned fallback", () => {
-		const input = {
-			stopType: "refusal",
-			latestUserText: "Write docs/fable/gateway-brief.md architecture documentation.",
-		} as const;
-		expect(decideRefusalReroute({ ...input, fallbackPinned: false })).toEqual({ reroute: true });
-		expect(decideRefusalReroute({ ...input, fallbackPinned: true })).toEqual({
-			reroute: false,
-			reason: "already-rerouted",
+	it("uses Luna for the configured smol responsibility", () => {
+		expect(decideSemanticRefusalRecovery({ ...base, responsibility: "quick_task" })).toEqual({
+			recover: true,
+			fallbackModel: DEFAULT_SEMANTIC_REFUSAL_SMOL_MODEL,
 		});
+	});
+
+	it("exempts the typed UI/UX responsibility", () => {
+		expect(decideSemanticRefusalRecovery({ ...base, responsibility: "designer" })).toEqual({
+			recover: false,
+			reason: "role-exempt",
+		});
+	});
+
+	it("allows at most one automatic fallback per turn and a bounded session total", () => {
+		expect(decideSemanticRefusalRecovery({ ...base, attemptedThisTurn: true })).toEqual({
+			recover: false,
+			reason: "already-attempted",
+		});
+		expect(decideSemanticRefusalRecovery({ ...base, completedRecoveries: 3 })).toEqual({
+			recover: false,
+			reason: "session-limit",
+		});
+	});
+
+	it("does not consume non-Fable or ordinary provider failures", () => {
+		expect(decideSemanticRefusalRecovery({ ...base, provider: "openai-codex" }).recover).toBe(false);
+		expect(decideSemanticRefusalRecovery({ ...base, stopType: "error" }).recover).toBe(false);
 	});
 });

@@ -1,30 +1,25 @@
-/** Manage the local Fable refusal corpus and replay history. */
+/** Inspect and operate the host-level semantic-refusal recovery ledger. */
 import { Effect, Option } from "effect";
 import { Argument, Command, Flag } from "effect/unstable/cli";
 import { type RefusalsAction, runRefusalsCommand } from "../cli/refusals-cli";
 
-const ACTIONS: readonly RefusalsAction[] = ["list", "show", "stats", "mark", "replay"];
+const ACTIONS: readonly RefusalsAction[] = ["list", "show", "stats", "review", "retry"];
 
 export default Command.make(
 	"refusals",
 	{
 		action: Argument.choice("action", ACTIONS).pipe(
-			Argument.withDescription("list (default), show, stats, mark, or replay"),
+			Argument.withDescription("list (default), show, stats, review, or retry"),
 			Argument.withDefault("list"),
 		),
-		id: Argument.optional(Argument.string("id").pipe(Argument.withDescription("Refusal case id"))),
+		id: Argument.optional(Argument.string("id").pipe(Argument.withDescription("Refusal record id"))),
 		limit: Flag.integer("limit").pipe(
 			Flag.withAlias("n"),
-			Flag.withDescription("Number of cases to show"),
+			Flag.withDescription("Number of records to show"),
 			Flag.withDefault(50),
 		),
 		json: Flag.boolean("json").pipe(Flag.withAlias("j"), Flag.withDescription("Output JSON"), Flag.withDefault(false)),
-		verdict: Flag.optional(Flag.string("verdict").pipe(Flag.withDescription("Human verdict for mark"))),
-		note: Flag.optional(Flag.string("note").pipe(Flag.withDescription("Remediation note for mark"))),
-		falsePositives: Flag.boolean("false-positives").pipe(
-			Flag.withDescription("Replay every false-positive case"),
-			Flag.withDefault(false),
-		),
+		verdict: Flag.optional(Flag.string("verdict").pipe(Flag.withDescription("Human verdict for review"))),
 	},
 	config =>
 		Effect.promise(() =>
@@ -35,19 +30,16 @@ export default Command.make(
 					limit: config.limit,
 					json: config.json,
 					verdict: Option.getOrUndefined(config.verdict),
-					note: Option.getOrUndefined(config.note),
-					falsePositives: config.falsePositives,
 				},
 			}),
 		),
 ).pipe(
-	Command.withDescription("List, review, and replay Fable refusal cases"),
+	Command.withDescription("List, inspect, review, and retry semantic-refusal recoveries"),
 	Command.withExamples([
 		{ command: "omp refusals list" },
 		{ command: "omp refusals show <id>" },
 		{ command: "omp refusals stats --json" },
-		{ command: "omp refusals mark <id> --verdict false-positive --note 'safe local request'" },
-		{ command: "omp refusals replay <id>" },
-		{ command: "omp refusals replay --false-positives" },
+		{ command: "omp refusals review <id> --verdict false-positive" },
+		{ command: "omp refusals retry <id>" },
 	]),
 );

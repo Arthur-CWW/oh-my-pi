@@ -1,37 +1,28 @@
 import chalk from "chalk";
 import {
-	type RefusalCase,
-	RefusalCorpus,
-	type RefusalReplayCompletion,
-	type RefusalReplayRecord,
+	type RefusalRecord,
+	type RefusalRetryHandler,
 	type RefusalStats,
-	type RefusalVerdictInput,
+	RefusalStore,
+	type RefusalVerdict,
 } from "../session/refusal-corpus";
 
-export type RefusalsAction = "list" | "show" | "stats" | "mark" | "replay";
+export type RefusalsAction = "list" | "show" | "stats" | "review" | "retry";
 
 export interface RefusalsCommandOptions {
 	readonly action: RefusalsAction;
 	readonly id?: string;
-	readonly path?: string;
+	readonly dbPath?: string;
+	readonly legacyPath?: string | null;
 	readonly flags?: {
 		readonly limit?: number;
 		readonly json?: boolean;
 		readonly verdict?: string;
-		readonly note?: string;
-		readonly falsePositives?: boolean;
 	};
-	readonly completion?: RefusalReplayCompletion;
+	readonly retry?: RefusalRetryHandler;
 }
 
-const VERDICTS: readonly RefusalVerdictInput[] = [
-	"false-positive",
-	"true-positive",
-	"ambiguous",
-	"unreviewed",
-	"pending",
-	"confirmed",
-];
+const VERDICTS: readonly RefusalVerdict[] = ["false-positive", "true-positive", "ambiguous"];
 
 function writeLine(value = ""): void {
 	process.stdout.write(`${value}\n`);
@@ -42,20 +33,16 @@ function writeError(message: string): void {
 	process.exitCode = 1;
 }
 
-function formatCase(refusalCase: RefusalCase): string[] {
-	const model = `${refusalCase.provider}/${refusalCase.model}@${refusalCase.modelVersion}`;
-	const lines = [
-		`${chalk.bold(refusalCase.id)} ${chalk.dim(new Date(refusalCase.timestamp).toISOString())}`,
-		`  model: ${model}  role: ${refusalCase.role}`,
-		`  category: ${refusalCase.category}  verdict: ${refusalCase.verdict}`,
-		`  action: ${refusalCase.action ?? "-"}  tool: ${refusalCase.tool ?? "-"}`,
-		`  excerpt: ${refusalCase.safeExcerpt}`,
-		`  refusal: ${refusalCase.refusalText || "-"}`,
+function formatRecord(record: RefusalRecord): string[] {
+	return [
+		`${chalk.bold(record.id)} ${chalk.dim(new Date(record.timestamp).toISOString())}`,
+		`  session: ${record.sessionId}  child: ${record.childId ?? "-"}`,
+		`  turn: ${record.turnId}  attempt: ${record.attemptId}`,
+		`  model: ${record.provider}/${record.model}  reason: ${record.reasonClass}`,
+		`  prompt digest: ${record.promptDigest}`,
+		`  recovery: ${record.recoveryState}  route: ${record.recoveryModel ?? "-"}`,
+		`  review: ${record.reviewStatus}  verdict: ${record.verdict ?? "-"}`,
 	];
-	if (refusalCase.contextSources.length > 0) lines.push(`  context: ${refusalCase.contextSources.join(", ")}`);
-	if (refusalCase.note) lines.push(`  note: ${refusalCase.note}`);
-	if (refusalCase.replayHistory.length > 0) lines.push(`  replays: ${refusalCase.replayHistory.length}`);
-	return lines;
 }
 
 function formatCounts(label: string, counts: readonly { value: string | null; count: number }[]): string[] {
@@ -65,85 +52,69 @@ function formatCounts(label: string, counts: readonly { value: string | null; co
 	return lines;
 }
 
-function validateVerdict(value: string | undefined): RefusalVerdictInput {
-	if (!value || !VERDICTS.includes(value as RefusalVerdictInput)) {
+function validateVerdict(value: string | undefined): RefusalVerdict {
+	if (!value || !VERDICTS.includes(value as RefusalVerdict)) {
 		throw new Error(`--verdict must be one of: ${VERDICTS.join(", ")}`);
 	}
-	return value as RefusalVerdictInput;
+	return value as RefusalVerdict;
 }
 
 function renderStats(stats: RefusalStats): string[] {
 	return [
 		chalk.bold(`Total refusals: ${stats.total}`),
-		...formatCounts("Model version", stats.modelVersion),
-		...formatCounts("Category", stats.category),
-		...formatCounts("Action", stats.action),
-		...formatCounts("Context source", stats.contextSource),
+		...formatCounts("Provider", stats.provider),
+		...formatCounts("Model", stats.model),
+		...formatCounts("Reason class", stats.reasonClass),
+		...formatCounts("Recovery state", stats.recoveryState),
+		...formatCounts("Review status", stats.reviewStatus),
 		...formatCounts("Verdict", stats.verdict),
 	];
 }
 
-function renderReplay(replay: RefusalReplayRecord): string[] {
-	const result =
-		replay.outcome === "error" ? `error: ${replay.error ?? "unknown"}` : replay.refused ? "refused" : "passed";
-	const category = replay.category ? ` (${replay.category})` : "";
-	return [`${replay.caseId}: ${result}${category}`, `  ${replay.textExcerpt ?? "No refusal text"}`];
-}
-
 export async function runRefusalsCommand(options: RefusalsCommandOptions): Promise<void> {
-	const corpus = new RefusalCorpus({ path: options.path });
+	const store = new RefusalStore({ dbPath: options.dbPath, legacyPath: options.legacyPath });
 	const flags = options.flags ?? {};
 	try {
 		switch (options.action) {
 			case "list": {
-				const cases = corpus.list({ limit: flags.limit ?? 50, falsePositivesOnly: flags.falsePositives });
-				if (flags.json) {
-					writeLine(JSON.stringify(cases, null, 2));
-					return;
-				}
-				if (cases.length === 0) {
-					writeLine(chalk.dim("No refusal cases recorded."));
-					return;
-				}
-				for (const refusalCase of cases) writeLine(formatCase(refusalCase).join("\n"));
+				const records = store.list({ limit: flags.limit ?? 50 });
+				if (flags.json) writeLine(JSON.stringify(records, null, 2));
+				else if (records.length === 0) writeLine(chalk.dim("No refusal records found."));
+				else for (const record of records) writeLine(formatRecord(record).join("\n"));
 				return;
 			}
 			case "show": {
-				if (!options.id) throw new Error("show requires a refusal case id");
-				const refusalCase = corpus.get(options.id);
-				if (!refusalCase) throw new Error(`Refusal case not found: ${options.id}`);
-				if (flags.json) writeLine(JSON.stringify(refusalCase, null, 2));
-				else writeLine(formatCase(refusalCase).join("\n"));
+				if (!options.id) throw new Error("show requires a refusal record id");
+				const record = store.get(options.id);
+				if (!record) throw new Error(`Refusal record not found: ${options.id}`);
+				if (flags.json) writeLine(JSON.stringify({ ...record, events: store.events(record.id) }, null, 2));
+				else writeLine([...formatRecord(record), `  events: ${store.events(record.id).length}`].join("\n"));
 				return;
 			}
 			case "stats": {
-				const stats = corpus.stats();
+				const stats = store.stats();
 				if (flags.json) writeLine(JSON.stringify(stats, null, 2));
 				else writeLine(renderStats(stats).join("\n"));
 				return;
 			}
-			case "mark": {
-				if (!options.id) throw new Error("mark requires a refusal case id");
-				const verdict = validateVerdict(flags.verdict);
-				const refusalCase = corpus.mark(options.id, { verdict, note: flags.note });
-				if (flags.json) writeLine(JSON.stringify(refusalCase, null, 2));
-				else writeLine(`Marked ${refusalCase.id} as ${refusalCase.verdict}.`);
+			case "review": {
+				if (!options.id) throw new Error("review requires a refusal record id");
+				const record = store.review(options.id, validateVerdict(flags.verdict));
+				if (flags.json) writeLine(JSON.stringify(record, null, 2));
+				else writeLine(`Reviewed ${record.id} as ${record.verdict}.`);
 				return;
 			}
-			case "replay": {
-				const replays = flags.falsePositives
-					? await corpus.replayFalsePositives({ completion: options.completion })
-					: options.id
-						? [await corpus.replay(options.id, { completion: options.completion })]
-						: (() => {
-								throw new Error("replay requires a refusal case id or --false-positives");
-							})();
-				if (flags.json) writeLine(JSON.stringify(replays, null, 2));
-				else for (const replay of replays) writeLine(renderReplay(replay).join("\n"));
+			case "retry": {
+				if (!options.id) throw new Error("retry requires a refusal record id");
+				const record = await store.retry(options.id, options.retry);
+				if (flags.json) writeLine(JSON.stringify(record, null, 2));
+				else writeLine(`Retry ${record.recoveryState} for ${record.id}; receipt ${record.recoveryReceipt}.`);
 				return;
 			}
 		}
 	} catch (error) {
 		writeError(error instanceof Error ? error.message : String(error));
+	} finally {
+		store.close();
 	}
 }

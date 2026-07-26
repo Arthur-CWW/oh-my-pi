@@ -1,111 +1,98 @@
 import { createHash, randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { type Api, type Context, completeSimple, type Model } from "@oh-my-pi/pi-ai";
-import { type GeneratedProvider, getBundledModel } from "@oh-my-pi/pi-catalog/models";
-import { getAgentDir, isEnoent } from "@oh-my-pi/pi-utils";
+import { Database } from "bun:sqlite";
+import { getAgentDir, isEnoent, parseJsonlLenient } from "@oh-my-pi/pi-utils";
 import { Schema } from "effect";
 
-export const REFUSAL_CORPUS_SCHEMA_VERSION = 1 as const;
-export const REFUSAL_PROMPT_EXCERPT_MAX = 160;
-export const REFUSAL_REPLAY_PROMPT_MAX = 4_000;
-export const REFUSAL_TEXT_MAX = 512;
-export const REFUSAL_NOTE_MAX = 1_000;
-export const REFUSAL_REDACTION_POLICY = "refusal-v1";
-export const REFUSAL_CORPUS_ENV = "OMP_REFUSALS_PATH";
-export const REFUSAL_CORPUS_FILENAME = "refusals.jsonl";
+export const REFUSAL_STORE_SCHEMA_VERSION = 2 as const;
+export const REFUSAL_REDACTION_POLICY = "refusal-v2-digest-only" as const;
+export const REFUSAL_DB_ENV = "OMP_REFUSALS_DB" as const;
+export const REFUSAL_LEGACY_ENV = "OMP_REFUSALS_PATH" as const;
+export const REFUSAL_LEGACY_FILENAME = "refusals.jsonl" as const;
 
-export type RefusalVerdict = "false-positive" | "true-positive" | "ambiguous" | "unreviewed";
-export type RefusalVerdictInput = RefusalVerdict | "pending" | "confirmed";
-export type RefusalReplayOutcome = "refused" | "passed" | "error";
+export const RefusalRecoveryStateSchema = Schema.Literals([
+	"observed",
+	"routed",
+	"resumed",
+	"fallback-failed",
+	"retry-requested",
+	"retry-failed",
+]);
+export type RefusalRecoveryState = typeof RefusalRecoveryStateSchema.Type;
 
-export interface RefusalReplayRecord {
-	readonly caseId: string;
-	readonly timestamp: number;
-	readonly refused: boolean;
-	readonly outcome: RefusalReplayOutcome;
-	readonly category: string | null;
-	readonly textExcerpt: string | null;
-	readonly refusalText: string | null;
-	readonly error: string | null;
-}
+export const RefusalReviewStatusSchema = Schema.Literals(["unreviewed", "reviewed"]);
+export type RefusalReviewStatus = typeof RefusalReviewStatusSchema.Type;
 
-export interface RefusalReplayEnvelope {
-	readonly prompt: string;
-	readonly contextSources: readonly string[];
-	readonly toolNames: readonly string[];
-}
+export const RefusalVerdictSchema = Schema.Literals(["false-positive", "true-positive", "ambiguous"]);
+export type RefusalVerdict = typeof RefusalVerdictSchema.Type;
 
-export interface RefusalCase {
-	readonly schemaVersion: typeof REFUSAL_CORPUS_SCHEMA_VERSION;
+export const RefusalEventTypeSchema = Schema.Literals([
+	"refusal-observed",
+	"route-persisted",
+	"resume-committed",
+	"fallback-failed",
+	"retry-requested",
+	"retry-failed",
+	"reviewed",
+]);
+export type RefusalEventType = typeof RefusalEventTypeSchema.Type;
+
+export interface RefusalRecord {
+	readonly schemaVersion: typeof REFUSAL_STORE_SCHEMA_VERSION;
 	readonly id: string;
-	readonly caseId: string;
-	readonly timestamp: number;
+	readonly sessionId: string;
+	readonly childId: string | null;
+	readonly turnId: string;
+	readonly attemptId: string;
 	readonly provider: string;
 	readonly model: string;
-	readonly modelVersion: string;
-	readonly version: string;
-	readonly role: string;
-	readonly category: string;
-	readonly tool: string | null;
-	readonly action: string | null;
-	readonly sessionId: string | null;
-	readonly turnId: string | null;
-	readonly correlationId: string | null;
-	readonly promptFingerprint: string;
-	readonly promptExcerpt: string;
-	readonly safeExcerpt: string;
-	readonly contextSources: readonly string[];
-	readonly refusalText: string;
-	readonly rerouteOutcome: string | null;
-	readonly verdict: RefusalVerdict;
-	readonly remediationNote: string | null;
-	readonly note: string | null;
-	readonly requiresTools: boolean;
-	readonly replayEnvelope: RefusalReplayEnvelope;
-	readonly replayHistory: readonly RefusalReplayRecord[];
+	readonly reasonClass: string;
+	readonly promptDigest: string;
+	readonly timestamp: number;
+	readonly buildVersion: string | null;
+	readonly buildDigest: string | null;
+	readonly recoveryState: RefusalRecoveryState;
+	readonly recoveryModel: string | null;
+	readonly recoveryReceipt: string | null;
+	readonly reviewStatus: RefusalReviewStatus;
+	readonly verdict: RefusalVerdict | null;
 	readonly redactionPolicyId: typeof REFUSAL_REDACTION_POLICY;
 }
 
-export interface RefusalCaseInput {
-	readonly id?: string;
-	readonly caseId?: string;
-	readonly timestamp?: number;
-	readonly provider?: string;
-	readonly model?: string;
-	readonly modelVersion?: string;
-	readonly version?: string;
-	readonly role?: string;
-	readonly category?: string;
-	readonly tool?: string | null;
-	readonly action?: string | null;
-	readonly sessionId?: string | null;
-	readonly turnId?: string | null;
-	readonly correlationId?: string | null;
-	readonly prompt?: string;
-	readonly contextSources?: readonly string[];
-	readonly refusalText?: string;
-	readonly rerouteOutcome?: string | null;
-	readonly verdict?: RefusalVerdictInput;
-	readonly remediationNote?: string | null;
-	readonly note?: string | null;
-	readonly requiresTools?: boolean;
-	readonly replayEnvelope?: Partial<RefusalReplayEnvelope>;
+export interface RefusalEvent {
+	readonly eventId: number;
+	readonly recordId: string;
+	readonly type: RefusalEventType;
+	readonly timestamp: number;
+	readonly recoveryModel: string | null;
+	readonly receipt: string | null;
 }
 
-export interface RefusalCorpusOptions {
-	readonly path?: string;
+export interface RefusalRecordInput {
+	readonly id?: string;
+	readonly sessionId: string;
+	readonly childId?: string | null;
+	readonly turnId: string;
+	readonly attemptId: string;
+	readonly provider: string;
+	readonly model: string;
+	readonly reasonClass: string;
+	readonly promptDigest: string;
+	readonly timestamp?: number;
+	readonly buildVersion?: string | null;
+	readonly buildDigest?: string | null;
 }
 
 export interface RefusalListOptions {
 	readonly limit?: number;
-	readonly modelVersion?: string;
-	readonly category?: string;
-	readonly action?: string;
-	readonly contextSource?: string;
-	readonly verdict?: RefusalVerdictInput;
+	readonly provider?: string;
+	readonly model?: string;
+	readonly reasonClass?: string;
+	readonly recoveryState?: RefusalRecoveryState;
+	readonly reviewStatus?: RefusalReviewStatus;
+	readonly verdict?: RefusalVerdict;
 	readonly since?: number;
-	readonly falsePositivesOnly?: boolean;
 }
 
 export interface RefusalCount {
@@ -115,442 +102,557 @@ export interface RefusalCount {
 
 export interface RefusalStats {
 	readonly total: number;
-	readonly modelVersion: readonly RefusalCount[];
-	readonly category: readonly RefusalCount[];
-	readonly action: readonly RefusalCount[];
-	readonly contextSource: readonly RefusalCount[];
+	readonly provider: readonly RefusalCount[];
+	readonly model: readonly RefusalCount[];
+	readonly reasonClass: readonly RefusalCount[];
+	readonly recoveryState: readonly RefusalCount[];
+	readonly reviewStatus: readonly RefusalCount[];
 	readonly verdict: readonly RefusalCount[];
-	readonly byModelVersion: readonly RefusalCount[];
-	readonly byCategory: readonly RefusalCount[];
-	readonly byAction: readonly RefusalCount[];
-	readonly byContextSource: readonly RefusalCount[];
-	readonly byVerdict: readonly RefusalCount[];
 }
 
-export interface RefusalReplayRequest extends RefusalReplayEnvelope {
-	readonly provider: string;
-	readonly model: string;
-	readonly modelVersion: string;
-	readonly role: string;
-	/** Always empty: refusal replay is deliberately a no-tools request. */
-	readonly tools: readonly [];
+export interface RefusalRetryContext {
+	readonly recordId: string;
+	readonly sessionId: string;
+	readonly childId: string | null;
+	readonly recoveryModel: string | null;
 }
 
-export interface RefusalReplayObservation {
-	readonly outcome?: Exclude<RefusalReplayOutcome, "error">;
-	readonly refused?: boolean;
-	readonly category?: string | null;
-	readonly refusalText?: string | null;
-	readonly textExcerpt?: string | null;
+export interface RefusalRetryReceipt {
+	readonly accepted: boolean;
+	readonly receipt: string;
 }
 
-export type RefusalReplayCompletion = (
-	envelope: RefusalReplayRequest,
-	refusalCase: RefusalCase,
-) => RefusalReplayObservation | Promise<RefusalReplayObservation>;
+export type RefusalRetryHandler = (context: RefusalRetryContext) => RefusalRetryReceipt | Promise<RefusalRetryReceipt>;
 
-export interface RefusalReplayOptions {
-	readonly completion?: RefusalReplayCompletion;
-	readonly resolveModel?: (
-		provider: string,
-		model: string,
-	) => Model<Api> | undefined | Promise<Model<Api> | undefined>;
-	readonly nowMs?: () => number;
+export interface RefusalStoreOptions {
+	readonly dbPath?: string;
+	readonly legacyPath?: string | null;
+	readonly readonly?: boolean;
 }
 
-export const RefusalReplayRecordSchema = Schema.Struct({
-	caseId: Schema.String,
-	timestamp: Schema.Number,
-	refused: Schema.Boolean,
-	outcome: Schema.Literals(["refused", "passed", "error"]),
-	category: Schema.NullOr(Schema.String),
-	textExcerpt: Schema.NullOr(Schema.String),
-	refusalText: Schema.NullOr(Schema.String),
-	error: Schema.NullOr(Schema.String),
-});
-
-export const RefusalReplayEnvelopeSchema = Schema.Struct({
-	prompt: Schema.String,
-	contextSources: Schema.Array(Schema.String),
-	toolNames: Schema.Array(Schema.String),
-});
-
-export const RefusalCaseSchema = Schema.Struct({
-	schemaVersion: Schema.Literal(REFUSAL_CORPUS_SCHEMA_VERSION),
+const RefusalRecordSchema = Schema.Struct({
+	schemaVersion: Schema.Literal(REFUSAL_STORE_SCHEMA_VERSION),
 	id: Schema.String,
-	caseId: Schema.String,
-	timestamp: Schema.Number,
+	sessionId: Schema.String,
+	childId: Schema.NullOr(Schema.String),
+	turnId: Schema.String,
+	attemptId: Schema.String,
 	provider: Schema.String,
 	model: Schema.String,
-	modelVersion: Schema.String,
-	version: Schema.String,
-	role: Schema.String,
-	category: Schema.String,
-	tool: Schema.NullOr(Schema.String),
-	action: Schema.NullOr(Schema.String),
-	sessionId: Schema.NullOr(Schema.String),
-	turnId: Schema.NullOr(Schema.String),
-	correlationId: Schema.NullOr(Schema.String),
-	promptFingerprint: Schema.String,
-	promptExcerpt: Schema.String,
-	safeExcerpt: Schema.String,
-	contextSources: Schema.Array(Schema.String),
-	refusalText: Schema.String,
-	rerouteOutcome: Schema.NullOr(Schema.String),
-	verdict: Schema.Literals(["false-positive", "true-positive", "ambiguous", "unreviewed"]),
-	remediationNote: Schema.NullOr(Schema.String),
-	note: Schema.NullOr(Schema.String),
-	requiresTools: Schema.Boolean,
-	replayEnvelope: RefusalReplayEnvelopeSchema,
-	replayHistory: Schema.Array(RefusalReplayRecordSchema),
+	reasonClass: Schema.String,
+	promptDigest: Schema.String,
+	timestamp: Schema.Number,
+	buildVersion: Schema.NullOr(Schema.String),
+	buildDigest: Schema.NullOr(Schema.String),
+	recoveryState: RefusalRecoveryStateSchema,
+	recoveryModel: Schema.NullOr(Schema.String),
+	recoveryReceipt: Schema.NullOr(Schema.String),
+	reviewStatus: RefusalReviewStatusSchema,
+	verdict: Schema.NullOr(RefusalVerdictSchema),
 	redactionPolicyId: Schema.Literal(REFUSAL_REDACTION_POLICY),
 });
 
-export function decodeRefusalCase(input: unknown): RefusalCase {
-	return Schema.decodeUnknownSync(RefusalCaseSchema)(input, { onExcessProperty: "error" });
+const LegacyRefusalSchema = Schema.Struct({
+	id: Schema.optional(Schema.String),
+	caseId: Schema.optional(Schema.String),
+	timestamp: Schema.optional(Schema.Number),
+	provider: Schema.optional(Schema.String),
+	model: Schema.optional(Schema.String),
+	modelVersion: Schema.optional(Schema.String),
+	version: Schema.optional(Schema.String),
+	role: Schema.optional(Schema.String),
+	category: Schema.optional(Schema.String),
+	sessionId: Schema.optional(Schema.NullOr(Schema.String)),
+	turnId: Schema.optional(Schema.NullOr(Schema.String)),
+	correlationId: Schema.optional(Schema.NullOr(Schema.String)),
+	promptFingerprint: Schema.optional(Schema.String),
+	promptExcerpt: Schema.optional(Schema.String),
+	safeExcerpt: Schema.optional(Schema.String),
+	refusalText: Schema.optional(Schema.String),
+	rerouteOutcome: Schema.optional(Schema.NullOr(Schema.String)),
+	verdict: Schema.optional(Schema.String),
+});
+
+type LegacyRefusal = typeof LegacyRefusalSchema.Type;
+
+interface RefusalRow {
+	readonly schema_version: number;
+	readonly id: string;
+	readonly session_id: string;
+	readonly child_id: string | null;
+	readonly turn_id: string;
+	readonly attempt_id: string;
+	readonly provider: string;
+	readonly model: string;
+	readonly reason_class: string;
+	readonly prompt_digest: string;
+	readonly occurred_at: number;
+	readonly build_version: string | null;
+	readonly build_digest: string | null;
+	readonly recovery_state: string;
+	readonly recovery_model: string | null;
+	readonly recovery_receipt: string | null;
+	readonly review_status: string;
+	readonly verdict: string | null;
+	readonly redaction_policy_id: string;
 }
 
-const SECRET_PATTERNS: readonly [RegExp, string][] = [
-	[/\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi, "Bearer [REDACTED]"],
-	[/\b(?:sk|pk|rk|api|key)-[A-Za-z0-9_-]{8,}\b/gi, "[REDACTED]"],
-	[
-		/\b(?:api[_-]?key|access[_-]?token|auth(?:orization)?|password|secret)\s*[:=]\s*["']?[^\s,"'};]+/gi,
-		"$1=[REDACTED]",
-	],
-];
-
-export function redactRefusalText(value: string): string {
-	let redacted = value;
-	for (const [pattern, replacement] of SECRET_PATTERNS) redacted = redacted.replace(pattern, replacement);
-	return redacted;
+interface RefusalEventRow {
+	readonly event_id: number;
+	readonly record_id: string;
+	readonly event_type: string;
+	readonly occurred_at: number;
+	readonly recovery_model: string | null;
+	readonly receipt: string | null;
 }
 
-export function redactContextSource(value: string): string {
-	const normalized = value.replaceAll("\\", "/").trim();
-	if (normalized.length === 0) return "[unknown]";
-	const basename = normalized.slice(normalized.lastIndexOf("/") + 1);
-	return basename;
+const RECORD_COLUMNS = `schema_version,id,session_id,child_id,turn_id,attempt_id,provider,model,reason_class,prompt_digest,
+ occurred_at,build_version,build_digest,recovery_state,recovery_model,recovery_receipt,review_status,verdict,redaction_policy_id`;
+const SHA256_PATTERN = /^[a-f0-9]{64}$/;
+
+function bounded(value: string | null | undefined, maximum = 256): string {
+	const normalized = value?.trim() || "unknown";
+	return normalized.length <= maximum ? normalized : normalized.slice(0, maximum);
 }
 
-function cap(value: string, maximum: number): string {
-	return value.length <= maximum ? value : value.slice(0, maximum);
+function nullable(value: string | null | undefined, maximum = 256): string | null {
+	if (value == null || value.trim().length === 0) return null;
+	return bounded(value, maximum);
 }
 
-function safeLabel(value: string | undefined | null, maximum = 256): string {
-	return cap(redactRefusalText(value?.trim() || "unknown"), maximum);
+export function digestRefusalPrompt(prompt: string): string {
+	return createHash("sha256").update(prompt).digest("hex");
 }
 
-function safeNullable(value: string | null | undefined, maximum = 512): string | null {
-	if (value === undefined || value === null || value.trim().length === 0) return null;
-	return cap(redactRefusalText(value.trim()), maximum);
+export function defaultRefusalDatabasePath(): string {
+	return (
+		Bun.env[REFUSAL_DB_ENV]?.trim() ||
+		Bun.env.OMP_SESSION_CONTROL_DB?.trim() ||
+		path.join(getAgentDir(), "session-control.sqlite")
+	);
 }
 
-function uniqueStrings(values: readonly string[]): string[] {
-	return [...new Set(values.filter(value => value.length > 0))];
+export function defaultLegacyRefusalPath(): string {
+	return Bun.env[REFUSAL_LEGACY_ENV]?.trim() || path.join(getAgentDir(), REFUSAL_LEGACY_FILENAME);
 }
 
-function normalizeContextSources(values: readonly string[] | undefined): string[] {
-	return uniqueStrings((values ?? []).map(redactContextSource)).slice(0, 128);
-}
-
-function normalizeVerdict(value: RefusalVerdictInput | undefined): RefusalVerdict {
-	if (value === "pending") return "unreviewed";
-	if (value === "confirmed") return "true-positive";
-	return value ?? "unreviewed";
-}
-
-export function normalizeRefusalCase(input: RefusalCaseInput): RefusalCase {
-	const prompt = redactRefusalText(input.prompt ?? "");
-	const contextSources = normalizeContextSources(input.contextSources);
-	const replayPrompt = redactRefusalText(input.replayEnvelope?.prompt ?? input.prompt ?? "");
-	const toolNames = uniqueStrings(input.replayEnvelope?.toolNames ?? (input.tool ? [input.tool] : []));
-	const id = input.id?.trim() || input.caseId?.trim() || randomUUID();
-	const modelVersion = safeLabel(input.modelVersion ?? input.version);
-	const note = safeNullable(input.note ?? input.remediationNote, REFUSAL_NOTE_MAX);
-	return {
-		schemaVersion: REFUSAL_CORPUS_SCHEMA_VERSION,
-		id,
-		caseId: id,
-		timestamp: input.timestamp ?? Date.now(),
-		provider: safeLabel(input.provider, 128),
-		model: safeLabel(input.model),
-		modelVersion,
-		version: modelVersion,
-		role: safeLabel(input.role),
-		category: safeLabel(input.category),
-		tool: safeNullable(input.tool),
-		action: safeNullable(input.action),
-		sessionId: safeNullable(input.sessionId, 256),
-		turnId: safeNullable(input.turnId, 256),
-		correlationId: safeNullable(input.correlationId, 256),
-		promptFingerprint: createHash("sha256").update(prompt).digest("hex"),
-		promptExcerpt: cap(prompt, REFUSAL_PROMPT_EXCERPT_MAX),
-		safeExcerpt: cap(prompt, REFUSAL_PROMPT_EXCERPT_MAX),
-		contextSources,
-		refusalText: cap(redactRefusalText(input.refusalText ?? ""), REFUSAL_TEXT_MAX),
-		rerouteOutcome: safeNullable(input.rerouteOutcome),
-		verdict: normalizeVerdict(input.verdict),
-		remediationNote: note,
-		note,
-		requiresTools: input.requiresTools ?? (input.tool !== undefined && input.tool !== null),
-		replayEnvelope: {
-			prompt: cap(replayPrompt, REFUSAL_REPLAY_PROMPT_MAX),
-			contextSources,
-			toolNames,
+function decodeRow(row: RefusalRow): RefusalRecord {
+	return Schema.decodeUnknownSync(RefusalRecordSchema)(
+		{
+			schemaVersion: row.schema_version,
+			id: row.id,
+			sessionId: row.session_id,
+			childId: row.child_id,
+			turnId: row.turn_id,
+			attemptId: row.attempt_id,
+			provider: row.provider,
+			model: row.model,
+			reasonClass: row.reason_class,
+			promptDigest: row.prompt_digest,
+			timestamp: row.occurred_at,
+			buildVersion: row.build_version,
+			buildDigest: row.build_digest,
+			recoveryState: row.recovery_state,
+			recoveryModel: row.recovery_model,
+			recoveryReceipt: row.recovery_receipt,
+			reviewStatus: row.review_status,
+			verdict: row.verdict,
+			redactionPolicyId: row.redaction_policy_id,
 		},
-		replayHistory: [],
-		redactionPolicyId: REFUSAL_REDACTION_POLICY,
+		{ onExcessProperty: "error" },
+	);
+}
+
+function decodeEventRow(row: RefusalEventRow): RefusalEvent {
+	const type = Schema.decodeUnknownSync(RefusalEventTypeSchema)(row.event_type);
+	return {
+		eventId: row.event_id,
+		recordId: row.record_id,
+		type,
+		timestamp: row.occurred_at,
+		recoveryModel: row.recovery_model,
+		receipt: row.receipt,
 	};
 }
 
-export function defaultRefusalCorpusPath(): string {
-	const override = Bun.env[REFUSAL_CORPUS_ENV]?.trim();
-	return override || path.join(getAgentDir(), REFUSAL_CORPUS_FILENAME);
+function normalizeInput(input: RefusalRecordInput): Required<Omit<RefusalRecordInput, "childId" | "buildVersion" | "buildDigest">> & {
+	readonly childId: string | null;
+	readonly buildVersion: string | null;
+	readonly buildDigest: string | null;
+} {
+	if (!SHA256_PATTERN.test(input.promptDigest)) throw new Error("Refusal promptDigest must be a lowercase SHA-256 digest");
+	return {
+		id: input.id?.trim() || randomUUID(),
+		sessionId: bounded(input.sessionId),
+		childId: nullable(input.childId),
+		turnId: bounded(input.turnId),
+		attemptId: bounded(input.attemptId),
+		provider: bounded(input.provider, 128),
+		model: bounded(input.model),
+		reasonClass: bounded(input.reasonClass, 128),
+		promptDigest: input.promptDigest,
+		timestamp: input.timestamp ?? Date.now(),
+		buildVersion: nullable(input.buildVersion),
+		buildDigest: nullable(input.buildDigest),
+	};
 }
 
-function readCases(filePath: string): Map<string, RefusalCase> {
-	let raw: string;
-	try {
-		raw = fs.readFileSync(filePath, "utf8");
-	} catch (error) {
-		if (isEnoent(error)) return new Map();
-		throw error;
+function legacyPromptDigest(record: LegacyRefusal): string {
+	if (record.promptFingerprint && SHA256_PATTERN.test(record.promptFingerprint)) return record.promptFingerprint;
+	return digestRefusalPrompt(record.promptExcerpt ?? record.safeExcerpt ?? "");
+}
+
+function legacyVerdict(record: LegacyRefusal): RefusalVerdict | null {
+	if (record.verdict === "false-positive" || record.verdict === "true-positive" || record.verdict === "ambiguous") {
+		return record.verdict;
 	}
-	const cases = new Map<string, RefusalCase>();
-	for (const line of raw.split("\n")) {
-		if (line.trim().length === 0) continue;
-		try {
-			const refusalCase = decodeRefusalCase(JSON.parse(line));
-			cases.set(refusalCase.id, refusalCase);
-		} catch {
-			// A malformed line must not hide valid later records in this append-only file.
+	if (record.verdict === "confirmed") return "true-positive";
+	return null;
+}
+
+export class RefusalStore {
+	readonly #db: Database;
+	readonly #readonly: boolean;
+	readonly #dbPath: string;
+
+	constructor(options: RefusalStoreOptions = {}) {
+		this.#readonly = options.readonly ?? false;
+		this.#dbPath = options.dbPath ?? defaultRefusalDatabasePath();
+		if (!this.#readonly) fs.mkdirSync(path.dirname(this.#dbPath), { recursive: true });
+		this.#db = this.#readonly ? new Database(this.#dbPath, { readonly: true }) : new Database(this.#dbPath);
+		this.#db.run("PRAGMA busy_timeout = 5000");
+		if (!this.#readonly) {
+			this.#initialize();
+			const legacyPath = options.legacyPath === undefined ? defaultLegacyRefusalPath() : options.legacyPath;
+			if (legacyPath) this.migrateLegacy(legacyPath);
 		}
 	}
-	return cases;
-}
 
-function appendLine(filePath: string, refusalCase: RefusalCase): void {
-	fs.mkdirSync(path.dirname(filePath), { recursive: true });
-	fs.appendFileSync(filePath, `${JSON.stringify(refusalCase)}\n`, "utf8");
-}
-
-function countBy(values: Iterable<string | null>): RefusalCount[] {
-	const counts = new Map<string | null, number>();
-	for (const value of values) counts.set(value, (counts.get(value) ?? 0) + 1);
-	return [...counts.entries()]
-		.sort((left, right) => right[1] - left[1] || String(left[0]).localeCompare(String(right[0])))
-		.map(([value, count]) => ({ value, count }));
-}
-
-function modelVersionOf(refusalCase: RefusalCase): string {
-	return refusalCase.modelVersion === "unknown"
-		? refusalCase.model
-		: `${refusalCase.model}@${refusalCase.modelVersion}`;
-}
-
-export function replayRequiresTools(refusalCase: RefusalCase): boolean {
-	return refusalCase.requiresTools || refusalCase.tool !== null || refusalCase.replayEnvelope.toolNames.length > 0;
-}
-
-export class RefusalCorpus {
-	readonly #path: string;
-	#cases: Map<string, RefusalCase>;
-
-	constructor(options: RefusalCorpusOptions = {}) {
-		this.#path = options.path ?? defaultRefusalCorpusPath();
-		this.#cases = readCases(this.#path);
+	get dbPath(): string {
+		return this.#dbPath;
 	}
 
-	get filePath(): string {
-		return this.#path;
+	close(): void {
+		this.#db.close();
 	}
 
-	appendCase(input: RefusalCaseInput): RefusalCase {
-		const refusalCase = normalizeRefusalCase(input);
-		appendLine(this.#path, refusalCase);
-		this.#cases.set(refusalCase.id, refusalCase);
-		return refusalCase;
+	#initialize(): void {
+		this.#db.run("PRAGMA journal_mode = WAL");
+		this.#db.run("PRAGMA synchronous = FULL");
+		this.#db.run(`CREATE TABLE IF NOT EXISTS refusal_records (
+			schema_version INTEGER NOT NULL,
+			id TEXT PRIMARY KEY,
+			session_id TEXT NOT NULL,
+			child_id TEXT,
+			turn_id TEXT NOT NULL,
+			attempt_id TEXT NOT NULL,
+			provider TEXT NOT NULL,
+			model TEXT NOT NULL,
+			reason_class TEXT NOT NULL,
+			prompt_digest TEXT NOT NULL,
+			occurred_at INTEGER NOT NULL,
+			build_version TEXT,
+			build_digest TEXT,
+			recovery_state TEXT NOT NULL,
+			recovery_model TEXT,
+			recovery_receipt TEXT,
+			review_status TEXT NOT NULL,
+			verdict TEXT,
+			redaction_policy_id TEXT NOT NULL,
+			UNIQUE(session_id, attempt_id)
+		)`);
+		this.#db.run(`CREATE TABLE IF NOT EXISTS refusal_events (
+			event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+			record_id TEXT NOT NULL REFERENCES refusal_records(id),
+			event_type TEXT NOT NULL,
+			occurred_at INTEGER NOT NULL,
+			recovery_model TEXT,
+			receipt TEXT
+		)`);
+		this.#db.run(`CREATE TABLE IF NOT EXISTS refusal_migrations (
+			source_path TEXT NOT NULL,
+			source_digest TEXT NOT NULL,
+			migrated_at INTEGER NOT NULL,
+			row_count INTEGER NOT NULL,
+			PRIMARY KEY(source_path, source_digest)
+		)`);
+		this.#db.run("CREATE INDEX IF NOT EXISTS idx_refusals_time ON refusal_records(occurred_at DESC)");
+		this.#db.run("CREATE INDEX IF NOT EXISTS idx_refusals_session ON refusal_records(session_id, occurred_at DESC)");
+		this.#db.run("CREATE INDEX IF NOT EXISTS idx_refusal_events_record ON refusal_events(record_id, event_id)");
 	}
 
-	get(id: string): RefusalCase | undefined {
-		return this.#cases.get(id);
+	record(input: RefusalRecordInput): RefusalRecord {
+		if (this.#readonly) throw new Error("Refusal store is read-only");
+		const normalized = normalizeInput(input);
+		this.#db.transaction(() => {
+			const inserted = this.#db
+				.query(`INSERT OR IGNORE INTO refusal_records (${RECORD_COLUMNS}) VALUES (
+					$schemaVersion,$id,$sessionId,$childId,$turnId,$attemptId,$provider,$model,$reasonClass,$promptDigest,
+					$timestamp,$buildVersion,$buildDigest,'observed',NULL,NULL,'unreviewed',NULL,$redactionPolicyId)`)
+				.run({
+					$schemaVersion: REFUSAL_STORE_SCHEMA_VERSION,
+					$id: normalized.id,
+					$sessionId: normalized.sessionId,
+					$childId: normalized.childId,
+					$turnId: normalized.turnId,
+					$attemptId: normalized.attemptId,
+					$provider: normalized.provider,
+					$model: normalized.model,
+					$reasonClass: normalized.reasonClass,
+					$promptDigest: normalized.promptDigest,
+					$timestamp: normalized.timestamp,
+					$buildVersion: normalized.buildVersion,
+					$buildDigest: normalized.buildDigest,
+					$redactionPolicyId: REFUSAL_REDACTION_POLICY,
+				});
+			if (inserted.changes === 1) {
+				this.#insertEvent(normalized.id, "refusal-observed", normalized.timestamp, null, null);
+			}
+		})();
+		const existing = this.#db
+			.query<RefusalRow, { $sessionId: string; $attemptId: string }>(
+				`SELECT ${RECORD_COLUMNS} FROM refusal_records WHERE session_id=$sessionId AND attempt_id=$attemptId`,
+			)
+			.get({ $sessionId: normalized.sessionId, $attemptId: normalized.attemptId });
+		if (!existing) throw new Error("Failed to record refusal");
+		return decodeRow(existing);
 	}
 
-	list(options: RefusalListOptions = {}): readonly RefusalCase[] {
-		const verdict =
-			options.verdict === "pending"
-				? "unreviewed"
-				: options.verdict === "confirmed"
-					? "true-positive"
-					: options.verdict;
-		const values = [...this.#cases.values()].filter(refusalCase => {
-			if (options.modelVersion !== undefined && refusalCase.modelVersion !== options.modelVersion) return false;
-			if (options.category !== undefined && refusalCase.category !== options.category) return false;
-			if (options.action !== undefined && refusalCase.action !== options.action) return false;
-			if (options.contextSource !== undefined && !refusalCase.contextSources.includes(options.contextSource))
-				return false;
-			if (verdict !== undefined && refusalCase.verdict !== verdict) return false;
-			if (options.falsePositivesOnly && refusalCase.verdict !== "false-positive") return false;
-			if (options.since !== undefined && refusalCase.timestamp < options.since) return false;
-			return true;
-		});
-		const limit = options.limit === undefined ? values.length : Math.max(0, Math.min(500, options.limit));
-		return values.slice(0, limit);
+	persistRoute(id: string, recoveryModel: string, receipt: string, timestamp = Date.now()): RefusalRecord {
+		return this.#transition(id, "routed", recoveryModel, receipt, "route-persisted", timestamp);
+	}
+
+	commitResume(id: string, recoveryModel: string, receipt: string, timestamp = Date.now()): RefusalRecord {
+		return this.#transition(id, "resumed", recoveryModel, receipt, "resume-committed", timestamp);
+	}
+
+	failRecovery(id: string, recoveryModel: string | null, receipt: string, timestamp = Date.now()): RefusalRecord {
+		return this.#transition(id, "fallback-failed", recoveryModel, receipt, "fallback-failed", timestamp);
+	}
+
+	#transition(
+		id: string,
+		state: RefusalRecoveryState,
+		recoveryModel: string | null,
+		receipt: string,
+		event: RefusalEventType,
+		timestamp: number,
+	): RefusalRecord {
+		if (this.#readonly) throw new Error("Refusal store is read-only");
+		this.#db.transaction(() => {
+			const result = this.#db
+				.query("UPDATE refusal_records SET recovery_state=$state,recovery_model=$model,recovery_receipt=$receipt WHERE id=$id")
+				.run({ $state: state, $model: recoveryModel, $receipt: bounded(receipt, 512), $id: id });
+			if (result.changes !== 1) throw new Error(`Refusal record not found: ${id}`);
+			this.#insertEvent(id, event, timestamp, recoveryModel, receipt);
+		})();
+		const record = this.get(id);
+		if (!record) throw new Error(`Refusal record not found: ${id}`);
+		return record;
+	}
+
+	#insertEvent(
+		recordId: string,
+		type: RefusalEventType,
+		timestamp: number,
+		recoveryModel: string | null,
+		receipt: string | null,
+	): void {
+		this.#db
+			.query("INSERT INTO refusal_events (record_id,event_type,occurred_at,recovery_model,receipt) VALUES ($recordId,$type,$timestamp,$model,$receipt)")
+			.run({
+				$recordId: recordId,
+				$type: type,
+				$timestamp: timestamp,
+				$model: recoveryModel,
+				$receipt: receipt === null ? null : bounded(receipt, 512),
+			});
+	}
+
+	get(id: string): RefusalRecord | undefined {
+		const row = this.#db
+			.query<RefusalRow, { $id: string }>(`SELECT ${RECORD_COLUMNS} FROM refusal_records WHERE id=$id`)
+			.get({ $id: id });
+		return row ? decodeRow(row) : undefined;
+	}
+
+	events(id: string): readonly RefusalEvent[] {
+		return this.#db
+			.query<RefusalEventRow, { $id: string }>(
+				"SELECT event_id,record_id,event_type,occurred_at,recovery_model,receipt FROM refusal_events WHERE record_id=$id ORDER BY event_id",
+			)
+			.all({ $id: id })
+			.map(decodeEventRow);
+	}
+
+	list(options: RefusalListOptions = {}): readonly RefusalRecord[] {
+		const clauses: string[] = [];
+		const bindings: Record<string, string | number> = {};
+		const add = (column: string, key: string, value: string | number | undefined): void => {
+			if (value === undefined) return;
+			clauses.push(`${column}=$${key}`);
+			bindings[`$${key}`] = value;
+		};
+		add("provider", "provider", options.provider);
+		add("model", "model", options.model);
+		add("reason_class", "reasonClass", options.reasonClass);
+		add("recovery_state", "recoveryState", options.recoveryState);
+		add("review_status", "reviewStatus", options.reviewStatus);
+		add("verdict", "verdict", options.verdict);
+		if (options.since !== undefined) {
+			clauses.push("occurred_at >= $since");
+			bindings.$since = options.since;
+		}
+		const limit = Math.max(0, Math.min(500, options.limit ?? 50));
+		bindings.$limit = limit;
+		const where = clauses.length > 0 ? ` WHERE ${clauses.join(" AND ")}` : "";
+		return this.#db
+			.query<RefusalRow, Record<string, string | number>>(
+				`SELECT ${RECORD_COLUMNS} FROM refusal_records${where} ORDER BY occurred_at DESC,id LIMIT $limit`,
+			)
+			.all(bindings)
+			.map(decodeRow);
 	}
 
 	stats(): RefusalStats {
-		const cases = this.list();
-		const modelVersion = countBy(cases.map(modelVersionOf));
-		const category = countBy(cases.map(refusalCase => refusalCase.category));
-		const action = countBy(cases.map(refusalCase => refusalCase.action));
-		const contextSource = countBy(cases.flatMap(refusalCase => refusalCase.contextSources));
-		const verdict = countBy(cases.map(refusalCase => refusalCase.verdict));
 		return {
-			total: cases.length,
-			modelVersion,
-			category,
-			action,
-			contextSource,
-			verdict,
-			byModelVersion: modelVersion,
-			byCategory: category,
-			byAction: action,
-			byContextSource: contextSource,
-			byVerdict: verdict,
+			total: this.#countTotal(),
+			provider: this.#counts("provider"),
+			model: this.#counts("model"),
+			reasonClass: this.#counts("reason_class"),
+			recoveryState: this.#counts("recovery_state"),
+			reviewStatus: this.#counts("review_status"),
+			verdict: this.#counts("verdict"),
 		};
 	}
 
-	mark(id: string, update: { verdict: RefusalVerdictInput; note?: string | null }): RefusalCase;
-	mark(id: string, verdict: RefusalVerdictInput, note?: string | null): RefusalCase;
-	mark(
-		id: string,
-		updateOrVerdict: { verdict: RefusalVerdictInput; note?: string | null } | RefusalVerdictInput,
-		note?: string | null,
-	): RefusalCase {
-		const current = this.#cases.get(id);
-		if (!current) throw new Error(`Refusal case not found: ${id}`);
-		const verdict = typeof updateOrVerdict === "string" ? updateOrVerdict : updateOrVerdict.verdict;
-		const noteValue = typeof updateOrVerdict === "string" ? note : updateOrVerdict.note;
-		const safeNote = noteValue === undefined ? current.note : safeNullable(noteValue, REFUSAL_NOTE_MAX);
-		const updated: RefusalCase = {
-			...current,
-			verdict: normalizeVerdict(verdict),
-			remediationNote: safeNote,
-			note: safeNote,
-		};
-		appendLine(this.#path, updated);
-		this.#cases.set(id, updated);
-		return updated;
+	#countTotal(): number {
+		return this.#db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM refusal_records").get()?.count ?? 0;
 	}
 
-	async replay(id: string, options: RefusalReplayOptions = {}): Promise<RefusalReplayRecord> {
-		const refusalCase = this.#cases.get(id);
-		if (!refusalCase) throw new Error(`Refusal case not found: ${id}`);
-		return replayRefusalCase(this, refusalCase, options);
+	#counts(column: "provider" | "model" | "reason_class" | "recovery_state" | "review_status" | "verdict"): RefusalCount[] {
+		return this.#db
+			.query<{ value: string | null; count: number }, []>(
+				`SELECT ${column} AS value,COUNT(*) AS count FROM refusal_records GROUP BY ${column} ORDER BY count DESC,value`,
+			)
+			.all();
 	}
 
-	async replayFalsePositives(options: RefusalReplayOptions = {}): Promise<readonly RefusalReplayRecord[]> {
-		const results: RefusalReplayRecord[] = [];
-		for (const refusalCase of this.list({ falsePositivesOnly: true })) {
-			results.push(await replayRefusalCase(this, refusalCase, options));
-		}
-		return results;
-	}
-
-	recordReplay(refusalCase: RefusalCase, replay: RefusalReplayRecord): RefusalReplayRecord {
-		const updated: RefusalCase = { ...refusalCase, replayHistory: [...refusalCase.replayHistory, replay] };
-		appendLine(this.#path, updated);
-		this.#cases.set(updated.id, updated);
-		return replay;
-	}
-}
-
-async function defaultReplayCompletion(
-	request: RefusalReplayRequest,
-	resolveModel?: RefusalReplayOptions["resolveModel"],
-): Promise<RefusalReplayObservation> {
-	const model =
-		(await resolveModel?.(request.provider, request.model)) ??
-		getBundledModel(request.provider as GeneratedProvider, request.model);
-	if (!model) throw new Error(`Current Fable model is unavailable: ${request.provider}/${request.model}`);
-	const context: Context = {
-		messages: [{ role: "user", content: request.prompt, timestamp: Date.now() }],
-		systemPrompt: request.contextSources.map(source => `Stored context source: ${source}`),
-		tools: [],
-	};
-	const response = await completeSimple(model, context);
-	const refused = response.stopDetails?.type === "refusal";
-	return {
-		refused,
-		outcome: refused ? "refused" : "passed",
-		category: refused ? (response.stopDetails?.category ?? null) : null,
-		refusalText: refused ? (response.errorMessage ?? response.stopDetails?.explanation ?? null) : null,
-	};
-}
-
-function normalizeReplayObservation(observation: RefusalReplayObservation): {
-	readonly refused: boolean;
-	readonly outcome: RefusalReplayOutcome;
-	readonly category: string | null;
-	readonly textExcerpt: string | null;
-} {
-	const refused = observation.refused ?? observation.outcome === "refused";
-	return {
-		refused,
-		outcome: observation.outcome ?? (refused ? "refused" : "passed"),
-		category: safeNullable(observation.category, 256),
-		textExcerpt: safeNullable(observation.textExcerpt ?? observation.refusalText, REFUSAL_TEXT_MAX),
-	};
-}
-
-async function replayRefusalCase(
-	corpus: RefusalCorpus,
-	refusalCase: RefusalCase,
-	options: RefusalReplayOptions,
-): Promise<RefusalReplayRecord> {
-	if (replayRequiresTools(refusalCase)) {
-		throw new Error(
-			`Refusal replay requires tools (${refusalCase.tool ?? refusalCase.replayEnvelope.toolNames.join(", ")}); replay is read-only and no-tools by design.`,
+	countAutomaticRecoveries(sessionId: string): number {
+		return (
+			this.#db
+				.query<{ count: number }, { $sessionId: string }>(
+					"SELECT COUNT(*) AS count FROM refusal_records WHERE session_id=$sessionId AND recovery_state IN ('routed','resumed','fallback-failed')",
+				)
+				.get({ $sessionId: sessionId })?.count ?? 0
 		);
 	}
-	const request: RefusalReplayRequest = {
-		provider: refusalCase.provider,
-		model: refusalCase.model,
-		modelVersion: refusalCase.modelVersion,
-		role: refusalCase.role,
-		prompt: refusalCase.replayEnvelope.prompt,
-		contextSources: refusalCase.replayEnvelope.contextSources,
-		toolNames: [],
-		tools: [],
-	};
-	let replay: RefusalReplayRecord;
-	try {
-		const observation = await (
-			options.completion ?? ((envelope, _case) => defaultReplayCompletion(envelope, options.resolveModel))
-		)(request, refusalCase);
-		const normalized = normalizeReplayObservation(observation);
-		replay = {
-			caseId: refusalCase.id,
-			timestamp: options.nowMs?.() ?? Date.now(),
-			refused: normalized.refused,
-			outcome: normalized.outcome,
-			category: normalized.category,
-			textExcerpt: normalized.textExcerpt,
-			refusalText: normalized.textExcerpt,
-			error: null,
-		};
-	} catch (error) {
-		replay = {
-			caseId: refusalCase.id,
-			timestamp: options.nowMs?.() ?? Date.now(),
-			refused: false,
-			outcome: "error",
-			category: null,
-			textExcerpt: null,
-			refusalText: null,
-			error: error instanceof Error ? cap(redactRefusalText(error.message), REFUSAL_TEXT_MAX) : "Replay failed",
-		};
+
+	review(id: string, verdict: RefusalVerdict, timestamp = Date.now()): RefusalRecord {
+		if (this.#readonly) throw new Error("Refusal store is read-only");
+		this.#db.transaction(() => {
+			const result = this.#db
+				.query("UPDATE refusal_records SET review_status='reviewed',verdict=$verdict WHERE id=$id")
+				.run({ $verdict: verdict, $id: id });
+			if (result.changes !== 1) throw new Error(`Refusal record not found: ${id}`);
+			this.#insertEvent(id, "reviewed", timestamp, null, null);
+		})();
+		const record = this.get(id);
+		if (!record) throw new Error(`Refusal record not found: ${id}`);
+		return record;
 	}
-	corpus.recordReplay(refusalCase, replay);
-	return replay;
+
+	async retry(id: string, handler?: RefusalRetryHandler): Promise<RefusalRecord> {
+		const current = this.get(id);
+		if (!current) throw new Error(`Refusal record not found: ${id}`);
+		const context: RefusalRetryContext = {
+			recordId: current.id,
+			sessionId: current.sessionId,
+			childId: current.childId,
+			recoveryModel: current.recoveryModel,
+		};
+		const result = handler
+			? await handler(context)
+			: { accepted: true, receipt: `manual-retry:${randomUUID()}` } satisfies RefusalRetryReceipt;
+		return this.#transition(
+			id,
+			result.accepted ? "retry-requested" : "retry-failed",
+			current.recoveryModel,
+			result.receipt,
+			result.accepted ? "retry-requested" : "retry-failed",
+			Date.now(),
+		);
+	}
+
+	migrateLegacy(legacyPath: string): number {
+		if (this.#readonly) throw new Error("Refusal store is read-only");
+		let raw: string;
+		try {
+			raw = fs.readFileSync(legacyPath, "utf8");
+		} catch (error) {
+			if (isEnoent(error)) return 0;
+			throw error;
+		}
+		const sourcePath = path.resolve(legacyPath);
+		const sourceDigest = createHash("sha256").update(raw).digest("hex");
+		const migrated = this.#db
+			.query<{ row_count: number }, { $sourcePath: string; $sourceDigest: string }>(
+				"SELECT row_count FROM refusal_migrations WHERE source_path=$sourcePath AND source_digest=$sourceDigest",
+			)
+			.get({ $sourcePath: sourcePath, $sourceDigest: sourceDigest });
+		if (migrated) return migrated.row_count;
+
+		const decoded: LegacyRefusal[] = [];
+		for (const value of parseJsonlLenient<unknown>(raw)) {
+			try {
+				decoded.push(Schema.decodeUnknownSync(LegacyRefusalSchema)(value));
+			} catch {
+				// Malformed historical rows are skipped without hiding later valid rows.
+			}
+		}
+		let rowCount = 0;
+		this.#db.transaction(() => {
+			for (let index = 0; index < decoded.length; index++) {
+				const record = decoded[index];
+				const sourceId = record.id?.trim() || record.caseId?.trim() || `${sourceDigest}:${index}`;
+				const id = `legacy:${createHash("sha256").update(`${sourcePath}\0${sourceId}`).digest("hex")}`;
+				const sessionId = record.sessionId?.trim() || `legacy:${sourceDigest}`;
+				const attemptId = record.correlationId?.trim() || sourceId;
+				const inserted = this.#db
+					.query(`INSERT OR IGNORE INTO refusal_records (${RECORD_COLUMNS}) VALUES (
+						$schemaVersion,$id,$sessionId,NULL,$turnId,$attemptId,$provider,$model,$reasonClass,$promptDigest,
+						$timestamp,$buildVersion,NULL,$state,NULL,NULL,$reviewStatus,$verdict,$redactionPolicyId)`)
+					.run({
+						$schemaVersion: REFUSAL_STORE_SCHEMA_VERSION,
+						$id: id,
+						$sessionId: sessionId,
+						$turnId: record.turnId?.trim() || sourceId,
+						$attemptId: attemptId,
+						$provider: bounded(record.provider, 128),
+						$model: bounded(record.model),
+						$reasonClass: bounded(record.category, 128),
+						$promptDigest: legacyPromptDigest(record),
+						$timestamp: record.timestamp ?? 0,
+						$buildVersion: nullable(record.modelVersion ?? record.version),
+						$state: record.rerouteOutcome ? "resumed" : "observed",
+						$reviewStatus: legacyVerdict(record) ? "reviewed" : "unreviewed",
+						$verdict: legacyVerdict(record),
+						$redactionPolicyId: REFUSAL_REDACTION_POLICY,
+					});
+				if (inserted.changes === 1) {
+					rowCount++;
+					this.#insertEvent(id, "refusal-observed", record.timestamp ?? 0, null, null);
+				}
+			}
+			this.#db
+				.query("INSERT INTO refusal_migrations (source_path,source_digest,migrated_at,row_count) VALUES ($sourcePath,$sourceDigest,$migratedAt,$rowCount)")
+				.run({
+					$sourcePath: sourcePath,
+					$sourceDigest: sourceDigest,
+					$migratedAt: Date.now(),
+					$rowCount: rowCount,
+				});
+		})();
+		return rowCount;
+	}
 }

@@ -48,6 +48,36 @@ export const RETRY_FALLBACK_SETTINGS_SCHEMA = {
 			],
 		},
 	},
+	"retry.semanticRefusalRecovery.enabled": {
+		type: "boolean",
+		default: true,
+		ui: {
+			tab: "model",
+			group: "Retry & Fallback",
+			label: "Semantic Refusal Recovery",
+			description: "Recover decoded Anthropic Fable refusals on the same session using a durable Codex route",
+		},
+	},
+	"retry.semanticRefusalRecovery.model": {
+		type: "string",
+		default: "openai-codex/gpt-5.6-sol",
+	},
+	"retry.semanticRefusalRecovery.smolModel": {
+		type: "string",
+		default: "openai-codex/gpt-5.6-luna",
+	},
+	"retry.semanticRefusalRecovery.maxPerSession": {
+		type: "number",
+		default: 3,
+	},
+	"retry.semanticRefusalRecovery.exemptResponsibilities": {
+		type: "array",
+		default: ["designer"],
+	},
+	"retry.semanticRefusalRecovery.smolResponsibilities": {
+		type: "array",
+		default: ["quick_task"],
+	},
 } as const;
 
 export const CODEX_RESET_SETTINGS_SCHEMA = {
@@ -117,6 +147,12 @@ export interface RetrySettings {
 	proposableFallbackChains: Record<string, string[]>;
 	subagentFallbackAutoApproveUntil: string;
 	fallbackRevertPolicy: "cooldown-expiry" | "never";
+	"semanticRefusalRecovery.enabled": boolean;
+	"semanticRefusalRecovery.model": string;
+	"semanticRefusalRecovery.smolModel": string;
+	"semanticRefusalRecovery.maxPerSession": number;
+	"semanticRefusalRecovery.exemptResponsibilities": string[];
+	"semanticRefusalRecovery.smolResponsibilities": string[];
 }
 
 export interface IncidentsSettings {

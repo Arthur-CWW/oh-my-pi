@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { RefusalCorpus } from "@oh-my-pi/pi-coding-agent/session/refusal-corpus";
+import { digestRefusalPrompt, RefusalStore } from "@oh-my-pi/pi-coding-agent/session/refusal-corpus";
 
 const tempRoots: string[] = [];
 
@@ -10,10 +10,17 @@ afterEach(async () => {
 	await Promise.all(tempRoots.splice(0).map(root => fs.rm(root, { recursive: true, force: true })));
 });
 
-async function runCli(file: string, ...args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
+async function runCli(root: string, db: string, ...args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
 	const processHandle = Bun.spawn([process.execPath, "src/cli.ts", "refusals", ...args], {
 		cwd: path.resolve(import.meta.dir, ".."),
-		env: { ...Bun.env, OMP_REFUSALS_PATH: file },
+		env: {
+			...Bun.env,
+			HOME: path.join(root, "home"),
+			OMP_CONFIG_ROOT: path.join(root, "config"),
+			OMP_SESSION_CONTROL_DB: db,
+			OMP_REFUSALS_DB: db,
+			OMP_IRC_DB: path.join(root, "irc.sqlite"),
+		},
 		stdout: "pipe",
 		stderr: "pipe",
 	});
@@ -26,36 +33,33 @@ async function runCli(file: string, ...args: string[]): Promise<{ code: number; 
 }
 
 describe("omp refusals", () => {
-	it("lists/stats and marks a persisted case through the real CLI", async () => {
+	it("lists, shows, stats, reviews, and retries from host SQLite", async () => {
 		const root = await fs.mkdtemp(path.join(os.tmpdir(), "omp-refusals-cli-"));
 		tempRoots.push(root);
-		const file = path.join(root, "refusals.jsonl");
-		const corpus = new RefusalCorpus({ path: file });
-		const refusalCase = corpus.appendCase({
-			prompt: "Update the local test fixture.",
-			model: "fable-test",
-			modelVersion: "2026.07",
-			category: "coding",
-			action: "edit",
+		const db = path.join(root, "control.sqlite");
+		const store = new RefusalStore({ dbPath: db, legacyPath: null });
+		const record = store.record({
+			sessionId: "session-1",
+			childId: "Child",
+			turnId: "turn-1",
+			attemptId: "attempt-1",
+			provider: "anthropic",
+			model: "claude-fable-5",
+			reasonClass: "bio",
+			promptDigest: digestRefusalPrompt("private"),
 		});
+		store.close();
 
-		const stats = await runCli(file, "stats", "--json");
+		const stats = await runCli(root, db, "stats", "--json");
 		expect(stats.code).toBe(0);
 		expect(JSON.parse(stats.stdout)).toEqual(expect.objectContaining({ total: 1 }));
-
-		const marked = await runCli(
-			file,
-			"mark",
-			refusalCase.id,
-			"--verdict",
-			"false-positive",
-			"--note",
-			"safe local fixture",
-		);
-		expect(marked.code).toBe(0);
-		const reopened = new RefusalCorpus({ path: file });
-		expect(reopened.get(refusalCase.id)).toEqual(
-			expect.objectContaining({ verdict: "false-positive", note: "safe local fixture" }),
-		);
+		const shown = await runCli(root, db, "show", record.id, "--json");
+		expect(JSON.parse(shown.stdout)).toEqual(expect.objectContaining({ id: record.id, events: expect.any(Array) }));
+		const reviewed = await runCli(root, db, "review", record.id, "--verdict", "false-positive", "--json");
+		expect(JSON.parse(reviewed.stdout)).toEqual(expect.objectContaining({ verdict: "false-positive" }));
+		const retried = await runCli(root, db, "retry", record.id, "--json");
+		expect(JSON.parse(retried.stdout)).toEqual(expect.objectContaining({ recoveryState: "retry-requested" }));
+		const listed = await runCli(root, db, "list", "--json");
+		expect(JSON.parse(listed.stdout)).toHaveLength(1);
 	});
 });

@@ -351,10 +351,10 @@ import {
 	USER_INTERRUPT_LABEL,
 } from "./messages";
 import { OversizedPromptRecoveryGuard, recoverOversizedPrompt } from "./oversized-prompt-recovery";
+import { digestRefusalPrompt, RefusalStore } from "./refusal-corpus";
 import {
-	decideRefusalReroute,
-	REFUSAL_REROUTE_ANNOTATION,
-	type RefusalRerouteDecision,
+	decideSemanticRefusalRecovery,
+	type SemanticRefusalRecoveryDecision,
 } from "./refusal-reroute-policy";
 import {
 	SCRAPING_DESKTOP_REMINDER,
@@ -810,6 +810,17 @@ interface DurableAttemptJournalMarker {
 	readonly state: DurableAttemptJournalState;
 	readonly revision?: number;
 	readonly retryAt?: number;
+}
+
+interface SemanticRefusalCheckpoint {
+	readonly attemptId: string;
+	readonly turnId: string;
+	readonly generation: number;
+	readonly provider: string;
+	readonly model: string;
+	readonly promptDigest: string;
+	readonly messageCount: number;
+	readonly journalLeafId: string | null;
 }
 
 function decodeDurableAttemptJournalMarker(entry: SessionEntry): DurableAttemptJournalMarker | undefined {
@@ -1400,6 +1411,8 @@ export class AgentSession {
 	#activeRetryFallback: ActiveRetryFallbackState | undefined = undefined;
 	#contentFilterRerouteFailures = 0;
 	#pendingFallbackApproval = false;
+	#semanticRefusalCheckpoint: SemanticRefusalCheckpoint | undefined;
+	#semanticRefusalAttemptedGeneration: number | undefined;
 	// Todo completion reminder state
 	#todoReminderCount = 0;
 	/**
@@ -5750,9 +5763,34 @@ export class AgentSession {
 		return this.#obfuscateForProvider(convertToLlm(messages));
 	}
 
+	async checkpointSemanticRefusalAttempt(messages: readonly AgentMessage[]): Promise<void> {
+		if (!this.settings.get("retry.semanticRefusalRecovery.enabled")) return;
+		const model = this.model;
+		if (model?.provider !== "anthropic" || !model.id.toLowerCase().includes("fable")) return;
+		const latestUser = messages.findLast(message => message.role === "user");
+		const promptText = latestUser ? this.#extractUserMessageText(latestUser.content) : "";
+		const checkpoint: SemanticRefusalCheckpoint = {
+			attemptId: Bun.randomUUIDv7(),
+			turnId: `${this.sessionId}:${this.#promptGeneration}`,
+			generation: this.#promptGeneration,
+			provider: model.provider,
+			model: model.id,
+			promptDigest: digestRefusalPrompt(promptText),
+			messageCount: messages.length,
+			journalLeafId: this.sessionManager.getLeafId(),
+		};
+		this.sessionManager.appendCustomEntry("provider_refusal_checkpoint", {
+			version: 1,
+			...checkpoint,
+		});
+		await this.sessionManager.flush();
+		this.#semanticRefusalCheckpoint = checkpoint;
+	}
+
 	/** Convert session messages using the same pre-LLM pipeline as the active session. */
 	async convertMessagesToLlm(messages: AgentMessage[], signal?: AbortSignal): Promise<Message[]> {
 		const transformedMessages = await this.#transformContext(messages, signal);
+		await this.checkpointSemanticRefusalAttempt(transformedMessages);
 		return await this.#convertToLlm(transformedMessages);
 	}
 
@@ -12104,16 +12142,21 @@ export class AgentSession {
 	}
 
 	#isRetryableError(message: AssistantMessage): boolean {
-		if (message.stopReason !== "error" || !message.errorMessage) return false;
+		if (message.stopReason !== "error") return false;
+		if (
+			this.model?.provider === "anthropic" &&
+			this.model.id.toLowerCase().includes("fable") &&
+			(message.stopDetails?.type === "refusal" || message.stopDetails?.type === "sensitive")
+		) {
+			return !this.#refusalHasUnsafeReplayContent(message);
+		}
+		if (!message.errorMessage) return false;
 
 		// Context overflow is handled by compaction, not retry
 		const contextWindow = this.model?.contextWindow ?? 0;
 		if (isContextOverflow(message, contextWindow)) return false;
 
 		if (this.#isAnthropicOutputContentFilterError(message.errorMessage)) {
-			return !this.#refusalHasUnsafeReplayContent(message);
-		}
-		if (this.#refusalRerouteDecision(message).reroute) {
 			return !this.#refusalHasUnsafeReplayContent(message);
 		}
 		if (this.#streamInterruptedAfterObservableOutput(message)) return false;
@@ -12163,13 +12206,27 @@ export class AgentSession {
 		);
 	}
 
-	#refusalRerouteDecision(message: AssistantMessage): RefusalRerouteDecision {
-		const latestUser = this.agent.state.messages.findLast(candidate => candidate.role === "user");
-		const latestUserText = latestUser ? this.#extractUserMessageText(latestUser.content) : undefined;
-		return decideRefusalReroute({
+	#semanticRefusalResponsibility(): string | undefined {
+		const init = this.sessionManager
+			.getBranch()
+			.find(entry => entry.type === "session_init" && entry.subagent?.spawnRecord);
+		return init?.type === "session_init" ? init.subagent?.spawnRecord?.agentType : undefined;
+	}
+
+	#semanticRefusalDecision(message: AssistantMessage, completedRecoveries: number): SemanticRefusalRecoveryDecision {
+		return decideSemanticRefusalRecovery({
+			enabled: this.settings.get("retry.semanticRefusalRecovery.enabled"),
+			provider: this.model?.provider,
+			model: this.model?.id,
 			stopType: message.stopReason === "error" ? message.stopDetails?.type : undefined,
-			latestUserText,
-			fallbackPinned: this.#activeRetryFallback?.pinned === true,
+			responsibility: this.#semanticRefusalResponsibility(),
+			exemptResponsibilities: this.settings.get("retry.semanticRefusalRecovery.exemptResponsibilities"),
+			smolResponsibilities: this.settings.get("retry.semanticRefusalRecovery.smolResponsibilities"),
+			attemptedThisTurn: this.#semanticRefusalAttemptedGeneration === this.#promptGeneration,
+			completedRecoveries,
+			maxTotalRecoveries: Math.max(0, this.settings.get("retry.semanticRefusalRecovery.maxPerSession")),
+			fallbackModel: this.settings.get("retry.semanticRefusalRecovery.model"),
+			smolFallbackModel: this.settings.get("retry.semanticRefusalRecovery.smolModel"),
 		});
 	}
 
@@ -12259,7 +12316,7 @@ export class AgentSession {
 		role: string,
 		selector: RetryFallbackSelector,
 		currentSelector: string,
-		options?: { pinFallback?: boolean },
+		options?: { pinFallback?: boolean; durableHotswap?: boolean },
 	): Promise<void> {
 		const candidate = this.#modelRegistry.find(selector.provider, selector.id);
 		if (!candidate) {
@@ -12279,7 +12336,10 @@ export class AgentSession {
 		const nextThinkingLevel = selector.thinkingLevel ?? currentThinkingLevel;
 
 		this.#setModelWithProviderSessionReset(candidate);
-		this.sessionManager.appendModelChange(`${candidate.provider}/${candidate.id}`, EPHEMERAL_MODEL_CHANGE_ROLE);
+		this.sessionManager.appendModelChange(
+			`${candidate.provider}/${candidate.id}`,
+			options?.durableHotswap ? "hotswap" : EPHEMERAL_MODEL_CHANGE_ROLE,
+		);
 		this.settings.getStorage()?.recordModelUsage(`${candidate.provider}/${candidate.id}`);
 		this.setThinkingLevel(nextThinkingLevel);
 		if (!this.#activeRetryFallback) {
@@ -12300,6 +12360,150 @@ export class AgentSession {
 			to: selector.raw,
 			role,
 		});
+	}
+
+	async #notifySemanticRefusalRecovery(
+		recordId: string,
+		state: "resumed" | "fallback-failed",
+		recoveryModel: string,
+		receipt: string,
+	): Promise<void> {
+		const timestamp = Date.now();
+		const notice = {
+			type: "semantic_refusal_recovery_notice" as const,
+			version: 1 as const,
+			recordId,
+			sessionId: this.sessionId,
+			childId: this.#agentId ?? null,
+			state,
+			recoveryModel,
+			receipt,
+			timestamp,
+		};
+		const body = JSON.stringify(notice);
+		const parentId = this.#agentId ? AgentRegistry.global().get(this.#agentId)?.parentId : undefined;
+		if (parentId) {
+			const parentSession = AgentRegistry.global().get(parentId)?.session;
+			if (parentSession) {
+				appendErrorInboxEvent(parentSession.sessionManager, {
+					id: `semantic-refusal-recovery:${recordId}`,
+					firstTimestamp: timestamp,
+					lastTimestamp: timestamp,
+					message: `Semantic provider recovery ${state}; record ${recordId}.`,
+					count: 1,
+					source: "retry",
+					category: "provider-recovery",
+					agent: this.#agentId,
+					model: recoveryModel,
+					retry: state === "resumed",
+					unread: true,
+					resolved: state === "resumed",
+				});
+			}
+			await IrcBus.global().send({ from: this.#agentId ?? "Main", to: parentId, body, origin: "system" });
+		}
+		try {
+			const majordomo = this.#externalIrcBus?.findPeerByName("Majordomo", {
+				excludeSessionId: this.#ircExternalSessionId,
+			});
+			if (majordomo) {
+				this.#externalIrcBus?.sendMessage({
+					fromPeer: this.#agentId ?? "Main",
+					toPeer: majordomo.name,
+					body,
+					origin: "system",
+					audience: "direct",
+				});
+			}
+		} catch (error) {
+			logger.warn("Majordomo refusal recovery notice failed", { recordId, error: String(error) });
+		}
+	}
+
+	async #handleSemanticRefusalRecovery(message: AssistantMessage): Promise<boolean> {
+		const checkpoint = this.#semanticRefusalCheckpoint;
+		if (
+			!checkpoint ||
+			checkpoint.generation !== this.#promptGeneration ||
+			checkpoint.provider !== this.model?.provider ||
+			checkpoint.model !== this.model.id
+		) {
+			return false;
+		}
+		const store = new RefusalStore();
+		try {
+			const decision = this.#semanticRefusalDecision(
+				message,
+				store.countAutomaticRecoveries(this.sessionId),
+			);
+			if (!decision.recover) return false;
+			this.#semanticRefusalAttemptedGeneration = this.#promptGeneration;
+			const ownership = this.sessionManager.getSessionOwnership();
+			const record = store.record({
+				sessionId: this.sessionId,
+				childId: this.#agentId ?? null,
+				turnId: checkpoint.turnId,
+				attemptId: checkpoint.attemptId,
+				provider: checkpoint.provider,
+				model: checkpoint.model,
+				reasonClass: message.stopDetails?.type ?? "refusal",
+				promptDigest: checkpoint.promptDigest,
+				buildVersion: ownership?.buildRevision.version ?? null,
+				buildDigest: ownership?.buildRevision.digest ?? null,
+			});
+			const selector = parseRetryFallbackSelector(decision.fallbackModel);
+			const receipt = Bun.randomUUIDv7();
+			if (!selector) {
+				store.failRecovery(record.id, decision.fallbackModel, receipt);
+				await this.#notifySemanticRefusalRecovery(record.id, "fallback-failed", decision.fallbackModel, receipt);
+				return true;
+			}
+			const currentSelector = this.model
+				? formatRetryFallbackSelector(this.model, this.thinkingLevel)
+				: `${checkpoint.provider}/${checkpoint.model}`;
+			try {
+				await this.#applyRetryFallbackCandidate(
+					this.#semanticRefusalResponsibility() ?? "semantic-refusal",
+					selector,
+					currentSelector,
+					{ pinFallback: true, durableHotswap: true },
+				);
+				this.sessionManager.appendCustomEntry("provider_refusal_route", {
+					version: 1,
+					recordId: record.id,
+					attemptId: checkpoint.attemptId,
+					turnId: checkpoint.turnId,
+					promptDigest: checkpoint.promptDigest,
+					from: `${checkpoint.provider}/${checkpoint.model}`,
+					to: decision.fallbackModel,
+					receipt,
+					preAttemptLeafId: checkpoint.journalLeafId,
+					preAttemptMessageCount: checkpoint.messageCount,
+				});
+				await this.sessionManager.flush();
+				store.persistRoute(record.id, decision.fallbackModel, receipt);
+			} catch {
+				store.failRecovery(record.id, decision.fallbackModel, receipt);
+				await this.#notifySemanticRefusalRecovery(record.id, "fallback-failed", decision.fallbackModel, receipt);
+				return true;
+			}
+
+			const messages = this.agent.state.messages;
+			if (messages.at(-1) === message) this.agent.replaceMessages(messages.slice(0, -1));
+			store.commitResume(record.id, decision.fallbackModel, receipt);
+			await this.#notifySemanticRefusalRecovery(record.id, "resumed", decision.fallbackModel, receipt);
+			if (!this.#retryPromise) {
+				const { promise, resolve } = Promise.withResolvers<void>();
+				this.#retryPromise = promise;
+				this.#retryResolve = resolve;
+			}
+			this.#retryAttempt = 0;
+			this.#contentFilterRerouteFailures = 0;
+			this.#scheduleAgentContinue({ delayMs: 1, generation: this.#promptGeneration });
+			return true;
+		} finally {
+			store.close();
+		}
 	}
 
 	async #selectRetryModelFallback(currentSelector: string) {
@@ -12543,9 +12747,9 @@ export class AgentSession {
 	 * @returns true if retry was initiated, false if max retries exceeded or disabled
 	 */
 	async #handleRetryableError(message: AssistantMessage): Promise<boolean> {
+		if (await this.#handleSemanticRefusalRecovery(message)) return true;
 		const retrySettings = this.settings.getGroup("retry");
 		if (!retrySettings.enabled) return false;
-		const classifierRefusal = this.#refusalRerouteDecision(message).reroute;
 		const generation = this.#promptGeneration;
 		const errorMessage = message.errorMessage || "Unknown error";
 		const requestFailureCause = classifyRequestFailure({ message: errorMessage, status: message.errorStatus });
@@ -12693,9 +12897,7 @@ export class AgentSession {
 			if (retrySettings.fallbackApproval && (!contentFilterBlocked || this.#retryAttempt > 1)) {
 				const approvalRequested = await this.#requestRetryFallbackApproval(currentSelector, retryCause, generation);
 				if (approvalRequested) {
-					if (!classifierRefusal) {
-						this.#noteRetryFallbackCooldown(currentSelector, parsedRetryAfterMs, errorMessage);
-					}
+					this.#noteRetryFallbackCooldown(currentSelector, parsedRetryAfterMs, errorMessage);
 					return true;
 				}
 			}
@@ -12713,12 +12915,6 @@ export class AgentSession {
 				attempt,
 				finalError: "Retry stopped because no native-video model is available for the pending context.",
 			});
-			this.#resolveRetry();
-			return false;
-		}
-		if (classifierRefusal) {
-			this.#retryAttempt = 0;
-			this.#contentFilterRerouteFailures = 0;
 			this.#resolveRetry();
 			return false;
 		}
@@ -12796,9 +12992,7 @@ export class AgentSession {
 				? "Provider credentials need refresh; this child will resume when the credential store changes."
 				: retryCause === "rate-limit" && durableProviderWait
 					? `Provider quota unavailable; this child will resume after ${new Date(providerRecoveryNow + delayMs).toISOString()}.`
-					: classifierRefusal
-						? `${REFUSAL_REROUTE_ANNOTATION} ${errorMessage}`
-						: errorMessage,
+					: errorMessage,
 		});
 
 		// Remove error message from agent state (keep in session for history)

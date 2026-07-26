@@ -2500,7 +2500,9 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 
 		const transformContext = async (messages: AgentMessage[], _signal?: AbortSignal) => {
 			const withContext = await extensionRunner.emitContext(messages);
-			return wrapSteeringForModel(withContext);
+			const transformed = wrapSteeringForModel(withContext);
+			await session.checkpointSemanticRefusalAttempt(transformed);
+			return transformed;
 		};
 		// Per-request provider-context transforms. Obfuscate FIRST so secrets are
 		// redacted from text before snapcompact rasterizes it into PNG frames.
