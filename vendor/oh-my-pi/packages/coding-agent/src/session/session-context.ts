@@ -80,6 +80,14 @@ export function getLatestCompactionEntry(entries: SessionEntry[]): CompactionEnt
 	return null;
 }
 
+export interface ContextRepairMessageProjection {
+	/**
+	 * Project provider-bound retry messages only. The source array is immutable,
+	 * and the projection may not increase the message count.
+	 */
+	readonly project: (messages: readonly AgentMessage[]) => readonly AgentMessage[];
+}
+
 export interface BuildSessionContextOptions {
 	/**
 	 * Build the full-history display transcript instead of the LLM context:
@@ -89,6 +97,8 @@ export interface BuildSessionContextOptions {
 	 * result to a provider.
 	 */
 	transcript?: boolean;
+	/** Optional append-only repair overlay projection for provider-bound retry context. */
+	contextRepairProjection?: ContextRepairMessageProjection;
 }
 
 export function resolveLeafIdAfterSessionEntry(
@@ -446,8 +456,15 @@ export function buildSessionContext(
 		}
 	}
 
+	const providerMessages = options?.transcript || !options?.contextRepairProjection
+		? messages
+		: [...options.contextRepairProjection.project(messages)];
+	if (providerMessages.length > messages.length) {
+		throw new Error("Context repair projection cannot increase retry message count");
+	}
+
 	return {
-		messages,
+		messages: providerMessages,
 		thinkingLevel,
 		serviceTier,
 		models,

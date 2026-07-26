@@ -22,7 +22,7 @@
   "dependencies": {
     "@wirebabel/media-contracts": "workspace:*",
     "drizzle-orm": "^0.45.0",
-    "effect": "^4.0.0-beta.71",
+    "effect": "4.0.0-beta.98",
     "puppeteer-core": "^24.26.1",
     "zod": "^4.3.6"
   },
@@ -33,7 +33,7 @@
     "test:vitest:update": "vitest run test-vitest --update"
   },
   "devDependencies": {
-    "@effect/vitest": "4.0.0-beta.71",
+    "@effect/vitest": "4.0.0-beta.98",
     "vitest": "^4.0.15"
   }
 }

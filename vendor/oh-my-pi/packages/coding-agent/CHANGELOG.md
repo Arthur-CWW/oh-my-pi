@@ -3,6 +3,8 @@
 ## [Unreleased]
 
 ### Added
+- Added strict, append-only refusal context-repair overlays with immutable source digests, dependency-safe projection, human review/revert controls, and the `omp context-repair` review surface.
+- `omp sessions health` now reports versioned read-only local-session evidence as a table or JSON, including process fingerprints, journal/queue age, active turns, held child attempts, process-tree RSS, build/owner metadata, and canonical divergence classifications.
 - Async child completions now commit idempotent receipts to the parent journal before live delivery; disposed parents replay unacknowledged receipts on resume, job polling persists acknowledgements, and refreshed child results use fenced delivery generations.
 - Live session ownership sockets now serve epoch-fenced observer attachments, owner proof, and terminal snapshots over the existing runner wire protocol.
 - Majordomo can now sweep every 15 minutes for provably idle, childless local sessions, checkpoint and gracefully park them behind an opt-in setting, persist exact reclaim/relaunch receipts, and resume a parked session with `omp sessions resume <id>`.

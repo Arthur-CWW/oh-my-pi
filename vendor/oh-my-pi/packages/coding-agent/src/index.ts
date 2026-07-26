@@ -42,6 +42,7 @@ export * from "./session/agent-session";
 export * from "./session/auth-storage";
 export * from "./session/bookmarks";
 export * from "./session/handoff-provenance";
+export * from "./session/context-repair";
 export * from "./session/indexed-session-storage";
 export * from "./session/messages";
 export * from "./session/redis-session-storage";

@@ -21,6 +21,7 @@ export const commands: OmpCommandEntry[] = [
 	commandEntry({ name: "commit", load: () => import("./commands/commit").then(m => m.default) }),
 	commandEntry({ name: "completions", load: () => import("./commands/completions").then(m => m.default) }),
 	commandEntry({ name: "__complete", load: () => import("./commands/complete").then(m => m.default) }),
+	commandEntry({ name: "context-repair", load: () => import("./commands/context-repair").then(m => m.default) }),
 	commandEntry({ name: "config", load: () => import("./commands/config").then(m => m.default) }),
 	commandEntry({ name: "dry-balance", load: () => import("./commands/dry-balance").then(m => m.default) }),
 	commandEntry({ name: "doctor", load: () => import("./commands/doctor").then(m => m.default) }),

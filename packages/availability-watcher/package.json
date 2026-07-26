@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "@wirebabel/twitter-archive": "workspace:*",
-    "effect": "^4.0.0-beta.71"
+    "effect": "4.0.0-beta.98"
   },
   "devDependencies": {
     "@types/node": "^25.2.3",

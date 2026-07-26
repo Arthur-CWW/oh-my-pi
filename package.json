@@ -4,8 +4,16 @@
   "private": true,
   "description": "Agent extensions, skills, tools, and local-first AI workflows",
   "type": "module",
-  "workspaces": ["packages/*", "apps/*"],
-  "keywords": ["pi-package", "pi", "workflows", "skills"],
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "keywords": [
+    "pi-package",
+    "pi",
+    "workflows",
+    "skills"
+  ],
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -109,7 +117,7 @@
   "dependencies": {
     "@pixiv/three-vrm": "3.5.4",
     "@pixiv/three-vrm-core": "3.5.4",
-    "effect": "^4.0.0-beta.98",
+    "effect": "4.0.0-beta.98",
     "three": "0.166.1"
   }
 }
