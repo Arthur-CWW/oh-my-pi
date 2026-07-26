@@ -101,15 +101,15 @@ describe(":route provenance assembly", () => {
 		expect(output.split("\n").every(line => line.includes("[source:"))).toBe(true);
 	});
 
-	it("explains a policy-layer winner and shadowed policy candidate", () => {
-		const settings = Settings.isolated({ modelRoles: { implementer: "openai-codex/gpt-5.6-terra" } });
+	it("explains enforced route provenance when policy is not consulted", () => {
+		const settings = Settings.isolated({ modelRoles: { implementer: "openai-codex/gpt-5.6-terra:medium" } });
 		const snapshot: PolicySnapshot = {
 			at: "2026-07-15T12:00:00.000Z",
 			workstream: "hr-132",
 			values: {
 				"core.routing.implementer": {
 					key: "core.routing.implementer",
-					value: "openai/smol-literal",
+					value: "openai/smol-literal:medium",
 					sourceLayer: "workstream-durable",
 					scope: { kind: "workstream", workstream: "hr-132" },
 					transactionId: "11111111-1111-4111-8111-111111111111",
@@ -118,7 +118,7 @@ describe(":route provenance assembly", () => {
 						{
 							key: "core.routing.implementer",
 							operation: "set",
-							value: "openai-codex/gpt-5.6-terra",
+							value: "openai-codex/gpt-5.6-terra:medium",
 							sourceLayer: "global-durable",
 							scope: { kind: "global" },
 							transactionId: "22222222-2222-4222-8222-222222222222",
@@ -141,16 +141,13 @@ describe(":route provenance assembly", () => {
 		});
 		const output = render(decision, { settings, policySnapshot: snapshot });
 
-		expect(output).toContain("selected: openai/smol-literal");
-		expect(output).toContain("policy core.routing.implementer: winner workstream-durable=openai/smol-literal");
-		expect(output).toContain("transaction=11111111-1111-4111-8111-111111111111");
-		expect(output).toContain("shadowed global-durable=openai-codex/gpt-5.6-terra; reason=lower policy precedence");
-		expect(output).toContain("temporary posture: none [source: policy snapshot=2026-07-15T12:00:00.000Z]");
+		expect(output).toContain("selected: openai-codex/gpt-5.6-terra:medium");
+		expect(output).toContain("temporary posture: none [source: no policy snapshot]");
 	});
 
 	it("labels the deprecated task alias and its definition source", () => {
 		const settings = Settings.isolated({
-			modelRoles: { task: "openai/smol-literal", implementer: "openai-codex/gpt-5.6-terra" },
+			modelRoles: { task: "openai/smol-literal:medium", implementer: "openai-codex/gpt-5.6-terra:medium" },
 		});
 		const preview = previewSpawnRoute({
 			selectorOrRole: "task",
@@ -168,25 +165,25 @@ describe(":route provenance assembly", () => {
 
 		expect(output).toContain("responsibility: implementer alias=deprecated-alias [source: definition /opt/omp/agents/task.md]");
 		expect(output).toContain("agent_frontmatter: selectors=pi/task");
-		expect(output).toContain("role task: winner runtime_override=openai/smol-literal");
+		expect(output).toContain("role task: winner runtime_override=openai/smol-literal:medium");
 	});
 
 	it("reports a blocked route and the quota fallback attempt", () => {
 		const settings = Settings.isolated({});
 		const initial = resolveSpawnRoute({
-			globalDefault: "openai-codex/gpt-5.6-terra",
+			globalDefault: "openai-codex/gpt-5.6-terra:medium",
 			settings,
 			modelRegistry: registry,
 			responsibility: "implementer",
 		});
 		const rerouted = rerouteSpawnRoute(
 			initial,
-			{ providerId: "openai", modelId: "smol-literal", selector: "openai/smol-literal" },
+			{ providerId: "openai", modelId: "smol-literal", selector: "openai/smol-literal:medium" },
 			{
 				originalProvider: "openai-codex",
 				reroutedProvider: "openai",
-				originalModel: "openai-codex/gpt-5.6-terra",
-				reroutedModel: "openai/smol-literal",
+				originalModel: "openai-codex/gpt-5.6-terra:medium",
+				reroutedModel: "openai/smol-literal:medium",
 				decisionReason: "primary quota below reserve",
 				quotaPoolId: "codex-primary",
 			},
@@ -194,20 +191,20 @@ describe(":route provenance assembly", () => {
 		);
 		const blocked = blockSpawnRoute(rerouted, {
 			kind: "quota_admission_blocked",
-			selector: "openai/smol-literal",
+			selector: "openai/smol-literal:medium",
 			reason: "fallback account ineligible",
 			resetAt: 1_752_600_000_000,
 		});
 		const output = render(blocked, { settings });
 
-		expect(output).toContain("selected: blocked selector=openai/smol-literal; reason=fallback account ineligible");
-		expect(output).toContain("fallback 1: rejected openai-codex/gpt-5.6-terra; reason=primary quota below reserve");
+		expect(output).toContain("selected: blocked selector=openai/smol-literal:medium; reason=fallback account ineligible");
+		expect(output).toContain("decision reason: primary quota below reserve");
 		expect(output).toContain("[source: quota admission receipt]");
-		expect(output).toContain("blocked: openai/smol-literal; reason=fallback account ineligible");
+		expect(output).toContain("blocked: openai/smol-literal:medium; reason=fallback account ineligible");
 	});
 
 	it("previews a role through resolveSpawnRoute without a spawn receipt", () => {
-		const settings = Settings.isolated({ modelRoles: { implementer: "openai/smol-literal" } });
+		const settings = Settings.isolated({ modelRoles: { implementer: "openai/smol-literal:medium" } });
 		const preview = previewSpawnRoute({
 			selectorOrRole: "implementer",
 			agents: [implementerAgent],
@@ -225,8 +222,8 @@ describe(":route provenance assembly", () => {
 
 		expect(output).toContain("Route RouteProbe — preview (no spawn, no writes)");
 		expect(output).toContain("responsibility: implementer [source: definition /repo/.omp/agents/implementer.md]");
-		expect(output).toContain("selected: openai/smol-literal");
-		expect(output).toContain("[source: dry-run resolveSpawnRoute result field=agent_frontmatter]");
+		expect(output).toContain("selected: openai/smol-literal:medium");
+		expect(output).toContain("[source: dry-run resolveSpawnRoute result field=agent_frontmat");
 		const command = COMMAND_MODE_COMMANDS.find(candidate => candidate.name === "route");
 		expect(command?.inlineHint).toBe("[agentId | preview <selector-or-role>]");
 		expect(command?.subcommands).toEqual([

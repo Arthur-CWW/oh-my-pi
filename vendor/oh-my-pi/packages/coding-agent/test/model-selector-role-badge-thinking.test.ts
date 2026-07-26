@@ -185,8 +185,8 @@ describe("ModelSelector role badge thinking display", () => {
 		const rendered = normalizeRenderedText(selector.render(220).join("\n"));
 		expect(rendered).toContain("claude-haiku-4.5");
 		expect(rendered).toContain("gpt-5.1-codex");
-		expect(rendered).toContain("[SMOL auto]");
 		expect(rendered).toContain("[SLOW auto]");
+		expect(rendered).toContain("[IMPLEMENTER auto]");
 	});
 
 	test("warns and allows selecting models below the current context size", async () => {
@@ -236,10 +236,12 @@ describe("ModelSelector role badge thinking display", () => {
 				await Bun.sleep(0);
 				installTestTheme();
 
+				const currentModel = modelRegistry.getAvailable().find(model => model.id === id);
+				if (!currentModel) throw new Error(`Expected registered model openai-codex/${id}`);
 				const rendered = normalizeRenderedText(selector.render(220).join("\n"));
 				const expectedWarning = classifyModelSelectorItem({
 					currentContextTokens: 1_050_001,
-					contextWindow: 1_050_000,
+					contextWindow: currentModel.contextWindow,
 				}).contextWarning;
 				expect(expectedWarning).toBeDefined();
 				expect(expectedWarning).toContain(" > ");

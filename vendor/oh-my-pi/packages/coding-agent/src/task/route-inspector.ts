@@ -8,8 +8,15 @@ import type { AgentSession } from "../session/agent-session";
 import type { SessionEntry } from "../session/session-entries";
 import { replaceTabs, truncateToWidth } from "../tools/render-utils";
 import { discoverAgents } from "./discovery";
-import type { ConsultedRouteInput, SpawnRouteDecision, SpawnRouteReceipt, SpawnRouteSource } from "./route-resolution";
+import type {
+	ConsultedRouteInput,
+	SpawnRouteDecision,
+	SpawnRouteReceipt,
+	SpawnRouteSource,
+	SubsequentSpawnRouteSource,
+} from "./route-resolution";
 import { resolveSpawnRoute } from "./route-resolution";
+import type { RouteResolutionSource } from "./route-events";
 import { snapshotTaskSpawnPolicy } from "./spawn-route";
 import { type SpawnRecord, isSpawnRecord } from "./spawn-record";
 import type { AgentDefinition } from "./types";
@@ -47,6 +54,85 @@ export interface RoutePreviewResult {
 }
 
 type RouteDecisionLike = SpawnRouteDecision | SpawnRouteReceipt;
+
+export type AgentRouteHistoryKind = "fallback" | RouteResolutionSource["changeKind"];
+
+export interface AgentRouteHistoryEntry {
+	readonly kind: AgentRouteHistoryKind;
+	readonly model: string;
+	readonly effort: string;
+	readonly reason: string | null;
+	readonly occurredAt: number | null;
+}
+
+export interface AgentRouteExplanation {
+	readonly agentId: string;
+	readonly selectedModel: string;
+	readonly effort: string;
+	readonly responsibility: string;
+	readonly receiptSource: SubsequentSpawnRouteSource | null;
+	readonly escalationReason: string | null;
+	readonly history: readonly AgentRouteHistoryEntry[];
+}
+
+export interface AgentRouteExplanationInput {
+	readonly agentId: string;
+	readonly receipt?: SpawnRouteReceipt;
+	readonly routeEvents?: readonly RouteResolutionSource[];
+	readonly fallbackModel?: string;
+	readonly fallbackEffort?: string | null;
+	readonly fallbackResponsibility?: string;
+}
+
+function concreteModel(provider: string, model: string): string {
+	return `${provider}/${model}`;
+}
+
+/**
+ * Project the selected route and its history from the canonical spawn receipt
+ * plus durable route-resolution events. This is a view model, never a second
+ * routing record.
+ */
+export function buildAgentRouteExplanation(input: AgentRouteExplanationInput): AgentRouteExplanation {
+	const events = [...(input.routeEvents ?? [])]
+		.filter(event => event.agentId === input.agentId)
+		.sort((left, right) => left.agentSeq - right.agentSeq || left.occurredAt - right.occurredAt);
+	const latest = events.at(-1);
+	const receipt = input.receipt;
+	const selectedModel = latest
+		? concreteModel(latest.route.provider, latest.route.model)
+		: receipt
+			? concreteModel(receipt.route.provider, receipt.route.model)
+			: (input.fallbackModel ?? "unknown");
+	const effort = latest?.route.effort ?? receipt?.route.thinking ?? input.fallbackEffort ?? "inherit";
+	const history: AgentRouteHistoryEntry[] = [
+		...(receipt?.priorAttempts ?? []).map(attempt => ({
+			kind: "fallback" as const,
+			model: concreteModel(attempt.route.provider, attempt.route.model),
+			effort: attempt.route.thinking ?? "inherit",
+			reason: attempt.reason ?? attempt.quotaAdmission?.decisionReason ?? null,
+			occurredAt: null,
+		})),
+		...events
+			.filter(event => event.changeKind !== "spawn_resolved")
+			.map(event => ({
+				kind: event.changeKind,
+				model: concreteModel(event.route.provider, event.route.model),
+				effort: event.route.effort,
+				reason: event.reason,
+				occurredAt: event.occurredAt,
+			})),
+	];
+	return {
+		agentId: input.agentId,
+		selectedModel,
+		effort,
+		responsibility: receipt?.responsibility ?? latest?.responsibility ?? input.fallbackResponsibility ?? "unknown",
+		receiptSource: receipt?.resolutionSource ?? receipt?.source ?? null,
+		escalationReason: receipt?.reason ?? null,
+		history,
+	};
+}
 
 function isDecision(value: RouteDecisionLike): value is SpawnRouteDecision {
 	return "invalid" in value;

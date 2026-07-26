@@ -26,6 +26,10 @@ export type InteractionSemantics =
 	| "next-sibling"
 	| "cycle-siblings"
 	| "cycle-sections"
+	| "focus-inspector"
+	| "focus-transcript"
+	| "toggle-panel-focus"
+	| "inspect-route"
 	| "previous-item"
 	| "next-item"
 	| "previous-group"
@@ -234,6 +238,15 @@ export const INTERACTIONS: readonly InteractionEntry[] = [
 		semantics: "next-sibling",
 		group: "navigate",
 	},
+	{
+		id: "viewer.route-explanation",
+		surface: "viewer",
+		mode: "normal",
+		keys: ["gi"],
+		description: "explain selected model and effort route",
+		semantics: "inspect-route",
+		group: "view",
+	},
 
 	{
 		id: "hub.table.search",
@@ -260,6 +273,33 @@ export const INTERACTIONS: readonly InteractionEntry[] = [
 		keys: ["k", "↑"],
 		description: "select previous visible row",
 		semantics: "previous-item",
+		group: "navigate",
+	},
+	{
+		id: "hub.table.focus-inspector",
+		surface: "hub.table",
+		mode: "normal",
+		keys: ["h"],
+		description: "focus prompt/route panel",
+		semantics: "focus-inspector",
+		group: "navigate",
+	},
+	{
+		id: "hub.table.focus-transcript",
+		surface: "hub.table",
+		mode: "normal",
+		keys: ["l"],
+		description: "focus transcript panel",
+		semantics: "focus-transcript",
+		group: "navigate",
+	},
+	{
+		id: "hub.table.toggle-panel-focus",
+		surface: "hub.table",
+		mode: "normal",
+		keys: ["Ctrl+W"],
+		description: "toggle roster/preview focus",
+		semantics: "toggle-panel-focus",
 		group: "navigate",
 	},
 	{
@@ -348,8 +388,8 @@ export const INTERACTIONS: readonly InteractionEntry[] = [
 		id: "hub.inspector.cycle-sections",
 		surface: "hub.inspector",
 		mode: "normal",
-		keys: ["[ / ]", "← / →"],
-		description: "cycle inspector sections",
+		keys: ["← / →"],
+		description: "cycle prompt/route/comms sections",
 		semantics: "cycle-sections",
 		group: "navigate",
 	},
@@ -489,10 +529,14 @@ export const AGENT_HUB_SHORTCUT_INTERACTION_IDS: readonly string[] = [
 	"viewer.fold",
 	"viewer.previous-sibling",
 	"viewer.next-sibling",
+	"viewer.route-explanation",
 	"viewer.help",
 	"hub.table.search",
 	"hub.table.next-row",
 	"hub.table.previous-row",
+	"hub.table.focus-inspector",
+	"hub.table.focus-transcript",
+	"hub.table.toggle-panel-focus",
 	"hub.table.next-orchestrator",
 	"hub.table.previous-orchestrator",
 	"hub.table.history",

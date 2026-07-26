@@ -1633,6 +1633,7 @@ export class InteractiveMode implements InteractiveModeContext, SubmittedInputRe
 			sessions,
 			this.ui.terminal.columns,
 			this.settings.get("task.showTokenRateBadge"),
+			agentId => AgentRegistry.global().get(agentId),
 		);
 		if (lines.length === 0) return;
 		this.subagentContainer.addChild(new Text(lines.join("\n"), 1, 0));

@@ -11,7 +11,7 @@ import { theme } from "../theme/theme";
 
 type AgentHubInteractionSurface = Extract<InteractionSurface, "hub.table" | "hub.chat" | "hub.inspector">;
 
-export const AGENT_HUB_G_CHORD_CUE = "g: gg gj gk gx gm gr gs gb ga";
+export const AGENT_HUB_G_CHORD_CUE = "g: gg gj gk gi gx gm gr gs gb ga";
 
 const TABLE_VIEWER_NAVIGATION_IDS = VIEWER_NAVIGATION_INTERACTION_IDS.filter(
 	id => id !== "viewer.line-down" && id !== "viewer.line-up",
@@ -20,9 +20,15 @@ const TABLE_VIEWER_NAVIGATION_IDS = VIEWER_NAVIGATION_INTERACTION_IDS.filter(
 const NORMAL_FOOTER_IDS: Record<AgentHubInteractionSurface, readonly string[]> = {
 	"hub.table": [
 		...TABLE_VIEWER_NAVIGATION_IDS,
+		"viewer.previous-sibling",
+		"viewer.next-sibling",
+		"viewer.route-explanation",
 		"hub.table.next-row",
 		"hub.table.previous-row",
 		"hub.table.next-orchestrator",
+		"hub.table.focus-inspector",
+		"hub.table.focus-transcript",
+		"hub.table.toggle-panel-focus",
 		"hub.table.previous-orchestrator",
 		"hub.table.search",
 		"viewer.fold",
@@ -35,6 +41,9 @@ const NORMAL_FOOTER_IDS: Record<AgentHubInteractionSurface, readonly string[]> =
 	],
 	"hub.chat": [
 		...VIEWER_NAVIGATION_INTERACTION_IDS,
+		"viewer.previous-sibling",
+		"viewer.next-sibling",
+		"viewer.route-explanation",
 		"hub.chat.search",
 		"viewer.help",
 		"hub.chat.rich",
@@ -42,6 +51,12 @@ const NORMAL_FOOTER_IDS: Record<AgentHubInteractionSurface, readonly string[]> =
 	],
 	"hub.inspector": [
 		...VIEWER_NAVIGATION_INTERACTION_IDS,
+		"viewer.previous-sibling",
+		"viewer.next-sibling",
+		"viewer.route-explanation",
+		"hub.table.focus-inspector",
+		"hub.table.focus-transcript",
+		"hub.table.toggle-panel-focus",
 		"hub.inspector.cycle-sections",
 		"viewer.help",
 	],
@@ -129,6 +144,8 @@ export function renderAgentHubChatFooter(options: {
 			: "route unavailable";
 		lines.push(` ${theme.fg("dim", `${options.archive.state} archived · ${route} · read-only`)}`);
 	}
+	if (options.archive && options.showHelp)
+		lines.push(`   ${theme.fg("dim", "[ / ] sibling cycling unavailable in archived chat")}`);
 	lines.push(...(options.status ?? []).filter(Boolean).map(line => ` ${theme.fg("dim", line)}`));
 	lines.push(
 		renderAgentHubFooter({

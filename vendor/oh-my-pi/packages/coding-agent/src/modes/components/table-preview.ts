@@ -158,6 +158,12 @@ export class TablePreviewComponent<Row, Key> implements Component {
 		return this.#focus;
 	}
 
+	setFocus(focus: TablePreviewFocus): void {
+		if (focus === this.#focus) return;
+		this.#focus = focus;
+		this.#options.requestRender();
+	}
+
 	refresh(options: { resetSelection?: boolean; refreshPreview?: boolean; requestRender?: boolean } = {}): void {
 		if (options.resetSelection) {
 			this.#selectedIndex = 0;

@@ -3,6 +3,7 @@ import * as path from "node:path";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import { getSessionsDir } from "@oh-my-pi/pi-utils";
 import type { AgentRef } from "../../registry/agent-registry";
+import { isRouteResolutionSource, ROUTE_RESOLUTION_ENTRY, type RouteResolutionSource } from "../../task/route-events";
 import { isSpawnRecord, type SpawnRecord } from "../../task/spawn-record";
 
 export interface DurableJournalModel {
@@ -11,6 +12,7 @@ export interface DurableJournalModel {
 	spawnRecord?: SpawnRecord;
 	systemPrompt?: string;
 	firstUserMessage?: string;
+	routeEvents?: readonly RouteResolutionSource[];
 }
 
 export function durableModelSelector(model: DurableJournalModel | undefined): string | undefined {
@@ -33,6 +35,7 @@ function durableJournalModel(text: string): DurableJournalModel | undefined {
 	let spawnRecord: SpawnRecord | undefined;
 	let systemPrompt: string | undefined;
 	let firstUserMessage: string | undefined;
+	const routeEvents: RouteResolutionSource[] = [];
 	for (const line of text.split("\n")) {
 		if (!line.trim()) continue;
 		let entry: Record<string, unknown>;
@@ -59,15 +62,24 @@ function durableJournalModel(text: string): DurableJournalModel | undefined {
 			(entry.thinkingLevel === null || typeof entry.thinkingLevel === "string")
 		) {
 			thinkingLevel = entry.thinkingLevel;
+		} else if (
+			entry.type === "custom" &&
+			entry.customType === ROUTE_RESOLUTION_ENTRY &&
+			isRouteResolutionSource(entry.data)
+		) {
+			routeEvents.push(entry.data);
+			modelId = `${entry.data.route.provider}/${entry.data.route.model}`;
+			thinkingLevel = entry.data.route.effort;
 		}
 	}
 	return modelId === undefined &&
 		thinkingLevel === undefined &&
 		spawnRecord === undefined &&
 		systemPrompt === undefined &&
-		firstUserMessage === undefined
+		firstUserMessage === undefined &&
+		routeEvents.length === 0
 		? undefined
-		: { modelId, thinkingLevel, spawnRecord, systemPrompt, firstUserMessage };
+		: { modelId, thinkingLevel, spawnRecord, systemPrompt, firstUserMessage, routeEvents };
 }
 
 /** Durable model metadata, cached by journal path and mtime so renders remain filesystem-free. */

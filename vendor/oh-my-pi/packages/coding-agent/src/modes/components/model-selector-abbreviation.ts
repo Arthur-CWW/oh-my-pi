@@ -127,7 +127,7 @@ const MODEL_VARIANTS: readonly [RegExp, string][] = [
 	[/\bgemini\b/, "gemini"],
 ];
 
-function splitEffortSuffix(value: string): { base: string; effort: string | undefined } {
+export function splitModelSelectorEffort(value: string): { base: string; effort: string | undefined } {
 	const separator = value.lastIndexOf(":");
 	if (separator <= 0 || separator === value.length - 1) return { base: value, effort: undefined };
 	const suffix = value.slice(separator + 1).toLowerCase();
@@ -178,7 +178,7 @@ export function formatModelSelectorAbbreviation(
 	const providerSeparator = normalized.indexOf("/");
 	const provider = providerSeparator > 0 ? normalized.slice(0, providerSeparator).toLowerCase() : "";
 	const modelWithEffort = providerSeparator > 0 ? normalized.slice(providerSeparator + 1) : normalized;
-	const { base: modelId, effort } = splitEffortSuffix(modelWithEffort);
+	const { base: modelId, effort } = splitModelSelectorEffort(modelWithEffort);
 	const providerLabel =
 		tier === "compact"
 			? provider
@@ -220,7 +220,7 @@ export function withModelSelectorEffort(
 	if (!selector) return undefined;
 	const providerSeparator = selector.indexOf("/");
 	const model = providerSeparator >= 0 ? selector.slice(providerSeparator + 1) : selector;
-	const parsed = splitEffortSuffix(model);
+	const parsed = splitModelSelectorEffort(model);
 	const runtimeEffort = sources.session ?? sources.route;
 	if (!runtimeEffort && parsed.effort) return selector;
 	const effort = runtimeEffort ?? sources.modelDefault ?? (sources.reasoning === false ? "off" : "inherit");

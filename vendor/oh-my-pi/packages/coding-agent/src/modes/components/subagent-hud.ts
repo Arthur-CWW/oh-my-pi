@@ -1,9 +1,14 @@
 import { padding, visibleWidth } from "@oh-my-pi/pi-tui";
+import type { AgentRef } from "../../registry/agent-registry";
 import { formatTaskId } from "../../task/render";
 import { replaceTabs, truncateToWidth } from "../../tools/render-utils";
 import type { ObservableSession } from "../session-observer-registry";
 import { theme, type Theme } from "../theme/theme";
-import { renderModelSelectorAbbreviation, withModelSelectorEffort } from "./model-selector-abbreviation";
+import {
+	renderModelSelectorAbbreviation,
+	splitModelSelectorEffort,
+	withModelSelectorEffort,
+} from "./model-selector-abbreviation";
 
 interface CachedRow {
 	columns: number;
@@ -34,6 +39,14 @@ export interface SubagentHudPerformanceCounters {
 	rowRebuilds: number;
 }
 
+export interface SubagentHudRouteViewModel {
+	readonly selector: string;
+	readonly model: string;
+	readonly effort: string;
+}
+
+export type SubagentHudAgentLookup = (agentId: string) => AgentRef | undefined;
+
 function shortAgentId(id: string): string {
 	const separator = id.lastIndexOf(".");
 	return formatTaskId(separator >= 0 ? id.slice(separator + 1) : id);
@@ -53,8 +66,37 @@ function subagentDepth(session: ObservableSession, sessionsById: ReadonlyMap<str
 	return depth;
 }
 
-function modelSelector(session: ObservableSession): string | undefined {
-	return withModelSelectorEffort(session.progress?.resolvedModel, { route: session.progress?.routeReceipt?.route.thinking });
+export function projectSubagentHudRoute(
+	session: ObservableSession,
+	ref?: AgentRef,
+): SubagentHudRouteViewModel | undefined {
+	const liveModel = ref?.session?.model;
+	const liveSelector = liveModel ? `${liveModel.provider}/${liveModel.id}` : undefined;
+	const recoveredHotswap = ref?.recovery?.hotswapModel;
+	const selector =
+		liveSelector ??
+		recoveredHotswap ??
+		session.progress?.resolvedModel ??
+		ref?.recovery?.model;
+	const effective = withModelSelectorEffort(selector, {
+		session: liveSelector || recoveredHotswap ? (ref?.session?.thinkingLevel ?? ref?.recovery?.thinkingLevel) : undefined,
+		route: session.progress?.routeReceipt?.route.thinking,
+		modelDefault: liveModel?.thinking?.defaultLevel,
+		reasoning: liveModel?.reasoning,
+	});
+	if (!effective) return undefined;
+	const separator = effective.indexOf("/");
+	const provider = separator >= 0 ? effective.slice(0, separator + 1) : "";
+	const parsed = splitModelSelectorEffort(separator >= 0 ? effective.slice(separator + 1) : effective);
+	return {
+		selector: effective,
+		model: `${provider}${parsed.base}`,
+		effort: parsed.effort ?? "inherit",
+	};
+}
+
+function modelSelector(session: ObservableSession, ref?: AgentRef): string | undefined {
+	return projectSubagentHudRoute(session, ref)?.selector;
 }
 
 const STALL_THRESHOLD_MS = 30_000;
@@ -111,7 +153,12 @@ export class SubagentHudRenderer {
 		return previous.at;
 	}
 
-	render(sessions: readonly ObservableSession[], columns: number, showTokenRateBadge = true): string[] {
+	render(
+		sessions: readonly ObservableSession[],
+		columns: number,
+		showTokenRateBadge = true,
+		agentLookup?: SubagentHudAgentLookup,
+	): string[] {
 		if (this.#theme !== theme) {
 			this.#theme = theme;
 			this.#rows.clear();
@@ -141,7 +188,7 @@ export class SubagentHudRenderer {
 				displayId: shortAgentId(session.id),
 				description,
 				task: description ? undefined : session.progress?.task?.trim(),
-				modelSelector: modelSelector(session),
+				modelSelector: modelSelector(session, agentLookup?.(session.id)),
 				tokenRate: showTokenRateBadge ? session.tokenRate : undefined,
 				status: hudStatus(session, now, this.#lastTokenProgressAt(session)),
 			};

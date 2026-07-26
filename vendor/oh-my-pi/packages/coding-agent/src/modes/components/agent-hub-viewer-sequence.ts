@@ -8,6 +8,7 @@ export type AgentHubViewerSequenceAction =
 	| { readonly kind: "logical-down" }
 	| { readonly kind: "logical-up" }
 	| { readonly kind: "attach-owner" }
+	| { readonly kind: "open-route-explanation" }
 	| { readonly kind: "open-errors" }
 	| { readonly kind: "open-messages" }
 	| { readonly kind: "open-bookmarks" }
@@ -52,6 +53,8 @@ export class AgentHubViewerSequence {
 		switch (keyData) {
 			case "a":
 				return { kind: "attach-owner" };
+			case "i":
+				return { kind: "open-route-explanation" };
 			case "x":
 				return { kind: "open-errors" };
 			case "m":

@@ -129,7 +129,13 @@ import { ToolExecutionComponent } from "./tool-execution";
 import { TranscriptBlock, TranscriptContainer } from "./transcript-container";
 import { createUsageRowBlock } from "./usage-row";
 import { TablePreviewComponent, type TablePreviewSession } from "./table-preview";
-import { formatRouteInspection, type RouteInspectionInput } from "../../task/route-inspector";
+import { routeResolutionEvents, type RouteResolutionSource } from "../../task/route-events";
+import {
+	buildAgentRouteExplanation,
+	formatRouteInspection,
+	type AgentRouteExplanation,
+	type RouteInspectionInput,
+} from "../../task/route-inspector";
 import { UserMessageComponent } from "./user-message";
 
 const AGE_TICK_MS = 5_000;
@@ -398,6 +404,27 @@ export interface AgentHubRetentionMetrics {
 	previewFinalizedPrefixScans: number;
 	liveTimers: number;
 }
+
+export type AgentHubInspectorSection = "prompt" | "route" | "comms";
+export type AgentHubPanelFocus = "roster" | "transcript" | AgentHubInspectorSection;
+
+export interface AgentHubInteractionState {
+	readonly view: "table" | "chat";
+	readonly panelFocus: AgentHubPanelFocus;
+	readonly inspectorSection: AgentHubInspectorSection;
+	readonly selectedAgentId?: string;
+	readonly tableIndex: number;
+	readonly transcriptOffset: number;
+	readonly inspectorOffset: number;
+	readonly archivedChat: boolean;
+}
+
+export interface AgentHubSelectedAgentViewModel {
+	readonly agentId: string;
+	readonly lifecycle: string;
+	readonly modelSelector?: string;
+	readonly route: AgentRouteExplanation;
+}
 const ROUTE_INSPECTOR_PANE_LINES = 8;
 
 function boundedRouteInspectionLines(input: RouteInspectionInput, resolvedModel?: string): string[] {
@@ -588,8 +615,8 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 	#lastMaxScroll = 0;
 	#viewportHeight = 20;
 	#wasAtBottom = true;
-	#inspectorSection: "prompt" | "route" | "comms" = "prompt";
-	#inspectorFocused = false;
+	#inspectorSection: AgentHubInspectorSection = "prompt";
+	#previewLaneFocus: "transcript" | "inspector" = "transcript";
 	#inspectorScrollOffset = 0;
 	#inspectorLastMaxScroll = 0;
 	#inspectorViewportHeight = 20;
@@ -728,6 +755,75 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 				Number(this.#ageTimer !== undefined) +
 				Number(this.#projectionTimer !== undefined) +
 				Number(this.#chatRefreshTimer !== undefined),
+		};
+	}
+
+	#panelFocus(): AgentHubPanelFocus {
+		if (this.#view === "chat") return "transcript";
+		if (this.#tablePreview.focus === "table") return "roster";
+		return this.#previewLaneFocus === "inspector" ? this.#inspectorSection : "transcript";
+	}
+
+	#focusPreviewLane(lane: "transcript" | "inspector"): boolean {
+		if (!this.#dualLaneActive) return false;
+		this.#previewLaneFocus = lane;
+		this.#tablePreview.setFocus("preview");
+		this.#requestRender();
+		return true;
+	}
+
+	getInteractionState(): AgentHubInteractionState {
+		this.#flushProjection();
+		const row = this.#selectedAgentRow();
+		const selectedAgentId =
+			this.#view === "chat"
+				? this.#chatAgentId
+				: row?.kind === "active"
+					? row.ref.id
+					: row?.descriptor.agentId;
+		return {
+			view: this.#view,
+			panelFocus: this.#panelFocus(),
+			inspectorSection: this.#inspectorSection,
+			...(selectedAgentId ? { selectedAgentId } : {}),
+			tableIndex: this.#tablePreview.selectedIndex,
+			transcriptOffset: this.#scrollOffset,
+			inspectorOffset: this.#inspectorScrollOffset,
+			archivedChat: this.#chatArchived !== undefined,
+		};
+	}
+
+	getSelectedAgentViewModel(): AgentHubSelectedAgentViewModel | undefined {
+		this.#flushProjection();
+		const row = this.#selectedAgentRow();
+		const active = row?.kind === "active" ? row.ref : undefined;
+		const archived = row?.kind === "archived" ? row.descriptor : this.#chatArchived;
+		const agentId = active?.id ?? archived?.agentId;
+		if (!agentId) return undefined;
+		const observed = active ? this.#observableFor(active.id) : undefined;
+		const durable = this.#journalModels.peek(active?.sessionFile ?? archived?.childSessionFile);
+		const receipt = observed?.progress?.routeReceipt ?? durable?.spawnRecord?.route;
+		const eventById = new Map<string, RouteResolutionSource>();
+		for (const event of durable?.routeEvents ?? []) eventById.set(event.resolutionId, event);
+		const sessionManager = active?.session?.sessionManager;
+		if (sessionManager)
+			for (const event of routeResolutionEvents(sessionManager.getEntries(), agentId))
+				eventById.set(event.resolutionId, event);
+		const modelSelector = active
+			? this.#resolvedModelSelector(active, observed)
+			: withModelSelectorEffort(archived?.modelId, { session: archived?.thinkingLevel });
+		const route = buildAgentRouteExplanation({
+			agentId,
+			...(receipt ? { receipt } : {}),
+			routeEvents: [...eventById.values()],
+			fallbackModel: modelSelector,
+			fallbackResponsibility: observed?.progress?.agent ?? durable?.spawnRecord?.agentType,
+		});
+		return {
+			agentId,
+			lifecycle: active?.status ?? archived?.state ?? "unknown",
+			...(modelSelector ? { modelSelector } : {}),
+			route,
 		};
 	}
 
@@ -891,6 +987,7 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 			}
 		}
 		if (this.#view === "table") {
+			if (this.#tablePreview.focus === "preview" && this.#handlePreviewPanelInput(keyData)) return;
 			this.#handleTableInput(keyData);
 		} else {
 			this.#handleChatInput(keyData);
@@ -1299,7 +1396,7 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 		this.#scrollOffset = 0;
 		this.#wasAtBottom = true;
 		this.#inspectorScrollOffset = 0;
-		this.#inspectorFocused = false;
+		this.#previewLaneFocus = "transcript";
 		this.#chatSearchQuery = "";
 		this.#chatSearchMatches = [];
 		if (nextId) {
@@ -1312,6 +1409,7 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 		}
 		return {
 			render: (width, height) => this.#renderPreview(width, height),
+			handleInput: data => this.#handlePreviewPanelInput(data),
 			dispose: () => this.#disposeTablePreview(selected),
 		};
 	}
@@ -1570,7 +1668,8 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 		if (this.#wasAtBottom && !this.#chatSearchQuery) this.#scrollOffset = this.#lastMaxScroll;
 		this.#scrollOffset = Math.max(0, Math.min(this.#scrollOffset, this.#lastMaxScroll));
 		this.#chatRenderedContent = content;
-		const focus = this.#dualLaneActive && !this.#inspectorFocused ? theme.fg("accent", "●") : "";
+		const focus =
+			this.#dualLaneActive && this.#panelFocus() === "transcript" ? theme.fg("accent", "●") : "";
 		const rate = this.#tokenRateBadge();
 		const lines = [` ${focus}${theme.fg("accent", "Preview transcript")}${rate ? `  ${rate}` : ""}`];
 		for (const row of content.slice(this.#scrollOffset, this.#scrollOffset + this.#viewportHeight))
@@ -1593,7 +1692,7 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 		this.#inspectorViewportHeight = Math.max(1, targetHeight - 2);
 		this.#inspectorLastMaxScroll = Math.max(0, content.length - this.#inspectorViewportHeight);
 		this.#inspectorScrollOffset = Math.max(0, Math.min(this.#inspectorScrollOffset, this.#inspectorLastMaxScroll));
-		const focus = this.#inspectorFocused ? theme.fg("accent", "●") : "";
+		const focus = this.#panelFocus() === this.#inspectorSection ? theme.fg("accent", "●") : "";
 		const label = this.#inspectorSection[0].toUpperCase() + this.#inspectorSection.slice(1);
 		const lines = [` ${focus}${theme.fg("accent", label)} ${theme.fg("dim", "[ / ] section · ← / →")}`];
 		for (const row of content.slice(
@@ -1683,22 +1782,28 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 		}
 		const progress = observed?.progress;
 		const receipt = progress?.routeReceipt ?? durableSpawn?.route;
-		if (!receipt) {
-			const ref = this.#chatAgentId ? this.#registry.get(this.#chatAgentId) : undefined;
-			const model =
-				(ref ? this.#resolvedModelSelector(ref, observed) : undefined) ??
-				withModelSelectorEffort(durableSpawn?.resolvedModel, { route: durableSpawn?.route?.route.thinking });
-			return model
-				? ["ROUTE", `Model: ${model}`, "No route provenance available."]
-				: ["ROUTE", "No route provenance available."];
-		}
+		const transactionId = receipt?.consulted.find(candidate => candidate.policy?.transactionId)?.policy?.transactionId;
+		const routeView = this.getSelectedAgentViewModel()?.route;
+		const explanationLines = routeView
+			? [
+					"ROUTE EXPLANATION",
+					`selected model: ${routeView.selectedModel} · effort: ${routeView.effort}`,
+					`responsibility: ${routeView.responsibility} · receipt source: ${routeView.receiptSource ?? "unknown"}`,
+					`escalation reason: ${routeView.escalationReason ?? "none"}${transactionId ? ` · transaction=${transactionId}` : ""}`,
+					...routeView.history.map(
+						event =>
+							`${event.kind}: ${event.model}:${event.effort}${event.reason ? ` · ${event.reason}` : ""}`,
+					),
+				]
+			: ["ROUTE EXPLANATION", "No route provenance available."];
+		if (!receipt) return explanationLines;
 		const agentId = this.#chatAgentId ?? "selected agent";
 		const ref = this.#chatAgentId ? this.#registry.get(this.#chatAgentId) : undefined;
 		const explicitOverride =
 			receipt.source === "spawn_explicit"
 				? receipt.consulted.find(candidate => candidate.explicit)?.selectors.join(",")
 				: undefined;
-		return boundedRouteInspectionLines(
+		const provenance = boundedRouteInspectionLines(
 			{
 				agentId,
 				responsibility: receipt.responsibility ?? durableSpawn?.agentType ?? progress?.agent ?? "unknown",
@@ -1713,6 +1818,7 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 				withModelSelectorEffort(durableSpawn?.resolvedModel, { route: durableSpawn?.route?.route.thinking }) ??
 				withModelSelectorEffort(`${receipt.route.provider}/${receipt.route.model}`, { route: receipt.route.thinking })!,
 		);
+		return [...explanationLines, ...provenance.slice(1)];
 	}
 
 	#wrapInspectorText(text: string, width: number, empty: string): string[] {
@@ -1989,15 +2095,22 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 		const progress = observed?.progress;
 		const cachedModel = this.#transcriptCache?.path === ref.sessionFile ? this.#transcriptCache.model : undefined;
 		const cachedThinking = this.#transcriptCache?.path === ref.sessionFile ? this.#transcriptCache.thinking : undefined;
-		const selector =
-			progress?.resolvedModel ??
-			cachedModel ??
-			ref.recovery?.hotswapModel ??
-			ref.recovery?.model ??
-			durableModelSelector(this.#journalModels.peek(ref.sessionFile));
 		const liveModel = ref.session?.model;
+		const liveSelector = liveModel ? `${liveModel.provider}/${liveModel.id}` : undefined;
+		const durable = this.#journalModels.peek(ref.sessionFile);
+		const selector =
+			liveSelector ??
+			ref.recovery?.hotswapModel ??
+			cachedModel ??
+			durableModelSelector(durable) ??
+			progress?.resolvedModel ??
+			ref.recovery?.model;
 		return withModelSelectorEffort(selector, {
-			session: ref.session?.thinkingLevel ?? cachedThinking ?? ref.recovery?.thinkingLevel,
+			session:
+				ref.session?.thinkingLevel ??
+				(ref.recovery?.hotswapModel ? ref.recovery.thinkingLevel : undefined) ??
+				cachedThinking ??
+				durable?.thinkingLevel,
 			route: progress?.routeReceipt?.route.thinking,
 			modelDefault: liveModel?.thinking?.defaultLevel,
 			reasoning: liveModel?.reasoning,
@@ -2029,7 +2142,7 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 		const lines: string[] = [];
 		for (const metadata of this.#contextualMetadataLines())
 			lines.push(`   ${theme.fg("dim", sanitizeLine(metadata, Math.max(10, width - 4)))}`);
-		lines.push(...renderAgentHubHelp(width, this.#inspectorFocused ? "hub.inspector" : "hub.table"));
+		lines.push(...renderAgentHubHelp(width, this.#previewLaneFocus === "inspector" ? "hub.inspector" : "hub.table"));
 		lines.push(`   ${theme.fg("dim", "[ / ] cycle siblings · ← / →")}`);
 		lines.push(...new DynamicBorder().render(width));
 		return lines;
@@ -2091,7 +2204,7 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 			? ""
 			: theme.fg("dim", ` · ${this.#historicalHiddenCount()} hidden`);
 		lines.push(
-			` ${theme.fg("accent", "Agent Hub")}${theme.fg("dim", " · tree")}${counts ? theme.fg("dim", `${theme.sep.dot}${counts}`) : ""}${terminalIndicator}${historyIndicator}${filterIndicator}`,
+			` ${theme.fg("accent", "Agent Hub")}${theme.fg("dim", ` · tree · focus ${this.#panelFocus()}`)}${counts ? theme.fg("dim", `${theme.sep.dot}${counts}`) : ""}${terminalIndicator}${historyIndicator}${filterIndicator}`,
 		);
 		lines.push(...new DynamicBorder().render(width));
 		const rail = this.#selectedRailLines(width);
@@ -2119,7 +2232,7 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 		lines.push(
 			renderAgentHubFooter({
 				width,
-				surface: this.#inspectorFocused ? "hub.inspector" : "hub.table",
+				surface: this.#previewLaneFocus === "inspector" ? "hub.inspector" : "hub.table",
 				mode: this.#tableSearchEditing() ? "filter" : "normal",
 				extra: query ? ["n/N:next/previous match"] : undefined,
 				pending: this.#viewerSequence.isPending ? AGENT_HUB_G_CHORD_CUE : undefined,
@@ -2241,6 +2354,29 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 		);
 	}
 
+	#openRouteExplanation(): void {
+		if (!this.#chatAgentId) {
+			this.#notice = "Select an agent to inspect its route.";
+			this.#requestRender();
+			return;
+		}
+		if (this.#view === "chat") {
+			const selectedKey = this.#chatExternal
+				? `external:${this.#chatExternal.sessionId}`
+				: this.#chatArchived
+					? `archived:${this.#chatArchived.childSessionFile}`
+					: `agent:${this.#chatAgentId}`;
+			this.#closeChat();
+			this.#tablePreview.selectKey(selectedKey);
+			this.#tablePreview.refresh({ refreshPreview: true });
+		}
+		this.#inspectorSection = "route";
+		this.#inspectorScrollOffset = 0;
+		this.#previewLaneFocus = "inspector";
+		this.#tablePreview.setFocus("preview");
+		this.#requestRender();
+	}
+
 	#handleGrammarSequence(keyData: string, lane: "table" | "chat" | "inspector"): boolean {
 		const action = this.#viewerSequence.handle(keyData, {
 			prefix: keyData === "g",
@@ -2277,7 +2413,10 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 			action.kind === "display-row-up" ||
 			action.kind === "logical-up"
 		) {
-			if (lane === "inspector") {
+			if (lane === "table") {
+				const down = action.kind === "display-row-down" || action.kind === "logical-down";
+				this.#tablePreview.moveSelection(down ? 1 : -1);
+			} else if (lane === "inspector") {
 				this.#inspectorScrollOffset = applyAgentHubViewerSequenceAction(
 					this.#inspectorScrollOffset,
 					this.#inspectorLastMaxScroll,
@@ -2292,6 +2431,8 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 		}
 		if (action.kind === "attach-owner") {
 			this.#attachSelectedExternalOwner();
+		} else if (action.kind === "open-route-explanation") {
+			this.#openRouteExplanation();
 		} else if (action.kind === "open-errors") {
 			if (this.#openErrors) this.#openErrors(this.#chatAgentId);
 			else this.#notice = "Errors dock is unavailable.";
@@ -2342,16 +2483,15 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 			return;
 		}
 		const dismiss = matchesUiDismiss(keyData);
-		const grammarLane = this.#dualLaneActive && this.#inspectorFocused ? "inspector" : "table";
+		const grammarLane = this.#dualLaneActive && this.#previewLaneFocus === "inspector" ? "inspector" : "table";
 		if (this.#viewerSequence.isPending && this.#handleGrammarSequence(keyData, grammarLane)) return;
 		if (dismiss) {
 			if (this.#tablePreview.focus === "preview") {
 				this.#tablePreview.handleInput(keyData);
 				return;
 			}
-			if (this.#dualLaneActive && this.#inspectorFocused) {
-				this.#inspectorFocused = false;
-				this.#requestRender();
+			if (this.#dualLaneActive && this.#previewLaneFocus === "inspector") {
+				this.#focusPreviewLane("transcript");
 				return;
 			}
 			const fold = this.#foldSequence.handle(keyData, this.#selectedInternalRef()?.id, true);
@@ -2368,7 +2508,7 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 			return;
 		}
 		if (this.#tablePreview.focus === "preview") {
-			this.#tablePreview.handleInput(keyData);
+			if (!this.#handlePreviewPanelInput(keyData)) this.#tablePreview.handleInput(keyData);
 			return;
 		}
 		if (this.#handleGrammarSequence(keyData, grammarLane)) return;
@@ -2390,6 +2530,12 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 			this.#requestRender();
 			return;
 		}
+		const tableDelta = resolveViewerScrollDelta(keyData, this.#tableViewportCapacity());
+		if (tableDelta !== undefined) {
+			this.#moveTableSelection(tableDelta);
+			this.#requestRender();
+			return;
+		}
 		if (keyData === "n" || keyData === "p") {
 			this.#moveTableSelection(keyData === "n" ? 1 : -1);
 			return;
@@ -2398,7 +2544,7 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 			this.#tablePreview.selectIndex(this.#totalTableRows() - 1);
 			return;
 		}
-		if (this.#dualLaneActive && this.#inspectorFocused) {
+		if (this.#dualLaneActive && this.#previewLaneFocus === "inspector") {
 			if (this.#handleInspectorNavigation(keyData)) return;
 		} else if (this.#handleViewerNavigation(keyData)) return;
 		const fold = this.#foldSequence.handle(keyData, this.#selectedInternalRef()?.id, matchesUiDismiss(keyData));
@@ -2424,13 +2570,13 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 		}
 		if (keyData === "h") {
 			if (!this.#toggleFold(this.#selectedInternalRef()?.id ?? "", false) && this.#dualLaneActive)
-				this.#inspectorFocused = true;
+				this.#focusPreviewLane("inspector");
 			this.#requestRender();
 			return;
 		}
 		if (keyData === "l") {
 			if (!this.#toggleFold(this.#selectedInternalRef()?.id ?? "", true) && this.#dualLaneActive)
-				this.#inspectorFocused = false;
+				this.#focusPreviewLane("transcript");
 			this.#requestRender();
 			return;
 		}
@@ -2985,6 +3131,19 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 			return;
 		}
 		if (this.#handleGrammarSequence(keyData, "chat")) return;
+		if (keyData === "[" || keyData === "]") {
+			if (this.#chatArchived || this.#chatExternal) {
+				this.#notice = "Sibling cycling is unavailable for archived and external transcripts.";
+				this.#requestRender();
+				return;
+			}
+			const currentId = this.#chatAgentId;
+			const sibling = currentId
+				? cycleVisibleAgentSibling(this.#visibleActiveRows, currentId, keyData === "]" ? 1 : -1)
+				: undefined;
+			if (sibling && sibling.id !== currentId) this.openChat(sibling.id);
+			return;
+		}
 		if (this.#inputUnavailableFlash) this.#inputUnavailableFlash = false;
 		if (this.#chatExternal) {
 			this.#handleReadOnlyChatInput(keyData);
@@ -3211,6 +3370,34 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 			this.#inspectorScrollOffset = 0;
 			this.#requestRender();
 		}
+	}
+
+	/** Route keys for the focused transcript/prompt pane inside the table preview. */
+	#handlePreviewPanelInput(keyData: string): boolean {
+		const lane = this.#previewLaneFocus === "inspector" ? "inspector" : "chat";
+		if (this.#viewerSequence.isPending && this.#handleGrammarSequence(keyData, lane)) return true;
+		if (this.#handleGrammarSequence(keyData, lane)) return true;
+		if (keyData === "h") return this.#focusPreviewLane("inspector");
+		if (keyData === "l") return this.#focusPreviewLane("transcript");
+		if (keyData === "[" || keyData === "]") {
+			this.#cycleSiblingOrSection(keyData === "]" ? 1 : -1);
+			return true;
+		}
+		if (keyData === "c" || keyData === "C") {
+			this.#copyTranscriptUnit(keyData === "C");
+			return true;
+		}
+		if (keyData === "v") {
+			this.#plainPreview = !this.#plainPreview;
+			this.#requestRender();
+			return true;
+		}
+		if (keyData === "?") {
+			this.#showLegend = !this.#showLegend;
+			this.#requestRender();
+			return true;
+		}
+		return lane === "inspector" ? this.#handleInspectorNavigation(keyData) : this.#handleViewerNavigation(keyData);
 	}
 
 	/** Viewport scrolling for the chat transcript. Returns true when handled. */

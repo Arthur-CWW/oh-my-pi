@@ -136,6 +136,49 @@ function isRouteSource(value: JsonValue | undefined): value is { readonly agentI
 	return typeof record.agentId === "string" && typeof record.agentSeq === "number";
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Decode durable route events before projecting them into observability views. */
+export function isRouteResolutionSource(value: unknown): value is RouteResolutionSource {
+	if (!isRecord(value) || !isRecord(value.route) || !isRecord(value.provenance)) return false;
+	return (
+		value.payloadVersion === 1 &&
+		typeof value.agentId === "string" &&
+		typeof value.agentSeq === "number" &&
+		typeof value.resolutionId === "string" &&
+		typeof value.occurredAt === "number" &&
+		typeof value.changeKind === "string" &&
+		typeof value.route.lane === "string" &&
+		typeof value.route.provider === "string" &&
+		typeof value.route.model === "string" &&
+		typeof value.route.effort === "string" &&
+		(value.reason === null || typeof value.reason === "string") &&
+		(value.responsibility === null || typeof value.responsibility === "string") &&
+		Array.isArray(value.candidates)
+	);
+}
+
+/** Return one agent's ordered route timeline from the canonical session entries. */
+export function routeResolutionEvents(
+	entries: readonly SessionEntry[],
+	agentId?: string,
+): RouteResolutionSource[] {
+	const events: RouteResolutionSource[] = [];
+	for (const entry of entries) {
+		if (
+			entry.type !== "custom" ||
+			entry.customType !== ROUTE_RESOLUTION_ENTRY ||
+			!isRouteResolutionSource(entry.data) ||
+			(agentId !== undefined && entry.data.agentId !== agentId)
+		)
+			continue;
+		events.push(entry.data);
+	}
+	return events.sort((left, right) => left.agentSeq - right.agentSeq || left.occurredAt - right.occurredAt);
+}
+
 function nextAgentSeq(entries: readonly SessionEntry[], agentId: string): number {
 	let next = 0;
 	for (const entry of entries) {

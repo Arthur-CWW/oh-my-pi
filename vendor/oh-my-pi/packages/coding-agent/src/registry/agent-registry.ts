@@ -208,6 +208,27 @@ export class AgentRegistry {
 		ref.activity = gist;
 	}
 
+	setRecovery(id: string, recovery: NonNullable<AgentRef["recovery"]>): boolean {
+		const ref = this.#refs.get(id);
+		if (!ref) return false;
+		ref.recovery = recovery;
+		ref.lastActivity = Date.now();
+		return true;
+	}
+
+	setRecoveryRoute(id: string, model: string, thinkingLevel?: string | null): boolean {
+		const ref = this.#refs.get(id);
+		if (!ref?.recovery) return false;
+		ref.recovery = {
+			...ref.recovery,
+			hotswapModel: model,
+			...(thinkingLevel === undefined ? {} : { thinkingLevel }),
+		};
+		ref.lastActivity = Date.now();
+		this.#emit({ type: "status_changed", ref });
+		return true;
+	}
+
 	attachSession(id: string, session: AgentSession, sessionFile?: string | null): void {
 		const ref = this.#refs.get(id);
 		if (!ref) return;
