@@ -51,6 +51,8 @@ export interface Args {
 	mode?: Mode;
 	noSession?: boolean;
 	tuiBundleManifest?: string;
+	headlessOwner?: boolean;
+	localAttach?: string;
 	collabHost?: boolean;
 	collabRelay?: string;
 	sessionDir?: string;
@@ -204,6 +206,8 @@ export function parseArgs(inputArgs: string[], extensionFlags?: Map<string, { ty
 			result.collabRelay = args[++i];
 		} else if (arg.startsWith("--collab-relay=")) {
 			result.collabRelay = arg.slice("--collab-relay=".length);
+		} else if (arg === "--headless-owner") {
+			result.headlessOwner = true;
 		} else if (arg === "--no-session") {
 			result.noSession = true;
 		} else if (arg === "--no-tools") {

@@ -87,6 +87,14 @@ export const launchCommandConfig = {
 		Flag.withDescription("Override the default rich terminal with a hash-reloadable TUI bundle manifest"),
 		Flag.optional,
 	),
+	headlessOwner: Flag.boolean("headless-owner").pipe(
+		Flag.withDescription("Serve the persistent session owner socket without starting a terminal view"),
+		Flag.withDefault(false),
+	),
+	localAttach: Flag.string("local-attach").pipe(
+		Flag.withDescription("Attach a local controller TUI through the provided Unix socket path"),
+		Flag.optional,
+	),
 	collabHost: Flag.boolean("collab-host").pipe(
 		Flag.withDescription("Host this runner-backed session for encrypted collaboration"),
 		Flag.withDefault(false),

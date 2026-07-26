@@ -24,17 +24,90 @@ import {
 } from "./errors";
 import type {
 	ClientHelloFrame,
+	ManifestResponseFrame,
 	EventFrame,
 	RequestFrame,
 	ResyncRequiredFrame,
 	ServerHelloFrame,
 	WireFrame,
 } from "./frames";
-import { decodeEventFrame, decodeResponseFrame, decodeServerHelloFrame, decodeResyncRequiredFrame } from "./frames";
+import {
+	decodeEventFrame,
+	decodeManifestResponseFrame,
+	decodeResponseFrame,
+	decodeServerHelloFrame,
+	decodeResyncRequiredFrame,
+} from "./frames";
 
 type JsonValue = typeof Schema.Json.Type;
 
 export type TerminalSessionWireClientHello = Omit<ClientHelloFrame, "kind" | "correlationId">;
+export type TerminalSessionAttachManifest = Omit<ManifestResponseFrame, "kind" | "correlationId">;
+
+/**
+ * Read the bounded, server-originated identity needed for an epoch-fenced hello.
+ * Unix permissions (or an authenticated SSH stream-local forward) gate access;
+ * the returned identity is still revalidated by the subsequent client hello.
+ */
+export function discoverTerminalSessionManifest(
+	socketPath: string,
+	options: { readonly timeoutMs?: number; readonly maxFrameBytes?: number } = {},
+): Promise<TerminalSessionAttachManifest> {
+	const timeoutMs = options.timeoutMs ?? 1_000;
+	if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+		throw new RangeError("Manifest discovery timeout must be positive");
+	}
+	const maxFrameBytes = options.maxFrameBytes ?? DEFAULT_MAX_WIRE_FRAME_BYTES;
+	const decoder = new IncrementalWireFrameDecoder(maxFrameBytes);
+	const correlationId = randomUUID();
+	const socket = net.createConnection(socketPath);
+	const result = Promise.withResolvers<TerminalSessionAttachManifest>();
+	let settled = false;
+	const finish = (error: unknown, manifest?: TerminalSessionAttachManifest): void => {
+		if (settled) return;
+		settled = true;
+		clearTimeout(timeout);
+		socket.destroy();
+		if (error !== undefined) result.reject(error);
+		else result.resolve(manifest as TerminalSessionAttachManifest);
+	};
+	const timeout = setTimeout(
+		() => finish(new TerminalSessionWireConnectionError("Terminal session manifest discovery timed out")),
+		timeoutMs,
+	);
+	socket.once("error", error =>
+		finish(new TerminalSessionWireConnectionError(`Unable to discover terminal session: ${error.message}`)),
+	);
+	socket.on("data", chunk => {
+		if (typeof chunk === "string") {
+			finish(new TerminalSessionWireConnectionError("Unexpected text terminal session manifest response"));
+			return;
+		}
+		try {
+			for (const frame of decoder.push(chunk)) {
+				if (frame.kind !== "manifestResponse" || frame.correlationId !== correlationId) {
+					finish(new TerminalSessionWireConnectionError("Unexpected terminal session manifest response"));
+					return;
+				}
+				const { kind: _kind, correlationId: _correlationId, ...manifest } =
+					decodeManifestResponseFrame(frame);
+				finish(undefined, manifest);
+				return;
+			}
+		} catch (error) {
+			finish(error);
+		}
+	});
+	socket.once("connect", () => {
+		socket.write(
+			encodeLengthPrefixedWireFrame(
+				{ kind: "manifestRequest", correlationId },
+				maxFrameBytes,
+			),
+		);
+	});
+	return result.promise;
+}
 
 export interface UnixSocketTerminalSessionTransportOptions {
 	readonly socketPath: string;

@@ -14,6 +14,8 @@ import { handleReloadTuiCommand, RELOAD_TUI_COMMAND, RELOAD_TUI_DESCRIPTION } fr
 import { editorKey } from "./components/keybinding-hints";
 import type { DisposableTerminalHostCallbacks, DisposableTerminalView } from "./disposable-terminal-host";
 import type { TerminalSessionController } from "./terminal-session-controller";
+import { setTerminalTitle } from "../utils/title-generator";
+import { EnhancedPasteController } from "../utils/enhanced-paste";
 
 const identity = (text: string): string => text;
 const symbols: SymbolTheme = {
@@ -92,10 +94,25 @@ function describeError(error: unknown): string {
 	return "Unknown error";
 }
 
+export class AttachedTerminalImageUnsupportedError extends Error {
+	constructor(readonly mimeType: string) {
+		super(
+			`Image paste (${mimeType}) is unavailable in a remote attached view; upload the image through a content-addressed side channel before referencing it.`,
+		);
+		this.name = "AttachedTerminalImageUnsupportedError";
+	}
+}
+
+export interface DisposableChatViewOptions {
+	/** Verified engine host shown only when the controller is attached cross-host. */
+	readonly remoteHost?: string;
+}
+
 /** Built-in compact revision for the opt-in disposable terminal host. */
 export function createDisposableTerminalView(
 	controller: TerminalSessionController,
 	callbacks: DisposableTerminalHostCallbacks,
+	options: DisposableChatViewOptions = {},
 ): DisposableTerminalView {
 	const hostCallbacks = callbacks as DisposableChatViewCallbacks;
 	let phase: "new" | "running" | "quiesced" | "disposed" = "new";
@@ -110,6 +127,7 @@ export function createDisposableTerminalView(
 	let unsubscribeAgentEvents: (() => void) | undefined;
 	let unsubscribeInput: (() => void) | undefined;
 	let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+	let enhancedPaste: EnhancedPasteController | undefined;
 	let refreshTask: Promise<void> | undefined;
 	let refreshAgain = false;
 	let viewGeneration = 0;
@@ -141,6 +159,7 @@ export function createDisposableTerminalView(
 		if (session.hasPostPromptWork) activity.push("post-prompt work");
 		if (activity.length === 0) activity.push("idle");
 		const status = [
+			...(options.remoteHost ? [`REMOTE · ${options.remoteHost}`] : []),
 			`model ${modelLabel}`,
 			`thinking ${thinking}`,
 			`workflow ${describeWorkflow(session.workflow)}`,
@@ -161,6 +180,9 @@ export function createDisposableTerminalView(
 			]);
 			if (!acceptingInput || generation !== viewGeneration || !callbacks.isCurrentEpoch()) return;
 			transcriptText?.setText(transcript || "No messages yet.");
+			if (options.remoteHost) {
+				setTerminalTitle(`[R ${options.remoteHost}] π: ${controller.snapshot().session.sessionId}`);
+			}
 			updateStatus();
 			requestRender();
 		} catch (error) {
@@ -267,6 +289,7 @@ export function createDisposableTerminalView(
 			feedbackText = new Text("", 1, 0);
 			const helpText = new Text(
 				`Disposable TUI · /${RELOAD_TUI_COMMAND} (${RELOAD_TUI_DESCRIPTION}) · ${editorKey("app.interrupt")} interrupt · Ctrl-D exit · Ctrl-L redraw\n` +
+					"Text paste is processed locally; remote image paste is refused until a content-addressed upload is available.\n" +
 					"Pending input management unavailable in disposable TUI · Agent Hub unavailable in disposable TUI",
 				1,
 				0,
@@ -287,8 +310,18 @@ export function createDisposableTerminalView(
 			tui = new TUI(terminal);
 			tui.addChild(root);
 			tui.setFocus(editor);
+			enhancedPaste = new EnhancedPasteController({
+				write: data => terminal?.write(data),
+				pasteText: text => editor?.pasteText(text),
+				pasteImage: image => {
+					setFeedback(new AttachedTerminalImageUnsupportedError(image.mimeType).message);
+				},
+				showStatus: setFeedback,
+			});
+			enhancedPaste.enable();
 			unsubscribeInput = tui.addInputListener(data => {
 				if (!acceptingInput) return { consume: true };
+				if (enhancedPaste?.handleInput(data)) return { consume: true };
 				if (matchesKey(data, Key.escape)) {
 					void controller.interruptPrompt().then(
 						() => {
@@ -342,6 +375,8 @@ export function createDisposableTerminalView(
 			clearTimeout(refreshTimer);
 			refreshTimer = undefined;
 		}
+		enhancedPaste?.disable();
+		enhancedPaste = undefined;
 		tui?.setFocus(null);
 		tui?.stop();
 		if (!tui) terminal?.stop();

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as net from "node:net";
+import * as os from "node:os";
 import type { Schema } from "effect";
 import type {
 	TerminalSessionAttachment,
@@ -20,6 +21,7 @@ import {
 	WireResyncRequiredError,
 } from "./errors";
 import type {
+	ManifestResponseFrame,
 	ClientHelloFrame,
 	EventFrame,
 	RequestFrame,
@@ -310,6 +312,22 @@ class ServerConnection {
 		}
 		for (const frame of frames) {
 			if (!this.#hello) {
+				if (frame.kind === "manifestRequest") {
+					const response: ManifestResponseFrame = {
+						kind: "manifestResponse",
+						correlationId: frame.correlationId,
+						hostLabel: os.hostname().split(".", 1)[0] || os.hostname(),
+						protocol: this.#expectedHello.protocol,
+						sessionId: this.#expectedHello.sessionId,
+						ownerEpoch: this.#expectedHello.ownerEpoch,
+						runnerInstanceId: this.#expectedHello.runnerInstanceId,
+						build: this.#expectedHello.build,
+						authority: this.#expectedHello.authority,
+						features: this.#expectedHello.features,
+					};
+					this.#writer.enqueueControl(response);
+					continue;
+				}
 				if (frame.kind !== "clientHello") {
 					this.#socket.destroy();
 					return;

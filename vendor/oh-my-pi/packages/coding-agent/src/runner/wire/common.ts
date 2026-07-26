@@ -1,6 +1,8 @@
 import { Schema } from "effect";
 
 export const WIRE_FRAME_KINDS = [
+	"manifestRequest",
+	"manifestResponse",
 	"clientHello",
 	"serverHello",
 	"request",

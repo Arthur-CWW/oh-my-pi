@@ -26,6 +26,22 @@ const HelloIdentityFields = {
 	authority: WireAuthorityProofSchema,
 };
 
+export const ManifestRequestFrameSchema = Schema.Struct({
+	kind: Schema.Literal("manifestRequest"),
+	...CorrelationFields,
+});
+export type ManifestRequestFrame = typeof ManifestRequestFrameSchema.Type;
+
+export const ManifestResponseFrameSchema = Schema.Struct({
+	kind: Schema.Literal("manifestResponse"),
+	...CorrelationFields,
+	hostLabel: NonEmptyStringSchema,
+	protocol: ProtocolRangeSchema,
+	...HelloIdentityFields,
+	features: WireFeaturesSchema,
+});
+export type ManifestResponseFrame = typeof ManifestResponseFrameSchema.Type;
+
 export const ClientHelloFrameSchema = Schema.Struct({
 	kind: Schema.Literal("clientHello"),
 	...CorrelationFields,
@@ -106,6 +122,8 @@ export const ResyncRequiredFrameSchema = Schema.Struct({
 export type ResyncRequiredFrame = typeof ResyncRequiredFrameSchema.Type;
 
 export const WireFrameSchema = Schema.Union([
+	ManifestRequestFrameSchema,
+	ManifestResponseFrameSchema,
 	ClientHelloFrameSchema,
 	ServerHelloFrameSchema,
 	RequestFrameSchema,
@@ -131,6 +149,14 @@ function inferSafeFrameKind(input: unknown): WireFrameKind | "unknown" {
 	if (typeof input !== "object" || input === null || !Object.hasOwn(input, "kind")) return "unknown";
 	const kind = Reflect.get(input, "kind");
 	return typeof kind === "string" && wireFrameKinds.has(kind) ? (kind as WireFrameKind) : "unknown";
+}
+
+export function decodeManifestResponseFrame(input: unknown): ManifestResponseFrame {
+	try {
+		return Schema.decodeUnknownSync(ManifestResponseFrameSchema)(input, STRICT_DECODE_OPTIONS);
+	} catch {
+		throw sanitizedDecodeError("manifestResponse");
+	}
 }
 
 export function decodeClientHelloFrame(input: unknown): ClientHelloFrame {

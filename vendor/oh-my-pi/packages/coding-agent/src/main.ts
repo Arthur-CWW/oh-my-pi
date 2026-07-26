@@ -23,6 +23,7 @@ import {
 	VERSION,
 } from "@oh-my-pi/pi-utils";
 import chalk from "chalk";
+import { Effect, Exit, Scope } from "effect";
 import { reset as resetCapabilities } from "./capability";
 import { type Args, reportUnrecognizedFlags } from "./cli/args";
 import { applyExtensionFlags, type ExtensionFlagSink } from "./cli/extension-flags";
@@ -62,6 +63,7 @@ import { ExtensionRunner } from "./extensibility/extensions/runner";
 import type { ExtensionUIContext } from "./extensibility/extensions/types";
 import { scheduleMarketplaceAutoUpdate } from "./extensibility/plugins/marketplace-auto-update";
 import { IrcExternalBus } from "./irc/bus-external";
+import { runAttachedTerminalMode } from "./modes/attached-terminal-mode";
 import { createRichDisposableTerminalViewFactory } from "./modes/disposable-interactive-view";
 import type { InteractiveMode } from "./modes/interactive-mode";
 import type { PrintModeOptions } from "./modes/print-mode";
@@ -1024,6 +1026,14 @@ export async function runRootCommand(
 	await logger.time("initTheme:initial", initTheme);
 
 	const parsedArgs = parsed;
+	if (parsedArgs.localAttach !== undefined) {
+		if (parsedArgs.headlessOwner) throw new Error("--local-attach cannot be combined with --headless-owner");
+		if (!path.isAbsolute(parsedArgs.localAttach)) throw new Error("--local-attach requires an absolute Unix socket path");
+		stopStartupWatchdog();
+		await runAttachedTerminalMode(parsedArgs.localAttach);
+		stopThemeWatcher();
+		return;
+	}
 	captureRestartLaunchArgs(rawArgs, process.argv0, process.execPath);
 	const restartApiKey = process.env[RESTART_API_KEY_ENV];
 	delete process.env[RESTART_API_KEY_ENV];
@@ -1138,7 +1148,8 @@ export async function runRootCommand(
 	// Protocol modes own stdin; treating it as prompt text would consume JSON-RPC frames before their transports start.
 	const pipedInput = isProtocolMode ? undefined : await logger.time("readPipedInput", readPipedInput);
 	const autoPrint = pipedInput !== undefined && !parsedArgs.print && parsedArgs.mode === undefined;
-	const isInteractive = !parsedArgs.print && !autoPrint && parsedArgs.mode === undefined;
+	const isHeadlessOwner = parsedArgs.headlessOwner === true;
+	const isInteractive = !isHeadlessOwner && !parsedArgs.print && !autoPrint && parsedArgs.mode === undefined;
 	// Print mode still constructs a full AgentSession, but must not publish a roster peer.
 	// Fence the environment only around construction so later in-process callers are unaffected.
 	const fleetRegistrationDisabled = parsedArgs.print || autoPrint;
@@ -1200,7 +1211,7 @@ export async function runRootCommand(
 			settingsInstance,
 			promptForkSession,
 			promptMoveSession,
-			isInteractive,
+			isInteractive || isHeadlessOwner,
 		);
 	} catch (error: unknown) {
 		if (error instanceof SessionResolutionError) {
@@ -1516,10 +1527,10 @@ export async function runRootCommand(
 		});
 
 		let interactiveRunner: Awaited<ReturnType<typeof createSessionRunner>>["runner"] | undefined;
-		const sessionResult = isInteractive
+		const sessionResult = isInteractive || isHeadlessOwner
 			? await (async () => {
 					if (!sessionManager || !ownership || !runnerIdentity) {
-						throw new Error("Interactive TUI requires a persistent session; --no-session is not supported");
+						throw new Error("A terminal session owner requires a persistent session; --no-session is not supported");
 					}
 					const result = await logger.time("createSessionRunner", createSessionRunner, {
 						...sessionOptions,
@@ -1653,7 +1664,7 @@ export async function runRootCommand(
 			notifs.push({ kind: "error", message: modelRegistryError.message });
 		}
 
-		if (!isInteractive && !session.model) {
+		if (!isInteractive && !isHeadlessOwner && !session.model) {
 			if (modelFallbackMessage) {
 				process.stderr.write(`${chalk.red(modelFallbackMessage)}\n`);
 			} else {
@@ -1665,7 +1676,38 @@ export async function runRootCommand(
 			process.exit(1);
 		}
 
-		if (mode === "rpc" || mode === "rpc-ui") {
+		if (isHeadlessOwner) {
+			if (!interactiveRunner || !ownership?.socketPath) {
+				throw new Error("Headless session owner endpoint was not initialized");
+			}
+			stopStartupWatchdog();
+			logger.endTiming();
+			process.stdout.write(
+				`${JSON.stringify({
+					kind: "headless-owner-ready",
+					sessionId: session.sessionManager.getSessionId(),
+					ownerEpoch: ownership.ownerEpoch,
+					socketPath: ownership.socketPath,
+					pid: process.pid,
+				})}\n`,
+			);
+			const stopped = Promise.withResolvers<void>();
+			const stop = (): void => {
+				process.off("SIGINT", stop);
+				process.off("SIGTERM", stop);
+				stopped.resolve();
+			};
+			process.once("SIGINT", stop);
+			process.once("SIGTERM", stop);
+			await stopped.promise;
+			const runnerScope = Scope.makeUnsafe("sequential");
+			try {
+				await Effect.runPromise(Scope.provide(runnerScope)(interactiveRunner.stop()));
+			} finally {
+				await Effect.runPromise(Scope.close(runnerScope, Exit.void));
+				stopThemeWatcher();
+			}
+		} else if (mode === "rpc" || mode === "rpc-ui") {
 			// Branch-only protocol runner: keep RPC host code out of normal interactive startup.
 			const runRpcMode: RunRpcMode = (await import("./modes/rpc/rpc-mode")).runRpcMode;
 			stopStartupWatchdog();

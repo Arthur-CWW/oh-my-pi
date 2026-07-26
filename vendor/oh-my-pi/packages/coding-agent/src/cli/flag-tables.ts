@@ -108,6 +108,9 @@ export const STRING_SETTERS: Record<string, StringSetter> = {
 	"--tui-bundle-manifest": (result, value) => {
 		result.tuiBundleManifest = value;
 	},
+	"--local-attach": (result, value) => {
+		result.localAttach = value;
+	},
 	"--fork": (result, value) => {
 		result.fork = value;
 	},
@@ -261,6 +264,7 @@ export const VALUELESS_FLAGS: ReadonlySet<string> = new Set([
 	"--version",
 	"--allow-home",
 	"--continue",
+	"--headless-owner",
 	"--no-session",
 	"--no-tools",
 	"--no-lsp",

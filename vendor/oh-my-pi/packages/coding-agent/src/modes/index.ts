@@ -9,6 +9,7 @@ import { postmortem } from "@oh-my-pi/pi-utils";
  * TUI graph.
  */
 export * from "./interactive-mode";
+export * from "./attached-terminal-mode";
 export * from "./rpc/rpc-client";
 export * from "./rpc/rpc-types";
 
