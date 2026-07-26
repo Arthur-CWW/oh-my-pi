@@ -45,6 +45,7 @@ Ancestor-first, each identity preserved:
 22. `lnlnmqrkpxxl` / `a92e6332d53c` — guard heavy work under disk pressure
 23. `lvowwnytwqzm` / `4cdd8b89d58d` — coalesce remote tmux workstreams natively; routing proof was updated to the required Opus 5 calibrated route
 24. `wlzlpqmmprwt` / `d870c8492ab5` — Majordomo directory and fenced migration control; preserves both IRC direct-audience hygiene and host identity
+25. `pzxymppyxtmm` / `b2978574b582` — Agent Hub panel focus, chord coverage, effort rendering, and `g i` route explanations; reconciled to mandatory explicit-effort routing and current model-context metadata
 
 The pre-existing ancestry from `xnvuspywkvrw` through `xqwrqwpwttnu`, plus the two old-main commits on the merge's other parent, remains intact. No leaf copy replaced those identities.
 
@@ -52,8 +53,8 @@ The pre-existing ancestry from `xnvuspywkvrw` through `xqwrqwpwttnu`, plus the t
 
 All six previously blocked priority units are now integrated and green. Their earlier failures were traced to omitted lineage foundations, intentionally disabled fleet registration in tests that exercise registration, or stale routing expectations—not accepted as permanent exclusions.
 - Duplicate losers remain excluded: `ruxxltns` (survivor `wlzlpqmm`), `nqzsksmo` (survivor `vqqopsnn`), `rxqzrmpm` (survivor `tkuzrpsv`), and `stssxsor/764449bc` (survivor `stssxsor/e7cef9b1`).
-- Active-owner exclusions remain untouched: `uwornqxy`, `pzxymppy`, and `rvzlvzuk`.
-- The nested cmux and separate dotfiles repositories were not touched. No push and no deploy occurred.
+- Active-owner exclusions remain untouched: `uwornqxy` and `rvzlvzuk`.
+- The nested cmux and separate dotfiles repositories were not touched. No remote push or deployment occurred.
 
 ## Final union gates
 
@@ -94,6 +95,9 @@ This receipt was written before the final union run. Observed commands and outpu
   - exit 0
 - Majordomo migration core plus session directory
   - 14 passed, 0 failed, 57 expectations
+  - exit 0
+- Agent Hub interaction contract, key grammar, route provenance/inspector, HUD, dual-lane, activation, and model-selector effort rendering
+  - 68 passed, 0 failed, 447 expectations
   - exit 0
 - `cd packages/fleet-sync && bun test ./test/fleet-sync.test.ts`
   - 5 passed, 0 failed, 30 expectations
