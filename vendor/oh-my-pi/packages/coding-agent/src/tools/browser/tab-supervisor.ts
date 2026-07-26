@@ -10,6 +10,11 @@ import { CmuxTab, runCmuxCode } from "./cmux/cmux-tab";
 import { mapWaitUntil } from "./cmux/rpc";
 import { DEFAULT_VIEWPORT } from "./launch";
 import {
+	releaseOwnedBrowserTabLease,
+	reserveOwnedBrowserTabLease,
+	touchOwnedBrowserTabLease,
+} from "./process-ownership";
+import {
 	type BrowserHandle,
 	type BrowserKindTag,
 	type CmuxBrowserHandle,
@@ -18,15 +23,10 @@ import {
 	releaseBrowser,
 } from "./registry";
 import {
-	releaseOwnedBrowserTabLease,
-	reserveOwnedBrowserTabLease,
-	touchOwnedBrowserTabLease,
-} from "./process-ownership";
-import {
+	type BrowserTabBudgetRecord,
 	DEFAULT_MAX_GLOBAL_TABS,
 	DEFAULT_MAX_TABS_PER_SESSION,
 	enforceTabBudget,
-	type BrowserTabBudgetRecord,
 	normalizeTabBudgetCap,
 } from "./tab-budget";
 import type {
@@ -268,7 +268,6 @@ export function normalizeTabUrlForTest(url: string, querySensitive = false): str
 	return normalizeUrl(url, querySensitive);
 }
 
-
 export function acquireTab(name: string, browser: BrowserHandle, opts: AcquireTabOptions): Promise<AcquireTabResult> {
 	const priorName = acquireChains.get(name) ?? Promise.resolve();
 	const priorPool = acquirePoolTail;
@@ -286,19 +285,21 @@ export function acquireTab(name: string, browser: BrowserHandle, opts: AcquireTa
 	return result;
 }
 
-async function sweepExpiredTabs(ttlValue: number | undefined): Promise<void> {
+/** Release idle owned tabs whose configured pool TTL has elapsed. */
+export async function releaseExpiredTabs(ttlValue?: number): Promise<number> {
 	const ttl = idleTtlMs(ttlValue);
 	const cutoff = Date.now() - ttl;
 	const expired = [...tabs.values()]
 		.filter(tab => isBudgetedTab(tab) && isIdle(tab) && tab.lastUsedAt < cutoff)
 		.map(tab => tab.name);
-	for (const name of expired) await releaseTab(name);
+	let count = 0;
+	for (const name of expired) {
+		if (await releaseTab(name)) count++;
+	}
+	return count;
 }
 
-async function navigateAndTouchTab(
-	tab: TabSession,
-	opts: AcquireTabOptions,
-): Promise<void> {
+async function navigateAndTouchTab(tab: TabSession, opts: AcquireTabOptions): Promise<void> {
 	const reuseSteps: string[] = [];
 	if (opts.viewport && tab.kindTag !== "cmux") {
 		const dsf = opts.viewport.deviceScaleFactor;
@@ -324,7 +325,11 @@ async function navigateAndTouchTab(
 	await touchOwnedTabLease(tab, true);
 }
 
-async function admitOwnedTab(name: string, browser: BrowserHandle, opts: AcquireTabOptions): Promise<string | undefined> {
+async function admitOwnedTab(
+	name: string,
+	browser: BrowserHandle,
+	opts: AcquireTabOptions,
+): Promise<string | undefined> {
 	if (
 		!opts.sessionId ||
 		browser.kind.kind !== "headless" ||
@@ -363,7 +368,7 @@ async function acquireTabImpl(
 	// Serialized opens can sit behind a slow predecessor in the pool chain;
 	// honor an abort at dequeue instead of spawning an unowned worker.
 	if (opts.signal?.aborted) throw new ToolAbortError("Browser tab open aborted");
-	await sweepExpiredTabs(opts.tabIdleTtlMs);
+	await releaseExpiredTabs(opts.tabIdleTtlMs);
 
 	// Temporary refCount hold so releasing an existing tab on the SAME browser
 	// below cannot dispose the instance we are about to replace.
@@ -739,7 +744,8 @@ export async function releaseTabsOwnedBy(owner: string, opts: ReleaseTabOptions 
 	const names = [...tabs.values()].filter(tab => tab.ownerSessionId === owner).map(tab => tab.name);
 	const results = await Promise.allSettled(names.map(name => releaseTab(name, opts)));
 	const failures = results.flatMap(result => (result.status === "rejected" ? [result.reason] : []));
-	if (failures.length > 0) throw new AggregateError(failures, `Failed to release tabs owned by ${JSON.stringify(owner)}`);
+	if (failures.length > 0)
+		throw new AggregateError(failures, `Failed to release tabs owned by ${JSON.stringify(owner)}`);
 	return results.reduce((count, result) => count + (result.status === "fulfilled" && result.value ? 1 : 0), 0);
 }
 

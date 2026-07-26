@@ -167,6 +167,27 @@ export class AgentLifecycleManager {
 		return { liveSessions, subscriptions, timers };
 	}
 
+	/** Immediately park every adopted idle child while leaving live work untouched. */
+	async parkIdleAgents(): Promise<number> {
+		const candidates = [...this.#adopted.keys()].filter(id => this.#registry.get(id)?.status === "idle");
+		const results = await Promise.allSettled(candidates.map(id => this.park(id)));
+		const failures = results.flatMap(result => (result.status === "rejected" ? [result.reason] : []));
+		if (failures.length > 0) throw new AggregateError(failures, "Failed to park one or more idle agents");
+		return candidates.reduce((count, id) => {
+			const ref = this.#registry.get(id);
+			return count + (ref?.status === "parked" && ref.session === null ? 1 : 0);
+		}, 0);
+	}
+
+	/** Permanently release adopted parked children and their retained revival state. */
+	async releaseParkedAgents(): Promise<number> {
+		const candidates = [...this.#adopted.keys()].filter(id => this.#registry.get(id)?.status === "parked");
+		const results = await Promise.allSettled(candidates.map(id => this.release(id)));
+		const failures = results.flatMap(result => (result.status === "rejected" ? [result.reason] : []));
+		if (failures.length > 0) throw new AggregateError(failures, "Failed to release one or more parked agents");
+		return candidates.reduce((count, id) => count + (this.#registry.get(id) === undefined ? 1 : 0), 0);
+	}
+
 	/**
 	 * Persist the parked state, dispose the live session, detach it from the
 	 * registry, and mark the agent `parked`. No-op unless the id is adopted,

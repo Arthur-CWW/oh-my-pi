@@ -59,6 +59,26 @@ const shellSessionQuarantines = new Map<string, Promise<unknown>>();
 /** Session keys with a command currently in flight on the persistent Shell. */
 const shellSessionsInUse = new Set<string>();
 
+/**
+ * Drop persistent shells belonging to idle agent sessions. A shell with a
+ * command in flight is never selected.
+ */
+export async function shutdownShellSessionsOwnedBy(ownerSessionIds: ReadonlySet<string>): Promise<number> {
+	const idleShells: Shell[] = [];
+	for (const [key, shell] of shellSessions) {
+		if (shellSessionsInUse.has(key)) continue;
+		const owner = key.slice(0, key.indexOf("\n"));
+		if (!ownerSessionIds.has(owner)) continue;
+		if (shellSessions.get(key) !== shell) continue;
+		shellSessions.delete(key);
+		idleShells.push(shell);
+	}
+	const results = await Promise.allSettled(idleShells.map(shell => shell.abort()));
+	const failures = results.flatMap(result => (result.status === "rejected" ? [result.reason] : []));
+	if (failures.length > 0) throw new AggregateError(failures, "Failed to shut down one or more idle shell sessions");
+	return results.length;
+}
+
 function quarantineShellSession(
 	sessionKey: string,
 	runPromise: Promise<ShellRunResult>,

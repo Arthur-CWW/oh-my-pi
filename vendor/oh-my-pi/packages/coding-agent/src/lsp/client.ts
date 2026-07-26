@@ -1150,6 +1150,35 @@ export async function shutdownAll(): Promise<void> {
 	]);
 }
 
+/**
+ * Shut down clients with no request, file operation, or server progress in
+ * flight. Busy and initializing clients remain untouched.
+ */
+export async function shutdownIdleClients(): Promise<number> {
+	const idleEntries = [...clients.entries()].filter(([, client]) => {
+		if (client.pendingRequests.size > 0 || client.activeProgressTokens.size > 0) return false;
+		const fileOperationPrefix = `${client.name}:`;
+		for (const key of fileOperationLocks.keys()) {
+			if (key.startsWith(fileOperationPrefix)) return false;
+		}
+		return true;
+	});
+	for (const [key, client] of idleEntries) {
+		if (clients.get(key) === client) clients.delete(key);
+	}
+	const results = await Promise.allSettled(idleEntries.map(([, client]) => shutdownClientInstance(client)));
+	const failures = results.flatMap(result => (result.status === "rejected" ? [result.reason] : []));
+	if (failures.length > 0) throw new AggregateError(failures, "Failed to shut down one or more idle LSP clients");
+	return results.length;
+}
+
+/** Drop negative initialization results; a later request can rebuild them. */
+export function clearLspInitFailureCache(): number {
+	const count = initFailures.size;
+	initFailures.clear();
+	return count;
+}
+
 /** Status of an LSP server */
 export interface LspServerStatus {
 	name: string;
