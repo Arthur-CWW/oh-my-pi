@@ -58,6 +58,11 @@ export interface ResolvedReleaseValidationPaths {
 	readonly releasesDir: string;
 }
 
+export interface InstalledRelease {
+	readonly digest: string;
+	readonly executable: string;
+}
+
 export interface ValidatedFleetPin {
 	readonly channel: FleetPinChannel;
 	readonly digest: string;
@@ -224,6 +229,20 @@ async function assertImmutableRelease(releasesDir: string, digest: string): Prom
 	} finally {
 		await handle?.close();
 	}
+}
+
+/** Resolve the globally installed build used for ordinary launches. */
+export async function resolveNewestInstalledRelease(
+	options: ReleaseRegistryValidationOptions = {},
+): Promise<InstalledRelease> {
+	const paths = resolveReleaseValidationPaths(options);
+	const registry = await readRegistry(paths);
+	if (registry.stable === null) throw new Error("Release registry has no installed stable digest");
+	await assertImmutableRelease(paths.releasesDir, registry.stable);
+	return {
+		digest: registry.stable,
+		executable: path.join(paths.releasesDir, `omp-${registry.stable}`),
+	};
 }
 
 export async function validateFleetPinSelection(

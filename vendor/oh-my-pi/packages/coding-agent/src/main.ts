@@ -15,6 +15,7 @@ import {
 	$env,
 	getLogPath,
 	getProjectDir,
+	isCompiledBinary,
 	logger,
 	normalizePathForComparison,
 	postmortem,
@@ -28,9 +29,12 @@ import { applyExtensionFlags, type ExtensionFlagSink } from "./cli/extension-fla
 import { prepareInitialInput, submitInitialPrompts } from "./cli/initial-input";
 import {
 	acquireRestartSessionOwnership,
+	buildRestartSpawnSpec,
 	captureRestartLaunchArgs,
 	RESTART_API_KEY_ENV,
 	RESTART_OWNER_EPOCH_ENV,
+	RESTART_TARGET_DIGEST_ENV,
+	replaceRestartProcess,
 } from "./cli/restart-session";
 import { selectSession } from "./cli/session-picker";
 import { applyStartupCwd } from "./cli/startup-cwd";
@@ -77,6 +81,12 @@ import {
 } from "./sdk";
 import type { AgentSession } from "./session/agent-session";
 import type { AuthStorage } from "./session/auth-storage";
+import { resolveNewestInstalledRelease } from "./session/release-registry-validation";
+import {
+	resolveSessionBinaryRoute,
+	SESSION_BINARY_ROUTE_DIGEST_ENV,
+	type SessionBinaryRoute,
+} from "./session/session-build-routing";
 import {
 	resolveResumableSessionWithDiagnostics,
 	type SessionInfo,
@@ -111,11 +121,22 @@ import { EventBus } from "./utils/event-bus";
 const DISPOSABLE_TUI_MAILBOX_CAPACITY = 64;
 const DISPOSABLE_TUI_EVENT_CAPACITY = 256;
 
+let mainBuildDigestPromise: Promise<string> | undefined;
+
+function mainBuildDigest(): Promise<string> {
+	if (mainBuildDigestPromise === undefined) {
+		mainBuildDigestPromise = (async () => {
+			const hash = createHash("sha256");
+			for await (const chunk of fsSync.createReadStream(process.execPath)) hash.update(chunk);
+			return hash.digest("hex");
+		})();
+	}
+	return mainBuildDigestPromise;
+}
+
 async function createMainRunnerIdentity() {
-	const hash = createHash("sha256");
-	for await (const chunk of fsSync.createReadStream(process.execPath)) hash.update(chunk);
 	return {
-		buildRevision: { digest: hash.digest("hex"), version: VERSION },
+		buildRevision: { digest: await mainBuildDigest(), version: VERSION },
 		runnerInstance: { runnerInstanceId: randomUUID(), startedAt: new Date().toISOString() },
 	};
 }
@@ -1005,6 +1026,33 @@ export async function runRootCommand(
 	if (parsedArgs.apiKey === undefined && restartApiKey !== undefined) parsedArgs.apiKey = restartApiKey;
 	await logger.time("applyStartupCwd", applyStartupCwd, parsedArgs);
 
+	// The normal resume lane always enters through the globally installed build
+	// before decoding a session journal. Per-session pins and live cordons are
+	// resolved only after the newest decoder has safely located the session.
+	if (
+		!parsedArgs.version &&
+		!process.env[RESTART_TARGET_DIGEST_ENV] &&
+		!process.env[SESSION_BINARY_ROUTE_DIGEST_ENV] &&
+		(parsedArgs.continue || parsedArgs.resume) &&
+		isCompiledBinary()
+	) {
+		const currentDigest = await mainBuildDigest();
+		const newest = await resolveNewestInstalledRelease().catch(() => undefined);
+		if (newest && newest.digest !== currentDigest) {
+			logger.info("resume re-routed through newest installed build", {
+				currentDigest,
+				selectedDigest: newest.digest,
+				selectedExecutable: newest.executable,
+			});
+			replaceRestartProcess({
+				executable: newest.executable,
+				args: [...rawArgs],
+				cwd: process.cwd(),
+			});
+			return;
+		}
+	}
+
 	const notifs: (InteractiveModeNotify | null)[] = [];
 
 	// Create AuthStorage and ModelRegistry upfront
@@ -1248,9 +1296,54 @@ export async function runRootCommand(
 		sessionManager = SessionManager.create(cwd, parsedArgs.sessionDir);
 	}
 
-	// The session file and persisted id are now final. Acquire before extension
-	// startup, session creation, writer open, or durable child re-adoption.
+	// The session file and persisted id are now final. Resolve the build before
+	// ownership so an older installed process cannot claim a session and then
+	// hand it to the current build. Source runs never jump into a global install.
 	const runnerIdentity = sessionManager?.getSessionFile() ? await createMainRunnerIdentity() : undefined;
+	let sessionBinaryRoute: SessionBinaryRoute | undefined;
+	if (
+		runnerIdentity &&
+		sessionManager?.getSessionFile() &&
+		(parsedArgs.continue || parsedArgs.resume) &&
+		isCompiledBinary()
+	) {
+		sessionBinaryRoute = await resolveSessionBinaryRoute({
+			sessionId: sessionManager.getSessionId(),
+			sessionFile: sessionManager.getSessionFile() as string,
+			currentExecutable: process.execPath,
+			currentDigest: runnerIdentity.buildRevision.digest,
+		});
+		if (
+			sessionBinaryRoute.receipt.decision === "missing-pin-fallback-newest" ||
+			sessionBinaryRoute.receipt.decision === "current-build-fallback"
+		) {
+			logger.warn("session binary route fell back", sessionBinaryRoute.receipt);
+		} else {
+			logger.info("session binary route resolved", sessionBinaryRoute.receipt);
+		}
+		if (sessionBinaryRoute.receipt.selectedDigest !== runnerIdentity.buildRevision.digest) {
+			const env = { ...Bun.env };
+			if (
+				sessionBinaryRoute.receipt.decision === "explicit-pin" ||
+				sessionBinaryRoute.receipt.decision === "active-cordon"
+			) {
+				env[SESSION_BINARY_ROUTE_DIGEST_ENV] = sessionBinaryRoute.receipt.selectedDigest;
+			} else {
+				delete env[SESSION_BINARY_ROUTE_DIGEST_ENV];
+			}
+			replaceRestartProcess({
+				...buildRestartSpawnSpec({
+					sessionId: sessionManager.getSessionId(),
+					cwd: sessionManager.getCwd(),
+					executable: sessionBinaryRoute.executable,
+				}),
+				env,
+			});
+			return;
+		}
+	}
+
+	// Acquire before extension startup, session creation, writer open, or durable child re-adoption.
 	let ownership: SessionOwnershipHandle | undefined;
 	if (sessionManager?.getSessionFile()) {
 		try {
@@ -1267,6 +1360,9 @@ export async function runRootCommand(
 				},
 			);
 			sessionManager.bindSessionOwnership(ownership);
+			if (sessionBinaryRoute) {
+				sessionManager.appendCustomEntry("session_binary_route", sessionBinaryRoute.receipt);
+			}
 		} catch (error) {
 			if (error instanceof ExternalSessionOwner) {
 				const focus = await focusLiveCmuxOwner(

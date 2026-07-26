@@ -530,7 +530,7 @@ export class SessionManager {
 
 	/** File reflects all current entries; appends can go incrementally. */
 	#fileIsCurrent = false;
-	/** In-memory entries diverged from disk (load-migration/sanitize) → next persist must full-rewrite. */
+	/** In-memory sanitization diverged from disk → next persist must full-rewrite. */
 	#rewriteRequired = false;
 	/** Lazy gate crossed (ensureOnDisk / loaded file): every entry must persist from now on. */
 	#forceFileCreation = false;
@@ -1121,7 +1121,8 @@ export class SessionManager {
 			return;
 		}
 
-		const migrated = migrateToCurrentVersion(fileEntries);
+		// Older schemas are projected in memory. Their original records remain byte-for-byte on disk.
+		migrateToCurrentVersion(fileEntries);
 		await resolveBlobRefsInEntries(fileEntries, this.#blobs);
 		// loadEntriesFromFile guarantees entries[0] is a valid session header.
 		const header = fileEntries[0] as SessionHeader;
@@ -1138,7 +1139,7 @@ export class SessionManager {
 
 		this.#applyEntries(header, fileEntries.slice(1) as SessionEntry[]);
 		this.#fileIsCurrent = true;
-		this.#rewriteRequired = migrated;
+		this.#rewriteRequired = false;
 		this.#forceFileCreation = true;
 		this.#artifactManager = null;
 		this.#artifactManagerSessionFile = null;

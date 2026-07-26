@@ -379,13 +379,21 @@ export interface SessionControlWaitOptions {
 	readonly onReceipt?: (receipt: SessionControlReceipt) => void;
 }
 
+export interface SessionControlBusOptions {
+	readonly readonly?: boolean;
+}
+
 export class SessionControlBus {
 	readonly #db: Database;
 
-	constructor(readonly dbPath: string = SESSION_CONTROL_DB_PATH) {
-		fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-		this.#db = new Database(dbPath);
+	constructor(
+		readonly dbPath: string = SESSION_CONTROL_DB_PATH,
+		options: SessionControlBusOptions = {},
+	) {
+		if (!options.readonly) fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+		this.#db = options.readonly ? new Database(dbPath, { readonly: true }) : new Database(dbPath);
 		this.#db.run("PRAGMA busy_timeout = 3000");
+		if (options.readonly) return;
 		this.#db.run("PRAGMA journal_mode = WAL");
 		this.#db.run(`
 			CREATE TABLE IF NOT EXISTS control_commands (
@@ -664,12 +672,23 @@ export class SessionControlBus {
 	}
 
 	getCordon(sessionId: string): SessionSpawnCordon | undefined {
-		const row = this.#db
-			.query<CordonRow, { $sessionId: string }>(
-				`SELECT session_id,owner_epoch,rollout_id,expected_digest,pause_provenance,cordoned_at,checkpoint_id
-				 FROM rollout_cordons WHERE session_id=$sessionId`,
-			)
-			.get({ $sessionId: sessionId });
+		let row: CordonRow | null;
+		try {
+			row = this.#db
+				.query<CordonRow, { $sessionId: string }>(
+					`SELECT session_id,owner_epoch,rollout_id,expected_digest,pause_provenance,cordoned_at,checkpoint_id
+					 FROM rollout_cordons WHERE session_id=$sessionId`,
+				)
+				.get({ $sessionId: sessionId });
+		} catch {
+			const legacy = this.#db
+				.query<Omit<CordonRow, "checkpoint_id">, { $sessionId: string }>(
+					`SELECT session_id,owner_epoch,rollout_id,expected_digest,pause_provenance,cordoned_at
+					 FROM rollout_cordons WHERE session_id=$sessionId`,
+				)
+				.get({ $sessionId: sessionId });
+			row = legacy ? { ...legacy, checkpoint_id: null } : null;
+		}
 		return row ? decodeCordonRow(row) : undefined;
 	}
 

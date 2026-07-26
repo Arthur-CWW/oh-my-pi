@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { Snowflake } from "@oh-my-pi/pi-utils";
 import { type CompactionEntry, CURRENT_SESSION_VERSION, type FileEntry, type SessionHeader } from "./session-entries";
 
@@ -10,18 +11,37 @@ export function generateId(byId: { has(id: string): boolean }): string {
 	return Snowflake.next(); // fallback to full snowflake id
 }
 
+function migratedEntryId(entry: FileEntry, index: number, usedIds: Set<string>): string {
+	const source = JSON.stringify(entry);
+	for (let collision = 0; ; collision++) {
+		const id = createHash("sha256").update(`${index}\0${collision}\0`).update(source).digest("hex").slice(0, 8);
+		if (!usedIds.has(id)) {
+			usedIds.add(id);
+			return id;
+		}
+	}
+}
+
 /** Migrate v1 → v2: add id/parentId tree structure. Mutates in place. */
 function migrateV1ToV2(entries: FileEntry[]): void {
 	const ids = new Set<string>();
 	let prevId: string | null = null;
 
-	for (const entry of entries) {
+	for (const [index, entry] of entries.entries()) {
 		if (entry.type === "session") {
 			entry.version = 2;
 			continue;
 		}
 
-		entry.id = generateId(ids);
+		// A current writer may have appended v4 records to an untouched v1 file.
+		// Preserve those durable IDs and only project IDs onto genuinely legacy rows.
+		if (typeof entry.id === "string" && entry.id.length > 0 && !ids.has(entry.id)) {
+			ids.add(entry.id);
+			prevId = entry.id;
+			continue;
+		}
+
+		entry.id = migratedEntryId(entry, index, ids);
 		entry.parentId = prevId;
 		prevId = entry.id;
 

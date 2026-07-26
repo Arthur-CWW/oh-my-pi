@@ -295,24 +295,22 @@ describe("SessionManager legacy session migration persistence", () => {
 		fs.rmSync(tempDir, { recursive: true, force: true });
 	});
 
-	it("keeps legacy migration in memory until later persisted activity rewrites the file", async () => {
+	it("appends current records without rewriting legacy journal history", async () => {
 		const sessionFile = path.join(tempDir, "legacy.jsonl");
-		fs.writeFileSync(
-			sessionFile,
-			`${[
-				JSON.stringify({ type: "session", id: "legacy-session", timestamp: "2025-01-01T00:00:00Z", cwd: tempDir }),
-				JSON.stringify({
-					type: "message",
-					timestamp: "2025-01-01T00:00:01Z",
-					message: { role: "user", content: "hello", timestamp: 1 },
-				}),
-				JSON.stringify({
-					type: "message",
-					timestamp: "2025-01-01T00:00:02Z",
-					message: makeAssistantMessage(),
-				}),
-			].join("\n")}\n`,
-		);
+		const original = `${[
+			JSON.stringify({ type: "session", id: "legacy-session", timestamp: "2025-01-01T00:00:00Z", cwd: tempDir }),
+			JSON.stringify({
+				type: "message",
+				timestamp: "2025-01-01T00:00:01Z",
+				message: { role: "user", content: "hello", timestamp: 1 },
+			}),
+			JSON.stringify({
+				type: "message",
+				timestamp: "2025-01-01T00:00:02Z",
+				message: makeAssistantMessage(),
+			}),
+		].join("\n")}\n`;
+		fs.writeFileSync(sessionFile, original);
 		const initialMtimeMs = fs.statSync(sessionFile).mtimeMs;
 
 		const session = await SessionManager.open(sessionFile, tempDir);
@@ -333,16 +331,18 @@ describe("SessionManager legacy session migration persistence", () => {
 		session.appendMessage({ role: "user", content: "follow up", timestamp: Date.now() });
 		await session.flush();
 
+		const persisted = fs.readFileSync(sessionFile, "utf8");
 		const persistedEntries = await loadEntriesFromFile(sessionFile);
 		const header = getHeader(persistedEntries);
 		if (!header) throw new Error("Expected session header");
 
 		expect(fs.statSync(sessionFile).mtimeMs).toBeGreaterThan(initialMtimeMs);
-		expect(header.version).toBe(3);
+		expect(persisted.startsWith(original)).toBeTrue();
+		expect(header.version).toBeUndefined();
 		expect(persistedEntries).toHaveLength(4);
-		for (const entry of persistedEntries.filter(entry => entry.type !== "session")) {
-			expect(entry.id).toBeDefined();
-		}
+		expect(persistedEntries[1]?.id).toBeUndefined();
+		expect(persistedEntries[2]?.id).toBeUndefined();
+		expect(persistedEntries[3]?.id).toBeDefined();
 	});
 
 	it("still rewrites immediately when explicitly requested", async () => {
@@ -377,36 +377,25 @@ describe("SessionManager legacy session migration persistence", () => {
 		expect(persistedEntries[1].parentId).toBeNull();
 	});
 
-	it("forces a deferred legacy rewrite when ensureOnDisk is requested", async () => {
+	it("does not treat ensureOnDisk as permission to rewrite a legacy journal", async () => {
 		const sessionFile = path.join(tempDir, "legacy-ensure-on-disk.jsonl");
-		fs.writeFileSync(
-			sessionFile,
-			`${[
-				JSON.stringify({ type: "session", id: "legacy-session", timestamp: "2025-01-01T00:00:00Z", cwd: tempDir }),
-				JSON.stringify({
-					type: "message",
-					timestamp: "2025-01-01T00:00:01Z",
-					message: { role: "user", content: "hello", timestamp: 1 },
-				}),
-			].join("\n")}\n`,
-		);
+		const original = `${[
+			JSON.stringify({ type: "session", id: "legacy-session", timestamp: "2025-01-01T00:00:00Z", cwd: tempDir }),
+			JSON.stringify({
+				type: "message",
+				timestamp: "2025-01-01T00:00:01Z",
+				message: { role: "user", content: "hello", timestamp: 1 },
+			}),
+		].join("\n")}\n`;
+		fs.writeFileSync(sessionFile, original);
 		const initialMtimeMs = fs.statSync(sessionFile).mtimeMs;
 
 		const session = await SessionManager.open(sessionFile, tempDir);
 		await new Promise(resolve => setTimeout(resolve, 20));
 		await session.ensureOnDisk();
 
-		const persistedEntries = await loadEntriesFromFile(sessionFile);
-		const header = getHeader(persistedEntries);
-		if (!header) throw new Error("Expected session header");
-
-		expect(fs.statSync(sessionFile).mtimeMs).toBeGreaterThan(initialMtimeMs);
-		expect(header.version).toBe(3);
-		expect(persistedEntries).toHaveLength(2);
-		expect(persistedEntries[1]?.type).toBe("message");
-		if (persistedEntries[1]?.type !== "message") throw new Error("Expected message entry");
-		expect(persistedEntries[1].id).toBeDefined();
-		expect(persistedEntries[1].parentId).toBeNull();
+		expect(fs.statSync(sessionFile).mtimeMs).toBe(initialMtimeMs);
+		expect(fs.readFileSync(sessionFile, "utf8")).toBe(original);
 	});
 	it("keeps the last non-empty session resumable after starting a fresh session", async () => {
 		const session = SessionManager.create(tempDir, tempDir);
