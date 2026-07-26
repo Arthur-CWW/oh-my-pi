@@ -7,11 +7,8 @@ import { findFreeCdpPort, findReusableCdp, gracefulKillTreeOnce, killExistingByP
 import type { CmuxKind } from "./cmux/rpc";
 import { CmuxSocketClient } from "./cmux/socket-client";
 import { BROWSER_PROTOCOL_TIMEOUT_MS, launchHeadlessBrowser, loadPuppeteer, type UserAgentOverride } from "./launch";
-import {
-	recordOwnedBrowserActiveTabs,
-	removeOwnedBrowserProfile,
-	type OwnedBrowserProfile,
-} from "./process-ownership";
+import { type OwnedBrowserProfile, recordOwnedBrowserActiveTabs, removeOwnedBrowserProfile } from "./process-ownership";
+import { ownedBrowserContextKey } from "./tab-group";
 
 export type PuppeteerBrowserKind =
 	| { kind: "headless"; headless: boolean }
@@ -49,10 +46,10 @@ export type BrowserHandle = PuppeteerBrowserHandle | CmuxBrowserHandle;
 const browsers = new Map<string, BrowserHandle>();
 const activeTabUpdates = new WeakMap<BrowserHandle, Promise<void>>();
 
-function browserKey(kind: BrowserKind): string {
+function browserKey(kind: BrowserKind, group: string): string {
 	switch (kind.kind) {
 		case "headless":
-			return `headless:${kind.headless ? "1" : "0"}`;
+			return ownedBrowserContextKey(kind.headless, group);
 		case "spawned":
 			return `spawned:${kind.path}`;
 		case "connected":
@@ -70,10 +67,12 @@ export interface AcquireBrowserOptions {
 	signal?: AbortSignal;
 	maxOwnedPerSession?: number;
 	maxOwnedGlobal?: number;
+	/** Workstream trust boundary for owned Chromium context reuse. */
+	group?: string;
 }
 
 export async function acquireBrowser(kind: BrowserKind, opts: AcquireBrowserOptions): Promise<BrowserHandle> {
-	const key = browserKey(kind);
+	const key = browserKey(kind, opts.group ?? "adhoc");
 	const existing = browsers.get(key);
 	if (existing) {
 		if ("client" in existing) return existing;
@@ -82,7 +81,7 @@ export async function acquireBrowser(kind: BrowserKind, opts: AcquireBrowserOpti
 		await disposeBrowserHandle(existing, { kill: false });
 	}
 
-	const handle = await openBrowserHandle(kind, opts);
+	const handle = await openBrowserHandle(kind, opts, key);
 	browsers.set(key, handle);
 	return handle;
 }
@@ -97,12 +96,12 @@ export function normalizeConnectedCdpUrl(rawCdpUrl: string): string {
 	return cdpUrl;
 }
 
-async function openBrowserHandle(kind: BrowserKind, opts: AcquireBrowserOptions): Promise<BrowserHandle> {
+async function openBrowserHandle(kind: BrowserKind, opts: AcquireBrowserOptions, key: string): Promise<BrowserHandle> {
 	if (kind.kind === "cmux") {
 		const client = new CmuxSocketClient({ socketPath: kind.socketPath, password: kind.password });
 		await client.connect();
 		return {
-			key: browserKey(kind),
+			key,
 			kind,
 			client,
 			surface: kind.surface,
@@ -118,7 +117,7 @@ async function openBrowserHandle(kind: BrowserKind, opts: AcquireBrowserOptions)
 			maxOwnedGlobal: opts.maxOwnedGlobal,
 		});
 		return {
-			key: browserKey(kind),
+			key,
 			kind,
 			browser: launch.browser,
 			pid: launch.pid,
@@ -137,7 +136,7 @@ async function openBrowserHandle(kind: BrowserKind, opts: AcquireBrowserOptions)
 			protocolTimeout: BROWSER_PROTOCOL_TIMEOUT_MS,
 		});
 		return {
-			key: browserKey(kind),
+			key,
 			kind,
 			browser,
 			cdpUrl,
@@ -197,7 +196,7 @@ async function openBrowserHandle(kind: BrowserKind, opts: AcquireBrowserOptions)
 		throw new ToolError(`Connected to ${cdpUrl} but puppeteer.connect failed: ${(err as Error).message}`);
 	}
 	return {
-		key: browserKey(kind),
+		key,
 		kind,
 		browser,
 		cdpUrl,
@@ -282,9 +281,7 @@ function updateOwnedBrowserActiveTabs(handle: BrowserHandle): void {
 	const ownership = handle.ownership;
 	if (!ownership) return;
 	const previous = activeTabUpdates.get(handle) ?? Promise.resolve();
-	const update = previous
-		.catch(() => undefined)
-		.then(() => recordOwnedBrowserActiveTabs(ownership, handle.refCount));
+	const update = previous.catch(() => undefined).then(() => recordOwnedBrowserActiveTabs(ownership, handle.refCount));
 	activeTabUpdates.set(handle, update);
 	void update.catch(error => {
 		logger.debug("Failed to update owned browser activity", { error: String(error) });

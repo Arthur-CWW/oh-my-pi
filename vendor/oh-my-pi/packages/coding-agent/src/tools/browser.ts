@@ -7,18 +7,15 @@ import type { ToolSession } from "../sdk";
 import { enforceInlineByteCap } from "../session/streaming-output";
 import { truncateForPrompt } from "./approval";
 import { resolveCmuxKind } from "./browser/cmux/rpc";
-import { acquireBrowser, type BrowserHandle, type BrowserKind, type BrowserKindTag } from "./browser/registry";
 import {
 	DEFAULT_MAX_OWNED_GLOBAL,
 	DEFAULT_MAX_OWNED_PER_SESSION,
 	normalizeBrowserOwnershipCap,
 } from "./browser/process-ownership";
+import { acquireBrowser, type BrowserHandle, type BrowserKind, type BrowserKindTag } from "./browser/registry";
+import { DEFAULT_MAX_GLOBAL_TABS, DEFAULT_MAX_TABS_PER_SESSION, normalizeTabBudgetCap } from "./browser/tab-budget";
+import { groupedBrowserTabName, resolveBrowserTabGroup } from "./browser/tab-group";
 import type { Observation, ScreenshotResult } from "./browser/tab-protocol";
-import {
-	DEFAULT_MAX_GLOBAL_TABS,
-	DEFAULT_MAX_TABS_PER_SESSION,
-	normalizeTabBudgetCap,
-} from "./browser/tab-budget";
 import { acquireTab, dropHeadlessTabs, getTab, releaseAllTabs, releaseTab, runInTab } from "./browser/tab-supervisor";
 import type { OutputMeta } from "./output-meta";
 import { resolveToCwd } from "./path-utils";
@@ -205,12 +202,14 @@ export class BrowserTool implements AgentTool<typeof browserSchema, BrowserToolD
 			throwIfAborted(signal);
 			const timeoutSeconds = clampTimeout("browser", params.timeout);
 			const timeoutMs = timeoutSeconds * 1000;
-			const name = params.name ?? DEFAULT_TAB_NAME;
+			const requestedName = params.name ?? DEFAULT_TAB_NAME;
+			const group = resolveBrowserTabGroup(this.session.sessionManager?.getWorkstream());
+			const name = groupedBrowserTabName(group, requestedName);
 			const details: BrowserToolDetails = { action: params.action, name };
 
 			switch (params.action) {
 				case "open":
-					return await this.#open(name, params, details, timeoutMs, signal);
+					return await this.#open(name, group, params, details, timeoutMs, signal);
 				case "close":
 					return await this.#close(name, params, details, signal);
 				case "run":
@@ -229,6 +228,7 @@ export class BrowserTool implements AgentTool<typeof browserSchema, BrowserToolD
 
 	async #open(
 		name: string,
+		group: string,
 		params: BrowserParams,
 		details: BrowserToolDetails,
 		timeoutMs: number,
@@ -265,6 +265,7 @@ export class BrowserTool implements AgentTool<typeof browserSchema, BrowserToolD
 			acquireBrowser(kind, {
 				cwd: this.session.cwd,
 				sessionId,
+				group,
 				viewport: params.viewport
 					? {
 							width: params.viewport.width,
@@ -285,6 +286,7 @@ export class BrowserTool implements AgentTool<typeof browserSchema, BrowserToolD
 		const result = await untilAborted(signal, () =>
 			acquireTab(name, browser, {
 				sessionId,
+				group,
 				ownerSessionId: sessionId,
 				ownerAgentId: this.session.getAgentId?.() ?? "unknown",
 				purpose: params.purpose ?? "browser",

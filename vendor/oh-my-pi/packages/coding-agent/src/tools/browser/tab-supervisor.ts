@@ -71,6 +71,8 @@ interface TabSessionBase<TBrowser extends BrowserHandle = BrowserHandle> {
 	pending: Map<string, PendingRun>;
 	dialogPolicy?: DialogPolicy;
 	kindTag: BrowserKindTag;
+	/** Workstream trust boundary used for deterministic naming and reuse. */
+	group: string;
 	/** Durable ownership label for diagnostics and budget enforcement. */
 	ownerSessionId: string;
 	ownerAgentId: string;
@@ -90,6 +92,7 @@ export interface TabPoolEntry {
 	readonly kind: BrowserKindTag;
 	readonly state: TabSession["state"];
 	readonly busy: boolean;
+	readonly group: string;
 	readonly ownerSessionId: string;
 	readonly ownerAgentId: string;
 	readonly purpose: string;
@@ -128,6 +131,7 @@ export interface AcquireTabOptions extends TabPoolOptions {
 	timeoutMs: number;
 	dialogs?: DialogPolicy;
 	cmuxSurface?: string;
+	group?: string;
 	/** Cap admission identity/options supplied by BrowserTool. */
 	sessionId?: string;
 	maxTabsPerSession?: number;
@@ -253,6 +257,7 @@ export function listTabs(now = Date.now()): readonly TabPoolEntry[] {
 				kind: tab.kindTag,
 				state: tab.state,
 				busy: tab.pending.size > 0,
+				group: tab.group,
 				ownerSessionId: tab.ownerSessionId,
 				ownerAgentId: tab.ownerAgentId,
 				purpose: tab.purpose,
@@ -398,14 +403,15 @@ async function acquireTabImpl(
 		}
 	}
 
-	// Reuse an idle tab by URL across caller-provided names. The browser handle
-	// must match too: a tab cannot be moved between cmux/CDP/worker backends.
+	// Reuse an idle tab by URL across caller-provided names inside the same
+	// workstream. The browser handle must match too: external and cmux backends
+	// cannot move tabs between driver contexts.
 	const requestedUrlKey = opts.url ? normalizeUrl(opts.url, opts.urlQuerySensitive) : undefined;
 	if (opts.reuse !== false && requestedUrlKey) {
 		const byUrl = [...tabs.values()].find(
 			tab =>
 				tab.browser === browser &&
-				tab.ownerSessionId === (opts.ownerSessionId ?? opts.sessionId ?? "unknown") &&
+				tab.group === (opts.group ?? "adhoc") &&
 				isIdle(tab) &&
 				normalizeUrl(tab.info.url, opts.urlQuerySensitive) === requestedUrlKey,
 		);
@@ -494,6 +500,7 @@ async function acquireTabImpl(
 		pending: new Map(),
 		dialogPolicy: opts.dialogs,
 		kindTag: browser.kind.kind,
+		group: opts.group ?? "adhoc",
 		ownerSessionId: opts.ownerSessionId ?? opts.sessionId ?? "unknown",
 		ownerAgentId: opts.ownerAgentId ?? "unknown",
 		purpose: opts.purpose ?? DEFAULT_TAB_PURPOSE,
@@ -534,6 +541,14 @@ async function acquireCmuxTab(
 			surfaceId = result.surface_id;
 			ownsSurface = true;
 			if (typeof result.url === "string" && result.url.length > 0) initialUrl = result.url;
+			// cmux has real tab renaming but no browser-tab-group primitive. The
+			// workstream prefix in `name` is therefore the group representation,
+			// rather than an invented group API parameter.
+			await browser.client.request(
+				"tab.action",
+				{ action: "rename", surface_id: surfaceId, title: name, focus: false },
+				{ timeoutMs: opts.timeoutMs },
+			);
 			if (opts.url) {
 				await browser.client.request(
 					"browser.wait",
@@ -566,6 +581,7 @@ async function acquireCmuxTab(
 			pending: new Map(),
 			dialogPolicy: opts.dialogs,
 			kindTag: browser.kind.kind,
+			group: opts.group ?? "adhoc",
 			cmuxAttachedSurface: attachedSurface,
 			ownerSessionId: opts.ownerSessionId ?? opts.sessionId ?? "unknown",
 			ownerAgentId: opts.ownerAgentId ?? "unknown",

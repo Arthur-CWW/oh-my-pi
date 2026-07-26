@@ -67,6 +67,7 @@ function makeWorkerTab(name: string, worker: FakeCloseWorker, pending: PendingRu
 		info: readyInfo,
 		pending: new Map([["run-for-test", pending]]),
 		kindTag: "headless",
+		group: "adhoc",
 		ownerSessionId: "test-session",
 		ownerAgentId: "TestAgent",
 		purpose: "browser-test",

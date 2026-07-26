@@ -1,14 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import type {
-	CmuxTabSession,
-	WorkerTabSession,
-} from "../../src/tools/browser/tab-supervisor";
-import {
-	acquireTab,
-	listTabs,
-	registerTabForTest,
-} from "../../src/tools/browser/tab-supervisor";
 import { formatTabs } from "../../src/slash-commands/tabs";
+import type { CmuxTabSession, WorkerTabSession } from "../../src/tools/browser/tab-supervisor";
+import { acquireTab, listTabs, registerTabForTest } from "../../src/tools/browser/tab-supervisor";
 
 function workerTab(name: string, kind: "spawned" | "connected"): WorkerTabSession {
 	const browser = {
@@ -34,6 +27,7 @@ function workerTab(name: string, kind: "spawned" | "connected"): WorkerTabSessio
 		info: { url: "about:blank", targetId: `target-${name}`, viewport: { width: 800, height: 600 } },
 		pending: new Map(),
 		kindTag: kind,
+		group: "adhoc",
 		ownerSessionId: "external-session",
 		ownerAgentId: "ExternalAgent",
 		purpose: "exemption-test",
@@ -60,6 +54,7 @@ function cmuxTab(name: string): CmuxTabSession {
 		info: { url: "about:blank", targetId: `surface-${name}`, viewport: { width: 800, height: 600 } },
 		pending: new Map(),
 		kindTag: "cmux",
+		group: "adhoc",
 		ownerSessionId: "external-session",
 		ownerAgentId: "ExternalAgent",
 		purpose: "exemption-test",
@@ -74,11 +69,7 @@ describe("browser external tab budget exemption", () => {
 		const spawned = workerTab("spawned", "spawned");
 		const connected = workerTab("connected", "connected");
 		const cmux = cmuxTab("cmux");
-		const unregister = [
-			registerTabForTest(spawned),
-			registerTabForTest(connected),
-			registerTabForTest(cmux),
-		];
+		const unregister = [registerTabForTest(spawned), registerTabForTest(connected), registerTabForTest(cmux)];
 		try {
 			const result = await acquireTab(spawned.name, spawned.browser, {
 				timeoutMs: 1_000,
