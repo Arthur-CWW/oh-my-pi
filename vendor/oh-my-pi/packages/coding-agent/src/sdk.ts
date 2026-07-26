@@ -1497,7 +1497,10 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			? new AsyncJobManager({
 					maxRunningJobs: asyncMaxJobs,
 					onJobAcknowledge: async receipts => {
-						await sessionManager.acknowledgeAsyncJobCompletions(receipts);
+						const currentParent = agentRegistry.get(resolvedAgentId)?.session;
+						const receiptManager =
+							currentParent && !currentParent.isDisposed ? currentParent.sessionManager : sessionManager;
+						await receiptManager.acknowledgeAsyncJobCompletions(receipts);
 					},
 					onJobComplete: async (jobId, result, job, sequence) => {
 						const group = job?.group;
@@ -1507,6 +1510,21 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 							group?.reporting === "hub" && group.topology === "supervised" && group.coordinatorId
 								? agentRegistry.get(group.coordinatorId)?.session
 								: session;
+						const resolveCurrentTarget = () => {
+							const currentParent = agentRegistry.get(resolvedAgentId)?.session;
+							if (!currentParent || currentParent.isDisposed) return undefined;
+							const currentDeliverySession =
+								group?.reporting === "hub" && group.topology === "supervised" && group.coordinatorId
+									? agentRegistry.get(group.coordinatorId)?.session
+									: currentParent;
+							return {
+								sessionManager: currentParent.sessionManager,
+								yieldQueue:
+									currentDeliverySession && !currentDeliverySession.isDisposed
+										? currentDeliverySession.yieldQueue
+										: undefined,
+							};
+						};
 						const durationMs = job ? Math.max(0, Date.now() - job.startTime) : undefined;
 						await admitParentCompletionReceipt(
 							sessionManager,
@@ -1520,6 +1538,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 								label: job?.label,
 								durationMs,
 							},
+							resolveCurrentTarget,
 						);
 					},
 				})

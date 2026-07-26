@@ -1,14 +1,25 @@
 import { describe, expect, test } from "bun:test";
+import { randomUUID } from "node:crypto";
+import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import { Agent } from "@oh-my-pi/pi-agent-core";
+import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { AsyncJobManager, asyncJobCompletionAgentId } from "@oh-my-pi/pi-coding-agent/async/job-manager";
 import {
 	ASYNC_JOB_RESULT_YIELD_KIND,
 	admitParentCompletionReceipt,
 	replayParentCompletionReceipts,
 } from "@oh-my-pi/pi-coding-agent/async/parent-receipt";
+import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
+import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
+import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
+import { SessionOwnershipLostError } from "@oh-my-pi/pi-coding-agent/session/durable-input-queue";
 import type { AsyncJobCompletionReceipt } from "@oh-my-pi/pi-coding-agent/session/session-entries";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
+import { acquireSessionOwnership } from "@oh-my-pi/pi-coding-agent/session/session-ownership";
 import { YieldQueue } from "@oh-my-pi/pi-coding-agent/session/yield-queue";
+import { recordSubagentFailure } from "@oh-my-pi/pi-coding-agent/task/subagent-failure";
 import { TempDir } from "@oh-my-pi/pi-utils";
 
 function createReceiptQueue(): YieldQueue {
@@ -41,6 +52,46 @@ async function createPersistentManager(temp: TempDir): Promise<SessionManager> {
 	const manager = SessionManager.create(temp.path(), path.join(temp.path(), "sessions"));
 	await manager.ensureOnDisk();
 	return manager;
+}
+
+async function acquireManagerOwnership(manager: SessionManager, root: string) {
+	const sessionFile = manager.getSessionFile();
+	if (!sessionFile) throw new Error("expected session file");
+	const ownership = await acquireSessionOwnership(sessionFile, manager.getSessionId(), {
+		root,
+		buildRevision: { digest: "a".repeat(64), version: "ownership-loss-terminal-test" },
+		runnerInstanceIdentity: {
+			runnerInstanceId: randomUUID(),
+			startedAt: new Date().toISOString(),
+		},
+	});
+	manager.bindSessionOwnership(ownership);
+	return ownership;
+}
+
+async function createOwnedAgentSession(temp: TempDir) {
+	const manager = await createPersistentManager(temp);
+	const ownershipRoot = path.join(temp.path(), "ownership");
+	const ownership = await acquireManagerOwnership(manager, ownershipRoot);
+	const authStorage = await AuthStorage.create(path.join(temp.path(), "auth.sqlite"));
+	authStorage.setRuntimeApiKey("anthropic", "test-key");
+	const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+	if (!model) throw new Error("expected bundled test model");
+	const agent = new Agent({
+		initialState: {
+			model,
+			systemPrompt: ["ownership loss terminal test"],
+			tools: [],
+			messages: [],
+		},
+	});
+	const session = new AgentSession({
+		agent,
+		sessionManager: manager,
+		settings: Settings.isolated(),
+		modelRegistry: new ModelRegistry(authStorage),
+	});
+	return { manager, ownership, ownershipRoot, authStorage, session };
 }
 
 describe("durable parent completion receipts", () => {
@@ -134,5 +185,130 @@ describe("durable parent completion receipts", () => {
 		});
 		expect(replay).toMatchObject({ replayed: true, acknowledged: true });
 		await resumed.close();
+	});
+
+	test("lease loss makes the stale AgentSession terminal and repeated appends stay non-writing", async () => {
+		using temp = TempDir.createSync("@omp-parent-receipt-ownership-loss-");
+		const fixture = await createOwnedAgentSession(temp);
+		const sessionFile = fixture.manager.getSessionFile();
+		if (!sessionFile) throw new Error("expected session file");
+		const beforeBody = await fs.readFile(sessionFile, "utf8");
+		const beforeEntries = fixture.manager.getEntries().length;
+		try {
+			await fixture.ownership.release();
+
+			let firstLoss: SessionOwnershipLostError | undefined;
+			for (const attempt of [1, 2]) {
+				try {
+					fixture.manager.appendCustomEntry("stale-callback", { attempt });
+					throw new Error("stale append unexpectedly succeeded");
+				} catch (error) {
+					expect(error).toBeInstanceOf(SessionOwnershipLostError);
+					if (firstLoss) expect(error).toBe(firstLoss);
+					else firstLoss = error as SessionOwnershipLostError;
+				}
+			}
+
+			expect(fixture.session.isDisposed).toBe(true);
+			expect(fixture.session.ownershipLostError).toBe(firstLoss);
+			await fixture.session.waitForOwnershipLossTerminal();
+			await expect(fixture.session.prompt("must be refused")).rejects.toBe(firstLoss);
+			expect(fixture.manager.getEntries()).toHaveLength(beforeEntries);
+			expect(await fs.readFile(sessionFile, "utf8")).toBe(beforeBody);
+		} finally {
+			await fixture.session.dispose();
+			fixture.authStorage.close();
+		}
+	});
+
+	test("lease-revoked child failure finalization retargets one durable receipt to the new owner", async () => {
+		using temp = TempDir.createSync("@omp-parent-receipt-owner-replay-");
+		const fixture = await createOwnedAgentSession(temp);
+		const sessionFile = fixture.manager.getSessionFile();
+		if (!sessionFile) throw new Error("expected session file");
+		let replacement: SessionManager | undefined;
+		let replacementOwnership: Awaited<ReturnType<typeof acquireManagerOwnership>> | undefined;
+		const queue = createReceiptQueue();
+		let jobs: AsyncJobManager | undefined;
+		try {
+			await fixture.ownership.release();
+			replacement = await SessionManager.open(sessionFile);
+			replacementOwnership = await acquireManagerOwnership(replacement, fixture.ownershipRoot);
+
+			jobs = new AsyncJobManager({
+				onJobComplete: async (jobId, result, job, sequence) => {
+					await admitParentCompletionReceipt(
+						fixture.manager,
+						undefined,
+						{
+							agentId: job ? asyncJobCompletionAgentId(job) : jobId,
+							jobId,
+							sequence,
+							result,
+							jobType: job?.type,
+							label: job?.label,
+						},
+						() => (replacement ? { sessionManager: replacement, yieldQueue: queue } : undefined),
+					);
+				},
+				onJobAcknowledge: async receipts => {
+					await replacement?.acknowledgeAsyncJobCompletions(receipts);
+				},
+			});
+			const jobId = jobs.register(
+				"task",
+				"child",
+				async () => {
+					expect(
+						recordSubagentFailure(fixture.manager, {
+							agent: "Child",
+							job: "Child",
+							operation: "async-finalize",
+							errorClass: "failed",
+							message: "child failed after lease revocation",
+							historyUri: "history://Child",
+							finalOutputUri: "agent://Child",
+							finalOutputAvailable: false,
+						}),
+					).toBe(false);
+					throw new Error("child failed after lease revocation");
+				},
+				{ id: "Child", ownerId: "Main" },
+			);
+			await jobs.waitForAll();
+			await jobs.drainDeliveries({ timeoutMs: 2_000 });
+			await fixture.session.waitForOwnershipLossTerminal();
+
+			expect(fixture.manager.getUnacknowledgedAsyncJobCompletionReceipts()).toEqual([]);
+			expect(replacement.getUnacknowledgedAsyncJobCompletionReceipts()).toHaveLength(1);
+			expect(drainReceiptTexts(queue)).toEqual(["child failed after lease revocation"]);
+
+			const replay = await admitParentCompletionReceipt(
+				fixture.manager,
+				undefined,
+				{
+					agentId: "Child",
+					jobId,
+					sequence: 1,
+					result: "child failed after lease revocation",
+					jobType: "task",
+					label: "child",
+				},
+				() => (replacement ? { sessionManager: replacement, yieldQueue: queue } : undefined),
+			);
+			expect(replay.replayed).toBe(true);
+			expect(drainReceiptTexts(queue)).toEqual([]);
+			expect(
+				fixture.manager
+					.getEntries()
+					.filter(entry => entry.type === "custom" && entry.customType === "ui_error"),
+			).toEqual([]);
+		} finally {
+			if (jobs) await jobs.dispose();
+			await fixture.session.dispose();
+			fixture.authStorage.close();
+			await replacement?.close();
+			await replacementOwnership?.release();
+		}
 	});
 });

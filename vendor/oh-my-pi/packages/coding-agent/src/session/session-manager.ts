@@ -636,6 +636,8 @@ export class SessionManager {
 				new SessionOwnershipLostError(this.#ownership.sessionId, this.#ownership.ownerEpoch);
 			if (!this.#ownershipLostError) {
 				this.#ownershipLostError = error;
+				this.#diskEpoch++;
+				this.#closeWriterEventually();
 				for (const listener of [...this.#ownershipLostListeners]) {
 					try {
 						listener(error);
@@ -845,6 +847,7 @@ export class SessionManager {
 	}
 
 	#reserveEntryForPersistence(entry: SessionEntry): void {
+		this.#assertOwnership();
 		this.#entries.push(entry);
 		this.#index.insert(entry);
 	}
@@ -952,6 +955,7 @@ export class SessionManager {
 	}
 
 	#recordEntry(entry: SessionEntry): void {
+		this.#assertOwnership();
 		if (this.#stateCommandPersistenceInFlight) throw new SessionStateCommandInFlightError();
 		this.#entries.push(entry);
 		this.#index.insert(entry);
@@ -1046,6 +1050,11 @@ export class SessionManager {
 	/** Current parent lease, when this manager has a durable writer. */
 	getSessionOwnership(): SessionOwnershipHandle | undefined {
 		return this.#ownership;
+	}
+
+	/** Typed terminal state after this manager has been fenced from its journal. */
+	getSessionOwnershipLostError(): SessionOwnershipLostError | undefined {
+		return this.#ownershipLostError;
 	}
 
 	/**

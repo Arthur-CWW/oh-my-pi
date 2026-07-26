@@ -72,6 +72,7 @@ export interface ErrorInboxWriter {
 	appendCustomEntry: SessionManager["appendCustomEntry"];
 	getEntries?: SessionManager["getEntries"];
 	getSessionOwnership?: SessionManager["getSessionOwnership"];
+	getSessionOwnershipLostError?: SessionManager["getSessionOwnershipLostError"];
 }
 
 function inferBuildDigest(sessionManager: ErrorInboxWriter): string | undefined {
@@ -125,6 +126,7 @@ export function enrichErrorInboxEvent(
 
 /** Persist one v2 ErrorInbox record without allowing ledger failures to recurse. */
 export function appendErrorInboxEvent(sessionManager: ErrorInboxWriter, event: DiagnosticEvent): boolean {
+	if (sessionManager.getSessionOwnershipLostError?.()) return false;
 	try {
 		enrichErrorInboxEvent(sessionManager, event);
 		sessionManager.appendCustomEntry("ui_error", { ...event, version: 2 });

@@ -1321,6 +1321,7 @@ export class AgentSession {
 	#sessionControlPaused = false;
 	#durableOwnershipLostError: SessionOwnershipLostError | undefined;
 	#ownershipLossUnsubscribe: (() => void) | undefined;
+	#ownershipLossTerminal: Promise<void> | undefined;
 	fileSnapshotStore?: InMemorySnapshotStore;
 	#autoApprove: boolean;
 
@@ -1755,10 +1756,15 @@ export class AgentSession {
 			configuredExternalIrcHeartbeatIntervalMs > 0
 				? configuredExternalIrcHeartbeatIntervalMs
 				: IRC_EXTERNAL_IDLE_HEARTBEAT_MS;
-		this.#ownershipLossUnsubscribe = this.sessionManager.subscribeOwnershipLost(error => {
+		const ownershipLossUnsubscribe = this.sessionManager.subscribeOwnershipLost(error => {
 			if (!this.#handleDurableOwnershipLoss(error)) return;
 			this.emitNotice("error", error.message, "session-ownership");
 		});
+		if (this.#durableOwnershipLostError) {
+			ownershipLossUnsubscribe();
+		} else {
+			this.#ownershipLossUnsubscribe = ownershipLossUnsubscribe;
+		}
 		const injectedDurableInputQueue = config.durableInputQueue;
 		const ownership = injectedDurableInputQueue ? undefined : this.sessionManager.getSessionOwnership();
 		let durableInputQueueInitialization: Promise<DurableInputQueue> | undefined;
@@ -4404,6 +4410,16 @@ export class AgentSession {
 		return this.#isDisposed;
 	}
 
+	/** The typed reason this instance became a terminal read-only stale owner. */
+	get ownershipLostError(): SessionOwnershipLostError | undefined {
+		return this.#durableOwnershipLostError;
+	}
+
+	/** Await cancellation of callbacks started before the ownership fence. */
+	waitForOwnershipLossTerminal(): Promise<void> {
+		return this.#ownershipLossTerminal ?? Promise.resolve();
+	}
+
 	/**
 	 * Synchronously mark the session as disposing so new work is rejected
 	 * immediately: Python/eval starts throw, queued asides are dropped, and the
@@ -6257,6 +6273,8 @@ export class AgentSession {
 	 * the ACP agent) use this to know whether to expect an `agent_end` event.
 	 */
 	async prompt(text: string, options?: PromptOptions): Promise<boolean> {
+		if (this.#durableOwnershipLostError) throw this.#durableOwnershipLostError;
+		if (this.#isDisposed) throw new Error("Session is disposed");
 		const expandPromptTemplates = options?.expandPromptTemplates ?? true;
 
 		// Handle extension commands first (execute immediately, even during streaming)
@@ -7748,7 +7766,26 @@ export class AgentSession {
 			this.#durableQueueDrainScheduled = false;
 			this.#durableQueueDrainPending = false;
 			this.#clearActiveDurableAttempt();
-			logger.warn("Durable input queue ownership lost; view is read-only", {
+
+			// Ownership loss is terminal for this AgentSession. Fence new work
+			// synchronously, then drain callbacks already in flight without ever
+			// reporting their cancellation through the fenced parent journal.
+			const durableQueueDrain = this.#durableQueueDrainPromise;
+			this.beginDispose();
+			this.abortRetry();
+			this.abortCompaction();
+			this.abortHandoff();
+			this.abortBash();
+			this.abortEval();
+			const postPromptDrain = this.#cancelPostPromptTasks();
+			this.agent.abort(error.message);
+			this.#ownershipLossTerminal = Promise.allSettled([
+				postPromptDrain,
+				this.agent.waitForIdle(),
+				...(durableQueueDrain ? [durableQueueDrain] : []),
+			]).then(() => undefined);
+
+			logger.warn("Session ownership lost; stale AgentSession is terminal", {
 				sessionId: error.sessionId,
 				ownerEpoch: error.ownerEpoch,
 			});

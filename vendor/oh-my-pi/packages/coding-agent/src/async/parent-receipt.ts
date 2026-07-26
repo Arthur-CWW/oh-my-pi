@@ -1,18 +1,44 @@
+import { SessionOwnershipLostError } from "../session/durable-input-queue";
 import type { AsyncJobCompletionReceipt } from "../session/session-entries";
 import type { AsyncJobCompletionReceiptAdmission, SessionManager } from "../session/session-manager";
 import type { YieldQueue } from "../session/yield-queue";
 
 export const ASYNC_JOB_RESULT_YIELD_KIND = "async-result";
 
-/** Commit the receipt before making it visible to the live parent queue. */
+export interface ParentCompletionReceiptTarget {
+	readonly sessionManager: SessionManager;
+	readonly yieldQueue?: YieldQueue;
+}
+
+/**
+ * Commit the receipt before making it visible to the live parent queue.
+ *
+ * A completion callback may outlive the AgentSession that created it. Once
+ * that manager is fenced, resolve the current owner and admit there instead;
+ * never retry a write against the stale journal.
+ */
 export async function admitParentCompletionReceipt(
 	sessionManager: SessionManager,
 	yieldQueue: YieldQueue | undefined,
 	receipt: Omit<AsyncJobCompletionReceipt, "version">,
+	resolveCurrentTarget?: () => ParentCompletionReceiptTarget | undefined,
 ): Promise<AsyncJobCompletionReceiptAdmission> {
-	const admission = await sessionManager.appendAsyncJobCompletionReceipt(receipt);
+	let target: ParentCompletionReceiptTarget = { sessionManager, yieldQueue };
+	if (sessionManager.getSessionOwnershipLostError()) {
+		target = resolveCurrentTarget?.() ?? target;
+	}
+	let admission: AsyncJobCompletionReceiptAdmission;
+	try {
+		admission = await target.sessionManager.appendAsyncJobCompletionReceipt(receipt);
+	} catch (error) {
+		if (!(error instanceof SessionOwnershipLostError)) throw error;
+		const current = resolveCurrentTarget?.();
+		if (!current || current.sessionManager === target.sessionManager) throw error;
+		target = current;
+		admission = await target.sessionManager.appendAsyncJobCompletionReceipt(receipt);
+	}
 	if (!admission.replayed && !admission.acknowledged) {
-		yieldQueue?.enqueue<AsyncJobCompletionReceipt>(ASYNC_JOB_RESULT_YIELD_KIND, admission.receipt);
+		target.yieldQueue?.enqueue<AsyncJobCompletionReceipt>(ASYNC_JOB_RESULT_YIELD_KIND, admission.receipt);
 	}
 	return admission;
 }
