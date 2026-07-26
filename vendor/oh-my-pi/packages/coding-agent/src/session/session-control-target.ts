@@ -33,6 +33,7 @@ export interface SessionControlTargetActions {
 		pauseProvenance: RolloutPauseProvenance,
 		command: PrepareRolloutCommand,
 	) => RolloutCheckpoint | Promise<RolloutCheckpoint>;
+	readonly operatorDirective?: (command: SessionControlCommand) => SessionControlResult | Promise<SessionControlResult>;
 	readonly restart: (command: SessionControlCommand, commit: () => void) => void | Promise<void>;
 	readonly setModel: (
 		selector: string,
@@ -220,6 +221,13 @@ export async function startSessionControlTarget(options: SessionControlTargetOpt
 						checkpointId: checkpoint.checkpointId,
 					});
 					bus.complete(command.commandId, ownership.ownerEpoch, actionResult(command, { cordon, checkpoint }));
+					return;
+				}
+				case "operatorDirective": {
+					if (!actions.operatorDirective) throw new Error("Target does not support operator directives");
+					const result = await actions.operatorDirective(command);
+					await assertCurrentOwner(ownership);
+					bus.complete(command.commandId, ownership.ownerEpoch, actionResult(command, result));
 					return;
 				}
 				case "setModel": {

@@ -30,12 +30,24 @@ import {
 	formatToolIssueProjection,
 } from "../cli/tool-issue-projection";
 import { SessionControlBus } from "../session/session-control";
+import {
+	formatSessionDirectory,
+	formatSessionDirectoryJson,
+	inspectSessionDirectory,
+	issueOperatorDirective,
+	querySessionDirectory,
+	type SessionDirectorySortKey,
+} from "../session/session-directory";
+import { FLEET_MAJORDOMO_ACTIONS, runFleetMajordomoCli, type FleetMajordomoAction } from "../cli/fleet-migration";
 
 const ACTIONS = [
 	"status",
 	"overview",
 	"errors",
 	"issues",
+	"query",
+	"inspect",
+	"instruct",
 	"prune",
 	"pause",
 	"resume",
@@ -44,6 +56,12 @@ const ACTIONS = [
 	"pin",
 	"unpin",
 	"label",
+	"checkpoint",
+	"correct",
+	"export",
+	"import",
+	"migrate",
+	"attach",
 ] as const;
 
 function fail(message: string): never {
@@ -65,6 +83,15 @@ interface FleetFlags {
 	readonly to: string | undefined;
 	readonly workstream: string | undefined;
 	readonly summary: string | undefined;
+	readonly host: string | undefined;
+	readonly state: string | undefined;
+	readonly attention: string | undefined;
+	readonly sort: string | undefined;
+	readonly descending: boolean;
+	readonly tag: string[] | undefined;
+	readonly "delegated-through": string | undefined;
+	readonly idempotency: string | undefined;
+	readonly timeout: number;
 	readonly claim: string[] | undefined;
 	readonly name: string | undefined;
 	readonly all: boolean;
@@ -74,6 +101,7 @@ interface FleetFlags {
 	readonly status: boolean;
 	readonly "include-paused": boolean;
 	readonly json: boolean;
+	readonly request: string | undefined;
 }
 
 const OVERVIEW_VALID_FLAGS = ["--all", "--json", "--workstream"].join(", ");
@@ -103,6 +131,7 @@ function invalidDeclaredFlag(flags: FleetFlags, valid: readonly string[]): strin
 		["status", flags.status],
 		["include-paused", flags["include-paused"]],
 		["json", flags.json],
+		["request", flags.request !== undefined],
 	];
 	for (const [name, set] of present) if (set && !valid.includes(name)) return `--${name}`;
 	return undefined;
@@ -157,9 +186,23 @@ export default Command.make(
 		workstream: Flag.optional(
 			Flag.string("workstream").pipe(Flag.withDescription("Filter by durable workstream ID")),
 		),
-		summary: Flag.optional(
-			Flag.string("summary").pipe(Flag.withDescription("Observer summary to store on a peer")),
+		host: Flag.optional(Flag.string("host").pipe(Flag.withDescription("Require an exact fleet host ID"))),
+		state: Flag.optional(Flag.string("state").pipe(Flag.withDescription("Filter by exact session state"))),
+		attention: Flag.optional(Flag.string("attention").pipe(Flag.withDescription("Filter by attention category"))),
+		sort: Flag.optional(Flag.string("sort").pipe(Flag.withDescription("Directory sort key"))),
+		descending: Flag.boolean("descending").pipe(Flag.withDescription("Reverse directory sort order")),
+		tag: Flag.string("tag").pipe(Flag.withDescription("Require an exact category tag (repeatable)"), Flag.atLeast(0)),
+		"delegated-through": Flag.optional(
+			Flag.string("delegated-through").pipe(Flag.withDescription("Current orchestrator identity for provenance")),
 		),
+		idempotency: Flag.optional(
+			Flag.string("idempotency").pipe(Flag.withDescription("Caller-stable operator directive idempotency key")),
+		),
+		timeout: Flag.integer("timeout").pipe(
+			Flag.withDescription("Directive acknowledgement/result timeout in milliseconds"),
+			Flag.withDefault(30_000),
+		),
+		summary: Flag.optional(Flag.string("summary").pipe(Flag.withDescription("Observer summary to store on a peer"))),
 		claim: Flag.string("claim").pipe(
 			Flag.withDescription("Workspace path prefix or stream slug claim (repeatable)"),
 			Flag.atLeast(0),
@@ -186,6 +229,9 @@ export default Command.make(
 			Flag.withDescription("Include paused sessions in rollout"),
 		),
 		json: Flag.boolean("json").pipe(Flag.withDescription("Output as JSON (overview)")),
+		request: Flag.optional(
+			Flag.string("request").pipe(Flag.withDescription("Typed Majordomo JSON operation request")),
+		),
 	},
 	(config) =>
 		Effect.promise(async () => {
@@ -199,6 +245,15 @@ export default Command.make(
 				to: Option.getOrUndefined(config.to),
 				workstream: Option.getOrUndefined(config.workstream),
 				summary: Option.getOrUndefined(config.summary),
+				host: Option.getOrUndefined(config.host),
+				state: Option.getOrUndefined(config.state),
+				attention: Option.getOrUndefined(config.attention),
+				sort: Option.getOrUndefined(config.sort),
+				descending: config.descending,
+				tag: config.tag.length > 0 ? [...config.tag] : undefined,
+				"delegated-through": Option.getOrUndefined(config["delegated-through"]),
+				idempotency: Option.getOrUndefined(config.idempotency),
+				timeout: config.timeout,
 				claim: config.claim.length > 0 ? [...config.claim] : undefined,
 				name: Option.getOrUndefined(config.name),
 				all: config.all,
@@ -208,13 +263,14 @@ export default Command.make(
 				status: config.status,
 				"include-paused": config["include-paused"],
 				json: config.json,
+				request: Option.getOrUndefined(config.request),
 			};
 			const action = config.action;
 			const selector = Option.getOrUndefined(config.selector);
 			const value = Option.getOrUndefined(config.value);
 			const selectors = selector ? [selector] : [];
-			if (flags.claim !== undefined && action !== "label")
-				fail("--claim is accepted only by fleet label");
+			if (flags.claim !== undefined && action !== "label" && action !== "query")
+				fail("--claim is accepted only by fleet label or fleet query");
 
 			if (flags.digest && flags.blessed) fail("--digest and --blessed are mutually exclusive");
 			if (
@@ -224,6 +280,20 @@ export default Command.make(
 				fail("--wave-size must be a positive integer");
 			if (flags.apply && action !== "prune") fail("--apply is accepted only by fleet prune");
 			if (flags.apply && flags["dry-run"]) fail("--apply and --dry-run are mutually exclusive");
+			if ((FLEET_MAJORDOMO_ACTIONS as readonly string[]).includes(action) && action !== "inspect") {
+				if (!flags.request) fail(`${action} requires --request <json-file>`);
+				if (value) fail(`${action} does not accept a positional value`);
+				if (action === "import" && !flags["dry-run"]) fail("import requires --dry-run");
+				if (action !== "import" && flags["dry-run"]) fail(`--dry-run is not accepted by fleet ${action}`);
+				process.stdout.write(
+					await runFleetMajordomoCli(action as FleetMajordomoAction, selector, flags.request, {
+						dryRun: flags["dry-run"],
+					}),
+				);
+				return;
+			}
+			if (flags.request !== undefined && action !== "inspect")
+				fail("--request is accepted only by Majordomo fleet actions");
 
 			if (action === "status") {
 				if (
@@ -262,6 +332,60 @@ export default Command.make(
 				process.stdout.write(
 					flags.json ? formatFleetOverviewJson(rows) : formatFleetOverview(rows),
 				);
+				return;
+			}
+
+			if (action === "query") {
+				if (value) fail("query accepts one optional search term and directory filter flags");
+				const states = ["unknown", "working", "waiting_input", "idle", "paused"] as const;
+				const attentions = ["active", "needs-attention", "idle", "unavailable"] as const;
+				const sorts = ["attention", "hostId", "lastSeen", "name", "sessionId", "state", "workstream"] as const;
+				if (flags.state && !states.some(state => state === flags.state))
+					fail(`invalid directory state ${flags.state}`);
+				if (flags.attention && !attentions.some(category => category === flags.attention))
+					fail(`invalid attention category ${flags.attention}`);
+				if (flags.sort && !sorts.some(key => key === flags.sort)) fail(`invalid directory sort ${flags.sort}`);
+				const rows = await querySessionDirectory({
+					text: selector,
+					sessionId: flags.session,
+					hostId: flags.host,
+					workstream: flags.workstream,
+					state: flags.state as (typeof states)[number] | undefined,
+					attention: flags.attention as (typeof attentions)[number] | undefined,
+					claim: flags.claim?.[0],
+					tags: flags.tag,
+					freshness: flags.all ? undefined : "fresh",
+					sort: flags.sort as SessionDirectorySortKey | undefined,
+					descending: flags.descending,
+				});
+				process.stdout.write(flags.json ? formatSessionDirectoryJson(rows) : formatSessionDirectory(rows));
+				return;
+			}
+
+			if (action === "inspect") {
+				if (!selector || value) fail("inspect requires exactly one selector");
+				if (flags.request) {
+					process.stdout.write(await runFleetMajordomoCli("inspect", selector, flags.request));
+					return;
+				}
+				const row = await inspectSessionDirectory(selector, { hostId: flags.host });
+				process.stdout.write(formatSessionDirectoryJson(row));
+				return;
+			}
+
+			if (action === "instruct") {
+				if (!selector || !value) fail("instruct requires a selector and quoted directive intent");
+				if (!flags["delegated-through"]) fail("instruct requires --delegated-through <current-orchestrator>");
+				if (!flags.idempotency) fail("instruct requires --idempotency <stable-key>");
+				const receipt = await issueOperatorDirective({
+					selector,
+					hostId: flags.host,
+					delegatedThrough: flags["delegated-through"],
+					intent: value,
+					idempotencyKey: flags.idempotency,
+					timeoutMs: flags.timeout,
+				});
+				process.stdout.write(formatSessionDirectoryJson(receipt));
 				return;
 			}
 
@@ -568,5 +692,13 @@ export default Command.make(
 		},
 		{ command: "omp fleet overview", description: "High-level fleet overview" },
 		{ command: "omp fleet overview --json", description: "Machine-readable fleet overview" },
+		{
+			command: "omp fleet checkpoint <session-id> --request checkpoint.json",
+			description: "Checkpoint immutable session boundaries",
+		},
+		{
+			command: "omp fleet migrate <session-id> --request migrate.json",
+			description: "Run a fenced cross-host migration",
+		},
 	]),
 );

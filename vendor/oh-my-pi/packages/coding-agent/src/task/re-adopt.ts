@@ -642,7 +642,7 @@ function childOwnerIsLive(
 			peer.sessionFile !== undefined &&
 			samePath(peer.sessionFile, sessionFile) &&
 			peer.processIdentity !== undefined &&
-			processMatches(peer.processIdentity),
+			matchesProcessIdentity(peer.processIdentity),
 	);
 }
 

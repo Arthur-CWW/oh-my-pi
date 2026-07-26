@@ -12,11 +12,13 @@ import {
 	type RolloutCheckpoint,
 	type RolloutPauseProvenance,
 } from "../session/rollout-checkpoint";
+import { operatorDirectiveMessage } from "../session/operator-directive";
 import {
 	CURRENT_SESSION_CONTROL_PROTOCOL,
 	type FleetPinControlCommand,
 	type FleetPinControlResult,
 	type FleetPinJournalRecord,
+	isOperatorDirectiveControlCommand,
 	type PrepareRolloutCommand,
 	type SessionControlCommand,
 	type SessionControlResult,
@@ -72,6 +74,7 @@ export interface SessionControlHandlers {
 		pauseProvenance: RolloutPauseProvenance,
 	) => RunnerEffect<RolloutCheckpoint>;
 }
+
 
 export function makeSessionControlHandlers(options: SessionControlHandlerOptions): SessionControlHandlers {
 	const { resources } = options;
@@ -136,6 +139,40 @@ export function makeSessionControlHandlers(options: SessionControlHandlerOptions
 					}),
 				);
 				return { paused: false };
+			case "operatorDirective": {
+				if (!isOperatorDirectiveControlCommand(command)) {
+					return yield* Effect.fail(new InvalidRunnerCommandError({ issue: "Invalid operator directive command" }));
+				}
+				const current = yield* options.snapshot();
+				const durable = yield* options.enqueue(
+					Effect.tryPromise({
+						try: () =>
+							resources.session.acceptDurableCustomMessage(
+								operatorDirectiveMessage(command),
+								{
+									schemaVersion: 1,
+									commandId: command.commandId,
+									correlationId: command.commandId,
+									viewId: `operator:${command.intent.delegatedThrough}`,
+									controllerEpoch: 0,
+									expectedRevision: current.revision,
+								},
+							),
+						catch: options.asRunnerFailure,
+					}),
+				);
+				return {
+					inputId: durable.item.inputId,
+					durableSequence: durable.item.sequence,
+					runnerRevision: durable.runnerRevision,
+					replayed: durable.replayed,
+					provenance: {
+						issuedBy: command.intent.issuedBy,
+						delegatedThrough: command.intent.delegatedThrough,
+						attribution: "agent",
+					},
+				};
+			}
 			case "fleet-pin":
 			case "fleet-unpin":
 				return yield* options.enqueue(

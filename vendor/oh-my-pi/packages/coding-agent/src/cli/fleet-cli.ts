@@ -355,23 +355,23 @@ export function applyFleetLabel(options: FleetLabelOptions): FleetLabelResult {
 		let skippedName: FleetLabelResult["skippedName"];
 		if (
 			options.summary !== undefined &&
-			bus.mergePeerLabels(options.sessionId, { summary: options.summary })
+			bus.mergePeerOperatorLabels(options.sessionId, { summary: options.summary })
 		) {
 			applied.push("summary");
 		}
 		if (options.name !== undefined) {
-			if (bus.updatePeerName(options.sessionId, options.name)) applied.push("name");
+			if (bus.setPeerOperatorName(options.sessionId, options.name)) applied.push("name");
 			else skippedName = peer.explicitName ? "explicit_name" : "unchanged";
 		}
 		if (
 			options.workstream !== undefined &&
-			bus.mergePeerLabels(options.sessionId, { workstream: options.workstream })
+			bus.mergePeerOperatorLabels(options.sessionId, { workstream: options.workstream })
 		) {
 			applied.push("workstream");
 		}
 		if (options.claims !== undefined) {
 			const claims = options.claims.length > 0 ? [...options.claims] : null;
-			if (bus.mergePeerLabels(options.sessionId, { claims })) applied.push("claims");
+			if (bus.mergePeerOperatorLabels(options.sessionId, { claims })) applied.push("claims");
 		}
 		return { sessionId: options.sessionId, found: true, applied, skippedName };
 	} finally {

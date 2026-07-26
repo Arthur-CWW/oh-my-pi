@@ -39,6 +39,7 @@ export * from "./modes/theme/theme";
 export * from "./sdk";
 // Runner wire transport for headless owner/controller views
 export * from "./runner/wire";
+export * from "./fleet/migration-core";
 export * from "./session/agent-session";
 // Auth and model registry
 export * from "./session/auth-storage";
@@ -52,6 +53,7 @@ export * from "./session/refusal-corpus";
 export * from "./session/session-context";
 export * from "./session/session-dump-format";
 export * from "./session/session-entries";
+export * from "./session/session-directory";
 export * from "./session/session-listing";
 export * from "./session/session-loader";
 export * from "./session/session-manager";

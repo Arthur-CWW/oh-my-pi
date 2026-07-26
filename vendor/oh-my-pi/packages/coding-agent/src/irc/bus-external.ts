@@ -29,6 +29,10 @@ export interface IrcExternalPeerLabels {
 	summary?: string;
 	/** Workspace-relative path prefixes or stream slugs currently owned by this session. */
 	claims?: string[];
+	/** Operator-defined exact category tags. */
+	tags?: string[];
+	/** Active Jujutsu change ID when published by the owning workspace. */
+	activeJjChange?: string;
 	/** Original ambient name captured on the first rename. */
 	spawnName?: string;
 }
@@ -39,6 +43,8 @@ export type IrcExternalPeerLabelPatch = {
 
 export interface IrcExternalPeer {
 	sessionId: string;
+	/** Exact host identity. Names are never assumed to be host-global. */
+	hostId?: string;
 	/** Stable in-process agent id used to address subprocess workers across the bus. */
 	agentId?: string;
 	name: string;
@@ -71,6 +77,7 @@ export interface IrcExternalMessage {
 
 interface PeerRow {
 	session_id: string;
+	host_id: string | null;
 	agent_id: string | null;
 	name: string;
 	cwd: string;
@@ -105,6 +112,7 @@ interface TableInfoRow {
 
 export interface IrcExternalRegistration {
 	sessionId: string;
+	hostId?: string;
 	/** Stable in-process agent id used for cross-process IRC addressing. */
 	agentId?: string;
 	name: string;
@@ -166,6 +174,12 @@ export function resolveIrcExternalDbPath(explicit?: string): string {
 	return explicit ?? path.join(os.homedir(), ".omp", "agent", "irc-bus.sqlite");
 }
 
+/** Resolve a stable exact host identity for the fleet directory. */
+export function resolveFleetHostId(explicit?: string): string {
+	const configured = explicit?.trim() || process.env.OMP_HOST_ID?.trim() || os.hostname().trim();
+	return (configured || "unknown-host").slice(0, 120);
+}
+
 function nowIso(): string {
 	return new Date().toISOString();
 }
@@ -197,6 +211,8 @@ export function isIrcExternalPeerFresh(lastSeen: string, nowMs = Date.now(), sta
 const MAX_SUMMARY_LENGTH = 280;
 const MAX_CLAIMS = 16;
 const MAX_CLAIM_LENGTH = 120;
+const MAX_TAGS = 16;
+const MAX_TAG_LENGTH = 64;
 const PEER_LABEL_KEYS: readonly (keyof IrcExternalPeerLabels)[] = [
 	"objective",
 	"workstream",
@@ -206,8 +222,11 @@ const PEER_LABEL_KEYS: readonly (keyof IrcExternalPeerLabels)[] = [
 	"model",
 	"summary",
 	"claims",
+	"tags",
+	"activeJjChange",
 	"spawnName",
 ];
+const OPERATOR_LABEL_FIELDS_KEY = "_operatorFields";
 
 function parseLabelObject(value: string | null): Record<string, unknown> {
 	if (value === null) return {};
@@ -220,11 +239,47 @@ function parseLabelObject(value: string | null): Record<string, unknown> {
 	}
 }
 
+function operatorLabelFields(labels: Record<string, unknown>): Set<keyof IrcExternalPeerLabels> {
+	const value = labels[OPERATOR_LABEL_FIELDS_KEY];
+	if (!Array.isArray(value)) return new Set();
+	return new Set(
+		value.filter(
+			(field): field is keyof IrcExternalPeerLabels =>
+				typeof field === "string" && PEER_LABEL_KEYS.includes(field as keyof IrcExternalPeerLabels),
+		),
+	);
+}
+
+function mergeRegisteredLabels(
+	existingJson: string | null,
+	selfLabels: IrcExternalPeerLabels | undefined,
+): string | null {
+	const existing = parseLabelObject(existingJson);
+	const operatorFields = operatorLabelFields(existing);
+	const merged: Record<string, unknown> = { ...(normalizePeerLabels(selfLabels) ?? {}) };
+	for (const field of operatorFields) {
+		if (existing[field] !== undefined) merged[field] = existing[field];
+	}
+	if (operatorFields.size > 0) merged[OPERATOR_LABEL_FIELDS_KEY] = [...operatorFields].sort();
+	return Object.keys(merged).length > 0 ? JSON.stringify(merged) : null;
+}
+
 function normalizeClaims(claims: readonly string[]): string[] {
 	return claims
 		.slice(0, MAX_CLAIMS)
 		.map(claim => claim.replace(/\/+$/, "").slice(0, MAX_CLAIM_LENGTH))
 		.filter(claim => claim.length > 0);
+}
+
+function normalizeTags(tags: readonly string[]): string[] {
+	return [
+		...new Set(
+			tags
+				.slice(0, MAX_TAGS)
+				.map(tag => tag.trim().slice(0, MAX_TAG_LENGTH))
+				.filter(Boolean),
+		),
+	];
 }
 
 function normalizePeerLabels(labels: IrcExternalPeerLabels | undefined): IrcExternalPeerLabels | undefined {
@@ -235,6 +290,12 @@ function normalizePeerLabels(labels: IrcExternalPeerLabels | undefined): IrcExte
 	}
 	if (labels.claims !== undefined) {
 		normalized = { ...normalized, claims: normalizeClaims(labels.claims) };
+	}
+	if (labels.tags !== undefined) {
+		normalized = { ...normalized, tags: normalizeTags(labels.tags) };
+	}
+	if (labels.activeJjChange !== undefined) {
+		normalized = { ...normalized, activeJjChange: labels.activeJjChange.trim().slice(0, 120) };
 	}
 	return normalized;
 }
@@ -256,6 +317,11 @@ function decodeLabelJson(value: string | null): IrcExternalPeerLabels | undefine
 			const claims = parsed.claims.filter((claim: unknown): claim is string => typeof claim === "string");
 			labels.claims = normalizeClaims(claims);
 		}
+		if (Array.isArray(parsed.tags)) {
+			const tags = parsed.tags.filter((tag: unknown): tag is string => typeof tag === "string");
+			labels.tags = normalizeTags(tags);
+		}
+		if (typeof parsed.activeJjChange === "string") labels.activeJjChange = parsed.activeJjChange.slice(0, 120);
 		if (typeof parsed.spawnName === "string") labels.spawnName = parsed.spawnName;
 		return Object.keys(labels).length > 0 ? labels : undefined;
 	} catch {
@@ -302,6 +368,7 @@ export function resolveIrcExternalPeerName(args: {
 function toPeer(row: PeerRow): IrcExternalPeer {
 	return {
 		sessionId: row.session_id,
+		hostId: resolveFleetHostId(row.host_id ?? undefined),
 		agentId: row.agent_id ?? undefined,
 		name: row.name,
 		cwd: row.cwd,
@@ -322,6 +389,7 @@ function toPeer(row: PeerRow): IrcExternalPeer {
 function toUnregisteredPeer(peer: IrcExternalRegistration, pid: number): IrcExternalPeer {
 	return {
 		sessionId: peer.sessionId,
+		hostId: resolveFleetHostId(peer.hostId),
 		agentId: peer.agentId,
 		name: peer.name,
 		cwd: peer.cwd,
@@ -377,6 +445,7 @@ export class IrcExternalBus {
 	#labelSelect = "label_json";
 	#processIdentitySelect = "process_identity_json";
 	#messageAudienceSelect = "audience";
+	#hostIdSelect = "host_id";
 
 	#ensurePeerStateColumns(): void {
 		const columns = new Set(
@@ -399,6 +468,10 @@ export class IrcExternalBus {
 		}
 		if (!columns.has("owner_epoch")) {
 			this.#db.run("ALTER TABLE peers ADD COLUMN owner_epoch TEXT");
+		}
+		if (!columns.has("host_id")) {
+			this.#db.run("ALTER TABLE peers ADD COLUMN host_id TEXT NOT NULL DEFAULT ''");
+			this.#db.query("UPDATE peers SET host_id = $hostId WHERE host_id = ''").run({ $hostId: resolveFleetHostId() });
 		}
 		if (!columns.has("build_digest")) {
 			this.#db.run("ALTER TABLE peers ADD COLUMN build_digest TEXT");
@@ -437,7 +510,7 @@ export class IrcExternalBus {
 	#getPeerBySessionId(sessionId: string): IrcExternalPeer | undefined {
 		const row = this.#db
 			.query<PeerRow, { $sessionId: string }>(
-				`SELECT session_id, agent_id, name, cwd, pid, last_seen, state, state_ts, explicit_name, session_file, owner_epoch, build_digest, version, ${this.#processIdentitySelect}, ${this.#fleetCapabilitySelect}, ${this.#labelSelect} FROM peers WHERE session_id = $sessionId`,
+				`SELECT session_id, ${this.#hostIdSelect}, agent_id, name, cwd, pid, last_seen, state, state_ts, explicit_name, session_file, owner_epoch, build_digest, version, ${this.#processIdentitySelect}, ${this.#fleetCapabilitySelect}, ${this.#labelSelect} FROM peers WHERE session_id = $sessionId`,
 			)
 			.get({ $sessionId: sessionId });
 		return row ? toPeer(row) : undefined;
@@ -453,6 +526,9 @@ export class IrcExternalBus {
 		this.#db.run("PRAGMA busy_timeout = 3000");
 		if (options.readonly) {
 			const columns = this.#db.query<TableInfoRow, []>("PRAGMA table_info(peers)").all();
+			if (!columns.some(column => column.name === "host_id")) {
+				this.#hostIdSelect = "NULL AS host_id";
+			}
 			if (!columns.some(column => column.name === "agent_id")) {
 				this.#agentIdSelect = "NULL AS agent_id";
 				this.#agentIdWhere = "0";
@@ -476,6 +552,7 @@ export class IrcExternalBus {
 		this.#db.run(`
 			CREATE TABLE IF NOT EXISTS peers (
 				session_id TEXT PRIMARY KEY,
+				host_id TEXT NOT NULL DEFAULT '',
 				agent_id TEXT,
 				name TEXT,
 				cwd TEXT,
@@ -508,6 +585,8 @@ export class IrcExternalBus {
 		this.#ensureMessageMetadataColumns();
 		this.#db.run("CREATE INDEX IF NOT EXISTS idx_irc_messages_to_delivered ON messages(to_peer, delivered, id)");
 		this.#db.run("CREATE INDEX IF NOT EXISTS idx_irc_peers_name ON peers(name)");
+		this.#db.run("CREATE INDEX IF NOT EXISTS idx_irc_peers_host_name ON peers(host_id, name, session_id)");
+		this.#db.run("CREATE INDEX IF NOT EXISTS idx_irc_peers_state_seen ON peers(state, last_seen)");
 	}
 
 	close(): void {
@@ -519,12 +598,20 @@ export class IrcExternalBus {
 		if (!this.#registrationEnabled) return toUnregisteredPeer(peer, pid);
 		const lastSeen = nowIso();
 		const labels = normalizePeerLabels(peer.labels);
+		const hostId = resolveFleetHostId(peer.hostId);
 		const processIdentity = readProcessIdentity(pid);
+		const existingLabels = this.#db
+			.query<{ label_json: string | null }, { $sessionId: string }>(
+				"SELECT label_json FROM peers WHERE session_id = $sessionId",
+			)
+			.get({ $sessionId: peer.sessionId });
+		const labelJson = mergeRegisteredLabels(existingLabels?.label_json ?? null, labels);
 		this.#db
 			.query(
-				`INSERT INTO peers (session_id, agent_id, name, cwd, pid, last_seen, explicit_name, session_file, owner_epoch, build_digest, version, process_identity_json, fleet_capability_json, label_json)
-				 VALUES ($sessionId, $agentId, $name, $cwd, $pid, $lastSeen, $explicitName, $sessionFile, $ownerEpoch, $buildDigest, $version, $processIdentityJson, $fleetCapabilityJson, $labelJson)
+				`INSERT INTO peers (session_id, host_id, agent_id, name, cwd, pid, last_seen, explicit_name, session_file, owner_epoch, build_digest, version, process_identity_json, fleet_capability_json, label_json)
+				 VALUES ($sessionId, $hostId, $agentId, $name, $cwd, $pid, $lastSeen, $explicitName, $sessionFile, $ownerEpoch, $buildDigest, $version, $processIdentityJson, $fleetCapabilityJson, $labelJson)
 				 ON CONFLICT(session_id) DO UPDATE SET
+					host_id = excluded.host_id,
 					agent_id = excluded.agent_id,
 					name = CASE WHEN peers.explicit_name = 1 THEN peers.name ELSE excluded.name END,
 					cwd = excluded.cwd,
@@ -541,6 +628,7 @@ export class IrcExternalBus {
 			)
 			.run({
 				$sessionId: peer.sessionId,
+				$hostId: hostId,
 				$agentId: peer.agentId ?? null,
 				$name: peer.name,
 				$cwd: peer.cwd,
@@ -553,11 +641,12 @@ export class IrcExternalBus {
 				$version: peer.version ?? null,
 				$processIdentityJson: processIdentity === null ? null : JSON.stringify(processIdentity),
 				$fleetCapabilityJson: peer.fleetCapability === undefined ? null : JSON.stringify(peer.fleetCapability),
-				$labelJson: labels === undefined ? null : JSON.stringify(labels),
+				$labelJson: labelJson,
 			});
 		return (
 			this.#getPeerBySessionId(peer.sessionId) ?? {
 				sessionId: peer.sessionId,
+				hostId,
 				agentId: peer.agentId,
 				name: peer.name,
 				cwd: peer.cwd,
@@ -596,7 +685,11 @@ export class IrcExternalBus {
 	 * Merge label fields without creating a peer row. Null values remove their
 	 * keys; omitted fields remain untouched.
 	 */
-	mergePeerLabels(sessionId: string, patch: IrcExternalPeerLabelPatch): boolean {
+	mergePeerLabels(
+		sessionId: string,
+		patch: IrcExternalPeerLabelPatch,
+		options: { readonly operator?: boolean } = {},
+	): boolean {
 		const row = this.#db
 			.query<{ label_json: string | null }, { $sessionId: string }>(
 				"SELECT label_json FROM peers WHERE session_id = $sessionId",
@@ -605,22 +698,33 @@ export class IrcExternalBus {
 		if (!row) return false;
 
 		const labels = parseLabelObject(row.label_json);
+		const protectedFields = operatorLabelFields(labels);
 		for (const key of PEER_LABEL_KEYS) {
-			if (!(key in patch)) continue;
+			if (!(key in patch) || (!options.operator && protectedFields.has(key))) continue;
 			const value = patch[key];
 			if (value === null) {
 				delete labels[key];
+				if (options.operator) protectedFields.delete(key);
 			} else if (value !== undefined) {
 				if (key === "summary") labels[key] = (value as string).slice(0, MAX_SUMMARY_LENGTH);
 				else if (key === "claims") labels[key] = normalizeClaims(value as readonly string[]);
+				else if (key === "tags") labels[key] = normalizeTags(value as readonly string[]);
+				else if (key === "activeJjChange") labels[key] = (value as string).trim().slice(0, 120);
 				else labels[key] = value;
+				if (options.operator) protectedFields.add(key);
 			}
 		}
+		if (protectedFields.size > 0) labels[OPERATOR_LABEL_FIELDS_KEY] = [...protectedFields].sort();
+		else delete labels[OPERATOR_LABEL_FIELDS_KEY];
 		const labelJson = Object.keys(labels).length > 0 ? JSON.stringify(labels) : null;
 		const result = this.#db
 			.query("UPDATE peers SET label_json = $labelJson WHERE session_id = $sessionId")
 			.run({ $sessionId: sessionId, $labelJson: labelJson });
 		return result.changes > 0;
+	}
+
+	mergePeerOperatorLabels(sessionId: string, patch: IrcExternalPeerLabelPatch): boolean {
+		return this.mergePeerLabels(sessionId, patch, { operator: true });
 	}
 
 	heartbeat(sessionId: string, labels?: IrcExternalPeerLabels): void {
@@ -650,6 +754,19 @@ export class IrcExternalBus {
 		return true;
 	}
 
+	setPeerOperatorName(sessionId: string, name: string): boolean {
+		const normalized = name.trim();
+		if (!normalized) return false;
+		const peer = this.#getPeerBySessionId(sessionId);
+		if (!peer || (peer.explicitName && peer.labels?.spawnName === undefined) || peer.name === normalized)
+			return false;
+		if (peer.labels?.spawnName === undefined) this.mergePeerLabels(sessionId, { spawnName: peer.name });
+		const result = this.#db
+			.query("UPDATE peers SET name = $name, explicit_name = 1 WHERE session_id = $sessionId")
+			.run({ $sessionId: sessionId, $name: normalized });
+		return result.changes > 0;
+	}
+
 	updatePeerState(sessionId: string, state: Exclude<IrcExternalPeerState, "unknown">): void {
 		if (!this.#registrationEnabled) return;
 		const ts = nowIso();
@@ -675,7 +792,7 @@ export class IrcExternalBus {
 		const staleMs = options.staleMs ?? IRC_EXTERNAL_STALE_MS;
 		return this.#db
 			.query<PeerRow, []>(
-				`SELECT session_id, ${this.#agentIdSelect}, name, cwd, pid, last_seen, state, state_ts, explicit_name, session_file, owner_epoch, build_digest, version, ${this.#processIdentitySelect}, ${this.#fleetCapabilitySelect}, ${this.#labelSelect} FROM peers ORDER BY last_seen DESC`,
+				`SELECT session_id, ${this.#hostIdSelect}, ${this.#agentIdSelect}, name, cwd, pid, last_seen, state, state_ts, explicit_name, session_file, owner_epoch, build_digest, version, ${this.#processIdentitySelect}, ${this.#fleetCapabilitySelect}, ${this.#labelSelect} FROM peers ORDER BY last_seen DESC`,
 			)
 			.all()
 			.filter(
@@ -720,7 +837,7 @@ export class IrcExternalBus {
 	findPeerByName(name: string, options: { excludeSessionId?: string } = {}): IrcExternalPeer | undefined {
 		const rows = this.#db
 			.query<PeerRow, { $name: string }>(
-				`SELECT session_id, ${this.#agentIdSelect}, name, cwd, pid, last_seen, state, state_ts, explicit_name, session_file, owner_epoch, build_digest, version, ${this.#processIdentitySelect}, ${this.#fleetCapabilitySelect}, ${this.#labelSelect} FROM peers WHERE name = $name OR ${this.#agentIdWhere} ORDER BY last_seen DESC`,
+				`SELECT session_id, ${this.#hostIdSelect}, ${this.#agentIdSelect}, name, cwd, pid, last_seen, state, state_ts, explicit_name, session_file, owner_epoch, build_digest, version, ${this.#processIdentitySelect}, ${this.#fleetCapabilitySelect}, ${this.#labelSelect} FROM peers WHERE name = $name OR ${this.#agentIdWhere} ORDER BY last_seen DESC`,
 			)
 			.all({ $name: name });
 		const row = rows.find(

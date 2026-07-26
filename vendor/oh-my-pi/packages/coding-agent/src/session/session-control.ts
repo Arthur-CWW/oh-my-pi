@@ -22,6 +22,18 @@ const NonEmptyStringSchema = Schema.Trim.pipe(Schema.check(Schema.isMinLength(1)
 const SHA256DigestSchema = Schema.String.pipe(Schema.check(Schema.isPattern(/^[a-f0-9]{64}$/)));
 const PositiveIntSchema = Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(1)));
 const ReadinessReceiptJsonSchema = Schema.String.pipe(Schema.check(Schema.isMinLength(1)));
+const OperatorDirectiveTextSchema = Schema.Trim.pipe(
+	Schema.check(Schema.isMinLength(1)),
+	Schema.refine((value): value is string => value.length <= 4_096),
+);
+const OperatorDelegateSchema = Schema.Trim.pipe(
+	Schema.check(Schema.isMinLength(1)),
+	Schema.refine((value): value is string => value.length <= 120),
+);
+const IdempotencyKeySchema = Schema.Trim.pipe(
+	Schema.check(Schema.isMinLength(1)),
+	Schema.refine((value): value is string => value.length <= 200),
+);
 const TimestampSchema = Schema.String.pipe(
 	Schema.refine((value): value is string => {
 		const parsed = Date.parse(value);
@@ -80,6 +92,13 @@ const FleetPinIntentSchema = Schema.Struct({
 const FleetUnpinIntentSchema = Schema.Struct({
 	kind: Schema.Literal("fleet-unpin"),
 });
+export const OperatorDirectiveIntentSchema = Schema.Struct({
+	kind: Schema.Literal("operatorDirective"),
+	issuedBy: Schema.Literal("arthur"),
+	delegatedThrough: OperatorDelegateSchema,
+	intent: OperatorDirectiveTextSchema,
+	idempotencyKey: IdempotencyKeySchema,
+});
 const CommandEnvelopeFields = {
 	commandId: UUIDSchema,
 	source: LocalSourceSchema,
@@ -118,6 +137,11 @@ export const PolicyApplyCommandSchema = Schema.Struct({
 	...CommandEnvelopeFields,
 	intent: PolicyApplyIntentSchema,
 });
+export const OperatorDirectiveCommandSchema = Schema.Struct({
+	schemaVersion: Schema.Literal(2),
+	...CommandEnvelopeFields,
+	intent: OperatorDirectiveIntentSchema,
+});
 export const SessionControlCommandSchema = Schema.Union([
 	SessionControlCommandV1Schema,
 	PrepareRolloutCommandSchema,
@@ -125,6 +149,7 @@ export const SessionControlCommandSchema = Schema.Union([
 	FleetPinCommandSchema,
 	FleetUnpinCommandSchema,
 	PolicyApplyCommandSchema,
+	OperatorDirectiveCommandSchema,
 ]);
 export type LegacySessionControlIntent = typeof LegacyIntentSchema.Type;
 export type PrepareRolloutIntent = typeof PrepareRolloutIntentSchema.Type;
@@ -133,22 +158,29 @@ export type FleetPinChannel = typeof FleetPinChannelSchema.Type;
 export type FleetPinSelection = typeof FleetPinSelectionSchema.Type;
 export type FleetPinIntent = typeof FleetPinIntentSchema.Type;
 export type FleetUnpinIntent = typeof FleetUnpinIntentSchema.Type;
+export type OperatorDirectiveIntent = typeof OperatorDirectiveIntentSchema.Type;
 export type SessionControlIntent =
 	| LegacySessionControlIntent
 	| PrepareRolloutIntent
 	| RolloutRestartIntent
 	| FleetPinIntent
 	| FleetUnpinIntent
-	| PolicyApplyIntent;
+	| PolicyApplyIntent
+	| OperatorDirectiveIntent;
 export type SessionControlCommand = typeof SessionControlCommandSchema.Type;
 export type PrepareRolloutCommand = typeof PrepareRolloutCommandSchema.Type;
 export type RolloutRestartCommand = typeof RolloutRestartCommandSchema.Type;
 export type FleetPinCommand = typeof FleetPinCommandSchema.Type;
 export type FleetUnpinCommand = typeof FleetUnpinCommandSchema.Type;
+export type OperatorDirectiveCommand = typeof OperatorDirectiveCommandSchema.Type;
 export type PolicyApplyIntent = typeof PolicyApplyIntentSchema.Type;
 export type PolicyApplyControlCommand = Extract<
 	SessionControlCommand,
 	{ readonly intent: { readonly kind: "policy-apply" } }
+>;
+export type OperatorDirectiveControlCommand = Extract<
+	SessionControlCommand,
+	{ readonly intent: { readonly kind: "operatorDirective" } }
 >;
 export type { PolicyApplyClass, PolicyApplyCommandV1 };
 export type FleetPinControlCommand = FleetPinCommand | FleetUnpinCommand;
@@ -192,6 +224,7 @@ const SESSION_CONTROL_INTENT_MAJOR: Record<SessionControlIntent["kind"], number>
 	"fleet-pin": 2,
 	"fleet-unpin": 2,
 	"policy-apply": 2,
+	operatorDirective: 2,
 };
 
 export function selectSessionControlCommandKind(
@@ -256,6 +289,11 @@ export function toPolicyApplyCommandV1(command: PolicyApplyControlCommand): Poli
 }
 export function isPolicyApplyControlCommand(command: SessionControlCommand): command is PolicyApplyControlCommand {
 	return command.intent.kind === "policy-apply";
+}
+export function isOperatorDirectiveControlCommand(
+	command: SessionControlCommand,
+): command is OperatorDirectiveControlCommand {
+	return command.intent.kind === "operatorDirective";
 }
 
 interface CommandRow {
@@ -355,6 +393,19 @@ function assertLocalSource(command: SessionControlCommand): void {
 	if (uid !== undefined && command.source.uid !== uid) {
 		throw new Error(`Control command ${command.commandId} is not from the current local user`);
 	}
+}
+
+function sameIdempotentOperatorDirective(left: SessionControlCommand, right: SessionControlCommand): boolean {
+	return (
+		left.intent.kind === "operatorDirective" &&
+		right.intent.kind === "operatorDirective" &&
+		left.sessionId === right.sessionId &&
+		left.targetOwnerEpoch === right.targetOwnerEpoch &&
+		left.intent.issuedBy === right.intent.issuedBy &&
+		left.intent.delegatedThrough === right.intent.delegatedThrough &&
+		left.intent.intent === right.intent.intent &&
+		left.intent.idempotencyKey === right.intent.idempotencyKey
+	);
 }
 
 function decodeReceiptRow(row: ReceiptRow): SessionControlReceipt {
@@ -490,8 +541,42 @@ export class SessionControlBus {
 				)
 				.run({ $sessionId: sessionId, $ownerEpoch: ownerEpoch, $at: at });
 		})();
+		this.#requeueInterruptedOperatorDirectives(sessionId, ownerEpoch);
 		const cordon = this.getCordon(sessionId);
 		if (cordon) activeSpawnCordons.set(sessionId, cordon);
+	}
+
+	#requeueInterruptedOperatorDirectives(sessionId: string, ownerEpoch: string): void {
+		const rows = this.#db
+			.query<CommandRow, { $sessionId: string; $ownerEpoch: string }>(
+				`SELECT c.command_json
+				 FROM control_commands c
+				 JOIN control_receipts r ON r.command_id = c.command_id
+				 WHERE r.session_id = $sessionId
+				   AND r.target_owner_epoch = $ownerEpoch
+				   AND r.state = 'acknowledged'`,
+			)
+			.all({ $sessionId: sessionId, $ownerEpoch: ownerEpoch });
+		for (const row of rows) {
+			const command = decodeSessionControlCommand(JSON.parse(row.command_json));
+			if (command.intent.kind !== "operatorDirective") continue;
+			this.#db
+				.query(
+					`UPDATE control_receipts
+					 SET state = 'requested', acknowledged_at = NULL
+					 WHERE command_id = $commandId AND state = 'acknowledged'`,
+				)
+				.run({ $commandId: command.commandId });
+		}
+	}
+
+	getTargetOwnerEpoch(sessionId: string): string | undefined {
+		const row = this.#db
+			.query<{ owner_epoch: string }, { $sessionId: string }>(
+				"SELECT owner_epoch FROM control_targets WHERE session_id = $sessionId",
+			)
+			.get({ $sessionId: sessionId });
+		return row?.owner_epoch;
 	}
 
 	releaseTarget(sessionId: string, ownerEpoch: string): void {
@@ -511,8 +596,10 @@ export class SessionControlBus {
 				)
 				.get({ $commandId: command.commandId });
 			if (existing) {
-				if (existing.command_json !== commandJson)
+				const persisted = decodeSessionControlCommand(JSON.parse(existing.command_json));
+				if (existing.command_json !== commandJson && !sameIdempotentOperatorDirective(persisted, command)) {
 					throw new Error(`Conflicting reuse of control command ${command.commandId}`);
+				}
 				const receipt = this.getReceipt(command.commandId);
 				if (!receipt) throw new Error(`Control command ${command.commandId} is missing its receipt`);
 				return receipt;
