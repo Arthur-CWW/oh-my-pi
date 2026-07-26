@@ -1,0 +1,259 @@
+version: 1
+shared:
+  laneSharedPaths:
+    - AGENTS.md
+    - mise.toml
+    - package.json
+    - bun.lock
+    - biome.json
+    - catalog/remote-workspaces.yml
+  syncIncludes:
+    - /AGENTS.md
+    - /mise.toml
+    - /package.json
+    - /bun.lock
+    - /biome.json
+    - /services.yml
+    - /catalog/
+    - /catalog/remote-workspaces.yml
+    - /.omp/***
+    - /scripts/***
+    - /skills/***
+    - /apps/
+    - /apps/***
+    - /packages/
+    - /packages/***
+    - /workflows/
+    - /workflows/***
+    - /browser-extensions/
+    - /browser-extensions/***
+    - /streams/
+    - /streams/***
+    - /vendor/
+    - /vendor/oh-my-pi/***
+  syncExcludes:
+    - .git/
+    - .jj/
+    - node_modules/
+    - target/
+    - /local/
+    - /data/
+    - /runtime/
+    - /.runtime/
+    - /runs/
+    - /.cache/
+    - /.tmp/
+    - '*.tsbuildinfo'
+workspaces:
+  desktop-agents:
+    host: desktop
+    user: arthur
+    root: /home/arthur/agents
+    remoteNu: /home/arthur/.local/share/mise/shims/nu
+    remoteRunner: /home/arthur/.local/bin/remote-workspace.nu
+    remoteManifest: /home/arthur/.local/bin/remote-workspaces.yml
+    bun: /home/arthur/.bun/bin/bun
+    omp: /home/arthur/.local/bin/omp
+    rustToolchain: nightly-2026-04-29
+    bunChannel: canary
+    bunMinimumMajor: 1
+    bunMinimumMinor: 4
+    capabilities:
+      healthProfile: workstation-maintenance
+      platforms: [linux, cpu, gpu, browser]
+      remoteWorkspace: true
+      reviewForwarding:
+        enabled: true
+        aliasPrefix: desktop
+        localPortOffset: 0
+    streams:
+      harness:
+        ompConfig: .omp/desktop-config.yml
+        setupDirs:
+          - packages/fleet-observer
+          - packages/fleet-board
+          - packages/genealogy-index
+        servicesEnabled: true
+        reviewWorkspace: workspace:7
+        promptRefs:
+          - streams/harness/GOAL.md
+          - docs/state/harness-priority-board.md
+        syncIncludes:
+          - /streams/
+          - /streams/harness/***
+          - /docs/
+          - /docs/fable/***
+          - /docs/state/harness-priority-board.md
+          - /packages/
+          - /packages/control-plane/***
+          - /packages/fleet-board/***
+          - /packages/fleet-observer/***
+          - /packages/genealogy-index/***
+        review:
+          - name: fleet-board
+            kind: portless
+            route: fleet-board
+            aliasSuffix: fleet-board
+            localPort: 18440
+            path: /
+      primer:
+        ompConfig: .omp/primer-config.yml
+        setupDirs:
+          - packages/primer-daemon
+          - packages/stema
+          - packages/twitter-archive
+        servicesEnabled: true
+        reviewWorkspace: workspace:2
+        promptRefs:
+          - streams/primer/GOAL.md
+        syncIncludes:
+          - /streams/
+          - /streams/primer/***
+          - /packages/
+          - /packages/primer-daemon/***
+          - /packages/stema/***
+          - /packages/twitter-archive/***
+          - /browser-extensions/
+          - /browser-extensions/extensions/
+          - /browser-extensions/extensions/twitter-archive-firefox/***
+        review:
+          - name: primer
+            kind: portless
+            route: primer
+            aliasSuffix: primer
+            localPort: 18441
+            path: /
+          - name: meltdown
+            kind: portless
+            route: meltdown
+            aliasSuffix: meltdown
+            localPort: 18442
+            path: /
+      companion:
+        ompConfig: .omp/companion-config.yml
+        setupDirs:
+          - apps/ai-companion-rtc
+          - apps/xanadu
+          - packages/spatial-audio-renderer
+        servicesEnabled: false
+        servicesBlockedReason: Current Darwin/MLX service commands are not Linux-ready.
+        reviewWorkspace: workspace:3
+        promptRefs:
+          - streams/companion/GOAL.md
+        syncIncludes:
+          - /streams/
+          - /streams/companion/***
+          - /apps/
+          - /apps/ai-companion-rtc/***
+          - /apps/xanadu/***
+          - /packages/
+          - /packages/spatial-audio-renderer/***
+        review:
+          - name: xanadu
+            kind: direct
+            remotePort: 4970
+            aliasSuffix: xanadu
+            localPort: 18444
+            path: /
+          - name: companion
+            kind: direct
+            remotePort: 4897
+            aliasSuffix: companion
+            localPort: 18445
+            path: /
+      playground:
+        ompConfig: .omp/playground-config.yml
+        errorLog: data/scene-playground/errors.log
+        setupDirs:
+          - apps/scene-playground
+          - packages/scene-renderer
+          - packages/jimeng-client
+        servicesEnabled: true
+        reviewWorkspace: workspace:4
+        promptRefs:
+          - streams/playground/GOAL.md
+        syncIncludes:
+          - /streams/
+          - /streams/playground/***
+          - /apps/
+          - /apps/scene-playground/***
+          - /packages/
+          - /packages/scene-renderer/***
+          - /packages/jimeng-client/***
+          - /workflows/
+          - /workflows/scene-lab/***
+          - /workflows/tiktok-recreate/***
+        review:
+          - name: scene
+            kind: portless
+            route: scene
+            aliasSuffix: scene
+            localPort: 18443
+            path: /
+  h11dsi-agents:
+    extends: desktop-agents
+    host: h11dsi
+    health:
+      machineId: 5c864a609a404027871b30d4262645c7
+      hostKeyFingerprint: SHA256:G3Uw3/GY7XjgHmKIU7W/t2H0y0SFeuS7SjzAIKL+Bes
+      operatingSystem: Linux
+      architecture: x86_64
+      minimumDiskAvailableKiB: 104857600
+    laneOnly: false
+    capabilities:
+      healthProfile: unprivileged-server
+      platforms: [linux, cpu, gpu, browser]
+      remoteWorkspace: true
+      reviewForwarding:
+        enabled: true
+        aliasPrefix: h11
+        localPortOffset: 100
+    routingRoots:
+      companion: /home/arthur/agents-companion
+      primer: /home/arthur/agents-primer
+      playground: /home/arthur/agents-playground
+    laneRoot: /home/arthur/tmp/harness-lanes/workspaces
+    laneManifest: /home/arthur/tmp/harness-lanes/manifest.json
+    laneBundleRoot: /home/arthur/tmp/harness-lanes/bundles
+    sharedCacheRoots:
+      - /home/arthur/.bun/install/cache
+      - /home/arthur/.cache/mise
+      - /home/arthur/.local/share/pnpm/store
+    laneStreams:
+      harness:
+        ownedRoots:
+          - .omp
+          - catalog
+          - scripts
+          - streams/harness
+          - docs/fable
+          - docs/state
+          - packages/control-plane
+          - packages/fleet-board
+          - packages/fleet-observer
+          - packages/genealogy-index
+          - vendor/oh-my-pi
+      primer:
+        ownedRoots:
+          - .omp
+          - streams/primer
+          - packages/primer-daemon
+          - packages/stema
+          - packages/twitter-archive
+          - browser-extensions/extensions/twitter-archive-firefox
+      companion:
+        ownedRoots:
+          - .omp
+          - streams/companion
+          - apps/ai-companion-rtc
+          - apps/xanadu
+          - packages/spatial-audio-renderer
+      playground:
+        ownedRoots:
+          - .omp
+          - streams/playground
+          - apps/scene-playground
+          - packages/scene-renderer
+          - packages/jimeng-client
+          - workflows/scene-lab
+          - workflows/tiktok-recreate
