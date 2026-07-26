@@ -225,6 +225,10 @@ export type AnyUiMetadata = UiBase & {
 	options?: ReadonlyArray<SubmenuOption> | "runtime";
 };
 
+interface ScopedDef {
+	/** Global-only settings cannot be overridden by project/session layers. */
+	scope?: "global";
+}
 interface BooleanDef {
 	type: "boolean";
 	default: boolean | undefined;
@@ -237,16 +241,17 @@ interface StringDef {
 	ui?: UiString;
 }
 
-interface NumberDef {
+interface NumberDef extends ScopedDef {
 	type: "number";
 	default: number;
 	/** Optional schema constraints for settings that require bounded integers. */
 	min?: number;
+	max?: number;
 	integer?: boolean;
 	ui?: UiNumber;
 }
 
-interface EnumDef<T extends readonly string[]> {
+interface EnumDef<T extends readonly string[]> extends ScopedDef {
 	type: "enum";
 	values: T;
 	default: T[number];
@@ -3752,7 +3757,7 @@ export const SETTINGS_SCHEMA = {
 			tab: "tasks",
 			group: "Subagents",
 			label: "Max Concurrent Tasks",
-			description: "Maximum number of subagents running concurrently",
+			description: "Maximum task items scheduled concurrently by one session call",
 			options: [
 				{ value: "0", label: "Unlimited" },
 				{ value: "1", label: "1 task" },
@@ -3766,28 +3771,34 @@ export const SETTINGS_SCHEMA = {
 		},
 	},
 
-	/**
-	 * Maximum concurrently live in-process children owned by one session.
-	 * The explicit default of 0 disables this additional narrowing and keeps
-	 * the historical `task.maxConcurrency` effective behavior unchanged.
-	 */
-	"task.maxLiveChildren": {
-		type: "number",
-		default: 0,
+	"task.globalAdmission.mode": {
+		type: "enum",
+		values: ["fixed"],
+		default: "fixed",
+		scope: "global",
 		ui: {
 			tab: "tasks",
 			group: "Subagents",
-			label: "Max Live Children",
-			description:
-				"Cap live in-process child sessions per parent (0 keeps the Max Concurrent Tasks limit). Deferred spawns queue FIFO.",
+			label: "Global Admission Mode",
+			description: "Host-scoped child admission policy. Fixed width is mandatory.",
+		},
+	},
+	"task.globalAdmission.maxLiveAttempts": {
+		type: "number",
+		default: 1,
+		min: 1,
+		max: 3,
+		integer: true,
+		scope: "global",
+		ui: {
+			tab: "tasks",
+			group: "Subagents",
+			label: "Global Live Attempts",
+			description: "Maximum live child attempts shared by every OMP session on this host",
 			options: [
-				{ value: "0", label: "Use task concurrency" },
-				{ value: "1", label: "1 child" },
-				{ value: "2", label: "2 children" },
-				{ value: "4", label: "4 children" },
-				{ value: "8", label: "8 children" },
-				{ value: "16", label: "16 children" },
-				{ value: "32", label: "32 children" },
+				{ value: "1", label: "1 attempt" },
+				{ value: "2", label: "2 attempts" },
+				{ value: "3", label: "3 attempts" },
 			],
 		},
 	},
@@ -4604,10 +4615,14 @@ export function getDefault<P extends SettingPath>(path: P): SettingValue<P> {
 /** Validate a raw setting value against schema constraints when present. */
 export function validateSettingValue<P extends SettingPath>(path: P, value: unknown): value is SettingValue<P> {
 	const definition = SETTINGS_SCHEMA[path];
+	if (definition.type === "enum") {
+		return typeof value === "string" && (definition.values as readonly string[]).includes(value);
+	}
 	if (definition.type !== "number") return true;
 	if (typeof value !== "number" || !Number.isFinite(value)) return false;
 	if ("integer" in definition && definition.integer && !Number.isSafeInteger(value)) return false;
-	return !("min" in definition) || definition.min === undefined || value >= definition.min;
+	if ("min" in definition && definition.min !== undefined && value < definition.min) return false;
+	return !("max" in definition) || definition.max === undefined || value <= definition.max;
 }
 
 /** Check if a path has UI metadata (should appear in settings panel) */

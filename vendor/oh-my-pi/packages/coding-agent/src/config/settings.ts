@@ -373,6 +373,15 @@ export class Settings {
 	}
 
 	/**
+	 * Read only the host-global config layer. Project, CLI overlay, and runtime
+	 * overrides cannot widen host resource admission.
+	 */
+	getGlobal<P extends SettingPath>(path: P): SettingValue<P> {
+		const value = getByPath(this.#global, SETTING_PATH_SEGMENTS[path]);
+		return (value !== undefined && validateSettingValue(path, value) ? value : getDefault(path)) as SettingValue<P>;
+	}
+
+	/**
 	 * Whether `path` has an explicitly configured value (global config, project
 	 * config, or runtime override) rather than falling back to the schema default.
 	 */
@@ -421,6 +430,9 @@ export class Settings {
 	 * Apply runtime overrides (not persisted).
 	 */
 	override<P extends SettingPath>(path: P, value: SettingValue<P>): void {
+		if ("scope" in SETTINGS_SCHEMA[path] && SETTINGS_SCHEMA[path].scope === "global") {
+			throw new Error(`Setting ${path} is global-only and cannot be overridden at runtime`);
+		}
 		const prev = this.get(path);
 		const segments = path.split(".");
 		setByPath(this.#overrides, segments, value);

@@ -378,7 +378,6 @@ function setMutation(
 				value: value as FallbackChainsValue,
 			};
 		case "core.budgets.task.maxConcurrency":
-		case "core.budgets.task.maxLiveChildren":
 		case "core.budgets.task.maxRuntimeMs":
 		case "core.budgets.task.softRequestBudget":
 			return {

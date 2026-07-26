@@ -62,7 +62,6 @@ import { ExtensionRunner } from "./extensibility/extensions/runner";
 import type { ExtensionUIContext } from "./extensibility/extensions/types";
 import { scheduleMarketplaceAutoUpdate } from "./extensibility/plugins/marketplace-auto-update";
 import { IrcExternalBus } from "./irc/bus-external";
-import type { MCPManager } from "./mcp";
 import { createRichDisposableTerminalViewFactory } from "./modes/disposable-interactive-view";
 import type { InteractiveMode } from "./modes/interactive-mode";
 import type { PrintModeOptions } from "./modes/print-mode";
@@ -108,7 +107,6 @@ import { reAdoptDirectChildren } from "./task/re-adopt";
 import { configureSpawnPolicyRouting } from "./task/spawn-route";
 import { initTelemetryExport, isTelemetryExportEnabled } from "./telemetry-export";
 import { AUTO_THINKING } from "./thinking";
-import type { LspStartupServerInfo } from "./tools";
 import {
 	getChangelogPath,
 	getNewEntries,
@@ -193,7 +191,8 @@ const HOST_DEFAULTED_SETTING_PATHS: SettingPath[] = [
 	"task.eager",
 	"task.batch",
 	"task.maxConcurrency",
-	"task.maxLiveChildren",
+	"task.globalAdmission.mode",
+	"task.globalAdmission.maxLiveAttempts",
 	"task.maxRecursionDepth",
 	"task.disabledAgents",
 	"task.agentModelOverrides",

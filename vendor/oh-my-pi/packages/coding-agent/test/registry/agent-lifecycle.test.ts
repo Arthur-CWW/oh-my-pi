@@ -1,11 +1,16 @@
+import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
 import { AsyncJobManager } from "@oh-my-pi/pi-coding-agent/async/job-manager";
+import { HostResourceAdmission } from "@oh-my-pi/pi-coding-agent/resource/host-resource-admission";
+import { readProcessIdentity } from "@oh-my-pi/pi-coding-agent/resource/process-identity";
 import { AgentLifecycleManager } from "@oh-my-pi/pi-coding-agent/registry/agent-lifecycle";
 import { AgentRegistry, MAIN_AGENT_ID } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { appendChildLifecycleRecord, type ChildLifecycleState } from "@oh-my-pi/pi-coding-agent/task/child-lifecycle";
-import { Semaphore } from "@oh-my-pi/pi-coding-agent/task/parallel";
 
 interface SessionStub {
 	session: AgentSession;
@@ -85,22 +90,75 @@ async function flushAsync(): Promise<void> {
 
 const TTL = 20;
 
+let root: string;
+let previousHome: string | undefined;
+let previousControlDb: string | undefined;
+
+function expectLeaseLifecycle(attemptCount: number): void {
+	const db = new Database(path.join(root, "irc-bus.sqlite"), { readonly: true });
+	try {
+		const events = db
+			.query<{ event: string }, []>("SELECT event FROM test_resource_lease_events ORDER BY rowid")
+			.all()
+			.map(row => row.event);
+		expect(events).toEqual(
+			Array.from({ length: attemptCount }, () => ["acquired", "released"]).flat(),
+		);
+	} finally {
+		db.close();
+	}
+}
+
 describe("AgentLifecycleManager", () => {
 	let registry: AgentRegistry;
 	let lifecycle: AgentLifecycleManager;
 
-	beforeEach(() => {
+	beforeEach(async () => {
+		root = await fs.mkdtemp(path.join(os.tmpdir(), "omp-revive-admission-"));
+		previousHome = process.env.HOME;
+		previousControlDb = process.env.OMP_SESSION_CONTROL_DB;
+		process.env.HOME = root;
+		process.env.OMP_SESSION_CONTROL_DB = path.join(root, "session-control.sqlite");
 		AgentRegistry.resetGlobalForTests();
 		AgentLifecycleManager.resetGlobalForTests();
+		HostResourceAdmission.resetGlobalForTests();
+		HostResourceAdmission.global({
+			dbPath: path.join(root, "irc-bus.sqlite"),
+			maxLiveAttempts: 1,
+			queuePollMs: 5,
+		});
+		const audit = new Database(path.join(root, "irc-bus.sqlite"));
+		audit.run("CREATE TABLE test_resource_lease_events (event TEXT NOT NULL, attempt_id TEXT NOT NULL)");
+		audit.run(`
+			CREATE TRIGGER test_resource_lease_acquired
+			AFTER INSERT ON resource_leases
+			BEGIN
+				INSERT INTO test_resource_lease_events (event, attempt_id) VALUES ('acquired', NEW.attempt_id);
+			END
+		`);
+		audit.run(`
+			CREATE TRIGGER test_resource_lease_released
+			AFTER DELETE ON resource_leases
+			BEGIN
+				INSERT INTO test_resource_lease_events (event, attempt_id) VALUES ('released', OLD.attempt_id);
+			END
+		`);
+		audit.close();
 		registry = AgentRegistry.global();
 		lifecycle = AgentLifecycleManager.global();
 	});
-	afterEach(() => {
+	afterEach(async () => {
 		vi.useRealTimers();
 		vi.restoreAllMocks();
 		AgentLifecycleManager.resetGlobalForTests();
 		AgentRegistry.resetGlobalForTests();
 		AsyncJobManager.resetForTests();
+		HostResourceAdmission.resetGlobalForTests();
+		if (previousHome === undefined) delete process.env.HOME;
+		else process.env.HOME = previousHome;
+		if (previousControlDb === undefined) delete process.env.OMP_SESSION_CONTROL_DB;
+		else process.env.OMP_SESSION_CONTROL_DB = previousControlDb;
+		await fs.rm(root, { recursive: true, force: true });
 	});
 
 	function registerIdleSub(id: string, session: AgentSession | null, sessionFile: string | null = `/tmp/${id}.jsonl`) {
@@ -415,7 +473,7 @@ describe("AgentLifecycleManager", () => {
 		expect(stub.disposeCalls()).toBe(1);
 	});
 
-	it("ensureLive revives a parked agent through its reviver and flips it back to idle", async () => {
+	it("revives through the host authority and releases its lease exactly once when parked", async () => {
 		const revived = makeSessionStub();
 		registry.register({
 			id: "3-Sub",
@@ -434,12 +492,37 @@ describe("AgentLifecycleManager", () => {
 		expect(ref?.status).toBe("idle");
 		expect(ref?.session).toBe(revived.session);
 		expect(ref?.sessionFile).toBe("/tmp/3-Sub.jsonl");
+		expect(HostResourceAdmission.global().inspect().leases).toHaveLength(1);
+		lifecycle.adopt("3-Sub", { idleTtlMs: 0, revive: async () => revived.session });
+		expect(HostResourceAdmission.global().inspect().leases).toHaveLength(1);
+
+		await lifecycle.park("3-Sub");
+		expect(registry.get("3-Sub")).toMatchObject({ status: "parked", session: null });
+		expect(revived.disposeCalls()).toBe(1);
+		expectLeaseLifecycle(1);
+
+		await lifecycle.release("3-Sub");
+		expectLeaseLifecycle(1);
 	});
 
 	it("keeps a failed admission-wait parked and releases admission when revival fails", async () => {
 		const revived = makeSessionStub();
-		const admission = new Semaphore(1);
-		let failAdmission = true;
+		const admission = HostResourceAdmission.global();
+		const holderProcess = readProcessIdentity(process.pid)!;
+		const held = await admission.acquire({
+			attemptId: "held-spawn",
+			kind: "spawn",
+			sessionId: "parent-session",
+			sessionOwnerEpoch: null,
+			parentAgentId: MAIN_AGENT_ID,
+			agentId: "held-child",
+			jobId: "held-job",
+			holderProcess,
+			reservationBytes: 0,
+		});
+		const controller = new AbortController();
+		let signal: AbortSignal | undefined = controller.signal;
+		let attempt = 0;
 		let reviverRuns = 0;
 		registry.register({
 			id: "3a-Sub",
@@ -451,27 +534,42 @@ describe("AgentLifecycleManager", () => {
 		});
 		lifecycle.adopt("3a-Sub", {
 			idleTtlMs: 0,
-			acquireReviveSlot: async () => {
-				if (failAdmission) throw new Error("admission aborted");
-				await admission.acquire();
-				return () => admission.release();
-			},
+			acquireResourceLease: () =>
+				admission.acquire(
+					{
+						attemptId: `revive-${++attempt}`,
+						kind: "revive",
+						sessionId: "parent-session",
+						sessionOwnerEpoch: null,
+						parentAgentId: MAIN_AGENT_ID,
+						agentId: "3a-Sub",
+						jobId: `revive-job-${attempt}`,
+						holderProcess,
+						reservationBytes: 0,
+					},
+					{ signal },
+				),
 			revive: async () => {
 				reviverRuns++;
 				throw new Error("reviver failed");
 			},
 		});
 
-		await expect(lifecycle.ensureLive("3a-Sub")).rejects.toThrow("admission aborted");
+		const cancelled = lifecycle.ensureLive("3a-Sub");
+		expect(admission.inspect().waiters).toHaveLength(1);
+		controller.abort(new Error("admission aborted"));
+		await expect(cancelled).rejects.toThrow("Host resource admission was cancelled");
 		expect(registry.get("3a-Sub")).toMatchObject({ status: "parked", session: null });
 		expect(reviverRuns).toBe(0);
+		expect(admission.inspect().waiters).toEqual([]);
 
-		failAdmission = false;
+		held.release();
+		signal = undefined;
 		await expect(lifecycle.ensureLive("3a-Sub")).rejects.toThrow("reviver failed");
 		expect(registry.get("3a-Sub")).toMatchObject({ status: "parked", session: null });
-		await admission.acquire();
-		admission.release();
+		expect(admission.inspect()).toMatchObject({ leases: [], waiters: [] });
 		expect(revived.disposeCalls()).toBe(0);
+		expectLeaseLifecycle(2);
 	});
 
 	it("concurrent ensureLive calls during a slow revive coalesce into one reviver run", async () => {

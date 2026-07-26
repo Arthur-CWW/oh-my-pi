@@ -13,6 +13,7 @@
  *   - Progress tracking via JSON events
  *   - Session artifacts for debugging
  */
+import { randomUUID } from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import path from "node:path";
@@ -46,9 +47,16 @@ import type { AsyncJobManager } from "../async";
 import type { LocalProtocolOptions } from "../internal-urls";
 import { type ArchivedDirectChildDescriptor, listArchivedDirectChildren } from "../internal-urls/history-protocol";
 import { loadOverallPlanReference } from "../plan-mode/plan-handoff";
-import { AgentLifecycleManager, type ReviveAdmissionAcquirer } from "../registry/agent-lifecycle";
+import { AgentLifecycleManager, type ResourceLeaseAcquirer } from "../registry/agent-lifecycle";
 import type { AgentStatus } from "../registry/agent-registry";
 import { AgentRegistry, MAIN_AGENT_ID } from "../registry/agent-registry";
+import {
+	HostAdmissionRejectedError,
+	HostResourceAdmission,
+	type HostResourceLease,
+	type ResourceAttemptKind,
+} from "../resource/host-resource-admission";
+import { readProcessIdentity } from "../resource/process-identity";
 import type { AgentSession } from "../session/agent-session";
 import { getSessionSpawnCordon, type SessionSpawnCordon } from "../session/session-control";
 import { generateCommitMessage } from "../utils/commit-message-generator";
@@ -57,7 +65,7 @@ import { type DiscoveryResult, discoverAgents, getAgent } from "./discovery";
 import { type ExecutorOptions, runSubprocess } from "./executor";
 import { generateTaskName } from "./name-generator";
 import { AgentOutputManager } from "./output-manager";
-import { mapWithConcurrencyLimit, REVIVE_ADMISSION_WAIT_MS, resolveSpawnConcurrency, Semaphore } from "./parallel";
+import { mapWithConcurrencyLimit } from "./parallel";
 import { ProgressAggregator } from "./progress-aggregator";
 import { addUsageTotals, createUsageTotals } from "./progress-usage";
 import { renderResult, renderCall as renderTaskCall } from "./render";
@@ -692,38 +700,6 @@ function discoverAgentsForCreate(cwd: string): Promise<DiscoveryResult> {
 	return pending;
 }
 
-export async function acquireReviveAdmissionSlot(
-	semaphore: Semaphore,
-	agentId: string,
-	waitMs = REVIVE_ADMISSION_WAIT_MS,
-): Promise<(() => void) | undefined> {
-	const signal = AbortSignal.timeout(waitMs);
-	try {
-		await semaphore.acquire(queueDepth => {
-			logger.info("Task revival deferred by live-child admission", { agentId, queueDepth });
-		}, signal);
-	} catch (error) {
-		if (!signal.aborted) throw error;
-		/*
-		 * IRC reserves a parked recipient's mailbox entry before ensureLive().
-		 * A child holding the last slot may itself be waiting for that recipient,
-		 * so an unbounded FIFO wait would wedge the lineage. After one bounded
-		 * wait we bypass admission with a warning: the reserved message survives,
-		 * and the tree is guaranteed to make progress within this bound.
-		 */
-		logger.warn("Task revival bypassing saturated live-child admission after bounded wait", {
-			agentId,
-			waitMs,
-		});
-		return undefined;
-	}
-	let released = false;
-	return () => {
-		if (released) return;
-		released = true;
-		semaphore.release();
-	};
-}
 
 export function reattachDetachedChildTask(options: {
 	manager: AsyncJobManager;
@@ -859,15 +835,8 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 	readonly #blockedAgent: string | undefined;
 	/** Schedule-time route decisions keyed by agentId, consumed by #runSpawn to avoid duplicate work. */
 	#preResolvedModels = new Map<string, SpawnRouteDecision>();
-	/**
-	 * The sole admission limiter for this session's children. A positive
-	 * `task.maxLiveChildren` narrows the historical `task.maxConcurrency`
-	 * ceiling. Each child session owns a separate TaskTool and therefore a
-	 * separate budget: nested spawns cannot deadlock behind their parent's
-	 * occupied slot.
-	 */
-	#spawnSemaphore: Semaphore | undefined;
-	readonly #reviveAdmission: ReviveAdmissionAcquirer | undefined;
+	readonly #fallbackAdmissionSessionId = `ephemeral:${process.pid}:${randomUUID()}`;
+	readonly #resourceLeaseAcquirer: ResourceLeaseAcquirer;
 
 	get parameters(): TaskToolSchemaInstance {
 		const isolationEnabled = this.session.settings.get("task.isolation.mode") !== "none";
@@ -900,28 +869,59 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 	) {
 		this.#blockedAgent = $env.PI_BLOCKED_AGENT;
 		this.#discoveredAgents = discoveredAgents;
-		if (this.session.settings.get("task.maxLiveChildren") > 0) {
-			this.#reviveAdmission = agentId => acquireReviveAdmissionSlot(this.#getSpawnSemaphore(), agentId);
-		}
+		this.#resourceLeaseAcquirer = agentId => {
+			const attemptId = randomUUID();
+			return this.#acquireResourceLease(attemptId, "revive", agentId, `revive:${attemptId}`);
+		};
 	}
 
 	#isBatchEnabled(): boolean {
 		return this.session.settings.get("task.batch");
 	}
-	#getSpawnSemaphore(): Semaphore {
-		this.#spawnSemaphore ??= new Semaphore(
-			resolveSpawnConcurrency(
-				this.session.settings.get("task.maxConcurrency"),
-				this.session.settings.get("task.maxLiveChildren"),
-			),
-		);
-		return this.#spawnSemaphore;
-	}
 
-	async #acquireSpawnSlot(agentId: string, signal?: AbortSignal): Promise<void> {
-		await this.#getSpawnSemaphore().acquire(queueDepth => {
-			logger.info("Task spawn deferred by live-child admission", { agentId, queueDepth });
-		}, signal);
+	async #acquireResourceLease(
+		attemptId: string,
+		kind: ResourceAttemptKind,
+		agentId: string,
+		jobId: string,
+		signal?: AbortSignal,
+	): Promise<HostResourceLease> {
+		if (this.session.settings.getGlobal("task.globalAdmission.mode") !== "fixed") {
+			throw new HostAdmissionRejectedError("authority-unavailable", "Only fixed host resource admission is available");
+		}
+		const holderProcess = readProcessIdentity(process.pid);
+		if (!holderProcess) {
+			throw new HostAdmissionRejectedError(
+				"authority-unavailable",
+				`Cannot prove process identity before starting ${agentId}`,
+			);
+		}
+		return HostResourceAdmission.global({
+			maxLiveAttempts: this.session.settings.getGlobal("task.globalAdmission.maxLiveAttempts"),
+		}).acquire(
+			{
+				attemptId,
+				kind,
+				sessionId: this.session.getSessionId?.() ?? this.#fallbackAdmissionSessionId,
+				sessionOwnerEpoch: this.session.sessionManager?.getSessionOwnership()?.ownerEpoch ?? null,
+				parentAgentId: this.session.getAgentId?.() ?? MAIN_AGENT_ID,
+				agentId,
+				jobId,
+				holderProcess,
+				reservationBytes: 0,
+			},
+			{
+				signal,
+				onDeferred: decision => {
+					logger.info("Task start deferred by host resource admission", {
+						agentId,
+						attemptId,
+						reason: decision.reason,
+						queueDepth: decision.queueDepth,
+					});
+				},
+			},
+		);
 	}
 
 	/**
@@ -1039,8 +1039,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 		if (!asyncEnabled || !manager || selectedAgent?.blocking === true) {
 			// Sync fallback: async execution disabled, orphaned host that never
 			// wired a job manager, or an agent definition that declares
-			// `blocking: true`. The session-scoped semaphore still bounds fan-out
-			// across parallel task calls.
+			// `blocking: true`. The host authority still governs every start.
 			if (asyncEnabled && !manager) {
 				logger.warn("task: no AsyncJobManager registered; falling back to sync execution");
 			}
@@ -1161,7 +1160,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 					routeDecision?.source,
 				);
 				// Reserve a durable `starting` identity before the nonblocking job is
-				// registered: its body may sit gated on the spawn semaphore, and until
+				// registered: its body may sit in the durable host admission queue, and until
 				// it builds a real session history/IRC would otherwise report this
 				// genuinely-queued id as unknown. The child's own registration clears
 				// the flag when it comes live; a startup failure finalizes it.
@@ -1263,7 +1262,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 	/**
 	 * Reserve a durable, addressable identity for a child whose nonblocking job
 	 * has been scheduled but whose body has not yet built a live session (it may
-	 * be gated on the spawn semaphore). Registered `running` + `starting: true`
+	 * be queued by host admission). Registered `running` + `starting: true`
 	 * so history/IRC resolve it as genuinely-known queued work rather than
 	 * unknown. Never clobbers an already-live session: the child's own
 	 * `createAgentSession` registration overwrites this ref (dropping the flag)
@@ -1331,39 +1330,42 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 				`transcript at history://${agentId}`
 			);
 		};
+		const attemptId = randomUUID();
 		return manager.register(
 			"task",
 			agentId,
 			async ({ jobId: ownJobId, signal: runSignal, reportProgress, markRunning }) => {
+				let resourceLease: HostResourceLease;
 				try {
-					await this.#acquireSpawnSlot(agentId, runSignal);
+					resourceLease = await this.#acquireResourceLease(
+						attemptId,
+						"spawn",
+						agentId,
+						ownJobId,
+						runSignal,
+					);
 				} catch (error) {
 					this.#preResolvedModels.delete(agentId);
 					progress.status = "aborted";
-					// Admission cancellation never acquired a slot, so only finalize
-					// the queued identity; there is nothing to release.
 					AgentRegistry.global().failStart(agentId);
 					onSettled?.(true);
 					throw error;
 				}
 				const startedAt = Date.now();
-				const semaphore = this.#getSpawnSemaphore();
 				if (runSignal.aborted) {
-					semaphore.release();
 					progress.status = "aborted";
-					// Cancelled before it ever built a session: finalize the reserved
-					// identity so it does not linger as phantom `starting` work.
 					AgentRegistry.global().failStart(agentId);
+					resourceLease.release();
 					onSettled?.(true);
 					throw new Error("Aborted before execution");
 				}
-				markRunning();
-				progress.status = "running";
-				await reportProgress(
-					`Running background task ${agentId}...`,
-					buildDetails("running", ownJobId) as unknown as Record<string, unknown>,
-				);
 				try {
+					markRunning();
+					progress.status = "running";
+					await reportProgress(
+						`Running background task ${agentId}...`,
+						buildDetails("running", ownJobId) as unknown as Record<string, unknown>,
+					);
 					const result = await this.#executeSync(
 						toolCallId,
 						spawnParams,
@@ -1428,11 +1430,10 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 					const hint = buildFollowUpHint(false);
 					throw new TaskJobError(`${message}${hint}`);
 				} finally {
-					semaphore.release();
-					// If the body never built a live session (startup failure), finalize
-					// the reserved identity as terminal. No-op once the child came live —
-					// its own registration already cleared the `starting` flag.
+					// Finalize startup failure/terminal projection before capacity
+					// becomes reusable. No-op once child registration cleared it.
 					AgentRegistry.global().failStart(agentId);
+					resourceLease.release();
 				}
 			},
 			{
@@ -1451,9 +1452,9 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 
 	/**
 	 * Sync fallback fan-out (no job manager, or a `blocking: true` agent): run
-	 * every spawn to completion inline and merge the per-spawn payloads into a
-	 * single tool result. The session-scoped semaphore still bounds concurrency
-	 * across parallel task calls.
+	 * every spawn to completion inline and merge the per-spawn payloads.
+	 * Global admission governs starts across sessions; task.maxConcurrency only
+	 * limits how many items this call schedules at once.
 	 */
 	async #executeSyncFanout(
 		toolCallId: string,
@@ -1462,9 +1463,16 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 		signal?: AbortSignal,
 		onUpdate?: AgentToolUpdateCallback<TaskToolDetails>,
 	): Promise<AgentToolResult<TaskToolDetails>> {
-		const semaphore = this.#getSpawnSemaphore();
 		if (spawnItems.length === 1) {
-			await this.#acquireSpawnSlot(spawnItems[0].id?.trim() || params.agent || "subagent", signal);
+			const agentId = spawnItems[0].id?.trim() || params.agent || "subagent";
+			const attemptId = randomUUID();
+			const resourceLease = await this.#acquireResourceLease(
+				attemptId,
+				"spawn",
+				agentId,
+				`sync:${toolCallId}:0`,
+				signal,
+			);
 			try {
 				return await this.#executeSync(
 					toolCallId,
@@ -1475,7 +1483,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 					0,
 				);
 			} finally {
-				semaphore.release();
+				resourceLease.release();
 			}
 		}
 
@@ -1494,9 +1502,17 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 
 		const { results: payloads } = await mapWithConcurrencyLimit(
 			spawnItems,
-			spawnItems.length,
+			this.session.settings.get("task.maxConcurrency"),
 			async (item, index, workerSignal) => {
-				await this.#acquireSpawnSlot(item.id?.trim() || `${params.agent || "subagent"}-${index + 1}`, workerSignal);
+				const agentId = item.id?.trim() || `${params.agent || "subagent"}-${index + 1}`;
+				const attemptId = randomUUID();
+				const resourceLease = await this.#acquireResourceLease(
+					attemptId,
+					"spawn",
+					agentId,
+					`sync:${toolCallId}:${index}`,
+					workerSignal,
+				);
 				try {
 					const itemOnUpdate: AgentToolUpdateCallback<TaskToolDetails> | undefined = onUpdate
 						? update => {
@@ -1515,7 +1531,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 						index,
 					);
 				} finally {
-					semaphore.release();
+					resourceLease.release();
 				}
 			},
 			signal,
@@ -1905,7 +1921,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 				parentSessionFile: sessionFile,
 				parentSessionId: this.session.getSessionId?.() ?? undefined,
 				parentAgentId: this.session.getAgentId?.() ?? undefined,
-				...(this.#reviveAdmission ? { acquireReviveSlot: this.#reviveAdmission } : {}),
+				acquireResourceLease: this.#resourceLeaseAcquirer,
 				parentWorkstream: this.session.sessionManager?.getWorkstream(),
 				persistArtifacts: !!artifactsDir,
 				artifactsDir: effectiveArtifactsDir,

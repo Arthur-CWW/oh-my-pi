@@ -10,8 +10,15 @@
  * `parked` ↔ `idle`.
  */
 
+import { randomUUID } from "node:crypto";
 import { logger } from "@oh-my-pi/pi-utils";
 import { AsyncJobManager } from "../async/job-manager";
+import {
+	HostAdmissionRejectedError,
+	HostResourceAdmission,
+	type HostResourceLease,
+} from "../resource/host-resource-admission";
+import { readProcessIdentity } from "../resource/process-identity";
 import type { AgentSession } from "../session/agent-session";
 import {
 	isTerminalChildLifecycleState,
@@ -24,19 +31,15 @@ import { type AgentRef, AgentRegistry, MAIN_AGENT_ID, type RegistryEvent } from 
 export type SessionSubscriptionRegistrar = (unsubscribe: () => void) => void;
 
 export type AgentReviver = (registerSubscription: SessionSubscriptionRegistrar) => Promise<AgentSession>;
-export type ReviveAdmissionRelease = () => void;
-export type ReviveAdmissionAcquirer = (agentId: string) => Promise<ReviveAdmissionRelease | undefined>;
+export type ResourceLeaseAcquirer = (agentId: string) => Promise<HostResourceLease>;
 
 export interface AdoptOptions {
 	/** TTL before an idle agent is parked. <= 0 disables parking. */
 	idleTtlMs: number;
 	/** Recreates a live AgentSession from the ref's sessionFile. Absent => not resumable after park (e.g. isolated runs). */
 	revive?: AgentReviver;
-	/**
-	 * Acquire the originating parent's live-child slot before rebuilding this
-	 * session. Undefined means admission is disabled or deliberately bypassed.
-	 */
-	acquireReviveSlot?: ReviveAdmissionAcquirer;
+	/** Acquire the host-scoped fenced lease before rebuilding this session. */
+	acquireResourceLease?: ResourceLeaseAcquirer;
 	/** Child-owned listener for the currently attached live session. */
 	sessionSubscription?: () => void;
 }
@@ -44,8 +47,8 @@ export interface AdoptOptions {
 interface AdoptedAgent {
 	idleTtlMs: number;
 	revive?: AgentReviver;
-	acquireReviveSlot?: ReviveAdmissionAcquirer;
-	admissionRelease?: ReviveAdmissionRelease;
+	acquireResourceLease?: ResourceLeaseAcquirer;
+	resourceLease?: HostResourceLease;
 	sessionSubscription?: () => void;
 	timer?: NodeJS.Timeout;
 }
@@ -85,8 +88,7 @@ export class AgentLifecycleManager {
 				clearTimeout(adopted.timer);
 				adopted.sessionSubscription?.();
 				adopted.sessionSubscription = undefined;
-				adopted.admissionRelease?.();
-				adopted.admissionRelease = undefined;
+				current.#releaseResourceLease(adopted);
 			}
 			current.#adopted.clear();
 			current.#revivals.clear();
@@ -124,12 +126,12 @@ export class AgentLifecycleManager {
 		const existing = this.#adopted.get(id);
 		clearTimeout(existing?.timer);
 		existing?.sessionSubscription?.();
-		existing?.admissionRelease?.();
 		const adopted: AdoptedAgent = {
 			idleTtlMs: opts.idleTtlMs,
 			revive: opts.revive,
-			acquireReviveSlot: opts.acquireReviveSlot,
+			acquireResourceLease: opts.acquireResourceLease,
 			sessionSubscription: opts.sessionSubscription,
+			resourceLease: existing?.resourceLease,
 		};
 		this.#adopted.set(id, adopted);
 		this.#armTimer(id, adopted);
@@ -282,7 +284,7 @@ export class AgentLifecycleManager {
 				`Agent "${id}" is ${ref.status} and cannot be revived${adopted?.revive ? "" : " (no reviver registered)"}. Its transcript remains readable at history://${id}.`,
 			);
 		}
-		const revival = this.#revive(id, adopted, ref.sessionFile);
+		const revival = this.#revive(id, adopted, ref);
 		this.#revivals.set(id, revival);
 		try {
 			return await revival;
@@ -310,8 +312,6 @@ export class AgentLifecycleManager {
 		clearTimeout(adopted?.timer);
 		adopted?.sessionSubscription?.();
 		if (adopted) adopted.sessionSubscription = undefined;
-		adopted?.admissionRelease?.();
-		if (adopted) adopted.admissionRelease = undefined;
 		this.#adopted.delete(id);
 		await this.#parkings.get(id);
 		await revival?.catch(() => undefined);
@@ -323,6 +323,7 @@ export class AgentLifecycleManager {
 				logger.warn("AgentLifecycleManager.release: session dispose failed", { id, error: String(error) });
 			}
 		}
+		this.#releaseResourceLease(adopted);
 		this.#registry.unregister(id);
 	}
 
@@ -347,8 +348,7 @@ export class AgentLifecycleManager {
 		for (const adopted of this.#adopted.values()) {
 			adopted.sessionSubscription?.();
 			adopted.sessionSubscription = undefined;
-			adopted.admissionRelease?.();
-			adopted.admissionRelease = undefined;
+			this.#releaseResourceLease(adopted);
 		}
 		this.#adopted.clear();
 		this.#revivals.clear();
@@ -431,8 +431,7 @@ export class AgentLifecycleManager {
 		// Only a replacement ref/session may take ownership away from this park.
 		if (this.#registry.get(id) !== ref || ref.session !== session) return;
 		this.#registry.detachSession(id);
-		adopted.admissionRelease?.();
-		adopted.admissionRelease = undefined;
+		this.#releaseResourceLease(adopted);
 	}
 
 	#hasLiveWork(id: string, session: AgentSession): "live_async_job" | "live_model_turn" | undefined {
@@ -509,10 +508,11 @@ export class AgentLifecycleManager {
 		}
 		this.#registry.detachSession(id);
 		this.#registry.setStatus(id, "parked");
+		this.#releaseResourceLease(adopted);
 		return { reconciled: true };
 	}
 
-	async #revive(id: string, adopted: AdoptedAgent, sessionFile: string | null): Promise<AgentSession> {
+	async #revive(id: string, adopted: AdoptedAgent, parkedRef: AgentRef): Promise<AgentSession> {
 		const registerSubscription: SessionSubscriptionRegistrar = unsubscribe => {
 			if (this.#adopted.get(id) !== adopted) {
 				unsubscribe();
@@ -521,26 +521,33 @@ export class AgentLifecycleManager {
 			adopted.sessionSubscription?.();
 			adopted.sessionSubscription = unsubscribe;
 		};
-		let releaseAdmission: ReviveAdmissionRelease | undefined;
+		let resourceLease: HostResourceLease | undefined;
 		let session: AgentSession;
 		try {
-			// Admission happens while the ref is still parked. If acquisition
-			// fails, IRC's reserve-before-revive mailbox entry remains durable
-			// and a later send/retry can revive the same adopted child.
-			releaseAdmission = await adopted.acquireReviveSlot?.(id);
+			// Admission happens while the ref is still parked. The mailbox entry
+			// reserved by IRC remains durable while this fair waiter is deferred.
+			resourceLease = adopted.acquireResourceLease
+				? await adopted.acquireResourceLease(id)
+				: await this.#acquireDefaultReviveLease(id, parkedRef);
 			session = await adopted.revive!(registerSubscription);
 		} catch (error) {
 			adopted.sessionSubscription?.();
 			adopted.sessionSubscription = undefined;
-			releaseAdmission?.();
+			resourceLease?.release();
 			throw error;
 		}
+		if (!resourceLease) {
+			throw new HostAdmissionRejectedError(
+				"authority-unavailable",
+				`Host resource authority returned no lease while reviving ${id}`,
+			);
+		}
 		const ref = this.#registry.get(id);
-		if (this.#adopted.get(id) !== adopted || !ref || (ref.session && ref.session !== session)) {
+		if (this.#adopted.get(id) !== adopted || !ref || ref !== parkedRef || (ref.session && ref.session !== session)) {
 			adopted.sessionSubscription?.();
 			adopted.sessionSubscription = undefined;
-			await session.dispose({ scope: "child" });
-			releaseAdmission?.();
+			await this.#disposeRevivedSession(id, session);
+			resourceLease.release();
 			throw new Error(`Agent "${id}" was released or replaced while reviving.`);
 		}
 		const sessionManager = session.sessionManager;
@@ -558,7 +565,7 @@ export class AgentLifecycleManager {
 			} catch (disposeError) {
 				logger.warn("AgentLifecycleManager.revive: session dispose failed", { id, error: String(disposeError) });
 			}
-			releaseAdmission?.();
+			resourceLease.release();
 			throw error;
 		}
 		if (
@@ -568,16 +575,53 @@ export class AgentLifecycleManager {
 		) {
 			adopted.sessionSubscription?.();
 			adopted.sessionSubscription = undefined;
-			await session.dispose({ scope: "child" });
-			releaseAdmission?.();
+			await this.#disposeRevivedSession(id, session);
+			resourceLease.release();
 			throw new Error(`Agent "${id}" was released or replaced while reviving.`);
 		}
-		// A successful revive owns the slot until it parks or is released,
-		// matching a fresh spawn's lifetime. Every failure above releases it.
-		adopted.admissionRelease = releaseAdmission;
-		if (!ref.session) this.#registry.attachSession(id, session, sessionFile);
+		// A successful revive owns the host lease until cleanup parks, releases,
+		// or detaches this session. Every failure above releases after cleanup.
+		adopted.resourceLease = resourceLease;
+		if (!ref.session) this.#registry.attachSession(id, session, parkedRef.sessionFile);
 		this.#registry.setStatus(id, "idle");
 		return session;
+	}
+
+	async #disposeRevivedSession(id: string, session: AgentSession): Promise<void> {
+		try {
+			await session.dispose({ scope: "child" });
+		} catch (error) {
+			logger.warn("AgentLifecycleManager.revive: session dispose failed", { id, error: String(error) });
+		}
+	}
+
+	#releaseResourceLease(adopted: AdoptedAgent | undefined): void {
+		const lease = adopted?.resourceLease;
+		if (!lease) return;
+		lease.release();
+		adopted.resourceLease = undefined;
+	}
+
+	async #acquireDefaultReviveLease(id: string, ref: AgentRef): Promise<HostResourceLease> {
+		const holderProcess = readProcessIdentity(process.pid);
+		if (!holderProcess) {
+			throw new HostAdmissionRejectedError(
+				"authority-unavailable",
+				`Cannot prove process identity while reviving ${id}`,
+			);
+		}
+		const attemptId = randomUUID();
+		return HostResourceAdmission.global().acquire({
+			attemptId,
+			kind: "revive",
+			sessionId: ref.parentId ?? MAIN_AGENT_ID,
+			sessionOwnerEpoch: null,
+			parentAgentId: ref.parentId ?? MAIN_AGENT_ID,
+			agentId: id,
+			jobId: `revive:${attemptId}`,
+			holderProcess,
+			reservationBytes: 0,
+		});
 	}
 
 	#armTimer(id: string, adopted: AdoptedAgent): void {
@@ -599,8 +643,7 @@ export class AgentLifecycleManager {
 			clearTimeout(adopted.timer);
 			adopted.sessionSubscription?.();
 			adopted.sessionSubscription = undefined;
-			adopted.admissionRelease?.();
-			adopted.admissionRelease = undefined;
+			this.#releaseResourceLease(adopted);
 			this.#adopted.delete(event.ref.id);
 			return;
 		}

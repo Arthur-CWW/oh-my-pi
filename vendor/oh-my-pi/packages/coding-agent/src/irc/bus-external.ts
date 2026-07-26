@@ -164,7 +164,10 @@ function hasTestOrTempProvenance(peer: IrcExternalPeer): boolean {
 	return !classifyFleetBuildProvenance(peer).valid;
 }
 
-const DEFAULT_DB_PATH = path.join(os.homedir(), ".omp", "agent", "irc-bus.sqlite");
+/** Resolve the canonical host-shared IRC/resource database path at call time. */
+export function resolveIrcExternalDbPath(explicit?: string): string {
+	return explicit ?? path.join(os.homedir(), ".omp", "agent", "irc-bus.sqlite");
+}
 
 function nowIso(): string {
 	return new Date().toISOString();
@@ -438,7 +441,7 @@ export class IrcExternalBus {
 		return row ? toPeer(row) : undefined;
 	}
 
-	constructor(readonly dbPath: string = DEFAULT_DB_PATH, options: IrcExternalBusOptions = {}) {
+	constructor(readonly dbPath: string = resolveIrcExternalDbPath(), options: IrcExternalBusOptions = {}) {
 		this.#registrationEnabled = options.registrationEnabled ?? process.env.OMP_FLEET_REGISTER !== "0";
 		if (!options.readonly) fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 		this.#db = options.readonly ? new Database(dbPath, { readonly: true }) : new Database(dbPath);

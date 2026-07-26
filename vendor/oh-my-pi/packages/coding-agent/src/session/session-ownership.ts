@@ -3,12 +3,10 @@ import * as fs from "node:fs/promises";
 import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
+import { matchesProcessIdentity, type ProcessIdentity, readProcessIdentity } from "../resource/process-identity";
 import type { BuildRevision, RunnerInstanceIdentity } from "../runner/protocol";
 import type { TerminalSessionTransport } from "../runner/terminal-session-transport";
-import {
-	UnixSocketTerminalSessionTransport,
-	type TerminalSessionWireClientHello,
-} from "../runner/wire/client";
+import { type TerminalSessionWireClientHello, UnixSocketTerminalSessionTransport } from "../runner/wire/client";
 import { UnixTerminalSessionServer } from "../runner/wire/server";
 import { type ProcessIdentity, processIdentityFor, processMatches } from "./process-identity";
 
@@ -578,7 +576,11 @@ interface OwnerProof {
 	readonly ownershipSocketPath: string;
 }
 
-function ownerProofChallenge(lease: SessionLeaseV1, identity: OwnerIdentitySidecarV1, nonce: string): OwnerProofChallenge {
+function ownerProofChallenge(
+	lease: SessionLeaseV1,
+	identity: OwnerIdentitySidecarV1,
+	nonce: string,
+): OwnerProofChallenge {
 	return {
 		nonce,
 		sessionId: lease.sessionId,
@@ -806,7 +808,11 @@ async function bindMuxReservation(
 
 function processIdentity(): ProcessIdentity {
 	return (
-		processIdentityFor(process.pid) ?? { bootId: "unavailable", pid: process.pid, startFingerprint: "unavailable" }
+		readProcessIdentity(process.pid) ?? {
+			bootId: "unavailable",
+			pid: process.pid,
+			startFingerprint: "unavailable",
+		}
 	);
 }
 
@@ -1115,8 +1121,8 @@ export async function inspectSessionOwnership(
 	if (await probeLease(lease, lease.ownerKind === "omp" ? await readOwnerIdentity(location) : undefined))
 		return { status: "live", lease };
 	if (
-		processMatches(lease.controllerProcess) ||
-		(lease.daemonProcess !== null && processMatches(lease.daemonProcess))
+		matchesProcessIdentity(lease.controllerProcess) ||
+		(lease.daemonProcess !== null && matchesProcessIdentity(lease.daemonProcess))
 	) {
 		return { status: "suspect", reason: "external_owner_unverifiable", lease };
 	}

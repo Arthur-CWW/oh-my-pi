@@ -150,7 +150,6 @@ export type CoreFallbackValue = FallbackChainsValue;
 
 export const CORE_BUDGET_KEYS = [
 	"core.budgets.task.maxConcurrency",
-	"core.budgets.task.maxLiveChildren",
 	"core.budgets.task.maxRuntimeMs",
 	"core.budgets.task.softRequestBudget",
 ] as const;
@@ -513,7 +512,6 @@ export function decodePolicyValueForKey<Key extends PolicyKey>(key: Key, input: 
 		case "core.fallback.chains":
 			return Schema.decodeUnknownSync(FallbackChainsValueSchema)(input, options) as PolicyValueForKey<Key>;
 		case "core.budgets.task.maxConcurrency":
-		case "core.budgets.task.maxLiveChildren":
 		case "core.budgets.task.maxRuntimeMs":
 		case "core.budgets.task.softRequestBudget":
 			return Schema.decodeUnknownSync(CoreBudgetValueSchema)(input, options) as PolicyValueForKey<Key>;

@@ -9,7 +9,8 @@ import { AgentRegistry } from "../src/registry/agent-registry";
 import { AgentSession } from "../src/session/agent-session";
 import { AuthStorage } from "../src/session/auth-storage";
 import { SessionManager } from "../src/session/session-manager";
-import { resolveSpawnConcurrency, Semaphore } from "../src/task/parallel";
+import { HostResourceAdmission } from "../src/resource/host-resource-admission";
+import { readProcessIdentity } from "../src/resource/process-identity";
 
 const CHILD_COUNTS = [1, 100, 300] as const;
 const PHASES = ["baseline", "live-idle", "parked-settled", "revived", "reparked"] as const;
@@ -262,30 +263,52 @@ async function runWorker(childCount: number): Promise<WorkerResult> {
 	return { samples };
 }
 
-export async function runFanoutAdmissionScenario(spawns = 12, cap = 4): Promise<FanoutAdmissionSummary> {
-	const admission = new Semaphore(resolveSpawnConcurrency(32, cap));
+export async function runFanoutAdmissionScenario(spawns = 12, cap = 3): Promise<FanoutAdmissionSummary> {
+	const dbDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-bench-admission-"));
+	const admission = new HostResourceAdmission({
+		dbPath: path.join(dbDir, "admission.sqlite"),
+		maxLiveAttempts: cap,
+		queuePollMs: 1,
+	});
+	const holderProcess = readProcessIdentity(process.pid);
+	if (holderProcess === null) throw new Error("Bench process identity unavailable");
 	let liveSessions = 0;
 	let peakLiveSessions = 0;
-	const completed = await Promise.all(
-		Array.from({ length: spawns }, async (_, index) => {
-			await admission.acquire();
-			liveSessions++;
-			peakLiveSessions = Math.max(peakLiveSessions, liveSessions);
-			try {
-				await Promise.resolve();
-				return index;
-			} finally {
-				liveSessions--;
-				admission.release();
-			}
-		}),
-	);
-	if (peakLiveSessions > cap || completed.length !== spawns) {
-		throw new Error(
-			`Live-child admission failed: peak=${peakLiveSessions}, cap=${cap}, completed=${completed.length}/${spawns}`,
+	try {
+		const completed = await Promise.all(
+			Array.from({ length: spawns }, async (_, index) => {
+				const lease = await admission.acquire({
+					attemptId: `bench-attempt-${index}`,
+					kind: "spawn",
+					sessionId: "bench-session",
+					sessionOwnerEpoch: null,
+					parentAgentId: "bench-parent",
+					agentId: `bench-child-${index}`,
+					jobId: `bench-job-${index}`,
+					holderProcess,
+					reservationBytes: 0,
+				});
+				liveSessions++;
+				peakLiveSessions = Math.max(peakLiveSessions, liveSessions);
+				try {
+					await Promise.resolve();
+					return index;
+				} finally {
+					liveSessions--;
+					lease.release();
+				}
+			}),
 		);
+		if (peakLiveSessions > cap || completed.length !== spawns) {
+			throw new Error(
+				`Live-child admission failed: peak=${peakLiveSessions}, cap=${cap}, completed=${completed.length}/${spawns}`,
+			);
+		}
+		return { cap, completed: completed.length, peakLiveSessions, spawns };
+	} finally {
+		admission.close();
+		await fs.rm(dbDir, { recursive: true, force: true });
 	}
-	return { cap, completed: completed.length, peakLiveSessions, spawns };
 }
 
 async function runParent(): Promise<BenchmarkOutput> {

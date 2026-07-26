@@ -41,7 +41,6 @@ const MODEL_ROLES: Record<string, true> = {
 
 const TASK_BUDGET_KEYS = {
 	maxConcurrency: "core.budgets.task.maxConcurrency",
-	maxLiveChildren: "core.budgets.task.maxLiveChildren",
 	maxRuntimeMs: "core.budgets.task.maxRuntimeMs",
 	softRequestBudget: "core.budgets.task.softRequestBudget",
 } as const;

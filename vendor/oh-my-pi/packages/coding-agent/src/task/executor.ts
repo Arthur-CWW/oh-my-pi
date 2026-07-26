@@ -29,7 +29,7 @@ import type { MCPManager } from "../mcp/manager";
 import type { MnemopiSessionState } from "../mnemopi/state";
 import subagentSystemPromptTemplate from "../prompts/system/subagent-system-prompt.md" with { type: "text" };
 import submitReminderTemplate from "../prompts/system/subagent-yield-reminder.md" with { type: "text" };
-import { AgentLifecycleManager, type ReviveAdmissionAcquirer } from "../registry/agent-lifecycle";
+import { AgentLifecycleManager, type ResourceLeaseAcquirer } from "../registry/agent-lifecycle";
 import type { AgentQuotaAdmission } from "../registry/agent-registry";
 
 import { AgentRegistry, MAIN_AGENT_ID } from "../registry/agent-registry";
@@ -400,8 +400,8 @@ export interface ExecutorOptions {
 	parentSessionId?: string;
 	/** Direct parent agent identity for registry lineage and restart capture. */
 	parentAgentId?: string;
-	/** Parent-local admission lease used when this child is later revived. */
-	acquireReviveSlot?: ReviveAdmissionAcquirer;
+	/** Host-scoped admission lease used when this child is later revived. */
+	acquireResourceLease?: ResourceLeaseAcquirer;
 	persistArtifacts?: boolean;
 	artifactsDir?: string;
 	eventBus?: EventBus;
@@ -2742,7 +2742,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 					lifecycle.adopt(id, {
 						idleTtlMs: agentIdleTtlMs,
 						revive: reviveSession ?? undefined,
-						acquireReviveSlot: options.acquireReviveSlot,
+						acquireResourceLease: options.acquireResourceLease,
 						sessionSubscription: sessionStatusSubscription,
 					});
 					sessionStatusSubscription = undefined;
