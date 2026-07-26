@@ -133,6 +133,57 @@ def atomic_link(path, target):
         temporary.unlink(missing_ok=True)
 
 
+
+def configured_path(variable, fallback, label):
+    value = os.environ.get(variable, fallback)
+    if not value or not value.strip(): fail(f"{label} must not be empty")
+    return pathlib.Path(value).expanduser().resolve()
+
+
+def release_storage_paths():
+    home = configured_path("HOME", str(pathlib.Path.home()), "HOME")
+    data_home = configured_path("XDG_DATA_HOME", str(home / ".local" / "share"), "XDG_DATA_HOME")
+    root = data_home / "omp"
+    registry = configured_path("OMP_RELEASE_REGISTRY_PATH", str(root / "release-registry.json"), "OMP_RELEASE_REGISTRY_PATH")
+    releases = configured_path("OMP_RELEASES_DIR", str(root / "releases"), "OMP_RELEASES_DIR")
+    return root, registry, releases, root / "workspace-local"
+
+
+def is_within(path, parent):
+    try:
+        return os.path.commonpath((path.resolve(), parent.resolve())) == str(parent.resolve())
+    except ValueError:
+        return False
+
+
+def ensure_external_alias(alias, target, label):
+    if alias.is_symlink():
+        linked = pathlib.Path(os.readlink(alias))
+        if not linked.is_absolute(): linked = alias.parent / linked
+        if linked.resolve() != target.resolve():
+            fail(f"{label} points to {linked.resolve()}, expected shared path {target.resolve()}")
+        return
+    if alias.exists():
+        fail(f"{label} is workspace-local state; run `omp workspace storage migrate --dry-run` before linking")
+    atomic_link(alias, target)
+    sync_directory(alias.parent)
+
+
+def prepare_storage(bin_dir, repo_root, root, registry_path, releases, workspace_local):
+    if is_within(registry_path, bin_dir) or is_within(releases, bin_dir):
+        fail("release registry and immutable releases must be outside the global bin directory")
+    repo_local = repo_root / "local"
+    if is_within(workspace_local, repo_root):
+        fail("shared workspace-local state must be outside the source checkout")
+    root.mkdir(parents=True, exist_ok=True)
+    registry_path.parent.mkdir(parents=True, exist_ok=True)
+    releases.mkdir(parents=True, exist_ok=True)
+    workspace_local.mkdir(parents=True, exist_ok=True)
+    ensure_external_alias(bin_dir / ".omp-releases", releases, "immutable releases")
+    ensure_external_alias(bin_dir / ".omp-release-registry.json", registry_path, "release registry")
+    ensure_external_alias(repo_local, workspace_local, "vendor/oh-my-pi/local")
+
+
 def empty_registry():
     return {"schemaVersion": 1, "stable": None, "previous": None, "candidate": None, "receiptDigest": None, "timestamps": {"candidate": None, "blessed": None, "rollback": None}}
 
@@ -222,12 +273,20 @@ def authoritative_receipt(bin_dir, release, expected, version, candidate_at):
 def main():
     if len(sys.argv) < 3: fail("internal registry helper usage")
     command, bin_arg, *args = sys.argv[1:]
-    bin_dir = pathlib.Path(bin_arg)
-    releases = bin_dir / ".omp-releases"
-    registry_path = bin_dir / ".omp-release-registry.json"
+    bin_dir = pathlib.Path(bin_arg).resolve()
+    repo_root = configured_path(
+        "OMP_LINK_REPO_ROOT",
+        str(pathlib.Path(__file__).resolve().parent.parent),
+        "OMP_LINK_REPO_ROOT",
+    )
+    root, registry_path, releases, workspace_local = release_storage_paths()
+    prepare_storage(bin_dir, repo_root, root, registry_path, releases, workspace_local)
+    if command == "prepare":
+        if args: fail("prepare takes no arguments")
+        return
+
     pending_path = bin_dir / ".omp-release-transaction.json"
-    releases.mkdir(parents=True, exist_ok=True)
-    lock_path = bin_dir / ".omp-release-registry.lock"
+    lock_path = registry_path.with_name(f".{registry_path.name}.lock")
     with open(lock_path, "a+") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         recover_pending(bin_dir, releases, registry_path, pending_path)
@@ -237,6 +296,7 @@ def main():
             if adopted is not None:
                 registry["stable"] = adopted
                 atomic_json(registry_path, registry)
+        sync_selectors(bin_dir, releases, registry)
         if command == "candidate":
             if len(args) != 1: fail("candidate requires an executable binary")
             source = pathlib.Path(args[0]).resolve()
@@ -249,6 +309,7 @@ def main():
                     shutil.copyfile(source, temporary); os.chmod(temporary, 0o555)
                     if digest(temporary) != expected: fail("candidate changed while being materialized")
                     os.replace(temporary, release)
+                    sync_directory(releases)
                 finally:
                     if os.path.exists(temporary): os.unlink(temporary)
             strict_build(release, expected)

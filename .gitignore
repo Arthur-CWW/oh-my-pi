@@ -115,6 +115,10 @@ vendor/ln-dev7/circle/.next/
 skills/chrome-devtools-mcp/
 packages/web-access/skills/chrome-devtools-mcp/
 vendor/badlogic/pi-skills/browser-tools/output/
+
+# Machine-local OMP release/proof storage (shared outside jj workspaces)
+/vendor/oh-my-pi/local/
+/local/*/vendor/oh-my-pi/local/
 .pi/extensions/*.disabled
 
 # Nested local-first AI companion RTC testbed (separate git repo)

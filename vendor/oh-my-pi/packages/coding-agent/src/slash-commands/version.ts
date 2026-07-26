@@ -1,15 +1,13 @@
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import * as fs from "node:fs/promises";
-import * as os from "node:os";
-import * as path from "node:path";
 import { isCompiledBinary, VERSION } from "@oh-my-pi/pi-utils";
+import { resolveReleaseStoragePaths } from "../session/release-storage-paths";
 import { commandConsumed } from "./helpers/parse";
 import type { ParsedSlashCommand, SlashCommandResult, SlashCommandRuntime, SlashCommandSpec } from "./types";
 
 const SHA256 = /^[a-f0-9]{64}$/;
 const FORK_COMMIT = /\+fork\.([0-9a-f]{7,40}|unknown)$/i;
-const DEFAULT_RELEASE_REGISTRY_PATH = path.join(os.homedir(), ".bun", "bin", ".omp-release-registry.json");
 
 type BlessedStatus = "blessed" | "not blessed" | "unknown";
 
@@ -77,7 +75,7 @@ export async function buildVersionViewModel(options: VersionViewModelOptions = {
 		(options.compiled ?? isCompiledBinary())
 			? await cachedBinaryDigest(options.executablePath ?? process.execPath).catch(() => "-")
 			: "-";
-	const registry = await readReleaseRegistry(options.registryPath ?? DEFAULT_RELEASE_REGISTRY_PATH);
+	const registry = await readReleaseRegistry(options.registryPath ?? resolveReleaseStoragePaths().registryPath);
 	return {
 		version,
 		binarySha256,

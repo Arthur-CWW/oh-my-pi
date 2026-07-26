@@ -50,6 +50,7 @@ export const commands: OmpCommandEntry[] = [
 	commandEntry({ name: "usage", load: () => import("./commands/usage").then(m => m.default) }),
 	commandEntry({ name: "tiny-models", load: () => import("./commands/tiny-models").then(m => m.default) }),
 	commandEntry({ name: "token", load: () => import("./commands/token").then(m => m.default) }),
+	commandEntry({ name: "workspace", load: () => import("./commands/workspace").then(m => m.default) }),
 	commandEntry({ name: "worktree", load: () => import("./commands/worktree").then(m => m.default), aliases: ["wt"] }),
 	commandEntry({ name: "search", load: () => import("./commands/web-search").then(m => m.default), aliases: ["q"] }),
 ];

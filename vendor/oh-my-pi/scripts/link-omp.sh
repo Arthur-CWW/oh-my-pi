@@ -48,9 +48,14 @@ repo_root="${OMP_LINK_REPO_ROOT:-$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd 
 global_bin="$(resolve_global_bin)"
 helper="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)/link-omp-registry.py"
 
+run_registry_helper() {
+	OMP_LINK_REPO_ROOT="$repo_root" python3 "$helper" "$@"
+}
+
 case "${1:-}" in
 	dev)
 		[ "$#" -eq 1 ] || usage
+		run_registry_helper prepare "$global_bin"
 		target="$repo_root/packages/coding-agent/scripts/omp"
 		[ -f "$target" ] && [ -x "$target" ] || { printf 'link-omp: development launcher not found or not executable: %s\n' "$target" >&2; exit 1; }
 		atomic_symlink "$target" "$global_bin/omp-dev"
@@ -58,17 +63,17 @@ case "${1:-}" in
 		;;
 	candidate)
 		[ "$#" -eq 2 ] || usage
-		digest="$(python3 "$helper" candidate "$global_bin" "$2")"
+		digest="$(run_registry_helper candidate "$global_bin" "$2")"
 		printf 'link-omp: materialized candidate %s (stable unchanged)\n' "$digest"
 		;;
 	bless)
 		[ "$#" -eq 3 ] || usage
-		digest="$(python3 "$helper" bless "$global_bin" "$2" "$3")"
+		digest="$(run_registry_helper bless "$global_bin" "$2" "$3")"
 		printf 'link-omp: blessed %s for future invocations; no live session was handed off\n' "$digest"
 		;;
 	rollback)
 		[ "$#" -eq 1 ] || usage
-		digest="$(python3 "$helper" rollback "$global_bin")"
+		digest="$(run_registry_helper rollback "$global_bin")"
 		printf 'link-omp: selected previous release %s for future invocations; nothing was launched\n' "$digest"
 		;;
 	stable)

@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import * as fs from "node:fs/promises";
-import * as os from "node:os";
 import * as path from "node:path";
+import { resolveReleaseStoragePaths } from "./release-storage-paths";
 import type { FleetPinChannel, FleetPinSelection } from "./session-control";
 
 const SHA256 = /^[a-f0-9]{64}$/;
@@ -85,18 +85,10 @@ function configuredPath(value: string | undefined, fallback: string, label: stri
 export function resolveReleaseValidationPaths(
 	options: ReleaseRegistryValidationOptions = {},
 ): ResolvedReleaseValidationPaths {
-	const binDir = configuredPath(process.env.OMP_RELEASE_BIN_DIR, path.join(os.homedir(), ".bun", "bin"), "Release bin directory");
+	const shared = resolveReleaseStoragePaths();
 	return {
-		registryPath: configuredPath(
-			options.registryPath ?? process.env.OMP_RELEASE_REGISTRY_PATH,
-			path.join(binDir, ".omp-release-registry.json"),
-			"Release registry path",
-		),
-		releasesDir: configuredPath(
-			options.releasesDir ?? process.env.OMP_RELEASES_DIR,
-			path.join(binDir, ".omp-releases"),
-			"Immutable releases directory",
-		),
+		registryPath: configuredPath(options.registryPath, shared.registryPath, "Release registry path"),
+		releasesDir: configuredPath(options.releasesDir, shared.releasesDir, "Immutable releases directory"),
 	};
 }
 
