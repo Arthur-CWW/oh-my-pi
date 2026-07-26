@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Admit a disk operation (heavy, read-only, status, cleanup, offload, already-running)"
+set -euo pipefail
+repo_root="${MISE_PROJECT_ROOT:-$(pwd)}"
+exec bun "${repo_root}/vendor/oh-my-pi/packages/coding-agent/scripts/disk-pressure.ts" guard "$@"

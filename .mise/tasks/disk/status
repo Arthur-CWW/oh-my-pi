@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Print live APFS disk-pressure bytes, percentage, thresholds, and admission state"
+set -euo pipefail
+repo_root="${MISE_PROJECT_ROOT:-$(pwd)}"
+exec bun "${repo_root}/vendor/oh-my-pi/packages/coding-agent/scripts/disk-pressure.ts" status "$@"

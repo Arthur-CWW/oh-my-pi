@@ -2,6 +2,7 @@ import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { Usage } from "@oh-my-pi/pi-ai";
 import { $env } from "@oh-my-pi/pi-utils";
 import { z } from "zod/v4";
+import type { DiskAdmissionDecision } from "../resource/disk-pressure";
 import type { AgentSessionEvent } from "../session/agent-session";
 import type { SessionSpawnCordon } from "../session/session-control";
 import type { NestedRepoPatch } from "./worktree";
@@ -448,6 +449,8 @@ export interface TaskToolDetails {
 	spawnRefusal?: SessionSpawnCordon;
 	/** Typed spawn-admission refusal while fleet control is paused. */
 	pauseRefusal?: SessionControlPauseRefusal;
+	/** Typed refusal for a new writable child under blocking disk pressure. */
+	diskPressureRefusal?: DiskAdmissionDecision;
 	/** Aggregated usage across all subagents. */
 	usage?: Usage;
 	outputPaths?: string[];

@@ -23,6 +23,11 @@ import { $env, isEnoent, logger, prompt, Snowflake, VERSION } from "@oh-my-pi/pi
 import type { ToolSession } from "..";
 import { MCPManager } from "../mcp/manager";
 import type { Theme } from "../modes/theme/theme";
+import {
+	checkDiskAdmission,
+	type DiskAdmissionDecision,
+	type DiskOperationKind,
+} from "../resource/disk-pressure";
 import planModeSubagentPrompt from "../prompts/system/plan-mode-subagent.md" with { type: "text" };
 import subagentUserPromptTemplate from "../prompts/system/subagent-user-prompt.md" with { type: "text" };
 import taskDescriptionTemplate from "../prompts/tools/task.md" with { type: "text" };
@@ -294,6 +299,10 @@ export function isReadOnlyAgent(agent: AgentDefinition): boolean {
 	return !!agent.tools?.length && agent.tools.every(tool => READ_ONLY_TOOL_NAMES.has(tool));
 }
 
+export function taskDiskOperationKind(agent: AgentDefinition | undefined): DiskOperationKind {
+	return agent && isReadOnlyAgent(agent) ? "readOnly" : "heavy";
+}
+
 /**
  * Preview text for a child result. Falls back to "(no output)" — annotated
  * with the request count when the child actually did work, so the parent can
@@ -373,6 +382,18 @@ function createSessionPausedRefusal(): AgentToolResult<TaskToolDetails> {
 			results: [],
 			totalDurationMs: 0,
 			pauseRefusal: { kind: "SessionControlPaused", reason: "session paused by fleet control" },
+		},
+	};
+}
+
+function createDiskPressureRefusal(decision: DiskAdmissionDecision): AgentToolResult<TaskToolDetails> {
+	return {
+		content: [{ type: "text", text: `Spawn refused: ${decision.reason ?? "new heavy work is blocked by disk pressure"}` }],
+		details: {
+			projectAgentsDir: null,
+			results: [],
+			totalDurationMs: 0,
+			diskPressureRefusal: decision,
 		},
 	};
 }
@@ -1075,6 +1096,12 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 				details: { projectAgentsDir: null, results: [], totalDurationMs: 0 },
 			};
 		}
+		const diskAdmission = await checkDiskAdmission(taskDiskOperationKind(selectedAgent), {
+			targetPath: this.session.cwd,
+			notify: true,
+		});
+		if (!diskAdmission.admitted) return createDiskPressureRefusal(diskAdmission);
+
 		const identityAdvisory =
 			identityMatches.length > 0 ? identityMatches.map(renderSpawnIdentityNotice).join("\n\n") : undefined;
 		// Coordination only makes sense when the siblings keep running after this
