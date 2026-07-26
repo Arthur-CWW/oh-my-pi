@@ -164,6 +164,7 @@ let acquirePoolTail: Promise<void> = Promise.resolve();
 const acquireChains = new Map<string, Promise<void>>();
 
 const ownedTabLeases = new WeakMap<TabSession, string>();
+const tabReleases = new WeakMap<TabSession, Promise<boolean>>();
 
 function isBudgetedTab(tab: TabSession): boolean {
 	return tab.kindTag === "headless" && "browser" in tab.browser && tab.browser.ownership !== undefined;
@@ -660,6 +661,23 @@ export async function releaseTab(name: string, opts: ReleaseTabOptions = {}): Pr
 		logger.debug("releaseTab: unknown tab", { name });
 		return false;
 	}
+	const existingRelease = tabReleases.get(tab);
+	if (existingRelease) return await existingRelease;
+	const release = releaseTabSession(name, canonical, tab, opts);
+	tabReleases.set(tab, release);
+	try {
+		return await release;
+	} finally {
+		if (tabReleases.get(tab) === release) tabReleases.delete(tab);
+	}
+}
+
+async function releaseTabSession(
+	name: string,
+	canonical: string,
+	tab: TabSession,
+	opts: ReleaseTabOptions,
+): Promise<boolean> {
 	const wasAlive = tab.state === "alive";
 	tab.state = "dead";
 	const closeError = new ToolError(`Tab ${JSON.stringify(name)} was closed`);
@@ -715,6 +733,14 @@ export async function releaseTab(name: string, opts: ReleaseTabOptions = {}): Pr
 	tabs.delete(canonical);
 	removeTabAliases(canonical);
 	return true;
+}
+
+export async function releaseTabsOwnedBy(owner: string, opts: ReleaseTabOptions = {}): Promise<number> {
+	const names = [...tabs.values()].filter(tab => tab.ownerSessionId === owner).map(tab => tab.name);
+	const results = await Promise.allSettled(names.map(name => releaseTab(name, opts)));
+	const failures = results.flatMap(result => (result.status === "rejected" ? [result.reason] : []));
+	if (failures.length > 0) throw new AggregateError(failures, `Failed to release tabs owned by ${JSON.stringify(owner)}`);
+	return results.reduce((count, result) => count + (result.status === "fulfilled" && result.value ? 1 : 0), 0);
 }
 
 export async function releaseAllTabs(opts: ReleaseTabOptions = {}): Promise<number> {

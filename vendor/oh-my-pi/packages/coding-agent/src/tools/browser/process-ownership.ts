@@ -166,7 +166,11 @@ async function sweepStaleRuns(sessionDir: string): Promise<void> {
 	try {
 		entries = await fs.readdir(sessionDir);
 	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+		const code = (error as NodeJS.ErrnoException).code;
+		// ENOENT: session dir vanished. ENOTDIR: a stray non-directory entry
+		// (e.g. a legacy tab-leases.json file) sits beside session dirs — skip
+		// it instead of failing every browser launch on this host.
+		if (code === "ENOENT" || code === "ENOTDIR") return;
 		throw error;
 	}
 	for (const entry of entries) {
@@ -204,7 +208,8 @@ async function listOwnedBrowserRecordsUnlocked(): Promise<OwnedBrowserRecord[]> 
 		try {
 			runEntries = await fs.readdir(sessionDir);
 		} catch (error) {
-			if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+			const code = (error as NodeJS.ErrnoException).code;
+			if (code === "ENOENT" || code === "ENOTDIR") continue;
 			throw error;
 		}
 		for (const runEntry of runEntries) {

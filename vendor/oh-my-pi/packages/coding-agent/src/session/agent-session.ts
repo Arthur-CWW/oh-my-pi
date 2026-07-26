@@ -281,7 +281,7 @@ import {
 } from "../tool-discovery/tool-index";
 import { assertEditableFile } from "../tools/auto-generated-guard";
 import { disposeAllBrowsers } from "../tools/browser/registry";
-import { releaseAllTabs } from "../tools/browser/tab-supervisor";
+import { releaseAllTabs, releaseTabsOwnedBy } from "../tools/browser/tab-supervisor";
 import type { CheckpointState } from "../tools/checkpoint";
 import { outputMeta } from "../tools/output-meta";
 import { normalizeLocalScheme, resolveToCwd } from "../tools/path-utils";
@@ -4490,6 +4490,15 @@ export class AgentSession {
 		}
 		await disposeKernelSessionsByOwner(this.#evalKernelOwnerId);
 		await disposeVmContextsByOwner(this.#evalKernelOwnerId);
+		if (scope === "child") {
+			try {
+				await releaseTabsOwnedBy(this.sessionManager.getSessionId());
+			} catch (error) {
+				logger.warn("Failed to dispose child-owned browser tabs during session shutdown", {
+					error: String(error),
+				});
+			}
+		}
 		if (scope === "root") await shutdownTinyTitleClient();
 		if (scope === "root") {
 			try {
