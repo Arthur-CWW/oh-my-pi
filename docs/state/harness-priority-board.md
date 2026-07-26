@@ -1,7 +1,7 @@
 # Harness priority board
 
 > **Class:** Derived operator projection — not task/design authority.
-> **Current orchestrator:** none — `Harness Successor` session `019f8864-b33f-7691-b13f-37c25fa788c6` (PID 40251) was SIGKILLed during a large subagent wave; its tab remains for forensic review at `workspace:5/pane:9/surface:298`.
+> **Current orchestrator:** 2026-07-26 recovery is active in jj change `oztxlqno`; prior `Harness Successor` session `019f8864-b33f-7691-b13f-37c25fa788c6` (PID 40251) was SIGKILLed during a large subagent wave; its tab remains for forensic review at `workspace:5/pane:9/surface:298`.
 > **Sources:** [`harness-request-register.md`](../fable/harness-request-register.md), [`harness-research-register.md`](../fable/harness-research-register.md), [`session-lifecycle-commands.md`](../fable/session-lifecycle-commands.md), current thread-garden/handoff receipts.
 > **Refresh:** successor orchestrator updates this projection at batch boundaries until the control-plane route derives it automatically.
 
@@ -9,7 +9,7 @@
 
 | Work | State | Owner / proof target |
 |---|---|---|
-| HR-246 subagent-wave memory incident | **P0 active investigation** | Preserve/collect process-tree + coordinator telemetry; build cross-session profiler; controlled progressive reproduction with hard abort; no concurrency-policy change before evidence |
+| HR-246 subagent-wave memory incident | **P0 active investigation; verified lifecycle sub-slice** | Detached spawn workers now use one bounded idempotent process-group reaper for result/error/abort/timeout/RSS/protocol races, and queued canceled admissions carry `AbortSignal`. Proof: the synthetic result-before-linger/process-group reap regression and queued-cancel-before-slot-release regression pass. Keep HR-246 profiler/aggregate process-tree evidence and width 1→2→3 reproduction open as P0; no HR-248 pooling claim. |
 | HR-247 cross-session attach/profile | P0/P1 incident enabler | Target live OMP by stable name/session and collect memory/heap/CPU/work/process-tree report without composer injection |
 | HR-205 `/successor`/`/succ` | Interrupted/unintegrated | Source changes and scouts exist in the crashed session/children; recover only after HR-246 evidence, then verify dynamic orchestrator role, identity, readiness, reviewable predecessor and full-stream propagation before promotion |
 

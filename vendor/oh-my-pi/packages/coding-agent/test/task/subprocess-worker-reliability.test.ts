@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { Settings, resetSettingsForTest, settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { resetSettingsForTest, Settings, settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { IrcExternalBus } from "@oh-my-pi/pi-coding-agent/irc/bus-external";
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import {
 	recoverSpawnWorkerResultFromJournal,
@@ -10,13 +11,12 @@ import {
 	runSyntheticSpawnWorkerWorkload,
 	SpawnWorkerError,
 } from "@oh-my-pi/pi-coding-agent/task/spawn-worker-client";
-import type { SingleResult } from "@oh-my-pi/pi-coding-agent/task/types";
+import { initializeSpawnWorkerSettings } from "@oh-my-pi/pi-coding-agent/task/spawn-worker-entry";
 import type { SpawnWorkerRunRequest } from "@oh-my-pi/pi-coding-agent/task/spawn-worker-protocol";
 import { SPAWN_WORKER_ARG } from "@oh-my-pi/pi-coding-agent/task/spawn-worker-protocol";
-import { initializeSpawnWorkerSettings } from "@oh-my-pi/pi-coding-agent/task/spawn-worker-entry";
-import { IrcExternalBus } from "@oh-my-pi/pi-coding-agent/irc/bus-external";
-import { IrcTool } from "@oh-my-pi/pi-coding-agent/tools/irc";
+import type { SingleResult } from "@oh-my-pi/pi-coding-agent/task/types";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
+import { IrcTool } from "@oh-my-pi/pi-coding-agent/tools/irc";
 
 let tmpDir = "";
 let previousHome: string | undefined;
@@ -105,7 +105,7 @@ async function writeTerminalWorkerExtension(
 	termination: "kill" | "exit",
 	delayMs = 30,
 ): Promise<void> {
-	const journal = [
+	const journal = `${[
 		JSON.stringify({ type: "session", version: 4, id: "session-1", timestamp: JOURNAL_TIMESTAMP, cwd: tmpDir }),
 		JSON.stringify({
 			type: "message",
@@ -120,7 +120,7 @@ async function writeTerminalWorkerExtension(
 				details: { status: "success", data: payload },
 			},
 		}),
-	].join("\n") + "\n";
+	].join("\n")}\n`;
 	const terminate = termination === "kill" ? 'process.kill(process.pid, "SIGKILL");' : "process.exit(0);";
 	await Bun.write(
 		extensionFile,
@@ -188,7 +188,7 @@ describe("subprocess worker reliability", () => {
 	it("[I1] turns a pre-yield nonzero child exit into exactly one typed error", async () => {
 		const sessionFile = path.join(tmpDir, "child-nonzero.jsonl");
 		const extensionFile = path.join(tmpDir, "crash-nonzero.ts");
-		await Bun.write(extensionFile, 'export default function() { process.exit(23); }\n');
+		await Bun.write(extensionFile, "export default function() { process.exit(23); }\n");
 
 		const livenessStates: Array<"stalled" | "dead" | undefined> = [];
 		const request = requestFor(sessionFile);
@@ -346,7 +346,35 @@ describe("subprocess worker reliability", () => {
 		expect(result.extractedToolData?.yield).toHaveLength(1);
 	});
 
-	it.todo("[I3][D2] wall-clock after yield must deliver result, not SpawnWorkerError (ledger D2)", () => {});
+	it("[I3][I8][D2] delivers a synthetic result before lingering and reaps its process group", async () => {
+		const workerStarted = Promise.withResolvers<number>();
+		const dispatchRequest = Promise.withResolvers<void>();
+		const lingerAfterResultMs = 10_000;
+		const pending = runSyntheticSpawnWorkerWorkload(
+			{ spinMs: 0, allocateBytes: 1024, lingerAfterResultMs },
+			{
+				onProcessStart: async pid => {
+					workerStarted.resolve(pid);
+					await dispatchRequest.promise;
+				},
+				timeoutMs: 2_000,
+			},
+		);
+
+		const workerPid = await workerStarted.promise;
+		const active = (await workerProcesses()).filter(process => process.pid === workerPid);
+		const startedAt = performance.now();
+		dispatchRequest.resolve();
+
+		const result = await pending;
+		const resultDeliveryMs = performance.now() - startedAt;
+
+		expect(active).toHaveLength(1);
+		expect(active[0]!.pgid).toBe(active[0]!.pid);
+		expect(result.allocatedBytes).toBe(1024);
+		expect(resultDeliveryMs).toBeLessThan(lingerAfterResultMs / 2);
+		await waitForWorkerProcessesToExit(active);
+	});
 	it.todo("[I9][D3] journal-terminal child must not report running (ledger D3)", () => {});
 
 	it("[I4] recovers a durable yield when the final pipe record is absent", async () => {
@@ -354,7 +382,7 @@ describe("subprocess worker reliability", () => {
 		const timestamp = JOURNAL_TIMESTAMP;
 		await Bun.write(
 			sessionFile,
-			[
+			`${[
 				JSON.stringify({ type: "session", version: 4, id: "session-1", timestamp, cwd: tmpDir }),
 				JSON.stringify({
 					type: "message",
@@ -369,7 +397,7 @@ describe("subprocess worker reliability", () => {
 						details: { status: "success", data: { ok: true } },
 					},
 				}),
-			].join("\n") + "\n",
+			].join("\n")}\n`,
 		);
 
 		const result = await recoverSpawnWorkerResultFromJournal(requestFor(sessionFile));
@@ -430,7 +458,7 @@ describe("subprocess worker reliability", () => {
 					'  const result = await new IrcTool(session).execute("probe", { op: "send", to: "Main", message: "worker-to-main" });',
 					"  await Bun.write(READY, JSON.stringify({ isError: result.isError, details: result.details }));",
 					"  await Bun.sleep(1000);",
-					'  const bus = new IrcExternalBus();',
+					"  const bus = new IrcExternalBus();",
 					'  await Bun.write(RECEIVED, JSON.stringify(bus.drainMessages("child-1")));',
 					"  bus.close();",
 					'  return { name: "irc_probe", label: "IRC probe", description: "IRC probe", parameters: pi.typebox.Type.Object({}), execute: async () => ({ content: [{ type: "text", text: "probe" }] }) };',

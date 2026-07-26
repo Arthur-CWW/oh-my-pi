@@ -81,6 +81,7 @@ export interface SpawnWorkerSyntheticRequest {
 		spinMs: number;
 		allocateBytes: number;
 		hangMs?: number;
+		lingerAfterResultMs?: number;
 	};
 }
 
@@ -102,7 +103,8 @@ export type SpawnWorkerRecord =
 	| (SpawnWorkerRecordBase & { type: "error"; code: SpawnWorkerErrorCode; message: string });
 
 function object(value: unknown, label: string): Record<string, unknown> {
-	if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error(`${label} must be an object`);
+	if (typeof value !== "object" || value === null || Array.isArray(value))
+		throw new Error(`${label} must be an object`);
 	return value as Record<string, unknown>;
 }
 
@@ -112,12 +114,14 @@ function string(value: unknown, label: string): string {
 }
 
 function integer(value: unknown, label: string, minimum = 0): number {
-	if (!Number.isSafeInteger(value) || (value as number) < minimum) throw new Error(`${label} must be an integer >= ${minimum}`);
+	if (!Number.isSafeInteger(value) || (value as number) < minimum)
+		throw new Error(`${label} must be an integer >= ${minimum}`);
 	return value as number;
 }
 
 function version(value: unknown): typeof SPAWN_WORKER_PROTOCOL_VERSION {
-	if (value !== SPAWN_WORKER_PROTOCOL_VERSION) throw new Error(`unsupported spawn-worker protocol version: ${String(value)}`);
+	if (value !== SPAWN_WORKER_PROTOCOL_VERSION)
+		throw new Error(`unsupported spawn-worker protocol version: ${String(value)}`);
 	return SPAWN_WORKER_PROTOCOL_VERSION;
 }
 
@@ -143,13 +147,28 @@ export function decodeSpawnWorkerRequest(value: unknown): SpawnWorkerRequest {
 			if (local.sessionId !== null && typeof local.sessionId !== "string") {
 				throw new Error("localProtocol.sessionId must be a string or null");
 			}
-			localProtocol = { artifactsDir: local.artifactsDir as string | null, sessionId: local.sessionId as string | null };
+			localProtocol = {
+				artifactsDir: local.artifactsDir as string | null,
+				sessionId: local.sessionId as string | null,
+			};
 		}
-		return { version: SPAWN_WORKER_PROTOCOL_VERSION, type: "run", requestId, options, settings, registry, localProtocol };
+		return {
+			version: SPAWN_WORKER_PROTOCOL_VERSION,
+			type: "run",
+			requestId,
+			options,
+			settings,
+			registry,
+			localProtocol,
+		};
 	}
 	if (input.type === "synthetic") {
 		const workload = object(input.workload, "workload");
 		const hangMs = workload.hangMs === undefined ? undefined : integer(workload.hangMs, "workload.hangMs");
+		const lingerAfterResultMs =
+			workload.lingerAfterResultMs === undefined
+				? undefined
+				: integer(workload.lingerAfterResultMs, "workload.lingerAfterResultMs");
 		return {
 			version: SPAWN_WORKER_PROTOCOL_VERSION,
 			type: "synthetic",
@@ -158,6 +177,7 @@ export function decodeSpawnWorkerRequest(value: unknown): SpawnWorkerRequest {
 				spinMs: integer(workload.spinMs, "workload.spinMs"),
 				allocateBytes: integer(workload.allocateBytes, "workload.allocateBytes"),
 				...(hangMs === undefined ? {} : { hangMs }),
+				...(lingerAfterResultMs === undefined ? {} : { lingerAfterResultMs }),
 			},
 		};
 	}
@@ -197,22 +217,70 @@ export function decodeSpawnWorkerRecord(value: unknown): SpawnWorkerRecord {
 			if (phase !== "decode" && phase !== "setup" && phase !== "run" && phase !== "finalize") {
 				throw new Error("phase is invalid");
 			}
-			return { version: SPAWN_WORKER_PROTOCOL_VERSION, type: "phase", requestId, phase, at: integer(input.at, "at") };
+			return {
+				version: SPAWN_WORKER_PROTOCOL_VERSION,
+				type: "phase",
+				requestId,
+				phase,
+				at: integer(input.at, "at"),
+			};
 		}
 		case "registry":
-			return { version: SPAWN_WORKER_PROTOCOL_VERSION, type: "registry", requestId, ref: decodeRegistryRef(input.ref, "ref") };
+			return {
+				version: SPAWN_WORKER_PROTOCOL_VERSION,
+				type: "registry",
+				requestId,
+				ref: decodeRegistryRef(input.ref, "ref"),
+			};
 		case "progress":
-			return { version: SPAWN_WORKER_PROTOCOL_VERSION, type: "progress", requestId, progress: object(input.progress, "progress") as unknown as AgentProgress };
+			return {
+				version: SPAWN_WORKER_PROTOCOL_VERSION,
+				type: "progress",
+				requestId,
+				progress: object(input.progress, "progress") as unknown as AgentProgress,
+			};
 		case "event":
-			return { version: SPAWN_WORKER_PROTOCOL_VERSION, type: "event", requestId, channel: string(input.channel, "channel"), payload: input.payload };
+			return {
+				version: SPAWN_WORKER_PROTOCOL_VERSION,
+				type: "event",
+				requestId,
+				channel: string(input.channel, "channel"),
+				payload: input.payload,
+			};
 		case "result":
-			return { version: SPAWN_WORKER_PROTOCOL_VERSION, type: "result", requestId, result: object(input.result, "result") as unknown as SingleResult, rssBytes: integer(input.rssBytes, "rssBytes") };
+			return {
+				version: SPAWN_WORKER_PROTOCOL_VERSION,
+				type: "result",
+				requestId,
+				result: object(input.result, "result") as unknown as SingleResult,
+				rssBytes: integer(input.rssBytes, "rssBytes"),
+			};
 		case "synthetic-result":
-			return { version: SPAWN_WORKER_PROTOCOL_VERSION, type: "synthetic-result", requestId, allocatedBytes: integer(input.allocatedBytes, "allocatedBytes"), rssBytes: integer(input.rssBytes, "rssBytes") };
+			return {
+				version: SPAWN_WORKER_PROTOCOL_VERSION,
+				type: "synthetic-result",
+				requestId,
+				allocatedBytes: integer(input.allocatedBytes, "allocatedBytes"),
+				rssBytes: integer(input.rssBytes, "rssBytes"),
+			};
 		case "error": {
 			const code = input.code;
-			if (code !== "protocol" && code !== "spawn" && code !== "exit" && code !== "timeout" && code !== "rss-limit" && code !== "aborted") throw new Error("error code is invalid");
-			return { version: SPAWN_WORKER_PROTOCOL_VERSION, type: "error", requestId, code, message: string(input.message, "message") };
+			if (
+				code !== "protocol" &&
+				code !== "spawn" &&
+				code !== "exit" &&
+				code !== "timeout" &&
+				code !== "rss-limit" &&
+				code !== "aborted"
+			)
+				throw new Error("error code is invalid");
+			return {
+				version: SPAWN_WORKER_PROTOCOL_VERSION,
+				type: "error",
+				requestId,
+				code,
+				message: string(input.message, "message"),
+			};
 		}
 		default:
 			throw new Error(`unknown spawn-worker record type: ${String(input.type)}`);

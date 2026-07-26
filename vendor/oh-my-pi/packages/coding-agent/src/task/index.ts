@@ -838,10 +838,10 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 		return this.#spawnSemaphore;
 	}
 
-	async #acquireSpawnSlot(agentId: string): Promise<void> {
+	async #acquireSpawnSlot(agentId: string, signal?: AbortSignal): Promise<void> {
 		await this.#getSpawnSemaphore().acquire(queueDepth => {
 			logger.info("Task spawn deferred by live-child admission", { agentId, queueDepth });
-		});
+		}, signal);
 	}
 
 	/**
@@ -1255,7 +1255,17 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 			"task",
 			agentId,
 			async ({ jobId: ownJobId, signal: runSignal, reportProgress, markRunning }) => {
-				await this.#acquireSpawnSlot(agentId);
+				try {
+					await this.#acquireSpawnSlot(agentId, runSignal);
+				} catch (error) {
+					this.#preResolvedModels.delete(agentId);
+					progress.status = "aborted";
+					// Admission cancellation never acquired a slot, so only finalize
+					// the queued identity; there is nothing to release.
+					AgentRegistry.global().failStart(agentId);
+					onSettled?.(true);
+					throw error;
+				}
 				const startedAt = Date.now();
 				const semaphore = this.#getSpawnSemaphore();
 				if (runSignal.aborted) {
@@ -1374,7 +1384,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 	): Promise<AgentToolResult<TaskToolDetails>> {
 		const semaphore = this.#getSpawnSemaphore();
 		if (spawnItems.length === 1) {
-			await this.#acquireSpawnSlot(spawnItems[0].id?.trim() || params.agent || "subagent");
+			await this.#acquireSpawnSlot(spawnItems[0].id?.trim() || params.agent || "subagent", signal);
 			try {
 				return await this.#executeSync(
 					toolCallId,
@@ -1406,7 +1416,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 			spawnItems,
 			spawnItems.length,
 			async (item, index, workerSignal) => {
-				await this.#acquireSpawnSlot(item.id?.trim() || `${params.agent || "subagent"}-${index + 1}`);
+				await this.#acquireSpawnSlot(item.id?.trim() || `${params.agent || "subagent"}-${index + 1}`, workerSignal);
 				try {
 					const itemOnUpdate: AgentToolUpdateCallback<TaskToolDetails> | undefined = onUpdate
 						? update => {

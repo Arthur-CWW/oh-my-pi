@@ -55,11 +55,6 @@ function makeResult(id: string, overrides: Partial<SingleResult> = {}): SingleRe
 	};
 }
 
-function getFirstText(result: { content: Array<{ type: string; text?: string }> }): string {
-	const content = result.content.find(part => part.type === "text");
-	return content?.type === "text" ? (content.text ?? "") : "";
-}
-
 async function pollUntil(predicate: () => boolean, timeoutMs = 2000): Promise<void> {
 	const start = Date.now();
 	while (!predicate()) {
@@ -193,13 +188,15 @@ describe("live child admission", () => {
 	});
 
 	// review-added
-	it("cancels a queued spawn without leaking the admission slot", async () => {
+	it("cancels a queued spawn before the occupied slot releases without leaking admission", async () => {
 		vi.spyOn(discoveryModule, "discoverAgents").mockResolvedValue({
 			agents: [taskAgent],
 			projectAgentsDir: null,
 		});
 		const gate = deferred();
+		const firstStarted = deferred();
 		const runSpy = vi.spyOn(executorModule, "runSubprocess").mockImplementation(async options => {
+			if (options.id === "First") firstStarted.resolve();
 			await gate.promise;
 			return makeResult(options.id ?? "?");
 		});
@@ -219,34 +216,39 @@ describe("live child admission", () => {
 				id: "First",
 				assignment: "Work A.",
 			} as TaskParams);
+			const firstJob = manager.getJob(first.details!.async!.jobId)!;
+			await firstStarted.promise;
+
 			const second = await tool.execute("tc-cancel-2", {
 				agent: "task",
 				id: "Second",
 				assignment: "Work B.",
 			} as TaskParams);
-
 			const secondJob = manager.getJob(second.details!.async!.jobId)!;
-			expect(secondJob.queued).toBe(true);
-
-			expect(manager.cancel(secondJob.id)).toBe(true);
-			expect(secondJob.status).toBe("cancelled");
-
 			const third = await tool.execute("tc-cancel-3", {
 				agent: "task",
 				id: "Third",
 				assignment: "Work C.",
 			} as TaskParams);
 			const thirdJob = manager.getJob(third.details!.async!.jobId)!;
+			expect(secondJob.queued).toBe(true);
 			expect(thirdJob.queued).toBe(true);
 
-			gate.resolve();
-			await manager.waitForAll();
+			expect(manager.cancel(secondJob.id)).toBe(true);
+			await secondJob.promise;
 
-			expect(thirdJob.status).toBe("completed");
 			expect(secondJob.status).toBe("cancelled");
-			expect(runSpy).toHaveBeenCalledTimes(2);
-			expect(runSpy.mock.calls.map(call => call[0].id)).toContain("First");
-			expect(runSpy.mock.calls.map(call => call[0].id)).toContain("Third");
+			expect(firstJob.status).toBe("running");
+			expect(firstJob.queued).toBe(false);
+			expect(thirdJob.queued).toBe(true);
+			expect(runSpy.mock.calls.map(call => call[0].id)).toEqual(["First"]);
+
+			gate.resolve();
+			await Promise.all([firstJob.promise, thirdJob.promise]);
+
+			expect(firstJob.status).toBe("completed");
+			expect(thirdJob.status).toBe("completed");
+			expect(runSpy.mock.calls.map(call => call[0].id)).toEqual(["First", "Third"]);
 		} finally {
 			await manager.dispose({ timeoutMs: 1000 });
 		}

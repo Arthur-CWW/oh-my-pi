@@ -1,6 +1,6 @@
-import { AgentRegistry, type AgentRef } from "../registry/agent-registry";
-import { IrcExternalBus } from "../irc/bus-external";
 import { Settings } from "../config/settings";
+import { IrcExternalBus } from "../irc/bus-external";
+import { type AgentRef, AgentRegistry } from "../registry/agent-registry";
 import { EventBus } from "../utils/event-bus";
 import {
 	decodeSpawnWorkerRequest,
@@ -12,11 +12,7 @@ import {
 	type SpawnWorkerRegistryRef,
 	type SpawnWorkerRequest,
 } from "./spawn-worker-protocol";
-import {
-	TASK_SUBAGENT_EVENT_CHANNEL,
-	TASK_SUBAGENT_LIFECYCLE_CHANNEL,
-	TASK_SUBAGENT_PROGRESS_CHANNEL,
-} from "./types";
+import { TASK_SUBAGENT_EVENT_CHANNEL, TASK_SUBAGENT_LIFECYCLE_CHANNEL, TASK_SUBAGENT_PROGRESS_CHANNEL } from "./types";
 
 interface QueuedRecord {
 	bytes: Uint8Array;
@@ -163,8 +159,10 @@ export async function startSpawnWorker(): Promise<void> {
 		writer.enqueue({ ...recordBase(requestId), type: "phase", phase: "decode", at: Date.now() });
 		if (request.type === "synthetic") {
 			writer.enqueue({ ...recordBase(requestId), type: "phase", phase: "run", at: Date.now() });
+			await writer.flush();
 			writer.enqueue(await runSynthetic(request));
 			await writer.flush();
+			if (request.workload.lingerAfterResultMs) await Bun.sleep(request.workload.lingerAfterResultMs);
 			return;
 		}
 
@@ -177,8 +175,14 @@ export async function startSpawnWorker(): Promise<void> {
 			if (ref) writer.enqueue({ ...recordBase(requestId), type: "registry", ref });
 		});
 		const eventBus = new EventBus();
-		const unsubscribeEvents = [TASK_SUBAGENT_PROGRESS_CHANNEL, TASK_SUBAGENT_EVENT_CHANNEL, TASK_SUBAGENT_LIFECYCLE_CHANNEL].map(
-			channel => eventBus.on(channel, payload => writer.enqueue({ ...recordBase(requestId), type: "event", channel, payload }, true)),
+		const unsubscribeEvents = [
+			TASK_SUBAGENT_PROGRESS_CHANNEL,
+			TASK_SUBAGENT_EVENT_CHANNEL,
+			TASK_SUBAGENT_LIFECYCLE_CHANNEL,
+		].map(channel =>
+			eventBus.on(channel, payload =>
+				writer.enqueue({ ...recordBase(requestId), type: "event", channel, payload }, true),
+			),
 		);
 		try {
 			writer.enqueue({ ...recordBase(requestId), type: "phase", phase: "setup", at: Date.now() });

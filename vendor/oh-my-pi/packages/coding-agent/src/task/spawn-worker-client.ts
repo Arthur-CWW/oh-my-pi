@@ -2,16 +2,16 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { isCompiledBinary, popLoopPhase, pushLoopPhase, workerHostEntry } from "@oh-my-pi/pi-utils";
 import type { Settings } from "../config/settings";
-import { SessionManager } from "../session/session-manager";
 import { AgentRegistry } from "../registry/agent-registry";
+import { SessionManager } from "../session/session-manager";
 import type { EventBus } from "../utils/event-bus";
-import { finalizeSubprocessOutput, snapshotExecutorSettings, type ExecutorOptions } from "./executor";
+import { type ExecutorOptions, finalizeSubprocessOutput, snapshotExecutorSettings } from "./executor";
 import {
 	decodeSpawnWorkerRecord,
+	type SerializableExecutorOptions,
 	SPAWN_WORKER_ARG,
 	SPAWN_WORKER_MAX_RECORD_BYTES,
 	SPAWN_WORKER_PROTOCOL_VERSION,
-	type SerializableExecutorOptions,
 	type SpawnWorkerErrorCode,
 	type SpawnWorkerRecord,
 	type SpawnWorkerRegistryRef,
@@ -25,6 +25,7 @@ const DEFAULT_MAX_RSS_BYTES = 1536 * 1024 * 1024;
 const RSS_SAMPLE_INTERVAL_MS = 250;
 const STDERR_CAP_BYTES = 64 * 1024;
 const SETUP_TIMEOUT_GRACE_MS = 60_000;
+const WORKER_REAP_TIMEOUT_MS = 1_500;
 const DEFAULT_STALL_THRESHOLD_MS = 5 * 60_000;
 let spawnLaunchTail: Promise<void> = Promise.resolve();
 
@@ -79,12 +80,14 @@ export interface SpawnWorkerClientOptions {
 	onProgress?: ExecutorOptions["onProgress"];
 	eventBus?: EventBus;
 	onPhase?: (phase: Extract<SpawnWorkerRecord, { type: "phase" }>["phase"]) => void;
+	onProcessStart?: (pid: number) => void | Promise<void>;
 }
 
 export interface SyntheticSpawnWorkload {
 	spinMs: number;
 	allocateBytes: number;
 	hangMs?: number;
+	lingerAfterResultMs?: number;
 }
 
 export interface SyntheticSpawnResult {
@@ -184,18 +187,52 @@ function projectRegistry(ref: SpawnWorkerRegistryRef): void {
 	registry.setStatus(ref.id, ref.status);
 }
 
-function killProcessTree(proc: Bun.Subprocess): void {
+const activeWorkerReapers = new Set<Promise<void>>();
+
+function signalWorkerProcessGroup(proc: Bun.Subprocess, signal: "SIGKILL"): void {
 	try {
-		process.kill(-proc.pid, "SIGKILL");
-		return;
+		process.kill(-proc.pid, signal);
 	} catch {
-		// The worker may have exited or may not yet own its process group.
+		// The worker may have exited between the live-owner check and the signal.
 	}
+}
+
+async function waitForWorkerExit(proc: Bun.Subprocess, timeoutMs: number): Promise<void> {
+	const { promise: timedOut, resolve } = Promise.withResolvers<void>();
+	const timer = setTimeout(resolve, timeoutMs);
 	try {
-		proc.kill("SIGKILL");
-	} catch {
-		// Exit processing reports the terminal state.
+		await Promise.race([
+			proc.exited.then(
+				() => undefined,
+				() => undefined,
+			),
+			timedOut,
+		]);
+	} finally {
+		clearTimeout(timer);
 	}
+}
+
+function createProcessGroupTeardown(proc: Bun.Subprocess): (signalOwnedGroup: boolean) => void {
+	let processExited = false;
+	let teardown: Promise<void> | undefined;
+	void proc.exited.then(
+		() => {
+			processExited = true;
+		},
+		() => {
+			processExited = true;
+		},
+	);
+	return (signalOwnedGroup: boolean): void => {
+		if (teardown) return;
+
+		if (signalOwnedGroup && !processExited) signalWorkerProcessGroup(proc, "SIGKILL");
+		const work = waitForWorkerExit(proc, WORKER_REAP_TIMEOUT_MS);
+		teardown = work;
+		activeWorkerReapers.add(work);
+		void work.finally(() => activeWorkerReapers.delete(work));
+	};
 }
 
 interface RssWatch {
@@ -266,7 +303,6 @@ async function readCappedStderr(stream: ReadableStream<Uint8Array>): Promise<str
 	}
 }
 
-
 type RecoveredYield = { data?: unknown; status?: "success" | "aborted"; error?: string; schemaOverridden?: boolean };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -330,7 +366,9 @@ export async function recoverSpawnWorkerResultFromJournal(
 			error: finalized.exitCode !== 0 && finalized.stderr ? finalized.stderr : undefined,
 			aborted: lastYield.status === "aborted",
 			abortReason: lastYield.status === "aborted" ? lastYield.error : undefined,
-			outputPath: request.options.artifactsDir ? path.join(request.options.artifactsDir, `${request.options.id}.md`) : undefined,
+			outputPath: request.options.artifactsDir
+				? path.join(request.options.artifactsDir, `${request.options.id}.md`)
+				: undefined,
 			extractedToolData: { yield: yields },
 			outputMeta: { lineCount: output.split("\n").length, charCount: output.length },
 		};
@@ -383,6 +421,13 @@ async function runRequest(
 		if (error instanceof SpawnWorkerError) throw error;
 		throw new SpawnWorkerError("spawn", error instanceof Error ? error.message : String(error));
 	}
+	const beginTeardown = createProcessGroupTeardown(proc);
+	try {
+		await options.onProcessStart?.(proc.pid);
+	} catch (error) {
+		beginTeardown(true);
+		throw new SpawnWorkerError("spawn", error instanceof Error ? error.message : String(error));
+	}
 
 	const startedAt = Date.now();
 	const terminal = Promise.withResolvers<void>();
@@ -403,32 +448,27 @@ async function runRequest(
 		latestProgress = { ...latestProgress, livenessState: state, durationMs: Date.now() - startedAt };
 		options.onProgress?.(latestProgress);
 	};
-	const claimError = (error: SpawnWorkerError, kill = true): void => {
+	const claimError = (error: SpawnWorkerError, signalOwnedGroup = true): void => {
 		if (terminalClaimed) return;
 		terminalClaimed = true;
 		terminalError = error;
-		if (kill) killProcessTree(proc);
+		beginTeardown(signalOwnedGroup);
 		terminal.resolve();
 	};
-	const claimResult = (value: SingleResult | SyntheticSpawnResult, terminateWorker = false): void => {
+	const claimResult = (value: SingleResult | SyntheticSpawnResult, signalOwnedGroup = true): void => {
 		if (terminalClaimed) return;
 		terminalClaimed = true;
 		result = value;
-		if (terminateWorker) {
-			try {
-				proc.kill();
-			} catch {
-				// The worker may already be exiting.
-			}
-		}
+		beginTeardown(signalOwnedGroup);
 		terminal.resolve();
 	};
 	const recoverAfterDeath = async (message: string): Promise<void> => {
 		if (terminalClaimed) return;
+		beginTeardown(false);
 		const recovered = request.type === "run" ? await recoverSpawnWorkerResultFromJournal(request) : undefined;
 		if (terminalClaimed) return;
 		if (recovered) {
-			claimResult(recovered);
+			claimResult(recovered, false);
 			return;
 		}
 		if (request.type === "run") emitLiveness("dead");
@@ -437,9 +477,15 @@ async function runRequest(
 	const failAndKill = (error: SpawnWorkerError): void => claimError(error);
 	const onAbort = (): void => failAndKill(new SpawnWorkerError("aborted", "Subagent subprocess aborted"));
 	options.signal?.addEventListener("abort", onAbort, { once: true });
-	const timeout = options.timeoutMs && options.timeoutMs > 0
-		? setTimeout(() => failAndKill(new SpawnWorkerError("timeout", `Subagent subprocess exceeded ${options.timeoutMs}ms`)), options.timeoutMs)
-		: undefined;
+	if (options.signal?.aborted) onAbort();
+	const timeout =
+		options.timeoutMs && options.timeoutMs > 0
+			? setTimeout(
+					() =>
+						failAndKill(new SpawnWorkerError("timeout", `Subagent subprocess exceeded ${options.timeoutMs}ms`)),
+					options.timeoutMs,
+				)
+			: undefined;
 	const stopRssWatch = watchWorkerRss(proc.pid, {
 		maxBytes: maxRssBytes,
 		onExceeded: rssBytes =>
@@ -470,7 +516,8 @@ async function runRequest(
 			}
 			switch (record.type) {
 				case "ready":
-					if (sawReady || record.pid !== proc.pid) failAndKill(new SpawnWorkerError("protocol", "Invalid worker ready record"));
+					if (sawReady || record.pid !== proc.pid)
+						failAndKill(new SpawnWorkerError("protocol", "Invalid worker ready record"));
 					sawReady = true;
 					break;
 				case "phase":
@@ -491,12 +538,24 @@ async function runRequest(
 					options.eventBus?.emit(record.channel, record.payload);
 					break;
 				case "result":
-					claimResult(record.result, true);
+					if (!sawReady) {
+						failAndKill(new SpawnWorkerError("protocol", "Subagent subprocess emitted a result before ready"));
+						break;
+					}
+					claimResult(record.result);
 					break;
 				case "synthetic-result":
-					result = { allocatedBytes: record.allocatedBytes, rssBytes: record.rssBytes };
+					if (!sawReady) {
+						failAndKill(new SpawnWorkerError("protocol", "Subagent subprocess emitted a result before ready"));
+						break;
+					}
+					claimResult({ allocatedBytes: record.allocatedBytes, rssBytes: record.rssBytes });
 					break;
 				case "error":
+					if (!sawReady) {
+						failAndKill(new SpawnWorkerError("protocol", "Subagent subprocess emitted an error before ready"));
+						break;
+					}
 					failAndKill(new SpawnWorkerError(record.code, record.message));
 					break;
 			}
@@ -549,18 +608,19 @@ async function runRequest(
 			probeInFlight = false;
 		}
 	};
-	const livenessTimer = request.type === "run"
-		? setInterval(() => {
-				void probeLiveness();
-			}, probeIntervalMs)
-		: undefined;
+	const livenessTimer =
+		request.type === "run"
+			? setInterval(() => {
+					void probeLiveness();
+				}, probeIntervalMs)
+			: undefined;
 
 	const naturalCompletion = (async (): Promise<void> => {
 		try {
 			proc.stdin.write(`${JSON.stringify(request)}\n`);
 			proc.stdin.end();
-			const [exitCode, stderr] = await Promise.all([proc.exited, stderrPromise, stdoutPromise]).then(values =>
-				[values[0], values[1]] as const
+			const [exitCode, stderr] = await Promise.all([proc.exited, stderrPromise, stdoutPromise]).then(
+				values => [values[0], values[1]] as const,
 			);
 			if (terminalClaimed) return;
 			if (!sawReady) {
