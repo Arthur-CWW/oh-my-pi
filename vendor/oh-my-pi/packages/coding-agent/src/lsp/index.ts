@@ -120,6 +120,8 @@ export interface LspWarmupResult {
 export interface LspWarmupOptions {
 	/** Called when starting to connect to servers */
 	onConnecting?: (serverNames: string[]) => void;
+	/** Agent session that owns clients started during warmup. */
+	owner?: object;
 }
 
 export function discoverStartupLspServers(
@@ -157,7 +159,12 @@ export async function warmupLspServers(cwd: string, options?: LspWarmupOptions):
 	// Servers that don't respond quickly will be initialized lazily on first use
 	const results = await Promise.allSettled(
 		lspServers.map(async ([name, serverConfig]) => {
-			const client = await getOrCreateClient(serverConfig, cwd, serverConfig.warmupTimeoutMs ?? WARMUP_TIMEOUT_MS);
+			const client = await getOrCreateClient(
+				serverConfig,
+				cwd,
+				serverConfig.warmupTimeoutMs ?? WARMUP_TIMEOUT_MS,
+				options?.owner,
+			);
 			return { name, client, fileTypes: serverConfig.fileTypes };
 		}),
 	);
@@ -208,6 +215,7 @@ async function syncFileContent(
 	cwd: string,
 	servers: Array<[string, ServerConfig]>,
 	signal?: AbortSignal,
+	owner?: object,
 ): Promise<void> {
 	throwIfAborted(signal);
 	await Promise.allSettled(
@@ -216,7 +224,7 @@ async function syncFileContent(
 			if (serverConfig.createClient) {
 				return;
 			}
-			const client = await getOrCreateClient(serverConfig, cwd);
+			const client = await getOrCreateClient(serverConfig, cwd, undefined, owner);
 			throwIfAborted(signal);
 			await syncContent(client, absolutePath, content, signal);
 		}),
@@ -236,6 +244,7 @@ async function notifyFileSaved(
 	cwd: string,
 	servers: Array<[string, ServerConfig]>,
 	signal?: AbortSignal,
+	owner?: object,
 ): Promise<void> {
 	throwIfAborted(signal);
 	await Promise.allSettled(
@@ -244,7 +253,7 @@ async function notifyFileSaved(
 			if (serverConfig.createClient) {
 				return;
 			}
-			const client = await getOrCreateClient(serverConfig, cwd);
+			const client = await getOrCreateClient(serverConfig, cwd, undefined, owner);
 			await notifySaved(client, absolutePath, signal);
 		}),
 	);
@@ -633,6 +642,7 @@ interface GetDiagnosticsForFileOptions {
 	expectedDocumentVersions?: ServerVersionMap;
 	/** Per-server wait budget (ms). Defaults to {@link SINGLE_DIAGNOSTICS_WAIT_TIMEOUT_MS}. */
 	timeoutMs?: number;
+	owner?: object;
 }
 
 /**
@@ -643,12 +653,13 @@ async function captureDiagnosticVersions(
 	cwd: string,
 	servers: Array<[string, ServerConfig]>,
 	initTimeoutMs?: number,
+	owner?: object,
 ): Promise<ServerVersionMap> {
 	const versions = new Map<string, number>();
 	await Promise.allSettled(
 		servers.map(async ([serverName, serverConfig]) => {
 			if (serverConfig.createClient) return;
-			const client = await getOrCreateClient(serverConfig, cwd, initTimeoutMs);
+			const client = await getOrCreateClient(serverConfig, cwd, initTimeoutMs, owner);
 			versions.set(serverName, client.diagnosticsVersion);
 		}),
 	);
@@ -659,12 +670,13 @@ async function captureOpenFileVersions(
 	absolutePath: string,
 	cwd: string,
 	servers: Array<[string, ServerConfig]>,
+	owner?: object,
 ): Promise<ServerVersionMap> {
 	const uri = fileToUri(absolutePath);
 	const versions = new Map<string, number>();
 	await Promise.allSettled(
 		servers.map(async ([serverName, serverConfig]) => {
-			const client = await getOrCreateClient(serverConfig, cwd);
+			const client = await getOrCreateClient(serverConfig, cwd, undefined, owner);
 			const version = client.openFiles.get(uri)?.version;
 			if (version !== undefined) {
 				versions.set(serverName, version);
@@ -689,7 +701,7 @@ async function getDiagnosticsForFile(
 	servers: Array<[string, ServerConfig]>,
 	options: GetDiagnosticsForFileOptions = {},
 ): Promise<FileDiagnosticsResult | undefined> {
-	const { signal, minVersions, expectedDocumentVersions, timeoutMs } = options;
+	const { signal, minVersions, expectedDocumentVersions, timeoutMs, owner } = options;
 	if (servers.length === 0) {
 		return undefined;
 	}
@@ -711,7 +723,7 @@ async function getDiagnosticsForFile(
 			}
 
 			// Default: use LSP
-			const client = await getOrCreateClient(serverConfig, cwd);
+			const client = await getOrCreateClient(serverConfig, cwd, undefined, owner);
 			throwIfAborted(signal);
 			if (isProjectAwareLspServer(serverConfig)) {
 				await waitForProjectLoaded(client, signal);
@@ -795,6 +807,7 @@ async function formatContent(
 	cwd: string,
 	servers: Array<[string, ServerConfig]>,
 	signal?: AbortSignal,
+	owner?: object,
 ): Promise<string> {
 	if (servers.length === 0) {
 		return content;
@@ -812,7 +825,7 @@ async function formatContent(
 			}
 
 			// Default: use LSP
-			const client = await getOrCreateClient(serverConfig, cwd);
+			const client = await getOrCreateClient(serverConfig, cwd, undefined, owner);
 			throwIfAborted(signal);
 
 			const caps = client.serverCapabilities;
@@ -855,6 +868,8 @@ export interface WritethroughOptions {
 	deferredSignal?: AbortSignal;
 	/** Transform diagnostics before surfacing them after a successful fetch. */
 	transformDiagnostics?: (absPath: string, result: FileDiagnosticsResult) => FileDiagnosticsResult;
+	/** Agent session that owns LSP clients used by this callback. */
+	owner?: object;
 }
 
 /** Internal resolved form of {@link WritethroughOptions} that the writethrough machinery operates on. */
@@ -862,6 +877,7 @@ type ResolvedWritethroughOptions = {
 	enableFormat: boolean;
 	enableDiagnostics: boolean;
 	transformDiagnostics?: (absPath: string, result: FileDiagnosticsResult) => FileDiagnosticsResult;
+	owner?: object;
 };
 
 /** Per-file deferred LSP diagnostics wiring for {@link WritethroughCallback}. */
@@ -922,6 +938,7 @@ function getOrCreateWritethroughBatch(id: string, options: ResolvedWritethroughO
 		existing.options.enableFormat ||= options.enableFormat;
 		existing.options.enableDiagnostics ||= options.enableDiagnostics;
 		existing.options.transformDiagnostics ??= options.transformDiagnostics;
+		existing.options.owner ??= options.owner;
 		return existing;
 	}
 	const batch: LspWritethroughBatchState = {
@@ -1009,6 +1026,7 @@ async function scheduleDeferredDiagnosticsFetch(args: {
 	expectedDocumentVersions: ServerVersionMap | undefined;
 	signal: AbortSignal;
 	callback: (diagnostics: FileDiagnosticsResult) => void;
+	owner?: object;
 }): Promise<void> {
 	try {
 		const deferredTimeout = AbortSignal.timeout(25_000);
@@ -1018,6 +1036,7 @@ async function scheduleDeferredDiagnosticsFetch(args: {
 			minVersions: args.minVersions,
 			expectedDocumentVersions: args.expectedDocumentVersions,
 			timeoutMs: DEFERRED_DIAGNOSTICS_WAIT_TIMEOUT_MS,
+			owner: args.owner,
 		});
 		if (args.signal.aborted || diagnostics === undefined) return;
 		args.callback(diagnostics);
@@ -1049,8 +1068,10 @@ async function fetchDiagnosticsWithDeferral(args: {
 	transformDiagnostics?: ResolvedWritethroughOptions["transformDiagnostics"];
 	deferred?: { onDeferredDiagnostics: (diagnostics: FileDiagnosticsResult) => void; signal: AbortSignal };
 	signal?: AbortSignal;
+	owner?: object;
 }): Promise<FileDiagnosticsResult | undefined> {
-	const { dst, cwd, servers, minVersions, expectedDocumentVersions, transformDiagnostics, deferred, signal } = args;
+	const { dst, cwd, servers, minVersions, expectedDocumentVersions, transformDiagnostics, deferred, signal, owner } =
+		args;
 	const apply = (d: FileDiagnosticsResult | undefined) =>
 		d && transformDiagnostics ? transformDiagnostics(dst, d) : d;
 
@@ -1061,6 +1082,7 @@ async function fetchDiagnosticsWithDeferral(args: {
 				signal,
 				minVersions,
 				expectedDocumentVersions,
+				owner,
 			}),
 		);
 	}
@@ -1071,6 +1093,7 @@ async function fetchDiagnosticsWithDeferral(args: {
 		minVersions,
 		expectedDocumentVersions,
 		timeoutMs: DEFERRED_DIAGNOSTICS_WAIT_TIMEOUT_MS,
+		owner,
 	});
 	const INLINE_TIMEOUT = Symbol("inline-diagnostics-timeout");
 	const raced = await Promise.race([
@@ -1102,7 +1125,7 @@ async function runLspWritethrough(
 		signal: AbortSignal;
 	},
 ): Promise<FileDiagnosticsResult | undefined> {
-	const { enableFormat, enableDiagnostics } = options;
+	const { enableFormat, enableDiagnostics, owner } = options;
 	const config = getConfig(cwd);
 	const servers = getServersForFile(config, dst);
 	if (servers.length === 0) {
@@ -1118,7 +1141,7 @@ async function runLspWritethrough(
 	// Capture diagnostic versions BEFORE syncing to detect stale diagnostics
 	// Bound client creation by the writethrough budget: a hung/broken server
 	// must not add its full init wait (30s default) to every edit.
-	const minVersions = enableDiagnostics ? await captureDiagnosticVersions(cwd, servers, 5_000) : undefined;
+	const minVersions = enableDiagnostics ? await captureDiagnosticVersions(cwd, servers, 5_000, owner) : undefined;
 	let expectedDocumentVersions: ServerVersionMap | undefined;
 
 	let formatter: FileFormatResult | undefined;
@@ -1139,23 +1162,23 @@ async function runLspWritethrough(
 			if (useCustomFormatter) {
 				// Custom linters (e.g. Biome CLI) require on-disk input.
 				await writeContent(content);
-				finalContent = await formatContent(dst, content, cwd, customLinterServers, operationSignal);
+				finalContent = await formatContent(dst, content, cwd, customLinterServers, operationSignal, owner);
 				formatter = finalContent !== content ? FileFormatResult.FORMATTED : FileFormatResult.UNCHANGED;
 				await writeContent(finalContent);
-				await syncFileContent(dst, finalContent, cwd, lspServers, operationSignal);
+				await syncFileContent(dst, finalContent, cwd, lspServers, operationSignal, owner);
 			} else {
 				// 1. Sync original content to LSP servers
-				await syncFileContent(dst, content, cwd, lspServers, operationSignal);
+				await syncFileContent(dst, content, cwd, lspServers, operationSignal, owner);
 
 				// 2. Format in-memory via LSP
 				if (enableFormat) {
-					finalContent = await formatContent(dst, content, cwd, lspServers, operationSignal);
+					finalContent = await formatContent(dst, content, cwd, lspServers, operationSignal, owner);
 					formatter = finalContent !== content ? FileFormatResult.FORMATTED : FileFormatResult.UNCHANGED;
 				}
 
 				// 3. If formatted, sync formatted content to LSP servers
 				if (finalContent !== content) {
-					await syncFileContent(dst, finalContent, cwd, lspServers, operationSignal);
+					await syncFileContent(dst, finalContent, cwd, lspServers, operationSignal, owner);
 				}
 
 				// 4. Write to disk
@@ -1163,11 +1186,11 @@ async function runLspWritethrough(
 			}
 
 			if (enableDiagnostics) {
-				expectedDocumentVersions = await captureOpenFileVersions(dst, cwd, lspServers);
+				expectedDocumentVersions = await captureOpenFileVersions(dst, cwd, lspServers, owner);
 			}
 
 			// 5. Notify saved to LSP servers
-			await notifyFileSaved(dst, cwd, lspServers, operationSignal);
+			await notifyFileSaved(dst, cwd, lspServers, operationSignal, owner);
 		});
 		synced = true;
 	} catch {
@@ -1184,6 +1207,7 @@ async function runLspWritethrough(
 					expectedDocumentVersions,
 					signal: deferred.signal,
 					callback: deferred.onDeferredDiagnostics,
+					owner,
 				});
 			}
 		}
@@ -1200,6 +1224,7 @@ async function runLspWritethrough(
 			transformDiagnostics: options.transformDiagnostics,
 			deferred,
 			signal,
+			owner,
 		});
 	}
 
@@ -1248,6 +1273,7 @@ export function createLspWritethrough(cwd: string, options?: WritethroughOptions
 		enableFormat: options?.enableFormat ?? false,
 		enableDiagnostics: options?.enableDiagnostics ?? false,
 		transformDiagnostics: options?.transformDiagnostics,
+		owner: options?.owner,
 	};
 	if (!resolvedOptions.enableFormat && !resolvedOptions.enableDiagnostics) {
 		return writethroughNoop;
@@ -1460,7 +1486,7 @@ export class LspTool implements AgentTool<typeof lspSchema, LspToolDetails, Them
 							allDiagnostics.push(...diagnostics);
 							continue;
 						}
-						const client = await getOrCreateClient(serverConfig, this.session.cwd);
+						const client = await getOrCreateClient(serverConfig, this.session.cwd, undefined, this.session);
 						if (isProjectAwareLspServer(serverConfig)) {
 							await waitForProjectLoaded(client, signal);
 							throwIfAborted(signal);
@@ -1634,7 +1660,7 @@ export class LspTool implements AgentTool<typeof lspSchema, LspToolDetails, Them
 			for (const [serverName, serverConfig] of servers) {
 				throwIfAborted(signal);
 				try {
-					const client = await getOrCreateClient(serverConfig, this.session.cwd);
+					const client = await getOrCreateClient(serverConfig, this.session.cwd, undefined, this.session);
 					if (isProjectAwareLspServer(serverConfig)) {
 						await waitForProjectLoaded(client, signal);
 					}
@@ -1781,7 +1807,7 @@ export class LspTool implements AgentTool<typeof lspSchema, LspToolDetails, Them
 
 			for (const [serverName, serverConfig] of servers) {
 				try {
-					const client = await getOrCreateClient(serverConfig, this.session.cwd);
+					const client = await getOrCreateClient(serverConfig, this.session.cwd, undefined, this.session);
 					for (const { oldUri } of pairs) {
 						if (client.openFiles.has(oldUri)) {
 							await sendNotification(client, "textDocument/didClose", {
@@ -1844,7 +1870,7 @@ export class LspTool implements AgentTool<typeof lspSchema, LspToolDetails, Them
 			for (const [serverName, serverConfig] of serverList) {
 				throwIfAborted(signal);
 				try {
-					const client = await getOrCreateClient(serverConfig, this.session.cwd);
+					const client = await getOrCreateClient(serverConfig, this.session.cwd, undefined, this.session);
 					respondingServers.add(serverName);
 					const caps = client.serverCapabilities ?? {};
 					sections.push(`${serverName}:`);
@@ -1930,7 +1956,7 @@ export class LspTool implements AgentTool<typeof lspSchema, LspToolDetails, Them
 			}
 
 			try {
-				const client = await getOrCreateClient(chosenConfig, this.session.cwd);
+				const client = await getOrCreateClient(chosenConfig, this.session.cwd, undefined, this.session);
 				if (resolvedTarget) {
 					await ensureFileOpen(client, resolvedTarget, signal);
 				}
@@ -2001,7 +2027,12 @@ export class LspTool implements AgentTool<typeof lspSchema, LspToolDetails, Them
 			for (const [workspaceServerName, workspaceServerConfig] of servers) {
 				throwIfAborted(signal);
 				try {
-					const workspaceClient = await getOrCreateClient(workspaceServerConfig, this.session.cwd);
+					const workspaceClient = await getOrCreateClient(
+						workspaceServerConfig,
+						this.session.cwd,
+						undefined,
+						this.session,
+					);
 					const workspaceResult = (await sendRequest(
 						workspaceClient,
 						"workspace/symbol",
@@ -2065,7 +2096,12 @@ export class LspTool implements AgentTool<typeof lspSchema, LspToolDetails, Them
 			for (const [workspaceServerName, workspaceServerConfig] of servers) {
 				throwIfAborted(signal);
 				try {
-					const workspaceClient = await getOrCreateClient(workspaceServerConfig, this.session.cwd);
+					const workspaceClient = await getOrCreateClient(
+						workspaceServerConfig,
+						this.session.cwd,
+						undefined,
+						this.session,
+					);
 					outputs.push(await reloadServer(workspaceClient, workspaceServerName, signal));
 				} catch (err) {
 					if (err instanceof ToolAbortError || signal?.aborted) {
@@ -2092,7 +2128,7 @@ export class LspTool implements AgentTool<typeof lspSchema, LspToolDetails, Them
 		const [serverName, serverConfig] = serverInfo;
 
 		try {
-			const client = await getOrCreateClient(serverConfig, this.session.cwd);
+			const client = await getOrCreateClient(serverConfig, this.session.cwd, undefined, this.session);
 			const targetFile = resolvedFile;
 			const isRustAnalyzerServer =
 				serverName === "rust-analyzer" ||

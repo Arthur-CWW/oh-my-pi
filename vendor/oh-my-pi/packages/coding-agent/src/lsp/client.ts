@@ -21,49 +21,56 @@ import { detectLanguageId, fileToUri } from "./utils";
 const clients = new Map<string, LspClient>();
 const clientLocks = new Map<string, Promise<LspClient>>();
 const fileOperationLocks = new Map<string, Promise<void>>();
+const clientOwners = new Map<string, Set<object>>();
+const ownerClients = new WeakMap<object, Set<string>>();
+const releasedOwners = new WeakSet<object>();
+const zeroRefSince = new Map<string, number>();
 
 /** Negative cache of recent init failures so a broken server fails fast instead of re-spawning per call. */
 const INIT_FAILURE_BACKOFF_MS = 3 * 60 * 1000;
 const initFailures = new Map<string, { at: number; message: string }>();
 
-// Idle timeout configuration (disabled by default)
-let idleTimeoutMs: number | null = null;
+/** Default time a zero-reference LSP client remains warm before shutdown. */
+export const DEFAULT_IDLE_TIMEOUT_MS = 10 * 60 * 1000;
+const MAX_IDLE_CHECK_INTERVAL_MS = 60 * 1000;
+let idleTimeoutMs: number | null = DEFAULT_IDLE_TIMEOUT_MS;
 let idleCheckInterval: NodeJS.Timeout | null = null;
-const IDLE_CHECK_INTERVAL_MS = 60 * 1000;
 
 /**
- * Configure the idle timeout for LSP clients.
- * @param ms - Timeout in milliseconds, or null/undefined to disable
+ * Configure the zero-reference idle timeout for LSP clients.
+ * @param ms - Timeout in milliseconds; null/undefined restores the 10 minute default, and zero disables cleanup
  */
 export function setIdleTimeout(ms: number | null | undefined): void {
-	idleTimeoutMs = ms ?? null;
-
-	if (idleTimeoutMs && idleTimeoutMs > 0) {
-		startIdleChecker();
-	} else {
-		stopIdleChecker();
-	}
+	idleTimeoutMs = ms ?? DEFAULT_IDLE_TIMEOUT_MS;
+	stopIdleChecker();
+	if (idleTimeoutMs > 0) startIdleChecker();
 }
 
 function startIdleChecker(): void {
-	if (idleCheckInterval) return;
-	idleCheckInterval = setInterval(() => {
-		if (!idleTimeoutMs) return;
-		const now = Date.now();
-		for (const [key, client] of Array.from(clients.entries())) {
-			if (now - client.lastActivity > idleTimeoutMs) {
-				void shutdownClient(key);
+	if (idleCheckInterval || !idleTimeoutMs || idleTimeoutMs <= 0) return;
+	idleCheckInterval = setInterval(
+		() => {
+			if (!idleTimeoutMs) return;
+			const now = Date.now();
+			for (const key of Array.from(clients.keys())) {
+				const idleSince = zeroRefSince.get(key);
+				if (idleSince !== undefined && now - idleSince >= idleTimeoutMs) {
+					void shutdownIdleClient(key, idleSince);
+				}
 			}
-		}
-	}, IDLE_CHECK_INTERVAL_MS);
+		},
+		Math.min(MAX_IDLE_CHECK_INTERVAL_MS, idleTimeoutMs),
+	);
+	idleCheckInterval.unref?.();
 }
 
 function stopIdleChecker(): void {
-	if (idleCheckInterval) {
-		clearInterval(idleCheckInterval);
-		idleCheckInterval = null;
-	}
+	if (!idleCheckInterval) return;
+	clearInterval(idleCheckInterval);
+	idleCheckInterval = null;
 }
+
+startIdleChecker();
 
 // =============================================================================
 // Client Capabilities
@@ -584,26 +591,85 @@ const PROJECT_LOAD_TIMEOUT_MS = 15_000;
 const SHUTDOWN_TIMEOUT_MS = 5_000;
 const EXIT_TIMEOUT_MS = 1_000;
 
+function retainClientForOwner(key: string, owner: object | undefined): void {
+	if (!owner || releasedOwners.has(owner) || !clients.has(key)) return;
+	let owners = clientOwners.get(key);
+	if (!owners) {
+		owners = new Set();
+		clientOwners.set(key, owners);
+	}
+	if (owners.has(owner)) return;
+	owners.add(owner);
+	zeroRefSince.delete(key);
+	let keys = ownerClients.get(owner);
+	if (!keys) {
+		keys = new Set();
+		ownerClients.set(owner, keys);
+	}
+	keys.add(key);
+}
+
+function forgetClientOwnership(key: string): void {
+	const owners = clientOwners.get(key);
+	if (owners) {
+		for (const owner of owners) ownerClients.get(owner)?.delete(key);
+		clientOwners.delete(key);
+	}
+	zeroRefSince.delete(key);
+}
+
+/**
+ * Release every shared LSP client reference held by one agent session.
+ * Repeated release calls are harmless; a disposed owner cannot retain new clients.
+ */
+export function releaseLspClientsForOwner(owner: object): void {
+	releasedOwners.add(owner);
+	const keys = ownerClients.get(owner);
+	if (!keys) return;
+	const releasedAt = Date.now();
+	for (const key of keys) {
+		const owners = clientOwners.get(key);
+		if (!owners) continue;
+		owners.delete(owner);
+		if (owners.size === 0) {
+			clientOwners.delete(key);
+			if (clients.has(key)) zeroRefSince.set(key, releasedAt);
+		}
+	}
+	keys.clear();
+	ownerClients.delete(owner);
+}
+
 /**
  * Get or create an LSP client for the given server configuration and working directory.
+ * A session owner retains at most one reference to each shared client.
  * @param config - Server configuration
  * @param cwd - Working directory
  * @param initTimeoutMs - Optional timeout for the initialize request (defaults to 30s)
+ * @param owner - Agent session that owns this acquisition
  */
-export async function getOrCreateClient(config: ServerConfig, cwd: string, initTimeoutMs?: number): Promise<LspClient> {
+export async function getOrCreateClient(
+	config: ServerConfig,
+	cwd: string,
+	initTimeoutMs?: number,
+	owner?: object,
+): Promise<LspClient> {
 	const key = `${config.command}:${cwd}`;
 
 	// Check if client already exists
 	const existingClient = clients.get(key);
 	if (existingClient) {
 		existingClient.lastActivity = Date.now();
+		retainClientForOwner(key, owner);
 		return existingClient;
 	}
 
 	// Check if another coroutine is already creating this client
 	const existingLock = clientLocks.get(key);
 	if (existingLock) {
-		return existingLock;
+		const client = await existingLock;
+		retainClientForOwner(key, owner);
+		return client;
 	}
 
 	// Fail fast on a recent deterministic init failure instead of re-spawning
@@ -666,7 +732,10 @@ export async function getOrCreateClient(config: ServerConfig, cwd: string, initT
 
 		// Register crash recovery - remove client on process exit
 		proc.exited.then(() => {
-			if (clients.get(key) === client) clients.delete(key);
+			if (clients.get(key) === client) {
+				clients.delete(key);
+				forgetClientOwnership(key);
+			}
 			if (clientLocks.get(key) === clientPromise) clientLocks.delete(key);
 			client.resolveProjectLoaded();
 
@@ -725,6 +794,8 @@ export async function getOrCreateClient(config: ServerConfig, cwd: string, initT
 			// solely through clientLocks, so concurrent callers (warmup vs first
 			// tool call) wait for init instead of using an unacknowledged client.
 			clients.set(key, client);
+			zeroRefSince.set(key, Date.now());
+			retainClientForOwner(key, owner);
 			initFailures.delete(key);
 			return client;
 		} catch (err) {
@@ -997,6 +1068,15 @@ async function shutdownClientInstance(client: LspClient): Promise<void> {
 	await waitForExit(client, EXIT_TIMEOUT_MS);
 }
 
+async function shutdownIdleClient(key: string, expectedIdleSince: number): Promise<void> {
+	const client = clients.get(key);
+	if (!client || zeroRefSince.get(key) !== expectedIdleSince) return;
+	if ((clientOwners.get(key)?.size ?? 0) > 0 || client.pendingRequests.size > 0) return;
+	clients.delete(key);
+	forgetClientOwnership(key);
+	await shutdownClientInstance(client);
+}
+
 /**
  * Shutdown a specific client by key.
  */
@@ -1004,6 +1084,7 @@ export async function shutdownClient(key: string): Promise<void> {
 	const client = clients.get(key);
 	if (!client) return;
 	clients.delete(key);
+	forgetClientOwnership(key);
 	await shutdownClientInstance(client);
 }
 
@@ -1130,8 +1211,10 @@ export async function sendNotification(client: LspClient, method: string, params
  * Shutdown all LSP clients.
  */
 export async function shutdownAll(): Promise<void> {
-	const clientsToShutdown = Array.from(clients.values());
+	const activeEntries = Array.from(clients.entries());
+	const clientsToShutdown = activeEntries.map(([, client]) => client);
 	clients.clear();
+	for (const [key] of activeEntries) forgetClientOwnership(key);
 	// Mid-initialize clients live only in clientLocks (publication is deferred
 	// until init succeeds) — without this, their server processes outlive
 	// shutdown. Failed init promises already cleaned up after themselves.

@@ -313,6 +313,7 @@ export class WriteTool implements AgentTool<typeof writeSchema, WriteToolDetails
 			? createLspWritethrough(session.cwd, {
 					enableFormat,
 					enableDiagnostics,
+					owner: session,
 					transformDiagnostics: dedup
 						? (path, result) => getDiagnosticsLedger(session).reduce(path, result)
 						: undefined,
@@ -1166,7 +1167,11 @@ export const writeToolRenderer = {
 		if (result.isError) {
 			const errorText = result.content?.find(c => c.type === "text")?.text ?? "";
 			const header = renderStatusLine(
-				{ icon: "error", title: options.headline ?? "Write", description: options.headline ? undefined : `${langIcon} ${pathDisplay}` },
+				{
+					icon: "error",
+					title: options.headline ?? "Write",
+					description: options.headline ? undefined : `${langIcon} ${pathDisplay}`,
+				},
 				uiTheme,
 			);
 			return framedBlock(uiTheme, width => ({

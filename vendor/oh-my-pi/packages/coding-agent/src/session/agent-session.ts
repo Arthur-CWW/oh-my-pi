@@ -139,6 +139,7 @@ import { type AsyncJob, type AsyncJobDeliveryState, AsyncJobManager } from "../a
 import { classifyDifficulty } from "../auto-thinking/classifier";
 import { reset as resetCapabilities } from "../capability";
 import type { Rule } from "../capability/rule";
+import type { PromptVariableContext } from "../commands/prompt-vars";
 import { shouldEnableAppendOnlyContext } from "../config/append-only-context-mode";
 import type { ModelRegistry } from "../config/model-registry";
 import {
@@ -199,7 +200,6 @@ import { ExtensionToolWrapper, RegisteredToolAdapter } from "../extensibility/ex
 import type { HookCommandContext } from "../extensibility/hooks/types";
 import type { Skill, SkillWarning } from "../extensibility/skills";
 import { expandSlashCommandAsync, type FileSlashCommand } from "../extensibility/slash-commands";
-import type { PromptVariableContext } from "../commands/prompt-vars";
 import {
 	FeedWatcher,
 	type FeedWatcherCompletion,
@@ -223,6 +223,7 @@ import {
 	type IrcExternalPeerState,
 	resolveIrcExternalPeerName,
 } from "../irc/bus-external";
+import { releaseLspClientsForOwner } from "../lsp/client";
 import { resolveMemoryBackend } from "../memory-backend";
 import { getMnemopiSessionState, type MnemopiSessionState, setMnemopiSessionState } from "../mnemopi/state";
 import { containsOrchestrate, ORCHESTRATE_NOTICE } from "../modes/orchestrate";
@@ -346,17 +347,17 @@ import {
 } from "./messages";
 import { OversizedPromptRecoveryGuard, recoverOversizedPrompt } from "./oversized-prompt-recovery";
 import {
+	decideRefusalReroute,
+	REFUSAL_REROUTE_ANNOTATION,
+	type RefusalRerouteDecision,
+} from "./refusal-reroute-policy";
+import {
 	SCRAPING_DESKTOP_REMINDER,
 	SCRAPING_DESKTOP_REMINDER_MESSAGE_TYPE,
 	SCRAPING_DESKTOP_REMINDER_STATE_TYPE,
 	type ScrapingDesktopActivity,
 	shouldInjectScrapingDesktopReminder,
 } from "./scraping-desktop-reminder";
-import {
-	decideRefusalReroute,
-	REFUSAL_REROUTE_ANNOTATION,
-	type RefusalRerouteDecision,
-} from "./refusal-reroute-policy";
 import type { SessionContext } from "./session-context";
 import {
 	getLatestCompactionEntry,
@@ -2992,7 +2993,8 @@ export class AgentSession {
 					if (block.type === "toolCall") {
 						const intent = block.arguments?._i;
 						if (typeof intent === "string" && intent.trim()) {
-							this.#peerActivityLabel = intent.trim().length > 120 ? `${intent.trim().slice(0, 117)}...` : intent.trim();
+							this.#peerActivityLabel =
+								intent.trim().length > 120 ? `${intent.trim().slice(0, 117)}...` : intent.trim();
 							break;
 						}
 					}
@@ -4392,6 +4394,7 @@ export class AgentSession {
 	 */
 	beginDispose(): void {
 		this.#isDisposed = true;
+		releaseLspClientsForOwner(this);
 		this.#stopExternalIrcHeartbeat();
 		this.#ownershipLossUnsubscribe?.();
 		this.#ownershipLossUnsubscribe = undefined;
@@ -13415,7 +13418,7 @@ export class AgentSession {
 		const isSubprocessWorker = process.env.OMP_SUBPROCESS_WORKER === "1" && agentId !== undefined;
 		const sessionId =
 			this.#ircExternalSessionId ??
-			(isSubprocessWorker ? agentId : ownership?.sessionId ?? `${cwd}:${process.pid}`);
+			(isSubprocessWorker ? agentId : (ownership?.sessionId ?? `${cwd}:${process.pid}`));
 		const name =
 			this.#ircExternalPeerName ??
 			(isSubprocessWorker
