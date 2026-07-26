@@ -499,6 +499,7 @@ export class IrcTool implements AgentTool<typeof ircSchema, IrcDetails> {
 				});
 		bus.registerPeer({
 			sessionId,
+			agentId: senderId,
 			name,
 			cwd: this.session.cwd,
 			pid: process.pid,
