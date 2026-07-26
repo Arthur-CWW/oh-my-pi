@@ -1,9 +1,9 @@
 /**
  * Contract: the anchored subagent HUD (rendered above the editor, next to the
- * Todos block) lists exactly the running *detached* subagents as
- * `Id: description` rows and yields no output once nothing qualifies, so the
- * block self-clears. Sync task spawns and eval `agent()` spawns are excluded:
- * their progress is already rendered inline (tool block / eval cell).
+ * Todos block) lists exactly the running *detached* subagents with a status
+ * glyph, model, bounded label, and fixed-width token-rate cell. It yields no
+ * output once nothing qualifies, so the block self-clears. Sync task spawns
+ * and eval `agent()` spawns are excluded because they already render inline.
  */
 import { beforeAll, describe, expect, it, setSystemTime, vi } from "bun:test";
 import { renderSubagentHudLines } from "@oh-my-pi/pi-coding-agent/modes/interactive-mode";
@@ -12,7 +12,7 @@ import {
 	type ObservableSession,
 	SessionObserverRegistry,
 } from "@oh-my-pi/pi-coding-agent/modes/session-observer-registry";
-import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
+import { initTheme, theme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import { AgentRegistry, MAIN_AGENT_ID } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import {
 	type AgentProgress,
@@ -304,7 +304,7 @@ describe("subagent HUD lines", () => {
 		}
 	});
 
-	it("renders parent-probed liveness states instead of 0 t/s", () => {
+	it("renders parent-probed liveness as status glyphs without replacing the rate cell", () => {
 		const out = render([
 			makeSession({
 				id: "StalledWorker",
@@ -318,9 +318,9 @@ describe("subagent HUD lines", () => {
 			}),
 		]);
 
-		expect(out).toContain("STALLED");
-		expect(out).toContain("DEAD");
-		expect(out).not.toContain("0 t/s");
+		expect(out).toContain(`${theme.status.warning} [?] StalledWorker`);
+		expect(out).toContain(`${theme.status.error} [?] DeadWorker`);
+		expect(out.match(/0 t\/s/g)).toHaveLength(2);
 	});
 
 	it("resets the rate baseline when a revived child's counters regress", () => {
@@ -354,7 +354,7 @@ describe("subagent HUD lines", () => {
 		}
 	});
 
-	it("renders liveness badges even when the token-rate badge is disabled", () => {
+	it("renders the liveness glyph when the token-rate cell is disabled", () => {
 		const renderer = new SubagentHudRenderer();
 		const rows = renderer.render(
 			[
@@ -367,7 +367,7 @@ describe("subagent HUD lines", () => {
 			120,
 			false,
 		);
-		expect(Bun.stripANSI(rows.join("\n"))).toContain("STALLED");
+		expect(Bun.stripANSI(rows.join("\n"))).toContain(`${theme.status.warning} [?] StalledQuiet`);
 	});
 
 	it("rebuilds a cached row when a healthy 0 t/s turns stuck", () => {

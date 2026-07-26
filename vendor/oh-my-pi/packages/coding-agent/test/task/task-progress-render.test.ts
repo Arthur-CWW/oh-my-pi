@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import type { RenderResultOptions } from "@oh-my-pi/pi-agent-core";
 import type { SettingPath, SettingValue } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { SubagentHudRenderer } from "@oh-my-pi/pi-coding-agent/modes/components/subagent-hud";
+import type { ObservableSession } from "@oh-my-pi/pi-coding-agent/modes/session-observer-registry";
 import { getThemeByName, setThemeInstance } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import { taskToolRenderer } from "@oh-my-pi/pi-coding-agent/task/render";
 import type { AgentProgress, SingleResult, TaskToolDetails } from "@oh-my-pi/pi-coding-agent/task/types";
@@ -53,6 +55,24 @@ function findRow(component: { render: (w: number) => readonly string[] }, needle
 		.join("\n")
 		.split("\n")
 		.find(line => Bun.stripANSI(line).includes(needle));
+	expect(row).toBeDefined();
+	return row!;
+}
+
+function hudSession(overrides: Partial<ObservableSession> & { id: string }): ObservableSession {
+	return {
+		kind: "subagent",
+		label: overrides.id,
+		status: "active",
+		detached: true,
+		lastUpdate: Date.now(),
+		progress: runningProgress({ id: overrides.id }),
+		...overrides,
+	};
+}
+
+function findHudRow(rows: readonly string[], id: string): string {
+	const row = rows.find(line => Bun.stripANSI(line).includes(id));
 	expect(row).toBeDefined();
 	return row!;
 }
@@ -360,6 +380,94 @@ describe("task progress rendering", () => {
 		// The run summary footer still counts the full batch.
 		expect(collapsed).toContain("5 succeeded");
 		expect(collapsed).toContain("1 failed");
+	});
+
+	it("keeps a fixed right-aligned rate cell on one line and truncates the description", async () => {
+		const theme = (await getThemeByName("dark"))!;
+		setThemeInstance(theme);
+		const renderer = new SubagentHudRenderer();
+		const width = 42;
+		const rows = renderer
+			.render(
+				[
+					hudSession({
+						id: "SlowRate",
+						description: "A deliberately long description that cannot fit in the available row",
+						tokenRate: 3,
+					}),
+					hudSession({
+						id: "FastRate",
+						description: "Another deliberately long description that cannot fit in the available row",
+						tokenRate: 123,
+					}),
+				],
+				width,
+			)
+			.slice(2);
+
+		expect(rows).toHaveLength(2);
+		const plain = rows.map(row => Bun.stripANSI(row));
+		expect(plain.map(row => Bun.stringWidth(row))).toEqual([width - 1, width - 1]);
+		expect(plain.every(row => row.split("\n").length === 1)).toBe(true);
+		expect(plain.every(row => row.includes("…"))).toBe(true);
+		expect(plain[0]).toMatch(/\s{3}3 t\/s$/);
+		expect(plain[1]).toMatch(/\s123 t\/s$/);
+		expect(plain.map(row => row.indexOf("t/s"))).toEqual([plain[0]!.indexOf("t/s"), plain[0]!.indexOf("t/s")]);
+	});
+
+	it("maps progress and terminal states to the theme status glyphs", async () => {
+		const theme = (await getThemeByName("dark"))!;
+		setThemeInstance(theme);
+		const now = Date.now();
+		const sessions = [
+			hudSession({
+				id: "Streaming",
+				tokenRate: 12,
+				progress: runningProgress({ id: "Streaming", tokens: 10, outputTokens: 10 }),
+			}),
+			hudSession({ id: "Starting", progress: runningProgress({ id: "Starting", status: "pending" }) }),
+			hudSession({ id: "Stalled", tokenRate: 0, lastUpdate: now - 30_000 }),
+			hudSession({ id: "Failed", progress: runningProgress({ id: "Failed", status: "failed" }) }),
+			hudSession({ id: "Canceled", progress: runningProgress({ id: "Canceled", status: "aborted" }) }),
+			hudSession({ id: "Done", progress: runningProgress({ id: "Done", status: "completed" }) }),
+		];
+		const rows = new SubagentHudRenderer().render(sessions, 120);
+		const expected = [
+			["Streaming", theme.status.running],
+			["Starting", theme.status.pending],
+			["Stalled", theme.status.warning],
+			["Failed", theme.status.error],
+			["Canceled", theme.status.aborted],
+			["Done", theme.status.done],
+		] as const;
+
+		for (const [id, glyph] of expected) {
+			expect(Bun.stripANSI(findHudRow(rows, id))).toContain(`${glyph} [?] ${id}`);
+		}
+	});
+
+	it("changes a zero-rate running row from starting to stalled at 30 seconds", async () => {
+		const theme = (await getThemeByName("dark"))!;
+		setThemeInstance(theme);
+		const renderer = new SubagentHudRenderer();
+		const startedAt = 1_000_000;
+		const now = vi.spyOn(Date, "now");
+		const session = hudSession({ id: "ThresholdWorker", tokenRate: 0, lastUpdate: startedAt });
+
+		now.mockReturnValue(startedAt);
+		renderer.render([session], 80);
+		// A later progress event with unchanged token counters must not reset
+		// the inactivity clock.
+		session.lastUpdate = startedAt + 20_000;
+		now.mockReturnValue(startedAt + 29_999);
+		expect(Bun.stripANSI(findHudRow(renderer.render([session], 80), session.id))).toContain(
+			`${theme.status.pending} [?] ${session.id}`,
+		);
+
+		now.mockReturnValue(startedAt + 30_000);
+		expect(Bun.stripANSI(findHudRow(renderer.render([session], 80), session.id))).toContain(
+			`${theme.status.warning} [?] ${session.id}`,
+		);
 	});
 });
 
