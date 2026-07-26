@@ -16,6 +16,7 @@ import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manage
 import { appendChildLifecycleRecord } from "@oh-my-pi/pi-coding-agent/task/child-lifecycle";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { BrowserTool } from "@oh-my-pi/pi-coding-agent/tools/browser";
+import { FALLBACK_BROWSER_TAB_GROUP, groupedBrowserTabName } from "@oh-my-pi/pi-coding-agent/tools/browser/tab-group";
 import { getTab, releaseTab } from "@oh-my-pi/pi-coding-agent/tools/browser/tab-supervisor";
 import { TempDir } from "@oh-my-pi/pi-utils";
 
@@ -103,8 +104,10 @@ it("reclaims only idle and parked session resources by pressure tier", async () 
 	const parked = createSession(parkedManager, settings, modelRegistry, parkedId, externalIrcBus);
 	const activeTool = createBrowserTool(active, activeManager, settings, root.path());
 	const idleTool = createBrowserTool(idle, idleManager, settings, root.path());
-	const activeTabName = `active-${randomUUID()}`;
-	const idleTabName = `idle-${randomUUID()}`;
+	// The browser tool registers tabs under workstream-grouped labels; these
+	// sessions carry no workstream, so both land in the "adhoc" group.
+	const activeTabName = groupedBrowserTabName(FALLBACK_BROWSER_TAB_GROUP, `active-${randomUUID()}`);
+	const idleTabName = groupedBrowserTabName(FALLBACK_BROWSER_TAB_GROUP, `idle-${randomUUID()}`);
 
 	try {
 		registry.register({ id: activeId, displayName: "active", kind: "sub", session: active, status: "running" });

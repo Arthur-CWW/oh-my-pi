@@ -404,14 +404,16 @@ async function acquireTabImpl(
 	}
 
 	// Reuse an idle tab by URL across caller-provided names inside the same
-	// workstream. The browser handle must match too: external and cmux backends
-	// cannot move tabs between driver contexts.
+	// workstream AND the same owning session. The browser handle must match
+	// too: external and cmux backends cannot move tabs between driver
+	// contexts, and cross-session reuse would break owner-filtered release.
 	const requestedUrlKey = opts.url ? normalizeUrl(opts.url, opts.urlQuerySensitive) : undefined;
 	if (opts.reuse !== false && requestedUrlKey) {
 		const byUrl = [...tabs.values()].find(
 			tab =>
 				tab.browser === browser &&
 				tab.group === (opts.group ?? "adhoc") &&
+				tab.ownerSessionId === opts.ownerSessionId &&
 				isIdle(tab) &&
 				normalizeUrl(tab.info.url, opts.urlQuerySensitive) === requestedUrlKey,
 		);
