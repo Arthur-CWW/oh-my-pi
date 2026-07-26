@@ -77,6 +77,7 @@ describe("sibling session observation", () => {
 					toPeer: "receiver",
 					body: "hello from the cockpit",
 					origin: "user",
+					audience: "direct",
 				},
 			]);
 			expect(sender.listPeers({ includeStale: true })[0]?.sessionFile).toBe(path.join(root, "receiver.jsonl"));

@@ -94,7 +94,13 @@ describe("IrcExternalBus", () => {
 			busB.registerPeer({ sessionId: sessionB, name: peerB, cwd: "/tmp/project-b", pid: 222 });
 
 			expect(busA.listPeers({ excludeSessionId: sessionA }).map(peer => peer.name)).toEqual([peerB]);
-			const messageId = busA.sendMessage({ fromPeer: peerA, toPeer: peerB, body: "hello from A", origin: "user" });
+			const messageId = busA.sendMessage({
+				fromPeer: peerA,
+				toPeer: peerB,
+				body: "hello from A",
+				origin: "user",
+				audience: "direct",
+			});
 			expect(messageId).toBeGreaterThan(0);
 			expect(busB.unreadCount(peerB)).toBe(1);
 
@@ -125,8 +131,18 @@ describe("IrcExternalBus", () => {
 			busA.registerPeer({ sessionId: "session-a", name: "peer-a", cwd: "/tmp/project-a", pid: 111 });
 			busB.registerPeer({ sessionId: "session-b", name: "peer-b", cwd: "/tmp/project-b", pid: 222 });
 
-			const firstId = busA.sendMessage({ fromPeer: "peer-a", toPeer: "peer-b", body: "first" });
-			const secondId = busA.sendMessage({ fromPeer: "peer-a", toPeer: "peer-b", body: "second" });
+			const firstId = busA.sendMessage({
+				fromPeer: "peer-a",
+				toPeer: "peer-b",
+				body: "first",
+				audience: "direct",
+			});
+			const secondId = busA.sendMessage({
+				fromPeer: "peer-a",
+				toPeer: "peer-b",
+				body: "second",
+				audience: "direct",
+			});
 
 			expect(busB.drainMessages("peer-b", { peek: true }).map(message => message.id)).toEqual([firstId, secondId]);
 			expect(busB.unreadCount("peer-b")).toBe(2);
@@ -326,9 +342,7 @@ describe("IrcExternalBus", () => {
 				$pid: 555,
 				$lastSeen: new Date().toISOString(),
 			});
-			db.query(
-				"INSERT INTO messages (ts, from_peer, to_peer, body) VALUES ($ts, $fromPeer, $toPeer, $body)",
-			).run({
+			db.query("INSERT INTO messages (ts, from_peer, to_peer, body) VALUES ($ts, $fromPeer, $toPeer, $body)").run({
 				$ts: new Date().toISOString(),
 				$fromPeer: "legacy",
 				$toPeer: "recipient",

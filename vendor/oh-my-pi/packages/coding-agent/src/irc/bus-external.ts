@@ -2,21 +2,14 @@ import { Database } from "bun:sqlite";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import {
-	classifyFleetBuildProvenance,
-	decodeFleetCapability,
-	type FleetCapability,
-} from "../session/fleet-capability";
-import {
-	decodeProcessIdentity,
-	type ProcessIdentity,
-	readProcessIdentity,
-} from "../resource/process-identity";
+import { decodeProcessIdentity, type ProcessIdentity, readProcessIdentity } from "../resource/process-identity";
+import { classifyFleetBuildProvenance, decodeFleetCapability, type FleetCapability } from "../session/fleet-capability";
 import type { IrcDeliveryRecord, IrcMessageOrigin } from "./bus";
 
 export type IrcExternalPeerState = "unknown" | "working" | "waiting_input" | "idle" | "paused";
 export type IrcExternalPeerDisplayState = IrcExternalPeerState | "disconnected";
 export type IrcExternalMessageOrigin = IrcMessageOrigin;
+export type IrcExternalMessageAudience = "direct" | "broadcast";
 
 /** Structured self-description published by a session at registration and heartbeat. */
 export interface IrcExternalPeerLabels {
@@ -73,6 +66,7 @@ export interface IrcExternalMessage {
 	toPeer: string;
 	body: string;
 	origin: IrcExternalMessageOrigin;
+	audience: IrcExternalMessageAudience;
 }
 
 interface PeerRow {
@@ -101,6 +95,7 @@ interface MessageRow {
 	to_peer: string;
 	body: string;
 	origin: string;
+	audience?: string | null;
 	delivered: number;
 }
 
@@ -155,7 +150,9 @@ export function isIrcExternalPeerProcessAlive(pid: number): boolean {
 function isTempPeer(peer: IrcExternalPeer): boolean {
 	const resolved = path.resolve(peer.cwd);
 	const tempRoot = path.resolve(os.tmpdir());
-	return resolved === tempRoot || resolved.startsWith(`${tempRoot}${path.sep}`) || resolved.startsWith("/var/folders/");
+	return (
+		resolved === tempRoot || resolved.startsWith(`${tempRoot}${path.sep}`) || resolved.startsWith("/var/folders/")
+	);
 }
 
 function hasTestOrTempProvenance(peer: IrcExternalPeer): boolean {
@@ -179,7 +176,9 @@ function parseTime(value: string): number {
 }
 
 function normalizePeerState(value: string): IrcExternalPeerState {
-	return value === "working" || value === "waiting_input" || value === "idle" || value === "paused" ? value : "unknown";
+	return value === "working" || value === "waiting_input" || value === "idle" || value === "paused"
+		? value
+		: "unknown";
 }
 
 function decodeFleetCapabilityJson(value: string | null): FleetCapability | undefined {
@@ -264,7 +263,6 @@ function decodeLabelJson(value: string | null): IrcExternalPeerLabels | undefine
 	}
 }
 
-
 export function getIrcExternalPeerDisplayState(
 	peer: Pick<IrcExternalPeer, "lastSeen" | "state">,
 	nowMs = Date.now(),
@@ -342,7 +340,6 @@ function toUnregisteredPeer(peer: IrcExternalRegistration, pid: number): IrcExte
 	};
 }
 
-
 function toMessage(row: MessageRow): IrcExternalMessage {
 	return {
 		id: row.id,
@@ -351,6 +348,7 @@ function toMessage(row: MessageRow): IrcExternalMessage {
 		toPeer: row.to_peer,
 		body: row.body,
 		origin: row.origin === "user" || row.origin === "system" ? row.origin : "agent",
+		audience: row.audience === "broadcast" ? "broadcast" : "direct",
 	};
 }
 
@@ -378,6 +376,7 @@ export class IrcExternalBus {
 	#fleetCapabilitySelect = "fleet_capability_json";
 	#labelSelect = "label_json";
 	#processIdentitySelect = "process_identity_json";
+	#messageAudienceSelect = "audience";
 
 	#ensurePeerStateColumns(): void {
 		const columns = new Set(
@@ -420,7 +419,7 @@ export class IrcExternalBus {
 			this.#db.run("ALTER TABLE peers ADD COLUMN agent_id TEXT");
 		}
 	}
-	#ensureMessageOriginColumn(): void {
+	#ensureMessageMetadataColumns(): void {
 		const columns = new Set(
 			this.#db
 				.query<TableInfoRow, []>("PRAGMA table_info(messages)")
@@ -429,6 +428,9 @@ export class IrcExternalBus {
 		);
 		if (!columns.has("origin")) {
 			this.#db.run("ALTER TABLE messages ADD COLUMN origin TEXT NOT NULL DEFAULT 'agent'");
+		}
+		if (!columns.has("audience")) {
+			this.#db.run("ALTER TABLE messages ADD COLUMN audience TEXT NOT NULL DEFAULT 'direct'");
 		}
 	}
 
@@ -441,7 +443,10 @@ export class IrcExternalBus {
 		return row ? toPeer(row) : undefined;
 	}
 
-	constructor(readonly dbPath: string = resolveIrcExternalDbPath(), options: IrcExternalBusOptions = {}) {
+	constructor(
+		readonly dbPath: string = resolveIrcExternalDbPath(),
+		options: IrcExternalBusOptions = {},
+	) {
 		this.#registrationEnabled = options.registrationEnabled ?? process.env.OMP_FLEET_REGISTER !== "0";
 		if (!options.readonly) fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 		this.#db = options.readonly ? new Database(dbPath, { readonly: true }) : new Database(dbPath);
@@ -460,6 +465,10 @@ export class IrcExternalBus {
 			}
 			if (!columns.some(column => column.name === "process_identity_json")) {
 				this.#processIdentitySelect = "NULL AS process_identity_json";
+			}
+			const messageColumns = this.#db.query<TableInfoRow, []>("PRAGMA table_info(messages)").all();
+			if (!messageColumns.some(column => column.name === "audience")) {
+				this.#messageAudienceSelect = "'direct' AS audience";
 			}
 			return;
 		}
@@ -492,10 +501,11 @@ export class IrcExternalBus {
 				from_peer TEXT,
 				to_peer TEXT,
 				body TEXT,
+				audience TEXT NOT NULL DEFAULT 'direct',
 				delivered INTEGER DEFAULT 0
 			)
 		`);
-		this.#ensureMessageOriginColumn();
+		this.#ensureMessageMetadataColumns();
 		this.#db.run("CREATE INDEX IF NOT EXISTS idx_irc_messages_to_delivered ON messages(to_peer, delivered, id)");
 		this.#db.run("CREATE INDEX IF NOT EXISTS idx_irc_peers_name ON peers(name)");
 	}
@@ -696,9 +706,7 @@ export class IrcExternalBus {
 		for (const candidate of candidates) {
 			if (ownerAlive(candidate.peer.pid)) continue;
 			const result = this.#db
-				.query(
-					"DELETE FROM peers WHERE session_id = $sessionId AND pid = $pid AND last_seen = $lastSeen",
-				)
+				.query("DELETE FROM peers WHERE session_id = $sessionId AND pid = $pid AND last_seen = $lastSeen")
 				.run({
 					$sessionId: candidate.peer.sessionId,
 					$pid: candidate.peer.pid,
@@ -721,10 +729,16 @@ export class IrcExternalBus {
 		return row ? toPeer(row) : undefined;
 	}
 
-	sendMessage(args: { fromPeer: string; toPeer: string; body: string; origin?: IrcExternalMessageOrigin }): number {
+	sendMessage(args: {
+		fromPeer: string;
+		toPeer: string;
+		body: string;
+		audience: IrcExternalMessageAudience;
+		origin?: IrcExternalMessageOrigin;
+	}): number {
 		const result = this.#db
 			.query(
-				"INSERT INTO messages (ts, from_peer, to_peer, body, origin) VALUES ($ts, $fromPeer, $toPeer, $body, $origin)",
+				"INSERT INTO messages (ts, from_peer, to_peer, body, origin, audience) VALUES ($ts, $fromPeer, $toPeer, $body, $origin, $audience)",
 			)
 			.run({
 				$ts: nowIso(),
@@ -732,6 +746,7 @@ export class IrcExternalBus {
 				$toPeer: args.toPeer,
 				$body: args.body,
 				$origin: args.origin ?? "agent",
+				$audience: args.audience,
 			});
 		return Number(result.lastInsertRowid);
 	}
@@ -739,7 +754,7 @@ export class IrcExternalBus {
 	pollMessages(toPeer: string): IrcExternalMessage[] {
 		return this.#db
 			.query<MessageRow, { $toPeer: string }>(
-				"SELECT id, ts, from_peer, to_peer, body, origin FROM messages WHERE to_peer = $toPeer AND delivered = 0 ORDER BY id",
+				`SELECT id, ts, from_peer, to_peer, body, origin, ${this.#messageAudienceSelect} FROM messages WHERE to_peer = $toPeer AND delivered = 0 ORDER BY id`,
 			)
 			.all({ $toPeer: toPeer })
 			.map(toMessage);

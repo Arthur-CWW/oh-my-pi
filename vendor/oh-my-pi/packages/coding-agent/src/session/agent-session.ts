@@ -223,6 +223,10 @@ import {
 	type IrcExternalPeerState,
 	resolveIrcExternalPeerName,
 } from "../irc/bus-external";
+import {
+	type PreparedExternalIrcInboundMessage,
+	prepareExternalIrcInboundMessage,
+} from "../irc/inbound-message-policy";
 import { releaseLspClientsForOwner } from "../lsp/client";
 import { resolveMemoryBackend } from "../memory-backend";
 import { getMnemopiSessionState, type MnemopiSessionState, setMnemopiSessionState } from "../mnemopi/state";
@@ -1428,6 +1432,7 @@ export class AgentSession {
 	// Incoming IRC messages received while a turn was streaming; drained as
 	// non-interrupting asides at the next step boundary (see the aside provider).
 	#pendingIrcAsides: CustomMessage[] = [];
+	#externalIrcPollPromise: Promise<void> | undefined;
 	#ircExternalSessionId: string | undefined;
 	#ircExternalPeerName: string | undefined;
 	#ircExternalPeerState: Exclude<IrcExternalPeerState, "unknown"> | undefined;
@@ -1885,7 +1890,7 @@ export class AgentSession {
 		// each step boundary as non-interrupting asides (see Agent.getAsideMessages),
 		// so they reach the model between requests without waiting for a yield.
 		this.agent.setAsideMessageProvider(() => {
-			this.#pollExternalIrcMessages();
+			void this.#pollExternalIrcMessages();
 			const pendingIrc = this.#pendingIrcAsides;
 			this.#pendingIrcAsides = [];
 			const thunks: AsideMessage[] = pendingIrc.map(record => () => record);
@@ -6466,7 +6471,7 @@ export class AgentSession {
 			// Flush any pending bash messages before the new prompt
 			this.#flushPendingBashMessages();
 			this.#flushPendingPythonMessages();
-			this.#flushPendingIrcAsides();
+			await this.#flushPendingIrcAsides();
 
 			// Reset todo reminder count on new user prompt
 			this.#todoReminderCount = 0;
@@ -13543,18 +13548,44 @@ export class AgentSession {
 		}
 	}
 
-	#pollExternalIrcMessages(): void {
-		if (this.#isDisposed) return;
+	#pollExternalIrcMessages(): Promise<void> {
+		if (this.#isDisposed) return Promise.resolve();
+		if (this.#externalIrcPollPromise) return this.#externalIrcPollPromise;
+		const poll = this.#drainExternalIrcMessages().catch(error => {
+			logger.warn("Failed to poll external IRC messages", { error: String(error) });
+		});
+		this.#externalIrcPollPromise = poll;
+		void poll.then(() => {
+			if (this.#externalIrcPollPromise === poll) this.#externalIrcPollPromise = undefined;
+		});
+		return poll;
+	}
+
+	async #drainExternalIrcMessages(): Promise<void> {
 		const { bus, name } = this.#registerExternalIrcPeer();
 		const messages = bus.pollMessages(name);
 		for (const message of messages) {
+			let prepared: PreparedExternalIrcInboundMessage;
+			try {
+				prepared = await prepareExternalIrcInboundMessage(message, {
+					inlineBodyMaxBytes: this.settings.get("irc.inboundInlineBodyMaxBytes"),
+					saveArtifact: body => this.sessionManager.saveArtifact(body, "irc"),
+				});
+			} catch (error) {
+				logger.warn("Failed to prepare external IRC message for context", {
+					error: String(error),
+					messageId: message.id,
+				});
+				continue;
+			}
+			if (this.#isDisposed) return;
 			const timestamp = Date.parse(message.ts) || Date.now();
 			const record: CustomMessage = {
 				role: "custom",
 				customType: "irc:incoming",
 				content: prompt.render(ircIncomingTemplate, {
 					from: message.fromPeer,
-					message: message.body,
+					message: prepared.body,
 					replyTo: "",
 					autoReplied: false,
 				}),
@@ -13562,7 +13593,7 @@ export class AgentSession {
 				details: {
 					id: `external:${message.id}`,
 					from: message.fromPeer,
-					message: message.body,
+					message: prepared.body,
 					origin: message.origin,
 				},
 				attribution: message.origin === "user" ? "user" : "agent",
@@ -13574,8 +13605,8 @@ export class AgentSession {
 		}
 	}
 
-	#flushPendingIrcAsides(): void {
-		this.#pollExternalIrcMessages();
+	async #flushPendingIrcAsides(): Promise<void> {
+		await this.#pollExternalIrcMessages();
 		if (this.#pendingIrcAsides.length === 0) return;
 		const records = this.#pendingIrcAsides;
 		this.#pendingIrcAsides = [];

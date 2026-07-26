@@ -89,7 +89,7 @@ function handleSend(cmd: IrcCliCommandArgs, bus: IrcExternalBus, io: IrcCliIo): 
 	}
 
 	const fromPeer = cmd.flags.from?.trim() || "human";
-	const id = bus.sendMessage({ fromPeer, toPeer: target.name, body });
+	const id = bus.sendMessage({ fromPeer, toPeer: target.name, body, audience: "direct" });
 	io.stdout.write(`Sent IRC message ${id} to ${target.name} from ${fromPeer}.\n`);
 	return { exitCode: 0 };
 }

@@ -7,11 +7,7 @@ import { createFleetCapability } from "../session/fleet-capability";
 import { CURRENT_SESSION_CONTROL_PROTOCOL } from "../session/session-control";
 import type { SessionEntry } from "../session/session-entries";
 import type { SessionManager } from "../session/session-manager";
-import {
-	FleetIncidentCoordinator,
-	type FleetIncident,
-	FleetIncidentStore,
-} from "./fleet-incident";
+import { type FleetIncident, FleetIncidentCoordinator, FleetIncidentStore } from "./fleet-incident";
 
 const INCIDENT_SOURCE = "fleet";
 const INCIDENT_CATEGORY = "fleet-incident";
@@ -105,9 +101,7 @@ async function broadcastIncident(incident: FleetIncident): Promise<void> {
 	const body = incidentMessage(incident, "open");
 	const internal = registry.listVisibleTo(MAIN_AGENT_ID).filter(ref => ref.kind === "sub");
 	await Promise.all(
-		internal.map(ref =>
-			IrcBus.global().send({ from: MAIN_AGENT_ID, to: ref.id, body, origin: "system" }),
-		),
+		internal.map(ref => IrcBus.global().send({ from: MAIN_AGENT_ID, to: ref.id, body, origin: "system" })),
 	);
 
 	try {
@@ -142,7 +136,7 @@ async function broadcastIncident(incident: FleetIncident): Promise<void> {
 						}),
 		});
 		for (const peer of bus.listPeers({ excludeSessionId: sessionId })) {
-			bus.sendMessage({ fromPeer: name, toPeer: peer.name, body, origin: "system" });
+			bus.sendMessage({ fromPeer: name, toPeer: peer.name, body, origin: "system", audience: "direct" });
 		}
 	} catch (error) {
 		logger.warn("Fleet incident external IRC broadcast failed", { incidentId: incident.id, error: String(error) });

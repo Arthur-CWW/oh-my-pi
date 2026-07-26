@@ -2,10 +2,7 @@ import { THINKING_EFFORTS } from "@oh-my-pi/pi-ai";
 import { DEFAULT_SHARE_URL } from "@oh-my-pi/pi-wire";
 import { SHAPE_VARIANT_NAMES } from "@oh-my-pi/snapcompact";
 import { DEFAULT_RELAY_URL } from "../collab/protocol";
-import {
-	DEFAULT_ATTEMPT_RESERVATION_BYTES,
-	defaultHostMemoryBudgetBytes,
-} from "../resource/host-resource-sampler";
+import { DEFAULT_ATTEMPT_RESERVATION_BYTES, defaultHostMemoryBudgetBytes } from "../resource/host-resource-sampler";
 import { DEFAULT_STT_MODEL_KEY, STT_MODEL_OPTIONS, STT_MODEL_VALUES } from "../stt/models";
 import { AUTO_THINKING, getConfiguredThinkingLevelMetadata, getThinkingLevelMetadata } from "../thinking";
 import {
@@ -3386,6 +3383,18 @@ export const SETTINGS_SCHEMA = {
 		},
 	},
 
+	"irc.inboundInlineBodyMaxBytes": {
+		type: "number",
+		default: 4096,
+		ui: {
+			tab: "tools",
+			group: "Execution",
+			label: "IRC Inline Body Limit",
+			description:
+				"Maximum UTF-8 byte size for an inbound external IRC body to enter model context directly; larger bodies are stored as artifacts",
+		},
+	},
+
 	"irc.peerName": {
 		type: "string",
 		default: "",
@@ -3798,8 +3807,7 @@ export const SETTINGS_SCHEMA = {
 			tab: "tasks",
 			group: "Subagents",
 			label: "Host Memory Budget",
-			description:
-				"Maximum memory bytes reserved and observed across subagents in every OMP session on this host",
+			description: "Maximum memory bytes reserved and observed across subagents in every OMP session on this host",
 		},
 	},
 	"task.globalAdmission.attemptReservationBytes": {

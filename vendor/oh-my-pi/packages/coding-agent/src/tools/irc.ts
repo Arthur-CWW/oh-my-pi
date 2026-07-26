@@ -313,7 +313,12 @@ export class IrcTool implements AgentTool<typeof ircSchema, IrcDetails> {
 					to,
 				});
 			}
-			external.bus.sendMessage({ fromPeer: external.name, toPeer: externalTarget.name, body: message });
+			external.bus.sendMessage({
+				fromPeer: external.name,
+				toPeer: externalTarget.name,
+				body: message,
+				audience: "direct",
+			});
 			const receipts: IrcDeliveryReceipt[] = [{ to: externalTarget.name, outcome: "injected" }];
 			return {
 				content: [{ type: "text", text: `Delivered to 1 peer(s):\n- ${externalTarget.name}: injected` }],

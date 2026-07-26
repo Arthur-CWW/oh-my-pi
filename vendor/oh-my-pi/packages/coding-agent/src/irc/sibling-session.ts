@@ -29,8 +29,13 @@ export function watchSiblingTranscript(sessionFile: string, onAppend: () => void
 }
 
 /** Operator-authored cockpit input retains user provenance across the external bus. */
-export function sendSiblingUserMessage(bus: IrcExternalBus, fromPeer: string, peer: IrcExternalPeer, body: string): number {
+export function sendSiblingUserMessage(
+	bus: IrcExternalBus,
+	fromPeer: string,
+	peer: IrcExternalPeer,
+	body: string,
+): number {
 	const message = body.trim();
 	if (!message) throw new Error("Cannot send an empty sibling message");
-	return bus.sendMessage({ fromPeer, toPeer: peer.name, body: message, origin: "user" });
+	return bus.sendMessage({ fromPeer, toPeer: peer.name, body: message, origin: "user", audience: "direct" });
 }
