@@ -1,10 +1,10 @@
 import {
+	type AssistantMessage,
 	classifyAbortReason,
 	classifyRequestFailure,
 	type RequestFailureCause,
 	type RetryCause,
 	requestFailureCauseFromRetryCause,
-	type AssistantMessage,
 } from "@oh-my-pi/pi-ai";
 import type { DiagnosticEventInput } from "../../session/error-inbox-ledger";
 
@@ -18,6 +18,77 @@ export type RequestFailureDisposition =
 export interface RequestFailureOwner {
 	readonly agent: string;
 	readonly session: string;
+}
+
+export const REQUEST_FAILURE_DETAIL_MAX_BYTES = 2 * 1024;
+const REDACTED_PROVIDER_SECRET = "[REDACTED]";
+
+const DOUBLE_QUOTED_SECRET_FIELD =
+	/((?:"(?:authorization|proxy-authorization|x-api-key|api[-_]?key|access[-_]?token|refresh[-_]?token|client[-_]?secret)"|(?:authorization|proxy-authorization|x-api-key|api[-_]?key|access[-_]?token|refresh[-_]?token|client[-_]?secret))\s*[:=]\s*)"[^"\r\n]*"/gi;
+const SINGLE_QUOTED_SECRET_FIELD =
+	/((?:'(?:authorization|proxy-authorization|x-api-key|api[-_]?key|access[-_]?token|refresh[-_]?token|client[-_]?secret)'|(?:authorization|proxy-authorization|x-api-key|api[-_]?key|access[-_]?token|refresh[-_]?token|client[-_]?secret))\s*[:=]\s*)'[^'\r\n]*'/gi;
+const UNQUOTED_SECRET_FIELD =
+	/(\b(?:authorization|proxy-authorization|x-api-key|api[-_]?key|access[-_]?token|refresh[-_]?token|client[-_]?secret)\b\s*[:=]\s*)(?:(?:bearer|basic)\s+)?[^\s,;}\]]+/gi;
+const AUTHORIZATION_CREDENTIAL = /\b(?:bearer|basic)\s+[A-Za-z0-9+/._~=-]+/gi;
+const PROVIDER_KEY_LITERAL = /\b(?:sk|pk|rk|tok|key|secret)[-_][A-Za-z0-9._~-]{12,}\b/g;
+
+function utf8ByteLength(codePoint: number): number {
+	if (codePoint <= 0x7f) return 1;
+	if (codePoint <= 0x7ff) return 2;
+	if (codePoint <= 0xffff) return 3;
+	return 4;
+}
+
+function boundUtf8(text: string, maxBytes: number): string {
+	const suffix = "…";
+	const contentBudget = maxBytes - 3;
+	let bytes = 0;
+	let codeUnitEnd = 0;
+	let boundedEnd = 0;
+	for (const character of text) {
+		bytes += utf8ByteLength(character.codePointAt(0) ?? 0);
+		codeUnitEnd += character.length;
+		if (bytes <= contentBudget) boundedEnd = codeUnitEnd;
+		if (bytes > maxBytes) return `${text.slice(0, boundedEnd)}${suffix}`;
+	}
+	return text;
+}
+
+/** Redact transport credentials before bounding provider-controlled failure text. */
+export function sanitizeRequestFailureDetail(detail: string): string {
+	const redacted = detail
+		.toWellFormed()
+		.replace(DOUBLE_QUOTED_SECRET_FIELD, `$1"${REDACTED_PROVIDER_SECRET}"`)
+		.replace(SINGLE_QUOTED_SECRET_FIELD, `$1'${REDACTED_PROVIDER_SECRET}'`)
+		.replace(UNQUOTED_SECRET_FIELD, `$1${REDACTED_PROVIDER_SECRET}`)
+		.replace(AUTHORIZATION_CREDENTIAL, REDACTED_PROVIDER_SECRET)
+		.replace(PROVIDER_KEY_LITERAL, REDACTED_PROVIDER_SECRET)
+		.trim();
+	return boundUtf8(redacted, REQUEST_FAILURE_DETAIL_MAX_BYTES);
+}
+
+function formatProviderStopDetail(message: AssistantMessage): string | undefined {
+	const stopDetails = message.stopDetails;
+	if (!stopDetails) return undefined;
+	const type = stopDetails.type?.trim();
+	const category = stopDetails.category?.trim();
+	const explanation = stopDetails.explanation?.trim();
+	if (!type && !category && !explanation) return undefined;
+	const classification = [type || "unknown", category ? `category=${category}` : undefined].filter(Boolean).join(" ");
+	return explanation
+		? `Provider stop reason: ${classification} — ${explanation}`
+		: `Provider stop reason: ${classification}`;
+}
+
+export function extractRequestFailureDetail(message: AssistantMessage, rawDetail = message.errorMessage): string {
+	const sdkOrHttpDetail = rawDetail?.trim();
+	const stopDetail = formatProviderStopDetail(message);
+	if (!sdkOrHttpDetail) return stopDetail ?? "Provider returned no error detail";
+	const explanation = message.stopDetails?.explanation?.trim();
+	if (stopDetail && explanation && !sdkOrHttpDetail.includes(explanation)) {
+		return `${sdkOrHttpDetail}\n${stopDetail}`;
+	}
+	return sdkOrHttpDetail;
 }
 
 function failureAction(cause: RequestFailureCause): string {
@@ -62,7 +133,7 @@ export function formatRequestFailureHeadline(
 
 function classifyAssistantRequestFailure(
 	message: AssistantMessage,
-	detail = message.errorMessage ?? "Provider returned no error detail",
+	detail = extractRequestFailureDetail(message),
 ): RequestFailureCause {
 	return classifyRequestFailure({
 		failureCause: message.stopReason === "aborted" ? classifyAbortReason(detail) : undefined,
@@ -77,14 +148,16 @@ export function buildRequestFailureDiagnostic(
 	disposition: RequestFailureDisposition,
 	retryCause?: RetryCause,
 ): DiagnosticEventInput {
-	const detail = message.errorMessage ?? "Provider returned no error detail";
-	const classifiedCause = classifyAssistantRequestFailure(message, detail);
+	const rawDetail = extractRequestFailureDetail(message);
+	const detail = sanitizeRequestFailureDetail(rawDetail);
+	const classifiedCause = classifyAssistantRequestFailure(message, rawDetail);
 	const cause =
 		retryCause && classifiedCause === "provider-error"
 			? requestFailureCauseFromRetryCause(retryCause)
 			: classifiedCause;
+	const headline = formatRequestFailureHeadline(message, cause, disposition);
 	return {
-		message: formatRequestFailureHeadline(message, cause, disposition),
+		message: `${headline}\nDetail: ${detail}`,
 		detail,
 		cause,
 		disposition: formatDisposition(disposition),
@@ -102,7 +175,7 @@ export function buildRequestFailureDiagnostic(
 }
 
 export function shouldAwaitRetryDisposition(message: AssistantMessage): boolean {
-	if (message.stopReason !== "error" || !message.errorMessage) return false;
+	if (message.stopReason !== "error") return false;
 	if (
 		message.content.some(
 			block =>
@@ -150,10 +223,11 @@ export class RequestFailurePresenter {
 		retryAttempt: number,
 		rawDetail = message.errorMessage,
 	): void {
-		if ((message.stopReason !== "error" && message.stopReason !== "aborted") || !rawDetail) return;
-		const cause = classifyAssistantRequestFailure(message, rawDetail);
+		if (message.stopReason !== "error" && message.stopReason !== "aborted") return;
+		const detail = extractRequestFailureDetail(message, rawDetail);
+		const cause = classifyAssistantRequestFailure(message, detail);
 		if (cause === "user-interrupt") return;
-		const pending = { message, component, rawDetail };
+		const pending = { message, component, rawDetail: detail };
 		if (retryEnabled && shouldAwaitRetryDisposition(message)) {
 			component.setErrorPinned(true);
 			this.#pending = pending;
@@ -201,7 +275,7 @@ export class RequestFailurePresenter {
 			disposition,
 			retryCause,
 		);
-		pending.message.errorMessage = `${diagnostic.message}\nDetail: ${pending.rawDetail}`;
+		pending.message.errorMessage = diagnostic.message;
 		pending.component.updateContent(pending.message);
 		pending.component.setErrorPinned(pin);
 		if (pin) {

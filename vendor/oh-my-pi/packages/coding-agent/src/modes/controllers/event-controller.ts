@@ -1,6 +1,6 @@
 import { INTENT_FIELD } from "@oh-my-pi/pi-agent-core";
 import { calculatePromptTokens } from "@oh-my-pi/pi-agent-core/compaction/compaction";
-import { type AssistantMessage, type ImageContent } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, ImageContent } from "@oh-my-pi/pi-ai";
 import { type Component, Loader, TERMINAL } from "@oh-my-pi/pi-tui";
 import { extractTextContent } from "../../commit/utils";
 import { settings } from "../../config/settings";
@@ -654,7 +654,7 @@ export class EventController {
 			this.ctx.streamingMessage = undefined;
 			if (
 				(event.message.stopReason === "error" || event.message.stopReason === "aborted") &&
-				event.message.errorMessage &&
+				(event.message.errorMessage !== undefined || event.message.stopDetails != null) &&
 				!isSilentAbort(event.message.errorMessage) &&
 				this.#lastAssistantComponent
 			) {
