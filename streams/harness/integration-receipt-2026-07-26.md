@@ -36,19 +36,21 @@ Ancestor-first, each identity preserved:
 13. `ltxokyyntrsl` / `c860ef3776d5` — inspect and sync remote routing safely
 14. `qnnskttxrowx` / `e59b3808cfc1` — derive host resource admission dynamically
 15. `pzyxsmrzuvqp` / `c42309335cba` — bound and reclaim durable control-plane outboxes; canonical reviewed head `c4f412c16fb0` rebased onto the verified union tip, retaining all seven newly tracked sources required by `index.ts`
+16. `nmmrwrnuutur` / `7edacc24d46d` — enforce exact responsibility routes; its earlier false red was caused by disabling real fleet registration in the test process
+17. `ulsysvyzulll` / `7a612258e865` — calibrate all 12 explicit responsibility routes: Luna 5.6 medium for quick task/explore/librarian/reviewer/QA/task, Sol 5.6 medium for plan/implementer/oracle/operator/synthesizer, and Opus 5 medium for designer; no high/xhigh default
+18. `skyqtmrtxpqn` / `1539e5a04366` — resume interrupted subagents in place; the integration also treats a schema-less optional fleet index as absent instead of leaking SQLite's `no such table`
+19. `tzpkrnzttmwm` / `2f6e9105a332` — ENOSPC-safe atomic config writes, the required foundation for reset redemption
+20. `zupzwxovtkvq` / `2d78c9708681` — report and salvage expiring Codex reset credits
+21. `znrulyrxqlxy` / `9dd9a9fc49af` — bound control-plane storage; reviewed outbox implementations win overlapping files while this identity adds the cold tier, daemon, CLI, and launchd policy
+22. `lnlnmqrkpxxl` / `a92e6332d53c` — guard heavy work under disk pressure
+23. `lvowwnytwqzm` / `4cdd8b89d58d` — coalesce remote tmux workstreams natively; routing proof was updated to the required Opus 5 calibrated route
+24. `wlzlpqmmprwt` / `d870c8492ab5` — Majordomo directory and fenced migration control; preserves both IRC direct-audience hygiene and host identity
 
 The pre-existing ancestry from `xnvuspywkvrw` through `xqwrqwpwttnu`, plus the two old-main commits on the merge's other parent, remains intact. No leaf copy replaced those identities.
 
 ## Excluded with evidence
 
-- `nmmrwrnu` — excluded. `provider-policy-cli.test.ts` reproducibly failed: 6 passed, 1 failed; the expected drift row (`appliedSequence: 1`, `headSequence: 2`) was `[]`.
-- `ulsysvyz` — excluded with its mandatory parent pair because `nmmrwrnu` was not green. Therefore no partial YAML calibration was landed; the main `.omp/*.yml` files remain the prior verified configuration rather than a half-applied pair.
-- `zupzwxov` — excluded. On the actual `main + wuxylmtv` parent, the focused run ended 5 passed, 2 failed, 2 import errors: `codex-expiry-reset.ts` could not resolve `../config/atomic-config-writer`.
-- `znrulyrx` — excluded. The control-plane suite ended 15 passed, 17 failed, 17 import errors; `src/outbox.ts` could not resolve `./relay-schema`, and the package also lacked required `http-api`/`drizzle-orm` resolution on this lineage.
-- `lnlnmqrk` — excluded with its required `znrulyrx` parent because the storage-bound foundation was not green.
-- `skyqtmrt` — excluded. The focused child/history suite reproducibly ended 27 passed, 1 failed; `history://NeverReserved` produced `no such table: peers` instead of `Unknown agent: NeverReserved` under isolated HOME/control state.
-- `lvowwnyt` — excluded. Both changed paths (`catalog/remote-workspaces.yml`, `scripts/remote-workspace.nu`) were deletion conflicts because its required remote-routing foundation had not yet landed at its prescribed position; resolving it there would have silently imported `ltxokyyn` under the wrong identity.
-- `wlzlpqmm` — excluded. Its four-way union resolution failed coding-agent `check:types`: `agent-session.ts(12410,6)` supplied `audience`, but the rebased `IrcExternalBus.sendMessage` input no longer accepted that field. Landing it would delete the sibling audience-boundary behavior.
+All six previously blocked priority units are now integrated and green. Their earlier failures were traced to omitted lineage foundations, intentionally disabled fleet registration in tests that exercise registration, or stale routing expectations—not accepted as permanent exclusions.
 - Duplicate losers remain excluded: `ruxxltns` (survivor `wlzlpqmm`), `nqzsksmo` (survivor `vqqopsnn`), `rxqzrmpm` (survivor `tkuzrpsv`), and `stssxsor/764449bc` (survivor `stssxsor/e7cef9b1`).
 - Active-owner exclusions remain untouched: `uwornqxy`, `pzxymppy`, and `rvzlvzuk`.
 - The nested cmux and separate dotfiles repositories were not touched. No push and no deploy occurred.
@@ -69,8 +71,29 @@ This receipt was written before the final union run. Observed commands and outpu
 - With `HOME`, `TMPDIR`, `AGENT_CONTROL_PLANE_OUTBOX_DIR`, `AGENT_CONTROL_PLANE_RAW_DIR`, and `OMP_SESSION_CONTROL_DB` under one fresh package-local directory: `bun test ./test/ingest-raw-reference.test.ts ./test/ingest.test.ts ./test/omp-publisher.test.ts ./test/outbox-limits.test.ts ./test/outbox-migrate.test.ts ./test/outbox-retention.test.ts ./test/publisher-ingest.test.ts ./test/raw-capture.test.ts ./test/storage.test.ts`
   - 45 passed, 0 failed, 286 expectations
   - exit 0
-- Thirteen isolated `bun test` invocations covering all 27 focused coding-agent files touched by the integrated changes, each with a fresh HOME and session-control database
-  - 218 passed, 0 failed, 846 expectations
+- Thirteen isolated legacy-focused coding-agent invocations covering the 27 pre-wave-3 files, each with fresh HOME/TMPDIR/session-control state. Task-spawn fixtures set test-only low disk thresholds so the real 17 GiB host guard does not mask the behavior under test.
+  - 219 passed, 0 failed, 852 expectations
+  - exit 0
+- Routing enforcement group: responsibility enforcement, route resolution, spawn receipts, Agent Hub provenance, and policy CLI
+  - 54 passed, 0 failed, 275 expectations
+  - exit 0
+- Config durability group: atomic writer and live reload
+  - 8 passed, 0 failed, 38 expectations
+  - exit 0
+- Codex reset automation group in coding-agent
+  - 41 passed, 0 failed, 85 expectations
+  - exit 0
+- `cd packages/ai && bun test ./test/auth-storage-reset-expiry.test.ts`
+  - 2 passed, 0 failed, 6 expectations
+  - exit 0
+- Disk-pressure guard with production defaults
+  - 6 passed, 0 failed, 24 expectations
+  - exit 0
+- Child resume plus history routing
+  - 29 passed, 0 failed, 135 expectations
+  - exit 0
+- Majordomo migration core plus session directory
+  - 14 passed, 0 failed, 57 expectations
   - exit 0
 - `cd packages/fleet-sync && bun test ./test/fleet-sync.test.ts`
   - 5 passed, 0 failed, 30 expectations

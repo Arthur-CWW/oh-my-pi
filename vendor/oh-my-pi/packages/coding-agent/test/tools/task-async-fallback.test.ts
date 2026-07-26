@@ -1,9 +1,23 @@
 import { afterEach, describe, expect, it, vi } from "bun:test";
+import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { TaskTool } from "@oh-my-pi/pi-coding-agent/task";
 import * as discoveryModule from "@oh-my-pi/pi-coding-agent/task/discovery";
 import type { TaskParams } from "@oh-my-pi/pi-coding-agent/task/types";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
+
+const routeModel = buildModel({
+	id: "gpt-5.6-sol",
+	name: "Sol",
+	api: "openai-responses",
+	provider: "openai-codex",
+	baseUrl: "https://api.openai.com/v1",
+	reasoning: false,
+	input: ["text"],
+	cost: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 },
+	contextWindow: 128000,
+	maxTokens: 8192,
+});
 
 function createSession(overrides: Partial<Record<string, unknown>> = {}): ToolSession {
 	return {
@@ -12,6 +26,7 @@ function createSession(overrides: Partial<Record<string, unknown>> = {}): ToolSe
 		settings: Settings.isolated(overrides),
 		getSessionFile: () => null,
 		getSessionSpawns: () => "*",
+		modelRegistry: { getAvailable: () => [routeModel] },
 	} as unknown as ToolSession;
 }
 
@@ -27,7 +42,7 @@ describe("task.async-fallback", () => {
 
 	it("falls back to sync execution without rediscovering task capabilities", async () => {
 		// The missing asyncJobManager routes through the synchronous run path.
-		// A deliberately invalid model stops after responsibility resolution,
+		// An explicit responsibility route reaches the live-parent precondition,
 		// proving that path retains the create-time capability snapshot.
 		const discoverSpy = vi.spyOn(discoveryModule, "discoverAgents");
 		discoverSpy.mockResolvedValueOnce({
@@ -44,7 +59,15 @@ describe("task.async-fallback", () => {
 		discoverSpy.mockResolvedValue({ agents: [], projectAgentsDir: null });
 
 		// Enable async so the missing `asyncJobManager` is the fallback trigger.
-		const tool = await TaskTool.create(createSession({ "async.enabled": true }));
+		const tool = await TaskTool.create(
+			createSession({
+				"async.enabled": true,
+				modelRoles: {
+					task: "openai-codex/gpt-5.6-luna:medium",
+					implementer: "openai-codex/gpt-5.6-sol:medium",
+				},
+			}),
+		);
 
 		const result = await tool.execute("tool-1", {
 			agent: "task",
@@ -55,8 +78,8 @@ describe("task.async-fallback", () => {
 		} as TaskParams);
 
 		const text = getFirstText(result);
-		expect(discoverSpy).toHaveBeenCalledTimes(2);
-		expect(text).toContain("Durable subagent sessions require the live parent session file and id");
+		expect(discoverSpy).toHaveBeenCalledTimes(1);
+		expect(text).toContain('Invalid model override for task agent "task": not-a-real-model.');
 		expect(text).not.toContain('Unknown agent "task"');
 	});
 });

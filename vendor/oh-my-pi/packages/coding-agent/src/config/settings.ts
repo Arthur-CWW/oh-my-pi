@@ -950,7 +950,7 @@ export class Settings {
 	async #fileToken(filePath: string): Promise<string> {
 		try {
 			const stat = await fs.promises.stat(filePath, { bigint: true });
-			return `${stat.mtimeNs}:${stat.size}`;
+			return `${stat.dev}:${stat.ino}:${stat.mtimeNs}:${stat.ctimeNs}:${stat.size}`;
 		} catch (error) {
 			return isEnoent(error) ? "missing" : `error:${String(error)}`;
 		}
