@@ -461,7 +461,7 @@ describe("history:// protocol", () => {
 		expect(error?.message).toContain("HubAgent");
 	});
 
-	it("rejects a ref with neither session nor session file", async () => {
+	it("keeps a lost-transcript ref discoverable as a durable tombstone", async () => {
 		AgentRegistry.global().register({
 			id: "Husk",
 			displayName: "task",
@@ -471,14 +471,52 @@ describe("history:// protocol", () => {
 			status: "aborted",
 		});
 
-		const error = await InternalUrlRouter.instance()
-			.resolve("history://Husk")
-			.then(
-				() => null,
-				err => err as Error,
-			);
+		const resource = await InternalUrlRouter.instance().resolve("history://Husk");
 
-		expect(error?.message).toContain("no transcript");
+		expect(resource.content).toContain("# Husk (transcript lost)");
+		expect(resource.content).toContain('job {"resume":["Husk"]}');
+		expect(resource.notes).toContain("Source: durable registry tombstone (child transcript missing)");
+	});
+
+	it("lists and resolves a transcript-less child from the parent failure receipt alone", async () => {
+		const timestamp = new Date().toISOString();
+		const failure = {
+			type: "custom",
+			id: "lost-child-failure",
+			parentId: null,
+			timestamp,
+			customType: "ui_error",
+			data: {
+				version: 2,
+				source: "task",
+				agent: "Vanished",
+				job: "Vanished",
+				errorClass: "lost-transcript",
+				disposition: "resumable",
+				message: "worker died before writing its terminal journal record",
+				historyUri: "history://Vanished",
+				finalOutputAvailable: false,
+				lastTimestamp: Date.parse(timestamp),
+			},
+		} as const;
+		AgentRegistry.global().register({
+			id: "Main",
+			displayName: "Main",
+			kind: "main",
+			session: {
+				messages: [],
+				sessionManager: { getEntries: () => [failure] },
+			} as unknown as AgentSession,
+			status: "running",
+		});
+
+		const index = await InternalUrlRouter.instance().resolve("history://");
+		expect(index.content).toContain("| Vanished | transcript lost · resumable |");
+
+		const resource = await InternalUrlRouter.instance().resolve("history://Vanished");
+		expect(resource.content).toContain("# Vanished (transcript lost)");
+		expect(resource.content).toContain("Durable disposition: **resumable** (lost-transcript)");
+		expect(resource.notes).toContain("Source: parent journal failure receipt (child transcript missing)");
 	});
 
 	it("resolves a reserved starting agent as starting rather than unknown", async () => {

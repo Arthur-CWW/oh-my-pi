@@ -2,7 +2,7 @@
 
 - Spawning is non-blocking: the call returns immediately with the agent id{{#if batchEnabled}}s{{/if}} and job id{{#if batchEnabled}}s{{/if}}; each result is delivered automatically when that agent yields.
 - Parallelism = {{#if batchEnabled}}multiple `tasks[]` items in ONE call. To launch several subagents, you MUST batch them into a single call's `tasks[]` — they share `context` once instead of duplicating it. Separate `task` calls in one message are ONLY for spawns needing a different `agent` type or unrelated `context`{{else}}multiple `task` calls in one assistant message{{/if}}. Concurrency is bounded at {{MAX_CONCURRENCY}} running subagents per session.
-- If genuinely blocked on a result, wait with `job poll`; otherwise keep working. `job cancel` terminates a task and **cannot carry a message** — only for stalled/abandoned work.
+- If genuinely blocked on a result, wait with `job poll`; otherwise keep working. An interrupted/failed prior child MUST be recovered first with exact verb `job {"resume":["<id>"]}`. `job cancel` terminates a task and **cannot carry a message** — only for abandoned work.
 {{else}}{{#if batchEnabled}}Runs subagents synchronously — one per `tasks[]` item; a single spawn is a one-item batch.{{else}}Runs ONE subagent synchronously per call.{{/if}}
 
 - Spawning is blocking: the call returns only after the agent{{#if batchEnabled}}s{{/if}} finish; results arrive inline.
@@ -13,12 +13,12 @@
 {{/if}}
 
 <spawn-decision>
-{{#if ircEnabled}}- Before spawning a retry, continuation, or `NameResume`/`Name-2` variant, check `irc` op:"list". If the prior agent is idle or parked, send it one `irc` message by id; revive it in place with full context instead of spawning a duplicate.{{/if}}
+- Before spawning any retry, continuation, or `NameResume`/`Name-2` variant, run `job {"resume":["<prior-id>"]}`. It resumes from durable journal context or explains precisely why it cannot. Spawn a replacement only after an explicit unrecoverable refusal.{{#if ircEnabled}} Use `irc` messages for new follow-up instructions after the child is live, not as a substitute for recovering an interrupted assignment.{{/if}}
 </spawn-decision>
 
 <lifecycle>
-- Finished agents stay alive: `idle` first, then `parked` after a TTL.{{#if ircEnabled}} Both remain addressable and revivable: messaging one via `irc` wakes it and runs your message as a follow-up turn. **Prefer messaging an agent that already holds the relevant context over spawning fresh** — check `irc` op:"list" for candidates.{{/if}}
-- `history://<id>` is the agent's transcript; `agent://<id>` its latest output artifact.
+- Finished agents stay alive: `idle` first, then `parked` after a TTL. Interrupted agents remain durable job/history records. Recover them with `job {"resume":["<id>"]}` before respawning.{{#if ircEnabled}} Once live, messaging via `irc` wakes idle/parked children for a new follow-up turn.{{/if}}
+- `history://<id>` is the agent's transcript or durable lost-transcript receipt; `agent://<id>` its latest output artifact.
 </lifecycle>
 
 <parameters>

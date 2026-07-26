@@ -1380,25 +1380,24 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 			onUpdate,
 			onSettled,
 		} = options;
-		const buildFollowUpHint = (interrupted: boolean): string => {
+		const buildFollowUpHint = (needsRecovery: boolean): string => {
+			if (needsRecovery) {
+				return (
+					`\n\nRecover ${agentId} in place before any replacement spawn with exact verb ` +
+					`\`job {"resume":["${agentId}"]}\`. It will preserve the durable transcript and assignment or ` +
+					`explain precisely why recovery is unsafe. Transcript: history://${agentId}`
+				);
+			}
 			const ref = AgentRegistry.global().get(agentId);
 			const addressable =
 				(ref?.status === "running" || ref?.status === "idle") && ref.session !== null
 					? true
 					: ref?.status === "parked" && AgentLifecycleManager.global().canResumeInPlace(agentId);
-			if (!addressable) {
-				const reason = interrupted ? " after the interruption" : "";
-				return (
-					`\n\n${agentId} is no longer addressable${reason}. ` +
-					`Salvage its transcript at history://${agentId} before spawning replacement work.`
-				);
-			}
-			const state = interrupted ? "after the interruption" : "after this job";
+			if (!addressable) return `\n\nTranscript: history://${agentId}`;
 			const send = ircEnabled ? "Send" : "When `irc` is available, send";
 			return (
-				`\n\n${agentId} remains addressable ${state}. ${send} one \`irc\` message ` +
-				`(\`op:"send", to:"${agentId}"\`) to resume it in place with context intact; ` +
-				`transcript at history://${agentId}`
+				`\n\n${agentId} remains addressable. ${send} one \`irc\` message ` +
+				`(\`op:"send", to:"${agentId}"\`) for a new follow-up; transcript at history://${agentId}`
 			);
 		};
 		const attemptId = randomUUID();
@@ -1463,7 +1462,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 						content: [{ type: "text", text: statusText }],
 						details: buildDetails(resultFailed ? "failed" : "completed", ownJobId),
 					});
-					const deliveryText = `${finalText}${buildFollowUpHint(singleResult?.aborted === true)}`;
+					const deliveryText = `${finalText}${buildFollowUpHint(resultFailed || singleResult?.aborted === true)}`;
 					if (resultFailed) {
 						// Mark the job itself failed; the failed agent stays interrogable.
 						throw new TaskJobError(deliveryText);
@@ -1492,7 +1491,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 						content: [{ type: "text", text: statusText }],
 						details: buildDetails("failed", ownJobId),
 					});
-					const hint = buildFollowUpHint(false);
+					const hint = buildFollowUpHint(true);
 					throw new TaskJobError(`${message}${hint}`);
 				} finally {
 					// Finalize startup failure/terminal projection before capacity

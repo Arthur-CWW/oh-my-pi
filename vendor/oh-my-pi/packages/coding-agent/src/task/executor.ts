@@ -56,7 +56,12 @@ import { ToolAbortError } from "../tools/tool-errors";
 import type { EventBus } from "../utils/event-bus";
 import { buildNamedToolChoice } from "../utils/tool-choice";
 import type { WorkspaceTree } from "../workspace-tree";
-import { appendChildLifecycleRecord, type ChildLifecycleState } from "./child-lifecycle";
+import {
+	appendChildLifecycleRecord,
+	type ChildFailureClass,
+	type ChildLifecycleState,
+	type ChildResumeDisposition,
+} from "./child-lifecycle";
 import { type RestorableSessionModel, resolveRestorableSessionModel } from "./hotswap";
 import { getNumberField, getProgressUsageOutputTokens, getProgressUsageTokens } from "./progress-usage";
 import type { SpawnRouteReceipt } from "./route-resolution";
@@ -2204,7 +2209,13 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 	let sessionStatusSubscription: (() => void) | undefined;
 	let reviveSession: ((registerSubscription: (unsubscribe: () => void) => void) => Promise<AgentSession>) | null =
 		null;
-	let appendLifecycleState: ((state: ChildLifecycleState) => void) | undefined;
+	let appendLifecycleState:
+		| ((
+				state: ChildLifecycleState,
+				failureClass?: ChildFailureClass,
+				resumeDisposition?: ChildResumeDisposition,
+		  ) => void)
+		| undefined;
 	const followUpResultRouter = createFollowUpResultRouter({
 		id,
 		parentAgentId: spawnerId,
@@ -2513,9 +2524,21 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 			}
 
 			const parentOwnedToolNames = new Set(["todo"]);
-			function createLifecycleAppender(target: AgentSession): ((state: ChildLifecycleState) => void) | undefined {
+			function createLifecycleAppender(
+				target: AgentSession,
+			):
+				| ((
+						state: ChildLifecycleState,
+						failureClass?: ChildFailureClass,
+						resumeDisposition?: ChildResumeDisposition,
+				  ) => void)
+				| undefined {
 				if (!sessionFile || !persistedParentSessionFile) return undefined;
-				return (state: ChildLifecycleState): void => {
+				return (
+					state: ChildLifecycleState,
+					failureClass?: ChildFailureClass,
+					resumeDisposition?: ChildResumeDisposition,
+				): void => {
 					appendChildLifecycleRecord(target.sessionManager, {
 						version: 1,
 						agentId: id,
@@ -2525,6 +2548,8 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 						updatedAt: new Date().toISOString(),
 						...(target.model ? { modelId: `${target.model.provider}/${target.model.id}` } : {}),
 						...(target.thinkingLevel === undefined ? {} : { thinkingLevel: target.thinkingLevel }),
+						...(failureClass === undefined ? {} : { failureClass }),
+						...(resumeDisposition === undefined ? {} : { resumeDisposition }),
 					});
 				};
 			}
@@ -2697,14 +2722,18 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 			if (session) {
 				monitor.captureSalvage(session);
 				const softInterruptKeptAlive = monitor.interrupted() && worktree === undefined;
+				const timeoutKeptAlive = aborted && monitor.runtimeLimitExceeded() && worktree === undefined;
+				const lifecycleState = softInterruptKeptAlive
+					? "idle"
+					: monitor.interrupted()
+						? "interrupted"
+						: completed && exitCode === 0
+							? "completed"
+							: "failed";
 				appendLifecycleState?.(
-					softInterruptKeptAlive
-						? "idle"
-						: monitor.interrupted()
-							? "interrupted"
-							: completed && exitCode === 0
-								? "completed"
-								: "failed",
+					lifecycleState,
+					timeoutKeptAlive ? "wall_timeout" : lifecycleState === "failed" ? "fatal" : undefined,
+					timeoutKeptAlive ? "resumable" : lifecycleState === "failed" ? "unrecoverable" : undefined,
 				);
 				if (softInterruptKeptAlive) {
 					const requestedBy = monitor.interruptRequestedBy() ?? "the orchestrator";
@@ -2721,7 +2750,6 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 					);
 				}
 				const registry = AgentRegistry.global();
-				const timeoutKeptAlive = aborted && monitor.runtimeLimitExceeded() && worktree === undefined;
 				if (aborted && !timeoutKeptAlive) {
 					// Caller/budget aborts and isolated runtime timeouts are terminal
 					// teardowns. Non-isolated wall-clock timeouts keep the session live

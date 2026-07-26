@@ -4,13 +4,22 @@ import { Text } from "@oh-my-pi/pi-tui";
 import { prompt } from "@oh-my-pi/pi-utils";
 import { z } from "zod/v4";
 import type { AsyncJob, AsyncJobManager } from "../async";
+import { IrcExternalBus } from "../irc/bus-external";
 import type { RenderResultOptions } from "../extensibility/custom-tools/types";
 import { shimmerEnabled, shimmerText } from "../modes/theme/shimmer";
 import type { Theme } from "../modes/theme/theme";
 import jobDescription from "../prompts/tools/job.md" with { type: "text" };
 import { isAgentJobOwned } from "../registry/agent-ref";
 import { AgentRegistry, MAIN_AGENT_ID } from "../registry/agent-registry";
+import { appendChildLifecycleRecord } from "../task/child-lifecycle";
+import { createReAdoptedSessionReviver } from "../task/executor";
 import { type HotswapResult, hotswapAgentModel } from "../task/hotswap";
+import {
+	type DurableChildJobRecord,
+	listDurableChildJobs,
+	type ResumeInterruptedChildResult,
+	resumeInterruptedChild,
+} from "../task/re-adopt";
 import { Ellipsis, Hasher, type RenderCache, renderStatusLine, renderTreeList, truncateToWidth } from "../tui";
 import type { ToolSession } from "./index";
 import { resolveFallbackApproval } from "./job-fallback-approval";
@@ -32,6 +41,7 @@ const jobSchema = z.object({
 	cancel: z.array(z.string()).optional().describe("job ids to cancel"),
 	interrupt: z.array(z.string()).optional().describe("job ids to interrupt without killing the agent"),
 	interruptReason: z.string().optional().describe("why the job is being interrupted"),
+	resume: z.array(z.string()).optional().describe("stable child ids to resume in place from their journals"),
 	list: z.boolean().optional().describe("snapshot all jobs"),
 	fallbackApproval: z
 		.object({
@@ -77,6 +87,8 @@ interface JobSnapshot {
 	resultText?: string;
 	errorText?: string;
 	interrupted?: boolean;
+	outcome?: DurableChildJobRecord["outcome"];
+	resumable?: boolean;
 }
 
 type CancelStatus = "cancelled" | "not_found" | "already_completed";
@@ -94,10 +106,20 @@ interface InterruptOutcome {
 	message: string;
 }
 
+type ResumeStatus = ResumeInterruptedChildResult["status"];
+
+interface ResumeOutcome {
+	id: string;
+	status: ResumeStatus;
+	jobId?: string;
+	reason?: string;
+}
+
 export interface JobToolDetails {
 	jobs: JobSnapshot[];
 	cancelled?: { id: string; status: CancelStatus }[];
 	interrupted?: { id: string; status: InterruptStatus }[];
+	resumed?: ResumeOutcome[];
 }
 
 /**
@@ -117,7 +139,7 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 	readonly name = "job";
 	readonly approval = "read" as const;
 	readonly label = "Job";
-	readonly summary = "Manage background jobs and hot-swap the current session or descendant models";
+	readonly summary = "Manage and resume background jobs or hot-swap session models";
 	readonly description: string;
 	readonly parameters = jobSchema;
 	readonly strict = true;
@@ -144,21 +166,22 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 		if (params.fallbackApproval) {
 			if (
 				params.setModel ||
+				params.resume?.length ||
 				params.list ||
 				params.cancel?.length ||
 				params.interrupt?.length ||
 				params.poll?.length
 			) {
 				throw new ToolError(
-					"`fallbackApproval` cannot be combined with `setModel`, `list`, `poll`, `cancel`, or `interrupt`.",
+					"`fallbackApproval` cannot be combined with `setModel`, `resume`, `list`, `poll`, `cancel`, or `interrupt`.",
 				);
 			}
 			return resolveFallbackApproval(ownerId, params.fallbackApproval);
 		}
 
 		if (params.setModel) {
-			if (params.list || params.cancel?.length || params.interrupt?.length || params.poll?.length) {
-				throw new ToolError("`setModel` cannot be combined with `list`, `poll`, `cancel`, or `interrupt`.");
+			if (params.resume?.length || params.list || params.cancel?.length || params.interrupt?.length || params.poll?.length) {
+				throw new ToolError("`setModel` cannot be combined with `resume`, `list`, `poll`, `cancel`, or `interrupt`.");
 			}
 			const job = params.setModel.id === MAIN_AGENT_ID ? undefined : manager?.getJob(params.setModel.id);
 			if (job && !this.#ownsJob(job, ownerId)) {
@@ -185,6 +208,19 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 			return this.#buildHotswapResult(result);
 		}
 
+		if (params.resume?.length) {
+			if (params.list || params.cancel?.length || params.interrupt?.length || params.poll?.length) {
+				throw new ToolError("`resume` cannot be combined with `list`, `poll`, `cancel`, or `interrupt`.");
+			}
+			if (!manager) {
+				return {
+					content: [{ type: "text", text: "Resume refused: async execution is disabled." }],
+					details: { jobs: [] },
+				};
+			}
+			return this.#resumeChildren(params.resume, manager, ownerId);
+		}
+
 		if (!manager) {
 			return {
 				content: [{ type: "text", text: "Async execution is disabled; no background jobs are available." }],
@@ -192,12 +228,31 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 			};
 		}
 
-		// `list` is a read-only snapshot mode. Replaces the legacy `jobs://` URL.
+		// `list` combines live jobs with durable child records so subprocess
+		// death and parent restart never erase a known child id.
 		if (params.list) {
 			if (params.cancel?.length || params.interrupt?.length || params.poll?.length) {
 				throw new ToolError("`list` cannot be combined with `poll`, `cancel`, or `interrupt`.");
 			}
-			return this.#buildResult(manager, manager.getAllJobs(ownerFilter), []);
+			const durable = await this.#durableJobs(manager);
+			const live = manager.getAllJobs(ownerFilter);
+			const liveIds = new Set(live.map(job => job.id));
+			return this.#buildResult(
+				manager,
+				[
+					...live,
+					...durable
+						.filter(job => !liveIds.has(job.id))
+						.map(job => ({
+							...job,
+							type: "task" as const,
+							label: job.label,
+							errorText: job.errorText,
+							resumable: job.disposition === "resumable",
+						})),
+				],
+				[],
+			);
 		}
 
 		const cancelIds = params.cancel ?? [];
@@ -375,6 +430,132 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 		return this.#buildResult(manager, allTrackedJobs, cancelOutcomes, interruptOutcomes);
 	}
 
+	async #durableJobs(manager: AsyncJobManager): Promise<DurableChildJobRecord[]> {
+		const parentSessionFile = this.session.getSessionFile();
+		const parentSessionId = this.session.getSessionId?.();
+		const parentEntries = this.session.sessionManager?.getEntries();
+		if (!parentSessionFile || !parentSessionId || !parentEntries) return [];
+		return listDurableChildJobs({
+			parentSessionFile,
+			parentSessionId,
+			parentEntries,
+			manager,
+			externalBus: IrcExternalBus.global(),
+		});
+	}
+
+	async #resumeChildren(
+		ids: readonly string[],
+		manager: AsyncJobManager,
+		ownerId: string | undefined,
+	): Promise<AgentToolResult<JobToolDetails>> {
+		const parentSessionFile = this.session.getSessionFile();
+		const parentSessionId = this.session.getSessionId?.();
+		const parentJournal = this.session.sessionManager;
+		const modelRegistry = this.session.modelRegistry;
+		if (!parentSessionFile || !parentSessionId || !parentJournal || !modelRegistry) {
+			return {
+				content: [{ type: "text", text: "Resume refused: durable parent journal or model registry is unavailable." }],
+				details: { jobs: [] },
+			};
+		}
+		const results = await Promise.all(
+			[...new Set(ids.map(id => id.trim()).filter(Boolean))].map(agentId =>
+				resumeInterruptedChild({
+					agentId,
+					parentSessionFile,
+					parentSessionId,
+					parentJournal,
+					manager,
+					idleTtlMs: Math.trunc(Number(this.session.settings.get("task.agentIdleTtlMs") ?? 420_000) || 0),
+					externalBus: IrcExternalBus.global(),
+					createReviver: (child, init) =>
+						createReAdoptedSessionReviver({
+							id: child.id,
+							displayName: child.displayName,
+							sessionFile: child.sessionFile,
+							systemPrompt: init.systemPrompt,
+							tools: init.tools,
+							outputSchema: init.outputSchema,
+							model: child.model,
+							thinkingLevel: child.thinkingLevel,
+							hotswapModel: child.hotswapModel,
+							taskDepth: child.taskDepth,
+							parentTaskPrefix: child.parentTaskPrefix,
+							settings: this.session.settings,
+							modelRegistry,
+						}),
+					startTurn: (child, childSession) =>
+						manager.register(
+							"task",
+							child.id,
+							async ({ signal, markRunning }) => {
+								markRunning();
+								const abort = (): void => childSession.agent.abort();
+								signal.addEventListener("abort", abort, { once: true });
+								try {
+									await childSession.prompt(
+										"<system-directive>Resume the interrupted assignment from your preserved transcript. Continue from the last safe point; do not restart or repeat completed work.</system-directive>",
+										{ synthetic: true, userInitiated: true, attribution: "agent" },
+									);
+									appendChildLifecycleRecord(childSession.sessionManager, {
+										version: 1,
+										agentId: child.id,
+										childSessionFile: child.sessionFile,
+										parentSessionFile,
+										state: "completed",
+										updatedAt: new Date().toISOString(),
+									});
+									await childSession.sessionManager.flush();
+									return `Resumed background task ${child.id} complete. Transcript: history://${child.id}`;
+								} catch (error) {
+									appendChildLifecycleRecord(childSession.sessionManager, {
+										version: 1,
+										agentId: child.id,
+										childSessionFile: child.sessionFile,
+										parentSessionFile,
+										state: "failed",
+										failureClass: "fatal",
+										resumeDisposition: "unrecoverable",
+										updatedAt: new Date().toISOString(),
+									});
+									await childSession.sessionManager.flush();
+									throw error;
+								} finally {
+									signal.removeEventListener("abort", abort);
+								}
+							},
+							{ id: child.id, ownerId, replaceTerminal: true },
+						),
+				}),
+			),
+		);
+		const outcomes: ResumeOutcome[] = results.map(result => ({
+			id: result.agentId,
+			status: result.status,
+			...(result.status === "started" || result.status === "already_running" ? { jobId: result.jobId } : {}),
+			...(result.status === "refused" ? { reason: result.reason } : {}),
+		}));
+		const lines = results.map(result => {
+			if (result.status === "started") {
+				return `Resume started: ${result.agentId} resumed in place as job \`${result.jobId}\` from ${result.transcriptUri}; original assignment preserved.`;
+			}
+			if (result.status === "already_running") {
+				return `Resume unchanged: ${result.agentId} is already running as job \`${result.jobId}\`; no duplicate was started.`;
+			}
+			return `Resume refused: ${result.agentId} — ${result.reason}.`;
+		});
+		const jobs = results.flatMap(result => {
+			if (result.status === "refused") return [];
+			const job = manager.getJob(result.jobId);
+			return job ? [job] : [];
+		});
+		return {
+			content: [{ type: "text", text: lines.join("\n") }],
+			details: { jobs: this.#snapshotJobs(jobs), resumed: outcomes },
+		};
+	}
+
 	/** Resolve job ids within the caller's complete registered agent subtree. */
 	#visibleJobs(manager: AsyncJobManager, ids: string[], ownerId: string | undefined): AsyncJob[] {
 		const out: AsyncJob[] = [];
@@ -400,6 +581,8 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 			errorText?: string;
 			interruptRequested?: boolean;
 			interrupted?: boolean;
+			outcome?: DurableChildJobRecord["outcome"];
+			resumable?: boolean;
 		}[],
 	): JobSnapshot[] {
 		const now = Date.now();
@@ -415,6 +598,8 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 				...(latest.resultText ? { resultText: latest.resultText } : {}),
 				...(latest.errorText ? { errorText: latest.errorText } : {}),
 				...(latest.interrupted || latest.interruptRequested ? { interrupted: true } : {}),
+				...("outcome" in latest && latest.outcome ? { outcome: latest.outcome } : {}),
+				...("resumable" in latest && latest.resumable ? { resumable: true } : {}),
 			};
 		});
 	}
@@ -443,6 +628,8 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 			errorText?: string;
 			interruptRequested?: boolean;
 			interrupted?: boolean;
+			outcome?: DurableChildJobRecord["outcome"];
+			resumable?: boolean;
 		}[],
 		cancelOutcomes: CancelOutcome[],
 		interruptOutcomes: InterruptOutcome[] = [],
@@ -524,6 +711,7 @@ interface JobRenderArgs {
 	cancel?: string[];
 	interrupt?: string[];
 	interruptReason?: string;
+	resume?: string[];
 	list?: boolean;
 	fallbackApproval?: {
 		id: string;
@@ -595,6 +783,8 @@ function flattenStructuredPreview(text: string): string {
 function describeTarget(args: JobRenderArgs | undefined): string {
 	if (args?.list) return "background jobs";
 	if (args?.setModel) return `swap model of ${args.setModel.id}`;
+	if (args?.resume?.length)
+		return args.resume.length === 1 ? `resume ${args.resume[0]}` : `resume ${args.resume.length} agents`;
 	if (args?.fallbackApproval) return `resolve fallback for ${args.fallbackApproval.id}`;
 	const poll = args?.poll ?? [];
 	const cancel = args?.cancel ?? [];
@@ -632,7 +822,9 @@ export const jobToolRenderer = {
 		if (jobs.length === 0) {
 			const fallback = result.content?.find(c => c.type === "text")?.text || "No jobs to process";
 			const icon: ToolUIStatus =
-				(args?.setModel && !fallback.startsWith("Hot-swap failed:")) || args?.fallbackApproval
+				(args?.setModel && !fallback.startsWith("Hot-swap failed:")) ||
+				(args?.resume && !fallback.startsWith("Resume refused:")) ||
+				args?.fallbackApproval
 					? "success"
 					: "warning";
 			const header = renderStatusLine({ icon, title: describeTarget(args) || "Job" }, uiTheme);

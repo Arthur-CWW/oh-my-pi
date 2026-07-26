@@ -1,6 +1,6 @@
-Inspects, waits, interrupts, cancels async jobs, resolves fallback proposals, or hot-swaps the current Main session or a direct child's model.
+Inspects, waits, resumes, interrupts, cancels async jobs, resolves fallback proposals, or hot-swaps the current Main session or a direct child's model.
 
-Background job results are delivered automatically when complete. Reach for this tool only when you need to intervene. Interrupt stops a subagent's current turn but keeps it alive for follow-up; cancel kills abandoned/stalled work. Model swaps apply immediately when the target is idle, otherwise at the next safe turn boundary; the target is told that it was swapped.
+Background job results are delivered automatically when complete. Reach for this tool only when you need to intervene. **Before spawning any retry or continuation, use `resume: ["<id>"]` to revive the existing child in place.** Resume reads the child's durable journal, preserves its id/transcript/workspace/assignment, and refuses rather than duplicating a live owner. Interrupt stops a subagent's current turn but keeps it alive for resume; cancel kills abandoned work. Model swaps apply immediately when the target is idle, otherwise at the next safe turn boundary.
 
 # Operations
 
@@ -13,6 +13,13 @@ Block until the specified jobs finish or the wait window elapses. Omit `poll` (w
 - Returns the current snapshot when the timer elapses; running jobs remain running.
 - Completed jobs include their final output in the returned snapshot.
 - With Max Poll Time set to `smart` (the default), the wait window adapts: it starts at ~5s and lengthens with each back-to-back poll (up to ~5m), then resets to ~5s after you go a while without polling. Spinning in a poll loop costs progressively more; do real work between polls.
+
+## `resume: [id, …]`
+Resume interrupted child agents in place from their own durable journals.
+- This is the default recovery path before any replacement `task` spawn.
+- Preserves the stable agent id, transcript, workspace, and original assignment.
+- A live owner returns an idempotent already-running result or a refusal; it never starts a duplicate.
+- A missing, corrupt, isolated, completed, or unrecoverable journal explains the exact refusal.
 
 ## `cancel: [id, …]`
 Stop running jobs.

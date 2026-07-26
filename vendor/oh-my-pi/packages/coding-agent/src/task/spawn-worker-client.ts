@@ -23,6 +23,7 @@ import {
 	type SpawnWorkerRunRequest,
 	type SpawnWorkerSyntheticRequest,
 } from "./spawn-worker-protocol";
+import { isTransientHostResourceFailure } from "./subagent-failure";
 import type { AgentProgress, SingleResult } from "./types";
 
 const DEFAULT_MAX_RSS_BYTES = 1536 * 1024 * 1024;
@@ -31,6 +32,7 @@ const STDERR_CAP_BYTES = 64 * 1024;
 const SETUP_TIMEOUT_GRACE_MS = 60_000;
 const WORKER_REAP_TIMEOUT_MS = 1_500;
 const DEFAULT_STALL_THRESHOLD_MS = 5 * 60_000;
+const SPAWN_CONTENTION_RETRY_DELAYS_MS = [50, 200] as const;
 let spawnLaunchTail: Promise<void> = Promise.resolve();
 
 async function launchSpawnProcess(
@@ -42,23 +44,30 @@ async function launchSpawnProcess(
 	const { promise: turnComplete, resolve: releaseTurn } = Promise.withResolvers<void>();
 	spawnLaunchTail = turnComplete;
 	await previous;
-	await new Promise<void>(resolve => setTimeout(resolve, 10));
+	await Bun.sleep(10);
 	try {
-		if (signal?.aborted) throw new SpawnWorkerError("aborted", "Subagent subprocess aborted before spawn");
-		pushLoopPhase(`subagent:${requestId}:process-spawn`);
-		try {
-			return Bun.spawn({
-				cmd: command.cmd,
-				cwd: command.cwd,
-				env: Bun.env,
-				stdin: "pipe",
-				stdout: "pipe",
-				stderr: "pipe",
-				detached: true,
-				windowsHide: true,
-			});
-		} finally {
-			popLoopPhase();
+		for (let attempt = 0; ; attempt++) {
+			if (signal?.aborted) throw new SpawnWorkerError("aborted", "Subagent subprocess aborted before spawn");
+			pushLoopPhase(`subagent:${requestId}:process-spawn`);
+			try {
+				return Bun.spawn({
+					cmd: command.cmd,
+					cwd: command.cwd,
+					env: Bun.env,
+					stdin: "pipe",
+					stdout: "pipe",
+					stderr: "pipe",
+					detached: true,
+					windowsHide: true,
+				});
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				const delayMs = SPAWN_CONTENTION_RETRY_DELAYS_MS[attempt];
+				if (delayMs === undefined || !isTransientHostResourceFailure(message)) throw error;
+				await Bun.sleep(delayMs);
+			} finally {
+				popLoopPhase();
+			}
 		}
 	} finally {
 		releaseTurn();

@@ -175,6 +175,8 @@ export interface AsyncJobRegisterOptions {
 	queued?: boolean;
 	/** Isolated task jobs cannot be kept alive after an interrupt. */
 	isolated?: boolean;
+	/** Reuse a stable id after its prior terminal projection settled; never replaces live work. */
+	replaceTerminal?: boolean;
 }
 
 /**
@@ -314,6 +316,12 @@ export class AsyncJobManager {
 			throw new Error(
 				`Background job limit reached (${this.#maxRunningJobs}). Wait for running jobs to finish or cancel one.`,
 			);
+		}
+
+		const preferredId = options?.id?.trim();
+		if (preferredId && options?.replaceTerminal) {
+			const previous = this.#jobs.get(preferredId);
+			if (previous && previous.status !== "running") this.#evictJob(preferredId);
 		}
 
 		const id = this.#resolveJobId(options?.id);

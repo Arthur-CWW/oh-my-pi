@@ -24,6 +24,10 @@ import {
 	isTerminalChildLifecycleState,
 	latestChildLifecycleRecord,
 } from "../task/child-lifecycle";
+import {
+	type DurableSubagentFailureReceipt,
+	listDurableSubagentFailureReceipts,
+} from "../task/subagent-failure";
 import { formatIdPreview } from "./id-preview";
 import type { InternalResource, InternalUrl, ProtocolHandler, ResolveContext, UrlCompletion } from "./types";
 
@@ -43,6 +47,30 @@ export interface ArchivedHistoryRef {
 	id: string;
 	sessionFile: string;
 	reason: string;
+}
+
+async function listFailureHistoryTombstones(
+	refs: readonly AgentRef[],
+	archives: readonly ArchivedHistoryRef[],
+): Promise<DurableSubagentFailureReceipt[]> {
+	const main = refs.find(ref => ref.kind === "main");
+	let entries: FileEntry[] = [];
+	if (main?.session) {
+		entries = main.session.sessionManager.getEntries();
+	} else if (main?.sessionFile) {
+		try {
+			entries = (await fs.readFile(main.sessionFile, "utf8"))
+				.split("\n")
+				.filter(Boolean)
+				.map(line => JSON.parse(line) as FileEntry);
+		} catch {
+			return [];
+		}
+	}
+	const known = new Set([...refs.map(ref => ref.id.toLowerCase()), ...archives.map(ref => ref.id.toLowerCase())]);
+	return listDurableSubagentFailureReceipts(entries).filter(
+		receipt => !receipt.finalOutputAvailable && !known.has(receipt.agent.toLowerCase()),
+	);
 }
 
 export type ArchivedDirectChildState = "completed" | "failed" | "interrupted" | "legacy";
@@ -558,9 +586,10 @@ export class HistoryProtocolHandler implements ProtocolHandler {
 		const registry = AgentRegistry.global();
 		const refs = registry.list();
 		const archives = await listArchivedChildHistories(refs);
+		const tombstones = await listFailureHistoryTombstones(refs, archives);
 
 		if (!agentId) {
-			const content = this.#renderIndex(refs, archives);
+			const content = this.#renderIndex(refs, archives, tombstones);
 			return { url: url.href, content, contentType: "text/markdown", size: Buffer.byteLength(content, "utf-8") };
 		}
 
@@ -580,15 +609,36 @@ export class HistoryProtocolHandler implements ProtocolHandler {
 		const archive = ref
 			? undefined
 			: archives.find(candidate => candidate.id.toLowerCase() === agentId.toLowerCase());
-		if (!ref && !archive) {
+		const tombstone = ref || archive
+			? undefined
+			: tombstones.find(candidate => candidate.agent.toLowerCase() === agentId.toLowerCase());
+		if (!ref && !archive && !tombstone) {
 			const remote = await this.#resolveFleet(url.href, agentId, undefined, context?.ircDbPath, true, query);
 			if (remote) return remote;
-			const known = [...refs.map(candidate => candidate.id), ...archives.map(candidate => candidate.id)];
+			const known = [
+				...refs.map(candidate => candidate.id),
+				...archives.map(candidate => candidate.id),
+				...tombstones.map(candidate => candidate.agent),
+			];
 			throw new Error(
 				`Unknown agent: ${agentId}\nKnown agents: ${formatIdPreview(known)}\nList all with history://`,
 			);
 		}
 
+		if (tombstone) {
+			const content =
+				`# ${tombstone.agent} (transcript lost)\n\n` +
+				`${tombstone.message}\n\n` +
+				`Durable disposition: **${tombstone.disposition}** (${tombstone.errorClass}). ` +
+				`The agent id remains reserved; do not respawn a replacement blindly.\n`;
+			return {
+				url: url.href,
+				content,
+				contentType: "text/markdown",
+				size: Buffer.byteLength(content, "utf-8"),
+				notes: ["Source: parent journal failure receipt (child transcript missing)"],
+			};
+		}
 		// A reserved-but-not-yet-live child (nonblocking spawn whose gated body has
 		// not built a session) resolves as `starting` rather than unknown: the
 		// identity is genuinely known and queued, it just has no transcript to
@@ -619,9 +669,18 @@ export class HistoryProtocolHandler implements ProtocolHandler {
 			messages = await loadSessionMessagesReadOnly(ref.sessionFile);
 			notes.push(`Source: session file (read-only, ${ref.status})`);
 		} else {
-			throw new Error(
-				`Agent ${ref?.id ?? agentId} has no transcript: session is gone and no session file was retained`,
-			);
+			const id = ref?.id ?? agentId;
+			const content =
+				`# ${id} (transcript lost)\n\n` +
+				`Agent \`${id}\` is durably known but its child journal was never created or retained. ` +
+				`The id remains discoverable; \`job {"resume":["${id}"]}\` will explain whether recovery is possible.\n`;
+			return {
+				url: url.href,
+				content,
+				contentType: "text/markdown",
+				size: Buffer.byteLength(content, "utf-8"),
+				notes: ["Source: durable registry tombstone (child transcript missing)"],
+			};
 		}
 
 		const id = archive?.id ?? ref!.id;
@@ -653,7 +712,14 @@ export class HistoryProtocolHandler implements ProtocolHandler {
 			throw new Error(`Unable to read fleet sessions index for session ${sessionId}`);
 		}
 		try {
-			const peer = findFleetPeer(bus.listPeers(), sessionId);
+			let peers: IrcExternalPeer[];
+			try {
+				peers = bus.listPeers();
+			} catch {
+				if (allowMissing) return undefined;
+				throw new Error(`Unable to read fleet sessions index for session ${sessionId}`);
+			}
+			const peer = findFleetPeer(peers, sessionId);
 			if (!peer) {
 				if (allowMissing) return undefined;
 				throw new Error(`Unknown session: ${sessionId} (missing or stale from fleet sessions index)`);
@@ -692,7 +758,11 @@ export class HistoryProtocolHandler implements ProtocolHandler {
 		}
 	}
 
-	#renderIndex(refs: AgentRef[], archives: readonly ArchivedHistoryRef[]): string {
+	#renderIndex(
+		refs: AgentRef[],
+		archives: readonly ArchivedHistoryRef[],
+		tombstones: readonly DurableSubagentFailureReceipt[],
+	): string {
 		const lines: string[] = ["# Agents", "", "## Active and revivable", ""];
 		if (refs.length === 0) lines.push("No active or revivable agents.");
 		else {
@@ -704,10 +774,12 @@ export class HistoryProtocolHandler implements ProtocolHandler {
 			}
 		}
 		lines.push("", "## Archived", "");
-		if (archives.length === 0) lines.push("No archived child journals.");
+		if (archives.length === 0 && tombstones.length === 0) lines.push("No archived child journals.");
 		else {
 			lines.push("| id | reason |", "|---|---|");
 			for (const archive of archives) lines.push(`| ${archive.id} | ${archive.reason} |`);
+			for (const tombstone of tombstones)
+				lines.push(`| ${tombstone.agent} | transcript lost · ${tombstone.disposition} |`);
 		}
 		lines.push("", "Read a transcript with `read history://<id>`.");
 		return `${lines.join("\n")}\n`;
@@ -716,12 +788,17 @@ export class HistoryProtocolHandler implements ProtocolHandler {
 	async complete(): Promise<UrlCompletion[]> {
 		const refs = AgentRegistry.global().list();
 		const archives = await listArchivedChildHistories(refs);
+		const tombstones = await listFailureHistoryTombstones(refs, archives);
 		return [
 			...refs.map(ref => ({
 				value: ref.id,
 				description: `${ref.status} · ${ref.kind}${ref.parentId ? ` · parent ${ref.parentId}` : ""}`,
 			})),
 			...archives.map(archive => ({ value: archive.id, description: `archived · ${archive.reason}` })),
+			...tombstones.map(tombstone => ({
+				value: tombstone.agent,
+				description: `transcript lost · ${tombstone.disposition}`,
+			})),
 		];
 	}
 }

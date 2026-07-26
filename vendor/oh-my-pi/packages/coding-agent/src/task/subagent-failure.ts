@@ -1,4 +1,5 @@
 import { isTransientNetworkError } from "@oh-my-pi/pi-ai";
+import type { FileEntry } from "../session/session-entries";
 import type { SessionManager } from "../session/session-manager";
 import { appendErrorInboxEvent, type ErrorInboxWriter } from "../session/error-inbox-ledger";
 import { observeFleetIncidentFailure } from "./fleet-incident-runtime";
@@ -8,7 +9,17 @@ interface ErrorInboxReaderWriter extends ErrorInboxWriter {
 	getEntries: SessionManager["getEntries"];
 }
 
-export type SubagentFailureClass = "failed" | "timeout" | "budget" | "network" | "provider" | "schema" | "no-yield";
+export type SubagentFailureClass =
+	| "failed"
+	| "timeout"
+	| "budget"
+	| "network"
+	| "provider"
+	| "schema"
+	| "no-yield"
+	| "host-resource"
+	| "subprocess-abort"
+	| "lost-transcript";
 
 export interface SubagentFailureInput {
 	agent: string;
@@ -22,6 +33,98 @@ export interface SubagentFailureInput {
 	intentionalCancellation?: boolean;
 	provider?: string;
 	model?: string;
+}
+
+export interface DurableSubagentFailureReceipt {
+	agent: string;
+	job: string;
+	errorClass: SubagentFailureClass;
+	disposition: "resumable" | "unrecoverable";
+	message: string;
+	historyUri: string;
+	finalOutputAvailable: boolean;
+	lastTimestamp: number;
+}
+
+export function isResumableSubagentFailureClass(errorClass: SubagentFailureClass): boolean {
+	return (
+		errorClass === "timeout" ||
+		errorClass === "host-resource" ||
+		errorClass === "subprocess-abort" ||
+		errorClass === "lost-transcript"
+	);
+}
+
+export function isTransientHostResourceFailure(message: string): boolean {
+	return containsFailureMarker(message, [
+		"database is locked",
+		"sqlite_busy",
+		"resource authority unavailable",
+		"host resource authority unavailable",
+		"resource temporarily unavailable",
+		"eagain",
+		"ebusy",
+	]);
+}
+
+function isSubagentFailureClass(value: unknown): value is SubagentFailureClass {
+	return (
+		value === "failed" ||
+		value === "timeout" ||
+		value === "budget" ||
+		value === "network" ||
+		value === "provider" ||
+		value === "schema" ||
+		value === "no-yield" ||
+		value === "host-resource" ||
+		value === "subprocess-abort" ||
+		value === "lost-transcript"
+	);
+}
+
+/** Decode durable parent-journal failure receipts used after the process-local job map is gone. */
+export function listDurableSubagentFailureReceipts(entries: readonly FileEntry[]): DurableSubagentFailureReceipt[] {
+	const receipts = new Map<string, DurableSubagentFailureReceipt>();
+	for (const entry of entries) {
+		if (
+			entry.type !== "custom" ||
+			entry.customType !== "ui_error" ||
+			typeof entry.data !== "object" ||
+			entry.data === null ||
+			Array.isArray(entry.data)
+		) {
+			continue;
+		}
+		const data = entry.data as Record<string, unknown>;
+		if (
+			data.source !== "task" ||
+			typeof data.agent !== "string" ||
+			data.agent.length === 0 ||
+			typeof data.job !== "string" ||
+			data.job.length === 0 ||
+			!isSubagentFailureClass(data.errorClass) ||
+			typeof data.message !== "string"
+		) {
+			continue;
+		}
+		const lastTimestamp = typeof data.lastTimestamp === "number" ? data.lastTimestamp : Date.parse(entry.timestamp);
+		const receipt: DurableSubagentFailureReceipt = {
+			agent: data.agent,
+			job: data.job,
+			errorClass: data.errorClass,
+			disposition:
+				data.disposition === "resumable" || isResumableSubagentFailureClass(data.errorClass)
+					? "resumable"
+					: "unrecoverable",
+			message: data.message,
+			historyUri: typeof data.historyUri === "string" ? data.historyUri : `history://${data.agent}`,
+			finalOutputAvailable: data.finalOutputAvailable === true,
+			lastTimestamp: Number.isFinite(lastTimestamp) ? lastTimestamp : 0,
+		};
+		const previous = receipts.get(receipt.agent);
+		if (!previous || receipt.lastTimestamp >= previous.lastTimestamp) receipts.set(receipt.agent, receipt);
+	}
+	return [...receipts.values()];
 }
 
 /** Sentinel for async jobs whose subagent finished with a failing result; progress is already updated. */
@@ -90,6 +193,7 @@ export function recordSubagentFailure(
 		source: "task",
 		category: input.errorClass,
 		errorClass: input.errorClass,
+		disposition: isResumableSubagentFailureClass(input.errorClass) ? "resumable" : "unrecoverable",
 		provider: input.provider,
 		model: input.model,
 		agent: input.agent,
@@ -125,8 +229,20 @@ function containsFailureMarker(value: string | undefined, markers: readonly stri
 	return markers.some(marker => normalized.includes(marker));
 }
 
+function classifyResultText(result: SingleResult): string {
+	return [result.abortReason, result.error, result.stderr, result.retryFailure?.errorMessage]
+		.filter((value): value is string => typeof value === "string")
+		.join("\n");
+}
+
 function classifySubagentFailure(result: SingleResult): SubagentFailureClass {
+	const failureText = classifyResultText(result);
 	if (result.timeoutPartial) return "timeout";
+	if (isTransientHostResourceFailure(failureText)) return "host-resource";
+	if (containsFailureMarker(failureText, ["died without terminal journal", "without a terminal journal record"]))
+		return "lost-transcript";
+	if (containsFailureMarker(failureText, ["subagent subprocess aborted", "subprocess aborted"]))
+		return "subprocess-abort";
 	if (
 		containsFailureMarker(result.abortReason, ["budget"]) ||
 		containsFailureMarker(result.error, ["budget"]) ||
@@ -165,8 +281,12 @@ function classifySubagentFailure(result: SingleResult): SubagentFailureClass {
 }
 
 function classifyThrownSubagentFailure(message: string): SubagentFailureClass {
+	if (isTransientHostResourceFailure(message)) return "host-resource";
+	if (containsFailureMarker(message, ["died without terminal journal", "without a terminal journal record"]))
+		return "lost-transcript";
+	if (containsFailureMarker(message, ["subagent subprocess aborted", "subprocess aborted"])) return "subprocess-abort";
 	if (isTransientNetworkError(message)) return "network";
-	if (containsFailureMarker(message, ["timeout", "timed out"])) return "timeout";
+	if (containsFailureMarker(message, ["timeout", "timed out", "subprocess exceeded"])) return "timeout";
 	if (containsFailureMarker(message, ["budget"])) return "budget";
 	if (containsFailureMarker(message, ["schema_violation", "invalid output schema", "schema-retry"])) return "schema";
 	if (containsFailureMarker(message, ["without calling yield", "missing yield"])) return "no-yield";

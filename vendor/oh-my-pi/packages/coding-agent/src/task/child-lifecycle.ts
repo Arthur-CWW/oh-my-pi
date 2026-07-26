@@ -30,6 +30,15 @@ export type ChildLifecycleState =
 	| "failed"
 	| "interrupted";
 
+export type ChildFailureClass =
+	| "wall_timeout"
+	| "subprocess_abort"
+	| "transient_host_resource"
+	| "lost_transcript"
+	| "fatal";
+
+export type ChildResumeDisposition = "resumable" | "unrecoverable";
+
 export interface ChildLifecycleRecord {
 	version: 1;
 	agentId: string;
@@ -39,6 +48,8 @@ export interface ChildLifecycleRecord {
 	updatedAt: string;
 	modelId?: string;
 	thinkingLevel?: string | null;
+	failureClass?: ChildFailureClass;
+	resumeDisposition?: ChildResumeDisposition;
 }
 
 export type ChildLifecycleRecordDecode =
@@ -58,6 +69,19 @@ const CHILD_LIFECYCLE_STATES: Record<ChildLifecycleState, true> = {
 	interrupted: true,
 };
 
+const CHILD_FAILURE_CLASSES: Record<ChildFailureClass, true> = {
+	wall_timeout: true,
+	subprocess_abort: true,
+	transient_host_resource: true,
+	lost_transcript: true,
+	fatal: true,
+};
+
+const CHILD_RESUME_DISPOSITIONS: Record<ChildResumeDisposition, true> = {
+	resumable: true,
+	unrecoverable: true,
+};
+
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -67,7 +91,18 @@ export function decodeChildLifecycleEntry(entry: FileEntry): ChildLifecycleRecor
 	if (entry.type !== "custom" || entry.customType !== CHILD_LIFECYCLE_CUSTOM_TYPE) return { kind: "not_lifecycle" };
 	const data = (entry as CustomEntry).data;
 	if (!isRecord(data)) return { kind: "invalid" };
-	const { version, agentId, childSessionFile, parentSessionFile, state, updatedAt, modelId, thinkingLevel } = data;
+	const {
+		version,
+		agentId,
+		childSessionFile,
+		parentSessionFile,
+		state,
+		updatedAt,
+		modelId,
+		thinkingLevel,
+		failureClass,
+		resumeDisposition,
+	} = data;
 	if (
 		version !== 1 ||
 		typeof agentId !== "string" ||
@@ -81,7 +116,11 @@ export function decodeChildLifecycleEntry(entry: FileEntry): ChildLifecycleRecor
 		typeof updatedAt !== "string" ||
 		!Number.isFinite(Date.parse(updatedAt)) ||
 		(modelId !== undefined && typeof modelId !== "string") ||
-		(thinkingLevel !== undefined && thinkingLevel !== null && typeof thinkingLevel !== "string")
+		(thinkingLevel !== undefined && thinkingLevel !== null && typeof thinkingLevel !== "string") ||
+		(failureClass !== undefined &&
+			(typeof failureClass !== "string" || !(failureClass in CHILD_FAILURE_CLASSES))) ||
+		(resumeDisposition !== undefined &&
+			(typeof resumeDisposition !== "string" || !(resumeDisposition in CHILD_RESUME_DISPOSITIONS)))
 	) {
 		return { kind: "invalid" };
 	}
@@ -96,6 +135,10 @@ export function decodeChildLifecycleEntry(entry: FileEntry): ChildLifecycleRecor
 			updatedAt,
 			...(modelId === undefined ? {} : { modelId }),
 			...(thinkingLevel === undefined ? {} : { thinkingLevel }),
+			...(failureClass === undefined ? {} : { failureClass: failureClass as ChildFailureClass }),
+			...(resumeDisposition === undefined
+				? {}
+				: { resumeDisposition: resumeDisposition as ChildResumeDisposition }),
 		},
 	};
 }
@@ -178,4 +221,117 @@ export function latestChildLifecycleRecord(entries: readonly FileEntry[]): Child
 
 export function isTerminalChildLifecycleState(state: ChildLifecycleState): boolean {
 	return state === "completed" || state === "failed" || state === "interrupted";
+}
+
+export type ChildResumeOutcome =
+	| "wall_timeout"
+	| "subprocess_abort"
+	| "transient_host_resource"
+	| "lost_transcript"
+	| "completed"
+	| "fatal"
+	| "isolated"
+	| "live_owner"
+	| "unusable_journal";
+
+export interface ChildResumeEvidence {
+	journal: "usable" | "missing" | "corrupt";
+	lifecycle?: ChildLifecycleRecord;
+	liveOwner: boolean;
+	isolated: boolean;
+	parentFailureClass?: string;
+}
+
+export interface ChildResumeClassification {
+	outcome: ChildResumeOutcome;
+	disposition: ChildResumeDisposition;
+	reason: string;
+}
+
+function persistedFailureClass(evidence: ChildResumeEvidence): ChildFailureClass | undefined {
+	if (evidence.lifecycle?.failureClass) return evidence.lifecycle.failureClass;
+	switch (evidence.parentFailureClass) {
+		case "timeout":
+			return "wall_timeout";
+		case "subprocess-abort":
+			return "subprocess_abort";
+		case "host-resource":
+			return "transient_host_resource";
+		case "lost-transcript":
+			return "lost_transcript";
+		default:
+			return undefined;
+	}
+}
+
+/** Classify resume safety from journal and owner evidence, never from the process-local job cache. */
+export function classifyChildResumeEvidence(evidence: ChildResumeEvidence): ChildResumeClassification {
+	if (evidence.liveOwner) {
+		return {
+			outcome: "live_owner",
+			disposition: "unrecoverable",
+			reason: "a live owner still holds this child",
+		};
+	}
+	if (evidence.isolated) {
+		return {
+			outcome: "isolated",
+			disposition: "unrecoverable",
+			reason: "isolated child workspaces cannot be resumed in place",
+		};
+	}
+	if (evidence.journal !== "usable") {
+		return {
+			outcome: evidence.journal === "missing" ? "lost_transcript" : "unusable_journal",
+			disposition: "unrecoverable",
+			reason:
+				evidence.journal === "missing"
+					? "the child journal is missing"
+					: "the child journal is malformed or unreadable",
+		};
+	}
+	const lifecycle = evidence.lifecycle;
+	if (!lifecycle) {
+		return {
+			outcome: "unusable_journal",
+			disposition: "unrecoverable",
+			reason: "the child journal has no lifecycle evidence",
+		};
+	}
+	if (lifecycle.state === "completed") {
+		return { outcome: "completed", disposition: "unrecoverable", reason: "the child already completed" };
+	}
+	if (lifecycle.resumeDisposition === "unrecoverable" || lifecycle.failureClass === "fatal") {
+		return { outcome: "fatal", disposition: "unrecoverable", reason: "the child recorded an unrecoverable failure" };
+	}
+	const failureClass = persistedFailureClass(evidence);
+	if (failureClass && failureClass !== "fatal") {
+		return {
+			outcome: failureClass,
+			disposition: "resumable",
+			reason: `the durable failure class is ${failureClass}`,
+		};
+	}
+	if (lifecycle.state === "interrupted") {
+		return {
+			outcome: "subprocess_abort",
+			disposition: "resumable",
+			reason: "the child recorded an interrupted turn",
+		};
+	}
+	if (lifecycle.state === "failed") {
+		return { outcome: "fatal", disposition: "unrecoverable", reason: "the child recorded an unclassified failure" };
+	}
+	if (lifecycle.state === "running") {
+		return {
+			outcome: "lost_transcript",
+			disposition: "resumable",
+			reason: "the journal remained non-terminal after its owner disappeared",
+		};
+	}
+	return {
+		outcome: "subprocess_abort",
+		disposition: "resumable",
+		reason: `the child is durably ${lifecycle.state} with no live owner`,
+	};
 }

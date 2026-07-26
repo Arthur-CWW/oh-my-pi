@@ -1,6 +1,7 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { logger } from "@oh-my-pi/pi-utils";
+import type { AsyncJobManager } from "../async/job-manager";
 import type { IrcExternalBus, IrcExternalPeer } from "../irc/bus-external";
 import { AgentLifecycleManager, type AgentReviver } from "../registry/agent-lifecycle";
 import { AgentRegistry, MAIN_AGENT_ID } from "../registry/agent-registry";
@@ -15,14 +16,21 @@ import {
 	type ProviderRecoveryRecord,
 } from "../session/provider-recovery";
 import {
+	appendChildLifecycleRecord,
 	appendChildRestartRecord,
+	classifyChildResumeEvidence,
 	isTerminalChildLifecycleState,
 	latestChildLifecycleRecord,
 	latestChildRestartRecord,
 	type ChildLifecycleRecord,
 	type ChildLifecycleState,
 	type ChildRestartRecord,
+	type ChildResumeClassification,
 } from "./child-lifecycle";
+import {
+	type DurableSubagentFailureReceipt,
+	listDurableSubagentFailureReceipts,
+} from "./subagent-failure";
 
 export const RE_ADOPTION_DIAGNOSTIC_CUSTOM_TYPE = "re-adoption-diagnostic" as const;
 
@@ -534,4 +542,416 @@ export async function reAdoptDirectChildren(options: ReAdoptionOptions): Promise
 		}
 	}
 	return finish();
+}
+
+interface DurableResumeCandidate {
+	sessionFile: string;
+	entries: FileEntry[];
+	init: SessionInitEntry;
+	metadata: SubagentSessionMetadata;
+	lifecycle: ChildLifecycleRecord | undefined | null;
+}
+
+export interface DurableChildJobRecord {
+	id: string;
+	label: string;
+	startTime: number;
+	status: "running" | "completed" | "failed";
+	outcome: ChildResumeClassification["outcome"];
+	disposition: ChildResumeClassification["disposition"];
+	errorText?: string;
+}
+
+export type ResumeInterruptedChildResult =
+	| {
+			status: "started";
+			agentId: string;
+			jobId: string;
+			transcriptUri: string;
+			assignment: string;
+			classification: ChildResumeClassification;
+	  }
+	| {
+			status: "already_running";
+			agentId: string;
+			jobId: string;
+			transcriptUri: string;
+	  }
+	| {
+			status: "refused";
+			agentId: string;
+			reason: string;
+			transcriptUri?: string;
+			classification?: ChildResumeClassification;
+	  };
+
+export interface ResumeInterruptedChildOptions {
+	agentId: string;
+	parentSessionFile: string;
+	parentSessionId: string;
+	parentJournal: Pick<SessionManager, "getEntries" | "getSessionOwnership">;
+	manager: AsyncJobManager;
+	idleTtlMs: number;
+	registry?: AgentRegistry;
+	lifecycle?: AgentLifecycleManager;
+	externalBus?: Pick<IrcExternalBus, "listPeers">;
+	createReviver: (child: ReAdoptedChild, init: SessionInitEntry) => Promise<AgentReviver>;
+	startTurn: (child: ReAdoptedChild, session: AgentSession) => Promise<string> | string;
+}
+
+export interface DurableChildJobOptions {
+	parentSessionFile: string;
+	parentSessionId: string;
+	parentEntries: readonly FileEntry[];
+	manager?: AsyncJobManager;
+	registry?: AgentRegistry;
+	externalBus?: Pick<IrcExternalBus, "listPeers">;
+}
+
+const resumeOperations = new Map<string, Promise<ResumeInterruptedChildResult>>();
+
+function resumeKey(parentSessionFile: string, agentId: string): string {
+	return `${path.resolve(parentSessionFile)}\0${agentId}`;
+}
+
+function failureReceiptFor(
+	receipts: readonly DurableSubagentFailureReceipt[],
+	agentId: string,
+): DurableSubagentFailureReceipt | undefined {
+	return receipts.find(receipt => receipt.agent === agentId);
+}
+
+function parentFailureClass(receipt: DurableSubagentFailureReceipt | undefined): string | undefined {
+	return receipt?.errorClass;
+}
+
+function childOwnerIsLive(
+	agentId: string,
+	sessionFile: string,
+	registry: AgentRegistry,
+	manager: AsyncJobManager | undefined,
+	externalBus: Pick<IrcExternalBus, "listPeers"> | undefined,
+): boolean {
+	if (manager?.getJob(agentId)?.status === "running") return true;
+	const ref = registry.get(agentId);
+	if (ref?.session?.isStreaming) return true;
+	const peers = externalBus?.listPeers({ includeStale: true }) ?? [];
+	return peers.some(
+		peer =>
+			peer.agentId === agentId &&
+			peer.sessionFile !== undefined &&
+			samePath(peer.sessionFile, sessionFile) &&
+			peer.processIdentity !== undefined &&
+			processMatches(peer.processIdentity),
+	);
+}
+
+async function durableResumeCandidates(
+	parentSessionFile: string,
+	parentSessionId: string,
+): Promise<DurableResumeCandidate[]> {
+	if (!parentSessionFile.endsWith(".jsonl")) return [];
+	const childrenDir = parentSessionFile.slice(0, -".jsonl".length);
+	let names: string[];
+	try {
+		names = await fs.readdir(childrenDir);
+	} catch {
+		return [];
+	}
+	const candidates: DurableResumeCandidate[] = [];
+	for (const name of names) {
+		if (!name.endsWith(".jsonl") || name.includes(".bak")) continue;
+		const sessionFile = path.join(childrenDir, name);
+		let entries: FileEntry[] | null;
+		try {
+			entries = parseJournal(await fs.readFile(sessionFile, "utf8"));
+		} catch {
+			continue;
+		}
+		if (!entries) continue;
+		const init = latestInit(entries);
+		const metadata = init?.subagent;
+		if (
+			!init ||
+			!isSubagentMetadata(metadata) ||
+			typeof init.task !== "string" ||
+			!samePath(metadata.parentSessionFile, parentSessionFile) ||
+			metadata.parentSessionId !== parentSessionId
+		) {
+			continue;
+		}
+		candidates.push({
+			sessionFile,
+			entries,
+			init,
+			metadata,
+			lifecycle: latestChildLifecycleRecord(entries),
+		});
+	}
+	return candidates;
+}
+
+function childDescriptor(candidate: DurableResumeCandidate): ReAdoptedChild {
+	const hotswap = [...candidate.entries].reverse().find(
+		(entry): entry is ModelChangeEntry => entry.type === "model_change" && entry.role === "hotswap",
+	);
+	return {
+		id: candidate.metadata.agentId,
+		task: candidate.init.task,
+		displayName: candidate.metadata.displayName,
+		sessionFile: candidate.sessionFile,
+		model: candidate.lifecycle?.modelId ?? candidate.metadata.model,
+		thinkingLevel: candidate.lifecycle?.thinkingLevel ?? candidate.metadata.thinkingLevel,
+		...(hotswap && typeof hotswap.model === "string" ? { hotswapModel: hotswap.model } : {}),
+		taskDepth: candidate.metadata.taskDepth,
+		parentTaskPrefix: candidate.metadata.parentTaskPrefix,
+		lifecycleState: candidate.lifecycle?.state ?? "interrupted",
+		turnState: "interrupted_by_restart",
+	};
+}
+
+function resumableErrorText(classification: ChildResumeClassification): string {
+	const suffix =
+		classification.disposition === "resumable"
+			? ' Resume in place with `job {"resume":["<id>"]}`.'
+			: "";
+	return `${classification.reason}.${suffix}`;
+}
+
+/** Durable job projection used when the process-local AsyncJobManager map has been lost. */
+export async function listDurableChildJobs(options: DurableChildJobOptions): Promise<DurableChildJobRecord[]> {
+	const registry = options.registry ?? AgentRegistry.global();
+	const receipts = listDurableSubagentFailureReceipts(options.parentEntries);
+	const candidates = await durableResumeCandidates(options.parentSessionFile, options.parentSessionId);
+	const counts = new Map<string, number>();
+	for (const candidate of candidates)
+		counts.set(candidate.metadata.agentId, (counts.get(candidate.metadata.agentId) ?? 0) + 1);
+	const records = new Map<string, DurableChildJobRecord>();
+	for (const candidate of candidates) {
+		const agentId = candidate.metadata.agentId;
+		if (counts.get(agentId) !== 1) continue;
+		const receipt = failureReceiptFor(receipts, agentId);
+		const liveOwner = childOwnerIsLive(
+			agentId,
+			candidate.sessionFile,
+			registry,
+			options.manager,
+			options.externalBus,
+		);
+		const classification = classifyChildResumeEvidence({
+			journal: candidate.lifecycle === null ? "corrupt" : "usable",
+			lifecycle: candidate.lifecycle ?? undefined,
+			liveOwner,
+			isolated: candidate.metadata.isolated,
+			parentFailureClass: parentFailureClass(receipt),
+		});
+		const status =
+			liveOwner || candidate.lifecycle?.state === "running"
+				? liveOwner
+					? "running"
+					: "failed"
+				: candidate.lifecycle?.state === "completed"
+					? "completed"
+					: "failed";
+		records.set(agentId, {
+			id: agentId,
+			label: candidate.metadata.displayName,
+			startTime: Date.parse(candidate.init.timestamp),
+			status,
+			outcome: classification.outcome,
+			disposition: classification.disposition,
+			...(status === "failed" ? { errorText: resumableErrorText(classification) } : {}),
+		});
+	}
+	for (const receipt of receipts) {
+		if (records.has(receipt.agent)) continue;
+		const classification = classifyChildResumeEvidence({
+			journal: "missing",
+			liveOwner: false,
+			isolated: false,
+			parentFailureClass: receipt.errorClass,
+		});
+		records.set(receipt.agent, {
+			id: receipt.agent,
+			label: receipt.agent,
+			startTime: receipt.lastTimestamp,
+			status: "failed",
+			outcome: classification.outcome,
+			disposition: receipt.disposition,
+			errorText:
+				receipt.disposition === "resumable"
+					? `${receipt.message} Resume requires the missing child journal; do not respawn until it is recovered.`
+					: receipt.message,
+		});
+	}
+	return [...records.values()].sort((left, right) => right.startTime - left.startTime);
+}
+
+/** Resume one interrupted direct child from its own append-only journal under the current parent ownership epoch. */
+export function resumeInterruptedChild(
+	options: ResumeInterruptedChildOptions,
+): Promise<ResumeInterruptedChildResult> {
+	const key = resumeKey(options.parentSessionFile, options.agentId);
+	const existing = resumeOperations.get(key);
+	if (existing) return existing;
+	const operation = performInterruptedChildResume(options);
+	resumeOperations.set(key, operation);
+	return operation.finally(() => {
+		if (resumeOperations.get(key) === operation) resumeOperations.delete(key);
+	});
+}
+
+async function performInterruptedChildResume(
+	options: ResumeInterruptedChildOptions,
+): Promise<ResumeInterruptedChildResult> {
+	const transcriptUri = `history://${options.agentId}`;
+	const liveJob = options.manager.getJob(options.agentId);
+	if (liveJob?.status === "running") {
+		return {
+			status: "already_running",
+			agentId: options.agentId,
+			jobId: liveJob.id,
+			transcriptUri,
+		};
+	}
+	const ownership = options.parentJournal.getSessionOwnership();
+	if (!ownership) {
+		return {
+			status: "refused",
+			agentId: options.agentId,
+			reason: "the parent session has no durable ownership handle",
+			transcriptUri,
+		};
+	}
+	if (ownership.isFenced?.() || !(await ownership.isCurrent())) {
+		return {
+			status: "refused",
+			agentId: options.agentId,
+			reason: `parent ownership epoch ${ownership.ownerEpoch} is not current`,
+			transcriptUri,
+		};
+	}
+	const candidates = (await durableResumeCandidates(options.parentSessionFile, options.parentSessionId)).filter(
+		candidate => candidate.metadata.agentId === options.agentId,
+	);
+	if (candidates.length !== 1) {
+		const receipt = failureReceiptFor(
+			listDurableSubagentFailureReceipts(options.parentJournal.getEntries()),
+			options.agentId,
+		);
+		const classification = classifyChildResumeEvidence({
+			journal: "missing",
+			liveOwner: false,
+			isolated: false,
+			parentFailureClass: parentFailureClass(receipt),
+		});
+		return {
+			status: "refused",
+			agentId: options.agentId,
+			reason:
+				candidates.length === 0
+					? "no usable direct-child journal exists; the durable failure record remains listed"
+					: "multiple child journals claim this stable id",
+			transcriptUri,
+			classification,
+		};
+	}
+	const candidate = candidates[0];
+	const registry = options.registry ?? AgentRegistry.global();
+	const lifecycle = options.lifecycle ?? AgentLifecycleManager.global();
+	const liveOwner = childOwnerIsLive(
+		options.agentId,
+		candidate.sessionFile,
+		registry,
+		undefined,
+		options.externalBus,
+	);
+	const receipt = failureReceiptFor(
+		listDurableSubagentFailureReceipts(options.parentJournal.getEntries()),
+		options.agentId,
+	);
+	const classification = classifyChildResumeEvidence({
+		journal: candidate.lifecycle === null ? "corrupt" : "usable",
+		lifecycle: candidate.lifecycle ?? undefined,
+		liveOwner,
+		isolated: candidate.metadata.isolated,
+		parentFailureClass: parentFailureClass(receipt),
+	});
+	if (classification.disposition !== "resumable") {
+		return {
+			status: "refused",
+			agentId: options.agentId,
+			reason: classification.reason,
+			transcriptUri,
+			classification,
+		};
+	}
+	const child = childDescriptor(candidate);
+	const revive = await options.createReviver(child, candidate.init);
+	if (ownership.isFenced?.() || !(await ownership.isCurrent())) {
+		return {
+			status: "refused",
+			agentId: options.agentId,
+			reason: `parent ownership epoch ${ownership.ownerEpoch} changed while preparing resume`,
+			transcriptUri,
+			classification,
+		};
+	}
+	const current = registry.get(child.id);
+	if (current?.session?.isStreaming || options.manager.getJob(child.id)?.status === "running") {
+		const jobId = options.manager.getJob(child.id)?.id ?? child.id;
+		return { status: "already_running", agentId: child.id, jobId, transcriptUri };
+	}
+	if (!current || !samePath(current.sessionFile ?? "", candidate.sessionFile)) {
+		registry.register({
+			id: child.id,
+			displayName: child.displayName,
+			kind: "sub",
+			parentId: MAIN_AGENT_ID,
+			session: null,
+			sessionFile: candidate.sessionFile,
+			status: "parked",
+			recovery: {
+				task: child.task,
+				model: child.model,
+				thinkingLevel: child.thinkingLevel,
+				hotswapModel: child.hotswapModel,
+				turnState: child.turnState,
+			},
+		});
+	} else if (!current.session) {
+		registry.setStatus(child.id, "parked");
+	}
+	lifecycle.adopt(child.id, { idleTtlMs: options.idleTtlMs, revive });
+	const session = await lifecycle.ensureLive(child.id);
+	if (ownership.isFenced?.() || !(await ownership.isCurrent())) {
+		return {
+			status: "refused",
+			agentId: options.agentId,
+			reason: `parent ownership epoch ${ownership.ownerEpoch} changed before resume registration`,
+			transcriptUri,
+			classification,
+		};
+	}
+	appendChildLifecycleRecord(session.sessionManager, {
+		version: 1,
+		agentId: child.id,
+		childSessionFile: child.sessionFile,
+		parentSessionFile: options.parentSessionFile,
+		state: "running",
+		updatedAt: new Date().toISOString(),
+		...(session.model ? { modelId: `${session.model.provider}/${session.model.id}` } : {}),
+		...(session.thinkingLevel === undefined ? {} : { thinkingLevel: session.thinkingLevel }),
+	});
+	await session.sessionManager.flush();
+	const jobId = await options.startTurn(child, session);
+	const assignment = candidate.metadata.spawnRecord?.assignment ?? candidate.init.task;
+	return {
+		status: "started",
+		agentId: child.id,
+		jobId,
+		transcriptUri,
+		assignment,
+		classification,
+	};
 }
