@@ -300,3 +300,17 @@ workspaces:
           - packages/jimeng-client
           - workflows/scene-lab
           - workflows/tiktok-recreate
+  nixbox-agents:
+    extends: desktop-agents
+    host: nixbox
+    remoteNu: /run/current-system/sw/bin/nu
+    bun: /run/current-system/sw/bin/bun
+    laneOnly: false
+    capabilities:
+      healthProfile: workstation-maintenance
+      platforms: [linux, cpu]
+      remoteWorkspace: true
+      reviewForwarding:
+        enabled: true
+        aliasPrefix: nixbox
+        localPortOffset: 200

@@ -39,51 +39,67 @@ cp $"($root)/.omp/companion-config.yml" $"($remote_lane)/.omp/companion-config.y
 } | to json --raw | save $models_json_path
 
 let nu_executable = $nu.current-exe
+let sh_executable = (which sh | first | get path)
+let bash_executable = (which bash | first | get path)
+let cat_executable = (which cat | first | get path)
+let cp_executable = (^$bash_executable -lc 'command -v cp' | str trim)
+let sha256_commands = (which sha256sum)
+let sha256_executable = if ($sha256_commands | is-empty) {
+    which shasum | first | get path
+} else {
+    $sha256_commands | first | get path
+}
+let sha256_invocation = if ($sha256_executable | path basename) == "shasum" {
+    $'exec "($sha256_executable)" -a 256 "$1"'
+} else {
+    $'exec "($sha256_executable)" "$1"'
+}
 
 ([
-    "#!/bin/sh"
+    $'#!($sh_executable)'
     $'exec "($nu_executable)" "$@"'
 ] | str join "\n") | save -f $"($remote_home)/.local/share/mise/shims/nu"
 
 ([
-    "#!/bin/sh"
+    $'#!($sh_executable)'
     'if test "${1:-}" = "--version"; then printf "omp 9.9.0\\n"; exit 0; fi'
     'if test "${1:-}" = "models"; then'
-    '  /bin/cat "$TEST_MODELS_JSON"'
+    $'  "($cat_executable)" "$TEST_MODELS_JSON"'
     '  exit 0'
     'fi'
     'exit 64'
 ] | str join "\n") | save -f $"($remote_home)/.local/bin/omp"
 
 ([
-    "#!/bin/sh"
+    $'#!($sh_executable)'
     'if test "${1:-}" = "/etc/machine-id"; then printf "5c864a609a404027871b30d4262645c7\\n"; exit 0; fi'
-    'exec /bin/cat "$@"'
+    $'exec "($cat_executable)" "$@"'
 ] | str join "\n") | save -f $"($fixture_bin)/cat"
 
 ([
-    "#!/bin/sh"
-    'shasum -a 256 "$1" | cut -d " " -f 1'
+    $'#!($sh_executable)'
+    $sha256_invocation
 ] | str join "\n") | save -f $"($fixture_bin)/sha256sum"
 
 ([
-    "#!/bin/bash"
+    $'#!($bash_executable)'
     'printf "ssh %s\\n" "$*" >> "$TEST_CALL_LOG"'
-    'script=$(/bin/cat)'
+    $'script=`"($cat_executable)"`'
     'printf "%s\\n---\\n" "$script" >> "$TEST_SHELL_LOG"'
     'script=${script//\/home\/arthur/$TEST_REMOTE_ROOT\/home\/arthur}'
     'printf "debug1: Server host key: ssh-ed25519 SHA256:G3Uw3/GY7XjgHmKIU7W/t2H0y0SFeuS7SjzAIKL+Bes\\n" >&2'
-    'printf "%s" "$script" | /bin/sh'
+    $'printf "%s" "$script" | "($sh_executable)"'
 ] | str join "\n") | save -f $"($fixture_bin)/ssh"
 
 ([
-    "#!/bin/bash"
+    $'#!($bash_executable)'
+    'set -eu'
     'printf "rsync %s\\n" "$*" >> "$TEST_CALL_LOG"'
     'source="$2"'
     'destination="$3"'
     'remote_path=${destination#*:}'
     'remote_path=${remote_path/#\/home\/arthur/$TEST_REMOTE_ROOT\/home\/arthur}'
-    '/bin/cp "$source" "$remote_path"'
+    $'"($cp_executable)" "$source" "$remote_path"'
     'if test -n "${TEST_CORRUPT_UPLOAD:-}" && [[ "$remote_path" == *"$TEST_CORRUPT_UPLOAD"* ]]; then printf "corrupt\\n" >> "$remote_path"; fi'
 ] | str join "\n") | save -f $"($fixture_bin)/rsync"
 
@@ -92,6 +108,7 @@ let nu_executable = $nu.current-exe
 let fixture_environment = {
     HOME: $home
     PATH: ([$fixture_bin] | append $env.PATH)
+    OMP_CONFIG_ROOT: $"($sandbox)/omp-config"
     OMP_IRC_EXTERNAL_BUS_DB: $"($sandbox)/irc.sqlite"
     OMP_SESSION_CONTROL_DB: $"($sandbox)/session-control.sqlite"
     TEST_CALL_LOG: $call_log
@@ -106,10 +123,22 @@ def run-routing [environment: record, runner: string, catalog_path: string, acti
     }
 }
 
+def run-review-results [environment: record, runner: string, input_path: string] {
+    with-env $environment {
+        let source = (["use '" $runner "' *; let input = (open '" $input_path "'); remote-review-results $input.workspace $input.stream $input.streamName | to json"] | str join "")
+        ^nu --no-config-file -c $source | complete
+    }
+}
+
 # Inspection is a single fixed identity-fenced SSH probe: it never installs or uploads the runner or catalog.
 "" | save -f $call_log
 "" | save -f $shell_log
 let inspect_result = (run-routing $fixture_environment $runner $catalog_path routing:inspect)
+if $inspect_result.exit_code != 0 {
+    error make {
+        msg: $"routing:inspect fixture failed: ($inspect_result.stderr | str trim)\ncalls:\n(open --raw $call_log)\nsha fixture:\n(open --raw $'($fixture_bin)/sha256sum')\nremote shell:\n(open --raw $shell_log)"
+    }
+}
 assert equal $inspect_result.exit_code 0
 let inspection = ($inspect_result.stdout | from json)
 assert equal $inspection.workspace h11dsi-agents
@@ -158,6 +187,11 @@ assert not ($noop_calls | any {|line| $line | str starts-with "rsync " })
 "stale stream only\n" | save -f $"($remote_lane)/.omp/companion-config.yml"
 "" | save -f $call_log
 let subset_result = (run-routing $fixture_environment $runner $catalog_path routing:sync)
+if $subset_result.exit_code != 0 {
+    error make {
+        msg: $"routing:sync subset fixture failed: ($subset_result.stderr | str trim)\ncalls:\n(open --raw $call_log)\nsha fixture:\n(open --raw $'($fixture_bin)/sha256sum')\nremote shell:\n(open --raw $shell_log)"
+    }
+}
 assert equal $subset_result.exit_code 0
 let subset_receipt = ($subset_result.stdout | from json)
 assert equal $subset_receipt.changedFiles [.omp/companion-config.yml]
@@ -200,6 +234,91 @@ assert ($failed_sync.exit_code != 0)
 assert equal (open --raw $"($remote_lane)/.omp/config.yml") $old_root
 assert equal (open --raw $"($remote_lane)/.omp/companion-config.yml") $old_stream
 assert equal (glob $"($remote_lane)/.omp/*.routing-sync.*" | length) 0
+
+# Remote review emits the exact metadata/status shape for every target even when Portless discovery fails.
+let discovery_root = $"($sandbox)/review-discovery"
+mkdir $discovery_root
+"not valid toml =" | save $"($discovery_root)/mise.toml"
+let discovery_input_path = $"($sandbox)/review-discovery.json"
+{
+    workspace: {
+        root: $discovery_root
+        bun: ((which bun) | first | get path | into string)
+        capabilities: {reviewForwarding: {aliasPrefix: fixture, localPortOffset: 0}}
+    }
+    streamName: contract-test
+    stream: {
+        review: [
+            {name: api, kind: direct, remotePort: 4312, aliasSuffix: api, localPort: 19001, path: /health}
+            {name: absent-route, kind: portless, route: definitely-absent, aliasSuffix: absent-route, localPort: 19002, path: /}
+        ]
+    }
+} | to json | save $discovery_input_path
+let discovery_result = (run-review-results $fixture_environment $runner $discovery_input_path)
+assert equal $discovery_result.exit_code 0
+let discovery_targets = ($discovery_result.stdout | from json)
+assert equal ($discovery_targets | length) 2
+let direct_target = ($discovery_targets | where name == api | first)
+assert equal ($direct_target | columns | sort) ([alias artifactDigest kind name path remotePort status] | sort)
+assert equal $direct_target {
+    name: api
+    kind: direct
+    alias: fixture-contract-test-api
+    path: /health
+    artifactDigest: null
+    status: healthy
+    remotePort: 4312
+}
+let portless_target = ($discovery_targets | where name == absent-route | first)
+assert equal ($portless_target | columns | sort) ([alias artifactDigest error kind name path status] | sort)
+assert equal $portless_target.status degraded
+assert equal $portless_target.artifactDigest null
+assert equal $portless_target.error._tag BackendAbsent
+assert equal $portless_target.error.target absent-route
+assert equal $portless_target.error.kind portless
+
+# A rejected static artifact degrades only that row while the real direct backend remains available.
+let static_stream_name = $"contract-(random uuid)"
+let static_digest = "0000000000000000000000000000000000000000000000000000000000000000"
+let static_state_dir = $"($root)/.runtime/remote-workspace/static/($static_stream_name)"
+let static_input_path = $"($sandbox)/review-static.json"
+{
+    workspace: {
+        root: $root
+        bun: ((which bun) | first | get path | into string)
+        capabilities: {reviewForwarding: {aliasPrefix: fixture, localPortOffset: 0}}
+    }
+    streamName: $static_stream_name
+    stream: {
+        review: [
+            {name: api, kind: direct, remotePort: 4312, aliasSuffix: api, localPort: 19001, path: /}
+            {
+                name: missing-report
+                kind: static
+                artifact: $"data/($static_stream_name)-missing.html"
+                artifactDigest: $static_digest
+                aliasSuffix: missing-report
+                localPort: 19002
+                path: /
+            }
+        ]
+    }
+} | to json | save $static_input_path
+let static_result = (run-review-results $fixture_environment $runner $static_input_path)
+rm -rf $static_state_dir
+assert equal $static_result.exit_code 0
+let static_targets = ($static_result.stdout | from json)
+assert equal ($static_targets | length) 2
+assert equal ($static_targets | where name == api | first | get status) healthy
+let missing_static = ($static_targets | where name == missing-report | first)
+assert equal ($missing_static | columns | sort) ([alias artifactDigest error kind name path status] | sort)
+assert equal $missing_static.status degraded
+assert equal $missing_static.kind static
+assert equal $missing_static.alias $"fixture-($static_stream_name)-missing-report"
+assert equal $missing_static.path /
+assert equal $missing_static.artifactDigest $static_digest
+assert equal $missing_static.error._tag StaticArtifactRejected
+assert equal $missing_static.error.reason missing
 
 rm -rf $sandbox
 print "remote routing inspection and synchronization boundary checks passed"

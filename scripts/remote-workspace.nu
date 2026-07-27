@@ -13,6 +13,9 @@ const ssh_options = [
     -o ServerAliveCountMax=3
 ]
 
+# Mirrors the static server allowlist in remote-forward-supervisor.ts.
+const static_review_extensions = [html css js json txt md svg png jpg jpeg webp gif ico]
+
 # This runner accepts only catalog-backed identifiers and fixed actions.
 def valid-id [value: string, label: string] {
     if not ($value =~ '^[a-z][a-z0-9-]*$') {
@@ -275,10 +278,17 @@ def validate-catalog [catalog: record] {
             if not ($review_workspace =~ '^workspace:[1-9][0-9]*$') {
                 error make {msg: $"Invalid reviewWorkspace for ($stream_name): ($review_workspace)"}
             }
+            let review_names = ($review_targets | get name)
+            if ($review_names | uniq | length) != ($review_names | length) {
+                error make {msg: $"Review target names must be unique for ($workspace_name)/($stream_name)"}
+            }
             for target in $review_targets {
                 valid-id $target.name "review target"
                 valid-id $target.aliasSuffix "local review alias suffix"
-                if $target.kind not-in ["direct" "portless"] { error make {msg: $"Invalid review kind for ($target.name)"} }
+                if $target.kind not-in ["direct" "portless" "static"] { error make {msg: $"Invalid review kind for ($target.name)"} }
+                if ($target.path? | describe) != "string" or not ($target.path | str starts-with "/") or ($target.path | str contains "\n") or ($target.path | str contains "\\") {
+                    error make {msg: $"Invalid review path for ($target.name)"}
+                }
                 let effective_port = ($target.localPort + $review_forwarding.localPortOffset)
                 if $effective_port < 1024 or $effective_port > 65535 { error make {msg: $"Invalid effective local review port for ($target.name)"} }
                 if $review_forwarding.enabled {
@@ -289,6 +299,21 @@ def validate-catalog [catalog: record] {
                     error make {msg: $"Invalid remote review port for ($target.name)"}
                 }
                 if $target.kind == "portless" { valid-id $target.route "portless route" }
+                if $target.kind == "static" {
+                    valid-relative-path ($target.artifact? | default "") $"static review artifact for ($target.name)"
+                    if ($target.artifact | path parse | get extension) not-in $static_review_extensions {
+                        error make {msg: $"Unsupported static review artifact type for ($target.name): ($target.artifact)"}
+                    }
+                    let artifact_digest = ($target.artifactDigest? | default "")
+                    if ($artifact_digest | describe) != "string" {
+                        error make {msg: $"Static review target must declare a lowercase sha256 artifactDigest for ($target.name)"}
+                    }
+                    if not ($artifact_digest =~ '^[0-9a-f]{64}$') {
+                        error make {msg: $"Static review target must declare a lowercase sha256 artifactDigest for ($target.name)"}
+                    }
+                } else if ($target.artifactDigest? | default null) != null {
+                    error make {msg: $"artifactDigest is only valid for static review targets: ($target.name)"}
+                }
             }
         }
     }
@@ -1542,8 +1567,66 @@ def remote-service [workspace: record, stream: record, action: string, stream_na
     }
 }
 
-# Resolve active portless backends on the remote host; direct ports are catalog data.
-def remote-review [workspace: record, stream: record] {
+# The review host resolves every catalog target independently. Metadata is repeated verbatim in
+# each result so the local supervisor can reject stale catalogs before accepting a backend port.
+def review-target-metadata [capability: record, stream_name: string, target: record] {
+    {
+        name: $target.name
+        kind: $target.kind
+        alias: (review-local-alias $capability $stream_name $target.aliasSuffix)
+        path: $target.path
+        artifactDigest: (if $target.kind == "static" { $target.artifactDigest } else { null })
+    }
+}
+
+def backend-review-error [target: record, message: string] {
+    {
+        _tag: "BackendAbsent"
+        target: $target.name
+        kind: $target.kind
+        message: $message
+    }
+}
+
+def ensure-static-review [workspace: record, stream_name: string, target: record, metadata: record] {
+    let supervisor = $"($workspace.root)/scripts/remote-forward-supervisor.ts"
+    if not ($supervisor | path exists) {
+        return ($metadata | merge {
+            status: "degraded"
+            error: (backend-review-error $target $"Forward supervisor is not installed on the review host: ($supervisor)")
+        })
+    }
+    let state_dir = $"($workspace.root)/.runtime/remote-workspace/static/($stream_name)"
+    mkdir $state_dir
+    let ensure_arguments = [
+        ensure-static
+        --root $workspace.root
+        --artifact $target.artifact
+        --artifact-digest $target.artifactDigest
+        --state $state_dir
+        --name $target.name
+    ]
+    let result = (^$workspace.bun $supervisor ...$ensure_arguments | complete)
+    if $result.exit_code != 0 {
+        let detail = (try { $result.stderr | str trim | from json } catch { null })
+        let typed_error = if ($detail | describe) =~ '^record' and (($detail._tag? | describe) == "string") and (($detail.message? | describe) == "string") {
+            $detail
+        } else {
+            backend-review-error $target $"Ensure static review server failed with exit code ($result.exit_code): ($result.stderr | str trim)"
+        }
+        return ($metadata | merge {status: "degraded", error: $typed_error})
+    }
+    let record = (try { $result.stdout | from json } catch { null })
+    if ($record | describe) !~ '^record' or ($record.port? | describe) != "int" or $record.port < 1 or $record.port > 65535 {
+        return ($metadata | merge {
+            status: "degraded"
+            error: (backend-review-error $target $"Static review server did not report a valid port for ($target.name)")
+        })
+    }
+    $metadata | merge {status: "healthy", remotePort: $record.port}
+}
+
+export def remote-review-results [workspace: record, stream: record, stream_name: string] {
     cd $workspace.root
     let bun_dir = ($workspace.bun | path dirname)
     $env.PATH = if (($env.PATH | describe) =~ '^list') {
@@ -1552,29 +1635,61 @@ def remote-review [workspace: record, stream: record] {
         [$bun_dir $env.PATH] | str join (char esep)
     }
     let needs_portless = ($stream.review | any {|target| $target.kind == "portless" })
-    let portless_runtime = (resolve-portless $workspace.root)
-    let node = $portless_runtime.node
-    let portless = $portless_runtime.portless
-    let listing = if $needs_portless {
-        checked-external "Remote Portless doctor" { ^$node $portless doctor } | ignore
-        checked-external "List remote Portless routes" { ^$node $portless list }
-    } else {
-        ""
-    }
-    let lines = ($listing | ansi strip | lines)
-    $stream.review | each {|review_target|
-        let remote_port = if $review_target.kind == "direct" {
-            $review_target.remotePort
-        } else {
-            let route_url = $"($review_target.route).localhost"
-            let route_lines = ($lines | where {|line| $line | str contains $route_url })
-            if ($route_lines | length) != 1 { error make {msg: $"Expected one active portless route for ($review_target.route)"} }
-            let parsed = ($route_lines | first | parse -r '.*->\s+(?:localhost|127\.0\.0\.1):(?P<port>[0-9]+).*')
-            if ($parsed | is-empty) { error make {msg: $"Could not resolve backend port for ($review_target.route)"} }
-            $parsed | first | get port | into int
+    let portless_discovery = if $needs_portless {
+        try {
+            let portless_runtime = (resolve-portless $workspace.root)
+            let node = $portless_runtime.node
+            let portless = $portless_runtime.portless
+            checked-external "Remote Portless doctor" { ^$node $portless doctor } | ignore
+            {
+                lines: (checked-external "List remote Portless routes" { ^$node $portless list } | ansi strip | lines)
+                error: null
+            }
+        } catch {|problem|
+            {lines: [], error: ($problem.msg? | default "Remote Portless discovery failed")}
         }
-        $review_target | merge {remotePort: $remote_port}
-    } | to json --indent 2
+    } else {
+        {lines: [], error: null}
+    }
+    $stream.review | each {|review_target|
+        let metadata = (review-target-metadata $workspace.capabilities.reviewForwarding $stream_name $review_target)
+        match $review_target.kind {
+            "direct" => {
+                $metadata | merge {status: "healthy", remotePort: $review_target.remotePort}
+            }
+            "static" => {
+                ensure-static-review $workspace $stream_name $review_target $metadata
+            }
+            _ => {
+                if $portless_discovery.error != null {
+                    $metadata | merge {
+                        status: "degraded"
+                        error: (backend-review-error $review_target $portless_discovery.error)
+                    }
+                } else {
+                    let route_url = $"($review_target.route).localhost"
+                    let route_lines = ($portless_discovery.lines | where {|line| $line | str contains $route_url })
+                    let parsed = if ($route_lines | length) == 1 {
+                        $route_lines | first | parse -r '.*->\s+(?:localhost|127\.0\.0\.1):(?P<port>[0-9]+).*'
+                    } else {
+                        []
+                    }
+                    if ($parsed | is-empty) {
+                        $metadata | merge {
+                            status: "degraded"
+                            error: (backend-review-error $review_target $"Expected one active Portless route for ($review_target.route)")
+                        }
+                    } else {
+                        $metadata | merge {status: "healthy", remotePort: ($parsed | first | get port | into int)}
+                    }
+                }
+            }
+        }
+    }
+}
+
+def remote-review [workspace: record, stream: record, stream_name: string] {
+    remote-review-results $workspace $stream $stream_name | to json --indent 2
 }
 
 def launcher-path [root: string, stream_name: string] {
@@ -1656,6 +1771,15 @@ def command-path [name: string] {
     $commands | first | get path | into string
 }
 
+export def review-forward-targets [workspace: record, stream_name: string] {
+    let stream = (select-stream $workspace $stream_name)
+    let capability = $workspace.capabilities.reviewForwarding
+    $stream.review | each {|review_target|
+        review-target-metadata $capability $stream_name $review_target
+        | merge {localPort: ($review_target.localPort + $capability.localPortOffset)}
+    }
+}
+
 def write-forward-config [workspace: record, workspace_name: string, stream_name: string] {
     let stream = (select-stream $workspace $stream_name)
     let capability = $workspace.capabilities.reviewForwarding
@@ -1671,14 +1795,7 @@ def write-forward-config [workspace: record, workspace_name: string, stream_name
     let portless_runtime = (local-portless-runtime)
     let config_path = (forward-config-path $workspace_name $stream_name)
     let state_dir = ($config_path | path dirname)
-    let targets = ($stream.review | each {|review_target|
-        {
-            name: $review_target.name
-            alias: (review-local-alias $capability $stream_name $review_target.aliasSuffix)
-            localPort: ($review_target.localPort + $capability.localPortOffset)
-            path: $review_target.path
-        }
-    })
+    let targets = (review-forward-targets $workspace $stream_name)
     let config = {
         version: 1
         id: $"($workspace_name)-($stream_name)"
@@ -1713,20 +1830,42 @@ def forward-supervisor [] {
     $path
 }
 
-def run-forward-action [workspace: record, workspace_name: string, stream_name: string, action: string, --preserve-config] {
+def run-forward-action [workspace: record, workspace_name: string, stream_name: string, action: string, --preserve-config, --allow-degraded] {
     let config_path = (forward-config-path $workspace_name $stream_name)
     if not $preserve_config or not ($config_path | path exists) {
         write-forward-config $workspace $workspace_name $stream_name | ignore
     }
     let bun = (command-path bun)
     let supervisor = (forward-supervisor)
-    checked-external $"Review forward ($action) for ($workspace_name)/($stream_name)" { ^$bun $supervisor $action --config $config_path } | print
+    let label = $"Review forward ($action) for ($workspace_name)/($stream_name)"
+    if not $allow_degraded {
+        checked-external $label { ^$bun $supervisor $action --config $config_path } | print
+        return
+    }
+    # `start` exits non-zero for any phase below healthy, but a forward that still carries live targets
+    # must not stop the operator from opening them: only an empty target set is fatal on this path.
+    let result = (do { ^$bun $supervisor $action --config $config_path } | complete)
+    let state = (try { $result.stdout | from json } catch { null })
+    let partially_live = if $state == null {
+        false
+    } else {
+        ($state.phase? | default "") == "degraded" and not (($state.targets? | default []) | is-empty)
+    }
+    if $result.exit_code != 0 and not $partially_live {
+        let detail = ($result.stderr | str trim)
+        let suffix = if ($detail | is-empty) { "" } else { $": ($detail)" }
+        error make {msg: $"($label) failed with exit code ($result.exit_code)($suffix)"}
+    }
+    print $result.stdout
 }
 
-def ensure-forward [workspace: record, workspace_name: string, stream_name: string] {
+def ensure-forward [workspace: record, workspace_name: string, stream_name: string, manifest_path: string] {
+    # The supervisor rejects any remote target whose metadata disagrees with this catalog, so the
+    # installed runner and manifest have to match this checkout before it opens the SSH connection.
+    install-runner $workspace $manifest_path
     let portless_runtime = (local-portless-runtime)
     checked-external "Local Portless health check" { ^$portless_runtime.node $portless_runtime.portless doctor } | ignore
-    run-forward-action $workspace $workspace_name $stream_name start
+    run-forward-action --allow-degraded $workspace $workspace_name $stream_name start
 }
 
 def stop-forward [workspace: record, workspace_name: string, stream_name: string] {
@@ -1738,8 +1877,8 @@ def stop-forward [workspace: record, workspace_name: string, stream_name: string
     run-forward-action --preserve-config $workspace $workspace_name $stream_name stop
 }
 
-def review [workspace: record, workspace_name: string, stream_name: string] {
-    ensure-forward $workspace $workspace_name $stream_name
+def review [workspace: record, workspace_name: string, stream_name: string, manifest_path: string] {
+    ensure-forward $workspace $workspace_name $stream_name $manifest_path
     run-forward-action --preserve-config $workspace $workspace_name $stream_name open
 }
 
@@ -1790,7 +1929,7 @@ def main [
             "_up" => { let stream_config = (select-stream $workspace_config $stream_name); remote-service $workspace_config $stream_config up $stream_name }
             "_down" => { let stream_config = (select-stream $workspace_config $stream_name); remote-service $workspace_config $stream_config down $stream_name }
             "_status" => { let stream_config = (select-stream $workspace_config $stream_name); remote-service $workspace_config $stream_config status $stream_name }
-            "_review" => { let stream_config = (select-stream $workspace_config $stream_name); remote-review $workspace_config $stream_config | print }
+            "_review" => { let stream_config = (select-stream $workspace_config $stream_name); remote-review $workspace_config $stream_config $stream_name | print }
             "_errors" => { let stream_config = (select-stream $workspace_config $stream_name); remote-errors $workspace_config $stream_config $stream_name }
             "_launch" => { let stream_config = (select-stream $workspace_config $stream_name); remote-launch $workspace_config $stream_config $stream_name | print }
             "_screen" => { let stream_config = (select-stream $workspace_config $stream_name); checked-external --stream "Capture agent tmux screen" { ^tmux capture-pane -p -t $"($stream_config.tmuxSession):($stream_config.tmuxWindows.orchestrator)" -S -80 } }
@@ -1878,7 +2017,7 @@ def main [
             require-services-enabled $stream_config "up"
             remote-action $workspace_config $workspace _up $stream_name $manifest_path | print
             open-native-tmux-projection $workspace_config $workspace $stream_config.tmuxSession | to json --indent 2 | print
-            ensure-forward $workspace_config $workspace $stream_name
+            ensure-forward $workspace_config $workspace $stream_name $manifest_path
         }
         "down" => {
             let stream_config = (select-stream $workspace_config $stream_name)
@@ -1904,7 +2043,10 @@ def main [
             require-stream $workspace_config $stream_name
             match ($arguments | first) {
                 "status" => { run-forward-action --preserve-config $workspace_config $workspace $stream_name status }
-                "restart" => { run-forward-action $workspace_config $workspace $stream_name restart }
+                "restart" => {
+                    install-runner $workspace_config $manifest_path
+                    run-forward-action $workspace_config $workspace $stream_name restart
+                }
                 "down" => { stop-forward $workspace_config $workspace $stream_name }
                 _ => { error make {msg: "forward requires <status|restart|down> <stream>"} }
             }
@@ -1915,12 +2057,12 @@ def main [
             remote-action $workspace_config $workspace _status $stream_name $manifest_path | print
         }
         "errors" => { require-stream $workspace_config $stream_name; remote-action --stream-output $workspace_config $workspace _errors $stream_name $manifest_path }
-        "review" => { require-stream $workspace_config $stream_name; review $workspace_config $workspace $stream_name }
+        "review" => { require-stream $workspace_config $stream_name; review $workspace_config $workspace $stream_name $manifest_path }
         "launch" => {
             let stream_config = (select-stream $workspace_config $stream_name)
             remote-action $workspace_config $workspace _launch $stream_name $manifest_path | print
             open-native-tmux-projection $workspace_config $workspace $stream_config.tmuxSession | to json --indent 2 | print
-            ensure-forward $workspace_config $workspace $stream_name
+            ensure-forward $workspace_config $workspace $stream_name $manifest_path
         }
         "screen" => { require-stream $workspace_config $stream_name; remote-action $workspace_config $workspace _screen $stream_name $manifest_path | print }
         "attach" => { error make {msg: "Direct SSH attach is disabled; use the native cmux remote tmux workspace"} }
