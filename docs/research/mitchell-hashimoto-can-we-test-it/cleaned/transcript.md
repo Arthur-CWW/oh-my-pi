@@ -1,0 +1,651 @@
+# Can we test it? Yes, we can!
+
+Mitchell Hashimoto — Big GABASH 2025. Spoken text is cleaned from the video's manual English captions; wording is preserved without paraphrase. Slide-context blocks are machine OCR and are kept separate from the spoken captions.
+
+## Transcript
+
+**Spoken captions [00:05]** [Music]
+
+**Spoken captions [00:06]** hello everyone thanks for coming in i'll try to make it positive I guess i think it's optimistic um but let's just dive right into it so this is something we've all heard before
+
+> [!NOTE] **Slide context — slide 001 — [00:14]**
+> OCR source: `slides/slide-001.png`. Vision flagged no lines below 0.70 confidence. Images, diagrams, decorative marks, and any unrecognized text are not reconstructed.
+>
+> "This Can't Be Tested"  
+
+**Spoken captions [00:18]** you know a PR is opened maybe it's trivial maybe it's not trivial who knows maybe uh the author proactively said this maybe they didn't maybe you ask why there aren't tests usually you'll see it this word this can't be tested um often followed by the phrase but it's okay because I just verified it manually uh you know I've said this before you've said this before someone in this room uh has probably said this in the past 24 to 48 hours it's fine
+
+**Spoken captions [00:47]** um and the truth however is usually this can't be tested yet or re or replace yet with easily
+
+> [!NOTE] **Slide context — slide 002 — [00:50]**
+> OCR source: `slides/slide-002.png`. Vision flagged no lines below 0.70 confidence. Images, diagrams, decorative marks, and any unrecognized text are not reconstructed.
+>
+> "This Can't Be Tested  
+> Yet"  
+
+**Spoken captions [00:57]** um and easily is okay because um sometimes you can make the argument that something is could be tested but the work involved in testing it is not worth it tons of stuff like that exists maybe if there's a catastrophic bug it's not an issue maybe you're just running this in you know reproducible environments it's not a big deal that's all fine um there's loads of those situations this talk is not at all about when to test i'll let you make those value decisions yourself um what I want
+
+**Spoken captions [01:26]** to talk about is how things can be tested so my goal with this talk is to really give you a tour of concepts and strategies that can be applied to a variety of different situations try to give you some like pattern matching capability um and how you might be able to you know apply those and I think it's very similar to I think all of us in here would agree that there's value in learning many different programming languages even if you work every day with only a single one learning
+
+**Spoken captions [01:54]** multiple different languages tends to make you a better programmer um similarly I think that just being exposed to different testing challenges even if you may not directly hit the examples I show you I think it'll make everyone a better tester um and so that's really my goal uh today okay so
+
+> [!NOTE] **Slide context — slide 003 — [02:12]**
+> OCR source: `slides/slide-003.png`. Vision flagged no lines below 0.70 confidence. Images, diagrams, decorative marks, and any unrecognized text are not reconstructed.
+>
+> My Background  
+> - ~12y HashiCorp  
+> - Networked systems  
+> - Large scale  
+> - Security-sensitive  
+> - ~3y Ghostty  
+> - Desktop software  
+> - macOS and Linux  
+> - GPU rendered  
+
+**Spoken captions [02:13]** you understand the goals of talk why should you uh sort of listen to me what's my experience um I'll go through this relatively quickly um my background is I started a company called Hashuk Cororp um we made a bunch of tools i was part of all those initial engineering teams so um it's either I'm sorry or you're welcome i don't know uh if you love them feel free to tell me if you don't love them then like I didn't do it was somebody else um uh but yeah I did that for about 12 years
+
+**Spoken captions [02:42]** um and importantly uh I think I was part of a lot of the initial testing uh laying out a lot of the initial testing strategies for this software and sort of some of the properties there they tended to be network systems mostly um there was a large scale in terms of usually nodes or you know that kind of scale that dimension those axes um and there was security sensitivity since one of the things we made was vault um more recently I left Tashi Cororp at the end of
+
+**Spoken captions [03:09]** 2023 if someone didn't know that um but more recently uh for the past few years I've been working on a project called Ghosty which is a terminal emulator it's not a company it's just a passion project it's just for fun um but it has dramatically different properties this is desktop software it's crossplatform across Mac OS and Linux um it's has G uh excuse me GPU rendering in it and uh and I think this is interesting because each of these experiences
+
+**Spoken captions [03:37]** has given me these dramatically different testing environments and I'm someone who loves testing so I wanted to figure this out um and uh I want to share sort of how uh what I what I figured out over the past 15 years all right um so going back in 2017 I gave a talk at gophercon titled
+
+> [!NOTE] **Slide context — slide 004 — [03:50]**
+> OCR source: `slides/slide-004.png`. Vision flagged 2 lines below 0.70 confidence; those lines are marked. Images, diagrams, decorative marks, and any unrecognized text are not reconstructed.
+>
+> 2017: "Advanced Testing with Go"  
+> SOPHERCON **[low confidence]**  
+> Deny  
+> Mitchell Hashimoto,  
+> Hashin **[low confidence]**  
+> 0:08 / 44:58 • Intro >  
+> GopherCon 2017: Advanced Testing with Go - Mitchell Hashimoto  
+> Gopher Academy  
+> 38K subscribers  
+> Subscribe  
+> 987  
+> Share  
+> & Clip  
+
+**Spoken captions [03:55]** uh advanced testing with go and as the title and then you may suggest this is fairly gosp specific um or this was heavily heavil a lot of examples were go here um but uh over the years a lot of people have come up this is sort of one of the most watched talks I've ever given u a lot of people have come to me and said even if I don't write go I found value in watching this talk and uh it's been almost 10 years and I felt that having a sequel to this talk would be a good
+
+**Spoken captions [04:23]** idea because I've learned a lot more um I've experienced more complex situations and I was sort of cut short in this and I wanted to talk about more but an important part of that is I'm trying not to overlap at all with this talk so there's one or one concept that overlaps with this only because we're going to use it in the future things I talk about but if some of the things I talk about maybe seem like I'm jumping into something advanced uh this has a lot more
+
+**Spoken captions [04:49]** even though this has advanced in the title this has a lot more elementary concepts and even if you don't write go like that if you like this talk I think you'll you would like uh watching that one as well okay so let's start getting into it here's what we're taught right like in school
+
+> [!NOTE] **Slide context — slide 005 — [05:00]**
+> OCR source: `slides/slide-005.png`. Vision flagged no lines below 0.70 confidence. Images, diagrams, decorative marks, and any unrecognized text are not reconstructed.
+>
+> What We're Taught  
+> expect (add (1, 2)  
+> ==  
+> 3) ;  
+
+**Spoken captions [05:05]** or in testing chapters of programming books or something like that we're sort of taught that uh there's some operation there's some output you run it and you expect or assert the out uh the out that output and some stuff is like this and if the stuff if what you're doing is like this then great it's easy we all have a great time and generally we'll write tests um but the issue is that let make sure you get this right the reality is that in a lot of real world cases you
+
+> [!NOTE] **Slide context — slide 006 — [05:30]**
+> OCR source: `slides/slide-006.png`. Vision flagged no lines below 0.70 confidence. Images, diagrams, decorative marks, and any unrecognized text are not reconstructed.
+>
+> What We're Taught  
+> expect (add (1, 2) == 3) ;  
+> Reality:  
+> add is executing echo  
+> "1 + 2" I ba  
+> and our software claims to be  
+> compatible with Windows. So nothing  
+> works and everything is terrible.1  
+> 1. This is a silly, exaggerated example, of course!  
+
+**Spoken captions [05:35]** might run into something where AD is actually subprocessing to a shell running BC for some reason and you wanted it to work on Windows and now it doesn't work on Windows um this is silly this is not reality like the only ecosystem that would possibly do this is probably JavaScript um uh but the whole point is that reality is actually messy right like most tests really don't come down
+
+> [!NOTE] **Slide context — slide 007 — [05:55]**
+> OCR source: `slides/slide-007.png`. Vision flagged no lines below 0.70 confidence. Images, diagrams, decorative marks, and any unrecognized text are not reconstructed.
+>
+> But Reality is Messy  
+> - Side effects  
+> - State setup  
+> - Networking  
+> - GPUS  
+> - Concurrency  
+> - Unclear pre/post-conditions  
+> - Complex outputs (e.g. images)  
+> - High-dimensionality  
+> - etc...  
+
+**Spoken captions [05:59]** to that simple run a thing get an output you're happy situation um at least in my experience a lot of the things that I actually care to work don't fall into that category they fall into these categories where they have side effects or there's a complex state of the world that needs to be created in order to even run it in the first place um you know networking other devices like GPUs concurrency and so on and so forth the list goes on and I'm not going to go into detail about
+
+**Spoken captions [06:27]** this i just hope that people agree and have noticed this in their own uh their own code and a lot of these are what give rise to you work in one of these categories and say hey this couldn't be tested uh but you know it works maybe okay so the last thing I want to talk about
+
+> [!NOTE] **Slide context — slide 008 — [06:41]**
+> OCR source: `slides/slide-008.png`. Vision flagged no lines below 0.70 confidence. Images, diagrams, decorative marks, and any unrecognized text are not reconstructed.
+>
+> Two Sides to Testing:  
+> Strategy  
+> How to test something  
+> Testability  
+> How to make testable software  
+> - Code structure  
+> - Available APIs, config, etc.  
+> - Packaging  
+> - Automation harnesses  
+
+**Spoken captions [06:44]** um one more setup slide before we sort of get into it is the two sides to testing so there's two parts to testing they're both equally important um this is also going to be the slide format so if the slide header starts with a test tube we're going to be talking about testing strategy if the t slide header starts with soap and bubbles uh we're going to be talking about testability so uh testing strategy doesn't need an explanation that's how to test something um
+
+**Spoken captions [07:10]** without this test don't exist everyone gets this one it's easy the second one is just as important but the one that I find regardless of engineering experience gets ignored more often is testability um if software isn't made testable there actually are cases where you can say this can't be tested and you would be telling the truth um so you need to pair testability with actual testing strategy in order to be able to test everything and the way you achieve testability generally are
+
+**Spoken captions [07:39]** things like proper code structure uh making the right uh APIs available making something friendly for automation things like that um so I'm going to be talking about both of these intermixed in this again with the slide design uh guiding it in order to get us to be able to test more things
+
+> [!NOTE] **Slide context — slide 009 — [07:56]**
+> OCR source: `slides/slide-009.png`. Vision flagged no lines below 0.70 confidence. Images, diagrams, decorative marks, and any unrecognized text are not reconstructed.
+>
+> Snapshot Testing-  
+> Verify produced output against some ground  
+> truth  
+> - Scenario: Complex output formats,  
+> significant quantity of comparisons,  
+> improved diff on failure  
+> - Don't forget to provide an easy way to  
+> update the ground truth when needed  
+> - Leverage VCS for reviewing test changes  
+> 1. née "Golden Files"  
+
+**Spoken captions [07:58]** all right so let's get started with our first testing strategy oh another important point the slides are roughly in order of simplest to uh more complicated or more advanced so if you feel that some of this stuff is like oh this is obvious and this whole talk is going to be obvious i suspect it won't i hope it won't but based on earlier talks this is a pretty advanced group so maybe so um but let's get started with uh the first one snapshot testing um sometimes this is also called
+
+**Spoken captions [08:24]** uh golden files testing ground truth testing um other things like that um snapshot testing is I used to call it some of those phrases but I feel like snapshot testing is more of the norm nowadays culturally so that's what I'm going to call it here um the scenario where you want to do snapshot testing generally is when you have some sort of complex output format where programmatically coding the comparisons is difficult um that's I think if you are familiar with snapshot testing
+
+**Spoken captions [08:51]** the one that you'd be familiar with a lesser discussed scenario but I think possibly more powerful for snapshot testing is that it often gives you better diffs to understand uh why something failed and I'm going to show you an example of this so here's oh this came out way smaller than I expected um here's an example directly from Ghosty my terminal emulator um
+
+**Spoken captions [09:16]** when I previewed this locally that image was really small and the code was really big so I don't know um but um the code you don't need to read it the code is Zigg i'm going to use Zig examples in this talk is totally language agnostic it doesn't matter so ignore that um but basically what we're doing here is GOC has an embedded sprite font within the terminal emulator there's a bunch of glyphs that terminals render that depend on the grid size to be perfect so
+
+**Spoken captions [09:41]** the ones you're probably most familiar with are PowerShell type glyphs like the arrows um if you end up using a font if you see this right now in your terminal you use a font and the arrows like don't quite perfectly match up with your grid size um then the terminal is not doing this what Ghosti does is those glyph code points we programmatically rasterize given the current grid dimensions so they're always pixel perfect this is not uncommon a handful of terminals do
+
+**Spoken captions [10:06]** this um but the issue is that how do you test this how do we make sure it works specifically one of the first things we found was that we had an off by one error when the grid size was odd in either dimension and we were one pixel off and so one of the ways oh and also new glyphs are introduced all the time we've changed out the library of how we rasterize and things like that how do we make sure we don't regress this stuff this is a perfect case for snapshot testing what we do
+
+**Spoken captions [10:31]** is we embed a we render a bit map of every glyph that we programmatically rasterize we commit that directly to the repository and we compare it pretty straightforward that's the snapshot and that's how we compare what the code was trying to show you there is that there's a basic step at the bottom where we read this ground truth we run the actual rasterization and we just compare it
+
+> [!NOTE] **Slide context — slide 010 — [10:50]**
+> OCR source: `slides/slide-010.png`. Vision flagged 1 line below 0.70 confidence; those lines are marked. Images, diagrams, decorative marks, and any unrecognized text are not reconstructed.
+>
+> Snapshot Testing  
+> test  
+> var atlas: font.Atlas • try •init (alloc, •grayscale):  
+> "render al1 aprites" (|  
+> defer atlas.deinit (alloc):  
+> try (Box!  
+> // Even cell size and thickness (18 × 36)  
+> •metrics - .calc(.í  
+> - cell_width = 18.0,  
+> H. testRenderAll (alloc, satlas):  
+> try (Box!  
+> 1/ Odd cell size and thickness (9 × 15)  
+> •metrics = .calc(.í| **[low confidence]**  
+> • cell_width = 9.0,  
+> 1). testRenderAll (alloc, Satlas);  
+> var stream = std.lo. changeDetectionStream (ground_truth)  
+> const ground_truth - Cembedfile("/testdata/Box.ppm"):  
+> try atlas.dump (stream.writer)):  
+> try testing.expect (!strean.changeDetected()):  
+> •O  
+
+**Spoken captions [10:50]** there's nothing fancy there but one of the things I talked about is that one of the helpful
+
+> [!NOTE] **Slide context — slide 011 — [10:52]**
+> OCR source: `slides/slide-011.png`. Vision flagged no lines below 0.70 confidence. Images, diagrams, decorative marks, and any unrecognized text are not reconstructed.
+>
+> Snapshot Testing  
+> Bonus: Some ground truth formats  
+> enable more helpful test failure  
+> information  
+
+**Spoken captions [10:56]** properties of ground truth testing snapshot testing is better diffs um and in this case since our comparison is an image we could apply standard image diffing techniques to this and we do this also in the repo so when the test fails we also generate the diff and dump it to the file system as part of the test run um and again I thought this would be a little bit more readable um but what I did was I artificially modified our code to draw vertical bars one pixel off to
+
+**Spoken captions [11:22]** the right it produced a failure and the diffs on the right um it's a bit hard to see but there are some green lines in there um that's the diff that gets generated um and the thing that I want to point out here is that this is a more helpful diff because prior to this we did have some tests and it would just basically say it didn't match um or this pixel in this place was wrong one thing that snapshot testing gives you is snapshots usually have more context than a single assertion like yes
+
+**Spoken captions [11:49]** this one pixel is wrong but here's all the pixels so you could see and usually standard assertions in like a unit test type environment don't also include the greater context and snapshots tend to so in this case I could see very clearly that vertical bars are an issue I could see it's across multiple glyphs and me with my experience with the codebase when I see something like this immediately think some common function that draws vertical bars is wrong and that's what I ended up
+
+**Spoken captions [12:15]** you know breaking here um this doesn't just apply to images make for an easy visual example um but for example uh for Terraform uh about a decade ago uh one thing that we ran into was that uh the first step that Terraform does is builds a resource graph that gets executed um and we had a bunch of tests around building that graph and we would get failures saying this expected node this expected edge doesn't exist and it would be very difficult we were spending a lot
+
+**Spoken captions [12:40]** of time as engineers figuring out what of the graph changed so one of the things I changed was even though it wasn't hard to program those assertions the diffing was very hard for us so I ended up starting to dump the expected graph and the graph we got and then doing uh generating a dot format that actually colored the edges that were missing red the bonus edges green vertices so on then you could load the whole graph and debugging these things became much easier um
+
+**Spoken captions [13:08]** that was actually a text diffing format you could render that into an image but um that was just text stiffing again since we're missing one verticy but we could see all the vertices the greater context around it uh debugging became easier so I think this is actually the bigger benefit of snapshot testing uh um but something to keep in mind okay this next section I didn't mean to keep in here so I'm actually going to skip it um uh you could that one overlaps as well with the
+
+> [!NOTE] **Slide context — slide 012 — [13:29]**
+> OCR source: `slides/slide-012.png`. Vision flagged 3 lines below 0.70 confidence; those lines are marked. Images, diagrams, decorative marks, and any unrecognized text are not reconstructed.
+>
+> Keep Context Close  
+> test "Terminal: eraseDisplay below protected attributes respected with iso mode" (  
+> var t = try init(alloc, . .rows = 5, .cols = 5 }) ;  
+> defer t. deinit (alloc);  
+> t. setProtectedMode (.iso); **[low confidence]**  
+> for ("ABC") |c| try t.print (c);  
+> t. carriageReturn () ;  
+> try t.linefeed () ; **[low confidence]**  
+> for ("DEF") Ic| try t.print (c) ;  
+> t. carriageReturn () ;  
+> try t.linefeed () ; **[low confidence]**  
+> for ("GHI") Ic| try t.print (c) ;  
+> t. setcursorPos (2, 2) ;  
+> t.eraseDisplay(.below,  
+> false);  
+> const str = try t.plainString (testing.allocator);  
+> defer testing. allocator. free (str);  
+> try testing. expectEqualstrings ("ABC\nDEF\nGHI", str) ;  
+
+> [!NOTE] **Slide context — slide 013 — [13:32]**
+> OCR source: `slides/slide-013.png`. Vision flagged no lines below 0.70 confidence. Images, diagrams, decorative marks, and any unrecognized text are not reconstructed.
+>
+> Isolate Side-Effects  
+> Extract purely functional behaviors  
+> - Scenario: Behavior intermixed with IO or  
+> complex setup requirements  
+> - Classic examples: I0 event handlers such  
+> as connections, mouse click, keyboard  
+> input, etc.  
+> - Garbage In, Garbage Out  
+> - But we can test the garbage  
+
+**Spoken captions [13:36]** uh gopher con talk so you could you could look into that one it was also kind of like a opinionated one that people tend to get upset about so it's fine we should skip it anyway um okay let's talk about a testability subject so soap and bubbles um isolating side effects i actually think if there's no other part of this talk that you pay attention to this is the number one force multiplying strategy that sort of exists to make code testable um this comes up over
+
+**Spoken captions [14:06]** and over in different contexts and the scenario is this uh you have some sort of behavior you want to test but it's reliant on some sort of external IO or otherwise complex system that's sort of filled with side effect type behavior um and this is a really common case of this can't be tested um and what you're looking for the goal with this is within this IO complexity state soup you're
+
+**Spoken captions [14:30]** trying to find the purely functional behavior stuck in there extract it out reorder things in order to get something that you could mostly test in this case you could usually get most of the complexity tested um as a result of this what you get is something that is obviously testable and I'm going to show you an example of this you get something that's obviously testable but it becomes a garbage in garbage out type of test and what I mean by that is you can't in this case
+
+**Spoken captions [14:58]** um simulate the external sidey things so you're going to artificially provide those inputs and so if you provide garbage and you test garbage you're going to get garbage out you need to make sure that the inputs that you're going to be providing to these sorts of tests are actually realistic in real world um and again I'm that's conceptual let's see it in practice okay so here
+
+> [!NOTE] **Slide context — slide 014 — [15:19]**
+> OCR source: `slides/slide-014.png`. Vision flagged 4 lines below 0.70 confidence; those lines are marked. Images, diagrams, decorative marks, and any unrecognized text are not reconstructed.
+>
+> Isolate Side-Effects  
+> Before  
+> getMouseState( **[low confidence]**  
+> checkMouseStatel  
+> getKeyboardState0  
+> checkKeyboardState(  
+> readSettings0  
+> encodeKeyo **[low confidence]**  
+> write ToPty0  
+> After  
+> getMouseState( **[low confidence]**  
+> getKeyboardState0  
+> readSettings  
+> KeyEncoder  
+> writeToPty0 **[low confidence]**  
+
+**Spoken captions [15:22]** is something we're going to start visually and then see code but I actually doubt we're going to see any code given the slide sizes um but let's try to understand this visually um here's a simplified but real example from GOI again one of the things a terminal emulator has to do is uh probably the main thing that it has to do is when you press something on the keyboard it has to encode that into some format which is then sent to your shell or whatever running program
+
+**Spoken captions [15:47]** and then it does whatever you know basic things like if you press controlr at your shell prompt you tend to expect a reverse search to show up um so on and so forth early versions of Ghosti uh had a keyboard input handler that looked like the above image um basically what would happen here is a user would press a key we would read mouse state which seems odd but depending on mouse state it actually affects whether a key should be encoded at all like if you're actually actively highlighting something and you press uh press certain keys you might want to move the highlight
+
+**Spoken captions [16:16]** shift the highlight things like that so we would first grab mouse state check respond in some way then we would check keyboard state because we need to know what keys are pressed what modifiers are pressed is it a repeat is it a first press you know things like that um do stuff around that then we would read terminal settings there's a variety of settings that affect how it's encoded are we doing legacy encoding kitty encoding within each of those are we encoding alternate unicode
+
+**Spoken captions [16:42]** code points are we encoding control is you know differently there there's a bunch of stuff and then finally we encode the key and then write it out to the actual PTY that we have uh and this was untested because setting up mouse keyboard state stuff like that uh is non-trivial and I originally approached this as oh this isn't a testable thing um and uh I punted it to a full endto-end test i figured one day I would probably spin up a VM or something synthesize
+
+**Spoken captions [17:08]** inputs and assert something um I just punted it away like we'll figure it out later uh but then uh I sort of got punched in the face enough with this code uh constant regressions happening here a lot of complexity that I realized I had to do something even if that something was that VMbased test right now and I took an a I actually sat down and focused on I need to make this testable because this can't go on um and what I realized is what these colors are showing if you could
+
+**Spoken captions [17:35]** see the colors um the yellow is the stuff that's dependent on external logic and the green is the stuff that doesn't need any is sort of pure it just has some inputs and gives you a set of outputs and doesn't touch any external systems and it's really easy to see here cuz it's colorized and I simplified it into distinct categories of function calls and also made it alternating um but hopefully people could understand that the reality of this function at the time was that all of this
+
+**Spoken captions [18:03]** was intermixed and we would grab state when we needed it and run conditionals on it uh and it wasn't at least to me uh it took me a few hours of really staring at this code to see the shape of suddenly something emerge and what I saw emerge was um this at the bottom if I actually took all of the stuff that grabbed external state moved it to the top the sort of turn it into a read process write order then I could isolate that you know provide artificial inputs there test
+
+**Spoken captions [18:32]** this green thing that is pure just has inputs and gives you an output uh and then it becomes that testing 101 you know expect add 1 plus 2 equals 3 sort of environment and in this case most of the complexity most of the bugs most of the issues was in this green thing so we were able to really dramatically eliminate a bunch of issues and also that made it much easier to fuzz and things like that um and I'm not going to talk about fuzzing in this there's enough of that here
+
+> [!NOTE] **Slide context — slide 015 — [19:02]**
+> OCR source: `slides/slide-015.png`. Vision flagged 3 lines below 0.70 confidence; those lines are marked. Images, diagrams, decorative marks, and any unrecognized text are not reconstructed.
+>
+> Isolate Side-Effects  
+> event: KeyEvent,  
+> macos_option_as_ait: contig.optionAsAlt .false,  
+> cursor_key_application: bool  
+> alt_esc prefix: bool  
+> = false,  
+> keypad_key_application: bool = false,  
+> -false,  
+> modity_other_keya_state_2: bool = false,  
+> İgnore_keypad_with_numlock: bool - false,  
+> kitty_flags: Kictyflags = .11.  
+> const KeyEvent = struct (  
+> action: Action = •press,  
+> physical_key: Key = .invalld,  
+> key: Key,  
+> mods: Mods = .l,  
+> consumed moda: Mods • -ll,  
+> composing: bool • false,  
+> uct8: []const u8 = **[low confidence]**  
+> unshifted_codepoint: u21 = 0,  
+> const Kittyflags - packed struct (u5) |  
+> disambiguate: bool = false,  
+> report_events: bool - false,  
+> report_alternates: bool - false,  
+> report_associated: bool = false,  
+> report_all: bool • false,  
+> var enc: KeyEncoder = .1  
+> "kitty: report alternates with ru layout" {  
+> • event = . (  
+> •key = .semicolon,  
+> • mods = . (l. **[low confidence]**  
+> • unshifted_codepoint - 1095,  
+> •ut[8 = "4", **[low confidence]**  
+> • report_all = crue,  
+> • disambiguate - true,  
+> • report_associated • true,  
+> • report_alternates  
+> var but: [128]u8 = undefined;  
+> try teating.expectEqualStrings("\xIb|1095: :59;;1095u", actual):  
+> const actual-try enc.kitty (ibuf):  
+
+**Spoken captions [19:02]** yep that's what I expected um this is the actual code from the key encoder i wish you could see the bottom the bottom is more important but um the top just know that each line I think you could all see lines just not the text that's in the line each line is a piece of state whether it's structure a boolean an integer a character um it's a piece of state that's needed to do the key encoding and what I'm just trying to visualize here is how much state is actually required for a
+
+**Spoken captions [19:29]** terminal to produce a valid key encoding there's something like in total there's something like 15 different fields here some of it is produced by the operating system some of it's produced by the terminal its internal settings um but the bottom is an actual test I copied out directly just verbatim zero edits to show the types of regressions that we can now test against and what the bottom test is doing just believe me and you could look at the slides later uh it's testing
+
+**Spoken captions [19:56]** how we encode a certain input from a Russian keyboard layout with kitty keyboard settings encoded to also add alternate unicode characters um and in predicts expects we get the right thing this is the reason we I had to test this because every time I would fix a feature or fix a bug or implement a feature I would regress some to me you know very foreign layout that I of course was
+
+**Spoken captions [20:23]** not just running I don't speak type Russian um and also getting the specific kitty layout is very difficult so you know this is very common there's Russian Japanese Chinese Hungarian like all sorts of very language specific test cases in there to make sure we constantly do the right thing and I think because of this u Goi has one of the most complete and stable sort of encoding uh key encoding uh features out there and so this helped a lot um and this is sort of the key point of
+
+**Spoken captions [20:52]** isolating the side effects and basically every section from here on out is going to continue to show examples of this we're going to take snapshot testing we're going to take isolating side effects and we're going to bring them together to do something more and more complicated all right GPUs
+
+> [!NOTE] **Slide context — slide 016 — [21:08]**
+> OCR source: `slides/slide-016.png`. Vision flagged no lines below 0.70 confidence. Images, diagrams, decorative marks, and any unrecognized text are not reconstructed.
+>
+> GPU  
+> SO HOT RIGHT NOW  
+
+**Spoken captions [21:10]** um what a crazy time for GPUs uh so uh thankfully I don't work at OpenAI so I'm not going to talk about AI at all in this talk u I'm just going to talk about GPU programming in general it could apply to AI but it in my case it applies to rendering and some compute um but I want to talk about GPU programming and GPU testing actually so background uh Ghosty is a GPU rendered
+
+> [!NOTE] **Slide context — slide 017 — [21:37]**
+> OCR source: `slides/slide-017.png`. Vision flagged no lines below 0.70 confidence. Images, diagrams, decorative marks, and any unrecognized text are not reconstructed.
+>
+> • GPU Testing  
+> Treat the GPU pipeline as a function  
+> - Scenario: Any type of shader pipeline  
+> - Two sides:  
+> - CPU emits correct buffer data  
+> - GPU emits correct buffer data  
+> - GPU simplification: f(x) = y  
+> - y comes out on a buffer (texture)  
+> - Plays well with snapshot testing, but not  
+> required  
+
+**Spoken captions [21:40]** terminal emulator and what that means is when you run the terminal that main thing you see with your cursor blinking that whole thing is just an image that I'm rendering via the GPU we also do a little bit of compute on the GPU um it was my personally it was my first foray into writing any kind of GPU code starting a few years ago um prior to that I lived purely on the CPU and given that when I started coming into it one of the first things I asked was all right how do I test this um my
+
+**Spoken captions [22:10]** initial feeling in response was the classic can't be tested this seemed like a very obvious thing that I should spin up a VM and take screenshots of i was rendering after all so that seemed to be the right solution um but uh for years our renderers didn't have unit tests and for years similar to key encoding we would just whack-a-ole regressions constantly in the renderer uh in the GPU code and so finally I sat down and said I need to figure this out uh resources on how to test
+
+**Spoken captions [22:38]** GPU logic is surprisingly scant like if you do a web search of how to test GPUs it's one of those rare things where Google the first page is just like completely garbage there's one response that uh has an idea that's kind of interesting but it was just an idea that no one implemented so um it kind of leads you in a direction that you then have to figure out on your own um I went from that to uh going to the Kronos group uh Apple and Microsoft and downloading the reference
+
+**Spoken captions [23:09]** material for DirectX Direct 3D Metal uh and OpenGL Vulcan and all their docs anything they could provide me in big text format and I did command F searching um LLVM assistance searching on that um everything i looked for test verify snapshot um uh st uh bug stability like I looked for all these um terms and the amazing thing is the total reference material across those three vendors for
+
+**Spoken captions [23:35]** their language specification driver specifications and so on is something like 4,000 pages of PDF and I didn't get a single hit on any of those terms like the word didn't pop up one time so as far as I could find there are zero official resources on how to do testing with GPUs um and very few people have even cared to ask the question at least publicly to where it was indexed so that's
+
+**Spoken captions [24:02]** where I was left uh I took that mostly as a challenge to see if well I feel pretty good about testing i like testing maybe I could figure this out and uh I think I did at least something that worked for me pretty well um so this is where I'm just going to add a quick disclaimer that you could probably tell based on my experience here that I'm not an expert on GPUs i never worked on complicated 3D games u my terminal emulator is one of the only things beyond like toy like Advent of
+
+**Spoken captions [24:28]** Code examples that ever used a GPU i'm not quite sure that my techniques here actually generalize that well um in my defense uh GOI does have about 15,000 lines of renderer code split across Metal and OpenGL um we have separate renderers for both systems and uh that includes both the CPU code and the shaders for the GPU the shaders are about 2,000 lines so 13,000 on the CPU 2,000
+
+**Spoken captions [24:53]** on the GPU um that that's what I was working with that's what I was trying to test uh the core realization I came up with here is that uh GPU programming requires two sides i'm going to go into that background there's the CPU side to prepare the data and then process the results usually and the GPU part that actually you know runs the shaders uh and I felt that we can test each of those in isolation and specifically really clearly a GPU is just a pure function evaluator
+
+**Spoken captions [25:22]** um which makes testing really easy but setting up the workloads really hard which is kind of a funny thing to run into um but let's go ahead and look at this more visually and start with the GPU
+
+> [!NOTE] **Slide context — slide 018 — [25:29]**
+> OCR source: `slides/slide-018.png`. Vision flagged no lines below 0.70 confidence. Images, diagrams, decorative marks, and any unrecognized text are not reconstructed.
+>
+> GPU Testing  
+> CPU side:  
+> I (state) = (V, E, Data)  
+> assert (f (state) == expected) ;  
+> Given world state, the CPU produces a graph  
+> of steps (i.e. vertex, fragment, compute)  
+> with attached data (literal byte buffers)  
+> - Isolate the Side-Effects!  
+
+**Spoken captions [25:32]** side uh the CPU side um we could actually read this basic thing um so as a point of background for those less familiar with GPU programming um the CPU do does have to do some work to prepare uh the GPU the CPU has to put together the right data the right steps basically these little job descriptions that it then eventually offloads and submits to the GPU and says here's a bunch of crap go do it and I'll come back or you tell me when you're done i'll read this later
+
+**Spoken captions [26:01]** um that's the really general way to think about a GPU um the work the CPU does in preparation for the GPU can be roughly thought of as this top function um there's it's a function that takes in some sort of state um state of the world some if you're doing rendering this might be called the scene state you know it's what monsters are on the level where are they where's the camera where's the player um what planet am I on you know like that's the scene state that exists it brings
+
+**Spoken captions [26:30]** in the scene state and as a result it produces sort of three sets of values it produces a graph so you get vertices and edges and it produces data attachments for that graph which nodes need which access to what data um and that's a GPU um the render the graph is just a graph it has vertices edges and the vertices are operations right it's stuff like vertex shading fragment shading compute shading um things like that edges are the data dependencies between the steps the vertex shader
+
+**Spoken captions [26:57]** is going to produce some sort of output that the fragment shader needs to bring in um or um the vertex shader needs the fragment shader needs access to a certain texture things like that the there's these edges that exist in the graph and the data attachments are literally bite buffers um historically you'd probably call these textures uh more modern graphics APIs out there Vulcan Metal and later Direct 3D they all tend to really just call these buffers now because it's really just a
+
+**Spoken captions [27:24]** set of bytes sometimes the bytes have structure to them they're rgba with dimensions and stride and you have a texture but sometimes they're just bytes because you're just computing stuff um so data is just bytes and therefore you could do whatever you want with it so to test the CPU side we have to apply that technique of isolating the side effects in this case the side effects are all
+
+**Spoken captions [27:48]** the API calls to the GPU itself in order to submit prepare and submit this workload and so what I was what I ended up doing was creating an intermediary where we bring in the scene state we produce the graph and the data and then I assert that the graph has the right shape which I have a bunch of experience with Terraform and the data is I do snapshot testing bringing that back because it's just bytes and so we're able to do some structured sort of snapshot verification on that and then
+
+**Spoken captions [28:17]** after that there's a small amount of simple untested code which just translates the graph and the data attachments into GPU API calls um that stuff never really changes i'm happy to keep it untested until there's end toend tests and in this way we're able to test that given a certain scene state we're producing the right workloads for the GPU but we're not sure the GPU is going to do the right thing with that but that's this is still one big part of the equation i mean this is 13 out of
+
+**Spoken captions [28:42]** the 15,000 lines of code that GOI does in order to render a scene so um this is a big one then on the
+
+> [!NOTE] **Slide context — slide 019 — [28:48]**
+> OCR source: `slides/slide-019.png`. Vision flagged no lines below 0.70 confidence. Images, diagrams, decorative marks, and any unrecognized text are not reconstructed.
+>
+> GPU Testing  
+> GPU side:  
+> £ (X) = Y  
+> X, Y = set of buffers  
+> General idea:  
+> 1. Artificially construct input buffers  
+> 2. Ensure output buffers are CPU-accessible  
+> 3. Submit actual GPU work  
+> 4. Compare the output buffers  
+
+**Spoken captions [28:49]** GPU side it's visually much simpler gpus have no access to disk they have no access to networking they have no access to any other peripherals they only have access to their own memory and so a GPU by definition is pretty much just a pure function evaluator it has some sort of computation it has data and it outputs data and that's something that's really juicy to test really easy to test but the funny thing about it is like I said the hard part is actually like submitting the
+
+**Spoken captions [29:16]** workload um so the general idea with the GPU side is I want to artificially construct some set of input buffers that my pipeline is going to expect I'm going to ensure the output buffers are CPU readable so instead of writing to a frame buffer that might never come back to the CPU you know it's going to render this screen don't render the screen render to this other CPU readable memory I have then I submit actual GPU work we run unit tests on the CPU on the
+
+**Spoken captions [29:42]** CPU we're going to run unit tests for the GPU on the GPU submit the actual GPU work and then compare the output buffers just handwaving you know snapshot testing actually parsing the data whatever you want to do but compare the output in some way uh that's the general idea it's hard
+
+> [!NOTE] **Slide context — slide 020 — [29:55]**
+> OCR source: `slides/slide-020.png`. Vision flagged no lines below 0.70 confidence. Images, diagrams, decorative marks, and any unrecognized text are not reconstructed.
+>
+> • GPU Testing  
+> GPU side:  
+> £ (X) = Y  
+> X, Y = set of buffers  
+> Practically:  
+> - Full render passes with snapshot testing  
+> Future:  
+> - Isolate shaders and capture their output (e.g.  
+> OpenGL transform feedback, compute shaders, etc.)  
+
+**Spoken captions [29:57]** right so in practice what I found and what I've really only gotten to work well enough that I've shipped it is full render passes with snapshot testing what I do is I artificially create the scene state usually a very small terminal like a 2x2 terminal um I send it to the actual GPU i get an image out and then I compare images and I expect pixel you know bite equivalent images
+
+**Spoken captions [30:21]** uh it sounds kind of like endto-end testing it is in a certain way i would say it's not quite a unit test it's more of an integration test um but it's very I think it's still a very robust powerful test for two reasons one it's much faster so getting a window made submitting GPU work grabbing a screenshot and uh and comparing it is instant on any modern computer uh it's really fast and it is very robust you're in this case we're really
+
+**Spoken captions [30:52]** tightly controlling the input scene state we're running one render pass we're grabbing exactly one frame of results out of the other side and comparing against it we don't have to worry about standard endto-end tests with timing and synthesized inputs and you know window positions and chroming and like all this other stuff around the edges like we get exactly the image perfectly cropped for what we're trying to compare and it's a single frame so um it's very robust it works um
+
+**Spoken captions [31:19]** for the future I do want to test shaders and more isolation and I've already done a bunch of this i'm going to kind of go through a few of the things I've done as proof of concepts and they work but they all have these trade-offs I'm not quite happy with so I haven't actually shipped this in any way so that's my disclaimer for this that the proof of concepts all do work though um so the full render pass obviously tests a full like input to image um but individual shaders themselves have quite a lot of complexity or can have quite a lot of complexity there's
+
+**Spoken captions [31:47]** conditionals there's loops there's obvious edge cases that I see that I want to test in some way um and it's sometimes hard to elicit those edge cases through an initial scene state or at least to visualize them in a resulting output state so I want to get closer to a unit test with shaders and so to do that I've been trying a variety of techniques um trying to figure out the best way forward um again these are all things that I haven't found a lot of people trying that much um
+
+**Spoken captions [32:16]** I'm not going to talk about each in detail because I'm still learning quite a bit about it um but I'm going to just cover the highle ones people know more details about this I'd love to hear about it um but for example sort of just a couple concepts um OpenGL I know a lot of people are hyped about Vulcan and things like that but OpenGL still works opengl has this feature called transform feedback and what it basically allows you to do is capture the output of some shaders some types of shaders
+
+**Spoken captions [32:41]** not all of them into a CPU readable buffer it's actually a really nice API cuz you literally just as strings say the variables that you want and it just grabs them and throws them in order into an output buffer and that's perfect um I don't know what this was made for uh I don't know i've never seen it i did a source graph search and things like that i don't see it used as very few API calls um it doesn't really exist in Vulcan so they you know clearly there wasn't enough value to move
+
+**Spoken captions [33:10]** it move it forward but it is kind of perfect for testing some kind of shaders and that's an issue it only applies to some um on the metal side metal doesn't have transform shaders neither does direct 3D so um what I found I've had to do there is extract shared logic into compute shaders so non-rendering just compute shaders um make each side just call the shared library and then run it through a compute shader and kind of build my own transferred feedback mechanism um that requires a
+
+**Spoken captions [33:37]** lot more code that requires code restructuring of GPU code which you know standard for testing but isn't great um and uh it works that that's the nice thing about that is that works for every kind of shader no matter what um but you have to be able to extract it into a compute uh shader which I've never found you can't do so um there's a lot of promise here i unfortunately just didn't get to a production state of the future site so I don't know um hopefully one day I could blog or talk about it and have it all figured out uh but the I think the result of this is I feel confident
+
+**Spoken captions [34:06]** that we're now able to test our renderers um the full render pass thing I have is very robust and fast and uh you don't actually need a GPU like hardware to do it because you could run it against software drivers we don't we assume we could assume the drivers work that we're not trying to verify drivers here um so just run it against software drivers and again we're just running one frame so it's super fast um and uh yeah it's interesting and I think it highlights snapshot
+
+**Spoken captions [34:30]** and isolate uh isolating side effects really well okay the last sort of topic I want to talk about
+
+> [!NOTE] **Slide context — slide 021 — [34:34]**
+> OCR source: `slides/slide-021.png`. Vision flagged no lines below 0.70 confidence. Images, diagrams, decorative marks, and any unrecognized text are not reconstructed.
+>
+> VM Testing  
+
+**Spoken captions [34:37]** is VM testing there are some things that do end up requiring this specifically to test those yellow boxes that I had earlier the only way to really do it is to really make it happen and the only way to simulate things like keyboard and mouse and other types of events is through things like VMs um not just keyboard or mouse right this is also network failures stuff that Antithesis is really good at um disk failures things like that it's sort of best done through a hypervisor
+
+**Spoken captions [35:03]** layer uh I'm going to apologize here because we're going to mention Nicks [Applause] and I know
+
+> [!NOTE] **Slide context — slide 022 — [35:08]**
+> OCR source: `slides/slide-022.png`. Vision flagged no lines below 0.70 confidence. Images, diagrams, decorative marks, and any unrecognized text are not reconstructed.
+>
+> NixOS VM Testing  
+> H  
+> NIX  
+> HISTORY.COM  
+> imgflip.com  
+
+**Spoken captions [35:15]** a lot of people feel that Nick's enthusiasm is pretty exhausting and don't want to hear about it uh so I am sorry uh in my defense I feel pretty confident that I have a good grasp about dev test environments virtualization containerization like it was my whole career for like 15 years and
+
+**Spoken captions [35:39]** I don't know any other technology that could achieve what I'm about to show you very well so I'm going to use Nyx and I'm gonna and I'm sorry but not sorry at the same time
+
+> [!NOTE] **Slide context — slide 023 — [35:51]**
+> OCR source: `slides/slide-023.png`. Vision flagged no lines below 0.70 confidence. Images, diagrams, decorative marks, and any unrecognized text are not reconstructed.
+>
+> NixOS VM Testing  
+> Full system reproducibility to run  
+> software in a very specific  
+> environment  
+> - Scenario: Complex state of the  
+> world requirements  
+> - Kernel versions, software versions,  
+> desktop environments, locales, etc.  
+
+**Spoken captions [35:51]** um okay so let's first talk about VM testing without the next part okay um so if you're like having an emotional reaction we'll start here to Okay uh there are some things like I said that just require an end toend test and VMs are the best uh for that you can maybe get away with containers but I'm just use them interchangeably if you want but in this case I'm going to keep
+
+**Spoken captions [36:15]** keep using the word VM uh VM testing lets you model really complex pretty much arbitrarily complex states of the world um you know specific kernel software versions specifically the interplay between those um for me on the desktop side it lets me simulate different local um different keyboard layouts excuse me things like that and uh you sometimes just need them so the idea is that you spin up you know a full VM you actually run software synthesize events and
+
+**Spoken captions [36:44]** then somehow assert that what you wanted to happen happened that's usually through screenshots or SSH commands you know SSH commands would be like this process is running this file exists this file has this contents whatever but those are usually the two mechanisms you do it okay now we bring in the
+
+> [!NOTE] **Slide context — slide 024 — [37:00]**
+> OCR source: `slides/slide-024.png`. Vision flagged 4 lines below 0.70 confidence; those lines are marked. Images, diagrams, decorative marks, and any unrecognized text are not reconstructed.
+>
+> • NixOS? VM Testing  
+> What makes it  
+> special:  
+> pkgs.testers.runNixOSTest { **[low confidence]**  
+> name = "minimal-test";  
+> A full, first party testing  
+> nodes.machine = { config, pkgs,  
+> framework powered by Nix.  
+> } : 1 **[low confidence]**  
+> users.users.alice = (  
+> - First party  
+> isNormalUser = true;  
+> extraGroups = [ "wheel" ];  
+> - Testing Framework  
+> packages = with pkgs; [  
+> - Powered by Nix  
+> firefox  
+> tree  
+> }; **[low confidence]**  
+> } ; **[low confidence]**  
+> testScript = ''  
+> machine.wait  
+> _for_unit ("default.target")  
+> machine. succeed ("su -- Alice -c  
+> 'which firefox'")  
+> machine.fail ("su -- root -c 'which  
+> firefox'")  
+
+**Spoken captions [37:00]** Nyx why do we have to bring in the Nyx i'm glad we could read this actually um so we I'm bringing in Nyx because Nyx provides a full firstparty testing framework that has access to Nyx and these three properties are really important because um first party it's Nyx actually uses this to test Nyx itself and so it's not going away it's running every day it's running right now there's thousands of jobs queued up right now um by the Nyx project in order to run these types of tests
+
+**Spoken captions [37:28]** second it's a it's an actual test framework it doesn't just define how to spin up a VM it has a full API for writing tests and asserting they pass um and that's important because it's not just like run a Docker image or something like Docker provides the runtime for a container but it's not going to give you any of the tools to actually test in that case this is giving you both sides of the equation and then third oop sorry go back one since it is powered by Nyx this is a benefit
+
+> [!NOTE] **Slide context — slide 025 — [37:50]**
+> OCR source: `slides/slide-025.png`. Vision flagged 2 lines below 0.70 confidence; those lines are marked. Images, diagrams, decorative marks, and any unrecognized text are not reconstructed.
+>
+> NixOS VM Testing  
+> Step one, defining the machine(s):  
+> nodes machine = { config, pkgs, ... J: {  
+> users.users.alice = {  
+> isNormalUser = true;  
+> extraGroups = I "wheel" ];  
+> packages = with pkgs; [  
+> firefox  
+> tree  
+> 1;  
+> } **[low confidence]**  
+> ;  
+> }; **[low confidence]**  
+
+**Spoken captions [37:55]** because you get full access well the language is probably a detriment i'm going to be honest um but the access to Nyx packages is a benefit because you get access to basically every version of every piece of semi-popular software that has existed for the past decades um and this is really important because you could pin specific versions of everything down to kernel libby everything um
+
+**Spoken captions [38:20]** so this is the only way I found when the most annoying desktop users of all time Debian users um bring an ancient version of long-term support software and say "This thing doesn't work." This is the only way I've been able to actually verify it works um so let's take a look at what this looks like um the first step for any VM test is actually define the machine um I put optional
+
+**Spoken captions [38:44]** pluralization because Nyx lets you define multiple machines and do networking between them we're not going to talk about that that's like a whole talk it's probably like a whole degree um for machine configuration it's just and these air quotes are doing a lot of work um it is just a Nyx OS configuration um you could put anything in there that you would configure a full Nyx installation with so that means like I said that means anything kernels drivers uh users packages everything uh
+
+> [!NOTE] **Slide context — slide 026 — [39:14]**
+> OCR source: `slides/slide-026.png`. Vision flagged no lines below 0.70 confidence. Images, diagrams, decorative marks, and any unrecognized text are not reconstructed.
+>
+> NixOS VM Testing  
+> Step two, defining the tests:  
+> testscript = ''  
+> machine.wait_for_unit("default.target")  
+> machine. succeed ("su -- Alice -c 'which  
+> firefox'")  
+> machine.fail("su -- root -c 'which  
+> firefox'")  
+
+**Spoken captions [39:14]** step two is actually defining the tests uh the tests are written in Python they're not written in Nyx so you actually put a string or embed a file with your tests here and Nyx gives you this full Python API that lets you gives you some nice highle stuff like waiting for systemd units since Nyx OS uses systemd um actually you could even do OCR you could wait for certain text to appear on the screen and it just handles that for you um and it's just Python and one of the things
+
+**Spoken captions [39:40]** you get out of this is you actually can access a ripple so you could have the VM and just use the ripple to be playing around with your tests so that's good we in this case we're defining a test that the Alice user I forgot to mention this the previous one we installed Firefox for Alice um the Alice user has Firefox and Root does not have Firefox obviously a toy example but you could do anything here and then step three is you have to run them um again handwaving going on here as
+
+> [!NOTE] **Slide context — slide 027 — [40:01]**
+> OCR source: `slides/slide-027.png`. Vision flagged no lines below 0.70 confidence. Images, diagrams, decorative marks, and any unrecognized text are not reconstructed.
+>
+> NixOS VM Testing  
+> Step three, running the tests:  
+> # Run all tests  
+> $ nix flake check  
+> # Get a Python REPL  
+> $ nix run •#test-gnome-fcitx5-hangful  
+> # Build a single test  
+> $ nix build .#checks.<system›.‹name>  
+
+**Spoken captions [40:07]** you have to do whenever you talk about Nix um but there uh basically the important thing is you have a mechanism built in to the framework runtime to run the tests to get a ripple to debug the tests to develop the tests uh to run a single test everything is sort of like there for you uh within a single command of some sort and so this is just a full endto-end thing in
+
+**Spoken captions [40:31]** order to handle VM tests and like I said I just haven't found any other thing that's focused on providing this level of flexibility with a focus on testing right we there's tons of frameworks i built some of them to spin up machines spin up VMs um but not to just complete the endto-end part of it uh in practice what am I actually using NixosVMs for and again
+
+> [!NOTE] **Slide context — slide 028 — [40:52]**
+> OCR source: `slides/slide-028.png`. Vision flagged no lines below 0.70 confidence. Images, diagrams, decorative marks, and any unrecognized text are not reconstructed.
+>
+> & NixOS VM Testing  
+> In practice:  
+> - Input methods (Japanese, Korean, etc.)  
+> - Desktop integration ("Open in Ghostty" context  
+> menu)  
+> - Window decorations (CSD vs. SSD)  
+> - X11 vs. Wayland  
+> - Broken dependencies  
+> - Distro simulation (e.g. exact versions of  
+> dependencies from Debian 12)  
+
+**Spoken captions [40:56]** stuff you really can't test without a full sandbox environment um the thing that really triggered me the thing that really made me do this was uh input methods uh I'm a fairly calm person but input input methods on Linux made me pound the table a few times um for those that don't know an input method is basically any sort of uh how you input sort of certain Asian languages emoji keyboards
+
+**Spoken captions [41:20]** are an input method it's the ability to input any character that's not represented on your physical keyboard is an input method um handwriting as well as an input method um on Linux the input method the input method framework the windowing system/compositor they're all developed by different people and this is where I think the struggles of Linux really shine because of this very specific versions of different things just behave wildly differently
+
+**Spoken captions [41:47]** um and it drove me crazy so I needed to use VM testing to test input methods that's uh I love Linux i use Nixos but that's in contrast to something like Apple where you could really clearly tell there's some vertical mandate that all these things must work together in lock step so much easier as an app developer but you know it's what I have to work with um and then there's other stuff sort of desktop integrations making sure that open and ghosty appears on rightclick
+
+**Spoken captions [42:13]** how can you possibly test that without actually like taking a screenshot and right clicking and taking a screenshot um these are things that also just break constantly in Linux with various version upgrades so perfect for VMs um there's a lot of complaining about Linux up here but it's just like this is the work you have to do to make in my opinion a stable desktop uh app experience for desktop Linux uh I'm just going to put this here for later you know take a picture or
+
+> [!NOTE] **Slide context — slide 029 — [42:35]**
+> OCR source: `slides/slide-029.png`. Vision flagged 2 lines below 0.70 confidence; those lines are marked. Images, diagrams, decorative marks, and any unrecognized text are not reconstructed.
+>
+> NixOS VM Testing  
+> Resources:  
+> - https://wiki.nixos.org/wiki/NixOS_VM_tests **[low confidence]**  
+> - https://aorith.github.io/posts/nixos- **[low confidence]**  
+> integration-tests/  
+> - https://bmcgee.ie/posts/2025/02/nixos-the-  
+> power-of-vm-tests/  
+> - https://nixcademy.com/posts/nixos-  
+> integration-tests/  
+
+**Spoken captions [42:38]** just download the slides later here are resources where you could actually learn a lot more about VM testing it's extremely powerful uh but like everything in Nyx the learning curve is like a sheer vertical cliff um so you know if you want to traverse the wall from Game of Thrones then this is uh the resources that you're going to need to use i think the benefit is the payoff from doing this for the right type of uh testing that you need there's nothing that compares uh
+
+> [!NOTE] **Slide context — slide 030 — [43:05]**
+> OCR source: `slides/slide-030.png`. Vision flagged no lines below 0.70 confidence. Images, diagrams, decorative marks, and any unrecognized text are not reconstructed.
+>
+> Thank You!  
+> Review:  
+> -  
+> • Snapshot Testing  
+> Keep Context Close  
+> -  
+> Isolate :  
+> Side Effects  
+> -  
+> GPU Testing  
+> NixOS VM Testing  
+> -  
+
+**Spoken captions [43:05]** and so that's it thank you i know we only covered five topics here um but it I think it was a lot uh I most importantly again if you got nothing else out of it isolating side effects is a super powerful technique and I wanted to show multiple examples of that and that's that's what I tried to do and if you want more see the go for con talk from 2017 so thank you
+
+**Spoken captions [43:30]** [Music]
