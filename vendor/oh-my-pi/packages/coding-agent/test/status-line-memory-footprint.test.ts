@@ -1,8 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import {
-	MEMORY_SAMPLE_INTERVAL_MS,
-	MemoryFootprintSampler,
-} from "@oh-my-pi/pi-coding-agent/modes/components/status-line/memory-footprint";
+import { MemoryFootprintSampler } from "@oh-my-pi/pi-coding-agent/modes/components/status-line/memory-footprint";
+import { MEMORY_SAMPLE_INTERVAL_MS } from "@oh-my-pi/pi-coding-agent/utils/process-memory";
 
 const GIB = 1024 ** 3;
 

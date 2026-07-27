@@ -1,5 +1,6 @@
+import { MEMORY_SAMPLE_INTERVAL_MS } from "../../../utils/process-memory";
+
 const GIB = 1024 ** 3;
-export const MEMORY_SAMPLE_INTERVAL_MS = 10_000;
 
 export interface MemoryFootprintSamplerOptions {
 	readRss: () => number;

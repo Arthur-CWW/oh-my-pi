@@ -673,6 +673,100 @@ describe("AsyncJobManager", () => {
 		expect(manager.enforceMemoryPressure(Number.MAX_SAFE_INTEGER)).toBe(1);
 		expect(manager.getJob(jobId)).toBeUndefined();
 	});
+
+	test("pressure eviction gates on coordinator RSS, not the JS heap", async () => {
+		let rssBytes = 0;
+		const threshold = 8 * 1024 ** 3;
+		const manager = new AsyncJobManager({
+			onJobComplete: async () => {},
+			memoryPressureBytes: threshold,
+			readRss: () => rssBytes,
+		});
+		const jobId = manager.register("task", "delivered child", async () => "summary");
+		await manager.waitForAll();
+		await manager.drainDeliveries({ timeoutMs: 2_000 });
+
+		// The manager's own JS heap stays tiny here; only RSS may decide.
+		rssBytes = threshold - 1;
+		expect(manager.enforceMemoryPressure()).toBe(0);
+		expect(manager.getJob(jobId)?.resultText).toBe("summary");
+		expect(manager.getMemoryReport().pressureEvictions).toBe(0);
+
+		rssBytes = threshold;
+		expect(manager.enforceMemoryPressure()).toBe(1);
+		expect(manager.getJob(jobId)).toBeUndefined();
+		expect(manager.getMemoryReport().pressureEvictions).toBe(1);
+		await manager.dispose({ timeoutMs: 1_000 });
+	});
+
+	test("pressure eviction spares running jobs and takes them once terminal", async () => {
+		const started = Promise.withResolvers<void>();
+		const gate = Promise.withResolvers<void>();
+		const manager = new AsyncJobManager({
+			onJobComplete: async () => {},
+			memoryPressureBytes: 1,
+			readRss: () => Number.MAX_SAFE_INTEGER,
+		});
+		const jobId = manager.register("bash", "long runner", async () => {
+			started.resolve();
+			await gate.promise;
+			return "summary";
+		});
+		await started.promise;
+
+		expect(manager.enforceMemoryPressure()).toBe(0);
+		expect(manager.getJob(jobId)?.status).toBe("running");
+		expect(manager.getMemoryReport().pressureEvictions).toBe(0);
+
+		gate.resolve();
+		await manager.waitForAll();
+		await manager.drainDeliveries({ timeoutMs: 2_000 });
+		expect(manager.getMemoryReport().pressureEvictions).toBeGreaterThan(0);
+		expect(manager.getJob(jobId)).toBeUndefined();
+		await manager.dispose({ timeoutMs: 1_000 });
+	});
+
+	test("the RSS sweep evicts on its own cadence with no explicit call", async () => {
+		let rssBytes = 0;
+		const threshold = 8 * 1024 ** 3;
+		const manager = new AsyncJobManager({
+			onJobComplete: async () => {},
+			memoryPressureBytes: threshold,
+			memoryPressureIntervalMs: 5,
+			readRss: () => rssBytes,
+		});
+		const jobId = manager.register("task", "delivered child", async () => "summary");
+		await manager.waitForAll();
+		await manager.drainDeliveries({ timeoutMs: 2_000 });
+		expect(manager.getJob(jobId)).toBeDefined();
+
+		rssBytes = threshold;
+		const deadline = Date.now() + 2_000;
+		while (manager.getJob(jobId) !== undefined && Date.now() < deadline) await Bun.sleep(5);
+
+		expect(manager.getJob(jobId)).toBeUndefined();
+		expect(manager.getMemoryReport().pressureEvictions).toBe(1);
+		await manager.dispose({ timeoutMs: 1_000 });
+	});
+
+	test("an unconfigured manager never samples RSS and never evicts", async () => {
+		let reads = 0;
+		const manager = new AsyncJobManager({
+			onJobComplete: async () => {},
+			readRss: () => {
+				reads++;
+				return Number.MAX_SAFE_INTEGER;
+			},
+		});
+		const jobId = manager.register("task", "delivered child", async () => "summary");
+		await manager.waitForAll();
+		await manager.drainDeliveries({ timeoutMs: 2_000 });
+
+		expect(manager.enforceMemoryPressure()).toBe(0);
+		expect(reads).toBe(0);
+		expect(manager.getJob(jobId)?.resultText).toBe("summary");
+		await manager.dispose({ timeoutMs: 1_000 });
+	});
 });
 
 describe("AsyncJobManager smart poll-wait escalation", () => {

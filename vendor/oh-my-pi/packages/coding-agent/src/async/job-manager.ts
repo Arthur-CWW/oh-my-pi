@@ -1,4 +1,5 @@
 import { logger } from "@oh-my-pi/pi-utils";
+import { MEMORY_SAMPLE_INTERVAL_MS } from "../utils/process-memory";
 import { ProgressCoalescer } from "./progress-coalescer";
 
 const DELIVERY_RETRY_BASE_MS = 500;
@@ -122,8 +123,16 @@ export interface AsyncJobManagerOptions {
 	retentionMs?: number;
 	/** Maximum UTF-8 bytes retained for a terminal job after reliable delivery. */
 	completionSummaryBytes?: number;
-	/** Heap-used threshold that evicts delivered terminal detail. Disabled when omitted. */
+	/**
+	 * Coordinator RSS threshold that evicts delivered terminal detail.
+	 * Disabled when omitted or 0. RSS, not heap-used: JSC heap is a rounding
+	 * error next to the native footprint that actually forces a restart.
+	 */
 	memoryPressureBytes?: number;
+	/** RSS reader for the pressure sweep. Injected by tests; defaults to this process. */
+	readRss?: () => number;
+	/** Pressure sweep cadence. Defaults to the status-line RSS sampling interval. */
+	memoryPressureIntervalMs?: number;
 }
 
 export interface AsyncJobMemoryReport {
@@ -223,7 +232,9 @@ export class AsyncJobManager {
 	readonly #maxRunningJobs: number;
 	readonly #retentionMs: number;
 	readonly #completionSummaryBytes: number;
-	readonly #memoryPressureBytes: number | undefined;
+	readonly #memoryPressureBytes: number;
+	readonly #readRss: () => number;
+	readonly #pressureSweep: NodeJS.Timeout | undefined;
 	#pressureEvictions = 0;
 	#deliveryLoop: Promise<void> | undefined;
 	#disposed = false;
@@ -247,8 +258,14 @@ export class AsyncJobManager {
 			0,
 			Math.floor(options.completionSummaryBytes ?? DEFAULT_COMPLETION_SUMMARY_BYTES),
 		);
-		this.#memoryPressureBytes =
-			options.memoryPressureBytes === undefined ? undefined : Math.max(0, Math.floor(options.memoryPressureBytes));
+		this.#memoryPressureBytes = Math.max(0, Math.floor(options.memoryPressureBytes ?? 0));
+		this.#readRss = options.readRss ?? (() => process.memoryUsage.rss());
+		if (this.#memoryPressureBytes > 0) {
+			const intervalMs = Math.max(1, Math.floor(options.memoryPressureIntervalMs ?? MEMORY_SAMPLE_INTERVAL_MS));
+			this.#pressureSweep = setInterval(() => this.enforceMemoryPressure(), intervalMs);
+			// A memory sweep must never be the reason the process stays alive.
+			this.#pressureSweep.unref();
+		}
 	}
 
 	/**
@@ -536,11 +553,18 @@ export class AsyncJobManager {
 	}
 
 	/**
-	 * Drop only delivered terminal cache entries under pressure. Pending
-	 * deliveries remain authoritative, and task journals are owned elsewhere.
+	 * Drop only delivered terminal cache entries once coordinator RSS reaches
+	 * the configured threshold. Pending deliveries remain authoritative, and
+	 * task journals are owned elsewhere.
+	 *
+	 * Gated on RSS rather than `heapUsed`: the manager's retained job detail is
+	 * native (string bytes reached through JSC), so the node-compatible heap
+	 * counter stays near zero while the process footprint grows.
 	 */
-	enforceMemoryPressure(heapUsedBytes = process.memoryUsage().heapUsed): number {
-		if (this.#memoryPressureBytes === undefined || heapUsedBytes < this.#memoryPressureBytes) return 0;
+	enforceMemoryPressure(rssBytes?: number): number {
+		// Reading RSS is a syscall; skip it entirely when the lever is disabled.
+		if (this.#memoryPressureBytes === 0) return 0;
+		if ((rssBytes ?? this.#readRss()) < this.#memoryPressureBytes) return 0;
 		let evicted = 0;
 		for (const [jobId, job] of this.#jobs) {
 			if (
@@ -782,6 +806,7 @@ export class AsyncJobManager {
 
 	async dispose(options?: { timeoutMs?: number }): Promise<boolean> {
 		this.#disposed = true;
+		if (this.#pressureSweep !== undefined) clearInterval(this.#pressureSweep);
 		this.#clearEvictionTimers();
 		this.cancelAll();
 		await this.waitForAll();

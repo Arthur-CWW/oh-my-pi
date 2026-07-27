@@ -78,6 +78,7 @@
 - Added the registry-backed `:` popup/`:commands`, strict read-only Hub preview, normal-mode navigation, and one-source Neovim viewer help.
 
 ### Changed
+- Runtime memory diagnostics now report mimalloc commit high-water marks and classify reclaim from coordinator RSS alone; `async.memoryPressureBytes` drives a bounded 10-second sweep that disposes only delivered terminal jobs under pressure.
 - Usage reports now pair every reset deadline with an absolute local date/time, timezone, and relative duration (including overdue values), and show saved-reset expiry when the provider supplies it.
 
 - IRC communication and tool-result bodies now honor `:wrap`/`:rich` while receipts, errors, metadata, and roster rows remain bounded single-line projections.

@@ -1,14 +1,38 @@
-import { heapStats } from "bun:jsc";
+import { heapStats, memoryUsage as jscMemoryUsage } from "bun:jsc";
 import type { SlashCommandSpec } from "./types";
 
 const GIBIBYTE = 1024 ** 3;
 const TOP_TYPE_LIMIT = 5;
 
+/**
+ * Small before/after sample for the forced-GC delta. Deliberately excludes the
+ * object-type histogram so a pending delta does not pin a large map across the
+ * collection it is measuring.
+ */
 export type RuntimeMemorySnapshot = {
 	coordinatorRss: number;
 	jscHeapSize: number;
 	jscHeapCapacity: number;
 	jscExtraMemory: number;
+	/** mimalloc bytes handed out to live allocations. */
+	mimallocInUse: number;
+	/** mimalloc bytes committed to this process; released only at exit. */
+	mimallocCommitted: number;
+};
+
+/** Everything `/runtime-memory` prints, sampled once. */
+export type RuntimeMemoryReport = RuntimeMemorySnapshot & {
+	nodeHeapUsed: number;
+	nodeHeapTotal: number;
+	external: number;
+	arrayBuffers: number;
+	objectCount: number;
+	protectedObjectCount: number;
+	objectTypeCounts: Record<string, number>;
+	/** Durable high-water marks. Free to read, and recorded without a sampling loop. */
+	mimallocPeakInUse: number;
+	mimallocPeakCommitted: number;
+	pageFaults: number;
 };
 
 export type RuntimeMemoryChange = "reclaimed" | "unchanged" | "higher";
@@ -24,28 +48,54 @@ function signedGibibytes(delta: number): string {
 function snapshotRuntimeMemory(): RuntimeMemorySnapshot {
 	const usage = process.memoryUsage();
 	const heap = heapStats();
+	const mimalloc = jscMemoryUsage();
 	return {
 		coordinatorRss: usage.rss,
 		jscHeapSize: heap.heapSize,
 		jscHeapCapacity: heap.heapCapacity,
 		jscExtraMemory: heap.extraMemorySize,
+		mimallocInUse: mimalloc.current,
+		mimallocCommitted: mimalloc.currentCommit,
 	};
 }
 
+export function sampleRuntimeMemoryReport(): RuntimeMemoryReport {
+	const usage = process.memoryUsage();
+	const heap = heapStats();
+	const mimalloc = jscMemoryUsage();
+	return {
+		coordinatorRss: usage.rss,
+		jscHeapSize: heap.heapSize,
+		jscHeapCapacity: heap.heapCapacity,
+		jscExtraMemory: heap.extraMemorySize,
+		mimallocInUse: mimalloc.current,
+		mimallocCommitted: mimalloc.currentCommit,
+		nodeHeapUsed: usage.heapUsed,
+		nodeHeapTotal: usage.heapTotal,
+		external: usage.external,
+		arrayBuffers: usage.arrayBuffers,
+		objectCount: heap.objectCount,
+		protectedObjectCount: heap.protectedObjectCount,
+		objectTypeCounts: heap.objectTypeCounts,
+		mimallocPeakInUse: mimalloc.peak,
+		mimallocPeakCommitted: mimalloc.peakCommit,
+		pageFaults: mimalloc.pageFaults,
+	};
+}
+
+/**
+ * Classify on coordinator RSS alone. The JSC and mimalloc counters move with
+ * ordinary nursery churn, so treating *any* of them falling as "reclaimed"
+ * reported success while the process footprint was flat or still climbing —
+ * exactly the case that forces a `/restart`.
+ */
 export function classifyRuntimeMemoryChange(
 	before: RuntimeMemorySnapshot,
 	after: RuntimeMemorySnapshot,
 ): RuntimeMemoryChange {
 	const rssDelta = after.coordinatorRss - before.coordinatorRss;
-	const heapSizeDelta = after.jscHeapSize - before.jscHeapSize;
-	const heapCapacityDelta = after.jscHeapCapacity - before.jscHeapCapacity;
-	const extraMemoryDelta = after.jscExtraMemory - before.jscExtraMemory;
-	if (rssDelta < 0 || heapSizeDelta < 0 || heapCapacityDelta < 0 || extraMemoryDelta < 0) {
-		return "reclaimed";
-	}
-	if (rssDelta === 0 && heapSizeDelta === 0 && heapCapacityDelta === 0 && extraMemoryDelta === 0) {
-		return "unchanged";
-	}
+	if (rssDelta < 0) return "reclaimed";
+	if (rssDelta === 0) return "unchanged";
 	return "higher";
 }
 
@@ -67,8 +117,10 @@ export function formatRuntimeMemoryChange(
 		formatMemoryMetric("JSC heap size", before.jscHeapSize, after.jscHeapSize),
 		formatMemoryMetric("JSC heap capacity", before.jscHeapCapacity, after.jscHeapCapacity),
 		formatMemoryMetric("JSC extra memory", before.jscExtraMemory, after.jscExtraMemory),
-		`Measured change: ${classifyRuntimeMemoryChange(before, after)}`,
-		"Native RSS release is not guaranteed by this measurement.",
+		formatMemoryMetric("mimalloc in use", before.mimallocInUse, after.mimallocInUse),
+		formatMemoryMetric("mimalloc committed", before.mimallocCommitted, after.mimallocCommitted),
+		`Measured change (coordinator RSS): ${classifyRuntimeMemoryChange(before, after)}`,
+		"Only RSS decides that verdict; the JSC and mimalloc counters above are informational.",
 	].join("\n");
 }
 
@@ -91,18 +143,25 @@ function formatTopObjectTypes(objectTypeCounts: Record<string, number>): string 
 	return result || "none";
 }
 
-export function buildRuntimeMemoryReport(): string {
-	const usage = process.memoryUsage();
-	const heap = heapStats();
+export function formatRuntimeMemoryReport(sample: RuntimeMemoryReport): string {
 	return [
-		`Coordinator RSS: ${gibibytes(usage.rss)}`,
-		`JSC heap: ${gibibytes(heap.heapSize)} used / ${gibibytes(heap.heapCapacity)} capacity`,
-		`JSC extra memory: ${gibibytes(heap.extraMemorySize)}`,
-		`Node-compatible heap: ${gibibytes(usage.heapUsed)} used / ${gibibytes(usage.heapTotal)} committed`,
-		`External / array buffers: ${gibibytes(usage.external)} / ${gibibytes(usage.arrayBuffers)}`,
-		`Objects: ${heap.objectCount.toLocaleString("en-US")} (${heap.protectedObjectCount.toLocaleString("en-US")} protected)`,
-		`Top object types: ${formatTopObjectTypes(heap.objectTypeCounts)}`,
-		"Reclaim: /runtime-memory gc forces two full collections; /restart replaces this coordinator; /debug → Memory Report captures a heap snapshot.",
+		`Coordinator RSS: ${gibibytes(sample.coordinatorRss)}`,
+		`JSC heap: ${gibibytes(sample.jscHeapSize)} used / ${gibibytes(sample.jscHeapCapacity)} capacity`,
+		`JSC extra memory: ${gibibytes(sample.jscExtraMemory)}`,
+		`mimalloc: ${gibibytes(sample.mimallocInUse)} in use / ${gibibytes(sample.mimallocCommitted)} committed`,
+		`mimalloc peak: ${gibibytes(sample.mimallocPeakInUse)} in use / ${gibibytes(sample.mimallocPeakCommitted)} committed`,
+		`Node-compatible heap: ${gibibytes(sample.nodeHeapUsed)} used / ${gibibytes(sample.nodeHeapTotal)} committed`,
+		`External / array buffers: ${gibibytes(sample.external)} / ${gibibytes(sample.arrayBuffers)}`,
+		`Objects: ${sample.objectCount.toLocaleString("en-US")} (${sample.protectedObjectCount.toLocaleString("en-US")} protected)`,
+		`Page faults: ${sample.pageFaults.toLocaleString("en-US")}`,
+		`Top object types: ${formatTopObjectTypes(sample.objectTypeCounts)}`,
+		// Bun allocates JSC payloads through mimalloc, and `Bun.gc(true)` reaches
+		// mimalloc only as `mi_collect(false)`: a non-forced collect of the
+		// calling thread's heap. It never force-purges arenas or other threads'
+		// page caches, and no JS API exposes `mi_collect(true)`.
+		"Reclaim: /runtime-memory gc forces two JSC collections plus a non-forced mimalloc collect of this thread only.",
+		"Committed mimalloc pages (see peak) are returned to the OS by process exit, so /restart is the only lever that lowers RSS.",
+		"/debug → Memory Report captures a heap snapshot for attributing the JSC side.",
 	].join("\n");
 }
 
@@ -124,8 +183,9 @@ export const RUNTIME_MEMORY_COMMAND_SPEC: SlashCommandSpec = {
 	subcommands: [{ name: "gc", description: "Force two full JSC collections and report measured memory changes" }],
 	handle: async (command, runtime) => {
 		const action = command.args.trim();
-		if (action === "gc") await runtime.output(`${await collectRuntimeGarbage()}\n${buildRuntimeMemoryReport()}`);
-		else if (action.length === 0) await runtime.output(buildRuntimeMemoryReport());
+		if (action === "gc")
+			await runtime.output(`${await collectRuntimeGarbage()}\n${formatRuntimeMemoryReport(sampleRuntimeMemoryReport())}`);
+		else if (action.length === 0) await runtime.output(formatRuntimeMemoryReport(sampleRuntimeMemoryReport()));
 		else await runtime.output("Usage: /runtime-memory [gc]");
 	},
 };

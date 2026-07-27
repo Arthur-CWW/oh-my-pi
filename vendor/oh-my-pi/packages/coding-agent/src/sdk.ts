@@ -1460,6 +1460,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	let hasRegistered = false;
 	const enableLsp = options.enableLsp ?? true;
 	const asyncMaxJobs = Math.min(100, Math.max(1, settings.get("async.maxJobs") ?? 100));
+	const asyncMemoryPressureBytes = Math.max(0, settings.get("async.memoryPressureBytes") ?? 0);
 	const ASYNC_INLINE_RESULT_MAX_CHARS = 12_000;
 	const ASYNC_PREVIEW_MAX_CHARS = 4_000;
 	const formatAsyncResultForFollowUp = async (result: string): Promise<string> => {
@@ -1496,6 +1497,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		!options.parentTaskPrefix && !AsyncJobManager.instance()
 			? new AsyncJobManager({
 					maxRunningJobs: asyncMaxJobs,
+					memoryPressureBytes: asyncMemoryPressureBytes,
 					onJobAcknowledge: async receipts => {
 						const currentParent = agentRegistry.get(resolvedAgentId)?.session;
 						const receiptManager =

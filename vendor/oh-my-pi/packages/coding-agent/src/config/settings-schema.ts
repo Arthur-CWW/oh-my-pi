@@ -3344,6 +3344,13 @@ export const SETTINGS_SCHEMA = {
 		default: 100,
 	},
 
+	"async.memoryPressureBytes": {
+		type: "number",
+		default: 4 * 1024 ** 3,
+		description:
+			"Evict delivered terminal async-job detail once coordinator RSS reaches this many bytes; 0 disables it",
+	},
+
 	"async.pollWaitDuration": {
 		type: "enum",
 		values: ["5s", "10s", "30s", "1m", "5m", "smart"] as const,
